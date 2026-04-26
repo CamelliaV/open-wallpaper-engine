@@ -45,7 +45,13 @@ constexpr std::array base_device_exts {
     Extension { true, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME },
-    Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME }
+    Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME },
+    // Optional. When present we can report the picked physical device's
+    // DRM render-node major/minor via `getDrmRenderNode()` so the
+    // waywallen daemon can match it against each connected display's
+    // GPU. When absent the accessor returns false and callers report
+    // (0, 0); the daemon then conservatively assumes cross-GPU.
+    Extension { false, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME },
 };
 
 struct VulkanRender::Impl {
@@ -108,6 +114,26 @@ bool VulkanRender::inited() const { return pImpl->m_inited; }
 
 int VulkanRender::takeLastFrameSyncFd() {
     return pImpl->m_last_sync_fd.exchange(-1, std::memory_order_acq_rel);
+}
+
+bool VulkanRender::getDrmRenderNode(uint32_t& out_major,
+                                    uint32_t& out_minor) const {
+    if (!pImpl->m_inited || !pImpl->m_device) return false;
+    VkPhysicalDeviceDrmPropertiesEXT drm {};
+    drm.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT;
+    VkPhysicalDeviceProperties2KHR props {};
+    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+    props.pNext = &drm;
+    pImpl->m_device->gpu().GetProperties2KHR(props);
+    if (!drm.hasRender) return false;
+    if (drm.renderMajor < 0 || drm.renderMinor < 0
+        || (uint64_t)drm.renderMajor > UINT32_MAX
+        || (uint64_t)drm.renderMinor > UINT32_MAX) {
+        return false;
+    }
+    out_major = static_cast<uint32_t>(drm.renderMajor);
+    out_minor = static_cast<uint32_t>(drm.renderMinor);
+    return true;
 }
 
 bool VulkanRender::init(RenderInitInfo info) { return pImpl->init(info); }

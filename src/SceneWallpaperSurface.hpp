@@ -22,6 +22,11 @@ struct RenderInitInfo {
 
     std::span<const std::uint8_t> uuid;
     TexTiling                     offscreen_tiling { TexTiling::OPTIMAL };
+    /* When true, allocate the offscreen ExSwapchain images out of
+     * HOST_VISIBLE && !DEVICE_LOCAL (true GTT) so the exported dmabuf
+     * fds are importable by a foreign GPU (cross-GPU PRIME). Ignored
+     * when offscreen == false. */
+    bool                          offscreen_host_visible { false };
     VulkanSurfaceInfo             surface_info;
 
     uint16_t width { 1920 };

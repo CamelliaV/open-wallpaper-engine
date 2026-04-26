@@ -158,6 +158,9 @@ public:
 
     ExSwapchain* exSwapchain() const { return m_render->exSwapchain(); }
     int          takeLastFrameSyncFd() { return m_render->takeLastFrameSyncFd(); }
+    bool getDrmRenderNode(uint32_t& major, uint32_t& minor) const {
+        return m_render->getDrmRenderNode(major, minor);
+    }
 
     bool renderInited() const { return m_render->inited(); }
 
@@ -308,6 +311,12 @@ int SceneWallpaper::takeLastFrameSyncFd() {
 
 ExSwapchain* SceneWallpaper::exSwapchain() const {
     return m_main_handler->renderHandler()->exSwapchain();
+}
+
+bool SceneWallpaper::getDrmRenderNode(uint32_t& out_major,
+                                      uint32_t& out_minor) const {
+    return m_main_handler->renderHandler()->getDrmRenderNode(out_major,
+                                                              out_minor);
 }
 
 MHANDLER_CMD_IMPL(MainHandler, LOAD_SCENE) {

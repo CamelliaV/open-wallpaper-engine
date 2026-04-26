@@ -52,6 +52,15 @@ public:
     // export failed). The caller MUST close() the returned fd.
     int takeLastFrameSyncFd();
 
+    // Read the DRM render-node major/minor of the picked
+    // VkPhysicalDevice. Returns true and writes `*out_major` /
+    // `*out_minor` on success; returns false when the driver lacks
+    // `VK_EXT_physical_device_drm` or initVulkan hasn't run yet. The
+    // waywallen-renderer host forwards the result on the IPC `Ready`
+    // event so the daemon can match the renderer's GPU against each
+    // display's GPU.
+    bool getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const;
+
 private:
     bool m_inited { false };
 

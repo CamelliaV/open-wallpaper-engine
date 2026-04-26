@@ -44,6 +44,16 @@
 #include <vulkan/vulkan.h>
 
 namespace {
+// Wescene's ExSwapchain pins TexTiling::LINEAR which forces every
+// dmabuf BO into a CPU-mappable physical placement (typically GTT) —
+// the same condition the kernel needs for cross-GPU PRIME import.
+// We therefore advertise BUF_HOST_VISIBLE unconditionally and answer
+// any daemon-side downgrade request as a best-effort no-op (re-emit
+// bind_buffers with bumped generation but unchanged placement).
+constexpr uint32_t WW_BUF_HOST_VISIBLE = 1u << 0;
+} // namespace
+
+namespace {
 
 struct Options {
     std::string ipc_path;
@@ -161,6 +171,13 @@ struct HostState {
     std::atomic<bool>     bound { false };
     std::atomic<uint64_t> seq { 0 };
     std::atomic<bool>     shutdown { false };
+    // bind_buffers generation: monotonic, bumped on every fresh
+    // BindBuffers we emit. Initial bind = 1; ConfigureBuffers re-emits
+    // increment. Held under send_mu.
+    uint64_t              bind_generation { 0 };
+    // Mirrors the ExSwapchain's actual placement; see the namespace
+    // comment for why this is unconditionally HOST_VISIBLE.
+    uint32_t              flags { WW_BUF_HOST_VISIBLE };
 };
 
 static HostState* g_state = nullptr; // redraw_callback has no user-data.
@@ -187,7 +204,11 @@ static void send_bind_buffers_locked(HostState& s, wallpaper::ExSwapchain* ex) {
         static_cast<uint64_t>(by_id[1]->size),
         static_cast<uint64_t>(by_id[2]->size),
     };
+    s.bind_generation += 1;
+
     ww_evt_bind_buffers_t bb {};
+    bb.generation   = s.bind_generation;
+    bb.flags        = s.flags;
     bb.count        = 3;
     bb.fourcc       = by_id[0]->drm_fourcc;
     bb.width        = static_cast<uint32_t>(by_id[0]->width);
@@ -301,6 +322,28 @@ static void apply_control(HostState& s, const ww_bridge_control_t& msg) {
     case WW_REQ_SHUTDOWN:
         s.shutdown.store(true, std::memory_order_release);
         break;
+    case WW_REQ_CONFIGURE_BUFFERS: {
+        // Wescene's ExSwapchain LINEAR placement is intrinsically GTT
+        // (host-visible); we cannot physically downgrade to
+        // DEVICE_LOCAL without rebuilding the SceneWallpaper renderer.
+        // Acknowledge by re-emitting bind_buffers with a bumped
+        // generation so the daemon clears its pending_configure.
+        if (msg.u.configure_buffers.flags != s.flags) {
+            std::fprintf(stderr,
+                         "waywallen-wescene-renderer: ConfigureBuffers asked "
+                         "for flags=0x%x but ExSwapchain LINEAR can only do "
+                         "flags=0x%x; answering with current placement\n",
+                         msg.u.configure_buffers.flags, s.flags);
+        }
+        if (s.wp) {
+            auto* ex = s.wp->exSwapchain();
+            if (ex) {
+                std::lock_guard<std::mutex> lock(s.send_mu);
+                send_bind_buffers_locked(s, ex);
+            }
+        }
+        break;
+    }
     default:
         std::fprintf(stderr, "waywallen-wescene-renderer: unknown control op %d\n", msg.op);
         break;
@@ -366,10 +409,23 @@ int main(int argc, char** argv) {
         wp.setPropertyInt32(wallpaper::PROPERTY_FPS,
                             static_cast<int32_t>(opts.initial_fps));
 
+    // Read the DRM render-node directly from the VkPhysicalDevice
+    // wescene picked. Falls back to (0,0) if the driver lacks
+    // VK_EXT_physical_device_drm — daemon then conservatively
+    // assumes cross-GPU and forces HOST_VISIBLE on every consumer
+    // (which is already what wescene's LINEAR ExSwapchain provides).
+    uint32_t drm_render_major = 0, drm_render_minor = 0;
+    (void)wp.getDrmRenderNode(drm_render_major, drm_render_minor);
+
     // Tell the daemon we finished initVulkan and are ready to render.
-    if (int rc = ww_bridge_send_ready(state.sock); rc != 0) {
+    if (int rc = ww_bridge_send_ready(state.sock,
+                                      drm_render_major, drm_render_minor);
+        rc != 0) {
         die("send ready failed: " + std::to_string(rc));
     }
+    std::fprintf(stderr,
+                 "waywallen-wescene-renderer: ready drm_render=%u:%u\n",
+                 drm_render_major, drm_render_minor);
 
     // Reader thread handles daemon → host control messages.
     std::thread reader([&]() { ipc_reader_loop(state); });

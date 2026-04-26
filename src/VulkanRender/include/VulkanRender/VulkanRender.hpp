@@ -40,6 +40,17 @@ public:
     // must close() it. Thread-safe.
     int takeLastFrameSyncFd();
 
+    // Look up the DRM render-node major/minor of the picked
+    // VkPhysicalDevice via `VK_EXT_physical_device_drm`. Returns true
+    // and writes `*out_major` / `*out_minor` on success; returns false
+    // when the extension wasn't enabled by the driver or the device
+    // doesn't expose a render node. Safe to call after `init()` has
+    // returned successfully; before that or after `destroy()` the
+    // result is `false`. Used by the waywallen-renderer host to fill
+    // the `Ready` event so the daemon can match the renderer's GPU
+    // against each display's GPU.
+    bool getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> pImpl;
