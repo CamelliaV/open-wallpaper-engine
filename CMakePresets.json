@@ -43,14 +43,6 @@
       }
     },
     {
-      "name": "clang-release-qml",
-      "displayName": "Clang · Release + Qt6 QML viewer",
-      "inherits": "clang-release",
-      "cacheVariables": {
-        "BUILD_QML": "ON"
-      }
-    },
-    {
       "name": "clang-release-renderdoc",
       "displayName": "Clang · Release + RenderDoc hooks",
       "inherits": "clang-release",
@@ -71,7 +63,6 @@
     { "name": "clang-debug",            "configurePreset": "clang-debug" },
     { "name": "clang-release",          "configurePreset": "clang-release" },
     { "name": "clang-relwithdebinfo",   "configurePreset": "clang-relwithdebinfo" },
-    { "name": "clang-release-qml",      "configurePreset": "clang-release-qml" },
     { "name": "clang-release-renderdoc","configurePreset": "clang-release-renderdoc" },
     { "name": "clang-release-no-host",  "configurePreset": "clang-release-no-host" }
   ],
