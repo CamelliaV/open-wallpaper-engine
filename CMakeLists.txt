@@ -38,3 +38,16 @@ option(BUILD_WAYWALLEN "Build the waywallen-renderer executable" ON)
 if(BUILD_WAYWALLEN)
     add_subdirectory(waywallen)
 endif()
+
+# Standalone GLFW viewer — auto-detected from glfw3 by default; force with
+# -DBUILD_VIEWER=ON/OFF.
+pkg_check_modules(GLFW IMPORTED_TARGET glfw3)
+option(BUILD_VIEWER "Build the GLFW standalone viewer" ${GLFW_FOUND})
+if(BUILD_VIEWER)
+    if(NOT GLFW_FOUND)
+        message(FATAL_ERROR
+            "BUILD_VIEWER=ON but glfw3 was not found via pkg-config. "
+            "Install glfw3 development headers or pass -DBUILD_VIEWER=OFF.")
+    endif()
+    add_subdirectory(viewer)
+endif()

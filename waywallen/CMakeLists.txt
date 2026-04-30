@@ -1,6 +1,3 @@
-# waywallen-wescene-renderer ��� wescene (Wallpaper Engine scene) host subprocess.
-# Spawned by the Rust waywallen daemon for wallpapers of type "scene".
-
 include(FetchContent)
 
 find_package(waywallen-bridge REQUIRED)
