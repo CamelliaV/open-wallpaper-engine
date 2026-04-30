@@ -6,7 +6,7 @@
 
 #include "Timer/FrameTimer.hpp"
 #include "Utils/FpsCounter.h"
-#include "WPSceneParser.hpp"
+#include "Parse/WPSceneParser.hpp"
 #include "Scene/Scene.h"
 #include "Particle/ParticleSystem.h"
 #include "Interface/IShaderValueUpdater.h"

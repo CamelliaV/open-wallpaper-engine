@@ -1,4 +1,4 @@
-#include "WPMdlParser.hpp"
+#include "Parse/WPMdlParser.hpp"
 #include "Fs/VFS.h"
 #include "Fs/IBinaryStream.h"
 #include "Fs/MemBinaryStream.h"
@@ -6,8 +6,8 @@
 #include "Utils/Logging.h"
 #include "Scene/SceneMesh.h"
 #include "SpecTexs.hpp"
-#include "wpscene/WPMaterial.h"
-#include "WPShaderParser.hpp"
+#include "Parse/WPMaterial.hpp"
+#include "Parse/WPShaderParser.hpp"
 
 using namespace wallpaper;
 

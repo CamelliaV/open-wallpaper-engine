@@ -1,4 +1,4 @@
-#include "WPSceneParser.hpp"
+#include "Parse/WPSceneParser.hpp"
 #include "WPJson.hpp"
 
 #include "Utils/String.h"
@@ -9,21 +9,21 @@
 #include "Core/ArrayHelper.hpp"
 #include "SpecTexs.hpp"
 
-#include "WPShaderParser.hpp"
-#include "WPTexImageParser.hpp"
-#include "WPParticleParser.hpp"
-#include "WPSoundParser.hpp"
-#include "WPMdlParser.hpp"
+#include "Parse/WPShaderParser.hpp"
+#include "Parse/WPTexImageParser.hpp"
+#include "Parse/WPParticleParser.hpp"
+#include "Parse/WPSoundParser.hpp"
+#include "Parse/WPMdlParser.hpp"
 
 #include "Particle/WPParticleRawGener.h"
 #include "Particle/ParticleSystem.h"
 
 #include "WPShaderValueUpdater.hpp"
-#include "wpscene/WPImageObject.h"
-#include "wpscene/WPParticleObject.h"
-#include "wpscene/WPSoundObject.h"
-#include "wpscene/WPLightObject.hpp"
-#include "wpscene/WPScene.h"
+#include "Parse/WPImageObject.hpp"
+#include "Parse/WPParticleObject.hpp"
+#include "Parse/WPSoundObject.hpp"
+#include "Parse/WPLightObject.hpp"
+#include "Parse/WPScene.hpp"
 
 #include "Fs/VFS.h"
 

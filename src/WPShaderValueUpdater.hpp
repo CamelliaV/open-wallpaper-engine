@@ -12,7 +12,7 @@
 #include "Interface/IShaderValueUpdater.h"
 #include "Core/MapSet.hpp"
 #include "SpriteAnimation.hpp"
-#include "WPPuppet.hpp"
+#include "Parse/WPPuppet.hpp"
 
 namespace wallpaper
 {

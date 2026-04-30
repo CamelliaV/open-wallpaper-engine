@@ -36,19 +36,19 @@ add_library(
   WPJson.cpp
   WPPkgFs.cpp
   Type.cpp
-  wpscene/WPImageObject.cpp
-  wpscene/WPParticleObject.cpp
-  wpscene/WPMaterial.cpp
-  wpscene/WPScene.cpp
-  wpscene/WPLightObject.cpp
-  WPParticleParser.cpp
-  WPShaderParser.cpp
-  WPSceneParser.cpp
+  Parse/WPImageObject.cpp
+  Parse/WPParticleObject.cpp
+  Parse/WPMaterial.cpp
+  Parse/WPScene.cpp
+  Parse/WPLightObject.cpp
+  Parse/WPParticleParser.cpp
+  Parse/WPShaderParser.cpp
+  Parse/WPSceneParser.cpp
+  Parse/WPTexImageParser.cpp
+  Parse/WPSoundParser.cpp
+  Parse/WPMdlParser.cpp
+  Parse/WPPuppet.cpp
   WPShaderValueUpdater.cpp
-  WPTexImageParser.cpp
-  WPSoundParser.cpp
-  WPMdlParser.cpp
-  WPPuppet.cpp
   SceneWallpaper.cpp)
 
 set(InteralLib

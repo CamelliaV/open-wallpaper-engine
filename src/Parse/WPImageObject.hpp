@@ -1,9 +1,9 @@
 #pragma once
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
-#include "WPMaterial.h"
+#include "Parse/WPMaterial.hpp"
 #include <vector>
-#include "WPPuppet.hpp"
+#include "Parse/WPPuppet.hpp"
 #include <unordered_set>
 #include <string>
 #include <filesystem>

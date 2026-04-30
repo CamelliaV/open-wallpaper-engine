@@ -1,4 +1,4 @@
-#include "WPLightObject.hpp"
+#include "Parse/WPLightObject.hpp"
 
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"

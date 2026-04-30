@@ -1,4 +1,4 @@
-#include "WPImageObject.h"
+#include "Parse/WPImageObject.hpp"
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"
 

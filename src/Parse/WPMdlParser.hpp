@@ -6,7 +6,7 @@
 #include <memory>
 #include <Eigen/Dense>
 
-#include "WPPuppet.hpp"
+#include "Parse/WPPuppet.hpp"
 
 namespace wallpaper
 {

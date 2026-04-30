@@ -1,4 +1,4 @@
-#include "WPParticleParser.hpp"
+#include "Parse/WPParticleParser.hpp"
 #include "Particle/ParticleEmitter.h"
 #include "Particle/ParticleModify.h"
 #include "Particle/ParticleSystem.h"

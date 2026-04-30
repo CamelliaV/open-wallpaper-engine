@@ -1,4 +1,4 @@
-#include "WPParticleObject.h"
+#include "Parse/WPParticleObject.hpp"
 
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"

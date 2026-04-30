@@ -1,4 +1,4 @@
-#include "WPPuppet.hpp"
+#include "Parse/WPPuppet.hpp"
 #include <cmath>
 #include "Utils/Logging.h"
 

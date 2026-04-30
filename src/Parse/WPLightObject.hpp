@@ -2,7 +2,7 @@
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
 #include <vector>
-#include "WPPuppet.hpp"
+#include "Parse/WPPuppet.hpp"
 
 namespace wallpaper
 {

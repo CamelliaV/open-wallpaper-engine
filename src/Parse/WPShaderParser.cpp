@@ -1,10 +1,10 @@
-#include "WPShaderParser.hpp"
+#include "Parse/WPShaderParser.hpp"
 
 #include "Fs/IBinaryStream.h"
 #include "Utils/Logging.h"
 #include "WPJson.hpp"
 
-#include "wpscene/WPUniform.h"
+#include "Parse/WPUniform.hpp"
 #include "Fs/VFS.h"
 #include "Utils/Sha.hpp"
 #include "Utils/String.h"

@@ -1,4 +1,4 @@
-#include "WPTexImageParser.hpp"
+#include "Parse/WPTexImageParser.hpp"
 
 #include "Type.hpp"
 #include "WPCommon.hpp"

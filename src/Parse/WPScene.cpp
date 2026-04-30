@@ -1,4 +1,4 @@
-#include "WPScene.h"
+#include "Parse/WPScene.hpp"
 
 using namespace wallpaper::wpscene;
 
