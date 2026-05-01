@@ -1,6 +1,7 @@
 #pragma once
 #include "VulkanPass.hpp"
 #include <string>
+#include <vector>
 
 #include "Vulkan/Device.hpp"
 #include "Vulkan/StagingBuffer.hpp"
@@ -19,7 +20,7 @@ public:
     struct Desc {
         // in
         const std::string_view result { SpecTex_Default };
-        VkFormat               present_format;
+        VkFormat               present_format { VK_FORMAT_UNDEFINED };
         VkImageLayout          present_layout;
         uint32_t               present_queue_index;
 
@@ -46,8 +47,34 @@ public:
     void execute(const Device&, RenderingResources&) override;
     void destory(const Device&, RenderingResources&) override;
 
+    // Rebuild the renderpass + graphics pipeline from the current
+    // present_format/present_layout. Call after setPresentFormat with a
+    // new format. The caller is responsible for ensuring no in-flight
+    // command buffer references the old pipeline (drawFrameOffscreen
+    // already fences the previous frame before reaching this).
+    //
+    // Requires prepare() to have run at least once so shaders / vertex
+    // buffer / descriptor info are cached. Returns true on success;
+    // on failure prepared() reverts to false.
+    bool rebuildPresent(const Device&);
+
 private:
+    // Build / rebuild the renderpass + graphics pipeline using cached
+    // shader bytecode (`m_vert_spv` / `m_frag_spv`) and the current
+    // present_format/present_layout. Owns no glslang state.
+    bool buildPresentPipeline(const Device&);
+
     Desc m_desc;
+
+    // Cached compile artifacts populated on first prepare(). Reused on
+    // every rebuildPresent — avoids re-running glslang outside the
+    // VulkanRender::compileRenderGraph init/finalize scope.
+    bool                                           m_resources_ready { false };
+    std::vector<unsigned int>                      m_vert_spv;
+    std::vector<unsigned int>                      m_frag_spv;
+    VkVertexInputBindingDescription                m_bind_description {};
+    std::vector<VkVertexInputAttributeDescription> m_attr_descriptions;
+    DescriptorSetInfo                              m_descriptor_info;
 };
 
 } // namespace vulkan

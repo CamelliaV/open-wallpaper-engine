@@ -246,7 +246,7 @@ std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, 
         VVK_CHECK_ACT(break, device.CreateSampler(sampler_info, image.sampler));
         VVK_CHECK_ACT(break, image.mem.GetMemoryFdKHR(&image.fd));
 
-        // Populate the DRM metadata so VulkanExSwapchain → ExHandle (and
+        // Populate the DRM metadata so LocalExSwapchain → ExHandle (and
         // eventually the waywallen-host process) can forward it to external
         // consumers without re-querying Vulkan.
         VkImageSubresource subres {

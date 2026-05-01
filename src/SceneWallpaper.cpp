@@ -22,6 +22,8 @@
 #include "VulkanRender/SceneToRenderGraph.hpp"
 #include "VulkanRender/VulkanRender.hpp"
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 using namespace wallpaper;
 
@@ -129,6 +131,7 @@ public:
         CMD_SET_SPEED,
         CMD_STOP,
         CMD_DRAW,
+        CMD_SWAPCHAIN_READY,
         CMD_NO
     };
     MainHandler& main_handler;
@@ -151,6 +154,7 @@ public:
                 CASE_CMD(SET_SCENE);
                 CASE_CMD(SET_SPEED);
                 CASE_CMD(INIT_VULKAN);
+                CASE_CMD(SWAPCHAIN_READY);
             default: break;
             }
         }
@@ -161,6 +165,7 @@ public:
     bool getDrmRenderNode(uint32_t& major, uint32_t& minor) const {
         return m_render->getDrmRenderNode(major, minor);
     }
+    vulkan::VulkanRender* render() const { return m_render.get(); }
 
     bool renderInited() const { return m_render->inited(); }
 
@@ -224,11 +229,49 @@ private:
     MHANDLER_CMD(INIT_VULKAN) {
         std::shared_ptr<RenderInitInfo> info;
         if (msg->findObject("info", &info)) {
-            m_render->init(*info);
+            m_render->init(std::move(*info));
+
+            // Subscribe to ExSwapchain ready/extent/format changes. The
+            // callback runs on the render thread (sync for Local, from
+            // drainPendingDirective for Bridge); we just relay it as a
+            // CMD_SWAPCHAIN_READY message back to ourselves so the
+            // actual handling happens through the normal looper path.
+            if (auto* sw = m_render->exSwapchain()) {
+                std::weak_ptr<looper::Handler> weak = shared_from_this();
+                sw->setOnReadyChanged([weak](const ExSwapchainReadyEvent& e) {
+                    auto self = weak.lock();
+                    if (!self) return;
+                    auto m = CreateMsgWithCmd(self, CMD::CMD_SWAPCHAIN_READY);
+                    m->setBool("ready", e.ready);
+                    m->setInt32("w", (int32_t)e.width);
+                    m->setInt32("h", (int32_t)e.height);
+                    // Format reaches VulkanRender via ExSwapchain::format()
+                    // directly; no need to round-trip it through this message.
+                    m->post();
+                });
+            }
 
             // inited, callback to laod scene
             main_handler.sendCmdLoadScene();
         }
+    }
+    MHANDLER_CMD(SWAPCHAIN_READY) {
+        bool ready = false;
+        msg->findBool("ready", &ready);
+        if (!ready) {
+            frame_timer.Stop();
+            return;
+        }
+        int32_t w = 0, h = 0;
+        msg->findInt32("w", &w);
+        msg->findInt32("h", &h);
+        bool extent_changed = m_render->onSwapchainReady((unsigned)w, (unsigned)h);
+        if (extent_changed && m_scene && m_rg) {
+            m_render->clearLastRenderGraph();
+            m_render->compileRenderGraph(*m_scene, *m_rg);
+            m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+        }
+        frame_timer.Run();
     }
 
 public:
@@ -267,10 +310,11 @@ bool SceneWallpaper::inited() const { return m_main_handler->inited(); }
 
 bool SceneWallpaper::init() { return m_main_handler->init(); }
 
-void SceneWallpaper::initVulkan(const RenderInitInfo& info) {
-    m_offscreen                             = info.offscreen;
-    std::shared_ptr<RenderInitInfo> sp_info = std::make_shared<RenderInitInfo>(info);
-    auto                            msg =
+void SceneWallpaper::initVulkan(RenderInitInfo info) {
+    m_offscreen = info.offscreen;
+    std::shared_ptr<RenderInitInfo> sp_info =
+        std::make_shared<RenderInitInfo>(std::move(info));
+    auto msg =
         CreateMsgWithCmd(m_main_handler->renderHandler(), RenderHandler::CMD::CMD_INIT_VULKAN);
     msg->setObject("info", sp_info);
     msg->post();
@@ -317,6 +361,39 @@ bool SceneWallpaper::getDrmRenderNode(uint32_t& out_major,
                                       uint32_t& out_minor) const {
     return m_main_handler->renderHandler()->getDrmRenderNode(out_major,
                                                               out_minor);
+}
+
+bool SceneWallpaper::waitVulkanInited(uint32_t timeout_ms) {
+    using clock = std::chrono::steady_clock;
+    auto deadline = clock::now() + std::chrono::milliseconds(timeout_ms);
+    auto rh = m_main_handler->renderHandler();
+    while (clock::now() < deadline) {
+        if (rh->renderInited()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return rh->renderInited();
+}
+
+VkInstance SceneWallpaper::vkInstance() const {
+    return m_main_handler->renderHandler()->render()->vkInstance();
+}
+VkPhysicalDevice SceneWallpaper::vkPhysicalDevice() const {
+    return m_main_handler->renderHandler()->render()->vkPhysicalDevice();
+}
+VkDevice SceneWallpaper::vkDevice() const {
+    return m_main_handler->renderHandler()->render()->vkDevice();
+}
+VkQueue SceneWallpaper::vkGraphicsQueue() const {
+    return m_main_handler->renderHandler()->render()->vkGraphicsQueue();
+}
+uint32_t SceneWallpaper::vkGraphicsQueueFamily() const {
+    return m_main_handler->renderHandler()->render()->vkGraphicsQueueFamily();
+}
+void SceneWallpaper::deviceUuid(uint8_t out[16]) const {
+    m_main_handler->renderHandler()->render()->deviceUuid(out);
+}
+void SceneWallpaper::driverUuid(uint8_t out[16]) const {
+    m_main_handler->renderHandler()->render()->driverUuid(out);
 }
 
 MHANDLER_CMD_IMPL(MainHandler, LOAD_SCENE) {

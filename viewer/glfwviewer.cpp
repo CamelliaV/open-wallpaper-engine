@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     data.psw  = psw;
 
     psw->init();
-    psw->initVulkan(info);
+    psw->initVulkan(std::move(info));
     psw->setPropertyString(wallpaper::PROPERTY_ASSETS, program.get<std::string>(ARG_ASSETS));
     psw->setPropertyString(wallpaper::PROPERTY_SOURCE, program.get<std::string>(ARG_SCENE));
     psw->setPropertyBool(wallpaper::PROPERTY_GRAPHIVZ, program.get<bool>(OPT_GRAPHVIZ));

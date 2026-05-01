@@ -2,6 +2,7 @@
 #include "Vulkan/Shader.hpp"
 #include "Resource.hpp"
 #include "PassCommon.hpp"
+#include "Utils/Logging.h"
 
 using namespace wallpaper::vulkan;
 
@@ -24,9 +25,18 @@ layout(location = 0) out vec4 out_FragColor;
 // 0 is global ublock
 layout(binding = 1) uniform sampler2D u_Texture;
 
+// The present buffer's fourcc may be either an alpha variant (ABGR/ARGB)
+// or an "X" variant (XBGR/XRGB). The X variants reserve a 4th byte but
+// the consumer treats it as 1.0 unconditionally. Render targets cannot
+// use non-identity component swizzle in Vulkan, so we normalize alpha
+// here in the shader: force fully opaque output regardless of what the
+// scene render target sampled into the alpha channel. This makes the
+// producer-side output identical in both fourcc families and removes
+// the need to rebuild FinPass when the bridge re-negotiates within the
+// same VkFormat (e.g. ABGR8888 ↔ XBGR8888 both map to R8G8B8A8_UNORM).
 void main()
 {
-	out_FragColor = texture(u_Texture, v_Texcoord);
+	out_FragColor = vec4(texture(u_Texture, v_Texcoord).rgb, 1.0);
 }
 )";
 
@@ -91,6 +101,68 @@ void FinPass::setPresentLayout(VkImageLayout layout) { m_desc.present_layout = l
 void FinPass::setPresentFormat(VkFormat format) { m_desc.present_format = format; }
 void FinPass::setPresentQueueIndex(uint32_t i) { m_desc.present_queue_index = i; }
 
+bool FinPass::buildPresentPipeline(const Device& device) {
+    if (!m_resources_ready) return false;
+    if (m_desc.present_format == VK_FORMAT_UNDEFINED) return false;
+    if (m_vert_spv.empty() || m_frag_spv.empty()) {
+        LOG_ERROR("FinPass: shader bytecode missing (vert=%zu frag=%zu)",
+                  m_vert_spv.size(), m_frag_spv.size());
+        return false;
+    }
+
+    auto opt = CreateRenderPass(device.handle(), m_desc.present_format, m_desc.present_layout);
+    if (! opt.has_value()) {
+        LOG_ERROR("FinPass: CreateRenderPass failed (format=%d layout=%d)",
+                  (int)m_desc.present_format, (int)m_desc.present_layout);
+        return false;
+    }
+    auto pass = std::move(opt.value());
+
+    GraphicsPipeline pipeline;
+    pipeline.toDefault();
+    pipeline.addDescriptorSetInfo(spanone { m_descriptor_info })
+        .setTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
+        .addInputBindingDescription(spanone { m_bind_description })
+        .addInputAttributeDescription(m_attr_descriptions);
+
+    // Pipeline takes Uni_ShaderSpv by &&, so we can't share cached
+    // bytecode across builds via move. Wrap the cached SPIR-V into fresh
+    // ShaderSpv objects each rebuild — bytes are copied, not the
+    // VkShaderModule (the pipeline owns the module after create).
+    auto vert_spv  = std::make_unique<ShaderSpv>();
+    vert_spv->stage = ShaderType::VERTEX;
+    vert_spv->spirv = m_vert_spv;
+    auto frag_spv  = std::make_unique<ShaderSpv>();
+    frag_spv->stage = ShaderType::FRAGMENT;
+    frag_spv->spirv = m_frag_spv;
+    pipeline.addStage(std::move(vert_spv));
+    pipeline.addStage(std::move(frag_spv));
+
+    PipelineParameters fresh;
+    if (! pipeline.create(device, pass, fresh)) {
+        LOG_ERROR("FinPass: GraphicsPipeline::create failed (format=%d)",
+                  (int)m_desc.present_format);
+        return false;
+    }
+    m_desc.pipeline = std::move(fresh);
+    return true;
+}
+
+bool FinPass::rebuildPresent(const Device& device) {
+    if (!m_resources_ready) return false;
+    // Reset old pipeline + renderpass first so vvk RAII destroys them
+    // before we allocate the new ones (avoids hitting any per-device
+    // descriptor / pipeline-cache caps).
+    m_desc.pipeline = PipelineParameters {};
+    // Drop prepared state up-front: if the build fails we leave the pass
+    // in a consistent "not prepared, no pipeline" state so any downstream
+    // `if (prepared()) execute()` cannot deref the cleared pipeline.
+    setPrepared(false);
+    bool ok = buildPresentPipeline(device);
+    setPrepared(ok);
+    return ok;
+}
+
 void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
     {
         auto tex_name = std::string(m_desc.result);
@@ -101,7 +173,6 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr
             m_desc.vk_result = opt.value();
         }
     }
-    std::vector<Uni_ShaderSpv> spvs;
     {
         ShaderCompOpt opt;
         opt.client_ver             = glslang::EShTargetVulkan_1_1;
@@ -112,15 +183,33 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr
         std::array<ShaderCompUnit, 2> units;
         units[0] = ShaderCompUnit { .stage = EShLangVertex, .src = std::string(vert_code) };
         units[1] = ShaderCompUnit { .stage = EShLangFragment, .src = std::string(frag_code) };
+        std::vector<Uni_ShaderSpv> spvs;
         CompileAndLinkShaderUnits(units, opt, spvs);
+        // Cache the SPIR-V bytes so rebuildPresent can build new
+        // pipelines without re-running glslang (which requires the
+        // process-global glslang::InitializeProcess scope set up by
+        // VulkanRender::compileRenderGraph).
+        m_vert_spv.clear();
+        m_frag_spv.clear();
+        for (auto& spv : spvs) {
+            if (!spv) continue;
+            switch (spv->stage) {
+            case ShaderType::VERTEX:   m_vert_spv = spv->spirv; break;
+            case ShaderType::FRAGMENT: m_frag_spv = spv->spirv; break;
+            default: break;
+            }
+        }
+        if (m_vert_spv.empty() || m_frag_spv.empty()) {
+            LOG_ERROR("FinPass: shader compile produced no SPIR-V (vert=%zu frag=%zu)",
+                      m_vert_spv.size(), m_frag_spv.size());
+            return;
+        }
     }
 
-    VkVertexInputBindingDescription                bind_description;
-    std::vector<VkVertexInputAttributeDescription> attr_descriptions;
     {
-        bind_description.stride    = (sizeof(VertexInput));
-        bind_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        bind_description.binding   = (0);
+        m_bind_description.stride    = (sizeof(VertexInput));
+        m_bind_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        m_bind_description.binding   = (0);
         VkVertexInputAttributeDescription attr_pos, attr_color;
         attr_pos.binding    = (0);
         attr_pos.location   = (0);
@@ -131,54 +220,55 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr
         attr_color.format   = VK_FORMAT_R32G32_SFLOAT;
         attr_color.offset   = (offsetof(VertexInput, color));
 
-        attr_descriptions.push_back(attr_pos);
-        attr_descriptions.push_back(attr_color);
+        m_attr_descriptions.clear();
+        m_attr_descriptions.push_back(attr_pos);
+        m_attr_descriptions.push_back(attr_color);
 
         {
             auto& buf = m_desc.vertex_buf;
+            // Guard against re-entrant prepare() (e.g. scene reload without
+            // an intervening destory()). StagingBufferRef::operator bool
+            // checks the underlying VmaVirtualAllocation; release the old
+            // sub-ref before grabbing a fresh one.
+            if (buf) {
+                rr.vertex_buf->unallocateSubRef(buf);
+                buf = StagingBufferRef {};
+            }
             rr.vertex_buf->allocateSubRef(sizeof(decltype(vertex_input)), buf);
             rr.vertex_buf->writeToBuf(buf, { (uint8_t*)vertex_input.data(), buf.size });
         }
     }
-    DescriptorSetInfo descriptor_info;
     {
-        descriptor_info.push_descriptor = true;
-        descriptor_info.bindings.resize(1);
-        auto& binding           = descriptor_info.bindings.back();
+        m_descriptor_info = DescriptorSetInfo {};
+        m_descriptor_info.push_descriptor = true;
+        m_descriptor_info.bindings.resize(1);
+        auto& binding           = m_descriptor_info.bindings.back();
         binding.binding         = (1);
         binding.descriptorCount = (1);
         binding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         binding.stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
-    {
-        auto opt = CreateRenderPass(device.handle(), m_desc.present_format, m_desc.present_layout);
-        if (! opt.has_value()) return;
-        auto pass = std::move(opt.value());
-
-        descriptor_info.push_descriptor = true;
-        GraphicsPipeline pipeline;
-        pipeline.toDefault();
-        pipeline.addDescriptorSetInfo(spanone { descriptor_info })
-            .setTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
-            .addInputBindingDescription(spanone { bind_description })
-            .addInputAttributeDescription(attr_descriptions);
-        for (auto& spv : spvs) pipeline.addStage(std::move(spv));
-
-        if (! pipeline.create(device, pass, m_desc.pipeline)) return;
-    }
-    /*
-    if(m_desc.present_layout == vk::ImageLayout::ePresentSrcKHR || m_desc.present_layout ==
-    vk::ImageLayout::eSharedPresentKHR) m_desc.render_layout = m_desc.present_layout; else
-    m_desc.render_layout = vk::ImageLayout::eColorAttachmentOptimal;
-    */
 
     m_desc.render_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
     {
         auto& sc           = scene.clearColor;
         m_desc.clear_value = VkClearValue { { sc[0], sc[1], sc[2], 1.0f } };
     }
-    setPrepared();
+
+    m_resources_ready = true;
+
+    // Build the renderpass+pipeline if the swapchain has already
+    // resolved a present format. Otherwise stay un-prepared and wait
+    // for the first rebuildPresent() — VulkanRender::drawFrameOffscreen
+    // calls it once the swapchain's negotiated format is known.
+    if (m_desc.present_format != VK_FORMAT_UNDEFINED) {
+        if (buildPresentPipeline(device)) {
+            setPrepared();
+        } else {
+            LOG_ERROR("FinPass: initial buildPresentPipeline failed (format=%d)",
+                      (int)m_desc.present_format);
+        }
+    }
 }
 
 void FinPass::execute(const Device& device, RenderingResources& rr) {
@@ -188,10 +278,9 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
     VkImageSubresourceRange base_srang {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel   = 0,
-        .levelCount     = VK_REMAINING_ARRAY_LAYERS,
+        .levelCount     = VK_REMAINING_MIP_LEVELS,
         .baseArrayLayer = 0,
-        .layerCount     = VK_REMAINING_MIP_LEVELS,
-
+        .layerCount     = VK_REMAINING_ARRAY_LAYERS,
     };
     {
         m_desc.fb = {};

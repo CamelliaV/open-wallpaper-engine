@@ -12,7 +12,7 @@
 #include "Vulkan/Device.hpp"
 #include "Vulkan/TextureCache.hpp"
 #include "Vulkan/Swapchain.hpp"
-#include "Vulkan/VulkanExSwapchain.hpp"
+#include "Vulkan/LocalExSwapchain.hpp"
 
 #include "VulkanPass.hpp"
 #include "PrePass.hpp"
@@ -74,6 +74,7 @@ struct VulkanRender::Impl {
     void drawFrameSwapchain();
     void drawFrameOffscreen();
     void setRenderTargetSize(Scene&, rg::RenderGraph&);
+    bool onSwapchainReady(unsigned width, unsigned height);
 
     Instance                m_instance;
     std::unique_ptr<Device> m_device;
@@ -95,14 +96,15 @@ struct VulkanRender::Impl {
     bool m_inited { false };
     bool m_pass_loaded { false };
 
-    std::unique_ptr<VulkanExSwapchain> m_ex_swapchain;
-    RenderingResources                 m_rendering_resources;
+    std::unique_ptr<ExSwapchain> m_ex_swapchain;
+    RenderingResources           m_rendering_resources;
 
-    // Exported dma_fence sync_file fd for the most recently completed
-    // offscreen frame. Written by drawFrameOffscreen(), consumed by
-    // takeLastFrameSyncFd() (called from the host's redraw callback).
-    // -1 means no frame has been exported yet. Ownership: the taker.
-    std::atomic<int> m_last_sync_fd { -1 };
+    // Format the FinPass renderpass+pipeline was last built for. Compared
+    // against m_ex_swapchain->format() at the head of drawFrameOffscreen
+    // — mismatch triggers a FinPass rebuild. VK_FORMAT_UNDEFINED means
+    // FinPass has no pipeline yet (BridgeExSwapchain hasn't received a
+    // directive).
+    VkFormat m_finpass_format_built { VK_FORMAT_UNDEFINED };
 
     std::vector<VulkanPass*> m_passes;
 };
@@ -113,7 +115,7 @@ VulkanRender::~VulkanRender() {};
 bool VulkanRender::inited() const { return pImpl->m_inited; }
 
 int VulkanRender::takeLastFrameSyncFd() {
-    return pImpl->m_last_sync_fd.exchange(-1, std::memory_order_acq_rel);
+    return pImpl->m_ex_swapchain ? pImpl->m_ex_swapchain->takeLastFrameSyncFd() : -1;
 }
 
 bool VulkanRender::getDrmRenderNode(uint32_t& out_major,
@@ -136,7 +138,56 @@ bool VulkanRender::getDrmRenderNode(uint32_t& out_major,
     return true;
 }
 
-bool VulkanRender::init(RenderInitInfo info) { return pImpl->init(info); }
+VkInstance VulkanRender::vkInstance() const {
+    if (!pImpl->m_inited) return VK_NULL_HANDLE;
+    return *pImpl->m_instance.inst();
+}
+
+VkPhysicalDevice VulkanRender::vkPhysicalDevice() const {
+    if (!pImpl->m_inited || !pImpl->m_device) return VK_NULL_HANDLE;
+    return *pImpl->m_device->gpu();
+}
+
+VkDevice VulkanRender::vkDevice() const {
+    if (!pImpl->m_inited || !pImpl->m_device) return VK_NULL_HANDLE;
+    return *pImpl->m_device->handle();
+}
+
+VkQueue VulkanRender::vkGraphicsQueue() const {
+    if (!pImpl->m_inited || !pImpl->m_device) return VK_NULL_HANDLE;
+    return *pImpl->m_device->graphics_queue().handle;
+}
+
+uint32_t VulkanRender::vkGraphicsQueueFamily() const {
+    if (!pImpl->m_inited || !pImpl->m_device) return 0;
+    return pImpl->m_device->graphics_queue().family_index;
+}
+
+void VulkanRender::deviceUuid(uint8_t out[16]) const {
+    std::memset(out, 0, 16);
+    if (!pImpl->m_inited || !pImpl->m_device) return;
+    VkPhysicalDeviceIDPropertiesKHR id {};
+    id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2KHR props {};
+    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+    props.pNext = &id;
+    pImpl->m_device->gpu().GetProperties2KHR(props);
+    std::memcpy(out, id.deviceUUID, 16);
+}
+
+void VulkanRender::driverUuid(uint8_t out[16]) const {
+    std::memset(out, 0, 16);
+    if (!pImpl->m_inited || !pImpl->m_device) return;
+    VkPhysicalDeviceIDPropertiesKHR id {};
+    id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR;
+    VkPhysicalDeviceProperties2KHR props {};
+    props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+    props.pNext = &id;
+    pImpl->m_device->gpu().GetProperties2KHR(props);
+    std::memcpy(out, id.driverUUID, 16);
+}
+
+bool VulkanRender::init(RenderInitInfo info) { return pImpl->init(std::move(info)); }
 void VulkanRender::destroy() { pImpl->destroy(); }
 void VulkanRender::drawFrame(Scene& scene) { pImpl->drawFrame(scene); };
 void VulkanRender::clearLastRenderGraph() { pImpl->clearLastRenderGraph(); };
@@ -146,6 +197,10 @@ void VulkanRender::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
 void VulkanRender::UpdateCameraFillMode(Scene& scene, wallpaper::FillMode fill) {
     pImpl->UpdateCameraFillMode(scene, fill);
 };
+
+bool VulkanRender::onSwapchainReady(unsigned width, unsigned height) {
+    return pImpl->onSwapchainReady(width, height);
+}
 
 wallpaper::ExSwapchain* VulkanRender::exSwapchain() const { return pImpl->m_ex_swapchain.get(); };
 
@@ -177,6 +232,9 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
         // strictly required on the offscreen path; if a driver lacks them
         // we fail fast in Device::CheckGPU.
         device_exts.push_back({ true, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME });
+        // Required by VK_EXT_image_drm_format_modifier on Vulkan 1.1 (promoted
+        // to core in 1.2). Validation layer rejects the device otherwise.
+        device_exts.push_back({ true, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME });
         device_exts.push_back({ true, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME });
         device_exts.push_back({ true, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME });
     }
@@ -220,12 +278,27 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
     }
 
     if (info.offscreen) {
-        m_ex_swapchain = CreateExSwapchain(*m_device,
-                                           extent.width,
-                                           extent.height,
-                                           (info.offscreen_tiling == TexTiling::OPTIMAL
-                                                ? VK_IMAGE_TILING_OPTIMAL
-                                                : VK_IMAGE_TILING_LINEAR));
+        if (info.ex_swapchain_factory) {
+            RenderInitInfo::ExSwapchainHandles h {
+                *m_instance.inst(),
+                *m_device->gpu(),
+                *m_device->handle(),
+                *m_device->graphics_queue().handle,
+                m_device->graphics_queue().family_index,
+            };
+            m_ex_swapchain = info.ex_swapchain_factory(h);
+            if (!m_ex_swapchain) {
+                LOG_ERROR("ex_swapchain_factory returned null");
+                return false;
+            }
+        } else {
+            m_ex_swapchain = CreateLocalExSwapchain(*m_device,
+                                                    extent.width,
+                                                    extent.height,
+                                                    (info.offscreen_tiling == TexTiling::OPTIMAL
+                                                         ? VK_IMAGE_TILING_OPTIMAL
+                                                         : VK_IMAGE_TILING_LINEAR));
+        }
         m_with_surface = false;
     }
 
@@ -240,20 +313,26 @@ bool VulkanRender::Impl::initRes() {
     m_prepass = std::make_unique<PrePass>(PrePass::Desc {});
     m_finpass = std::make_unique<FinPass>(FinPass::Desc {});
     if (m_with_surface) {
+        // Surface mode FinPass uses the swapchain's negotiated format
+        // for the lifetime of this VulkanRender instance. Swapchain
+        // recreation (resize) tears down VulkanRender and re-inits, so
+        // there is no in-place reformat path here — `m_finpass_format_built`
+        // stays UNDEFINED and is never read in `drawFrameSwapchain`.
         m_finpass->setPresentFormat(m_device->swapchain().format());
         m_finpass->setPresentQueueIndex(m_device->present_queue().family_index);
         m_finpass->setPresentLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     } else {
+        // For offscreen, the present format is whatever the ExSwapchain
+        // resolved through negotiation. LocalExSwapchain returns a fixed
+        // format here; BridgeExSwapchain returns VK_FORMAT_UNDEFINED
+        // until the first directive lands — in that case prepare() skips
+        // the pipeline build and drawFrameOffscreen rebuilds FinPass on
+        // the first frame after format becomes known.
         m_finpass->setPresentFormat(m_ex_swapchain->format());
         m_finpass->setPresentLayout(VK_IMAGE_LAYOUT_GENERAL);
         m_finpass->setPresentQueueIndex(VK_QUEUE_FAMILY_EXTERNAL);
+        m_finpass_format_built = m_ex_swapchain->format();
     }
-    /*
-    m_testpass = std::make_unique<FinPass>(FinPass::Desc{});
-    m_testpass->setPresentFormat(m_ex_swapchain->format());
-    m_testpass->setPresentQueueIndex(m_device->graphics_queue().family_index);
-    m_testpass->setPresentLayout(vk::ImageLayout::ePresentSrcKHR);
-    */
 
     m_vertex_buf = std::make_unique<StagingBuffer>(*m_device,
                                                    2 * 1024 * 1024,
@@ -342,7 +421,6 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
 
 void VulkanRender::Impl::DestroyRenderingResource(RenderingResources& rr) {}
 
-// VulkanExSwapchain* VulkanRender::exSwapchain() const { return m_ex_swapchain.get(); }
 
 void VulkanRender::Impl::drawFrame(Scene& scene) {
     if (! (m_inited && m_pass_loaded)) return;
@@ -429,8 +507,38 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 }
 void VulkanRender::Impl::drawFrameOffscreen() {
-    RenderingResources& rr    = m_rendering_resources;
-    ImageParameters     image = m_ex_swapchain->GetInprogressImage();
+    if (!m_ex_swapchain) return;
+
+    // Drain any pending bridge directive *before* committing to a slot.
+    // Previous frame's GPU work has fenced at the tail of the last
+    // drawFrameOffscreen, so the cmd pool is idle — safe to swap the
+    // slot pool / destroy the old pipeline here.
+    m_ex_swapchain->poll();
+
+    // Format may have flipped during poll(). Rebuild FinPass *before*
+    // acquiring a slot — BridgeExSwapchain has no cancel path, so a
+    // post-acquire failure would leak the slot (no submitRendered would
+    // ever pair with it).
+    {
+        VkFormat current_fmt = m_ex_swapchain->format();
+        if (current_fmt != VK_FORMAT_UNDEFINED && current_fmt != m_finpass_format_built) {
+            m_finpass->setPresentFormat(current_fmt);
+            if (!m_finpass->rebuildPresent(*m_device)) {
+                LOG_ERROR("FinPass rebuildPresent failed for format %d", (int)current_fmt);
+                return;
+            }
+            m_finpass_format_built = current_fmt;
+        }
+    }
+    if (m_finpass_format_built == VK_FORMAT_UNDEFINED || !m_finpass->prepared()) {
+        return; // FinPass not yet ready; skip this tick
+    }
+
+    RenderingResources& rr = m_rendering_resources;
+    ImageParameters     image;
+    if (!m_ex_swapchain->acquireRenderTarget(image)) {
+        return;
+    }
 
     m_finpass->setPresent(image);
 
@@ -462,25 +570,41 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 
-    // Export the signaled semaphore as a dma_fence sync_file fd. The
-    // export resets the semaphore's payload, so the next submit can
-    // signal it again. Stored in an atomic slot that the host reads in
-    // send_frame_ready_locked via takeLastFrameSyncFd().
+    // Export the signaled semaphore as a dma_fence sync_file fd and hand
+    // it to the swapchain along with the slot. LocalExSwapchain stashes
+    // it for the host's takeLastFrameSyncFd; BridgeExSwapchain forwards
+    // it to ww_bridge_pool_submit_slot.
+    int sync_fd = -1;
     {
-        int fd = -1;
         VkSemaphoreGetFdInfoKHR gi {
             .sType      = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
             .pNext      = nullptr,
             .semaphore  = *rr.sem_export,
             .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT_KHR,
         };
-        if (m_device->handle().GetSemaphoreFdKHR(gi, &fd) == VK_SUCCESS && fd >= 0) {
-            int old = m_last_sync_fd.exchange(fd, std::memory_order_acq_rel);
-            if (old >= 0) ::close(old);
+        if (m_device->handle().GetSemaphoreFdKHR(gi, &sync_fd) != VK_SUCCESS) {
+            sync_fd = -1;
         }
     }
 
-    m_ex_swapchain->renderFrame();
+    m_ex_swapchain->submitRendered(sync_fd);
+}
+
+bool VulkanRender::Impl::onSwapchainReady(unsigned width, unsigned height) {
+    if (!m_inited || !m_device) return false;
+    auto& cur = m_device->out_extent();
+    bool extent_changed = (width != cur.width) || (height != cur.height);
+    if (!extent_changed) {
+        // Format-only changes flow through ExSwapchain::format() and
+        // are handled by drawFrameOffscreen's head check.
+        return false;
+    }
+    // Drain GPU work for the previous extent's resources before tearing
+    // down the texture cache + render passes inside compileRenderGraph
+    // (which the caller will run next).
+    VVK_CHECK(m_device->handle().WaitIdle());
+    m_device->set_out_extent(VkExtent2D { width, height });
+    return true;
 }
 
 void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) {

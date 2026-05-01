@@ -1,7 +1,9 @@
 #pragma once
+#include <cstdint>
 #include <memory>
 #include <string_view>
 #include <functional>
+#include <vulkan/vulkan.h>
 #include "Type.hpp"
 #include "Swapchain/ExSwapchain.hpp"
 
@@ -32,7 +34,7 @@ public:
     bool init();
     bool inited() const;
 
-    void initVulkan(const RenderInitInfo&);
+    void initVulkan(RenderInitInfo);
 
     void play();
     void pause();
@@ -60,6 +62,26 @@ public:
     // event so the daemon can match the renderer's GPU against each
     // display's GPU.
     bool getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const;
+
+    // Block until VulkanRender::init has finished, with a wall-clock
+    // timeout. Returns true if init completed; false on timeout. Used
+    // by the waywallen-wescene host to gate `vkInstance()` etc. on the
+    // looper's INIT_VULKAN handler.
+    bool waitVulkanInited(uint32_t timeout_ms);
+
+    // Raw Vulkan handles for IPC backends that need to share the device
+    // with another library (e.g. waywallen-bridge pool). Valid after
+    // `waitVulkanInited()` returns true; nullptr / 0 otherwise.
+    VkInstance       vkInstance() const;
+    VkPhysicalDevice vkPhysicalDevice() const;
+    VkDevice         vkDevice() const;
+    VkQueue          vkGraphicsQueue() const;
+    uint32_t         vkGraphicsQueueFamily() const;
+
+    // 16-byte UUIDs from VkPhysicalDeviceIDProperties; zero-filled if
+    // the extension is unavailable.
+    void deviceUuid(uint8_t out[16]) const;
+    void driverUuid(uint8_t out[16]) const;
 
 private:
     bool m_inited { false };

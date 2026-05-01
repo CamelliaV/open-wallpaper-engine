@@ -4,6 +4,7 @@ find_package(waywallen-bridge REQUIRED)
 
 add_executable(waywallen-wescene-renderer
     main.cpp
+    BridgeExSwapchain.cpp
 )
 
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
@@ -11,6 +12,8 @@ target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
 target_include_directories(waywallen-wescene-renderer
     PRIVATE
         ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/Vulkan/include
+        ${CMAKE_SOURCE_DIR}/src/VulkanRender/include
         ${CMAKE_SOURCE_DIR}/third_party
 )
 
