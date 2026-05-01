@@ -240,12 +240,10 @@ int main(int argc, char** argv) {
         pi.drm_render_major      = 0;
         pi.drm_render_minor      = 0;
         pi.drm_render_fd         = -1; // bridge opens its own
-        // FinPass uses vkCmdBlitImage to write the slot — needs
-        // TRANSFER_DST. Keeping TRANSFER_SRC matches the consumer's
-        // shadow-import usage so the modifier sub-layouts align. (Same
-        // as bridge's default; passed explicitly to document intent.)
-        pi.image_usage_flags     = VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                                 | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        // FinPass uses vkCmdBlitImage to write the slot — needs only
+        // TRANSFER_DST. Bridge OR-s in TRANSFER_SRC unconditionally so
+        // the consumer-side shadow-import sub-layout matches.
+        pi.image_usage_flags     = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool);
             rc != 0) {
             std::fprintf(stderr,
