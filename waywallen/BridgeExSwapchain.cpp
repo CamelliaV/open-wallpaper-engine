@@ -24,11 +24,19 @@ namespace
 // preserves logical RGBA channels regardless, and the wallpaper scene
 // renders alpha=1.0 anyway, so X is folded onto the A variant.
 VkFormat fourcc_to_vk_format(uint32_t fourcc) {
+    // Mirrors waywallen/bridge/src/pool_vulkan.c::s_vk_fourcc_table and
+    // waywallen-display/src/backend_vulkan.c::s_vk_fourcc_table — the
+    // three sides must agree on the same advertised set since the
+    // daemon negotiates by exact fourcc match.
     switch (fourcc) {
     case WW_DRM_FORMAT_ABGR8888: return VK_FORMAT_R8G8B8A8_UNORM;
     case WW_DRM_FORMAT_XBGR8888: return VK_FORMAT_R8G8B8A8_UNORM;
     case WW_DRM_FORMAT_ARGB8888: return VK_FORMAT_B8G8R8A8_UNORM;
     case WW_DRM_FORMAT_XRGB8888: return VK_FORMAT_B8G8R8A8_UNORM;
+    case WW_DRM_FORMAT_RGBA8888: return VK_FORMAT_R8G8B8A8_UNORM;
+    case WW_DRM_FORMAT_BGRA8888: return VK_FORMAT_B8G8R8A8_UNORM;
+    case WW_DRM_FORMAT_RGBX8888: return VK_FORMAT_R8G8B8A8_UNORM;
+    case WW_DRM_FORMAT_BGRX8888: return VK_FORMAT_B8G8R8A8_UNORM;
     default:                     return VK_FORMAT_UNDEFINED;
     }
 }
