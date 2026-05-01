@@ -88,6 +88,13 @@ public:
     unsigned height() const override { return m_extent.height; }
     VkFormat format() const override { return VK_FORMAT_R8G8B8A8_UNORM; }
 
+    // LocalExSwapchain's images are GENERAL throughout — see CreateExTex
+    // which transitions to GENERAL once after allocation; the consumer
+    // (host process mmap) doesn't care about Vulkan layout.
+    VkImageLayout producerOutputLayout() const override {
+        return VK_IMAGE_LAYOUT_GENERAL;
+    }
+
     // Local backend is ready as soon as the constructor returns —
     // images are pre-allocated and the format is fixed.
     bool ready() const override { return true; }

@@ -40,25 +40,232 @@ VkFormat fourcc_to_vk_format(uint32_t fourcc) {
 
 
 BridgeExSwapchain::BridgeExSwapchain(ww_pool_t* pool, int sock,
-                                     VkDevice device,
-                                     PFN_vkCreateImageView pfn_create_view,
-                                     PFN_vkDestroyImageView pfn_destroy_view)
+                                     VkPhysicalDevice physical_device,
+                                     VkDevice         device,
+                                     VkQueue          graphics_queue,
+                                     uint32_t         graphics_queue_family)
     : m_pool(pool),
       m_sock(sock),
+      m_physical_device(physical_device),
       m_device(device),
-      m_pfn_create_view(pfn_create_view),
-      m_pfn_destroy_view(pfn_destroy_view) {}
-
-BridgeExSwapchain::~BridgeExSwapchain() {
-    destroyViews();
+      m_queue(graphics_queue),
+      m_queue_family(graphics_queue_family) {
+    if (!createCopyResources()) {
+        std::fprintf(stderr,
+                     "BridgeExSwapchain: copy resource init failed; swapchain "
+                     "will report not-ready forever\n");
+    }
 }
 
-void BridgeExSwapchain::destroyViews() {
-    if (!m_pfn_destroy_view || m_device == VK_NULL_HANDLE) return;
-    for (auto& v : m_views) {
-        if (v != VK_NULL_HANDLE) {
-            m_pfn_destroy_view(m_device, v, nullptr);
-            v = VK_NULL_HANDLE;
+BridgeExSwapchain::~BridgeExSwapchain() {
+    if (m_device != VK_NULL_HANDLE) {
+        // Drain any in-flight copy before tearing down.
+        if (m_copy_fence_inflight && m_copy_fence != VK_NULL_HANDLE) {
+            vkWaitForFences(m_device, 1, &m_copy_fence, VK_TRUE, UINT64_MAX);
+            m_copy_fence_inflight = false;
+        }
+    }
+    destroyIntermediates();
+    destroyCopyResources();
+}
+
+uint32_t BridgeExSwapchain::pickMemoryType(uint32_t type_bits,
+                                           VkMemoryPropertyFlags want) const {
+    VkPhysicalDeviceMemoryProperties mp {};
+    vkGetPhysicalDeviceMemoryProperties(m_physical_device, &mp);
+    for (uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
+        if (!(type_bits & (1u << i))) continue;
+        if ((mp.memoryTypes[i].propertyFlags & want) == want) return i;
+    }
+    return UINT32_MAX;
+}
+
+bool BridgeExSwapchain::createCopyResources() {
+    if (m_resources_ready) return true;
+    if (m_device == VK_NULL_HANDLE) return false;
+
+    // Load KHR extension entry points. Required: VK_KHR_external_semaphore_fd
+    // (already pulled in via VulkanRender's device_exts).
+    m_pfn_import_sem = reinterpret_cast<PFN_vkImportSemaphoreFdKHR>(
+        vkGetDeviceProcAddr(m_device, "vkImportSemaphoreFdKHR"));
+    m_pfn_get_sem_fd = reinterpret_cast<PFN_vkGetSemaphoreFdKHR>(
+        vkGetDeviceProcAddr(m_device, "vkGetSemaphoreFdKHR"));
+    if (!m_pfn_import_sem || !m_pfn_get_sem_fd) {
+        std::fprintf(stderr,
+                     "BridgeExSwapchain: VK_KHR_external_semaphore_fd entry "
+                     "points not available (import=%p get=%p)\n",
+                     (void*)m_pfn_import_sem, (void*)m_pfn_get_sem_fd);
+        return false;
+    }
+
+    {
+        VkCommandPoolCreateInfo ci {
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .pNext            = nullptr,
+            .flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = m_queue_family,
+        };
+        if (vkCreateCommandPool(m_device, &ci, nullptr, &m_cmd_pool) != VK_SUCCESS) {
+            std::fprintf(stderr, "BridgeExSwapchain: vkCreateCommandPool failed\n");
+            return false;
+        }
+    }
+    {
+        VkCommandBufferAllocateInfo ai {
+            .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext              = nullptr,
+            .commandPool        = m_cmd_pool,
+            .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+        if (vkAllocateCommandBuffers(m_device, &ai, &m_cmd) != VK_SUCCESS) {
+            std::fprintf(stderr, "BridgeExSwapchain: vkAllocateCommandBuffers failed\n");
+            return false;
+        }
+    }
+    {
+        VkFenceCreateInfo ci {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+        };
+        if (vkCreateFence(m_device, &ci, nullptr, &m_copy_fence) != VK_SUCCESS) {
+            std::fprintf(stderr, "BridgeExSwapchain: vkCreateFence failed\n");
+            return false;
+        }
+    }
+    {
+        // Importable SYNC_FD semaphore — payload comes from the
+        // producer's sync_fd via vkImportSemaphoreFdKHR.
+        VkExportSemaphoreCreateInfo exp {
+            .sType       = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+            .pNext       = nullptr,
+            .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT_KHR,
+        };
+        VkSemaphoreCreateInfo ci {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = &exp,
+            .flags = 0,
+        };
+        if (vkCreateSemaphore(m_device, &ci, nullptr, &m_wait_sem) != VK_SUCCESS) {
+            std::fprintf(stderr, "BridgeExSwapchain: vkCreateSemaphore (wait) failed\n");
+            return false;
+        }
+        if (vkCreateSemaphore(m_device, &ci, nullptr, &m_signal_sem) != VK_SUCCESS) {
+            std::fprintf(stderr, "BridgeExSwapchain: vkCreateSemaphore (signal) failed\n");
+            return false;
+        }
+    }
+
+    m_resources_ready = true;
+    return true;
+}
+
+void BridgeExSwapchain::destroyCopyResources() {
+    if (m_device == VK_NULL_HANDLE) return;
+    if (m_signal_sem != VK_NULL_HANDLE) {
+        vkDestroySemaphore(m_device, m_signal_sem, nullptr);
+        m_signal_sem = VK_NULL_HANDLE;
+    }
+    if (m_wait_sem != VK_NULL_HANDLE) {
+        vkDestroySemaphore(m_device, m_wait_sem, nullptr);
+        m_wait_sem = VK_NULL_HANDLE;
+    }
+    if (m_copy_fence != VK_NULL_HANDLE) {
+        vkDestroyFence(m_device, m_copy_fence, nullptr);
+        m_copy_fence = VK_NULL_HANDLE;
+    }
+    if (m_cmd_pool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(m_device, m_cmd_pool, nullptr); // frees m_cmd
+        m_cmd_pool = VK_NULL_HANDLE;
+        m_cmd      = VK_NULL_HANDLE;
+    }
+    m_resources_ready = false;
+}
+
+bool BridgeExSwapchain::createIntermediate(uint32_t slot, uint32_t w, uint32_t h,
+                                           VkFormat fmt) {
+    auto& m = m_intermediates[slot];
+    VkImageCreateInfo ici {
+        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext                 = nullptr,
+        .flags                 = 0,
+        .imageType             = VK_IMAGE_TYPE_2D,
+        .format                = fmt,
+        .extent                = { w, h, 1 },
+        .mipLevels             = 1,
+        .arrayLayers           = 1,
+        .samples               = VK_SAMPLE_COUNT_1_BIT,
+        .tiling                = VK_IMAGE_TILING_OPTIMAL,
+        .usage                 = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                               | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices   = nullptr,
+        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    if (vkCreateImage(m_device, &ici, nullptr, &m.image) != VK_SUCCESS) {
+        std::fprintf(stderr, "BridgeExSwapchain: vkCreateImage(intermediate) failed\n");
+        return false;
+    }
+
+    VkMemoryRequirements mr {};
+    vkGetImageMemoryRequirements(m_device, m.image, &mr);
+    uint32_t type = pickMemoryType(mr.memoryTypeBits,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (type == UINT32_MAX) {
+        std::fprintf(stderr, "BridgeExSwapchain: no device-local memory type\n");
+        return false;
+    }
+    VkMemoryAllocateInfo mai {
+        .sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext           = nullptr,
+        .allocationSize  = mr.size,
+        .memoryTypeIndex = type,
+    };
+    if (vkAllocateMemory(m_device, &mai, nullptr, &m.memory) != VK_SUCCESS) {
+        std::fprintf(stderr, "BridgeExSwapchain: vkAllocateMemory(intermediate) failed\n");
+        return false;
+    }
+    if (vkBindImageMemory(m_device, m.image, m.memory, 0) != VK_SUCCESS) {
+        std::fprintf(stderr, "BridgeExSwapchain: vkBindImageMemory(intermediate) failed\n");
+        return false;
+    }
+
+    VkImageViewCreateInfo vci {
+        .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext    = nullptr,
+        .flags    = 0,
+        .image    = m.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format   = fmt,
+        .components = {
+            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+        },
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+    if (vkCreateImageView(m_device, &vci, nullptr, &m.view) != VK_SUCCESS) {
+        std::fprintf(stderr, "BridgeExSwapchain: vkCreateImageView(intermediate) failed\n");
+        return false;
+    }
+    return true;
+}
+
+void BridgeExSwapchain::destroyIntermediates() {
+    if (m_device == VK_NULL_HANDLE) return;
+    for (auto& m : m_intermediates) {
+        if (m.view != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_device, m.view, nullptr);
+            m.view = VK_NULL_HANDLE;
+        }
+        if (m.image != VK_NULL_HANDLE) {
+            vkDestroyImage(m_device, m.image, nullptr);
+            m.image = VK_NULL_HANDLE;
+        }
+        if (m.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(m_device, m.memory, nullptr);
+            m.memory = VK_NULL_HANDLE;
         }
     }
 }
@@ -128,16 +335,25 @@ int BridgeExSwapchain::applyDirective(const ww_pool_directive_t& directive) {
         return 1;
     }
 
+    if (!m_resources_ready) {
+        std::fprintf(stderr,
+                     "BridgeExSwapchain: copy resources never initialized\n");
+        return 1;
+    }
+
+    // Drain any in-flight copy before tearing down intermediates.
+    if (m_copy_fence_inflight) {
+        vkWaitForFences(m_device, 1, &m_copy_fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(m_device, 1, &m_copy_fence);
+        m_copy_fence_inflight = false;
+    }
+
     // Bridge contract (pool.h apply_directive step 2): the call itself
     // tears down the previous slots, so old `vk_image` handles are
-    // invalidated synchronously. We must destroy our VkImageViews bound
-    // to those VkImages *before* invoking apply_directive — atomic
-    // replacement is not possible.
-    //
-    // GPU work for the previous frame has already fenced inside
-    // VulkanRender::Impl::drawFrameOffscreen (rr.fence_frame.Wait), so
-    // tearing down here cannot UAF a live submit.
-    destroyViews();
+    // invalidated synchronously. Our intermediates are independent of
+    // bridge slots — destroy them only after the per-frame fence has
+    // drained (above), then rebuild for the new geometry.
+    destroyIntermediates();
     m_slot_count   = 0;
     m_next_slot    = 0;
     m_have_pending = false;
@@ -149,8 +365,6 @@ int BridgeExSwapchain::applyDirective(const ww_pool_directive_t& directive) {
 
     int rc = ww_bridge_pool_apply_directive(m_pool, m_sock, &directive);
     if (rc < 0) {
-        // Dry-run failure (bridge already sent bind_failed). Daemon will
-        // re-pick; we stay slot-less until the next directive.
         std::fprintf(stderr,
                      "BridgeExSwapchain: apply_directive dry-run failed: %d\n", rc);
         // m_export_format intentionally untouched — keeps last good state.
@@ -163,39 +377,13 @@ int BridgeExSwapchain::applyDirective(const ww_pool_directive_t& directive) {
     }
 
     for (uint32_t i = 0; i < directive.count; ++i) {
-        ww_pool_slot_t s {};
-        if (int arc = ww_bridge_pool_acquire_slot(m_pool, i, &s); arc != 0) {
-            std::fprintf(stderr,
-                         "BridgeExSwapchain: acquire_slot(%u) after directive failed: %d\n",
-                         i, arc);
-            destroyViews();
+        if (!createIntermediate(i, directive.width, directive.height, picked)) {
+            destroyIntermediates();
             return 1;
         }
-
-        VkImageViewCreateInfo vci {};
-        vci.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        vci.image    = static_cast<VkImage>(s.vk_image);
-        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vci.format   = picked;
-        vci.components = {
-            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-        };
-        vci.subresourceRange = {
-            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1,
-        };
-        VkImageView view = VK_NULL_HANDLE;
-        VkResult vr = m_pfn_create_view(m_device, &vci, nullptr, &view);
-        if (vr != VK_SUCCESS) {
-            std::fprintf(stderr,
-                         "BridgeExSwapchain: vkCreateImageView slot %u: %d\n", i, vr);
-            destroyViews();
-            return 1;
-        }
-        m_views[i] = view;
     }
 
-    // Publish atomically only after every slot view succeeded.
+    // Publish atomically only after every intermediate succeeded.
     m_width         = directive.width;
     m_height        = directive.height;
     m_fourcc        = directive.fourcc;
@@ -205,35 +393,26 @@ int BridgeExSwapchain::applyDirective(const ww_pool_directive_t& directive) {
 }
 
 bool BridgeExSwapchain::acquireRenderTarget(wallpaper::vulkan::ImageParameters& out) {
-    // Caller must invoke `poll()` first to drain any pending directive.
-    // Splitting drain out of acquire lets the caller inspect format()
-    // and rebuild downstream pipelines *before* committing to a slot —
-    // a post-acquire failure would otherwise leak the slot (no
-    // `cancelRenderTarget` exists; bridge only releases on submit).
+    // Caller must invoke `poll()` first. Splitting drain out of acquire
+    // lets the caller inspect format() and rebuild downstream pipelines
+    // *before* committing to a slot — a post-acquire failure would
+    // otherwise leak the slot (no `cancelRenderTarget` exists).
     if (m_slot_count == 0) return false;
 
     uint32_t idx = m_next_slot;
     m_next_slot  = (m_next_slot + 1) % m_slot_count;
 
-    // Producer back-pressure — bounded wait. Bridge contract (pool.h
-    // wait_slot_release): non-zero return means "consumer still using
-    // the buffer; render anyway". So this is purely a politeness wait,
-    // not a synchronization point. Cap at one ~60Hz frame so a stuck
-    // consumer can't pin the render thread for 250ms (15 frames at
-    // 60Hz). Producer-runs-ahead is the documented behaviour.
+    // Producer back-pressure on the *bridge* slot, not the
+    // intermediate. Keep the timeout tight: bridge contract says
+    // non-zero return means "consumer still using; render anyway"
+    // (pool.h wait_slot_release). Producer-runs-ahead is documented.
     (void)ww_bridge_pool_wait_slot_release(m_pool, idx, /*timeout_ms*/ 16);
 
-    ww_pool_slot_t s {};
-    if (int rc = ww_bridge_pool_acquire_slot(m_pool, idx, &s); rc != 0) {
-        std::fprintf(stderr,
-                     "BridgeExSwapchain: acquire_slot(%u) failed: %d\n", idx, rc);
-        return false;
-    }
-
-    out.handle       = static_cast<VkImage>(s.vk_image);
-    out.view         = m_views[idx];
+    auto& mid = m_intermediates[idx];
+    out.handle       = mid.image;
+    out.view         = mid.view;
     out.sampler      = VK_NULL_HANDLE;
-    out.extent       = { s.width, s.height, 1 };
+    out.extent       = { m_width, m_height, 1 };
     out.mipmap_level = 1;
 
     m_pending_slot = idx;
@@ -241,17 +420,201 @@ bool BridgeExSwapchain::acquireRenderTarget(wallpaper::vulkan::ImageParameters& 
     return true;
 }
 
-void BridgeExSwapchain::submitRendered(int acquire_sync_fd) {
-    // Render-thread-only; no lock needed. m_have_pending / m_pending_slot
-    // were last written by the same thread inside acquireRenderTarget.
+void BridgeExSwapchain::submitRendered(int producer_sync_fd) {
     if (!m_have_pending) {
-        if (acquire_sync_fd >= 0) ::close(acquire_sync_fd);
+        if (producer_sync_fd >= 0) ::close(producer_sync_fd);
         return;
     }
     uint32_t slot = m_pending_slot;
     m_have_pending = false;
 
-    int rc = ww_bridge_pool_submit_slot(m_pool, m_sock, slot, acquire_sync_fd);
+    if (!m_resources_ready) {
+        if (producer_sync_fd >= 0) ::close(producer_sync_fd);
+        return;
+    }
+
+    // Bring the bridge slot's underlying VkImage handle into our cmd
+    // — bridge owns lifetime; we just need the VkImage for cmdCopyImage.
+    ww_pool_slot_t s {};
+    if (int rc = ww_bridge_pool_acquire_slot(m_pool, slot, &s); rc != 0) {
+        std::fprintf(stderr,
+                     "BridgeExSwapchain: acquire_slot(%u) failed: %d\n", slot, rc);
+        if (producer_sync_fd >= 0) ::close(producer_sync_fd);
+        return;
+    }
+    VkImage slot_image = static_cast<VkImage>(s.vk_image);
+    if (slot_image == VK_NULL_HANDLE) {
+        std::fprintf(stderr,
+                     "BridgeExSwapchain: slot %u has no vk_image\n", slot);
+        if (producer_sync_fd >= 0) ::close(producer_sync_fd);
+        return;
+    }
+
+    // Wait the previous copy (if any) so we can reuse cmd buffer +
+    // signal semaphore. Spec: SYNC_FD-typed semaphore can only be
+    // signaled if its prior signal already retired — i.e. after fence.
+    if (m_copy_fence_inflight) {
+        vkWaitForFences(m_device, 1, &m_copy_fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(m_device, 1, &m_copy_fence);
+        m_copy_fence_inflight = false;
+    }
+
+    // Import producer's sync_fd into m_wait_sem. Vulkan takes ownership
+    // of the fd on success; we MUST NOT close it after.
+    bool wait_imported = false;
+    if (producer_sync_fd >= 0) {
+        VkImportSemaphoreFdInfoKHR isi {
+            .sType      = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
+            .pNext      = nullptr,
+            .semaphore  = m_wait_sem,
+            .flags      = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT,
+            .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT_KHR,
+            .fd         = producer_sync_fd,
+        };
+        if (m_pfn_import_sem(m_device, &isi) == VK_SUCCESS) {
+            wait_imported   = true;
+            producer_sync_fd = -1; // ownership transferred to Vulkan
+        } else {
+            std::fprintf(stderr,
+                         "BridgeExSwapchain: vkImportSemaphoreFdKHR failed\n");
+            ::close(producer_sync_fd);
+            producer_sync_fd = -1;
+            // Fall through without a wait — producer has already fenced
+            // its own submit in VulkanRender::drawFrameOffscreen, so
+            // this is safe in the current architecture (just lose the
+            // GPU-side wait).
+        }
+    }
+
+    // Record copy + release barrier.
+    vkResetCommandBuffer(m_cmd, 0);
+    VkCommandBufferBeginInfo bi {
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext            = nullptr,
+        .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr,
+    };
+    if (vkBeginCommandBuffer(m_cmd, &bi) != VK_SUCCESS) {
+        std::fprintf(stderr, "BridgeExSwapchain: vkBeginCommandBuffer failed\n");
+        return;
+    }
+
+    VkImageSubresourceRange sub {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1,
+    };
+
+    // Bridge slot: UNDEFINED → TRANSFER_DST_OPTIMAL. The slot may have
+    // been previously released to FOREIGN; UNDEFINED layout transition
+    // forgets that ownership. No queue-family transfer needed (UNDEFINED
+    // is the documented free pass).
+    {
+        VkImageMemoryBarrier b {
+            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext               = nullptr,
+            .srcAccessMask       = 0,
+            .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image               = slot_image,
+            .subresourceRange    = sub,
+        };
+        vkCmdPipelineBarrier(m_cmd,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &b);
+    }
+
+    // FinPass left the intermediate in TRANSFER_SRC_OPTIMAL (see
+    // ExSwapchain::producerOutputLayout). vkCmdCopyImage requires
+    // exactly that layout for the source — no extra transition.
+    VkImageCopy region {
+        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .srcOffset      = { 0, 0, 0 },
+        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .dstOffset      = { 0, 0, 0 },
+        .extent         = { m_width, m_height, 1 },
+    };
+    vkCmdCopyImage(m_cmd,
+                   m_intermediates[slot].image,
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   slot_image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &region);
+
+    // Release slot to foreign consumer. oldLayout=TRANSFER_DST_OPTIMAL
+    // (just-written), newLayout=GENERAL, src=graphics, dst=FOREIGN_EXT.
+    // Forces driver cache flush so the consumer (KMS / display server
+    // through DMA-BUF) reads coherent pixels.
+    {
+        VkImageMemoryBarrier b {
+            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext               = nullptr,
+            .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask       = 0,
+            .oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = m_queue_family,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
+            .image               = slot_image,
+            .subresourceRange    = sub,
+        };
+        vkCmdPipelineBarrier(m_cmd,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &b);
+    }
+
+    if (vkEndCommandBuffer(m_cmd) != VK_SUCCESS) {
+        std::fprintf(stderr, "BridgeExSwapchain: vkEndCommandBuffer failed\n");
+        return;
+    }
+
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkSubmitInfo si {
+        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext                = nullptr,
+        .waitSemaphoreCount   = wait_imported ? 1u : 0u,
+        .pWaitSemaphores      = wait_imported ? &m_wait_sem : nullptr,
+        .pWaitDstStageMask    = wait_imported ? &wait_stage : nullptr,
+        .commandBufferCount   = 1,
+        .pCommandBuffers      = &m_cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores    = &m_signal_sem,
+    };
+    if (vkQueueSubmit(m_queue, 1, &si, m_copy_fence) != VK_SUCCESS) {
+        std::fprintf(stderr, "BridgeExSwapchain: vkQueueSubmit (copy) failed\n");
+        return;
+    }
+    m_copy_fence_inflight = true;
+
+    // Export the signal semaphore as SYNC_FD. Spec allows export of a
+    // pending semaphore — the resulting fd signals when the GPU finally
+    // signals the semaphore. Bridge / consumer wait this fd before
+    // scanout / read.
+    int new_sync_fd = -1;
+    {
+        VkSemaphoreGetFdInfoKHR gi {
+            .sType      = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+            .pNext      = nullptr,
+            .semaphore  = m_signal_sem,
+            .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT_KHR,
+        };
+        VkResult vr = m_pfn_get_sem_fd(m_device, &gi, &new_sync_fd);
+        if (vr != VK_SUCCESS || new_sync_fd < 0) {
+            std::fprintf(stderr,
+                         "BridgeExSwapchain: vkGetSemaphoreFdKHR(signal) "
+                         "vr=%d fd=%d\n", (int)vr, new_sync_fd);
+            new_sync_fd = -1;
+        }
+    }
+
+    int rc = ww_bridge_pool_submit_slot(m_pool, m_sock, slot, new_sync_fd);
     if (rc != 0) {
         std::fprintf(stderr,
                      "BridgeExSwapchain: submit_slot(%u) rc=%d\n", slot, rc);

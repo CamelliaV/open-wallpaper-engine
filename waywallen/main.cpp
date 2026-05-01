@@ -248,8 +248,8 @@ int main(int argc, char** argv) {
         }
         auto sw = std::make_unique<ww_wescene::BridgeExSwapchain>(
             host.pool, host.sock,
-            h.device,
-            vkCreateImageView, vkDestroyImageView);
+            h.physical_device, h.device,
+            h.graphics_queue, h.graphics_queue_family);
         host.swapchain = sw.get();
         return sw;
     };

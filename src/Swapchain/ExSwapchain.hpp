@@ -102,6 +102,21 @@ public:
     virtual unsigned height() const = 0;
     virtual VkFormat format() const = 0;
 
+    // Layout the producer leaves its FinPass-rendered image in.
+    // - LocalExSwapchain: VK_IMAGE_LAYOUT_GENERAL (consumer mmaps the
+    //   DMA-BUF directly; layout invariant once the GPU finishes).
+    // - BridgeExSwapchain: VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL (the
+    //   bridge slot is transfer-only by design; FinPass renders into a
+    //   producer-owned intermediate image and BridgeExSwapchain
+    //   internally copies the intermediate into the bridge slot inside
+    //   submitRendered, so the producer's renderpass should leave the
+    //   intermediate ready to be a transfer source).
+    //
+    // VulkanRender wires this to FinPass via setPresentLayout. Surface
+    // mode does not consult this method — its layout is dictated by
+    // VkSwapchainKHR (PRESENT_SRC_KHR).
+    virtual VkImageLayout producerOutputLayout() const = 0;
+
     // True iff the swapchain is ready to hand out render targets. Local
     // backend is always ready post-construction; bridge backend goes
     // ready once the first NEGOTIATE directive succeeds (slot count > 0

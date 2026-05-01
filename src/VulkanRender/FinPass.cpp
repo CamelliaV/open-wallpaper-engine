@@ -4,6 +4,9 @@
 #include "PassCommon.hpp"
 #include "Utils/Logging.h"
 
+#include <cstdlib>
+#include <cstring>
+
 using namespace wallpaper::vulkan;
 
 constexpr std::string_view vert_code = R"(#version 320 es
@@ -39,6 +42,43 @@ void main()
 	out_FragColor = vec4(texture(u_Texture, v_Texcoord).rgb, 1.0);
 }
 )";
+
+// Debug shader: outputs a solid color, ignoring the scene render target.
+// Selected by env var WW_FINPASS_DEBUG=red|green|blue|white. Use this to
+// bisect the render path: if a debug color reaches the display, the
+// producer→consumer DMA-BUF + sync_fd path is healthy and the issue is
+// upstream (scene render graph not producing into the result tex). If
+// the debug color does NOT reach the display, the bug is in FinPass /
+// bridge / queue family transfer / sync.
+constexpr std::string_view frag_code_debug_red = R"(#version 320 es
+layout(location = 0) out vec4 out_FragColor;
+void main() { out_FragColor = vec4(1.0, 0.0, 0.0, 1.0); }
+)";
+constexpr std::string_view frag_code_debug_green = R"(#version 320 es
+layout(location = 0) out vec4 out_FragColor;
+void main() { out_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }
+)";
+constexpr std::string_view frag_code_debug_blue = R"(#version 320 es
+layout(location = 0) out vec4 out_FragColor;
+void main() { out_FragColor = vec4(0.0, 0.0, 1.0, 1.0); }
+)";
+constexpr std::string_view frag_code_debug_white = R"(#version 320 es
+layout(location = 0) out vec4 out_FragColor;
+void main() { out_FragColor = vec4(1.0, 1.0, 1.0, 1.0); }
+)";
+
+namespace {
+std::string_view pick_frag_source() {
+    const char* env = std::getenv("WW_FINPASS_DEBUG");
+    if (!env || !*env) return frag_code;
+    if (std::strcmp(env, "red")   == 0) return frag_code_debug_red;
+    if (std::strcmp(env, "green") == 0) return frag_code_debug_green;
+    if (std::strcmp(env, "blue")  == 0) return frag_code_debug_blue;
+    if (std::strcmp(env, "white") == 0) return frag_code_debug_white;
+    LOG_ERROR("FinPass: unknown WW_FINPASS_DEBUG=\"%s\" (expected red|green|blue|white)", env);
+    return frag_code;
+}
+}
 
 struct VertexInput {
     std::array<float, 3> pos;
@@ -181,8 +221,16 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr
         opt.suppress_warnings_glsl = true;
 
         std::array<ShaderCompUnit, 2> units;
-        units[0] = ShaderCompUnit { .stage = EShLangVertex, .src = std::string(vert_code) };
-        units[1] = ShaderCompUnit { .stage = EShLangFragment, .src = std::string(frag_code) };
+        // Fragment source may be the production sampler shader or one of
+        // the WW_FINPASS_DEBUG=red|green|blue|white solid-color overrides.
+        // The override is read once per prepare(); changing the env var
+        // at runtime requires reloading the scene.
+        const std::string_view frag_src = pick_frag_source();
+        if (frag_src.data() != frag_code.data()) {
+            LOG_INFO("FinPass: WW_FINPASS_DEBUG active — using solid-color fragment shader");
+        }
+        units[0] = ShaderCompUnit { .stage = EShLangVertex,   .src = std::string(vert_code) };
+        units[1] = ShaderCompUnit { .stage = EShLangFragment, .src = std::string(frag_src) };
         std::vector<Uni_ShaderSpv> spvs;
         CompileAndLinkShaderUnits(units, opt, spvs);
         // Cache the SPIR-V bytes so rebuildPresent can build new
@@ -314,26 +362,16 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
         cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
     }
 
-    // do queue family transfer operation
-    if (m_desc.present_queue_index != device.graphics_queue().family_index) {
-        VkImageMemoryBarrier imb {
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext               = nullptr,
-            .srcAccessMask       = VK_ACCESS_MEMORY_READ_BIT,
-            .dstAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout           = m_desc.present_layout,
-            .newLayout           = m_desc.present_layout,
-            .srcQueueFamilyIndex = m_desc.present_queue_index,
-            .dstQueueFamilyIndex = device.graphics_queue().family_index,
-            .image               = m_desc.vk_present.handle,
-            .subresourceRange    = base_srang,
-        };
+    // No explicit acquire barrier — the renderpass attachment uses
+    // initialLayout=VK_IMAGE_LAYOUT_UNDEFINED, which per spec discards
+    // any previous contents *and forgets the prior queue family
+    // ownership*. That gives us a free implicit "acquire from
+    // FOREIGN/UNDEFINED" without needing a release-acquire pair on
+    // every frame. The bridge creates slot images with
+    // VK_SHARING_MODE_EXCLUSIVE + initialLayout=UNDEFINED, so the very
+    // first frame is also fine. Mirrors the working image-renderer
+    // plugin (waywallen-image-renderer/src/vk_producer.cpp).
 
-        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                            VK_DEPENDENCY_BY_REGION_BIT,
-                            imb);
-    }
     VkRenderPassBeginInfo pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext       = nullptr,
@@ -367,13 +405,22 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
     cmd.Draw(4, 1, 0, 0);
     cmd.EndRenderPass();
 
-    // do queue family transfer operation
+    // Surface-mode queue family transfer (graphics → present queue).
+    // Only fires when the device exposes a separate present queue family;
+    // common GPUs unify them and skip this barrier.
+    //
+    // Offscreen mode: VulkanRender sets present_queue_index =
+    // graphics_queue.family_index, so this branch never fires. The
+    // release-to-FOREIGN happens inside ExSwapchain implementations
+    // (BridgeExSwapchain emits it in its own cmd buffer during
+    // submitRendered; LocalExSwapchain doesn't need it because the
+    // consumer is in-process).
     if (m_desc.present_queue_index != device.graphics_queue().family_index) {
         VkImageMemoryBarrier imb {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext               = nullptr,
             .srcAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstAccessMask       = VK_ACCESS_MEMORY_READ_BIT,
+            .dstAccessMask       = 0,
             .oldLayout           = m_desc.present_layout,
             .newLayout           = m_desc.present_layout,
             .srcQueueFamilyIndex = device.graphics_queue().family_index,
@@ -383,7 +430,7 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
         };
 
         cmd.PipelineBarrier(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                             VK_DEPENDENCY_BY_REGION_BIT,
                             imb);
     }

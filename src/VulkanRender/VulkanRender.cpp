@@ -329,8 +329,19 @@ bool VulkanRender::Impl::initRes() {
         // the pipeline build and drawFrameOffscreen rebuilds FinPass on
         // the first frame after format becomes known.
         m_finpass->setPresentFormat(m_ex_swapchain->format());
-        m_finpass->setPresentLayout(VK_IMAGE_LAYOUT_GENERAL);
-        m_finpass->setPresentQueueIndex(VK_QUEUE_FAMILY_EXTERNAL);
+        // Producer output layout depends on what the swapchain does
+        // with the rendered image: LocalExSwapchain wants GENERAL
+        // (in-process mmap consumer), BridgeExSwapchain wants
+        // TRANSFER_SRC_OPTIMAL (it copies the intermediate into the
+        // bridge slot inside submitRendered).
+        m_finpass->setPresentLayout(m_ex_swapchain->producerOutputLayout());
+        // Producer renders + (any) ownership release happens entirely
+        // on the graphics queue family; FinPass does NOT do a
+        // queue-family transfer barrier. BridgeExSwapchain emits its
+        // own release-to-FOREIGN inside submitRendered. Setting
+        // present_queue_index == graphics_queue.family_index makes
+        // FinPass::execute skip its release barrier.
+        m_finpass->setPresentQueueIndex(m_device->graphics_queue().family_index);
         m_finpass_format_built = m_ex_swapchain->format();
     }
 
@@ -574,6 +585,11 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     // it to the swapchain along with the slot. LocalExSwapchain stashes
     // it for the host's takeLastFrameSyncFd; BridgeExSwapchain forwards
     // it to ww_bridge_pool_submit_slot.
+    //
+    // Diagnostics: sync_fd export failure is silent in production but
+    // the result is the consumer reading a buffer the producer hasn't
+    // finished writing — exactly the "blank frame" symptom. We log the
+    // first failure loudly and rate-limit subsequent ones.
     int sync_fd = -1;
     {
         VkSemaphoreGetFdInfoKHR gi {
@@ -582,8 +598,26 @@ void VulkanRender::Impl::drawFrameOffscreen() {
             .semaphore  = *rr.sem_export,
             .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT_KHR,
         };
-        if (m_device->handle().GetSemaphoreFdKHR(gi, &sync_fd) != VK_SUCCESS) {
+        VkResult vr = m_device->handle().GetSemaphoreFdKHR(gi, &sync_fd);
+        if (vr != VK_SUCCESS) {
+            static std::atomic<uint64_t> n_failed { 0 };
+            uint64_t k = n_failed.fetch_add(1, std::memory_order_relaxed);
+            if (k == 0 || (k & (k - 1)) == 0) { // 1st, 2nd, 4th, 8th...
+                LOG_ERROR("VulkanRender: vkGetSemaphoreFdKHR failed (vr=%d, count=%llu)",
+                          (int)vr, (unsigned long long)(k + 1));
+            }
             sync_fd = -1;
+        } else if (sync_fd < 0) {
+            // The driver returned VK_SUCCESS with fd=-1 — spec says this
+            // means "the semaphore was unsignaled". Should not happen
+            // because we just waited the fence; flag loudly.
+            static std::atomic<uint64_t> n_unsig { 0 };
+            uint64_t k = n_unsig.fetch_add(1, std::memory_order_relaxed);
+            if (k == 0 || (k & (k - 1)) == 0) {
+                LOG_ERROR("VulkanRender: GetSemaphoreFdKHR returned fd=-1 "
+                          "(semaphore not signaled? count=%llu)",
+                          (unsigned long long)(k + 1));
+            }
         }
     }
 
