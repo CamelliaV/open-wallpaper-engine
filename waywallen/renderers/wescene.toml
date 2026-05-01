@@ -2,11 +2,20 @@
 #
 # Installed to <prefix>/share/waywallen/renderers/wescene.toml by the
 # open-wallpaper-engine CMake install step. The waywallen daemon scans
-# that directory at startup and will spawn `waywallen-wescene-renderer` for any
-# wallpaper with wp_type = "scene".
+# that directory at startup and will spawn `waywallen-wescene-renderer`
+# for any wallpaper with wp_type = "scene". `[renderer.settings]` is
+# the typed schema the daemon validates source-plugin metadata against
+# before forking the child; the canonical resource path travels in
+# `metadata["path"]`, with `assets` and `workshop_id` riding along as
+# allow-listed extras.
 
 [renderer]
 name = "wescene-renderer"
-bin = "../../../bin/waywallen-wescene-renderer"
+bin  = "../../../bin/waywallen-wescene-renderer"
 types = ["scene"]
 priority = 100
+spawn_version = 1
+extras = ["assets", "workshop_id"]
+
+[renderer.settings]
+volume = { type = "f32", default = 1.0, identity = false }

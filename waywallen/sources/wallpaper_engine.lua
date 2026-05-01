@@ -135,23 +135,18 @@ function M.scan(ctx)
                 end
             end
 
-            -- Metadata is forwarded to the renderer subprocess as
-            -- `--<key> <value>` flags, so it must contain ONLY keys the
-            -- renderer recognises. Project-level scalars like
-            -- `contentrating` / `visibility` / `approved` / `version`
-            -- would cause the renderer to reject its CLI on spawn and
-            -- belong on `item` columns instead (once those exist).
-            local metadata = {
-                workshop_id = workshop_id,
-            }
+            -- Metadata is forwarded to the renderer via the daemon's
+            -- typed `Init` message; `path` is the canonical resource
+            -- key (v6 schema), `assets` + `workshop_id` ride along as
+            -- allow-listed extras. mpv's manifest is schema-less and
+            -- falls back to legacy resolution that picks `path` last
+            -- in the priority chain, so the video flow keeps working
+            -- through the path key alone.
+            local metadata = { path = resource }
             if wp_type == "scene" then
-                metadata.scene = resource
                 metadata.assets = we_assets
-            else
-                -- waywallen-mpv reads `video` / `path` from metadata.
-                metadata.video = resource
-                metadata.path = resource
             end
+            metadata.workshop_id = workshop_id
 
             table.insert(entries, {
                 id = workshop_id,

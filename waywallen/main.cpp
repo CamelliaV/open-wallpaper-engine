@@ -32,6 +32,7 @@
 #include <argparse/argparse.hpp>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -56,6 +57,8 @@ struct Options {
     std::string initial_assets;
     std::string workshop_id;
     uint32_t    initial_fps { 30 };
+    bool        test_pattern { false };
+    float       initial_volume { 1.0f };
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -63,33 +66,17 @@ struct Options {
     std::exit(1);
 }
 
+// Step 3 of the renderer-Init refactor: spawn-time params come from
+// the daemon's typed `Init` message; the only CLI flag the renderer
+// honours is `--ipc <socket>`. The argparse `remaining()` catch-all
+// is kept (but ignored) so any straggling daemon argv during the
+// transition window is silently consumed instead of failing the parse.
 Options parse_args(int argc, char** argv) {
     argparse::ArgumentParser program("waywallen-wescene-renderer");
 
     program.add_argument("--ipc")
         .required()
         .help("Unix-domain socket path for daemon IPC");
-    program.add_argument("--width")
-        .default_value(1280u)
-        .help("render width")
-        .scan<'u', uint32_t>();
-    program.add_argument("--height")
-        .default_value(720u)
-        .help("render height")
-        .scan<'u', uint32_t>();
-    program.add_argument("--scene")
-        .default_value(std::string())
-        .help("initial scene pkg path");
-    program.add_argument("--assets")
-        .default_value(std::string())
-        .help("initial assets directory");
-    program.add_argument("--workshop_id")
-        .default_value(std::string())
-        .help("Workshop item ID (forwarded from source plugin metadata)");
-    program.add_argument("--fps")
-        .default_value(30u)
-        .help("target frames per second")
-        .scan<'u', uint32_t>();
     program.add_argument("remaining").remaining();
 
     try {
@@ -101,14 +88,29 @@ Options parse_args(int argc, char** argv) {
     }
 
     Options o;
-    o.ipc_path       = program.get<std::string>("--ipc");
-    o.width          = program.get<uint32_t>("--width");
-    o.height         = program.get<uint32_t>("--height");
-    o.initial_scene  = program.get<std::string>("--scene");
-    o.initial_assets = program.get<std::string>("--assets");
-    o.workshop_id    = program.get<std::string>("--workshop_id");
-    o.initial_fps    = program.get<uint32_t>("--fps");
+    o.ipc_path = program.get<std::string>("--ipc");
     return o;
+}
+
+// Linear-scan lookup for ww_kv_list_t. Lists are tiny (manifest-driven
+// settings have <10 entries today).
+const char* kv_get(const ww_kv_list_t& kv, const char* key) {
+    for (uint32_t i = 0; i < kv.count; ++i) {
+        if (kv.data[i].key && std::strcmp(kv.data[i].key, key) == 0)
+            return kv.data[i].value;
+    }
+    return nullptr;
+}
+
+// Parse a setting string as f32; falls back to `def` on parse error
+// or a NULL pointer.
+float parse_f32(const char* s, float def) {
+    if (!s || !*s) return def;
+    char* end = nullptr;
+    errno = 0;
+    float v = std::strtof(s, &end);
+    if (errno != 0 || end == s) return def;
+    return v;
 }
 
 
@@ -121,6 +123,10 @@ struct HostState {
     ww_pool_t*                     pool { nullptr };
     // Non-owning pointer; the unique_ptr lives inside VulkanRender.
     ww_wescene::BridgeExSwapchain* swapchain { nullptr };
+    // Non-owning pointer to the SceneWallpaper that lives in main's
+    // stack frame; the reader thread uses it to dispatch ApplySettings
+    // hot-reload (volume / fps) into the looper.
+    wallpaper::SceneWallpaper*     wp { nullptr };
 
     std::atomic<bool> shutdown { false };
 };
@@ -129,17 +135,57 @@ void signal_shutdown(HostState& s) {
     s.shutdown.store(true, std::memory_order_release);
 }
 
-void apply_control(HostState& s, const ww_bridge_control_t& msg) {
+// Apply a single fps change through the same path WW_REQ_SET_FPS would
+// have used. Centralised so ApplySettings can route through it.
+void set_fps(HostState& s, uint32_t fps) {
+    if (!s.wp || fps == 0) return;
+    s.wp->setPropertyInt32(wallpaper::PROPERTY_FPS,
+                           static_cast<int32_t>(fps));
+}
+
+void apply_control(HostState& s, ww_bridge_control_t& msg) {
     switch (msg.op) {
-    case WW_REQ_HELLO:
-    case WW_REQ_LOAD_SCENE:
+    case WW_REQ_INIT:
+        // Init is consumed at the top of main before the reader thread
+        // starts. A late Init is either a buggy daemon resending or a
+        // protocol violation; log and ignore.
+        std::fprintf(stderr,
+                     "waywallen-wescene-renderer: unexpected late Init; ignoring\n");
+        break;
+    case WW_REQ_APPLY_SETTINGS: {
+        // v5 hot-reload. Peel the typed view, dispatch known keys
+        // (volume) through the SceneWallpaper looper; route fps through
+        // the same path WW_REQ_SET_FPS used to. Unknown keys warn.
+        ww_bridge_apply_settings_t as {};
+        if (ww_bridge_apply_settings_from_control(&msg, &as) != 0) break;
+        for (uint32_t i = 0; i < as.settings.count; ++i) {
+            const char* key = as.settings.data[i].key;
+            const char* val = as.settings.data[i].value;
+            if (!key || !val) continue;
+            if (std::strcmp(key, "volume") == 0) {
+                if (s.wp) {
+                    s.wp->setPropertyFloat(wallpaper::PROPERTY_VOLUME,
+                                           parse_f32(val, 1.0f));
+                }
+            } else {
+                std::fprintf(stderr,
+                             "waywallen-wescene-renderer: ApplySettings: "
+                             "wescene has no setting '%s'; ignoring\n",
+                             key);
+            }
+        }
+        if (as.fps != 0) set_fps(s, as.fps);
+        ww_bridge_apply_settings_free(&as);
+        break;
+    }
     case WW_REQ_PLAY:
     case WW_REQ_PAUSE:
     case WW_REQ_MOUSE:
-    case WW_REQ_SET_FPS:
         // Iter 1: routed through the daemon's higher-level control API
-        // (DBus/WebSocket) rather than through this subprocess. The
-        // initial scene/assets/fps are forwarded as launch flags.
+        // (DBus/WebSocket) rather than through this subprocess.
+        break;
+    case WW_REQ_SET_FPS:
+        set_fps(s, msg.u.set_fps.fps);
         break;
     case WW_REQ_SHUTDOWN:
         signal_shutdown(s);
@@ -204,8 +250,52 @@ int main(int argc, char** argv) {
 
     ::prctl(PR_SET_PDEATHSIG, SIGTERM);
 
+    // Step 3 of the renderer-Init refactor: connect first, then
+    // recv Init and use its typed fields to populate Options before
+    // any GPU init or scene-property writes. The wescene renderer
+    // already had connect() before initVulkan(); we just slot Init
+    // recv right after the connect.
+    HostState host;
+    host.sock = ww_bridge_connect(opts.ipc_path.c_str());
+    if (host.sock < 0)
+        die("ww_bridge_connect: " + std::string(std::strerror(-host.sock)));
+
+    {
+        ww_bridge_init_t init {};
+        if (int rc = ww_bridge_recv_init(host.sock, &init); rc != 0) {
+            const char* reason = (rc == -EPROTO)
+                ? "init: protocol error or unsupported spawn_version"
+                : "init: recv failed";
+            ww_bridge_send_init_nack(host.sock, init.spawn_version,
+                                     WW_BRIDGE_SUPPORTED_SPAWN_VERSION,
+                                     reason);
+            ww_bridge_init_free(&init);
+            die(std::string(reason) + " rc=" + std::to_string(rc));
+        }
+
+        // Map typed Init fields onto Options. The canonical resource
+        // path for wescene is the .pkg path; assets + workshop_id ride
+        // along as resource_extras. `volume` is the only hot-applicable
+        // setting wescene exposes today.
+        opts.width  = init.extent_w ? init.extent_w : opts.width;
+        opts.height = init.extent_h ? init.extent_h : opts.height;
+        if (init.fps) opts.initial_fps = init.fps;
+        if (init.resource_primary && init.resource_primary[0])
+            opts.initial_scene = init.resource_primary;
+        if (const char* v = kv_get(init.resource_extras, "assets"))
+            opts.initial_assets = v ? v : "";
+        if (const char* v = kv_get(init.resource_extras, "workshop_id"))
+            opts.workshop_id = v ? v : "";
+        opts.test_pattern = init.test_pattern != 0;
+        opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 1.0f);
+
+        ww_bridge_init_free(&init);
+    }
+
     wallpaper::SceneWallpaper wp;
     if (!wp.init()) die("SceneWallpaper::init failed");
+
+    host.wp = &wp;
 
     if (!opts.initial_assets.empty())
         wp.setPropertyString(wallpaper::PROPERTY_ASSETS, opts.initial_assets);
@@ -214,11 +304,7 @@ int main(int argc, char** argv) {
     if (opts.initial_fps)
         wp.setPropertyInt32(wallpaper::PROPERTY_FPS,
                             static_cast<int32_t>(opts.initial_fps));
-
-    HostState host;
-    host.sock = ww_bridge_connect(opts.ipc_path.c_str());
-    if (host.sock < 0)
-        die("ww_bridge_connect: " + std::string(std::strerror(-host.sock)));
+    wp.setPropertyFloat(wallpaper::PROPERTY_VOLUME, opts.initial_volume);
 
     // The factory runs inside VulkanRender::init after the GPU is picked
     // and the VkDevice is created; that's when ww_bridge_pool_create can
