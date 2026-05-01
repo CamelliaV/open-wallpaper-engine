@@ -1,11 +1,8 @@
 #pragma once
 #include "VulkanPass.hpp"
 #include <string>
-#include <vector>
 
 #include "Vulkan/Device.hpp"
-#include "Vulkan/StagingBuffer.hpp"
-#include "Vulkan/GraphicsPipeline.hpp"
 
 #include "Scene/Scene.h"
 #include "SpecTexs.hpp"
@@ -15,24 +12,34 @@ namespace wallpaper
 namespace vulkan
 {
 
+// Final pass: blit the scene render target into the present buffer
+// (offscreen ExSwapchain slot or surface-mode swapchain image), then
+// emit the appropriate barrier so the consumer reads coherent pixels.
+//
+// Implemented as a pure transfer pass (vkCmdBlitImage) — no
+// renderpass, pipeline, shader, or descriptor. Per-frame state is just
+// the chosen present image, set via setPresent before each execute().
+//
+// The blit handles cross-format channel reordering (R8G8B8A8 ↔
+// B8G8R8A8) automatically because vkCmdBlitImage maps logical RGBA
+// channels rather than raw bytes. So no rebuild is needed when the
+// bridge renegotiates between ABGR/ARGB families.
 class FinPass : public VulkanPass {
 public:
     struct Desc {
         // in
-        const std::string_view result { SpecTex_Default };
-        VkFormat               present_format { VK_FORMAT_UNDEFINED };
-        VkImageLayout          present_layout;
-        uint32_t               present_queue_index;
+        const std::string_view result { SpecTex_Default }; // scene RT key
 
-        // prepared
+        // resolved in prepare()
         ImageParameters vk_result;
-        ImageParameters vk_present;
-        VkImageLayout   render_layout;
-        VkClearValue    clear_value;
 
-        StagingBufferRef   vertex_buf;
-        vvk::Framebuffer   fb;
-        PipelineParameters pipeline;
+        // set per-frame via setPresent()
+        ImageParameters vk_present;
+
+        // configured once at init by VulkanRender (from
+        // ExSwapchain::producerOutputLayout / releaseTargetQueueFamily)
+        VkImageLayout present_layout    { VK_IMAGE_LAYOUT_UNDEFINED };
+        uint32_t      present_queue_index { 0 };
     };
 
     FinPass(const Desc&);
@@ -40,41 +47,14 @@ public:
 
     void setPresent(ImageParameters);
     void setPresentLayout(VkImageLayout);
-    void setPresentFormat(VkFormat);
     void setPresentQueueIndex(uint32_t);
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
     void execute(const Device&, RenderingResources&) override;
     void destory(const Device&, RenderingResources&) override;
 
-    // Rebuild the renderpass + graphics pipeline from the current
-    // present_format/present_layout. Call after setPresentFormat with a
-    // new format. The caller is responsible for ensuring no in-flight
-    // command buffer references the old pipeline (drawFrameOffscreen
-    // already fences the previous frame before reaching this).
-    //
-    // Requires prepare() to have run at least once so shaders / vertex
-    // buffer / descriptor info are cached. Returns true on success;
-    // on failure prepared() reverts to false.
-    bool rebuildPresent(const Device&);
-
 private:
-    // Build / rebuild the renderpass + graphics pipeline using cached
-    // shader bytecode (`m_vert_spv` / `m_frag_spv`) and the current
-    // present_format/present_layout. Owns no glslang state.
-    bool buildPresentPipeline(const Device&);
-
     Desc m_desc;
-
-    // Cached compile artifacts populated on first prepare(). Reused on
-    // every rebuildPresent — avoids re-running glslang outside the
-    // VulkanRender::compileRenderGraph init/finalize scope.
-    bool                                           m_resources_ready { false };
-    std::vector<unsigned int>                      m_vert_spv;
-    std::vector<unsigned int>                      m_frag_spv;
-    VkVertexInputBindingDescription                m_bind_description {};
-    std::vector<VkVertexInputAttributeDescription> m_attr_descriptions;
-    DescriptorSetInfo                              m_descriptor_info;
 };
 
 } // namespace vulkan

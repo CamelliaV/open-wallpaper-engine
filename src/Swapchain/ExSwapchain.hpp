@@ -102,20 +102,29 @@ public:
     virtual unsigned height() const = 0;
     virtual VkFormat format() const = 0;
 
-    // Layout the producer leaves its FinPass-rendered image in.
-    // - LocalExSwapchain: VK_IMAGE_LAYOUT_GENERAL (consumer mmaps the
-    //   DMA-BUF directly; layout invariant once the GPU finishes).
-    // - BridgeExSwapchain: VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL (the
-    //   bridge slot is transfer-only by design; FinPass renders into a
-    //   producer-owned intermediate image and BridgeExSwapchain
-    //   internally copies the intermediate into the bridge slot inside
-    //   submitRendered, so the producer's renderpass should leave the
-    //   intermediate ready to be a transfer source).
+    // Layout the slot ends in after FinPass finishes. FinPass blits into
+    // the slot in TRANSFER_DST_OPTIMAL, then transitions to this layout
+    // as part of its release barrier so the consumer reads coherent
+    // pixels. Both backends pick GENERAL: bridge slot's foreign consumer
+    // (KMS / display server) ignores Vulkan layout but expects a defined
+    // transition; local in-process consumer mmaps the dma-buf — also
+    // layout-agnostic.
     //
     // VulkanRender wires this to FinPass via setPresentLayout. Surface
     // mode does not consult this method — its layout is dictated by
     // VkSwapchainKHR (PRESENT_SRC_KHR).
     virtual VkImageLayout producerOutputLayout() const = 0;
+
+    // Queue family to release the rendered slot to in FinPass's exit
+    // barrier. Returns VK_QUEUE_FAMILY_FOREIGN_EXT for bridge (DMA-BUF
+    // hand-off to a non-Vulkan consumer needs a release-to-FOREIGN to
+    // flush GPU caches). Returns VK_QUEUE_FAMILY_IGNORED when no
+    // transfer is needed (LocalExSwapchain's consumer is in-process).
+    // VulkanRender translates IGNORED to graphics_queue.family_index
+    // before handing off to FinPass, so FinPass's barrier-emitting
+    // branch (`present_queue_index != graphics_queue.family_index`)
+    // simply doesn't fire.
+    virtual uint32_t releaseTargetQueueFamily() const = 0;
 
     // True iff the swapchain is ready to hand out render targets. Local
     // backend is always ready post-construction; bridge backend goes

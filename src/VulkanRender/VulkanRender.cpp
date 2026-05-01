@@ -99,13 +99,6 @@ struct VulkanRender::Impl {
     std::unique_ptr<ExSwapchain> m_ex_swapchain;
     RenderingResources           m_rendering_resources;
 
-    // Format the FinPass renderpass+pipeline was last built for. Compared
-    // against m_ex_swapchain->format() at the head of drawFrameOffscreen
-    // — mismatch triggers a FinPass rebuild. VK_FORMAT_UNDEFINED means
-    // FinPass has no pipeline yet (BridgeExSwapchain hasn't received a
-    // directive).
-    VkFormat m_finpass_format_built { VK_FORMAT_UNDEFINED };
-
     std::vector<VulkanPass*> m_passes;
 };
 
@@ -313,36 +306,22 @@ bool VulkanRender::Impl::initRes() {
     m_prepass = std::make_unique<PrePass>(PrePass::Desc {});
     m_finpass = std::make_unique<FinPass>(FinPass::Desc {});
     if (m_with_surface) {
-        // Surface mode FinPass uses the swapchain's negotiated format
-        // for the lifetime of this VulkanRender instance. Swapchain
-        // recreation (resize) tears down VulkanRender and re-inits, so
-        // there is no in-place reformat path here — `m_finpass_format_built`
-        // stays UNDEFINED and is never read in `drawFrameSwapchain`.
-        m_finpass->setPresentFormat(m_device->swapchain().format());
-        m_finpass->setPresentQueueIndex(m_device->present_queue().family_index);
+        // Surface mode: FinPass blits into the swapchain image, ending
+        // it in PRESENT_SRC_KHR. Queue-family transfer to the present
+        // queue is needed only when graphics != present family.
         m_finpass->setPresentLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        m_finpass->setPresentQueueIndex(m_device->present_queue().family_index);
     } else {
-        // For offscreen, the present format is whatever the ExSwapchain
-        // resolved through negotiation. LocalExSwapchain returns a fixed
-        // format here; BridgeExSwapchain returns VK_FORMAT_UNDEFINED
-        // until the first directive lands — in that case prepare() skips
-        // the pipeline build and drawFrameOffscreen rebuilds FinPass on
-        // the first frame after format becomes known.
-        m_finpass->setPresentFormat(m_ex_swapchain->format());
-        // Producer output layout depends on what the swapchain does
-        // with the rendered image: LocalExSwapchain wants GENERAL
-        // (in-process mmap consumer), BridgeExSwapchain wants
-        // TRANSFER_SRC_OPTIMAL (it copies the intermediate into the
-        // bridge slot inside submitRendered).
+        // Offscreen: ExSwapchain implementation chooses both. Bridge
+        // returns (GENERAL, FOREIGN_EXT); local returns (GENERAL,
+        // IGNORED). Translate IGNORED to graphics_family so FinPass's
+        // release-barrier branch (`!= graphics_family`) skips cleanly.
         m_finpass->setPresentLayout(m_ex_swapchain->producerOutputLayout());
-        // Producer renders + (any) ownership release happens entirely
-        // on the graphics queue family; FinPass does NOT do a
-        // queue-family transfer barrier. BridgeExSwapchain emits its
-        // own release-to-FOREIGN inside submitRendered. Setting
-        // present_queue_index == graphics_queue.family_index makes
-        // FinPass::execute skip its release barrier.
-        m_finpass->setPresentQueueIndex(m_device->graphics_queue().family_index);
-        m_finpass_format_built = m_ex_swapchain->format();
+        uint32_t qf = m_ex_swapchain->releaseTargetQueueFamily();
+        if (qf == VK_QUEUE_FAMILY_IGNORED) {
+            qf = m_device->graphics_queue().family_index;
+        }
+        m_finpass->setPresentQueueIndex(qf);
     }
 
     m_vertex_buf = std::make_unique<StagingBuffer>(*m_device,
@@ -522,27 +501,15 @@ void VulkanRender::Impl::drawFrameOffscreen() {
 
     // Drain any pending bridge directive *before* committing to a slot.
     // Previous frame's GPU work has fenced at the tail of the last
-    // drawFrameOffscreen, so the cmd pool is idle — safe to swap the
-    // slot pool / destroy the old pipeline here.
+    // drawFrameOffscreen, so the cmd pool is idle.
     m_ex_swapchain->poll();
 
-    // Format may have flipped during poll(). Rebuild FinPass *before*
-    // acquiring a slot — BridgeExSwapchain has no cancel path, so a
-    // post-acquire failure would leak the slot (no submitRendered would
-    // ever pair with it).
-    {
-        VkFormat current_fmt = m_ex_swapchain->format();
-        if (current_fmt != VK_FORMAT_UNDEFINED && current_fmt != m_finpass_format_built) {
-            m_finpass->setPresentFormat(current_fmt);
-            if (!m_finpass->rebuildPresent(*m_device)) {
-                LOG_ERROR("FinPass rebuildPresent failed for format %d", (int)current_fmt);
-                return;
-            }
-            m_finpass_format_built = current_fmt;
-        }
-    }
-    if (m_finpass_format_built == VK_FORMAT_UNDEFINED || !m_finpass->prepared()) {
-        return; // FinPass not yet ready; skip this tick
+    // Skip until both the swapchain has slots and the scene has loaded
+    // (FinPass.prepare runs from compileRenderGraph). FinPass itself is
+    // format-agnostic now — vkCmdBlitImage handles cross-format channel
+    // mapping, no rebuild needed on renegotiation.
+    if (!m_ex_swapchain->ready() || !m_finpass->prepared()) {
+        return;
     }
 
     RenderingResources& rr = m_rendering_resources;

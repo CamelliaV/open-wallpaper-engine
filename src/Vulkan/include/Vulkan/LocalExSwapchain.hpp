@@ -95,6 +95,12 @@ public:
         return VK_IMAGE_LAYOUT_GENERAL;
     }
 
+    // Consumer is in-process (host mmaps the dma-buf). No queue family
+    // transfer needed.
+    uint32_t releaseTargetQueueFamily() const override {
+        return VK_QUEUE_FAMILY_IGNORED;
+    }
+
     // Local backend is ready as soon as the constructor returns —
     // images are pre-allocated and the format is fixed.
     bool ready() const override { return true; }

@@ -246,10 +246,9 @@ int main(int argc, char** argv) {
                          "waywallen-wescene-renderer: ww_bridge_pool_create failed: %d\n", rc);
             return nullptr;
         }
+        (void)h; // Vulkan handles no longer needed by BridgeExSwapchain.
         auto sw = std::make_unique<ww_wescene::BridgeExSwapchain>(
-            host.pool, host.sock,
-            h.physical_device, h.device,
-            h.graphics_queue, h.graphics_queue_family);
+            host.pool, host.sock);
         host.swapchain = sw.get();
         return sw;
     };
