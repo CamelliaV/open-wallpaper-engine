@@ -57,6 +57,7 @@ public:
 
     // ---- baseline (PKGV0001+) ------------------------------------------
     std::array<float, 3> clearcolor { 0.0f, 0.0f, 0.0f };
+    bool                 clearenabled { true };
     bool                 cameraparallax { false };
     float                cameraparallaxamount { 0.0f };
     float                cameraparallaxdelay { 0.0f };

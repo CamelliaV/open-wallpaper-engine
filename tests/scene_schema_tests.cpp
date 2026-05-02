@@ -39,7 +39,7 @@ constexpr std::string_view kGeneralPrefix = "general.";
 const auto& kParsedGeneralKeys() {
     using set = std::set<std::string>;
     static const std::map<unsigned, set> m = {
-        { 1u, set { "ambientcolor", "skylightcolor", "clearcolor",
+        { 1u, set { "ambientcolor", "skylightcolor", "clearcolor", "clearenabled",
                     "cameraparallax", "cameraparallaxamount",
                     "cameraparallaxdelay", "cameraparallaxmouseinfluence",
                     "zoom", "fov", "nearz", "farz",

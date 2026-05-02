@@ -67,6 +67,7 @@ void parse_baseline(WPSceneGeneral& g, const nlohmann::json& json) {
     GET_JSON_NAME_VALUE(json, "ambientcolor", g.ambientcolor);
     GET_JSON_NAME_VALUE(json, "skylightcolor", g.skylightcolor);
     GET_JSON_NAME_VALUE(json, "clearcolor", g.clearcolor);
+    GET_JSON_NAME_VALUE_NOWARN(json, "clearenabled", g.clearenabled);
     GET_JSON_NAME_VALUE(json, "cameraparallax", g.cameraparallax);
     GET_JSON_NAME_VALUE(json, "cameraparallaxamount", g.cameraparallaxamount);
     GET_JSON_NAME_VALUE(json, "cameraparallaxdelay", g.cameraparallaxdelay);
