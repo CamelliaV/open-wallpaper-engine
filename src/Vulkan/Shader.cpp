@@ -11,7 +11,7 @@ module;
 #include <glslang/MachineIndependent/iomapper.h>
 #include <glslang/MachineIndependent/localintermediate.h>
 #include <glslang/Public/ShaderLang.h>
-#include <glslang/SPIRV/GlslangToSpv.h>
+#include <SPIRV/GlslangToSpv.h>
 #include <spirv_reflect.h>
 
 #include "Core/Literals.hpp"
