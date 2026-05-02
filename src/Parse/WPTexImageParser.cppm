@@ -22,6 +22,42 @@ export namespace wallpaper
 //   texs: 0 (non-sprite)  |  2 (early sprites; 15)  |  3 (current sprites; 491, including 90 with texb=4)
 //          texs == 1 is documented in legacy code but never observed.
 //
+// Full binary layout, by version. All ints are little-endian int32
+// unless noted; "TEXX####" stamps are 9-byte ASCII strings.
+//
+//   ┌── texv stamp ("TEXV0005")
+//   ├── texi stamp ("TEXI0001")
+//   ├── format       int32  (0=RGBA8, 4=BC3, 6=BC2, 7=BC1, 8=RG8, 9=R8)
+//   ├── flags        uint32 (bit0=noInterpolation bit1=clampUVs bit2=sprite
+//   │                        bit20..22=compo1..3)
+//   ├── width/height int32 ×2  pow-2 texture coord size (or pic size when not pow-2)
+//   ├── map_w/h      int32 ×2  original picture size (== width/height when pow-2)
+//   ├── reserved_a   int32  unused, never observed != 0
+//   ├── texb stamp ("TEXB0001"..0004)
+//   ├── count        int32  number of image slots
+//   ├── image_type   int32  if texb >= 3   (-1=UNKNOWN, FreeImage enum otherwise)
+//   ├── reserved_b   int32  if texb >= 4   (always 0 in corpus)
+//   │
+//   ├── per slot (× count):
+//   │   ├── mip_count int32
+//   │   └── per mip:
+//   │       ├── mip_w/mip_h int32 ×2
+//   │       ├── lz4_compressed   int32  if texb >= 2
+//   │       ├── decompressed_sz  int32  if texb >= 2
+//   │       ├── src_size         int32
+//   │       └── src_size bytes (LZ4 if compressed; image-container body when
+//   │           texb>=3 + image_type valid; raw pixel data otherwise)
+//   │
+//   └── if flags.sprite:
+//       ├── texs stamp ("TEXS0001"..0003)  ← only valid texs values
+//       ├── frame_count int32
+//       ├── atlas_w/h   int32 ×2  if texs >= 3
+//       └── per frame (× frame_count):
+//           ├── image_id int32
+//           ├── frametime float32
+//           └── (x, y, xAxis[0..1], yAxis[0..1])  6 ×
+//               int32 if texs == 1, float32 otherwise
+//
 // The predicate methods below collapse texb / texs version drift into a
 // single source of truth so the parser body and the sprite branch share
 // the same dispatch rules.
