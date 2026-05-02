@@ -1,23 +1,6 @@
 module;
 
-#include <algorithm>
-#include <array>
-#include <atomic>
 #include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <iterator>
-#include <limits>
-#include <memory>
-#include <new>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <type_traits>
-#include <utility>
-#include <vector>
 
 #include <unistd.h>
 
@@ -48,6 +31,7 @@ module;
 #include "vvk/macros.hpp"
 
 export module wescene.vulkan;
+import cppstd;
 import wescene.utils;
 
 // =================================================================

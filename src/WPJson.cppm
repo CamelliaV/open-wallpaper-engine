@@ -1,13 +1,9 @@
 module;
 
-#include <cstdint>
-#include <string>
-#include <string_view>
-#include <type_traits>
-
 #include <nlohmann/json_fwd.hpp>
 
 export module wescene.json;
+import cppstd;
 
 export namespace wallpaper
 {

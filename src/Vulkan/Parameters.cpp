@@ -1,9 +1,7 @@
 module;
 
-#include <utility>
-#include <vector>
-
 module wescene.vulkan;
+import cppstd;
 
 namespace wallpaper
 {

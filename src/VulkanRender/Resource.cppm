@@ -1,12 +1,11 @@
 module;
 
-#include <memory>
-
 #include "Core/NoCopyMove.hpp"
 
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:resource;
+import cppstd;
 import wescene.vulkan;
 
 export namespace wallpaper::vulkan

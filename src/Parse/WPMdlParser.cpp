@@ -1,10 +1,6 @@
 module;
-#include <array>
 #include <cassert>
 #include <cstring>
-#include <memory>
-#include <string>
-#include <vector>
 
 #include "Core/Literals.hpp"
 
@@ -13,6 +9,7 @@ module;
 #include "SpecTexs.hpp"
 
 module wescene.parse;
+import cppstd;
 import wescene.scene;
 import wescene.common;
 

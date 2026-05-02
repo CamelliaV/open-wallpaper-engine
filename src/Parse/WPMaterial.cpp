@@ -1,13 +1,11 @@
 module;
-#include <string>
-#include <vector>
 
 #include "WPJson.hpp"
 
 #include <nlohmann/json.hpp>
 
-
 module wescene.parse;
+import cppstd;
 
 using namespace wallpaper::wpscene;
 
@@ -16,7 +14,6 @@ bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE(json, "index", index);
     return true;
 }
-
 
 void WPMaterialPass::Update(const WPMaterialPass& p) {
     int32_t i = -1;

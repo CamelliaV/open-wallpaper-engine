@@ -1,12 +1,5 @@
 module;
 
-#include <memory>
-#include <vector>
-#include <array>
-#include <unordered_map>
-#include <cstdint>
-#include <chrono>
-
 #include <Eigen/Dense>
 
 #include "Core/Core.hpp"
@@ -14,6 +7,7 @@ module;
 #include "SpriteAnimation.hpp"
 
 export module wescene.shader_value_updater;
+import cppstd;
 import wescene.scene;
 
 import wescene.puppet;  // WPPuppetLayer

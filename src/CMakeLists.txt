@@ -136,7 +136,7 @@ target_link_libraries(
   PUBLIC ${Vulkan_LIBRARIES} glslang
   PRIVATE nlohmann_json ${LZ4_LIBRARIES}
           SPIRV spirv-reflect-static miniaudio
-          ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} rstd::rstd)
+          ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} rstd::rstd rstd.cppstd)
 
 target_include_directories(${PROJECT_NAME}
   PUBLIC . Swapchain Utils/include RenderGraph/include Vulkan/include

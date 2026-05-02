@@ -2,10 +2,6 @@ module;
 
 #include <cassert>
 #include <cstdlib>
-#include <memory>
-#include <span>
-#include <string>
-#include <vector>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
@@ -25,6 +21,7 @@ module;
 #include "Utils/Logging.h"
 
 module wescene.vulkan;
+import cppstd;
 import wescene.utils;
 
 using namespace wallpaper;

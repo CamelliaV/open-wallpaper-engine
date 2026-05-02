@@ -1,16 +1,8 @@
 module;
 
 #include <cassert>
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
@@ -28,6 +20,7 @@ module;
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import cppstd;
 
 import wescene.utils;
 

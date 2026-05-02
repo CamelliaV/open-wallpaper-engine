@@ -1,11 +1,9 @@
 module;
 
-#include <cstdint>
 #include <cstring>
-#include <span>
-#include <utility>
 
 module wescene.scene;
+import cppstd;
 
 using namespace wallpaper;
 

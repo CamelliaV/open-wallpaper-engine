@@ -7,12 +7,10 @@ module;
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-#include <iostream>
-#include <chrono>
 #include <ctime>
-#include <numeric>
 
 module wescene.shader_value_updater;
+import cppstd;
 import wescene.utils;
 import wescene.scene;
 

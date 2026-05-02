@@ -5,14 +5,8 @@ module;
 #include "Core/MapSet.hpp"
 #include "RenderGraph/Pass.hpp"
 
-#include <array>
-#include <functional>
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
-
 module wescene.vulkan_render;
+import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 

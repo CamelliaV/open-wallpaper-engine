@@ -1,17 +1,10 @@
 module;
 
-#include <cstdint>
-#include <vector>
-#include <numeric>
-#include <memory>
-#include <unordered_set>
-#include <string>
-#include <string_view>
-
 #include "Core/Literals.hpp"
 #include "Core/NoCopyMove.hpp"
 
 export module wescene.rgraph:dependency_graph;
+import cppstd;
 
 export namespace wallpaper::rg
 {

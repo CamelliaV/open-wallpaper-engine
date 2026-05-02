@@ -2,11 +2,9 @@ module;
 
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
-#include <string>
-#include <vector>
-#include <cstdint>
 
 export module wescene.parse:wp_material;
+import cppstd;
 import wescene.fs;
 
 export namespace wallpaper

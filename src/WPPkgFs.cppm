@@ -1,13 +1,9 @@
 module;
 
-#include <memory>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-
 #include "Core/Literals.hpp"
 
 export module wescene.pkg_fs;
+import cppstd;
 
 export import wescene.fs;
 

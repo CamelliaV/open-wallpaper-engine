@@ -1,9 +1,7 @@
 module;
 
-#include <algorithm>
-#include <span>
-
 module wescene.scene;
+import cppstd;
 
 using namespace wallpaper;
 

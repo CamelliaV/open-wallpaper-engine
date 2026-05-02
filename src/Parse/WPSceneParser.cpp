@@ -1,6 +1,4 @@
 module;
-#include <array>
-#include <vector>
 
 #include "Core/Literals.hpp"
 
@@ -16,25 +14,13 @@ module;
 #include "Core/MapSet.hpp"
 #include "SpecTexs.hpp"
 
-
-
-
 #include "Image.hpp"
 
-
-#include <algorithm>
-#include <iostream>
-#include <sstream>
-#include <string>
-#include <unordered_map>
-#include <random>
 #include <cmath>
-#include <functional>
-#include <regex>
-#include <variant>
 #include <Eigen/Dense>
 
 module wescene.parse;
+import cppstd;
 import wescene.utils;
 import wescene.scene;
 
@@ -971,7 +957,6 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
 		1000.0f,
 	};
  
-
 
     u32 maxcount = particle_obj.maxcount;
     maxcount     = std::min(maxcount, 20000u);

@@ -1,6 +1,4 @@
 module;
-#include <string>
-#include <unordered_set>
 
 #include "WPJson.hpp"
 
@@ -9,9 +7,9 @@ module;
 #include "Utils/Logging.h"
 
 module wescene.parse;
+import cppstd;
 
 using namespace wallpaper::wpscene;
-
 
 bool WPEffectCommand::FromJson(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE(json, "command", command);
@@ -37,7 +35,6 @@ const std::unordered_set<std::string> WPImageEffect::BLACKLISTED_WORKSHOP_EFFECT
 {
     "2799421411" // Audio Responsive Oscilloscope   --  causes vulcan deadlock
 };
-
 
 bool WPImageEffect::IsEffectBlacklisted(const std::string& filePath) {
     

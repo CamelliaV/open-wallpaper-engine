@@ -1,11 +1,6 @@
 module;
 
 #include <cassert>
-#include <cstdint>
-#include <optional>
-#include <span>
-#include <utility>
-#include <vector>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
@@ -18,6 +13,7 @@ module;
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import cppstd;
 
 using namespace wallpaper::vulkan;
 

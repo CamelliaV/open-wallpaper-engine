@@ -1,13 +1,10 @@
 module;
 
-#include <chrono>
-#include <functional>
-#include <numeric>
-
 #include "Core/Literals.hpp"
 #include "Utils/Logging.h"
 
 module wescene.timer;
+import cppstd;
 
 using namespace wallpaper;
 using micros = std::chrono::microseconds;
@@ -46,7 +43,7 @@ double FrameTimer::IdeaTime() const {
 void FrameTimer::UpdateFrametime() {
     m_frametime.store(std::accumulate(m_frametime_queue.begin(),
                                       m_frametime_queue.end(),
-                                      duration_cast<microseconds>(0s)) /
+                                      microseconds(0)) /
                       m_frametime_queue.size());
 }
 

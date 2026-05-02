@@ -1,16 +1,10 @@
 module;
 
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <functional>
-#include <mutex>
-#include <thread>
-
 #include "Core/Literals.hpp"
 #include "Core/NoCopyMove.hpp"
 
 export module wescene.timer:thread_timer;
+import cppstd;
 
 export namespace wallpaper
 {

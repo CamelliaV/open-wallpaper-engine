@@ -1,22 +1,6 @@
 module;
 
-#include <algorithm>
-#include <array>
-#include <atomic>
 #include <climits>
-#include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <list>
-#include <memory>
-#include <random>
-#include <span>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-#include <limits>
 
 #include <Eigen/Dense>
 
@@ -29,6 +13,7 @@ module;
 #include "Image.hpp"
 
 export module wescene.scene;
+import cppstd;
 
 export namespace wallpaper
 {

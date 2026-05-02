@@ -1,20 +1,8 @@
 module;
 
 // Module purview content needs these std headers + a few internal classics.
-#include <array>
-#include <bitset>
-#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <cstdlib>
-#include <filesystem>
-#include <functional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <type_traits>
-#include <utility>
-#include <vector>
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -42,6 +30,7 @@ module;
 #include "Utils/Sha.hpp"
 
 export module wescene.utils;
+import cppstd;
 
 // ---------- Module-purview entities ----------------------------------------
 

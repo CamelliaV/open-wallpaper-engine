@@ -1,11 +1,10 @@
 module;
 
-
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
-#include <vector>
 
 export module wescene.parse:wp_light_object;
+import cppstd;
 import wescene.fs;
 
 export import wescene.puppet;

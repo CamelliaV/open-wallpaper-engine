@@ -1,12 +1,5 @@
 module;
 
-#include <algorithm>
-#include <cstdint>
-#include <memory>
-#include <optional>
-#include <utility>
-#include <vector>
-
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 
@@ -15,6 +8,7 @@ module;
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import cppstd;
 import wescene.utils;
 
 namespace vvk

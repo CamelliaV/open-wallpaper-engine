@@ -4,17 +4,12 @@ module;
 
 #include "Utils/Logging.h"
 
-
 #include "Type.hpp"
 
 #include "Swapchain/ExSwapchain.hpp"
 
-#include <atomic>
-#include <chrono>
-#include <filesystem>
-#include <thread>
-
 module wescene.scene_wallpaper;
+import cppstd;
 import wescene.utils;
 import wescene.scene;
 

@@ -1,11 +1,9 @@
 module;
 
-#include <chrono>
-#include <iostream>
-
 #include "Core/Literals.hpp"
 
 module wescene.utils;
+import cppstd;
 
 using namespace wallpaper;
 using namespace std::chrono;
@@ -14,7 +12,7 @@ FpsCounter::FpsCounter(): m_fps(0), m_frameCount(0), m_startTime(steady_clock::n
 
 namespace
 {
-constexpr seconds timeout { 2s };
+constexpr seconds timeout { 2 };
 }
 
 void FpsCounter::RegisterFrame() {

@@ -1,11 +1,7 @@
 module;
 
-#include <memory>
-#include <string>
-#include <string_view>
-#include <utility>
-
 module wescene.rgraph;
+import cppstd;
 
 using namespace wallpaper::rg;
 
@@ -24,7 +20,6 @@ std::string_view PassNode::name() const { return m_name; }
 void PassNode::setName(std::string_view name) {
     m_name = name;
 }
-
 
 std::string PassNode::ToGraphviz() const {
     return GraphID() + "[label=\""+m_name+"\"]";

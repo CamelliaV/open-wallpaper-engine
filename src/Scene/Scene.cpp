@@ -1,8 +1,7 @@
 module;
 
-#include <memory>
-
 module wescene.scene;
+import cppstd;
 
 import wescene.fs;
 

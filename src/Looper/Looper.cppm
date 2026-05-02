@@ -1,24 +1,12 @@
 module;
 
-#include <atomic>
-#include <array>
-#include <condition_variable>
-#include <cstdint>
-#include <list>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <string_view>
-#include <thread>
-#include <variant>
-
 #include <cerrno>
 
 #include "Core/NoCopyMove.hpp"
 #include "Core/Visitors.hpp"
 
 export module wescene.looper;
+import cppstd;
 
 export namespace wallpaper::looper
 {

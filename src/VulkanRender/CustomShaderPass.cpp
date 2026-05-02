@@ -1,14 +1,6 @@
 module;
 
-#include <array>
 #include <cassert>
-#include <cstdint>
-#include <functional>
-#include <optional>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
 
 #include <vulkan/vulkan.h>
 
@@ -21,6 +13,7 @@ module;
 #include "vvk/macros.hpp"
 
 module wescene.vulkan_render;
+import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 

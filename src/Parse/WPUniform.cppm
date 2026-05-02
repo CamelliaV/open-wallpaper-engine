@@ -2,11 +2,9 @@ module;
 
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
-#include <unordered_map>
-#include <string>
-#include <cstdint>
 
 export module wescene.parse:wp_uniform;
+import cppstd;
 import wescene.fs;
 
 import wescene.json;

@@ -1,15 +1,11 @@
 module;
 
-#include <cstdint>
-#include <vector>
-#include <string>
-#include <memory>
-#include <span>
 #include <Eigen/Geometry>
 
 #include "Core/Literals.hpp"
 
 export module wescene.puppet;
+import cppstd;
 
 export namespace wallpaper
 

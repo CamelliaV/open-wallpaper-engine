@@ -1,9 +1,5 @@
 module;
 
-#include <functional>
-#include <string>
-#include <vector>
-
 #include <vulkan/vulkan.h>
 
 #include "SpriteAnimation.hpp"
@@ -11,6 +7,7 @@ module;
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:custom_shader_pass;
+import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 

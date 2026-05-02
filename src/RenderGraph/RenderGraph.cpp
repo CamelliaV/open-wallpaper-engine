@@ -1,17 +1,13 @@
 module;
 
 #include <cassert>
-#include <algorithm>
-#include <memory>
-#include <span>
-#include <string_view>
-#include <vector>
 
 #include "Core/MapSet.hpp"
 #include "Utils/Logging.h"
 #include "RenderGraph/Pass.hpp"
 
 module wescene.rgraph;
+import cppstd;
 
 using namespace wallpaper::rg;
 
@@ -130,7 +126,6 @@ void RenderGraphBuilder::write(TexNode* node) {
     m_rg.m_dg.Connect(m_passnode_wip->ID(), node->ID());
     node->setWriter(m_passnode_wip);
 }
-
 
 const PassNode& RenderGraphBuilder::workPassNode() const {
     return *m_passnode_wip;

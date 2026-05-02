@@ -1,17 +1,11 @@
 module;
 
-#include <array>
-#include <cstdint>
-#include <span>
-#include <string>
-#include <utility>
-#include <vector>
-
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
 #include "Type.hpp"
 
 export module wescene.parse:wp_shader_parser;
+import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 import wescene.fs;

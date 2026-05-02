@@ -1,14 +1,10 @@
 module;
 
-#include <atomic>
-#include <chrono>
-#include <deque>
-#include <functional>
-
 #include "Core/Literals.hpp"
 #include "Core/NoCopyMove.hpp"
 
 export module wescene.timer:frame_timer;
+import cppstd;
 
 import :thread_timer;
 

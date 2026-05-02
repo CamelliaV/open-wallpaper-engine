@@ -1,9 +1,7 @@
 module;
 
-#include <string>
-#include <string_view>
-
 export module wescene.rgraph:tex_node;
+import cppstd;
 
 import :dependency_graph;
 
