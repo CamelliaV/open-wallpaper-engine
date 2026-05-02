@@ -45,7 +45,9 @@ struct ParseContext {
 };
 
 using WPObjectVar = std::variant<wpscene::WPImageObject, wpscene::WPParticleObject,
-                                 wpscene::WPSoundObject, wpscene::WPLightObject>;
+                                 wpscene::WPSoundObject, wpscene::WPLightObject,
+                                 wpscene::WPTextObject, wpscene::WPModelObject,
+                                 wpscene::WPCameraObject>;
 
 namespace
 {
@@ -1108,6 +1110,10 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     std::vector<WPObjectVar> wp_objs;
 
     for (auto& obj : json.at("objects")) {
+        // Order matters: text/model/camera kinds coexist with null
+        // image/particle/sound/light fields, so the renderer-supported
+        // kinds get first pick. Falls through to the parsing-only kinds
+        // (no rendering yet) so the data stays absorbed.
         if (obj.contains("image") && ! obj.at("image").is_null()) {
             AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs, pkg_version);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
@@ -1116,6 +1122,12 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs, pkg_version);
         } else if (obj.contains("light") && ! obj.at("light").is_null()) {
             AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs, pkg_version);
+        } else if (obj.contains("text") && ! obj.at("text").is_null()) {
+            AddWPObject<wpscene::WPTextObject>(wp_objs, obj, vfs, pkg_version);
+        } else if (obj.contains("model") && ! obj.at("model").is_null()) {
+            AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs, pkg_version);
+        } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
+            AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs, pkg_version);
         }
     }
 
@@ -1157,7 +1169,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
 
     for (WPObjectVar& obj : wp_objs) {
         std::visit(visitor::overload {
-                       [&context](wpscene::WPImageObject& obj) {                           
+                       [&context](wpscene::WPImageObject& obj) {
                             ParseImageObj(context, obj);
                        },
                        [&context](wpscene::WPParticleObject& obj) {
@@ -1169,6 +1181,15 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                        [&context](wpscene::WPLightObject& obj) {
                            ParseLightObj(context, obj);
                        },
+                       // Parsing-only kinds: data is captured into the
+                       // WPObjectVar but no SceneNode is created yet —
+                       // renderer support for text overlays, .mdl model
+                       // attachments, and per-object camera markers is
+                       // still on the support matrix. See SceneSchema
+                       // tests for absorption coverage.
+                       [](wpscene::WPTextObject&) {},
+                       [](wpscene::WPModelObject&) {},
+                       [](wpscene::WPCameraObject&) {},
                    },
                    obj);
     }

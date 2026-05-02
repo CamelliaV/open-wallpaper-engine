@@ -134,6 +134,7 @@ T_IMPL_GET_JSON(float);
 T_IMPL_GET_JSON(double);
 T_IMPL_GET_JSON(std::string);
 T_IMPL_GET_JSON(std::vector<float>);
+T_IMPL_GET_JSON(std::vector<int32_t>);
 
 template<std::size_t N>
 using iarray = std::array<int, N>;

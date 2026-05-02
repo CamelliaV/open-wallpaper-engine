@@ -33,6 +33,8 @@ struct WPSoundObject {
     bool                     muteineditor { false };
     bool                     nointerpolation { false };
     std::uint32_t            parent { 0 };
+    std::vector<std::int32_t> dependencies;
+    nlohmann::json           instance;
 
     // Sound-kind specifics.
     bool                     startsilent { false };       // PKGV0002+
@@ -57,6 +59,8 @@ struct WPSoundObject {
         GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
         GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
         GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+        GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+        if (json.contains("instance")) instance = json.at("instance");
 
         GET_JSON_NAME_VALUE_NOWARN(json, "startsilent", startsilent);
         GET_JSON_NAME_VALUE_NOWARN(json, "blockalign", blockalign);

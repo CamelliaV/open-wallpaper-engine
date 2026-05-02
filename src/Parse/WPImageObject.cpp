@@ -231,5 +231,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     GET_JSON_NAME_VALUE_NOWARN(json, "depthtest", depthtest);
     GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
     GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
+    GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+    if (json.contains("instance")) instance = json.at("instance");
     return true;
 }

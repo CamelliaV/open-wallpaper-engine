@@ -69,6 +69,7 @@ target_sources(
          Parse/WPLightObject.cppm
          Parse/WPMaterial.cppm
          Parse/WPMdlParser.cppm
+         Parse/WPMiscObject.cppm
          Parse/WPParticleObject.cppm
          Parse/WPParticleParser.cppm
          Parse/WPPuppet.cppm

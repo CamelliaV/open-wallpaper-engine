@@ -88,6 +88,8 @@ public:
     bool                       muteineditor { false };
     bool                       nointerpolation { false };  // PKGV0021+
     std::uint32_t              parent { 0 };               // PKGV0019+; 0 = no parent
+    std::vector<std::int32_t>  dependencies;               // PKGV0001+; referenced object ids
+    nlohmann::json             instance;                   // PKGV0018+; instance binding
 
     // Image-kind specifics (gates listed for reference; reads are unconditional via _NOWARN).
     bool                       perspective { false };          // PKGV0002+

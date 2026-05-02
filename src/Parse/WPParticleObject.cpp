@@ -206,6 +206,10 @@ bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneV
     GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
     GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
     GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+    GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+    GET_JSON_NAME_VALUE_NOWARN(json, "controlpoint", controlpoint);
+    if (json.contains("instance")) instance = json.at("instance");
+    if (json.contains("particlesrc")) particlesrc = json.at("particlesrc");
 
     nlohmann::json jParticle;
     if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + particle), jParticle)) return false;

@@ -170,6 +170,10 @@ public:
     bool                     muteineditor { false };
     bool                     nointerpolation { false };
     std::uint32_t            parent { 0 };
+    std::vector<std::int32_t> dependencies;
+    nlohmann::json           instance;
+    nlohmann::json           particlesrc;       // PKGV0001+; always null in corpus
+    std::array<float, 3>     controlpoint { 0.0f, 0.0f, 0.0f };  // PKGV0019+
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);

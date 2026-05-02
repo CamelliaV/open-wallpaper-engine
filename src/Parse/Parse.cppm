@@ -8,6 +8,7 @@ export import :wp_image_object;
 export import :wp_light_object;
 export import :wp_material;
 export import :wp_mdl_parser;
+export import :wp_misc_object;
 export import :wp_particle_object;
 export import :wp_particle_parser;
 export import wescene.puppet;

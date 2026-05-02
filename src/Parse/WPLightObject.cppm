@@ -39,6 +39,8 @@ public:
     bool                 muteineditor { false };
     bool                 nointerpolation { false };
     std::uint32_t        parent { 0 };
+    std::vector<std::int32_t> dependencies;
+    nlohmann::json       instance;
 
     // Light-kind specifics.
     bool                 ledsource { false };          // PKGV0006+

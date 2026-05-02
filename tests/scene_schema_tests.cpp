@@ -90,6 +90,7 @@ const std::set<std::string>& kParsedObjectKeys() {
         // shared by all kinds
         "id", "name", "visible", "origin", "angles", "scale", "parallaxDepth",
         "locktransforms", "muteineditor", "nointerpolation", "parent",
+        "dependencies", "instance",
         // image-only
         "image", "alignment", "colorBlendMode", "color", "alpha", "brightness",
         "size", "effects", "animationlayers", "config",
@@ -102,10 +103,18 @@ const std::set<std::string>& kParsedObjectKeys() {
         "exponent", "density", "volumetricsexponent", "lightsourcesize",
         "mindistance", "cascadedistance0", "cascadedistance1", "cascadedistance2",
         // particle-only
-        "particle", "instanceoverride",
+        "particle", "instanceoverride", "particlesrc", "controlpoint",
         // sound-only
         "sound", "volume", "playbackmode", "mintime", "maxtime",
         "startsilent", "blockalign", "spatialization", "queuemode",
+        // text-only (WPTextObject)
+        "text", "font", "pointsize", "padding", "horizontalalign",
+        "verticalalign", "anchor", "maxrows", "maxwidth",
+        "limitrows", "limitwidth", "limituseellipsis",
+        // model-only (WPModelObject)
+        "model", "attachment",
+        // camera-only (WPCameraObject)
+        "camera", "fov", "zoom", "path",
     };
     return s;
 }
