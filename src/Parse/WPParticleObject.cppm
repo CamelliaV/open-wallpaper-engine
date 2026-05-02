@@ -164,6 +164,12 @@ public:
     std::string              particle;
     Particle                 particleObj;
     ParticleInstanceoverride instanceoverride;
+
+    // Common cross-kind metadata.
+    bool                     locktransforms { false };
+    bool                     muteineditor { false };
+    bool                     nointerpolation { false };
+    std::uint32_t            parent { 0 };
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);

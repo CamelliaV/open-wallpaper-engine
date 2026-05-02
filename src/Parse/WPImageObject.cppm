@@ -83,6 +83,24 @@ public:
     std::vector<WPImageEffect> effects;
     Config                     config;
 
+    // Common cross-kind metadata (PKGV0001+ unless noted).
+    bool                       locktransforms { false };
+    bool                       muteineditor { false };
+    bool                       nointerpolation { false };  // PKGV0021+
+    std::uint32_t              parent { 0 };               // PKGV0019+; 0 = no parent
+
+    // Image-kind specifics (gates listed for reference; reads are unconditional via _NOWARN).
+    bool                       perspective { false };          // PKGV0002+
+    bool                       copybackground { false };       // PKGV0001+
+    bool                       solid { false };                // PKGV0002+
+    bool                       opaquebackground { false };     // PKGV0005+
+    bool                       clampuvs { false };             // PKGV0022+
+    bool                       castshadow { false };           // PKGV0019+
+    bool                       disablepropagation { false };   // PKGV0023+
+    std::string                depthtest { "enabled" };        // PKGV0020+
+    std::array<float, 3>       backgroundcolor { 0.0f, 0.0f, 0.0f }; // PKGV0005+
+    float                      backgroundbrightness { 1.0f };  // PKGV0010+
+
     std::string                                puppet;
     std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
 };

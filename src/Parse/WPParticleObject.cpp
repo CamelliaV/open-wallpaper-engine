@@ -202,6 +202,11 @@ bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneV
         instanceoverride.FromJosn(json.at("instanceoverride"));
     }
 
+    GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
+    GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
+    GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
+    GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+
     nlohmann::json jParticle;
     if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + particle), jParticle)) return false;
     if (! particleObj.FromJson(jParticle, vfs)) return false;

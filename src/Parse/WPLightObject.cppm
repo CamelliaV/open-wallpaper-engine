@@ -28,10 +28,33 @@ public:
     std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
-    std::string          light;
+    std::string          light;          // "point" / "spot" / "directional" / ...
+    std::string          shape;          // PKGV0021+
     float                radius { 1000.0f };
     float                intensity { 1.0f };
     bool                 visible { true };
+
+    // Common cross-kind metadata.
+    bool                 locktransforms { false };
+    bool                 muteineditor { false };
+    bool                 nointerpolation { false };
+    std::uint32_t        parent { 0 };
+
+    // Light-kind specifics.
+    bool                 ledsource { false };          // PKGV0006+
+    bool                 castshadow { false };         // PKGV0019+
+    bool                 castvolumetrics { false };    // PKGV0019+
+    float                outercone { 0.0f };           // PKGV0019+
+    float                innercone { 0.0f };           // PKGV0019+
+    float                attenuation { 0.0f };         // PKGV0023+
+    float                exponent { 1.0f };            // PKGV0021+
+    float                density { 1.0f };             // PKGV0021+
+    float                volumetricsexponent { 1.0f }; // PKGV0021+
+    float                lightsourcesize { 0.0f };     // PKGV0022+
+    float                mindistance { 0.0f };         // PKGV0023+
+    float                cascadedistance0 { 0.0f };    // PKGV0021+
+    float                cascadedistance1 { 0.0f };
+    float                cascadedistance2 { 0.0f };
 };
 
 } // namespace wpscene

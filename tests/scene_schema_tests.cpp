@@ -1,19 +1,31 @@
 // scene.json schema reverse-coverage report.
 //
-// Two-direction check against the live corpus, sourced from ScanSceneKeys:
+// Two-direction check against the live corpus (sourced from ScanSceneKeys),
+// applied independently per top-level scope:
 //
-//  1. ASSERT — every `general.<X>` key the parser declares it reads must
-//     appear in at least one observed scene. Catches typos and dead
-//     declarations (e.g. someone removed a field but the read remained).
+//   * "general.<X>" — fields directly under the scene's `general` object.
+//     Source of truth: src/Parse/WPScene.cpp parse_*/capture_* helpers.
+//   * "objects[].<X>" — fields directly on each scene object (image/light/
+//     particle/sound). Source of truth: the union of fields read across
+//     WPImageObject / WPLightObject / WPParticleObject / WPSoundObject
+//     FromJson implementations.
 //
-//  2. REPORT (stderr only, no assertion) — for each PKGV version, the
-//     top general.<X> keys that *do* appear in scenes but are not in
-//     kParsedGeneralKeys. Drives the priority list for future work
-//     (lightconfig, fog*, hdr* etc).
+// For each scope we run:
 //
-// kParsedGeneralKeys() must be kept in sync with the parse_*/capture_*
-// helpers in src/Parse/WPScene.cpp. When you add a new GET_JSON_NAME_VALUE
-// for a general.* field, list it here too.
+//   1. ASSERT — every key the parser declares it reads must appear in at
+//      least one observed scene. Catches typos and dead declarations.
+//
+//   2. REPORT (stderr only, no assertion) — for each PKGV version, the top
+//      N keys that *do* appear in scenes but are NOT in the parsed set.
+//      Drives the priority list for absorbing more keys into the structs.
+//
+// `general` additionally asserts (3) that each declared min_v gate is not
+// later than the corpus's actual earliest observation of that key (would
+// otherwise silently miss data on older scenes).
+//
+// kParsedGeneralKeys / kParsedObjectKeys must be kept in sync with
+// src/Parse/WPScene.cpp and src/Parse/WP*Object.cpp respectively; when you
+// add a new GET_JSON_NAME_VALUE for a top-level field, list it here too.
 
 #include <algorithm>
 #include <cstdint>
@@ -32,6 +44,7 @@
 namespace {
 
 constexpr std::string_view kGeneralPrefix = "general.";
+constexpr std::string_view kObjectsPrefix = "objects[].";
 
 // Mirrors src/Parse/WPScene.cpp. Group keyed by the min PKGV version where
 // the parser starts attempting the read. Updates here are docs; the
@@ -67,7 +80,37 @@ const auto& kParsedGeneralKeys() {
     return m;
 }
 
-std::set<std::string> AllParsed() {
+// Union of objects[].<X> fields read across the four object-kind parsers.
+// No version gates: object schemas evolve much more slowly than general,
+// and per-kind dispatch is the dominant axis. Keep this list as a flat
+// set; the SceneSchema.EveryParsedObjectKeyIsObserved test verifies each
+// entry actually shows up in the corpus.
+const std::set<std::string>& kParsedObjectKeys() {
+    static const std::set<std::string> s = {
+        // shared by all kinds
+        "id", "name", "visible", "origin", "angles", "scale", "parallaxDepth",
+        "locktransforms", "muteineditor", "nointerpolation", "parent",
+        // image-only
+        "image", "alignment", "colorBlendMode", "color", "alpha", "brightness",
+        "size", "effects", "animationlayers", "config",
+        "perspective", "copybackground", "solid", "opaquebackground",
+        "clampuvs", "castshadow", "disablepropagation", "depthtest",
+        "backgroundcolor", "backgroundbrightness",
+        // light-only
+        "light", "radius", "intensity", "shape",
+        "ledsource", "castvolumetrics", "outercone", "innercone", "attenuation",
+        "exponent", "density", "volumetricsexponent", "lightsourcesize",
+        "mindistance", "cascadedistance0", "cascadedistance1", "cascadedistance2",
+        // particle-only
+        "particle", "instanceoverride",
+        // sound-only
+        "sound", "volume", "playbackmode", "mintime", "maxtime",
+        "startsilent", "blockalign", "spatialization", "queuemode",
+    };
+    return s;
+}
+
+std::set<std::string> AllParsedGeneral() {
     std::set<std::string> out;
     for (const auto& [_, ks] : kParsedGeneralKeys())
         out.insert(ks.begin(), ks.end());
@@ -79,16 +122,61 @@ unsigned PkgIntFromStamp(const std::string& s) {
     return static_cast<unsigned>(std::stoi(s.substr(4)));
 }
 
-// Accepts only paths of shape "general.<X>" with no further '.' or '['
-// — i.e. a direct child of `general`, not a nested sub-field.
-bool IsTopLevelGeneralKey(std::string_view path) {
-    if (! path.starts_with(kGeneralPrefix)) return false;
-    return path.find_first_of(".[", kGeneralPrefix.size()) == std::string_view::npos;
+// Accepts only paths of shape "<prefix><X>" with no further '.' or '['
+// — i.e. a direct child of the scope, not a nested sub-field.
+bool IsDirectChildOf(std::string_view prefix, std::string_view path) {
+    if (! path.starts_with(prefix)) return false;
+    return path.find_first_of(".[", prefix.size()) == std::string_view::npos;
 }
 
 const nlohmann::json& Report() {
     static const nlohmann::json r = wallpaper::testing::ScanSceneKeys(WAYWALLEN_WORKSHOP_DIR);
     return r;
+}
+
+// Print top-N unparsed direct-child keys per pkg version for the given
+// scope. Pure stderr signal — no assertion.
+void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
+                         const std::set<std::string>& parsed, std::size_t top_n) {
+    std::cerr << "\n=== unparsed top-level " << scope_label << "<X> keys per pkg version "
+                 "(top " << top_n << " by present_in count) ===\n";
+
+    std::vector<std::pair<unsigned, std::string>> stamps;
+    for (const auto& [stamp, _] : Report().items())
+        stamps.emplace_back(PkgIntFromStamp(stamp), stamp);
+    std::sort(stamps.begin(), stamps.end());
+
+    for (const auto& [v, stamp] : stamps) {
+        const auto& ver_data = Report()[stamp];
+        if (! ver_data.contains("keys")) continue;
+
+        struct Entry {
+            std::string   key;
+            std::uint64_t present_in;
+        };
+        std::vector<Entry> miss;
+        for (const auto& [path, info] : ver_data["keys"].items()) {
+            if (! IsDirectChildOf(prefix, path)) continue;
+            const std::string k { path.substr(prefix.size()) };
+            if (parsed.contains(k)) continue;
+            miss.push_back({ k, info.value("present_in", std::uint64_t { 0 }) });
+        }
+        std::sort(miss.begin(), miss.end(),
+                  [](auto& a, auto& b) { return a.present_in > b.present_in; });
+
+        std::cerr << "  " << stamp << ": ";
+        if (miss.empty()) {
+            std::cerr << "(all top-level " << scope_label << "* keys are parsed)";
+        } else {
+            const std::size_t n = std::min(miss.size(), top_n);
+            for (std::size_t i = 0; i < n; ++i) {
+                if (i) std::cerr << ", ";
+                std::cerr << miss[i].key << "(" << miss[i].present_in << ")";
+            }
+            if (miss.size() > n) std::cerr << ", … +" << (miss.size() - n) << " more";
+        }
+        std::cerr << "\n";
+    }
 }
 
 } // namespace
@@ -98,12 +186,12 @@ TEST(SceneSchema, EveryParsedGeneralKeyIsObservedSomewhere) {
     for (const auto& [_, ver_data] : Report().items()) {
         if (! ver_data.contains("keys")) continue;
         for (const auto& [path, __] : ver_data["keys"].items()) {
-            if (! IsTopLevelGeneralKey(path)) continue;
+            if (! IsDirectChildOf(kGeneralPrefix, path)) continue;
             observed.insert(path.substr(kGeneralPrefix.size()));
         }
     }
 
-    for (const auto& k : AllParsed()) {
+    for (const auto& k : AllParsedGeneral()) {
         EXPECT_TRUE(observed.contains(k))
             << "general." << k
             << " is read by the parser but never appears in any scene "
@@ -120,7 +208,7 @@ TEST(SceneSchema, ParsedKeyDeclarationLowerBoundIsRespected) {
         const unsigned v = PkgIntFromStamp(stamp);
         if (! ver_data.contains("keys")) continue;
         for (const auto& [path, _] : ver_data["keys"].items()) {
-            if (! IsTopLevelGeneralKey(path)) continue;
+            if (! IsDirectChildOf(kGeneralPrefix, path)) continue;
             const std::string k { path.substr(kGeneralPrefix.size()) };
             auto it = earliest.find(k);
             if (it == earliest.end() || v < it->second) earliest[k] = v;
@@ -141,48 +229,30 @@ TEST(SceneSchema, ParsedKeyDeclarationLowerBoundIsRespected) {
     }
 }
 
-TEST(SceneSchema, ReportTopUnparsedGeneralKeysPerVersion) {
-    const auto parsed = AllParsed();
-
-    std::cerr << "\n=== unparsed top-level general.<X> keys per pkg version "
-                 "(top 15 by present_in count) ===\n";
-
-    // Iterate in pkg-version numeric order for readability.
-    std::vector<std::pair<unsigned, std::string>> stamps;
-    for (const auto& [stamp, _] : Report().items())
-        stamps.emplace_back(PkgIntFromStamp(stamp), stamp);
-    std::sort(stamps.begin(), stamps.end());
-
-    for (const auto& [v, stamp] : stamps) {
-        const auto& ver_data = Report()[stamp];
+TEST(SceneSchema, EveryParsedObjectKeyIsObservedSomewhere) {
+    std::set<std::string> observed;
+    for (const auto& [_, ver_data] : Report().items()) {
         if (! ver_data.contains("keys")) continue;
-
-        struct Entry {
-            std::string   key;
-            std::uint64_t present_in;
-        };
-        std::vector<Entry> miss;
-        for (const auto& [path, info] : ver_data["keys"].items()) {
-            if (! IsTopLevelGeneralKey(path)) continue;
-            const std::string k { path.substr(kGeneralPrefix.size()) };
-            if (parsed.contains(k)) continue;
-            miss.push_back({ k, info.value("present_in", std::uint64_t { 0 }) });
+        for (const auto& [path, __] : ver_data["keys"].items()) {
+            if (! IsDirectChildOf(kObjectsPrefix, path)) continue;
+            observed.insert(path.substr(kObjectsPrefix.size()));
         }
-        std::sort(miss.begin(), miss.end(),
-                  [](auto& a, auto& b) { return a.present_in > b.present_in; });
-
-        std::cerr << "  " << stamp << ": ";
-        if (miss.empty()) {
-            std::cerr << "(all top-level general.* keys are parsed)";
-        } else {
-            const std::size_t n = std::min(miss.size(), std::size_t { 15 });
-            for (std::size_t i = 0; i < n; ++i) {
-                if (i) std::cerr << ", ";
-                std::cerr << miss[i].key << "(" << miss[i].present_in << ")";
-            }
-            if (miss.size() > n) std::cerr << ", … +" << (miss.size() - n) << " more";
-        }
-        std::cerr << "\n";
     }
+
+    for (const auto& k : kParsedObjectKeys()) {
+        EXPECT_TRUE(observed.contains(k))
+            << "objects[]." << k
+            << " is read by the parser but never appears in any scene "
+               "across the corpus — typo or dead declaration?";
+    }
+}
+
+TEST(SceneSchema, ReportTopUnparsedGeneralKeysPerVersion) {
+    PrintUnparsedReport(kGeneralPrefix, "general.", AllParsedGeneral(), 15);
+    SUCCEED();
+}
+
+TEST(SceneSchema, ReportTopUnparsedObjectKeysPerVersion) {
+    PrintUnparsedReport(kObjectsPrefix, "objects[].", kParsedObjectKeys(), 15);
     SUCCEED();
 }

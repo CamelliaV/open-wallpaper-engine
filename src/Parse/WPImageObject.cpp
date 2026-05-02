@@ -216,5 +216,20 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
         const auto& jConf = json.at("config");
         GET_JSON_NAME_VALUE_NOWARN(jConf, "passthrough", config.passthrough);
     }
+
+    GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
+    GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
+    GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
+    GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+    GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
+    GET_JSON_NAME_VALUE_NOWARN(json, "copybackground", copybackground);
+    GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
+    GET_JSON_NAME_VALUE_NOWARN(json, "opaquebackground", opaquebackground);
+    GET_JSON_NAME_VALUE_NOWARN(json, "clampuvs", clampuvs);
+    GET_JSON_NAME_VALUE_NOWARN(json, "castshadow", castshadow);
+    GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
+    GET_JSON_NAME_VALUE_NOWARN(json, "depthtest", depthtest);
+    GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
+    GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
     return true;
 }

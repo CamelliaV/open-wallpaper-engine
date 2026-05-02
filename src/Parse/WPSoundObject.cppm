@@ -19,6 +19,7 @@ namespace wpscene
 {
 
 struct WPSoundObject {
+    std::int32_t             id { 0 };
     std::string              playbackmode { "loop" };
     float                    maxtime { 10.0f };
     float                    mintime { 0.0f };
@@ -26,6 +27,18 @@ struct WPSoundObject {
     bool                     visible { true };
     std::string              name;
     std::vector<std::string> sound;
+
+    // Common cross-kind metadata.
+    bool                     locktransforms { false };
+    bool                     muteineditor { false };
+    bool                     nointerpolation { false };
+    std::uint32_t            parent { 0 };
+
+    // Sound-kind specifics.
+    bool                     startsilent { false };       // PKGV0002+
+    bool                     blockalign { false };        // PKGV0018+
+    bool                     spatialization { false };    // PKGV0023+
+    std::string              queuemode;                   // PKGV0020+
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
@@ -38,6 +51,18 @@ struct WPSoundObject {
         GET_JSON_NAME_VALUE_NOWARN(json, "maxtime", maxtime);
         GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
         GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
+        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+
+        GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
+        GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
+        GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
+        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+
+        GET_JSON_NAME_VALUE_NOWARN(json, "startsilent", startsilent);
+        GET_JSON_NAME_VALUE_NOWARN(json, "blockalign", blockalign);
+        GET_JSON_NAME_VALUE_NOWARN(json, "spatialization", spatialization);
+        GET_JSON_NAME_VALUE_NOWARN(json, "queuemode", queuemode);
+
         if (! json.contains("sound") || ! json.at("sound").is_array()) {
             return false;
         }
