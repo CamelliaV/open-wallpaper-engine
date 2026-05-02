@@ -83,6 +83,8 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     std::string filePath;
     GET_JSON_NAME_VALUE(json, "file", filePath);
     GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
+    GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
+    GET_JSON_NAME_VALUE_NOWARN(json, "username", username);
     if(this->IsEffectBlacklisted(filePath)) {
         //hide blacklisted effects
         visible = false;

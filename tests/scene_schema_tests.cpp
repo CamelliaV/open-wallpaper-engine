@@ -172,6 +172,13 @@ const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
                 "id", "name",
                 "additive", "blendin", "blendout", "blendtime" } },
 
+        // Effects: scene-level entries on top of WPImageEffect-loaded data.
+        { "objects[].effects[].",
+          set { "file", "id", "name", "passes", "username", "visible" } },
+        { "objects[].effects[].passes[].",
+          set { "combos", "constantshadervalues", "id",
+                "textures", "usertextures" } },
+
         // Property-binding side channel — any animatable scalar field on
         // an object can carry an `.animation` curve subtree. The shape is
         // identical regardless of which field it hangs off, so a single

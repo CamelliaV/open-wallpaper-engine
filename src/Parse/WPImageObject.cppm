@@ -65,6 +65,7 @@ public:
     bool                         FromFileJson(const nlohmann::json&, fs::VFS& vfs);
     int32_t                      id;
     std::string                  name;
+    std::string                  username;       // PKGV0001+; per-instance label override
     bool                         visible { true };
     int32_t                      version;
     std::vector<WPMaterial>      materials;

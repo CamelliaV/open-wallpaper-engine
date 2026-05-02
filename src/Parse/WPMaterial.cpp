@@ -52,12 +52,18 @@ void WPMaterial::MergePass(const WPMaterialPass& p) {
 }
 
 bool WPMaterialPass::FromJson(const nlohmann::json& json) {
+    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
     if(json.contains("textures")) {
         for(const auto& jT:json.at("textures")) {
             std::string tex;
             if(!jT.is_null())
                 GET_JSON_VALUE(jT, tex);
             textures.push_back(tex);
+        }
+    }
+    if(json.contains("usertextures") && json.at("usertextures").is_array()) {
+        for(const auto& jU : json.at("usertextures")) {
+            usertextures.push_back(jU);
         }
     }
     if(json.contains("constantshadervalues")) {

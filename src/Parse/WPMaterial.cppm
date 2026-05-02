@@ -25,7 +25,9 @@ class WPMaterialPass {
 public:
     bool                                                FromJson(const nlohmann::json&);
     void                                                Update(const WPMaterialPass&);
+    std::uint32_t                                       id { 0 };  // pass id (PKGV0001+)
     std::vector<std::string>                            textures;
+    std::vector<nlohmann::json>                         usertextures;  // PKGV0018+; polymorphic
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::string                                         target;
