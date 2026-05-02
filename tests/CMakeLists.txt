@@ -59,6 +59,12 @@ target_link_libraries(wpscan PRIVATE wpdump_lib)
 add_executable(scene_parse_tests scene_parse_tests.cpp)
 target_link_libraries(scene_parse_tests PRIVATE wpdump_lib GTest::gtest_main)
 
+# Schema reverse coverage: asserts the parser doesn't read keys that
+# never appear in the corpus, and prints unparsed-but-common keys per
+# pkg version as a TODO list for future refactor passes.
+add_executable(scene_schema_tests scene_schema_tests.cpp)
+target_link_libraries(scene_schema_tests PRIVATE wpdump_lib GTest::gtest_main)
+
 # Per-version deep tests live in tests/version/<category>_<version>_test.cpp.
 # Each is a tiny gtest TU built into the same binary so the corpus + gtest
 # fixture machinery is amortised across them.
@@ -86,6 +92,11 @@ if(TARGET deep_version_tests)
 endif()
 gtest_discover_tests(
     scene_parse_tests
+    PROPERTIES TIMEOUT 60
+    DISCOVERY_TIMEOUT 60
+)
+gtest_discover_tests(
+    scene_schema_tests
     PROPERTIES TIMEOUT 60
     DISCOVERY_TIMEOUT 60
 )
