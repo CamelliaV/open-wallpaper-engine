@@ -9,25 +9,39 @@
 // Source of truth: src/Parse/WPTexImageParser.cpp + the
 // WPTexFormatVersion predicates in src/Parse/WPTexImageParser.cppm.
 //
-// Two checks driven by the live corpus:
+// Three layers of checks driven by the live corpus:
 //
-//   1. ASSERT — every (texv, texi, texb, texs) sub-version observed in
-//      the corpus is in the supported set documented by
+//   1. SUB-VERSION COVERAGE — every (texv, texi, texb, texs) sub-version
+//      observed in the corpus is in the supported set documented by
 //      WPTexFormatVersion. A new pkg surfacing an unknown stamp value
-//      fails immediately rather than silently falling through the
-//      production parser's permissive branches.
+//      fails immediately rather than falling through silently.
 //
-//   2. REPORT (stderr only) — distinct tuples and their sample counts,
-//      so additions to the corpus are visible even when they fall in
-//      the supported set.
+//   2. GEOMETRIC INVARIANT — for every non-sprite texture, the first
+//      mip's (width, height) read from the body must equal the texture
+//      stamp section's (width, height). This is a property of the WE
+//      binary format itself, independent of any parser. It catches
+//      header/body misalignment bugs (e.g. the texb=4 reserved-u32 slot
+//      that the production parser silently skipped before the Apr 2026
+//      fix). If a corpus pkg violates the invariant, either the format
+//      grew a new layout variant or this reader is wrong — both worth
+//      knowing.
 //
-// Reads the .tex sub-version stamps directly from the pkg blob instead of
-// going through WPTexImageParser::ParseHeader. ParseHeader's sprite path
-// has a long-standing assertion-failure bug on certain malformed mipmap
-// counts (vector<float>::operator[] on an empty inner vector); routing
-// through it would abort the test process before any tuple gets reported.
-// Using a stand-alone reader keeps this test orthogonal to body-parser
-// regressions and lets it scan the entire corpus unconditionally.
+//   3. PRODUCTION PARITY — for every non-sprite texture, run
+//      WPTexImageParser::ParseHeader and verify its mipmap_pow2 /
+//      mipmap_larger fields agree with values computed from the
+//      authoritative mip0 dims this test reader extracted directly.
+//      This is the cross-implementation check that turns the geometric
+//      invariant into a real production-parser test: any layout drift
+//      between the production parser and the binary spec immediately
+//      shows up as disagreement on these derived fields.
+//
+//   4. REPORT (stderr only) — distinct sub-version tuples and sample
+//      counts so corpus growth is visible even when nothing fails.
+//
+// Sprites use a different mip0/header relationship (mip0 is the full
+// atlas, header is per-frame) and ParseHeader's sprite path has a
+// pre-existing assertion-abort bug on certain inputs, so the geometric
+// invariant and production parity are gated on `!sprite`.
 
 #include <algorithm>
 #include <cstdint>
@@ -36,12 +50,20 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
 #include <gtest/gtest.h>
+
+#include "Image.hpp"
+
+import wescene.parse;
+import wescene.pkg_fs;
+import wescene.fs;
 
 namespace {
 
@@ -55,32 +77,36 @@ constexpr const char* kWorkshopDirMacro =
 #endif
     ;
 
-using TexTuple = std::tuple<int, int, int, int>;  // (texv, texi, texb, texs)
-
-struct TupleStats {
-    std::size_t total { 0 };
-    std::size_t header_ok { 0 };  // header read produced a sane texv/texi/texb
-    std::size_t sprite { 0 };
+// Per-texture authoritative metadata extracted by this test's own binary
+// reader. Holds enough to drive both the geometric invariant and the
+// production parity check.
+struct TexMeta {
+    std::string  workshop_id;
+    std::string  pkg_path;       // "/materials/foo.tex" inside the pkg
+    int          texv { 0 };
+    int          texi { 0 };
+    int          texb { 0 };
+    int          texs { 0 };     // 0 == absent / non-sprite
+    bool         sprite { false };
+    bool         malformed { false };
+    std::int32_t header_w { 0 }; // texture stamp section
+    std::int32_t header_h { 0 };
+    std::int32_t map_w { 0 };
+    std::int32_t map_h { 0 };
+    std::int32_t image_count { 0 };
+    std::int32_t mip0_w { 0 };   // first mip of slot 0; 0 if mip_count == 0
+    std::int32_t mip0_h { 0 };
+    std::int32_t slot0_mip_count { 0 };
 };
 
-// Mirrors WPTexFormatVersion::valid() and the texb/texs predicates. Every
-// value in these sets must be reachable through one of the documented
-// version branches.
-const std::set<int>& kSupportedTexv() {
-    static const std::set<int> v { 5 };
-    return v;
-}
-const std::set<int>& kSupportedTexi() {
-    static const std::set<int> v { 1 };
-    return v;
-}
-const std::set<int>& kSupportedTexb() {
-    static const std::set<int> v { 1, 2, 3, 4 };
-    return v;
-}
+using TexTuple = std::tuple<int, int, int, int>;
+
+const std::set<int>& kSupportedTexv() { static const std::set<int> v { 5 }; return v; }
+const std::set<int>& kSupportedTexi() { static const std::set<int> v { 1 }; return v; }
+const std::set<int>& kSupportedTexb() { static const std::set<int> v { 1, 2, 3, 4 }; return v; }
 const std::set<int>& kSupportedTexs() {
-    // 0 == absent (non-sprite). 2 and 3 cover all sprite samples in the
-    // corpus; 1 is documented as legacy int-coords but never observed.
+    // 0 == absent (non-sprite). 2 / 3 cover all sprite samples; 1 is
+    // documented as legacy int-coords but never observed.
     static const std::set<int> v { 0, 1, 2, 3 };
     return v;
 }
@@ -92,9 +118,8 @@ bool read_pod(const char* buf, std::size_t len, std::size_t off, T& out) {
     return true;
 }
 
-// Mirrors `ReadVersion("TEX", file)` from src/WPCommon.cppm: 9 bytes,
-// expecting "TEXX" + 4-digit ASCII int. Returns 0 on prefix mismatch /
-// short read.
+// Mirrors `ReadVersion("TEX", file)` from src/WPCommon.cppm: 9 bytes of
+// "TEXX####\0". Returns 0 on prefix mismatch / short read.
 int parse_tex_stamp(const char* buf, std::size_t len, std::size_t off) {
     if (off + 9 > len) return 0;
     const char* p = buf + off;
@@ -108,70 +133,79 @@ int parse_tex_stamp(const char* buf, std::size_t len, std::size_t off) {
     return n;
 }
 
-// Read just enough of the .tex blob to recover (texv, texi, texb) plus
-// the `flags` int needed to distinguish sprites from non-sprites. Walks
-// past mip bodies to read the trailing texs stamp when sprite. Returns
-// (-1, -1, -1, -1) on any short / malformed read.
-TexTuple read_tex_versions(const std::string& blob) {
+// Mirrors src/Utils/Utils.cppm's algorism::IsPowOfTwo, including its
+// `x > 1` lower bound — 1 is *not* considered pow-of-two there, and
+// production's `mipmap_pow2` derivation depends on that.
+bool IsPowOfTwo(std::uint32_t x) { return x > 1 && (x & (x - 1)) == 0; }
+
+// Independent reader. Fills `m` from the .tex blob using the authoritative
+// layout (texb >= 3 has image_type, texb >= 4 has reserved u32). Sets
+// m.malformed = true on any short / nonsensical read.
+TexMeta read_tex_meta(const std::string& blob) {
+    TexMeta m;
+    m.malformed         = true;  // flipped to false at the end
     const char*       buf = blob.data();
     const std::size_t len = blob.size();
     std::size_t       o   = 0;
 
-    int texv = parse_tex_stamp(buf, len, o); o += 9;
-    int texi = parse_tex_stamp(buf, len, o); o += 9;
-    if (texv == 0 || texi == 0) return { -1, -1, -1, -1 };
+    m.texv = parse_tex_stamp(buf, len, o); o += 9;
+    m.texi = parse_tex_stamp(buf, len, o); o += 9;
+    if (m.texv <= 0 || m.texi <= 0) return m;
 
-    std::int32_t format = 0, flags = 0, w = 0, h = 0, mw = 0, mh = 0, _u = 0;
-    if (! read_pod(buf, len, o, format)) return { texv, texi, -1, -1 }; o += 4;
-    if (! read_pod(buf, len, o, flags))  return { texv, texi, -1, -1 }; o += 4;
-    if (! read_pod(buf, len, o, w))      return { texv, texi, -1, -1 }; o += 4;
-    if (! read_pod(buf, len, o, h))      return { texv, texi, -1, -1 }; o += 4;
-    if (! read_pod(buf, len, o, mw))     return { texv, texi, -1, -1 }; o += 4;
-    if (! read_pod(buf, len, o, mh))     return { texv, texi, -1, -1 }; o += 4;
-    if (! read_pod(buf, len, o, _u))     return { texv, texi, -1, -1 }; o += 4;
+    std::int32_t format = 0, flags = 0, _u = 0;
+    if (! read_pod(buf, len, o, format))     return m; o += 4;
+    if (! read_pod(buf, len, o, flags))      return m; o += 4;
+    if (! read_pod(buf, len, o, m.header_w)) return m; o += 4;
+    if (! read_pod(buf, len, o, m.header_h)) return m; o += 4;
+    if (! read_pod(buf, len, o, m.map_w))    return m; o += 4;
+    if (! read_pod(buf, len, o, m.map_h))    return m; o += 4;
+    if (! read_pod(buf, len, o, _u))         return m; o += 4;
 
-    int texb = parse_tex_stamp(buf, len, o); o += 9;
-    if (texb == 0) return { texv, texi, -1, -1 };
+    m.texb = parse_tex_stamp(buf, len, o); o += 9;
+    if (m.texb <= 0) return m;
 
-    std::int32_t count = 0;
-    if (! read_pod(buf, len, o, count)) return { texv, texi, texb, -1 }; o += 4;
-
-    if (texb >= 3) {
+    if (! read_pod(buf, len, o, m.image_count)) return m; o += 4;
+    if (m.texb >= 3) {
         std::int32_t image_type = 0;
-        if (! read_pod(buf, len, o, image_type)) return { texv, texi, texb, -1 };
-        o += 4;
+        if (! read_pod(buf, len, o, image_type)) return m; o += 4;
+    }
+    if (m.texb >= 4) {
+        std::int32_t reserved = 0;
+        if (! read_pod(buf, len, o, reserved)) return m; o += 4;
     }
 
-    const bool sprite = (flags & (1u << 2)) != 0;
-    if (! sprite) return { texv, texi, texb, 0 };
+    m.sprite = (flags & (1u << 2)) != 0;
 
-    // walk past mip bodies to reach the trailing texs stamp
-    for (std::int32_t i = 0; i < count; ++i) {
+    // Walk slot 0 to extract mip0 dims; walk subsequent slots to reach
+    // the trailing texs stamp on sprite atlases.
+    for (std::int32_t i = 0; i < m.image_count; ++i) {
         std::int32_t mip_count = 0;
-        if (! read_pod(buf, len, o, mip_count)) return { texv, texi, texb, -1 };
-        o += 4;
-        for (std::int32_t m = 0; m < mip_count; ++m) {
+        if (! read_pod(buf, len, o, mip_count)) return m; o += 4;
+        if (i == 0) m.slot0_mip_count = mip_count;
+        for (std::int32_t k = 0; k < mip_count; ++k) {
             std::int32_t mw0 = 0, mh0 = 0;
-            if (! read_pod(buf, len, o, mw0)) return { texv, texi, texb, -1 }; o += 4;
-            if (! read_pod(buf, len, o, mh0)) return { texv, texi, texb, -1 }; o += 4;
-            if (texb >= 2) {
+            if (! read_pod(buf, len, o, mw0)) return m; o += 4;
+            if (! read_pod(buf, len, o, mh0)) return m; o += 4;
+            if (i == 0 && k == 0) { m.mip0_w = mw0; m.mip0_h = mh0; }
+            if (m.texb >= 2) {
                 std::int32_t lz4 = 0, dec = 0;
-                if (! read_pod(buf, len, o, lz4)) return { texv, texi, texb, -1 }; o += 4;
-                if (! read_pod(buf, len, o, dec)) return { texv, texi, texb, -1 }; o += 4;
+                if (! read_pod(buf, len, o, lz4)) return m; o += 4;
+                if (! read_pod(buf, len, o, dec)) return m; o += 4;
             }
             std::int32_t src = 0;
-            if (! read_pod(buf, len, o, src)) return { texv, texi, texb, -1 }; o += 4;
-            if (src < 0 || o + static_cast<std::size_t>(src) > len)
-                return { texv, texi, texb, -1 };
+            if (! read_pod(buf, len, o, src)) return m; o += 4;
+            if (src < 0 || o + static_cast<std::size_t>(src) > len) return m;
             o += static_cast<std::size_t>(src);
         }
     }
-    int texs = parse_tex_stamp(buf, len, o);
-    return { texv, texi, texb, texs };
+
+    if (m.sprite) m.texs = parse_tex_stamp(buf, len, o);
+    m.malformed = false;
+    return m;
 }
 
-// Reads scene.pkg's table of contents (mirrors dump.cpp's ReadPkgHeader).
-// Returns each .tex entry as a fully-loaded blob. Empty vector on error.
+// Mirrors dump.cpp's pkg header reader so we don't need to expose pkg
+// enumeration through wescene's public API.
 struct TexEntry {
     std::string path;
     std::string blob;
@@ -220,7 +254,7 @@ std::vector<TexEntry> ReadTexEntries(const fs::path& pkg) {
         if (e.path.compare(e.path.size() - 4, 4, ".tex") != 0) continue;
         in.seekg(data_start + static_cast<std::streamoff>(e.offset));
         TexEntry te;
-        te.path = e.path;
+        te.path = "/" + e.path;
         te.blob.resize(static_cast<std::size_t>(std::max<std::int32_t>(e.length, 0)));
         in.read(te.blob.data(), e.length);
         out.push_back(std::move(te));
@@ -228,85 +262,206 @@ std::vector<TexEntry> ReadTexEntries(const fs::path& pkg) {
     return out;
 }
 
-std::map<TexTuple, TupleStats> CollectTuples() {
-    std::map<TexTuple, TupleStats> out;
-    fs::path                       root { kWorkshopDirMacro };
-    if (! fs::exists(root) || ! fs::is_directory(root)) {
-        std::cerr << "tex_schema_tests: workshop dir " << root.string()
-                  << " missing\n";
-        return out;
-    }
-
-    std::vector<fs::path> pkgs;
-    for (auto& e : fs::directory_iterator(root)) {
-        if (! e.is_directory()) continue;
-        auto pkg = e.path() / "scene.pkg";
-        if (fs::exists(pkg)) pkgs.push_back(pkg);
-    }
-    std::sort(pkgs.begin(), pkgs.end());
-
-    for (const auto& pkg : pkgs) {
-        for (const auto& te : ReadTexEntries(pkg)) {
-            auto tup = read_tex_versions(te.blob);
-            auto& s  = out[tup];
-            ++s.total;
-            const auto [v, i, b, sp] = tup;
-            if (v > 0 && i > 0 && b > 0) ++s.header_ok;
-            if (sp > 0) ++s.sprite;
-        }
-    }
-    return out;
+// Strip /materials/...".tex" → "..." for ParseHeader's `name` argument.
+std::string TexNameFromPkgPath(const std::string& pkg_path) {
+    constexpr std::string_view prefix = "/materials/";
+    constexpr std::string_view suffix = ".tex";
+    if (pkg_path.compare(0, prefix.size(), prefix) != 0) return {};
+    if (pkg_path.size() < prefix.size() + suffix.size()) return {};
+    if (pkg_path.compare(pkg_path.size() - suffix.size(), suffix.size(), suffix) != 0)
+        return {};
+    return pkg_path.substr(prefix.size(),
+                           pkg_path.size() - prefix.size() - suffix.size());
 }
 
-const std::map<TexTuple, TupleStats>& AllTuples() {
-    static const auto m = CollectTuples();
-    return m;
+struct CorpusScan {
+    std::vector<TexMeta>                               metas;
+    // Per-pkg cached VFS so production-parity test can run ParseHeader
+    // without re-mounting per texture. Indexed by workshop_id.
+    std::map<std::string, std::shared_ptr<wallpaper::fs::VFS>> vfs_by_workshop;
+};
+
+const CorpusScan& AllScans() {
+    static const CorpusScan c = [] {
+        CorpusScan out;
+        fs::path   root { kWorkshopDirMacro };
+        if (! fs::exists(root) || ! fs::is_directory(root)) {
+            std::cerr << "tex_schema_tests: workshop dir " << root.string() << " missing\n";
+            return out;
+        }
+
+        std::vector<fs::path> pkgs;
+        for (auto& e : fs::directory_iterator(root)) {
+            if (! e.is_directory()) continue;
+            auto pkg = e.path() / "scene.pkg";
+            if (fs::exists(pkg)) pkgs.push_back(pkg);
+        }
+        std::sort(pkgs.begin(), pkgs.end());
+
+        for (const auto& pkg : pkgs) {
+            std::string id = pkg.parent_path().filename().string();
+
+            auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg.string());
+            if (! wfs) continue;
+            auto vfs = std::make_shared<wallpaper::fs::VFS>();
+            if (! vfs->Mount("/assets", std::move(wfs))) continue;
+
+            for (auto& te : ReadTexEntries(pkg)) {
+                auto m = read_tex_meta(te.blob);
+                m.workshop_id = id;
+                m.pkg_path    = te.path;
+                out.metas.push_back(std::move(m));
+            }
+            out.vfs_by_workshop[id] = std::move(vfs);
+        }
+        return out;
+    }();
+    return c;
 }
 
 } // namespace
 
 TEST(TexSchema, EveryObservedSubVersionIsSupported) {
-    const auto& stats = AllTuples();
-    ASSERT_FALSE(stats.empty()) << "tex scan produced zero textures";
+    const auto& metas = AllScans().metas;
+    ASSERT_FALSE(metas.empty()) << "tex scan produced zero textures";
 
-    for (const auto& [tup, s] : stats) {
-        const auto [v, i, b, sp] = tup;
-        // Skip purely malformed reads (header truncated mid-stream); those
-        // surface as -1 / 0 components and are not real version drift.
-        if (v <= 0 || i <= 0 || b <= 0) continue;
+    std::set<TexTuple> seen;
+    for (const auto& m : metas) {
+        if (m.malformed) continue;
+        seen.emplace(m.texv, m.texi, m.texb, m.texs);
+    }
+    for (const auto& [v, i, b, sp] : seen) {
         EXPECT_TRUE(kSupportedTexv().contains(v))
-            << "texv=" << v << " not in supported set; sample count=" << s.total;
+            << "texv=" << v << " not in supported set";
         EXPECT_TRUE(kSupportedTexi().contains(i))
-            << "texi=" << i << " not in supported set; sample count=" << s.total;
+            << "texi=" << i << " not in supported set";
         EXPECT_TRUE(kSupportedTexb().contains(b))
-            << "texb=" << b << " not in supported set; sample count=" << s.total;
+            << "texb=" << b << " not in supported set";
         EXPECT_TRUE(kSupportedTexs().contains(sp))
-            << "texs=" << sp << " not in supported set; sample count=" << s.total;
+            << "texs=" << sp << " not in supported set";
     }
 }
 
 TEST(TexSchema, NoMalformedHeadersInCorpus) {
-    const auto& stats = AllTuples();
-    ASSERT_FALSE(stats.empty()) << "tex scan produced zero textures";
+    const auto& metas = AllScans().metas;
+    ASSERT_FALSE(metas.empty()) << "tex scan produced zero textures";
 
     std::size_t malformed = 0;
-    for (const auto& [tup, s] : stats) {
-        const auto [v, i, b, sp] = tup;
-        if (v <= 0 || i <= 0 || b <= 0 || sp < 0) malformed += s.total;
-    }
+    for (const auto& m : metas)
+        if (m.malformed) ++malformed;
     EXPECT_EQ(malformed, 0u)
         << malformed << " textures had truncated / unparseable headers";
 }
 
+// Geometric invariant: for non-sprite textures, the first mip's dims
+// must agree with one of the two sizes the .tex header advertises:
+//
+//   * (header_w, header_h) — pow-of-2 texture coordinate space.
+//   * (map_w,    map_h)    — original picture size before pow-2 round-up.
+//
+// In practice ~99 % of corpus textures store mip0 at the pow-2 size; a
+// minority of non-pow-2 source pictures keep mip0 at picture size with
+// `header_{w,h}` carrying the next pow-2 up (the "mipmap_larger" branch
+// in production). Any mip0 dim that matches *neither* indicates either
+// a new layout this reader / the production parser hasn't grown to
+// understand, or a header/body misalignment (e.g. the texb=4 reserved-u32
+// bug, which produced mip0 dims of 0x1 — agreeing with neither).
+TEST(TexSchema, NonSpriteMip0AgreesWithHeaderOrMap) {
+    const auto& metas = AllScans().metas;
+    ASSERT_FALSE(metas.empty());
+
+    std::size_t checked = 0, mismatched = 0, matched_map = 0;
+    for (const auto& m : metas) {
+        if (m.malformed || m.sprite) continue;
+        if (m.slot0_mip_count == 0) continue;  // no mips → invariant N/A
+        ++checked;
+        const bool eq_header = (m.mip0_w == m.header_w && m.mip0_h == m.header_h);
+        const bool eq_map    = (m.mip0_w == m.map_w    && m.mip0_h == m.map_h);
+        if (eq_map && ! eq_header) ++matched_map;
+        if (eq_header || eq_map) continue;
+        ++mismatched;
+        ADD_FAILURE() << "mip0 dims " << m.mip0_w << "x" << m.mip0_h
+                      << " agree with neither header " << m.header_w << "x" << m.header_h
+                      << " nor map " << m.map_w << "x" << m.map_h
+                      << " for " << m.workshop_id << " " << m.pkg_path
+                      << " (texb=" << m.texb << ")";
+        if (mismatched >= 5) break;  // cap noise
+    }
+    std::cerr << "TexSchema.NonSpriteMip0AgreesWithHeaderOrMap: checked=" << checked
+              << " matched_map=" << matched_map << " mismatched=" << mismatched << "\n";
+}
+
+// Production parity: for every non-sprite texture the test's binary
+// reader can read fully, run WPTexImageParser::ParseHeader and verify
+// its derived `mipmap_pow2` / `mipmap_larger` fields match values
+// computed directly from the authoritative mip0 dims. This is the
+// cross-implementation check that catches production-side layout bugs
+// the fixture-only tests can't (fixtures are produced by the parser
+// itself, so any stable bug is committed as ground truth).
+//
+// Sprites are excluded — ParseHeader's sprite path has a pre-existing
+// assertion-abort on certain malformed mip vectors, unrelated to the
+// invariant being tested here.
+TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
+    const auto& scan = AllScans();
+    ASSERT_FALSE(scan.metas.empty());
+
+    std::size_t checked = 0, parity_fail = 0;
+    for (const auto& m : scan.metas) {
+        if (m.malformed || m.sprite) continue;
+        if (m.slot0_mip_count == 0) continue;
+
+        auto it = scan.vfs_by_workshop.find(m.workshop_id);
+        if (it == scan.vfs_by_workshop.end()) continue;
+        auto& vfs = *it->second;
+
+        std::string name = TexNameFromPkgPath(m.pkg_path);
+        if (name.empty()) continue;
+
+        wallpaper::WPTexImageParser parser(&vfs);
+        wallpaper::ImageHeader      h;
+        try {
+            h = parser.ParseHeader(name);
+        } catch (...) {
+            continue;
+        }
+
+        const bool expected_pow2 =
+            IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w)) ||
+            IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_h));
+        const bool expected_larger =
+            (m.mip0_w * m.mip0_h) > (m.map_w * m.map_h);
+
+        ++checked;
+        if (h.mipmap_pow2 != expected_pow2 || h.mipmap_larger != expected_larger) {
+            ++parity_fail;
+            ADD_FAILURE() << "ParseHeader divergence for " << m.workshop_id
+                          << " " << m.pkg_path << " (texb=" << m.texb << "): "
+                          << "expected pow2=" << expected_pow2
+                          << " larger=" << expected_larger
+                          << ", got pow2=" << h.mipmap_pow2
+                          << " larger=" << h.mipmap_larger
+                          << " (mip0=" << m.mip0_w << "x" << m.mip0_h
+                          << " map=" << m.map_w << "x" << m.map_h << ")";
+            if (parity_fail >= 5) break;
+        }
+    }
+    std::cerr << "TexSchema.ProductionParseHeaderAgreesWithMip0Reader: checked="
+              << checked << " parity_fail=" << parity_fail << "\n";
+}
+
 TEST(TexSchema, ReportObservedTuples) {
-    const auto& stats = AllTuples();
+    const auto& metas = AllScans().metas;
+    std::map<TexTuple, std::size_t> tuples;
+    for (const auto& m : metas) {
+        if (m.malformed) continue;
+        ++tuples[{ m.texv, m.texi, m.texb, m.texs }];
+    }
     std::cerr << "\n# observed (texv, texi, texb, texs) tuples in corpus:\n";
-    for (const auto& [tup, s] : stats) {
+    for (const auto& [tup, c] : tuples) {
         const auto [v, i, b, sp] = tup;
         std::cerr << "  (" << v << ", " << i << ", " << b << ", " << sp
-                  << "): total=" << s.total
-                  << " header_ok=" << s.header_ok
-                  << " sprite=" << s.sprite << "\n";
+                  << "): count=" << c << "\n";
     }
     SUCCEED();
 }
