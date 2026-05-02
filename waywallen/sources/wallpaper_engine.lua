@@ -170,4 +170,24 @@ function M.scan(ctx)
     return entries
 end
 
+-- SPAWN_VERSION 3: daemon calls this at WallpaperApply time to build
+-- the renderer's CLI argv. For scene wallpapers we surface `path` +
+-- the wescene manifest's whitelisted extras (`assets`, `workshop_id`);
+-- for video wallpapers (mpv/video plugin), only `path` is meaningful.
+-- We read what `scan()` cached in entry.metadata so we don't have to
+-- re-walk the workshop dir.
+function M.extras(entry)
+    local md = entry.metadata or {}
+    local out = { path = md.path or entry.resource }
+    if entry.wp_type == "scene" then
+        if md.assets and md.assets ~= "" then
+            out.assets = md.assets
+        end
+    end
+    if md.workshop_id and md.workshop_id ~= "" then
+        out.workshop_id = md.workshop_id
+    end
+    return out
+end
+
 return M

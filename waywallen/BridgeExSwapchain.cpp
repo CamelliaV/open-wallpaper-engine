@@ -136,9 +136,21 @@ int BridgeExSwapchain::applyDirective(const ww_pool_directive_t& directive) {
         return rc;
     }
 
+    // The directive carries no extent (NegotiateBuffers wire dropped
+    // extent_w/h since the renderer is the authority on render extent).
+    // Read the actual slot dimensions back from the bridge — they were
+    // sized from the `probe_width/height` we passed into advertise_caps.
+    ww_pool_slot_t s0 {};
+    if (int srx = ww_bridge_pool_acquire_slot(m_pool, 0, &s0); srx != 0) {
+        std::fprintf(stderr,
+                     "BridgeExSwapchain: acquire_slot(0) post-apply failed: %d\n",
+                     srx);
+        return srx;
+    }
+
     // Publish atomically only after apply_directive succeeded.
-    m_width         = directive.width;
-    m_height        = directive.height;
+    m_width         = s0.width;
+    m_height        = s0.height;
     m_fourcc        = directive.fourcc;
     m_export_format = picked;
     m_slot_count    = directive.count;

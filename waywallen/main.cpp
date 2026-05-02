@@ -23,6 +23,7 @@
 #include "BridgeExSwapchain.hpp"
 
 #include <waywallen-bridge/bridge.h>
+#include <waywallen-bridge/extent_resolve.h>
 #include <waywallen-bridge/pool.h>
 #include <waywallen-bridge/protocol_bits.h>
 
@@ -70,12 +71,25 @@ struct Options {
 // honours is `--ipc <socket>`. The argparse `remaining()` catch-all
 // is kept (but ignored) so any straggling daemon argv during the
 // transition window is silently consumed instead of failing the parse.
+// SPAWN_VERSION 3: scene .pkg path arrives as `--path`, with
+// plugin-specific extras `--assets <dir>` and `--workshop_id <id>` from
+// the wescene manifest's whitelist. argparse's `remaining()` catches
+// any other unknown flags and silently ignores them.
 Options parse_args(int argc, char** argv) {
     argparse::ArgumentParser program("waywallen-wescene-renderer");
 
     program.add_argument("--ipc")
         .required()
         .help("Unix-domain socket path for daemon IPC");
+    program.add_argument("--path")
+        .default_value(std::string{})
+        .help("Wallpaper Engine .pkg path (canonical resource)");
+    program.add_argument("--assets")
+        .default_value(std::string{})
+        .help("Optional Wallpaper Engine assets directory");
+    program.add_argument("--workshop_id")
+        .default_value(std::string{})
+        .help("Optional Steam workshop id (informational)");
     program.add_argument("remaining").remaining();
 
     try {
@@ -87,7 +101,10 @@ Options parse_args(int argc, char** argv) {
     }
 
     Options o;
-    o.ipc_path = program.get<std::string>("--ipc");
+    o.ipc_path       = program.get<std::string>("--ipc");
+    o.initial_scene  = program.get<std::string>("--path");
+    o.initial_assets = program.get<std::string>("--assets");
+    o.workshop_id    = program.get<std::string>("--workshop_id");
     return o;
 }
 
@@ -166,6 +183,14 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                     s.wp->setPropertyFloat(wallpaper::PROPERTY_VOLUME,
                                            parse_f32(val, 1.0f));
                 }
+            } else if (std::strcmp(key, "fps") == 0) {
+                char* end = nullptr;
+                unsigned long n = std::strtoul(val, &end, 10);
+                if (end != val) set_fps(s, static_cast<uint32_t>(n));
+            } else if (std::strcmp(key, "test_pattern") == 0) {
+                // Wescene's test_pattern flag is set on initial spawn
+                // through PROPERTY_TEST_PATTERN; runtime toggling not
+                // wired (would require respawn). Log and ignore.
             } else {
                 std::fprintf(stderr,
                              "waywallen-wescene-renderer: ApplySettings: "
@@ -173,7 +198,6 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                              key);
             }
         }
-        if (as.fps != 0) set_fps(s, as.fps);
         ww_bridge_apply_settings_free(&as);
         break;
     }
@@ -200,8 +224,6 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         d.sync_mode   = nb.sync_mode;
         d.color       = nb.color;
         d.mem_hint    = nb.mem_hint;
-        d.width       = nb.extent_w;
-        d.height      = nb.extent_h;
         d.count       = nb.count > 0 ? nb.count : 3;
         if (d.count > ww_wescene::BridgeExSwapchain::kMaxSlots)
             d.count = ww_wescene::BridgeExSwapchain::kMaxSlots;
@@ -272,20 +294,28 @@ int main(int argc, char** argv) {
             die(std::string(reason) + " rc=" + std::to_string(rc));
         }
 
-        // Map typed Init fields onto Options. The canonical resource
-        // path for wescene is the .pkg path; assets + workshop_id ride
-        // along as resource_extras. `volume` is the only hot-applicable
-        // setting wescene exposes today.
-        opts.width  = init.extent_w ? init.extent_w : opts.width;
-        opts.height = init.extent_h ? init.extent_h : opts.height;
-        if (init.fps) opts.initial_fps = init.fps;
-        if (init.resource_primary && init.resource_primary[0])
-            opts.initial_scene = init.resource_primary;
-        if (const char* v = kv_get(init.resource_extras, "assets"))
-            opts.initial_assets = v ? v : "";
-        if (const char* v = kv_get(init.resource_extras, "workshop_id"))
-            opts.workshop_id = v ? v : "";
-        opts.test_pattern = init.test_pattern != 0;
+        // SPAWN_VERSION 3: scene .pkg path + assets + workshop_id all
+        // arrive via CLI argv (already parsed into opts.{initial_scene,
+        // initial_assets, workshop_id}). Init carries only extent +
+        // settings kv. Wescene scenes don't ship a fixed native
+        // resolution (every scene is designed to scale), so we treat
+        // the host's compiled-in `opts.{width,height}` defaults as
+        // the "native" size that `ww_resolve_extent` resolves against.
+        {
+            uint32_t native_w = opts.width;
+            uint32_t native_h = opts.height;
+            ww_resolve_extent(init.extent_w, init.extent_h, init.extent_mode,
+                              native_w, native_h,
+                              &opts.width, &opts.height);
+        }
+        if (const char* v = kv_get(init.settings, "fps"); v && *v) {
+            char* end = nullptr;
+            unsigned long n = std::strtoul(v, &end, 10);
+            if (end != v) opts.initial_fps = static_cast<uint32_t>(n);
+        }
+        if (const char* v = kv_get(init.settings, "test_pattern"); v && *v) {
+            opts.test_pattern = (std::strcmp(v, "0") != 0);
+        }
         opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 1.0f);
 
         ww_bridge_init_free(&init);
