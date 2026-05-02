@@ -1,4 +1,11 @@
-#include "PassNode.hpp"
+module;
+
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+
+module wescene.rgraph;
 
 using namespace wallpaper::rg;
 

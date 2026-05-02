@@ -1,7 +1,13 @@
-#include "FrameTimer.hpp"
-#include "Utils//Logging.h"
+module;
 
+#include <chrono>
+#include <functional>
 #include <numeric>
+
+#include "Core/Literals.hpp"
+#include "Utils/Logging.h"
+
+module wescene.timer;
 
 using namespace wallpaper;
 using micros = std::chrono::microseconds;

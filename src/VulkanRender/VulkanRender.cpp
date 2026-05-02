@@ -1,35 +1,39 @@
-#include "VulkanRender.hpp"
+module;
 
 #include "Utils/Logging.h"
-#include "RenderGraph/RenderGraph.hpp"
-#include "Scene/Scene.h"
-#include "Interface/IShaderValueUpdater.h"
-
-#include "Utils/Algorism.h"
+#include "Swapchain/ExSwapchain.hpp"
 
 #include <glslang/Public/ShaderLang.h>
 
-#include "Vulkan/Device.hpp"
-#include "Vulkan/TextureCache.hpp"
-#include "Vulkan/Swapchain.hpp"
-#include "Vulkan/LocalExSwapchain.hpp"
-
-#include "VulkanPass.hpp"
-#include "PrePass.hpp"
-#include "FinPass.hpp"
-#include "Resource.hpp"
-
 #include "Core/ArrayHelper.hpp"
+#include "Core/Literals.hpp"
+#include "Core/MapSet.hpp"
+#include "Type.hpp"
+#include "vvk/macros.hpp"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <iterator>
+#include <memory>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #if ENABLE_RENDERDOC_API
 #    include "RenderDoc.h"
 #endif
+
+module wescene.vulkan_render;
+import wescene.vulkan;
+import wescene.utils;
+import wescene.scene;
+
+import wescene.rgraph;
 
 using namespace wallpaper::vulkan;
 

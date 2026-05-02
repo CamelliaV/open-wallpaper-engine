@@ -1,13 +1,17 @@
-#include "ParticleSystem.h"
-#include "Core/Literals.hpp"
-#include "Scene/Scene.h"
-#include "ParticleModify.h"
-#include "Scene/SceneMesh.h"
-#include "Core/Random.hpp"
+module;
 
+#include "Core/Literals.hpp"
+#include "Core/Random.hpp"
 #include "Utils/Logging.h"
 
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <vector>
+
+module wescene.scene;
 
 using namespace wallpaper;
 

@@ -1,12 +1,22 @@
-#include "SceneToRenderGraph.hpp"
+module;
 
-#include "Scene/Scene.h"
-#include "RenderGraph/RenderGraph.hpp"
 #include "SpecTexs.hpp"
 #include "Utils/Logging.h"
 #include "Core/MapSet.hpp"
+#include "RenderGraph/Pass.hpp"
 
-#include "VulkanRender/AllPasses.hpp"
+#include <array>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+module wescene.vulkan_render;
+import wescene.vulkan;
+import wescene.scene;
+
+import wescene.rgraph;
 
 using namespace wallpaper;
 namespace wallpaper::rg

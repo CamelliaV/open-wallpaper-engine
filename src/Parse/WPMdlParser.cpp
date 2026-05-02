@@ -1,13 +1,20 @@
-#include "Parse/WPMdlParser.hpp"
-#include "Fs/VFS.h"
-#include "Fs/IBinaryStream.h"
-#include "Fs/MemBinaryStream.h"
-#include "WPCommon.hpp"
+module;
+#include <array>
+#include <cassert>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "Core/Literals.hpp"
+
+#include "Type.hpp"
 #include "Utils/Logging.h"
-#include "Scene/SceneMesh.h"
 #include "SpecTexs.hpp"
-#include "Parse/WPMaterial.hpp"
-#include "Parse/WPShaderParser.hpp"
+
+module wescene.parse;
+import wescene.scene;
+import wescene.common;
 
 using namespace wallpaper;
 

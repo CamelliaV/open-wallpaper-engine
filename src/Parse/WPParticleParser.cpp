@@ -1,7 +1,15 @@
-#include "Parse/WPParticleParser.hpp"
-#include "Particle/ParticleEmitter.h"
-#include "Particle/ParticleModify.h"
-#include "Particle/ParticleSystem.h"
+module;
+#include <array>
+#include <string>
+#include <vector>
+
+#include "WPJson.hpp"
+
+#include "Core/Literals.hpp"
+
+
+#include <nlohmann/json.hpp>
+
 #include <random>
 #include <memory>
 #include <algorithm>
@@ -11,8 +19,11 @@
 #include <Eigen/Geometry>
 
 #include "Utils/Logging.h"
-#include "Utils/Algorism.h"
 #include "Core/Random.hpp"
+
+module wescene.parse;
+import wescene.utils;
+import wescene.scene;
 
 using namespace wallpaper;
 using namespace Eigen;

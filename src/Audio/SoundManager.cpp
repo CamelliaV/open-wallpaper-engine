@@ -1,8 +1,17 @@
-#include "Audio/SoundManager.h"
+module;
+
+#include <cstdint>
+#include <memory>
+#include <utility>
+
 #include "miniaudio-wrapper.hpp"
-#include "Fs/IBinaryStream.h"
 #include "Core/Literals.hpp"
+#include "Core/NoCopyMove.hpp"
 #include "Utils/Logging.h"
+
+module wescene.audio;
+
+import wescene.fs;
 
 using namespace wallpaper;
 using namespace wallpaper::audio;
@@ -40,7 +49,6 @@ struct BStreamWrapper {
     std::shared_ptr<wallpaper::fs::IBinaryStream> stream;
     size_t                                        Read(void* pBufferOut, size_t bytesToRead) {
                                                size_t reads = stream->Read(pBufferOut, bytesToRead);
-                                               // LOG_INFO("r:%u, %u",bytesToRead, reads);
                                                return reads;
     }
     bool Seek(idx offset, ma_seek_origin origin) {
@@ -50,7 +58,6 @@ struct BStreamWrapper {
         case ma_seek_origin_current: result = stream->SeekCur(offset); break;
         case ma_seek_origin_end: result = stream->SeekEnd(offset); break;
         }
-        // LOG_INFO("s:%u, %d",offset, result);
         return result;
     }
 };
@@ -91,7 +98,6 @@ SoundManager::SoundManager(): pImpl(std::make_unique<impl>()) {}
 SoundManager::~SoundManager() {}
 
 void SoundManager::MountStream(std::unique_ptr<SoundStream>&& ss) {
-    // if(!IsInited()) return;
     pImpl->device.MountChannel(std::make_unique<Channel_Impl>(std::move(ss)));
 }
 

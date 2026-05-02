@@ -1,7 +1,23 @@
-#include "Device.hpp"
+module;
 
+#include <algorithm>
+#include <iterator>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include "vk_mem_alloc.h"
+
+#include "Core/MapSet.hpp"
 #include "Utils/Logging.h"
-#include "GraphicsPipeline.hpp"
+#include "vvk/macros.hpp"
+
+module wescene.vulkan;
 
 using namespace wallpaper::vulkan;
 
@@ -11,18 +27,15 @@ namespace
 void EnumateDeviceExts(const vvk::PhysicalDevice& gpu, wallpaper::Set<std::string>& set) {
     std::vector<VkExtensionProperties> properties;
     VVK_CHECK_VOID_RE(gpu.EnumerateDeviceExtensionProperties(properties));
-    for (auto& ext : properties) {
-        set.insert(ext.extensionName);
-    }
+    for (auto& ext : properties) set.insert(ext.extensionName);
 }
 
 } // namespace
 
-bool Device::CheckGPU(vvk::PhysicalDevice gpu, std::span<const Extension> exts, VkSurfaceKHR surface) {
-    std::vector<VkDeviceQueueCreateInfo> queues;
-    auto                                 props = gpu.GetQueueFamilyProperties();
+bool Device::CheckGPU(vvk::PhysicalDevice gpu, std::span<const Extension> exts,
+                      VkSurfaceKHR surface) {
+    auto props = gpu.GetQueueFamilyProperties();
 
-    // check queue
     bool has_graphics_queue { false };
     bool has_present_queue { false };
     uint index { 0 };
@@ -34,11 +47,10 @@ bool Device::CheckGPU(vvk::PhysicalDevice gpu, std::span<const Extension> exts, 
             if (ok) has_present_queue = true;
         }
         index++;
-    };
+    }
     if (! has_graphics_queue) return false;
     if (surface && ! has_present_queue) return false;
 
-    // check exts
     Set<std::string> extensions;
     EnumateDeviceExts(gpu, extensions);
     for (auto& ext : exts) {
@@ -59,7 +71,7 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
     for (auto& prop : props) {
         if (prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) graphic_indexs.push_back(index);
         index++;
-    };
+    }
     m_graphics_queue.family_index           = graphic_indexs.front();
     const static float defaultQueuePriority = 0.0f;
     {
@@ -75,11 +87,12 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
     if (surface) {
         index = 0;
         for (auto& prop : props) {
+            (void)prop;
             bool ok { false };
             VVK_CHECK(m_gpu.GetSurfaceSupportKHR(index, surface, ok))
             if (ok) present_indexs.push_back(index);
             index++;
-        };
+        }
         if (present_indexs.empty()) {
             LOG_ERROR("not find present queue");
         } else if (graphic_indexs.front() != present_indexs.front()) {
@@ -96,7 +109,8 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
     return queues;
 }
 
-bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D extent, Device& device) {
+bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D extent,
+                    Device& device) {
     device.dld      = vvk::DeviceDispatch { inst.inst().Dispatch() };
     device.m_gpu    = inst.gpu();
     device.m_limits = inst.gpu().GetProperties().limits;
@@ -128,11 +142,9 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
                                           nullptr,
                                           device.dld));
 
-    // VK_CHECK_RESULT_BOOL_RE(CreateDevice(inst, device.ChooseDeviceQueue(inst.surface()),
-    // tested_exts_c, &device.m_device));
-
-    device.m_graphics_queue.handle = device.m_device.GetQueue(device.m_graphics_queue.family_index);
-    device.m_present_queue.handle  = device.m_device.GetQueue(device.m_present_queue.family_index);
+    device.m_graphics_queue.handle =
+        device.m_device.GetQueue(device.m_graphics_queue.family_index);
+    device.m_present_queue.handle = device.m_device.GetQueue(device.m_present_queue.family_index);
 
     if (rq_surface) {
         if (! Swapchain::Create(device, *inst.surface(), extent, device.m_swapchain)) {
@@ -141,10 +153,12 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         }
     }
     {
-        VkCommandPoolCreateInfo info { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                                       .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                                       .queueFamilyIndex = device.m_graphics_queue.family_index };
+        VkCommandPoolCreateInfo info {
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = device.m_graphics_queue.family_index
+        };
         VVK_CHECK_BOOL_RE(device.m_device.CreateCommandPool(info, device.m_command_pool));
     }
     {
@@ -168,6 +182,6 @@ VkDeviceSize Device::GetUsage() const {
 void Device::Destroy() { VVK_CHECK(m_device.WaitIdle()); }
 
 Device::Device(): m_tex_cache(std::make_unique<TextureCache>(*this)) {}
-Device::~Device() {};
+Device::~Device() {}
 
 bool Device::supportExt(std::string_view name) const { return exists(m_extensions, name); }

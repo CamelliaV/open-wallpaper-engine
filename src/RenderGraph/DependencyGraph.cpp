@@ -1,9 +1,16 @@
-#include "DependencyGraph.hpp"
+module;
+
 #include <algorithm>
 #include <functional>
 #include <fstream>
 #include <cassert>
+#include <memory>
+#include <vector>
+
+#include "Core/Literals.hpp"
 #include "Utils/Logging.h"
+
+module wescene.rgraph;
 
 using namespace wallpaper::rg;
 

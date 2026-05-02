@@ -9,7 +9,29 @@
 namespace wallpaper
 {
 
-namespace vulkan { struct ImageParameters; }
+// Stays classic-attached because (a) ExSwapchain (classic virtual) takes
+// a reference to it in `acquireRenderTarget`, and (b) the `wescene.vulkan`
+// module-attached LocalExSwapchain / BridgeExSwapchain override that
+// virtual — both sides must see the *same* type identity, so it can't
+// be in module purview.
+namespace vulkan {
+
+struct ImageParameters {
+    VkImage     handle {};
+    VkImageView view {};
+    VkSampler   sampler {};
+    VkExtent3D  extent {};
+    uint32_t    mipmap_level { 1 };
+
+    ImageParameters()  = default;
+    ~ImageParameters() = default;
+
+    // Conversion helpers live as free functions in `wescene.vulkan` —
+    // they can't be inline class members here because they read members
+    // of the module-attached Vma/Ex types.
+};
+
+} // namespace vulkan
 
 // Snapshot of the negotiated buffer set the producer should render into.
 // Fired by ExSwapchain implementations whenever readiness flips or the

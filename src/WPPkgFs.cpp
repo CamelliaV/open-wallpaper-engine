@@ -1,8 +1,17 @@
-#include "WPPkgFs.hpp"
-#include "Utils/Logging.h"
-#include "Fs/LimitedBinaryStream.h"
-#include "Fs/CBinaryStream.h"
+module;
+
+#include <cassert>
+#include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
+
+#include "Core/Literals.hpp"
+#include "Utils/Logging.h"
+
+module wescene.pkg_fs;
+
+import wescene.fs;
 
 using namespace wallpaper;
 using namespace wallpaper::fs;

@@ -22,9 +22,6 @@
 
 #include "BridgeExSwapchain.hpp"
 
-#include "SceneWallpaper.hpp"
-#include "SceneWallpaperSurface.hpp"
-
 #include <waywallen-bridge/bridge.h>
 #include <waywallen-bridge/pool.h>
 #include <waywallen-bridge/protocol_bits.h>
@@ -45,6 +42,8 @@
 #include <sys/socket.h>
 #include <thread>
 #include <vulkan/vulkan.h>
+
+import wescene.scene_wallpaper;
 
 namespace
 {

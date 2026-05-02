@@ -6,3 +6,5 @@ target_link_libraries(viewer
         wescene-renderer
         argparse::argparse
 )
+
+set_target_properties(viewer PROPERTIES CXX_SCAN_FOR_MODULES ON)

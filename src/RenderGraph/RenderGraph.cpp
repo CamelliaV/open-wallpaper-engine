@@ -1,10 +1,17 @@
+module;
+
 #include <cassert>
 #include <algorithm>
+#include <memory>
+#include <span>
+#include <string_view>
+#include <vector>
 
-#include "RenderGraph.hpp"
-
+#include "Core/MapSet.hpp"
 #include "Utils/Logging.h"
-#include "Pass.hpp"
+#include "RenderGraph/Pass.hpp"
+
+module wescene.rgraph;
 
 using namespace wallpaper::rg;
 

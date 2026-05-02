@@ -1,9 +1,21 @@
-#include "CopyPass.hpp"
+module;
+
+#include <array>
+#include <cassert>
+#include <string>
+
+#include <vulkan/vulkan.h>
+
+#include "Core/Literals.hpp"
 #include "SpecTexs.hpp"
+#include "Swapchain/ExSwapchain.hpp"
 #include "Utils/Logging.h"
 #include "Utils/AutoDeletor.hpp"
-#include "Resource.hpp"
-#include "PassCommon.hpp"
+#include "vvk/macros.hpp"
+
+module wescene.vulkan_render;
+import wescene.vulkan;
+import wescene.scene;
 
 using namespace wallpaper::vulkan;
 

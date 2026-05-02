@@ -6,10 +6,10 @@
 #include <GLFW/glfw3.h>
 #include <atomic>
 #include "arg.hpp"
-#include "SceneWallpaper.hpp"
-#include "SceneWallpaperSurface.hpp"
 
-#include "Utils/Platform.hpp"
+
+import wescene.scene_wallpaper;
+import wescene.utils;
 
 using namespace std;
 

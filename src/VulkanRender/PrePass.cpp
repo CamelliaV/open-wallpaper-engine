@@ -1,15 +1,22 @@
-#include "PrePass.hpp"
-#include "Scene/Scene.h"
-#include "Resource.hpp"
+module;
+
+#include <string>
+
+#include <vulkan/vulkan.h>
+
+#include "Swapchain/ExSwapchain.hpp"
+#include "Type.hpp"
+
+
+module wescene.vulkan_render;
+import wescene.vulkan;
+import wescene.scene;
 
 using namespace wallpaper::vulkan;
 
-PrePass::PrePass(const Desc&) {}
-PrePass::~PrePass() {}
-
 namespace
 {
-TextureKey ToTexKey(wallpaper::SceneRenderTarget rt) {
+TextureKey ToTexKeyNoMip(wallpaper::SceneRenderTarget rt) {
     return TextureKey {
         .width  = rt.width,
         .height = rt.height,
@@ -20,12 +27,15 @@ TextureKey ToTexKey(wallpaper::SceneRenderTarget rt) {
 }
 } // namespace
 
+PrePass::PrePass(const Desc&) {}
+PrePass::~PrePass() {}
+
 void PrePass::prepare(Scene& scene, const Device& device, RenderingResources&) {
     {
         auto tex_name = std::string(m_desc.result);
         if (scene.renderTargets.count(tex_name) == 0) return;
         auto& rt = scene.renderTargets.at(tex_name);
-        if (auto opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
+        if (auto opt = device.tex_cache().Query(tex_name, ToTexKeyNoMip(rt), ! rt.allowReuse);
             opt.has_value()) {
             m_desc.vk_result = opt.value();
         } else

@@ -1,15 +1,19 @@
-#include "WPParticleRawGener.h"
+module;
 
-#include <cstring>
-#include <Eigen/Dense>
+#include <algorithm>
 #include <array>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <span>
+
+#include <Eigen/Dense>
 
 #include "Core/Literals.hpp"
 #include "SpecTexs.hpp"
-#include "ParticleModify.h"
-#include "ParticleSystem.h"
-
 #include "Utils/Logging.h"
+
+module wescene.scene;
 
 using namespace wallpaper;
 using namespace Eigen;

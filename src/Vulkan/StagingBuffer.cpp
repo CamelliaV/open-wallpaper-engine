@@ -1,8 +1,20 @@
-#include "StagingBuffer.hpp"
+module;
+
 #include <algorithm>
 #include <cstring>
-#include "Util.hpp"
-#include "Device.hpp"
+#include <optional>
+#include <span>
+#include <vector>
+
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include "vk_mem_alloc.h"
+
+#include "Utils/Logging.h"
+#include "vvk/macros.hpp"
+
+module wescene.vulkan;
 
 using namespace wallpaper::vulkan;
 
@@ -98,7 +110,6 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
         VVK_CHECK_BOOL_RE(mapStageBuf());
     }
     auto newsize = m_stage_buf.req_size + nsize;
-    // do double copy
     std::vector<uint8_t> tmp;
     tmp.resize(newsize);
     memcpy(tmp.data(), m_stage_raw, m_stage_buf.req_size);
@@ -141,7 +152,6 @@ void StagingBuffer::destroy() {
 
 bool StagingBuffer::allocateSubRef(VkDeviceSize size, StagingBufferRef& ref,
                                    VkDeviceSize alignment) {
-    VkResult                       result;
     VmaVirtualAllocationCreateInfo allocCreateInfo = {};
     allocCreateInfo.size                           = size;
     allocCreateInfo.alignment                      = alignment;
@@ -207,9 +217,7 @@ bool StagingBuffer::writeToBuf(const StagingBufferRef& ref, std::span<uint8_t> d
                                size_t offset) {
     CHECK_REF(ref, return false);
 
-    if (m_stage_raw == nullptr) {
-        mapStageBuf();
-    }
+    if (m_stage_raw == nullptr) mapStageBuf();
     VkDeviceSize size = std::min(ref.size - offset, data.size());
     uint8_t*     raw  = (uint8_t*)m_stage_raw;
     std::copy(data.begin(), data.begin() + size, raw + ref.offset + offset);
@@ -219,9 +227,7 @@ bool StagingBuffer::writeToBuf(const StagingBufferRef& ref, std::span<uint8_t> d
 bool StagingBuffer::fillBuf(const StagingBufferRef& ref, size_t offset, size_t size, uint8_t c) {
     CHECK_REF(ref, return false);
 
-    if (m_stage_raw == nullptr) {
-        mapStageBuf();
-    }
+    if (m_stage_raw == nullptr) mapStageBuf();
     VkDeviceSize size_     = std::min(ref.size - offset, size);
     uint8_t*     raw       = (uint8_t*)m_stage_raw;
     uint8_t*     raw_begin = raw + ref.offset + offset;

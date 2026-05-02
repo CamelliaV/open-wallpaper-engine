@@ -1,9 +1,21 @@
-#include "vvk/vulkan_wrapper.hpp"
+module;
 
-namespace
-{
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <utility>
+#include <vector>
 
-}
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include "Utils/Logging.h"
+
+#include "vvk/macros.hpp"
+
+module wescene.vulkan;
+import wescene.utils;
 
 namespace vvk
 {

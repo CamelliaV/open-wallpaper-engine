@@ -1,11 +1,23 @@
-#include "GraphicsPipeline.hpp"
-#include "Device.hpp"
+module;
 
-#include "TextureCache.hpp"
-#include "Utils/Logging.h"
-#include "Utils/AutoDeletor.hpp"
-#include "vvk/vulkan_wrapper.hpp"
+#include <cassert>
 #include <cstdint>
+#include <optional>
+#include <span>
+#include <utility>
+#include <vector>
+
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include "Core/Literals.hpp"
+#include "Core/MapSet.hpp"
+#include "Type.hpp"
+#include "Utils/AutoDeletor.hpp"
+#include "Utils/Logging.h"
+#include "vvk/macros.hpp"
+
+module wescene.vulkan;
 
 using namespace wallpaper::vulkan;
 
@@ -47,7 +59,6 @@ void GraphicsPipeline::toDefault() {
         .pNext         = nullptr,
         .viewportCount = 1,
         .scissorCount  = 1
-
     };
     multisample = VkPipelineMultisampleStateCreateInfo {
         .sType                 = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -127,24 +138,18 @@ GraphicsPipeline& GraphicsPipeline::addStage(Uni_ShaderSpv&& spv) {
 }
 
 GraphicsPipeline& GraphicsPipeline::addDescriptorSetInfo(std::span<const DescriptorSetInfo> info) {
-    for (auto& i : info) {
-        m_descriptor_set_infos.push_back(i);
-    }
+    for (auto& i : info) m_descriptor_set_infos.push_back(i);
     return *this;
 }
 
 GraphicsPipeline& GraphicsPipeline::addInputAttributeDescription(
     std::span<const VkVertexInputAttributeDescription> attrs) {
-    for (auto& a : attrs) {
-        m_input_attr_descriptions.push_back(a);
-    }
+    for (auto& a : attrs) m_input_attr_descriptions.push_back(a);
     return *this;
 }
 GraphicsPipeline& GraphicsPipeline::addInputBindingDescription(
     std::span<const VkVertexInputBindingDescription> binds) {
-    for (auto& b : binds) {
-        m_input_bind_descriptions.push_back(b);
-    }
+    for (auto& b : binds) m_input_bind_descriptions.push_back(b);
     return *this;
 }
 GraphicsPipeline& GraphicsPipeline::setTopology(VkPrimitiveTopology topology) {
@@ -204,13 +209,6 @@ bool GraphicsPipeline::create(const Device& device, vvk::RenderPass& pass,
 
         shaderStages.push_back(info);
     }
-    /*
-    AUTO_DELETER(shadermodule, ([&shaderStages, &device]() {
-                     for (auto& sha : shaderStages) {
-                         device.handle().destroyShaderModule(sha.module);
-                     }
-                 }));
-    */
 
     VkPipelineVertexInputStateCreateInfo input {
         .sType                         = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,

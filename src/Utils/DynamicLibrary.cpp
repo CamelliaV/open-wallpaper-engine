@@ -1,6 +1,10 @@
-#include "DynamicLibrary.hpp"
+module;
 
-#include "dlfcn.h"
+#include <utility>
+
+#include <dlfcn.h>
+
+module wescene.utils;
 
 namespace utils
 {
@@ -38,4 +42,4 @@ void* DynamicLibrary::GetSymbolAddr(const char* name) const {
     return reinterpret_cast<void*>(dlsym(handle, name));
 }
 
-}; // namespace wallpaper
+} // namespace utils

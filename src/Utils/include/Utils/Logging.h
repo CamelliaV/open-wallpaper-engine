@@ -14,8 +14,8 @@
             p;                                                   \
         })
 */
-static constexpr const char* past_last_slash(const char* const path, const int pos = 0,
-                                             const int last_slash = 0) {
+constexpr const char* past_last_slash(const char* const path, const int pos = 0,
+                                      const int last_slash = 0) {
     if (path[pos] == '\0') return &path[last_slash];
     if (path[pos] == '/')
         return past_last_slash(path, pos + 1, pos + 1);

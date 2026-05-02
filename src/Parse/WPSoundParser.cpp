@@ -1,11 +1,15 @@
-#include "Parse/WPSoundParser.hpp"
-#include "Audio/SoundManager.h"
-#include "Fs/VFS.h"
-#include "Parse/WPSoundObject.hpp"
+module;
+#include <memory>
+#include <vector>
+
+#include "Core/Literals.hpp"
+
 #include "Utils/Logging.h"
 
 #include <string>
 #include <string_view>
+
+module wescene.parse;
 
 using namespace wallpaper;
 

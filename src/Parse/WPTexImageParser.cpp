@@ -1,20 +1,28 @@
-#include "Parse/WPTexImageParser.hpp"
+module;
+#include <string>
+#include <vector>
+
+#include "Core/Literals.hpp"
+
 
 #include "Type.hpp"
-#include "WPCommon.hpp"
+#include "Image.hpp"
 #include <cstdint>
 #include <lz4.h>
 
 #include "SpriteAnimation.hpp"
-#include "Utils/Algorism.h"
-#include "Fs/VFS.h"
-#include "Utils/BitFlags.hpp"
+#include "Utils/Logging.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #include <cstring>
 #include <iostream>
+
+module wescene.parse;
+import wescene.utils;
+import wescene.scene;
+import wescene.common;
 
 using namespace wallpaper;
 

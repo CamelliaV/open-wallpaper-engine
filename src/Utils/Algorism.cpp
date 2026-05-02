@@ -1,5 +1,11 @@
-#include "Algorism.h"
-#include "Eigen.h"
+module;
+
+#include <cmath>
+
+#include <Eigen/Dense>
+#include <Eigen/Geometry>
+
+module wescene.utils;
 
 using namespace wallpaper;
 using namespace Eigen;
@@ -18,7 +24,6 @@ double algorism::CalculatePersperctiveFov(double distence, double height) noexce
 namespace
 {
 constexpr double grad(int hash, double x, double y, double z) noexcept {
-    // http://riven8192.blogspot.com/2010/08/calculate-perlinnoise-twice-as-fast.html
     switch (hash & 0xF) {
     case 0x0: return x + y;
     case 0x1: return -x + y;
@@ -36,20 +41,11 @@ constexpr double grad(int hash, double x, double y, double z) noexcept {
     case 0xD: return -y + z;
     case 0xE: return y - x;
     case 0xF: return -y - z;
-    default: return 0; // never happens
+    default: return 0;
     }
-    /*
-    int    h = hash & 15;     // CONVERT LO 4 BITS OF HASH CODE
-    double u = h < 8 ? x : y, // INTO 12 GRADIENT DIRECTIONS.
-        v    = h < 4                ? y
-               : h == 12 || h == 14 ? x
-                                    : z;
-    return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
-    */
 }
 } // namespace
 
-// from https://mrl.cs.nyu.edu/~perlin/noise/
 double algorism::PerlinNoise(double x, double y, double z) noexcept {
     static const unsigned char perm[] = {
         151, 160, 137, 91,  90,  15,  131, 13,  201, 95,  96,  53,  194, 233, 7,   225, 140, 36,
@@ -84,34 +80,28 @@ double algorism::PerlinNoise(double x, double y, double z) noexcept {
         150, 254, 138, 236, 205, 93,  222, 114, 67,  29,  24,  72,  243, 141, 128, 195, 78,  66,
         215, 61,  156, 180
     };
-    int X = (int)floor(x) & 255, // FIND UNIT CUBE THAT
-        Y = (int)floor(y) & 255, // CONTAINS POINT.
-        Z = (int)floor(z) & 255;
+    int X = (int)floor(x) & 255, Y = (int)floor(y) & 255, Z = (int)floor(z) & 255;
 
-    x -= floor(x); // FIND RELATIVE X,Y,Z
-    y -= floor(y); // OF POINT IN CUBE.
+    x -= floor(x);
+    y -= floor(y);
     z -= floor(z);
 
-    double u = PerlinEase(x), // COMPUTE FADE CURVES
-        v    = PerlinEase(y), // FOR EACH OF X,Y,Z.
-        w    = PerlinEase(z);
+    double u = algorism::PerlinEase(x), v = algorism::PerlinEase(y), w = algorism::PerlinEase(z);
 
-    int A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z,     // HASH COORDINATES OF
-        B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z; // THE 8 CUBE CORNERS,
+    int A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z, B = perm[X + 1] + Y,
+        BA = perm[B] + Z, BB = perm[B + 1] + Z;
 
-    return lerp(
+    return algorism::lerp(
         w,
-        lerp(v,
-             lerp(u,
-                  grad(perm[AA], x, y, z),      // AND ADD
-                  grad(perm[BA], x - 1, y, z)), // BLENDED
-             lerp(u,
-                  grad(perm[AB], x, y - 1, z),       // RESULTS
-                  grad(perm[BB], x - 1, y - 1, z))), // FROM  8
-        lerp(
+        algorism::lerp(
             v,
-            lerp(u,
-                 grad(perm[AA + 1], x, y, z - 1),      // CORNERS
-                 grad(perm[BA + 1], x - 1, y, z - 1)), // OF CUBE
-            lerp(u, grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1))));
+            algorism::lerp(u, grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z)),
+            algorism::lerp(u, grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z))),
+        algorism::lerp(
+            v,
+            algorism::lerp(
+                u, grad(perm[AA + 1], x, y, z - 1), grad(perm[BA + 1], x - 1, y, z - 1)),
+            algorism::lerp(u,
+                           grad(perm[AB + 1], x, y - 1, z - 1),
+                           grad(perm[BB + 1], x - 1, y - 1, z - 1))));
 }

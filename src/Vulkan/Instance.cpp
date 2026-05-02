@@ -1,12 +1,25 @@
-#include "Instance.hpp"
-#include "Device.hpp"
+module;
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstdio>
+#include <iterator>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include "Core/MapSet.hpp"
 #include "Utils/Logging.h"
+#include "vvk/macros.hpp"
+
+module wescene.vulkan;
 
 using namespace wallpaper::vulkan;
-
-// VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 constexpr std::array<InstanceLayer, 0> base_inst_layers {};
 
@@ -16,13 +29,12 @@ namespace
 {
 
 VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT      messageSeverity,
-                                     VkDebugUtilsMessageTypeFlagsEXT             messageType,
+                                     VkDebugUtilsMessageTypeFlagsEXT             /*messageType*/,
                                      const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-                                     void*                                       pUserData) {
+                                     void*                                       /*pUserData*/) {
     VkBool32 result = VK_FALSE;
     if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
         result |= VK_TRUE;
-
         std::printf("validation layer: %s\n", pCallbackData->pMessage);
     }
     return result;
@@ -57,9 +69,10 @@ VkResult CreatInstance(vvk::Instance* inst, std::span<const std::string_view> ex
     };
 
     std::vector<const char*> extension_names_c;
-    std::transform(exts.begin(), exts.end(), std::back_inserter(extension_names_c), [](auto& ext) {
-        return ext.data();
-    });
+    std::transform(
+        exts.begin(), exts.end(), std::back_inserter(extension_names_c), [](auto& ext) {
+            return ext.data();
+        });
 
     std::vector<const char*> layer_names_c;
     std::transform(
@@ -71,16 +84,12 @@ VkResult CreatInstance(vvk::Instance* inst, std::span<const std::string_view> ex
 }
 void EnumateExts(wallpaper::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
     if (auto rv = vvk::EnumerateInstanceExtensionProperties(dld); rv.has_value()) {
-        for (const auto& ext : *rv) {
-            set.insert(ext.extensionName);
-        }
+        for (const auto& ext : *rv) set.insert(ext.extensionName);
     }
 }
 void EnumateLayers(wallpaper::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
     if (auto rv = vvk::EnumerateInstanceLayerProperties(dld); rv.has_value()) {
-        for (const auto& ext : *rv) {
-            set.insert(ext.layerName);
-        }
+        for (const auto& ext : *rv) set.insert(ext.layerName);
     }
 }
 } // namespace
@@ -89,32 +98,25 @@ bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
                                     std::span<const std::uint8_t> uuid) {
     auto deviceList = m_vinst.EnumeratePhysicalDevices();
 
-    VkInstanceCreateInfo crea;
-    auto                 logGpu = [](const VkPhysicalDeviceProperties& props) {
+    auto logGpu = [](const VkPhysicalDeviceProperties& props) {
         LOG_INFO("vulkan device: %s", props.deviceName);
     };
 
     vvk::PhysicalDevice        final_gpu;
     VkPhysicalDeviceProperties final_props;
 
-    // choose deiscrete device
     for (const auto& d : deviceList) {
         VkPhysicalDeviceIDProperties device_id_props {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, .pNext = NULL
         };
-        VkPhysicalDeviceProperties2 props2 { .sType =
-                                                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-                                             .pNext = &device_id_props };
+        VkPhysicalDeviceProperties2 props2 {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &device_id_props
+        };
         d.GetProperties2KHR(props2);
         auto& props = props2.properties;
         if (uuid.size() > 0) {
             decltype(uuid) device_uuid { device_id_props.deviceUUID };
             if (std::equal(uuid.begin(), uuid.end(), device_uuid.begin(), device_uuid.end())) {
-                /*
-                for(const auto& p:device_uuid) {
-                    printf("%02x ", p);
-                }
-                */
                 final_props = props;
                 final_gpu   = d;
                 break;
@@ -137,7 +139,7 @@ bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
     }
 }
 
-const vvk::Instance&       Instance::inst() const { return m_vinst; };
+const vvk::Instance&       Instance::inst() const { return m_vinst; }
 const vvk::PhysicalDevice& Instance::gpu() const { return m_gpu; }
 const vvk::SurfaceKHR&     Instance::surface() const { return m_surface; }
 
@@ -193,16 +195,5 @@ bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
     vvk::Load(*inst.m_vinst, inst.m_dld);
 
     inst.m_debug_utils = SetupDebugCallback(inst.m_vinst);
-
-    // VK_CHECK_RESULT_ACT(return false, CreatInstance(&inst.m_inst, exts_vec, layers_vec));
-    // VK_CHECK_RESULT_ACT(return false, setupDebugCallback(&inst.m_inst, inst.m_debug_utils));
-    /*
-    if(!ChoosePhysicalDevice(inst.m_inst, inst.m_gpu, checkgpu, uuid)) {
-        if(uuid.size() > 0) {
-            // to do
-        }
-        return false;
-    }
-    */
     return true;
 }

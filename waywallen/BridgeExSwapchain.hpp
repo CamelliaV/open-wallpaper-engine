@@ -35,7 +35,6 @@
 #pragma once
 
 #include "Swapchain/ExSwapchain.hpp"
-#include "Vulkan/Parameters.hpp"
 
 #include <waywallen-bridge/bridge.h>
 #include <waywallen-bridge/pool.h>
@@ -45,6 +44,8 @@
 #include <functional>
 #include <mutex>
 #include <vulkan/vulkan.h>
+
+import wescene.vulkan;
 
 namespace ww_wescene
 {

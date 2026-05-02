@@ -1,6 +1,13 @@
-#include "ThreadTimer.hpp"
+module;
 
 #include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <thread>
+
+module wescene.timer;
 
 using namespace wallpaper;
 using micros = std::chrono::microseconds;

@@ -1,11 +1,9 @@
-#include "WPShaderValueUpdater.hpp"
-#include "Eigen/src/Core/Matrix.h"
-#include "Eigen/src/Geometry/Transform.h"
-#include "Scene/Scene.h"
+module;
+
 #include "SpriteAnimation.hpp"
 #include "SpecTexs.hpp"
 #include "Core/ArrayHelper.hpp"
-#include "Utils/Algorism.h"
+#include "Core/MapSet.hpp"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -13,6 +11,10 @@
 #include <chrono>
 #include <ctime>
 #include <numeric>
+
+module wescene.shader_value_updater;
+import wescene.utils;
+import wescene.scene;
 
 using namespace wallpaper;
 using namespace Eigen;

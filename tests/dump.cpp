@@ -6,22 +6,12 @@
 #include <string>
 #include <vector>
 
-#include "WPCommon.hpp"
-#include "Parse/WPMdlParser.hpp"
-#include "WPPkgFs.hpp"
-#include "Parse/WPTexImageParser.hpp"
 #include "Image.hpp"
-#include "Parse/WPImageObject.hpp"
-#include "Parse/WPLightObject.hpp"
-#include "Parse/WPMaterial.hpp"
-#include "Parse/WPParticleObject.hpp"
-#include "Parse/WPScene.hpp"
-#include "Parse/WPSoundObject.hpp"
 
-#include "Fs/CBinaryStream.h"
-#include "Fs/IBinaryStream.h"
-#include "Fs/PhysicalFs.h"
-#include "Fs/VFS.h"
+
+import wescene.parse;
+import wescene.pkg_fs;
+import wescene.fs;
 
 namespace wallpaper::testing {
 

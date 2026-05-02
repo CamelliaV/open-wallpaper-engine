@@ -1,5 +1,12 @@
-#include "TexNode.hpp"
-#include "PassNode.hpp"
+module;
+
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+
+module wescene.rgraph;
 
 using namespace wallpaper::rg;
 

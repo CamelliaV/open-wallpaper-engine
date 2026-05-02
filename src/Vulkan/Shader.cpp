@@ -1,20 +1,31 @@
-#include "Shader.hpp"
+module;
 
 #include <cassert>
-#include <glslang/Include/Types.h>
-#include <glslang/MachineIndependent/localintermediate.h>
-#include <glslang/MachineIndependent/iomapper.h>
-#include <glslang/SPIRV/GlslangToSpv.h>
-#include "Spv.hpp"
-#include "TextureCache.hpp"
-#include "Utils/Logging.h"
 #include <cstdlib>
 #include <memory>
+#include <span>
 #include <string>
-#include "Core/StringHelper.hpp"
-#include "Utils/Sha.hpp"
-#include "Core/MapSet.hpp"
+#include <vector>
+
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include <glslang/Include/BaseTypes.h>
+#include <glslang/Include/Types.h>
+#include <glslang/MachineIndependent/iomapper.h>
+#include <glslang/MachineIndependent/localintermediate.h>
+#include <glslang/Public/ShaderLang.h>
+#include <glslang/SPIRV/GlslangToSpv.h>
 #include <spirv_reflect.h>
+
+#include "Core/Literals.hpp"
+#include "Core/MapSet.hpp"
+#include "Core/StringHelper.hpp"
+#include "Type.hpp"
+#include "Utils/Logging.h"
+
+module wescene.vulkan;
+import wescene.utils;
 
 using namespace wallpaper;
 using namespace wallpaper::vulkan;

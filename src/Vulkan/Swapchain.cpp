@@ -1,6 +1,19 @@
-#include "Swapchain.hpp"
+module;
 
-#include "Device.hpp"
+#include <algorithm>
+#include <iterator>
+#include <optional>
+#include <span>
+#include <vector>
+
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include "Swapchain/ExSwapchain.hpp"
+#include "Utils/Logging.h"
+#include "vvk/macros.hpp"
+
+module wescene.vulkan;
 
 using namespace wallpaper::vulkan;
 
@@ -37,30 +50,18 @@ VkSurfaceFormatKHR chooseSwapSurfaceFormat(std::span<const VkSurfaceFormatKHR> a
 }
 
 VkExtent2D GetSwapChainExtent(VkSurfaceCapabilitiesKHR& surface_capabilities, VkExtent2D ext) {
-    auto min = surface_capabilities.minImageExtent;
-    auto max = surface_capabilities.maxImageExtent;
+    auto min     = surface_capabilities.minImageExtent;
+    auto max     = surface_capabilities.maxImageExtent;
     auto currExt = surface_capabilities.currentExtent;
 
-    if( currExt.width == 0
-        || currExt.width < min.width || currExt.width > max.width
-        || currExt.height < min.height || currExt.height > max.height
-    ){
-        if (ext.width < min.width) {
-            ext.width = min.width;
-        }
-        if (ext.height < min.height) {
-            ext.height = min.height;
-        }
-        if (ext.width > max.width) {
-            ext.width = max.width;
-        }
-        if (ext.height > max.height) {
-            ext.height = max.height;
-        }
+    if (currExt.width == 0 || currExt.width < min.width || currExt.width > max.width ||
+        currExt.height < min.height || currExt.height > max.height) {
+        if (ext.width < min.width) ext.width = min.width;
+        if (ext.height < min.height) ext.height = min.height;
+        if (ext.width > max.width) ext.width = max.width;
+        if (ext.height > max.height) ext.height = max.height;
         return ext;
     }
-
-    // Most of the cases we define size of the swap_chain images equal to current window's size
     return surface_capabilities.currentExtent;
 }
 
@@ -82,20 +83,18 @@ std::optional<vvk::ImageView> CreateSwapImageView(const vvk::Device& device, VkF
             },
     };
     vvk::ImageView view;
-    if (auto res = device.CreateImageView(ci, view); res == VK_SUCCESS) {
-        return view;
-    }
+    if (auto res = device.CreateImageView(ci, view); res == VK_SUCCESS) return view;
     return std::nullopt;
 }
 } // namespace
 
 const vvk::SwapchainKHR& Swapchain::handle() const { return m_handle; }
-VkFormat                 Swapchain::format() const { return m_format.format; };
-VkExtent2D               Swapchain::extent() const { return m_extent; };
+VkFormat                 Swapchain::format() const { return m_format.format; }
+VkExtent2D               Swapchain::extent() const { return m_extent; }
 
 std::span<const ImageParameters> Swapchain::images() const { return m_images; }
 
-VkPresentModeKHR Swapchain::presentMode() const { return m_present_mode; };
+VkPresentModeKHR Swapchain::presentMode() const { return m_present_mode; }
 
 bool Swapchain::Create(Device& device, VkSurfaceKHR surface, VkExtent2D extent, Swapchain& swap) {
     SwapChainSupportDetails swap_details;
@@ -105,12 +104,11 @@ bool Swapchain::Create(Device& device, VkSurfaceKHR surface, VkExtent2D extent, 
 
     auto& surfaceCapabilities = swap_details.capabilities;
 
-    // triple
     uint32_t image_count = surfaceCapabilities.minImageCount + 1;
     if (surfaceCapabilities.maxImageCount > 0 && image_count > surfaceCapabilities.maxImageCount)
         image_count = surfaceCapabilities.maxImageCount;
     surfaceCapabilities.currentExtent = swap.m_extent;
-    
+
     swap.m_extent = GetSwapChainExtent(surfaceCapabilities, extent);
 
     swap.m_present_mode                          = VK_PRESENT_MODE_FIFO_KHR;

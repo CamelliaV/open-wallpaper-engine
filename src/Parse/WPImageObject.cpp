@@ -1,6 +1,14 @@
-#include "Parse/WPImageObject.hpp"
+module;
+#include <string>
+#include <unordered_set>
+
+#include "WPJson.hpp"
+
+#include <nlohmann/json.hpp>
+
 #include "Utils/Logging.h"
-#include "Fs/VFS.h"
+
+module wescene.parse;
 
 using namespace wallpaper::wpscene;
 

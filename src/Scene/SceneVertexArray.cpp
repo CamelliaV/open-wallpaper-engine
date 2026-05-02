@@ -1,9 +1,21 @@
-#include "SceneVertexArray.h"
-#include <cstring>
-#include <iostream>
-#include <utility>
+module;
+
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "Core/Literals.hpp"
+#include "Core/MapSet.hpp"
+#include "Type.hpp"
+
+module wescene.scene;
 
 using namespace wallpaper;
 

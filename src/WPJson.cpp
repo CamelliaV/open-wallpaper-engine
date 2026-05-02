@@ -1,8 +1,19 @@
-#include "WPJson.hpp"
+module;
+
+#include <array>
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include <nlohmann/json.hpp>
 
-#include "Utils/Identity.hpp"
+#include "Utils/Logging.h"
 #include "Utils/String.h"
+
+module wescene.json;
+import wescene.utils;
 
 namespace wallpaper
 {
@@ -139,5 +150,4 @@ using farray = std::array<float, N>;
 T_IMPL_GET_JSON(farray<2>);
 T_IMPL_GET_JSON(farray<3>);
 
-// template bool GetJsonValue();
 } // namespace wallpaper

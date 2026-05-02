@@ -1,6 +1,8 @@
-#include "SceneNode.h"
+module;
 
 #include <Eigen/Geometry>
+
+module wescene.scene;
 
 using namespace wallpaper;
 using namespace Eigen;

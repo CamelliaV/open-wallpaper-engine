@@ -1,14 +1,21 @@
-#include "ParticleEmitter.h"
-#include "ParticleModify.h"
-#include "Utils/Algorism.h"
-#include "Utils/Logging.h"
-#include "Utils/Algorism.h"
-#include "Core/Random.hpp"
+module;
 
-#include <Eigen/src/Core/Matrix.h>
+#include "Utils/Logging.h"
+#include "Core/Random.hpp"
+#include "Core/Literals.hpp"
+
+#include <Eigen/Dense>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <functional>
 #include <random>
-#include <array>
+#include <span>
 #include <tuple>
+#include <vector>
+
+module wescene.scene;
+import wescene.utils;
 
 using namespace wallpaper;
 

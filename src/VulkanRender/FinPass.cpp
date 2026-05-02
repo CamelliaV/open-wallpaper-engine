@@ -1,7 +1,16 @@
-#include "FinPass.hpp"
-#include "Resource.hpp"
-#include "PassCommon.hpp"
+module;
+
+#include <cstdint>
+#include <string>
+
+#include <vulkan/vulkan.h>
+
+#include "Swapchain/ExSwapchain.hpp"
 #include "Utils/Logging.h"
+
+module wescene.vulkan_render;
+import wescene.vulkan;
+import wescene.scene;
 
 using namespace wallpaper::vulkan;
 
@@ -40,10 +49,6 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
         .layerCount     = 1,
     };
 
-    // 1. Scene RT: SHADER_READ_ONLY_OPTIMAL → TRANSFER_SRC_OPTIMAL.
-    //    All RenderGraph passes leave their outputs in
-    //    SHADER_READ_ONLY_OPTIMAL (PrePass + CustomShaderPass enforce
-    //    this). We need TRANSFER_SRC for vkCmdBlitImage's source.
     {
         VkImageMemoryBarrier b {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -63,10 +68,6 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
                             b);
     }
 
-    // 2. Present buffer: UNDEFINED → TRANSFER_DST_OPTIMAL.
-    //    UNDEFINED forgets prior contents AND prior queue family
-    //    ownership (spec) — the free implicit "acquire from FOREIGN"
-    //    when the slot was previously released to the consumer.
     {
         VkImageMemoryBarrier b {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -86,8 +87,6 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
                             b);
     }
 
-    // 3. Blit scene RT → present. vkCmdBlitImage handles cross-format
-    //    channel mapping (R8G8B8A8 ↔ B8G8R8A8 → correct logical RGBA).
     {
         VkImageBlit region {
             .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
@@ -111,11 +110,6 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
                       VK_FILTER_LINEAR);
     }
 
-    // 4. Scene RT: TRANSFER_SRC_OPTIMAL → SHADER_READ_ONLY_OPTIMAL.
-    //    Restores the inter-frame invariant the RenderGraph relies on
-    //    (next frame's first pass writing this RT will start from
-    //    SHADER_READ_ONLY_OPTIMAL or run a renderpass with
-    //    finalLayout=SHADER_READ_ONLY_OPTIMAL).
     {
         VkImageMemoryBarrier b {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -135,12 +129,6 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
                             b);
     }
 
-    // 5. Present: TRANSFER_DST_OPTIMAL → present_layout, with optional
-    //    queue family release. Bridge path uses
-    //    VK_QUEUE_FAMILY_FOREIGN_EXT to flush GPU caches before the
-    //    consumer reads via DMA-BUF. Local path (and surface-single-
-    //    family path) sets present_queue_index == graphics, so the
-    //    barrier is a pure layout transition with no ownership transfer.
     {
         bool xfer = (m_desc.present_queue_index != gqf);
         VkImageMemoryBarrier b {

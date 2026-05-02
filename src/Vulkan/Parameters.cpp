@@ -1,4 +1,9 @@
-#include "Parameters.hpp"
+module;
+
+#include <utility>
+#include <vector>
+
+module wescene.vulkan;
 
 namespace wallpaper
 {
@@ -8,12 +13,12 @@ namespace vulkan
 VmaBufferParameters::VmaBufferParameters()  = default;
 VmaBufferParameters::~VmaBufferParameters() = default;
 VmaBufferParameters::VmaBufferParameters(VmaBufferParameters&& o) noexcept
-    : handle(std::move(o.handle)), req_size(o.req_size) {};
+    : handle(std::move(o.handle)), req_size(o.req_size) {}
 VmaBufferParameters& VmaBufferParameters::operator=(VmaBufferParameters&& o) noexcept {
     handle   = std::move(o.handle);
     req_size = o.req_size;
     return *this;
-};
+}
 
 VmaImageParameters::VmaImageParameters()  = default;
 VmaImageParameters::~VmaImageParameters() = default;
@@ -73,8 +78,10 @@ ImageSlots& ImageSlots::operator=(ImageSlots&& o) noexcept {
 
 ImageSlotsRef::ImageSlotsRef()  = default;
 ImageSlotsRef::~ImageSlotsRef() = default;
-ImageSlotsRef::ImageSlotsRef(const ImageSlots& o)
-    : slots(std::vector<ImageParameters>(o.slots.begin(), o.slots.end())) {}
+ImageSlotsRef::ImageSlotsRef(const ImageSlots& o) {
+    slots.reserve(o.slots.size());
+    for (const auto& vma : o.slots) slots.push_back(ToImageParameters(vma));
+}
 
 } // namespace vulkan
 } // namespace wallpaper

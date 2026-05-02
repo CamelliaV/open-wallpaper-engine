@@ -1,21 +1,31 @@
-#include "Parse/WPShaderParser.hpp"
+module;
+#include <vector>
 
-#include "Fs/IBinaryStream.h"
+#include "Core/Literals.hpp"
+#include "Core/MapSet.hpp"
+
+#include <nlohmann/json.hpp>
+
+#include <glslang/Public/ShaderLang.h>
+
+#include "Type.hpp"
 #include "Utils/Logging.h"
 #include "WPJson.hpp"
 
-#include "Parse/WPUniform.hpp"
-#include "Fs/VFS.h"
-#include "Utils/Sha.hpp"
 #include "Utils/String.h"
-#include "WPCommon.hpp"
 
-#include "Vulkan/ShaderComp.hpp"
 
+#include <cassert>
 #include <regex>
 #include <stack>
 #include <charconv>
 #include <string>
+
+module wescene.parse;
+import wescene.vulkan;
+import wescene.scene;
+import wescene.common;
+import wescene.utils;
 
 static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 

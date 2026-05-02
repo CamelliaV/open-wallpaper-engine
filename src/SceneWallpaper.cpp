@@ -1,29 +1,32 @@
-#include "SceneWallpaper.hpp"
-#include "SceneWallpaperSurface.hpp"
+module;
+
+#include <rstd/macro.hpp>
 
 #include "Utils/Logging.h"
-#include "Looper/Looper.hpp"
 
-#include "Timer/FrameTimer.hpp"
-#include "Utils/FpsCounter.h"
-#include "Parse/WPSceneParser.hpp"
-#include "Scene/Scene.h"
-#include "Particle/ParticleSystem.h"
-#include "Interface/IShaderValueUpdater.h"
 
-#include "Fs/VFS.h"
-#include "Fs/PhysicalFs.h"
-#include "WPPkgFs.hpp"
+#include "Type.hpp"
 
-#include "Audio/SoundManager.h"
+#include "Swapchain/ExSwapchain.hpp"
 
-#include "RenderGraph/RenderGraph.hpp"
-
-#include "VulkanRender/SceneToRenderGraph.hpp"
-#include "VulkanRender/VulkanRender.hpp"
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <thread>
+
+module wescene.scene_wallpaper;
+import wescene.utils;
+import wescene.scene;
+
+import rstd;
+import wescene.audio;
+import wescene.fs;
+import wescene.looper;
+import wescene.timer;
+import wescene.parse;
+import wescene.pkg_fs;
+import wescene.rgraph;
+import wescene.vulkan_render;
 
 using namespace wallpaper;
 
@@ -537,7 +540,7 @@ void MainHandler::loadScene() {
             return;
         }
         scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager);
-        scene->vfs.swap(pVfs);
+        scene->vfs.reset(pVfs.release());
     }
 
     {

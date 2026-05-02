@@ -30,12 +30,11 @@ target_link_libraries(
     wpdump_lib
     PUBLIC
         ${PROJECT_NAME}
-        wpFs
-        wpScene
         nlohmann_json::nlohmann_json
 )
 target_include_directories(wpdump_lib PUBLIC .)
 target_compile_features(wpdump_lib PUBLIC cxx_std_20)
+set_target_properties(wpdump_lib PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_definitions(
     wpdump_lib PUBLIC
     "WAYWALLEN_WORKSHOP_DIR=\"${CMAKE_SOURCE_DIR}/workshop\""

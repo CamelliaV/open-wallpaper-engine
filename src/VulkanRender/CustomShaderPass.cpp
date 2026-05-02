@@ -1,18 +1,28 @@
-#include "CustomShaderPass.hpp"
-#include "Scene/Scene.h"
-#include "Scene/SceneShader.h"
+module;
 
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <vulkan/vulkan.h>
+
+#include "Core/Literals.hpp"
+#include "Core/ArrayHelper.hpp"
+#include "Core/MapSet.hpp"
 #include "SpecTexs.hpp"
-#include "Vulkan/Shader.hpp"
 #include "Utils/Logging.h"
 #include "Utils/AutoDeletor.hpp"
-#include "Resource.hpp"
-#include "PassCommon.hpp"
-#include "Interface/IImageParser.h"
+#include "vvk/macros.hpp"
 
-#include "Core/ArrayHelper.hpp"
-
-#include <cassert>
+module wescene.vulkan_render;
+import wescene.vulkan;
+import wescene.scene;
 
 using namespace wallpaper::vulkan;
 

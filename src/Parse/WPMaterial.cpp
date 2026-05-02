@@ -1,4 +1,13 @@
-#include "Parse/WPMaterial.hpp"
+module;
+#include <string>
+#include <vector>
+
+#include "WPJson.hpp"
+
+#include <nlohmann/json.hpp>
+
+
+module wescene.parse;
 
 using namespace wallpaper::wpscene;
 

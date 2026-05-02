@@ -1,8 +1,15 @@
-#include "SceneImageEffectLayer.h"
-#include "SceneNode.h"
+module;
 
+#include <algorithm>
+#include <cassert>
+#include <memory>
+#include <string_view>
+
+#include "Type.hpp"
 #include "SpecTexs.hpp"
 #include "Core/StringHelper.hpp"
+
+module wescene.scene;
 
 using namespace wallpaper;
 

@@ -1,20 +1,35 @@
+module;
 
-#include "Shader.hpp"
-#include "Swapchain.hpp"
-#include "TextureCache.hpp"
-#include "Device.hpp"
-#include "Util.hpp"
-
-#include "Image.hpp"
-#include "Core/MapSet.hpp"
-#include "Core/ArrayHelper.hpp"
-#include "Utils/AutoDeletor.hpp"
-#include "Utils/Hash.h"
-#include "include/Vulkan/Parameters.hpp"
-#include "vvk/vulkan_wrapper.hpp"
-
+#include <cassert>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <memory>
 #include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+
+#include "vk_mem_alloc.h"
+
+#include "Core/ArrayHelper.hpp"
+#include "Core/Literals.hpp"
+#include "Core/MapSet.hpp"
+#include "Image.hpp"
+#include "Swapchain/ExSwapchain.hpp"
+#include "Type.hpp"
+#include "Utils/AutoDeletor.hpp"
+#include "Utils/Logging.h"
+#include "vvk/macros.hpp"
+
+module wescene.vulkan;
+
+import wescene.utils;
 
 using namespace wallpaper;
 using namespace wallpaper::vulkan;
@@ -452,7 +467,8 @@ std::optional<ExImageParameters> TextureCache::CreateExTex(uint32_t width, uint3
         const auto& eximg = opt.value();
 
         if (! m_tex_cmd) allocateCmd();
-        TransImgLayout(m_device.graphics_queue().handle, m_tex_cmd, eximg, VK_IMAGE_LAYOUT_GENERAL);
+        TransImgLayout(m_device.graphics_queue().handle, m_tex_cmd,
+                       ToImageParameters(eximg), VK_IMAGE_LAYOUT_GENERAL);
         VVK_CHECK(m_device.handle().WaitIdle());
     }
     return opt;
@@ -534,7 +550,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
                       extents,
                       m_device.graphics_queue().handle,
                       m_tex_cmd,
-                      image_paras);
+                      ToImageParameters(image_paras));
 
         m_device.handle().WaitIdle();
     }
@@ -571,7 +587,7 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
         if (! m_tex_cmd) allocateCmd();
         TransImgLayout(m_device.graphics_queue().handle,
                        m_tex_cmd,
-                       image_paras,
+                       ToImageParameters(image_paras),
                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         VVK_CHECK_ACT(break, m_device.handle().WaitIdle());
@@ -598,7 +614,7 @@ std::optional<ImageParameters> TextureCache::Query(std::string_view key, Texture
         query.share_ready = false;
         query.persist     = persist;
 
-        return query.image;
+        return ToImageParameters(query.image);
     };
 
     TexHash tex_hash = TextureKey::HashValue(content_hash);
@@ -612,7 +628,7 @@ std::optional<ImageParameters> TextureCache::Query(std::string_view key, Texture
 
         m_query_map[std::string(key)] = &(*query);
 
-        return query->image;
+        return ToImageParameters(query->image);
     }
 
     m_query_texs.emplace_back(std::make_unique<QueryTex>());
@@ -625,7 +641,7 @@ std::optional<ImageParameters> TextureCache::Query(std::string_view key, Texture
     query.persist = persist;
     if (auto opt = CreateTex(content_hash); opt.has_value()) {
         query.image = std::move(opt.value());
-        return query.image;
+        return ToImageParameters(query.image);
     }
     return std::nullopt;
 }

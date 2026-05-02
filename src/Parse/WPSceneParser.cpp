@@ -1,31 +1,26 @@
-#include "Parse/WPSceneParser.hpp"
+module;
+#include <array>
+#include <vector>
+
+#include "Core/Literals.hpp"
+
+#include <nlohmann/json.hpp>
+
 #include "WPJson.hpp"
 
 #include "Utils/String.h"
 #include "Utils/Logging.h"
-#include "Utils/Algorism.h"
 #include "Core/Visitors.hpp"
 #include "Core/StringHelper.hpp"
 #include "Core/ArrayHelper.hpp"
+#include "Core/MapSet.hpp"
 #include "SpecTexs.hpp"
 
-#include "Parse/WPShaderParser.hpp"
-#include "Parse/WPTexImageParser.hpp"
-#include "Parse/WPParticleParser.hpp"
-#include "Parse/WPSoundParser.hpp"
-#include "Parse/WPMdlParser.hpp"
 
-#include "Particle/WPParticleRawGener.h"
-#include "Particle/ParticleSystem.h"
 
-#include "WPShaderValueUpdater.hpp"
-#include "Parse/WPImageObject.hpp"
-#include "Parse/WPParticleObject.hpp"
-#include "Parse/WPSoundObject.hpp"
-#include "Parse/WPLightObject.hpp"
-#include "Parse/WPScene.hpp"
 
-#include "Fs/VFS.h"
+#include "Image.hpp"
+
 
 #include <algorithm>
 #include <iostream>
@@ -38,6 +33,12 @@
 #include <regex>
 #include <variant>
 #include <Eigen/Dense>
+
+module wescene.parse;
+import wescene.utils;
+import wescene.scene;
+
+import wescene.shader_value_updater;
 
 using namespace wallpaper;
 using namespace Eigen;

@@ -1,6 +1,11 @@
-#include "SceneIndexArray.h"
+module;
+
+#include <cstdint>
 #include <cstring>
+#include <span>
 #include <utility>
+
+module wescene.scene;
 
 using namespace wallpaper;
 

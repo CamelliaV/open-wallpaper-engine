@@ -1,16 +1,23 @@
-#include "Scene.h"
+module;
 
-#include "Fs/VFS.h"
-#include "Interface/IImageParser.h"
-#include "Interface/IShaderValueUpdater.h"
-#include "Particle/ParticleSystem.h"
+#include <memory>
 
-namespace wallpaper 
+module wescene.scene;
+
+import wescene.fs;
+
+namespace wallpaper
 {
 
-Scene::Scene(): sceneGraph(std::make_shared<SceneNode>()) ,paritileSys(std::make_unique<ParticleSystem>(*this)) {}
+namespace
+{
+void delete_vfs(void* p) noexcept { delete static_cast<fs::VFS*>(p); }
+} // namespace
+
+Scene::Scene()
+    : sceneGraph(std::make_shared<SceneNode>()),
+      vfs(nullptr, &delete_vfs),
+      paritileSys(std::make_unique<ParticleSystem>(*this)) {}
 Scene::~Scene() = default;
 
-}
-
-
+} // namespace wallpaper

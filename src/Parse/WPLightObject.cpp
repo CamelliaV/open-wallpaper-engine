@@ -1,7 +1,13 @@
-#include "Parse/WPLightObject.hpp"
+module;
+
+#include "WPJson.hpp"
+
+#include <nlohmann/json.hpp>
+
 
 #include "Utils/Logging.h"
-#include "Fs/VFS.h"
+
+module wescene.parse;
 
 using namespace wallpaper::wpscene;
 

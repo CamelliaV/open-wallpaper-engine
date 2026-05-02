@@ -1,0 +1,36 @@
+module;
+
+#include <string>
+#include <string_view>
+
+export module wescene.rgraph:pass_node;
+
+import :dependency_graph;
+
+export namespace wallpaper::rg
+{
+
+class TexNode;
+class PassNode : public DependencyGraph::Node {
+public:
+    enum class Type
+    {
+        CustomShader,
+        Copy,
+        Virtual // for mark a virual writer to update version
+    };
+    static PassNode* addPassNode(DependencyGraph& dg, Type type);
+
+    Type             type() const;
+    std::string_view name() const;
+
+    void setName(std::string_view);
+
+    std::string ToGraphviz() const override;
+
+private:
+    Type        m_type;
+    std::string m_name { "unknown pass" };
+};
+
+} // namespace wallpaper::rg
