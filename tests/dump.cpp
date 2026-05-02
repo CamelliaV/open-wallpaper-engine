@@ -71,6 +71,7 @@ struct TexMeta {
     int32_t     texv { 0 };
     int32_t     texi { 0 };
     int32_t     texb { 0 };
+    int32_t     texs { 0 };  // 0 == absent (non-sprite); else 2 or 3 in observed corpus
     int32_t     compo1 { 0 };
     int32_t     compo2 { 0 };
     int32_t     compo3 { 0 };
@@ -122,6 +123,7 @@ TexMeta ReadTexMeta(wallpaper::fs::VFS& vfs, const std::string& pkg_path) {
     meta.texv          = extra_val("texv");
     meta.texi          = extra_val("texi");
     meta.texb          = extra_val("texb");
+    meta.texs          = extra_val("texs");
     meta.compo1        = extra_val("compo1");
     meta.compo2        = extra_val("compo2");
     meta.compo3        = extra_val("compo3");
@@ -485,6 +487,7 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err) {
         jm["texv"]          = m.texv;
         jm["texi"]          = m.texi;
         jm["texb"]          = m.texb;
+        jm["texs"]          = m.texs;
         jm["compo1"]        = m.compo1;
         jm["compo2"]        = m.compo2;
         jm["compo3"]        = m.compo3;

@@ -39,6 +39,7 @@ public:
     const std::set<int>&         texv_versions() const { return texv_versions_; }
     const std::set<int>&         texi_versions() const { return texi_versions_; }
     const std::set<int>&         texb_versions() const { return texb_versions_; }
+    const std::set<int>&         texs_versions() const { return texs_versions_; }
     const std::set<int>&         tex_formats() const { return tex_formats_; }
     const std::set<int>&         mdlv_versions() const { return mdlv_versions_; }
     const std::set<int>&         mdls_versions() const { return mdls_versions_; }
@@ -64,6 +65,7 @@ public:
     std::vector<TexRef> textures_with_texv(int v) const;
     std::vector<TexRef> textures_with_texi(int v) const;
     std::vector<TexRef> textures_with_texb(int v) const;
+    std::vector<TexRef> textures_with_texs(int v) const;
     std::vector<TexRef> textures_with_format(int v) const;
     std::vector<MdlRef> mdls_with_mdlv(int v) const;
     std::vector<MdlRef> mdls_with_mdls(int v) const;
@@ -78,6 +80,7 @@ private:
     std::set<int>              texv_versions_;
     std::set<int>              texi_versions_;
     std::set<int>              texb_versions_;
+    std::set<int>              texs_versions_;
     std::set<int>              tex_formats_;
     std::set<int>              mdlv_versions_;
     std::set<int>              mdls_versions_;

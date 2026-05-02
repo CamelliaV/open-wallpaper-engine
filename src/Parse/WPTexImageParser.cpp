@@ -49,6 +49,26 @@ char* Lz4Decompress(const char* src, int size, int decompressed_size) {
     return dst;
 }
 
+// Magic-bytes sniffer used as a fallback when the .tex header's
+// `image_type` slot says UNKNOWN but the body is actually an embedded
+// image container. Some PKGV0022+ assets ship this way (the texture's
+// declared image_type is -1 even though the LZ4-decompressed payload
+// is a self-contained PNG/JPEG). Without this fallback the body bytes
+// are memcpy'd into a "raw RGBA8" slot, which decodes to garbage and
+// the wallpaper renders as a flat clear-color screen.
+ImageType DetectEmbeddedImageType(const unsigned char* data, usize size) {
+    if (size >= 8 && std::memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) return ImageType::PNG;
+    if (size >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff) return ImageType::JPEG;
+    if (size >= 6 && (std::memcmp(data, "GIF87a", 6) == 0 ||
+                      std::memcmp(data, "GIF89a", 6) == 0))
+        return ImageType::GIF;
+    if (size >= 2 && data[0] == 'B' && data[1] == 'M') return ImageType::BMP;
+    if (size >= 4 && ((data[0] == 'I' && data[1] == 'I' && data[2] == 0x2a && data[3] == 0x00) ||
+                      (data[0] == 'M' && data[1] == 'M' && data[2] == 0x00 && data[3] == 0x2a)))
+        return ImageType::TIFF;
+    return ImageType::UNKNOWN;
+}
+
 TextureFormat ToTexFormate(int type) {
     /*
         type
@@ -71,9 +91,21 @@ TextureFormat ToTexFormate(int type) {
         return TextureFormat::RGBA8;
     }
 }
-void LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
-    header.extraHeader["texv"].val = ReadTexVesion(file);
-    header.extraHeader["texi"].val = ReadTexVesion(file);
+// Reads the fixed-layout portion of a .tex header (everything up to and
+// including the optional image_type slot). Populates `header.extraHeader`
+// with the version stamps + flag bits the renderer consumes downstream,
+// and returns the parsed sub-versions so the body / sprite branches can
+// dispatch off explicit predicates instead of re-fetching the magic ints.
+//
+// Version validation is permissive: unsupported (texv,texi,texb) tuples
+// log an error but the function still returns a populated struct so the
+// caller can decide whether to bail or attempt a best-effort read.
+WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
+    WPTexFormatVersion v;
+    v.texv = ReadTexVesion(file);
+    v.texi = ReadTexVesion(file);
+    header.extraHeader["texv"].val = v.texv;
+    header.extraHeader["texi"].val = v.texi;
 
     header.format = ToTexFormate(file.ReadInt32());
     WPTexFlags flags(file.ReadUint32());
@@ -110,11 +142,19 @@ void LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
 
     file.ReadInt32(); // unknown
 
-    header.extraHeader["texb"].val = ReadTexVesion(file);
+    v.texb = ReadTexVesion(file);
+    header.extraHeader["texb"].val = v.texb;
 
     header.count = file.ReadInt32();
 
-    if (header.extraHeader["texb"].val == 3) header.type = static_cast<ImageType>(file.ReadInt32());
+    if (v.body_has_image_type()) header.type = static_cast<ImageType>(file.ReadInt32());
+    if (v.body_has_reserved_slot()) file.ReadInt32(); // reserved (always 0 in corpus)
+
+    if (v.texv != 5 || v.texi != 1 || v.texb < 1 || v.texb > 4) {
+        LOG_ERROR("WPTexImageParser: unsupported version texv=%d texi=%d texb=%d",
+                  v.texv, v.texi, v.texb);
+    }
+    return v;
 }
 
 void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
@@ -134,7 +174,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
     if (! pfile) return nullptr;
     auto& file     = *pfile;
     auto  startpos = file.Tell();
-    LoadHeader(file, img.header);
+    auto  ver      = LoadHeader(file, img.header);
 
     // image
     i32 _image_count = img.header.count;
@@ -162,7 +202,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             bool    LZ4_compressed    = false;
             int32_t decompressed_size = 0;
             // check compress
-            if (img.header.extraHeader["texb"].val > 1) {
+            if (ver.body_has_lz4_prelude()) {
                 LZ4_compressed    = file.ReadInt32() == 1;
                 decompressed_size = file.ReadInt32();
             }
@@ -188,11 +228,25 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                     return nullptr;
                 }
             }
-            // is image container
-            if (img.header.extraHeader["texb"].val == 3 && img.header.type != ImageType::UNKNOWN) {
+            // is image container — declared image_type takes precedence; if
+            // it's UNKNOWN, sniff the magic bytes so PKGV0022+ assets that
+            // ship containerised PNG/JPEG with image_type=-1 still decode.
+            ImageType embedded = img.header.type;
+            if (ver.body_has_image_type() && embedded == ImageType::UNKNOWN) {
+                embedded = DetectEmbeddedImageType((const unsigned char*)result,
+                                                   (usize)src_size);
+            }
+            if (ver.body_has_image_type() && embedded != ImageType::UNKNOWN) {
                 int32_t w, h, n;
                 auto*   data =
                     stbi_load_from_memory((const unsigned char*)result, src_size, &w, &h, &n, 4);
+                if (data == nullptr) {
+                    LOG_ERROR("stbi failed to decode embedded image (type=%d)", (int)embedded);
+                    delete[] result;
+                    return nullptr;
+                }
+                img.header.type   = embedded;
+                img.header.format = TextureFormat::RGBA8;
                 mipmap.data = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
                     stbi_image_free((unsigned char*)data);
                 });
@@ -217,7 +271,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
     if (! pfile) return header;
     auto& file = *pfile;
 
-    LoadHeader(file, header);
+    auto ver = LoadHeader(file, header);
     if (header.count < 0) return header;
 
     usize image_count = (usize)header.count;
@@ -235,7 +289,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                     imageDatas.at(i_image) = { (float)width, (float)height };
                     header.mipmap_pow2     = algorism::IsPowOfTwo((u32)(width * height));
                 }
-                if (header.extraHeader["texb"].val > 1) {
+                if (ver.body_has_lz4_prelude()) {
                     int32_t LZ4_compressed    = file.ReadInt32();
                     int32_t decompressed_size = file.ReadInt32();
                     (void)LZ4_compressed;
@@ -246,12 +300,13 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             }
         }
         // sprite pos
-        int32_t texs       = ReadTexVesion(file);
-        int32_t framecount = file.ReadInt32();
-        if (texs > 3) {
-            LOG_ERROR("Unkown texs version");
+        ver.texs                       = ReadTexVesion(file);
+        header.extraHeader["texs"].val = ver.texs;
+        int32_t framecount             = file.ReadInt32();
+        if (ver.texs < 1 || ver.texs > 3) {
+            LOG_ERROR("WPTexImageParser: unsupported texs version %d", ver.texs);
         }
-        if (texs == 3) {
+        if (ver.sprite_has_atlas_size()) {
             i32 width  = file.ReadInt32();
             i32 height = file.ReadInt32();
             (void)width;
@@ -268,7 +323,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             float spriteHeight = imageDatas.at((usize)sf.imageId)[1];
 
             sf.frametime = file.ReadFloat();
-            if (texs == 1) {
+            if (ver.sprite_frame_coords_int()) {
                 sf.x        = (float)file.ReadInt32() / spriteWidth;
                 sf.y        = (float)file.ReadInt32() / spriteHeight;
                 sf.xAxis[0] = (float)file.ReadInt32();

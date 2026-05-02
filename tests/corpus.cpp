@@ -78,6 +78,7 @@ void Corpus::build() {
                 texv_versions_.insert(t.value("texv", 0));
                 texi_versions_.insert(t.value("texi", 0));
                 texb_versions_.insert(t.value("texb", 0));
+                texs_versions_.insert(t.value("texs", 0));
                 tex_formats_.insert(t.value("format", -1));
             }
         }
@@ -93,10 +94,11 @@ void Corpus::build() {
 
     std::fprintf(stderr,
                  "corpus: indexed %zu workshops; pkgv=%zu texv=%zu texi=%zu texb=%zu "
-                 "fmt=%zu mdlv=%zu mdls=%zu mdla=%zu\n",
+                 "texs=%zu fmt=%zu mdlv=%zu mdls=%zu mdla=%zu\n",
                  entries_.size(), pkg_versions_.size(), texv_versions_.size(),
-                 texi_versions_.size(), texb_versions_.size(), tex_formats_.size(),
-                 mdlv_versions_.size(), mdls_versions_.size(), mdla_versions_.size());
+                 texi_versions_.size(), texb_versions_.size(), texs_versions_.size(),
+                 tex_formats_.size(), mdlv_versions_.size(), mdls_versions_.size(),
+                 mdla_versions_.size());
 }
 
 std::vector<Corpus::PkgRef> Corpus::workshops_with_pkg(const std::string& v) const {
@@ -143,6 +145,9 @@ std::vector<Corpus::TexRef> Corpus::textures_with_texi(int v) const {
 }
 std::vector<Corpus::TexRef> Corpus::textures_with_texb(int v) const {
     return tex_filter(entries_, [v](const nlohmann::json& t) { return t.value("texb", -1) == v; });
+}
+std::vector<Corpus::TexRef> Corpus::textures_with_texs(int v) const {
+    return tex_filter(entries_, [v](const nlohmann::json& t) { return t.value("texs", -1) == v; });
 }
 std::vector<Corpus::TexRef> Corpus::textures_with_format(int v) const {
     return tex_filter(entries_, [v](const nlohmann::json& t) { return t.value("format", -1) == v; });
