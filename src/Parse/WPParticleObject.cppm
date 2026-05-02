@@ -10,6 +10,7 @@ import wescene.utils;
 import wescene.fs;
 
 export import :wp_material;
+import :wp_scene;
 
 export namespace wallpaper
 
@@ -151,7 +152,8 @@ public:
 
 class WPParticleObject {
 public:
-    bool                     FromJson(const nlohmann::json&, fs::VFS&);
+    bool                     FromJson(const nlohmann::json&, fs::VFS&);                  // legacy
+    bool                     FromJson(const nlohmann::json&, fs::VFS&, SceneVersion);    // canonical
     int32_t                  id;
     std::string              name;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };

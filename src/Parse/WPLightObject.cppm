@@ -8,6 +8,7 @@ import cppstd;
 import wescene.fs;
 
 export import wescene.puppet;
+import :wp_scene;
 
 export namespace wallpaper
 
@@ -18,7 +19,8 @@ namespace wpscene
 
 class WPLightObject {
 public:
-    bool                 FromJson(const nlohmann::json&, fs::VFS&);
+    bool                 FromJson(const nlohmann::json&, fs::VFS&);                  // legacy
+    bool                 FromJson(const nlohmann::json&, fs::VFS&, SceneVersion);    // canonical
     int32_t              id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };

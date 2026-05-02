@@ -90,6 +90,10 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
 }
 
 bool WPMaterial::FromJson(const nlohmann::json& json) {
+    return FromJson(json, kSceneVersionUnknown);
+}
+
+bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
     if(!json.contains("passes") || json.at("passes").size() == 0) {
         LOG_ERROR("material no data");
         return false;

@@ -6,6 +6,7 @@ module;
 export module wescene.parse:wp_material;
 import cppstd;
 import wescene.fs;
+import :wp_scene;
 
 export namespace wallpaper
 
@@ -33,7 +34,8 @@ public:
 
 class WPMaterial {
 public:
-    bool                                                FromJson(const nlohmann::json&);
+    bool                                                FromJson(const nlohmann::json&);                  // legacy
+    bool                                                FromJson(const nlohmann::json&, SceneVersion);    // canonical
     void                                                MergePass(const WPMaterialPass&);
     std::string                                         blending { "translucent" };
     std::string                                         cullmode { "nocull" };

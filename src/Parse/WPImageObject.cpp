@@ -52,6 +52,10 @@ bool WPImageEffect::IsEffectBlacklisted(const std::string& filePath) {
 }
     
 bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    return FromJson(json, vfs, kSceneVersionUnknown);
+}
+
+bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     std::string filePath;
     GET_JSON_NAME_VALUE(json, "file", filePath);
     GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
@@ -140,6 +144,10 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
 }
 
 bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    return FromJson(json, vfs, kSceneVersionUnknown);
+}
+
+bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     GET_JSON_NAME_VALUE(json, "image", image);
     GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
     GET_JSON_NAME_VALUE_NOWARN(json, "alignment", alignment);

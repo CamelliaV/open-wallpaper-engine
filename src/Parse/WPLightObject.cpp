@@ -11,7 +11,11 @@ module wescene.parse;
 
 using namespace wallpaper::wpscene;
 
-bool WPLightObject::FromJson(const nlohmann::json& json,  fs::VFS&) {
+bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    return FromJson(json, vfs, kSceneVersionUnknown);
+}
+
+bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
     GET_JSON_NAME_VALUE(json, "origin", origin);
     GET_JSON_NAME_VALUE(json, "angles", angles);
     GET_JSON_NAME_VALUE(json, "scale", scale);

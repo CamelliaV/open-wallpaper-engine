@@ -1079,9 +1079,10 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
 }
 
 template<typename T>
-void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj, fs::VFS& vfs) {
+void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj, fs::VFS& vfs,
+                 wpscene::SceneVersion v) {
     T wpobj;
-    if (! wpobj.FromJson(json_obj, vfs)) {
+    if (! wpobj.FromJson(json_obj, vfs, v)) {
         LOG_ERROR("parse scene object failed, name: %s", wpobj.name.c_str());
         return;
     }
@@ -1108,13 +1109,13 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
 
     for (auto& obj : json.at("objects")) {
         if (obj.contains("image") && ! obj.at("image").is_null()) {
-            AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs, pkg_version);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
-            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs, pkg_version);
         } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
-            AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs, pkg_version);
         } else if (obj.contains("light") && ! obj.at("light").is_null()) {
-            AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs);
+            AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs, pkg_version);
         }
     }
 

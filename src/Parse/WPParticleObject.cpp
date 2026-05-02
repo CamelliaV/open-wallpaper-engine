@@ -184,6 +184,10 @@ bool Particle::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 }
 
 bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    return FromJson(json, vfs, kSceneVersionUnknown);
+}
+
+bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     GET_JSON_NAME_VALUE(json, "particle", particle);
     GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
 

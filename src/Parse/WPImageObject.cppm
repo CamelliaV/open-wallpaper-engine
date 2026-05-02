@@ -11,6 +11,7 @@ import wescene.fs;
 
 export import :wp_material;
 export import wescene.puppet;
+import :wp_scene;
 
 export namespace wallpaper
 
@@ -42,7 +43,8 @@ private:
     static const std::unordered_set<std::string> BLACKLISTED_WORKSHOP_EFFECTS;
     bool IsEffectBlacklisted(const std::string& filePath);
 public:
-    bool                         FromJson(const nlohmann::json&, fs::VFS& vfs);
+    bool                         FromJson(const nlohmann::json&, fs::VFS& vfs);                  // legacy
+    bool                         FromJson(const nlohmann::json&, fs::VFS& vfs, SceneVersion);    // canonical
     bool                         FromFileJson(const nlohmann::json&, fs::VFS& vfs);
     int32_t                      id;
     std::string                  name;
@@ -59,7 +61,8 @@ public:
     struct Config {
         bool passthrough { false };
     };
-    bool                       FromJson(const nlohmann::json&, fs::VFS&);
+    bool                       FromJson(const nlohmann::json&, fs::VFS&);                  // legacy
+    bool                       FromJson(const nlohmann::json&, fs::VFS&, SceneVersion);    // canonical
     int32_t                    id { 0 };
     std::string                name;
     std::array<float, 3>       origin { 0.0f, 0.0f, 0.0f };

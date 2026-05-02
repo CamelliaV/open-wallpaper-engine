@@ -9,6 +9,7 @@ import wescene.audio;
 import wescene.fs;
 
 import wescene.json;
+import :wp_scene;
 
 export namespace wallpaper
 
@@ -26,7 +27,11 @@ struct WPSoundObject {
     std::string              name;
     std::vector<std::string> sound;
 
-    bool FromJson(const nlohmann::json& json, fs::VFS&) {
+    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+        return FromJson(json, vfs, kSceneVersionUnknown);
+    }
+
+    bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
         GET_JSON_NAME_VALUE(json, "volume", volume);
         GET_JSON_NAME_VALUE(json, "playbackmode", playbackmode);
         GET_JSON_NAME_VALUE_NOWARN(json, "mintime", mintime);
