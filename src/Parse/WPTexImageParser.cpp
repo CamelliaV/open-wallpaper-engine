@@ -302,10 +302,20 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         // sprite pos
         ver.texs                       = ReadTexVesion(file);
         header.extraHeader["texs"].val = ver.texs;
-        int32_t framecount             = file.ReadInt32();
+        // texs out of [1,3] means the body walk above ended at the wrong
+        // offset (corrupt file or a layout drift this parser doesn't
+        // know). Reading framecount + frame records past that point gives
+        // us garbage, and worse, dereferences imageDatas with whatever
+        // the next 4 bytes happen to be — historically that asserted on
+        // an empty inner vector and aborted the whole process. Bail out
+        // with the structural fields we already populated; sprite-frame
+        // info is best-effort anyway in our renderer pipeline.
         if (ver.texs < 1 || ver.texs > 3) {
-            LOG_ERROR("WPTexImageParser: unsupported texs version %d", ver.texs);
+            LOG_ERROR("WPTexImageParser: unsupported texs version %d for %s",
+                      ver.texs, name.c_str());
+            return header;
         }
+        int32_t framecount = file.ReadInt32();
         if (ver.sprite_has_atlas_size()) {
             i32 width  = file.ReadInt32();
             i32 height = file.ReadInt32();
@@ -316,11 +326,27 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         for (int32_t i = 0; i < framecount; i++) {
             SpriteFrame sf;
             sf.imageId = file.ReadInt32();
-            if (sf.imageId < 0) {
-                LOG_ERROR("get neg imageid");
+            // Two ways an imageId can be poison: outright negative (old
+            // sentinel) or pointing past image_count, or pointing to an
+            // image whose mip section was empty. All three previously
+            // tripped vector::operator[]'s assertion. Skip the frame's
+            // remaining bytes so subsequent frames stay aligned.
+            const auto bad_id =
+                sf.imageId < 0 ||
+                static_cast<usize>(sf.imageId) >= imageDatas.size() ||
+                imageDatas[static_cast<usize>(sf.imageId)].size() < 2;
+            if (bad_id) {
+                LOG_ERROR("WPTexImageParser: invalid sprite frame imageId=%d (image_count=%zu) in %s",
+                          sf.imageId, imageDatas.size(), name.c_str());
+                file.ReadFloat();              // frametime
+                for (int j = 0; j < 6; ++j) {  // x, y, xAxis[0..1], yAxis[0..1]
+                    if (ver.sprite_frame_coords_int()) file.ReadInt32();
+                    else                                file.ReadFloat();
+                }
+                continue;
             }
-            float spriteWidth  = imageDatas.at((usize)sf.imageId)[0];
-            float spriteHeight = imageDatas.at((usize)sf.imageId)[1];
+            float spriteWidth  = imageDatas[static_cast<usize>(sf.imageId)][0];
+            float spriteHeight = imageDatas[static_cast<usize>(sf.imageId)][1];
 
             sf.frametime = file.ReadFloat();
             if (ver.sprite_frame_coords_int()) {

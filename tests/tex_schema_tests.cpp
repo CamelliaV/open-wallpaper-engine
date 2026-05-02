@@ -353,19 +353,21 @@ TEST(TexSchema, NoMalformedHeadersInCorpus) {
         << malformed << " textures had truncated / unparseable headers";
 }
 
-// Geometric invariant: for non-sprite textures, the first mip's dims
-// must agree with one of the two sizes the .tex header advertises:
+// Geometric invariant — non-sprite textures.
+//
+// The first mip's dims must agree with one of the two sizes the .tex
+// header advertises:
 //
 //   * (header_w, header_h) — pow-of-2 texture coordinate space.
 //   * (map_w,    map_h)    — original picture size before pow-2 round-up.
 //
-// In practice ~99 % of corpus textures store mip0 at the pow-2 size; a
-// minority of non-pow-2 source pictures keep mip0 at picture size with
-// `header_{w,h}` carrying the next pow-2 up (the "mipmap_larger" branch
-// in production). Any mip0 dim that matches *neither* indicates either
-// a new layout this reader / the production parser hasn't grown to
-// understand, or a header/body misalignment (e.g. the texb=4 reserved-u32
-// bug, which produced mip0 dims of 0x1 — agreeing with neither).
+// ~99 % of corpus textures store mip0 at the pow-2 size; a minority of
+// non-pow-2 source pictures keep mip0 at picture size with `header_{w,h}`
+// carrying the next pow-2 up (the "mipmap_larger" branch in production).
+// Any mip0 dim that matches *neither* indicates either a new layout
+// this reader / the production parser hasn't grown to understand, or a
+// header/body misalignment (e.g. the texb=4 reserved-u32 bug, which
+// produced mip0 dims of 0x1 — agreeing with neither).
 TEST(TexSchema, NonSpriteMip0AgreesWithHeaderOrMap) {
     const auto& metas = AllScans().metas;
     ASSERT_FALSE(metas.empty());
@@ -385,30 +387,73 @@ TEST(TexSchema, NonSpriteMip0AgreesWithHeaderOrMap) {
                       << " nor map " << m.map_w << "x" << m.map_h
                       << " for " << m.workshop_id << " " << m.pkg_path
                       << " (texb=" << m.texb << ")";
-        if (mismatched >= 5) break;  // cap noise
+        if (mismatched >= 5) break;
     }
     std::cerr << "TexSchema.NonSpriteMip0AgreesWithHeaderOrMap: checked=" << checked
               << " matched_map=" << matched_map << " mismatched=" << mismatched << "\n";
 }
 
-// Production parity: for every non-sprite texture the test's binary
-// reader can read fully, run WPTexImageParser::ParseHeader and verify
-// its derived `mipmap_pow2` / `mipmap_larger` fields match values
-// computed directly from the authoritative mip0 dims. This is the
-// cross-implementation check that catches production-side layout bugs
-// the fixture-only tests can't (fixtures are produced by the parser
-// itself, so any stable bug is committed as ground truth).
+// Sprites: structural sanity only.
 //
-// Sprites are excluded — ParseHeader's sprite path has a pre-existing
-// assertion-abort on certain malformed mip vectors, unrelated to the
-// invariant being tested here.
+// Sprites have two empirically-observed layout patterns and no clean
+// universal invariant collapses both:
+//
+//   A. "loose"  — mip0 == map dims, header is pow-2 rounded.
+//                 e.g. mip0=1280x256, map=1280x256, header=2048x256.
+//   B. "packed" — atlas mip0 packs many frames; header == map records
+//                 per-frame dims; mip0 is much larger.
+//                 e.g. mip0=8192x4096, header=map=1100x582.
+//
+// Cross-implementation parity (`ProductionParseHeaderAgreesWithMip0Reader`)
+// already exercises sprites end-to-end, so the only thing this test
+// adds is a smoke check that nothing is zero / negative — catches
+// truncated reads or version drift that produces garbage dims.
+TEST(TexSchema, SpriteHeaderAndMip0DimsArePositive) {
+    const auto& metas = AllScans().metas;
+    ASSERT_FALSE(metas.empty());
+
+    std::size_t checked = 0, bad = 0;
+    for (const auto& m : metas) {
+        if (m.malformed || ! m.sprite) continue;
+        if (m.slot0_mip_count == 0) continue;
+        ++checked;
+        const bool ok = m.mip0_w > 0 && m.mip0_h > 0 &&
+                        m.header_w > 0 && m.header_h > 0;
+        if (ok) continue;
+        ++bad;
+        ADD_FAILURE() << "non-positive sprite dims: mip0 " << m.mip0_w << "x" << m.mip0_h
+                      << " header " << m.header_w << "x" << m.header_h
+                      << " for " << m.workshop_id << " " << m.pkg_path
+                      << " (texb=" << m.texb << " texs=" << m.texs << ")";
+        if (bad >= 5) break;
+    }
+    std::cerr << "TexSchema.SpriteHeaderAndMip0DimsArePositive: checked=" << checked
+              << " bad=" << bad << "\n";
+}
+
+// Production parity: for every texture the test's binary reader can
+// read fully, run WPTexImageParser::ParseHeader and verify its derived
+// `mipmap_pow2` / `mipmap_larger` fields match values computed directly
+// from the authoritative mip0 dims. Cross-implementation check that
+// catches production-side layout bugs which fixture-only tests can't
+// (fixtures are produced by the parser itself, so any stable bug is
+// committed as ground truth).
+//
+// Covers both sprites and non-sprites since the sprite-path assertion
+// abort was fixed (defensive guards on imageId / texs version range).
 TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
     const auto& scan = AllScans();
     ASSERT_FALSE(scan.metas.empty());
 
-    std::size_t checked = 0, parity_fail = 0;
+    // Production formulas (mirrored from WPTexImageParser.cpp's
+    // SetHeaderPow2 + the sprite-path inline computation):
+    //   non-sprite mipmap_pow2:   IsPowOfTwo(mip0_w) || IsPowOfTwo(mip0_h)
+    //   non-sprite mipmap_larger: mip0_w * mip0_h > map_w * map_h
+    //   sprite     mipmap_pow2:   IsPowOfTwo(mip0_w * mip0_h)
+    //   sprite     mipmap_larger: never set (stays at the ImageHeader default)
+    std::size_t checked = 0, parity_fail = 0, parity_fail_sprite = 0;
     for (const auto& m : scan.metas) {
-        if (m.malformed || m.sprite) continue;
+        if (m.malformed) continue;
         if (m.slot0_mip_count == 0) continue;
 
         auto it = scan.vfs_by_workshop.find(m.workshop_id);
@@ -427,27 +472,45 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
         }
 
         const bool expected_pow2 =
-            IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w)) ||
-            IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_h));
-        const bool expected_larger =
-            (m.mip0_w * m.mip0_h) > (m.map_w * m.map_h);
+            m.sprite
+                ? IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w * m.mip0_h))
+                : (IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w)) ||
+                   IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_h)));
 
         ++checked;
-        if (h.mipmap_pow2 != expected_pow2 || h.mipmap_larger != expected_larger) {
+        if (h.mipmap_pow2 != expected_pow2) {
             ++parity_fail;
+            if (m.sprite) ++parity_fail_sprite;
             ADD_FAILURE() << "ParseHeader divergence for " << m.workshop_id
-                          << " " << m.pkg_path << " (texb=" << m.texb << "): "
+                          << " " << m.pkg_path
+                          << " (texb=" << m.texb << " sprite=" << m.sprite << "): "
                           << "expected pow2=" << expected_pow2
-                          << " larger=" << expected_larger
                           << ", got pow2=" << h.mipmap_pow2
-                          << " larger=" << h.mipmap_larger
                           << " (mip0=" << m.mip0_w << "x" << m.mip0_h
                           << " map=" << m.map_w << "x" << m.map_h << ")";
             if (parity_fail >= 5) break;
+            continue;
+        }
+        // mipmap_larger is only set on the non-sprite path; checking it
+        // for sprites would just compare against the ImageHeader default.
+        if (! m.sprite) {
+            const bool expected_larger = (m.mip0_w * m.mip0_h) > (m.map_w * m.map_h);
+            if (h.mipmap_larger != expected_larger) {
+                ++parity_fail;
+                ADD_FAILURE() << "ParseHeader mipmap_larger divergence for "
+                              << m.workshop_id << " " << m.pkg_path
+                              << " (texb=" << m.texb << "): "
+                              << "expected " << expected_larger
+                              << ", got " << h.mipmap_larger
+                              << " (mip0=" << m.mip0_w << "x" << m.mip0_h
+                              << " map=" << m.map_w << "x" << m.map_h << ")";
+                if (parity_fail >= 5) break;
+            }
         }
     }
     std::cerr << "TexSchema.ProductionParseHeaderAgreesWithMip0Reader: checked="
-              << checked << " parity_fail=" << parity_fail << "\n";
+              << checked << " parity_fail=" << parity_fail
+              << " (sprite=" << parity_fail_sprite << ")\n";
 }
 
 TEST(TexSchema, ReportObservedTuples) {

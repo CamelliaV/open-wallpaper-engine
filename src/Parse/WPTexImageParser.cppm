@@ -15,11 +15,11 @@ export namespace wallpaper
 // independent "TEXX0000" stamps interleaved with the header / sprite
 // payload (see `LoadHeader` and the sprite branch of `ParseHeader`).
 //
-// Observed corpus distribution (732 pkgs, 14763 textures across PKGV0001..23):
+// Observed corpus distribution (732 pkgs, 15399 textures across PKGV0001..23):
 //   texv: always 5
 //   texi: always 1
-//   texb: 1 (PKGV0001 only, 4 occurrences) | 2 (early; 168) | 3 (historic dominant; 10052) | 4 (PKGV0022+ dominant; 4537)
-//   texs: 0 (= absent / non-sprite) | 2 (early sprites; 15) | 3 (historic+current sprites; 401)
+//   texb: 1 (PKGV0001 only; 4)  |  2 (early; 170)  |  3 (historic; 10096)  |  4 (PKGV0022+; 5129)
+//   texs: 0 (non-sprite)  |  2 (early sprites; 15)  |  3 (current sprites; 491, including 90 with texb=4)
 //          texs == 1 is documented in legacy code but never observed.
 //
 // The predicate methods below collapse texb / texs version drift into a
