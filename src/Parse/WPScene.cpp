@@ -68,6 +68,8 @@ void parse_baseline(WPSceneGeneral& g, const nlohmann::json& json) {
     GET_JSON_NAME_VALUE(json, "skylightcolor", g.skylightcolor);
     GET_JSON_NAME_VALUE(json, "clearcolor", g.clearcolor);
     GET_JSON_NAME_VALUE_NOWARN(json, "clearenabled", g.clearenabled);
+    GET_JSON_NAME_VALUE_NOWARN(json, "camerafade", g.camerafade);
+    GET_JSON_NAME_VALUE_NOWARN(json, "camerapreview", g.camerapreview);
     GET_JSON_NAME_VALUE(json, "cameraparallax", g.cameraparallax);
     GET_JSON_NAME_VALUE(json, "cameraparallaxamount", g.cameraparallaxamount);
     GET_JSON_NAME_VALUE(json, "cameraparallaxdelay", g.cameraparallaxdelay);
@@ -96,47 +98,50 @@ void parse_baseline(WPSceneGeneral& g, const nlohmann::json& json) {
 
 void parse_v10_plus(WPSceneGeneral& g, const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "hdr", g.hdr);
+    GET_JSON_NAME_VALUE_NOWARN(json, "norecompile", g.norecompile);
+    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrfeather", g.bloomhdrfeather);
+    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdriterations", g.bloomhdriterations);
+    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrscatter", g.bloomhdrscatter);
+    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrstrength", g.bloomhdrstrength);
+    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrthreshold", g.bloomhdrthreshold);
+}
+
+void parse_v20_plus(WPSceneGeneral& g, const nlohmann::json& json) {
+    GET_JSON_NAME_VALUE_NOWARN(json, "bloomtint", g.bloomtint);
 }
 
 void parse_v21_plus(WPSceneGeneral& g, const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "perspectiveoverridefov", g.perspectiveoverridefov);
+    GET_JSON_NAME_VALUE_NOWARN(json, "windenabled", g.windenabled);
+    GET_JSON_NAME_VALUE_NOWARN(json, "winddirection", g.winddirection);
+    GET_JSON_NAME_VALUE_NOWARN(json, "windstrength", g.windstrength);
+    GET_JSON_NAME_VALUE_NOWARN(json, "gravitydirection", g.gravitydirection);
+    GET_JSON_NAME_VALUE_NOWARN(json, "gravitystrength", g.gravitystrength);
 }
 
 void parse_v22_plus(WPSceneGeneral& g, const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "transparentsorting", g.transparentsorting);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistance", g.fogdistance);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancestart", g.fogdistancestart);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistanceend", g.fogdistanceend);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancecolor", g.fogdistancecolor);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancestartdensity", g.fogdistancestartdensity);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistanceenddensity", g.fogdistanceenddensity);
 }
 
-// Copies select keys verbatim out of `json` into `dst` if present. Used
-// to capture renderer-not-yet-supported subtrees so future work can
-// decode them without a re-parse.
-void take_keys(nlohmann::json& dst, const nlohmann::json& src,
-               std::initializer_list<const char*> keys) {
-    if (! dst.is_object()) dst = nlohmann::json::object();
-    for (const char* k : keys) {
-        if (src.contains(k)) dst[k] = src.at(k);
-    }
+void parse_v23_plus(WPSceneGeneral& g, const nlohmann::json& json) {
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogheight", g.fogheight);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightstart", g.fogheightstart);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightend", g.fogheightend);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightcolor", g.fogheightcolor);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightstartdensity", g.fogheightstartdensity);
+    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightenddensity", g.fogheightenddensity);
 }
 
 void capture_raw_subtrees(WPSceneGeneral& g, const nlohmann::json& json,
                           SceneVersion v) {
     if (wants(v, 21) && json.contains("lightconfig")) {
         g.raw_lightconfig = json.at("lightconfig");
-    }
-    if (wants(v, 22)) {
-        take_keys(g.raw_fog, json,
-                  { "fogdistance", "fogdistancestart", "fogdistanceend",
-                    "fogdistancecolor", "fogdistancestartdensity", "fogdistanceenddensity",
-                    "fogheight", "fogheightstart", "fogheightend",
-                    "fogheightcolor", "fogheightstartdensity", "fogheightenddensity" });
-    }
-    if (wants(v, 21)) {
-        take_keys(g.raw_wind, json, { "windenabled", "winddirection", "windstrength" });
-        take_keys(g.raw_gravity, json, { "gravitydirection", "gravitystrength" });
-    }
-    if (wants(v, 10)) {
-        take_keys(g.raw_bloomhdr, json,
-                  { "bloomhdrfeather", "bloomhdriterations", "bloomhdrscatter",
-                    "bloomhdrstrength", "bloomhdrthreshold", "bloomtint" });
     }
 }
 
@@ -149,8 +154,10 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json) {
 bool WPSceneGeneral::FromJson(const nlohmann::json& json, SceneVersion v) {
     parse_baseline(*this, json);
     if (wants(v, 10)) parse_v10_plus(*this, json);
+    if (wants(v, 20)) parse_v20_plus(*this, json);
     if (wants(v, 21)) parse_v21_plus(*this, json);
     if (wants(v, 22)) parse_v22_plus(*this, json);
+    if (wants(v, 23)) parse_v23_plus(*this, json);
     capture_raw_subtrees(*this, json, v);
     return true;
 }

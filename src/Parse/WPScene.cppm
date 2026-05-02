@@ -58,6 +58,8 @@ public:
     // ---- baseline (PKGV0001+) ------------------------------------------
     std::array<float, 3> clearcolor { 0.0f, 0.0f, 0.0f };
     bool                 clearenabled { true };
+    bool                 camerafade { false };
+    bool                 camerapreview { false };
     bool                 cameraparallax { false };
     float                cameraparallaxamount { 0.0f };
     float                cameraparallaxdelay { 0.0f };
@@ -81,19 +83,48 @@ public:
     float                camerashakespeed { 0.0f };
     float                camerashakeroughness { 0.0f };
 
-    // ---- progressive scalar additions (each gated by introduction PKGV) ----
-    bool                 hdr { false };                        // PKGV0010+
-    float                perspectiveoverridefov { 0.0f };      // PKGV0021+
-    bool                 transparentsorting { false };         // PKGV0022+
+    // ---- PKGV0010+ ------------------------------------------------------
+    bool                 hdr { false };
+    bool                 norecompile { false };
+    float                bloomhdrfeather { 0.0f };
+    std::uint32_t        bloomhdriterations { 0 };
+    float                bloomhdrscatter { 0.0f };
+    float                bloomhdrstrength { 0.0f };
+    float                bloomhdrthreshold { 0.0f };
 
-    // ---- raw subtree captures (renderer support deferred) ---------------
-    // Stored as object json verbatim; consumers can decode lazily without
-    // forcing a full struct expansion of every WE feature surface.
-    nlohmann::json raw_lightconfig;   // PKGV0021+; e.g. directional/point/spot config
-    nlohmann::json raw_fog;           // PKGV0022+ fogdistance*, PKGV0023+ fogheight*
-    nlohmann::json raw_wind;          // PKGV0021+ windenabled/winddirection/windstrength
-    nlohmann::json raw_gravity;       // PKGV0021+ gravitydirection/gravitystrength
-    nlohmann::json raw_bloomhdr;      // PKGV0010+ bloomhdr*, PKGV0020+ bloomtint
+    // ---- PKGV0020+ ------------------------------------------------------
+    std::array<float, 3> bloomtint { 1.0f, 1.0f, 1.0f };
+
+    // ---- PKGV0021+ ------------------------------------------------------
+    float                perspectiveoverridefov { 0.0f };
+    bool                 windenabled { false };
+    std::array<float, 3> winddirection { 0.0f, 0.0f, 1.0f };
+    float                windstrength { 0.0f };
+    std::array<float, 3> gravitydirection { 0.0f, -1.0f, 0.0f };
+    float                gravitystrength { 0.0f };
+
+    // ---- PKGV0022+ ------------------------------------------------------
+    bool                 transparentsorting { false };
+    bool                 fogdistance { false };
+    float                fogdistancestart { 0.0f };
+    float                fogdistanceend { 0.0f };
+    std::array<float, 3> fogdistancecolor { 1.0f, 1.0f, 1.0f };
+    float                fogdistancestartdensity { 0.0f };
+    float                fogdistanceenddensity { 0.0f };
+
+    // ---- PKGV0023+ ------------------------------------------------------
+    bool                 fogheight { false };
+    float                fogheightstart { 0.0f };
+    float                fogheightend { 0.0f };
+    std::array<float, 3> fogheightcolor { 1.0f, 1.0f, 1.0f };
+    float                fogheightstartdensity { 0.0f };
+    float                fogheightenddensity { 0.0f };
+
+    // ---- raw subtree captures (nested schema, deferred) -----------------
+    // lightconfig has a deeply nested structure (directional/point/spot
+    // configs each with several sub-objects); kept as raw json until a
+    // dedicated parse pass is justified.
+    nlohmann::json raw_lightconfig;   // PKGV0021+
 };
 
 class WPScene {

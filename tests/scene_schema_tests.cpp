@@ -40,6 +40,7 @@ const auto& kParsedGeneralKeys() {
     using set = std::set<std::string>;
     static const std::map<unsigned, set> m = {
         { 1u, set { "ambientcolor", "skylightcolor", "clearcolor", "clearenabled",
+                    "camerafade", "camerapreview",
                     "cameraparallax", "cameraparallaxamount",
                     "cameraparallaxdelay", "cameraparallaxmouseinfluence",
                     "zoom", "fov", "nearz", "farz",
@@ -47,10 +48,11 @@ const auto& kParsedGeneralKeys() {
                     "camerashake", "camerashakeamplitude",
                     "camerashakespeed", "camerashakeroughness",
                     "orthogonalprojection" } },
-        { 10u, set { "hdr",
+        { 10u, set { "hdr", "norecompile",
                      "bloomhdrfeather", "bloomhdriterations",
                      "bloomhdrscatter", "bloomhdrstrength",
-                     "bloomhdrthreshold", "bloomtint" } },
+                     "bloomhdrthreshold" } },
+        { 20u, set { "bloomtint" } },
         { 21u, set { "perspectiveoverridefov", "lightconfig",
                      "windenabled", "winddirection", "windstrength",
                      "gravitydirection", "gravitystrength" } },
