@@ -56,7 +56,12 @@ function M.scan(ctx)
     if we_assets == "" or not ctx.file_exists(we_assets) then
         ctx.log("wallpaper_engine: WE assets dir not found under " .. workshop_dir
                 .. ", shaders may be missing")
+        we_assets = ""
     end
+    -- Stash the WE assets dir on `library.metadata` so `extras(entry, ctx)`
+    -- can fetch it later without re-deriving it. Stored once per
+    -- library (per workshop dir), shared by every scene under it.
+    ctx.library_meta_set(workshop_dir, "assets", we_assets ~= "" and we_assets or nil)
 
     local dirs = ctx.list_dirs(workshop_dir)
     for _, dir in ipairs(dirs) do
@@ -135,19 +140,11 @@ function M.scan(ctx)
                 end
             end
 
-            -- Metadata is forwarded to the renderer via the daemon's
-            -- typed `Init` message; `path` is the canonical resource
-            -- key (v6 schema), `assets` + `workshop_id` ride along as
-            -- allow-listed extras. mpv's manifest is schema-less and
-            -- falls back to legacy resolution that picks `path` last
-            -- in the priority chain, so the video flow keeps working
-            -- through the path key alone.
-            local metadata = { path = resource }
-            if wp_type == "scene" then
-                metadata.assets = we_assets
-            end
-            metadata.workshop_id = workshop_id
-
+            -- `assets` lives on library.metadata (set once per
+            -- workshop dir above), `workshop_id` rides as
+            -- `external_id`. Both are reconstructed in
+            -- `extras(entry, ctx)` so we don't duplicate them on
+            -- every entry.
             table.insert(entries, {
                 id = workshop_id,
                 name = name,
@@ -158,7 +155,7 @@ function M.scan(ctx)
                 description = project and project.description or nil,
                 tags = (project and project.tags) or {},
                 external_id = workshop_id,
-                metadata = metadata,
+                metadata = {},
             })
         end
     end
@@ -174,18 +171,18 @@ end
 -- the renderer's CLI argv. For scene wallpapers we surface `path` +
 -- the wescene manifest's whitelisted extras (`assets`, `workshop_id`);
 -- for video wallpapers (mpv/video plugin), only `path` is meaningful.
--- We read what `scan()` cached in entry.metadata so we don't have to
--- re-walk the workshop dir.
-function M.extras(entry)
-    local md = entry.metadata or {}
-    local out = { path = md.path or entry.resource }
-    if entry.wp_type == "scene" then
-        if md.assets and md.assets ~= "" then
-            out.assets = md.assets
+-- `assets` is pulled from library.metadata (cached at scan time);
+-- `workshop_id` is the entry's external_id verbatim.
+function M.extras(entry, ctx)
+    local out = { path = entry.resource }
+    if entry.wp_type == "scene" and entry.library_root then
+        local assets = ctx.library_meta_get(entry.library_root, "assets")
+        if assets and assets ~= "" then
+            out.assets = assets
         end
     end
-    if md.workshop_id and md.workshop_id ~= "" then
-        out.workshop_id = md.workshop_id
+    if entry.external_id and entry.external_id ~= "" then
+        out.workshop_id = entry.external_id
     end
     return out
 end
