@@ -265,5 +265,6 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     if (json.contains("instance") && json.at("instance").is_object()) {
         instance.FromJson(json.at("instance"));
     }
+    AbsorbAllFieldBindings(json, field_bindings);
     return true;
 }

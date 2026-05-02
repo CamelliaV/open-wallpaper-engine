@@ -7,6 +7,7 @@ export module wescene.parse:wp_misc_object;
 import cppstd;
 import wescene.fs;
 import wescene.json;
+export import :wp_animation;
 import :wp_scene;
 
 // Object kinds beyond image/light/particle/sound: text overlays, .mdl
@@ -39,6 +40,7 @@ struct WPTextObject {
     std::uint32_t        parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json       instance;
+    WPFieldBindings      field_bindings;
 
     // Text-specific.
     nlohmann::json       text;        // string | {script: ...} | {value: ...}
@@ -117,6 +119,7 @@ struct WPTextObject {
         GET_JSON_NAME_VALUE_NOWARN(json, "ledsource", ledsource);
         GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
         GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
+        AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }
 };
@@ -139,6 +142,7 @@ struct WPModelObject {
     std::uint32_t        parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json       instance;
+    WPFieldBindings      field_bindings;
 
     std::string          model;
     std::string          attachment;
@@ -165,6 +169,7 @@ struct WPModelObject {
         GET_JSON_NAME_VALUE_NOWARN(json, "model", model);
         GET_JSON_NAME_VALUE_NOWARN(json, "attachment", attachment);
         GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
+        AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }
 };
@@ -187,6 +192,7 @@ struct WPCameraObject {
     std::uint32_t        parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json       instance;
+    WPFieldBindings      field_bindings;
 
     std::string          camera;        // camera name reference
     std::string          path;          // animation path .json
@@ -221,6 +227,7 @@ struct WPCameraObject {
         GET_JSON_NAME_VALUE_NOWARN(json, "zoom", zoom);
         GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
         GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
+        AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }
 };

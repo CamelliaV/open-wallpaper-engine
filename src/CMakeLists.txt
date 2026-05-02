@@ -65,6 +65,7 @@ target_sources(
          RenderGraph/TexNode.cppm
          RenderGraph/RenderGraph.cppm
          Parse/Parse.cppm
+         Parse/WPAnimation.cppm
          Parse/WPImageObject.cppm
          Parse/WPLightObject.cppm
          Parse/WPMaterial.cppm
@@ -117,6 +118,7 @@ target_sources(
          VulkanRender/CustomShaderPass.cpp
          VulkanRender/FinPass.cpp
          VulkanRender/PrePass.cpp
+         Parse/WPAnimation.cpp
          Parse/WPImageObject.cpp
          Parse/WPLightObject.cpp
          Parse/WPMaterial.cpp

@@ -7,6 +7,7 @@ export module wescene.parse:wp_light_object;
 import cppstd;
 import wescene.fs;
 
+export import :wp_animation;
 export import wescene.puppet;
 import :wp_scene;
 
@@ -41,6 +42,7 @@ public:
     std::uint32_t        parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json       instance;
+    WPFieldBindings      field_bindings;
 
     // Light-kind specifics.
     bool                 ledsource { false };          // PKGV0006+

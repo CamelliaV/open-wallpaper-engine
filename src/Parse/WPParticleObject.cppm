@@ -9,6 +9,7 @@ import cppstd;
 import wescene.utils;
 import wescene.fs;
 
+export import :wp_animation;
 export import :wp_material;
 import :wp_scene;
 
@@ -182,6 +183,7 @@ public:
     nlohmann::json           instance;
     nlohmann::json           particlesrc;       // PKGV0001+; always null in corpus
     std::array<float, 3>     controlpoint { 0.0f, 0.0f, 0.0f };  // PKGV0019+
+    WPFieldBindings          field_bindings;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);

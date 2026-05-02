@@ -226,6 +226,8 @@ bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneV
     if (json.contains("instance")) instance = json.at("instance");
     if (json.contains("particlesrc")) particlesrc = json.at("particlesrc");
 
+    AbsorbAllFieldBindings(json, field_bindings);
+
     nlohmann::json jParticle;
     if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + particle), jParticle)) return false;
     if (! particleObj.FromJson(jParticle, vfs)) return false;

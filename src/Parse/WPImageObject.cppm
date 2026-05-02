@@ -9,6 +9,7 @@ export module wescene.parse:wp_image_object;
 import cppstd;
 import wescene.fs;
 
+export import :wp_animation;
 export import :wp_material;
 export import wescene.puppet;
 import :wp_scene;
@@ -121,6 +122,11 @@ public:
 
     std::string                                puppet;
     std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
+
+    // Per-field property-binding side channel; populated when scalar
+    // fields (origin/scale/alpha/...) carry an `animation` curve or a
+    // `scriptproperties` subtree. See WPAnimation.cppm.
+    WPFieldBindings                            field_bindings;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPEffectFbo, name, scale);

@@ -171,6 +171,31 @@ const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
           set { "animation", "blend", "rate", "visible",
                 "id", "name",
                 "additive", "blendin", "blendout", "blendtime" } },
+
+        // Property-binding side channel — any animatable scalar field on
+        // an object can carry an `.animation` curve subtree. The shape is
+        // identical regardless of which field it hangs off, so a single
+        // <field>.animation.* parent description applies to all fields
+        // (origin, scale, alpha, color, angles, parallaxDepth, visible,
+        // brightness, alignment, ...). Captured by AbsorbAllFieldBindings
+        // into WPFieldBindings::animations.
+        { "objects[].alpha.animation.",
+          set { "c0", "options" } },
+        { "objects[].alpha.animation.options.",
+          set { "fps", "length", "mode", "name", "startpaused", "wraploop",
+                "smoothing", "children", "events", "parent" } },
+        { "objects[].alpha.animation.c0[].",
+          set { "frame", "value", "lockangle", "locklength",
+                "front", "back" } },
+        { "objects[].alpha.animation.c0[].front.",
+          set { "enabled", "x", "y", "magic" } },
+        { "objects[].alpha.animation.c0[].back.",
+          set { "enabled", "x", "y", "magic" } },
+        { "objects[].origin.animation.",
+          set { "c0", "c1", "c2", "options", "relative" } },
+        { "objects[].origin.animation.options.",
+          set { "fps", "length", "mode", "name", "startpaused", "wraploop",
+                "smoothing", "children", "events", "parent" } },
     };
     return m;
 }

@@ -50,5 +50,6 @@ bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion 
     GET_JSON_NAME_VALUE_NOWARN(json, "cascadedistance2", cascadedistance2);
     GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
     if (json.contains("instance")) instance = json.at("instance");
+    AbsorbAllFieldBindings(json, field_bindings);
     return true;
 }

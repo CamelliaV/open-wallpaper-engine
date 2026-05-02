@@ -4,6 +4,7 @@ import wescene.json;
 import wescene.fs;
 import wescene.audio;
 
+export import :wp_animation;
 export import :wp_image_object;
 export import :wp_light_object;
 export import :wp_material;

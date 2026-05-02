@@ -9,6 +9,7 @@ import wescene.audio;
 import wescene.fs;
 
 import wescene.json;
+export import :wp_animation;
 import :wp_scene;
 
 export namespace wallpaper
@@ -35,6 +36,7 @@ struct WPSoundObject {
     std::uint32_t            parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json           instance;
+    WPFieldBindings          field_bindings;
 
     // Sound-kind specifics.
     bool                     startsilent { false };       // PKGV0002+
@@ -75,6 +77,7 @@ struct WPSoundObject {
             GET_JSON_VALUE(el, name);
             if (! name.empty()) sound.push_back(name);
         }
+        AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }
 };
