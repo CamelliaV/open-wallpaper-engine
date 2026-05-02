@@ -14,6 +14,26 @@ export namespace wallpaper
 namespace wpscene
 {
 
+// pkg container version (the "PKGV00xx" stamp at the head of scene.pkg).
+// Spans 1..23 in the live corpus. All scene.json schema evolution is gated
+// on this axis (lightconfig/fog/hdr added in v23, etc.).
+using SceneVersion = std::uint16_t;
+
+// scene.json self-reported revision (top-level "version" int). Independent
+// of SceneVersion: a single PKGV0023 pkg can contain scene.json with
+// version 0/1/3/4/5. Captured for diagnostics, not used for dispatch.
+using SceneJsonVersion = std::uint16_t;
+
+constexpr SceneVersion     kSceneVersionUnknown     = 0;
+constexpr SceneJsonVersion kSceneJsonVersionDefault = 0;
+
+// Parse "PKGV0023" → 23. Returns kSceneVersionUnknown on any other shape.
+SceneVersion ParsePkgVersionStamp(std::string_view stamp);
+
+// Read top-level "version" number_unsigned; returns kSceneJsonVersionDefault
+// when absent or wrong type.
+SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root);
+
 class Orthogonalprojection {
 public:
     bool    FromJson(const nlohmann::json&);
@@ -50,9 +70,12 @@ public:
 
 class WPScene {
 public:
-    bool           FromJson(const nlohmann::json&);
-    WPSceneCamera  camera;
-    WPSceneGeneral general;
+    bool             FromJson(const nlohmann::json&);                  // legacy: defaults to unknown version
+    bool             FromJson(const nlohmann::json&, SceneVersion);    // canonical entry
+    SceneVersion     pkg_version { kSceneVersionUnknown };
+    SceneJsonVersion scene_json_version { kSceneJsonVersionDefault };
+    WPSceneCamera    camera;
+    WPSceneGeneral   general;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Orthogonalprojection, width, height);

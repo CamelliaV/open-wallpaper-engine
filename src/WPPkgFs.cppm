@@ -23,6 +23,10 @@ public:
     std::shared_ptr<IBinaryStream>  Open(std::string_view path) override;
     std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) override;
 
+    // Pkg-format version stamp from the binary header (e.g. "PKGV0023").
+    // Empty if the pkg was malformed.
+    std::string_view pkg_version_stamp() const noexcept { return m_pkg_version; }
+
 private:
     struct PkgFile {
         std::string path;
@@ -31,6 +35,7 @@ private:
         idx length { 0 };
     };
     std::string                              m_pkgPath;
+    std::string                              m_pkg_version;
     std::unordered_map<std::string, PkgFile> m_files;
 };
 

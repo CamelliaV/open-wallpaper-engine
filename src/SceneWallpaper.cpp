@@ -503,9 +503,15 @@ void MainHandler::loadScene() {
     std::string pkgDir   = pkgPath_fs.parent_path().native();
     std::string scene_id = pkgPath_fs.parent_path().filename().native();
 
-    // load pkgfile
-    if (! vfs.Mount("/assets", fs::WPPkgFs::CreatePkgFs(pkgPath))) {
+    // load pkgfile. Read pkg version stamp before move-mounting so we can
+    // pass it to the scene parser; on fallback (loose dir) we have no
+    // version info and use kSceneVersionUnknown.
+    wpscene::SceneVersion pkg_v = wpscene::kSceneVersionUnknown;
+    auto                  wfs   = fs::WPPkgFs::CreatePkgFs(pkgPath);
+    if (wfs) pkg_v = wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
+    if (! wfs || ! vfs.Mount("/assets", std::move(wfs))) {
         LOG_INFO("load pkg file %s failed, fallback to use dir", pkgPath.c_str());
+        pkg_v = wpscene::kSceneVersionUnknown;
         // load pkg dir
         if (! vfs.Mount("/assets", fs::CreatePhysicalFs(pkgDir))) {
             LOG_ERROR("can't load pkg directory: %s", pkgDir.c_str());
@@ -534,7 +540,7 @@ void MainHandler::loadScene() {
             LOG_ERROR("Not supported scene type");
             return;
         }
-        scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager);
+        scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, pkg_v);
         scene->vfs.reset(pVfs.release());
     }
 

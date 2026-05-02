@@ -2,12 +2,37 @@ module;
 
 #include "WPJson.hpp"
 
+#include <charconv>
 #include <nlohmann/json.hpp>
 
 
 module wescene.parse;
 
 using namespace wallpaper::wpscene;
+
+namespace wallpaper::wpscene {
+
+SceneVersion ParsePkgVersionStamp(std::string_view stamp) {
+    constexpr std::string_view kPrefix = "PKGV";
+    if (stamp.size() < kPrefix.size() + 1) return kSceneVersionUnknown;
+    if (stamp.substr(0, kPrefix.size()) != kPrefix) return kSceneVersionUnknown;
+    SceneVersion     v       = 0;
+    const char*      first   = stamp.data() + kPrefix.size();
+    const char*      last    = stamp.data() + stamp.size();
+    const auto [end, ec]     = std::from_chars(first, last, v);
+    if (ec != std::errc {} || end != last) return kSceneVersionUnknown;
+    return v;
+}
+
+SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root) {
+    if (root.is_object() && root.contains("version") &&
+        root.at("version").is_number_unsigned()) {
+        return root.at("version").template get<SceneJsonVersion>();
+    }
+    return kSceneJsonVersionDefault;
+}
+
+} // namespace wallpaper::wpscene
 
 bool Orthogonalprojection::FromJson(const nlohmann::json& json) {
     if(json.is_null()) return false;
@@ -53,6 +78,12 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json) {
 }
 
 bool WPScene::FromJson(const nlohmann::json& json) {
+    return FromJson(json, kSceneVersionUnknown);
+}
+
+bool WPScene::FromJson(const nlohmann::json& json, SceneVersion v) {
+    pkg_version        = v;
+    scene_json_version = DetectSceneJsonVersion(json);
     if(json.contains("camera")) {
         camera.FromJson(json.at("camera"));
     } else {
@@ -65,5 +96,5 @@ bool WPScene::FromJson(const nlohmann::json& json) {
         LOG_ERROR("scene no genera data");
         return false;
     }
-    return true; 
+    return true;
 }

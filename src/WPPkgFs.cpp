@@ -43,8 +43,9 @@ std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
         idx         length = pkg.ReadInt32();
         pkgfiles.push_back({ path, offset, length });
     }
-    auto pkgfs       = std::unique_ptr<WPPkgFs>(new WPPkgFs());
-    pkgfs->m_pkgPath = pkgpath;
+    auto pkgfs          = std::unique_ptr<WPPkgFs>(new WPPkgFs());
+    pkgfs->m_pkgPath    = pkgpath;
+    pkgfs->m_pkg_version = std::move(ver);
     idx headerSize   = pkg.Tell();
     for (auto& el : pkgfiles) {
         el.offset += headerSize;

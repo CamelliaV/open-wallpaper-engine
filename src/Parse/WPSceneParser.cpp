@@ -1091,11 +1091,15 @@ void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj,
 } // namespace
 
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
-                                            fs::VFS& vfs, audio::SoundManager& sm) {
+                                            fs::VFS& vfs, audio::SoundManager& sm,
+                                            wpscene::SceneVersion pkg_version) {
     nlohmann::json json;
     if (! PARSE_JSON(buf, json)) return nullptr;
     wpscene::WPScene sc;
-    sc.FromJson(json);
+    sc.FromJson(json, pkg_version);
+    LOG_INFO("scene: pkg_version=%u scene_json_version=%u",
+             static_cast<unsigned>(pkg_version),
+             static_cast<unsigned>(sc.scene_json_version));
     //	LOG_INFO(nlohmann::json(sc).dump(4));
 
     ParseContext context;
