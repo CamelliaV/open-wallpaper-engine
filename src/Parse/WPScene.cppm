@@ -52,12 +52,15 @@ public:
 
 class WPSceneGeneral {
 public:
-    bool                 FromJson(const nlohmann::json&);
+    bool                 FromJson(const nlohmann::json&);                  // legacy
+    bool                 FromJson(const nlohmann::json&, SceneVersion);    // canonical
+
+    // ---- baseline (PKGV0001+) ------------------------------------------
     std::array<float, 3> clearcolor { 0.0f, 0.0f, 0.0f };
     bool                 cameraparallax { false };
-    float                cameraparallaxamount;
-    float                cameraparallaxdelay;
-    float                cameraparallaxmouseinfluence;
+    float                cameraparallaxamount { 0.0f };
+    float                cameraparallaxdelay { 0.0f };
+    float                cameraparallaxmouseinfluence { 0.0f };
     bool                 isOrtho { true };
     Orthogonalprojection orthogonalprojection { 1920, 1080 };
     float                zoom { 1.0f };
@@ -66,6 +69,30 @@ public:
     float                farz { 10000.0f };
     std::array<float, 3> ambientcolor { 0.2f, 0.2f, 0.2f };
     std::array<float, 3> skylightcolor { 0.3f, 0.3f, 0.3f };
+
+    // bloom / camerashake scalars exist since PKGV0001 but were never
+    // unpacked into the struct before the version-aware split.
+    bool                 bloom { false };
+    float                bloomstrength { 0.0f };
+    float                bloomthreshold { 0.0f };
+    bool                 camerashake { false };
+    float                camerashakeamplitude { 0.0f };
+    float                camerashakespeed { 0.0f };
+    float                camerashakeroughness { 0.0f };
+
+    // ---- progressive scalar additions (each gated by introduction PKGV) ----
+    bool                 hdr { false };                        // PKGV0010+
+    float                perspectiveoverridefov { 0.0f };      // PKGV0021+
+    bool                 transparentsorting { false };         // PKGV0022+
+
+    // ---- raw subtree captures (renderer support deferred) ---------------
+    // Stored as object json verbatim; consumers can decode lazily without
+    // forcing a full struct expansion of every WE feature surface.
+    nlohmann::json raw_lightconfig;   // PKGV0021+; e.g. directional/point/spot config
+    nlohmann::json raw_fog;           // PKGV0022+ fogdistance*, PKGV0023+ fogheight*
+    nlohmann::json raw_wind;          // PKGV0021+ windenabled/winddirection/windstrength
+    nlohmann::json raw_gravity;       // PKGV0021+ gravitydirection/gravitystrength
+    nlohmann::json raw_bloomhdr;      // PKGV0010+ bloomhdr*, PKGV0020+ bloomtint
 };
 
 class WPScene {
