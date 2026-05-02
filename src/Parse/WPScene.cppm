@@ -50,6 +50,19 @@ public:
     std::array<float, 3> up { 0.0f, 1.0f, 0.0f };
 };
 
+// PKGV0021+ — global maximum-light counts the runtime should be sized for
+// (per WE editor configuration). All entries default to 0 if absent.
+class WPSceneLightConfig {
+public:
+    bool          FromJson(const nlohmann::json&);
+    std::uint32_t directional { 0 };
+    std::uint32_t directionalshadow { 0 };
+    std::uint32_t point { 0 };
+    std::uint32_t pointshadow { 0 };
+    std::uint32_t spot { 0 };
+    std::uint32_t spotshadow { 0 };
+};
+
 class WPSceneGeneral {
 public:
     bool                 FromJson(const nlohmann::json&);                  // legacy
@@ -120,11 +133,8 @@ public:
     float                fogheightstartdensity { 0.0f };
     float                fogheightenddensity { 0.0f };
 
-    // ---- raw subtree captures (nested schema, deferred) -----------------
-    // lightconfig has a deeply nested structure (directional/point/spot
-    // configs each with several sub-objects); kept as raw json until a
-    // dedicated parse pass is justified.
-    nlohmann::json raw_lightconfig;   // PKGV0021+
+    // PKGV0021+ — global per-kind maximum light counts.
+    WPSceneLightConfig lightconfig;
 };
 
 class WPScene {

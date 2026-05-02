@@ -53,6 +53,16 @@ bool WPSceneCamera::FromJson(const nlohmann::json& json) {
     return true;
 }
 
+bool WPSceneLightConfig::FromJson(const nlohmann::json& json) {
+    GET_JSON_NAME_VALUE_NOWARN(json, "directional", directional);
+    GET_JSON_NAME_VALUE_NOWARN(json, "directionalshadow", directionalshadow);
+    GET_JSON_NAME_VALUE_NOWARN(json, "point", point);
+    GET_JSON_NAME_VALUE_NOWARN(json, "pointshadow", pointshadow);
+    GET_JSON_NAME_VALUE_NOWARN(json, "spot", spot);
+    GET_JSON_NAME_VALUE_NOWARN(json, "spotshadow", spotshadow);
+    return true;
+}
+
 namespace {
 
 // A single SceneVersion is the sole gate for "should we attempt to read
@@ -138,10 +148,9 @@ void parse_v23_plus(WPSceneGeneral& g, const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "fogheightenddensity", g.fogheightenddensity);
 }
 
-void capture_raw_subtrees(WPSceneGeneral& g, const nlohmann::json& json,
-                          SceneVersion v) {
-    if (wants(v, 21) && json.contains("lightconfig")) {
-        g.raw_lightconfig = json.at("lightconfig");
+void parse_lightconfig(WPSceneGeneral& g, const nlohmann::json& json) {
+    if (json.contains("lightconfig") && json.at("lightconfig").is_object()) {
+        g.lightconfig.FromJson(json.at("lightconfig"));
     }
 }
 
@@ -158,7 +167,7 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, SceneVersion v) {
     if (wants(v, 21)) parse_v21_plus(*this, json);
     if (wants(v, 22)) parse_v22_plus(*this, json);
     if (wants(v, 23)) parse_v23_plus(*this, json);
-    capture_raw_subtrees(*this, json, v);
+    if (wants(v, 21)) parse_lightconfig(*this, json);
     return true;
 }
 

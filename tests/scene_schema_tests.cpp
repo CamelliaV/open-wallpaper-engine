@@ -138,6 +138,43 @@ bool IsDirectChildOf(std::string_view prefix, std::string_view path) {
     return path.find_first_of(".[", prefix.size()) == std::string_view::npos;
 }
 
+// Parsed direct children of selected nested parents. Mirrors the parser
+// code paths (see WPSceneGeneral / WPParticleObject / WPImageObject /
+// WPPuppetLayer parsing). Used by ReportTopUnparsedNestedKeys.
+const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
+    using set = std::set<std::string>;
+    static const std::map<std::string, set> m = {
+        { "general.orthogonalprojection.",
+          // `auto` is read in Orthogonalprojection::FromJson when present,
+          // but no scene in the live corpus exercises that branch — listing
+          // it here would trip EveryParsedNestedKeyIsObservedSomewhere.
+          set { "width", "height" } },
+        { "general.lightconfig.",
+          set { "directional", "directionalshadow",
+                "point", "pointshadow",
+                "spot", "spotshadow" } },
+        { "objects[].config.",
+          set { "passthrough" } },
+        { "objects[].instance.",
+          set { "id", "combos", "textures", "usertextures" } },
+        { "objects[].instanceoverride.",
+          set { "alpha", "size", "lifetime", "rate", "speed", "count",
+                "brightness", "id", "color", "colorn",
+                "controlpoint0", "controlpoint1", "controlpoint2",
+                "controlpoint3", "controlpoint4", "controlpoint5",
+                "controlpoint6", "controlpoint7",
+                "controlpointangle0", "controlpointangle1",
+                "controlpointangle2", "controlpointangle3",
+                "controlpointangle4", "controlpointangle5",
+                "controlpointangle6", "controlpointangle7" } },
+        { "objects[].animationlayers[].",
+          set { "animation", "blend", "rate", "visible",
+                "id", "name",
+                "additive", "blendin", "blendout", "blendtime" } },
+    };
+    return m;
+}
+
 const nlohmann::json& Report() {
     static const nlohmann::json r = wallpaper::testing::ScanSceneKeys(WAYWALLEN_WORKSHOP_DIR);
     return r;
@@ -263,5 +300,71 @@ TEST(SceneSchema, ReportTopUnparsedGeneralKeysPerVersion) {
 
 TEST(SceneSchema, ReportTopUnparsedObjectKeysPerVersion) {
     PrintUnparsedReport(kObjectsPrefix, "objects[].", kParsedObjectKeys(), 15);
+    SUCCEED();
+}
+
+TEST(SceneSchema, EveryParsedNestedKeyIsObservedSomewhere) {
+    // For each nested-parent in kParsedNestedKeys, assert each declared
+    // child appears under that prefix in the corpus. Catches typos in
+    // sub-struct field names exactly the same way as the top-level test.
+    for (const auto& [parent, parsed] : kParsedNestedKeys()) {
+        std::set<std::string> observed;
+        for (const auto& [_, ver_data] : Report().items()) {
+            if (! ver_data.contains("keys")) continue;
+            for (const auto& [path, __] : ver_data["keys"].items()) {
+                if (! IsDirectChildOf(parent, path)) continue;
+                observed.insert(path.substr(parent.size()));
+            }
+        }
+        for (const auto& k : parsed) {
+            EXPECT_TRUE(observed.contains(k))
+                << parent << k
+                << " is read by the parser but never appears in any scene "
+                   "across the corpus — typo or dead declaration?";
+        }
+    }
+}
+
+TEST(SceneSchema, ReportTopUnparsedNestedKeys) {
+    // Aggregated (cross-version) miss list per nested parent. Most of
+    // these parents are sparsely populated, so per-version columns add
+    // noise without insight. Print one row per parent.
+    std::cerr << "\n=== unparsed direct-child keys per declared nested parent "
+                 "(top 10 by aggregate present_in) ===\n";
+
+    for (const auto& [parent, parsed] : kParsedNestedKeys()) {
+        struct Entry {
+            std::string   key;
+            std::uint64_t present_in;
+        };
+        std::map<std::string, std::uint64_t> agg;
+        for (const auto& [_, ver_data] : Report().items()) {
+            if (! ver_data.contains("keys")) continue;
+            for (const auto& [path, info] : ver_data["keys"].items()) {
+                if (! IsDirectChildOf(parent, path)) continue;
+                const std::string k { path.substr(parent.size()) };
+                if (parsed.contains(k)) continue;
+                agg[k] += info.value("present_in", std::uint64_t { 0 });
+            }
+        }
+        std::vector<Entry> miss;
+        miss.reserve(agg.size());
+        for (auto& kv : agg) miss.push_back({ kv.first, kv.second });
+        std::sort(miss.begin(), miss.end(),
+                  [](auto& a, auto& b) { return a.present_in > b.present_in; });
+
+        std::cerr << "  " << parent << "<X>: ";
+        if (miss.empty()) {
+            std::cerr << "(all observed keys parsed)";
+        } else {
+            const std::size_t n = std::min(miss.size(), std::size_t { 10 });
+            for (std::size_t i = 0; i < n; ++i) {
+                if (i) std::cerr << ", ";
+                std::cerr << miss[i].key << "(" << miss[i].present_in << ")";
+            }
+            if (miss.size() > n) std::cerr << ", … +" << (miss.size() - n) << " more";
+        }
+        std::cerr << "\n";
+    }
     SUCCEED();
 }

@@ -38,6 +38,22 @@ public:
     uint32_t    scale { 1 };
 };
 
+// objects[].instance — PKGV0018+. Embedded WE-format material binding
+// (compiled-shader id + textures + combos). The renderer doesn't currently
+// substitute it, but the parser needs to accept the shape.
+class WPObjectInstance {
+public:
+    bool                                          FromJson(const nlohmann::json&);
+    bool                                          present { false };
+    std::uint32_t                                 id { 0 };
+    std::unordered_map<std::string, std::int32_t> combos;
+    std::vector<std::string>                      textures;
+    // usertextures elements are polymorphic: bare property-name strings
+    // (PKGV0022+) and `{name, type}` system bindings (PKGV0018+). Stored
+    // as raw json so both shapes are preserved.
+    std::vector<nlohmann::json>                   usertextures;
+};
+
 class WPImageEffect {
 private:
     static const std::unordered_set<std::string> BLACKLISTED_WORKSHOP_EFFECTS;
@@ -89,7 +105,7 @@ public:
     bool                       nointerpolation { false };  // PKGV0021+
     std::uint32_t              parent { 0 };               // PKGV0019+; 0 = no parent
     std::vector<std::int32_t>  dependencies;               // PKGV0001+; referenced object ids
-    nlohmann::json             instance;                   // PKGV0018+; instance binding
+    WPObjectInstance           instance;                   // PKGV0018+; instance binding
 
     // Image-kind specifics (gates listed for reference; reads are unconditional via _NOWARN).
     bool                       perspective { false };          // PKGV0002+

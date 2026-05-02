@@ -101,12 +101,27 @@ bool ParticleInstanceoverride::FromJosn(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "rate", rate);
     GET_JSON_NAME_VALUE_NOWARN(json, "speed", speed);
     GET_JSON_NAME_VALUE_NOWARN(json, "count", count);
+    GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
+    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
     if (json.contains("color")) {
         GET_JSON_NAME_VALUE(json, "color", color);
         overColor = true;
     } else if (json.contains("colorn")) {
         GET_JSON_NAME_VALUE(json, "colorn", colorn);
         overColorn = true;
+    }
+    {
+        const char* cp_keys[]    = { "controlpoint0", "controlpoint1", "controlpoint2",
+                                     "controlpoint3", "controlpoint4", "controlpoint5",
+                                     "controlpoint6", "controlpoint7" };
+        const char* cpa_keys[]   = { "controlpointangle0", "controlpointangle1",
+                                     "controlpointangle2", "controlpointangle3",
+                                     "controlpointangle4", "controlpointangle5",
+                                     "controlpointangle6", "controlpointangle7" };
+        for (int i = 0; i < 8; ++i) {
+            GET_JSON_NAME_VALUE_NOWARN(json, cp_keys[i],  controlpoint[i]);
+            GET_JSON_NAME_VALUE_NOWARN(json, cpa_keys[i], controlpointangle[i]);
+        }
     }
     return true;
 };

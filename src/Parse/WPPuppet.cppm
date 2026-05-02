@@ -87,11 +87,19 @@ public:
     bool hasPuppet() const { return (bool)m_puppet; };
 
     struct AnimationLayer {
-        i32    id { 0 };
-        double rate { 1.0f };
-        double blend { 1.0f };
-        bool   visible { true };
-        double cur_time { 0.0f };
+        i32         id { 0 };          // animation file id (PKGV0001+)
+        double      rate { 1.0f };
+        double      blend { 1.0f };
+        bool        visible { true };
+        double      cur_time { 0.0f };
+
+        // Schema-only absorption (renderer reads only id/rate/blend/visible).
+        i32         layer_id { 0 };    // animationlayers[].id (was unread)
+        std::string name;              // animationlayers[].name (was unread)
+        bool        additive { false }; // PKGV0019+; blend operator
+        bool        blendin { false };  // PKGV0021+
+        bool        blendout { false }; // PKGV0021+
+        double      blendtime { 0.0 };  // PKGV0021+
     };
 
     void prepared(std::span<AnimationLayer>);

@@ -18,6 +18,30 @@ bool WPEffectCommand::FromJson(const nlohmann::json& json) {
     return true;
 }
 
+bool WPObjectInstance::FromJson(const nlohmann::json& json) {
+    present = true;
+    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+    if (json.contains("combos") && json.at("combos").is_object()) {
+        for (const auto& jC : json.at("combos").items()) {
+            std::int32_t v { 0 };
+            try { v = jC.value().get<std::int32_t>(); }
+            catch (...) { continue; }
+            combos.emplace(jC.key(), v);
+        }
+    }
+    if (json.contains("textures") && json.at("textures").is_array()) {
+        for (const auto& jT : json.at("textures")) {
+            if (jT.is_string()) textures.push_back(jT.get<std::string>());
+        }
+    }
+    if (json.contains("usertextures") && json.at("usertextures").is_array()) {
+        for (const auto& jU : json.at("usertextures")) {
+            usertextures.push_back(jU);
+        }
+    }
+    return true;
+}
+
 bool WPEffectFbo::FromJson(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE(json, "name", name);
     GET_JSON_NAME_VALUE(json, "format", format);
@@ -209,6 +233,12 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
              GET_JSON_NAME_VALUE(jLayer, "blend", layer.blend);
              GET_JSON_NAME_VALUE(jLayer, "rate", layer.rate);
              GET_JSON_NAME_VALUE_NOWARN(jLayer, "visible", layer.visible);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "id", layer.layer_id);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "name", layer.name);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "additive", layer.additive);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "blendin", layer.blendin);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "blendout", layer.blendout);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "blendtime", layer.blendtime);
              puppet_layers.push_back(layer);
         }
     }
@@ -232,6 +262,8 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
     GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
     GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
-    if (json.contains("instance")) instance = json.at("instance");
+    if (json.contains("instance") && json.at("instance").is_object()) {
+        instance.FromJson(json.at("instance"));
+    }
     return true;
 }

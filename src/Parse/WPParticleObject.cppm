@@ -146,8 +146,16 @@ public:
     float                rate { 1.0f };
     float                speed { 1.0f };
     float                size { 1.0f };
+    float                brightness { 1.0f };
+    std::int32_t         id { 0 };
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
     std::array<float, 3> colorn { 1.0f, 1.0f, 1.0f };
+
+    // controlpoint{0..7} carry "x y z" triplet strings (per-particle CP
+    // overrides); controlpointangle{0..7} carry euler triplets in the same
+    // string format. Captured into static arrays of array<float,3>.
+    std::array<std::array<float, 3>, 8> controlpoint {};
+    std::array<std::array<float, 3>, 8> controlpointangle {};
 };
 
 class WPParticleObject {
