@@ -25,7 +25,7 @@ FetchContent_MakeAvailable(googletest)
 
 # Shared library for the dumper + corpus index. Used by the gtest binary
 # and any future ad-hoc tools.
-add_library(wpdump_lib STATIC dump.cpp corpus.cpp)
+add_library(wpdump_lib STATIC dump.cpp corpus.cpp scene_keys.cpp)
 target_link_libraries(
     wpdump_lib
     PUBLIC
@@ -46,6 +46,12 @@ target_link_libraries(version_tests PRIVATE wpdump_lib GTest::gtest_main)
 # CLI for fixture authoring: dumps a single workshop to a JSON file.
 add_executable(wpdump wpdump_main.cpp)
 target_link_libraries(wpdump PRIVATE wpdump_lib)
+
+# Aggregator: walks all workshops, scans every scene.json, and writes a
+# per-pkg-version key-path frequency report. Used to discover unknown /
+# rare scene.json fields and schema drift across WE versions.
+add_executable(wpscan wpscan_main.cpp)
+target_link_libraries(wpscan PRIVATE wpdump_lib)
 
 # Per-version deep tests live in tests/version/<category>_<version>_test.cpp.
 # Each is a tiny gtest TU built into the same binary so the corpus + gtest
