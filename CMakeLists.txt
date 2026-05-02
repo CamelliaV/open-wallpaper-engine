@@ -26,9 +26,11 @@ link_libraries(Eigen3::Eigen)
 add_subdirectory(src)
 
 
-# Test suite — gated by BUILD_TESTS (default ON). Include CTest so
+# Test suite — gated by BUILD_TESTS (default OFF; pulls in googletest via
+# FetchContent and walks the workshop corpus, both costly). Enable with
+# -DBUILD_TESTS=ON when iterating on parsers / fixtures. Include CTest so
 # gtest_discover_tests / add_test inside tests/ register with ctest.
-option(BUILD_TESTS "Build the wescene-renderer test suite" ON)
+option(BUILD_TESTS "Build the wescene-renderer test suite" OFF)
 if(BUILD_TESTS)
     include(CTest)
     add_subdirectory(tests)
