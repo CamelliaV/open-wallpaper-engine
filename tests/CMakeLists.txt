@@ -25,7 +25,7 @@ FetchContent_MakeAvailable(googletest)
 
 # Shared library for the dumper + corpus index. Used by the gtest binary
 # and any future ad-hoc tools.
-add_library(wpdump_lib STATIC dump.cpp corpus.cpp scene_keys.cpp)
+add_library(wpdump_lib STATIC dump.cpp corpus.cpp scene_keys.cpp scene_parse_probe.cpp)
 target_link_libraries(
     wpdump_lib
     PUBLIC
@@ -53,6 +53,12 @@ target_link_libraries(wpdump PRIVATE wpdump_lib)
 add_executable(wpscan wpscan_main.cpp)
 target_link_libraries(wpscan PRIVATE wpdump_lib)
 
+# Regression net for the version-aware WPScene::FromJson path.
+# Stays decoupled from Corpus so unrelated .mdl/.tex parser bugs cannot
+# mask scene.json parse regressions.
+add_executable(scene_parse_tests scene_parse_tests.cpp)
+target_link_libraries(scene_parse_tests PRIVATE wpdump_lib GTest::gtest_main)
+
 # Per-version deep tests live in tests/version/<category>_<version>_test.cpp.
 # Each is a tiny gtest TU built into the same binary so the corpus + gtest
 # fixture machinery is amortised across them.
@@ -78,3 +84,8 @@ if(TARGET deep_version_tests)
         DISCOVERY_TIMEOUT 60
     )
 endif()
+gtest_discover_tests(
+    scene_parse_tests
+    PROPERTIES TIMEOUT 60
+    DISCOVERY_TIMEOUT 60
+)
