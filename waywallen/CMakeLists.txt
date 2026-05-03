@@ -8,7 +8,10 @@ add_executable(waywallen-wescene-renderer
 )
 
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
-set_target_properties(waywallen-wescene-renderer PROPERTIES CXX_SCAN_FOR_MODULES ON)
+set_target_properties(waywallen-wescene-renderer PROPERTIES 
+    CXX_SCAN_FOR_MODULES ON
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+)
 
 target_include_directories(waywallen-wescene-renderer
     PRIVATE
@@ -46,3 +49,6 @@ install(DIRECTORY
     DESTINATION share/waywallen/renderers
     FILES_MATCHING PATTERN "*.toml"
 )
+
+install(FILES $<TARGET_FILE:dxcompiler>
+        DESTINATION ${CMAKE_INSTALL_LIBDIR})

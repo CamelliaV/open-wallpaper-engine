@@ -4,6 +4,8 @@ project(wescene-renderer)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 
 # Restrict to Clang. The renderer + tests rely on Clang-specific behaviour
 # (clang-format style, sanitizer flags wired in src/CMakeLists.txt, and
@@ -15,6 +17,7 @@ if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT WAYWALLEN_ALLOW_NONCLANG)
         "Re-run cmake with `-DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang`, "
         "or pass -DWAYWALLEN_ALLOW_NONCLANG=ON to bypass this check.")
 endif()
+
 
 find_package(PkgConfig REQUIRED)
 
