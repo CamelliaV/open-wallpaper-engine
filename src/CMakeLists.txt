@@ -1,6 +1,7 @@
 find_package(OpenGL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Vulkan REQUIRED)
+find_package(Freetype REQUIRED)
 pkg_check_modules(LZ4 REQUIRED liblz4)
 
 option(ENABLE_RENDERDOC "Build with renderdoc api" OFF)
@@ -154,7 +155,8 @@ add_library(
   Parse/WPSceneParser.cpp
   Parse/WPShaderParser.cpp
   Parse/WPSoundParser.cpp
-  Parse/WPTexImageParser.cpp)
+  Parse/WPTexImageParser.cpp
+  Text/Text.cpp)
 target_sources(
   wescene-parse
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
@@ -175,11 +177,12 @@ target_sources(
          Parse/WPSoundObject.cppm
          Parse/WPSoundParser.cppm
          Parse/WPTexImageParser.cppm
-         Parse/WPUniform.cppm)
+         Parse/WPUniform.cppm
+         Text/Text.cppm)
 target_link_libraries(
   wescene-parse
   PUBLIC wescene-base wescene-shader-compile
-  PRIVATE nlohmann_json ${LZ4_LIBRARIES})
+  PRIVATE nlohmann_json ${LZ4_LIBRARIES} Freetype::Freetype)
 target_include_directories(
   wescene-parse
   PUBLIC . Utils/include

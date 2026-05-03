@@ -23,6 +23,7 @@ module wescene.parse;
 import cppstd;
 import wescene.utils;
 import wescene.scene;
+import wescene.text;
 
 import wescene.shader_value_updater;
 
@@ -1080,6 +1081,332 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     context.scene->sceneGraph->AppendChild(node);
 }
 
+// Wrapping image parser: serves text-atlas Images for synthetic urls (set
+// via Register) and delegates everything else to the underlying parser.
+// Installed lazily on first text object so the WE .tex path is unchanged
+// for image-only wallpapers.
+class TextRenderImageParser : public IImageParser {
+public:
+    explicit TextRenderImageParser(std::unique_ptr<IImageParser> inner)
+        : m_inner(std::move(inner)) {}
+    std::shared_ptr<Image> Parse(const std::string& name) override {
+        if (auto it = m_synth.find(name); it != m_synth.end()) return it->second;
+        return m_inner ? m_inner->Parse(name) : nullptr;
+    }
+    ImageHeader ParseHeader(const std::string& name) override {
+        if (auto it = m_synth.find(name); it != m_synth.end()) return it->second->header;
+        return m_inner ? m_inner->ParseHeader(name) : ImageHeader {};
+    }
+    void Register(std::string name, std::shared_ptr<Image> img) {
+        m_synth[std::move(name)] = std::move(img);
+    }
+
+private:
+    std::unique_ptr<IImageParser>                              m_inner;
+    std::unordered_map<std::string, std::shared_ptr<Image>>    m_synth;
+};
+
+TextRenderImageParser& EnsureTextImageParser(Scene& scene) {
+    auto* p = dynamic_cast<TextRenderImageParser*>(scene.imageParser.get());
+    if (p != nullptr) return *p;
+    auto inner   = std::unique_ptr<IImageParser>(scene.imageParser.release());
+    auto wrapped = std::make_unique<TextRenderImageParser>(std::move(inner));
+    auto* raw    = wrapped.get();
+    scene.imageParser = std::move(wrapped);
+    return *raw;
+}
+
+namespace
+{
+struct TextLineRun {
+    std::vector<std::pair<std::uint32_t, const text::GlyphInfo*>> glyphs;
+    float width { 0.0f };
+};
+} // namespace
+
+void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
+    if (! obj.visible) return;
+
+    std::string s_text;
+    if (obj.text.is_string()) {
+        s_text = obj.text.get<std::string>();
+    } else if (obj.text.is_object()) {
+        if (obj.text.contains("value") && obj.text.at("value").is_string())
+            s_text = obj.text.at("value").get<std::string>();
+        else if (obj.text.contains("text") && obj.text.at("text").is_string())
+            s_text = obj.text.at("text").get<std::string>();
+        else {
+            LOG_INFO("text '%s': bound text not yet supported, skipping",
+                     obj.name.c_str());
+            return;
+        }
+    }
+    if (s_text.empty()) return;
+
+    std::string font_name;
+    if (obj.font.is_string()) {
+        font_name = obj.font.get<std::string>();
+    } else if (obj.font.is_object()) {
+        if (obj.font.contains("value") && obj.font.at("value").is_string())
+            font_name = obj.font.at("value").get<std::string>();
+    }
+
+    auto resolved = text::FontCache::ResolveSystemFont(font_name, /*fallback_to_any=*/true);
+    if (! resolved.bytes) {
+        LOG_ERROR("text '%s': could not resolve font '%s'",
+                  obj.name.c_str(),
+                  font_name.c_str());
+        return;
+    }
+
+    std::uint32_t px = static_cast<std::uint32_t>(std::lroundf(obj.pointsize));
+    if (px < 1) px = 1;
+    if (px > 512) px = 512;
+
+    // Local cache so the atlas dimensions stay stable for this text object's
+    // baked UVs — see Text.cpp's GrowAtlas comment.
+    text::FontCache cache;
+    auto blob_view =
+        std::span<const std::byte>(resolved.bytes->data(), resolved.bytes->size());
+    auto* face = cache.GetFace(blob_view, px);
+    if (face == nullptr) {
+        LOG_ERROR("text '%s': FreeType failed to open '%s'",
+                  obj.name.c_str(),
+                  resolved.source.c_str());
+        return;
+    }
+
+    auto shader = text::GetTextSceneShader();
+    if (! shader) {
+        LOG_ERROR("text '%s': text shader compile failed", obj.name.c_str());
+        return;
+    }
+
+    // Phase 1: split codepoints into lines and rasterise glyph metrics.
+    auto codepoints = text::DecodeUtf8(s_text);
+    std::vector<TextLineRun> lines;
+    lines.emplace_back();
+    for (std::uint32_t cp : codepoints) {
+        if (cp == '\n') {
+            lines.emplace_back();
+            continue;
+        }
+        const auto* gi = face->Glyph(cp);
+        if (gi == nullptr) continue;
+        lines.back().glyphs.push_back({ cp, gi });
+        lines.back().width += gi->advance_x;
+    }
+    auto  fm = face->Metrics();
+    float text_w = 0.0f;
+    for (auto& l : lines)
+        if (l.width > text_w) text_w = l.width;
+    float text_h = fm.ascender - fm.descender +
+                   static_cast<float>(lines.size() - 1) * fm.line_height;
+    if (text_w <= 0.0f || text_h <= 0.0f) return;
+
+    // Phase 2: snapshot atlas → Image, register under a synthetic url.
+    std::string atlas_url =
+        std::string("_text_atlas_") + std::to_string(obj.id) + "_" + getAddr(face);
+    auto atlas_img = text::BuildAtlasImage(*face, atlas_url);
+    if (! atlas_img) {
+        LOG_ERROR("text '%s': atlas snapshot failed", obj.name.c_str());
+        return;
+    }
+    EnsureTextImageParser(*context.scene).Register(atlas_url, atlas_img);
+
+    {
+        // Mirror the registration into Scene::textures so the renderer's
+        // sampling settings (LINEAR/CLAMP_TO_EDGE) are preserved.
+        SceneTexture stex;
+        stex.url    = atlas_url;
+        stex.sample = atlas_img->header.sample;
+        context.scene->textures[atlas_url] = stex;
+    }
+
+    // Phase 3: emit vertex/index buffers. Layout is one quad per visible
+    // glyph plus one optional background quad at the head, drawn first so
+    // glyphs blend over the bg fill in the same pass.
+    bool has_bg = obj.opaquebackground;
+    std::size_t glyph_quads = 0;
+    for (auto& l : lines) glyph_quads += l.glyphs.size();
+    std::size_t total_quads = glyph_quads + (has_bg ? 1u : 0u);
+    if (total_quads == 0) return;
+
+    SceneVertexArray vertex(
+        {
+            { WE_IN_POSITION.data(), VertexType::FLOAT3 },
+            { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
+            { WE_IN_COLOR.data(),    VertexType::FLOAT4 },
+        },
+        total_quads * 4);
+
+    std::vector<float> positions(total_quads * 4 * 3);
+    std::vector<float> texcoords(total_quads * 4 * 2);
+    std::vector<float> colors   (total_quads * 4 * 4);
+    std::vector<std::uint32_t> indices(total_quads * 6);
+
+    auto write_quad = [&](std::size_t q_idx, float left, float right, float bottom,
+                           float top, float u_l, float u_r, float v_t, float v_b,
+                           const std::array<float, 4>& rgba) {
+        std::size_t v_off = q_idx * 4;
+        // CCW: top-left, top-right, bottom-right, bottom-left.
+        const float pos[4][3] = {
+            { left,  top,    0.0f },
+            { right, top,    0.0f },
+            { right, bottom, 0.0f },
+            { left,  bottom, 0.0f },
+        };
+        const float uv[4][2] = {
+            { u_l, v_t },
+            { u_r, v_t },
+            { u_r, v_b },
+            { u_l, v_b },
+        };
+        for (std::size_t k = 0; k < 4; ++k) {
+            std::memcpy(&positions[(v_off + k) * 3], pos[k], sizeof(pos[k]));
+            std::memcpy(&texcoords[(v_off + k) * 2], uv[k], sizeof(uv[k]));
+            std::memcpy(&colors   [(v_off + k) * 4], rgba.data(), sizeof(float) * 4);
+        }
+        std::size_t i_off = q_idx * 6;
+        const std::uint32_t base = static_cast<std::uint32_t>(v_off);
+        indices[i_off + 0] = base + 0;
+        indices[i_off + 1] = base + 1;
+        indices[i_off + 2] = base + 2;
+        indices[i_off + 3] = base + 0;
+        indices[i_off + 4] = base + 2;
+        indices[i_off + 5] = base + 3;
+    };
+
+    // Local-space layout: bbox centred at origin, y-up scene convention.
+    float text_top    = +text_h * 0.5f;
+    float text_bottom = -text_h * 0.5f;
+    float text_left   = -text_w * 0.5f;
+    float text_right  = +text_w * 0.5f;
+    (void)text_left;
+    (void)text_right;
+    float pad         = static_cast<float>(obj.padding);
+
+    std::size_t q = 0;
+
+    if (has_bg) {
+        // Sample the white cell reserved at atlas (0,0) — see SeedWhiteCell
+        // in Text.cpp. 4×4 px gives stable LINEAR sampling away from edges.
+        float u_l = 1.0f / static_cast<float>(fm.atlas_w);
+        float u_r = 3.0f / static_cast<float>(fm.atlas_w);
+        float v_t = 1.0f / static_cast<float>(fm.atlas_h);
+        float v_b = 3.0f / static_cast<float>(fm.atlas_h);
+        std::array<float, 4> rgba {
+            obj.backgroundcolor[0] * obj.backgroundbrightness,
+            obj.backgroundcolor[1] * obj.backgroundbrightness,
+            obj.backgroundcolor[2] * obj.backgroundbrightness,
+            1.0f,
+        };
+        write_quad(q++,
+                   -text_w * 0.5f - pad,
+                   +text_w * 0.5f + pad,
+                   -text_h * 0.5f - pad,
+                   +text_h * 0.5f + pad,
+                   u_l,
+                   u_r,
+                   v_t,
+                   v_b,
+                   rgba);
+    }
+
+    // Resolve horizontal alignment. WE accepts the dedicated horizontalalign
+    // string when present, otherwise falls back to the legacy alignment
+    // string (which also folds in vertical hints).
+    auto contains = [](std::string_view s, std::string_view what) {
+        return s.find(what) != std::string::npos;
+    };
+    std::string_view halign = obj.horizontalalign.empty() ? std::string_view(obj.alignment)
+                                                          : std::string_view(obj.horizontalalign);
+
+    std::array<float, 4> text_rgba {
+        obj.color[0] * obj.brightness,
+        obj.color[1] * obj.brightness,
+        obj.color[2] * obj.brightness,
+        obj.alpha,
+    };
+
+    for (std::size_t li = 0; li < lines.size(); ++li) {
+        const auto& line = lines[li];
+        float       line_origin_x;
+        if (contains(halign, "left")) {
+            line_origin_x = -text_w * 0.5f;
+        } else if (contains(halign, "right")) {
+            line_origin_x = +text_w * 0.5f - line.width;
+        } else {
+            line_origin_x = -line.width * 0.5f;
+        }
+        float baseline_y =
+            text_top - fm.ascender - static_cast<float>(li) * fm.line_height;
+
+        float pen_x = line_origin_x;
+        for (auto& [cp, gi] : line.glyphs) {
+            (void)cp;
+            if (gi->pixel_w == 0 || gi->pixel_h == 0) {
+                pen_x += gi->advance_x;
+                continue;
+            }
+            float left   = pen_x + gi->bearing_x;
+            float right  = left + static_cast<float>(gi->pixel_w);
+            float top    = baseline_y + gi->bearing_y;
+            float bottom = top - static_cast<float>(gi->pixel_h);
+            float u_l    = static_cast<float>(gi->atlas_x) / static_cast<float>(fm.atlas_w);
+            float u_r    = static_cast<float>(gi->atlas_x + gi->pixel_w) /
+                        static_cast<float>(fm.atlas_w);
+            float v_t = static_cast<float>(gi->atlas_y) / static_cast<float>(fm.atlas_h);
+            float v_b = static_cast<float>(gi->atlas_y + gi->pixel_h) /
+                        static_cast<float>(fm.atlas_h);
+            write_quad(q++, left, right, bottom, top, u_l, u_r, v_t, v_b, text_rgba);
+            pen_x += gi->advance_x;
+        }
+    }
+
+    vertex.SetVertex(WE_IN_POSITION, positions);
+    vertex.SetVertex(WE_IN_TEXCOORD, texcoords);
+    vertex.SetVertex(WE_IN_COLOR,    colors);
+
+    auto sp_mesh = std::make_shared<SceneMesh>();
+    sp_mesh->AddVertexArray(std::move(vertex));
+    sp_mesh->AddIndexArray(SceneIndexArray(std::span<const std::uint32_t>(indices)));
+
+    SceneMaterial material;
+    material.name     = "text";
+    material.textures = { atlas_url };
+    material.defines  = { "g_Texture0" };
+    material.blenmode = BlendMode::Translucent;
+    material.customShader.shader = shader;
+
+    sp_mesh->AddMaterial(std::move(material));
+
+    auto sp_node = std::make_shared<SceneNode>(Vector3f(obj.origin.data()),
+                                               Vector3f(obj.scale.data()),
+                                               Vector3f(obj.angles.data()));
+    sp_node->ID() = obj.id;
+    LoadAlignment(*sp_node,
+                  obj.alignment,
+                  { text_w + 2.0f * pad, text_h + 2.0f * pad });
+    sp_node->AddMesh(sp_mesh);
+
+    WPShaderValueData svData;
+    svData.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+    context.shader_updater->SetNodeData(sp_node.get(), svData);
+
+    context.scene->sceneGraph->AppendChild(sp_node);
+
+    LOG_INFO("text '%s': %zu glyphs, %zu lines, bbox=%.1fx%.1f atlas=%ux%u (%s)",
+             obj.name.c_str(),
+             glyph_quads,
+             lines.size(),
+             static_cast<double>(text_w),
+             static_cast<double>(text_h),
+             fm.atlas_w,
+             fm.atlas_h,
+             resolved.source.c_str());
+}
+
 template<typename T>
 void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj, fs::VFS& vfs,
                  wpscene::SceneVersion v) {
@@ -1181,13 +1508,16 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                        [&context](wpscene::WPLightObject& obj) {
                            ParseLightObj(context, obj);
                        },
-                       // Parsing-only kinds: data is captured into the
-                       // WPObjectVar but no SceneNode is created yet —
-                       // renderer support for text overlays, .mdl model
-                       // attachments, and per-object camera markers is
-                       // still on the support matrix. See SceneSchema
-                       // tests for absorption coverage.
-                       [](wpscene::WPTextObject&) {},
+                       // Stage A text-layer support: ParseTextObj loads the
+                       // font, lays glyphs into a CPU-side atlas, and logs
+                       // the resolved layout. Scene-graph emission is still
+                       // pending Stage B (custom shader + atlas texture
+                       // through the existing imageParser path).
+                       [&context](wpscene::WPTextObject& obj) {
+                           ParseTextObj(context, obj);
+                       },
+                       // .mdl model attachments and per-object camera markers
+                       // remain absorption-only; see SceneSchema tests.
                        [](wpscene::WPModelObject&) {},
                        [](wpscene::WPCameraObject&) {},
                    },

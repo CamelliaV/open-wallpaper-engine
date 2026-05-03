@@ -9,7 +9,7 @@ Made this for fun.
 - [x] Layer
 	- [x] Image
 	- [x] Composition / Fullscreen
-	- [ ] Text
+	- [x] Text
 - [x] Effect
     - [x] Basic
 	- [x] Mouse position with delay
