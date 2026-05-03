@@ -24,15 +24,54 @@ set(SPIRV_REFLECT_EXECUTABLE  OFF CACHE INTERNAL "")
 set(SPIRV_REFLECT_BUILD_TESTS OFF CACHE INTERNAL "")
 set(SPIRV_REFLECT_EXAMPLES    OFF CACHE INTERNAL "")
 set(SPIRV_REFLECT_INSTALL    OFF CACHE INTERNAL "")
-set(SKIP_GLSLANG_INSTALL    ON  CACHE INTERNAL "")
-set(ENABLE_GLSLANG_BINARIES OFF CACHE INTERNAL "")
-set(ENABLE_SPVREMAPPER      OFF CACHE INTERNAL "")
-set(ENABLE_GLSLANG_JS       OFF CACHE INTERNAL "")
-set(ENABLE_HLSL             OFF CACHE INTERNAL "")
-set(ENABLE_OPT              OFF CACHE INTERNAL "")
 set(ARGPARSE_INSTALL        OFF CACHE INTERNAL "")
 set(ARGPARSE_BUILD_TESTS    OFF CACHE INTERNAL "")
 set(ARGPARSE_BUILD_SAMPLES  OFF CACHE INTERNAL "")
+
+# DirectXShaderCompiler — fork of LLVM, brings hundreds of CMake options
+# along. The set below approximates DXC's own cmake/caches/PredefinedParams
+# cache file: trim everything except the HLSL→SPIR-V frontend.
+set(LLVM_TARGETS_TO_BUILD       "None" CACHE STRING   "")
+set(LLVM_INCLUDE_TESTS          OFF    CACHE INTERNAL "")
+set(LLVM_INCLUDE_DOCS           OFF    CACHE INTERNAL "")
+set(LLVM_INCLUDE_EXAMPLES       OFF    CACHE INTERNAL "")
+set(LLVM_INCLUDE_GO_TESTS       OFF    CACHE INTERNAL "")
+set(LLVM_BUILD_TESTS            OFF    CACHE INTERNAL "")
+set(LLVM_BUILD_TOOLS            OFF    CACHE INTERNAL "")
+set(LLVM_BUILD_EXAMPLES         OFF    CACHE INTERNAL "")
+set(LLVM_BUILD_DOCS             OFF    CACHE INTERNAL "")
+set(LLVM_BUILD_RUNTIME          OFF    CACHE INTERNAL "")
+# LLVM_OPTIMIZED_TABLEGEN triggers a NATIVE sub-build that re-invokes cmake
+# on CMAKE_SOURCE_DIR — under FetchContent that's our project root, not
+# DXC's. Forcing OFF avoids the cross-build bootstrap entirely.
+set(LLVM_OPTIMIZED_TABLEGEN     OFF    CACHE INTERNAL "")
+set(LLVM_USE_HOST_TOOLS         OFF    CACHE INTERNAL "")
+set(LLVM_REQUIRES_RTTI          ON     CACHE INTERNAL "")
+set(LLVM_REQUIRES_EH            ON     CACHE INTERNAL "")
+set(LLVM_ENABLE_RTTI            ON     CACHE INTERNAL "")
+set(LLVM_ENABLE_EH              ON     CACHE INTERNAL "")
+set(LLVM_APPEND_VC_REV          OFF    CACHE INTERNAL "")
+set(LLVM_TOOL_OPENMP_BUILD      OFF    CACHE INTERNAL "")
+set(LLVM_TOOL_LIBCXX_BUILD      OFF    CACHE INTERNAL "")
+set(LLVM_TOOL_LIBCXXABI_BUILD   OFF    CACHE INTERNAL "")
+set(LLVM_TOOL_COMPILER_RT_BUILD OFF    CACHE INTERNAL "")
+set(CLANG_BUILD_EXAMPLES        OFF    CACHE INTERNAL "")
+set(CLANG_INCLUDE_TESTS         OFF    CACHE INTERNAL "")
+set(CLANG_ENABLE_ARCMT          OFF    CACHE INTERNAL "")
+set(CLANG_ENABLE_STATIC_ANALYZER OFF   CACHE INTERNAL "")
+set(HLSL_INCLUDE_TESTS          OFF    CACHE INTERNAL "")
+set(HLSL_BUILD_DXILCONV         OFF    CACHE INTERNAL "")
+set(HLSL_OFFICIAL_BUILD         OFF    CACHE INTERNAL "")
+set(SPIRV_BUILD_TESTS           OFF    CACHE INTERNAL "")
+set(SPIRV_HEADERS_SKIP_EXAMPLES ON     CACHE INTERNAL "")
+set(SPIRV_HEADERS_SKIP_INSTALL  ON     CACHE INTERNAL "")
+set(ENABLE_SPIRV_CODEGEN        ON     CACHE INTERNAL "")
+# DXC's HCT step regenerates HlslIntrinsicOp.h etc. and verifies clang-format
+# output matches the in-tree copy. We don't need the regeneration at all —
+# the in-tree headers ship with DXC and are correct as-is. Disabling the
+# whole HCT pipeline avoids stamp files that ninja treats as always-dirty
+# and cascade-rebuilds the entire LLVM tree on every incremental build.
+set(HLSL_DISABLE_SOURCE_GENERATION ON  CACHE INTERNAL "")
 
 fetchdeps(${CMAKE_SOURCE_DIR}/deps.json)
 

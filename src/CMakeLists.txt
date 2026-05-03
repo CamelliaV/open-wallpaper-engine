@@ -136,10 +136,22 @@ find_package(Vulkan REQUIRED)
 
 target_link_libraries(
   ${PROJECT_NAME}
-  PUBLIC ${Vulkan_LIBRARIES} glslang
+  PUBLIC ${Vulkan_LIBRARIES}
   PRIVATE nlohmann_json ${LZ4_LIBRARIES}
-          SPIRV spirv-reflect-static miniaudio
+          dxcompiler spirv-reflect-static miniaudio
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} rstd::rstd rstd.cppstd)
+
+# DXC ships dxcapi.h under <dxc_SOURCE_DIR>/include. The dxcompiler target
+# does not always export this include path correctly when consumed via
+# add_subdirectory, so wire it explicitly. FetchContent_MakeAvailable
+# populates dxc_SOURCE_DIR as a normal variable in the parent macro's
+# scope; force-republish via FetchContent_GetProperties so it reaches
+# this directory.
+include(FetchContent)
+FetchContent_GetProperties(dxc SOURCE_DIR _dxc_source_dir)
+if(_dxc_source_dir)
+  target_include_directories(${PROJECT_NAME} PRIVATE ${_dxc_source_dir}/include)
+endif()
 
 target_include_directories(${PROJECT_NAME}
   PUBLIC . Swapchain Utils/include RenderGraph/include Vulkan/include

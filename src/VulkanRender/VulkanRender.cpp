@@ -3,8 +3,6 @@ module;
 #include "Utils/Logging.h"
 #include "Swapchain/ExSwapchain.hpp"
 
-#include <glslang/Public/ShaderLang.h>
-
 #include "Core/ArrayHelper.hpp"
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
@@ -733,13 +731,11 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
 
     setRenderTargetSize(scene, rg);
 
-    glslang::InitializeProcess();
     for (auto* p : m_passes) {
         if (! p->prepared()) {
             p->prepare(scene, *m_device, m_rendering_resources);
         }
     }
-    glslang::FinalizeProcess();
 
     VVK_CHECK_VOID_RE(m_upload_cmd.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,

@@ -10,9 +10,6 @@ module;
 
 #include "vk_mem_alloc.h"
 
-#include <glslang/Include/BaseTypes.h>
-#include <glslang/Public/ShaderLang.h>
-
 #include "Type.hpp"
 #include "Image.hpp"
 #include "Core/Literals.hpp"
@@ -1513,8 +1510,6 @@ private:
 
 // ---------- Shader.hpp ----------
 
-VkFormat ToVkType(glslang::TBasicType, size_t);
-
 struct ShaderReflected {
     struct BlockedUniform {
         int    block_index;
@@ -1545,26 +1540,23 @@ bool GenReflect(std::span<const std::vector<uint>> codes, std::vector<Uni_Shader
 
 // ---------- ShaderComp.hpp ----------
 
-extern const TBuiltInResource DefaultTBuiltInResource;
+enum class VulkanTarget : uint
+{
+    Vulkan_1_0,
+    Vulkan_1_1,
+    Vulkan_1_2,
+    Vulkan_1_3,
+};
 
 struct ShaderCompUnit {
-    EShLanguage stage;
+    ShaderType  stage;
     std::string src;
+    std::string entry_point; // if empty, "main_<stage>" is used.
 };
 
 struct ShaderCompOpt {
-    glslang::EShTargetClientVersion client_ver;
-
-    bool hlsl { false };
-    bool auto_map_locations { false };
-    bool auto_map_bindings { false };
-    bool suppress_warnings_glsl { false };
-    bool relaxed_errors_glsl { false };
-    bool relaxed_rules_vulkan { false };
-    uint global_uniform_binding { 0 };
-
-    bool reflect_all_io_var { true };
-    bool reflect_all_block_var { false };
+    VulkanTarget target { VulkanTarget::Vulkan_1_1 };
+    bool         optimize { false };
 };
 
 bool CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits,

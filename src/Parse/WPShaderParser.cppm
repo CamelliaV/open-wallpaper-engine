@@ -32,6 +32,13 @@ struct WPPreprocessorInfo {
     Map<std::string, std::string> input; // name to line
     Map<std::string, std::string> output;
 
+    // `uniform TYPE NAME;` declarations for non-sampler types. Captured
+    // per-stage so Finalprocessor can build a cross-stage union and emit
+    // a single shared cbuffer (matching what glslang's iomapper used to
+    // produce). Without this, DXC's per-stage $Globals cbuffers desync
+    // and FS-only uniforms read as zero.
+    Map<std::string, std::string> uniforms; // name -> "TYPE"
+
     Set<uint> active_tex_slots;
 };
 

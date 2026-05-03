@@ -37,14 +37,15 @@
     }
   },
   {
-    "dest": "build/_flatpak_deps/glslang-src",
-    "disable-shallow-clone": false,
-    "commit": "fc9889c889561c5882e83819dcaffef5ed45529b",
+    "dest": "build/_flatpak_deps/dxc-src",
+    "disable-shallow-clone": true,
+    "tag": "v1.10.2605.2",
     "type": "git",
-    "url": "https://github.com/KhronosGroup/glslang.git",
+    "url": "https://github.com/microsoft/DirectXShaderCompiler.git",
     "x-cmake": {
-      "name": "glslang",
-      "exclude_from_all": true
+      "name": "dxc",
+      "exclude_from_all": true,
+      "git_submodules": ["external/SPIRV-Headers", "external/SPIRV-Tools", "external/DirectX-Headers"]
     }
   },
   {

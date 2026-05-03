@@ -28,7 +28,11 @@ VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT     
     VkBool32 result = VK_FALSE;
     if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
         result |= VK_TRUE;
-        std::printf("validation layer: %s\n", pCallbackData->pMessage);
+        // stderr (unbuffered) so messages survive an abort() right after.
+        // printf to stdout was line-buffered and eaten on assertion failure.
+        LOG_ERROR("validation layer: %s", pCallbackData->pMessage);
+    } else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+        LOG_WARN("validation layer: %s", pCallbackData->pMessage);
     }
     return result;
 }

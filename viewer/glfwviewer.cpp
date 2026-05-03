@@ -1,6 +1,7 @@
 #include <iostream>
 #include <set>
 #include <fstream>
+#include <cstdlib>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -48,6 +49,21 @@ int main(int argc, char** argv) {
     setAndParseArg(program, argc, argv);
     auto [w_width, w_height] = program.get<Resolution>(OPT_RESOLUTION);
 
+    // RenderDoc's Vulkan capture only hooks xcb/xlib WSI; under a Wayland
+    // session GLFW will request VK_KHR_wayland_surface and the instance
+    // creation fails with VK_ERROR_EXTENSION_NOT_PRESENT. Force the X11
+    // backend (via XWayland) when WP_GLFW_X11=1, or when RenderDoc is
+    // detected by env. Set WP_GLFW_X11=0 to keep native Wayland.
+    {
+        const char* x11_env = std::getenv("WP_GLFW_X11");
+        const bool  renderdoc_active =
+            std::getenv("RENDERDOC_CAPTUREOPTS") || std::getenv("RENDERDOC_HOOK_VK");
+        const bool force_x11 = (x11_env && x11_env[0] == '1') ||
+                               (renderdoc_active && (x11_env == nullptr || x11_env[0] != '0'));
+        if (force_x11) {
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+        }
+    }
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(w_width, w_height, "WP", nullptr, nullptr);
