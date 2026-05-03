@@ -15,7 +15,7 @@ module;
 
 module wescene.parse;
 import cppstd;
-import wescene.vulkan;
+import wescene.shader_compile;
 import wescene.scene;
 import wescene.common;
 import wescene.utils;
@@ -37,16 +37,12 @@ namespace
 // to invert this; this prologue keeps HLSL native and bridges the GLSL
 // residue.
 //
-// TODO(dxc-migration): the stage I/O bridge is incomplete. The shaders
-// declare `attribute`/`varying`/`gl_Position`/`gl_FragColor` as free
-// globals; HLSL needs them inside an entry-point struct. The full fix
-// requires synthesizing a real HLSL entry-point (`main_vs`/`main_ps`/
-// `main_gs`) below the user `main()` that copies the static globals into
-// `[[vk::location(N)]]` struct fields. That synthesis lives in
-// Finalprocessor() and depends on the regex-discovered varying/attribute
-// table from Preprocessor(). Doing it requires iterative validation
-// against DXC error output on the actual asset shaders — see
-// .claude/plans/generic-baking-treehouse.md step 3-5.
+// Pipeline: this prologue + the user source is fed through DXC's
+// preprocessor (-P, see vulkan::Preprocess) which expands every #if /
+// #include / #define. Then a regex pass extracts the surviving
+// `attribute`/`varying`/`uniform` declarations (live code only — combo-
+// gated dead branches are gone), and Finalprocessor strips them and
+// re-emits canonical statics + cbuffer + samplers + entry-point wrapper.
 static constexpr const char* pre_shader_code = R"(// auto-generated WE→HLSL prologue
 #define HLSL 1
 #define GLSL 0
@@ -144,11 +140,12 @@ float    _ww_mul(float4 a, float4 b) { return dot(a, b); }
 
 #define mul _ww_mul
 
-// `uniform` is not an HLSL keyword. WE shaders use `uniform vec4 X;` for
-// loose constants and `uniform sampler2D X;` for textures. Loose constants
-// fall into DXC's $Globals cbuffer via -fvk-bind-globals; texture decls
-// are stripped + re-emitted in C++ as Texture2D + SamplerState pairs.
-#define uniform
+// `uniform` is intentionally NOT #define'd here. The DXC preprocess pass
+// (-P) runs over this prologue; if `uniform` were stripped to empty, the
+// post-preprocess regex couldn't tell `uniform vec4 X;` apart from a
+// plain global decl. We let the keyword survive -P, the regex strips
+// every `uniform TYPE NAME;` line in Finalprocessor, and the union of
+// names is re-emitted as a shared cbuffer ww_Uniforms member set.
 
 // WE-dialect texture sampling. Each sampler2D NAME generates a paired
 // SamplerState NAME_ww_sampler in the synth.pre block; texSample2D thus
@@ -178,11 +175,6 @@ static float4 glOutColor;
 
 __SHADER_PLACEHOLD__
 
-)";
-
-static constexpr const char* pre_shader_code_vert = R"(
-)";
-static constexpr const char* pre_shader_code_frag = R"(
 )";
 
 inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
@@ -385,21 +377,29 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
 
 inline std::string Preprocessor(const std::string& in_src, ShaderType type, const Combos& combos,
                                 WPPreprocessorInfo& process_info) {
-    std::string src = wallpaper::WPShaderParser::PreShaderHeader(in_src, combos, type);
+    std::string with_prologue = wallpaper::WPShaderParser::PreShaderHeader(in_src, combos, type);
 
-    // workaround #require directive
+    // #require is a WE-specific extension marker, not a real preprocessor
+    // directive. DXC would error on it, so comment it out before -P.
     {
         std::regex re_require("(^|\r?\n)#require (.+)(\r?\n)");
-        src = std::regex_replace(src, re_require, "$1//#require $2$3");
+        with_prologue = std::regex_replace(with_prologue, re_require, "$1//#require $2$3");
     }
 
-    // TODO(dxc-migration): without glslang's preprocessor we no longer expand
-    // #if/#define before the regex scan. The WE shader corpus uses combos
-    // (gated by `#if COMBO_NAME`) to toggle declarations, so identifiers
-    // inside disabled branches still match this regex and get added as
-    // varyings — Finalprocessor needs to be robust against that, or we must
-    // implement a minimal #if expander here. For now we scan the raw source
-    // pre-expansion; the synthesized entry-point wrapper is also TODO.
+    // Run DXC's preprocessor: every `#if SKINNING` / `#if FOG_COMPUTED &&
+    // (...)` / `#if BLENDMODE == 0` block is resolved, every macro (combo
+    // names like BONECOUNT, type aliases like vec3 → float3, function-like
+    // macros like texSample2D) is expanded, every `#include` (already
+    // inlined in PreShaderSrc, but harmless to re-run) is handled. The
+    // regex extraction below sees only live declarations.
+    std::string src;
+    if (! vulkan::Preprocess(with_prologue, src)) {
+        // Fall through: subsequent compile will fail loudly with the same
+        // diagnostics. Keep with_prologue so the failing path matches what
+        // a developer would see if they bypassed the preprocess step.
+        src = std::move(with_prologue);
+    }
+
     std::regex re_io(R"((^|\n)\s*(attribute|varying)\s+([\w]+)\s+(\w+)\s*[;\[])",
                      std::regex::ECMAScript);
     for (auto it = std::sregex_iterator(src.begin(), src.end(), re_io);
@@ -438,39 +438,6 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
             ty == "sampler2DComparison" || ty == "sampler2DShadow")
             continue;
         std::string array = mc[4].matched ? mc[4].str() : "";
-
-        // The regex doesn't honor #if guards, so it picks up declarations
-        // from inactive combo branches too. If the array dimension is a
-        // symbolic identifier and we have no value for it (e.g.
-        // `g_Bones[BONECOUNT]` when SKINNING=0 leaves BONECOUNT unset),
-        // emitting this uniform into the shared cbuffer would error at
-        // DXC's "undeclared identifier BONECOUNT". The user shader body
-        // inside the dead #if doesn't reference the uniform, so dropping
-        // it from the cbuffer is correct.
-        if (! array.empty() && array.size() >= 2 && array.front() == '[' &&
-            array.back() == ']') {
-            std::string inner = array.substr(1, array.size() - 2);
-            while (! inner.empty() && (inner.front() == ' ' || inner.front() == '\t'))
-                inner.erase(0, 1);
-            while (! inner.empty() && (inner.back() == ' ' || inner.back() == '\t'))
-                inner.pop_back();
-            const bool is_numeric =
-                ! inner.empty() &&
-                std::all_of(inner.begin(), inner.end(), [](char c) { return std::isdigit(c); });
-            if (! is_numeric) {
-                // Symbolic dim. Try to resolve via combos (case-insensitive
-                // since PreShaderHeader uppercases combo names).
-                std::string upper(inner);
-                std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
-                auto cit = combos.find(upper);
-                if (cit == combos.end() || cit->second.empty()) {
-                    cit = combos.find(inner);
-                }
-                if (cit == combos.end() || cit->second.empty()) {
-                    continue; // unresolvable → uniform is in dead code, skip
-                }
-            }
-        }
         process_info.uniforms[name] = ty + array;
     }
 
@@ -942,9 +909,8 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
+    (void)type;
     std::string pre(pre_shader_code);
-    if (type == ShaderType::VERTEX) pre += pre_shader_code_vert;
-    if (type == ShaderType::FRAGMENT) pre += pre_shader_code_frag;
 
     std::string combo_defines;
     for (const auto& c : combos) {
@@ -957,11 +923,11 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
         combo_defines += "#define " + cup + " " + c.second + "\n";
     }
 
-    // Inject combo `#define`s BEFORE the __SHADER_PLACEHOLD__ slot. The
-    // synthesized cbuffer (which Finalprocessor stuffs into that slot)
-    // can reference combo names in array dimensions, e.g.
-    // `mat4x3 g_Bones[BONECOUNT];`. If combos land after the placeholder
-    // the cbuffer parses before BONECOUNT is defined and DXC errors.
+    // Combo `#define`s land before __SHADER_PLACEHOLD__ so they're visible
+    // throughout the user source during the DXC -P pass. The placeholder
+    // slot itself is filled by Finalprocessor *after* preprocessing, so
+    // the synthesized cbuffer always sees combo references already
+    // expanded to literal numbers (e.g. `g_Bones[BONECOUNT]` → `[4]`).
     if (auto pos = pre.find(SHADER_PLACEHOLD); pos != std::string::npos) {
         pre.insert(pos, combo_defines);
     } else {
@@ -975,10 +941,76 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
 void WPShaderParser::InitGlslang() {}
 void WPShaderParser::FinalGlslang() {}
 
+namespace
+{
+
+// Serialize one CompileToSpv invocation as a JSON object. Captures the
+// raw post-PreShaderSrc state (includes resolved, prologue not yet
+// applied, regex extraction not yet run) so a replay through the full
+// pipeline exercises every transform downstream.
+nlohmann::json BuildShaderRecord(std::string_view scene_id, std::span<const WPShaderUnit> units,
+                                 const WPShaderInfo*                  shader_info,
+                                 std::span<const WPShaderTexInfo>     texs) {
+    auto stage_name = [](ShaderType s) -> const char* {
+        switch (s) {
+        case ShaderType::VERTEX:   return "VERTEX";
+        case ShaderType::FRAGMENT: return "FRAGMENT";
+        case ShaderType::GEOMETRY: return "GEOMETRY";
+        }
+        return "UNKNOWN";
+    };
+
+    nlohmann::json rec;
+    rec["scene_id"] = std::string(scene_id);
+
+    nlohmann::json js_stages = nlohmann::json::array();
+    for (const auto& u : units) {
+        js_stages.push_back({ { "stage", stage_name(u.stage) }, { "src", u.src } });
+    }
+    rec["stages"] = std::move(js_stages);
+
+    nlohmann::json js_combos = nlohmann::json::object();
+    if (shader_info) {
+        for (const auto& [k, v] : shader_info->combos) js_combos[k] = v;
+    }
+    rec["combos"] = std::move(js_combos);
+
+    nlohmann::json js_texs = nlohmann::json::array();
+    for (const auto& t : texs) {
+        js_texs.push_back({ { "enabled", t.enabled },
+                            { "compos",
+                              nlohmann::json::array(
+                                  { t.composEnabled[0], t.composEnabled[1], t.composEnabled[2] }) } });
+    }
+    rec["tex_infos"] = std::move(js_texs);
+
+    return rec;
+}
+
+// Appends one JSONL line to WP_SHADER_RECORD's path. O_APPEND is atomic
+// for writes ≤ PIPE_BUF on Linux, which is more than enough for a single
+// JSON line; concurrent recorders won't interleave.
+void MaybeRecordCompile(std::string_view scene_id, std::span<const WPShaderUnit> units,
+                        const WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs) {
+    const char* path = std::getenv("WP_SHADER_RECORD");
+    if (! path || path[0] == '\0') return;
+    nlohmann::json rec  = BuildShaderRecord(scene_id, units, shader_info, texs);
+    std::string    line = rec.dump();
+    line.push_back('\n');
+    if (FILE* f = std::fopen(path, "a")) {
+        std::fwrite(line.data(), 1, line.size(), f);
+        std::fclose(f);
+    } else {
+        LOG_WARN("WP_SHADER_RECORD: cannot open '%s' for append", path);
+    }
+}
+
+} // namespace
+
 bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderUnit> units,
                                   std::vector<ShaderCode>& codes, fs::VFS& vfs,
                                   WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs) {
-    (void)texs;
+    MaybeRecordCompile(scene_id, units, shader_info, texs);
 
     std::for_each(units.begin(), units.end(), [shader_info](auto& unit) {
         unit.src = Preprocessor(unit.src, unit.stage, shader_info->combos, unit.preprocess_info);

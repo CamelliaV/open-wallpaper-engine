@@ -16,9 +16,8 @@ module;
 #include "Type.hpp"
 #include "Utils/Logging.h"
 
-module wescene.vulkan;
+module wescene.shader_compile;
 import cppstd;
-import wescene.utils;
 
 using namespace wallpaper;
 using namespace wallpaper::vulkan;
@@ -222,6 +221,87 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
             }
         }
     }
+    return true;
+}
+
+bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
+    IDxcUtils*     utils_raw    = nullptr;
+    IDxcCompiler3* compiler_raw = nullptr;
+    HRESULT        hr;
+
+    hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils_raw));
+    if (FAILED(hr) || ! utils_raw) {
+        LOG_ERROR("dxc(preprocess): DxcCreateInstance(DxcUtils) failed: 0x%lx",
+                  (unsigned long)hr);
+        return false;
+    }
+    ComPtr<IDxcUtils> utils(utils_raw);
+
+    hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler_raw));
+    if (FAILED(hr) || ! compiler_raw) {
+        LOG_ERROR("dxc(preprocess): DxcCreateInstance(DxcCompiler) failed: 0x%lx",
+                  (unsigned long)hr);
+        return false;
+    }
+    ComPtr<IDxcCompiler3> compiler(compiler_raw);
+
+    IDxcIncludeHandler* default_include_raw = nullptr;
+    utils->CreateDefaultIncludeHandler(&default_include_raw);
+    ComPtr<IDxcIncludeHandler> default_include(default_include_raw);
+
+    // -P alone (no filename) writes the preprocessed text to DXC_OUT_HLSL.
+    std::vector<LPCWSTR> args { L"-P" };
+
+    DxcBuffer source_buf {};
+    source_buf.Ptr      = src.data();
+    source_buf.Size     = src.size();
+    source_buf.Encoding = DXC_CP_UTF8;
+
+    IDxcResult* result_raw = nullptr;
+    hr                     = compiler->Compile(&source_buf,
+                            args.data(),
+                            static_cast<UINT32>(args.size()),
+                            default_include.get(),
+                            IID_PPV_ARGS(&result_raw));
+    if (FAILED(hr) || ! result_raw) {
+        LOG_ERROR("dxc(preprocess): IDxcCompiler3::Compile failed: 0x%lx",
+                  (unsigned long)hr);
+        return false;
+    }
+    ComPtr<IDxcResult> result(result_raw);
+
+    HRESULT compile_status = E_FAIL;
+    result->GetStatus(&compile_status);
+    const bool failed = FAILED(compile_status);
+
+    IDxcBlobUtf8* errors_raw = nullptr;
+    result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors_raw), nullptr);
+    ComPtr<IDxcBlobUtf8> errors(errors_raw);
+    if (errors && errors->GetStringLength() > 0) {
+        if (failed) {
+            std::string tmp_name = logToTmpfileWithSha1(std::string(src), "%.*s",
+                                                        static_cast<int>(src.size()), src.data());
+            LOG_ERROR("dxc(preprocess): %.*s",
+                      static_cast<int>(errors->GetStringLength()),
+                      errors->GetStringPointer());
+            LOG_ERROR("shader source is at %s", tmp_name.c_str());
+        } else {
+            LOG_WARN("dxc(preprocess): %.*s",
+                     static_cast<int>(errors->GetStringLength()),
+                     errors->GetStringPointer());
+        }
+    }
+    if (failed) return false;
+
+    IDxcBlobUtf8* hlsl_raw = nullptr;
+    result->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&hlsl_raw), nullptr);
+    ComPtr<IDxcBlobUtf8> hlsl(hlsl_raw);
+    if (! hlsl || hlsl->GetStringLength() == 0) {
+        LOG_ERROR("dxc(preprocess): no preprocessed output");
+        return false;
+    }
+
+    out.assign(hlsl->GetStringPointer(), hlsl->GetStringLength());
     return true;
 }
 

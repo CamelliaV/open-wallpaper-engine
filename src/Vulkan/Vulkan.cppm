@@ -31,6 +31,12 @@ export module wescene.vulkan;
 import cppstd;
 import wescene.utils;
 
+// Re-export the host-only shader compile API. Lets existing consumers
+// (VulkanRender/* etc.) keep their `import wescene.vulkan;` without
+// caring that ShaderSpv / ShaderReflected / Preprocess / etc. now live
+// in a separate module.
+export import wescene.shader_compile;
+
 // =================================================================
 // Layer 1: vvk:: low-level Vulkan C++ wrapper
 // =================================================================
@@ -1116,16 +1122,7 @@ private:
     Set<std::string> m_layers;
 };
 
-// ---------- Spv.hpp ----------
-
-struct ShaderSpv {
-    std::string entry_point { "main" };
-    ShaderType  stage;
-
-    std::vector<unsigned int> spirv;
-};
-
-using Uni_ShaderSpv = std::unique_ptr<ShaderSpv>;
+// ShaderSpv / Uni_ShaderSpv now live in wescene.shader_compile (re-exported above).
 
 // ---------- Parameters.hpp ----------
 
@@ -1508,60 +1505,9 @@ private:
     Map<VkShaderStageFlagBits, Uni_ShaderSpv>        m_stage_spv_map;
 };
 
-// ---------- Shader.hpp ----------
-
-struct ShaderReflected {
-    struct BlockedUniform {
-        int    block_index;
-        uint   offset;
-        size_t size { 0 };
-        size_t num { 1 };
-    };
-    struct Block {
-        int         index;
-        uint        size;
-        std::string name;
-
-        Map<std::string, BlockedUniform> member_map;
-    };
-    std::vector<Block> blocks;
-
-    Map<std::string, VkDescriptorSetLayoutBinding> binding_map;
-
-    struct Input {
-        uint     location;
-        VkFormat format;
-    };
-    Map<std::string, Input> input_location_map;
-};
-
-bool GenReflect(std::span<const std::vector<uint>> codes, std::vector<Uni_ShaderSpv>& spvs,
-                ShaderReflected& ref);
-
-// ---------- ShaderComp.hpp ----------
-
-enum class VulkanTarget : uint
-{
-    Vulkan_1_0,
-    Vulkan_1_1,
-    Vulkan_1_2,
-    Vulkan_1_3,
-};
-
-struct ShaderCompUnit {
-    ShaderType  stage;
-    std::string src;
-    std::string entry_point; // if empty, "main_<stage>" is used.
-};
-
-struct ShaderCompOpt {
-    VulkanTarget target { VulkanTarget::Vulkan_1_1 };
-    bool         optimize { false };
-};
-
-bool CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits,
-                               const ShaderCompOpt&            opt,
-                               std::vector<Uni_ShaderSpv>&     spvs);
+// ShaderReflected / GenReflect / VulkanTarget / ShaderCompUnit / ShaderCompOpt /
+// CompileAndLinkShaderUnits / Preprocess all live in wescene.shader_compile
+// (re-exported above).
 
 // ---------- VertexInputState.hpp ----------
 

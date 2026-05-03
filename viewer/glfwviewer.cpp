@@ -2,6 +2,8 @@
 #include <set>
 #include <fstream>
 #include <cstdlib>
+#include <chrono>
+#include <thread>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -66,6 +68,12 @@ int main(int argc, char** argv) {
     }
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    // Bulk-scan path: WP_HEADLESS=1 hides the window so a scan loop over
+    // hundreds of pkgs doesn't spam the desktop. Compile/render still
+    // runs against the offscreen surface — stderr captures shader errors.
+    if (const char* hl = std::getenv("WP_HEADLESS"); hl && hl[0] == '1') {
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    }
     GLFWwindow* window = glfwCreateWindow(w_width, w_height, "WP", nullptr, nullptr);
 
     UserData data;
@@ -116,8 +124,18 @@ int main(int argc, char** argv) {
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
 
-    while (! glfwWindowShouldClose(window)) {
-        glfwPollEvents();
+    // Bulk-scan path: WP_COMPILE_ONLY=N waits N seconds after scene load
+    // to let the async shader-compile pass drain, then exits. Skips the
+    // render loop so no swapchain present is required (which would deadlock
+    // with a hidden window). Use together with WP_HEADLESS=1.
+    if (const char* co = std::getenv("WP_COMPILE_ONLY"); co && co[0] != '\0') {
+        int seconds = std::atoi(co);
+        if (seconds <= 0) seconds = 2;
+        std::this_thread::sleep_for(std::chrono::seconds(seconds));
+    } else {
+        while (! glfwWindowShouldClose(window)) {
+            glfwPollEvents();
+        }
     }
     delete psw;
     // wgl.Clear();

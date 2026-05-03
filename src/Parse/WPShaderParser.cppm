@@ -6,7 +6,7 @@ module;
 
 export module wescene.parse:wp_shader_parser;
 import cppstd;
-import wescene.vulkan;
+import wescene.shader_compile;
 import wescene.scene;
 import wescene.fs;
 

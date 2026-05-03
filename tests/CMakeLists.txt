@@ -26,10 +26,15 @@ FetchContent_MakeAvailable(googletest)
 # Shared library for the dumper + corpus index. Used by the gtest binary
 # and any future ad-hoc tools.
 add_library(wpdump_lib STATIC dump.cpp corpus.cpp scene_keys.cpp scene_parse_probe.cpp)
+# Test infrastructure only needs scene-parse + shader-compile + base — no
+# Vulkan runtime, no render graph, no SceneWallpaper. Drops ~25MB off
+# every test binary and removes the libvulkan runtime dependency.
 target_link_libraries(
     wpdump_lib
     PUBLIC
-        ${PROJECT_NAME}
+        wescene-parse
+        wescene-shader-compile
+        wescene-base
         nlohmann_json::nlohmann_json
 )
 target_include_directories(wpdump_lib PUBLIC .)
@@ -52,6 +57,31 @@ target_link_libraries(wpdump PRIVATE wpdump_lib)
 # rare scene.json fields and schema drift across WE versions.
 add_executable(wpscan wpscan_main.cpp)
 target_link_libraries(wpscan PRIVATE wpdump_lib)
+
+# Host-only shader replay: reads a JSONL manifest produced by viewer
+# under WP_SHADER_RECORD and re-runs WPShaderParser::CompileToSpv on
+# each record. No Vulkan device, no GLFW, no rendering. Used as the
+# primary regression net for the shader-compile pipeline.
+add_executable(wpshadercompile wpshadercompile_main.cpp)
+target_link_libraries(wpshadercompile PRIVATE wpdump_lib)
+set_target_properties(wpshadercompile PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+# Host-only .tex full-decode iteration: walks every workshop, runs
+# WPTexImageParser on every /materials/*.tex (header by default, full
+# pixel decode with --full). The broad coverage net for the .tex format;
+# tex_schema_tests asserts schema invariants on a sampled subset.
+add_executable(wptexparse wptexparse_main.cpp)
+target_link_libraries(wptexparse PRIVATE wpdump_lib)
+set_target_properties(wptexparse PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+# Host-only scene.json parse iteration: walks every workshop and runs
+# both axes — WPScene::FromJson (pure JSON) and WPSceneParser::Parse
+# (full pipeline incl. shader compile, mdl/tex parse, material setup) —
+# on every pkg. Broader than scene_parse_tests (which only does FromJson)
+# and broader than wpdump (which doesn't run SceneParser at all).
+add_executable(wpparse wpparse_main.cpp)
+target_link_libraries(wpparse PRIVATE wpdump_lib)
+set_target_properties(wpparse PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Regression net for the version-aware WPScene::FromJson path.
 # Stays decoupled from Corpus so unrelated .mdl/.tex parser bugs cannot
