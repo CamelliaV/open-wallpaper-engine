@@ -74,7 +74,7 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": false,
-    "commit": "ce977c9aac9e06b2ef7bceef11f91dd2cd82c78c",
+    "commit": "92e68ff44753a417545f9c5ba976c35b45f4440c",
     "type": "git",
     "url": "https://github.com/hypengw/rstd.git",
     "x-cmake": {

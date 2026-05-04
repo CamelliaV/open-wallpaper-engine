@@ -1,3 +1,7 @@
+include_directories(.)
+
+if(BUILD_WESCENE)
+
 find_package(OpenGL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Vulkan REQUIRED)
@@ -19,8 +23,6 @@ endif()
 set(warn_opts
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wno-unused-variable
     CACHE INTERNAL "")
-
-include_directories(.)
 
 # DXC's dxcapi.h sits under <dxc_SOURCE_DIR>/include. The dxcompiler target
 # does not always export this include path correctly when consumed via
@@ -298,3 +300,27 @@ target_link_libraries(
   ${PROJECT_NAME}
   INTERFACE wescene-render wescene-parse wescene-script
             wescene-vulkan-runtime wescene-shader-compile wescene-base)
+
+endif()  # BUILD_WESCENE
+
+# ============================================================================
+# weweb-host  (CEF browser embedding for HTML/JS wallpapers)
+#
+# Independently buildable from the wescene side — no transitive dep on
+# wescene-* targets. Source files live under Web/ to mirror Scene/.
+# ============================================================================
+if(BUILD_WEWEB)
+    add_library(weweb-host STATIC
+        Web/Manifest.cpp
+        Web/UserProperties.cpp
+        Web/AppHandler.cpp
+        Web/ClientHandler.cpp
+        Web/OsrRenderHandler.cpp
+        Web/BrowserHost.cpp)
+    target_include_directories(weweb-host PUBLIC Web)
+    target_link_libraries(weweb-host
+        PUBLIC libcef_lib libcef_dll_wrapper nlohmann_json)
+    target_compile_features(weweb-host PUBLIC cxx_std_20)
+    weweb_apply_cef_target_settings(weweb-host)
+    set_property(TARGET weweb-host PROPERTY POSITION_INDEPENDENT_CODE ON)
+endif()

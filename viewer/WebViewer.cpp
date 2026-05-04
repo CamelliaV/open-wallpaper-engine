@@ -13,23 +13,12 @@
 #include <argparse/argparse.hpp>
 
 #include "BrowserHost.hpp"
+#include "Common.hpp"
 #include "Manifest.hpp"
 
 #include "VulkanBlitter.hpp"
 
 namespace {
-
-// Resolve where CEF's Resources/ + Release/ files live at runtime. We stage
-// them next to the executable in the build tree (see weweb_stage_cef_runtime
-// in cef.cmake) — so they sit alongside argv[0] both in build/ and after a
-// hypothetical install.
-std::filesystem::path ExecutableDir(const char* argv0) {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    auto self = fs::read_symlink("/proc/self/exe", ec);
-    if (!ec) return self.parent_path();
-    return fs::path(argv0).parent_path();
-}
 
 struct ViewerCtx {
     weweb::BrowserHost*  host{nullptr};
@@ -136,7 +125,7 @@ int main(int argc, char** argv) {
     // initialising Ozone (clipboard, font fallback, …) and we run with
     // --ozone-platform=x11; matching the toolkit avoids cross-display
     // synchronization weirdness.
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    viewer::InitGlfwPlatformHint(/*force_x11=*/true);
     if (!glfwInit()) {
         std::cerr << "webviewer: glfwInit failed\n";
         return 1;
@@ -166,7 +155,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    auto exe_dir = ExecutableDir(argv[0]);
+    auto exe_dir = viewer::ExecutableDir(argv[0]);
 
     weweb::BrowserHost::InitOptions opts;
     opts.resources_dir = exe_dir;

@@ -34,9 +34,17 @@ add_subdirectory(third_party)
 option(BUILD_WESCENE "Build the wescene (Wallpaper Engine *scene*) renderer" ON)
 option(BUILD_WEWEB   "Build the weweb (Wallpaper Engine *web*) renderer"     OFF)
 
-if(BUILD_WESCENE)
-    add_subdirectory(src)
+# CEF integration must be set up at top-level scope so libcef_lib /
+# libcef_dll_wrapper / weweb_stage_cef_runtime are visible to consumers in
+# both src/ (weweb-host) and viewer/ (webviewer).
+if(BUILD_WEWEB)
+    include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
 endif()
+
+# src/ now hosts both wescene libraries (gated by BUILD_WESCENE inside) and
+# weweb-host under Web/ (gated by BUILD_WEWEB inside). Always recurse — the
+# CMakeLists.txt there guards each block independently.
+add_subdirectory(src)
 
 
 # Test suite — gated by BUILD_TESTS (default OFF; pulls in googletest via
@@ -54,19 +62,16 @@ if(BUILD_WESCENE AND BUILD_WAYWALLEN)
     add_subdirectory(waywallen)
 endif()
 
-# Standalone GLFW viewer — auto-detected from glfw3 by default; force with
-# -DBUILD_VIEWER=ON/OFF.
+# Standalone GLFW viewers — auto-detected from glfw3 by default; force with
+# -DBUILD_VIEWER=ON/OFF. Both SceneViewer (wescene) and WebViewer (weweb)
+# live in the top-level viewer/ directory.
 pkg_check_modules(GLFW IMPORTED_TARGET glfw3)
 option(BUILD_VIEWER "Build the GLFW standalone viewer" ${GLFW_FOUND})
-if(BUILD_WESCENE AND BUILD_VIEWER)
+if((BUILD_WESCENE AND BUILD_VIEWER) OR BUILD_WEWEB)
     if(NOT GLFW_FOUND)
         message(FATAL_ERROR
-            "BUILD_VIEWER=ON but glfw3 was not found via pkg-config. "
-            "Install glfw3 development headers or pass -DBUILD_VIEWER=OFF.")
+            "Need glfw3 for any standalone viewer. Install glfw3 "
+            "development headers or set BUILD_VIEWER=OFF and BUILD_WEWEB=OFF.")
     endif()
     add_subdirectory(viewer)
-endif()
-
-if(BUILD_WEWEB)
-    add_subdirectory(weweb)
 endif()
