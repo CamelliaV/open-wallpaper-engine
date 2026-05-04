@@ -2,23 +2,16 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 
+#include "DmaBufFrame.hpp"
 #include "Manifest.hpp"
 
 namespace weweb {
 
 class OsrRenderHandler;
 class ClientHandler;
-
-// Snapshot of the latest OSR frame. While alive, holds the OSR
-// handler's mutex; release with BrowserHost::UnlockFrame.
-struct FrameLock {
-    const std::uint8_t* pixels{nullptr};
-    int                 width{0};
-    int                 height{0};
-    bool                fresh{false};
-};
 
 // Owns the CEF browser lifecycle for one webviewer process. Standard
 // same-binary multi-process model: helper procs early-exit via
@@ -56,6 +49,12 @@ public:
     // -fno-exceptions so we can't throw.
     bool Init(const InitOptions& opts);
 
+    // Install an accelerated-paint sink. When set BEFORE OpenWallpaper
+    // and `info.shared_texture_enabled = 1` is honoured by CEF, the
+    // host will deliver DMA-BUF frames here instead of CPU OnPaint
+    // bitmaps. Plane FDs are valid only inside the synchronous call.
+    void SetAcceleratedPaintCallback(AcceleratedPaintCallback cb);
+
     // Spawn a windowless (OSR) browser for the wallpaper. The entry HTML
     // is loaded from `file://<workshop_dir>/<entry_html>` and the
     // manifest's user properties are injected on first load. The caller
@@ -65,17 +64,14 @@ public:
                        const std::filesystem::path& workshop_dir,
                        int width, int height);
 
-    // Lock the latest CEF-painted frame. The returned pointer is valid
-    // until UnlockFrame() is called. The bool `fresh` indicates whether
-    // the frame changed since the last lock. While the frame is locked,
-    // CEF's UI thread cannot deliver a new OnPaint, so do the GPU upload
-    // and unlock as quickly as possible.
-    FrameLock LockFrame();
-    void      UnlockFrame();
-
     // Notify CEF that the host window changed size. Updates GetViewRect's
     // returned rect so the next OnPaint matches `width` x `height`.
     void OnResize(int width, int height);
+
+    // Force CEF to repaint the view. CEF's internal pacing in OSR mode
+    // can stop emitting OnAcceleratedPaint when nothing on the page
+    // appears to require redraw — this kicks it.
+    void Invalidate();
 
     // Forward GLFW input events into the live browser. Coordinates are in
     // logical pixels matching the GetViewRect rect.

@@ -16,6 +16,7 @@ struct BrowserHost::Impl {
     CefRefPtr<AppHandler>          app;
     CefRefPtr<OsrRenderHandler>    osr;
     CefRefPtr<ClientHandler>       client;
+    AcceleratedPaintCallback       accel_cb;
     std::atomic<bool>              should_exit{false};
     bool                           initialised{false};
     // Stash the original argv from RunOrExitIfHelper; CefInitialize needs
@@ -86,6 +87,9 @@ bool BrowserHost::OpenWallpaper(const WebManifest& manifest,
 
     impl_->osr = new OsrRenderHandler();
     impl_->osr->SetViewSize(width, height);
+    if (impl_->accel_cb) {
+        impl_->osr->SetAcceleratedPaintCallback(impl_->accel_cb);
+    }
 
     impl_->client = new ClientHandler(manifest.user_props, impl_->osr);
     impl_->client->SetCloseCallback([this] {
@@ -96,7 +100,8 @@ bool BrowserHost::OpenWallpaper(const WebManifest& manifest,
     std::string url = "file://" + entry.string();
 
     CefWindowInfo info;
-    info.SetAsWindowless(0);  // no parent window — pure OSR
+    info.SetAsWindowless(0);             // no parent window — pure OSR
+    info.shared_texture_enabled = 1;     // request DMA-BUF / OnAcceleratedPaint
 
     CefBrowserSettings browser_settings;
     browser_settings.windowless_frame_rate = 60;
@@ -106,19 +111,15 @@ bool BrowserHost::OpenWallpaper(const WebManifest& manifest,
     return true;
 }
 
-FrameLock BrowserHost::LockFrame() {
-    FrameLock out;
-    if (!impl_->osr) return out;
-    auto inner = impl_->osr->LockLatestFrame();
-    out.pixels = inner.pixels;
-    out.width  = inner.width;
-    out.height = inner.height;
-    out.fresh  = inner.fresh;
-    return out;
+void BrowserHost::SetAcceleratedPaintCallback(AcceleratedPaintCallback cb) {
+    impl_->accel_cb = std::move(cb);
+    if (impl_->osr) impl_->osr->SetAcceleratedPaintCallback(impl_->accel_cb);
 }
 
-void BrowserHost::UnlockFrame() {
-    if (impl_->osr) impl_->osr->UnlockLatestFrame();
+void BrowserHost::Invalidate() {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (b && b->GetHost()) b->GetHost()->Invalidate(PET_VIEW);
 }
 
 void BrowserHost::OnResize(int width, int height) {

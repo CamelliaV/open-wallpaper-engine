@@ -183,6 +183,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Hook DMA-BUF frames straight into the blitter's import path.
+    // The callback runs synchronously inside CefDoMessageLoopWork on the
+    // main thread; FDs in `frame` are valid only for the duration.
+    host.SetAcceleratedPaintCallback(
+        [&blitter](const weweb::DmaBufFrame& frame) {
+            blitter.AcceptDmaBuf(frame);
+        });
+
     // Open the wallpaper at the swapchain extent — CEF renders straight
     // into our swapchain-pixel space, no rescaling needed.
     int initial_w = static_cast<int>(blitter.Width());
@@ -211,6 +219,14 @@ int main(int argc, char** argv) {
         glfwPollEvents();
         host.Pump();
 
+        // CEF's internal pacing in OSR shared-texture mode goes quiet
+        // after the first paint until something on the page is dirty.
+        // Pages with rAF-driven animation expect a presenter to ask
+        // for frames continuously. CEF dedupes internally to its
+        // windowless_frame_rate (60), so an unconditional Invalidate
+        // per loop iteration is the right pattern.
+        host.Invalidate();
+
         if (ctx.need_swapchain_recreate) {
             int fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -228,21 +244,11 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Pull the latest CEF frame (may be stale on first iterations).
-        // The lock holds OSR's mutex — render fast and unlock.
-        auto lk = host.LockFrame();
-        const std::uint8_t* pixels = nullptr;
-        // Only forward a buffer that matches the swapchain extent —
-        // between OnResize and CEF's next paint there's a window where
-        // dimensions disagree.
-        if (lk.pixels &&
-            lk.width  == static_cast<int>(blitter.Width()) &&
-            lk.height == static_cast<int>(blitter.Height())) {
-            pixels = lk.pixels;
+        // Owned image was already updated synchronously inside Pump()
+        // when CEF delivered an OnAcceleratedPaint frame.
+        if (!blitter.RenderFrame()) {
+            ctx.need_swapchain_recreate = true;
         }
-        bool ok = blitter.RenderFrame(pixels);
-        host.UnlockFrame();
-        if (!ok) ctx.need_swapchain_recreate = true;
     }
 
     host.Shutdown();

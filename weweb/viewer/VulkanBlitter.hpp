@@ -5,21 +5,22 @@
 
 #include <vulkan/vulkan.h>
 
+#include "DmaBufFrame.hpp"
+
 struct GLFWwindow;
 
 namespace weweb {
 
-// Minimal Vulkan presenter for OSR pixels. Per frame the caller hands us
-// a CPU BGRA8 buffer matching the current swapchain extent; we
-// memcpy → mapped host-visible buffer, vkCmdCopyBufferToImage straight
-// into the acquired swapchain image, transition to PRESENT_SRC, present.
+// Vulkan presenter for CEF accelerated-paint frames.
 //
-// Format: VK_FORMAT_B8G8R8A8_UNORM (matches CEF's OnPaint byte layout
-// exactly, no SRGB conversion). Fallback to A8B8G8R8 if BGRA8_UNORM is
-// not in the surface's supported format list.
+// AcceptDmaBuf imports a CEF DMA-BUF as a temporary linear VkImage,
+// vkCmdCopyImage's it into a persistent device-local "owned" VkImage,
+// waits on a fence (CEF reclaims the buffer the moment the callback
+// returns), and tears down the temporaries.
 //
-// No render pass / pipeline / shaders. v1 OSR — when we move to
-// OnAcceleratedPaint + DMA-BUF import, this whole class gets replaced.
+// RenderFrame vkCmdBlitImage's owned → swapchain image and presents.
+//
+// No render pass / pipeline / shaders.
 class VulkanBlitter {
 public:
     VulkanBlitter();
@@ -44,12 +45,18 @@ public:
     // until the new extent is non-zero (window is iconified ⇒ skip).
     bool Resize();
 
-    // Render one frame. `pixels` is BGRA8 row-tight, exactly w*h*4 bytes,
-    // matching the current swapchain extent. If `pixels` is null we
-    // present a black frame (used before CEF delivers its first paint).
-    // Returns false if the swapchain went out-of-date and the caller
-    // should call Resize() before next frame.
-    bool RenderFrame(const std::uint8_t* pixels);
+    // Import a CEF DMA-BUF frame, copy it onto our owned image. Must be
+    // called synchronously from inside the OnAcceleratedPaint callback —
+    // we do a CPU-side fence wait so the GPU is finished reading the
+    // imported buffer before this returns (CEF then reclaims the FD).
+    // Returns false on any Vulkan error; the frame is dropped.
+    bool AcceptDmaBuf(const DmaBufFrame& frame);
+
+    // Render one frame. Blits the latest owned image to the acquired
+    // swapchain image. If no owned image yet (no CEF paint received)
+    // presents a black frame. Returns false if the swapchain went
+    // out-of-date — caller should Resize() before the next frame.
+    bool RenderFrame();
 
 private:
     bool CreateInstance();
@@ -57,12 +64,13 @@ private:
     bool PickPhysicalDevice();
     bool CreateDevice();
     bool CreateSwapchain();
-    bool CreateStagingBuffer();
     bool CreateCommandPool();
     bool CreateSyncObjects();
 
+    bool EnsureOwnedImage(int width, int height);
+    void DestroyOwnedImage();
+
     void DestroySwapchain();
-    void DestroyStagingBuffer();
 
     std::uint32_t FindMemoryType(std::uint32_t type_bits,
                                  VkMemoryPropertyFlags props) const;
@@ -86,12 +94,20 @@ private:
     std::uint32_t            frame_index_{0};
     static constexpr std::uint32_t kMaxFramesInFlight = 2;
 
-    // Staging buffer (host-visible, persistently mapped). Resized to
-    // match the current extent.
-    VkBuffer        staging_buf_   {VK_NULL_HANDLE};
-    VkDeviceMemory  staging_mem_   {VK_NULL_HANDLE};
-    VkDeviceSize    staging_size_  {0};
-    void*           staging_mapped_{nullptr};
+    // Owned device-local image — CEF DMA-BUFs get copied into this. The
+    // swapchain blit reads from here. Recreated when CEF's coded size
+    // changes.
+    VkImage         owned_image_    {VK_NULL_HANDLE};
+    VkDeviceMemory  owned_image_mem_{VK_NULL_HANDLE};
+    VkImageLayout   owned_layout_   {VK_IMAGE_LAYOUT_UNDEFINED};
+    int             owned_width_    {0};
+    int             owned_height_   {0};
+    bool            owned_has_data_ {false};
+
+    // Function pointers loaded with vkGetDeviceProcAddr at device
+    // creation time — these come from VK_KHR_external_memory_fd which
+    // is enabled as a device extension.
+    PFN_vkGetMemoryFdPropertiesKHR pfn_GetMemoryFdProperties_{nullptr};
 
     // Commands + sync. One per in-flight frame.
     VkCommandPool   cmd_pool_      {VK_NULL_HANDLE};

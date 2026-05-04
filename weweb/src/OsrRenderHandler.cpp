@@ -1,7 +1,5 @@
 #include "OsrRenderHandler.hpp"
 
-#include <cstring>
-
 namespace weweb {
 
 void OsrRenderHandler::SetViewSize(int width, int height) {
@@ -23,8 +21,6 @@ void OsrRenderHandler::GetViewRect(CefRefPtr<CefBrowser> /*browser*/,
 bool OsrRenderHandler::GetScreenInfo(CefRefPtr<CefBrowser> /*browser*/,
                                      CefScreenInfo& info) {
     std::lock_guard lk(mu_);
-    // Match the view; CEF uses this for window.screen.* and devicePixelRatio
-    // bookkeeping. Single-monitor logical-pixel space is fine for v1.
     info.device_scale_factor = 1.0f;
     info.depth = 32;
     info.depth_per_component = 8;
@@ -38,38 +34,44 @@ bool OsrRenderHandler::GetScreenInfo(CefRefPtr<CefBrowser> /*browser*/,
 }
 
 void OsrRenderHandler::OnPaint(CefRefPtr<CefBrowser> /*browser*/,
-                               PaintElementType type,
-                               const RectList& /*dirtyRects*/,
-                               const void* buffer,
-                               int width,
-                               int height) {
-    if (type != PET_VIEW) return;             // ignore popup widgets for v1
-    if (!buffer || width <= 0 || height <= 0) return;
-
-    const std::size_t bytes =
-        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u;
-
-    std::lock_guard lk(mu_);
-    if (bgra_.size() != bytes) bgra_.resize(bytes);
-    std::memcpy(bgra_.data(), buffer, bytes);
-    width_  = width;
-    height_ = height;
-    fresh_  = true;
+                               PaintElementType /*type*/,
+                               const RectList&  /*dirtyRects*/,
+                               const void*      /*buffer*/,
+                               int              /*width*/,
+                               int              /*height*/) {
+    // Pure virtual in CefRenderHandler so we must define it. Never
+    // fires while shared_texture_enabled = 1 — CEF routes to
+    // OnAcceleratedPaint instead.
 }
 
-OsrRenderHandler::FrameLock OsrRenderHandler::LockLatestFrame() {
-    mu_.lock();
-    FrameLock lk;
-    lk.pixels = bgra_.empty() ? nullptr : bgra_.data();
-    lk.width  = width_;
-    lk.height = height_;
-    lk.fresh  = fresh_;
-    fresh_ = false;
-    return lk;
-}
+void OsrRenderHandler::OnAcceleratedPaint(CefRefPtr<CefBrowser> /*browser*/,
+                                          PaintElementType type,
+                                          const RectList& /*dirtyRects*/,
+                                          const CefAcceleratedPaintInfo& info) {
+    if (type != PET_VIEW) return;
+    if (!accel_cb_) return;
 
-void OsrRenderHandler::UnlockLatestFrame() {
-    mu_.unlock();
+    DmaBufFrame frame;
+    frame.plane_count = info.plane_count;
+    if (frame.plane_count > 4) frame.plane_count = 4;
+    for (int i = 0; i < frame.plane_count; ++i) {
+        frame.planes[i].fd     = info.planes[i].fd;
+        frame.planes[i].stride = info.planes[i].stride;
+        frame.planes[i].offset = info.planes[i].offset;
+        frame.planes[i].size   = info.planes[i].size;
+    }
+    frame.modifier       = info.modifier;
+    frame.format         = info.format == CEF_COLOR_TYPE_BGRA_8888
+                              ? DmaBufFormat::BGRA8_UNORM
+                              : DmaBufFormat::RGBA8_UNORM;
+    frame.coded_width    = info.extra.coded_size.width;
+    frame.coded_height   = info.extra.coded_size.height;
+    frame.visible_width  = info.extra.visible_rect.width;
+    frame.visible_height = info.extra.visible_rect.height;
+
+    // Synchronous: callback must finish before this returns; CEF
+    // reclaims the DMA-BUF the moment we exit.
+    accel_cb_(frame);
 }
 
 }  // namespace weweb
