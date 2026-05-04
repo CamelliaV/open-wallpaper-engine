@@ -54,10 +54,10 @@ struct ParseContext {
 };
 
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
-// MVP-supported targets (origin/scale/angles), creates a FieldScript and
-// pins an Actuator onto the just-built SceneNode. Other field kinds
-// (alpha/color/visible/text) get logged once and skipped — they need
-// material-side write-back paths which aren't wired yet.
+// MVP-supported transform fields (origin/scale/angles), creates a
+// FieldScript + closure-based Actuator. Other fields are skipped here;
+// field-specific paths (notably text content) wire their own actuators
+// inline at the parse site.
 void WireFieldScripts(ParseContext& context, SceneNode* node,
                       const wpscene::WPFieldBindings& fb) {
     if (! node || fb.scripts.empty()) return;
@@ -67,28 +67,28 @@ void WireFieldScripts(ParseContext& context, SceneNode* node,
     auto& rt = ss.runtime();
 
     for (const auto& [field, sb] : fb.scripts) {
-        script::ActuatorTarget tgt;
-        script::FieldKind      kind;
+        script::NodeTransformTarget tgt;
+        script::FieldKind           kind;
         if (field == "origin") {
-            tgt  = script::ActuatorTarget::Translate;
+            tgt  = script::NodeTransformTarget::Translate;
             kind = script::FieldKind::Vec3;
         } else if (field == "scale") {
-            tgt  = script::ActuatorTarget::Scale;
+            tgt  = script::NodeTransformTarget::Scale;
             kind = script::FieldKind::Vec3;
         } else if (field == "angles") {
-            tgt  = script::ActuatorTarget::Rotation;
+            tgt  = script::NodeTransformTarget::Rotation;
             kind = script::FieldKind::Vec3;
         } else {
-            // Recognised but no actuator yet (alpha/color/visible/text/
-            // rate/intensity/...). The script's runtime side still works;
-            // its output is just not currently wired to a write-back path.
+            // Recognised but no transform actuator (alpha/color/visible/
+            // text/rate/intensity/...). Field-specific call sites wire
+            // those themselves with their own apply closure.
             continue;
         }
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
         auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties,
                                        sb.initial_value);
         if (! fs) continue;
-        ss.AddActuator({ fs, node, tgt });
+        ss.AddActuator({ fs, script::MakeNodeTransformApply(node, tgt) });
     }
 }
 
@@ -1165,16 +1165,12 @@ TextRenderImageParser& EnsureTextImageParser(Scene& scene) {
     return *raw;
 }
 
-namespace
-{
-struct TextLineRun {
-    std::vector<std::pair<std::uint32_t, const text::GlyphInfo*>> glyphs;
-    float width { 0.0f };
-};
-} // namespace
-
 void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     if (! obj.visible) return;
+
+    // --- determine initial text + whether a script binding will rewrite it
+    auto text_binding_it = obj.field_bindings.scripts.find("text");
+    bool has_text_script = (text_binding_it != obj.field_bindings.scripts.end());
 
     std::string s_text;
     if (obj.text.is_string()) {
@@ -1184,14 +1180,11 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             s_text = obj.text.at("value").get<std::string>();
         else if (obj.text.contains("text") && obj.text.at("text").is_string())
             s_text = obj.text.at("text").get<std::string>();
-        else {
-            LOG_INFO("text '%s': bound text not yet supported, skipping",
-                     obj.name.c_str());
-            return;
-        }
     }
-    if (s_text.empty()) return;
+    if (s_text.empty() && ! has_text_script) return;
 
+    // --- font resolution: VFS first (WE shared /assets + pkg overlay),
+    //     then host system font dirs.
     std::string font_name;
     if (obj.font.is_string()) {
         font_name = obj.font.get<std::string>();
@@ -1200,28 +1193,40 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
             font_name = obj.font.at("value").get<std::string>();
     }
 
-    auto resolved = text::FontCache::ResolveSystemFont(font_name, /*fallback_to_any=*/true);
+    text::FontCache::ResolvedBlob resolved;
+    if (! font_name.empty()) {
+        std::string vfs_path =
+            "/assets/fonts/" + std::filesystem::path(font_name).filename().string();
+        std::string blob_str = fs::GetFileContent(*context.vfs, vfs_path);
+        if (! blob_str.empty()) {
+            auto bytes = std::make_shared<std::vector<std::byte>>(blob_str.size());
+            std::memcpy(bytes->data(), blob_str.data(), blob_str.size());
+            resolved.bytes  = std::move(bytes);
+            resolved.source = vfs_path;
+        }
+    }
+    if (! resolved.bytes) {
+        resolved = text::FontCache::ResolveSystemFont(font_name, /*fallback_to_any=*/true);
+    }
     if (! resolved.bytes) {
         LOG_ERROR("text '%s': could not resolve font '%s'",
-                  obj.name.c_str(),
-                  font_name.c_str());
+                  obj.name.c_str(), font_name.c_str());
         return;
     }
 
-    std::uint32_t px = static_cast<std::uint32_t>(std::lroundf(obj.pointsize));
+    // --- pointsize → px (empirical 4× — see earlier comment).
+    constexpr float kPointsizeToPx = 4.0f;
+    std::uint32_t px = static_cast<std::uint32_t>(std::lroundf(obj.pointsize * kPointsizeToPx));
     if (px < 1) px = 1;
-    if (px > 512) px = 512;
+    if (px > 1024) px = 1024;
 
-    // Local cache so the atlas dimensions stay stable for this text object's
-    // baked UVs — see Text.cpp's GrowAtlas comment.
-    text::FontCache cache;
+    auto cache = std::make_unique<text::FontCache>();
     auto blob_view =
         std::span<const std::byte>(resolved.bytes->data(), resolved.bytes->size());
-    auto* face = cache.GetFace(blob_view, px);
+    auto* face = cache->GetFace(blob_view, px);
     if (face == nullptr) {
         LOG_ERROR("text '%s': FreeType failed to open '%s'",
-                  obj.name.c_str(),
-                  resolved.source.c_str());
+                  obj.name.c_str(), resolved.source.c_str());
         return;
     }
 
@@ -1231,29 +1236,19 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         return;
     }
 
-    // Phase 1: split codepoints into lines and rasterise glyph metrics.
-    auto codepoints = text::DecodeUtf8(s_text);
-    std::vector<TextLineRun> lines;
-    lines.emplace_back();
-    for (std::uint32_t cp : codepoints) {
-        if (cp == '\n') {
-            lines.emplace_back();
-            continue;
+    // --- pre-rasterise glyph set. Atlas snapshot below freezes coverage;
+    //     SetText() at runtime can only reuse cached glyphs. For script-
+    //     bound text we widen to printable ASCII so common clock/label
+    //     outputs always have glyphs.
+    {
+        auto seed = text::DecodeUtf8(s_text);
+        for (auto cp : seed) face->Glyph(cp);
+        if (has_text_script) {
+            for (std::uint32_t cp = 0x20; cp <= 0x7Eu; ++cp) face->Glyph(cp);
         }
-        const auto* gi = face->Glyph(cp);
-        if (gi == nullptr) continue;
-        lines.back().glyphs.push_back({ cp, gi });
-        lines.back().width += gi->advance_x;
     }
-    auto  fm = face->Metrics();
-    float text_w = 0.0f;
-    for (auto& l : lines)
-        if (l.width > text_w) text_w = l.width;
-    float text_h = fm.ascender - fm.descender +
-                   static_cast<float>(lines.size() - 1) * fm.line_height;
-    if (text_w <= 0.0f || text_h <= 0.0f) return;
 
-    // Phase 2: snapshot atlas → Image, register under a synthetic url.
+    // --- snapshot atlas + register
     std::string atlas_url =
         std::string("_text_atlas_") + std::to_string(obj.id) + "_" + getAddr(face);
     auto atlas_img = text::BuildAtlasImage(*face, atlas_url);
@@ -1262,173 +1257,74 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         return;
     }
     EnsureTextImageParser(*context.scene).Register(atlas_url, atlas_img);
-
     {
-        // Mirror the registration into Scene::textures so the renderer's
-        // sampling settings (LINEAR/CLAMP_TO_EDGE) are preserved.
         SceneTexture stex;
         stex.url    = atlas_url;
         stex.sample = atlas_img->header.sample;
         context.scene->textures[atlas_url] = stex;
     }
 
-    // Phase 3: emit vertex/index buffers. Layout is one quad per visible
-    // glyph plus one optional background quad at the head, drawn first so
-    // glyphs blend over the bg fill in the same pass.
-    bool has_bg = obj.opaquebackground;
-    std::size_t glyph_quads = 0;
-    for (auto& l : lines) glyph_quads += l.glyphs.size();
-    std::size_t total_quads = glyph_quads + (has_bg ? 1u : 0u);
-    if (total_quads == 0) return;
-
-    SceneVertexArray vertex(
-        {
-            { WE_IN_POSITION.data(), VertexType::FLOAT3 },
-            { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
-            { WE_IN_COLOR.data(),    VertexType::FLOAT4 },
-        },
-        total_quads * 4);
-
-    std::vector<float> positions(total_quads * 4 * 3);
-    std::vector<float> texcoords(total_quads * 4 * 2);
-    std::vector<float> colors   (total_quads * 4 * 4);
-    std::vector<std::uint32_t> indices(total_quads * 6);
-
-    auto write_quad = [&](std::size_t q_idx, float left, float right, float bottom,
-                           float top, float u_l, float u_r, float v_t, float v_b,
-                           const std::array<float, 4>& rgba) {
-        std::size_t v_off = q_idx * 4;
-        // CCW: top-left, top-right, bottom-right, bottom-left.
-        const float pos[4][3] = {
-            { left,  top,    0.0f },
-            { right, top,    0.0f },
-            { right, bottom, 0.0f },
-            { left,  bottom, 0.0f },
-        };
-        const float uv[4][2] = {
-            { u_l, v_t },
-            { u_r, v_t },
-            { u_r, v_b },
-            { u_l, v_b },
-        };
-        for (std::size_t k = 0; k < 4; ++k) {
-            std::memcpy(&positions[(v_off + k) * 3], pos[k], sizeof(pos[k]));
-            std::memcpy(&texcoords[(v_off + k) * 2], uv[k], sizeof(uv[k]));
-            std::memcpy(&colors   [(v_off + k) * 4], rgba.data(), sizeof(float) * 4);
-        }
-        std::size_t i_off = q_idx * 6;
-        const std::uint32_t base = static_cast<std::uint32_t>(v_off);
-        indices[i_off + 0] = base + 0;
-        indices[i_off + 1] = base + 1;
-        indices[i_off + 2] = base + 2;
-        indices[i_off + 3] = base + 0;
-        indices[i_off + 4] = base + 2;
-        indices[i_off + 5] = base + 3;
-    };
-
-    // Local-space layout: bbox centred at origin, y-up scene convention.
-    float text_top    = +text_h * 0.5f;
-    float text_bottom = -text_h * 0.5f;
-    float text_left   = -text_w * 0.5f;
-    float text_right  = +text_w * 0.5f;
-    (void)text_left;
-    (void)text_right;
-    float pad         = static_cast<float>(obj.padding);
-
-    std::size_t q = 0;
-
-    if (has_bg) {
-        // Sample the white cell reserved at atlas (0,0) — see SeedWhiteCell
-        // in Text.cpp. 4×4 px gives stable LINEAR sampling away from edges.
-        float u_l = 1.0f / static_cast<float>(fm.atlas_w);
-        float u_r = 3.0f / static_cast<float>(fm.atlas_w);
-        float v_t = 1.0f / static_cast<float>(fm.atlas_h);
-        float v_b = 3.0f / static_cast<float>(fm.atlas_h);
-        std::array<float, 4> rgba {
-            obj.backgroundcolor[0] * obj.backgroundbrightness,
-            obj.backgroundcolor[1] * obj.backgroundbrightness,
-            obj.backgroundcolor[2] * obj.backgroundbrightness,
-            1.0f,
-        };
-        write_quad(q++,
-                   -text_w * 0.5f - pad,
-                   +text_w * 0.5f + pad,
-                   -text_h * 0.5f - pad,
-                   +text_h * 0.5f + pad,
-                   u_l,
-                   u_r,
-                   v_t,
-                   v_b,
-                   rgba);
+    // --- mesh capacity. Static text exactly fits its initial layout;
+    //     dynamic (script-bound) text reserves headroom so SetText can
+    //     accommodate a moderately longer string without realloc.
+    std::size_t initial_codepoints = text::DecodeUtf8(s_text).size();
+    bool        has_bg             = obj.opaquebackground;
+    std::size_t peak_quads;
+    if (has_text_script) {
+        peak_quads = std::max<std::size_t>(initial_codepoints * 4, 64);
+        if (has_bg) ++peak_quads;
+    } else {
+        peak_quads = initial_codepoints + (has_bg ? 1u : 0u);
+        if (peak_quads == 0) return;
     }
 
-    // Resolve horizontal alignment. WE accepts the dedicated horizontalalign
-    // string when present, otherwise falls back to the legacy alignment
-    // string (which also folds in vertical hints).
-    auto contains = [](std::string_view s, std::string_view what) {
-        return s.find(what) != std::string::npos;
-    };
-    std::string_view halign = obj.horizontalalign.empty() ? std::string_view(obj.alignment)
-                                                          : std::string_view(obj.horizontalalign);
-
-    std::array<float, 4> text_rgba {
-        obj.color[0] * obj.brightness,
-        obj.color[1] * obj.brightness,
-        obj.color[2] * obj.brightness,
-        obj.alpha,
-    };
-
-    for (std::size_t li = 0; li < lines.size(); ++li) {
-        const auto& line = lines[li];
-        float       line_origin_x;
-        if (contains(halign, "left")) {
-            line_origin_x = -text_w * 0.5f;
-        } else if (contains(halign, "right")) {
-            line_origin_x = +text_w * 0.5f - line.width;
-        } else {
-            line_origin_x = -line.width * 0.5f;
-        }
-        float baseline_y =
-            text_top - fm.ascender - static_cast<float>(li) * fm.line_height;
-
-        float pen_x = line_origin_x;
-        for (auto& [cp, gi] : line.glyphs) {
-            (void)cp;
-            if (gi->pixel_w == 0 || gi->pixel_h == 0) {
-                pen_x += gi->advance_x;
-                continue;
-            }
-            float left   = pen_x + gi->bearing_x;
-            float right  = left + static_cast<float>(gi->pixel_w);
-            float top    = baseline_y + gi->bearing_y;
-            float bottom = top - static_cast<float>(gi->pixel_h);
-            float u_l    = static_cast<float>(gi->atlas_x) / static_cast<float>(fm.atlas_w);
-            float u_r    = static_cast<float>(gi->atlas_x + gi->pixel_w) /
-                        static_cast<float>(fm.atlas_w);
-            float v_t = static_cast<float>(gi->atlas_y) / static_cast<float>(fm.atlas_h);
-            float v_b = static_cast<float>(gi->atlas_y + gi->pixel_h) /
-                        static_cast<float>(fm.atlas_h);
-            write_quad(q++, left, right, bottom, top, u_l, u_r, v_t, v_b, text_rgba);
-            pen_x += gi->advance_x;
-        }
+    auto sp_mesh = std::make_shared<SceneMesh>(/*dynamic=*/has_text_script);
+    {
+        SceneVertexArray vertex(
+            {
+                { WE_IN_POSITION.data(), VertexType::FLOAT3 },
+                { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
+                { WE_IN_COLOR.data(),    VertexType::FLOAT4 },
+            },
+            peak_quads * 4);
+        sp_mesh->AddVertexArray(std::move(vertex));
+        sp_mesh->AddIndexArray(SceneIndexArray(peak_quads * 6));
+    }
+    {
+        SceneMaterial material;
+        material.name                = "text";
+        material.textures            = { atlas_url };
+        material.defines             = { "g_Texture0" };
+        material.blenmode            = BlendMode::Translucent;
+        material.customShader.shader = shader;
+        sp_mesh->AddMaterial(std::move(material));
     }
 
-    vertex.SetVertex(WE_IN_POSITION, positions);
-    vertex.SetVertex(WE_IN_TEXCOORD, texcoords);
-    vertex.SetVertex(WE_IN_COLOR,    colors);
+    // --- layouter owns the cache (FontFace lifetime) + mesh ref + style.
+    text::TextLayoutStyle style;
+    style.color = { obj.color[0], obj.color[1], obj.color[2] };
+    style.alpha = obj.alpha;
+    style.brightness = obj.brightness;
+    style.opaquebackground = has_bg;
+    style.background_color = { obj.backgroundcolor[0], obj.backgroundcolor[1],
+                                obj.backgroundcolor[2] };
+    style.background_brightness = obj.backgroundbrightness;
+    style.halign  = obj.horizontalalign.empty() ? obj.alignment : obj.horizontalalign;
+    style.padding = static_cast<float>(obj.padding);
 
-    auto sp_mesh = std::make_shared<SceneMesh>();
-    sp_mesh->AddVertexArray(std::move(vertex));
-    sp_mesh->AddIndexArray(SceneIndexArray(std::span<const std::uint32_t>(indices)));
+    auto layouter = std::make_shared<text::TextLayouter>(
+        std::move(cache), face, sp_mesh, style, peak_quads);
+    layouter->SetText(s_text);
 
-    SceneMaterial material;
-    material.name     = "text";
-    material.textures = { atlas_url };
-    material.defines  = { "g_Texture0" };
-    material.blenmode = BlendMode::Translucent;
-    material.customShader.shader = shader;
-
-    sp_mesh->AddMaterial(std::move(material));
+    float text_w = layouter->TextWidth();
+    float text_h = layouter->TextHeight();
+    if (text_w <= 0.0f || text_h <= 0.0f) {
+        // Initial text was empty / all unknown glyphs but a script binding
+        // is expected to populate it. Fake a 1×1 bbox so SceneNode/parallax
+        // still set up correctly.
+        text_w = 1.0f;
+        text_h = 1.0f;
+    }
 
     auto sp_node = std::make_shared<SceneNode>(Vector3f(obj.origin.data()),
                                                Vector3f(obj.scale.data()),
@@ -1436,24 +1332,48 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     sp_node->ID() = obj.id;
     LoadAlignment(*sp_node,
                   obj.alignment,
-                  { text_w + 2.0f * pad, text_h + 2.0f * pad });
+                  { text_w + 2.0f * style.padding, text_h + 2.0f * style.padding });
     sp_node->AddMesh(sp_mesh);
 
     WPShaderValueData svData;
     svData.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
     context.shader_updater->SetNodeData(sp_node.get(), svData);
 
+    // Transform-style script bindings (origin/scale/angles).
     WireFieldScripts(context, sp_node.get(), obj.field_bindings);
+
+    // --- text-content actuator. Captures a shared_ptr<TextLayouter> so
+    //     the layouter stays alive for the lifetime of ScriptScene.
+    if (has_text_script) {
+        const auto& sb = text_binding_it->second;
+        if (! context.script_scene)
+            context.script_scene = std::make_unique<script::ScriptScene>();
+        auto&       ss  = *context.script_scene;
+        std::string sha = utils::genSha1(std::span<const char>(sb.source));
+        auto*       fs  = ss.runtime().MakeFieldScript(sb.source, sha,
+                                                        script::FieldKind::String,
+                                                        sb.properties, sb.initial_value);
+        if (fs) {
+            ss.AddActuator({
+                fs,
+                [layouter](const script::ScriptValue& v) {
+                    if (auto* p = std::get_if<script::StringValue>(&v))
+                        layouter->SetText(p->s);
+                },
+            });
+        }
+    }
+
     context.scene->sceneGraph->AppendChild(sp_node);
 
-    LOG_INFO("text '%s': %zu glyphs, %zu lines, bbox=%.1fx%.1f atlas=%ux%u (%s)",
+    LOG_INFO("text '%s': initial=\"%s\" px=%u peak_quads=%zu bbox=%.1fx%.1f%s (%s)",
              obj.name.c_str(),
-             glyph_quads,
-             lines.size(),
+             s_text.c_str(),
+             px,
+             peak_quads,
              static_cast<double>(text_w),
              static_cast<double>(text_h),
-             fm.atlas_w,
-             fm.atlas_h,
+             has_text_script ? " [scripted]" : "",
              resolved.source.c_str());
 }
 

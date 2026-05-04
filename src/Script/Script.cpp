@@ -642,6 +642,14 @@ JsRuntime::JsRuntime() : m_impl(std::make_unique<Impl>()) {
         LOG_ERROR("script: JS_NewRuntime/JS_NewContext failed");
         return;
     }
+    // QuickJS's default stack-overflow check is conservative (relative to
+    // the OS thread stack at runtime init). When the wallpaper renderer
+    // runs scripts from a deep call site (Vulkan render thread, post-
+    // particle emission), `new Date()` and similar built-ins hit the
+    // stack-frame guard and throw "Maximum call stack size exceeded".
+    // Disable the soft check; the OS stack is plenty for clock/audio-
+    // response style scripts in the corpus.
+    JS_SetMaxStackSize(m_impl->rt, 0);
     JS_SetContextOpaque(m_impl->ctx, &m_impl->host);
     InstallEngineGlobal(m_impl->ctx);
 }
@@ -835,64 +843,58 @@ JsRuntime& ScriptScene::runtime() noexcept { return m_impl->rt; }
 void       ScriptScene::AddActuator(Actuator a) { m_impl->actuators.push_back(a); }
 bool       ScriptScene::empty() const noexcept { return m_impl->actuators.empty(); }
 
-namespace {
+std::function<void(const ScriptValue&)>
+MakeNodeTransformApply(wallpaper::SceneNode* node, NodeTransformTarget target) {
+    return [node, target](const ScriptValue& v) {
+        if (! node) return;
+        if (std::holds_alternative<std::monostate>(v)) return;
 
-// Apply one ScriptValue to one (node, target). Coercion is permissive:
-// scalars/bools fan out, missing components retain their previous value.
-void DrainActuator(const Actuator& a) {
-    if (! a.script || ! a.node) return;
-    const auto& v = a.script->last_value();
-    if (std::holds_alternative<std::monostate>(v)) return;
+        Eigen::Vector3f current = [&] {
+            switch (target) {
+            case NodeTransformTarget::Translate: return node->Translate();
+            case NodeTransformTarget::Scale:     return node->Scale();
+            case NodeTransformTarget::Rotation:  return node->Rotation();
+            }
+            return Eigen::Vector3f { 0.0f, 0.0f, 0.0f };
+        }();
 
-    auto current = [&] {
-        switch (a.target) {
-        case ActuatorTarget::Translate: return a.node->Translate();
-        case ActuatorTarget::Scale:     return a.node->Scale();
-        case ActuatorTarget::Rotation:  return a.node->Rotation();
-        }
-        return Eigen::Vector3f { 0.0f, 0.0f, 0.0f };
-    }();
-
-    Eigen::Vector3f next = current;
-    if (auto* p = std::get_if<Vec3Value>(&v)) {
-        next = Eigen::Vector3f { static_cast<float>(p->x),
-                                 static_cast<float>(p->y),
-                                 static_cast<float>(p->z) };
-    } else if (auto* p = std::get_if<Vec2Value>(&v)) {
-        next = Eigen::Vector3f { static_cast<float>(p->x),
-                                 static_cast<float>(p->y), current.z() };
-    } else if (auto* p = std::get_if<ScalarValue>(&v)) {
-        // Scalar splats across all three axes for scale; falls back to
-        // current.x for translate/rotation (rare but seen in the corpus
-        // when scripts mistakenly bind to the wrong field kind).
-        if (a.target == ActuatorTarget::Scale) {
-            float s = static_cast<float>(p->v);
-            next    = Eigen::Vector3f { s, s, s };
+        Eigen::Vector3f next = current;
+        if (auto* p = std::get_if<Vec3Value>(&v)) {
+            next = Eigen::Vector3f { static_cast<float>(p->x),
+                                     static_cast<float>(p->y),
+                                     static_cast<float>(p->z) };
+        } else if (auto* p = std::get_if<Vec2Value>(&v)) {
+            next = Eigen::Vector3f { static_cast<float>(p->x),
+                                     static_cast<float>(p->y), current.z() };
+        } else if (auto* p = std::get_if<ScalarValue>(&v)) {
+            // Scalar splats across all three axes for scale; falls back to
+            // current.x for translate/rotation (rare but seen in the corpus
+            // when scripts mistakenly bind to the wrong field kind).
+            if (target == NodeTransformTarget::Scale) {
+                float s = static_cast<float>(p->v);
+                next    = Eigen::Vector3f { s, s, s };
+            } else {
+                next.x() = static_cast<float>(p->v);
+            }
         } else {
-            next.x() = static_cast<float>(p->v);
+            return;
         }
-    } else if (auto* p = std::get_if<BoolValue>(&v)) {
-        // Don't apply bools to vec3 actuators (visible-style actuators
-        // aren't wired in MVP scope).
-        (void)p;
-        return;
-    } else {
-        return;
-    }
 
-    switch (a.target) {
-    case ActuatorTarget::Translate: a.node->SetTranslate(next); break;
-    case ActuatorTarget::Scale:     a.node->SetScale(next); break;
-    case ActuatorTarget::Rotation:  a.node->SetRotation(next); break;
-    }
+        switch (target) {
+        case NodeTransformTarget::Translate: node->SetTranslate(next); break;
+        case NodeTransformTarget::Scale:     node->SetScale(next); break;
+        case NodeTransformTarget::Rotation:  node->SetRotation(next); break;
+        }
+    };
 }
-
-}  // namespace
 
 void ScriptScene::Tick(const FrameInputs& fi) {
     m_impl->rt.SetFrameInputs(fi);
     m_impl->rt.TickAll();
-    for (const auto& a : m_impl->actuators) DrainActuator(a);
+    for (const auto& a : m_impl->actuators) {
+        if (! a.script || ! a.apply) continue;
+        a.apply(a.script->last_value());
+    }
 }
 
 void InstallScriptScene(wallpaper::Scene&             scene,

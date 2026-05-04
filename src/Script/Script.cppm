@@ -149,21 +149,26 @@ public:
 
 // --- per-Scene script runtime + actuators -----------------------------------
 
-// Where on a SceneNode the script's last_value() should be written. We
-// only wire scalar/vec actuators against transform fields in MVP — alpha
-// and visible are material-level and will follow once the parser exposes
-// the relevant SceneMaterial.
-enum class ActuatorTarget {
+// Where on a SceneNode the transform-style script value should be written.
+// Used by MakeNodeTransformApply to manufacture the corresponding closure.
+enum class NodeTransformTarget {
     Translate,  // Vec3 → SceneNode m_translate (origin field)
     Scale,      // Vec3 → SceneNode m_scale (scale field)
     Rotation,   // Vec3 → SceneNode m_rotation (angles field)
 };
 
+// One write-back binding from script.last_value() to whatever subsystem
+// owns the bound field. The closure does the type coercion + write; the
+// generic ScriptScene::Tick has no idea what 'apply' does.
 struct Actuator {
-    FieldScript*               script { nullptr };
-    wallpaper::SceneNode*      node { nullptr };
-    ActuatorTarget             target { ActuatorTarget::Translate };
+    FieldScript*                            script { nullptr };
+    std::function<void(const ScriptValue&)> apply;
 };
+
+// Build the closure that drives a SceneNode transform field. Encapsulates
+// the Vec3/Vec2/Scalar/Bool coercion table so callers stay one-liners.
+std::function<void(const ScriptValue&)>
+MakeNodeTransformApply(wallpaper::SceneNode* node, NodeTransformTarget target);
 
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
 // populated by the parser, attached to the Scene as an opaque pointer

@@ -8,11 +8,6 @@ export module wescene.text;
 import cppstd;
 import wescene.scene;
 
-// Stage A surface: UTF-8 decoding + a FreeType-backed glyph cache that
-// rasterises codepoints on demand into a single CPU-side R8 atlas. The
-// scene-graph emission for text layers is Stage B and lives behind
-// ParseTextObj in WPSceneParser; this module does not depend on Scene.
-
 export namespace wallpaper::text
 {
 
@@ -159,5 +154,60 @@ std::shared_ptr<wallpaper::Image> BuildAtlasImage(const FontFace& face,
 //   - combined image sampler g_Texture0 (R8 atlas; .r = coverage)
 // Returns nullptr if the SPIR-V compile fails.
 std::shared_ptr<wallpaper::SceneShader> GetTextSceneShader();
+
+// --- TextLayouter -----------------------------------------------------------
+// Holds everything needed to lay out a string of glyphs into a SceneMesh:
+// the FontCache (so the Face stays alive), the Face, the layout style, and
+// the mesh whose vertex/index arrays the layouter rewrites in-place when
+// SetText() is called from a script actuator.
+//
+// Glyph coverage is fixed at construction: every codepoint in `initial_text`
+// AND every codepoint in `pre_raster_alphabet` is rasterised before the
+// initial layout, then the atlas is snapshot and registered with the scene.
+// SetText() draws only with these pre-rasterised glyphs; codepoints outside
+// the set are dropped (logged once per layouter).
+//
+// Mesh capacity is fixed at construction (`peak_quads`). SetText() that
+// would exceed it gets clamped + logged.
+
+struct TextLayoutStyle {
+    std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
+    float                alpha { 1.0f };
+    float                brightness { 1.0f };
+
+    bool                 opaquebackground { false };
+    std::array<float, 3> background_color { 0.0f, 0.0f, 0.0f };
+    float                background_brightness { 1.0f };
+
+    std::string halign;        // "left" / "right" / contains-substring; default = center
+    float       padding { 0.0f };
+};
+
+class TextLayouter {
+public:
+    // The layouter takes ownership of `cache` so `face` outlives the mesh.
+    // `mesh` must already have its SceneVertexArray/SceneIndexArray sized
+    // to peak_quads * 4 vertices and peak_quads * 6 indices.
+    TextLayouter(std::unique_ptr<FontCache>          cache,
+                 FontFace*                           face,
+                 std::shared_ptr<wallpaper::SceneMesh> mesh,
+                 TextLayoutStyle                     style,
+                 std::size_t                         peak_quads);
+    ~TextLayouter();
+    TextLayouter(const TextLayouter&)            = delete;
+    TextLayouter& operator=(const TextLayouter&) = delete;
+
+    // Rewrites the vertex/index arrays in place, marks the mesh dirty.
+    // Safe to call any number of times after construction.
+    void SetText(std::string_view utf8);
+
+    // For ParseTextObj's initial-bbox log; reflects the most recent layout.
+    float TextWidth() const noexcept;
+    float TextHeight() const noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
 
 } // namespace wallpaper::text

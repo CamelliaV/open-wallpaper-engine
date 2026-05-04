@@ -11,6 +11,7 @@ module;
 
 #include "Image.hpp"
 #include "Type.hpp"
+#include "SpecTexs.hpp"
 #include "Utils/Logging.h"
 
 module wescene.text;
@@ -492,6 +493,243 @@ std::shared_ptr<wallpaper::SceneShader> GetTextSceneShader() {
     static std::shared_ptr<wallpaper::SceneShader>   shader;
     std::call_once(once, [] { shader = CompileTextShader(); });
     return shader;
+}
+
+// -- TextLayouter ---------------------------------------------------------
+
+namespace
+{
+
+struct TextLineRunGI {
+    std::vector<const GlyphInfo*> glyphs;
+    float                         width { 0.0f };
+};
+
+bool ContainsSubstring(std::string_view s, std::string_view what) noexcept {
+    return s.find(what) != std::string::npos;
+}
+
+} // namespace
+
+struct TextLayouter::Impl {
+    std::unique_ptr<FontCache>            cache;
+    FontFace*                             face { nullptr };
+    std::shared_ptr<wallpaper::SceneMesh> mesh;
+    TextLayoutStyle                       style;
+    std::size_t                           peak_quads { 0 };
+    FontMetrics                           metrics;
+
+    float        last_text_w { 0.0f };
+    float        last_text_h { 0.0f };
+    bool         missing_glyph_logged { false };
+
+    // Scratch buffers reused across SetText calls — avoids reallocs for
+    // every script tick. Sized at construction to peak capacity.
+    std::vector<float>         positions;
+    std::vector<float>         texcoords;
+    std::vector<float>         colors;
+    std::vector<std::uint32_t> indices;
+
+    Impl(std::unique_ptr<FontCache> c, FontFace* f,
+         std::shared_ptr<wallpaper::SceneMesh> m, TextLayoutStyle s, std::size_t pq)
+        : cache(std::move(c)), face(f), mesh(std::move(m)), style(std::move(s)),
+          peak_quads(pq), metrics(face->Metrics()) {
+        positions.assign(pq * 4 * 3, 0.0f);
+        texcoords.assign(pq * 4 * 2, 0.0f);
+        colors   .assign(pq * 4 * 4, 0.0f);
+        indices  .assign(pq * 6,     0u);
+    }
+};
+
+TextLayouter::TextLayouter(std::unique_ptr<FontCache>            cache,
+                           FontFace*                             face,
+                           std::shared_ptr<wallpaper::SceneMesh> mesh,
+                           TextLayoutStyle                       style,
+                           std::size_t                           peak_quads)
+    : m_impl(std::make_unique<Impl>(std::move(cache), face, std::move(mesh),
+                                    std::move(style), peak_quads)) {}
+
+TextLayouter::~TextLayouter() = default;
+
+float TextLayouter::TextWidth() const noexcept  { return m_impl->last_text_w; }
+float TextLayouter::TextHeight() const noexcept { return m_impl->last_text_h; }
+
+void TextLayouter::SetText(std::string_view utf8) {
+    auto& im = *m_impl;
+
+    auto codepoints = DecodeUtf8(utf8);
+
+    // Phase 1: split into lines and look up pre-rasterised glyph metrics.
+    std::vector<TextLineRunGI> lines;
+    lines.emplace_back();
+    std::size_t total_glyph_quads = 0;
+    for (std::uint32_t cp : codepoints) {
+        if (cp == '\n') {
+            lines.emplace_back();
+            continue;
+        }
+        const auto* gi = im.face->Glyph(cp);
+        if (gi == nullptr) {
+            if (! im.missing_glyph_logged) {
+                LOG_INFO("text: codepoint U+%04X not in pre-rasterised set, skipping",
+                         cp);
+                im.missing_glyph_logged = true;
+            }
+            continue;
+        }
+        lines.back().glyphs.push_back(gi);
+        lines.back().width += gi->advance_x;
+        ++total_glyph_quads;
+    }
+
+    bool has_bg = im.style.opaquebackground;
+    std::size_t total_quads = total_glyph_quads + (has_bg ? 1u : 0u);
+    if (total_quads > im.peak_quads) {
+        LOG_INFO("text: %zu quads exceed peak capacity %zu, truncating",
+                 total_quads, im.peak_quads);
+        total_quads = im.peak_quads;
+        if (has_bg && total_glyph_quads + 1 > im.peak_quads)
+            total_glyph_quads = im.peak_quads - 1;
+        else if (! has_bg)
+            total_glyph_quads = total_quads;
+    }
+
+    auto&  fm    = im.metrics;
+    float  text_w = 0.0f;
+    for (auto& l : lines)
+        if (l.width > text_w) text_w = l.width;
+    float text_h = fm.ascender - fm.descender +
+                   static_cast<float>(lines.size() - 1) * fm.line_height;
+    im.last_text_w = text_w;
+    im.last_text_h = text_h;
+
+    // Zero the unused tail so stale data from the previous (longer) text
+    // doesn't show up. Cheaper than tracking exact quad count downstream.
+    std::fill(im.positions.begin(), im.positions.end(), 0.0f);
+    std::fill(im.texcoords.begin(), im.texcoords.end(), 0.0f);
+    std::fill(im.colors.begin(),    im.colors.end(),    0.0f);
+    std::fill(im.indices.begin(),   im.indices.end(),   0u);
+
+    auto write_quad = [&](std::size_t q_idx, float left, float right, float bottom,
+                          float top, float u_l, float u_r, float v_t, float v_b,
+                          const std::array<float, 4>& rgba) {
+        std::size_t v_off = q_idx * 4;
+        const float pos[4][3] = {
+            { left,  top,    0.0f },
+            { right, top,    0.0f },
+            { right, bottom, 0.0f },
+            { left,  bottom, 0.0f },
+        };
+        const float uv[4][2] = {
+            { u_l, v_t },
+            { u_r, v_t },
+            { u_r, v_b },
+            { u_l, v_b },
+        };
+        for (std::size_t k = 0; k < 4; ++k) {
+            std::memcpy(&im.positions[(v_off + k) * 3], pos[k], sizeof(pos[k]));
+            std::memcpy(&im.texcoords[(v_off + k) * 2], uv[k], sizeof(uv[k]));
+            std::memcpy(&im.colors   [(v_off + k) * 4], rgba.data(), sizeof(float) * 4);
+        }
+        std::size_t i_off = q_idx * 6;
+        const std::uint32_t base = static_cast<std::uint32_t>(v_off);
+        im.indices[i_off + 0] = base + 0;
+        im.indices[i_off + 1] = base + 1;
+        im.indices[i_off + 2] = base + 2;
+        im.indices[i_off + 3] = base + 0;
+        im.indices[i_off + 4] = base + 2;
+        im.indices[i_off + 5] = base + 3;
+    };
+
+    float text_top    = +text_h * 0.5f;
+    float text_bottom = -text_h * 0.5f;
+    float text_left   = -text_w * 0.5f;
+    float text_right  = +text_w * 0.5f;
+    (void)text_left;
+    (void)text_right;
+    (void)text_bottom;
+    float pad         = im.style.padding;
+
+    std::size_t q = 0;
+
+    if (has_bg) {
+        float u_l = 1.0f / static_cast<float>(fm.atlas_w);
+        float u_r = 3.0f / static_cast<float>(fm.atlas_w);
+        float v_t = 1.0f / static_cast<float>(fm.atlas_h);
+        float v_b = 3.0f / static_cast<float>(fm.atlas_h);
+        std::array<float, 4> rgba {
+            im.style.background_color[0] * im.style.background_brightness,
+            im.style.background_color[1] * im.style.background_brightness,
+            im.style.background_color[2] * im.style.background_brightness,
+            1.0f,
+        };
+        write_quad(q++,
+                   -text_w * 0.5f - pad, +text_w * 0.5f + pad,
+                   -text_h * 0.5f - pad, +text_h * 0.5f + pad,
+                   u_l, u_r, v_t, v_b, rgba);
+    }
+
+    std::array<float, 4> text_rgba {
+        im.style.color[0] * im.style.brightness,
+        im.style.color[1] * im.style.brightness,
+        im.style.color[2] * im.style.brightness,
+        im.style.alpha,
+    };
+
+    std::size_t emitted_glyphs = 0;
+    for (std::size_t li = 0; li < lines.size(); ++li) {
+        const auto& line = lines[li];
+        float       line_origin_x;
+        if (ContainsSubstring(im.style.halign, "left")) {
+            line_origin_x = -text_w * 0.5f;
+        } else if (ContainsSubstring(im.style.halign, "right")) {
+            line_origin_x = +text_w * 0.5f - line.width;
+        } else {
+            line_origin_x = -line.width * 0.5f;
+        }
+        float baseline_y =
+            text_top - fm.ascender - static_cast<float>(li) * fm.line_height;
+
+        float pen_x = line_origin_x;
+        for (auto* gi : line.glyphs) {
+            if (q >= im.peak_quads) break;
+            if (gi->pixel_w == 0 || gi->pixel_h == 0) {
+                pen_x += gi->advance_x;
+                ++emitted_glyphs;
+                continue;
+            }
+            float left   = pen_x + gi->bearing_x;
+            float right  = left + static_cast<float>(gi->pixel_w);
+            float top    = baseline_y + gi->bearing_y;
+            float bottom = top - static_cast<float>(gi->pixel_h);
+            float u_l    = static_cast<float>(gi->atlas_x) / static_cast<float>(fm.atlas_w);
+            float u_r    = static_cast<float>(gi->atlas_x + gi->pixel_w) /
+                        static_cast<float>(fm.atlas_w);
+            float v_t = static_cast<float>(gi->atlas_y) / static_cast<float>(fm.atlas_h);
+            float v_b = static_cast<float>(gi->atlas_y + gi->pixel_h) /
+                        static_cast<float>(fm.atlas_h);
+            write_quad(q++, left, right, bottom, top, u_l, u_r, v_t, v_b, text_rgba);
+            pen_x += gi->advance_x;
+            ++emitted_glyphs;
+            if (emitted_glyphs >= total_glyph_quads) break;
+        }
+        if (emitted_glyphs >= total_glyph_quads) break;
+    }
+
+    // Push into the mesh. Vertex array's stride is interleaved with padding
+    // already laid out by SceneVertexArray; SetVertex scatters by name.
+    auto& v = im.mesh->GetVertexArray(0);
+    v.SetVertex(WE_IN_POSITION, im.positions);
+    v.SetVertex(WE_IN_TEXCOORD, im.texcoords);
+    v.SetVertex(WE_IN_COLOR,    im.colors);
+
+    auto& idx = im.mesh->GetIndexArray(0);
+    idx.Assign(0, im.indices);
+    // Render only the indices we actually populated (rest are zeroed out
+    // and reference vertex 0, which is harmless but wastes draw calls).
+    idx.SetRenderDataCount(q * 6);
+
+    im.mesh->SetDirty();
 }
 
 } // namespace wallpaper::text
