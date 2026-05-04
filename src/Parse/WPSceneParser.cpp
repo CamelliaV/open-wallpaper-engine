@@ -149,7 +149,7 @@ void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_
     }
     attrs.push_back({ WE_IN_TEXCOORDC2.data(), VertexType::FLOAT2 });
     mesh.AddVertexArray(SceneVertexArray(attrs, count * 4));
-    mesh.AddIndexArray(SceneIndexArray(count));
+    mesh.AddIndexArray(SceneIndexArray(count * 6));
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
 }
 
@@ -171,7 +171,7 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
     }
     attrs.push_back({ WE_IN_COLOR.data(), VertexType::FLOAT4 });
     mesh.AddVertexArray(SceneVertexArray(attrs, count * 4));
-    mesh.AddIndexArray(SceneIndexArray(count));
+    mesh.AddIndexArray(SceneIndexArray(count * 6));
     mesh.GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
 }

@@ -205,11 +205,11 @@ inline size_t GenRopeParticleData(std::span<const Particle>   particles,
     return i == 0 ? 0 : i - 1;
 }
 
-inline void updateIndexArray(uint16_t index, size_t count, SceneIndexArray& iarray) noexcept {
+inline void updateIndexArray(uint32_t index, size_t count, SceneIndexArray& iarray) noexcept {
     constexpr size_t single_size = 6;
-    const uint16_t   cv          = index * 4;
+    uint32_t         cv          = index * 4;
 
-    std::array<uint16_t, single_size> single;
+    std::array<uint32_t, single_size> single;
     // 0 1 3
     // 1 2 3
     single[0] = cv;
@@ -219,8 +219,8 @@ inline void updateIndexArray(uint16_t index, size_t count, SceneIndexArray& iarr
     single[4] = cv + 2;
     single[5] = cv + 3;
     // every particle
-    for (uint16_t i = index; i < count; i++) {
-        iarray.AssignHalf(i * single_size, single);
+    for (uint32_t i = index; i < count; i++) {
+        iarray.Assign(i * single_size, single);
         for (auto& x : single) x += 4;
     }
 }
@@ -246,9 +246,9 @@ void WPParticleRawGener::GenGLData(std::span<const std::unique_ptr<ParticleInsta
 
     // LOG_INFO("num: %d", particle_num);
 
-    u16 indexNum = (si.DataCount() * 2) / 6;
+    u32 indexNum = (u32)(si.DataCount() / 6);
     if (particle_num > indexNum) {
         updateIndexArray(indexNum, particle_num, si);
     }
-    si.SetRenderDataCount(particle_num * 6 / 2);
+    si.SetRenderDataCount(particle_num * 6);
 }

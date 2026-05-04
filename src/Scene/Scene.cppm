@@ -141,8 +141,10 @@ public:
     SceneIndexArray(SceneIndexArray&&) noexcept;
     ~SceneIndexArray();
 
-    void Assign(usize index, std::span<const uint32_t> data) { AssignSpan(index, data); }
-    void AssignHalf(usize index, std::span<const uint16_t> data) { AssignSpan(index, data); }
+    void Assign(usize index, std::span<const uint32_t> data) {
+        if (! IncreaseCheckSet((index + data.size()) * Unit_Byte_Size)) return;
+        std::copy(data.begin(), data.end(), m_pData + index);
+    }
 
     const uint32_t* Data() const { return m_pData; }
     usize           DataCount() const { return m_size; }
@@ -161,13 +163,6 @@ public:
 
 private:
     bool IncreaseCheckSet(size_t size);
-
-    template<typename T>
-    void AssignSpan(usize index, std::span<const T> data) {
-        using in_value_type = T;
-        if (! IncreaseCheckSet((index + data.size()) * sizeof(in_value_type))) return;
-        std::copy(data.begin(), data.end(), ((in_value_type*)m_pData) + index);
-    }
 
     uint32_t* m_pData;
     usize     m_size;

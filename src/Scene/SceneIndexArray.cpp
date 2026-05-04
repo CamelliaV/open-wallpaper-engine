@@ -7,7 +7,7 @@ import cppstd;
 
 using namespace wallpaper;
 
-SceneIndexArray::SceneIndexArray(std::size_t indexCount): m_size(0), m_capacity(indexCount * 3) {
+SceneIndexArray::SceneIndexArray(std::size_t indexCount): m_size(0), m_capacity(indexCount) {
     m_pData = new uint32_t[m_capacity];
     std::memset(m_pData, 0, m_capacity * sizeof(uint32_t));
 }

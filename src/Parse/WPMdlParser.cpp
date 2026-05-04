@@ -323,12 +323,13 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl) {
         vertex.SetVertexs(i, one_vert);
     }
     std::vector<uint32_t> indices;
-    size_t                u16_count = mdl.indices.size() * 3;
-    indices.resize(u16_count / 2 + 1);
-    memcpy(indices.data(), mdl.indices.data(), u16_count * sizeof(uint16_t));
+    indices.reserve(mdl.indices.size() * 3);
+    for (const auto& tri : mdl.indices) {
+        for (uint16_t v : tri) indices.push_back(v);
+    }
 
     mesh.AddVertexArray(std::move(vertex));
-    mesh.AddIndexArray(SceneIndexArray(indices));
+    mesh.AddIndexArray(SceneIndexArray(std::span<const uint32_t>(indices)));
 }
 
 void WPMdlParser::AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl) {

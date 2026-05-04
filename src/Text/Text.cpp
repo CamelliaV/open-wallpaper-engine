@@ -429,9 +429,9 @@ constexpr const char* kTextShaderHlsl = R"hlsl(
 };
 
 struct VSInput {
-    float3 a_Position : POSITION;
-    float2 a_TexCoord : TEXCOORD0;
-    float4 a_Color    : COLOR0;
+    float3 a_Position : a_Position;
+    float2 a_TexCoord : a_TexCoord;
+    float4 a_Color    : a_Color;
 };
 struct PSInput {
     float4 sv_pos : SV_Position;
