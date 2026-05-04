@@ -115,6 +115,51 @@ struct ComRelease {
 template<typename T>
 using ComPtr = std::unique_ptr<T, ComRelease<T>>;
 
+// IDxcUtils / IDxcCompiler3 / DefaultIncludeHandler are COM thread-affine
+// but otherwise reusable across compile calls — DXC has no per-call state
+// that would invalidate them. Cached per thread; raw pointers returned
+// are non-owning (lifetime tied to the thread_local ComPtr).
+struct DxcCtx {
+    IDxcUtils*          utils;
+    IDxcCompiler3*      compiler;
+    IDxcIncludeHandler* default_include;
+};
+
+inline DxcCtx GetDxcCtx() {
+    static thread_local ComPtr<IDxcUtils>          tl_utils;
+    static thread_local ComPtr<IDxcCompiler3>      tl_compiler;
+    static thread_local ComPtr<IDxcIncludeHandler> tl_include;
+
+    if (! tl_utils) {
+        IDxcUtils* raw = nullptr;
+        HRESULT    hr  = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&raw));
+        if (FAILED(hr) || ! raw) {
+            LOG_ERROR("dxc: DxcCreateInstance(DxcUtils) failed: 0x%lx", (unsigned long)hr);
+            return {};
+        }
+        tl_utils.reset(raw);
+    }
+    if (! tl_compiler) {
+        IDxcCompiler3* raw = nullptr;
+        HRESULT        hr  = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&raw));
+        if (FAILED(hr) || ! raw) {
+            LOG_ERROR("dxc: DxcCreateInstance(DxcCompiler) failed: 0x%lx", (unsigned long)hr);
+            return {};
+        }
+        tl_compiler.reset(raw);
+    }
+    if (! tl_include) {
+        IDxcIncludeHandler* raw = nullptr;
+        tl_utils->CreateDefaultIncludeHandler(&raw);
+        if (! raw) {
+            LOG_ERROR("dxc: CreateDefaultIncludeHandler failed");
+            return {};
+        }
+        tl_include.reset(raw);
+    }
+    return { tl_utils.get(), tl_compiler.get(), tl_include.get() };
+}
+
 } // namespace
 
 bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
@@ -225,29 +270,8 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
 }
 
 bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
-    IDxcUtils*     utils_raw    = nullptr;
-    IDxcCompiler3* compiler_raw = nullptr;
-    HRESULT        hr;
-
-    hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils_raw));
-    if (FAILED(hr) || ! utils_raw) {
-        LOG_ERROR("dxc(preprocess): DxcCreateInstance(DxcUtils) failed: 0x%lx",
-                  (unsigned long)hr);
-        return false;
-    }
-    ComPtr<IDxcUtils> utils(utils_raw);
-
-    hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler_raw));
-    if (FAILED(hr) || ! compiler_raw) {
-        LOG_ERROR("dxc(preprocess): DxcCreateInstance(DxcCompiler) failed: 0x%lx",
-                  (unsigned long)hr);
-        return false;
-    }
-    ComPtr<IDxcCompiler3> compiler(compiler_raw);
-
-    IDxcIncludeHandler* default_include_raw = nullptr;
-    utils->CreateDefaultIncludeHandler(&default_include_raw);
-    ComPtr<IDxcIncludeHandler> default_include(default_include_raw);
+    DxcCtx ctx = GetDxcCtx();
+    if (! ctx.compiler) return false;
 
     // -P alone (no filename) writes the preprocessed text to DXC_OUT_HLSL.
     std::vector<LPCWSTR> args { L"-P" };
@@ -258,11 +282,11 @@ bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
     source_buf.Encoding = DXC_CP_UTF8;
 
     IDxcResult* result_raw = nullptr;
-    hr                     = compiler->Compile(&source_buf,
-                            args.data(),
-                            static_cast<UINT32>(args.size()),
-                            default_include.get(),
-                            IID_PPV_ARGS(&result_raw));
+    HRESULT     hr         = ctx.compiler->Compile(&source_buf,
+                                       args.data(),
+                                       static_cast<UINT32>(args.size()),
+                                       ctx.default_include,
+                                       IID_PPV_ARGS(&result_raw));
     if (FAILED(hr) || ! result_raw) {
         LOG_ERROR("dxc(preprocess): IDxcCompiler3::Compile failed: 0x%lx",
                   (unsigned long)hr);
@@ -308,27 +332,8 @@ bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
 bool wallpaper::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  compUnits,
                                                   const ShaderCompOpt&        opt,
                                                   std::vector<Uni_ShaderSpv>& spvs) {
-    IDxcUtils*     utils_raw    = nullptr;
-    IDxcCompiler3* compiler_raw = nullptr;
-    HRESULT        hr;
-
-    hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils_raw));
-    if (FAILED(hr) || ! utils_raw) {
-        LOG_ERROR("dxc: DxcCreateInstance(DxcUtils) failed: 0x%lx", (unsigned long)hr);
-        return false;
-    }
-    ComPtr<IDxcUtils> utils(utils_raw);
-
-    hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler_raw));
-    if (FAILED(hr) || ! compiler_raw) {
-        LOG_ERROR("dxc: DxcCreateInstance(DxcCompiler) failed: 0x%lx", (unsigned long)hr);
-        return false;
-    }
-    ComPtr<IDxcCompiler3> compiler(compiler_raw);
-
-    IDxcIncludeHandler* default_include_raw = nullptr;
-    utils->CreateDefaultIncludeHandler(&default_include_raw);
-    ComPtr<IDxcIncludeHandler> default_include(default_include_raw);
+    DxcCtx ctx = GetDxcCtx();
+    if (! ctx.compiler) return false;
 
     spvs.clear();
     spvs.reserve(compUnits.size());
@@ -373,11 +378,11 @@ bool wallpaper::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit
         source_buf.Encoding = DXC_CP_UTF8;
 
         IDxcResult* result_raw = nullptr;
-        hr                     = compiler->Compile(&source_buf,
-                                args.data(),
-                                static_cast<UINT32>(args.size()),
-                                default_include.get(),
-                                IID_PPV_ARGS(&result_raw));
+        HRESULT     hr         = ctx.compiler->Compile(&source_buf,
+                                       args.data(),
+                                       static_cast<UINT32>(args.size()),
+                                       ctx.default_include,
+                                       IID_PPV_ARGS(&result_raw));
         if (FAILED(hr) || ! result_raw) {
             LOG_ERROR("dxc(compile): IDxcCompiler3::Compile failed: 0x%lx", (unsigned long)hr);
             return false;
