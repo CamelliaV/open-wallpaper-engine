@@ -70,7 +70,7 @@ private:
     friend class MainHandler;
 
     bool                         m_offscreen { false };
-    std::shared_ptr<MainHandler> m_main_handler;
+    std::unique_ptr<MainHandler> m_main_handler;
 };
 
 // `TexTiling` is declared in the classic header `Swapchain/ExSwapchain.hpp`

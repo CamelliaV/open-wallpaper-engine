@@ -16,7 +16,7 @@ import wescene.scene;
 import rstd;
 import wescene.audio;
 import wescene.fs;
-import wescene.looper;
+import wescene.message_loop;
 import wescene.timer;
 import wescene.parse;
 import wescene.pkg_fs;
@@ -26,81 +26,92 @@ import wescene.vulkan_render;
 
 using namespace wallpaper;
 
-#define CASE_CMD(cmd)      \
-    case CMD::CMD_##cmd:   \
-        handle_##cmd(msg); \
-        break;
-#define MHANDLER_CMD(cmd) void handle_##cmd(const std::shared_ptr<looper::Message>& msg)
-#define MHANDLER_CMD_IMPL(cl, cmd) \
-    void impl_##cl::handle_##cmd(const std::shared_ptr<looper::Message>& msg)
-#define CALL_MHANDLER_CMD(cmd, msg) handle_##cmd(msg)
-
-namespace
-{
-template<typename T>
-void AddMsgCmd(looper::Message& msg, T cmd) {
-    msg.setInt32("cmd", (int32_t)cmd);
-}
-template<typename T>
-std::shared_ptr<looper::Message> CreateMsgWithCmd(const std::shared_ptr<looper::Handler>& handler,
-                                                  T                                       cmd) {
-    auto msg = looper::Message::create(0, handler);
-    AddMsgCmd(*msg, cmd);
-    return msg;
-}
-} // namespace
-
 namespace wallpaper
 {
+
+// ---- Render-thread messages -------------------------------------------------
+
+struct RenderInit {
+    std::shared_ptr<RenderInitInfo> info;
+};
+struct RenderSetScene {
+    std::shared_ptr<Scene> scene;
+};
+struct RenderSetFillMode {
+    FillMode mode;
+};
+struct RenderSetSpeed {
+    float speed;
+};
+struct RenderStop {
+    bool stop;
+};
+struct RenderDraw {};
+struct RenderSwapchainReady {
+    bool     ready;
+    uint32_t width;
+    uint32_t height;
+};
+
+// Wrapped in a non-std struct so the rstd channel's internal `addressof`
+// calls don't fall into ADL ambiguity with std::addressof when the element
+// type sits in namespace std.
+struct RenderMsg {
+    std::variant<RenderInit, RenderSetScene, RenderSetFillMode, RenderSetSpeed,
+                 RenderStop, RenderDraw, RenderSwapchainReady>
+        v;
+};
+
+// ---- Main-thread messages ---------------------------------------------------
+
+struct MainLoadScene {};
+struct MainStop {
+    bool stop;
+};
+struct MainFirstFrame {};
+
+// Property values stay in a small variant so we don't need a separate
+// message kind per property.
+using PropertyValue =
+    std::variant<bool, int32_t, float, std::string,
+                 std::shared_ptr<FirstFrameCallback>>;
+
+struct MainSetProperty {
+    std::string   key;
+    PropertyValue value;
+};
+
+struct MainMsg {
+    std::variant<MainLoadScene, MainSetProperty, MainStop, MainFirstFrame> v;
+};
+
+using MainSender   = msgloop::MessageLoop<MainMsg>::Sender;
+using RenderSender = msgloop::MessageLoop<RenderMsg>::Sender;
+
 class RenderHandler;
 
-class MainHandler : public looper::Handler {
-public:
-    enum class CMD
-    {
-        CMD_LOAD_SCENE,
-        CMD_SET_PROPERTY,
-        CMD_STOP,
-        CMD_FIRST_FRAME,
-        CMD_NO
-    };
-
+class MainHandler {
 public:
     MainHandler();
-    virtual ~MainHandler() {};
+    ~MainHandler();
 
     bool init();
-    auto renderHandler() const { return m_render_handler; }
+    auto renderHandler() const { return m_render_handler.get(); }
     bool inited() const { return m_inited; }
 
-public:
-    void onMessageReceived(const std::shared_ptr<looper::Message>& msg) override {
-        int32_t cmd_int = (int32_t)CMD::CMD_NO;
-        if (msg->findInt32("cmd", &cmd_int)) {
-            CMD cmd = static_cast<CMD>(cmd_int);
-            switch (cmd) {
-                CASE_CMD(SET_PROPERTY);
-                CASE_CMD(LOAD_SCENE);
-                CASE_CMD(STOP);
-                CASE_CMD(FIRST_FRAME);
-            default: break;
-            }
-        }
-    }
+    MainSender   mainSender() { return m_main_loop.sender(); }
+    RenderSender renderSender() { return m_render_loop.sender(); }
 
-    void sendCmdLoadScene();
-    void sendFirstFrameOk();
+    void on(MainLoadScene&&);
+    void on(MainSetProperty&&);
+    void on(MainStop&&);
+    void on(MainFirstFrame&&);
+
     bool isGenGraphviz() const { return m_gen_graphviz; }
 
 private:
     void loadScene();
 
-    MHANDLER_CMD(LOAD_SCENE);
-    MHANDLER_CMD(SET_PROPERTY);
-    MHANDLER_CMD(STOP);
-    MHANDLER_CMD(FIRST_FRAME);
-
-private:
     bool m_inited { false };
 
     std::string m_assets;
@@ -112,52 +123,26 @@ private:
     std::unique_ptr<audio::SoundManager> m_sound_manager;
     FirstFrameCallback                   m_first_frame_callback;
 
-private:
-    std::shared_ptr<looper::Looper> m_main_loop;
-    std::shared_ptr<looper::Looper> m_render_loop;
-    std::shared_ptr<RenderHandler>  m_render_handler;
+    msgloop::MessageLoop<MainMsg>   m_main_loop;
+    msgloop::MessageLoop<RenderMsg> m_render_loop;
+    std::unique_ptr<RenderHandler>  m_render_handler;
 };
-// for macro
-using impl_MainHandler = MainHandler;
 
-class RenderHandler : public looper::Handler {
+class RenderHandler {
 public:
-    enum class CMD
-    {
-        CMD_INIT_VULKAN,
-        CMD_SET_SCENE,
-        CMD_SET_FILLMODE,
-        CMD_SET_SPEED,
-        CMD_STOP,
-        CMD_DRAW,
-        CMD_SWAPCHAIN_READY,
-        CMD_NO
-    };
-    MainHandler& main_handler;
-    RenderHandler(MainHandler& m)
-        : main_handler(m), m_render(std::make_unique<vulkan::VulkanRender>()) {}
-    virtual ~RenderHandler() {
-        frame_timer.Stop();
+    explicit RenderHandler(MainHandler& main): m_main(main) {}
+    ~RenderHandler() {
         m_render->destroy();
         LOG_INFO("render handler deleted");
     }
 
-    void onMessageReceived(const std::shared_ptr<looper::Message>& msg) override {
-        int32_t cmd_int = (int32_t)CMD::CMD_NO;
-        if (msg->findInt32("cmd", &cmd_int)) {
-            CMD cmd = static_cast<CMD>(cmd_int);
-            switch (cmd) {
-                CASE_CMD(DRAW);
-                CASE_CMD(STOP);
-                CASE_CMD(SET_FILLMODE);
-                CASE_CMD(SET_SCENE);
-                CASE_CMD(SET_SPEED);
-                CASE_CMD(INIT_VULKAN);
-                CASE_CMD(SWAPCHAIN_READY);
-            default: break;
-            }
-        }
-    }
+    void on(RenderInit&&);
+    void on(RenderSetScene&&);
+    void on(RenderSetFillMode&&);
+    void on(RenderSetSpeed&&);
+    void on(RenderStop&&);
+    void on(RenderDraw&&);
+    void on(RenderSwapchainReady&&);
 
     ExSwapchain* exSwapchain() const { return m_render->exSwapchain(); }
     int          takeLastFrameSyncFd() { return m_render->takeLastFrameSyncFd(); }
@@ -168,324 +153,221 @@ public:
 
     bool renderInited() const { return m_render->inited(); }
 
-    void setMousePos(double x, double y) { m_mouse_pos.store(std::array { (float)x, (float)y }); }
-
-private:
-    MHANDLER_CMD(STOP) {
-        bool stop { false };
-        if (msg->findBool("value", &stop)) {
-            if (stop)
-                frame_timer.Stop();
-            else
-                frame_timer.Run();
-        }
-    }
-    MHANDLER_CMD(DRAW) {
-        frame_timer.FrameBegin();
-        if (m_rg) {
-            // LOG_INFO("frame info, fps: %.1f, frametime: %.1f", 1.0f, 1000.0f*m_scene->frameTime);
-            m_scene->shaderValueUpdater->FrameBegin();
-            {
-                auto pos = m_mouse_pos.load();
-                m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
-            }
-            // Drive any per-Scene scenescripts before particle emission.
-            // Scripts mutate SceneNode transforms (scale/origin/angles) so
-            // they need to run before the matrix-derivation in the
-            // shaderValueUpdater's per-frame uniform pass — that's already
-            // what FrameBegin set up; UpdateUniforms runs inside drawFrame.
-            // The runtime is a no-op when no ScriptScene is installed.
-            {
-                wallpaper::script::FrameInputs fi;
-                fi.frametime   = static_cast<float>(m_scene->frameTime * m_speed);
-                fi.runtime     = static_cast<float>(m_scene->elapsingTime);
-                fi.canvas_w    = static_cast<float>(m_scene->ortho[0]);
-                fi.canvas_h    = static_cast<float>(m_scene->ortho[1]);
-                fi.screen_w    = fi.canvas_w;
-                fi.screen_h    = fi.canvas_h;
-                wallpaper::script::TickSceneScripts(*m_scene, fi);
-            }
-            m_scene->paritileSys->Emitt();
-
-            m_render->drawFrame(*m_scene);
-
-            m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);
-
-            m_scene->shaderValueUpdater->FrameEnd();
-            // fps_counter.RegisterFrame();
-
-            if (! m_scene->first_frame_ok) {
-                m_scene->first_frame_ok = true;
-                main_handler.sendFirstFrameOk();
-            }
-        }
-        frame_timer.FrameEnd();
-    }
-    MHANDLER_CMD(SET_FILLMODE) {
-        int32_t value;
-        if (msg->findInt32("value", &value)) {
-            m_fillmode = (FillMode)value;
-            if (m_scene && renderInited()) {
-                m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
-            }
-        }
-    }
-    MHANDLER_CMD(SET_SCENE) {
-        if (msg->findObject("scene", &m_scene)) {
-            if (m_rg) m_render->clearLastRenderGraph();
-            m_rg = sceneToRenderGraph(*m_scene);
-
-            if (main_handler.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");
-            m_render->compileRenderGraph(*m_scene, *m_rg);
-            m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
-        }
-    }
-    MHANDLER_CMD(SET_SPEED) { msg->findFloat("value", &m_speed); }
-    MHANDLER_CMD(INIT_VULKAN) {
-        std::shared_ptr<RenderInitInfo> info;
-        if (msg->findObject("info", &info)) {
-            m_render->init(std::move(*info));
-
-            // Subscribe to ExSwapchain ready/extent/format changes. The
-            // callback runs on the render thread (sync for Local, from
-            // drainPendingDirective for Bridge); we just relay it as a
-            // CMD_SWAPCHAIN_READY message back to ourselves so the
-            // actual handling happens through the normal looper path.
-            if (auto* sw = m_render->exSwapchain()) {
-                std::weak_ptr<looper::Handler> weak = shared_from_this();
-                sw->setOnReadyChanged([weak](const ExSwapchainReadyEvent& e) {
-                    auto self = weak.lock();
-                    if (!self) return;
-                    auto m = CreateMsgWithCmd(self, CMD::CMD_SWAPCHAIN_READY);
-                    m->setBool("ready", e.ready);
-                    m->setInt32("w", (int32_t)e.width);
-                    m->setInt32("h", (int32_t)e.height);
-                    // Format reaches VulkanRender via ExSwapchain::format()
-                    // directly; no need to round-trip it through this message.
-                    m->post();
-                });
-            }
-
-            // inited, callback to laod scene
-            main_handler.sendCmdLoadScene();
-        }
-    }
-    MHANDLER_CMD(SWAPCHAIN_READY) {
-        bool ready = false;
-        msg->findBool("ready", &ready);
-        if (!ready) {
-            frame_timer.Stop();
-            return;
-        }
-        int32_t w = 0, h = 0;
-        msg->findInt32("w", &w);
-        msg->findInt32("h", &h);
-        bool extent_changed = m_render->onSwapchainReady((unsigned)w, (unsigned)h);
-        if (extent_changed && m_scene && m_rg) {
-            m_render->clearLastRenderGraph();
-            m_render->compileRenderGraph(*m_scene, *m_rg);
-            m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
-        }
-        frame_timer.Run();
+    void setMousePos(double x, double y) {
+        m_mouse_pos.store(std::array { (float)x, (float)y });
     }
 
-public:
-    FrameTimer frame_timer;
+    void setSenders(RenderSender render_tx, MainSender main_tx) {
+        m_render_tx.emplace(std::move(render_tx));
+        m_main_tx.emplace(std::move(main_tx));
+    }
+
+    // Drop every Sender clone owned by this handler so the render channel
+    // can disconnect at shutdown. The swapchain callback's sender is held
+    // through `m_swapchain_tx` (strong) + a weak_ptr in the lambda — clearing
+    // the strong ref turns the lambda into a no-op.
+    void clearSenders() {
+        m_swapchain_tx.reset();
+        m_render_tx.reset();
+        m_main_tx.reset();
+    }
+
+    FrameTimer frame_timer { [] {} };
     FpsCounter fps_counter;
 
 private:
-    std::shared_ptr<Scene> m_scene { nullptr };
-    float                  m_speed { 1.0f };
+    MainHandler& m_main;
 
-    std::unique_ptr<vulkan::VulkanRender> m_render;
+    std::unique_ptr<vulkan::VulkanRender> m_render { std::make_unique<vulkan::VulkanRender>() };
+    std::shared_ptr<Scene>                m_scene { nullptr };
     std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
-
-    FillMode m_fillmode { FillMode::ASPECTCROP };
+    float                                 m_speed { 1.0f };
+    FillMode                              m_fillmode { FillMode::ASPECTCROP };
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
+
+    std::optional<RenderSender> m_render_tx;
+    std::optional<MainSender>   m_main_tx;
+
+    // Strong ref kept here, weak copy captured by the swapchain callback;
+    // nulling this out at shutdown lets the callback short-circuit so the
+    // render channel can actually reach Err on recv().
+    std::shared_ptr<RenderSender> m_swapchain_tx;
 };
-} // namespace wallpaper
 
-SceneWallpaper::SceneWallpaper(): m_main_handler(std::make_shared<MainHandler>()) {}
+// ---- RenderHandler message handlers ----------------------------------------
 
-SceneWallpaper::~SceneWallpaper() {
-    /*
-    if(m_offscreen) {
-        // no wait
-        auto msg = looper::Message::create(0, m_main_handler);
-        msg->setObject("self_clean", m_main_handler);
-        msg->setCleanAfterDeliver(true);
-        m_main_handler = nullptr;
-        msg->post();
+void RenderHandler::on(RenderStop&& m) {
+    if (m.stop)
+        frame_timer.Stop();
+    else
+        frame_timer.Run();
+}
+
+void RenderHandler::on(RenderDraw&&) {
+    frame_timer.FrameBegin();
+    if (m_rg) {
+        m_scene->shaderValueUpdater->FrameBegin();
+        {
+            auto pos = m_mouse_pos.load();
+            m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
+        }
+        // Drive any per-Scene scenescripts before particle emission.
+        // Scripts mutate SceneNode transforms (scale/origin/angles) so
+        // they need to run before the matrix-derivation in the
+        // shaderValueUpdater's per-frame uniform pass — that's already
+        // what FrameBegin set up; UpdateUniforms runs inside drawFrame.
+        // The runtime is a no-op when no ScriptScene is installed.
+        {
+            wallpaper::script::FrameInputs fi;
+            fi.frametime = static_cast<float>(m_scene->frameTime * m_speed);
+            fi.runtime   = static_cast<float>(m_scene->elapsingTime);
+            fi.canvas_w  = static_cast<float>(m_scene->ortho[0]);
+            fi.canvas_h  = static_cast<float>(m_scene->ortho[1]);
+            fi.screen_w  = fi.canvas_w;
+            fi.screen_h  = fi.canvas_h;
+            wallpaper::script::TickSceneScripts(*m_scene, fi);
+        }
+        m_scene->paritileSys->Emitt();
+
+        m_render->drawFrame(*m_scene);
+
+        m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);
+
+        m_scene->shaderValueUpdater->FrameEnd();
+
+        if (! m_scene->first_frame_ok) {
+            m_scene->first_frame_ok = true;
+            if (m_main_tx) (void)m_main_tx->send(MainMsg { MainFirstFrame {} });
+        }
     }
-    */
+    frame_timer.FrameEnd();
 }
 
-bool SceneWallpaper::inited() const { return m_main_handler->inited(); }
-
-bool SceneWallpaper::init() { return m_main_handler->init(); }
-
-void SceneWallpaper::initVulkan(RenderInitInfo info) {
-    m_offscreen = info.offscreen;
-    std::shared_ptr<RenderInitInfo> sp_info =
-        std::make_shared<RenderInitInfo>(std::move(info));
-    auto msg =
-        CreateMsgWithCmd(m_main_handler->renderHandler(), RenderHandler::CMD::CMD_INIT_VULKAN);
-    msg->setObject("info", sp_info);
-    msg->post();
+void RenderHandler::on(RenderSetFillMode&& m) {
+    m_fillmode = m.mode;
+    if (m_scene && renderInited()) {
+        m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+    }
 }
 
-void SceneWallpaper::play() {
-    auto msg = CreateMsgWithCmd(m_main_handler, MainHandler::CMD::CMD_STOP);
-    msg->setBool("value", false);
-    msg->post();
-}
-void SceneWallpaper::pause() {
-    auto msg = CreateMsgWithCmd(m_main_handler, MainHandler::CMD::CMD_STOP);
-    msg->setBool("value", true);
-    msg->post();
+void RenderHandler::on(RenderSetScene&& m) {
+    m_scene = std::move(m.scene);
+    if (m_rg) m_render->clearLastRenderGraph();
+    m_rg = sceneToRenderGraph(*m_scene);
+
+    if (m_main.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");
+    m_render->compileRenderGraph(*m_scene, *m_rg);
+    m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
 }
 
-void SceneWallpaper::mouseInput(double x, double y) {
-    m_main_handler->renderHandler()->setMousePos(x, y);
-}
+void RenderHandler::on(RenderSetSpeed&& m) { m_speed = m.speed; }
 
-#define BASIC_TYPE(NAME, TYPENAME)                                                       \
-    void SceneWallpaper::setProperty##NAME(std::string_view name, TYPENAME value) {      \
-        auto msg = CreateMsgWithCmd(m_main_handler, MainHandler::CMD::CMD_SET_PROPERTY); \
-        msg->setString("property", std::string(name));                                   \
-        msg->set##NAME("value", value);                                                  \
-        msg->post();                                                                     \
+void RenderHandler::on(RenderInit&& m) {
+    m_render->init(std::move(*m.info));
+
+    // Subscribe to ExSwapchain ready/extent/format changes. The
+    // callback runs on the render thread (sync for Local, from
+    // drainPendingDirective for Bridge); we just relay it as a
+    // RenderSwapchainReady message back to ourselves so the actual
+    // handling happens through the normal loop path. Format reaches
+    // VulkanRender via ExSwapchain::format() directly; no need to
+    // round-trip it through this message.
+    if (auto* sw = m_render->exSwapchain()) {
+        if (m_render_tx) {
+            m_swapchain_tx = std::make_shared<RenderSender>(*m_render_tx);
+            std::weak_ptr<RenderSender> weak = m_swapchain_tx;
+            sw->setOnReadyChanged([weak](const ExSwapchainReadyEvent& e) {
+                if (auto tx = weak.lock()) {
+                    (void)tx->send(RenderMsg { RenderSwapchainReady {
+                        e.ready, e.width, e.height } });
+                }
+            });
+        }
     }
 
-BASIC_TYPE(Bool, bool);
-BASIC_TYPE(Int32, int32_t);
-BASIC_TYPE(Float, float);
-BASIC_TYPE(String, std::string);
-BASIC_TYPE(Object, std::shared_ptr<void>);
-
-int SceneWallpaper::takeLastFrameSyncFd() {
-    return m_main_handler->renderHandler()->takeLastFrameSyncFd();
+    // inited, callback to load scene
+    if (m_main_tx) (void)m_main_tx->send(MainMsg { MainLoadScene {} });
 }
 
-ExSwapchain* SceneWallpaper::exSwapchain() const {
-    return m_main_handler->renderHandler()->exSwapchain();
-}
-
-bool SceneWallpaper::getDrmRenderNode(uint32_t& out_major,
-                                      uint32_t& out_minor) const {
-    return m_main_handler->renderHandler()->getDrmRenderNode(out_major,
-                                                              out_minor);
-}
-
-bool SceneWallpaper::waitVulkanInited(uint32_t timeout_ms) {
-    using clock = std::chrono::steady_clock;
-    auto deadline = clock::now() + std::chrono::milliseconds(timeout_ms);
-    auto rh = m_main_handler->renderHandler();
-    while (clock::now() < deadline) {
-        if (rh->renderInited()) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+void RenderHandler::on(RenderSwapchainReady&& m) {
+    if (! m.ready) {
+        frame_timer.Stop();
+        return;
     }
-    return rh->renderInited();
+    bool extent_changed = m_render->onSwapchainReady(m.width, m.height);
+    if (extent_changed && m_scene && m_rg) {
+        m_render->clearLastRenderGraph();
+        m_render->compileRenderGraph(*m_scene, *m_rg);
+        m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+    }
+    frame_timer.Run();
 }
 
-VkInstance SceneWallpaper::vkInstance() const {
-    return m_main_handler->renderHandler()->render()->vkInstance();
-}
-VkPhysicalDevice SceneWallpaper::vkPhysicalDevice() const {
-    return m_main_handler->renderHandler()->render()->vkPhysicalDevice();
-}
-VkDevice SceneWallpaper::vkDevice() const {
-    return m_main_handler->renderHandler()->render()->vkDevice();
-}
-VkQueue SceneWallpaper::vkGraphicsQueue() const {
-    return m_main_handler->renderHandler()->render()->vkGraphicsQueue();
-}
-uint32_t SceneWallpaper::vkGraphicsQueueFamily() const {
-    return m_main_handler->renderHandler()->render()->vkGraphicsQueueFamily();
-}
-void SceneWallpaper::deviceUuid(uint8_t out[16]) const {
-    m_main_handler->renderHandler()->render()->deviceUuid(out);
-}
-void SceneWallpaper::driverUuid(uint8_t out[16]) const {
-    m_main_handler->renderHandler()->render()->driverUuid(out);
-}
+// ---- MainHandler message handlers ------------------------------------------
 
-MHANDLER_CMD_IMPL(MainHandler, LOAD_SCENE) {
+void MainHandler::on(MainLoadScene&&) {
     if (m_render_handler->renderInited()) {
         loadScene();
     }
 }
 
-MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
-    std::string property;
-    if (msg->findString("property", &property)) {
-        if (property == PROPERTY_SOURCE) {
-            msg->findString("value", &m_source);
+void MainHandler::on(MainSetProperty&& m) {
+    const auto& property = m.key;
+    const auto& value    = m.value;
+
+    if (property == PROPERTY_SOURCE) {
+        if (auto* p = std::get_if<std::string>(&value)) {
+            m_source = *p;
             LOG_INFO("source: %s", m_source.c_str());
-            CALL_MHANDLER_CMD(LOAD_SCENE, msg);
-        } else if (property == PROPERTY_ASSETS) {
-            msg->findString("value", &m_assets);
-            CALL_MHANDLER_CMD(LOAD_SCENE, msg);
-        } else if (property == PROPERTY_FPS) {
-            int32_t fps { 15 };
-            msg->findInt32("value", &fps);
+            on(MainLoadScene {});
+        }
+    } else if (property == PROPERTY_ASSETS) {
+        if (auto* p = std::get_if<std::string>(&value)) {
+            m_assets = *p;
+            on(MainLoadScene {});
+        }
+    } else if (property == PROPERTY_FPS) {
+        if (auto* p = std::get_if<int32_t>(&value)) {
+            int32_t fps = *p;
             if (fps >= 5) {
                 m_render_handler->frame_timer.SetRequiredFps((uint8_t)fps);
             }
-        } else if (property == PROPERTY_FILLMODE) {
-            int32_t value;
-            if (msg->findInt32("value", &value)) {
-                auto nmsg =
-                    CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_FILLMODE);
-                nmsg->setInt32("value", value);
-                nmsg->post();
-            }
-        } else if (property == PROPERTY_GRAPHIVZ) {
-            msg->findBool("value", &m_gen_graphviz);
-        } else if (property == PROPERTY_MUTED) {
-            bool muted { false };
-            msg->findBool("value", &muted);
-            m_sound_manager->SetMuted(muted);
-        } else if (property == PROPERTY_VOLUME) {
-            float volume { 1.0f };
-            msg->findFloat("value", &volume);
-            m_sound_manager->SetVolume(volume);
-        } else if (property == PROPERTY_CACHE_PATH) {
-            std::string path;
-            msg->findString("value", &path);
-            m_cache_path = path;
-        } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
-            std::shared_ptr<FirstFrameCallback> cb;
-            msg->findObject("value", &cb);
-            m_first_frame_callback = *cb;
-        } else if (property == PROPERTY_SPEED) {
-            float speed { 1.0f };
-            if (msg->findFloat("value", &speed)) {
-                auto nmsg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_SPEED);
-                nmsg->setFloat("value", speed);
-                nmsg->post();
-            }
+        }
+    } else if (property == PROPERTY_FILLMODE) {
+        if (auto* p = std::get_if<int32_t>(&value)) {
+            (void)m_render_loop.sender().send(
+                RenderMsg { RenderSetFillMode { (FillMode)*p } });
+        }
+    } else if (property == PROPERTY_GRAPHIVZ) {
+        if (auto* p = std::get_if<bool>(&value)) m_gen_graphviz = *p;
+    } else if (property == PROPERTY_MUTED) {
+        if (auto* p = std::get_if<bool>(&value)) m_sound_manager->SetMuted(*p);
+    } else if (property == PROPERTY_VOLUME) {
+        if (auto* p = std::get_if<float>(&value)) m_sound_manager->SetVolume(*p);
+    } else if (property == PROPERTY_CACHE_PATH) {
+        if (auto* p = std::get_if<std::string>(&value)) m_cache_path = *p;
+    } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
+        if (auto* p = std::get_if<std::shared_ptr<FirstFrameCallback>>(&value)) {
+            m_first_frame_callback = **p;
+        }
+    } else if (property == PROPERTY_SPEED) {
+        if (auto* p = std::get_if<float>(&value)) {
+            (void)m_render_loop.sender().send(RenderMsg { RenderSetSpeed { *p } });
         }
     }
 }
 
-MHANDLER_CMD_IMPL(MainHandler, STOP) {
-    bool stop { false };
-    if (msg->findBool("value", &stop)) {
-        if (stop) {
-            m_sound_manager->Pause();
-        } else {
-            m_sound_manager->Play();
-        }
-
-        auto msg_r = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_STOP);
-        msg_r->setBool("value", stop);
-        msg_r->post();
+void MainHandler::on(MainStop&& m) {
+    if (m.stop) {
+        m_sound_manager->Pause();
+    } else {
+        m_sound_manager->Play();
     }
+    (void)m_render_loop.sender().send(RenderMsg { RenderStop { m.stop } });
 }
 
-MHANDLER_CMD_IMPL(MainHandler, FIRST_FRAME) {
+void MainHandler::on(MainFirstFrame&&) {
     if (m_first_frame_callback) m_first_frame_callback();
 }
 
@@ -561,43 +443,32 @@ void MainHandler::loadScene() {
         scene->vfs.reset(pVfs.release());
     }
 
-    {
-        auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_SCENE);
-        msg->setObject("scene", scene);
-        msg->post();
-    }
-
+    auto rtx = m_render_loop.sender();
+    (void)rtx.send(RenderMsg { RenderSetScene { scene } });
     // draw first frame
-    {
-        auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_DRAW);
-        msg->post();
-    }
-}
-void MainHandler::sendCmdLoadScene() {
-    auto msg = CreateMsgWithCmd(shared_from_this(), MainHandler::CMD::CMD_LOAD_SCENE);
-    msg->post();
-}
-void MainHandler::sendFirstFrameOk() {
-    auto msg = CreateMsgWithCmd(shared_from_this(), MainHandler::CMD::CMD_FIRST_FRAME);
-    msg->post();
+    (void)rtx.send(RenderMsg { RenderDraw {} });
 }
 
 bool MainHandler::init() {
     if (m_inited) return true;
-    m_main_loop->setName("main");
-    m_render_loop->setName("render");
 
-    m_main_loop->start();
-    m_render_loop->start();
+    // Wire render handler senders before starting the loops; otherwise an
+    // early RenderInit could fire before they're set.
+    m_render_handler->setSenders(m_render_loop.sender(), m_main_loop.sender());
 
-    m_main_loop->registerHandler(shared_from_this());
-    m_render_loop->registerHandler(m_render_handler);
+    m_main_loop.start([this](MainMsg&& m) {
+        std::visit([this](auto&& v) { on(std::move(v)); }, std::move(m.v));
+    });
+    m_render_loop.start([this](RenderMsg&& m) {
+        std::visit([this](auto&& v) { m_render_handler->on(std::move(v)); },
+                   std::move(m.v));
+    });
 
     {
-        auto  msg        = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_DRAW);
         auto& frameTimer = m_render_handler->frame_timer;
-        frameTimer.SetCallback([msg]() {
-            msg->post();
+        auto  rtx        = m_render_loop.sender();
+        frameTimer.SetCallback([rtx]() mutable {
+            (void)rtx.send(RenderMsg { RenderDraw {} });
         });
         frameTimer.SetRequiredFps(15);
         frameTimer.Run();
@@ -606,8 +477,134 @@ bool MainHandler::init() {
     m_inited = true;
     return true;
 }
+
 MainHandler::MainHandler()
     : m_sound_manager(std::make_unique<audio::SoundManager>()),
-      m_main_loop(std::make_shared<looper::Looper>()),
-      m_render_loop(std::make_shared<looper::Looper>()),
-      m_render_handler(std::make_shared<RenderHandler>(*this)) {}
+      m_main_loop("main"),
+      m_render_loop("render"),
+      m_render_handler(std::make_unique<RenderHandler>(*this)) {}
+
+MainHandler::~MainHandler() {
+    // Orderly shutdown: drain both loops *before* RenderHandler dies, so
+    // m_render->destroy() doesn't race with an in-flight RenderDraw.
+    //
+    //   1. Stop the frame timer (joins its thread → no more Draw posts).
+    //   2. Replace the timer callback with a no-op so the captured render
+    //      Sender clone is released.
+    //   3. Drop every Sender clone the render handler holds, including the
+    //      strong ref the swapchain callback weak-captures.
+    //   4. Stop the render loop — drops engine sender, recv() returns Err
+    //      after the in-flight handler returns, thread joins.
+    //   5. Same for the main loop.
+    //   6. Default member destruction then runs RenderHandler's dtor with
+    //      the render thread already gone, so destroy() is single-threaded.
+    if (m_render_handler) {
+        m_render_handler->frame_timer.Stop();
+        m_render_handler->frame_timer.SetCallback([] {});
+        m_render_handler->clearSenders();
+    }
+    m_render_loop.stop();
+    m_main_loop.stop();
+}
+
+} // namespace wallpaper
+
+SceneWallpaper::SceneWallpaper(): m_main_handler(std::make_unique<MainHandler>()) {}
+
+SceneWallpaper::~SceneWallpaper() = default;
+
+bool SceneWallpaper::inited() const { return m_main_handler->inited(); }
+
+bool SceneWallpaper::init() { return m_main_handler->init(); }
+
+void SceneWallpaper::initVulkan(RenderInitInfo info) {
+    m_offscreen = info.offscreen;
+    auto sp     = std::make_shared<RenderInitInfo>(std::move(info));
+    (void)m_main_handler->renderSender().send(
+        RenderMsg { RenderInit { std::move(sp) } });
+}
+
+void SceneWallpaper::play() {
+    (void)m_main_handler->mainSender().send(MainMsg { MainStop { false } });
+}
+void SceneWallpaper::pause() {
+    (void)m_main_handler->mainSender().send(MainMsg { MainStop { true } });
+}
+
+void SceneWallpaper::mouseInput(double x, double y) {
+    m_main_handler->renderHandler()->setMousePos(x, y);
+}
+
+void SceneWallpaper::setPropertyBool(std::string_view name, bool value) {
+    (void)m_main_handler->mainSender().send(MainMsg {
+        MainSetProperty { std::string(name), PropertyValue { value } } });
+}
+void SceneWallpaper::setPropertyInt32(std::string_view name, int32_t value) {
+    (void)m_main_handler->mainSender().send(MainMsg {
+        MainSetProperty { std::string(name), PropertyValue { value } } });
+}
+void SceneWallpaper::setPropertyFloat(std::string_view name, float value) {
+    (void)m_main_handler->mainSender().send(MainMsg {
+        MainSetProperty { std::string(name), PropertyValue { value } } });
+}
+void SceneWallpaper::setPropertyString(std::string_view name, std::string value) {
+    (void)m_main_handler->mainSender().send(MainMsg { MainSetProperty {
+        std::string(name), PropertyValue { std::move(value) } } });
+}
+void SceneWallpaper::setPropertyObject(std::string_view name, std::shared_ptr<void> value) {
+    // Currently the only object property is the first-frame callback. Cast at
+    // the API boundary so the typed message stays self-describing.
+    if (name == PROPERTY_FIRST_FRAME_CALLBACK) {
+        std::shared_ptr<FirstFrameCallback> cb {
+            value, reinterpret_cast<FirstFrameCallback*>(value.get()) };
+        (void)m_main_handler->mainSender().send(MainMsg { MainSetProperty {
+            std::string(name), PropertyValue { std::move(cb) } } });
+    }
+}
+
+int SceneWallpaper::takeLastFrameSyncFd() {
+    return m_main_handler->renderHandler()->takeLastFrameSyncFd();
+}
+
+ExSwapchain* SceneWallpaper::exSwapchain() const {
+    return m_main_handler->renderHandler()->exSwapchain();
+}
+
+bool SceneWallpaper::getDrmRenderNode(uint32_t& out_major,
+                                      uint32_t& out_minor) const {
+    return m_main_handler->renderHandler()->getDrmRenderNode(out_major,
+                                                              out_minor);
+}
+
+bool SceneWallpaper::waitVulkanInited(uint32_t timeout_ms) {
+    using clock   = std::chrono::steady_clock;
+    auto deadline = clock::now() + std::chrono::milliseconds(timeout_ms);
+    auto rh       = m_main_handler->renderHandler();
+    while (clock::now() < deadline) {
+        if (rh->renderInited()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return rh->renderInited();
+}
+
+VkInstance SceneWallpaper::vkInstance() const {
+    return m_main_handler->renderHandler()->render()->vkInstance();
+}
+VkPhysicalDevice SceneWallpaper::vkPhysicalDevice() const {
+    return m_main_handler->renderHandler()->render()->vkPhysicalDevice();
+}
+VkDevice SceneWallpaper::vkDevice() const {
+    return m_main_handler->renderHandler()->render()->vkDevice();
+}
+VkQueue SceneWallpaper::vkGraphicsQueue() const {
+    return m_main_handler->renderHandler()->render()->vkGraphicsQueue();
+}
+uint32_t SceneWallpaper::vkGraphicsQueueFamily() const {
+    return m_main_handler->renderHandler()->render()->vkGraphicsQueueFamily();
+}
+void SceneWallpaper::deviceUuid(uint8_t out[16]) const {
+    m_main_handler->renderHandler()->render()->deviceUuid(out);
+}
+void SceneWallpaper::driverUuid(uint8_t out[16]) const {
+    m_main_handler->renderHandler()->render()->driverUuid(out);
+}

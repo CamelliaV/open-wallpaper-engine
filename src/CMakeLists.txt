@@ -72,7 +72,6 @@ add_library(
   WPJson.cpp
   WPPkgFs.cpp
   Audio/SoundManager.cpp
-  Looper/Looper.cpp
   Timer/ThreadTimer.cpp
   Timer/FrameTimer.cpp
   Scene/Scene.cpp
@@ -94,7 +93,7 @@ target_sources(
          WPPkgFs.cppm
          Utils/Utils.cppm
          Audio/SoundManager.cppm
-         Looper/Looper.cppm
+         MessageLoop/MessageLoop.cppm
          Timer/Timer.cppm
          Timer/ThreadTimer.cppm
          Timer/FrameTimer.cppm

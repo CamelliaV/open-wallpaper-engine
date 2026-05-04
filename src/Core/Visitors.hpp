@@ -8,8 +8,6 @@ namespace visitor
 template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
 template<class... Ts> overload(Ts...) -> overload<Ts...>;
 
-struct NoType {};
-
 struct EqualVisitor
 {
     using result_type = bool;
@@ -26,12 +24,6 @@ struct EqualVisitor
     {
         // Same types : compare values
         return v1 == v2;
-    }
-
-    bool operator()(NoType, NoType) const
-    {
-        // No type (empty values) : they're considered equal
-        return true;
     }
 };
 
