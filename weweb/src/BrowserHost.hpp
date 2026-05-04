@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
@@ -7,10 +8,26 @@
 
 namespace weweb {
 
+class OsrRenderHandler;
+class ClientHandler;
+
+// Snapshot of the latest OSR frame. While alive, holds the OSR
+// handler's mutex; release with BrowserHost::UnlockFrame.
+struct FrameLock {
+    const std::uint8_t* pixels{nullptr};
+    int                 width{0};
+    int                 height{0};
+    bool                fresh{false};
+};
+
 // Owns the CEF browser lifecycle for one webviewer process. Standard
 // same-binary multi-process model: helper procs early-exit via
 // `RunOrExitIfHelper`; the main browser proc continues into Init +
 // OpenWallpaper + Pump loop + Shutdown.
+//
+// v2 OSR: the browser renders into a CPU bitmap delivered by
+// OsrRenderHandler::OnPaint. The viewer owns the host window (Vulkan
+// surface) and uploads each frame to the GPU.
 class BrowserHost {
 public:
     struct InitOptions {
@@ -39,14 +56,36 @@ public:
     // -fno-exceptions so we can't throw.
     bool Init(const InitOptions& opts);
 
-    // Open the given wallpaper in a child window of `parent_x11_window`.
-    // The entry HTML is loaded from `file://<workshop_dir>/<entry_html>`
-    // and the manifest's user properties are injected on first load.
-    // Returns false if Init has not been called.
+    // Spawn a windowless (OSR) browser for the wallpaper. The entry HTML
+    // is loaded from `file://<workshop_dir>/<entry_html>` and the
+    // manifest's user properties are injected on first load. The caller
+    // accesses pixels via the returned OsrRenderHandler. Initial logical
+    // size is `width` x `height`; resize via OnResize.
     bool OpenWallpaper(const WebManifest& manifest,
                        const std::filesystem::path& workshop_dir,
-                       unsigned long parent_x11_window,
                        int width, int height);
+
+    // Lock the latest CEF-painted frame. The returned pointer is valid
+    // until UnlockFrame() is called. The bool `fresh` indicates whether
+    // the frame changed since the last lock. While the frame is locked,
+    // CEF's UI thread cannot deliver a new OnPaint, so do the GPU upload
+    // and unlock as quickly as possible.
+    FrameLock LockFrame();
+    void      UnlockFrame();
+
+    // Notify CEF that the host window changed size. Updates GetViewRect's
+    // returned rect so the next OnPaint matches `width` x `height`.
+    void OnResize(int width, int height);
+
+    // Forward GLFW input events into the live browser. Coordinates are in
+    // logical pixels matching the GetViewRect rect.
+    void OnMouseMove(int x, int y, bool left_down);
+    void OnMouseButton(int x, int y, int cef_button, bool down, int click_count);
+    void OnMouseWheel(int x, int y, int delta_x, int delta_y);
+    void OnKey(int cef_key_event_type, int native_key_code,
+               int windows_key_code, int modifiers,
+               unsigned int unicode_char);
+    void OnFocus(bool gained);
 
     // Pump the CEF message loop once. Caller drives this from their main
     // event loop alongside whatever windowing-system polling they do.

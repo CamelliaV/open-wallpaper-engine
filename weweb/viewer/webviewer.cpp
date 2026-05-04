@@ -1,20 +1,21 @@
-// weweb standalone GLFW + CEF viewer.
+// weweb standalone GLFW + Vulkan + CEF (OSR) viewer.
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <thread>
 
-#define GLFW_EXPOSE_NATIVE_X11
 #include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 
 #include <argparse/argparse.hpp>
 
 #include "BrowserHost.hpp"
 #include "Manifest.hpp"
+
+#include "VulkanBlitter.hpp"
 
 namespace {
 
@@ -30,11 +31,59 @@ std::filesystem::path ExecutableDir(const char* argv0) {
     return fs::path(argv0).parent_path();
 }
 
-GLFWwindow* g_window = nullptr;
+struct ViewerCtx {
+    weweb::BrowserHost*  host{nullptr};
+    weweb::VulkanBlitter* blitter{nullptr};
+    bool need_swapchain_recreate{false};
+};
 
-void OnFramebufferResize(GLFWwindow*, int /*w*/, int /*h*/) {
-    // CEF's child window resizes itself to match its parent automatically
-    // via the X11 ResizeRedirectMask CEF sets up. Nothing to do here.
+// CEF mouse button codes match cef_mouse_button_type_t: 0=L, 1=M, 2=R.
+int CefButtonFromGlfw(int glfw_button) {
+    switch (glfw_button) {
+        case GLFW_MOUSE_BUTTON_LEFT:   return 0;
+        case GLFW_MOUSE_BUTTON_MIDDLE: return 1;
+        case GLFW_MOUSE_BUTTON_RIGHT:  return 2;
+        default:                       return -1;
+    }
+}
+
+void OnFramebufferSize(GLFWwindow* w, int /*fb_w*/, int /*fb_h*/) {
+    auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
+    if (ctx) ctx->need_swapchain_recreate = true;
+}
+
+void OnCursorPos(GLFWwindow* w, double x, double y) {
+    auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
+    if (!ctx || !ctx->host) return;
+    bool left = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    ctx->host->OnMouseMove(static_cast<int>(x), static_cast<int>(y), left);
+}
+
+void OnMouseButton(GLFWwindow* w, int button, int action, int /*mods*/) {
+    auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
+    if (!ctx || !ctx->host) return;
+    int cef_btn = CefButtonFromGlfw(button);
+    if (cef_btn < 0) return;
+    double x = 0, y = 0;
+    glfwGetCursorPos(w, &x, &y);
+    ctx->host->OnMouseButton(static_cast<int>(x), static_cast<int>(y),
+                             cef_btn, action == GLFW_PRESS, /*click_count=*/1);
+}
+
+void OnScroll(GLFWwindow* w, double dx, double dy) {
+    auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
+    if (!ctx || !ctx->host) return;
+    double x = 0, y = 0;
+    glfwGetCursorPos(w, &x, &y);
+    // GLFW scroll units are "wheel notches"; CEF expects pixel-ish deltas.
+    ctx->host->OnMouseWheel(static_cast<int>(x), static_cast<int>(y),
+                            static_cast<int>(dx * 40),
+                            static_cast<int>(dy * 40));
+}
+
+void OnFocus(GLFWwindow* w, int focused) {
+    auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
+    if (ctx && ctx->host) ctx->host->OnFocus(focused == GLFW_TRUE);
 }
 
 }  // namespace
@@ -80,67 +129,125 @@ int main(int argc, char** argv) {
     }
 
     auto manifest_opt = weweb::LoadWebManifest(workshop_dir);
-    if (!manifest_opt) return 2;  // LoadWebManifest already logged.
+    if (!manifest_opt) return 2;
     auto& manifest = *manifest_opt;
 
-    // Force GLFW to use the X11 backend. CEF Linux's child-window mode
-    // wants an X11 Window handle; on Wayland sessions GLFW will route via
-    // XWayland once we set this hint.
+    // Force GLFW to use the X11 backend. CEF in OSR mode still ends up
+    // initialising Ozone (clipboard, font fallback, …) and we run with
+    // --ozone-platform=x11; matching the toolkit avoids cross-display
+    // synchronization weirdness.
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     if (!glfwInit()) {
         std::cerr << "webviewer: glfwInit failed\n";
+        return 1;
+    }
+    if (!glfwVulkanSupported()) {
+        std::cerr << "webviewer: glfw says Vulkan is not supported\n";
+        glfwTerminate();
         return 1;
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     int w_width  = p.get<int>("--width");
     int w_height = p.get<int>("--height");
-    g_window = glfwCreateWindow(w_width, w_height,
-                                manifest.title.c_str(), nullptr, nullptr);
-    if (!g_window) {
-        std::cerr << "webviewer: glfwCreateWindow failed (X11 unavailable?)\n";
+    GLFWwindow* window = glfwCreateWindow(w_width, w_height,
+                                          manifest.title.c_str(),
+                                          nullptr, nullptr);
+    if (!window) {
+        std::cerr << "webviewer: glfwCreateWindow failed\n";
         glfwTerminate();
         return 1;
     }
-    glfwSetFramebufferSizeCallback(g_window, OnFramebufferResize);
+
+    weweb::VulkanBlitter blitter;
+    if (!blitter.Init(window)) {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
 
     auto exe_dir = ExecutableDir(argv[0]);
 
     weweb::BrowserHost::InitOptions opts;
     opts.resources_dir = exe_dir;
     opts.locales_dir   = exe_dir / "locales";
-    // Use CEF's default per-user cache; setting a path here is optional.
     if (int port = p.get<int>("--remote-debugging-port"); port > 0) {
         opts.enable_remote_debugging = true;
         opts.remote_debugging_port   = port;
     }
 
     if (!host.Init(opts)) {
-        glfwDestroyWindow(g_window);
+        blitter.Shutdown();
+        glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
     }
 
-    Window x11_window = glfwGetX11Window(g_window);
-    if (!host.OpenWallpaper(manifest, workshop_dir,
-                            static_cast<unsigned long>(x11_window),
-                            w_width, w_height)) {
+    // Open the wallpaper at the swapchain extent — CEF renders straight
+    // into our swapchain-pixel space, no rescaling needed.
+    int initial_w = static_cast<int>(blitter.Width());
+    int initial_h = static_cast<int>(blitter.Height());
+    if (!host.OpenWallpaper(manifest, workshop_dir, initial_w, initial_h)) {
         host.Shutdown();
-        glfwDestroyWindow(g_window);
+        blitter.Shutdown();
+        glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
     }
 
-    // Pump GLFW + CEF together. ~60Hz nominal — CefDoMessageLoopWork is
-    // cheap, and glfwPollEvents returns immediately when no events queue.
-    while (!glfwWindowShouldClose(g_window) && !host.ShouldExit()) {
+    ViewerCtx ctx;
+    ctx.host    = &host;
+    ctx.blitter = &blitter;
+    glfwSetWindowUserPointer(window, &ctx);
+    glfwSetFramebufferSizeCallback(window, OnFramebufferSize);
+    glfwSetCursorPosCallback     (window, OnCursorPos);
+    glfwSetMouseButtonCallback   (window, OnMouseButton);
+    glfwSetScrollCallback        (window, OnScroll);
+    glfwSetWindowFocusCallback   (window, OnFocus);
+
+    // Main loop. ~60Hz nominal. CefDoMessageLoopWork is cheap; the
+    // Vulkan FIFO present pacing also throttles us.
+    while (!glfwWindowShouldClose(window) && !host.ShouldExit()) {
         glfwPollEvents();
         host.Pump();
-        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+
+        if (ctx.need_swapchain_recreate) {
+            int fbw = 0, fbh = 0;
+            glfwGetFramebufferSize(window, &fbw, &fbh);
+            if (fbw > 0 && fbh > 0) {
+                if (!blitter.Resize()) {
+                    std::cerr << "webviewer: blitter Resize failed\n";
+                    break;
+                }
+                host.OnResize(static_cast<int>(blitter.Width()),
+                              static_cast<int>(blitter.Height()));
+                ctx.need_swapchain_recreate = false;
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                continue;
+            }
+        }
+
+        // Pull the latest CEF frame (may be stale on first iterations).
+        // The lock holds OSR's mutex — render fast and unlock.
+        auto lk = host.LockFrame();
+        const std::uint8_t* pixels = nullptr;
+        // Only forward a buffer that matches the swapchain extent —
+        // between OnResize and CEF's next paint there's a window where
+        // dimensions disagree.
+        if (lk.pixels &&
+            lk.width  == static_cast<int>(blitter.Width()) &&
+            lk.height == static_cast<int>(blitter.Height())) {
+            pixels = lk.pixels;
+        }
+        bool ok = blitter.RenderFrame(pixels);
+        host.UnlockFrame();
+        if (!ok) ctx.need_swapchain_recreate = true;
     }
 
     host.Shutdown();
-    glfwDestroyWindow(g_window);
+    blitter.Shutdown();
+    glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
 }

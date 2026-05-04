@@ -15,6 +15,7 @@ add_library(weweb-host STATIC
     src/UserProperties.cpp
     src/AppHandler.cpp
     src/ClientHandler.cpp
+    src/OsrRenderHandler.cpp
     src/BrowserHost.cpp)
 target_include_directories(weweb-host PUBLIC src)
 target_link_libraries(weweb-host

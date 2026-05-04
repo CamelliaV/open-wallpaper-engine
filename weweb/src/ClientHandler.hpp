@@ -10,6 +10,8 @@
 #include "include/cef_life_span_handler.h"
 #include "include/cef_load_handler.h"
 
+#include "OsrRenderHandler.hpp"
+
 namespace weweb {
 
 class ClientHandler : public CefClient,
@@ -17,15 +19,23 @@ class ClientHandler : public CefClient,
                       public CefLoadHandler,
                       public CefDisplayHandler {
 public:
-    explicit ClientHandler(nlohmann::json user_props);
+    explicit ClientHandler(nlohmann::json user_props,
+                           CefRefPtr<OsrRenderHandler> render_handler);
 
     // Called from BrowserHost — fired once when the browser closes.
     void SetCloseCallback(std::function<void()> cb);
+
+    // Stash the live browser ref so the viewer can call WasResized() /
+    // SendMouseMoveEvent() / etc. without going through CEF's task queue.
+    CefRefPtr<CefBrowser> GetBrowser() const { return browser_; }
 
     // CefClient.
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefLoadHandler>     GetLoadHandler()     override { return this; }
     CefRefPtr<CefDisplayHandler>  GetDisplayHandler()  override { return this; }
+    CefRefPtr<CefRenderHandler>   GetRenderHandler()   override {
+        return render_handler_;
+    }
 
     // CefLifeSpanHandler.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
@@ -46,6 +56,8 @@ public:
 
 private:
     nlohmann::json user_props_;
+    CefRefPtr<OsrRenderHandler> render_handler_;
+    CefRefPtr<CefBrowser> browser_;
     std::function<void()> close_cb_;
     std::atomic<bool> property_injected_{false};
 

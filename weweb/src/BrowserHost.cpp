@@ -8,14 +8,16 @@
 
 #include "AppHandler.hpp"
 #include "ClientHandler.hpp"
+#include "OsrRenderHandler.hpp"
 
 namespace weweb {
 
 struct BrowserHost::Impl {
-    CefRefPtr<AppHandler>    app;
-    CefRefPtr<ClientHandler> client;
-    std::atomic<bool>        should_exit{false};
-    bool                     initialised{false};
+    CefRefPtr<AppHandler>          app;
+    CefRefPtr<OsrRenderHandler>    osr;
+    CefRefPtr<ClientHandler>       client;
+    std::atomic<bool>              should_exit{false};
+    bool                           initialised{false};
     // Stash the original argv from RunOrExitIfHelper; CefInitialize needs
     // the real argv to derive the per-child --type=… / --icu-data-file=…
     // switches it forwards to subprocesses.
@@ -44,33 +46,17 @@ bool BrowserHost::Init(const InitOptions& opts) {
         return false;
     }
 
-    // Browser process Init. Hand CEF the original argv (saved during
-    // RunOrExitIfHelper) — without the real argv, CEF can't materialise
-    // the internal command line it forwards to child processes, and
-    // helpers SIGABRT in ICU init with "Invalid file descriptor to ICU
-    // data received." argparse has already consumed argv but the array
-    // is still valid memory.
     CefMainArgs main_args(impl_->saved_argc, impl_->saved_argv);
 
     CefSettings settings;
     settings.no_sandbox                   = true;
-    settings.windowless_rendering_enabled = false;
+    settings.windowless_rendering_enabled = true;   // OSR mode
     settings.multi_threaded_message_loop  = false;
-    // Leave command_line_args_disabled at its default (false). Setting it
-    // true blocks CEF from materialising the *internal* argv that gets
-    // passed to child processes, which then SIGABRT in ICU init with
-    // "Invalid file descriptor to ICU data received." The user-supplied
-    // positional `workshop` arg only reaches the *browser* process here
-    // (helpers re-enter through RunOrExitIfHelper before argparse), so
-    // adopting argv is harmless — Chromium ignores unknown args.
     settings.log_severity                 = LOGSEVERITY_WARNING;
 
     auto set_cef_path = [](cef_string_t* dest,
                            const std::filesystem::path& p) {
         if (p.empty()) return;
-        // Wrap dest in a temp CefString and assign — using brace-init to
-        // dodge the C++ vexing parse where `CefString(dest)` would be
-        // read as a redundant-parens declaration of `dest`.
         CefString cef_str{dest};
         cef_str = p.string();
     };
@@ -92,14 +78,16 @@ bool BrowserHost::Init(const InitOptions& opts) {
 
 bool BrowserHost::OpenWallpaper(const WebManifest& manifest,
                                 const std::filesystem::path& workshop_dir,
-                                unsigned long parent_x11_window,
                                 int width, int height) {
     if (!impl_->initialised) {
         std::fprintf(stderr, "weweb: OpenWallpaper before Init\n");
         return false;
     }
 
-    impl_->client = new ClientHandler(manifest.user_props);
+    impl_->osr = new OsrRenderHandler();
+    impl_->osr->SetViewSize(width, height);
+
+    impl_->client = new ClientHandler(manifest.user_props, impl_->osr);
     impl_->client->SetCloseCallback([this] {
         impl_->should_exit.store(true);
     });
@@ -108,8 +96,7 @@ bool BrowserHost::OpenWallpaper(const WebManifest& manifest,
     std::string url = "file://" + entry.string();
 
     CefWindowInfo info;
-    CefRect rect{0, 0, width, height};
-    info.SetAsChild(static_cast<CefWindowHandle>(parent_x11_window), rect);
+    info.SetAsWindowless(0);  // no parent window — pure OSR
 
     CefBrowserSettings browser_settings;
     browser_settings.windowless_frame_rate = 60;
@@ -117,6 +104,90 @@ bool BrowserHost::OpenWallpaper(const WebManifest& manifest,
     CefBrowserHost::CreateBrowser(info, impl_->client.get(), url,
                                   browser_settings, nullptr, nullptr);
     return true;
+}
+
+FrameLock BrowserHost::LockFrame() {
+    FrameLock out;
+    if (!impl_->osr) return out;
+    auto inner = impl_->osr->LockLatestFrame();
+    out.pixels = inner.pixels;
+    out.width  = inner.width;
+    out.height = inner.height;
+    out.fresh  = inner.fresh;
+    return out;
+}
+
+void BrowserHost::UnlockFrame() {
+    if (impl_->osr) impl_->osr->UnlockLatestFrame();
+}
+
+void BrowserHost::OnResize(int width, int height) {
+    if (width <= 0 || height <= 0) return;
+    if (!impl_->osr) return;
+    impl_->osr->SetViewSize(width, height);
+    if (!impl_->client) return;
+    if (auto b = impl_->client->GetBrowser(); b && b->GetHost()) {
+        b->GetHost()->WasResized();
+    }
+}
+
+void BrowserHost::OnMouseMove(int x, int y, bool left_down) {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (!b || !b->GetHost()) return;
+    CefMouseEvent ev;
+    ev.x = x;
+    ev.y = y;
+    ev.modifiers = left_down ? EVENTFLAG_LEFT_MOUSE_BUTTON : 0;
+    b->GetHost()->SendMouseMoveEvent(ev, /*mouseLeave=*/false);
+}
+
+void BrowserHost::OnMouseButton(int x, int y, int cef_button,
+                                bool down, int click_count) {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (!b || !b->GetHost()) return;
+    CefMouseEvent ev;
+    ev.x = x;
+    ev.y = y;
+    b->GetHost()->SendMouseClickEvent(
+        ev,
+        static_cast<cef_mouse_button_type_t>(cef_button),
+        /*mouseUp=*/!down,
+        click_count);
+}
+
+void BrowserHost::OnMouseWheel(int x, int y, int delta_x, int delta_y) {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (!b || !b->GetHost()) return;
+    CefMouseEvent ev;
+    ev.x = x;
+    ev.y = y;
+    b->GetHost()->SendMouseWheelEvent(ev, delta_x, delta_y);
+}
+
+void BrowserHost::OnKey(int cef_key_event_type, int native_key_code,
+                        int windows_key_code, int modifiers,
+                        unsigned int unicode_char) {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (!b || !b->GetHost()) return;
+    CefKeyEvent ev;
+    ev.type             = static_cast<cef_key_event_type_t>(cef_key_event_type);
+    ev.native_key_code  = native_key_code;
+    ev.windows_key_code = windows_key_code;
+    ev.modifiers        = modifiers;
+    ev.character        = static_cast<char16_t>(unicode_char);
+    ev.unmodified_character = ev.character;
+    b->GetHost()->SendKeyEvent(ev);
+}
+
+void BrowserHost::OnFocus(bool gained) {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (!b || !b->GetHost()) return;
+    b->GetHost()->SetFocus(gained);
 }
 
 void BrowserHost::Pump() {

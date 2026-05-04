@@ -1,7 +1,12 @@
-add_executable(webviewer webviewer.cpp)
+find_package(Vulkan REQUIRED)
+
+add_executable(webviewer
+    webviewer.cpp
+    VulkanBlitter.cpp)
 target_link_libraries(webviewer PRIVATE
     weweb-host
     PkgConfig::GLFW
+    Vulkan::Vulkan
     argparse::argparse)
 
 target_link_libraries(webviewer PRIVATE ${CEF_STANDARD_LIBS})

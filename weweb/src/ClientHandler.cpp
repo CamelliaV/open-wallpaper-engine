@@ -6,15 +6,17 @@
 
 namespace weweb {
 
-ClientHandler::ClientHandler(nlohmann::json user_props)
-    : user_props_(std::move(user_props)) {}
+ClientHandler::ClientHandler(nlohmann::json user_props,
+                             CefRefPtr<OsrRenderHandler> render_handler)
+    : user_props_(std::move(user_props)),
+      render_handler_(std::move(render_handler)) {}
 
 void ClientHandler::SetCloseCallback(std::function<void()> cb) {
     close_cb_ = std::move(cb);
 }
 
-void ClientHandler::OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) {
-    // BrowserHost owns the lifecycle; we don't need a back-reference here.
+void ClientHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
+    browser_ = browser;
 }
 
 bool ClientHandler::DoClose(CefRefPtr<CefBrowser> /*browser*/) {
@@ -22,6 +24,7 @@ bool ClientHandler::DoClose(CefRefPtr<CefBrowser> /*browser*/) {
 }
 
 void ClientHandler::OnBeforeClose(CefRefPtr<CefBrowser> /*browser*/) {
+    browser_ = nullptr;
     if (close_cb_) close_cb_();
 }
 
