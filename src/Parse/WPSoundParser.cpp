@@ -23,7 +23,32 @@ static PlaybackMode ToPlaybackMode(std::string_view s) {
     return PlaybackMode::Loop;
 };
 
-class WPSoundStream : public audio::SoundStream {
+namespace {
+
+// Adapter: wallpaper::fs::IBinaryStream → wavsen::audio::IByteStream.
+class BStreamAdapter : public wavsen::audio::IByteStream {
+public:
+    explicit BStreamAdapter(std::shared_ptr<fs::IBinaryStream> s): inner(std::move(s)) {}
+
+    std::size_t read(void* dst, std::size_t bytes) override {
+        return inner->Read(dst, bytes);
+    }
+    bool seek(std::int64_t offset, Origin origin) override {
+        switch (origin) {
+        case Origin::Begin:   return inner->SeekSet(offset);
+        case Origin::Current: return inner->SeekCur(offset);
+        case Origin::End:     return inner->SeekEnd(offset);
+        }
+        return false;
+    }
+
+private:
+    std::shared_ptr<fs::IBinaryStream> inner;
+};
+
+} // namespace
+
+class WPSoundStream : public wavsen::audio::SoundStream {
 public:
     struct Config {
         float        maxtime { 10.0f };
@@ -35,17 +60,16 @@ public:
         : vfs(vfs), m_config(c), m_soundPaths(paths) {};
     virtual ~WPSoundStream() = default;
 
-    uint64_t NextPcmData(void* pData, uint32_t frameCount) override {
-        // first
+    uint64_t next_pcm(void* pData, uint32_t frameCount) override {
         if (! m_curActive) {
             Switch();
         }
 
-        // loop
-        uint64_t frameReads = m_curActive->NextPcmData(pData, frameCount);
+        // loop on EOF
+        uint64_t frameReads = m_curActive ? m_curActive->next_pcm(pData, frameCount) : 0;
         if (frameReads == 0) {
             Switch();
-            frameReads = m_curActive->NextPcmData(pData, frameCount);
+            frameReads = m_curActive ? m_curActive->next_pcm(pData, frameCount) : 0;
         }
         // volume
         {
@@ -57,11 +81,16 @@ public:
         }
         return frameReads;
     };
-    void PassDesc(const Desc& d) override { m_desc = d; }
+    void pass_desc(const Desc& d) override { m_desc = d; }
     void Switch() {
-        std::string path = m_soundPaths[LoopIndex()];
-        // LOG_INFO("Switch to audio file: %s", path.c_str());
-        m_curActive = audio::CreateSoundStream(vfs.Open("/assets/" + path), m_desc);
+        std::string path  = m_soundPaths[LoopIndex()];
+        auto        bin   = vfs.Open("/assets/" + path);
+        if (! bin) {
+            m_curActive.reset();
+            return;
+        }
+        auto adapter = std::make_shared<BStreamAdapter>(std::move(bin));
+        m_curActive = wavsen::audio::make_stream(std::move(adapter), m_desc);
     }
     uint32_t LoopIndex() {
         m_curIndex++;
@@ -75,18 +104,17 @@ private:
     Desc     m_desc;
     uint32_t m_curIndex { 0 };
 
-    const std::vector<std::string> m_soundPaths;
-    std::unique_ptr<SoundStream>   m_curActive;
+    const std::vector<std::string>             m_soundPaths;
+    std::unique_ptr<wavsen::audio::SoundStream> m_curActive;
 };
 
 void WPSoundParser::Parse(const wpscene::WPSoundObject& obj, fs::VFS& vfs,
-                          audio::SoundManager& sm) {
+                          wavsen::audio::SoundManager& sm) {
     WPSoundStream::Config config { .maxtime = obj.maxtime,
                                    .mintime = obj.mintime,
                                    .volume  = obj.volume > 1.0f ? 1.0f : obj.volume,
                                    .mode    = ToPlaybackMode(obj.playbackmode) };
 
     auto ss = std::make_unique<WPSoundStream>(obj.sound, vfs, config);
-    // auto ss_raw = ss.get();
-    sm.MountStream(std::move(ss));
+    sm.mount(std::move(ss));
 }

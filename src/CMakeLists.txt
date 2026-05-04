@@ -73,7 +73,6 @@ add_library(
   Utils/Algorism.cpp
   WPJson.cpp
   WPPkgFs.cpp
-  Audio/SoundManager.cpp
   Timer/ThreadTimer.cpp
   Timer/FrameTimer.cpp
   Scene/Scene.cpp
@@ -94,7 +93,6 @@ target_sources(
          WPJson.cppm
          WPPkgFs.cppm
          Utils/Utils.cppm
-         Audio/SoundManager.cppm
          MessageLoop/MessageLoop.cppm
          Timer/Timer.cppm
          Timer/ThreadTimer.cppm
@@ -103,13 +101,13 @@ target_sources(
          Scene/Scene.cppm)
 target_link_libraries(
   wescene-base
-  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen
-  PRIVATE nlohmann_json ${LZ4_LIBRARIES} miniaudio
+  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio
+  PRIVATE nlohmann_json ${LZ4_LIBRARIES}
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 target_include_directories(
   wescene-base
   PUBLIC . Utils/include
-  PRIVATE Utils Utils/include/Utils Scene Particle Audio)
+  PRIVATE Utils Utils/include/Utils Scene Particle)
 target_compile_options(wescene-base PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET wescene-base PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET wescene-base PROPERTY CXX_SCAN_FOR_MODULES ON)

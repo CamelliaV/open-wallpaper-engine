@@ -25,6 +25,11 @@ find_package(PkgConfig REQUIRED)
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
 
+# wavsen — sibling repo providing wavsen::decode / wavsen::video / wavsen::audio.
+# Added after third_party so rstd::rstd and cubeb (fetched via deps.json) are
+# already targets — wavsen reuses them rather than re-declaring.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../wavsen wavsen-build)
+
 # open-wallpaper-engine hosts two Wallpaper Engine renderer subprojects:
 #   * wescene — the WE *scene* (`scene.pkg`) renderer (Vulkan).
 #   * weweb   — the WE *web*   (HTML/JS) renderer    (CEF, GLFW v1).

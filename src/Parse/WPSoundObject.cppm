@@ -5,7 +5,7 @@ module;
 
 export module wescene.parse:wp_sound_object;
 import cppstd;
-import wescene.audio;
+import wavsen.audio;
 import wescene.fs;
 
 import wescene.json;

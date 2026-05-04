@@ -10,7 +10,7 @@ add_subdirectory(glad)
 
 # ------------------------------------------------------------------
 # JSON-driven FetchContent for eigen, nlohmann_json, spirv_reflect,
-# glslang, miniaudio. To enable the flatpak-aware dependency provider,
+# glslang, cubeb. To enable the flatpak-aware dependency provider,
 # pass:
 #   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=cmake/FetchDepsProvider.cmake
 # ------------------------------------------------------------------
@@ -88,10 +88,9 @@ add_library(eigen INTERFACE)
 add_library(Eigen3::Eigen ALIAS eigen)
 target_include_directories(eigen SYSTEM INTERFACE ${eigen_SOURCE_DIR})
 
-# Post-fetch setup for miniaudio (single-header, source_subdir=cmake-noop).
-# Consumers include as <miniaudio.h> / <extras/stb_vorbis.c>.
-add_library(miniaudio INTERFACE)
-target_include_directories(miniaudio SYSTEM INTERFACE ${miniaudio_SOURCE_DIR})
+# Audio output is now handled by wavsen::audio (cubeb-backed). cubeb
+# itself is fetched via deps.json above and consumed transitively through
+# wavsen — no post-fetch shim needed here.
 
 # Promote CEF source dir to global scope so weweb/cmake/cef.cmake can
 # reach it via add_subdirectory from the project root. fetchdeps()

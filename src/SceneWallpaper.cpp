@@ -14,7 +14,7 @@ import wescene.utils;
 import wescene.scene;
 
 import rstd;
-import wescene.audio;
+import wavsen.audio;
 import wescene.fs;
 import wescene.message_loop;
 import wescene.timer;
@@ -120,7 +120,7 @@ private:
     bool        m_gen_graphviz { false };
 
     WPSceneParser                        m_scene_parser;
-    std::unique_ptr<audio::SoundManager> m_sound_manager;
+    std::unique_ptr<wavsen::audio::SoundManager> m_sound_manager;
     FirstFrameCallback                   m_first_frame_callback;
 
     msgloop::MessageLoop<MainMsg>   m_main_loop;
@@ -342,9 +342,9 @@ void MainHandler::on(MainSetProperty&& m) {
     } else if (property == PROPERTY_GRAPHIVZ) {
         if (auto* p = std::get_if<bool>(&value)) m_gen_graphviz = *p;
     } else if (property == PROPERTY_MUTED) {
-        if (auto* p = std::get_if<bool>(&value)) m_sound_manager->SetMuted(*p);
+        if (auto* p = std::get_if<bool>(&value)) m_sound_manager->set_muted(*p);
     } else if (property == PROPERTY_VOLUME) {
-        if (auto* p = std::get_if<float>(&value)) m_sound_manager->SetVolume(*p);
+        if (auto* p = std::get_if<float>(&value)) m_sound_manager->set_volume(*p);
     } else if (property == PROPERTY_CACHE_PATH) {
         if (auto* p = std::get_if<std::string>(&value)) m_cache_path = *p;
     } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
@@ -360,9 +360,9 @@ void MainHandler::on(MainSetProperty&& m) {
 
 void MainHandler::on(MainStop&& m) {
     if (m.stop) {
-        m_sound_manager->Pause();
+        m_sound_manager->pause();
     } else {
-        m_sound_manager->Play();
+        m_sound_manager->play();
     }
     (void)m_render_loop.sender().send(RenderMsg { RenderStop { m.stop } });
 }
@@ -376,11 +376,11 @@ void MainHandler::loadScene() {
 
     LOG_INFO("loading scene: %s", m_source.c_str());
 
-    if (! m_sound_manager->IsInited()) {
-        m_sound_manager->Init();
-        m_sound_manager->Play();
+    if (! m_sound_manager->is_inited()) {
+        m_sound_manager->init();
+        m_sound_manager->play();
     } else {
-        m_sound_manager->UnMountAll();
+        m_sound_manager->unmount_all();
     }
 
     std::shared_ptr<Scene> scene { nullptr };
@@ -479,7 +479,7 @@ bool MainHandler::init() {
 }
 
 MainHandler::MainHandler()
-    : m_sound_manager(std::make_unique<audio::SoundManager>()),
+    : m_sound_manager(std::make_unique<wavsen::audio::SoundManager>()),
       m_main_loop("main"),
       m_render_loop("render"),
       m_render_handler(std::make_unique<RenderHandler>(*this)) {}

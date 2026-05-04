@@ -2,7 +2,7 @@ export module wescene.parse;
 
 import wescene.json;
 import wescene.fs;
-import wescene.audio;
+import wavsen.audio;
 
 export import :wp_animation;
 export import :wp_image_object;
