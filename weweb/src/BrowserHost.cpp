@@ -16,6 +16,11 @@ struct BrowserHost::Impl {
     CefRefPtr<ClientHandler> client;
     std::atomic<bool>        should_exit{false};
     bool                     initialised{false};
+    // Stash the original argv from RunOrExitIfHelper; CefInitialize needs
+    // the real argv to derive the per-child --type=… / --icu-data-file=…
+    // switches it forwards to subprocesses.
+    int    saved_argc{0};
+    char** saved_argv{nullptr};
 };
 
 BrowserHost::BrowserHost() : impl_(std::make_unique<Impl>()) {
@@ -27,6 +32,8 @@ BrowserHost::~BrowserHost() {
 }
 
 int BrowserHost::RunOrExitIfHelper(int argc, char** argv) {
+    impl_->saved_argc = argc;
+    impl_->saved_argv = argv;
     CefMainArgs main_args(argc, argv);
     return CefExecuteProcess(main_args, impl_->app.get(), nullptr);
 }
@@ -37,21 +44,25 @@ bool BrowserHost::Init(const InitOptions& opts) {
         return false;
     }
 
-    // Browser process Init — at this point our argv has already been
-    // consumed by argparse, so we hand CEF a fresh empty argv. Helpers
-    // get the real argv via their own CefMainArgs back in
-    // RunOrExitIfHelper.
-    int   dummy_argc = 0;
-    char* dummy_argv[1] = { nullptr };
-    CefMainArgs main_args(dummy_argc, dummy_argv);
+    // Browser process Init. Hand CEF the original argv (saved during
+    // RunOrExitIfHelper) — without the real argv, CEF can't materialise
+    // the internal command line it forwards to child processes, and
+    // helpers SIGABRT in ICU init with "Invalid file descriptor to ICU
+    // data received." argparse has already consumed argv but the array
+    // is still valid memory.
+    CefMainArgs main_args(impl_->saved_argc, impl_->saved_argv);
 
     CefSettings settings;
     settings.no_sandbox                   = true;
     settings.windowless_rendering_enabled = false;
     settings.multi_threaded_message_loop  = false;
-    // Disable automatic argv adoption — our positional `workshop` arg
-    // would otherwise confuse Chromium's command-line parser.
-    settings.command_line_args_disabled   = true;
+    // Leave command_line_args_disabled at its default (false). Setting it
+    // true blocks CEF from materialising the *internal* argv that gets
+    // passed to child processes, which then SIGABRT in ICU init with
+    // "Invalid file descriptor to ICU data received." The user-supplied
+    // positional `workshop` arg only reaches the *browser* process here
+    // (helpers re-enter through RunOrExitIfHelper before argparse), so
+    // adopting argv is harmless — Chromium ignores unknown args.
     settings.log_severity                 = LOGSEVERITY_WARNING;
 
     auto set_cef_path = [](cef_string_t* dest,

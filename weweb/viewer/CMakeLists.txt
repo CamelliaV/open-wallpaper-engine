@@ -5,4 +5,10 @@ target_link_libraries(webviewer PRIVATE
     argparse::argparse)
 
 target_link_libraries(webviewer PRIVATE ${CEF_STANDARD_LIBS})
+
+set_target_properties(webviewer PROPERTIES
+    BUILD_RPATH   "\$ORIGIN"
+    INSTALL_RPATH "\$ORIGIN"
+    BUILD_WITH_INSTALL_RPATH ON)
+
 weweb_stage_cef_runtime(webviewer)

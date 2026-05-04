@@ -20,12 +20,46 @@ void AppHandler::OnBeforeCommandLineProcessing(const CefString& process_type,
     cmd->AppendSwitch("disable-web-security");
 
     // The `minimal` CEF Linux distribution does not ship the SUID sandbox
-    // helper. Match `CefSettings.no_sandbox = true` at the cmdline level so
-    // the switch propagates to all child procs.
+    // helper. Match `CefSettings.no_sandbox = true` at the cmdline level
+    // so the switch propagates to all child procs.
     cmd->AppendSwitch("no-sandbox");
+
+    cmd->AppendSwitchWithValue("ozone-platform", "x11");
+
+    // Autoplay video / audio without user-gesture prompts. WE wallpapers
+    // routinely auto-play media on load.
+    cmd->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
 
     // Wallpapers are decorative; suppress the chromium component updater.
     cmd->AppendSwitch("disable-component-update");
+
+    cmd->AppendSwitch("disable-session-crashed-bubble");
+
+    // Skip KDE/GNOME password-store probes (kwalletd6 / libsecret /
+    // klauncher D-Bus calls). Wallpapers never store credentials.
+    cmd->AppendSwitchWithValue("password-store", "basic");
+
+    {
+        std::string features;
+        if (cmd->HasSwitch("disable-features")) {
+            features = cmd->GetSwitchValue("disable-features").ToString();
+            if (!features.empty()) features += ",";
+        }
+        features += "Crashpad,AutofillServerCommunication,HardwareMediaKeyHandling,WebBluetooth,WebUSB";
+        cmd->AppendSwitchWithValue("disable-features", features);
+    }
+
+    cmd->AppendSwitch("no-first-run");                                                            
+    cmd->AppendSwitch("no-default-browser-check");                                                
+    cmd->AppendSwitch("disable-plugins");                                                
+    cmd->AppendSwitch("disable-sync");                                                            
+    cmd->AppendSwitch("disable-translate");                                                       
+    cmd->AppendSwitch("disable-default-apps");                                                    
+    cmd->AppendSwitch("disable-extensions");                                                      
+    cmd->AppendSwitch("disable-client-side-phishing-detection");                                  
+    cmd->AppendSwitch("disable-popup-blocking");       
+    cmd->AppendSwitch("disable-pinch");       
+    cmd->AppendSwitch("metrics-recording-only");       
 }
 
 void AppHandler::OnContextInitialized() {
