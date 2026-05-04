@@ -81,5 +81,17 @@
       "name": "rstd",
       "exclude_from_all": true
     }
+  },
+  {
+    "dest": "build/_flatpak_deps/quickjs-src",
+    "disable-shallow-clone": false,
+    "tag": "v0.14.0",
+    "commit": "3c051980ab7e783dfbfb1c70c014ce5e05ecf24c",
+    "type": "git",
+    "url": "https://github.com/quickjs-ng/quickjs.git",
+    "x-cmake": {
+      "name": "quickjs",
+      "exclude_from_all": true
+    }
   }
 ]

@@ -79,6 +79,18 @@ std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindin
             out.scriptproperties[field_name] = field_value.at("scriptproperties");
             ++n;
         }
+        if (field_value.contains("script") && field_value.at("script").is_string()) {
+            WPScriptBinding sb;
+            sb.source = field_value.at("script").get<std::string>();
+            if (field_value.contains("scriptproperties"))
+                sb.properties = field_value.at("scriptproperties");
+            if (field_value.contains("value"))
+                sb.initial_value = field_value.at("value");
+            if (field_value.contains("user") && field_value.at("user").is_string())
+                sb.user = field_value.at("user").get<std::string>();
+            out.scripts[field_name] = std::move(sb);
+            ++n;
+        }
     }
     return n;
 }

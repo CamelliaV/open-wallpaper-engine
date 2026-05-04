@@ -1,19 +1,4 @@
 // wptexparse [--workshop-dir DIR] [--quiet] [--report FILE] [--full]
-//
-// Walks workshop_dir, opens each scene.pkg, enumerates every entry under
-// /materials/*.tex, and runs WPTexImageParser::Parse on each. By default
-// only ParseHeader is called (cheap; matches `wpdump`/`tex_schema_tests`
-// coverage). With --full, the full Parse path runs LZ4 decompression +
-// stb_image embedded-container decoding + BC dispatch — the same path the
-// renderer takes when uploading a texture.
-//
-// Output: one line per texture (OK/FAIL), aggregate stats on stderr,
-// optional TSV report. Exit 0 iff every tex parsed without error.
-//
-// This is the broad coverage net for the .tex format: tex_schema_tests
-// only validates header schema and geometric invariants on a sampled
-// subset, but this CLI exercises the full pipeline on every .tex in the
-// corpus so format-specific decode regressions surface immediately.
 
 #include <cstdio>
 #include <cstring>
@@ -25,6 +10,7 @@
 #include <vector>
 
 #include "Image.hpp"
+#include "pkg_header.hpp"
 
 import wescene.parse;
 import wescene.pkg_fs;
@@ -33,6 +19,9 @@ import wescene.fs;
 namespace {
 
 namespace fs = std::filesystem;
+
+using wallpaper::testing::PkgEntry;
+using wallpaper::testing::ReadPkgHeader;
 
 constexpr const char* kDefaultWorkshopDir =
 #ifdef WAYWALLEN_WORKSHOP_DIR
@@ -52,37 +41,6 @@ void Usage(const char* prog) {
                  "  --report   write TSV report (id, tex, ok, texv, texi, texb, texs, format, w, h, slots).\n",
                  prog ? prog : "wptexparse");
 }
-
-struct PkgEntry {
-    std::string path;
-    std::int32_t offset { 0 };
-    std::int32_t length { 0 };
-};
-
-std::string ReadSizedString(wallpaper::fs::IBinaryStream& f) {
-    std::int32_t len = f.ReadInt32();
-    if (len < 0) return {};
-    std::string out;
-    out.resize(static_cast<std::size_t>(len));
-    f.Read(out.data(), static_cast<std::size_t>(len));
-    return out;
-}
-
-bool ReadPkgHeader(const std::string& pkg_path, std::string& version,
-                   std::vector<PkgEntry>& entries) {
-    auto stream = wallpaper::fs::CreateCBinaryStream(pkg_path);
-    if (! stream) return false;
-    version = ReadSizedString(*stream);
-    std::int32_t count = stream->ReadInt32();
-    if (count < 0) return false;
-    entries.reserve(static_cast<std::size_t>(count));
-    for (std::int32_t i = 0; i < count; ++i) {
-        PkgEntry e;
-        e.path   = "/" + ReadSizedString(*stream);
-        e.offset = stream->ReadInt32();
-        e.length = stream->ReadInt32();
-        entries.push_back(std::move(e));
-    }
     return true;
 }
 

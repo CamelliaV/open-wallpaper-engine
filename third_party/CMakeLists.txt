@@ -28,6 +28,14 @@ set(ARGPARSE_INSTALL        OFF CACHE INTERNAL "")
 set(ARGPARSE_BUILD_TESTS    OFF CACHE INTERNAL "")
 set(ARGPARSE_BUILD_SAMPLES  OFF CACHE INTERNAL "")
 
+# QuickJS-NG: only the static library is needed; suppress the CLI / examples
+# / install rules so they don't clutter our tree.
+set(QJS_BUILD_EXAMPLES      OFF CACHE INTERNAL "")
+set(QJS_BUILD_CLI_STATIC    OFF CACHE INTERNAL "")
+set(QJS_BUILD_CLI_WITH_MIMALLOC OFF CACHE INTERNAL "")
+set(QJS_BUILD_CLI_WITH_STATIC_MIMALLOC OFF CACHE INTERNAL "")
+set(QJS_ENABLE_INSTALL      OFF CACHE INTERNAL "")
+
 # DirectXShaderCompiler — fork of LLVM, brings hundreds of CMake options
 # along. The set below approximates DXC's own cmake/caches/PredefinedParams
 # cache file: trim everything except the HLSL→SPIR-V frontend.

@@ -76,12 +76,27 @@ bool ParseAnimAxis(const nlohmann::json&, std::vector<WPAnimKeyframe>&);
 bool ParseAnimOptions(const nlohmann::json&, WPAnimOptions&);
 bool ParseAnimCurve(const nlohmann::json&, WPAnimCurve&);
 
+// One captured `{value, script, scriptproperties, user}` per-field
+// binding. `source` is the inline JS module text observed in scene.json's
+// `"script"` key (5286 bindings, 2877 unique sources in the workshop
+// corpus — see `tests/wpscriptdump`). `properties` mirrors the per-binding
+// `scriptproperties` config block; `initial_value` is the binding's
+// `value` field, fed to `init(value)` by the runtime. `user` carries the
+// optional user-property name from `{user, value}` companion bindings.
+struct WPScriptBinding {
+    std::string    source;
+    nlohmann::json properties;
+    nlohmann::json initial_value;
+    std::string    user;
+};
+
 // Side-channel container attached to every parseable object kind. Only
 // fields that actually carry a binding contribute entries — empty maps
 // for the common case where every field is a plain literal.
 struct WPFieldBindings {
     std::unordered_map<std::string, WPAnimCurve>     animations;
     std::unordered_map<std::string, nlohmann::json>  scriptproperties;
+    std::unordered_map<std::string, WPScriptBinding> scripts;
 };
 
 // Walks every direct child of `obj_json` and, when the child is an

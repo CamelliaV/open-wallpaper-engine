@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "pkg_header.hpp"
+
 import wescene.pkg_fs;
 import wescene.fs;
 
@@ -18,42 +20,6 @@ namespace {
 
 namespace fs = std::filesystem;
 using json   = nlohmann::json;
-
-// pkg header re-parser. Same shape as the one in dump.cpp; duplicated rather
-// than factored out because the pkg binary format is stable and the helper
-// is ~15 lines — not worth a shared header for two callers.
-struct PkgEntry {
-    std::string path;
-    int32_t     offset { 0 };
-    int32_t     length { 0 };
-};
-
-std::string ReadSizedString(wallpaper::fs::IBinaryStream& f) {
-    int32_t len = f.ReadInt32();
-    if (len < 0) return {};
-    std::string out;
-    out.resize(static_cast<std::size_t>(len));
-    f.Read(out.data(), static_cast<std::size_t>(len));
-    return out;
-}
-
-bool ReadPkgHeader(const std::string& pkg_path, std::string& version,
-                   std::vector<PkgEntry>& entries) {
-    auto stream = wallpaper::fs::CreateCBinaryStream(pkg_path);
-    if (! stream) return false;
-    version            = ReadSizedString(*stream);
-    int32_t entryCount = stream->ReadInt32();
-    if (entryCount < 0) return false;
-    entries.reserve(static_cast<std::size_t>(entryCount));
-    for (int32_t i = 0; i < entryCount; ++i) {
-        PkgEntry e;
-        e.path   = "/" + ReadSizedString(*stream);
-        e.offset = stream->ReadInt32();
-        e.length = stream->ReadInt32();
-        entries.push_back(std::move(e));
-    }
-    return true;
-}
 
 const char* TypeName(json::value_t t) {
     using vt = json::value_t;

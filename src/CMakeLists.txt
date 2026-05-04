@@ -221,6 +221,31 @@ set_property(TARGET wescene-vulkan-runtime PROPERTY POSITION_INDEPENDENT_CODE ON
 set_property(TARGET wescene-vulkan-runtime PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 # ---------------------------------------------------------------------------
+# wescene-script  (QuickJS-NG runtime for the WE scenescript surface)
+#
+# Slotted between wescene-parse and wescene-render. Owns the JS runtime,
+# the engine.* host bindings, scriptProperties resolution, and the per-
+# frame field-script tick. PRIVATE-links quickjs-ng so the C JSRuntime/
+# JSContext types stay invisible to downstream consumers.
+# ---------------------------------------------------------------------------
+
+add_library(wescene-script STATIC Script/Script.cpp)
+target_sources(
+  wescene-script
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Script/Script.cppm)
+target_link_libraries(
+  wescene-script
+  PUBLIC  wescene-base
+  PRIVATE qjs nlohmann_json)
+target_include_directories(
+  wescene-script
+  PUBLIC  . Utils/include
+  PRIVATE Utils Utils/include/Utils Script)
+target_compile_options(wescene-script PRIVATE -Wno-missing-field-initializers)
+set_property(TARGET wescene-script PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET wescene-script PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+# ---------------------------------------------------------------------------
 # wescene-render  (RenderGraph + VulkanRender + SceneWallpaper)
 # ---------------------------------------------------------------------------
 
@@ -256,7 +281,7 @@ target_sources(
          VulkanRender/PrePass.cppm)
 target_link_libraries(
   wescene-render
-  PUBLIC wescene-vulkan-runtime wescene-parse)
+  PUBLIC wescene-vulkan-runtime wescene-parse wescene-script)
 target_include_directories(
   wescene-render
   PUBLIC . Swapchain Utils/include RenderGraph/include Vulkan/include
@@ -272,5 +297,5 @@ set_property(TARGET wescene-render PROPERTY CXX_SCAN_FOR_MODULES ON)
 add_library(${PROJECT_NAME} INTERFACE)
 target_link_libraries(
   ${PROJECT_NAME}
-  INTERFACE wescene-render wescene-parse wescene-vulkan-runtime
-            wescene-shader-compile wescene-base)
+  INTERFACE wescene-render wescene-parse wescene-script
+            wescene-vulkan-runtime wescene-shader-compile wescene-base)

@@ -25,7 +25,12 @@ FetchContent_MakeAvailable(googletest)
 
 # Shared library for the dumper + corpus index. Used by the gtest binary
 # and any future ad-hoc tools.
-add_library(wpdump_lib STATIC dump.cpp corpus.cpp scene_keys.cpp scene_parse_probe.cpp)
+add_library(wpdump_lib STATIC
+    dump.cpp
+    corpus.cpp
+    scene_keys.cpp
+    scene_parse_probe.cpp
+    pkg_header.cpp)
 # Test infrastructure only needs scene-parse + shader-compile + base — no
 # Vulkan runtime, no render graph, no SceneWallpaper. Drops ~25MB off
 # every test binary and removes the libvulkan runtime dependency.
@@ -57,6 +62,21 @@ target_link_libraries(wpdump PRIVATE wpdump_lib)
 # rare scene.json fields and schema drift across WE versions.
 add_executable(wpscan wpscan_main.cpp)
 target_link_libraries(wpscan PRIVATE wpdump_lib)
+
+# Userscript dumper / aggregator. Walks every scene.pkg, finds every
+# {"script":..., "scriptproperties":...} per-field binding inside scene.json,
+# and writes scripts.jsonl + report.json to OUT_DIR. The deduped sources are
+# the empirical WE built-in script catalogue and drive the QuickJS surface.
+add_executable(wpscriptdump wpscriptdump_main.cpp)
+target_link_libraries(wpscriptdump PRIVATE wpdump_lib)
+set_target_properties(wpscriptdump PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+# Verifier: replays scripts.jsonl through a fresh JsRuntime per binding and
+# asserts the runtime can compile + tick every observed userscript without
+# tripping a JS exception. Cluster pass-rates also reported per field name.
+add_executable(wpscriptrun wpscriptrun_main.cpp)
+target_link_libraries(wpscriptrun PRIVATE wpdump_lib wescene-script)
+set_target_properties(wpscriptrun PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Host-only shader replay: reads a JSONL manifest produced by viewer
 # under WP_SHADER_RECORD and re-runs WPShaderParser::CompileToSpv on
