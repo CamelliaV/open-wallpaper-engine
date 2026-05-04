@@ -116,12 +116,13 @@ float2   _ww_mul(float2x2 M, float2   v) { return mul(v, M); }
 float3   _ww_mul(float3x3 M, float3   v) { return mul(v, M); }
 float4   _ww_mul(float4x4 M, float4   v) { return mul(v, M); }
 // Rectangular matrix variants (e.g. bone transforms `mat4x3 g_Bones[]`
-// = HLSL float3x4): WE callsites always pass the matrix first
-// (`mul(g_Bones[i], pos4)`) so the result is a 3-vector. No flip needed
-// — HLSL native `mul(matrix, column_vector)` already gives the right
-// answer with column-major-stored memory + RowMajor decoration. We
-// don't define the vec-first overload because it'd force a dim
-// mismatch (float4 row × float3x4 needs 4=3, fails).
+// = HLSL float3x4). Both orderings appear in WE shaders — skinning
+// callsites do `mul(v4, weighted_sum_of_g_Bones)` (vec-first), while
+// tangent-space rebases sometimes do `mul(g_Bones[i], pos4)`
+// (matrix-first). Without the vec-first overload HLSL's implicit
+// truncations make several square/scalar candidates match and the
+// resolver reports ambiguity.
+float3   _ww_mul(float4   v, float3x4 M) { return mul(M, v); }
 float3   _ww_mul(float3x4 M, float4   v) { return mul(M, v); }
 // Scalar passthroughs (HLSL `mul` accepts these but our overload needs
 // to match): we let the macro expand and the resolver pick the right
