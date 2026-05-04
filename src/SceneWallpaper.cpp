@@ -21,6 +21,7 @@ import wescene.timer;
 import wescene.parse;
 import wescene.pkg_fs;
 import wescene.rgraph;
+import wescene.script;
 import wescene.vulkan_render;
 
 using namespace wallpaper;
@@ -187,6 +188,22 @@ private:
             {
                 auto pos = m_mouse_pos.load();
                 m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
+            }
+            // Drive any per-Scene scenescripts before particle emission.
+            // Scripts mutate SceneNode transforms (scale/origin/angles) so
+            // they need to run before the matrix-derivation in the
+            // shaderValueUpdater's per-frame uniform pass — that's already
+            // what FrameBegin set up; UpdateUniforms runs inside drawFrame.
+            // The runtime is a no-op when no ScriptScene is installed.
+            {
+                wallpaper::script::FrameInputs fi;
+                fi.frametime   = static_cast<float>(m_scene->frameTime * m_speed);
+                fi.runtime     = static_cast<float>(m_scene->elapsingTime);
+                fi.canvas_w    = static_cast<float>(m_scene->ortho[0]);
+                fi.canvas_h    = static_cast<float>(m_scene->ortho[1]);
+                fi.screen_w    = fi.canvas_w;
+                fi.screen_h    = fi.canvas_h;
+                wallpaper::script::TickSceneScripts(*m_scene, fi);
             }
             m_scene->paritileSys->Emitt();
 

@@ -3,6 +3,7 @@ module;
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <Eigen/Dense>
 #include <nlohmann/json.hpp>
 #include "Utils/Logging.h"
 
@@ -10,6 +11,7 @@ module;
 
 module wescene.script;
 import cppstd;
+import wescene.scene;
 
 using nlohmann::json;
 
@@ -815,6 +817,97 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     auto* raw = fs.get();
     m_impl->scripts.push_back(std::move(fs));
     return raw;
+}
+
+// ---------------------------------------------------------------------------
+// ScriptScene — per-Scene runtime + actuator drain.
+// ---------------------------------------------------------------------------
+
+struct ScriptScene::Impl {
+    JsRuntime              rt;
+    std::vector<Actuator>  actuators;
+};
+
+ScriptScene::ScriptScene() : m_impl(std::make_unique<Impl>()) {}
+ScriptScene::~ScriptScene() = default;
+
+JsRuntime& ScriptScene::runtime() noexcept { return m_impl->rt; }
+void       ScriptScene::AddActuator(Actuator a) { m_impl->actuators.push_back(a); }
+bool       ScriptScene::empty() const noexcept { return m_impl->actuators.empty(); }
+
+namespace {
+
+// Apply one ScriptValue to one (node, target). Coercion is permissive:
+// scalars/bools fan out, missing components retain their previous value.
+void DrainActuator(const Actuator& a) {
+    if (! a.script || ! a.node) return;
+    const auto& v = a.script->last_value();
+    if (std::holds_alternative<std::monostate>(v)) return;
+
+    auto current = [&] {
+        switch (a.target) {
+        case ActuatorTarget::Translate: return a.node->Translate();
+        case ActuatorTarget::Scale:     return a.node->Scale();
+        case ActuatorTarget::Rotation:  return a.node->Rotation();
+        }
+        return Eigen::Vector3f { 0.0f, 0.0f, 0.0f };
+    }();
+
+    Eigen::Vector3f next = current;
+    if (auto* p = std::get_if<Vec3Value>(&v)) {
+        next = Eigen::Vector3f { static_cast<float>(p->x),
+                                 static_cast<float>(p->y),
+                                 static_cast<float>(p->z) };
+    } else if (auto* p = std::get_if<Vec2Value>(&v)) {
+        next = Eigen::Vector3f { static_cast<float>(p->x),
+                                 static_cast<float>(p->y), current.z() };
+    } else if (auto* p = std::get_if<ScalarValue>(&v)) {
+        // Scalar splats across all three axes for scale; falls back to
+        // current.x for translate/rotation (rare but seen in the corpus
+        // when scripts mistakenly bind to the wrong field kind).
+        if (a.target == ActuatorTarget::Scale) {
+            float s = static_cast<float>(p->v);
+            next    = Eigen::Vector3f { s, s, s };
+        } else {
+            next.x() = static_cast<float>(p->v);
+        }
+    } else if (auto* p = std::get_if<BoolValue>(&v)) {
+        // Don't apply bools to vec3 actuators (visible-style actuators
+        // aren't wired in MVP scope).
+        (void)p;
+        return;
+    } else {
+        return;
+    }
+
+    switch (a.target) {
+    case ActuatorTarget::Translate: a.node->SetTranslate(next); break;
+    case ActuatorTarget::Scale:     a.node->SetScale(next); break;
+    case ActuatorTarget::Rotation:  a.node->SetRotation(next); break;
+    }
+}
+
+}  // namespace
+
+void ScriptScene::Tick(const FrameInputs& fi) {
+    m_impl->rt.SetFrameInputs(fi);
+    m_impl->rt.TickAll();
+    for (const auto& a : m_impl->actuators) DrainActuator(a);
+}
+
+void InstallScriptScene(wallpaper::Scene&             scene,
+                        std::unique_ptr<ScriptScene>  ss) {
+    // Move into Scene's opaque-pointer slot. The deleter knows the
+    // concrete type because it's instantiated in this TU.
+    void* raw = ss.release();
+    scene.script_scene = decltype(scene.script_scene)(
+        raw, [](void* p) noexcept { delete static_cast<ScriptScene*>(p); });
+}
+
+void TickSceneScripts(wallpaper::Scene& scene, const FrameInputs& fi) {
+    auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
+    if (! ss) return;
+    ss->Tick(fi);
 }
 
 }  // namespace wallpaper::script

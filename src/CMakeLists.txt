@@ -137,6 +137,31 @@ set_property(TARGET wescene-shader-compile PROPERTY POSITION_INDEPENDENT_CODE ON
 set_property(TARGET wescene-shader-compile PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 # ---------------------------------------------------------------------------
+# wescene-script  (QuickJS-NG runtime for the WE scenescript surface)
+#
+# Sits between wescene-base and wescene-parse: the parser consumes it to
+# materialise FieldScripts + actuators from `WPFieldBindings::scripts`
+# during scene parse. PRIVATE-links quickjs-ng so the C JSRuntime/JSContext
+# types stay invisible to downstream consumers.
+# ---------------------------------------------------------------------------
+
+add_library(wescene-script STATIC Script/Script.cpp)
+target_sources(
+  wescene-script
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Script/Script.cppm)
+target_link_libraries(
+  wescene-script
+  PUBLIC  wescene-base
+  PRIVATE qjs nlohmann_json)
+target_include_directories(
+  wescene-script
+  PUBLIC  . Utils/include
+  PRIVATE Utils Utils/include/Utils Script)
+target_compile_options(wescene-script PRIVATE -Wno-missing-field-initializers)
+set_property(TARGET wescene-script PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET wescene-script PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+# ---------------------------------------------------------------------------
 # wescene-parse  (Parse/* + Puppet + ShaderValueUpdater)
 # ---------------------------------------------------------------------------
 
@@ -181,7 +206,7 @@ target_sources(
          Text/Text.cppm)
 target_link_libraries(
   wescene-parse
-  PUBLIC wescene-base wescene-shader-compile
+  PUBLIC wescene-base wescene-shader-compile wescene-script
   PRIVATE nlohmann_json ${LZ4_LIBRARIES} Freetype::Freetype)
 target_include_directories(
   wescene-parse
@@ -219,31 +244,6 @@ target_include_directories(
 target_compile_options(wescene-vulkan-runtime PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET wescene-vulkan-runtime PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET wescene-vulkan-runtime PROPERTY CXX_SCAN_FOR_MODULES ON)
-
-# ---------------------------------------------------------------------------
-# wescene-script  (QuickJS-NG runtime for the WE scenescript surface)
-#
-# Slotted between wescene-parse and wescene-render. Owns the JS runtime,
-# the engine.* host bindings, scriptProperties resolution, and the per-
-# frame field-script tick. PRIVATE-links quickjs-ng so the C JSRuntime/
-# JSContext types stay invisible to downstream consumers.
-# ---------------------------------------------------------------------------
-
-add_library(wescene-script STATIC Script/Script.cpp)
-target_sources(
-  wescene-script
-  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Script/Script.cppm)
-target_link_libraries(
-  wescene-script
-  PUBLIC  wescene-base
-  PRIVATE qjs nlohmann_json)
-target_include_directories(
-  wescene-script
-  PUBLIC  . Utils/include
-  PRIVATE Utils Utils/include/Utils Script)
-target_compile_options(wescene-script PRIVATE -Wno-missing-field-initializers)
-set_property(TARGET wescene-script PROPERTY POSITION_INDEPENDENT_CODE ON)
-set_property(TARGET wescene-script PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 # ---------------------------------------------------------------------------
 # wescene-render  (RenderGraph + VulkanRender + SceneWallpaper)

@@ -8,6 +8,7 @@ module;
 
 #include "Utils/String.h"
 #include "Utils/Logging.h"
+#include "Utils/Sha.hpp"
 #include "Core/Visitors.hpp"
 #include "Core/StringHelper.hpp"
 #include "Core/ArrayHelper.hpp"
@@ -24,6 +25,7 @@ import cppstd;
 import wescene.utils;
 import wescene.scene;
 import wescene.text;
+import wescene.script;
 
 import wescene.shader_value_updater;
 
@@ -43,7 +45,52 @@ struct ParseContext {
     std::shared_ptr<SceneNode> effect_camera_node;
     std::shared_ptr<SceneNode> global_camera_node;
     std::shared_ptr<SceneNode> global_perspective_camera_node;
+
+    // Lazily allocated; populated by `WireFieldScripts` as objects with
+    // script bindings come in. Installed onto the Scene at the end of
+    // parse via `wallpaper::script::InstallScriptScene`. Stays null when
+    // no object in the scene has any script binding (image-only pkgs).
+    std::unique_ptr<wallpaper::script::ScriptScene> script_scene;
 };
+
+// Walks `fb.scripts` for one parsed object's field bindings and, for the
+// MVP-supported targets (origin/scale/angles), creates a FieldScript and
+// pins an Actuator onto the just-built SceneNode. Other field kinds
+// (alpha/color/visible/text) get logged once and skipped — they need
+// material-side write-back paths which aren't wired yet.
+void WireFieldScripts(ParseContext& context, SceneNode* node,
+                      const wpscene::WPFieldBindings& fb) {
+    if (! node || fb.scripts.empty()) return;
+    if (! context.script_scene)
+        context.script_scene = std::make_unique<script::ScriptScene>();
+    auto& ss = *context.script_scene;
+    auto& rt = ss.runtime();
+
+    for (const auto& [field, sb] : fb.scripts) {
+        script::ActuatorTarget tgt;
+        script::FieldKind      kind;
+        if (field == "origin") {
+            tgt  = script::ActuatorTarget::Translate;
+            kind = script::FieldKind::Vec3;
+        } else if (field == "scale") {
+            tgt  = script::ActuatorTarget::Scale;
+            kind = script::FieldKind::Vec3;
+        } else if (field == "angles") {
+            tgt  = script::ActuatorTarget::Rotation;
+            kind = script::FieldKind::Vec3;
+        } else {
+            // Recognised but no actuator yet (alpha/color/visible/text/
+            // rate/intensity/...). The script's runtime side still works;
+            // its output is just not currently wired to a write-back path.
+            continue;
+        }
+        std::string sha = utils::genSha1(std::span<const char>(sb.source));
+        auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties,
+                                       sb.initial_value);
+        if (! fs) continue;
+        ss.AddActuator({ fs, node, tgt });
+    }
+}
 
 using WPObjectVar = std::variant<wpscene::WPImageObject, wpscene::WPParticleObject,
                                  wpscene::WPSoundObject, wpscene::WPLightObject,
@@ -876,6 +923,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
         }
     }
+    WireFieldScripts(context, spImgNode.get(), wpimgobj.field_bindings);
     context.scene->sceneGraph->AppendChild(spImgNode);
 }
 
@@ -1061,6 +1109,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     else
         context.scene->paritileSys->subsystems.emplace_back(std::move(particleSub));
 
+    WireFieldScripts(context, spNode.get(), wppartobj.field_bindings);
     if (is_child)
         child_ptr.node_parent->AppendChild(spNode);
     else
@@ -1394,6 +1443,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     svData.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
     context.shader_updater->SetNodeData(sp_node.get(), svData);
 
+    WireFieldScripts(context, sp_node.get(), obj.field_bindings);
     context.scene->sceneGraph->AppendChild(sp_node);
 
     LOG_INFO("text '%s': %zu glyphs, %zu lines, bbox=%.1fx%.1f atlas=%ux%u (%s)",
@@ -1525,5 +1575,14 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     }
 
     WPShaderParser::FinalGlslang();
+
+    // If any object during the visit installed a script binding, hand the
+    // ScriptScene off to the Scene now. The renderer ticks it once per
+    // frame via wallpaper::script::TickSceneScripts. Empty ScriptScenes
+    // are skipped so image-only pkgs don't pay any runtime cost.
+    if (context.script_scene && ! context.script_scene->empty()) {
+        wallpaper::script::InstallScriptScene(*context.scene,
+                                              std::move(context.script_scene));
+    }
     return context.scene;
 }

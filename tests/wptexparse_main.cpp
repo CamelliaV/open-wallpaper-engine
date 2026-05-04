@@ -41,8 +41,6 @@ void Usage(const char* prog) {
                  "  --report   write TSV report (id, tex, ok, texv, texi, texb, texs, format, w, h, slots).\n",
                  prog ? prog : "wptexparse");
 }
-    return true;
-}
 
 bool ends_with(std::string_view s, std::string_view suffix) {
     return s.size() >= suffix.size() &&

@@ -504,8 +504,10 @@ public:
 
     const auto& Translate() const { return m_translate; }
     const auto& Rotation() const { return m_rotation; }
+    const auto& Scale() const { return m_scale; }
     void        SetRotation(Eigen::Vector3f v) { m_rotation = v; }
     void        SetTranslate(Eigen::Vector3f v) { m_translate = v; }
+    void        SetScale(Eigen::Vector3f v)     { m_scale = v; }
 
     void CopyTrans(const SceneNode& node) {
         m_translate = node.m_translate;
@@ -1040,6 +1042,15 @@ public:
     // declaration in any TU that imports wescene.fs and imports wescene.scene.
     using VFSDeleterFn = void (*)(void*) noexcept;
     std::unique_ptr<void, VFSDeleterFn>  vfs;
+
+    // Same opaque-pointer pattern for the per-Scene scenescript runtime.
+    // The concrete type is `wallpaper::script::ScriptScene` (defined in
+    // wescene-script), but Scene itself lives in wescene-base which sits
+    // upstream of wescene-script — so we keep it opaque here. The renderer
+    // ticks it once per frame via `wallpaper::script::TickSceneScripts`.
+    using ScriptDeleterFn = void (*)(void*) noexcept;
+    std::unique_ptr<void, ScriptDeleterFn> script_scene { nullptr,
+                                                          [](void*) noexcept {} };
 
     std::string scene_id { "unknown_id" };
 

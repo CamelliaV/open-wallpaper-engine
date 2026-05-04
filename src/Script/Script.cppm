@@ -8,6 +8,7 @@ module;
 
 export module wescene.script;
 import cppstd;
+import wescene.scene;
 
 export namespace wallpaper::script
 {
@@ -145,5 +146,54 @@ public:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };
+
+// --- per-Scene script runtime + actuators -----------------------------------
+
+// Where on a SceneNode the script's last_value() should be written. We
+// only wire scalar/vec actuators against transform fields in MVP — alpha
+// and visible are material-level and will follow once the parser exposes
+// the relevant SceneMaterial.
+enum class ActuatorTarget {
+    Translate,  // Vec3 → SceneNode m_translate (origin field)
+    Scale,      // Vec3 → SceneNode m_scale (scale field)
+    Rotation,   // Vec3 → SceneNode m_rotation (angles field)
+};
+
+struct Actuator {
+    FieldScript*               script { nullptr };
+    wallpaper::SceneNode*      node { nullptr };
+    ActuatorTarget             target { ActuatorTarget::Translate };
+};
+
+// Owns one JsRuntime + the actuator list for one Scene. Constructed and
+// populated by the parser, attached to the Scene as an opaque pointer
+// (Scene::script_scene). Ticked once per frame by `TickSceneScripts`.
+class ScriptScene : NoCopy, NoMove {
+public:
+    ScriptScene();
+    ~ScriptScene();
+
+    JsRuntime&                  runtime() noexcept;
+    void                        AddActuator(Actuator a);
+    bool                        empty() const noexcept;
+
+    // Push the host's per-frame state, drive every FieldScript, drain
+    // results into actuators. Call once per frame, before the renderer
+    // begins drawing.
+    void Tick(const FrameInputs& fi);
+
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+// Attach a ScriptScene to a Scene via the opaque-pointer slot. Takes
+// ownership; replaces any previous attachment.
+void InstallScriptScene(wallpaper::Scene&             scene,
+                        std::unique_ptr<ScriptScene>  ss);
+
+// Convenience tick: looks up the ScriptScene attached to `scene` and
+// drives one frame. No-op when no ScriptScene is installed (image-only
+// pkgs, scenes without script bindings).
+void TickSceneScripts(wallpaper::Scene& scene, const FrameInputs& fi);
 
 } // namespace wallpaper::script
