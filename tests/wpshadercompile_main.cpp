@@ -37,7 +37,7 @@ import wescene.parse;
 import wescene.fs;
 import wescene.scene;
 import wescene.pkg_fs;
-import wescene.audio;
+import wavsen.audio;
 
 using json = nlohmann::json;
 
@@ -53,11 +53,21 @@ constexpr const char* kDefaultWorkshopDir =
 #endif
     ;
 
+constexpr const char* kDefaultAssetsDir =
+#ifdef WAYWALLEN_ASSETS_DIR
+    WAYWALLEN_ASSETS_DIR
+#else
+    ""
+#endif
+    ;
+
 void Usage(const char* prog) {
     std::fprintf(stderr,
                  "usage:\n"
                  "  %s <manifest.jsonl> [--quiet]\n"
-                 "  %s --workshop-dir DIR [--assets DIR] [--quiet] [--keep-manifest FILE]\n",
+                 "  %s --workshop-dir DIR [--assets DIR] [--quiet] [--keep-manifest FILE]\n"
+                 "    DIR is either a workshop root (children are <id>/scene.pkg)\n"
+                 "    or a single pkg directory (DIR itself contains scene.pkg).\n",
                  prog ? prog : "wpshadercompile", prog ? prog : "wpshadercompile");
 }
 
@@ -101,6 +111,16 @@ ReplayResult ReplayOne(const json& rec) {
         r.stages_summary = stages_ss.str();
     }
 
+    // Empty src means SceneParser couldn't resolve the engine shader at
+    // capture time — almost always because the engine assets dir wasn't
+    // mounted. Replaying would emit a synthetic "shader_main undeclared"
+    // diagnostic that masks the real error class. Fail loudly instead.
+    for (const auto& u : units) {
+        if (u.src.empty()) {
+            throw std::runtime_error("captured shader src is empty (missing --assets?)");
+        }
+    }
+
     wallpaper::WPShaderInfo shader_info;
     if (rec.contains("combos")) {
         for (auto it = rec.at("combos").begin(); it != rec.at("combos").end(); ++it) {
@@ -137,6 +157,10 @@ ReplayResult ReplayOne(const json& rec) {
 // /assets first as a physical fs so the workshop's pkg can resolve
 // references to the project's bundled shaders.
 //
+// Two shapes are accepted: a workshop root (children are <id>/scene.pkg)
+// or a single pkg directory (workshop_dir itself contains scene.pkg) for
+// quick single-wallpaper iteration.
+//
 // Returns the number of pkgs the parser was driven through (regardless
 // of whether SceneParser succeeded — the relevant signal lives in the
 // manifest line count, not here).
@@ -152,13 +176,17 @@ int CapturePkgsToManifest(const std::string& workshop_dir, const std::string& as
     static constexpr const char* kSkipId = "2435537849";
 
     std::vector<fs::path> dirs;
-    for (auto& e : fs::directory_iterator(workshop_dir)) {
-        if (! e.is_directory()) continue;
-        if (! fs::exists(e.path() / "scene.pkg")) continue;
-        if (e.path().filename().string() == kSkipId) continue;
-        dirs.push_back(e.path());
+    if (fs::exists(fs::path(workshop_dir) / "scene.pkg")) {
+        dirs.push_back(workshop_dir);
+    } else {
+        for (auto& e : fs::directory_iterator(workshop_dir)) {
+            if (! e.is_directory()) continue;
+            if (! fs::exists(e.path() / "scene.pkg")) continue;
+            if (e.path().filename().string() == kSkipId) continue;
+            dirs.push_back(e.path());
+        }
+        std::sort(dirs.begin(), dirs.end());
     }
-    std::sort(dirs.begin(), dirs.end());
 
     if (! quiet) {
         std::fprintf(stderr, "wpshadercompile: capturing %zu pkgs into %s\n",
@@ -193,7 +221,7 @@ int CapturePkgsToManifest(const std::string& workshop_dir, const std::string& as
         const std::string text = stream->ReadAllStr();
 
         try {
-            wallpaper::audio::SoundManager sm;
+            wavsen::audio::SoundManager sm;
             wallpaper::WPSceneParser       parser;
             parser.Parse(id, text, vfs, sm,
                          static_cast<wallpaper::wpscene::SceneVersion>(pkg_version));
@@ -273,7 +301,7 @@ int main(int argc, char** argv) {
     bool        quiet         = false;
     std::string manifest_path;
     std::string workshop_dir;
-    std::string assets_dir;
+    std::string assets_dir   = kDefaultAssetsDir;
     std::string keep_manifest;
 
     for (int i = 1; i < argc; ++i) {

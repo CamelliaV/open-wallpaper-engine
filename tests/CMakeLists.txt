@@ -48,6 +48,7 @@ set_target_properties(wpdump_lib PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_definitions(
     wpdump_lib PUBLIC
     "WAYWALLEN_WORKSHOP_DIR=\"${CMAKE_SOURCE_DIR}/workshop\""
+    "WAYWALLEN_ASSETS_DIR=\"${CMAKE_SOURCE_DIR}/assets\""
     "WAYWALLEN_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures\"")
 
 add_executable(version_tests version_tests.cpp)
