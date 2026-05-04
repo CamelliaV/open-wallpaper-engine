@@ -41,5 +41,5 @@ Made this for fun.
 - [x] Puppet warp
 - [ ] 3D model
 - [ ] Timeline animations
-- [ ] Scenescript  
+- [x] Scenescript  
 - [ ] User Properties
