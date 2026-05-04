@@ -144,7 +144,11 @@ macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
       foreach(_fd_algo sha512 sha256 sha1 md5)
         _fetchdeps_json_get_opt(_fd_v "${_fd_entry}" "${_fd_algo}")
         if(_fd_v)
-          set(_fd_hash "${_fd_algo}=${_fd_v}")
+          # CMake's ExternalProject URL_HASH parser requires the algo
+          # token in uppercase (SHA256, SHA512, …) — lowercase fails the
+          # regex match in shared_internal_commands.cmake.
+          string(TOUPPER "${_fd_algo}" _fd_algo_upper)
+          set(_fd_hash "${_fd_algo_upper}=${_fd_v}")
           break()
         endif()
       endforeach()

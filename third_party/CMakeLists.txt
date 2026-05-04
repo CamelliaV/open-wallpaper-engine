@@ -92,3 +92,11 @@ target_include_directories(eigen SYSTEM INTERFACE ${eigen_SOURCE_DIR})
 # Consumers include as <miniaudio.h> / <extras/stb_vorbis.c>.
 add_library(miniaudio INTERFACE)
 target_include_directories(miniaudio SYSTEM INTERFACE ${miniaudio_SOURCE_DIR})
+
+# Promote CEF source dir to global scope so weweb/cmake/cef.cmake can
+# reach it via add_subdirectory from the project root. fetchdeps()
+# populates `cef_SOURCE_DIR` here in third_party/, but only this scope
+# sees it without an explicit cache.
+if(DEFINED cef_SOURCE_DIR)
+    set(cef_SOURCE_DIR "${cef_SOURCE_DIR}" CACHE INTERNAL "" FORCE)
+endif()

@@ -93,5 +93,16 @@
       "name": "quickjs",
       "exclude_from_all": true
     }
+  },
+  {
+    "dest": "build/_flatpak_deps/cef-src",
+    "type": "archive",
+    "url": "https://cef-builds.spotifycdn.com/cef_binary_147.0.10%2Bgd58e84d%2Bchromium-147.0.7727.118_linux64_minimal.tar.bz2",
+    "sha256": "087ccfa1f0438429e20d91293b15cae08ee9e7b4988cc018d47568dd59dad1ef",
+    "x-cmake": {
+      "name": "cef",
+      "exclude_from_all": true,
+      "source_subdir": "cmake-noop"
+    }
   }
 ]

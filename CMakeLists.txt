@@ -25,8 +25,18 @@ find_package(PkgConfig REQUIRED)
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
 
-link_libraries(Eigen3::Eigen)
-add_subdirectory(src)
+# open-wallpaper-engine hosts two Wallpaper Engine renderer subprojects:
+#   * wescene — the WE *scene* (`scene.pkg`) renderer (Vulkan).
+#   * weweb   — the WE *web*   (HTML/JS) renderer    (CEF, GLFW v1).
+# Each can be built independently; their libraries deliberately don't share
+# a transitive dep edge, so `-DBUILD_WESCENE=OFF` won't drag scene-only
+# baggage into a weweb-only build, and vice versa.
+option(BUILD_WESCENE "Build the wescene (Wallpaper Engine *scene*) renderer" ON)
+option(BUILD_WEWEB   "Build the weweb (Wallpaper Engine *web*) renderer"     OFF)
+
+if(BUILD_WESCENE)
+    add_subdirectory(src)
+endif()
 
 
 # Test suite — gated by BUILD_TESTS (default OFF; pulls in googletest via
@@ -34,13 +44,13 @@ add_subdirectory(src)
 # -DBUILD_TESTS=ON when iterating on parsers / fixtures. Include CTest so
 # gtest_discover_tests / add_test inside tests/ register with ctest.
 option(BUILD_TESTS "Build the wescene-renderer test suite" OFF)
-if(BUILD_TESTS)
+if(BUILD_WESCENE AND BUILD_TESTS)
     include(CTest)
     add_subdirectory(tests)
 endif()
 
 option(BUILD_WAYWALLEN "Build the waywallen-renderer executable" ON)
-if(BUILD_WAYWALLEN)
+if(BUILD_WESCENE AND BUILD_WAYWALLEN)
     add_subdirectory(waywallen)
 endif()
 
@@ -48,11 +58,15 @@ endif()
 # -DBUILD_VIEWER=ON/OFF.
 pkg_check_modules(GLFW IMPORTED_TARGET glfw3)
 option(BUILD_VIEWER "Build the GLFW standalone viewer" ${GLFW_FOUND})
-if(BUILD_VIEWER)
+if(BUILD_WESCENE AND BUILD_VIEWER)
     if(NOT GLFW_FOUND)
         message(FATAL_ERROR
             "BUILD_VIEWER=ON but glfw3 was not found via pkg-config. "
             "Install glfw3 development headers or pass -DBUILD_VIEWER=OFF.")
     endif()
     add_subdirectory(viewer)
+endif()
+
+if(BUILD_WEWEB)
+    add_subdirectory(weweb)
 endif()

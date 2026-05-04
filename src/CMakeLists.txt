@@ -102,7 +102,7 @@ target_sources(
          Scene/Scene.cppm)
 target_link_libraries(
   wescene-base
-  PUBLIC rstd::rstd rstd.cppstd
+  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen
   PRIVATE nlohmann_json ${LZ4_LIBRARIES} miniaudio
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 target_include_directories(

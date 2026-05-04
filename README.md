@@ -1,11 +1,13 @@
-# Wallpaper Engine Scene Renderer
+# Open Wallpaper Engine
+
+## Scene Renderer
 Open source scene renderer, mostly for linux.  
 Made this for fun.
 
 - vulkan 1.1
 - render graph for automatic pass dependencies
 
-## Supported
+### Supported
 - [x] Layer
 	- [x] Image
 	- [x] Composition / Fullscreen
