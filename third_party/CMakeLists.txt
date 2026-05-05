@@ -81,6 +81,13 @@ set(ENABLE_SPIRV_CODEGEN        ON     CACHE INTERNAL "")
 # and cascade-rebuilds the entire LLVM tree on every incremental build.
 set(HLSL_DISABLE_SOURCE_GENERATION ON  CACHE INTERNAL "")
 
+# cubeb
+set(BUILD_TESTS OFF)
+set(BUILD_TOOLS OFF)
+set(BUNDLE_SPEEX ON)
+set(USE_SANITIZERS OFF)
+set(USE_WINMM OFF)
+
 fetchdeps(${CMAKE_SOURCE_DIR}/deps.json)
 
 # Post-fetch setup for eigen (header-only, source_subdir=cmake-noop).
