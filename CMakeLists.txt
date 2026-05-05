@@ -23,7 +23,7 @@ include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
 
 option(BUILD_WESCENE "Build the wescene (Wallpaper Engine *scene*) renderer" ON)
-option(BUILD_WEWEB   "Build the weweb (Wallpaper Engine *web*) renderer"     OFF)
+option(BUILD_WEWEB   "Build the weweb (Wallpaper Engine *web*) renderer"     ON)
 
 if(BUILD_WEWEB)
     include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
@@ -39,13 +39,13 @@ if(BUILD_WESCENE AND BUILD_TESTS)
 endif()
 
 option(BUILD_WAYWALLEN "Build the waywallen-renderer executable" ON)
-if(BUILD_WESCENE AND BUILD_WAYWALLEN)
+if(BUILD_WAYWALLEN)
     add_subdirectory(waywallen)
 endif()
 
 pkg_check_modules(GLFW IMPORTED_TARGET glfw3)
 option(BUILD_VIEWER "Build the GLFW standalone viewer" ${GLFW_FOUND})
-if((BUILD_WESCENE AND BUILD_VIEWER) OR BUILD_WEWEB)
+if((BUILD_WESCENE AND BUILD_VIEWER) OR (BUILD_WEWEB AND BUILD_VIEWER))
     if(NOT GLFW_FOUND)
         message(FATAL_ERROR
             "Need glfw3 for any standalone viewer. Install glfw3 "
