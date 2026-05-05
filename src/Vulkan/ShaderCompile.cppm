@@ -10,9 +10,8 @@ module;
 #include <vulkan/vulkan.h>
 
 #include "Core/MapSet.hpp"
-#include "Type.hpp"
-
 export module wescene.shader_compile;
+import wescene.types;
 import cppstd;
 
 export namespace wallpaper::vulkan

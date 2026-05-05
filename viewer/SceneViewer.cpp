@@ -12,6 +12,7 @@
 #include "Common.hpp"
 
 
+import rstd.log;
 import wescene.scene_wallpaper;
 import wescene.utils;
 
@@ -48,6 +49,10 @@ void updateCallback() {
 }
 
 int main(int argc, char** argv) {
+    static rstd::log::EnvLogger _logger;
+    rstd::log::set_logger(_logger);
+    rstd::log::set_max_level(_logger.filter());
+
     argparse::ArgumentParser program("scene-viewer");
     setAndParseArg(program, argc, argv);
     auto [w_width, w_height] = program.get<Resolution>(OPT_RESOLUTION);

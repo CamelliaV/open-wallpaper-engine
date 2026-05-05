@@ -2,9 +2,8 @@ module;
 
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
-#include "Type.hpp"
-
 export module wescene.parse:wp_shader_parser;
+import wescene.types;
 import cppstd;
 import wescene.shader_compile;
 import wescene.scene;

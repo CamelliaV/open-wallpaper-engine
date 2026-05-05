@@ -3,8 +3,6 @@ module;
 #include <cassert>
 
 #include "Core/Literals.hpp"
-#include "Utils/Logging.h"
-
 module wescene.rgraph;
 import cppstd;
 

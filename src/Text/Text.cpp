@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -8,13 +9,11 @@ module;
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
-
-#include "Image.hpp"
-#include "Type.hpp"
 #include "SpecTexs.hpp"
-#include "Utils/Logging.h"
-
 module wescene.text;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.scene;
 import wescene.shader_compile;
@@ -43,7 +42,7 @@ public:
 private:
     FtLibrary() {
         if (FT_Init_FreeType(&m_lib) != 0) {
-            LOG_ERROR("FT_Init_FreeType failed");
+            rstd_error("FT_Init_FreeType failed");
             m_lib = nullptr;
         }
     }
@@ -288,11 +287,11 @@ FontFace* FontCache::GetFace(std::span<const std::byte> blob, std::uint32_t pixe
                            static_cast<FT_Long>(blob.size()),
                            0,
                            &face->m_impl->face) != 0) {
-        LOG_ERROR("FT_New_Memory_Face failed");
+        rstd_error("FT_New_Memory_Face failed");
         return nullptr;
     }
     if (FT_Set_Pixel_Sizes(face->m_impl->face, 0, pixel_size) != 0) {
-        LOG_ERROR("FT_Set_Pixel_Sizes failed (px=%u)", pixel_size);
+        rstd_error("FT_Set_Pixel_Sizes failed (px={})", pixel_size);
         return nullptr;
     }
     face->m_impl->pixel_size = pixel_size;
@@ -472,7 +471,7 @@ std::shared_ptr<wallpaper::SceneShader> CompileTextShader() {
 
     std::vector<Uni_ShaderSpv> spvs;
     if (! CompileAndLinkShaderUnits(units, opt, spvs)) {
-        LOG_ERROR("text shader compile failed");
+        rstd_error("text shader compile failed");
         return nullptr;
     }
 
@@ -571,7 +570,7 @@ void TextLayouter::SetText(std::string_view utf8) {
         const auto* gi = im.face->Glyph(cp);
         if (gi == nullptr) {
             if (! im.missing_glyph_logged) {
-                LOG_INFO("text: codepoint U+%04X not in pre-rasterised set, skipping",
+                rstd_info("text: codepoint U+{:04X} not in pre-rasterised set, skipping",
                          cp);
                 im.missing_glyph_logged = true;
             }
@@ -585,7 +584,7 @@ void TextLayouter::SetText(std::string_view utf8) {
     bool has_bg = im.style.opaquebackground;
     std::size_t total_quads = total_glyph_quads + (has_bg ? 1u : 0u);
     if (total_quads > im.peak_quads) {
-        LOG_INFO("text: %zu quads exceed peak capacity %zu, truncating",
+        rstd_info("text: {} quads exceed peak capacity {}, truncating",
                  total_quads, im.peak_quads);
         total_quads = im.peak_quads;
         if (has_bg && total_glyph_quads + 1 > im.peak_quads)

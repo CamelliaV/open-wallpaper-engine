@@ -5,9 +5,8 @@ module;
 
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
-#include "Type.hpp"
-
 module wescene.scene;
+import wescene.types;
 import cppstd;
 
 using namespace wallpaper;

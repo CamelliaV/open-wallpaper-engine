@@ -1,12 +1,10 @@
 module;
-
-#include "Utils/Logging.h"
+#include <rstd/macro.hpp>
 #include "Swapchain/ExSwapchain.hpp"
 
 #include "Core/ArrayHelper.hpp"
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
-#include "Type.hpp"
 #include "vvk/macros.hpp"
 
 #include <cassert>
@@ -19,6 +17,9 @@ module;
 #endif
 
 module wescene.vulkan_render;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.vulkan;
 import wescene.utils;
@@ -198,9 +199,9 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
     m_redraw_cb = info.redraw_callback;
     VkExtent2D extent { info.width, info.height };
     if (extent.width * extent.height < 500 * 500) {
-        LOG_ERROR("too small swapchain image size: %dx%d", extent.width, extent.height);
+        rstd_error("too small swapchain image size: {}x{}", extent.width, extent.height);
     } else {
-        LOG_INFO("set swapchain image size: %dx%d", extent.width, extent.height);
+        rstd_info("set swapchain image size: {}x{}", extent.width, extent.height);
     }
 
     std::vector<Extension> inst_exts { base_inst_exts.begin(), base_inst_exts.end() };
@@ -231,18 +232,18 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
     // valid layer
     if (info.enable_valid_layer) {
         inst_layers.push_back({ true, VALIDATION_LAYER_NAME });
-        LOG_INFO("vulkan valid layer \"%s\" enabled", VALIDATION_LAYER_NAME.data());
+        rstd_info("vulkan valid layer \"{}\" enabled", VALIDATION_LAYER_NAME);
     }
 
     if (! Instance::Create(m_instance, inst_exts, inst_layers)) {
-        LOG_ERROR("init vulkan failed");
+        rstd_error("init vulkan failed");
         return false;
     }
     if (! info.offscreen) {
         VkSurfaceKHR surface;
         VVK_CHECK_ACT(
             {
-                LOG_ERROR("create vulkan surface failed");
+                rstd_error("create vulkan surface failed");
                 return false;
             },
             info.surface_info.createSurfaceOp(*m_instance.inst(), &surface));
@@ -260,7 +261,7 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
     {
         m_device = std::make_unique<Device>();
         if (! Device::Create(m_instance, device_exts, extent, *m_device)) {
-            LOG_ERROR("init vulkan device failed");
+            rstd_error("init vulkan device failed");
             return false;
         }
     }
@@ -276,7 +277,7 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
             };
             m_ex_swapchain = info.ex_swapchain_factory(h);
             if (!m_ex_swapchain) {
-                LOG_ERROR("ex_swapchain_factory returned null");
+                rstd_error("ex_swapchain_factory returned null");
                 return false;
             }
         } else {
@@ -409,7 +410,7 @@ void VulkanRender::Impl::DestroyRenderingResource(RenderingResources& rr) {}
 void VulkanRender::Impl::drawFrame(Scene& scene) {
     if (! (m_inited && m_pass_loaded)) return;
 
-        // LOG_INFO("used ram: %fm", (m_device->GetUsage()/1024.0f)/1024.0f);
+        // rstd_info("used ram: {}m", (m_device->GetUsage()/1024.0f)/1024.0f);
 
 #if ENABLE_RENDERDOC_API
     if (rdoc_api)
@@ -564,7 +565,7 @@ void VulkanRender::Impl::drawFrameOffscreen() {
             static std::atomic<uint64_t> n_failed { 0 };
             uint64_t k = n_failed.fetch_add(1, std::memory_order_relaxed);
             if (k == 0 || (k & (k - 1)) == 0) { // 1st, 2nd, 4th, 8th...
-                LOG_ERROR("VulkanRender: vkGetSemaphoreFdKHR failed (vr=%d, count=%llu)",
+                rstd_error("VulkanRender: vkGetSemaphoreFdKHR failed (vr={}, count={})",
                           (int)vr, (unsigned long long)(k + 1));
             }
             sync_fd = -1;
@@ -575,8 +576,8 @@ void VulkanRender::Impl::drawFrameOffscreen() {
             static std::atomic<uint64_t> n_unsig { 0 };
             uint64_t k = n_unsig.fetch_add(1, std::memory_order_relaxed);
             if (k == 0 || (k & (k - 1)) == 0) {
-                LOG_ERROR("VulkanRender: GetSemaphoreFdKHR returned fd=-1 "
-                          "(semaphore not signaled? count=%llu)",
+                rstd_error("VulkanRender: GetSemaphoreFdKHR returned fd=-1 "
+                          "(semaphore not signaled? count={})",
                           (unsigned long long)(k + 1));
             }
         }
@@ -616,7 +617,7 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
         if (rt.bind.screen || ! rt.bind.enable) continue;
         auto bind_rt = scene.renderTargets.find(rt.bind.name);
         if (rt.bind.name.empty() || bind_rt == scene.renderTargets.end()) {
-            LOG_ERROR("unknonw render target bind: %s", rt.bind.name.c_str());
+            rstd_error("unknonw render target bind: {}", rt.bind.name);
             continue;
         }
         rt.width  = (i32)(rt.bind.scale * bind_rt->second.width);
@@ -625,7 +626,7 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
     for (auto& item : scene.renderTargets) {
         auto& rt = item.second;
         if (! item.first.empty() && (rt.width * rt.height <= 4)) {
-            LOG_ERROR("wrong size for render target: %s", item.first.c_str());
+            rstd_error("wrong size for render target: {}", item.first);
         } else if (rt.has_mipmap) {
             rt.mipmap_level =
                 std::max(3u,
@@ -718,10 +719,10 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
                        auto* pass = rg.getPass(id);
                        assert(pass != nullptr);
                        VulkanPass* vpass = static_cast<VulkanPass*>(pass);
-                       // LOG_INFO("----release tex");
+                       // rstd_info("----release tex");
                        for (auto& tex : texs) {
                            vpass->addReleaseTexs(spanone<const std::string_view> { tex->key() });
-                           //    LOG_INFO("%s", tex->key().data());
+                           //    rstd_info("{}", tex->key().data());
                        }
                        return vpass;
                    });

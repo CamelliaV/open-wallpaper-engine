@@ -1,12 +1,12 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "WPJson.hpp"
 
 #include <nlohmann/json.hpp>
-
-#include "Utils/Logging.h"
-
 module wescene.parse;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper::wpscene;
@@ -48,7 +48,7 @@ bool WPEffectFbo::FromJson(const nlohmann::json& json) {
 
     GET_JSON_NAME_VALUE(json, "scale", scale);
     if(scale == 0) { 
-        LOG_ERROR("fbo scale can't be 0");
+        rstd_error("fbo scale can't be 0");
         scale = 1;
     }
     return true;
@@ -99,7 +99,7 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     if(json.contains("passes")) {
         const auto& jPasses = json.at("passes");
         if(jPasses.size() > passes.size()) {
-            LOG_ERROR("passes is not injective");
+            rstd_error("passes is not injective");
             return false;
         }
         int32_t i = 0;
@@ -134,7 +134,7 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
                     commands.push_back(cmd);
                     continue;
                 }
-                LOG_ERROR("no material in effect pass");
+                rstd_error("no material in effect pass");
                 return false;
             }
             std::string matPath;
@@ -153,7 +153,7 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
         }
         if(compose) {
             if(passes.size() != 2) {
-                LOG_ERROR("effect compose option error");
+                rstd_error("effect compose option error");
                 return false;
             }
             WPEffectFbo fbo; {fbo.name = "_rt_FullCompoBuffer1"; fbo.scale = 1;}
@@ -163,7 +163,7 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
             passes.at(1).bind.push_back({"_rt_FullCompoBuffer1", 0});
         }
     } else {
-        LOG_ERROR("no passes in effect file");
+        rstd_error("no passes in effect file");
         return false;
     }
     return true;
@@ -179,7 +179,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     GET_JSON_NAME_VALUE_NOWARN(json, "alignment", alignment);
     nlohmann::json jImage;
     if(!PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + image), jImage)) {
-        LOG_ERROR("Can't load image json: %s", image.c_str());
+        rstd_error("Can't load image json: {}", image);
         return false;
     }
     GET_JSON_NAME_VALUE_NOWARN(jImage, "fullscreen", fullscreen);
@@ -213,12 +213,12 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
 		GET_JSON_NAME_VALUE(jImage, "material", matPath);	
         nlohmann::json jMat;
         if(!PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) {
-            LOG_ERROR("Can't load material json: %s", matPath.c_str());
+            rstd_error("Can't load material json: {}", matPath);
             return false;
         }
         material.FromJson(jMat);
     } else {
-        LOG_INFO("image object no material");
+        rstd_info("image object no material");
         return false;
     }
     if(json.contains("effects")) {

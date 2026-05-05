@@ -4,8 +4,6 @@ module;
 
 #include "Core/Core.hpp"
 #include "Core/MapSet.hpp"
-#include "SpriteAnimation.hpp"
-
 export module wescene.shader_value_updater;
 import cppstd;
 import wescene.scene;

@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "WPJson.hpp"
 
 #include "Core/Literals.hpp"
@@ -10,11 +11,11 @@ module;
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-
-#include "Utils/Logging.h"
 #include "Core/Random.hpp"
 
 module wescene.parse;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.utils;
 import wescene.scene;
@@ -387,7 +388,7 @@ struct Vortex {
     static auto ReadFromJson(const nlohmann::json& j) {
         Vortex v;
         GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
-        if (v.controlpoint >= 8) LOG_ERROR("wrong contropoint index %d", v.controlpoint);
+        if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
         v.controlpoint %= 8;
 
         GET_JSON_NAME_VALUE_NOWARN(j, "distanceinner", v.distanceinner);
@@ -420,7 +421,7 @@ struct ControlPointForce {
     static auto ReadFromJson(const nlohmann::json& j) {
         ControlPointForce v;
         GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
-        if (v.controlpoint >= 8) LOG_ERROR("wrong contropoint index %d", v.controlpoint);
+        if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
         v.controlpoint %= 8;
 
         GET_JSON_NAME_VALUE_NOWARN(j, "scale", v.scale);

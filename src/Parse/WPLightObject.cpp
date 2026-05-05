@@ -3,10 +3,6 @@ module;
 #include "WPJson.hpp"
 
 #include <nlohmann/json.hpp>
-
-
-#include "Utils/Logging.h"
-
 module wescene.parse;
 
 using namespace wallpaper::wpscene;

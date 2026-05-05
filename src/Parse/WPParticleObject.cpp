@@ -1,13 +1,14 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "WPJson.hpp"
 
 #include <nlohmann/json.hpp>
-
-#include "Utils/Logging.h"
 #include "Core/StringHelper.hpp"
 
 module wescene.parse;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper::wpscene;
@@ -77,7 +78,7 @@ bool Emitter::FromJson(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingmode", audioprocessingmode);
     GET_JSON_NAME_VALUE_NOWARN(json, "controlpoint", controlpoint);
 
-    if (controlpoint >= 8) LOG_ERROR("wrong controlpoint %d", controlpoint);
+    if (controlpoint >= 8) rstd_error("wrong controlpoint {}", controlpoint);
     controlpoint = controlpoint % 8; // limited to 0-7
 
     uint32_t _raw_flags { 0 };
@@ -128,7 +129,7 @@ bool ParticleInstanceoverride::FromJosn(const nlohmann::json& json) {
 
 bool Particle::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     if (! json.contains("emitter")) {
-        LOG_ERROR("particle no emitter");
+        rstd_error("particle no emitter");
         return false;
     }
     for (const auto& el : json.at("emitter")) {
@@ -182,7 +183,7 @@ bool Particle::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) return false;
         material.FromJson(jMat);
     } else {
-        LOG_ERROR("particle object no material");
+        rstd_error("particle object no material");
         return false;
     }
 

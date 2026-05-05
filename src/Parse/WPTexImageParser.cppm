@@ -1,8 +1,6 @@
 module;
-
-#include "Image.hpp"
-
 export module wescene.parse:wp_tex_image_parser;
+import wescene.types;
 import cppstd;
 import wescene.scene;
 import wescene.fs;

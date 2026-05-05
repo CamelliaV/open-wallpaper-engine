@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "WPJson.hpp"
 
 #include <charconv>
@@ -7,6 +8,8 @@ module;
 
 
 module wescene.parse;
+import rstd.log;
+import rstd.cppstd;
 
 using namespace wallpaper::wpscene;
 
@@ -182,13 +185,13 @@ bool WPScene::FromJson(const nlohmann::json& json, SceneVersion v) {
         // camera schema is identical across PKGV0001..PKGV0023; no version gate needed.
         camera.FromJson(json.at("camera"));
     } else {
-        LOG_ERROR("scene no camera");
+        rstd_error("scene no camera");
         return false;
     }
     if(json.contains("general")) {
         general.FromJson(json.at("general"), v);
     } else {
-        LOG_ERROR("scene no genera data");
+        rstd_error("scene no genera data");
         return false;
     }
     return true;

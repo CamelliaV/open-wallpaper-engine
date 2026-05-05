@@ -1,10 +1,8 @@
 module;
 
 #include <cstdint>
-
-#include "Image.hpp"
-
 export module wescene.text;
+import wescene.types;
 import cppstd;
 import wescene.scene;
 

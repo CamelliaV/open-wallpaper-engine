@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 // Module purview content needs these std headers + a few internal classics.
 #include <cmath>
 #include <cstdlib>
@@ -11,68 +12,20 @@ module;
 #include "Core/NoCopyMove.hpp"
 #include "Core/StringHelper.hpp"
 
-// Stays-classic headers (macros forced classic, plus their classic-attached
-// declarations they expose). GMF-included so we can re-export the few
-// non-macro entities they declare via `using` decls below.
-//
-//  - Logging.h    : LOG_INFO/LOG_ERROR/__SHORT_FILE__ macros + classic-attached
-//                   WallpaperLog / logToTmpfileWithSha1 / past_last_slash /
-//                   LOGLEVEL_*. Macro-bound → must be #include'd directly.
-//  - String.h     : STRTONUM macro + utils::StrToNum/SpliteString/StrToArray.
-//                   Macro-bound → must be #include'd directly.
-//  - AutoDeletor.hpp : AUTO_DELETER macro + wallpaper::AutoDeleter template.
-//                      Macro-bound → must be #include'd directly.
-//  - Sha.hpp      : utils::genSha1 + utils::SHA1_LEN. Stays classic because
-//                   classic Logging.cpp's logToTmpfileWithSha1 calls genSha1
-//                   (and Logging.cpp can't migrate — its WallpaperLog/
-//                    logToTmpfileWithSha1 are declared classic in Logging.h).
-#include "Utils/Logging.h"
+// Sha.hpp stays classic — utils::genSha1 is consumed by impl units that
+// need to spill blobs to /tmp for post-mortem inspection (Vulkan/Shader.cpp).
 #include "Utils/Sha.hpp"
 
 export module wescene.utils;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
+export import wescene.types;
 
 // ---------- Module-purview entities ----------------------------------------
 
 export namespace wallpaper
 {
-
-// BitFlags<EnumT> — was Utils/BitFlags.hpp.
-template<typename EnumT>
-class BitFlags {
-    static_assert(std::is_enum_v<EnumT>, "Flags can only be specialized for enum types");
-
-    using UnderlyingT = typename std::make_unsigned_t<typename std::underlying_type_t<EnumT>>;
-
-public:
-    constexpr BitFlags() noexcept: bits_(0u) {}
-    constexpr BitFlags(UnderlyingT val) noexcept: bits_(val) {}
-
-    BitFlags& set(EnumT e, bool value = true) noexcept {
-        bits_.set(underlying(e), value);
-        return *this;
-    }
-    BitFlags& reset(EnumT e) noexcept {
-        set(e, false);
-        return *this;
-    }
-    BitFlags& reset() noexcept {
-        bits_.reset();
-        return *this;
-    }
-    [[nodiscard]] bool        all() const noexcept { return bits_.all(); }
-    [[nodiscard]] bool        any() const noexcept { return bits_.any(); }
-    [[nodiscard]] bool        none() const noexcept { return bits_.none(); }
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return bits_.size(); }
-    [[nodiscard]] std::size_t count() const noexcept { return bits_.count(); }
-    constexpr bool operator[](EnumT e) const { return bits_[underlying(e)]; }
-    constexpr bool operator[](UnderlyingT t) const { return bits_[t]; }
-    auto           to_string() const { return bits_.to_string(); }
-
-private:
-    static constexpr UnderlyingT underlying(EnumT e) { return static_cast<UnderlyingT>(e); }
-    std::bitset<sizeof(UnderlyingT) * 8> bits_;
-};
 
 // FpsCounter — was Utils/FpsCounter.h. Implementation in Utils/FpsCounter.cpp.
 class FpsCounter {
@@ -196,15 +149,7 @@ export namespace utils
 // Re-exported from classic Sha.hpp (kept classic for classic-Logging.cpp).
 using ::utils::genSha1;
 
-// Was Utils/Hash.h. boost::functional/hash inline templates.
-template<typename T>
-inline void hash_combine(std::size_t& seed, const T& val) {
-    seed ^= std::hash<T>()(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
-template<typename T>
-inline void hash_combine_fast(std::size_t& seed, const T& val) {
-    seed ^= std::hash<T>()(val) << 1u;
-}
+// hash_combine moved to wescene.types (re-exported above).
 
 // Was Utils/Identity.hpp. Used by wescene.json's _GetJsonValue<T> overloads.
 template<typename>
@@ -218,33 +163,7 @@ struct is_std_array<std::array<T, N>> {
     using type = std::array<T, N>;
 };
 
-// Was Utils/DynamicLibrary.hpp. Definitions in Utils/DynamicLibrary.cpp.
-class DynamicLibrary : NoCopy {
-public:
-    DynamicLibrary();
-    ~DynamicLibrary();
-
-    DynamicLibrary(const char* filename);
-
-    DynamicLibrary(DynamicLibrary&& o) noexcept;
-    DynamicLibrary& operator=(DynamicLibrary&& o) noexcept;
-
-    bool IsOpen() const;
-    bool Open(const char* filename);
-    void Close();
-
-    void* GetSymbolAddr(const char* name) const;
-
-    // not using func deduction
-    template<typename T>
-    bool GetSymbol(const char* name, T& pfunc) const {
-        pfunc = reinterpret_cast<T>(GetSymbolAddr(name));
-        return pfunc != nullptr;
-    }
-
-private:
-    void* handle { nullptr };
-};
+// DynamicLibrary lives in wescene.types now (re-exported above).
 
 } // namespace utils (export)
 

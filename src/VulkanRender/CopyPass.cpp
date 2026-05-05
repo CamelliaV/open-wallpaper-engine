@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cassert>
 
 #include <vulkan/vulkan.h>
@@ -7,11 +8,12 @@ module;
 #include "Core/Literals.hpp"
 #include "SpecTexs.hpp"
 #include "Swapchain/ExSwapchain.hpp"
-#include "Utils/Logging.h"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan_render;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.vulkan;
 import wescene.scene;
@@ -24,7 +26,7 @@ CopyPass::~CopyPass() {};
 
 void CopyPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
     if (scene.renderTargets.count(m_desc.src) == 0) {
-        LOG_ERROR("%s not found", m_desc.src.c_str());
+        rstd_error("{} not found", m_desc.src);
         return;
     }
     if (scene.renderTargets.count(m_desc.dst) == 0) {
@@ -46,9 +48,9 @@ void CopyPass::prepare(Scene& scene, const Device& device, RenderingResources& r
             if (opt.has_value())
                 img = opt.value();
             else
-                LOG_ERROR("query image from cache failed");
+                rstd_error("query image from cache failed");
         } else {
-            LOG_ERROR("can't copy image source");
+            rstd_error("can't copy image source");
             return;
         }
         *vk_textures[i] = img;

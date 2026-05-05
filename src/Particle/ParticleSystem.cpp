@@ -2,8 +2,6 @@ module;
 
 #include "Core/Literals.hpp"
 #include "Core/Random.hpp"
-#include "Utils/Logging.h"
-
 #include <cassert>
 
 module wescene.scene;

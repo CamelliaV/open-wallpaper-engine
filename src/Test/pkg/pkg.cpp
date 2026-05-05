@@ -15,10 +15,10 @@ int main(int argc, char** argv) {
     auto file  = vfs.Open("/assets/scene.json");
     auto file2 = vfs.Open("/assets/shaders/genericimage2.frag");
     if (file) {
-        LOG_INFO(file->ReadAllStr());
+        rstd_info(file->ReadAllStr());
     }
     if (file2) {
-        LOG_INFO(file2->ReadAllStr());
+        rstd_info(file2->ReadAllStr());
     }
     return 0;
 }

@@ -1,15 +1,16 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
 #include <Eigen/Dense>
 #include <nlohmann/json.hpp>
-#include "Utils/Logging.h"
-
 #include "quickjs.h"
 
 module wescene.script;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.scene;
 
@@ -365,8 +366,9 @@ struct JsRuntime::Impl {
         errored.insert(std::string(sha));
         JSValue exc = JS_GetException(c);
         const char* msg = JS_ToCString(c, exc);
-        LOG_ERROR("script[%.*s] %s: %s", (int)sha.size(), sha.data(),
-                            what, msg ? msg : "<no message>");
+        rstd_error("script[{}] {}: {}",
+                            sha,
+                            std::string_view(what), std::string_view(msg ? msg : "<no message>"));
         if (msg) JS_FreeCString(c, msg);
         JS_FreeValue(c, exc);
     }
@@ -592,7 +594,7 @@ void InstallEngineGlobal(JSContext* ctx) {
     if (JS_IsException(r)) {
         JSValue exc = JS_GetException(ctx);
         const char* msg = JS_ToCString(ctx, exc);
-        LOG_ERROR("script bootstrap: %s", msg ? msg : "<exc>");
+        rstd_error("script bootstrap: {}", msg ? msg : "<exc>");
         if (msg) JS_FreeCString(ctx, msg);
         JS_FreeValue(ctx, exc);
     }
@@ -639,7 +641,7 @@ JsRuntime::JsRuntime() : m_impl(std::make_unique<Impl>()) {
     m_impl->rt  = JS_NewRuntime();
     m_impl->ctx = JS_NewContext(m_impl->rt);
     if (! m_impl->rt || ! m_impl->ctx) {
-        LOG_ERROR("script: JS_NewRuntime/JS_NewContext failed");
+        rstd_error("script: JS_NewRuntime/JS_NewContext failed");
         return;
     }
     // QuickJS's default stack-overflow check is conservative (relative to

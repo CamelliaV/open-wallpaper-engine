@@ -1,23 +1,25 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cstring>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 
 #include "vk_mem_alloc.h"
-
-#include "Utils/Logging.h"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper::vulkan;
 
 #define CHECK_REF(ref, act)                                                  \
     if (! ref) {                                                             \
-        LOG_ERROR("stage ref not available, index %d", ref.m_virtual_index); \
+        rstd_error("stage ref not available, index {}", ref.m_virtual_index); \
         { act; }                                                             \
     }
 
@@ -95,8 +97,8 @@ StagingBuffer::VirtualBlock* StagingBuffer::newVirtualBlock(VkDeviceSize nsize) 
     VVK_CHECK_ACT(return nullptr, vmaCreateVirtualBlock(&blockCreateInfo, &block.handle));
     block.enabled = true;
 
-    LOG_INFO("new buffer block(%p), size: %d, index: %d / %d",
-             this,
+    rstd_info("new buffer block({:#x}), size: {}, index: {} / {}",
+             reinterpret_cast<std::uintptr_t>(this),
              block.size,
              block.index,
              m_virtual_blocks.size());
@@ -120,7 +122,7 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
     memcpy(m_stage_raw, tmp.data(), newsize);
 
     m_gpu_buf.handle = nullptr;
-    LOG_INFO("increase buffer size: %d", nsize);
+    rstd_info("increase buffer size: {}", nsize);
     return true;
 }
 
@@ -185,7 +187,7 @@ bool StagingBuffer::allocateSubRef(VkDeviceSize size, StagingBufferRef& ref,
             vmaClearVirtualBlock(block.handle);
             vmaDestroyVirtualBlock(block.handle);
             m_virtual_blocks.pop_back();
-            LOG_ERROR("increase buf failed, pop_back block, current: %d", m_virtual_blocks.size());
+            rstd_error("increase buf failed, pop_back block, current: {}", m_virtual_blocks.size());
             return false;
         }
     }
@@ -204,7 +206,7 @@ void StagingBuffer::unallocateSubRef(const StagingBufferRef& ref) {
             block.enabled = false;
         }
     } else {
-        LOG_ERROR("unallocate stagingbuffer failed: wrong index %d", ref.m_virtual_index);
+        rstd_error("unallocate stagingbuffer failed: wrong index {}", ref.m_virtual_index);
     }
 }
 

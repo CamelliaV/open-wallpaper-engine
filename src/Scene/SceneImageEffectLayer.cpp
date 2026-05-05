@@ -1,12 +1,11 @@
 module;
 
 #include <cassert>
-
-#include "Type.hpp"
 #include "SpecTexs.hpp"
 #include "Core/StringHelper.hpp"
 
 module wescene.scene;
+import wescene.types;
 import cppstd;
 
 using namespace wallpaper;

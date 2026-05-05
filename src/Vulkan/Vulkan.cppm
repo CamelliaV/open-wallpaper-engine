@@ -4,20 +4,13 @@ module;
 
 #include <unistd.h>
 
-// Vulkan loader dynamically — VK_NO_PROTOTYPES so we go through Dispatch.
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
+// Vk types/enumerators/PFN typedefs flow in via `import vulkan;` (purview
+// below). vk_mem_alloc.h still needs the raw vulkan.h declarations, so we
+// let it pull them in transitively.
 #include "vk_mem_alloc.h"
-
-#include "Type.hpp"
-#include "Image.hpp"
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
 #include "Core/NoCopyMove.hpp"
-
-#include "Utils/Logging.h"
-
 // ExSwapchain / TripleSwapchain are classic public headers (consumed by
 // SceneWallpaperSurface.hpp). LocalExSwapchain inherits from ExSwapchain;
 // the base class stays global-attached, the derived is module-attached.
@@ -28,8 +21,17 @@ module;
 #include "vvk/macros.hpp"
 
 export module wescene.vulkan;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
-import wescene.utils;
+import wescene.types;
+
+// Vulkan FFI: wavsen::ffi::vulkan exposes the full Vk symbol surface as
+// a comprehensive FFI module. Re-exported so downstream consumers
+// (wescene.vulkan_render etc.) that `import wescene.vulkan;` still see
+// every Vk type / enumerator / PFN_* without needing their own
+// `import vulkan;`.
+export import vulkan;
 
 // Re-export the host-only shader compile API. Lets existing consumers
 // (VulkanRender/* etc.) keep their `import wescene.vulkan;` without

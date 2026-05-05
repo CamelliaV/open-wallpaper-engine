@@ -1,11 +1,11 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "Core/NoCopyMove.hpp"
-#include "Utils/Logging.h"
-
 export module wescene.message_loop;
 import cppstd;
-import rstd;
+import rstd.log;
+import rstd.cppstd;
 
 export namespace wallpaper::msgloop
 {
@@ -36,13 +36,13 @@ public:
         if (m_thread.joinable()) return;
         m_thread = std::thread(
             [this, fn = std::forward<F>(on_message)]() mutable {
-                LOG_INFO("%s loop started", m_name.c_str());
+                rstd_info("{} loop started", m_name);
                 while (true) {
                     auto r = m_rx->recv();
                     if (! r.is_ok()) break;
                     fn(std::move(r).unwrap());
                 }
-                LOG_INFO("%s loop stopped", m_name.c_str());
+                rstd_info("{} loop stopped", m_name);
             });
     }
 

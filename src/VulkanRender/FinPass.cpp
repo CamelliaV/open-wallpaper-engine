@@ -1,11 +1,12 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <vulkan/vulkan.h>
 
 #include "Swapchain/ExSwapchain.hpp"
-#include "Utils/Logging.h"
-
 module wescene.vulkan_render;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.vulkan;
 import wescene.scene;
@@ -22,13 +23,13 @@ void FinPass::setPresentQueueIndex(uint32_t i)       { m_desc.present_queue_inde
 void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& /*rr*/) {
     auto tex_name = std::string(m_desc.result);
     if (scene.renderTargets.count(tex_name) == 0) {
-        LOG_ERROR("FinPass: scene render target \"%s\" not found", tex_name.c_str());
+        rstd_error("FinPass: scene render target \"{}\" not found", tex_name);
         return;
     }
     auto& rt  = scene.renderTargets.at(tex_name);
     auto  opt = device.tex_cache().Query(tex_name, ToTexKey(rt), !rt.allowReuse);
     if (! opt.has_value()) {
-        LOG_ERROR("FinPass: TextureCache::Query(\"%s\") failed", tex_name.c_str());
+        rstd_error("FinPass: TextureCache::Query(\"{}\") failed", tex_name);
         return;
     }
     m_desc.vk_result = opt.value();

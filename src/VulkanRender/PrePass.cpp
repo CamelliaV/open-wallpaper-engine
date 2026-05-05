@@ -3,9 +3,8 @@ module;
 #include <vulkan/vulkan.h>
 
 #include "Swapchain/ExSwapchain.hpp"
-#include "Type.hpp"
-
 module wescene.vulkan_render;
+import wescene.types;
 import cppstd;
 import wescene.vulkan;
 import wescene.scene;

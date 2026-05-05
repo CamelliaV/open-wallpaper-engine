@@ -30,12 +30,31 @@ set(warn_opts
 include(FetchContent)
 FetchContent_GetProperties(dxc SOURCE_DIR _dxc_source_dir)
 
+# ---------------------------------------------------------------------------
+# wescene-types — minimal types module (enums, BitFlags, Image, SpriteAnim)
+# Independent of wescene-base so consumers (e.g. wescene-vulkan-runtime)
+# can pick it up without dragging the rest of base in.
+# ---------------------------------------------------------------------------
+add_library(wescene-types STATIC)
+target_sources(
+  wescene-types
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+         types/types.cppm)
+target_sources(wescene-types PRIVATE
+  types/types.cpp)
+target_link_libraries(wescene-types
+  PUBLIC rstd::rstd rstd.cppstd)
+target_include_directories(wescene-types
+  PUBLIC .)
+target_compile_features(wescene-types PUBLIC cxx_std_20)
+target_compile_options(wescene-types PRIVATE -Wno-missing-field-initializers)
+set_property(TARGET wescene-types PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET wescene-types PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+
 add_library(
   wescene-base STATIC
-  Type.cpp
-  Utils/Logging.cpp
   Utils/Sha.cpp
-  Utils/DynamicLibrary.cpp
   Utils/FpsCounter.cpp
   Utils/Algorism.cpp
   WPJson.cpp
@@ -68,7 +87,7 @@ target_sources(
          Scene/Scene.cppm)
 target_link_libraries(
   wescene-base
-  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio
+  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio wescene-types
   PRIVATE nlohmann_json ${LZ4_LIBRARIES}
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 target_include_directories(
@@ -89,7 +108,7 @@ target_sources(
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Vulkan/ShaderCompile.cppm)
 target_link_libraries(
   wescene-shader-compile
-  PUBLIC rstd::rstd rstd.cppstd
+  PUBLIC rstd::rstd rstd.cppstd wescene-types
   PRIVATE dxcompiler spirv-reflect-static)
 target_include_directories(
   wescene-shader-compile
@@ -197,7 +216,7 @@ target_sources(
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Vulkan/Vulkan.cppm)
 target_link_libraries(
   wescene-vulkan-runtime
-  PUBLIC ${Vulkan_LIBRARIES} wescene-base wescene-shader-compile)
+  PUBLIC wavsen::ffi::vulkan wescene-types wescene-shader-compile)
 target_include_directories(
   wescene-vulkan-runtime
   PUBLIC . Swapchain Utils/include Vulkan/include

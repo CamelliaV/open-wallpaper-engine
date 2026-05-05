@@ -1,13 +1,14 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cstdio>
 #include <cassert>
 
 #include "Core/Literals.hpp"
 #include "Core/NoCopyMove.hpp"
-#include "Utils/Logging.h"
-
 export module wescene.fs;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 export namespace wallpaper::fs
@@ -235,12 +236,12 @@ inline std::shared_ptr<TBinaryStream> t_CreateCBinaryStream(std::string_view pat
         Shared(std::string_view path, std::FILE* file): CBinaryStream<TBinaryStream>(path, file) {};
     };
     if (std::filesystem::is_directory(path)) {
-        LOG_ERROR("can't open: \'%s\', which is a directory", path.data());
+        rstd_error("can't open: \'{}\', which is a directory", path);
         return nullptr;
     }
     auto* file = std::fopen(std::string(path).c_str(), mode);
     if (file == NULL) {
-        LOG_ERROR("can't open: %s", path.data());
+        rstd_error("can't open: {}", path);
         return nullptr;
     }
     auto cb = std::make_shared<Shared>(path, file);
@@ -421,7 +422,7 @@ public:
                 return true;
             }
         }
-        LOG_INFO("mount point not exist");
+        rstd_info("mount point not exist");
         return false;
     }
     bool IsMounted(std::string_view name) {
@@ -438,7 +439,7 @@ public:
             });
         if (find_it != std::rend(m_mountedFss))
             return find_it->fs->Open(MountedFs::GetPathInMount(find_it->mountPoint, path));
-        LOG_ERROR("not found \"%s\" in vfs", path.data());
+        rstd_error("not found \"{}\" in vfs", path);
         return nullptr;
     }
     std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) {
@@ -455,7 +456,7 @@ public:
         }
         if (find_it != std::rend(m_mountedFss))
             return find_it->fs->OpenW(MountedFs::GetPathInMount(find_it->mountPoint, path));
-        LOG_ERROR("not found \"%s\" in vfs", path.data());
+        rstd_error("not found \"{}\" in vfs", path);
         return nullptr;
     }
     bool Contains(std::string_view path) const {
@@ -510,11 +511,11 @@ inline std::unique_ptr<PhysicalFs> CreatePhysicalFs(std::string_view path, bool 
     if (! std::filesystem::exists(path)) {
         if (create) {
             if (! std::filesystem::create_directories(path)) {
-                LOG_ERROR("mkdir \"%s\" failed", path.data());
+                rstd_error("mkdir \"{}\" failed", path);
                 return nullptr;
             }
         } else {
-            LOG_ERROR("\"%s\" not exists", path.data());
+            rstd_error("\"{}\" not exists", path);
             return nullptr;
         }
     }

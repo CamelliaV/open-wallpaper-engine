@@ -1,20 +1,17 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "Core/Literals.hpp"
-
-#include "Type.hpp"
-#include "Image.hpp"
 #include <lz4.h>
-
-#include "SpriteAnimation.hpp"
-#include "Utils/Logging.h"
-
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #include <cstring>
 
 module wescene.parse;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.utils;
 import wescene.scene;
@@ -42,7 +39,7 @@ char* Lz4Decompress(const char* src, int size, int decompressed_size) {
     char* dst       = new char[(usize)decompressed_size];
     int   load_size = LZ4_decompress_safe(src, dst, size, decompressed_size);
     if (load_size < decompressed_size) {
-        LOG_ERROR("lz4 decompress failed");
+        rstd_error("lz4 decompress failed");
         delete[] dst;
         return nullptr;
     }
@@ -87,7 +84,7 @@ TextureFormat ToTexFormate(int type) {
     case 8: return TextureFormat::RG8;
     case 9: return TextureFormat::R8;
     default:
-        LOG_ERROR("ERROR::ToTexFormate Unkown image type: %d", type);
+        rstd_error("ERROR::ToTexFormate Unkown image type: {}", type);
         return TextureFormat::RGBA8;
     }
 }
@@ -151,7 +148,7 @@ WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
     if (v.body_has_reserved_slot()) file.ReadInt32(); // reserved (always 0 in corpus)
 
     if (v.texv != 5 || v.texi != 1 || v.texb < 1 || v.texb > 4) {
-        LOG_ERROR("WPTexImageParser: unsupported version texv=%d texi=%d texb=%d",
+        rstd_error("WPTexImageParser: unsupported version texv={} texi={} texb={}",
                   v.texv, v.texi, v.texb);
     }
     return v;
@@ -223,7 +220,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                     delete[] result;
                     result = decompressed_char;
                 } else {
-                    LOG_ERROR("lz4 decompress failed");
+                    rstd_error("lz4 decompress failed");
                     delete[] result;
                     return nullptr;
                 }
@@ -241,7 +238,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 auto*   data =
                     stbi_load_from_memory((const unsigned char*)result, src_size, &w, &h, &n, 4);
                 if (data == nullptr) {
-                    LOG_ERROR("stbi failed to decode embedded image (type=%d)", (int)embedded);
+                    rstd_error("stbi failed to decode embedded image (type={})", (int)embedded);
                     delete[] result;
                     return nullptr;
                 }
@@ -311,8 +308,8 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         // with the structural fields we already populated; sprite-frame
         // info is best-effort anyway in our renderer pipeline.
         if (ver.texs < 1 || ver.texs > 3) {
-            LOG_ERROR("WPTexImageParser: unsupported texs version %d for %s",
-                      ver.texs, name.c_str());
+            rstd_error("WPTexImageParser: unsupported texs version {} for {}",
+                      ver.texs, name);
             return header;
         }
         int32_t framecount = file.ReadInt32();
@@ -336,8 +333,8 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                 static_cast<usize>(sf.imageId) >= imageDatas.size() ||
                 imageDatas[static_cast<usize>(sf.imageId)].size() < 2;
             if (bad_id) {
-                LOG_ERROR("WPTexImageParser: invalid sprite frame imageId=%d (image_count=%zu) in %s",
-                          sf.imageId, imageDatas.size(), name.c_str());
+                rstd_error("WPTexImageParser: invalid sprite frame imageId={} (image_count={}) in {}",
+                          sf.imageId, imageDatas.size(), name);
                 file.ReadFloat();              // frametime
                 for (int j = 0; j < 6; ++j) {  // x, y, xAxis[0..1], yAxis[0..1]
                     if (ver.sprite_frame_coords_int()) file.ReadInt32();

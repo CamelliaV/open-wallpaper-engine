@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "Core/Literals.hpp"
 
 #include <nlohmann/json.hpp>
@@ -7,20 +8,19 @@ module;
 #include "WPJson.hpp"
 
 #include "Utils/String.h"
-#include "Utils/Logging.h"
 #include "Utils/Sha.hpp"
 #include "Core/Visitors.hpp"
 #include "Core/StringHelper.hpp"
 #include "Core/ArrayHelper.hpp"
 #include "Core/MapSet.hpp"
 #include "SpecTexs.hpp"
-
-#include "Image.hpp"
-
 #include <cmath>
 #include <Eigen/Dense>
 
 module wescene.parse;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.utils;
 import wescene.scene;
@@ -247,7 +247,7 @@ BlendMode ParseBlendMode(std::string_view str) {
         bm = BlendMode::Normal;
     } else {
         bm = BlendMode::Normal;
-        LOG_ERROR("unknown blending: %s", str.data());
+        rstd_error("unknown blending: {}", str);
     }
     return bm;
 }
@@ -264,7 +264,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
             }
             */
         } else if (sstart_with(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX)) {
-            LOG_INFO("link tex \"%s\"", name.c_str());
+            rstd_info("link tex \"{}\"", name);
             int         wpid { -1 };
             std::regex  reImgId { R"(_rt_imageLayerComposite_([0-9]+))" };
             std::smatch match;
@@ -278,7 +278,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_FULL_COMPO_BUFFER_PREFIX)) {
         } else {
-            LOG_ERROR("unknown tex \"%s\"", name.c_str());
+            rstd_error("unknown tex \"{}\"", name);
         }
     }
 }
@@ -374,7 +374,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
             if (IsSpecLinkTex(name)) {
                 svData.renderTargets.push_back({ i, name });
             } else if (pScene->renderTargets.count(name) == 0) {
-                LOG_ERROR("%s not found in render targes", name.c_str());
+                rstd_error("{} not found in render targes", name);
             } else {
                 svData.renderTargets.push_back({ i, name });
                 const auto& rt = pScene->renderTargets.at(name);
@@ -491,7 +491,7 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
             }
         }
         if (glname.empty()) {
-            LOG_ERROR("ShaderValue: %s not found in glsl", name.c_str());
+            rstd_error("ShaderValue: {} not found in glsl", name);
         } else {
             material.customShader.constValues[glname] = value;
         }
@@ -615,11 +615,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     if (! wpimgobj.puppet.empty()) {
         puppet = std::make_unique<WPMdl>();
         if (! WPMdlParser::Parse(wpimgobj.puppet, vfs, *puppet)) {
-            LOG_ERROR("parse puppet failed: %s", wpimgobj.puppet.c_str());
+            rstd_error("parse puppet failed: {}", wpimgobj.puppet);
             puppet = nullptr;
         }
         else if (puppet->puppet->bones.size() == 0){
-            LOG_ERROR("puppet has no bones: %s", wpimgobj.puppet.c_str());
+            rstd_error("puppet has no bones: {}", wpimgobj.puppet);
             puppet = nullptr;
         }
     }
@@ -662,7 +662,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                            &material,
                            &svData,
                            &shaderInfo)) {
-            LOG_ERROR("load imageobj '%s' material faild", wpimgobj.name.c_str());
+            rstd_error("load imageobj '{}' material faild", wpimgobj.name);
             return;
         };
         LoadConstvalue(material, wpimgobj.material, shaderInfo);
@@ -683,7 +683,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
         }
         if (glname.empty()) {
-            LOG_ERROR("ShaderValue: %s not found in glsl", name.c_str());
+            rstd_error("ShaderValue: {} not found in glsl", name);
         } else {
             material.customShader.constValues[glname] = value;
         }
@@ -832,13 +832,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             {
                 for (const auto& el : wpeffobj.commands) {
                     if (el.command != "copy") {
-                        LOG_ERROR("Unknown effect command: %s", el.command.c_str());
+                        rstd_error("Unknown effect command: {}", el.command);
                         continue;
                     }
                     if (fboMap.count(el.target) + fboMap.count(el.source) < 2) {
-                        LOG_ERROR("Unknown effect command dst or src: %s %s",
-                                  el.target.c_str(),
-                                  el.source.c_str());
+                        rstd_error("Unknown effect command dst or src: {} {}",
+                                  el.target,
+                                  el.source);
                         continue;
                     }
                     imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
@@ -859,7 +859,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     // Set rendertarget, in and out
                     for (const auto& el : wppass.bind) {
                         if (fboMap.count(el.name) == 0) {
-                            LOG_ERROR("fbo %s not found", el.name.c_str());
+                            rstd_error("fbo {} not found", el.name);
                             continue;
                         }
                         if (wpmat.textures.size() <= (usize)el.index)
@@ -868,7 +868,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     }
                     if (! wppass.target.empty()) {
                         if (fboMap.count(wppass.target) == 0) {
-                            LOG_ERROR("fbo %s not found", wppass.target.c_str());
+                            rstd_error("fbo {} not found", wppass.target);
                         } else {
                             matOutRT = fboMap.at(wppass.target);
                         }
@@ -919,7 +919,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             if (eff_mat_ok)
                 imgEffectLayer->AddEffect(imgEffect);
             else {
-                LOG_ERROR("effect \'%s\' failed to load", wpeffobj.name.c_str());
+                rstd_error("effect \'{}\' failed to load", wpeffobj.name);
             }
         }
     }
@@ -1039,10 +1039,10 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                               &svData,
                               &shaderInfo);
     } catch (const std::exception& e) {
-        LOG_ERROR("load particleobj '%s' material exception: %s", wppartobj.name.c_str(), e.what());
+        rstd_error("load particleobj '{}' material exception: {}", wppartobj.name, e.what());
     }
     if (! mat_ok) {
-        LOG_ERROR("load particleobj '%s' material faild", wppartobj.name.c_str());
+        rstd_error("load particleobj '{}' material faild", wppartobj.name);
         return;
     }
     LoadConstvalue(material, particle_obj.material, shaderInfo);
@@ -1209,8 +1209,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         resolved = text::FontCache::ResolveSystemFont(font_name, /*fallback_to_any=*/true);
     }
     if (! resolved.bytes) {
-        LOG_ERROR("text '%s': could not resolve font '%s'",
-                  obj.name.c_str(), font_name.c_str());
+        rstd_error("text '{}': could not resolve font '{}'",
+                  obj.name, font_name);
         return;
     }
 
@@ -1225,14 +1225,14 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         std::span<const std::byte>(resolved.bytes->data(), resolved.bytes->size());
     auto* face = cache->GetFace(blob_view, px);
     if (face == nullptr) {
-        LOG_ERROR("text '%s': FreeType failed to open '%s'",
-                  obj.name.c_str(), resolved.source.c_str());
+        rstd_error("text '{}': FreeType failed to open '{}'",
+                  obj.name, resolved.source);
         return;
     }
 
     auto shader = text::GetTextSceneShader();
     if (! shader) {
-        LOG_ERROR("text '%s': text shader compile failed", obj.name.c_str());
+        rstd_error("text '{}': text shader compile failed", obj.name);
         return;
     }
 
@@ -1253,7 +1253,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         std::string("_text_atlas_") + std::to_string(obj.id) + "_" + getAddr(face);
     auto atlas_img = text::BuildAtlasImage(*face, atlas_url);
     if (! atlas_img) {
-        LOG_ERROR("text '%s': atlas snapshot failed", obj.name.c_str());
+        rstd_error("text '{}': atlas snapshot failed", obj.name);
         return;
     }
     EnsureTextImageParser(*context.scene).Register(atlas_url, atlas_img);
@@ -1366,15 +1366,15 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
 
     context.scene->sceneGraph->AppendChild(sp_node);
 
-    LOG_INFO("text '%s': initial=\"%s\" px=%u peak_quads=%zu bbox=%.1fx%.1f%s (%s)",
-             obj.name.c_str(),
-             s_text.c_str(),
+    rstd_info("text '{}': initial=\"{}\" px={} peak_quads={} bbox={}x{}{} ({})",
+             obj.name,
+             s_text,
              px,
              peak_quads,
-             static_cast<double>(text_w),
-             static_cast<double>(text_h),
-             has_text_script ? " [scripted]" : "",
-             resolved.source.c_str());
+             static_cast<int>(text_w),
+             static_cast<int>(text_h),
+             std::string_view(has_text_script ? " [scripted]" : ""),
+             resolved.source);
 }
 
 template<typename T>
@@ -1382,7 +1382,7 @@ void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj,
                  wpscene::SceneVersion v) {
     T wpobj;
     if (! wpobj.FromJson(json_obj, vfs, v)) {
-        LOG_ERROR("parse scene object failed, name: %s", wpobj.name.c_str());
+        rstd_error("parse scene object failed, name: {}", wpobj.name);
         return;
     }
     if (! wpobj.visible) return;
@@ -1397,10 +1397,10 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     if (! PARSE_JSON(buf, json)) return nullptr;
     wpscene::WPScene sc;
     sc.FromJson(json, pkg_version);
-    LOG_INFO("scene: pkg_version=%u scene_json_version=%u",
+    rstd_info("scene: pkg_version={} scene_json_version={}",
              static_cast<unsigned>(pkg_version),
              static_cast<unsigned>(sc.scene_json_version));
-    //	LOG_INFO(nlohmann::json(sc).dump(4));
+    //	rstd_info(nlohmann::json(sc).dump(4));
 
     ParseContext context;
 

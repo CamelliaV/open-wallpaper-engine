@@ -3,11 +3,10 @@ module;
 #include <cstdio>
 
 #include <vulkan/vulkan.h>
-
-#include "Type.hpp"
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render;
+import wescene.types;
 import cppstd;
 import wescene.vulkan;
 import wescene.scene;

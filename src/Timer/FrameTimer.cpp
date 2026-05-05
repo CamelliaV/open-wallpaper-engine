@@ -1,8 +1,6 @@
 module;
 
 #include "Core/Literals.hpp"
-#include "Utils/Logging.h"
-
 module wescene.timer;
 import cppstd;
 

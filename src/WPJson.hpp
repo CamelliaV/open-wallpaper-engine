@@ -1,10 +1,9 @@
 #pragma once
-#include "Utils/Logging.h"
-
 // Macros only. The wallpaper::GetJsonValue / wallpaper::ParseJson templates
 // are exported by the `wescene.json` module — every TU that uses these
 // macros must also `import wescene.json;` (and #include <nlohmann/json.hpp>
 // so the json type is in scope).
+#include "Utils/Logging.h"  // for __SHORT_FILE__
 
 #define GET_JSON_VALUE(json, value) \
     wallpaper::GetJsonValue(        \

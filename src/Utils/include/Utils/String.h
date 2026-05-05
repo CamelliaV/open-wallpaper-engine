@@ -1,12 +1,14 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <vector>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <exception>
 #include <stdexcept>
-#include "Logging.h"
+#include "Logging.h"  // for __SHORT_FILE__
 
 #define STRTONUM(s, num) utils::StrToNum(s, num, __SHORT_FILE__, __LINE__);
 
@@ -32,10 +34,10 @@ template<typename TNum>
 void StrToNum(std::string_view s, TNum& num, const char* file, int line) {
     try {
         _StrToNum(s, num);
-    } catch (const std::invalid_argument& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "not a number");
-    } catch (const std::out_of_range& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "too larger number");
+    } catch (const std::invalid_argument&) {
+        std::fprintf(stderr, "[ERROR %s:%d] not a number\n", file, line);
+    } catch (const std::out_of_range&) {
+        std::fprintf(stderr, "[ERROR %s:%d] too larger number\n", file, line);
     }
 }
 

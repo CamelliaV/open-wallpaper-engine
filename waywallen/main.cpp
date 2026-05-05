@@ -44,6 +44,7 @@
 #include <thread>
 #include <vulkan/vulkan.h>
 
+import rstd.log;
 import wescene.scene_wallpaper;
 
 namespace
@@ -95,7 +96,7 @@ Options parse_args(int argc, char** argv) {
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
-        std::cerr << err.what() << std::endl;
+        std::fprintf(stderr, "%s\n", err.what());
         std::cerr << program;
         std::exit(1);
     }
@@ -267,6 +268,10 @@ void reader_loop(HostState& s) {
 // ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
+    static rstd::log::EnvLogger _logger;
+    rstd::log::set_logger(_logger);
+    rstd::log::set_max_level(_logger.filter());
+
     Options opts = parse_args(argc, argv);
 
     ::prctl(PR_SET_PDEATHSIG, SIGTERM);

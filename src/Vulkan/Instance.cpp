@@ -1,15 +1,18 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cstdio>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 
 #include "Core/MapSet.hpp"
-#include "Utils/Logging.h"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper::vulkan;
@@ -30,9 +33,9 @@ VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT     
         result |= VK_TRUE;
         // stderr (unbuffered) so messages survive an abort() right after.
         // printf to stdout was line-buffered and eaten on assertion failure.
-        LOG_ERROR("validation layer: %s", pCallbackData->pMessage);
+        rstd_error("validation layer: {}", pCallbackData->pMessage);
     } else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-        LOG_WARN("validation layer: %s", pCallbackData->pMessage);
+        rstd_warn("validation layer: {}", pCallbackData->pMessage);
     }
     return result;
 }
@@ -96,7 +99,7 @@ bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
     auto deviceList = m_vinst.EnumeratePhysicalDevices();
 
     auto logGpu = [](const VkPhysicalDeviceProperties& props) {
-        LOG_INFO("vulkan device: %s", props.deviceName);
+        rstd_info("vulkan device: {}", props.deviceName);
     };
 
     vvk::PhysicalDevice        final_gpu;
@@ -131,7 +134,7 @@ bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
         m_gpu = final_gpu;
         return true;
     } else {
-        LOG_ERROR("failed to find GPU with vulkan support");
+        rstd_error("failed to find GPU with vulkan support");
         return false;
     }
 }
@@ -164,8 +167,8 @@ bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
             bool ok = inst.supportExt(ext.name);
             if (ok) exts.insert(std::string(ext.name));
             if (ext.required && ! ok) {
-                LOG_ERROR("required vulkan instance extension \"%s\" is not supported",
-                          ext.name.data());
+                rstd_error("required vulkan instance extension \"{}\" is not supported",
+                          ext.name);
                 return false;
             }
         }
@@ -178,8 +181,8 @@ bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
             bool ok = inst.supportLayer(layer.name);
             if (ok) layers.insert(std::string(layer.name));
             if (layer.required && ! ok) {
-                LOG_ERROR("required vulkan instance layer \"%s\" is not supported",
-                          layer.name.data());
+                rstd_error("required vulkan instance layer \"{}\" is not supported",
+                          layer.name);
                 return false;
             }
         }

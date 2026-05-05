@@ -1,6 +1,7 @@
 module;
 
 module wescene.vulkan;
+import wescene.types;
 import cppstd;
 
 namespace wallpaper

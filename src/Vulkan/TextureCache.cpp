@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -12,17 +13,16 @@ module;
 #include "Core/ArrayHelper.hpp"
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
-#include "Image.hpp"
 #include "Swapchain/ExSwapchain.hpp"
-#include "Type.hpp"
 #include "Utils/AutoDeletor.hpp"
-#include "Utils/Logging.h"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
-import wescene.utils;
+import wescene.types;
 
 using namespace wallpaper;
 using namespace wallpaper::vulkan;
@@ -157,7 +157,7 @@ std::optional<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::
             }
         }
     }
-    LOG_ERROR("vulkan allocate memory failed, no memory match requires");
+    rstd_error("vulkan allocate memory failed, no memory match requires");
     return std::nullopt;
 }
 
@@ -188,7 +188,7 @@ std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, 
         // a queried list; we keep LINEAR-only for now so that consumers
         // can mmap the buffer directly (the iteration 4 milestone).
         if (tiling != VK_IMAGE_TILING_LINEAR) {
-            LOG_INFO(
+            rstd_info(
                 "[ex-image] OPTIMAL tiling requested; downgrading to LINEAR "
                 "because the DRM-format-modifier path is not yet wired up");
             tiling = VK_IMAGE_TILING_LINEAR;
@@ -640,11 +640,12 @@ std::optional<ImageParameters> TextureCache::Query(std::string_view key, Texture
 }
 
 void TextureCache::MarkShareReady(std::string_view key) {
-    if (exists(m_query_map, key)) {
-        auto& query = m_query_map.find(key)->second;
+    auto it = m_query_map.find(key);
+    if (it != m_query_map.end()) {
+        auto& query = it->second;
         if (query->persist) return;
         query->share_ready = true;
-        m_query_map.erase(key.data());
+        m_query_map.erase(it);
     }
 }
 

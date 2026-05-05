@@ -3,17 +3,13 @@ module;
 #include <climits>
 
 #include <Eigen/Dense>
-
-#include "Type.hpp"
 #include "Core/Literals.hpp"
 #include "Core/NoCopyMove.hpp"
 #include "Core/MapSet.hpp"
 #include "Core/ArrayHelper.hpp"
-#include "SpriteAnimation.hpp"
-#include "Image.hpp"
-
 export module wescene.scene;
 import cppstd;
+import wescene.types;
 
 export namespace wallpaper
 {

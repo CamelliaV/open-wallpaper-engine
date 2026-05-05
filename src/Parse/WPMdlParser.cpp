@@ -1,14 +1,15 @@
 module;
+#include <rstd/macro.hpp>
 #include <cassert>
 #include <cstring>
 
 #include "Core/Literals.hpp"
-
-#include "Type.hpp"
-#include "Utils/Logging.h"
 #include "SpecTexs.hpp"
 
 module wescene.parse;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.scene;
 import wescene.common;
@@ -23,7 +24,7 @@ WPPuppet::PlayMode ToPlayMode(std::string_view m) {
     if (m == "mirror") return WPPuppet::PlayMode::Mirror;
     if (m == "single") return WPPuppet::PlayMode::Single;
 
-    LOG_ERROR("unknown puppet animation play mode \"%s\"", m.data());
+    rstd_error("unknown puppet animation play mode \"{}\"", m);
     assert(m == "loop");
     return WPPuppet::PlayMode::Loop;
 }
@@ -54,7 +55,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 
     int32_t mdl_flag = f.ReadInt32();
     if (mdl_flag == 9) {
-        LOG_INFO("puppet '%s' is not complete, ignore", str_path.c_str());
+        rstd_info("puppet '{}' is not complete, ignore", str_path);
         return false;
     };
     f.ReadInt32(); // unk, 1
@@ -83,7 +84,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 
     uint32_t vertex_size = curr;
     if (vertex_size % (alt_mdl_format? alt_singile_vertex : singile_vertex) != 0) {
-        LOG_ERROR("unsupport mdl vertex size %d", vertex_size);
+        rstd_error("unsupport mdl vertex size {}", vertex_size);
         return false;
     }
 
@@ -101,7 +102,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 
     uint32_t indices_size = f.ReadUint32();
     if (indices_size % singile_indices != 0) {
-        LOG_ERROR("unsupport mdl indices size %d", indices_size);
+        rstd_error("unsupport mdl indices size {}", indices_size);
         return false;
     }
 
@@ -133,13 +134,13 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         bone.parent = f.ReadUint32();
         assert(bone.parent < i || bone.noParent());
         if (bone.parent >= i && ! bone.noParent()) {
-            LOG_ERROR("mdl wrong bone parent index %d", bone.parent);
+            rstd_error("mdl wrong bone parent index {}", bone.parent);
             return false;
         }
 
         uint32_t size = f.ReadUint32();
         if (size != 64) {
-            LOG_ERROR("mdl unsupport bones size: %d", size);
+            rstd_error("mdl unsupport bones size: {}", size);
             return false;
         }
         for (auto row : bone.transform.matrix().colwise()) {
@@ -149,14 +150,14 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         std::string bone_simulation_json = f.ReadStr();
         /*
         auto trans = bone.transform.translation();
-        LOG_INFO("trans: %f %f %f", trans[0], trans[1], trans[2]);
+        rstd_info("trans: {} {} {}", trans[0], trans[1], trans[2]);
         */
     }
 
     if (mdl.mdls > 1) {
         int16_t unk = f.ReadInt16();
         if (unk != 0) {
-            LOG_INFO("puppet: one unk is not 0, may be wrong");
+            rstd_info("puppet: one unk is not 0, may be wrong");
         }
 
         uint8_t has_trans = f.ReadUint8();
@@ -234,7 +235,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                 }
     
                 if (anim.id <= 0) {
-                    LOG_ERROR("wrong anime id %d", anim.id);
+                    rstd_error("wrong anime id {}", anim.id);
                     return false;
                 }
                 f.ReadInt32();
@@ -254,7 +255,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                     uint32_t byte_size = f.ReadUint32();
                     uint32_t num       = byte_size / singile_bone_frame;
                     if (byte_size % singile_bone_frame != 0) {
-                        LOG_ERROR("wrong bone frame size %d", byte_size);
+                        rstd_error("wrong bone frame size {}", byte_size);
                         return false;
                     }
                     bframes.frames.resize(num);
@@ -293,7 +294,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     
     mdl.puppet->prepared();
 
-    LOG_INFO("read puppet: mdlv: %d, nmdls: %d, mdla: %d, bones: %d, anims: %d",
+    rstd_info("read puppet: mdlv: {}, nmdls: {}, mdla: {}, bones: {}, anims: {}",
              mdl.mdlv,
              mdl.mdls,
              mdl.mdla,
@@ -303,11 +304,14 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 }
 
 void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl) {
-    SceneVertexArray vertex({ { WE_IN_POSITION.data(), VertexType::FLOAT3 },
-                              { WE_IN_BLENDINDICES.data(), VertexType::UINT4 },
-                              { WE_IN_BLENDWEIGHTS.data(), VertexType::FLOAT4 },
-                              { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 } },
-                            mdl.vertexs.size());
+    using Attr = SceneVertexArray::SceneVertexAttribute;
+    std::vector<Attr> attrs {
+        Attr { std::string(WE_IN_POSITION),     VertexType::FLOAT3 },
+        Attr { std::string(WE_IN_BLENDINDICES), VertexType::UINT4  },
+        Attr { std::string(WE_IN_BLENDWEIGHTS), VertexType::FLOAT4 },
+        Attr { std::string(WE_IN_TEXCOORD),     VertexType::FLOAT2 },
+    };
+    SceneVertexArray vertex(attrs, mdl.vertexs.size());
 
     std::array<float, 16> one_vert;
     auto                  to_one = [](const WPMdl::Vertex& in, decltype(one_vert)& out) {

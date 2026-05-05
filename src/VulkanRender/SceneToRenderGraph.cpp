@@ -1,11 +1,14 @@
 module;
 
+#include <rstd/macro.hpp>
+#include "Core/Literals.hpp"
 #include "SpecTexs.hpp"
-#include "Utils/Logging.h"
 #include "Core/MapSet.hpp"
 #include "RenderGraph/Pass.hpp"
 
 module wescene.vulkan_render;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.vulkan;
 import wescene.scene;
@@ -210,7 +213,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
 
     for (auto& info : extra.link_info) {
         if (! exists(extra.id_link_map, info.link_id)) {
-            LOG_ERROR("link tex %d not found", info.link_id);
+            rstd_error("link tex {} not found", info.link_id);
             continue;
         }
         rgraph->afterBuild(

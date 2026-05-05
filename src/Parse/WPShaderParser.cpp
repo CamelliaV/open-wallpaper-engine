@@ -1,12 +1,10 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
 
 #include <nlohmann/json.hpp>
-
-#include "Type.hpp"
-#include "Utils/Logging.h"
 #include "WPJson.hpp"
 
 #include "Utils/String.h"
@@ -14,6 +12,9 @@ module;
 #include <cassert>
 
 module wescene.parse;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.shader_compile;
 import wescene.scene;
@@ -290,7 +291,7 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
                         }
                     }
                     if (defines.back()[0] != 'g') {
-                        LOG_INFO("PreShaderSrc User shadervalue not supported");
+                        rstd_info("PreShaderSrc User shadervalue not supported");
                     }
                 }
             }
@@ -918,7 +919,7 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
         std::string cup(c.first);
         std::transform(c.first.begin(), c.first.end(), cup.begin(), ::toupper);
         if (c.second.empty()) {
-            LOG_ERROR("combo '%s' can't be empty", cup.c_str());
+            rstd_error("combo '{}' can't be empty", cup);
             continue;
         }
         combo_defines += "#define " + cup + " " + c.second + "\n";
@@ -1002,7 +1003,7 @@ void MaybeRecordCompile(std::string_view scene_id, std::span<const WPShaderUnit>
         std::fwrite(line.data(), 1, line.size(), f);
         std::fclose(f);
     } else {
-        LOG_WARN("WP_SHADER_RECORD: cannot open '%s' for append", path);
+        rstd_warn("WP_SHADER_RECORD: cannot open '{}' for append", path);
     }
 }
 
@@ -1058,7 +1059,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         if (vfs.Contains(cache_file_path)) {
             auto cache_file = vfs.Open(cache_file_path);
             if (! cache_file || ! ::LoadShaderFromFile(codes, *cache_file)) {
-                LOG_ERROR("load shader from \'%s\' failed", cache_file_path.c_str());
+                rstd_error("load shader from \'{}\' failed", cache_file_path);
                 return false;
             }
         } else {

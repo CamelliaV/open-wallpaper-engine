@@ -1,11 +1,12 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cassert>
 
 #include "Core/Literals.hpp"
-#include "Utils/Logging.h"
-
 module wescene.pkg_fs;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 import wescene.fs;
@@ -33,7 +34,7 @@ std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
 
     auto&       pkg = *ppkg;
     std::string ver = ReadSizedString(pkg);
-    LOG_INFO("pkg version: %s", ver.data());
+    rstd_info("pkg version: {}", ver);
 
     std::vector<PkgFile> pkgfiles;
     i32                  entryCount = pkg.ReadInt32();

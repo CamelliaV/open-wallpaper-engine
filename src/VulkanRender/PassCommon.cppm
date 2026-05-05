@@ -1,12 +1,10 @@
 module;
 
 #include <vulkan/vulkan.h>
-
-#include "Type.hpp"
-
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:pass_common;
+import wescene.types;
 import wescene.vulkan;
 import wescene.scene;
 

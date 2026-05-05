@@ -1,8 +1,13 @@
 module;
 
 #include <cassert>
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+
+#include <rstd/macro.hpp>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
@@ -13,14 +18,37 @@ module;
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
 #include "Core/StringHelper.hpp"
-#include "Type.hpp"
-#include "Utils/Logging.h"
-
+#include "Utils/Sha.hpp"
 module wescene.shader_compile;
+import wescene.types;
 import cppstd;
+import rstd.log;
+import rstd.cppstd;
 
 using namespace wallpaper;
 using namespace wallpaper::vulkan;
+
+namespace
+{
+// Spill a payload to /tmp/<sha1> for post-mortem inspection. Returns the
+// written path so callers can mention it in the error message.
+std::string logToTmpfileWithSha1(std::span<const char> in, const char* fmt, ...) {
+    std::va_list          args;
+    std::string           name   = utils::genSha1(in);
+    std::filesystem::path fspath = std::filesystem::temp_directory_path() / name;
+    std::string           path   = fspath.native();
+    auto*                 file   = std::fopen(path.c_str(), "w+");
+    if (! file) return path;
+    {
+        va_start(args, fmt);
+        std::vfprintf(file, fmt, args);
+        va_end(args);
+    }
+    std::fprintf(file, "\n");
+    std::fclose(file);
+    return path;
+}
+} // namespace
 
 namespace
 {
@@ -134,7 +162,7 @@ inline DxcCtx GetDxcCtx() {
         IDxcUtils* raw = nullptr;
         HRESULT    hr  = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&raw));
         if (FAILED(hr) || ! raw) {
-            LOG_ERROR("dxc: DxcCreateInstance(DxcUtils) failed: 0x%lx", (unsigned long)hr);
+            rstd_error("dxc: DxcCreateInstance(DxcUtils) failed: 0x{:x}", (unsigned long)hr);
             return {};
         }
         tl_utils.reset(raw);
@@ -143,7 +171,7 @@ inline DxcCtx GetDxcCtx() {
         IDxcCompiler3* raw = nullptr;
         HRESULT        hr  = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&raw));
         if (FAILED(hr) || ! raw) {
-            LOG_ERROR("dxc: DxcCreateInstance(DxcCompiler) failed: 0x%lx", (unsigned long)hr);
+            rstd_error("dxc: DxcCreateInstance(DxcCompiler) failed: 0x{:x}", (unsigned long)hr);
             return {};
         }
         tl_compiler.reset(raw);
@@ -152,7 +180,7 @@ inline DxcCtx GetDxcCtx() {
         IDxcIncludeHandler* raw = nullptr;
         tl_utils->CreateDefaultIncludeHandler(&raw);
         if (! raw) {
-            LOG_ERROR("dxc: CreateDefaultIncludeHandler failed");
+            rstd_error("dxc: CreateDefaultIncludeHandler failed");
             return {};
         }
         tl_include.reset(raw);
@@ -232,7 +260,7 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
                 vkbinding.descriptorCount = 1;
                 vkbinding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             } else {
-                LOG_ERROR("unknown DescriptorBinding %d", b.descriptor_type);
+                rstd_error("unknown DescriptorBinding {}", (int)b.descriptor_type);
                 return false;
             }
 
@@ -249,7 +277,7 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
                 if (wallpaper::sstart_with(input.name, "gl_")) continue;
 
                 if (input.location == std::numeric_limits<decltype(input.location)>::max()) {
-                    LOG_ERROR("shader input %s no location", input.name);
+                    rstd_error("shader input {} no location", input.name);
                     return false;
                 }
                 ShaderReflected::Input rinput;
@@ -288,7 +316,7 @@ bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
                                        ctx.default_include,
                                        IID_PPV_ARGS(&result_raw));
     if (FAILED(hr) || ! result_raw) {
-        LOG_ERROR("dxc(preprocess): IDxcCompiler3::Compile failed: 0x%lx",
+        rstd_error("dxc(preprocess): IDxcCompiler3::Compile failed: 0x{:x}",
                   (unsigned long)hr);
         return false;
     }
@@ -304,15 +332,15 @@ bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
     if (errors && errors->GetStringLength() > 0) {
         if (failed) {
             std::string tmp_name = logToTmpfileWithSha1(std::string(src), "%.*s",
-                                                        static_cast<int>(src.size()), src.data());
-            LOG_ERROR("dxc(preprocess): %.*s",
-                      static_cast<int>(errors->GetStringLength()),
-                      errors->GetStringPointer());
-            LOG_ERROR("shader source is at %s", tmp_name.c_str());
+                                                        static_cast<int>(src.size()), src);
+            rstd_error("dxc(preprocess): {}",
+                      std::string_view(errors->GetStringPointer(),
+                                       errors->GetStringLength()));
+            rstd_error("shader source is at {}", tmp_name);
         } else {
-            LOG_WARN("dxc(preprocess): %.*s",
-                     static_cast<int>(errors->GetStringLength()),
-                     errors->GetStringPointer());
+            rstd_warn("dxc(preprocess): {}",
+                     std::string_view(errors->GetStringPointer(),
+                                      errors->GetStringLength()));
         }
     }
     if (failed) return false;
@@ -321,7 +349,7 @@ bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
     result->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&hlsl_raw), nullptr);
     ComPtr<IDxcBlobUtf8> hlsl(hlsl_raw);
     if (! hlsl || hlsl->GetStringLength() == 0) {
-        LOG_ERROR("dxc(preprocess): no preprocessed output");
+        rstd_error("dxc(preprocess): no preprocessed output");
         return false;
     }
 
@@ -384,7 +412,7 @@ bool wallpaper::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit
                                        ctx.default_include,
                                        IID_PPV_ARGS(&result_raw));
         if (FAILED(hr) || ! result_raw) {
-            LOG_ERROR("dxc(compile): IDxcCompiler3::Compile failed: 0x%lx", (unsigned long)hr);
+            rstd_error("dxc(compile): IDxcCompiler3::Compile failed: 0x{:x}", (unsigned long)hr);
             return false;
         }
         ComPtr<IDxcResult> result(result_raw);
@@ -404,14 +432,14 @@ bool wallpaper::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit
             // when the compile actually failed.
             if (compile_failed) {
                 std::string tmp_name = logToTmpfileWithSha1(unit.src, "%s", unit.src.c_str());
-                LOG_ERROR("dxc(compile): %.*s",
-                          static_cast<int>(errors->GetStringLength()),
-                          errors->GetStringPointer());
-                LOG_ERROR("shader source is at %s", tmp_name.c_str());
+                rstd_error("dxc(compile): {}",
+                          std::string_view(errors->GetStringPointer(),
+                                           errors->GetStringLength()));
+                rstd_error("shader source is at {}", tmp_name);
             } else {
-                LOG_WARN("dxc(compile): %.*s",
-                         static_cast<int>(errors->GetStringLength()),
-                         errors->GetStringPointer());
+                rstd_warn("dxc(compile): {}",
+                         std::string_view(errors->GetStringPointer(),
+                                          errors->GetStringLength()));
             }
         }
 
@@ -423,7 +451,7 @@ bool wallpaper::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit
         result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&spv_blob_raw), nullptr);
         ComPtr<IDxcBlob> spv_blob(spv_blob_raw);
         if (! spv_blob || spv_blob->GetBufferSize() == 0) {
-            LOG_ERROR("dxc(compile): no SPIR-V output produced");
+            rstd_error("dxc(compile): no SPIR-V output produced");
             return false;
         }
 
@@ -451,7 +479,7 @@ bool wallpaper::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit
                 std::fwrite(unit.src.data(), 1, unit.src.size(), f);
                 std::fclose(f);
             }
-            LOG_INFO("dumped SPIR-V + HLSL: %s.{spv,hlsl}", base.c_str());
+            rstd_info("dumped SPIR-V + HLSL: {}.{{spv,hlsl}}", base);
         }
 
         spvs.emplace_back(std::move(spv));

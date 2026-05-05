@@ -1,5 +1,6 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cassert>
 
 #include <vulkan/vulkan.h>
@@ -8,11 +9,12 @@ module;
 #include "Core/ArrayHelper.hpp"
 #include "Core/MapSet.hpp"
 #include "SpecTexs.hpp"
-#include "Utils/Logging.h"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan_render;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 import wescene.vulkan;
 import wescene.scene;
@@ -122,7 +124,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             if (image) {
                 img_slots = device.tex_cache().CreateTex(*image);
             } else {
-                LOG_ERROR("parse tex \"%s\" failed", tex_name.c_str());
+                rstd_error("parse tex \"{}\" failed", tex_name);
             }
         }
         m_desc.vk_textures[i] = img_slots;
@@ -148,7 +150,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         SceneShader& shader = *(mesh.Material()->customShader.shader);
 
         if (! GenReflect(shader.codes, spvs, ref)) {
-            LOG_ERROR("gen spv reflect failed, %s", shader.name.c_str());
+            rstd_error("gen spv reflect failed, {}", shader.name);
             return;
         }
 
@@ -156,18 +158,18 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         bindings.resize(ref.binding_map.size());
 
         /*
-        LOG_INFO("----shader------");
-        LOG_INFO("%s", shader.name.c_str());
-        LOG_INFO("--inputs:");
+        rstd_info("----shader------");
+        rstd_info("{}", shader.name);
+        rstd_info("--inputs:");
         for (auto& i : ref.input_location_map) {
-            LOG_INFO("%d %s", i.second, i.first.c_str());
+            rstd_info("{} {}", i.second, i.first);
         }
-        LOG_INFO("--bindings:");
+        rstd_info("--bindings:");
         */
 
         std::transform(
             ref.binding_map.begin(), ref.binding_map.end(), bindings.begin(), [](auto& item) {
-                // LOG_INFO("%d %s", item.second.binding, item.first.c_str());
+                // rstd_info("{} {}", item.second.binding, item.first);
                 return item.second;
             });
 

@@ -1,12 +1,13 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <nlohmann/json.hpp>
-
-#include "Utils/Logging.h"
 #include "Utils/String.h"
 
 module wescene.json;
 import cppstd;
+import rstd.log;
+import rstd.cppstd;
 import wescene.utils;
 
 namespace wallpaper
@@ -17,7 +18,9 @@ bool ParseJson(const char* file, const char* func, int line, const std::string& 
     try {
         result = nlohmann::json::parse(source);
     } catch (nlohmann::json::parse_error& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "parse json(%s), %s", func, e.what());
+        rstd_error("parse json({}), {} at {}:{}",
+                   std::string_view(func), std::string_view(e.what()),
+                   std::string_view(file), line);
         return false;
     }
     return true;
@@ -60,20 +63,19 @@ inline bool _GetJsonValue(const char* file, const char* func, int line, const nl
     try {
         return _GetJsonValue<T>(json, value);
     } catch (const njson::type_error& e) {
-        WallpaperLog(LOGLEVEL_INFO,
-                     file,
-                     line,
-                     "%s %s at %s\n%s",
-                     e.what(),
-                     nameinfo.c_str(),
-                     func,
-                     json.dump(4).c_str());
+        rstd_info("{} {} at {} {}:{}\n{}",
+                  std::string_view(e.what()), nameinfo,
+                  std::string_view(func), std::string_view(file), line,
+                  json.dump(4));
     } catch (const std::invalid_argument& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "%s %s at %s", e.what(), nameinfo.c_str(), func);
+        rstd_error("{} {} at {} {}:{}", std::string_view(e.what()), nameinfo,
+                   std::string_view(func), std::string_view(file), line);
     } catch (const std::out_of_range& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "%s %s at %s", e.what(), nameinfo.c_str(), func);
+        rstd_error("{} {} at {} {}:{}", std::string_view(e.what()), nameinfo,
+                   std::string_view(func), std::string_view(file), line);
     } catch (const utils::StrToArray::WrongSizeExp& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "%s %s at %s", e.what(), nameinfo.c_str(), func);
+        rstd_error("{} {} at {} {}:{}", std::string_view(e.what()), nameinfo,
+                   std::string_view(func), std::string_view(file), line);
     }
     return false;
 }
@@ -86,25 +88,15 @@ GetJsonValue(const char* file, const char* func, int line, const nlohmann::json&
     if (has_name) {
         if (! json.contains(name)) {
             if (warn)
-                WallpaperLog(LOGLEVEL_INFO,
-                             "",
-                             0,
-                             "read json \"%s\" not a key at %s(%s:%d)",
-                             name.data(),
-                             func,
-                             file,
-                             line);
+                rstd_info("read json \"{}\" not a key at {}({}:{})",
+                          name, std::string_view(func),
+                          std::string_view(file), line);
             return false;
         } else if (json.at(name).is_null()) {
             if (warn)
-                WallpaperLog(LOGLEVEL_INFO,
-                             "",
-                             0,
-                             "read json \"%s\" is null at %s(%s:%d)",
-                             name.data(),
-                             func,
-                             file,
-                             line);
+                rstd_info("read json \"{}\" is null at {}({}:{})",
+                          name, std::string_view(func),
+                          std::string_view(file), line);
             return false;
         }
     }

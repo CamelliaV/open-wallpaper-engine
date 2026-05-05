@@ -1,15 +1,18 @@
 module;
 
+#include <rstd/macro.hpp>
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 
 #include "vk_mem_alloc.h"
 
 #include "Core/MapSet.hpp"
-#include "Utils/Logging.h"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper::vulkan;
@@ -87,7 +90,7 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
             index++;
         }
         if (present_indexs.empty()) {
-            LOG_ERROR("not find present queue");
+            rstd_error("not find present queue");
         } else if (graphic_indexs.front() != present_indexs.front()) {
             m_present_queue.family_index = present_indexs.front();
             VkDeviceQueueCreateInfo info {
@@ -116,8 +119,8 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
             bool ok = device.supportExt(ext.name);
             if (ok) tested_exts.insert(std::string(ext.name));
             if (ext.required && ! ok) {
-                LOG_ERROR("required vulkan device extension \"%s\" is not supported",
-                          ext.name.data());
+                rstd_error("required vulkan device extension \"{}\" is not supported",
+                          ext.name);
                 return false;
             }
         }
@@ -141,7 +144,7 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
 
     if (rq_surface) {
         if (! Swapchain::Create(device, *inst.surface(), extent, device.m_swapchain)) {
-            LOG_ERROR("create swapchain failed");
+            rstd_error("create swapchain failed");
             return false;
         }
     }

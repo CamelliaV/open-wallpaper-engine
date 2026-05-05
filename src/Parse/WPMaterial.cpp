@@ -1,10 +1,13 @@
 module;
 
+#include <rstd/macro.hpp>
 #include "WPJson.hpp"
 
 #include <nlohmann/json.hpp>
 
 module wescene.parse;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper::wpscene;
@@ -101,12 +104,12 @@ bool WPMaterial::FromJson(const nlohmann::json& json) {
 
 bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
     if(!json.contains("passes") || json.at("passes").size() == 0) {
-        LOG_ERROR("material no data");
+        rstd_error("material no data");
         return false;
     }
     const auto jContent = json.at("passes").at(0);
     if(!jContent.contains("shader")) {
-        LOG_ERROR("material no shader");
+        rstd_error("material no shader");
         return false;
     }
 	GET_JSON_NAME_VALUE(jContent, "blending", blending);

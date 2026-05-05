@@ -3,7 +3,6 @@ module;
 #include <cassert>
 
 #include "Core/MapSet.hpp"
-#include "Utils/Logging.h"
 #include "RenderGraph/Pass.hpp"
 
 module wescene.rgraph;

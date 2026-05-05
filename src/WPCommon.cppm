@@ -1,11 +1,12 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cstdio>
-
-#include "Utils/Logging.h"
 #include "Core/StringHelper.hpp"
 
 export module wescene.common;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 import wescene.fs;
@@ -22,7 +23,7 @@ int32_t ReadVersion(std::string_view prefix, fs::IBinaryStream& file) {
     int   slot;
     auto [ptr, ec] { std::from_chars(str_int, std::end(str_v), slot) };
     if (ec != std::errc()) {
-        LOG_ERROR("read version of \'%.*s\' failed", 8, str_v);
+        rstd_error("read version of \'{}\' failed", std::string_view(str_v, 8));
         return 0;
     }
     return slot;

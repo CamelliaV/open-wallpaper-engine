@@ -1,19 +1,16 @@
 module;
 
 #include <rstd/macro.hpp>
-
-#include "Utils/Logging.h"
-
-#include "Type.hpp"
-
 #include "Swapchain/ExSwapchain.hpp"
 
 module wescene.scene_wallpaper;
+import wescene.types;
 import cppstd;
 import wescene.utils;
 import wescene.scene;
 
-import rstd;
+import rstd.log;
+import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;
 import wescene.message_loop;
@@ -133,7 +130,7 @@ public:
     explicit RenderHandler(MainHandler& main): m_main(main) {}
     ~RenderHandler() {
         m_render->destroy();
-        LOG_INFO("render handler deleted");
+        rstd_info("render handler deleted");
     }
 
     void on(RenderInit&&);
@@ -319,7 +316,7 @@ void MainHandler::on(MainSetProperty&& m) {
     if (property == PROPERTY_SOURCE) {
         if (auto* p = std::get_if<std::string>(&value)) {
             m_source = *p;
-            LOG_INFO("source: %s", m_source.c_str());
+            rstd_info("source: {}", m_source);
             on(MainLoadScene {});
         }
     } else if (property == PROPERTY_ASSETS) {
@@ -374,7 +371,7 @@ void MainHandler::on(MainFirstFrame&&) {
 void MainHandler::loadScene() {
     if (m_source.empty() || m_assets.empty()) return;
 
-    LOG_INFO("loading scene: %s", m_source.c_str());
+    rstd_info("loading scene: {}", m_source);
 
     if (! m_sound_manager->is_inited()) {
         m_sound_manager->init();
@@ -391,7 +388,7 @@ void MainHandler::loadScene() {
     if (! vfs.IsMounted("assets")) {
         bool sus = vfs.Mount("/assets", fs::CreatePhysicalFs(m_assets), "assets");
         if (! sus) {
-            LOG_ERROR("Mount assets dir failed");
+            rstd_error("Mount assets dir failed");
             return;
         }
     }
@@ -409,19 +406,19 @@ void MainHandler::loadScene() {
     auto                  wfs   = fs::WPPkgFs::CreatePkgFs(pkgPath);
     if (wfs) pkg_v = wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
     if (! wfs || ! vfs.Mount("/assets", std::move(wfs))) {
-        LOG_INFO("load pkg file %s failed, fallback to use dir", pkgPath.c_str());
+        rstd_info("load pkg file {} failed, fallback to use dir", pkgPath);
         pkg_v = wpscene::kSceneVersionUnknown;
         // load pkg dir
         if (! vfs.Mount("/assets", fs::CreatePhysicalFs(pkgDir))) {
-            LOG_ERROR("can't load pkg directory: %s", pkgDir.c_str());
+            rstd_error("can't load pkg directory: {}", pkgDir);
             return;
         }
     }
     if (! m_cache_path.empty()) {
         if (! vfs.Mount("/cache", fs::CreatePhysicalFs(m_cache_path, true), "cache")) {
-            LOG_ERROR("can't load cache folder: %s", m_cache_path.c_str());
+            rstd_error("can't load cache folder: {}", m_cache_path);
         } else {
-            LOG_INFO("cache folder: %s", m_cache_path.c_str());
+            rstd_info("cache folder: {}", m_cache_path);
         }
     }
 
@@ -436,7 +433,7 @@ void MainHandler::loadScene() {
             }
         }
         if (scene_src.empty()) {
-            LOG_ERROR("Not supported scene type");
+            rstd_error("Not supported scene type");
             return;
         }
         scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, pkg_v);

@@ -1,13 +1,16 @@
 module;
 
+#include <rstd/macro.hpp>
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 
 #include "Swapchain/ExSwapchain.hpp"
-#include "Utils/Logging.h"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.types;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper::vulkan;
@@ -38,7 +41,7 @@ VkSurfaceFormatKHR chooseSwapSurfaceFormat(std::span<const VkSurfaceFormatKHR> a
         }
     }
     auto& format = availableFormats[0];
-    LOG_INFO("swapchain format: %s, color space: %s",
+    rstd_info("swapchain format: {}, color space: {}",
              vvk::ToString(format.format),
              vvk::ToString(format.colorSpace));
     return format;

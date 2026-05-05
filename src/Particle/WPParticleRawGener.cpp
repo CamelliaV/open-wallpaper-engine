@@ -1,14 +1,15 @@
 module;
 
+#include <rstd/macro.hpp>
 #include <cstring>
 
 #include <Eigen/Dense>
 
 #include "Core/Literals.hpp"
 #include "SpecTexs.hpp"
-#include "Utils/Logging.h"
-
 module wescene.scene;
+import rstd.log;
+import rstd.cppstd;
 import cppstd;
 
 using namespace wallpaper;
@@ -244,7 +245,7 @@ void WPParticleRawGener::GenGLData(std::span<const std::unique_ptr<ParticleInsta
     */
     particle_num += GenParticleData(instances, specOp, opt, sv);
 
-    // LOG_INFO("num: %d", particle_num);
+    // rstd_info("num: {}", particle_num);
 
     u32 indexNum = (u32)(si.DataCount() / 6);
     if (particle_num > indexNum) {
