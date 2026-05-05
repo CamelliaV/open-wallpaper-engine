@@ -63,8 +63,8 @@ namespace
 
 struct Options {
     std::string ipc_path;
-    uint32_t    width  { 1280 };
-    uint32_t    height { 720 };
+    uint32_t    width  { 1920 };
+    uint32_t    height { 1080 };
     std::filesystem::path workshop_dir;
     std::string workshop_id;
     uint32_t    initial_fps { 60 };
@@ -330,7 +330,7 @@ int main(int argc, char** argv) {
         }
 
         // Web wallpapers don't have a fixed native resolution — use the
-        // hardcoded 1280×720 default as the "native" extent_resolve
+        // hardcoded 1920×1080 default as the "native" extent_resolve
         // argument so AUTO modes pick the host's preference.
         {
             uint32_t native_w = opts.width;
