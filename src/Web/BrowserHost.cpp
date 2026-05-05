@@ -100,7 +100,7 @@ bool BrowserHost::OpenWallpaper(const WebManifest& manifest,
     std::string url = "file://" + entry.string();
 
     CefWindowInfo info;
-    info.SetAsWindowless(0);             // no parent window — pure OSR
+    info.SetAsWindowless(0);      // no parent window — pure OSR
     info.shared_texture_enabled = 1;     // request DMA-BUF / OnAcceleratedPaint
 
     CefBrowserSettings browser_settings;
@@ -193,6 +193,49 @@ void BrowserHost::OnFocus(bool gained) {
 
 void BrowserHost::Pump() {
     if (impl_->initialised) CefDoMessageLoopWork();
+}
+
+void BrowserHost::ApplyVolume(float volume) {
+    nlohmann::json v;
+    v["value"] = volume;
+    ApplyUserProperty("audio", v);
+}
+
+void BrowserHost::SetFrameRate(int fps) {
+    if (fps <= 0 || !impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (b && b->GetHost()) b->GetHost()->SetWindowlessFrameRate(fps);
+}
+
+void BrowserHost::ApplyUserProperty(std::string_view      key,
+                                    const nlohmann::json& value) {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (!b) return;
+    auto frame = b->GetMainFrame();
+    if (!frame) return;
+
+    // Page-side listener convention (mirrors BuildPropertyListenerSnippet):
+    //   window.wallpaperPropertyListener.applyUserProperties({key: {value: V}}).
+    std::string snippet =
+        "(function(){"
+        "  if (typeof window.wallpaperPropertyListener !== 'object') return;"
+        "  if (typeof window.wallpaperPropertyListener.applyUserProperties !== 'function') return;"
+        "  try {"
+        "    window.wallpaperPropertyListener.applyUserProperties({\"";
+    snippet.append(key);
+    snippet += "\": ";
+    snippet += value.dump();
+    snippet +=
+        "});"
+        "  } catch (e) {"
+        "    console.error('weweb: applyUserProperties patch threw:', e);"
+        "  }"
+        "})();";
+    frame->ExecuteJavaScript(
+        snippet,
+        "weweb://internal/apply_user_property.js",
+        0);
 }
 
 bool BrowserHost::ShouldExit() const {

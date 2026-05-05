@@ -6,13 +6,13 @@
 #include <string>
 #include <vector>
 
-#include "Image.hpp"
 #include "pkg_header.hpp"
 
 
 import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;
+import wescene.types;
 
 namespace wallpaper::testing {
 

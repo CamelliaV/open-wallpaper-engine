@@ -3,8 +3,8 @@ local M = {}
 function M.info()
     return {
         name = "wallpaper_engine",
-        types = {"scene", "video"},
-        version = "0.2.0",
+        types = {"scene", "video", "web"},
+        version = "0.3.0",
     }
 end
 
@@ -86,7 +86,16 @@ function M.scan(ctx)
         local wp_type = nil
         local resource = nil
 
-        if project_type == "video" then
+        if project_type == "web" then
+            -- Web wallpapers ship a directory containing project.json
+            -- + the entry HTML (manifest.file, default "index.html").
+            -- Renderer takes the dir path itself; CEF loads
+            -- file://<dir>/<entry_html>.
+            if ctx.file_exists(dir .. "/project.json") then
+                wp_type = "web"
+                resource = dir
+            end
+        elseif project_type == "video" then
             -- Resolve the video file referenced by project.json.
             local file = project and project.file
             if file and ctx.file_exists(dir .. "/" .. file) then

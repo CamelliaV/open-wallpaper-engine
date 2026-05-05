@@ -1,47 +1,4 @@
 // .tex format schema reverse-coverage report.
-//
-// Mirrors scene_schema_tests.cpp's pattern but for the binary `.tex`
-// container produced by Wallpaper Engine. There are no string keys to
-// audit; the "schema" is the (texv, texi, texb, texs) sub-version tuple,
-// each component a tiny int read from a "TEXX0000" stamp embedded in the
-// header / sprite payload.
-//
-// Source of truth: src/Parse/WPTexImageParser.cpp + the
-// WPTexFormatVersion predicates in src/Parse/WPTexImageParser.cppm.
-//
-// Three layers of checks driven by the live corpus:
-//
-//   1. SUB-VERSION COVERAGE — every (texv, texi, texb, texs) sub-version
-//      observed in the corpus is in the supported set documented by
-//      WPTexFormatVersion. A new pkg surfacing an unknown stamp value
-//      fails immediately rather than falling through silently.
-//
-//   2. GEOMETRIC INVARIANT — for every non-sprite texture, the first
-//      mip's (width, height) read from the body must equal the texture
-//      stamp section's (width, height). This is a property of the WE
-//      binary format itself, independent of any parser. It catches
-//      header/body misalignment bugs (e.g. the texb=4 reserved-u32 slot
-//      that the production parser silently skipped before the Apr 2026
-//      fix). If a corpus pkg violates the invariant, either the format
-//      grew a new layout variant or this reader is wrong — both worth
-//      knowing.
-//
-//   3. PRODUCTION PARITY — for every non-sprite texture, run
-//      WPTexImageParser::ParseHeader and verify its mipmap_pow2 /
-//      mipmap_larger fields agree with values computed from the
-//      authoritative mip0 dims this test reader extracted directly.
-//      This is the cross-implementation check that turns the geometric
-//      invariant into a real production-parser test: any layout drift
-//      between the production parser and the binary spec immediately
-//      shows up as disagreement on these derived fields.
-//
-//   4. REPORT (stderr only) — distinct sub-version tuples and sample
-//      counts so corpus growth is visible even when nothing fails.
-//
-// Sprites use a different mip0/header relationship (mip0 is the full
-// atlas, header is per-frame) and ParseHeader's sprite path has a
-// pre-existing assertion-abort bug on certain inputs, so the geometric
-// invariant and production parity are gated on `!sprite`.
 
 #include <algorithm>
 #include <cstdint>
@@ -59,11 +16,10 @@
 
 #include <gtest/gtest.h>
 
-#include "Image.hpp"
-
 import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;
+import wescene.types;
 
 namespace {
 

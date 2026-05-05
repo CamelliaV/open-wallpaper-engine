@@ -4,6 +4,9 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <string_view>
+
+#include <nlohmann/json.hpp>
 
 #include "DmaBufFrame.hpp"
 #include "Manifest.hpp"
@@ -86,6 +89,23 @@ public:
     // Pump the CEF message loop once. Caller drives this from their main
     // event loop alongside whatever windowing-system polling they do.
     void Pump();
+
+    // Hot-reload setting hooks. Safe to call from the same thread that
+    // drives Pump (typically the main thread).
+    //
+    // ApplyVolume builds an `applyUserProperties({audio: {value: v}})`
+    // payload and forwards it to the page; pages that follow WE
+    // convention map this onto in-page audio gain.
+    void ApplyVolume(float volume);
+
+    // SetWindowlessFrameRate; CEF clamps to [1, ?]. 0 ⇒ no-op.
+    void SetFrameRate(int fps);
+
+    // Inject `applyUserProperties({key: {value: <value>}})` into the
+    // main frame so the page's wallpaperPropertyListener observes the
+    // change. Mirrors the shape of the initial-load snippet
+    // (`BuildPropertyListenerSnippet`) but with a single-key patch.
+    void ApplyUserProperty(std::string_view key, const nlohmann::json& value);
 
     // True once the browser has been closed (close button, JS-driven
     // close, etc.).

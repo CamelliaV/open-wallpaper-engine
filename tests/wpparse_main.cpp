@@ -42,8 +42,8 @@
 import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;
-import wescene.audio;
 import wescene.scene;
+import wavsen.audio;
 
 namespace {
 
@@ -212,7 +212,7 @@ bool SpawnFull(PkgResult& r, wallpaper::fs::VFS& vfs, const std::string& text,
         ::close(fds[0]);
         char marker = 'E';
         try {
-            wallpaper::audio::SoundManager sm;
+            wavsen::audio::SoundManager sm;
             wallpaper::WPSceneParser       parser;
             auto scene = parser.Parse(
                 r.id, text, vfs, sm,

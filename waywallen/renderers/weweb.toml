@@ -1,0 +1,17 @@
+# weweb-renderer — CEF (Wallpaper Engine *web*) renderer for waywallen.
+
+[renderer]
+name = "weweb-renderer"
+bin  = "../weweb/waywallen-weweb-renderer"
+types = ["web"]
+priority = 100
+spawn_version = 3
+extras = ["workshop_id"]
+
+[renderer.settings]
+volume = { type = "f32", default = 1.0, identity = false, label_key = "settings.weweb.volume", group = "audio", order = 10 }
+# Hot-reloadable via SetWindowlessFrameRate on the live browser.
+fps = { type = "u32", default = 60, min = 1, max = 240, step = 1, identity = false, label_key = "settings.weweb.fps", group = "render", order = 20 }
+# CEF can only honour --remote-debugging-port at CefInitialize time;
+# changing it requires a respawn — identity = true.
+remote_debugging_port = { type = "u32", default = 0, min = 0, max = 65535, identity = true, label_key = "settings.weweb.remote_debugging_port", group = "debug", order = 30 }

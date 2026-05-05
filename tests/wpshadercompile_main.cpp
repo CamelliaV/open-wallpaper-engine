@@ -31,13 +31,12 @@
 
 #include <nlohmann/json.hpp>
 
-#include "Type.hpp"
-
 import wescene.parse;
 import wescene.fs;
 import wescene.scene;
 import wescene.pkg_fs;
 import wavsen.audio;
+import wescene.types;
 
 using json = nlohmann::json;
 
