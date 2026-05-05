@@ -4,10 +4,6 @@ module;
 #include <cassert>
 #include <cstdio>
 #include <cstring>
-
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
 #include "vk_mem_alloc.h"
 
 #include "Core/ArrayHelper.hpp"

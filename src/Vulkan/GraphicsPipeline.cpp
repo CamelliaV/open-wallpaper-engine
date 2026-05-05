@@ -1,10 +1,6 @@
 module;
 
 #include <cassert>
-
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
 #include "Core/Literals.hpp"
 #include "Core/MapSet.hpp"
 #include "Utils/AutoDeletor.hpp"

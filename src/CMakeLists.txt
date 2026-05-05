@@ -108,7 +108,7 @@ target_sources(
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Vulkan/ShaderCompile.cppm)
 target_link_libraries(
   wescene-shader-compile
-  PUBLIC rstd::rstd rstd.cppstd wescene-types
+  PUBLIC rstd::rstd rstd.cppstd wescene-types wavsen::ffi::vulkan
   PRIVATE dxcompiler spirv-reflect-static)
 target_include_directories(
   wescene-shader-compile
@@ -213,7 +213,9 @@ add_library(
   Vulkan/Vma.cpp)
 target_sources(
   wescene-vulkan-runtime
-  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Vulkan/Vulkan.cppm)
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+         Vulkan/Vulkan.cppm
+         Vulkan/Vvk.cppm)
 target_link_libraries(
   wescene-vulkan-runtime
   PUBLIC wavsen::ffi::vulkan wescene-types wescene-shader-compile)

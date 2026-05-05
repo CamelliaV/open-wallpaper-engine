@@ -1,8 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <vulkan/vulkan.h>
-
 #include "Swapchain/ExSwapchain.hpp"
 module wescene.vulkan_render;
 import rstd.log;

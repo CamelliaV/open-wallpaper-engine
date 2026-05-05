@@ -2,10 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cstring>
-
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
 #include "vk_mem_alloc.h"
 #include "vvk/macros.hpp"
 

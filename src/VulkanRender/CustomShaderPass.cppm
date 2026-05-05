@@ -1,6 +1,4 @@
 module;
-
-#include <vulkan/vulkan.h>
 #include "Core/Literals.hpp"
 #include "Swapchain/ExSwapchain.hpp"
 

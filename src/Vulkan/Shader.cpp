@@ -8,10 +8,6 @@ module;
 #include <filesystem>
 
 #include <rstd/macro.hpp>
-
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
 #include <dxc/dxcapi.h>
 #include <spirv_reflect.h>
 

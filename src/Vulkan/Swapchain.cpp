@@ -1,9 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
 #include "Swapchain/ExSwapchain.hpp"
 #include "vvk/macros.hpp"
 

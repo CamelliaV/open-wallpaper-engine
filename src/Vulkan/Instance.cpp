@@ -2,10 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cstdio>
-
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
 #include "Core/MapSet.hpp"
 #include "vvk/macros.hpp"
 

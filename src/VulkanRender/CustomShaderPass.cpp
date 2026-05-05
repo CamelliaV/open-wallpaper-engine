@@ -2,9 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cassert>
-
-#include <vulkan/vulkan.h>
-
 #include "Core/Literals.hpp"
 #include "Core/ArrayHelper.hpp"
 #include "Core/MapSet.hpp"

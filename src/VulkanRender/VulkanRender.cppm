@@ -1,8 +1,6 @@
 module;
 
 #include <cstdio>
-
-#include <vulkan/vulkan.h>
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render;

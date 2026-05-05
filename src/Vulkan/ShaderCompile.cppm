@@ -6,11 +6,9 @@ module;
 // builder without translating types. We do NOT link Vulkan_LIBRARIES from
 // this module's target; downstream binaries that only want shader
 // compilation get the headers but no libvulkan dependency.
-#define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
-
 #include "Core/MapSet.hpp"
 export module wescene.shader_compile;
+export import vulkan;
 import wescene.types;
 import cppstd;
 
