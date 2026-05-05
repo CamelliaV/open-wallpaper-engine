@@ -30,39 +30,6 @@ set(warn_opts
 include(FetchContent)
 FetchContent_GetProperties(dxc SOURCE_DIR _dxc_source_dir)
 
-# ============================================================================
-# Layered library decomposition. Each lib owns a clean slice of the project
-# and pulls only the deps it actually uses. The old `wescene-renderer` name
-# becomes an INTERFACE umbrella linking everything for back-compat with
-# viewer / waywallen-bridge / standalone_view / etc.
-#
-#   rstd::rstd, rstd.cppstd, nlohmann_json, miniaudio, LZ4, threads, dl
-#       ↓
-#   wescene-base
-#     modules: utils, fs, json, common, scene (incl. Particle/* impl),
-#              audio, looper, timer, pkg_fs
-#     no Vulkan, no DXC.
-#       ↓
-#   wescene-shader-compile (no Vulkan_LIBRARIES; vulkan.h headers only)
-#     modules: shader_compile  ← DXC + SPIRV-Reflect
-#       ↓                                       ↓
-#   wescene-parse                       wescene-vulkan-runtime
-#     modules: parse + submodules,        modules: vulkan
-#              puppet, shader_value_      sources: Instance, Device,
-#              updater                             Swapchain, etc.
-#                                         pulls Vulkan_LIBRARIES.
-#                                                ↓
-#   wescene-render
-#     modules: rgraph, vulkan_render, scene_wallpaper
-#                                                ↓
-#   wescene-renderer (INTERFACE)
-#     links all five above so existing consumers keep working unchanged.
-# ============================================================================
-
-# ---------------------------------------------------------------------------
-# wescene-base
-# ---------------------------------------------------------------------------
-
 add_library(
   wescene-base STATIC
   Type.cpp
@@ -137,11 +104,6 @@ set_property(TARGET wescene-shader-compile PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 # ---------------------------------------------------------------------------
 # wescene-script  (QuickJS-NG runtime for the WE scenescript surface)
-#
-# Sits between wescene-base and wescene-parse: the parser consumes it to
-# materialise FieldScripts + actuators from `WPFieldBindings::scripts`
-# during scene parse. PRIVATE-links quickjs-ng so the C JSRuntime/JSContext
-# types stay invisible to downstream consumers.
 # ---------------------------------------------------------------------------
 
 add_library(wescene-script STATIC Script/Script.cpp)
@@ -293,9 +255,8 @@ set_property(TARGET wescene-render PROPERTY CXX_SCAN_FOR_MODULES ON)
 # wescene-renderer (INTERFACE umbrella for back-compat).
 # ---------------------------------------------------------------------------
 
-add_library(${PROJECT_NAME} INTERFACE)
-target_link_libraries(
-  ${PROJECT_NAME}
+add_library(wescene-renderer INTERFACE)
+target_link_libraries(wescene-renderer
   INTERFACE wescene-render wescene-parse wescene-script
             wescene-vulkan-runtime wescene-shader-compile wescene-base)
 
@@ -303,9 +264,6 @@ endif()  # BUILD_WESCENE
 
 # ============================================================================
 # weweb-host  (CEF browser embedding for HTML/JS wallpapers)
-#
-# Independently buildable from the wescene side — no transitive dep on
-# wescene-* targets. Source files live under Web/ to mirror Scene/.
 # ============================================================================
 if(BUILD_WEWEB)
     add_library(weweb-host STATIC

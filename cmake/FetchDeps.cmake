@@ -6,24 +6,45 @@
 #     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDeps.cmake)
 #     fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json)
 #
-# The deps.json format is a valid flatpak-builder sources array — the
-# `x-cmake` sidecar is an extension key (flatpak-builder ignores `x-*`
-# keys). Reference the same file from a flatpak manifest with:
+# The deps.json format is a valid flatpak-builder sources array. The
+# `x-cmake` sidecar is an extension key used to carry CMake-specific
+# metadata such as the dependency name or source_subdir override.
 #
-#     sources:
-#       - path/to/deps.json
+# Local source overrides
+# ----------------------
+# By default a dep `<name>` is taken from `<deps.json dir>/<name>` if
+# that directory exists, otherwise it is fetched. To override per-dep,
+# set the cache variable `FETCHDEPS_LOCAL_<name>=<path>` (typically
+# from a CMakeUserPresets.json `cacheVariables` block, or `-D` on the
+# command line). When set and the path exists it has the highest
+# precedence; otherwise the lookup falls through to the deps.json dir
+# / fetch.
 #
-# For the flatpak-aware dependency provider (source-tree redirect inside
-# flatpak-builder + auto-record of transitive deps), load its companion
-# FetchDepsProvider.cmake via CMAKE_PROJECT_TOP_LEVEL_INCLUDES *before*
-# project(). See FetchDepsProvider.cmake for details.
+# Selective fetch
+# ---------------
+#   NAMES <name> [<name> ...]
+#     Whitelist. If non-empty, only entries whose `x-cmake.name` is in
+#     the list are declared/fetched; others are skipped silently. Empty
+#     (default) keeps the fetch-all behavior. A NAMES entry not present
+#     in deps.json is reported as a warning.
+#
+# Skip-already-loaded
+# -------------------
+# A dep loaded by an earlier fetchdeps() call in the same configure is
+# tracked as the directory property `_FETCHDEPS_LOADED` on
+# CMAKE_SOURCE_DIR (one shared list for the whole tree). Subsequent
+# calls hit a "<name> already loaded, skipping" log line instead of
+# re-running add_subdirectory()/FetchContent_MakeAvailable().
+#
+# Example:
+#
+#     fetchdeps(${CMAKE_SOURCE_DIR}/deps.json)
+#     fetchdeps(${CMAKE_SOURCE_DIR}/deps.json NAMES rstd)
+#     # CMakeUserPresets.json cacheVariables:
+#     #   "FETCHDEPS_LOCAL_qml_material": "${sourceDir}/../qml_material"
 
 include_guard(GLOBAL)
 include(FetchContent)
-
-# ---------------------------------------------------------------------------
-# JSON helpers
-# ---------------------------------------------------------------------------
 
 function(_fetchdeps_json_has_key out json key)
   string(JSON _t ERROR_VARIABLE _err TYPE "${json}" "${key}")
@@ -43,10 +64,6 @@ function(_fetchdeps_json_get_opt out json)
   endif()
 endfunction()
 
-# ---------------------------------------------------------------------------
-# Registry (global properties so nested subdirs share state)
-# ---------------------------------------------------------------------------
-
 function(_fetchdeps_is_declared out name)
   get_property(_d GLOBAL PROPERTY _FETCHDEPS_DECLARED)
   if(name IN_LIST _d)
@@ -60,35 +77,49 @@ function(_fetchdeps_mark_declared name)
   set_property(GLOBAL APPEND PROPERTY _FETCHDEPS_DECLARED "${name}")
 endfunction()
 
-# ---------------------------------------------------------------------------
-# Root-entry fetch
-#
-# Implemented as a macro (not a function) so that <name>_SOURCE_DIR and
-# <name>_BINARY_DIR populated by FetchContent_MakeAvailable remain visible
-# to the caller's scope — users rely on those to add_subdirectory or set
-# INTERFACE include paths post-fetch.
-# ---------------------------------------------------------------------------
+function(_fetchdeps_loaded_has out_var name)
+  get_property(_v DIRECTORY "${CMAKE_SOURCE_DIR}" PROPERTY _FETCHDEPS_LOADED)
+  if(name IN_LIST _v)
+    set(${out_var} TRUE PARENT_SCOPE)
+  else()
+    set(${out_var} FALSE PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(_fetchdeps_loaded_add name)
+  get_property(_v DIRECTORY "${CMAKE_SOURCE_DIR}" PROPERTY _FETCHDEPS_LOADED)
+  if(NOT name IN_LIST _v)
+    list(APPEND _v "${name}")
+    set_property(DIRECTORY "${CMAKE_SOURCE_DIR}"
+                 PROPERTY _FETCHDEPS_LOADED "${_v}")
+  endif()
+endfunction()
 
 macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
   string(JSON _fd_name  GET "${_fd_entry}" "x-cmake" name)
   string(JSON _fd_dtype GET "${_fd_entry}" type)
 
-  # Mark before any work so even the local-override path counts as declared.
   _fetchdeps_mark_declared("${_fd_name}")
 
-  # If a transitive FetchContent already populated this dep earlier in the
-  # same configure (e.g. ncrequest's CMakeLists pulled pegtl before the root
-  # loop reached the pegtl entry), don't re-declare it — FetchContent would
-  # rerun find_package and collide with the existing binary dir.
-  FetchContent_GetProperties(${_fd_name})
-  if(${_fd_name}_POPULATED)
-    # already populated — nothing to do
-  elseif(EXISTS "${_fd_source_root}/${_fd_name}")
-    # Workspace-local override.
-    message(STATUS "fetchdeps: using local ${_fd_source_root}/${_fd_name}")
-    add_subdirectory("${_fd_source_root}/${_fd_name}" "${_fd_name}")
+  set(_fd_did_load FALSE)
+  _fetchdeps_loaded_has(_fd_loaded_hit "${_fd_name}")
+  if(_fd_loaded_hit)
+    message(STATUS "fetchdeps: ${_fd_name} already loaded, skipping")
   else()
-    # Stash dest + exclude-from-all so the provider can reach them.
+    FetchContent_GetProperties(${_fd_name})
+    if(${_fd_name}_POPULATED)
+      message(STATUS "fetchdeps: ${_fd_name} already populated, skipping")
+      set(_fd_did_load TRUE)
+    elseif(DEFINED FETCHDEPS_LOCAL_${_fd_name}
+           AND EXISTS "${FETCHDEPS_LOCAL_${_fd_name}}")
+      message(STATUS "fetchdeps: ${_fd_name} <- local override ${FETCHDEPS_LOCAL_${_fd_name}}")
+      add_subdirectory("${FETCHDEPS_LOCAL_${_fd_name}}" "${_fd_name}")
+      set(_fd_did_load TRUE)
+    elseif(EXISTS "${_fd_source_root}/${_fd_name}")
+      message(STATUS "fetchdeps: ${_fd_name} <- local ${_fd_source_root}/${_fd_name}")
+      add_subdirectory("${_fd_source_root}/${_fd_name}" "${_fd_name}")
+      set(_fd_did_load TRUE)
+    else()
     _fetchdeps_json_get_opt(_fd_dest "${_fd_entry}" dest)
     if(_fd_dest)
       set(_FETCHDEPS_DEST_${_fd_name} "${_fd_dest}" CACHE INTERNAL "" FORCE)
@@ -144,9 +175,6 @@ macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
       foreach(_fd_algo sha512 sha256 sha1 md5)
         _fetchdeps_json_get_opt(_fd_v "${_fd_entry}" "${_fd_algo}")
         if(_fd_v)
-          # CMake's ExternalProject URL_HASH parser requires the algo
-          # token in uppercase (SHA256, SHA512, …) — lowercase fails the
-          # regex match in shared_internal_commands.cmake.
           string(TOUPPER "${_fd_algo}" _fd_algo_upper)
           set(_fd_hash "${_fd_algo_upper}=${_fd_v}")
           break()
@@ -162,7 +190,6 @@ macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
       message(FATAL_ERROR "fetchdeps: '${_fd_name}' unsupported type '${_fd_dtype}'")
     endif()
 
-    # x-cmake sidecar.
     _fetchdeps_json_has_key(_fd_has_xc "${_fd_entry}" "x-cmake")
     if(_fd_has_xc)
       string(JSON _fd_xc GET "${_fd_entry}" "x-cmake")
@@ -202,19 +229,25 @@ macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
 
     set(_FETCHDEPS_EXCLUDE_${_fd_name} "${_fd_exclude_from_all}" CACHE INTERNAL "" FORCE)
 
+    message(STATUS "fetchdeps: ${_fd_name} <- fetch ${_fd_dtype}")
     FetchContent_Declare(${_fd_name} ${_fd_declare_args})
     FetchContent_MakeAvailable(${_fd_name})
+    set(_fd_did_load TRUE)
+    endif()
+  endif()
+
+  if(_fd_did_load)
+    _fetchdeps_loaded_add("${_fd_name}")
   endif()
 endmacro()
 
-# ---------------------------------------------------------------------------
-# Public entry point
-#
-# Macro (not function) so <dep>_SOURCE_DIR / <dep>_BINARY_DIR populated by
-# FetchContent_MakeAvailable inside the loop remain visible to the caller.
-# ---------------------------------------------------------------------------
-
 macro(fetchdeps _fd_deps_path)
+  cmake_parse_arguments(_FD "" "" "NAMES" ${ARGN})
+  if(_FD_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR
+      "fetchdeps: unexpected argument(s): ${_FD_UNPARSED_ARGUMENTS}")
+  endif()
+
   if(NOT EXISTS "${_fd_deps_path}")
     message(FATAL_ERROR "fetchdeps: ${_fd_deps_path} not found")
   endif()
@@ -225,24 +258,42 @@ macro(fetchdeps _fd_deps_path)
     message(FATAL_ERROR "fetchdeps: ${_fd_deps_path} is not valid JSON: ${_fd_err}")
   endif()
 
-  # Expose the authoritative deps.json path to the provider so auto-record
-  # can write new transitive deps back into it.
   set_property(GLOBAL PROPERTY _FETCHDEPS_JSON_PATH "${_fd_deps_path}")
 
   get_filename_component(_fd_top_source_root "${_fd_deps_path}" DIRECTORY)
 
   if(_fd_n GREATER 0)
     math(EXPR _fd_top_last "${_fd_n} - 1")
-    # Pre-pass: mark every root entry as declared so transitive provider
-    # calls that land on a name already in deps.json (possibly later in the
-    # array) don't misfire autorecord during the main loop below.
+
+    if(_FD_NAMES)
+      set(_fd_known_names "")
+      foreach(_fd_top_i RANGE 0 ${_fd_top_last})
+        string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
+        string(JSON _fd_pre_name GET "${_fd_top_entry}" "x-cmake" name)
+        list(APPEND _fd_known_names "${_fd_pre_name}")
+      endforeach()
+      foreach(_fd_want IN LISTS _FD_NAMES)
+        if(NOT _fd_want IN_LIST _fd_known_names)
+          message(WARNING
+            "fetchdeps: NAMES entry '${_fd_want}' not in ${_fd_deps_path}")
+        endif()
+      endforeach()
+    endif()
+
     foreach(_fd_top_i RANGE 0 ${_fd_top_last})
       string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
       string(JSON _fd_pre_name GET "${_fd_top_entry}" "x-cmake" name)
+      if(_FD_NAMES AND NOT _fd_pre_name IN_LIST _FD_NAMES)
+        continue()
+      endif()
       _fetchdeps_mark_declared("${_fd_pre_name}")
     endforeach()
     foreach(_fd_top_i RANGE 0 ${_fd_top_last})
       string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
+      string(JSON _fd_pre_name GET "${_fd_top_entry}" "x-cmake" name)
+      if(_FD_NAMES AND NOT _fd_pre_name IN_LIST _FD_NAMES)
+        continue()
+      endif()
       _fetchdeps_fetch_one("${_fd_top_entry}" "${_fd_top_source_root}")
     endforeach()
   endif()

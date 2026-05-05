@@ -25,6 +25,17 @@
     }
   },
   {
+    "commit": "a37dadd1ed5949ab0accd7087b7c5c57800eab43",
+    "dest": "build/_flatpak_deps/cubeb-src",
+    "disable-shallow-clone": true,
+    "type": "git",
+    "url": "https://github.com/mozilla/cubeb.git",
+    "x-cmake": {
+      "name": "cubeb",
+      "exclude_from_all": true
+    }
+  },
+  {
     "dest": "build/_flatpak_deps/spirv_reflect-src",
     "disable-shallow-clone": false,
     "tag": "vulkan-sdk-1.4.321.0",
@@ -45,18 +56,11 @@
     "x-cmake": {
       "name": "dxc",
       "exclude_from_all": true,
-      "git_submodules": ["external/SPIRV-Headers", "external/SPIRV-Tools", "external/DirectX-Headers"]
-    }
-  },
-  {
-    "dest": "build/_flatpak_deps/cubeb-src",
-    "disable-shallow-clone": true,
-    "commit": "a37dadd1ed5949ab0accd7087b7c5c57800eab43",
-    "type": "git",
-    "url": "https://github.com/mozilla/cubeb.git",
-    "x-cmake": {
-      "name": "cubeb",
-      "exclude_from_all": true
+      "git_submodules": [
+        "external/SPIRV-Headers",
+        "external/SPIRV-Tools",
+        "external/DirectX-Headers"
+      ]
     }
   },
   {
@@ -73,11 +77,22 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": false,
-    "commit": "92e68ff44753a417545f9c5ba976c35b45f4440c",
+    "commit": "91e3dab1d5c5a94e87f90a4cafa38da7c34937c1",
     "type": "git",
     "url": "https://github.com/hypengw/rstd.git",
     "x-cmake": {
       "name": "rstd",
+      "exclude_from_all": true
+    }
+  },
+  {
+    "commit": "3eb48e6cba947e6fb8d79e2faee3ac1d375872ac",
+    "dest": "build/_flatpak_deps/wavsen-src",
+    "disable-shallow-clone": true,
+    "type": "git",
+    "url": "https://github.com/hypengw/wavsen.git",
+    "x-cmake": {
+      "name": "wavsen",
       "exclude_from_all": true
     }
   },
