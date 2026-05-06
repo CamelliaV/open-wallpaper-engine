@@ -18,10 +18,10 @@ import cppstd;
 
 import wescene.types;
 
-using namespace wallpaper;
-using namespace wallpaper::vulkan;
+using namespace owe;
+using namespace owe::vulkan;
 
-namespace wallpaper
+namespace owe
 {
 namespace vulkan
 {
@@ -38,16 +38,16 @@ VkFormat ToVkType(TextureFormat tf) {
     }
 }
 
-VkSamplerAddressMode ToVkType(wallpaper::TextureWrap sam) {
-    using namespace wallpaper;
+VkSamplerAddressMode ToVkType(owe::TextureWrap sam) {
+    using namespace owe;
     switch (sam) {
     case TextureWrap::CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     case TextureWrap::REPEAT:
     default: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
     }
 }
-VkFilter ToVkType(wallpaper::TextureFilter sam) {
-    using namespace wallpaper;
+VkFilter ToVkType(owe::TextureFilter sam) {
+    using namespace owe;
     switch (sam) {
     case TextureFilter::LINEAR: return VK_FILTER_LINEAR;
     case TextureFilter::NEAREST:
@@ -55,7 +55,7 @@ VkFilter ToVkType(wallpaper::TextureFilter sam) {
     }
 }
 } // namespace vulkan
-} // namespace wallpaper
+} // namespace owe
 
 namespace
 {

@@ -8,7 +8,7 @@ import wescene.core;
 import wescene.types;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 
 uint8_t SceneVertexArray::TypeCount(VertexType t) {
     switch (t) {

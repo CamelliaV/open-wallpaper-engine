@@ -2,7 +2,7 @@
 #include <array>
 #include <atomic>
 
-namespace wallpaper
+namespace owe
 {
 
 template<typename T>
@@ -52,4 +52,4 @@ private:
     std::atomic<bool>  m_dirty { false };
 };
 
-} // namespace wallpaper
+} // namespace owe

@@ -30,7 +30,7 @@
 
 #include "dump.hpp"
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 struct FixturePick {
     const char* workshop_id;
@@ -62,19 +62,19 @@ inline void VerifyFixture(const FixturePick& pick) {
                   << patch.dump(2);
 }
 
-} // namespace wallpaper::testing
+} // namespace owe::testing
 
 // One macro hides the gtest fixture boilerplate so a per-version test
 // file is just two lines of declaration plus the picks list.
 #define DEFINE_FIXTURE_TEST_SUITE(SuiteName, ...)                                  \
     class SuiteName : public ::testing::TestWithParam<                              \
-                          ::wallpaper::testing::FixturePick> {};                    \
+                          ::owe::testing::FixturePick> {};                    \
     TEST_P(SuiteName, MatchesFixture) {                                             \
-        ::wallpaper::testing::VerifyFixture(GetParam());                            \
+        ::owe::testing::VerifyFixture(GetParam());                            \
     }                                                                                \
-    static const ::wallpaper::testing::FixturePick k##SuiteName##Picks[] = { __VA_ARGS__ }; \
+    static const ::owe::testing::FixturePick k##SuiteName##Picks[] = { __VA_ARGS__ }; \
     INSTANTIATE_TEST_SUITE_P(                                                       \
         All, SuiteName, ::testing::ValuesIn(k##SuiteName##Picks),                   \
-        [](const ::testing::TestParamInfo<::wallpaper::testing::FixturePick>& i) {  \
+        [](const ::testing::TestParamInfo<::owe::testing::FixturePick>& i) {  \
             return std::string(i.param.workshop_id);                                \
         })

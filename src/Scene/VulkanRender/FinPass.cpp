@@ -9,7 +9,7 @@ import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 FinPass::FinPass(const Desc&) {}
 FinPass::~FinPass() {}

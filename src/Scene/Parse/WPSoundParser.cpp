@@ -5,7 +5,7 @@ module wescene.parse;
 import wescene.core;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 
 enum class PlaybackMode
 {
@@ -23,7 +23,7 @@ static PlaybackMode ToPlaybackMode(std::string_view s) {
 
 namespace {
 
-// Adapter: wallpaper::fs::IBinaryStream → wavsen::audio::IByteStream.
+// Adapter: owe::fs::IBinaryStream → wavsen::audio::IByteStream.
 class BStreamAdapter : public wavsen::audio::IByteStream {
 public:
     explicit BStreamAdapter(std::shared_ptr<fs::IBinaryStream> s): inner(std::move(s)) {}

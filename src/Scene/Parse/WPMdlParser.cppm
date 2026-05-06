@@ -13,7 +13,7 @@ export import wescene.puppet;
 import :wp_shader_parser;  // WPShaderInfo
 import :wp_material;       // wpscene::WPMaterial
 
-export namespace wallpaper
+export namespace owe
 
 {
 
@@ -54,4 +54,4 @@ public:
     static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl);
 };
 
-} // namespace wallpaper
+} // namespace owe

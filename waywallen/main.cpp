@@ -143,7 +143,7 @@ struct HostState {
     // Non-owning pointer to the SceneWallpaper that lives in main's
     // stack frame; the reader thread uses it to dispatch ApplySettings
     // hot-reload (volume / fps) into the looper.
-    wallpaper::SceneWallpaper*     wp { nullptr };
+    owe::SceneWallpaper*     wp { nullptr };
 
     std::atomic<bool> shutdown { false };
 };
@@ -156,7 +156,7 @@ void signal_shutdown(HostState& s) {
 // have used. Centralised so ApplySettings can route through it.
 void set_fps(HostState& s, uint32_t fps) {
     if (!s.wp || fps == 0) return;
-    s.wp->setPropertyInt32(wallpaper::PROPERTY_FPS,
+    s.wp->setPropertyInt32(owe::PROPERTY_FPS,
                            static_cast<int32_t>(fps));
 }
 
@@ -181,7 +181,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             if (!key || !val) continue;
             if (std::strcmp(key, "volume") == 0) {
                 if (s.wp) {
-                    s.wp->setPropertyFloat(wallpaper::PROPERTY_VOLUME,
+                    s.wp->setPropertyFloat(owe::PROPERTY_VOLUME,
                                            parse_f32(val, 1.0f));
                 }
             } else if (std::strcmp(key, "fps") == 0) {
@@ -326,27 +326,27 @@ int main(int argc, char** argv) {
         ww_bridge_init_free(&init);
     }
 
-    wallpaper::SceneWallpaper wp;
+    owe::SceneWallpaper wp;
     if (!wp.init()) die("SceneWallpaper::init failed");
 
     host.wp = &wp;
 
     if (!opts.initial_assets.empty())
-        wp.setPropertyString(wallpaper::PROPERTY_ASSETS, opts.initial_assets);
+        wp.setPropertyString(owe::PROPERTY_ASSETS, opts.initial_assets);
     if (!opts.initial_scene.empty())
-        wp.setPropertyString(wallpaper::PROPERTY_SOURCE, opts.initial_scene);
+        wp.setPropertyString(owe::PROPERTY_SOURCE, opts.initial_scene);
     if (opts.initial_fps)
-        wp.setPropertyInt32(wallpaper::PROPERTY_FPS,
+        wp.setPropertyInt32(owe::PROPERTY_FPS,
                             static_cast<int32_t>(opts.initial_fps));
-    wp.setPropertyFloat(wallpaper::PROPERTY_VOLUME, opts.initial_volume);
+    wp.setPropertyFloat(owe::PROPERTY_VOLUME, opts.initial_volume);
 
     // The factory runs inside VulkanRender::init after the GPU is picked
     // and the VkDevice is created; that's when ww_bridge_pool_create can
     // succeed. The factory captures `host` by reference; after init both
     // host.pool and host.swapchain point at live objects.
     auto factory =
-        [&host](const wallpaper::RenderInitInfo::ExSwapchainHandles& h)
-            -> std::unique_ptr<wallpaper::ExSwapchain> {
+        [&host](const owe::RenderInitInfo::ExSwapchainHandles& h)
+            -> std::unique_ptr<owe::ExSwapchain> {
         ww_pool_vulkan_init_t pi {};
         pi.instance              = h.instance;
         pi.physical_device       = h.physical_device;
@@ -378,9 +378,9 @@ int main(int argc, char** argv) {
     };
 
     {
-        wallpaper::RenderInitInfo info;
+        owe::RenderInitInfo info;
         info.offscreen        = true;
-        info.offscreen_tiling = wallpaper::TexTiling::OPTIMAL;
+        info.offscreen_tiling = owe::TexTiling::OPTIMAL;
         info.width            = static_cast<uint16_t>(opts.width);
         info.height           = static_cast<uint16_t>(opts.height);
         info.surface_info.createSurfaceOp =

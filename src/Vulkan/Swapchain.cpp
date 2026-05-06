@@ -10,7 +10,7 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR        capabilities;

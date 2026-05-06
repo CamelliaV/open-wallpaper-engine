@@ -8,7 +8,7 @@ import wescene.shader_compile;
 import wescene.scene;
 import wescene.fs;
 
-export namespace wallpaper
+export namespace owe
 
 {
 using Combos = Map<std::string, std::string>;
@@ -65,4 +65,4 @@ public:
                              std::vector<ShaderCode>& spvs, fs::VFS&, WPShaderInfo*,
                              std::span<const WPShaderTexInfo>);
 };
-} // namespace wallpaper
+} // namespace owe

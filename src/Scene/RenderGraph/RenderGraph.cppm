@@ -10,7 +10,7 @@ import :dependency_graph;
 import :pass_node;
 import :tex_node;
 
-export namespace wallpaper::rg
+export namespace owe::rg
 {
 
 class RenderGraph;
@@ -89,4 +89,4 @@ private:
     Map<NodeID, std::shared_ptr<Pass>> m_map_pass;
 };
 
-} // namespace wallpaper::rg
+} // namespace owe::rg

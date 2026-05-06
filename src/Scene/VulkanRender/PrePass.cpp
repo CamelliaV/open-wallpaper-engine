@@ -6,16 +6,16 @@ import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 namespace
 {
-TextureKey ToTexKeyNoMip(wallpaper::SceneRenderTarget rt) {
+TextureKey ToTexKeyNoMip(owe::SceneRenderTarget rt) {
     return TextureKey {
         .width  = rt.width,
         .height = rt.height,
         .usage  = {},
-        .format = wallpaper::TextureFormat::RGBA8,
+        .format = owe::TextureFormat::RGBA8,
         .sample = rt.sample,
     };
 }

@@ -5,7 +5,7 @@ export module wescene.rgraph:dependency_graph;
 import wescene.core;
 import cppstd;
 
-export namespace wallpaper::rg
+export namespace owe::rg
 {
 
 typedef size_t NodeID;
@@ -66,4 +66,4 @@ private:
     std::vector<std::unique_ptr<Node>>      m_nodes;
 };
 
-} // namespace wallpaper::rg
+} // namespace owe::rg

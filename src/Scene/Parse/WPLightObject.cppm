@@ -11,7 +11,7 @@ export import :wp_animation;
 export import wescene.puppet;
 import :wp_scene;
 
-export namespace wallpaper
+export namespace owe
 
 {
 
@@ -62,7 +62,7 @@ public:
 };
 
 } // namespace wpscene
-} // namespace wallpaper
+} // namespace owe
   /*
           {
               "angles" : "0.00000 0.00000 0.00000",

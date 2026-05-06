@@ -20,8 +20,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-using wallpaper::testing::PkgEntry;
-using wallpaper::testing::ReadPkgHeader;
+using owe::testing::PkgEntry;
+using owe::testing::ReadPkgHeader;
 
 constexpr const char* kDefaultWorkshopDir =
 #ifdef WAYWALLEN_WORKSHOP_DIR
@@ -69,7 +69,7 @@ struct TexResult {
 // - ParseHeader fills ImageHeader (incl. extraHeader["texv"|...]).
 // - Parse fills the full Image with decoded pixel data per slot/mip.
 // Both throw on malformed input.
-TexResult RunOne(wallpaper::fs::VFS& vfs, const std::string& workshop_id,
+TexResult RunOne(owe::fs::VFS& vfs, const std::string& workshop_id,
                  const std::string& tex_path, bool full) {
     TexResult r;
     r.workshop = workshop_id;
@@ -92,16 +92,16 @@ TexResult RunOne(wallpaper::fs::VFS& vfs, const std::string& workshop_id,
     std::string name = tex_path.substr(
         prefix.size(), tex_path.size() - prefix.size() - suffix.size());
 
-    wallpaper::WPTexImageParser parser(&vfs);
+    owe::WPTexImageParser parser(&vfs);
 
-    auto extra = [](const wallpaper::ImageHeader& h, const std::string& k) {
+    auto extra = [](const owe::ImageHeader& h, const std::string& k) {
         auto it = h.extraHeader.find(k);
         return it == h.extraHeader.end() ? 0 : it->second.val;
     };
 
     if (! full) {
         try {
-            wallpaper::ImageHeader h = parser.ParseHeader(name);
+            owe::ImageHeader h = parser.ParseHeader(name);
             r.texv      = extra(h, "texv");
             r.texi      = extra(h, "texi");
             r.texb      = extra(h, "texb");
@@ -224,8 +224,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        wallpaper::fs::VFS vfs;
-        auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg_path);
+        owe::fs::VFS vfs;
+        auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
         if (! wfs) {
             std::fprintf(stdout, "FAIL  %s/?              CreatePkgFs failed\n",
                          id.c_str());

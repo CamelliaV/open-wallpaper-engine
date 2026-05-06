@@ -19,8 +19,8 @@ import cppstd;
 import rstd.log;
 import rstd.cppstd;
 
-using namespace wallpaper;
-using namespace wallpaper::vulkan;
+using namespace owe;
+using namespace owe::vulkan;
 
 namespace
 {
@@ -47,7 +47,7 @@ std::string logToTmpfileWithSha1(std::span<const char> in, const char* fmt, ...)
 namespace
 {
 
-inline VkShaderStageFlagBits ToVkType(wallpaper::ShaderType s) {
+inline VkShaderStageFlagBits ToVkType(owe::ShaderType s) {
     switch (s) {
     case ShaderType::VERTEX:   return VK_SHADER_STAGE_VERTEX_BIT;
     case ShaderType::FRAGMENT: return VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -68,7 +68,7 @@ inline VkShaderStageFlagBits ToVkType(SpvReflectShaderStageFlagBits s) {
     }
 }
 
-inline wallpaper::ShaderType FromSpvStage(SpvReflectShaderStageFlagBits s) {
+inline owe::ShaderType FromSpvStage(SpvReflectShaderStageFlagBits s) {
     switch (s) {
     case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT:   return ShaderType::VERTEX;
     case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT: return ShaderType::FRAGMENT;
@@ -88,7 +88,7 @@ bool EnumAllRef(VEC& vec, FUNC&& func) {
     return result == SPV_REFLECT_RESULT_SUCCESS;
 }
 
-inline LPCWSTR DxcStageProfile(wallpaper::ShaderType s) {
+inline LPCWSTR DxcStageProfile(owe::ShaderType s) {
     switch (s) {
     case ShaderType::VERTEX:   return L"vs_6_0";
     case ShaderType::FRAGMENT: return L"ps_6_0";
@@ -98,7 +98,7 @@ inline LPCWSTR DxcStageProfile(wallpaper::ShaderType s) {
     return L"vs_6_0";
 }
 
-inline const char* DefaultEntryName(wallpaper::ShaderType s) {
+inline const char* DefaultEntryName(owe::ShaderType s) {
     switch (s) {
     case ShaderType::VERTEX:   return "main_vs";
     case ShaderType::FRAGMENT: return "main_ps";
@@ -184,7 +184,7 @@ inline DxcCtx GetDxcCtx() {
 
 } // namespace
 
-bool wallpaper::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
+bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                                    std::vector<Uni_ShaderSpv>& spvs, ShaderReflected& ref) {
     spvs.clear();
     for (const auto& code : codes) {
@@ -268,7 +268,7 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
 
             for (auto pinput : inputs) {
                 auto& input = *pinput;
-                if (wallpaper::sstart_with(input.name, "gl_")) continue;
+                if (owe::sstart_with(input.name, "gl_")) continue;
 
                 if (input.location == std::numeric_limits<decltype(input.location)>::max()) {
                     rstd_error("shader input {} no location", input.name);
@@ -291,7 +291,7 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
     return true;
 }
 
-bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
+bool owe::vulkan::Preprocess(std::string_view src, std::string& out) {
     DxcCtx ctx = GetDxcCtx();
     if (! ctx.compiler) return false;
 
@@ -351,7 +351,7 @@ bool wallpaper::vulkan::Preprocess(std::string_view src, std::string& out) {
     return true;
 }
 
-bool wallpaper::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  compUnits,
+bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  compUnits,
                                                   const ShaderCompOpt&        opt,
                                                   std::vector<Uni_ShaderSpv>& spvs) {
     DxcCtx ctx = GetDxcCtx();

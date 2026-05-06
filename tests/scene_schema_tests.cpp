@@ -208,7 +208,7 @@ const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
 }
 
 const nlohmann::json& Report() {
-    static const nlohmann::json r = wallpaper::testing::ScanSceneKeys(WAYWALLEN_WORKSHOP_DIR);
+    static const nlohmann::json r = owe::testing::ScanSceneKeys(WAYWALLEN_WORKSHOP_DIR);
     return r;
 }
 

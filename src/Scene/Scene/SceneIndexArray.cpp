@@ -5,7 +5,7 @@ module;
 module wescene.scene;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 
 SceneIndexArray::SceneIndexArray(std::size_t indexCount): m_size(0), m_capacity(indexCount) {
     m_pData = new uint32_t[m_capacity];

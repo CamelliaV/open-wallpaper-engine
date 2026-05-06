@@ -17,7 +17,7 @@ import cppstd;
 
 namespace fs = std::filesystem;
 using json   = nlohmann::json;
-using namespace wallpaper::script;
+using namespace owe::script;
 
 namespace {
 

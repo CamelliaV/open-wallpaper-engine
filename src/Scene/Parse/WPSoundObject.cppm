@@ -12,7 +12,7 @@ import wescene.json;
 export import :wp_animation;
 import :wp_scene;
 
-export namespace wallpaper
+export namespace owe
 
 {
 
@@ -82,4 +82,4 @@ struct WPSoundObject {
     }
 };
 } // namespace wpscene
-} // namespace wallpaper
+} // namespace owe

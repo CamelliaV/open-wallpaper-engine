@@ -7,7 +7,7 @@ export module wescene.puppet;
 import wescene.core;
 import cppstd;
 
-export namespace wallpaper
+export namespace owe
 
 {
 
@@ -125,4 +125,4 @@ private:
     std::shared_ptr<WPPuppet> m_puppet;
 };
 
-} // namespace wallpaper
+} // namespace owe

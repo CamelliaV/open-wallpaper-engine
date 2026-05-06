@@ -211,13 +211,13 @@ bool ProcessOnePkg(const std::string& workshop_id, const std::string& pkg_path,
                    std::vector<Record>&                            out,
                    std::unordered_map<std::string, std::string>& sha_to_source) {
     std::string                                 pkg_version;
-    std::vector<wallpaper::testing::PkgEntry>   entries;
-    if (! wallpaper::testing::ReadPkgHeader(pkg_path, pkg_version, entries))
+    std::vector<owe::testing::PkgEntry>   entries;
+    if (! owe::testing::ReadPkgHeader(pkg_path, pkg_version, entries))
         return false;
 
-    auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) return false;
-    wallpaper::fs::VFS vfs;
+    owe::fs::VFS vfs;
     vfs.Mount("/assets", std::move(wfs));
 
     auto stream = vfs.Open("/assets/scene.json");

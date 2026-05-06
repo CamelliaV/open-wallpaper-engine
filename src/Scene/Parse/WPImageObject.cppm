@@ -14,7 +14,7 @@ export import :wp_material;
 export import wescene.puppet;
 import :wp_scene;
 
-export namespace wallpaper
+export namespace owe
 
 {
 
@@ -136,4 +136,4 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPImageObject, name, origin, angles, scale, s
                                    material, effects);
 
 } // namespace wpscene
-} // namespace wallpaper
+} // namespace owe

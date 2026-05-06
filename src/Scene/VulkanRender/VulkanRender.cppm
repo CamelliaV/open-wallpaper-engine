@@ -19,7 +19,7 @@ export import :custom_shader_pass;
 export import :fin_pass;
 export import :pre_pass;
 
-export namespace wallpaper
+export namespace owe
 {
 
 using ReDrawCB = std::function<void()>;
@@ -83,7 +83,7 @@ public:
 
     void clearLastRenderGraph();
     void compileRenderGraph(Scene&, rg::RenderGraph&);
-    void UpdateCameraFillMode(Scene&, wallpaper::FillMode);
+    void UpdateCameraFillMode(Scene&, owe::FillMode);
 
     bool onSwapchainReady(unsigned width, unsigned height);
 
@@ -109,4 +109,4 @@ private:
 };
 
 } // namespace vulkan
-} // namespace wallpaper
+} // namespace owe

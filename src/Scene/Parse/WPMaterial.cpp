@@ -10,7 +10,7 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper::wpscene;
+using namespace owe::wpscene;
 
 bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE(json, "name", name);

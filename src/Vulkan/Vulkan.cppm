@@ -44,10 +44,10 @@ export import wescene.shader_compile;
 
 
 // =================================================================
-// Layer 2: wallpaper::vulkan:: high-level wrapper
+// Layer 2: owe::vulkan:: high-level wrapper
 // =================================================================
 
-export namespace wallpaper
+export namespace owe
 {
 
 namespace vulkan
@@ -520,15 +520,15 @@ struct LocalExHandle : NoCopy {
 // global-attached base — clang refuses the implicit `this` conversion at
 // the qualified-call site. Public inheritance is semantically equivalent
 // here (callers never reach for the base interface directly).
-class LocalExSwapchain final : public ::wallpaper::ExSwapchain,
-                               public ::wallpaper::TripleSwapchain<::wallpaper::ExHandle> {
+class LocalExSwapchain final : public ::owe::ExSwapchain,
+                               public ::owe::TripleSwapchain<::owe::ExHandle> {
 public:
     LocalExSwapchain(std::array<LocalExHandle, 3> handles, VkExtent2D ext)
         : m_handles(std::move(handles)), m_extent(ext) {
         int index = 0;
         for (auto& h : m_handles) {
             auto& handle         = h.handle;
-            handle               = ::wallpaper::ExHandle(index++);
+            handle               = ::owe::ExHandle(index++);
             handle.width         = (i32)h.image.extent.width;
             handle.height        = (i32)h.image.extent.height;
             handle.fd            = h.image.fd;
@@ -565,11 +565,11 @@ public:
         return m_last_sync_fd.exchange(-1, std::memory_order_acq_rel);
     }
 
-    ::wallpaper::ExHandle* eatFrame() override {
-        return this->TripleSwapchain<::wallpaper::ExHandle>::eatFrame();
+    ::owe::ExHandle* eatFrame() override {
+        return this->TripleSwapchain<::owe::ExHandle>::eatFrame();
     }
-    std::array<::wallpaper::ExHandle*, 3> snapshot_all_slots() override {
-        return this->TripleSwapchain<::wallpaper::ExHandle>::snapshot_all_slots();
+    std::array<::owe::ExHandle*, 3> snapshot_all_slots() override {
+        return this->TripleSwapchain<::owe::ExHandle>::snapshot_all_slots();
     }
 
     unsigned width() const override { return m_extent.width; }
@@ -581,9 +581,9 @@ public:
     bool          ready() const override { return true; }
 
     void setOnReadyChanged(
-        std::function<void(const ::wallpaper::ExSwapchainReadyEvent&)> cb) override {
+        std::function<void(const ::owe::ExSwapchainReadyEvent&)> cb) override {
         if (cb) {
-            ::wallpaper::ExSwapchainReadyEvent e {
+            ::owe::ExSwapchainReadyEvent e {
                 .ready  = true,
                 .width  = m_extent.width,
                 .height = m_extent.height,
@@ -594,15 +594,15 @@ public:
     }
 
 protected:
-    std::atomic<::wallpaper::ExHandle*>& presented() override { return m_presented; }
-    std::atomic<::wallpaper::ExHandle*>& ready() override { return m_ready; }
-    std::atomic<::wallpaper::ExHandle*>& inprogress() override { return m_inprogress; }
+    std::atomic<::owe::ExHandle*>& presented() override { return m_presented; }
+    std::atomic<::owe::ExHandle*>& ready() override { return m_ready; }
+    std::atomic<::owe::ExHandle*>& inprogress() override { return m_inprogress; }
 
 private:
     std::array<LocalExHandle, 3>        m_handles;
-    std::atomic<::wallpaper::ExHandle*> m_presented { nullptr };
-    std::atomic<::wallpaper::ExHandle*> m_ready { nullptr };
-    std::atomic<::wallpaper::ExHandle*> m_inprogress { nullptr };
+    std::atomic<::owe::ExHandle*> m_presented { nullptr };
+    std::atomic<::owe::ExHandle*> m_ready { nullptr };
+    std::atomic<::owe::ExHandle*> m_inprogress { nullptr };
     VkExtent2D                          m_extent;
     std::atomic<int>                    m_last_sync_fd { -1 };
 };
@@ -622,4 +622,4 @@ inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& de
 }
 
 } // namespace vulkan
-} // namespace wallpaper (export)
+} // namespace owe (export)

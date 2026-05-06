@@ -2,11 +2,11 @@
 
 import wescene.fs;
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 namespace {
 
-std::string ReadSizedString(wallpaper::fs::IBinaryStream& f) {
+std::string ReadSizedString(owe::fs::IBinaryStream& f) {
     std::int32_t len = f.ReadInt32();
     if (len < 0) return {};
     std::string out;
@@ -19,7 +19,7 @@ std::string ReadSizedString(wallpaper::fs::IBinaryStream& f) {
 
 bool ReadPkgHeader(const std::string& pkg_path, std::string& version,
                    std::vector<PkgEntry>& entries) {
-    auto stream = wallpaper::fs::CreateCBinaryStream(pkg_path);
+    auto stream = owe::fs::CreateCBinaryStream(pkg_path);
     if (! stream) return false;
     version            = ReadSizedString(*stream);
     std::int32_t count = stream->ReadInt32();
@@ -35,4 +35,4 @@ bool ReadPkgHeader(const std::string& pkg_path, std::string& version,
     return true;
 }
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

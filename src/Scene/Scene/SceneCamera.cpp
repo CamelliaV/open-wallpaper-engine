@@ -8,7 +8,7 @@ import rstd.cppstd;
 import cppstd;
 import wescene.utils;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace Eigen;
 
 Vector3d SceneCamera::GetPosition() const {

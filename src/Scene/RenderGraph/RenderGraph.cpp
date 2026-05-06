@@ -8,7 +8,7 @@ module wescene.rgraph;
 import wescene.core;
 import cppstd;
 
-using namespace wallpaper::rg;
+using namespace owe::rg;
 
 RenderGraph::RenderGraph() {}
 

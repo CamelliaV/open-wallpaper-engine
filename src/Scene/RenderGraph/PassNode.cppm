@@ -5,7 +5,7 @@ import cppstd;
 
 import :dependency_graph;
 
-export namespace wallpaper::rg
+export namespace owe::rg
 {
 
 class TexNode;
@@ -31,4 +31,4 @@ private:
     std::string m_name { "unknown pass" };
 };
 
-} // namespace wallpaper::rg
+} // namespace owe::rg

@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    auto report = wallpaper::testing::ScanSceneKeys(workshop_dir);
+    auto report = owe::testing::ScanSceneKeys(workshop_dir);
     std::string text = report.dump(2);
     text.push_back('\n');
 

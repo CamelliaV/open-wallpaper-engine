@@ -25,7 +25,7 @@ import wescene.scene;
 
 import wescene.rgraph;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 constexpr uint64_t vk_wait_time { 10u * 1000u * 1000000u };
 constexpr uint32_t vk_command_num { 2 };
@@ -62,7 +62,7 @@ struct VulkanRender::Impl {
 
     void clearLastRenderGraph();
     void compileRenderGraph(Scene&, rg::RenderGraph&);
-    void UpdateCameraFillMode(Scene&, wallpaper::FillMode);
+    void UpdateCameraFillMode(Scene&, owe::FillMode);
 
     bool initRes();
     void drawFrameSwapchain();
@@ -181,7 +181,7 @@ void VulkanRender::clearLastRenderGraph() { pImpl->clearLastRenderGraph(); };
 void VulkanRender::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     pImpl->compileRenderGraph(scene, rg);
 };
-void VulkanRender::UpdateCameraFillMode(Scene& scene, wallpaper::FillMode fill) {
+void VulkanRender::UpdateCameraFillMode(Scene& scene, owe::FillMode fill) {
     pImpl->UpdateCameraFillMode(scene, fill);
 };
 
@@ -189,7 +189,7 @@ bool VulkanRender::onSwapchainReady(unsigned width, unsigned height) {
     return pImpl->onSwapchainReady(width, height);
 }
 
-wallpaper::ExSwapchain* VulkanRender::exSwapchain() const { return pImpl->m_ex_swapchain.get(); };
+owe::ExSwapchain* VulkanRender::exSwapchain() const { return pImpl->m_ex_swapchain.get(); };
 
 bool VulkanRender::Impl::init(RenderInitInfo info) {
     if (m_inited) return true;
@@ -635,9 +635,9 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
     scene.shaderValueUpdater->SetScreenSize((i32)ext.width, (i32)ext.height);
 }
 
-void VulkanRender::Impl::UpdateCameraFillMode(wallpaper::Scene&   scene,
-                                              wallpaper::FillMode fillmode) {
-    using namespace wallpaper;
+void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene&   scene,
+                                              owe::FillMode fillmode) {
+    using namespace owe;
     auto width  = m_device->out_extent().width;
     auto height = m_device->out_extent().height;
 

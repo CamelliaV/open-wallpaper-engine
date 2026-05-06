@@ -17,7 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 struct WorkshopEntry {
     std::string    id;
@@ -87,4 +87,4 @@ private:
     std::set<int>              mdla_versions_;
 };
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

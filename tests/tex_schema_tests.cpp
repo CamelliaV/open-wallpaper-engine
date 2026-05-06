@@ -234,7 +234,7 @@ struct CorpusScan {
     std::vector<TexMeta>                               metas;
     // Per-pkg cached VFS so production-parity test can run ParseHeader
     // without re-mounting per texture. Indexed by workshop_id.
-    std::map<std::string, std::shared_ptr<wallpaper::fs::VFS>> vfs_by_workshop;
+    std::map<std::string, std::shared_ptr<owe::fs::VFS>> vfs_by_workshop;
 };
 
 const CorpusScan& AllScans() {
@@ -257,9 +257,9 @@ const CorpusScan& AllScans() {
         for (const auto& pkg : pkgs) {
             std::string id = pkg.parent_path().filename().string();
 
-            auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg.string());
+            auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg.string());
             if (! wfs) continue;
-            auto vfs = std::make_shared<wallpaper::fs::VFS>();
+            auto vfs = std::make_shared<owe::fs::VFS>();
             if (! vfs->Mount("/assets", std::move(wfs))) continue;
 
             for (auto& te : ReadTexEntries(pkg)) {
@@ -419,8 +419,8 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
         std::string name = TexNameFromPkgPath(m.pkg_path);
         if (name.empty()) continue;
 
-        wallpaper::WPTexImageParser parser(&vfs);
-        wallpaper::ImageHeader      h;
+        owe::WPTexImageParser parser(&vfs);
+        owe::ImageHeader      h;
         try {
             h = parser.ParseHeader(name);
         } catch (...) {
@@ -514,8 +514,8 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         std::string name = TexNameFromPkgPath(m.pkg_path);
         if (name.empty()) continue;
 
-        wallpaper::WPTexImageParser parser(&vfs);
-        wallpaper::ImageHeader      h;
+        owe::WPTexImageParser parser(&vfs);
+        owe::ImageHeader      h;
         try {
             h = parser.ParseHeader(name);
         } catch (...) {
@@ -526,7 +526,7 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         ++bucket_counts[key];
 
         ++parse_attempted;
-        std::shared_ptr<wallpaper::Image> img;
+        std::shared_ptr<owe::Image> img;
         try {
             img = parser.Parse(name);
         } catch (...) {
@@ -579,7 +579,7 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
 // switch statement is the source; this test pins it so a future
 // renumbering is loud rather than silent.
 TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
-    using TF = wallpaper::TextureFormat;
+    using TF = owe::TextureFormat;
     const std::map<int, TF> kExpected {
         { 0, TF::RGBA8 },
         { 4, TF::BC3 },
@@ -612,8 +612,8 @@ TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
         std::string name = TexNameFromPkgPath(m.pkg_path);
         if (name.empty()) continue;
 
-        wallpaper::WPTexImageParser parser(&vfs);
-        wallpaper::ImageHeader      h;
+        owe::WPTexImageParser parser(&vfs);
+        owe::ImageHeader      h;
         try {
             h = parser.ParseHeader(name);
         } catch (...) {

@@ -12,7 +12,7 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace Eigen;
 
 struct WPGOption {

@@ -7,7 +7,7 @@ import cppstd;
 
 export import wescene.fs;
 
-export namespace wallpaper::fs
+export namespace owe::fs
 {
 
 class WPPkgFs : public Fs {
@@ -39,4 +39,4 @@ private:
     std::unordered_map<std::string, PkgFile> m_files;
 };
 
-} // namespace wallpaper::fs
+} // namespace owe::fs

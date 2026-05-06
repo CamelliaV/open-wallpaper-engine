@@ -9,7 +9,7 @@ import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 namespace {
 
@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 // Mirrors WPPkgFs::CreatePkgFs's first read: just the length-prefixed
 // version stamp. Avoids paying for the full pkg+vfs construction.
 bool ReadPkgVersionStamp(const std::string& pkg_path, std::string& out) {
-    auto stream = wallpaper::fs::CreateCBinaryStream(pkg_path);
+    auto stream = owe::fs::CreateCBinaryStream(pkg_path);
     if (! stream) return false;
     std::int32_t len = stream->ReadInt32();
     if (len < 0) return false;
@@ -38,14 +38,14 @@ SceneParseResult ProbeSceneParse(const std::string& workshop_dir) {
         return out;
     }
 
-    auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) {
         out.error = "WPPkgFs::CreatePkgFs failed";
         return out;
     }
     out.pkg_version = wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
 
-    wallpaper::fs::VFS vfs;
+    owe::fs::VFS vfs;
     if (! vfs.Mount("/assets", std::move(wfs))) {
         out.error = "vfs.Mount failed";
         return out;
@@ -105,4 +105,4 @@ std::vector<WorkshopProbe> EnumerateWorkshopProbes(const std::string& workshop_r
     return out;
 }
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

@@ -8,7 +8,7 @@ import wescene.core;
 import cppstd;
 import wescene.vulkan;
 
-export namespace wallpaper::vulkan
+export namespace owe::vulkan
 {
 
 struct RenderingResources {
@@ -23,4 +23,4 @@ struct RenderingResources {
     StagingBuffer* dyn_buf;
 };
 
-} // namespace wallpaper::vulkan
+} // namespace owe::vulkan

@@ -6,7 +6,7 @@ import wescene.types;
 import cppstd;
 import wescene.scene;
 
-export namespace wallpaper::text
+export namespace owe::text
 {
 
 inline std::vector<std::uint32_t> DecodeUtf8(std::string_view s) {
@@ -141,7 +141,7 @@ private:
 // single slot, single mipmap, LINEAR/CLAMP_TO_EDGE sampler). The returned
 // Image owns its pixel buffer; the FontFace can subsequently mutate or be
 // destroyed without affecting the snapshot.
-std::shared_ptr<wallpaper::Image> BuildAtlasImage(const FontFace& face,
+std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face,
                                                    const std::string& key);
 
 // Lazily compiles the embedded text HLSL shader (one-time, process-wide
@@ -151,7 +151,7 @@ std::shared_ptr<wallpaper::Image> BuildAtlasImage(const FontFace& face,
 //   - uniform block ww_Uniforms with member g_ModelViewProjectionMatrix
 //   - combined image sampler g_Texture0 (R8 atlas; .r = coverage)
 // Returns nullptr if the SPIR-V compile fails.
-std::shared_ptr<wallpaper::SceneShader> GetTextSceneShader();
+std::shared_ptr<owe::SceneShader> GetTextSceneShader();
 
 // --- TextLayouter -----------------------------------------------------------
 // Holds everything needed to lay out a string of glyphs into a SceneMesh:
@@ -188,7 +188,7 @@ public:
     // to peak_quads * 4 vertices and peak_quads * 6 indices.
     TextLayouter(std::unique_ptr<FontCache>          cache,
                  FontFace*                           face,
-                 std::shared_ptr<wallpaper::SceneMesh> mesh,
+                 std::shared_ptr<owe::SceneMesh> mesh,
                  TextLayoutStyle                     style,
                  std::size_t                         peak_quads);
     ~TextLayouter();
@@ -208,4 +208,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace wallpaper::text
+} // namespace owe::text

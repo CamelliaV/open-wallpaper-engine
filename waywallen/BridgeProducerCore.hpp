@@ -13,7 +13,7 @@
 // What it does NOT do:
 //   - any Vulkan command recording (the producer host owns the
 //     VkDevice and submits the blit).
-//   - any inheritance from `wallpaper::ExSwapchain` — that adapter is
+//   - any inheritance from `owe::ExSwapchain` — that adapter is
 //     `BridgeExSwapchain`, which is a thin shim around this core for
 //     the wescene host. Other producers (e.g. weweb) consume this core
 //     directly without pulling wescene-vulkan-runtime.
@@ -38,7 +38,7 @@ namespace ww_wescene
 {
 
 // Snapshot fired by `setOnReadyChanged` whenever applyDirective resolves
-// a new slot pool. Mirrors `wallpaper::ExSwapchainReadyEvent` shape but
+// a new slot pool. Mirrors `owe::ExSwapchainReadyEvent` shape but
 // kept Vulkan-native and free of any wescene types so non-wescene
 // producers can consume it.
 struct BridgeReadyEvent {

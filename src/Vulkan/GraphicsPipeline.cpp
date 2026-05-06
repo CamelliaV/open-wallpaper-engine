@@ -11,13 +11,13 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 namespace
 {
 
-inline VkShaderStageFlagBits ToVkType(wallpaper::ShaderType stage) {
-    using namespace wallpaper;
+inline VkShaderStageFlagBits ToVkType(owe::ShaderType stage) {
+    using namespace owe;
     switch (stage) {
     case ShaderType::VERTEX: return VK_SHADER_STAGE_VERTEX_BIT;
     case ShaderType::FRAGMENT: return VK_SHADER_STAGE_FRAGMENT_BIT;

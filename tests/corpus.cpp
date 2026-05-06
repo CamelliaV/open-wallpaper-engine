@@ -7,7 +7,7 @@
 
 #include "dump.hpp"
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 namespace {
 
@@ -162,4 +162,4 @@ std::vector<Corpus::MdlRef> Corpus::mdls_with_mdla(int v) const {
     return mdl_filter(entries_, [v](const nlohmann::json& m) { return m.value("mdla", -1) == v; });
 }
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

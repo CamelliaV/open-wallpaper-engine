@@ -25,7 +25,7 @@ import wescene.script;
 
 import wescene.shader_value_updater;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace Eigen;
 
 std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(p)); }
@@ -44,9 +44,9 @@ struct ParseContext {
 
     // Lazily allocated; populated by `WireFieldScripts` as objects with
     // script bindings come in. Installed onto the Scene at the end of
-    // parse via `wallpaper::script::InstallScriptScene`. Stays null when
+    // parse via `owe::script::InstallScriptScene`. Stays null when
     // no object in the scene has any script binding (image-only pkgs).
-    std::unique_ptr<wallpaper::script::ScriptScene> script_scene;
+    std::unique_ptr<owe::script::ScriptScene> script_scene;
 };
 
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
@@ -1494,10 +1494,10 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
 
     // If any object during the visit installed a script binding, hand the
     // ScriptScene off to the Scene now. The renderer ticks it once per
-    // frame via wallpaper::script::TickSceneScripts. Empty ScriptScenes
+    // frame via owe::script::TickSceneScripts. Empty ScriptScenes
     // are skipped so image-only pkgs don't pay any runtime cost.
     if (context.script_scene && ! context.script_scene->empty()) {
-        wallpaper::script::InstallScriptScene(*context.scene,
+        owe::script::InstallScriptScene(*context.scene,
                                               std::move(context.script_scene));
     }
     return context.scene;

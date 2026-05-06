@@ -7,7 +7,7 @@ import cppstd;
 import rstd.log;
 import rstd.cppstd;
 
-export namespace wallpaper::msgloop
+export namespace owe::msgloop
 {
 
 template<class T>
@@ -66,4 +66,4 @@ private:
     std::thread             m_thread;
 };
 
-} // namespace wallpaper::msgloop
+} // namespace owe::msgloop

@@ -11,7 +11,7 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 #define CHECK_REF(ref, act)                                                  \
     if (! ref) {                                                             \

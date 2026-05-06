@@ -16,7 +16,7 @@ import wescene.scene;
 
 using nlohmann::json;
 
-namespace wallpaper::script {
+namespace owe::script {
 
 // ---------------------------------------------------------------------------
 // Field-kind inference. The bound field's name is the only signal we have at
@@ -846,7 +846,7 @@ void       ScriptScene::AddActuator(Actuator a) { m_impl->actuators.push_back(a)
 bool       ScriptScene::empty() const noexcept { return m_impl->actuators.empty(); }
 
 std::function<void(const ScriptValue&)>
-MakeNodeTransformApply(wallpaper::SceneNode* node, NodeTransformTarget target) {
+MakeNodeTransformApply(owe::SceneNode* node, NodeTransformTarget target) {
     return [node, target](const ScriptValue& v) {
         if (! node) return;
         if (std::holds_alternative<std::monostate>(v)) return;
@@ -899,7 +899,7 @@ void ScriptScene::Tick(const FrameInputs& fi) {
     }
 }
 
-void InstallScriptScene(wallpaper::Scene&             scene,
+void InstallScriptScene(owe::Scene&             scene,
                         std::unique_ptr<ScriptScene>  ss) {
     // Move into Scene's opaque-pointer slot. The deleter knows the
     // concrete type because it's instantiated in this TU.
@@ -908,10 +908,10 @@ void InstallScriptScene(wallpaper::Scene&             scene,
         raw, [](void* p) noexcept { delete static_cast<ScriptScene*>(p); });
 }
 
-void TickSceneScripts(wallpaper::Scene& scene, const FrameInputs& fi) {
+void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi) {
     auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
     if (! ss) return;
     ss->Tick(fi);
 }
 
-}  // namespace wallpaper::script
+}  // namespace owe::script

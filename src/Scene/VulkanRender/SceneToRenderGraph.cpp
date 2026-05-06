@@ -14,8 +14,8 @@ import wescene.scene;
 
 import wescene.rgraph;
 
-using namespace wallpaper;
-namespace wallpaper::rg
+using namespace owe;
+namespace owe::rg
 {
 
 void doCopy(RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc, TexNode* in, TexNode* out) {
@@ -68,7 +68,7 @@ static TexNode::Desc createTexDesc(std::string path) {
                            .type = IsSpecTex(path) ? TexNode::TexType::Temp
                                                    : TexNode::TexType::Imported };
 }
-} // namespace wallpaper::rg
+} // namespace owe::rg
 
 static void TraverseNode(const std::function<void(SceneNode*)>& func, SceneNode* node) {
     func(node);
@@ -201,7 +201,7 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
     if (imgeff != nullptr) loadEffect(imgeff);
 }
 
-std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
+std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     std::unique_ptr<rg::RenderGraph> rgraph = std::make_unique<rg::RenderGraph>();
     ExtraInfo                        extra { .rgraph = rgraph.get(), .scene = &scene };
     TraverseNode(

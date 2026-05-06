@@ -21,7 +21,7 @@ using namespace std;
 atomic<bool> renderCall(false);
 
 struct UserData {
-    wallpaper::SceneWallpaper* psw { nullptr };
+    owe::SceneWallpaper* psw { nullptr };
 
     uint16_t width;
     uint16_t height;
@@ -33,7 +33,7 @@ void framebuffer_size_callback(GLFWwindow*, int width, int height) {}
 void mouse_button_callback(GLFWwindow* win, int button, int action, int mods) {
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
         UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
-        // data->psw->setPropertyString(wallpaper::PROPERTY_SOURCE,
+        // data->psw->setPropertyString(owe::PROPERTY_SOURCE,
     }
 }
 
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     data.width  = w_width;
     data.height = w_height;
 
-    wallpaper::RenderInitInfo info;
+    owe::RenderInitInfo info;
     info.enable_valid_layer = program.get<bool>(OPT_VALID_LAYER);
     info.width              = w_width;
     info.height             = w_height;
@@ -96,19 +96,19 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    auto* psw = new wallpaper::SceneWallpaper();
+    auto* psw = new owe::SceneWallpaper();
     data.psw  = psw;
 
     psw->init();
     psw->initVulkan(std::move(info));
-    psw->setPropertyString(wallpaper::PROPERTY_ASSETS, program.get<std::string>(ARG_ASSETS));
-    psw->setPropertyString(wallpaper::PROPERTY_SOURCE, program.get<std::string>(ARG_SCENE));
-    psw->setPropertyBool(wallpaper::PROPERTY_GRAPHIVZ, program.get<bool>(OPT_GRAPHVIZ));
-    psw->setPropertyInt32(wallpaper::PROPERTY_FPS, program.get<int32_t>(OPT_FPS));
+    psw->setPropertyString(owe::PROPERTY_ASSETS, program.get<std::string>(ARG_ASSETS));
+    psw->setPropertyString(owe::PROPERTY_SOURCE, program.get<std::string>(ARG_SCENE));
+    psw->setPropertyBool(owe::PROPERTY_GRAPHIVZ, program.get<bool>(OPT_GRAPHVIZ));
+    psw->setPropertyInt32(owe::PROPERTY_FPS, program.get<int32_t>(OPT_FPS));
 
     std::string cache_path = program.get<std::string>(OPT_CACHE_PATH);
-    if (cache_path.empty()) cache_path = wallpaper::platform::GetCachePath("wescene-renderer");
-    psw->setPropertyString(wallpaper::PROPERTY_CACHE_PATH, cache_path);
+    if (cache_path.empty()) cache_path = owe::platform::GetCachePath("wescene-renderer");
+    psw->setPropertyString(owe::PROPERTY_CACHE_PATH, cache_path);
 
     glfwSetWindowUserPointer(window, &data);
 

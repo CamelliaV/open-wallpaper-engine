@@ -4,7 +4,7 @@ module wescene.vulkan;
 import wescene.types;
 import cppstd;
 
-namespace wallpaper
+namespace owe
 {
 namespace vulkan
 {
@@ -83,4 +83,4 @@ ImageSlotsRef::ImageSlotsRef(const ImageSlots& o) {
 }
 
 } // namespace vulkan
-} // namespace wallpaper
+} // namespace owe

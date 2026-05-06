@@ -8,7 +8,7 @@ import wescene.core;
 import cppstd;
 import wescene.utils;
 
-using namespace wallpaper;
+using namespace owe;
 
 typedef std::function<Particle()> GenParticleOp;
 typedef std::function<Particle()> SpwanOp;

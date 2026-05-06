@@ -3,7 +3,7 @@ module;
 module wescene.scene;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 
 void ShaderValue::fromSpan(std::span<const value_type> s) noexcept {
     m_size    = (size_t)s.size();

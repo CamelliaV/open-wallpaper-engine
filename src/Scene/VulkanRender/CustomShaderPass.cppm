@@ -10,7 +10,7 @@ import wescene.scene;
 import :vulkan_pass;
 import :resource;
 
-export namespace wallpaper::vulkan
+export namespace owe::vulkan
 {
 
 class CustomShaderPass : public VulkanPass {
@@ -58,4 +58,4 @@ private:
     Desc m_desc;
 };
 
-} // namespace wallpaper::vulkan
+} // namespace owe::vulkan

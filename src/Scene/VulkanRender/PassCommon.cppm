@@ -6,7 +6,7 @@ import wescene.types;
 import wescene.vulkan;
 import wescene.scene;
 
-export namespace wallpaper::vulkan
+export namespace owe::vulkan
 {
 
 inline void SetBlend(BlendMode bm, VkPipelineColorBlendAttachmentState& state) {
@@ -44,15 +44,15 @@ inline void SetAttachmentLoadOp(BlendMode bm, VkAttachmentLoadOp& load_op) {
     }
 }
 
-inline TextureKey ToTexKey(wallpaper::SceneRenderTarget rt) {
+inline TextureKey ToTexKey(owe::SceneRenderTarget rt) {
     return TextureKey {
         .width        = rt.width,
         .height       = rt.height,
         .usage        = {},
-        .format       = wallpaper::TextureFormat::RGBA8,
+        .format       = owe::TextureFormat::RGBA8,
         .sample       = rt.sample,
         .mipmap_level = rt.mipmap_level,
     };
 }
 
-} // namespace wallpaper::vulkan
+} // namespace owe::vulkan

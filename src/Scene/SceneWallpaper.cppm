@@ -9,7 +9,7 @@ import cppstd;
 
 export import wescene.vulkan_render;
 
-export namespace wallpaper
+export namespace owe
 {
 
 using FirstFrameCallback = std::function<void()>;
@@ -76,7 +76,7 @@ private:
 // `TexTiling` is declared in the classic header `Swapchain/ExSwapchain.hpp`
 // which is still consumed by ExSwapchain backends. Re-export it from the
 // module purview so a single `import wescene.scene_wallpaper;` lets
-// consumers reach `wallpaper::TexTiling::OPTIMAL`.
-using ::wallpaper::TexTiling;
+// consumers reach `owe::TexTiling::OPTIMAL`.
+using ::owe::TexTiling;
 
-} // namespace wallpaper
+} // namespace owe

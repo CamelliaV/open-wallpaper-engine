@@ -8,7 +8,7 @@ import cppstd;
 import wescene.fs;
 import :wp_scene;
 
-export namespace wallpaper
+export namespace owe
 
 {
 namespace wpscene
@@ -57,4 +57,4 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterialPass, bind, target, textures, combo
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterial, blending, shader, textures, combos,
                                    constantshadervalues);
 } // namespace wpscene
-} // namespace wallpaper
+} // namespace owe

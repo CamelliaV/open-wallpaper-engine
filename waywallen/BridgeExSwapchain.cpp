@@ -8,7 +8,7 @@ BridgeExSwapchain::BridgeExSwapchain(ww_pool_t* pool, int sock)
 
 BridgeExSwapchain::~BridgeExSwapchain() = default;
 
-bool BridgeExSwapchain::acquireRenderTarget(wallpaper::vulkan::ImageParameters& out) {
+bool BridgeExSwapchain::acquireRenderTarget(owe::vulkan::ImageParameters& out) {
     VkImage  image = VK_NULL_HANDLE;
     uint32_t w = 0, h = 0;
     if (!m_core.acquireSlot(&image, &w, &h)) return false;

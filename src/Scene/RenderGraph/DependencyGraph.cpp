@@ -6,7 +6,7 @@ module wescene.rgraph;
 import wescene.core;
 import cppstd;
 
-using namespace wallpaper::rg;
+using namespace owe::rg;
 
 std::vector<NodeID> DependencyGraph::GetNodeOut(NodeID i) const {
     const auto&         nexts = m_nodeNext[i];

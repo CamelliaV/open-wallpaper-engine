@@ -25,7 +25,7 @@ import wescene.json;
 //
 // One curve covers a vec3 field (c0/c1/c2 axes) or a scalar (c0 only).
 
-export namespace wallpaper::wpscene
+export namespace owe::wpscene
 {
 
 struct WPAnimKeyframeTangent {
@@ -105,4 +105,4 @@ struct WPFieldBindings {
 // entries. Returns the count of bindings absorbed.
 std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindings& out);
 
-} // namespace wallpaper::wpscene
+} // namespace owe::wpscene

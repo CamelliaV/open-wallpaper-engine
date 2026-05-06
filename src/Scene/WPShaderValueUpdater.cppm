@@ -9,7 +9,7 @@ import wescene.scene;
 
 import wescene.puppet;  // WPPuppetLayer
 
-export namespace wallpaper
+export namespace owe
 {
 
 struct WPUniformInfo {
@@ -89,4 +89,4 @@ private:
     Map<void*, WPUniformInfo>     m_nodeUniformInfoMap;
 };
 
-} // namespace wallpaper
+} // namespace owe

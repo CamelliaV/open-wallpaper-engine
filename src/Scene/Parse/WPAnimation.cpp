@@ -6,7 +6,7 @@ module;
 module wescene.parse;
 import cppstd;
 
-namespace wallpaper::wpscene {
+namespace owe::wpscene {
 
 bool ParseAnimKeyframeTangent(const nlohmann::json& json, WPAnimKeyframeTangent& out) {
     if (! json.is_object()) return false;
@@ -95,4 +95,4 @@ std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindin
     return n;
 }
 
-} // namespace wallpaper::wpscene
+} // namespace owe::wpscene

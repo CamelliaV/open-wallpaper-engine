@@ -6,7 +6,7 @@ module wescene.scene;
 import wescene.core;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 
 void ParticleInstance::Refresh() {
     SetDeath(false);

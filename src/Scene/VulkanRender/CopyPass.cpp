@@ -15,7 +15,7 @@ import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 CopyPass::CopyPass(const Desc& desc): m_desc(desc) {}
 

@@ -8,7 +8,7 @@ import wescene.core;
 import cppstd;
 import wescene.types;
 
-export namespace wallpaper
+export namespace owe
 {
 
 // ============================================================================
@@ -1032,10 +1032,10 @@ public:
     std::unique_ptr<void, VFSDeleterFn>  vfs;
 
     // Same opaque-pointer pattern for the per-Scene scenescript runtime.
-    // The concrete type is `wallpaper::script::ScriptScene` (defined in
+    // The concrete type is `owe::script::ScriptScene` (defined in
     // wescene-script), but Scene itself lives in wescene-base which sits
     // upstream of wescene-script — so we keep it opaque here. The renderer
-    // ticks it once per frame via `wallpaper::script::TickSceneScripts`.
+    // ticks it once per frame via `owe::script::TickSceneScripts`.
     using ScriptDeleterFn = void (*)(void*) noexcept;
     std::unique_ptr<void, ScriptDeleterFn> script_scene { nullptr,
                                                           [](void*) noexcept {} };
@@ -1072,4 +1072,4 @@ public:
     }
 };
 
-} // export namespace wallpaper
+} // export namespace owe

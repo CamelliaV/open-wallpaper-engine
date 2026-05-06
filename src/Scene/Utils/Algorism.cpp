@@ -7,7 +7,7 @@ module;
 
 module wescene.utils;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace Eigen;
 
 double algorism::CalculatePersperctiveDistance(double fov, double height) noexcept {

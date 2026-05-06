@@ -5,7 +5,7 @@ export module wescene.timer:thread_timer;
 import wescene.core;
 import cppstd;
 
-export namespace wallpaper
+export namespace owe
 {
 
 class ThreadTimer : NoCopy, NoMove {
@@ -33,4 +33,4 @@ private:
     std::atomic<bool>                      m_running;
 };
 
-} // namespace wallpaper
+} // namespace owe

@@ -7,7 +7,7 @@ import wescene.fs;
 import wescene.scene;
 import :wp_scene;
 
-export namespace wallpaper
+export namespace owe
 {
 
 class ISceneParser {
@@ -37,4 +37,4 @@ public:
                                  wpscene::SceneVersion pkg_version) override;
 };
 
-} // namespace wallpaper
+} // namespace owe

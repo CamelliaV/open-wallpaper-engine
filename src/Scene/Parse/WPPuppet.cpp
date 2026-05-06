@@ -7,7 +7,7 @@ module wescene.puppet;
 import wescene.core;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace Eigen;
 
 static Quaterniond ToQuaternion(Vector3f euler) {

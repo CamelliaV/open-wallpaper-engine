@@ -10,7 +10,7 @@ import rstd.log;
 import rstd.cppstd;
 import wescene.utils;
 
-namespace wallpaper
+namespace owe
 {
 
 bool ParseJson(const char* file, const char* func, int line, const std::string& source,
@@ -137,4 +137,4 @@ using farray = std::array<float, N>;
 T_IMPL_GET_JSON(farray<2>);
 T_IMPL_GET_JSON(farray<3>);
 
-} // namespace wallpaper
+} // namespace owe

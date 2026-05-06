@@ -9,7 +9,7 @@ import wescene.fs;
 
 import wescene.json;
 
-export namespace wallpaper
+export namespace owe
 
 {
 namespace wpscene
@@ -66,4 +66,4 @@ struct WPUniformTex {
     }
 };
 } // namespace wpscene
-} // namespace wallpaper
+} // namespace owe

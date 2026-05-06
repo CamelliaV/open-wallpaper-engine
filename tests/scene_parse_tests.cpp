@@ -22,8 +22,8 @@
 
 namespace {
 
-const std::vector<wallpaper::testing::WorkshopProbe>& AllWorkshopProbes() {
-    static const auto v = wallpaper::testing::EnumerateWorkshopProbes(WAYWALLEN_WORKSHOP_DIR);
+const std::vector<owe::testing::WorkshopProbe>& AllWorkshopProbes() {
+    static const auto v = owe::testing::EnumerateWorkshopProbes(WAYWALLEN_WORKSHOP_DIR);
     return v;
 }
 
@@ -49,7 +49,7 @@ TEST_P(ScenePkgVersionParseTest, AllWorkshopsParseAtExplicitVersion) {
         ++hits;
         SCOPED_TRACE("workshop " + p.id + " " + p.pkg_stamp);
 
-        auto r = wallpaper::testing::ProbeSceneParse(p.dir);
+        auto r = owe::testing::ProbeSceneParse(p.dir);
         EXPECT_TRUE(r.ok) << "ProbeSceneParse failed: " << r.error;
         EXPECT_EQ(r.pkg_version, p.pkg_version)
             << "pkg_version mismatch for " << p.id;

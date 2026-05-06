@@ -11,7 +11,7 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 constexpr std::array<InstanceLayer, 0> base_inst_layers {};
 
@@ -78,12 +78,12 @@ VkResult CreatInstance(vvk::Instance* inst, std::span<const std::string_view> ex
 
     return vvk::Instance::Create(*inst, app_info, layer_names_c, extension_names_c, dld);
 }
-void EnumateExts(wallpaper::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
+void EnumateExts(owe::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
     if (auto rv = vvk::EnumerateInstanceExtensionProperties(dld); rv.has_value()) {
         for (const auto& ext : *rv) set.insert(ext.extensionName);
     }
 }
-void EnumateLayers(wallpaper::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
+void EnumateLayers(owe::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
     if (auto rv = vvk::EnumerateInstanceLayerProperties(dld); rv.has_value()) {
         for (const auto& ext : *rv) set.insert(ext.layerName);
     }

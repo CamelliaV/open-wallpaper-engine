@@ -4,7 +4,7 @@ module wescene.timer;
 import wescene.core;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 using micros = std::chrono::microseconds;
 using namespace std::chrono;
 

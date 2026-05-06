@@ -8,7 +8,7 @@ export module wescene.types;
 import wescene.core;
 import cppstd;
 
-export namespace wallpaper
+export namespace owe
 {
 
 // ---------- enums + TextureSample (was Type.hpp) ---------------------------
@@ -241,7 +241,7 @@ struct Image : NoCopy, NoMove {
     std::string       key;
 };
 
-} // namespace wallpaper (export)
+} // namespace owe (export)
 
 // Small OS utility — dlopen/dlsym wrapper. Lives here so wescene-vulkan-runtime
 // can reach it without dragging wescene-base in. hash_combine is co-located

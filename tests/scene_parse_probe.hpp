@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 struct SceneParseResult {
     bool        ok { false };
@@ -42,4 +42,4 @@ struct WorkshopProbe {
 // — safe to use even when the corpus has a workshop that crashes those.
 std::vector<WorkshopProbe> EnumerateWorkshopProbes(const std::string& workshop_root);
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

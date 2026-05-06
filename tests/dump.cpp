@@ -14,7 +14,7 @@ import wescene.pkg_fs;
 import wescene.fs;
 import wescene.types;
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 namespace {
 
@@ -54,7 +54,7 @@ struct TexMeta {
     bool        ok { false };
 };
 
-TexMeta ReadTexMeta(wallpaper::fs::VFS& vfs, const std::string& pkg_path) {
+TexMeta ReadTexMeta(owe::fs::VFS& vfs, const std::string& pkg_path) {
     TexMeta meta;
     meta.path = pkg_path;
 
@@ -69,8 +69,8 @@ TexMeta ReadTexMeta(wallpaper::fs::VFS& vfs, const std::string& pkg_path) {
     std::string name = pkg_path.substr(prefix.size(),
                                        pkg_path.size() - prefix.size() - suffix.size());
 
-    wallpaper::WPTexImageParser parser(&vfs);
-    wallpaper::ImageHeader      h;
+    owe::WPTexImageParser parser(&vfs);
+    owe::ImageHeader      h;
     try {
         h = parser.ParseHeader(name);
     } catch (const std::exception&) {
@@ -131,7 +131,7 @@ json map_to_json(const Map& m) {
     return o;
 }
 
-json dump_material(const wallpaper::wpscene::WPMaterial& m) {
+json dump_material(const owe::wpscene::WPMaterial& m) {
     return {
         { "shader", m.shader },
         { "blending", m.blending },
@@ -145,7 +145,7 @@ json dump_material(const wallpaper::wpscene::WPMaterial& m) {
     };
 }
 
-json dump_material_pass(const wallpaper::wpscene::WPMaterialPass& p) {
+json dump_material_pass(const owe::wpscene::WPMaterialPass& p) {
     json bind = json::array();
     for (const auto& b : p.bind) {
         bind.push_back({ { "name", b.name }, { "index", b.index } });
@@ -159,7 +159,7 @@ json dump_material_pass(const wallpaper::wpscene::WPMaterialPass& p) {
     };
 }
 
-json dump_effect_fbo(const wallpaper::wpscene::WPEffectFbo& f) {
+json dump_effect_fbo(const owe::wpscene::WPEffectFbo& f) {
     return {
         { "name", f.name },
         { "format", f.format },
@@ -184,10 +184,10 @@ json dump_object_common(const json& obj) {
     return o;
 }
 
-json dump_light_object(const json& obj, wallpaper::fs::VFS& vfs) {
+json dump_light_object(const json& obj, owe::fs::VFS& vfs) {
     json out  = dump_object_common(obj);
     out["kind"] = "light";
-    wallpaper::wpscene::WPLightObject lo;
+    owe::wpscene::WPLightObject lo;
     bool                              ok = false;
     try {
         ok = lo.FromJson(obj, vfs);
@@ -207,10 +207,10 @@ json dump_light_object(const json& obj, wallpaper::fs::VFS& vfs) {
     return out;
 }
 
-json dump_particle_object(const json& obj, wallpaper::fs::VFS& vfs) {
+json dump_particle_object(const json& obj, owe::fs::VFS& vfs) {
     json out  = dump_object_common(obj);
     out["kind"] = "particle";
-    wallpaper::wpscene::WPParticleObject po;
+    owe::wpscene::WPParticleObject po;
     bool                                 ok = false;
     try {
         ok = po.FromJson(obj, vfs);
@@ -236,10 +236,10 @@ json dump_particle_object(const json& obj, wallpaper::fs::VFS& vfs) {
     return out;
 }
 
-json dump_sound_object(const json& obj, wallpaper::fs::VFS& vfs) {
+json dump_sound_object(const json& obj, owe::fs::VFS& vfs) {
     json out  = dump_object_common(obj);
     out["kind"] = "sound";
-    wallpaper::wpscene::WPSoundObject so;
+    owe::wpscene::WPSoundObject so;
     bool                              ok = false;
     try {
         ok = so.FromJson(obj, vfs);
@@ -260,10 +260,10 @@ json dump_sound_object(const json& obj, wallpaper::fs::VFS& vfs) {
 // Run WPImageObject::FromJson against a single object json and dump the
 // parsed fields. Returns nullopt if the object is not an image object
 // (no "image" field) so the caller can fall back to common-only dumps.
-json dump_image_object(const json& obj, wallpaper::fs::VFS& vfs) {
+json dump_image_object(const json& obj, owe::fs::VFS& vfs) {
     json out                          = dump_object_common(obj);
     out["kind"]                       = "image";
-    wallpaper::wpscene::WPImageObject img;
+    owe::wpscene::WPImageObject img;
     bool                              ok = false;
     try {
         ok = img.FromJson(obj, vfs);
@@ -351,9 +351,9 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err) {
     jpkg["has_scene_json"] = has_scene_json;
 
     // ---- mount VFS ---------------------------------------------------------
-    wallpaper::fs::VFS vfs;
-    auto pfs = wallpaper::fs::CreatePhysicalFs(workshop_dir);
-    auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    owe::fs::VFS vfs;
+    auto pfs = owe::fs::CreatePhysicalFs(workshop_dir);
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) {
         err          = "WPPkgFs::CreatePkgFs failed";
         out["error"] = err;
@@ -369,7 +369,7 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err) {
             std::string text = stream->ReadAllStr();
             try {
                 auto j = json::parse(text);
-                wallpaper::wpscene::WPScene scene;
+                owe::wpscene::WPScene scene;
                 bool                        parsed = scene.FromJson(j);
                 json&                       jscene = out["scene"];
                 jscene["parsed"]                   = parsed;
@@ -483,7 +483,7 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err) {
         WPMdl mdl;
         bool  ok = false;
         try {
-            ok = wallpaper::WPMdlParser::Parse(rel, vfs, mdl);
+            ok = owe::WPMdlParser::Parse(rel, vfs, mdl);
         } catch (const std::exception&) {
             ok = false;
         }
@@ -540,4 +540,4 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err) {
     return out;
 }
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

@@ -84,7 +84,7 @@ struct PkgResult {
 };
 
 bool LoadSceneJson(const std::string& workshop_dir,
-                   wallpaper::fs::VFS&  vfs_out,
+                   owe::fs::VFS&  vfs_out,
                    std::string&         text_out,
                    nlohmann::json&      json_out,
                    unsigned&            pkg_version,
@@ -95,12 +95,12 @@ bool LoadSceneJson(const std::string& workshop_dir,
         return false;
     }
 
-    auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) {
         err = "WPPkgFs::CreatePkgFs failed";
         return false;
     }
-    pkg_version = wallpaper::wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
+    pkg_version = owe::wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
 
     if (! vfs_out.Mount("/assets", std::move(wfs))) {
         err = "vfs.Mount failed";
@@ -127,7 +127,7 @@ bool LoadSceneJson(const std::string& workshop_dir,
 // avoiding fork halves the per-pkg overhead.
 void DoFromJson(PkgResult& r, const nlohmann::json& j) {
     try {
-        wallpaper::wpscene::WPScene scene;
+        owe::wpscene::WPScene scene;
         const bool                  parsed = scene.FromJson(j, r.pkg_version);
         r.fromjson_ok                      = parsed;
         if (! parsed) r.fromjson_err = "FromJson returned false";
@@ -191,7 +191,7 @@ void ReapOne(InflightFull& f, std::vector<PkgResult>& results) {
 // Fork off a Full-axis worker. Parent gets back an InflightFull; reap
 // it later via ReapOne. The child re-uses the parent's mounted VFS via
 // COW pages, so we don't have to re-mount in the child.
-bool SpawnFull(PkgResult& r, wallpaper::fs::VFS& vfs, const std::string& text,
+bool SpawnFull(PkgResult& r, owe::fs::VFS& vfs, const std::string& text,
                size_t result_idx, InflightFull& out) {
     int fds[2];
     if (::pipe(fds) < 0) {
@@ -213,10 +213,10 @@ bool SpawnFull(PkgResult& r, wallpaper::fs::VFS& vfs, const std::string& text,
         char marker = 'E';
         try {
             wavsen::audio::SoundManager sm;
-            wallpaper::WPSceneParser       parser;
+            owe::WPSceneParser       parser;
             auto scene = parser.Parse(
                 r.id, text, vfs, sm,
-                static_cast<wallpaper::wpscene::SceneVersion>(r.pkg_version));
+                static_cast<owe::wpscene::SceneVersion>(r.pkg_version));
             marker = scene ? 'O' : 'N';
         } catch (...) {
             marker = 'E';
@@ -318,7 +318,7 @@ int main(int argc, char** argv) {
     // shader/material/.tex files via VFS COW pages. VFS is NoCopy/NoMove
     // so the slots are unique_ptr.
     struct PkgState {
-        wallpaper::fs::VFS vfs;
+        owe::fs::VFS vfs;
         std::string        text;
         nlohmann::json     j;
     };

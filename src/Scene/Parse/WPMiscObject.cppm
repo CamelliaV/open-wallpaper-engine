@@ -16,7 +16,7 @@ import :wp_scene;
 // parser absorbs every observed top-level field so the data model stays
 // schema-complete (drives SceneSchema.EveryParsedObjectKeyIsObserved).
 
-export namespace wallpaper::wpscene
+export namespace owe::wpscene
 {
 
 // Text-overlay object (PKGV0005+). Discriminator: top-level `text` is
@@ -232,4 +232,4 @@ struct WPCameraObject {
     }
 };
 
-} // namespace wallpaper::wpscene
+} // namespace owe::wpscene

@@ -1,9 +1,9 @@
 #pragma once
 #include <utility>
 
-#define AUTO_DELETER(name, del_func) wallpaper::AutoDeleter del_##name(del_func);
+#define AUTO_DELETER(name, del_func) owe::AutoDeleter del_##name(del_func);
 
-namespace wallpaper
+namespace owe
 {
 template<typename TDeleter>
 struct AutoDeleter {

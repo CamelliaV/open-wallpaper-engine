@@ -11,8 +11,8 @@ import cppstd;
 
 import wescene.fs;
 
-using namespace wallpaper;
-using namespace wallpaper::fs;
+using namespace owe;
+using namespace owe::fs;
 
 namespace
 {

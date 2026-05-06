@@ -13,7 +13,7 @@ export import :wp_animation;
 export import :wp_material;
 import :wp_scene;
 
-export namespace wallpaper
+export namespace owe
 
 {
 namespace wpscene
@@ -192,4 +192,4 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Particle, initializers, operators, emitters);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPParticleObject, name, origin, angles, scale, visible, particle,
                                    particleObj);
 } // namespace wpscene
-} // namespace wallpaper
+} // namespace owe

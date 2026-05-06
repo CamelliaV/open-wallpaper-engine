@@ -8,7 +8,7 @@ import wescene.core;
 import wescene.types;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 
 SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
                                              std::string_view pingpong_a,

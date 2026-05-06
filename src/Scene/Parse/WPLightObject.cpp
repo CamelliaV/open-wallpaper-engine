@@ -5,7 +5,7 @@ module;
 #include <nlohmann/json.hpp>
 module wescene.parse;
 
-using namespace wallpaper::wpscene;
+using namespace owe::wpscene;
 
 bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);

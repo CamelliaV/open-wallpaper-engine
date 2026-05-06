@@ -19,7 +19,7 @@ import cppstd;
 import wescene.utils;
 import wescene.scene;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace Eigen;
 namespace PM = ParticleModify;
 

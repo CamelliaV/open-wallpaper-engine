@@ -7,7 +7,7 @@ export module wescene.parse:wp_scene;
 import cppstd;
 import wescene.fs;
 
-export namespace wallpaper
+export namespace owe
 
 {
 
@@ -152,4 +152,4 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneCamera, center, eye, up);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneGeneral, clearcolor, orthogonalprojection, zoom);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPScene, camera, general);
 } // namespace wpscene
-} // namespace wallpaper
+} // namespace owe

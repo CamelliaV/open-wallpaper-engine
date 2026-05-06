@@ -12,7 +12,7 @@
 #include <string>
 #include <nlohmann/json.hpp>
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 // Returns:
 //   {
@@ -35,4 +35,4 @@ namespace wallpaper::testing {
 // keeps going.
 nlohmann::json ScanSceneKeys(const std::string& workshop_root);
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

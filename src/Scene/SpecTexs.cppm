@@ -10,7 +10,7 @@ import cppstd;
         "g_Texture5" #ext, "g_Texture6" #ext, "g_Texture7" #ext, "g_Texture8" #ext,                \
         "g_Texture9" #ext, "g_Texture10" #ext, "g_Texture11" #ext, "g_Texture12" #ext
 
-export namespace wallpaper
+export namespace owe
 {
 
 inline constexpr std::array WE_GLTEX_NAMES { BASE_GLTEX_NAMES() };
@@ -90,6 +90,6 @@ inline std::string GenLinkTex(std::ptrdiff_t id) {
     return std::string(SpecTex_Link) + std::to_string(id);
 }
 
-} // namespace wallpaper
+} // namespace owe
 
 #undef BASE_GLTEX_NAMES

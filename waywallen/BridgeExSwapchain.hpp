@@ -1,10 +1,10 @@
-// BridgeExSwapchain — `wallpaper::ExSwapchain` adapter over
+// BridgeExSwapchain — `owe::ExSwapchain` adapter over
 // BridgeProducerCore for the wescene host.
 //
 // All bridge protocol work (directive stash, applyDirective, slot
 // acquisition, frame_ready emission) lives in BridgeProducerCore. This
 // header is a thin shim that maps the core's API into the
-// `wallpaper::ExSwapchain` virtual surface VulkanRender expects:
+// `owe::ExSwapchain` virtual surface VulkanRender expects:
 //
 //   acquireRenderTarget(ImageParameters&) → core.acquireSlot(VkImage*)
 //   submitRendered(int)                   → core.submitSlot(int)
@@ -27,7 +27,7 @@
 namespace ww_wescene
 {
 
-class BridgeExSwapchain : public wallpaper::ExSwapchain {
+class BridgeExSwapchain : public owe::ExSwapchain {
 public:
     static constexpr uint32_t kMaxSlots = BridgeProducerCore::kMaxSlots;
 
@@ -47,7 +47,7 @@ public:
 
     void poll() override { m_core.drainPendingDirective(); }
 
-    bool acquireRenderTarget(wallpaper::vulkan::ImageParameters& out) override;
+    bool acquireRenderTarget(owe::vulkan::ImageParameters& out) override;
 
     void submitRendered(int producer_sync_fd) override {
         m_core.submitSlot(producer_sync_fd);
@@ -68,14 +68,14 @@ public:
     bool ready() const override { return m_core.ready(); }
 
     void setOnReadyChanged(
-        std::function<void(const wallpaper::ExSwapchainReadyEvent&)> cb) override {
+        std::function<void(const owe::ExSwapchainReadyEvent&)> cb) override {
         if (!cb) {
             m_core.setOnReadyChanged({});
             return;
         }
         m_core.setOnReadyChanged(
             [cb = std::move(cb)](const BridgeReadyEvent& e) {
-                cb(wallpaper::ExSwapchainReadyEvent {
+                cb(owe::ExSwapchainReadyEvent {
                     .ready  = e.ready,
                     .width  = e.width,
                     .height = e.height,

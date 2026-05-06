@@ -22,7 +22,7 @@ export import wescene.types;
 
 // ---------- Module-purview entities ----------------------------------------
 
-export namespace wallpaper
+export namespace owe
 {
 
 // FpsCounter — was Utils/FpsCounter.h. Implementation in Utils/FpsCounter.cpp.
@@ -137,7 +137,7 @@ inline std::filesystem::path GetCachePath(std::string_view name) {
 }
 } // namespace platform
 
-} // namespace wallpaper (export)
+} // namespace owe (export)
 
 // ---------- Migrated from former Utils/{Hash,DynamicLibrary,Identity} -------
 

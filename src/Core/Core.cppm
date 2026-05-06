@@ -24,7 +24,7 @@ protected:
     NoMove& operator=(NoMove&&) = delete;
 };
 
-export namespace wallpaper
+export namespace owe
 {
 
 // Literals
@@ -221,4 +221,4 @@ private:
     usize                   m_capacity;
 };
 
-} // namespace wallpaper
+} // namespace owe

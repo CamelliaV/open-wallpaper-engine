@@ -3,7 +3,7 @@ module;
 module wescene.rgraph;
 import cppstd;
 
-using namespace wallpaper::rg;
+using namespace owe::rg;
 
 TexNode* TexNode::addTexNode(DependencyGraph& dg, const Desc& desc) {
     std::unique_ptr<TexNode> node = std::make_unique<TexNode>();

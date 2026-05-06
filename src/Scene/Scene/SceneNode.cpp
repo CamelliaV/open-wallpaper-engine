@@ -4,7 +4,7 @@ module;
 
 module wescene.scene;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace Eigen;
 
 Matrix4d SceneNode::GetLocalTrans() const {

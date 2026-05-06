@@ -19,7 +19,7 @@ import cppstd;
 import wescene.scene;
 import wescene.shader_compile;
 
-namespace wallpaper::text
+namespace owe::text
 {
 
 namespace
@@ -378,29 +378,29 @@ FontCache::ResolvedBlob FontCache::ResolveSystemFont(std::string_view name, bool
 
 // -- Atlas snapshot -------------------------------------------------------
 
-std::shared_ptr<wallpaper::Image> BuildAtlasImage(const FontFace& face,
+std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face,
                                                    const std::string& key) {
     auto fm  = face.Metrics();
     auto pix = face.AtlasPixels();
     if (fm.atlas_w == 0 || fm.atlas_h == 0 || pix.empty()) return nullptr;
 
-    auto img = std::make_shared<wallpaper::Image>();
+    auto img = std::make_shared<owe::Image>();
     img->key = key;
 
-    img->header.width    = static_cast<wallpaper::i32>(fm.atlas_w);
-    img->header.height   = static_cast<wallpaper::i32>(fm.atlas_h);
+    img->header.width    = static_cast<owe::i32>(fm.atlas_w);
+    img->header.height   = static_cast<owe::i32>(fm.atlas_h);
     img->header.mapWidth  = img->header.width;
     img->header.mapHeight = img->header.height;
     img->header.mipmap_larger = false;
     img->header.mipmap_pow2   = false;
-    img->header.type     = wallpaper::ImageType::UNKNOWN;
-    img->header.format   = wallpaper::TextureFormat::R8;
+    img->header.type     = owe::ImageType::UNKNOWN;
+    img->header.format   = owe::TextureFormat::R8;
     img->header.count    = 1;
     img->header.isSprite = false;
-    img->header.sample   = { wallpaper::TextureWrap::CLAMP_TO_EDGE,
-                             wallpaper::TextureWrap::CLAMP_TO_EDGE,
-                             wallpaper::TextureFilter::LINEAR,
-                             wallpaper::TextureFilter::LINEAR };
+    img->header.sample   = { owe::TextureWrap::CLAMP_TO_EDGE,
+                             owe::TextureWrap::CLAMP_TO_EDGE,
+                             owe::TextureFilter::LINEAR,
+                             owe::TextureFilter::LINEAR };
 
     img->slots.resize(1);
     auto& slot = img->slots[0];
@@ -410,11 +410,11 @@ std::shared_ptr<wallpaper::Image> BuildAtlasImage(const FontFace& face,
     auto& mip   = slot.mipmaps[0];
     mip.width   = img->header.width;
     mip.height  = img->header.height;
-    mip.size    = static_cast<wallpaper::isize>(pix.size());
+    mip.size    = static_cast<owe::isize>(pix.size());
 
     auto* buf = new std::uint8_t[pix.size()];
     std::memcpy(buf, pix.data(), pix.size());
-    mip.data  = wallpaper::ImageDataPtr(buf, [](std::uint8_t* p) { delete[] p; });
+    mip.data  = owe::ImageDataPtr(buf, [](std::uint8_t* p) { delete[] p; });
 
     return img;
 }
@@ -459,12 +459,12 @@ float4 main_ps(PSInput i) : SV_Target {
 }
 )hlsl";
 
-std::shared_ptr<wallpaper::SceneShader> CompileTextShader() {
-    using namespace wallpaper::vulkan;
+std::shared_ptr<owe::SceneShader> CompileTextShader() {
+    using namespace owe::vulkan;
 
     std::array<ShaderCompUnit, 2> units {
-        ShaderCompUnit { wallpaper::ShaderType::VERTEX,   kTextShaderHlsl, "main_vs" },
-        ShaderCompUnit { wallpaper::ShaderType::FRAGMENT, kTextShaderHlsl, "main_ps" },
+        ShaderCompUnit { owe::ShaderType::VERTEX,   kTextShaderHlsl, "main_vs" },
+        ShaderCompUnit { owe::ShaderType::FRAGMENT, kTextShaderHlsl, "main_ps" },
     };
     ShaderCompOpt opt {};
     opt.target   = VulkanTarget::Vulkan_1_1;
@@ -476,7 +476,7 @@ std::shared_ptr<wallpaper::SceneShader> CompileTextShader() {
         return nullptr;
     }
 
-    auto shader  = std::make_shared<wallpaper::SceneShader>();
+    auto shader  = std::make_shared<owe::SceneShader>();
     shader->id   = 0;
     shader->name = "text";
     shader->codes.reserve(spvs.size());
@@ -488,9 +488,9 @@ std::shared_ptr<wallpaper::SceneShader> CompileTextShader() {
 
 } // namespace
 
-std::shared_ptr<wallpaper::SceneShader> GetTextSceneShader() {
+std::shared_ptr<owe::SceneShader> GetTextSceneShader() {
     static std::once_flag                            once;
-    static std::shared_ptr<wallpaper::SceneShader>   shader;
+    static std::shared_ptr<owe::SceneShader>   shader;
     std::call_once(once, [] { shader = CompileTextShader(); });
     return shader;
 }
@@ -514,7 +514,7 @@ bool ContainsSubstring(std::string_view s, std::string_view what) noexcept {
 struct TextLayouter::Impl {
     std::unique_ptr<FontCache>            cache;
     FontFace*                             face { nullptr };
-    std::shared_ptr<wallpaper::SceneMesh> mesh;
+    std::shared_ptr<owe::SceneMesh> mesh;
     TextLayoutStyle                       style;
     std::size_t                           peak_quads { 0 };
     FontMetrics                           metrics;
@@ -531,7 +531,7 @@ struct TextLayouter::Impl {
     std::vector<std::uint32_t> indices;
 
     Impl(std::unique_ptr<FontCache> c, FontFace* f,
-         std::shared_ptr<wallpaper::SceneMesh> m, TextLayoutStyle s, std::size_t pq)
+         std::shared_ptr<owe::SceneMesh> m, TextLayoutStyle s, std::size_t pq)
         : cache(std::move(c)), face(f), mesh(std::move(m)), style(std::move(s)),
           peak_quads(pq), metrics(face->Metrics()) {
         positions.assign(pq * 4 * 3, 0.0f);
@@ -543,7 +543,7 @@ struct TextLayouter::Impl {
 
 TextLayouter::TextLayouter(std::unique_ptr<FontCache>            cache,
                            FontFace*                             face,
-                           std::shared_ptr<wallpaper::SceneMesh> mesh,
+                           std::shared_ptr<owe::SceneMesh> mesh,
                            TextLayoutStyle                       style,
                            std::size_t                           peak_quads)
     : m_impl(std::make_unique<Impl>(std::move(cache), face, std::move(mesh),
@@ -732,4 +732,4 @@ void TextLayouter::SetText(std::string_view utf8) {
     im.mesh->SetDirty();
 }
 
-} // namespace wallpaper::text
+} // namespace owe::text

@@ -14,7 +14,7 @@
 import wescene.pkg_fs;
 import wescene.fs;
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 namespace {
 
@@ -112,12 +112,12 @@ bool ScanOneWorkshop(const fs::path& workshop_dir,
         }
     if (! has_scene_json) return false;
 
-    auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) {
         std::fprintf(stderr, "wpscan: skip %s: WPPkgFs::CreatePkgFs failed\n", id.c_str());
         return false;
     }
-    wallpaper::fs::VFS vfs;
+    owe::fs::VFS vfs;
     vfs.Mount("/assets", std::move(wfs));
 
     auto stream = vfs.Open("/assets/scene.json");
@@ -198,4 +198,4 @@ json ScanSceneKeys(const std::string& workshop_root) {
     return AggToJson(by_version);
 }
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

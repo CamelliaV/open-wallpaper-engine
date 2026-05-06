@@ -10,7 +10,7 @@ import wescene.scene;
 import :vulkan_pass;
 import :resource;
 
-export namespace wallpaper::vulkan
+export namespace owe::vulkan
 {
 
 class CopyPass : public VulkanPass {
@@ -34,4 +34,4 @@ private:
     Desc m_desc;
 };
 
-} // namespace wallpaper::vulkan
+} // namespace owe::vulkan

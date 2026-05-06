@@ -10,7 +10,7 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-export namespace wallpaper::fs
+export namespace owe::fs
 {
 
 // -- Bswap -----------------------------------------------------------------
@@ -521,4 +521,4 @@ inline std::unique_ptr<PhysicalFs> CreatePhysicalFs(std::string_view path, bool 
     return std::make_unique<PhysicalFs>(path);
 }
 
-} // namespace wallpaper::fs
+} // namespace owe::fs

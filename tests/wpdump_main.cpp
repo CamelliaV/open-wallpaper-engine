@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
     }
     const std::string workshop_dir = argv[1];
     std::string       err;
-    auto              snapshot = wallpaper::testing::DumpWorkshop(workshop_dir, err);
+    auto              snapshot = owe::testing::DumpWorkshop(workshop_dir, err);
     if (! err.empty()) {
         std::fprintf(stderr, "wpdump: %s\n", err.c_str());
         return 1;

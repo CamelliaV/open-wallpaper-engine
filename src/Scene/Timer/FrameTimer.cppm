@@ -7,7 +7,7 @@ import cppstd;
 
 import :thread_timer;
 
-export namespace wallpaper
+export namespace owe
 {
 
 class FrameTimer : NoCopy, NoMove {
@@ -49,4 +49,4 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> m_clock;
 };
 
-} // namespace wallpaper
+} // namespace owe

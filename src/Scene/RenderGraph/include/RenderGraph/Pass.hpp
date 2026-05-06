@@ -1,6 +1,6 @@
 #pragma once
 
-namespace wallpaper
+namespace owe
 {
 namespace rg
 {
@@ -21,4 +21,4 @@ public:
     virtual ~VirtualPass() noexcept {};
 };
 } // namespace rg
-} // namespace wallpaper
+} // namespace owe

@@ -5,7 +5,7 @@ module;
 module wescene.timer;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 using micros = std::chrono::microseconds;
 
 ThreadTimer::ThreadTimer(std::function<void()> cb): m_callback(cb) {}

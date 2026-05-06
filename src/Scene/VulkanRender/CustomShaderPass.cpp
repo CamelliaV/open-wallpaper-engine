@@ -14,7 +14,7 @@ import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 CustomShaderPass::CustomShaderPass(const Desc& desc) {
     m_desc.node        = desc.node;
@@ -82,8 +82,8 @@ std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFor
 
 static void UpdateUniform(StagingBuffer* buf, const StagingBufferRef& bufref,
                           const ShaderReflected::Block& block, std::string_view name,
-                          const wallpaper::ShaderValue& value) {
-    using namespace wallpaper;
+                          const owe::ShaderValue& value) {
+    using namespace owe;
     std::span<uint8_t> value_u8 { (uint8_t*)value.data(),
                                   value.size() * sizeof(ShaderValue::value_type) };
     auto               uni = block.member_map.find(name);
@@ -338,7 +338,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                             &vk_textures,
                             update_dyn_buf_op]() {
             auto update_unf_op = [&block, buf, bufref](std::string_view       name,
-                                                       wallpaper::ShaderValue value) {
+                                                       owe::ShaderValue value) {
                 UpdateUniform(buf, *bufref, block, name, value);
             };
             shader_updater->UpdateUniforms(node, sprites, update_unf_op);

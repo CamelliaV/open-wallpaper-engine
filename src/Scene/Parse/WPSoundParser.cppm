@@ -6,7 +6,7 @@ import wavsen.audio;
 
 import :wp_sound_object;
 
-export namespace wallpaper
+export namespace owe
 {
 
 class WPSoundParser {

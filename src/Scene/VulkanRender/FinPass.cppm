@@ -11,7 +11,7 @@ import wescene.scene;
 import :vulkan_pass;
 import :resource;
 
-export namespace wallpaper::vulkan
+export namespace owe::vulkan
 {
 
 // Final pass: blit the scene render target into the present buffer
@@ -49,4 +49,4 @@ private:
     Desc m_desc;
 };
 
-} // namespace wallpaper::vulkan
+} // namespace owe::vulkan

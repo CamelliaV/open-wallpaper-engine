@@ -7,7 +7,7 @@ module;
 
 module wescene.types;
 
-namespace wallpaper
+namespace owe
 {
 
 std::string ToString(const ImageType& type) {
@@ -33,7 +33,7 @@ std::string ToString(const TextureFormat& format) {
 #undef FMT
 }
 
-} // namespace wallpaper
+} // namespace owe
 
 namespace utils
 {

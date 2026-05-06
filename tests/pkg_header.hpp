@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 struct PkgEntry {
     std::string  path;
@@ -28,4 +28,4 @@ struct PkgEntry {
 bool ReadPkgHeader(const std::string& pkg_path, std::string& version,
                    std::vector<PkgEntry>& entries);
 
-} // namespace wallpaper::testing
+} // namespace owe::testing

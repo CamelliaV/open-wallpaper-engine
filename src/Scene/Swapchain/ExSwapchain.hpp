@@ -5,7 +5,7 @@
 #include <functional>
 #include <vulkan/vulkan.h>
 
-namespace wallpaper
+namespace owe
 {
 
 // Stays classic-attached because (a) ExSwapchain (classic virtual) takes
@@ -176,4 +176,4 @@ protected:
     ExSwapchain() = default;
 };
 
-} // namespace wallpaper
+} // namespace owe

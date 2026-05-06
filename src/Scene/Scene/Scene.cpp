@@ -5,7 +5,7 @@ import cppstd;
 
 import wescene.fs;
 
-namespace wallpaper
+namespace owe
 {
 
 namespace
@@ -19,4 +19,4 @@ Scene::Scene()
       paritileSys(std::make_unique<ParticleSystem>(*this)) {}
 Scene::~Scene() = default;
 
-} // namespace wallpaper
+} // namespace owe

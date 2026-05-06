@@ -5,7 +5,7 @@ import cppstd;
 
 import :dependency_graph;
 
-export namespace wallpaper::rg
+export namespace owe::rg
 {
 
 class RenderGraphBuilder;
@@ -54,4 +54,4 @@ private:
     PassNode* m_writer { nullptr };
 };
 
-} // namespace wallpaper::rg
+} // namespace owe::rg

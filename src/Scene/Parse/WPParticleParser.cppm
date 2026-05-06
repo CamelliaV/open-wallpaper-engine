@@ -8,7 +8,7 @@ import wescene.fs;
 
 export import :wp_particle_object;
 
-export namespace wallpaper
+export namespace owe
 
 {
 class WPParticleParser {
@@ -19,4 +19,4 @@ public:
     static ParticleEmittOp genParticleEmittOp(const wpscene::Emitter&, bool sort = false);
     static ParticleInitOp  genOverrideInitOp(const wpscene::ParticleInstanceoverride&);
 };
-} // namespace wallpaper
+} // namespace owe

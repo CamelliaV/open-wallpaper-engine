@@ -11,9 +11,9 @@ module wescene.parse;
 import rstd.log;
 import rstd.cppstd;
 
-using namespace wallpaper::wpscene;
+using namespace owe::wpscene;
 
-namespace wallpaper::wpscene {
+namespace owe::wpscene {
 
 SceneVersion ParsePkgVersionStamp(std::string_view stamp) {
     constexpr std::string_view kPrefix = "PKGV";
@@ -35,7 +35,7 @@ SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root) {
     return kSceneJsonVersionDefault;
 }
 
-} // namespace wallpaper::wpscene
+} // namespace owe::wpscene
 
 bool Orthogonalprojection::FromJson(const nlohmann::json& json) {
     if(json.is_null()) return false;

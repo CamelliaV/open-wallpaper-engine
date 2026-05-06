@@ -11,7 +11,7 @@ import wescene.scene;
 
 import :resource;
 
-export namespace wallpaper
+export namespace owe
 {
 
 namespace vulkan
@@ -44,4 +44,4 @@ private:
 };
 
 } // namespace vulkan
-} // namespace wallpaper
+} // namespace owe

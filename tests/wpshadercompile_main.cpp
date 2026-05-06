@@ -70,18 +70,18 @@ void Usage(const char* prog) {
                  prog ? prog : "wpshadercompile", prog ? prog : "wpshadercompile");
 }
 
-wallpaper::ShaderType ParseStage(const std::string& s) {
-    if (s == "VERTEX")   return wallpaper::ShaderType::VERTEX;
-    if (s == "FRAGMENT") return wallpaper::ShaderType::FRAGMENT;
-    if (s == "GEOMETRY") return wallpaper::ShaderType::GEOMETRY;
-    return wallpaper::ShaderType::VERTEX;
+owe::ShaderType ParseStage(const std::string& s) {
+    if (s == "VERTEX")   return owe::ShaderType::VERTEX;
+    if (s == "FRAGMENT") return owe::ShaderType::FRAGMENT;
+    if (s == "GEOMETRY") return owe::ShaderType::GEOMETRY;
+    return owe::ShaderType::VERTEX;
 }
 
-const char* StageName(wallpaper::ShaderType s) {
+const char* StageName(owe::ShaderType s) {
     switch (s) {
-    case wallpaper::ShaderType::VERTEX:   return "VS";
-    case wallpaper::ShaderType::FRAGMENT: return "FS";
-    case wallpaper::ShaderType::GEOMETRY: return "GS";
+    case owe::ShaderType::VERTEX:   return "VS";
+    case owe::ShaderType::FRAGMENT: return "FS";
+    case owe::ShaderType::GEOMETRY: return "GS";
     }
     return "??";
 }
@@ -96,11 +96,11 @@ ReplayResult ReplayOne(const json& rec) {
     ReplayResult r;
     r.scene_id = rec.value("scene_id", "");
 
-    std::vector<wallpaper::WPShaderUnit> units;
+    std::vector<owe::WPShaderUnit> units;
     {
         std::stringstream stages_ss;
         for (const auto& js_stage : rec.at("stages")) {
-            wallpaper::WPShaderUnit u;
+            owe::WPShaderUnit u;
             u.stage = ParseStage(js_stage.at("stage").get<std::string>());
             u.src   = js_stage.at("src").get<std::string>();
             if (! units.empty()) stages_ss << '+';
@@ -120,17 +120,17 @@ ReplayResult ReplayOne(const json& rec) {
         }
     }
 
-    wallpaper::WPShaderInfo shader_info;
+    owe::WPShaderInfo shader_info;
     if (rec.contains("combos")) {
         for (auto it = rec.at("combos").begin(); it != rec.at("combos").end(); ++it) {
             shader_info.combos[it.key()] = it.value().get<std::string>();
         }
     }
 
-    std::vector<wallpaper::WPShaderTexInfo> texs;
+    std::vector<owe::WPShaderTexInfo> texs;
     if (rec.contains("tex_infos")) {
         for (const auto& jt : rec.at("tex_infos")) {
-            wallpaper::WPShaderTexInfo ti;
+            owe::WPShaderTexInfo ti;
             ti.enabled = jt.value("enabled", false);
             if (jt.contains("compos") && jt.at("compos").is_array()) {
                 const auto& c = jt.at("compos");
@@ -142,10 +142,10 @@ ReplayResult ReplayOne(const json& rec) {
         }
     }
 
-    wallpaper::fs::VFS vfs;
+    owe::fs::VFS vfs;
 
-    std::vector<wallpaper::ShaderCode> codes;
-    r.ok = wallpaper::WPShaderParser::CompileToSpv(r.scene_id, units, codes, vfs,
+    std::vector<owe::ShaderCode> codes;
+    r.ok = owe::WPShaderParser::CompileToSpv(r.scene_id, units, codes, vfs,
                                                    &shader_info, texs);
     return r;
 }
@@ -197,19 +197,19 @@ int CapturePkgsToManifest(const std::string& workshop_dir, const std::string& as
         const std::string id = d.filename().string();
         const std::string pkg_path = (d / "scene.pkg").string();
 
-        wallpaper::fs::VFS vfs;
+        owe::fs::VFS vfs;
         if (! assets_dir.empty()) {
-            auto afs = wallpaper::fs::CreatePhysicalFs(assets_dir);
+            auto afs = owe::fs::CreatePhysicalFs(assets_dir);
             if (afs) vfs.Mount("/assets", std::move(afs));
         }
 
-        auto wfs = wallpaper::fs::WPPkgFs::CreatePkgFs(pkg_path);
+        auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
         if (! wfs) {
             if (! quiet) std::fprintf(stderr, "skip %s: CreatePkgFs failed\n", id.c_str());
             continue;
         }
         const unsigned pkg_version =
-            wallpaper::wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
+            owe::wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
         vfs.Mount("/assets", std::move(wfs));
 
         auto stream = vfs.Open("/assets/scene.json");
@@ -221,9 +221,9 @@ int CapturePkgsToManifest(const std::string& workshop_dir, const std::string& as
 
         try {
             wavsen::audio::SoundManager sm;
-            wallpaper::WPSceneParser       parser;
+            owe::WPSceneParser       parser;
             parser.Parse(id, text, vfs, sm,
-                         static_cast<wallpaper::wpscene::SceneVersion>(pkg_version));
+                         static_cast<owe::wpscene::SceneVersion>(pkg_version));
             ++captured_pkgs;
         } catch (const std::exception& e) {
             if (! quiet) std::fprintf(stderr, "skip %s: SceneParser threw: %s\n",

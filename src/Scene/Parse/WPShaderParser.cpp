@@ -25,7 +25,7 @@ static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 #define SHADER_DIR    "spvs01"
 #define SHADER_SUFFIX "spvs"
 
-using namespace wallpaper;
+using namespace owe;
 
 namespace
 {
@@ -378,7 +378,7 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
 
 inline std::string Preprocessor(const std::string& in_src, ShaderType type, const Combos& combos,
                                 WPPreprocessorInfo& process_info) {
-    std::string with_prologue = wallpaper::WPShaderParser::PreShaderHeader(in_src, combos, type);
+    std::string with_prologue = owe::WPShaderParser::PreShaderHeader(in_src, combos, type);
 
     // #require is a WE-specific extension marker, not a real preprocessor
     // directive. DXC would error on it, so comment it out before -P.

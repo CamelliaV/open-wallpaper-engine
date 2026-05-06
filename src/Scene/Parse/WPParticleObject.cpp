@@ -11,7 +11,7 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper::wpscene;
+using namespace owe::wpscene;
 
 bool ParticleChild::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     GET_JSON_NAME_VALUE(json, "name", name);

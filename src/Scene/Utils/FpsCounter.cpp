@@ -5,7 +5,7 @@ module wescene.utils;
 import wescene.core;
 import cppstd;
 
-using namespace wallpaper;
+using namespace owe;
 using namespace std::chrono;
 
 FpsCounter::FpsCounter(): m_fps(0), m_frameCount(0), m_startTime(steady_clock::now()) {}

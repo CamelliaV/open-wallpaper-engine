@@ -12,7 +12,7 @@ export import vulkan;
 import wescene.types;
 import cppstd;
 
-export namespace wallpaper::vulkan
+export namespace owe::vulkan
 {
 
 // ---------- Spv.hpp ----------
@@ -89,4 +89,4 @@ bool CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits,
 // returns false and leaves `out` untouched.
 bool Preprocess(std::string_view src, std::string& out);
 
-} // namespace wallpaper::vulkan
+} // namespace owe::vulkan

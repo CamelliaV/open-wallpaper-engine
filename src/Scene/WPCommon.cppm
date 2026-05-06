@@ -11,7 +11,7 @@ import cppstd;
 
 import wescene.fs;
 
-export namespace wallpaper
+export namespace owe
 {
 
 int32_t ReadVersion(std::string_view prefix, fs::IBinaryStream& file) {
@@ -41,4 +41,4 @@ int32_t ReadMDLVesion(fs::IBinaryStream& file) { return ReadVersion("MDL", file)
 int32_t ReadSPVVesion(fs::IBinaryStream& file) { return ReadVersion("SPV", file); }
 void WriteSPVVesion(fs::IBinaryStreamW& file, int ver) { WriteVersion("SPVS", file, ver); }
 
-} // namespace wallpaper
+} // namespace owe

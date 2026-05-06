@@ -10,7 +10,7 @@ import wescene.core;
 import cppstd;
 import wescene.scene;
 
-export namespace wallpaper::script
+export namespace owe::script
 {
 
 // --- shared value variant ----------------------------------------------------
@@ -168,7 +168,7 @@ struct Actuator {
 // Build the closure that drives a SceneNode transform field. Encapsulates
 // the Vec3/Vec2/Scalar/Bool coercion table so callers stay one-liners.
 std::function<void(const ScriptValue&)>
-MakeNodeTransformApply(wallpaper::SceneNode* node, NodeTransformTarget target);
+MakeNodeTransformApply(owe::SceneNode* node, NodeTransformTarget target);
 
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
 // populated by the parser, attached to the Scene as an opaque pointer
@@ -193,12 +193,12 @@ public:
 
 // Attach a ScriptScene to a Scene via the opaque-pointer slot. Takes
 // ownership; replaces any previous attachment.
-void InstallScriptScene(wallpaper::Scene&             scene,
+void InstallScriptScene(owe::Scene&             scene,
                         std::unique_ptr<ScriptScene>  ss);
 
 // Convenience tick: looks up the ScriptScene attached to `scene` and
 // drives one frame. No-op when no ScriptScene is installed (image-only
 // pkgs, scenes without script bindings).
-void TickSceneScripts(wallpaper::Scene& scene, const FrameInputs& fi);
+void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi);
 
-} // namespace wallpaper::script
+} // namespace owe::script

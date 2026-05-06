@@ -3,7 +3,7 @@ module;
 module wescene.rgraph;
 import cppstd;
 
-using namespace wallpaper::rg;
+using namespace owe::rg;
 
 PassNode* PassNode::addPassNode(DependencyGraph& dg, PassNode::Type type) {
     std::unique_ptr<PassNode> node = std::make_unique<PassNode>();

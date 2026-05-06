@@ -3,7 +3,7 @@
 #include "../../Fs/VFS.h"
 #include "../../Utils/Log.h"
 
-using namespace wallpaper::fs;
+using namespace owe::fs;
 
 int main(int argc, char** argv) {
     if (argc != 3) return 1;

@@ -12,12 +12,12 @@ import rstd.log;
 import rstd.cppstd;
 import cppstd;
 
-using namespace wallpaper::vulkan;
+using namespace owe::vulkan;
 
 namespace
 {
 
-void EnumateDeviceExts(const vvk::PhysicalDevice& gpu, wallpaper::Set<std::string>& set) {
+void EnumateDeviceExts(const vvk::PhysicalDevice& gpu, owe::Set<std::string>& set) {
     std::vector<VkExtensionProperties> properties;
     VVK_CHECK_VOID_RE(gpu.EnumerateDeviceExtensionProperties(properties));
     for (auto& ext : properties) set.insert(ext.extensionName);

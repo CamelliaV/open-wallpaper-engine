@@ -17,7 +17,7 @@ import wescene.utils;
 import wescene.scene;
 import wescene.common;
 
-using namespace wallpaper;
+using namespace owe;
 
 enum class WPTexFlagEnum : uint32_t
 {

@@ -5,7 +5,7 @@ import cppstd;
 import wescene.scene;
 import wescene.fs;
 
-export namespace wallpaper
+export namespace owe
 
 {
 
@@ -97,4 +97,4 @@ public:
 private:
     fs::VFS* m_vfs;
 };
-} // namespace wallpaper
+} // namespace owe

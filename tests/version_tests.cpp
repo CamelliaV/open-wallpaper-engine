@@ -24,7 +24,7 @@
 
 #include "corpus.hpp"
 
-using wallpaper::testing::Corpus;
+using owe::testing::Corpus;
 
 namespace {
 

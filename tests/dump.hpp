@@ -21,10 +21,10 @@
 #include <string>
 #include <nlohmann/json.hpp>
 
-namespace wallpaper::testing {
+namespace owe::testing {
 
 // Returns a json snapshot of `workshop_dir`. On failure returns a json
 // object with `{"error": "..."}` and `err` is set to the same message.
 nlohmann::json DumpWorkshop(const std::string& workshop_dir, std::string& err);
 
-} // namespace wallpaper::testing
+} // namespace owe::testing
