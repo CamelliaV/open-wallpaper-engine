@@ -3,7 +3,6 @@ module;
 #include <rstd/macro.hpp>
 #include "WPJson.hpp"
 
-#include "Core/Literals.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -11,9 +10,9 @@ module;
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-#include "Core/Random.hpp"
 
 module wescene.parse;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;
@@ -504,7 +503,7 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
                 for (auto& p : info.particles) {
                     auto     life = PM::LifetimePos(p);
                     Vector3f result;
-                    for (uint i = 0; i < 3; i++)
+                    for (unsigned i = 0; i < 3; i++)
                         result[i] = FadeValueChange(
                             life, vc.starttime, vc.endtime, vc.startvalue[i], vc.endvalue[i]);
                     PM::MutiplyColor(p, result[0], result[1], result[2]);
@@ -514,7 +513,7 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
             FrequencyValue fv = FrequencyValue::ReadFromJson(wpj, name);
             return [fv](const ParticleInfo& info) mutable {
                 fv.CheckAndResize(info.particles.size());
-                for (uint i = 0; i < info.particles.size(); i++) {
+                for (unsigned i = 0; i < info.particles.size(); i++) {
                     auto& p = info.particles[i];
                     fv.GenFrequency(p, i);
                     PM::MutiplyAlpha(p, fv.GetScale(i, PM::LifetimePassed(p)));
@@ -524,7 +523,7 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
             FrequencyValue fv = FrequencyValue::ReadFromJson(wpj, name);
             return [fv](const ParticleInfo& info) mutable {
                 fv.CheckAndResize(info.particles.size());
-                for (uint i = 0; i < info.particles.size(); i++) {
+                for (unsigned i = 0; i < info.particles.size(); i++) {
                     auto& p = info.particles[i];
                     fv.GenFrequency(p, i);
                     PM::MutiplySize(p, fv.GetScale(i, PM::LifetimePassed(p)));
@@ -537,11 +536,11 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
             std::array<FrequencyValue, 3> fxp = { fvx, fvx, fvx };
             return [=](const ParticleInfo& info) mutable {
                 for (auto& f : fxp) f.CheckAndResize(info.particles.size());
-                for (uint i = 0; i < info.particles.size(); i++) {
+                for (unsigned i = 0; i < info.particles.size(); i++) {
                     auto&    p = info.particles[i];
                     Vector3d del { Vector3d::Zero() };
                     auto     time = PM::LifetimePassed(p);
-                    for (uint d = 0; d < 3; d++) {
+                    for (unsigned d = 0; d < 3; d++) {
                         if (fxp[0].mask[d] < 0.01) continue;
                         fxp[d].GenFrequency(p, i);
                         del[d] = fxp[d].GetMove(i, time, info.time_pass);

@@ -1,13 +1,12 @@
 module;
-#include "SpecTexs.hpp"
-#include "Core/ArrayHelper.hpp"
-#include "Core/MapSet.hpp"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <ctime>
 
 module wescene.shader_value_updater;
+import wescene.spec_texs;
+import wescene.core;
 import cppstd;
 import wescene.utils;
 import wescene.scene;
@@ -74,7 +73,7 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp&
     info.has_SCREEN           = existsOp(G_SCREEN);
     info.has_LP               = existsOp(G_LP);
 
-    std::accumulate(begin(info.texs), end(info.texs), 0, [&existsOp](uint index, auto& value) {
+    std::accumulate(begin(info.texs), end(info.texs), 0, [&existsOp](unsigned index, auto& value) {
         value.has_resolution = existsOp(WE_GLTEX_RESOLUTION_NAMES[index]);
         value.has_mipmap     = existsOp(WE_GLTEX_MIPMAPINFO_NAMES[index]);
         return index + 1;
@@ -223,7 +222,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     if (info.has_LP) {
         std::array<float, 16> lights { 0 };
         std::array<float, 12> lights_color { 0 };
-        uint                  i = 0;
+        unsigned                  i = 0;
         for (auto& l : m_scene->lights) {
             if (i == 4) break;
             assert(l->node() != nullptr);

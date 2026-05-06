@@ -1,15 +1,17 @@
 #pragma once
-#include "Core/NoCopyMove.hpp"
 
 namespace wallpaper
 {
 namespace rg
 {
 
-class Pass : NoCopy {
+class Pass {
 public:
     Pass()          = default;
     virtual ~Pass() = default;
+
+    Pass(const Pass&)            = delete;
+    Pass& operator=(const Pass&) = delete;
 };
 
 class VirtualPass : public Pass {

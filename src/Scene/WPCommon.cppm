@@ -2,9 +2,9 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cstdio>
-#include "Core/StringHelper.hpp"
 
 export module wescene.common;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;

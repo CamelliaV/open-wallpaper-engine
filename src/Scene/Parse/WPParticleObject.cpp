@@ -4,9 +4,9 @@ module;
 #include "WPJson.hpp"
 
 #include <nlohmann/json.hpp>
-#include "Core/StringHelper.hpp"
 
 module wescene.parse;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;

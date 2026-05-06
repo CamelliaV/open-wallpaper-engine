@@ -30,6 +30,7 @@ set(warn_opts
 include(FetchContent)
 FetchContent_GetProperties(dxc SOURCE_DIR _dxc_source_dir)
 
+add_subdirectory(Core)
 add_subdirectory(Vulkan)
 add_subdirectory(Scene)
 

@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Core/Literals.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -9,15 +8,12 @@ module;
 
 #include "Utils/String.h"
 #include "Utils/Sha.hpp"
-#include "Core/Visitors.hpp"
-#include "Core/StringHelper.hpp"
-#include "Core/ArrayHelper.hpp"
-#include "Core/MapSet.hpp"
-#include "SpecTexs.hpp"
 #include <cmath>
 #include <Eigen/Dense>
 
 module wescene.parse;
+import wescene.spec_texs;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
@@ -442,7 +438,7 @@ const auto& f1     = texh.spriteAnim.GetCurFrame();
 
     material.blenmode = ParseBlendMode(wpmat.blending);
 
-    for (uint i = 0; i < material.textures.size(); i++) {
+    for (unsigned i = 0; i < material.textures.size(); i++) {
         if (! exists(sd_units[1].preprocess_info.active_tex_slots, i)) material.textures[i].clear();
     }
 

@@ -1,10 +1,9 @@
 module;
 
-#include "Core/Literals.hpp"
-#include "Core/Random.hpp"
 #include <cassert>
 
 module wescene.scene;
+import wescene.core;
 import cppstd;
 
 using namespace wallpaper;

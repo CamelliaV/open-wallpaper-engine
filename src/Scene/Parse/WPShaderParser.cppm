@@ -1,8 +1,7 @@
 module;
 
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
 export module wescene.parse:wp_shader_parser;
+import wescene.core;
 import wescene.types;
 import cppstd;
 import wescene.shader_compile;
@@ -38,7 +37,7 @@ struct WPPreprocessorInfo {
     // and FS-only uniforms read as zero.
     Map<std::string, std::string> uniforms; // name -> "TYPE"
 
-    Set<uint> active_tex_slots;
+    Set<unsigned> active_tex_slots;
 };
 
 struct WPShaderTexInfo {

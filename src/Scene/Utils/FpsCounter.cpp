@@ -1,8 +1,8 @@
 module;
 
-#include "Core/Literals.hpp"
 
 module wescene.utils;
+import wescene.core;
 import cppstd;
 
 using namespace wallpaper;

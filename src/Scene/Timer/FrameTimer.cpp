@@ -1,7 +1,7 @@
 module;
 
-#include "Core/Literals.hpp"
 module wescene.timer;
+import wescene.core;
 import cppstd;
 
 using namespace wallpaper;

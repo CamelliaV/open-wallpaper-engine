@@ -3,10 +3,9 @@ module;
 #include <cstdint>
 #include <cstddef>
 
-#include "Core/Literals.hpp"
-#include "Core/NoCopyMove.hpp"
 
 export module wescene.types;
+import wescene.core;
 import cppstd;
 
 export namespace wallpaper

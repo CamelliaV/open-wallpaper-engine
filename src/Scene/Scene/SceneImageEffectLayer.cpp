@@ -1,10 +1,10 @@
 module;
 
 #include <cassert>
-#include "SpecTexs.hpp"
-#include "Core/StringHelper.hpp"
 
 module wescene.scene;
+import wescene.spec_texs;
+import wescene.core;
 import wescene.types;
 import cppstd;
 

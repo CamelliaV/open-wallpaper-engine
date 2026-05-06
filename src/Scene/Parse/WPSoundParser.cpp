@@ -1,8 +1,8 @@
 module;
 
 #include <sys/types.h>
-#include "Core/Literals.hpp"
 module wescene.parse;
+import wescene.core;
 import cppstd;
 
 using namespace wallpaper;
@@ -73,7 +73,7 @@ public:
         {
             float*     pData_float = static_cast<float*>(pData);
             const auto num         = frameReads * m_desc.channels;
-            for (uint i = 0; i < num; i++, pData_float++) {
+            for (unsigned i = 0; i < num; i++, pData_float++) {
                 (*pData_float) *= m_config.volume;
             }
         }

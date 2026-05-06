@@ -1,12 +1,11 @@
 module;
 
 #include <cassert>
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;

@@ -1,8 +1,8 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Core/NoCopyMove.hpp"
 export module wescene.message_loop;
+import wescene.core;
 import cppstd;
 import rstd.log;
 import rstd.cppstd;

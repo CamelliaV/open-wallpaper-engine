@@ -2,9 +2,6 @@ module;
 #include <rstd/macro.hpp>
 #include "Swapchain/ExSwapchain.hpp"
 
-#include "Core/ArrayHelper.hpp"
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
 #include "vvk/macros.hpp"
 
 #include <cassert>
@@ -17,6 +14,7 @@ module;
 #endif
 
 module wescene.vulkan_render;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
@@ -630,7 +628,7 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
         } else if (rt.has_mipmap) {
             rt.mipmap_level =
                 std::max(3u,
-                         static_cast<uint>(std::floor(std::log2(std::min(rt.width, rt.height))))) -
+                         static_cast<unsigned>(std::floor(std::log2(std::min(rt.width, rt.height))))) -
                 2u;
         }
     }

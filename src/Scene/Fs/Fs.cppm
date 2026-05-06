@@ -4,9 +4,8 @@ module;
 #include <cstdio>
 #include <cassert>
 
-#include "Core/Literals.hpp"
-#include "Core/NoCopyMove.hpp"
 export module wescene.fs;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;

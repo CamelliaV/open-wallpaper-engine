@@ -3,10 +3,10 @@ module;
 #include <cassert>
 #include <cstring>
 
-#include "Core/Literals.hpp"
-#include "SpecTexs.hpp"
 
 module wescene.parse;
+import wescene.spec_texs;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
@@ -68,7 +68,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     bool alt_mdl_format = false;
     uint32_t curr = f.ReadUint32();
 
-    // if the uint at the normal vertex size position is 0, then this file
+    // if the unsigned at the normal vertex size position is 0, then this file
     // uses the alternative MDL format, therefore the actual vertex size is
     // located after the herald value, and we'll need to account for other differences later on.
     if(curr == 0){
@@ -126,7 +126,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     auto& anims = mdl.puppet->anims;
 
     bones.resize(bones_num);
-    for (uint i = 0; i < bones_num; i++) {
+    for (unsigned i = 0; i < bones_num; i++) {
         auto&       bone = bones[i];
         std::string name = f.ReadStr();
         f.ReadInt32(); // unk
@@ -162,26 +162,26 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 
         uint8_t has_trans = f.ReadUint8();
         if (has_trans) {
-            for (uint i = 0; i < bones_num; i++)
-                for (uint j = 0; j < 16; j++) f.ReadFloat(); // mat
+            for (unsigned i = 0; i < bones_num; i++)
+                for (unsigned j = 0; j < 16; j++) f.ReadFloat(); // mat
         }
         uint32_t size_unk = f.ReadUint32();
-        for (uint i = 0; i < size_unk; i++)
+        for (unsigned i = 0; i < size_unk; i++)
             for (int j = 0; j < 3; j++) f.ReadUint32();
 
         f.ReadUint32(); // unk
 
         uint8_t has_offset_trans = f.ReadUint8();
         if (has_offset_trans) {
-            for (uint i = 0; i < bones_num; i++) {
-                for (uint j = 0; j < 3; j++) f.ReadFloat();  // like pos
-                for (uint j = 0; j < 16; j++) f.ReadFloat(); // mat
+            for (unsigned i = 0; i < bones_num; i++) {
+                for (unsigned j = 0; j < 3; j++) f.ReadFloat();  // like pos
+                for (unsigned j = 0; j < 16; j++) f.ReadFloat(); // mat
             }
         }
 
         uint8_t has_index = f.ReadUint8();
         if (has_index) {
-            for (uint i = 0; i < bones_num; i++) {
+            for (unsigned i = 0; i < bones_num; i++) {
                 f.ReadUint32();
             }
         }
@@ -222,10 +222,10 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     if(mdType == "MDLA" && mdVersion.length() > 0){
         mdl.mdla = std::stoi(mdVersion);
         if (mdl.mdla != 0) {
-            uint end_size = f.ReadUint32();
+            unsigned end_size = f.ReadUint32();
             (void)end_size;
 
-            uint anim_num = f.ReadUint32();
+            unsigned anim_num = f.ReadUint32();
             anims.resize(anim_num);
             for (auto& anim : anims) {
                 // there can be a variable number of 32-bit 0s between animations
@@ -282,7 +282,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                 }
                 else{
                     uint32_t unk_extra_uint = f.ReadUint32();
-                    for (uint i = 0; i < unk_extra_uint; i++) {
+                    for (unsigned i = 0; i < unk_extra_uint; i++) {
                         f.ReadFloat();
                         // data is like: {"$$hashKey":"object:2110","frame":1,"name":"random_anim"}
                         std::string unk_extra = f.ReadStr();
@@ -315,13 +315,13 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl) {
 
     std::array<float, 16> one_vert;
     auto                  to_one = [](const WPMdl::Vertex& in, decltype(one_vert)& out) {
-        uint offset = 0;
+        unsigned offset = 0;
         memcpy(out.data() + 4 * (offset++), in.position.data(), sizeof(in.position));
         memcpy(out.data() + 4 * (offset++), in.blend_indices.data(), sizeof(in.blend_indices));
         memcpy(out.data() + 4 * (offset++), in.weight.data(), sizeof(in.weight));
         memcpy(out.data() + 4 * (offset++), in.texcoord.data(), sizeof(in.texcoord));
     };
-    for (uint i = 0; i < mdl.vertexs.size(); i++) {
+    for (unsigned i = 0; i < mdl.vertexs.size(); i++) {
         auto& v = mdl.vertexs[i];
         to_one(v, one_vert);
         vertex.SetVertexs(i, one_vert);

@@ -1,10 +1,10 @@
 module;
 
-#include "Core/Literals.hpp"
 
 #include <Eigen/Dense>
 
 export module wescene.parse:wp_mdl_parser;
+import wescene.core;
 import cppstd;
 import wescene.fs;
 import wescene.scene;

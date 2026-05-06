@@ -8,15 +8,13 @@ module;
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
-#include "Core/Literals.hpp"
-#include "Core/NoCopyMove.hpp"
-#include "Core/StringHelper.hpp"
 
 // Sha.hpp stays classic — utils::genSha1 is consumed by impl units that
 // need to spill blobs to /tmp for post-mortem inspection (Vulkan/Shader.cpp).
 #include "Utils/Sha.hpp"
 
 export module wescene.utils;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;

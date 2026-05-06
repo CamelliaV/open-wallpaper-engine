@@ -2,10 +2,10 @@ module;
 
 #include <cassert>
 
-#include "Core/MapSet.hpp"
 #include "RenderGraph/Pass.hpp"
 
 module wescene.rgraph;
+import wescene.core;
 import cppstd;
 
 using namespace wallpaper::rg;

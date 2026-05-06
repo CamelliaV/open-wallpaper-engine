@@ -1,10 +1,10 @@
 module;
 
-#include "Core/NoCopyMove.hpp"
 
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:resource;
+import wescene.core;
 import cppstd;
 import wescene.vulkan;
 

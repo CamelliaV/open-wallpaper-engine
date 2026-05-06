@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Core/Literals.hpp"
 #include <lz4.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -9,6 +8,7 @@ module;
 #include <cstring>
 
 module wescene.parse;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;

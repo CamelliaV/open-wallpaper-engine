@@ -2,9 +2,9 @@ module;
 
 #include <Eigen/Geometry>
 
-#include "Core/Literals.hpp"
 
 export module wescene.puppet;
+import wescene.core;
 import cppstd;
 
 export namespace wallpaper

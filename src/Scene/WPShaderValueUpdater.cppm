@@ -2,9 +2,8 @@ module;
 
 #include <Eigen/Dense>
 
-#include "Core/Core.hpp"
-#include "Core/MapSet.hpp"
 export module wescene.shader_value_updater;
+import wescene.core;
 import cppstd;
 import wescene.scene;
 
@@ -80,7 +79,7 @@ private:
     std::array<float, 2> m_mousePos { 0.5f, 0.5f };
     std::array<float, 2> m_mousePosInput { 0.5f, 0.5f };
     double               m_mouseDelayedTime { 0.0f };
-    uint                 m_mouseInputCount { 0 };
+    unsigned                 m_mouseInputCount { 0 };
 
     std::chrono::time_point<std::chrono::steady_clock> m_last_mouse_input_time;
 

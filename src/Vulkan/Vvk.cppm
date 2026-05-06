@@ -6,13 +6,11 @@ module;
 #include <rstd/macro.hpp>
 
 #include "vk_mem_alloc.h"
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
-#include "Core/NoCopyMove.hpp"
 
 #include "vvk/macros.hpp"
 
 export module wescene.vulkan:vvk;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import vulkan;

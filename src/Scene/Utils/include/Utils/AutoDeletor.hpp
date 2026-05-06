@@ -1,5 +1,5 @@
 #pragma once
-
+#include <utility>
 
 #define AUTO_DELETER(name, del_func) wallpaper::AutoDeleter del_##name(del_func);
 

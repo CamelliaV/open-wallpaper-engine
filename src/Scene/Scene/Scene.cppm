@@ -3,11 +3,8 @@ module;
 #include <climits>
 
 #include <Eigen/Dense>
-#include "Core/Literals.hpp"
-#include "Core/NoCopyMove.hpp"
-#include "Core/MapSet.hpp"
-#include "Core/ArrayHelper.hpp"
 export module wescene.scene;
+import wescene.core;
 import cppstd;
 import wescene.types;
 
@@ -115,7 +112,7 @@ struct SceneRenderTarget {
     bool          allowReuse { false };
     bool          withDepth { false };
     bool          has_mipmap { false };
-    uint          mipmap_level { 1 };
+    unsigned          mipmap_level { 1 };
     TextureSample sample { TextureWrap::CLAMP_TO_EDGE,
                            TextureWrap::CLAMP_TO_EDGE,
                            TextureFilter::LINEAR,

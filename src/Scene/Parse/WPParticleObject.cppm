@@ -2,9 +2,9 @@ module;
 
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
-#include "Core/Literals.hpp"
 
 export module wescene.parse:wp_particle_object;
+import wescene.core;
 import cppstd;
 import wescene.utils;
 import wescene.fs;

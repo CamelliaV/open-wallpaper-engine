@@ -1,9 +1,9 @@
 module;
 
-#include "Core/MapSet.hpp"
 #include "RenderGraph/Pass.hpp"
 
 export module wescene.rgraph:render_graph;
+import wescene.core;
 import cppstd;
 
 import :dependency_graph;

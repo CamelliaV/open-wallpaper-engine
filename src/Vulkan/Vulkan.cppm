@@ -8,9 +8,6 @@ module;
 // below). vk_mem_alloc.h still needs the raw vulkan.h declarations, so we
 // let it pull them in transitively.
 #include "vk_mem_alloc.h"
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
-#include "Core/NoCopyMove.hpp"
 // ExSwapchain / TripleSwapchain are classic public headers (consumed by
 // SceneWallpaperSurface.hpp). LocalExSwapchain inherits from ExSwapchain;
 // the base class stays global-attached, the derived is module-attached.
@@ -21,6 +18,7 @@ module;
 #include "vvk/macros.hpp"
 
 export module wescene.vulkan;
+import wescene.core;
 export import :vvk;
 import rstd.log;
 import rstd.cppstd;
@@ -138,7 +136,7 @@ struct VmaImageParameters : NoCopy {
     vvk::ImageView view;
     vvk::Sampler   sampler;
     VkExtent3D     extent;
-    uint           mipmap_level { 1 };
+    unsigned           mipmap_level { 1 };
 
     VmaImageParameters();
     ~VmaImageParameters();
@@ -154,7 +152,7 @@ struct ExImageParameters : NoCopy {
     vvk::ImageView view;
     vvk::Sampler   sampler;
     VkExtent3D     extent;
-    uint           mipmap_level { 1 };
+    unsigned           mipmap_level { 1 };
     int            fd { 0 };
 
     uint32_t drm_fourcc { 0 };
@@ -254,7 +252,7 @@ struct TextureKey {
     TexUsage      usage;
     TextureFormat format;
     TextureSample sample;
-    uint          mipmap_level { 1 };
+    unsigned          mipmap_level { 1 };
 
     static TexHash HashValue(const TextureKey&);
 };

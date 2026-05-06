@@ -1,15 +1,19 @@
 #pragma once
 #include <array>
 #include <atomic>
-#include "Core/NoCopyMove.hpp"
 
 namespace wallpaper
 {
 
 template<typename T>
-class TripleSwapchain : NoCopy, NoMove {
+class TripleSwapchain {
 public:
     virtual ~TripleSwapchain() = default;
+
+    TripleSwapchain(const TripleSwapchain&)            = delete;
+    TripleSwapchain& operator=(const TripleSwapchain&) = delete;
+    TripleSwapchain(TripleSwapchain&&)                 = delete;
+    TripleSwapchain& operator=(TripleSwapchain&&)      = delete;
 
     T* eatFrame() {
         if (! dirty().exchange(false)) return nullptr;
@@ -33,8 +37,8 @@ public:
         return { presented().load(), ready().load(), inprogress().load() };
     }
 
-    virtual uint width() const  = 0;
-    virtual uint height() const = 0;
+    virtual unsigned width() const  = 0;
+    virtual unsigned height() const = 0;
 
 protected:
     TripleSwapchain() = default;

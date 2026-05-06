@@ -1,11 +1,10 @@
 module;
-#include "Core/Random.hpp"
-#include "Core/Literals.hpp"
 
 #include <Eigen/Dense>
 #include <cmath>
 
 module wescene.scene;
+import wescene.core;
 import cppstd;
 import wescene.utils;
 

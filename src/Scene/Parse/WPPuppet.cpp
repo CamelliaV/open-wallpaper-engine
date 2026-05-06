@@ -3,8 +3,8 @@ module;
 #include <cmath>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-#include "Core/Literals.hpp"
 module wescene.puppet;
+import wescene.core;
 import cppstd;
 
 using namespace wallpaper;
@@ -18,7 +18,7 @@ static Quaterniond ToQuaternion(Vector3f euler) {
 
 void WPPuppet::prepared() {
     std::vector<Affine3f> combined_tran(bones.size());
-    for (uint i = 0; i < bones.size(); i++) {
+    for (unsigned i = 0; i < bones.size(); i++) {
         auto& b = bones[i];
         combined_tran[i] =
             (b.noParent() ? Affine3f::Identity() : combined_tran[b.parent]) * b.transform;
@@ -52,7 +52,7 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
 
     puppet_layer.updateInterpolation(time);
 
-    for (uint i = 0; i < m_final_affines.size(); i++) {
+    for (unsigned i = 0; i < m_final_affines.size(); i++) {
         const auto& bone   = bones[i];
         auto&       affine = m_final_affines[i];
 
@@ -110,7 +110,7 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         affine = parent * affine;
     }
 
-    for (uint i = 0; i < m_final_affines.size(); i++) {
+    for (unsigned i = 0; i < m_final_affines.size(); i++) {
         m_final_affines[i] *= bones[i].offset_trans.matrix();
     }
     return m_final_affines;
@@ -122,7 +122,7 @@ static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInf
     cur          = std::fmod(cur, max_time);
     double _rate = cur / frame_time;
 
-    info.frame_a = ((uint)_rate) % length;
+    info.frame_a = ((unsigned)_rate) % length;
     info.frame_b = (info.frame_a + 1) % length;
     info.t       = _rate - (double)info.frame_a;
 }

@@ -2,8 +2,8 @@ module;
 
 #include <cassert>
 
-#include "Core/Literals.hpp"
 module wescene.rgraph;
+import wescene.core;
 import cppstd;
 
 using namespace wallpaper::rg;

@@ -3,9 +3,8 @@ module;
 #include <cassert>
 #include <cstring>
 
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
 module wescene.scene;
+import wescene.core;
 import wescene.types;
 import cppstd;
 

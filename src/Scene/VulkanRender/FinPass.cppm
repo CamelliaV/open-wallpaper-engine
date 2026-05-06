@@ -1,9 +1,9 @@
 module;
-#include "SpecTexs.hpp"
 
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:fin_pass;
+import wescene.spec_texs;
 import cppstd;
 import wescene.vulkan;
 import wescene.scene;

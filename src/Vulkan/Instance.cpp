@@ -2,10 +2,10 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cstdio>
-#include "Core/MapSet.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;

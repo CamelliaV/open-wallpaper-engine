@@ -3,10 +3,10 @@ module;
 #include <rstd/macro.hpp>
 #include "vk_mem_alloc.h"
 
-#include "Core/MapSet.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
@@ -31,7 +31,7 @@ bool Device::CheckGPU(vvk::PhysicalDevice gpu, std::span<const Extension> exts,
 
     bool has_graphics_queue { false };
     bool has_present_queue { false };
-    uint index { 0 };
+    unsigned index { 0 };
     for (auto& prop : props) {
         if (prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) has_graphics_queue = true;
         if (surface) {

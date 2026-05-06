@@ -2,13 +2,13 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cassert>
-#include "Core/Literals.hpp"
-#include "SpecTexs.hpp"
 #include "Swapchain/ExSwapchain.hpp"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan_render;
+import wescene.spec_texs;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;

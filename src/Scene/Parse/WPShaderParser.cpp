@@ -1,8 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
 
 #include <nlohmann/json.hpp>
 #include "WPJson.hpp"
@@ -12,6 +10,7 @@ module;
 #include <cassert>
 
 module wescene.parse;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
@@ -449,7 +448,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
          it++) {
         std::smatch mc  = *it;
         auto        str = mc[1].str();
-        uint        slot;
+        unsigned        slot;
         auto [ptr, ec] { std::from_chars(str.c_str(), str.c_str() + str.size(), slot) };
         if (ec != std::errc()) continue;
         process_info.active_tex_slots.insert(slot);

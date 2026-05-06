@@ -1,5 +1,4 @@
 #pragma once
-#include "Core/NoCopyMove.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -83,9 +82,14 @@ private:
 //     and emits bind_buffers / frame_ready itself when the host calls
 //     `submitRendered`. `eatFrame()` / `snapshot_all_slots()` return null
 //     in this mode.
-class ExSwapchain : NoCopy, NoMove {
+class ExSwapchain {
 public:
     virtual ~ExSwapchain() = default;
+
+    ExSwapchain(const ExSwapchain&)            = delete;
+    ExSwapchain& operator=(const ExSwapchain&) = delete;
+    ExSwapchain(ExSwapchain&&)                 = delete;
+    ExSwapchain& operator=(ExSwapchain&&)      = delete;
 
     // Render-thread-only. Apply any pending IPC state (e.g. bridge
     // negotiate directives) so `format()` / `ready()` reflect the latest

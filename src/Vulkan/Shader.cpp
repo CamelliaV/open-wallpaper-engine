@@ -11,11 +11,9 @@ module;
 #include <dxc/dxcapi.h>
 #include <spirv_reflect.h>
 
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
-#include "Core/StringHelper.hpp"
 #include "Utils/Sha.hpp"
 module wescene.shader_compile;
+import wescene.core;
 import wescene.types;
 import cppstd;
 import rstd.log;
@@ -81,7 +79,7 @@ inline wallpaper::ShaderType FromSpvStage(SpvReflectShaderStageFlagBits s) {
 
 template<typename VEC, typename FUNC>
 bool EnumAllRef(VEC& vec, FUNC&& func) {
-    uint count { 0 };
+    unsigned count { 0 };
     auto result = func(&count, nullptr);
     assert(result == SPV_REFLECT_RESULT_SUCCESS);
     vec.resize(count);
@@ -186,7 +184,7 @@ inline DxcCtx GetDxcCtx() {
 
 } // namespace
 
-bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
+bool wallpaper::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                                    std::vector<Uni_ShaderSpv>& spvs, ShaderReflected& ref) {
     spvs.clear();
     for (const auto& code : codes) {

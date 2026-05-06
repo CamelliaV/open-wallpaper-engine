@@ -1,11 +1,11 @@
 module;
 
-#include "Core/Literals.hpp"
 
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_image_object;
+import wescene.core;
 import cppstd;
 import wescene.fs;
 

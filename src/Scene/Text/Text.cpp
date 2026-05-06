@@ -9,8 +9,9 @@ module;
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
-#include "SpecTexs.hpp"
 module wescene.text;
+import wescene.spec_texs;
+import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;

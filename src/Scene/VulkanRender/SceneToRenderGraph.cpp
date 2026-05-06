@@ -1,12 +1,11 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Core/Literals.hpp"
-#include "SpecTexs.hpp"
-#include "Core/MapSet.hpp"
 #include "RenderGraph/Pass.hpp"
 
 module wescene.vulkan_render;
+import wescene.spec_texs;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;

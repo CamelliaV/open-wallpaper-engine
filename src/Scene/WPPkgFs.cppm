@@ -1,8 +1,8 @@
 module;
 
-#include "Core/Literals.hpp"
 
 export module wescene.pkg_fs;
+import wescene.core;
 import cppstd;
 
 export import wescene.fs;

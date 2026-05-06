@@ -3,8 +3,8 @@ module;
 #include <rstd/macro.hpp>
 #include <cassert>
 
-#include "Core/Literals.hpp"
 module wescene.pkg_fs;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;

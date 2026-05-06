@@ -2,14 +2,12 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cassert>
-#include "Core/Literals.hpp"
-#include "Core/ArrayHelper.hpp"
-#include "Core/MapSet.hpp"
-#include "SpecTexs.hpp"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan_render;
+import wescene.spec_texs;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;
@@ -185,7 +183,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         m_desc.dyn_vertex = mesh.Dynamic();
         m_desc.vertex_bufs.resize(mesh.VertexCount());
 
-        for (uint i = 0; i < mesh.VertexCount(); i++) {
+        for (unsigned i = 0; i < mesh.VertexCount(); i++) {
             const auto& vertex    = mesh.GetVertexArray(i);
             auto        attrs_map = vertex.GetAttrOffsetMap();
 

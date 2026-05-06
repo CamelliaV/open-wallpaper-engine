@@ -8,7 +8,7 @@ target_sources(owe-types
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES types/types.cppm)
 target_sources(owe-types PRIVATE types/types.cpp)
 target_link_libraries(owe-types
-  PUBLIC rstd::rstd rstd.cppstd)
+  PUBLIC rstd::rstd rstd.cppstd owe-core)
 target_include_directories(owe-types PUBLIC ..)
 target_compile_features(owe-types PUBLIC cxx_std_20)
 target_compile_options(owe-types PRIVATE -Wno-missing-field-initializers)
@@ -40,6 +40,7 @@ add_library(owe-base STATIC
   Particle/WPParticleRawGener.cpp)
 target_sources(owe-base
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+         SpecTexs.cppm
          WPCommon.cppm
          WPJson.cppm
          WPPkgFs.cppm

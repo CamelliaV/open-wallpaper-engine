@@ -4,9 +4,9 @@ module;
 #include <cstddef>
 
 #include <nlohmann/json.hpp>
-#include "Core/NoCopyMove.hpp"
 
 export module wescene.script;
+import wescene.core;
 import cppstd;
 import wescene.scene;
 

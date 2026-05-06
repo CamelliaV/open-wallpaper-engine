@@ -6,14 +6,12 @@ module;
 #include <cstring>
 #include "vk_mem_alloc.h"
 
-#include "Core/ArrayHelper.hpp"
-#include "Core/Literals.hpp"
-#include "Core/MapSet.hpp"
 #include "Swapchain/ExSwapchain.hpp"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
+import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import cppstd;
@@ -671,7 +669,7 @@ void TextureCache::RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParame
     i32 mipWidth  = (i32)image.extent.width;
     i32 mipHeight = (i32)image.extent.height;
 
-    for (uint i = 1; i < image.mipmap_level; i++) {
+    for (unsigned i = 1; i < image.mipmap_level; i++) {
         barrier.subresourceRange.baseMipLevel = i - 1;
         barrier.oldLayout                     = i == 1 ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                                                        : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;

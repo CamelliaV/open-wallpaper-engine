@@ -1,9 +1,8 @@
 module;
 
-#include "Core/Literals.hpp"
-#include "Core/NoCopyMove.hpp"
 
 export module wescene.timer:frame_timer;
+import wescene.core;
 import cppstd;
 
 import :thread_timer;
