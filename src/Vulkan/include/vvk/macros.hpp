@@ -8,7 +8,6 @@
 // AND `import rstd;` + `import wescene.vulkan;` so rstd::log::* and
 // vvk::ToString resolve at the call site.
 
-#include <cassert>
 #include <rstd/macro.hpp>
 
 #define VVK_CHECK(f)         VVK_CHECK_ACT(, f)
@@ -20,7 +19,7 @@
         VkResult _res = (f);                                       \
         if (_res != VK_SUCCESS && _res != VK_SUBOPTIMAL_KHR) {     \
             rstd_error("VkResult is \"{}\"", vvk::ToString(_res)); \
-            assert(_res == VK_SUCCESS);                            \
+            rstd_assert(_res == VK_SUCCESS);                            \
             { act; };                                              \
         }                                                          \
     }
