@@ -35,7 +35,7 @@ target_include_directories(waywallen-wescene-renderer
 
 target_link_libraries(waywallen-wescene-renderer
     PRIVATE
-        wescene-renderer
+        owe-renderer
         waywallen::bridge
         waywallen-bridge-producer
         argparse::argparse
@@ -93,7 +93,7 @@ if(BUILD_WEWEB)
     # required.
     target_link_libraries(waywallen-weweb-renderer
         PRIVATE
-            weweb-host
+            owe-web-host
             waywallen::bridge
             waywallen-bridge-producer
             waywallen-web-producer-device

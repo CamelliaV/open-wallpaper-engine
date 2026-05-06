@@ -15,7 +15,7 @@ if(BUILD_WESCENE AND BUILD_VIEWER)
         PRIVATE
             viewer-common
             PkgConfig::GLFW
-            wescene-renderer
+            owe-renderer
             argparse::argparse)
     set_target_properties(SceneViewer PROPERTIES CXX_SCAN_FOR_MODULES ON)
 endif()
@@ -28,7 +28,7 @@ if(BUILD_WEWEB)
         VulkanBlitter.cpp)
     target_link_libraries(WebViewer PRIVATE
         viewer-common
-        weweb-host
+        owe-web-host
         PkgConfig::GLFW
         Vulkan::Vulkan
         argparse::argparse

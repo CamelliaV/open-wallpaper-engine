@@ -37,9 +37,9 @@ add_library(wpdump_lib STATIC
 target_link_libraries(
     wpdump_lib
     PUBLIC
-        wescene-parse
-        wescene-shader-compile
-        wescene-base
+        owe-parse
+        owe-shader-compile
+        owe-base
         nlohmann_json::nlohmann_json
 )
 target_include_directories(wpdump_lib PUBLIC .)
@@ -76,7 +76,7 @@ set_target_properties(wpscriptdump PROPERTIES CXX_SCAN_FOR_MODULES ON)
 # asserts the runtime can compile + tick every observed userscript without
 # tripping a JS exception. Cluster pass-rates also reported per field name.
 add_executable(wpscriptrun wpscriptrun_main.cpp)
-target_link_libraries(wpscriptrun PRIVATE wpdump_lib wescene-script)
+target_link_libraries(wpscriptrun PRIVATE wpdump_lib owe-script)
 set_target_properties(wpscriptrun PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Host-only shader replay: reads a JSONL manifest produced by viewer
