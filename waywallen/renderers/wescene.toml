@@ -5,8 +5,9 @@ name = "wescene-renderer"
 bin  = "../../../bin/waywallen-wescene-renderer"
 types = ["scene"]
 priority = 100
-spawn_version = 3
+spawn_version = 4
 extras = ["assets", "workshop_id"]
+events = ["pointer"]
 
 [renderer.settings]
 volume = { type = "f32", default = 1.0, identity = false, label_key = "settings.wescene.volume", group = "audio", order = 10 }

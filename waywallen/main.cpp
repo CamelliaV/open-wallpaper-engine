@@ -214,7 +214,7 @@ void signal_shutdown(HostState& s) {
     s.shutdown.store(true, std::memory_order_release);
 }
 
-// Apply a single fps change through the same path WW_REQ_SET_FPS would
+// Apply a single fps change through the same path WW_EVT_IN_SET_FPS would
 // have used. Centralised so ApplySettings can route through it.
 void set_fps(HostState& s, uint32_t fps) {
     if (!s.wp || fps == 0) return;
@@ -224,19 +224,19 @@ void set_fps(HostState& s, uint32_t fps) {
 
 void apply_control(HostState& s, ww_bridge_control_t& msg) {
     switch (msg.op) {
-    case WW_REQ_INIT:
+    case WW_EVT_IN_INIT:
         // Init is consumed at the top of main before the reader thread
         // starts. A late Init is either a buggy daemon resending or a
         // protocol violation; log and ignore.
         std::fprintf(stderr,
                      "waywallen-wescene-renderer: unexpected late Init; ignoring\n");
         break;
-    case WW_REQ_APPLY_SETTINGS: {
+    case WW_EVT_IN_SETTING_CHANGED: {
         // v5 hot-reload. Peel the typed view, dispatch known keys
         // (volume) through the SceneWallpaper looper; route fps through
-        // the same path WW_REQ_SET_FPS used to. Unknown keys warn.
-        ww_bridge_apply_settings_t as {};
-        if (ww_bridge_apply_settings_from_control(&msg, &as) != 0) break;
+        // the same path WW_EVT_IN_SET_FPS used to. Unknown keys warn.
+        ww_bridge_setting_changed_t as {};
+        if (ww_bridge_setting_changed_from_control(&msg, &as) != 0) break;
         for (uint32_t i = 0; i < as.settings.count; ++i) {
             const char* key = as.settings.data[i].key;
             const char* val = as.settings.data[i].value;
@@ -261,22 +261,55 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                              key);
             }
         }
-        ww_bridge_apply_settings_free(&as);
+        ww_bridge_setting_changed_free(&as);
         break;
     }
-    case WW_REQ_PLAY:
-    case WW_REQ_PAUSE:
-    case WW_REQ_MOUSE:
+    case WW_EVT_IN_PLAY:
+    case WW_EVT_IN_PAUSE:
         // Iter 1: routed through the daemon's higher-level control API
         // (DBus/WebSocket) rather than through this subprocess.
         break;
-    case WW_REQ_SET_FPS:
+    case WW_EVT_IN_POINTER_MOTION: {
+        ww_bridge_pointer_motion_t pm {};
+        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0) {
+            // Forward to the engine's mouse-input hook. v1 just logs;
+            // hooking into wpscene's interactive surface comes later.
+            std::fprintf(stderr,
+                         "waywallen-wescene-renderer: pointer_motion "
+                         "x=%.2f y=%.2f ts=%llu mods=0x%x\n",
+                         pm.x, pm.y,
+                         static_cast<unsigned long long>(pm.timestamp_us),
+                         pm.modifiers);
+        }
+        break;
+    }
+    case WW_EVT_IN_POINTER_BUTTON: {
+        ww_bridge_pointer_button_t pb {};
+        if (ww_bridge_pointer_button_from_control(&msg, &pb) == 0) {
+            std::fprintf(stderr,
+                         "waywallen-wescene-renderer: pointer_button "
+                         "x=%.2f y=%.2f button=%u state=%u mods=0x%x\n",
+                         pb.x, pb.y, pb.button, pb.state, pb.modifiers);
+        }
+        break;
+    }
+    case WW_EVT_IN_POINTER_AXIS: {
+        ww_bridge_pointer_axis_t pa {};
+        if (ww_bridge_pointer_axis_from_control(&msg, &pa) == 0) {
+            std::fprintf(stderr,
+                         "waywallen-wescene-renderer: pointer_axis "
+                         "x=%.2f y=%.2f dx=%.2f dy=%.2f source=%u\n",
+                         pa.x, pa.y, pa.delta_x, pa.delta_y, pa.source);
+        }
+        break;
+    }
+    case WW_EVT_IN_SET_FPS:
         set_fps(s, msg.u.set_fps.fps);
         break;
-    case WW_REQ_SHUTDOWN:
+    case WW_EVT_IN_SHUTDOWN:
         signal_shutdown(s);
         break;
-    case WW_REQ_NEGOTIATE_BUFFERS: {
+    case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         const auto& nb = msg.u.negotiate_buffers;
         ww_pool_directive_t d {};
         d.category    = nb.path;
