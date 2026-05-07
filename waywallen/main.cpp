@@ -207,6 +207,11 @@ struct HostState {
     // hot-reload (volume / fps) into the looper.
     owe::SceneWallpaper*     wp { nullptr };
 
+    // Render-target extent. Pointer events arrive in pixel coords from
+    // the consumer display; 
+    uint32_t width { 0 };
+    uint32_t height { 0 };
+
     std::atomic<bool> shutdown { false };
 };
 
@@ -266,43 +271,19 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     }
     case WW_EVT_IN_PLAY:
     case WW_EVT_IN_PAUSE:
-        // Iter 1: routed through the daemon's higher-level control API
-        // (DBus/WebSocket) rather than through this subprocess.
         break;
     case WW_EVT_IN_POINTER_MOTION: {
         ww_bridge_pointer_motion_t pm {};
-        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0) {
-            // Forward to the engine's mouse-input hook. v1 just logs;
-            // hooking into wpscene's interactive surface comes later.
-            std::fprintf(stderr,
-                         "waywallen-wescene-renderer: pointer_motion "
-                         "x=%.2f y=%.2f ts=%llu mods=0x%x\n",
-                         pm.x, pm.y,
-                         static_cast<unsigned long long>(pm.timestamp_us),
-                         pm.modifiers);
+        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.wp
+            && s.width > 0 && s.height > 0) {
+            s.wp->mouseInput(static_cast<double>(pm.x) / s.width,
+                             static_cast<double>(pm.y) / s.height);
         }
         break;
     }
-    case WW_EVT_IN_POINTER_BUTTON: {
-        ww_bridge_pointer_button_t pb {};
-        if (ww_bridge_pointer_button_from_control(&msg, &pb) == 0) {
-            std::fprintf(stderr,
-                         "waywallen-wescene-renderer: pointer_button "
-                         "x=%.2f y=%.2f button=%u state=%u mods=0x%x\n",
-                         pb.x, pb.y, pb.button, pb.state, pb.modifiers);
-        }
+    case WW_EVT_IN_POINTER_BUTTON:
+    case WW_EVT_IN_POINTER_AXIS:
         break;
-    }
-    case WW_EVT_IN_POINTER_AXIS: {
-        ww_bridge_pointer_axis_t pa {};
-        if (ww_bridge_pointer_axis_from_control(&msg, &pa) == 0) {
-            std::fprintf(stderr,
-                         "waywallen-wescene-renderer: pointer_axis "
-                         "x=%.2f y=%.2f dx=%.2f dy=%.2f source=%u\n",
-                         pa.x, pa.y, pa.delta_x, pa.delta_y, pa.source);
-        }
-        break;
-    }
     case WW_EVT_IN_SET_FPS:
         set_fps(s, msg.u.set_fps.fps);
         break;
@@ -433,6 +414,8 @@ int main(int argc, char** argv) {
     if (!wp.init()) die("SceneWallpaper::init failed");
 
     host.wp = &wp;
+    host.width  = opts.width;
+    host.height = opts.height;
 
     if (!opts.initial_assets.empty())
         wp.setPropertyString(owe::PROPERTY_ASSETS, opts.initial_assets);
