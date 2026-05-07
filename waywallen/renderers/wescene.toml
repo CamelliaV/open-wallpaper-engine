@@ -1,13 +1,4 @@
 # wescene-renderer — Wallpaper Engine scene (.pkg) renderer for waywallen.
-#
-# Installed to <prefix>/share/waywallen/renderers/wescene.toml by the
-# open-wallpaper-engine CMake install step. The waywallen daemon scans
-# that directory at startup and will spawn `waywallen-wescene-renderer`
-# for any wallpaper with wp_type = "scene". `[renderer.settings]` is
-# the typed schema the daemon validates source-plugin metadata against
-# before forking the child; the canonical resource path travels in
-# `metadata["path"]`, with `assets` and `workshop_id` riding along as
-# allow-listed extras.
 
 [renderer]
 name = "wescene-renderer"
@@ -19,7 +10,5 @@ extras = ["assets", "workshop_id"]
 
 [renderer.settings]
 volume = { type = "f32", default = 1.0, identity = false, label_key = "settings.wescene.volume", group = "audio", order = 10 }
-# Hot-reloadable: wescene routes ApplySettings.fps through
-# `wp.setPropertyInt32(PROPERTY_FPS, ...)` (see waywallen/main.cpp's
-# `set_fps`), so fps changes don't need a respawn — keep identity = false.
 fps    = { type = "u32", default = 30,  min = 1, max = 240, step = 1, identity = false, label_key = "settings.wescene.fps", group = "render", order = 20 }
+render_node = { type = "string", default = "", identity = true, label_key = "settings.wescene.render_node", group = "render", order = 30 }

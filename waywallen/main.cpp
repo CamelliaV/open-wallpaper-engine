@@ -25,10 +25,12 @@
 #include <waywallen-bridge/bridge.h>
 #include <waywallen-bridge/extent_resolve.h>
 #include <waywallen-bridge/pool.h>
+#include <waywallen-bridge/probe_vk.h>
 #include <waywallen-bridge/protocol_bits.h>
 
 #include <argparse/argparse.hpp>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -38,6 +40,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <span>
 #include <string>
 #include <sys/prctl.h>
 #include <sys/socket.h>
@@ -60,6 +63,7 @@ struct Options {
     uint32_t    initial_fps { 30 };
     bool        test_pattern { false };
     float       initial_volume { 1.0f };
+    std::string render_node;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -91,6 +95,10 @@ Options parse_args(int argc, char** argv) {
     program.add_argument("--workshop_id")
         .default_value(std::string{})
         .help("Optional Steam workshop id (informational)");
+    program.add_argument("--render-node")
+        .default_value(std::string{})
+        .help("DRM render-node path to pin Vulkan device selection to "
+              "(empty ⇒ let Vulkan pick the default)");
     program.add_argument("remaining").remaining();
 
     try {
@@ -106,6 +114,7 @@ Options parse_args(int argc, char** argv) {
     o.initial_scene  = program.get<std::string>("--path");
     o.initial_assets = program.get<std::string>("--assets");
     o.workshop_id    = program.get<std::string>("--workshop_id");
+    o.render_node    = program.get<std::string>("--render-node");
     return o;
 }
 
@@ -128,6 +137,59 @@ float parse_f32(const char* s, float def) {
     float v = std::strtof(s, &end);
     if (errno != 0 || end == s) return def;
     return v;
+}
+
+// Spin up a throwaway VkInstance, hand it to bridge's
+// ww_bridge_vk_resolve_render_node, and copy out the matching device's
+// 16-byte deviceUUID. SceneWallpaper's ChoosePhysicalDevice only filters
+// by UUID, so this is the bridge between a user-provided render-node
+// path and RenderInitInfo.uuid.
+bool resolve_render_node_to_uuid(const std::string& path,
+                                 std::array<uint8_t, VK_UUID_SIZE>& out_uuid,
+                                 std::string& err_msg) {
+    static const char* k_inst_exts[] = {
+        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+    };
+    VkApplicationInfo app {};
+    app.sType            = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app.pApplicationName = "wescene-render-node-probe";
+    app.apiVersion       = VK_API_VERSION_1_1;
+    VkInstanceCreateInfo ici {};
+    ici.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    ici.pApplicationInfo        = &app;
+    ici.enabledExtensionCount   = sizeof(k_inst_exts) / sizeof(k_inst_exts[0]);
+    ici.ppEnabledExtensionNames = k_inst_exts;
+    VkInstance inst = VK_NULL_HANDLE;
+    if (vkCreateInstance(&ici, nullptr, &inst) != VK_SUCCESS) {
+        err_msg = "vkCreateInstance failed";
+        return false;
+    }
+
+    ww_bridge_vk_dt_t dt {};
+    if (ww_bridge_vk_dt_load(&dt, vkGetInstanceProcAddr, inst) != 0) {
+        vkDestroyInstance(inst, nullptr);
+        err_msg = "ww_bridge_vk_dt_load failed";
+        return false;
+    }
+
+    int rc = ww_bridge_vk_resolve_render_node(&dt, inst, path.c_str(),
+                                              out_uuid.data());
+    vkDestroyInstance(inst, nullptr);
+
+    if (rc == 0) return true;
+    if (rc == -ENOENT) {
+        err_msg = "no Vulkan device with VK_EXT_physical_device_drm matches "
+                  + path;
+    } else if (rc == -ENOTSUP) {
+        err_msg = "Vulkan instance lacks vkGetPhysicalDeviceProperties2 chain";
+    } else if (rc < 0) {
+        err_msg = std::string("ww_bridge_vk_resolve_render_node: ")
+                  + std::strerror(-rc);
+    } else {
+        err_msg = "ww_bridge_vk_resolve_render_node returned "
+                  + std::to_string(rc);
+    }
+    return false;
 }
 
 
@@ -322,6 +384,14 @@ int main(int argc, char** argv) {
             opts.test_pattern = (std::strcmp(v, "0") != 0);
         }
         opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 1.0f);
+        // CLI `--render-node` wins over Init kv (mirroring mpv/video).
+        // Empty ⇒ let SceneWallpaper pick the default Vulkan device.
+        if (opts.render_node.empty()) {
+            if (const char* v = kv_get(init.settings, "render_node");
+                v && *v) {
+                opts.render_node = v;
+            }
+        }
 
         ww_bridge_init_free(&init);
     }
@@ -380,6 +450,23 @@ int main(int argc, char** argv) {
         return sw;
     };
 
+    std::array<uint8_t, VK_UUID_SIZE> chosen_uuid {};
+    bool have_uuid = false;
+    if (!opts.render_node.empty()) {
+        std::string err;
+        if (resolve_render_node_to_uuid(opts.render_node, chosen_uuid, err)) {
+            have_uuid = true;
+            std::fprintf(stderr,
+                         "waywallen-wescene-renderer: render_node=%s pinning Vulkan device by UUID\n",
+                         opts.render_node.c_str());
+        } else {
+            std::fprintf(stderr,
+                         "waywallen-wescene-renderer: render_node=%s not honored: %s; "
+                         "falling back to default device\n",
+                         opts.render_node.c_str(), err.c_str());
+        }
+    }
+
     {
         owe::RenderInitInfo info;
         info.offscreen        = true;
@@ -389,6 +476,10 @@ int main(int argc, char** argv) {
         info.surface_info.createSurfaceOp =
             [](VkInstance, VkSurfaceKHR*) -> VkResult { return VK_SUCCESS; };
         info.ex_swapchain_factory = std::move(factory);
+        if (have_uuid) {
+            info.uuid = std::span<const std::uint8_t>(chosen_uuid.data(),
+                                                     chosen_uuid.size());
+        }
         wp.initVulkan(std::move(info));
     }
 
