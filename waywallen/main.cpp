@@ -360,10 +360,13 @@ int main(int argc, char** argv) {
         pi.drm_render_major      = 0;
         pi.drm_render_minor      = 0;
         pi.drm_render_fd         = -1; // bridge opens its own
-        // FinPass uses vkCmdBlitImage to write the slot — needs only
-        // TRANSFER_DST. Bridge OR-s in TRANSFER_SRC unconditionally so
-        // the consumer-side shadow-import sub-layout matches.
+        // FinPass uses vkCmdBlitImage to write the slot. 
         pi.image_usage_flags     = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        // BLIT_DST is required by vkCmdBlitImage at the modifier-feature
+        // level and has no usage-flag analogue; 
+        // try fix NVIDIA blank screen
+        pi.format_feature_flags  = VK_FORMAT_FEATURE_TRANSFER_DST_BIT
+                                 | VK_FORMAT_FEATURE_BLIT_DST_BIT;
         if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool);
             rc != 0) {
             std::fprintf(stderr,

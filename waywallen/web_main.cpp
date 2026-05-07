@@ -370,6 +370,10 @@ int main(int argc, char** argv) {
     pi.drm_render_minor       = 0;
     pi.drm_render_fd          = -1; // bridge opens its own
     pi.image_usage_flags      = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    // weweb writes the slot via vkCmdBlitImage (see
+    // WebProducerDevice.cpp); BLIT_DST has no usage-flag analogue.
+    pi.format_feature_flags   = VK_FORMAT_FEATURE_TRANSFER_DST_BIT
+                              | VK_FORMAT_FEATURE_BLIT_DST_BIT;
 
     if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &state.pool);
         rc != 0)
