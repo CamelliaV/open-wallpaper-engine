@@ -30,8 +30,8 @@ namespace
 
 struct Options {
     std::string ipc_path;
-    uint32_t    width { 1280 };
-    uint32_t    height { 720 };
+    uint32_t    width { 1920 };
+    uint32_t    height { 1080 };
     std::string initial_scene;
     std::string initial_assets;
     std::string workshop_id;
