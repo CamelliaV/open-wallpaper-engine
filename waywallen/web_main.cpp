@@ -33,6 +33,7 @@
 #include <waywallen-bridge/bridge.h>
 #include <waywallen-bridge/extent_resolve.h>
 #include <waywallen-bridge/pool.h>
+#include <waywallen-bridge/probe_vk.h>
 #include <waywallen-bridge/protocol_bits.h>
 
 #include <argparse/argparse.hpp>
@@ -368,9 +369,19 @@ int main(int argc, char** argv) {
         reinterpret_cast<void* (*)(void*, const char*)>(vkGetInstanceProcAddr);
     pi.device_uuid            = producer.DeviceUuid();
     pi.driver_uuid            = producer.DriverUuid();
-    pi.drm_render_major       = 0;
-    pi.drm_render_minor       = 0;
-    pi.drm_render_fd          = -1; // bridge opens its own
+    {
+        ww_bridge_vk_dt_t dt {};
+        ww_bridge_vk_dt_load(&dt, vkGetInstanceProcAddr, producer.Instance());
+        if (int rc = ww_bridge_vk_query_render_node(
+                &dt, producer.Physical(),
+                &pi.drm_render_major, &pi.drm_render_minor);
+            rc != 0) {
+            std::fprintf(stderr,
+                         "waywallen-weweb-renderer: drm render-node query failed (%d); "
+                         "topology will be unknown to daemon\n", rc);
+        }
+    }
+    pi.drm_render_fd          = -1; // bridge opens by minor
     pi.image_usage_flags      = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     // weweb writes the slot via vkCmdBlitImage (see
     // WebProducerDevice.cpp); BLIT_DST has no usage-flag analogue.

@@ -443,9 +443,18 @@ int main(int argc, char** argv) {
             reinterpret_cast<void* (*)(void*, const char*)>(vkGetInstanceProcAddr);
         pi.device_uuid           = nullptr; // bridge will zero
         pi.driver_uuid           = nullptr;
-        pi.drm_render_major      = 0;
-        pi.drm_render_minor      = 0;
-        pi.drm_render_fd         = -1; // bridge opens its own
+
+        ww_bridge_vk_dt_t dt {};
+        ww_bridge_vk_dt_load(&dt, vkGetInstanceProcAddr, h.instance);
+        if (int rc = ww_bridge_vk_query_render_node(
+                &dt, h.physical_device,
+                &pi.drm_render_major, &pi.drm_render_minor);
+            rc != 0) {
+            std::fprintf(stderr,
+                         "waywallen-wescene-renderer: drm render-node query failed (%d); "
+                         "topology will be unknown to daemon\n", rc);
+        }
+        pi.drm_render_fd         = -1; // bridge opens by minor
         // FinPass uses vkCmdBlitImage to write the slot. 
         pi.image_usage_flags     = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         // BLIT_DST is required by vkCmdBlitImage at the modifier-feature
@@ -523,11 +532,8 @@ int main(int argc, char** argv) {
         rc != 0)
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
-    uint32_t drm_render_major = 0, drm_render_minor = 0;
-    (void)wp.getDrmRenderNode(drm_render_major, drm_render_minor);
     std::fprintf(stderr,
-                 "waywallen-wescene-renderer: ready, advertised caps drm_render=%u:%u\n",
-                 drm_render_major, drm_render_minor);
+                 "waywallen-wescene-renderer: ready, advertise sent to daemon\n");
 
     // Reader thread receives daemon → host messages and pushes any
     // NEGOTIATE_BUFFERS directly onto the swapchain. The render thread
