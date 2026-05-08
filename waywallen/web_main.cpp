@@ -7,6 +7,8 @@
 #include "DmaBufFrame.hpp"
 #include "Manifest.hpp"
 
+#include <rstd/macro.hpp>
+
 #include <waywallen-bridge/bridge.h>
 #include <waywallen-bridge/extent_resolve.h>
 #include <waywallen-bridge/pool.h>
@@ -15,25 +17,19 @@
 
 #include <argparse/argparse.hpp>
 
-#include <atomic>
-#include <cerrno>
-#include <chrono>
-#include <csignal>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <mutex>
-#include <string>
+#include <errno.h>
+#include <signal.h>
+#include <string.h>
+
+#include <filesystem> // for std::filesystem::read_symlink (not exported by cppstd)
+
 #include <sys/prctl.h>
 #include <sys/socket.h>
-#include <thread>
-#include <vector>
 #include <vulkan/vulkan.h>
 
 #include <nlohmann/json.hpp>
 
+import rstd.cppstd;
 import rstd.log;
 
 namespace
@@ -51,7 +47,7 @@ struct Options {
 };
 
 [[noreturn]] void die(const std::string& msg) {
-    std::fprintf(stderr, "waywallen-weweb-renderer: %s\n", msg.c_str());
+    rstd_error("waywallen-weweb-renderer: {}", msg);
     std::exit(1);
 }
 
@@ -71,7 +67,7 @@ Options parse_args(int argc, char** argv) {
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
-        std::fprintf(stderr, "%s\n", err.what());
+        rstd_error("{}", static_cast<const char*>(err.what()));
         std::exit(1);
     }
 
@@ -94,9 +90,9 @@ float parse_f32(const char* s, float def) {
     if (!s || !*s) return def;
     char* end = nullptr;
     errno = 0;
-    float v = std::strtof(s, &end);
+    double v = std::strtod(s, &end);
     if (errno != 0 || end == s) return def;
-    return v;
+    return static_cast<float>(v);
 }
 
 uint32_t parse_u32(const char* s, uint32_t def) {
@@ -196,8 +192,7 @@ void drain_settings(HostState& s) {
 void apply_control(HostState& s, ww_bridge_control_t& msg) {
     switch (msg.op) {
     case WW_EVT_IN_INIT:
-        std::fprintf(stderr,
-                     "waywallen-weweb-renderer: unexpected late Init; ignoring\n");
+        rstd_warn("waywallen-weweb-renderer: unexpected late Init; ignoring");
         break;
     case WW_EVT_IN_SETTING_CHANGED: {
         ww_bridge_setting_changed_t as {};
@@ -241,9 +236,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     default:
-        std::fprintf(stderr,
-                     "waywallen-weweb-renderer: unknown control op %d\n",
-                     static_cast<int>(msg.op));
+        rstd_warn("waywallen-weweb-renderer: unknown control op {}",
+                  static_cast<int>(msg.op));
         break;
     }
 }
@@ -254,9 +248,7 @@ void reader_loop(HostState& s) {
         int rc = ww_bridge_recv_control(s.sock, &msg);
         if (rc != 0) {
             if (!s.shutdown.load(std::memory_order_acquire)) {
-                std::fprintf(stderr,
-                             "waywallen-weweb-renderer: recv_control failed: %d\n",
-                             rc);
+                rstd_error("waywallen-weweb-renderer: recv_control failed: {}", rc);
             }
             s.shutdown.store(true, std::memory_order_release);
             return;
@@ -294,7 +286,7 @@ int main(int argc, char** argv) {
     HostState state;
     state.sock = ww_bridge_connect(opts.ipc_path.c_str());
     if (state.sock < 0)
-        die("ww_bridge_connect: " + std::string(std::strerror(-state.sock)));
+        die("ww_bridge_connect: " + std::string(::strerror(-state.sock)));
 
     {
         ww_bridge_init_t init {};
@@ -353,9 +345,8 @@ int main(int argc, char** argv) {
                 &dt, producer.Physical(),
                 &pi.drm_render_major, &pi.drm_render_minor);
             rc != 0) {
-            std::fprintf(stderr,
-                         "waywallen-weweb-renderer: drm render-node query failed (%d); "
-                         "topology will be unknown to daemon\n", rc);
+            rstd_warn("waywallen-weweb-renderer: drm render-node query failed ({}); "
+                      "topology will be unknown to daemon", rc);
         }
     }
     pi.drm_render_fd          = -1; // bridge opens by minor
@@ -381,10 +372,9 @@ int main(int argc, char** argv) {
         if (opts.initial_fps > 0)
             host.SetFrameRate(static_cast<int>(opts.initial_fps));
         host.ApplyVolume(opts.initial_volume);
-        std::fprintf(stderr,
-                     "waywallen-weweb-renderer: negotiated, fps=%u volume=%.2f\n",
-                     opts.initial_fps,
-                     static_cast<double>(opts.initial_volume));
+        rstd_info("waywallen-weweb-renderer: negotiated, fps={} volume={}",
+                  opts.initial_fps,
+                  std::format("{:.2f}", static_cast<double>(opts.initial_volume)));
     });
 
     // BrowserHost::Init wants resources / locales relative to argv[0].
@@ -435,9 +425,8 @@ int main(int argc, char** argv) {
         rc != 0)
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
-    std::fprintf(stderr,
-                 "waywallen-weweb-renderer: ready, advertised caps %ux%u\n",
-                 opts.width, opts.height);
+    rstd_info("waywallen-weweb-renderer: ready, advertised caps {}x{}",
+              opts.width, opts.height);
 
     std::thread reader([&]() { reader_loop(state); });
 

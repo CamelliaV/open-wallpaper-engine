@@ -15,7 +15,7 @@ target_link_libraries(waywallen-bridge-producer
 target_compile_features(waywallen-bridge-producer PUBLIC cxx_std_20)
 
 add_executable(waywallen-wescene-renderer
-    main.cpp
+    scene_main.cpp
     BridgeExSwapchain.cpp
 )
 
@@ -100,6 +100,7 @@ if(BUILD_WEWEB)
             argparse::argparse
             Vulkan::Vulkan
             rstd::rstd
+            rstd.cppstd
     )
     target_compile_options(waywallen-weweb-renderer PRIVATE
         -Wall -Wextra -Wpedantic

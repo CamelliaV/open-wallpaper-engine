@@ -3,6 +3,8 @@
 
 #include "BridgeExSwapchain.hpp"
 
+#include <rstd/macro.hpp>
+
 #include <waywallen-bridge/bridge.h>
 #include <waywallen-bridge/extent_resolve.h>
 #include <waywallen-bridge/pool.h>
@@ -11,23 +13,15 @@
 
 #include <argparse/argparse.hpp>
 
-#include <array>
-#include <atomic>
-#include <cerrno>
-#include <chrono>
-#include <csignal>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <span>
-#include <string>
+#include <errno.h>
+#include <signal.h>
+#include <string.h>
+
 #include <sys/prctl.h>
 #include <sys/socket.h>
-#include <thread>
 #include <vulkan/vulkan.h>
 
+import rstd.cppstd;
 import rstd.log;
 import wescene.scene_wallpaper;
 
@@ -48,7 +42,7 @@ struct Options {
 };
 
 [[noreturn]] void die(const std::string& msg) {
-    std::fprintf(stderr, "waywallen-wescene-renderer: %s\n", msg.c_str());
+    rstd_error("waywallen-wescene-renderer: {}", msg);
     std::exit(1);
 }
 
@@ -76,7 +70,7 @@ Options parse_args(int argc, char** argv) {
     try {
         program.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
-        std::fprintf(stderr, "%s\n", err.what());
+        rstd_error("{}", static_cast<const char*>(err.what()));
         std::cerr << program;
         std::exit(1);
     }
@@ -106,9 +100,9 @@ float parse_f32(const char* s, float def) {
     if (!s || !*s) return def;
     char* end = nullptr;
     errno = 0;
-    float v = std::strtof(s, &end);
+    double v = std::strtod(s, &end);
     if (errno != 0 || end == s) return def;
-    return v;
+    return static_cast<float>(v);
 }
 
 bool resolve_render_node_to_uuid(const std::string& path,
@@ -151,7 +145,7 @@ bool resolve_render_node_to_uuid(const std::string& path,
         err_msg = "Vulkan instance lacks vkGetPhysicalDeviceProperties2 chain";
     } else if (rc < 0) {
         err_msg = std::string("ww_bridge_vk_resolve_render_node: ")
-                  + std::strerror(-rc);
+                  + ::strerror(-rc);
     } else {
         err_msg = "ww_bridge_vk_resolve_render_node returned "
                   + std::to_string(rc);
@@ -200,8 +194,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         // Init is consumed at the top of main before the reader thread
         // starts. A late Init is either a buggy daemon resending or a
         // protocol violation; log and ignore.
-        std::fprintf(stderr,
-                     "waywallen-wescene-renderer: unexpected late Init; ignoring\n");
+        rstd_warn("waywallen-wescene-renderer: unexpected late Init; ignoring");
         break;
     case WW_EVT_IN_SETTING_CHANGED: {
         // v5 hot-reload. Peel the typed view, dispatch known keys
@@ -227,10 +220,9 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 // through PROPERTY_TEST_PATTERN; runtime toggling not
                 // wired (would require respawn). Log and ignore.
             } else {
-                std::fprintf(stderr,
-                             "waywallen-wescene-renderer: ApplySettings: "
-                             "wescene has no setting '%s'; ignoring\n",
-                             key);
+                rstd_warn("waywallen-wescene-renderer: ApplySettings: "
+                          "wescene has no setting '{}'; ignoring",
+                          static_cast<const char*>(key));
             }
         }
         ww_bridge_setting_changed_free(&as);
@@ -278,9 +270,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     default:
-        std::fprintf(stderr,
-                     "waywallen-wescene-renderer: unknown control op %d\n",
-                     static_cast<int>(msg.op));
+        rstd_warn("waywallen-wescene-renderer: unknown control op {}",
+                  static_cast<int>(msg.op));
         break;
     }
 }
@@ -291,9 +282,7 @@ void reader_loop(HostState& s) {
         int rc = ww_bridge_recv_control(s.sock, &msg);
         if (rc != 0) {
             if (!s.shutdown.load(std::memory_order_acquire)) {
-                std::fprintf(stderr,
-                             "waywallen-wescene-renderer: recv_control failed: %d\n",
-                             rc);
+                rstd_error("waywallen-wescene-renderer: recv_control failed: {}", rc);
             }
             signal_shutdown(s);
             return;
@@ -322,7 +311,7 @@ int main(int argc, char** argv) {
     HostState host;
     host.sock = ww_bridge_connect(opts.ipc_path.c_str());
     if (host.sock < 0)
-        die("ww_bridge_connect: " + std::string(std::strerror(-host.sock)));
+        die("ww_bridge_connect: " + std::string(::strerror(-host.sock)));
 
     {
         ww_bridge_init_t init {};
@@ -412,9 +401,8 @@ int main(int argc, char** argv) {
                 &dt, h.physical_device,
                 &pi.drm_render_major, &pi.drm_render_minor);
             rc != 0) {
-            std::fprintf(stderr,
-                         "waywallen-wescene-renderer: drm render-node query failed (%d); "
-                         "topology will be unknown to daemon\n", rc);
+            rstd_warn("waywallen-wescene-renderer: drm render-node query failed ({}); "
+                      "topology will be unknown to daemon", rc);
         }
         pi.drm_render_fd         = -1; // bridge opens by minor
         // FinPass uses vkCmdBlitImage to write the slot. 
@@ -426,8 +414,7 @@ int main(int argc, char** argv) {
                                  | VK_FORMAT_FEATURE_BLIT_DST_BIT;
         if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool);
             rc != 0) {
-            std::fprintf(stderr,
-                         "waywallen-wescene-renderer: ww_bridge_pool_create failed: %d\n", rc);
+            rstd_error("waywallen-wescene-renderer: ww_bridge_pool_create failed: {}", rc);
             return nullptr;
         }
         (void)h; // Vulkan handles no longer needed by BridgeExSwapchain.
@@ -443,14 +430,12 @@ int main(int argc, char** argv) {
         std::string err;
         if (resolve_render_node_to_uuid(opts.render_node, chosen_uuid, err)) {
             have_uuid = true;
-            std::fprintf(stderr,
-                         "waywallen-wescene-renderer: render_node=%s pinning Vulkan device by UUID\n",
-                         opts.render_node.c_str());
+            rstd_info("waywallen-wescene-renderer: render_node={} pinning Vulkan device by UUID",
+                      opts.render_node);
         } else {
-            std::fprintf(stderr,
-                         "waywallen-wescene-renderer: render_node=%s not honored: %s; "
-                         "falling back to default device\n",
-                         opts.render_node.c_str(), err.c_str());
+            rstd_warn("waywallen-wescene-renderer: render_node={} not honored: {}; "
+                      "falling back to default device",
+                      opts.render_node, err);
         }
     }
 
@@ -477,8 +462,7 @@ int main(int argc, char** argv) {
 
     host.swapchain->setOnFirstNegotiated([&] {
         wp.play();
-        std::fprintf(stderr,
-                     "waywallen-wescene-renderer: negotiated, scene playback started\n");
+        rstd_info("waywallen-wescene-renderer: negotiated, scene playback started");
     });
 
     // Bridge sends ready + release_syncobj + format_caps in one go.
@@ -489,8 +473,7 @@ int main(int argc, char** argv) {
         rc != 0)
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
-    std::fprintf(stderr,
-                 "waywallen-wescene-renderer: ready, advertise sent to daemon\n");
+    rstd_info("waywallen-wescene-renderer: ready, advertise sent to daemon");
 
     std::thread reader([&]() { reader_loop(host); });
 
