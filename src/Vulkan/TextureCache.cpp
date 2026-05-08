@@ -272,9 +272,17 @@ std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, 
 inline std::optional<VmaImageParameters>
 CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat format,
             VkSamplerCreateInfo sampler_info, VkImageUsageFlags usage,
-            VmaMemoryUsage mem_usage = VMA_MEMORY_USAGE_GPU_ONLY) {
+            VmaMemoryUsage mem_usage = VMA_MEMORY_USAGE_GPU_ONLY,
+            VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT) {
     VmaImageParameters image;
     do {
+        // Multisample images can't have mipmaps; force levelCount=1 and
+        // restrict usage to color attachment (no transfer/sampled needed
+        // since the resolved sibling carries the readable copy).
+        if (samples != VK_SAMPLE_COUNT_1_BIT) {
+            miplevel = 1;
+            usage    = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
         VkImageCreateInfo info {
             .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .pNext                 = nullptr,
@@ -283,7 +291,7 @@ CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat form
             .extent                = extent,
             .mipLevels             = miplevel,
             .arrayLayers           = 1,
-            .samples               = VK_SAMPLE_COUNT_1_BIT,
+            .samples               = samples,
             .tiling                = VK_IMAGE_TILING_OPTIMAL,
             .usage                 = usage,
             .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
@@ -417,6 +425,7 @@ std::size_t TextureKey::HashValue(const TextureKey& k) {
     utils::hash_combine(seed, (int)k.sample.wrapS);
     utils::hash_combine(seed, (int)k.sample.wrapT);
     utils::hash_combine(seed, (int)k.sample.magFilter);
+    utils::hash_combine(seed, (int)k.samples);
     return seed;
 }
 
@@ -565,17 +574,25 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
                             format,
                             sam_info,
                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                            VMA_MEMORY_USAGE_GPU_ONLY,
+                            tex_key.samples);
             opt.has_value()) {
             image_paras = std::move(opt.value());
         } else
             break;
 
+        // Single-sample images settle in SHADER_READ_ONLY (sampled by other
+        // passes). MSAA twin is never sampled — pre-transition to
+        // COLOR_ATTACHMENT_OPTIMAL so the first render pass with LoadOp=LOAD
+        // doesn't see UNDEFINED on a non-DONT_CARE attachment.
         if (! m_tex_cmd) allocateCmd();
         TransImgLayout(m_device.graphics_queue().handle,
                        m_tex_cmd,
                        ToImageParameters(image_paras),
-                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                       tex_key.samples == VK_SAMPLE_COUNT_1_BIT
+                           ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                           : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
         VVK_CHECK_ACT(break, m_device.handle().WaitIdle());
         return image_paras;

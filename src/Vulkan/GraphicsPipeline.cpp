@@ -149,6 +149,11 @@ GraphicsPipeline& GraphicsPipeline::setTopology(VkPrimitiveTopology topology) {
     return *this;
 }
 
+GraphicsPipeline& GraphicsPipeline::setSampleCount(VkSampleCountFlagBits s) {
+    multisample.rasterizationSamples = s;
+    return *this;
+}
+
 bool GraphicsPipeline::create(const Device& device, vvk::RenderPass& pass,
                               PipelineParameters& pipeline) {
     VkPipelineDynamicStateCreateInfo dynamic_info {

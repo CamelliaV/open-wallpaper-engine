@@ -44,6 +44,9 @@ struct RenderInitInfo {
 
     uint16_t width { 1920 };
     uint16_t height { 1080 };
+    // MSAA samples for the screen RT only. 1 disables. Clamped down to
+    // device's framebufferColorSampleCounts at init.
+    uint32_t msaa_samples { 1 };
     ReDrawCB redraw_callback;
 
     /* When set AND `offscreen == true`, VulkanRender invokes this factory

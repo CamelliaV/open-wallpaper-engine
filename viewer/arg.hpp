@@ -11,6 +11,7 @@ constexpr std::string_view OPT_GRAPHVIZ    = "--graphviz";
 constexpr std::string_view OPT_FPS         = "--fps";
 constexpr std::string_view OPT_RESOLUTION  = "--resolution";
 constexpr std::string_view OPT_CACHE_PATH  = "--cache-path";
+constexpr std::string_view OPT_MSAA        = "--msaa";
 
 struct Resolution {
 	uint w;
@@ -49,6 +50,12 @@ void setAndParseArg(argparse::ArgumentParser& arg, int argc, char** argv) {
         .default_value(std::string())
         .nargs(1)
         .append();
+
+    arg.add_argument("-M", OPT_MSAA)
+        .help("MSAA samples for screen RT (1/2/4/8/16; default 1=off)")
+        .default_value<uint32_t>(1u)
+        .nargs(1)
+        .scan<'i', uint32_t>();
 
     arg.add_argument("-R", OPT_RESOLUTION)
         .help("Set the resolution, eg. 1920x1080")

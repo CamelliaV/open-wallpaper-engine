@@ -25,32 +25,60 @@ CustomShaderPass::CustomShaderPass(const Desc& desc) {
 CustomShaderPass::~CustomShaderPass() {}
 
 std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFormat format,
-                                                VkAttachmentLoadOp loadOp,
-                                                VkImageLayout      finalLayout) {
-    VkAttachmentDescription attachment {
+                                                VkAttachmentLoadOp     loadOp,
+                                                VkImageLayout          finalLayout,
+                                                VkSampleCountFlagBits  samples) {
+    const bool has_resolve = (samples != VK_SAMPLE_COUNT_1_BIT);
+
+    // attachment[0] is the color attachment. With MSAA it's the multisample
+    // twin (never sampled, finalLayout=COLOR_ATTACHMENT_OPTIMAL); without
+    // MSAA it's the resolved texture itself (finalLayout=SHADER_READ).
+    VkAttachmentDescription color {
         .format         = format,
-        .samples        = VK_SAMPLE_COUNT_1_BIT,
-        .loadOp         = loadOp, // VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .samples        = samples,
+        .loadOp         = loadOp,
         .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
         .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout    = finalLayout, // ShaderReadOnlyOptimal
+        .finalLayout    = has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : finalLayout,
     };
 
     if (loadOp == VK_ATTACHMENT_LOAD_OP_LOAD) {
-        attachment.initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        color.initialLayout =
+            has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    VkAttachmentReference attachment_ref {
+    // attachment[1] is the resolve target (single-sample). loadOp DONT_CARE
+    // since we always overwrite via the implicit resolve at end-of-subpass.
+    VkAttachmentDescription resolve {
+        .format         = format,
+        .samples        = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout    = finalLayout,
+    };
+
+    std::array<VkAttachmentDescription, 2> attachments { color, resolve };
+
+    VkAttachmentReference color_ref {
         .attachment = 0,
+        .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+    VkAttachmentReference resolve_ref {
+        .attachment = 1,
         .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     };
 
     VkSubpassDescription subpass {
         .pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS,
         .colorAttachmentCount = 1,
-        .pColorAttachments    = &attachment_ref,
+        .pColorAttachments    = &color_ref,
+        .pResolveAttachments  = has_resolve ? &resolve_ref : nullptr,
     };
 
     VkSubpassDependency dependency {
@@ -64,8 +92,8 @@ std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFor
 
     VkRenderPassCreateInfo creatinfo {
         .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments    = &attachment,
+        .attachmentCount = has_resolve ? 2u : 1u,
+        .pAttachments    = attachments.data(),
         .subpassCount    = 1,
         .pSubpasses      = &subpass,
         .dependencyCount = 1,
@@ -134,6 +162,31 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             m_desc.vk_output = opt.value();
         } else
             return;
+
+        // Map sample_count → VkSampleCountFlagBits. 1=disabled.
+        m_desc.samples = VK_SAMPLE_COUNT_1_BIT;
+        switch (rt.sample_count) {
+        case 2:  m_desc.samples = VK_SAMPLE_COUNT_2_BIT;  break;
+        case 4:  m_desc.samples = VK_SAMPLE_COUNT_4_BIT;  break;
+        case 8:  m_desc.samples = VK_SAMPLE_COUNT_8_BIT;  break;
+        case 16: m_desc.samples = VK_SAMPLE_COUNT_16_BIT; break;
+        case 32: m_desc.samples = VK_SAMPLE_COUNT_32_BIT; break;
+        case 64: m_desc.samples = VK_SAMPLE_COUNT_64_BIT; break;
+        default: break;
+        }
+        if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
+            // MSAA twin needs its own cache key — Query() resolves by name,
+            // not by TextureKey content_hash.
+            std::string twin_name = tex_name + "::msaa" + std::to_string((unsigned)m_desc.samples);
+            if (auto opt = device.tex_cache().Query(
+                    twin_name, ToTexKeyMsaa(rt, m_desc.samples), /*persist*/ true);
+                opt.has_value()) {
+                m_desc.vk_output_msaa = opt.value();
+            } else {
+                rstd_error("MSAA twin Query failed for {}", tex_name);
+                return;
+            }
+        }
     }
 
     SceneMesh& mesh = *(m_desc.node->Mesh());
@@ -253,7 +306,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         auto opt = CreateRenderPass(device.handle(),
                                     VK_FORMAT_R8G8B8A8_UNORM,
                                     loadOp,
-                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                    m_desc.samples);
         if (! opt.has_value()) return;
         auto& pass = opt.value();
 
@@ -265,19 +319,25 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             .setTopology(m_desc.index_buf ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
                                           : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
             .addInputBindingDescription(bind_descriptions)
-            .addInputAttributeDescription(attr_descriptions);
+            .addInputAttributeDescription(attr_descriptions)
+            .setSampleCount(m_desc.samples);
         for (auto& spv : spvs) pipeline.addStage(std::move(spv));
 
         if (! pipeline.create(device, pass, m_desc.pipeline)) return;
     }
 
     {
+        const bool has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
+        std::array<VkImageView, 2> views {
+            has_msaa ? m_desc.vk_output_msaa.view : m_desc.vk_output.view,
+            m_desc.vk_output.view,
+        };
         VkFramebufferCreateInfo info {
             .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .pNext           = nullptr,
             .renderPass      = *m_desc.pipeline.pass,
-            .attachmentCount = 1,
-            .pAttachments    = &m_desc.vk_output.view,
+            .attachmentCount = has_msaa ? 2u : 1u,
+            .pAttachments    = views.data(),
             .width           = m_desc.vk_output.extent.width,
             .height          = m_desc.vk_output.extent.height,
             .layers          = 1,
@@ -453,6 +513,8 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
         cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
     }
 
+    const bool has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
+    std::array<VkClearValue, 2> clears { m_desc.clear_value, VkClearValue {} };
     VkRenderPassBeginInfo pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext       = nullptr,
@@ -463,8 +525,8 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
                 .offset = { 0, 0 },
                 .extent = { outext.width, outext.height },
             },
-        .clearValueCount = 1,
-        .pClearValues    = &m_desc.clear_value,
+        .clearValueCount = has_msaa ? 2u : 1u,
+        .pClearValues    = clears.data(),
     };
     cmd.BeginRenderPass(pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 

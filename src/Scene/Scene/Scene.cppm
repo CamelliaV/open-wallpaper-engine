@@ -113,6 +113,8 @@ struct SceneRenderTarget {
     bool          withDepth { false };
     bool          has_mipmap { false };
     unsigned          mipmap_level { 1 };
+    // 1 disables MSAA; only screen RT is opted-in by VulkanRender at init.
+    unsigned      sample_count { 1 };
     TextureSample sample { TextureWrap::CLAMP_TO_EDGE,
                            TextureWrap::CLAMP_TO_EDGE,
                            TextureFilter::LINEAR,

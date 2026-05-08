@@ -22,6 +22,7 @@ import cppstd;
 import wescene.vulkan;
 import wescene.utils;
 import wescene.scene;
+import wescene.spec_texs;
 
 import wescene.rgraph;
 
@@ -89,6 +90,10 @@ struct VulkanRender::Impl {
     bool m_with_surface { false };
     bool m_inited { false };
     bool m_pass_loaded { false };
+
+    // MSAA sample count for the screen RT only. 1bit = disabled.
+    // Resolved against device's framebufferColorSampleCounts in init().
+    VkSampleCountFlagBits m_msaa_samples { VK_SAMPLE_COUNT_1_BIT };
 
     std::unique_ptr<ExSwapchain> m_ex_swapchain;
     RenderingResources           m_rendering_resources;
@@ -267,6 +272,29 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
         }
     }
 
+    {
+        // Map requested integer to a bit; clamp down to highest supported bit
+        // not exceeding the request, given device's framebufferColorSampleCounts.
+        const uint32_t requested = info.msaa_samples == 0 ? 1u : info.msaa_samples;
+        const VkSampleCountFlags supported =
+            m_device->limits().framebufferColorSampleCounts;
+        VkSampleCountFlagBits chosen = VK_SAMPLE_COUNT_1_BIT;
+        constexpr std::array<VkSampleCountFlagBits, 6> ladder { {
+            VK_SAMPLE_COUNT_64_BIT, VK_SAMPLE_COUNT_32_BIT,
+            VK_SAMPLE_COUNT_16_BIT, VK_SAMPLE_COUNT_8_BIT,
+            VK_SAMPLE_COUNT_4_BIT,  VK_SAMPLE_COUNT_2_BIT,
+        } };
+        for (auto bit : ladder) {
+            if ((uint32_t)bit <= requested && (supported & bit)) {
+                chosen = bit;
+                break;
+            }
+        }
+        m_msaa_samples = chosen;
+        rstd_info("msaa requested={} actual={}",
+                  requested, (uint32_t)m_msaa_samples);
+    }
+
     if (info.offscreen) {
         if (info.ex_swapchain_factory) {
             RenderInitInfo::ExSwapchainHandles h {
@@ -308,6 +336,7 @@ bool VulkanRender::Impl::initRes() {
         // queue is needed only when graphics != present family.
         m_finpass->setPresentLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         m_finpass->setPresentQueueIndex(m_device->present_queue().family_index);
+        m_finpass->setPresentFormat(m_device->swapchain().format());
     } else {
         // Offscreen: ExSwapchain implementation chooses both. Bridge
         // returns (GENERAL, FOREIGN_EXT); local returns (GENERAL,
@@ -319,6 +348,7 @@ bool VulkanRender::Impl::initRes() {
             qf = m_device->graphics_queue().family_index;
         }
         m_finpass->setPresentQueueIndex(qf);
+        m_finpass->setPresentFormat(m_ex_swapchain->format());
     }
 
     m_vertex_buf = std::make_unique<StagingBuffer>(*m_device,
@@ -641,6 +671,12 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
                 std::max(3u,
                          static_cast<unsigned>(std::floor(std::log2(std::min(rt.width, rt.height))))) -
                 2u;
+        }
+    }
+    if (m_msaa_samples != VK_SAMPLE_COUNT_1_BIT) {
+        auto it = scene.renderTargets.find(std::string(SpecTex_Default));
+        if (it != scene.renderTargets.end()) {
+            it->second.sample_count = (unsigned)m_msaa_samples;
         }
     }
     scene.shaderValueUpdater->SetScreenSize((i32)ext.width, (i32)ext.height);

@@ -40,6 +40,8 @@ struct Options {
     float       initial_volume { 1.0f };
     bool        enable_audio { true };
     std::string render_node;
+    // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
+    uint32_t    msaa_samples { 1 };
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -375,6 +377,11 @@ int main(int argc, char** argv) {
                 opts.render_node = v;
             }
         }
+        if (const char* v = kv_get(init.settings, "msaa"); v && *v) {
+            char* end = nullptr;
+            unsigned long n = std::strtoul(v, &end, 10);
+            if (end != v) opts.msaa_samples = static_cast<uint32_t>(n);
+        }
 
         ww_bridge_init_free(&init);
     }
@@ -427,11 +434,10 @@ int main(int argc, char** argv) {
                       "topology will be unknown to daemon", rc);
         }
         pi.drm_render_fd         = -1; // bridge opens by minor
-        // FinPass uses vkCmdBlitImage to write the slot. 
+        // FinPass writes the slot via vkCmdCopyImage when extent+format
+        // match, otherwise vkCmdBlitImage. Advertise both feature bits so
+        // the daemon's modifier negotiation works on either path.
         pi.image_usage_flags     = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        // BLIT_DST is required by vkCmdBlitImage at the modifier-feature
-        // level and has no usage-flag analogue; 
-        // try fix NVIDIA blank screen
         pi.format_feature_flags  = VK_FORMAT_FEATURE_TRANSFER_DST_BIT
                                  | VK_FORMAT_FEATURE_BLIT_DST_BIT;
         if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool);
@@ -467,6 +473,7 @@ int main(int argc, char** argv) {
         info.offscreen_tiling = owe::TexTiling::OPTIMAL;
         info.width            = static_cast<uint16_t>(opts.width);
         info.height           = static_cast<uint16_t>(opts.height);
+        info.msaa_samples     = opts.msaa_samples;
         info.surface_info.createSurfaceOp =
             [](VkInstance, VkSurfaceKHR*) -> VkResult { return VK_SUCCESS; };
         info.ex_swapchain_factory = std::move(factory);

@@ -17,6 +17,7 @@ FinPass::~FinPass() {}
 void FinPass::setPresent(ImageParameters img)        { m_desc.vk_present = img; }
 void FinPass::setPresentLayout(VkImageLayout layout) { m_desc.present_layout = layout; }
 void FinPass::setPresentQueueIndex(uint32_t i)       { m_desc.present_queue_index = i; }
+void FinPass::setPresentFormat(VkFormat fmt)         { m_desc.present_format = fmt; }
 
 void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& /*rr*/) {
     auto tex_name = std::string(m_desc.result);
@@ -85,26 +86,55 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
     }
 
     {
-        VkImageBlit region {
-            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .srcOffsets     = {
-                VkOffset3D { 0, 0, 0 },
-                VkOffset3D { (int32_t)m_desc.vk_result.extent.width,
-                             (int32_t)m_desc.vk_result.extent.height, 1 },
-            },
-            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .dstOffsets     = {
-                VkOffset3D { 0, 0, 0 },
-                VkOffset3D { (int32_t)m_desc.vk_present.extent.width,
-                             (int32_t)m_desc.vk_present.extent.height, 1 },
-            },
-        };
-        cmd.BlitImage(m_desc.vk_result.handle,
-                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                      m_desc.vk_present.handle,
-                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                      region,
-                      VK_FILTER_LINEAR);
+        // Result is always R8G8B8A8_UNORM (screen RT). We can copy when
+        // present matches that and dimensions are identical; otherwise
+        // fall back to blit which handles size/format mismatch.
+        const bool can_copy =
+            m_desc.vk_result.extent.width  == m_desc.vk_present.extent.width &&
+            m_desc.vk_result.extent.height == m_desc.vk_present.extent.height &&
+            m_desc.present_format          == VK_FORMAT_R8G8B8A8_UNORM;
+
+        if (! m_path_logged) {
+            rstd_info("FinPass: {}", can_copy ? "copy" : "blit");
+            m_path_logged = true;
+        }
+
+        if (can_copy) {
+            VkImageCopy region {
+                .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .srcOffset      = { 0, 0, 0 },
+                .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .dstOffset      = { 0, 0, 0 },
+                .extent         = { m_desc.vk_result.extent.width,
+                                    m_desc.vk_result.extent.height, 1 },
+            };
+            cmd.CopyImage(m_desc.vk_result.handle,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          m_desc.vk_present.handle,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          region);
+        } else {
+            VkImageBlit region {
+                .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .srcOffsets     = {
+                    VkOffset3D { 0, 0, 0 },
+                    VkOffset3D { (int32_t)m_desc.vk_result.extent.width,
+                                 (int32_t)m_desc.vk_result.extent.height, 1 },
+                },
+                .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .dstOffsets     = {
+                    VkOffset3D { 0, 0, 0 },
+                    VkOffset3D { (int32_t)m_desc.vk_present.extent.width,
+                                 (int32_t)m_desc.vk_present.extent.height, 1 },
+                },
+            };
+            cmd.BlitImage(m_desc.vk_result.handle,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          m_desc.vk_present.handle,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          region,
+                          VK_FILTER_LINEAR);
+        }
     }
 
     {

@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
     info.enable_valid_layer = program.get<bool>(OPT_VALID_LAYER);
     info.width              = w_width;
     info.height             = w_height;
+    info.msaa_samples       = program.get<uint32_t>(OPT_MSAA);
 
     auto& sf_info = info.surface_info;
     {

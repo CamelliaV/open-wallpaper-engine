@@ -253,6 +253,7 @@ struct TextureKey {
     TextureFormat format;
     TextureSample sample;
     unsigned          mipmap_level { 1 };
+    VkSampleCountFlagBits samples { VK_SAMPLE_COUNT_1_BIT };
 
     static TexHash HashValue(const TextureKey&);
 };
@@ -470,6 +471,7 @@ public:
     addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
     GraphicsPipeline& addInputBindingDescription(std::span<const VkVertexInputBindingDescription>);
     GraphicsPipeline& setTopology(VkPrimitiveTopology);
+    GraphicsPipeline& setSampleCount(VkSampleCountFlagBits);
 
 private:
     vvk::RenderPass m_pass;

@@ -2,6 +2,7 @@ module;
 #include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:pass_common;
+import cppstd;
 import wescene.types;
 import wescene.vulkan;
 import wescene.scene;
@@ -53,6 +54,12 @@ inline TextureKey ToTexKey(owe::SceneRenderTarget rt) {
         .sample       = rt.sample,
         .mipmap_level = rt.mipmap_level,
     };
+}
+
+inline TextureKey ToTexKeyMsaa(owe::SceneRenderTarget rt, VkSampleCountFlagBits s) {
+    auto k    = ToTexKey(rt);
+    k.samples = s;
+    return k;
 }
 
 } // namespace owe::vulkan

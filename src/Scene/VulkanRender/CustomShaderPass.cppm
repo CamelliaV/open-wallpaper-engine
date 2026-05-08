@@ -27,6 +27,10 @@ public:
         std::vector<ImageSlotsRef> vk_textures;
         std::vector<i32>           vk_tex_binding;
         ImageParameters            vk_output;
+        // MSAA twin (color attachment) when output RT has sample_count>1.
+        // Empty handle means no MSAA; framebuffer attaches only vk_output.
+        ImageParameters            vk_output_msaa;
+        VkSampleCountFlagBits      samples { VK_SAMPLE_COUNT_1_BIT };
 
         // bufs
         bool                          dyn_vertex { false };
