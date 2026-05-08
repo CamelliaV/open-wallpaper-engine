@@ -10,6 +10,10 @@ class AppHandler : public CefApp,
 public:
     AppHandler();
 
+    // Must be set BEFORE CefInitialize. true ⇒ append `--mute-audio` so
+    // Chromium never opens an output device.
+    void SetMuteAudio(bool m) { m_mute_audio = m; }
+
     // CefApp.
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
         return this;
@@ -21,6 +25,8 @@ public:
     void OnContextInitialized() override;
 
 private:
+    bool m_mute_audio { false };
+
     IMPLEMENT_REFCOUNTING(AppHandler);
     DISALLOW_COPY_AND_ASSIGN(AppHandler);
 };

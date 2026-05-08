@@ -69,6 +69,10 @@ bool BrowserHost::Init(const InitOptions& opts) {
         settings.remote_debugging_port = opts.remote_debugging_port;
     }
 
+    // Stash before CefInitialize; AppHandler::OnBeforeCommandLineProcessing
+    // runs synchronously inside it and reads the flag.
+    impl_->app->SetMuteAudio(!opts.enable_audio);
+
     if (!CefInitialize(main_args, settings, impl_->app.get(), nullptr)) {
         std::fprintf(stderr, "weweb: CefInitialize failed\n");
         return false;

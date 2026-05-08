@@ -10,6 +10,7 @@ extras = ["assets", "workshop_id"]
 events = ["pointer"]
 
 [renderer.settings]
+enable_audio = { type = "bool", default = true, identity = true, label_key = "settings.wescene.enable_audio", group = "audio", order = 5 }
 volume = { type = "u32", default = 100, min = 0, max = 100, step = 1, identity = false, label_key = "settings.wescene.volume", group = "audio", order = 10 }
 fps    = { type = "u32", default = 30,  min = 1, max = 240, step = 1, identity = false, label_key = "settings.wescene.fps", group = "render", order = 20 }
 render_node = { type = "string", default = "", identity = true, label_key = "settings.wescene.render_node", group = "render", order = 30 }

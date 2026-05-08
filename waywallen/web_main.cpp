@@ -44,6 +44,7 @@ struct Options {
     uint32_t    initial_fps { 60 };
     float       initial_volume { 1.0f };
     int         remote_debugging_port { 0 };
+    bool        enable_audio { true };
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -93,6 +94,14 @@ float parse_f32(const char* s, float def) {
     double v = std::strtod(s, &end);
     if (errno != 0 || end == s) return def;
     return static_cast<float>(v);
+}
+
+// Daemon serializes bool settings as the literal "true"/"false".
+bool parse_bool(const char* s, bool def) {
+    if (!s || !*s) return def;
+    if (std::strcmp(s, "true") == 0)  return true;
+    if (std::strcmp(s, "false") == 0) return false;
+    return def;
 }
 
 uint32_t parse_u32(const char* s, uint32_t def) {
@@ -317,6 +326,10 @@ int main(int argc, char** argv) {
         // Wire format is u32 0..100; CEF host takes 0..1 ratio.
         opts.initial_volume =
             parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
+        // identity=true: respawn-only. Translates to --mute-audio so
+        // Chromium never opens an output device.
+        opts.enable_audio =
+            parse_bool(kv_get(init.settings, "enable_audio"), true);
         opts.remote_debugging_port = static_cast<int>(parse_u32(
             kv_get(init.settings, "remote_debugging_port"), 0));
 
@@ -389,6 +402,7 @@ int main(int argc, char** argv) {
         ho.enable_remote_debugging = true;
         ho.remote_debugging_port   = opts.remote_debugging_port;
     }
+    ho.enable_audio = opts.enable_audio;
     if (!host.Init(ho)) die("BrowserHost::Init failed");
 
     // OnAcceleratedPaint runs synchronously on the CEF UI thread (=

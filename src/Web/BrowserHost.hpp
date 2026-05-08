@@ -32,6 +32,8 @@ public:
         std::filesystem::path cache_dir;      // optional CEF disk cache
         bool enable_remote_debugging{false};
         int  remote_debugging_port{0};
+        // false ⇒ pass --mute-audio to Chromium so no output device opens.
+        bool enable_audio{true};
     };
 
     BrowserHost();

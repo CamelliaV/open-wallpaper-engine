@@ -38,6 +38,7 @@ struct Options {
     uint32_t    initial_fps { 30 };
     bool        test_pattern { false };
     float       initial_volume { 1.0f };
+    bool        enable_audio { true };
     std::string render_node;
 };
 
@@ -103,6 +104,16 @@ float parse_f32(const char* s, float def) {
     double v = std::strtod(s, &end);
     if (errno != 0 || end == s) return def;
     return static_cast<float>(v);
+}
+
+// Daemon serializes bool settings as the literal "true"/"false". Anything
+// else falls back to `def` so a malformed wire value doesn't silently
+// flip the gate.
+bool parse_bool(const char* s, bool def) {
+    if (!s || !*s) return def;
+    if (std::strcmp(s, "true") == 0)  return true;
+    if (std::strcmp(s, "false") == 0) return false;
+    return def;
 }
 
 bool resolve_render_node_to_uuid(const std::string& path,
@@ -352,6 +363,10 @@ int main(int argc, char** argv) {
         // Wire format is u32 0..100; engine takes 0..1 ratio.
         opts.initial_volume =
             parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
+        // identity=true: respawn-only. Reflected into PROPERTY_MUTED below
+        // so SoundManager::init() short-circuits and no cubeb device opens.
+        opts.enable_audio =
+            parse_bool(kv_get(init.settings, "enable_audio"), true);
         // CLI `--render-node` wins over Init kv (mirroring mpv/video).
         // Empty ⇒ let SceneWallpaper pick the default Vulkan device.
         if (opts.render_node.empty()) {
@@ -371,6 +386,10 @@ int main(int argc, char** argv) {
     host.width  = opts.width;
     host.height = opts.height;
 
+    // Mute first so loadScene's SoundManager::init() short-circuits when
+    // audio is disabled; the cubeb device + system output never open.
+    if (!opts.enable_audio)
+        wp.setPropertyBool(owe::PROPERTY_MUTED, true);
     if (!opts.initial_assets.empty())
         wp.setPropertyString(owe::PROPERTY_ASSETS, opts.initial_assets);
     if (!opts.initial_scene.empty())

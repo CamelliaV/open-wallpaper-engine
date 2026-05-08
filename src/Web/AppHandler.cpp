@@ -95,6 +95,13 @@ void AppHandler::OnBeforeCommandLineProcessing(const CefString&          process
     cmd->AppendSwitch("metrics-recording-only");
     cmd->AppendSwitch("disable-component-update");
     cmd->AppendSwitch("disable-session-crashed-bubble");
+
+    // Honour the host's enable_audio gate. Chromium never instantiates an
+    // output stream when this switch is present, so no system audio device
+    // (PulseAudio/PipeWire) gets opened.
+    if (m_mute_audio) {
+        cmd->AppendSwitch("mute-audio");
+    }
 }
 
 void AppHandler::OnContextInitialized() {
