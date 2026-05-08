@@ -132,9 +132,8 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         f.ReadInt32(); // unk
 
         bone.parent = f.ReadUint32();
-        assert(bone.parent < i || bone.noParent());
         if (bone.parent >= i && ! bone.noParent()) {
-            rstd_error("mdl wrong bone parent index {}", bone.parent);
+            rstd_error("mdl wrong bone parent index {} (i={}) in {}", bone.parent, i, str_path);
             return false;
         }
 
