@@ -164,7 +164,8 @@ void drain_settings(HostState& s) {
     if (!s.host) return;
     for (auto& sd : drained) {
         if (sd.key == "volume") {
-            s.host->ApplyVolume(parse_f32(sd.value.c_str(), 1.0f));
+            // Wire format is u32 0..100; CEF host takes 0..1 ratio.
+            s.host->ApplyVolume(parse_f32(sd.value.c_str(), 100.0f) / 100.0f);
         } else if (sd.key == "fps") {
             uint32_t fps = parse_u32(sd.value.c_str(), 0);
             if (fps > 0) s.host->SetFrameRate(static_cast<int>(fps));
@@ -313,8 +314,9 @@ int main(int argc, char** argv) {
         }
         opts.initial_fps    = parse_u32(kv_get(init.settings, "fps"),
                                         opts.initial_fps);
-        opts.initial_volume = parse_f32(kv_get(init.settings, "volume"),
-                                        opts.initial_volume);
+        // Wire format is u32 0..100; CEF host takes 0..1 ratio.
+        opts.initial_volume =
+            parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
         opts.remote_debugging_port = static_cast<int>(parse_u32(
             kv_get(init.settings, "remote_debugging_port"), 0));
 

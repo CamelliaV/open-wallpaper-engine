@@ -208,8 +208,9 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             if (!key || !val) continue;
             if (std::strcmp(key, "volume") == 0) {
                 if (s.wp) {
+                    // Wire format is u32 0..100; engine takes 0..1 ratio.
                     s.wp->setPropertyFloat(owe::PROPERTY_VOLUME,
-                                           parse_f32(val, 1.0f));
+                                           parse_f32(val, 100.0f) / 100.0f);
                 }
             } else if (std::strcmp(key, "fps") == 0) {
                 char* end = nullptr;
@@ -348,7 +349,9 @@ int main(int argc, char** argv) {
         if (const char* v = kv_get(init.settings, "test_pattern"); v && *v) {
             opts.test_pattern = (std::strcmp(v, "0") != 0);
         }
-        opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 1.0f);
+        // Wire format is u32 0..100; engine takes 0..1 ratio.
+        opts.initial_volume =
+            parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
         // CLI `--render-node` wins over Init kv (mirroring mpv/video).
         // Empty ⇒ let SceneWallpaper pick the default Vulkan device.
         if (opts.render_node.empty()) {
