@@ -1,24 +1,5 @@
 // waywallen-wescene-renderer — wescene (Wallpaper Engine scene) host
 // subprocess.
-//
-// Speaks ipc-v3 through the waywallen-bridge pool API:
-//   1. Connect to the daemon's Unix-domain socket (`--ipc <path>`).
-//   2. wp.init() spins up SceneWallpaper's main + render loopers.
-//   3. wp.initVulkan(...) is called with `ex_swapchain_factory` set.
-//      VulkanRender picks the GPU, creates the VkDevice, then invokes
-//      the factory: the factory creates the bridge pool and a
-//      BridgeExSwapchain that VulkanRender adopts as its offscreen
-//      target.
-//   4. ww_bridge_pool_advertise_caps. Bridge sends ready,
-//      release_syncobj, and format_caps to the daemon.
-//   5. A reader thread decodes daemon → host messages. NEGOTIATE_BUFFERS
-//      goes to the main thread, which calls
-//      `BridgeExSwapchain::applyDirective`. Bridge then emits
-//      bind_buffers; first directive triggers wp.play().
-//   6. Each frame the SceneWallpaper render loop calls drawFrameOffscreen,
-//      which pulls a slot from the BridgeExSwapchain, records, exports
-//      a sync_fd, and submits — bridge emits frame_ready under the hood.
-//   7. prctl(PR_SET_PDEATHSIG) so the renderer dies with the daemon.
 
 #include "BridgeExSwapchain.hpp"
 
@@ -71,15 +52,6 @@ struct Options {
     std::exit(1);
 }
 
-// Step 3 of the renderer-Init refactor: spawn-time params come from
-// the daemon's typed `Init` message; the only CLI flag the renderer
-// honours is `--ipc <socket>`. The argparse `remaining()` catch-all
-// is kept (but ignored) so any straggling daemon argv during the
-// transition window is silently consumed instead of failing the parse.
-// SPAWN_VERSION 3: scene .pkg path arrives as `--path`, with
-// plugin-specific extras `--assets <dir>` and `--workshop_id <id>` from
-// the wescene manifest's whitelist. argparse's `remaining()` catches
-// any other unknown flags and silently ignores them.
 Options parse_args(int argc, char** argv) {
     argparse::ArgumentParser program("waywallen-wescene-renderer");
 
@@ -139,11 +111,6 @@ float parse_f32(const char* s, float def) {
     return v;
 }
 
-// Spin up a throwaway VkInstance, hand it to bridge's
-// ww_bridge_vk_resolve_render_node, and copy out the matching device's
-// 16-byte deviceUUID. SceneWallpaper's ChoosePhysicalDevice only filters
-// by UUID, so this is the bridge between a user-provided render-node
-// path and RenderInitInfo.uuid.
 bool resolve_render_node_to_uuid(const std::string& path,
                                  std::array<uint8_t, VK_UUID_SIZE>& out_uuid,
                                  std::string& err_msg) {
@@ -352,11 +319,6 @@ int main(int argc, char** argv) {
 
     ::prctl(PR_SET_PDEATHSIG, SIGTERM);
 
-    // Step 3 of the renderer-Init refactor: connect first, then
-    // recv Init and use its typed fields to populate Options before
-    // any GPU init or scene-property writes. The wescene renderer
-    // already had connect() before initVulkan(); we just slot Init
-    // recv right after the connect.
     HostState host;
     host.sock = ww_bridge_connect(opts.ipc_path.c_str());
     if (host.sock < 0)
@@ -513,11 +475,6 @@ int main(int argc, char** argv) {
     if (!host.pool || !host.swapchain)
         die("ex_swapchain_factory did not produce a pool / swapchain");
 
-    // Fired from the render thread the first time the swapchain
-    // successfully applies a directive — at that point slot views are
-    // live and drawFrameOffscreen will start emitting frame_ready. wp.play
-    // is itself a looper post, so re-entering from the render thread is
-    // fine.
     host.swapchain->setOnFirstNegotiated([&] {
         wp.play();
         std::fprintf(stderr,
@@ -535,11 +492,6 @@ int main(int argc, char** argv) {
     std::fprintf(stderr,
                  "waywallen-wescene-renderer: ready, advertise sent to daemon\n");
 
-    // Reader thread receives daemon → host messages and pushes any
-    // NEGOTIATE_BUFFERS directly onto the swapchain. The render thread
-    // (RenderHandler's looper) drains pending directives at the head of
-    // each acquireRenderTarget, so all slot/view lifetime is single-
-    // threaded.
     std::thread reader([&]() { reader_loop(host); });
 
     // Idle until shutdown. All real work is on the render and reader

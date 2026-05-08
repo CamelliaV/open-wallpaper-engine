@@ -1,28 +1,5 @@
 // waywallen-weweb-renderer — CEF (Wallpaper Engine *web*) host
 // subprocess.
-//
-// CEF spawns helper processes by re-execing the same binary with
-// `--type=zygote` / `--type=renderer` / `--type=utility` switches. The
-// `BrowserHost::RunOrExitIfHelper` call MUST run before any other
-// initialisation so helpers early-exit without booting the bridge,
-// argparse, or the producer Vulkan device.
-//
-// Frame path:
-//   1. CEF's OnAcceleratedPaint hands us a DMA-BUF from the browser
-//      compositor. The fd is borrowed; CEF reclaims when the callback
-//      returns.
-//   2. WebProducerDevice imports the dma-buf as a temp VkImage,
-//      acquires the next bridge slot, blits into it, signals an
-//      exportable sync_file semaphore, CPU-waits the blit fence, and
-//      returns the sync_fd.
-//   3. BridgeProducerCore::submitSlot forwards the sync_fd to
-//      `ww_bridge_pool_submit_slot` — bridge emits frame_ready.
-//   4. The temp VkImage + memory are destroyed. CEF's callback returns
-//      and the dma-buf can be reclaimed safely.
-//
-// Settings hot-reload: WW_EVT_IN_SETTING_CHANGED arrives on the reader
-// thread; the action is enqueued and drained on the main loop so all
-// CEF API calls happen on the CEF UI thread.
 
 #include "BridgeProducerCore.hpp"
 #include "WebProducerDevice.hpp"
