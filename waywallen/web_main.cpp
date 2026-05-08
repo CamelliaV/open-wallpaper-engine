@@ -366,8 +366,10 @@ int main(int argc, char** argv) {
     }
     pi.drm_render_fd          = -1; // bridge opens by minor
     pi.image_usage_flags      = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    // weweb writes the slot via vkCmdBlitImage (see
-    // WebProducerDevice.cpp); BLIT_DST has no usage-flag analogue.
+    // TRANSFER_DST is the default contract for any producer slot.
+    // weweb additionally writes via vkCmdBlitImage in
+    // WebProducerDevice::BlitToSlot (CEF source extent/format never
+    // matches the slot), so OR in BLIT_DST.
     pi.format_feature_flags   = VK_FORMAT_FEATURE_TRANSFER_DST_BIT
                               | VK_FORMAT_FEATURE_BLIT_DST_BIT;
 

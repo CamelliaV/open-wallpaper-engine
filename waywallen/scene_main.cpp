@@ -410,8 +410,9 @@ int main(int argc, char** argv) {
     // and the VkDevice is created; that's when ww_bridge_pool_create can
     // succeed. The factory captures `host` by reference; after init both
     // host.pool and host.swapchain point at live objects.
+    const bool msaa_enabled = opts.msaa_samples > 1;
     auto factory =
-        [&host](const owe::RenderInitInfo::ExSwapchainHandles& h)
+        [&host, msaa_enabled](const owe::RenderInitInfo::ExSwapchainHandles& h)
             -> std::unique_ptr<owe::ExSwapchain> {
         ww_pool_vulkan_init_t pi {};
         pi.instance              = h.instance;
@@ -434,12 +435,16 @@ int main(int argc, char** argv) {
                       "topology will be unknown to daemon", rc);
         }
         pi.drm_render_fd         = -1; // bridge opens by minor
-        // FinPass writes the slot via vkCmdCopyImage when extent+format
-        // match, otherwise vkCmdBlitImage. Advertise both feature bits so
-        // the daemon's modifier negotiation works on either path.
+        // FinPass writes the slot via vkCmdCopyImage by default (single-
+        // sample screen RT, extent + RGBA8 already match), so
+        // TRANSFER_DST is always required. MSAA additionally needs
+        // BLIT_DST because vkCmdBlitImage is the only op that does the
+        // multi-sample → single-sample resolve at the same step.
         pi.image_usage_flags     = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        pi.format_feature_flags  = VK_FORMAT_FEATURE_TRANSFER_DST_BIT
-                                 | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+        pi.format_feature_flags  = VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        if (msaa_enabled) {
+            pi.format_feature_flags |= VK_FORMAT_FEATURE_BLIT_DST_BIT;
+        }
         if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool);
             rc != 0) {
             rstd_error("waywallen-wescene-renderer: ww_bridge_pool_create failed: {}", rc);
