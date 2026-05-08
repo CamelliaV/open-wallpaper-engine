@@ -263,6 +263,10 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
 
 ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
     ImageHeader header;
+    // WE "_alias_*" textures are runtime aliases the engine resolves
+    // internally (light cookies, etc.). We don't model that, so just
+    // return an empty header without spamming a vfs miss.
+    if (name.find("_alias_") != std::string::npos) return header;
     std::string path  = "/assets/materials/" + name + ".tex";
     auto        pfile = m_vfs->Open(path);
     if (! pfile) return header;

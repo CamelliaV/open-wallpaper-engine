@@ -249,7 +249,7 @@ BlendMode ParseBlendMode(std::string_view str) {
 }
 
 void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
-                      const WPShaderInfo& sinfo) {
+                      const WPShaderInfo& sinfo, const Scene& scene) {
     if (IsSpecTex(name)) {
         if (name == "_rt_FullFrameBuffer") {
             name = SpecTex_Default;
@@ -273,8 +273,15 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
         } else if (sstart_with(name, WE_HALF_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_FULL_COMPO_BUFFER_PREFIX)) {
+        } else if (scene.renderTargets.count(name) > 0) {
+            // an effect-local fbo registered with a non-conventional name
+            // (e.g. WE DOF's `_rt__coc_<addr>`) — already a valid RT.
         } else {
-            rstd_error("unknown tex \"{}\"", name);
+            // unsupported special tex (shadow atlas, light cookie, ...).
+            // Drop the binding so it's skipped instead of looked up as a
+            // missing texture.
+            rstd_warn("ignoring unsupported special tex \"{}\"", name);
+            name.clear();
         }
     }
 }
@@ -358,7 +365,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
 
     for (usize i = 0; i < textures.size(); i++) {
         std::string name = textures.at(i);
-        ParseSpecTexName(name, wpmat, *pWPShaderInfo);
+        ParseSpecTexName(name, wpmat, *pWPShaderInfo, *pScene);
         material.textures.push_back(name);
         material.defines.push_back("g_Texture" + std::to_string(i));
         if (name.empty()) {
@@ -805,7 +812,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 fboMap["previous"] = inRT;
                 for (usize i = 0; i < wpeffobj.fbos.size(); i++) {
                     const auto& wpfbo  = wpeffobj.fbos.at(i);
-                    std::string rtname = wpfbo.name + "_" + effaddr;
+                    // Some effects (e.g. WE DOF) use fbo names without the
+                    // `_rt_` prefix (`_coc`, `_downscaled1`, ...). Force the
+                    // prefix so IsSpecTex / render-target lookups treat them
+                    // as render targets instead of disk textures.
+                    std::string rtname = sstart_with(wpfbo.name, WE_SPEC_PREFIX)
+                                             ? wpfbo.name + "_" + effaddr
+                                             : std::string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
                     if (wpimgobj.fullscreen) {
                         scene.renderTargets[rtname]      = { 2, 2, true };
                         scene.renderTargets[rtname].bind = {
