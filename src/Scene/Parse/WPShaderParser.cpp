@@ -769,6 +769,20 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     // alphabetically ordered, so vert and frag agree on offsets.
     std::string stage3 = StripUniforms(stage2);
 
+    // File-scope `const TYPE NAME[N] = { ... };` (e.g. WE bokeh's `kernel`)
+    // lands as a `$Globals` cbuffer member under DXC unless it's `static
+    // const`. We don't allocate or bind a $Globals descriptor, so a draw
+    // hits an unbound descriptor and the GPU hangs (validation reports
+    // "$Globals at Binding 4 never updated"). Promote line-start `const`
+    // array decls to `static const` so DXC inlines them as a constant
+    // table instead of materializing through the cbuffer.
+    {
+        static const std::regex re_const_arr(
+            R"((^|\n)const[ \t]+([\w]+)[ \t]+(\w+)[ \t]*\[)",
+            std::regex::ECMAScript);
+        stage3 = std::regex_replace(stage3, re_const_arr, "$1static const $2 $3[");
+    }
+
     std::vector<IODecl> attrs, varyings;
     Set<std::string>    seen;
     auto add = [&](const IODecl& d) {
