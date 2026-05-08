@@ -93,6 +93,9 @@ struct VulkanRender::Impl {
     std::unique_ptr<ExSwapchain> m_ex_swapchain;
     RenderingResources           m_rendering_resources;
 
+    // for VUID-vkQueueSubmit-pSignalSemaphores-00067
+    std::vector<vvk::Semaphore> m_sem_swap_finish_per_image;
+
     std::vector<VulkanPass*> m_passes;
 };
 
@@ -375,8 +378,14 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
     if (m_with_surface) {
         VkSemaphoreCreateInfo ci { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
                                    .pNext = nullptr };
-        VVK_CHECK_BOOL_RE(m_device->handle().CreateSemaphore(ci, rr.sem_swap_finish));
         VVK_CHECK_BOOL_RE(m_device->handle().CreateSemaphore(ci, rr.sem_swap_wait_image));
+
+        const usize n_images = m_device->swapchain().images().size();
+        m_sem_swap_finish_per_image.clear();
+        m_sem_swap_finish_per_image.resize(n_images);
+        for (auto& s : m_sem_swap_finish_per_image) {
+            VVK_CHECK_BOOL_RE(m_device->handle().CreateSemaphore(ci, s));
+        }
     }
 
     // Exportable SYNC_FD semaphore used by the waywallen-renderer host
@@ -461,6 +470,8 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     }
     (void)rr.command.End();
 
+    auto& sem_present_done = m_sem_swap_finish_per_image[image_index];
+
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo         sub_info {
                 .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -471,7 +482,7 @@ void VulkanRender::Impl::drawFrameSwapchain() {
                 .commandBufferCount   = 1,
                 .pCommandBuffers      = rr.command.address(),
                 .signalSemaphoreCount = 1,
-                .pSignalSemaphores    = rr.sem_swap_finish.address(),
+                .pSignalSemaphores    = sem_present_done.address(),
     };
 
     VVK_CHECK_VOID_RE(m_device->present_queue().handle.Submit(sub_info, *rr.fence_frame));
@@ -479,7 +490,7 @@ void VulkanRender::Impl::drawFrameSwapchain() {
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext              = nullptr,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = rr.sem_swap_finish.address(),
+        .pWaitSemaphores    = sem_present_done.address(),
         .swapchainCount     = 1,
         .pSwapchains        = m_device->swapchain().handle().address(),
         .pImageIndices      = &image_index,
