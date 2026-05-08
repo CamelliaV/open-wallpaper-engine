@@ -4,6 +4,7 @@ module;
 module wescene.parse;
 import wescene.core;
 import cppstd;
+import rstd.log;
 
 using namespace owe;
 
@@ -59,13 +60,15 @@ public:
     virtual ~WPSoundStream() = default;
 
     uint64_t next_pcm(void* pData, uint32_t frameCount) override {
+        if (m_dead) return 0;
+
         if (! m_curActive) {
             Switch();
         }
 
         // loop on EOF
         uint64_t frameReads = m_curActive ? m_curActive->next_pcm(pData, frameCount) : 0;
-        if (frameReads == 0) {
+        if (frameReads == 0 && ! m_dead) {
             Switch();
             frameReads = m_curActive ? m_curActive->next_pcm(pData, frameCount) : 0;
         }
@@ -80,15 +83,32 @@ public:
         return frameReads;
     };
     void pass_desc(const Desc& d) override { m_desc = d; }
+
+    // Walk paths until one opens. If all fail, disable the stream so the
+    // audio callback stops re-trying every tick (which spammed FFmpeg's
+    // demuxer-probe errors at audio-callback rate).
     void Switch() {
-        std::string path  = m_soundPaths[LoopIndex()];
-        auto        bin   = vfs.Open("/assets/" + path);
-        if (! bin) {
-            m_curActive.reset();
+        m_curActive.reset();
+        const uint32_t n = static_cast<uint32_t>(m_soundPaths.size());
+        if (n == 0) {
+            m_dead = true;
             return;
         }
-        auto adapter = std::make_shared<BStreamAdapter>(std::move(bin));
-        m_curActive = wavsen::audio::make_stream(std::move(adapter), m_desc);
+        for (uint32_t tried = 0; tried < n; ++tried) {
+            const std::string& path = m_soundPaths[LoopIndex()];
+            auto bin = vfs.Open("/assets/" + path);
+            if (! bin) continue;
+            auto adapter = std::make_shared<BStreamAdapter>(std::move(bin));
+            auto stream  = wavsen::audio::make_stream(std::move(adapter), m_desc);
+            if (stream) {
+                m_curActive = std::move(stream);
+                return;
+            }
+        }
+        m_dead = true;
+        rstd::log::warn(
+            "WPSoundStream: all {} sound path(s) failed to open; disabling stream",
+            n);
     }
     uint32_t LoopIndex() {
         m_curIndex++;
@@ -101,6 +121,7 @@ private:
     Config   m_config;
     Desc     m_desc;
     uint32_t m_curIndex { 0 };
+    bool     m_dead { false };
 
     const std::vector<std::string>             m_soundPaths;
     std::unique_ptr<wavsen::audio::SoundStream> m_curActive;
