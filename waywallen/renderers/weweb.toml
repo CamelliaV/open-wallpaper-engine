@@ -5,6 +5,7 @@ name = "weweb-renderer"
 bin  = "../weweb/waywallen-weweb-renderer"
 types = ["web"]
 priority = 100
+version = "0.1.0"
 spawn_version = 4
 extras = ["workshop_id"]
 

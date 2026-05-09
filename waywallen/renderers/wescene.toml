@@ -5,6 +5,7 @@ name = "wescene-renderer"
 bin  = "../../../bin/waywallen-wescene-renderer"
 types = ["scene"]
 priority = 100
+version = "0.1.0"
 spawn_version = 4
 extras = ["assets", "workshop_id"]
 events = ["pointer"]
