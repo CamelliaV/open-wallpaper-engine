@@ -157,7 +157,23 @@ struct HostState {
     std::vector<SettingDelta>             pending_settings;
 
     std::atomic<bool> shutdown { false };
+
+    // Tracked locally on the reader thread so OnMouseMove can carry
+    // the left-button-down flag CEF expects in modifiers (GLFW path
+    // does the same — there's no protocol field for it).
+    bool left_down { false };
 };
+
+// Linux input-event-code → CEF cef_mouse_button_type_t. -1 for codes
+// CEF can't represent (BTN_SIDE, BTN_EXTRA, …).
+int cef_button_from_linux(uint32_t btn) {
+    switch (btn) {
+    case 0x110: return 0; // BTN_LEFT  -> MBT_LEFT
+    case 0x111: return 2; // BTN_RIGHT -> MBT_RIGHT
+    case 0x112: return 1; // BTN_MIDDLE-> MBT_MIDDLE
+    default:    return -1;
+    }
+}
 
 void enqueue_setting(HostState& s, std::string key, std::string val) {
     std::lock_guard<std::mutex> lk(s.settings_mu);
@@ -218,10 +234,48 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     }
     case WW_EVT_IN_PLAY:
     case WW_EVT_IN_PAUSE:
-    case WW_EVT_IN_POINTER_MOTION:
-    case WW_EVT_IN_POINTER_BUTTON:
-    case WW_EVT_IN_POINTER_AXIS:
         break;
+    case WW_EVT_IN_POINTER_MOTION: {
+        // Daemon transforms display-local coords into renderer-tex
+        // pixel space before sending; CEF view rect is opened at the
+        // same pixel size, so the values map 1:1.
+        ww_bridge_pointer_motion_t pm {};
+        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.host) {
+            s.host->OnMouseMove(static_cast<int>(pm.x),
+                                static_cast<int>(pm.y),
+                                s.left_down);
+        }
+        break;
+    }
+    case WW_EVT_IN_POINTER_BUTTON: {
+        ww_bridge_pointer_button_t pb {};
+        if (ww_bridge_pointer_button_from_control(&msg, &pb) == 0 && s.host) {
+            int cef_btn = cef_button_from_linux(pb.button);
+            if (cef_btn >= 0) {
+                bool down = pb.state != 0;
+                if (cef_btn == 0) s.left_down = down;
+                s.host->OnMouseButton(static_cast<int>(pb.x),
+                                      static_cast<int>(pb.y),
+                                      cef_btn, down,
+                                      /*click_count=*/1);
+            }
+        }
+        break;
+    }
+    case WW_EVT_IN_POINTER_AXIS: {
+        ww_bridge_pointer_axis_t pa {};
+        if (ww_bridge_pointer_axis_from_control(&msg, &pa) == 0 && s.host) {
+            // delta_* arrives in "logical notches" (1.0 per wheel
+            // click). CEF wants pixel-ish deltas; 40 px/notch matches
+            // the GLFW WebViewer convention.
+            constexpr float kPxPerNotch = 40.0f;
+            s.host->OnMouseWheel(static_cast<int>(pa.x),
+                                 static_cast<int>(pa.y),
+                                 static_cast<int>(pa.delta_x * kPxPerNotch),
+                                 static_cast<int>(pa.delta_y * kPxPerNotch));
+        }
+        break;
+    }
     case WW_EVT_IN_SET_FPS:
         enqueue_setting(s, "fps", std::to_string(msg.u.set_fps.fps));
         break;
