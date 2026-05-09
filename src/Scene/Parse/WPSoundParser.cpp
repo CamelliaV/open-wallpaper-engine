@@ -5,6 +5,7 @@ module wescene.parse;
 import wescene.core;
 import cppstd;
 import rstd.log;
+import rstd;  // rstd::io::Result / SeekFrom for IByteStream impl
 
 using namespace owe;
 
@@ -29,16 +30,31 @@ class BStreamAdapter : public wavsen::audio::IByteStream {
 public:
     explicit BStreamAdapter(std::shared_ptr<fs::IBinaryStream> s): inner(std::move(s)) {}
 
-    std::size_t read(void* dst, std::size_t bytes) override {
-        return inner->Read(dst, bytes);
+    auto read(rstd::u8* dst, rstd::usize bytes)
+        -> rstd::io::Result<rstd::usize> override {
+        const auto n = inner->Read(dst, bytes);
+        return rstd::Ok(static_cast<rstd::usize>(n));
     }
-    bool seek(std::int64_t offset, Origin origin) override {
-        switch (origin) {
-        case Origin::Begin:   return inner->SeekSet(offset);
-        case Origin::Current: return inner->SeekCur(offset);
-        case Origin::End:     return inner->SeekEnd(offset);
+
+    auto seek(rstd::io::SeekFrom pos)
+        -> rstd::io::Result<rstd::u64> override {
+        bool ok = false;
+        switch (pos.which) {
+        case rstd::io::SeekFrom::Which::Start:
+            ok = inner->SeekSet(static_cast<std::int64_t>(pos.offset)); break;
+        case rstd::io::SeekFrom::Which::Current:
+            ok = inner->SeekCur(pos.offset); break;
+        case rstd::io::SeekFrom::Which::End:
+            ok = inner->SeekEnd(pos.offset); break;
         }
-        return false;
+        if (!ok) {
+            return rstd::Err(rstd::io::error::Error::from_kind(
+                rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::Other }));
+        }
+        // owe::fs::IBinaryStream doesn't expose post-seek absolute offset
+        // directly, so report 0 — wavsen's stream_decoder ignores the
+        // returned position (only checks is_err).
+        return rstd::Ok(rstd::u64 { 0 });
     }
 
 private:
