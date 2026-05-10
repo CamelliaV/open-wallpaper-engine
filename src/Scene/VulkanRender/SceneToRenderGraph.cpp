@@ -210,6 +210,23 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
         },
         scene.sceneGraph.get());
 
+    // Emit global post-process passes after the main scene-graph traversal.
+    // Each step is either a CustomShaderPass (built on the synthetic node's
+    // mesh+material) or a CopyPass (RT-to-RT blit).
+    for (auto& pp : scene.post_processes) {
+        for (auto& step : pp->steps) {
+            if (auto* sp = std::get_if<ScenePostProcessPass>(&step)) {
+                std::string_view target = sp->output.empty() ? SpecTex_Default
+                                                              : std::string_view(sp->output);
+                ToGraphPass(sp->node.get(), target, sp->node->ID(), extra);
+            } else if (auto* cp = std::get_if<ScenePostProcessCopy>(&step)) {
+                rg::addCopyPass(*rgraph,
+                                rg::createTexDesc(cp->src),
+                                rg::createTexDesc(cp->dst));
+            }
+        }
+    }
+
     for (auto& info : extra.link_info) {
         if (! exists(extra.id_link_map, info.link_id)) {
             rstd_error("link tex {} not found", info.link_id);

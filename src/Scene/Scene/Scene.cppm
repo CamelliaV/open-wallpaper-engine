@@ -383,6 +383,29 @@ private:
 };
 
 // ============================================================================
+// ScenePostProcess.h
+// First-class global post-process. Each pass uses the scene's default
+// fullscreen NDC quad as its mesh - no camera, no transform, no image.
+// Runs after main scene-graph traversal and writes through SpecTex_Default.
+// ============================================================================
+
+struct ScenePostProcessPass {
+    std::shared_ptr<SceneNode> node;     // synthetic; mesh + material only
+    std::string                output;   // RT key; empty -> SpecTex_Default
+};
+
+struct ScenePostProcessCopy {
+    std::string src;
+    std::string dst;
+};
+
+struct ScenePostProcess {
+    using Step = std::variant<ScenePostProcessPass, ScenePostProcessCopy>;
+    std::string       name;
+    std::vector<Step> steps;
+};
+
+// ============================================================================
 // SceneCamera.h
 // ============================================================================
 
@@ -1047,6 +1070,8 @@ public:
     bool first_frame_ok { false };
 
     SceneMesh default_effect_mesh;
+
+    std::vector<std::shared_ptr<ScenePostProcess>> post_processes;
 
     std::unique_ptr<ParticleSystem> paritileSys;
 

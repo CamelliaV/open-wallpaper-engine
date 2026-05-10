@@ -460,6 +460,22 @@ void LoadAlignment(SceneNode& node, std::string_view align, Vector2f size) {
     node.SetTranslate(trans);
 }
 
+// Apply effect-pass `bind` overrides onto wpmat.textures by index, using
+// fboMap to resolve effect-local FBO names to actual scene RT keys.
+void ApplyTextureBinds(wpscene::WPMaterial& wpmat,
+                       std::span<const wpscene::WPMaterialPassBindItem> binds,
+                       const std::unordered_map<std::string, std::string>& fboMap) {
+    for (const auto& el : binds) {
+        if (fboMap.count(el.name) == 0) {
+            rstd_error("fbo {} not found", el.name);
+            continue;
+        }
+        if (wpmat.textures.size() <= (usize)el.index)
+            wpmat.textures.resize((usize)el.index + 1);
+        wpmat.textures[(usize)el.index] = fboMap.at(el.name);
+    }
+}
+
 void LoadConstvalue(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
                     const WPShaderInfo& info) {
     // load glname from alias and load to constvalue
@@ -849,16 +865,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
                     wpmat.MergePass(wppass);
-                    // Set rendertarget, in and out
-                    for (const auto& el : wppass.bind) {
-                        if (fboMap.count(el.name) == 0) {
-                            rstd_error("fbo {} not found", el.name);
-                            continue;
-                        }
-                        if (wpmat.textures.size() <= (usize)el.index)
-                            wpmat.textures.resize((usize)el.index + 1);
-                        wpmat.textures[(usize)el.index] = fboMap[el.name];
-                    }
+                    ApplyTextureBinds(wpmat, std::span(wppass.bind), fboMap);
                     if (! wppass.target.empty()) {
                         if (fboMap.count(wppass.target) == 0) {
                             rstd_error("fbo {} not found", wppass.target);
@@ -1501,6 +1508,128 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
     return context.scene;
 }
 
+// Build a first-class global post-process for LDR bloom and append it to
+// scene.post_processes. 
+//
+// Five steps:
+//   1. downsample_quarter_bloom  : SpecTex_Default -> _rt_bloom_mip1
+//   2. downsample_eighth_blur_v  : _rt_bloom_mip1  -> _rt_bloom_mip2  (gaussian X)
+//   3. blur_h_bloom              : _rt_bloom_mip2  -> _rt_bloom_mip1  (gaussian Y)
+//   4. combine_ldr               : SpecTex_Default + _rt_bloom_mip1 -> _rt_bloom_combine
+//   5. copy                      : _rt_bloom_combine -> SpecTex_Default
+//
+// TODO: HDR bloom (combine_hdr / hdr_downsample chain)
+void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs,
+                           const wpscene::WPSceneGeneral& g) {
+    if (g.hdr) return;
+
+    auto& scene = *context.scene;
+
+    // Allocate post-process RTs as screen-bound (auto-resized with swapchain).
+    auto declare_rt = [&](std::string name, float inv_scale) {
+        SceneRenderTarget rt {};
+        rt.width      = 2;
+        rt.height     = 2;
+        rt.allowReuse = true;
+        rt.bind.enable = true;
+        rt.bind.screen = true;
+        rt.bind.scale  = inv_scale;
+        scene.renderTargets[std::move(name)] = rt;
+    };
+    declare_rt("_rt_bloom_mip1",    0.25f);
+    declare_rt("_rt_bloom_mip2",    0.25f);
+    declare_rt("_rt_bloom_combine", 1.0f);
+
+    const std::unordered_map<std::string, std::string> fboMap {
+        { "previous",          std::string(SpecTex_Default) },
+        { "_rt_default",       std::string(SpecTex_Default) },
+        { "_rt_bloom_mip1",    "_rt_bloom_mip1" },
+        { "_rt_bloom_mip2",    "_rt_bloom_mip2" },
+        { "_rt_bloom_combine", "_rt_bloom_combine" },
+    };
+
+    auto pp  = std::make_shared<ScenePostProcess>();
+    pp->name = "__bloom";
+
+    auto add_pass = [&](const char* mat_relpath,
+                        std::vector<wpscene::WPMaterialPassBindItem> binds,
+                        std::string output_rt,
+                        std::function<void(wpscene::WPMaterial&)> mutate = nullptr) -> bool {
+        nlohmann::json jMat;
+        if (! PARSE_JSON(fs::GetFileContent(vfs, std::string("/assets/") + mat_relpath), jMat)) {
+            rstd_error("bloom: parse material json failed: {}", mat_relpath);
+            return false;
+        }
+        wpscene::WPMaterial wpmat;
+        if (! wpmat.FromJson(jMat)) {
+            rstd_error("bloom: WPMaterial::FromJson failed: {}", mat_relpath);
+            return false;
+        }
+        ApplyTextureBinds(wpmat, std::span(binds), fboMap);
+        if (mutate) mutate(wpmat);
+
+        WPShaderInfo wpShaderInfo;
+        wpShaderInfo.baseConstSvs = context.global_base_uniforms;
+
+        auto              pp_node = std::make_shared<SceneNode>();
+        SceneMaterial     material;
+        WPShaderValueData svData;
+        if (! LoadMaterial(vfs, wpmat, &scene, pp_node.get(),
+                           &material, &svData, &wpShaderInfo)) {
+            rstd_error("bloom: LoadMaterial failed: {}", mat_relpath);
+            return false;
+        }
+        LoadConstvalue(material, wpmat, wpShaderInfo);
+
+        auto pp_mesh = std::make_shared<SceneMesh>();
+        pp_mesh->ChangeMeshDataFrom(scene.default_effect_mesh);
+        pp_mesh->AddMaterial(std::move(material));
+        pp_node->AddMesh(pp_mesh);
+
+        context.shader_updater->SetNodeData(pp_node.get(), svData);
+
+        pp->steps.emplace_back(ScenePostProcessPass {
+            .node   = std::move(pp_node),
+            .output = std::move(output_rt),
+        });
+        return true;
+    };
+
+    // Bright-pass: feed scene-general bloom params via material constvalues.
+    // The shader's `g_BloomStrength` / `g_BloomThreshold` / `g_BloomTint`
+    // pick them up through the // {"material":...} aliases (LoadConstvalue
+    // wires alias name -> uniform name).
+    if (! add_pass("materials/util/downsample_quarter_bloom.json",
+                   { { "previous", 0 } },
+                   "_rt_bloom_mip1",
+                   [&](wpscene::WPMaterial& m) {
+                       m.constantshadervalues["bloomstrength"]  = { g.bloomstrength };
+                       m.constantshadervalues["bloomthreshold"] = { g.bloomthreshold };
+                       m.constantshadervalues["bloomtint"]      = {
+                           g.bloomtint[0], g.bloomtint[1], g.bloomtint[2],
+                       };
+                   })) return;
+
+    if (! add_pass("materials/util/downsample_eighth_blur_v.json",
+                   { { "_rt_bloom_mip1", 0 } },
+                   "_rt_bloom_mip2")) return;
+
+    if (! add_pass("materials/util/blur_h_bloom.json",
+                   { { "_rt_bloom_mip2", 0 } },
+                   "_rt_bloom_mip1")) return;
+
+    if (! add_pass("materials/util/combine_ldr.json",
+                   { { "previous", 0 }, { "_rt_bloom_mip1", 1 } },
+                   "_rt_bloom_combine")) return;
+
+    pp->steps.emplace_back(ScenePostProcessCopy {
+        .src = "_rt_bloom_combine",
+        .dst = std::string(SpecTex_Default),
+    });
+
+    scene.post_processes.push_back(std::move(pp));
+}
+
 } // namespace owe
 
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
@@ -1518,5 +1647,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     AdjustAutoOrthoProjection(sc, wp_objs);
     auto context = BuildContext(vfs, scene_id, sc);
     ProcessObjects(context, wp_objs, &sm);
+    if (sc.general.bloom && ! sc.general.hdr) {
+        BuildBloomPostProcess(context, vfs, sc.general);
+    }
     return FinalizeScene(context);
 }
