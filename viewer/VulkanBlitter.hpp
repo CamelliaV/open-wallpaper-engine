@@ -113,7 +113,11 @@ private:
     VkCommandPool   cmd_pool_      {VK_NULL_HANDLE};
     VkCommandBuffer cmd_bufs_      [kMaxFramesInFlight] {VK_NULL_HANDLE, VK_NULL_HANDLE};
     VkSemaphore     img_avail_sem_ [kMaxFramesInFlight] {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    VkSemaphore     render_done_sem_[kMaxFramesInFlight]{VK_NULL_HANDLE, VK_NULL_HANDLE};
+    // Per-swapchain-image render-done semaphore, indexed by acquired
+    // image index. Reusing one binary semaphore across frames violates
+    // VUID-vkQueueSubmit-pSignalSemaphores-00067 because vkQueuePresentKHR
+    // keeps the wait semaphore busy until the image is re-acquired.
+    std::vector<VkSemaphore> render_done_sem_;
     VkFence         in_flight_fence_[kMaxFramesInFlight]{VK_NULL_HANDLE, VK_NULL_HANDLE};
 
     GLFWwindow* window_{nullptr};

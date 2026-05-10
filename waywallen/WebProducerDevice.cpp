@@ -254,9 +254,10 @@ WebProducerDevice::Import(const ::weweb::DmaBufFrame& frame) {
     uint64_t modifier = (frame.modifier == DRM_FORMAT_MOD_INVALID)
                             ? DRM_FORMAT_MOD_LINEAR : frame.modifier;
 
+    // VUID-VkImageDrmFormatModifierExplicitCreateInfoEXT-size-02267:
+    // size must be 0; driver derives it from rowPitch + extent + format.
     VkSubresourceLayout plane_layout {};
     plane_layout.offset   = frame.planes[0].offset;
-    plane_layout.size     = frame.planes[0].size;
     plane_layout.rowPitch = frame.planes[0].stride;
 
     VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info {};

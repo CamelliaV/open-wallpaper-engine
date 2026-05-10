@@ -58,7 +58,8 @@ void VulkanBlitter::Shutdown() {
     DestroyOwnedImage();
 
     for (auto& s : img_avail_sem_)  if (s) { vkDestroySemaphore(device_, s, nullptr); s = VK_NULL_HANDLE; }
-    for (auto& s : render_done_sem_) if (s) { vkDestroySemaphore(device_, s, nullptr); s = VK_NULL_HANDLE; }
+    for (auto& s : render_done_sem_) if (s) vkDestroySemaphore(device_, s, nullptr);
+    render_done_sem_.clear();
     for (auto& f : in_flight_fence_) if (f) { vkDestroyFence(device_, f, nullptr); f = VK_NULL_HANDLE; }
 
     if (cmd_pool_ != VK_NULL_HANDLE) {
@@ -271,10 +272,20 @@ bool VulkanBlitter::CreateSwapchain() {
     VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain_, &scount, nullptr));
     swap_images_.resize(scount);
     VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain_, &scount, swap_images_.data()));
+
+    // Per-image render-done semaphore (see hpp comment).
+    VkSemaphoreCreateInfo si{};
+    si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    render_done_sem_.resize(scount, VK_NULL_HANDLE);
+    for (std::uint32_t i = 0; i < scount; ++i) {
+        VK_CHECK(vkCreateSemaphore(device_, &si, nullptr, &render_done_sem_[i]));
+    }
     return true;
 }
 
 void VulkanBlitter::DestroySwapchain() {
+    for (auto& s : render_done_sem_) if (s) vkDestroySemaphore(device_, s, nullptr);
+    render_done_sem_.clear();
     if (swapchain_ != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(device_, swapchain_, nullptr);
         swapchain_ = VK_NULL_HANDLE;
@@ -289,9 +300,9 @@ bool VulkanBlitter::CreateSyncObjects() {
     fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
+    // render_done_sem_ is created per swapchain image in CreateSwapchain.
     for (std::uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
         VK_CHECK(vkCreateSemaphore(device_, &si, nullptr, &img_avail_sem_[i]));
-        VK_CHECK(vkCreateSemaphore(device_, &si, nullptr, &render_done_sem_[i]));
         VK_CHECK(vkCreateFence    (device_, &fi, nullptr, &in_flight_fence_[i]));
     }
     return true;
@@ -417,9 +428,10 @@ bool VulkanBlitter::AcceptDmaBuf(const DmaBufFrame& frame) {
     uint64_t modifier = (frame.modifier == DRM_FORMAT_MOD_INVALID)
                             ? DRM_FORMAT_MOD_LINEAR : frame.modifier;
 
+    // VUID-VkImageDrmFormatModifierExplicitCreateInfoEXT-size-02267:
+    // size must be 0; driver derives it from rowPitch + extent + format.
     VkSubresourceLayout plane_layout{};
     plane_layout.offset     = frame.planes[0].offset;
-    plane_layout.size       = frame.planes[0].size;
     plane_layout.rowPitch   = frame.planes[0].stride;
     plane_layout.arrayPitch = 0;
     plane_layout.depthPitch = 0;
@@ -627,7 +639,6 @@ bool VulkanBlitter::RenderFrame() {
     const std::uint32_t fi = 1;
     VkFence         fence    = in_flight_fence_[fi];
     VkSemaphore     img_sem  = img_avail_sem_[fi];
-    VkSemaphore     done_sem = render_done_sem_[fi];
     VkCommandBuffer cmd      = cmd_bufs_[fi];
 
     vkWaitForFences(device_, 1, &fence, VK_TRUE, kFenceTimeoutNs);
@@ -641,6 +652,7 @@ bool VulkanBlitter::RenderFrame() {
         std::fprintf(stderr, "weweb: vkAcquireNextImageKHR=%d\n", static_cast<int>(acq));
         return true;
     }
+    VkSemaphore done_sem = render_done_sem_[img_idx];
 
     vkResetFences(device_, 1, &fence);
     vkResetCommandBuffer(cmd, 0);
@@ -665,8 +677,11 @@ bool VulkanBlitter::RenderFrame() {
     b.subresourceRange.layerCount = 1;
     b.srcAccessMask               = 0;
     b.dstAccessMask               = VK_ACCESS_TRANSFER_WRITE_BIT;
+    // srcStage matches the wait dstStage on img_sem (TRANSFER) so the
+    // validator can chain "acquire-read → wait → barrier"; using
+    // TOP_OF_PIPE produces a SYNC-HAZARD-WRITE-AFTER-READ.
     vkCmdPipelineBarrier(cmd,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT,
                          0, 0, nullptr, 0, nullptr, 1, &b);
 
