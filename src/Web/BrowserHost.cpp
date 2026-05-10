@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
@@ -54,6 +55,15 @@ bool BrowserHost::Init(const InitOptions& opts) {
     settings.windowless_rendering_enabled = true;   // OSR mode
     settings.multi_threaded_message_loop  = false;
     settings.log_severity                 = LOGSEVERITY_WARNING;
+    // WW_CEF_DEBUG=1 ⇒ flip CEF's own log threshold so the chromium VLOG
+    // stream actually fires (--enable-logging=stderr alone is gated by
+    // settings.log_severity). WW_CEF_LOG_FILE redirects the file sink.
+    if (const char* dbg = std::getenv("WW_CEF_DEBUG"); dbg && dbg[0] && dbg[0] != '0') {
+        settings.log_severity = LOGSEVERITY_VERBOSE;
+    }
+    if (const char* lf = std::getenv("WW_CEF_LOG_FILE"); lf && lf[0]) {
+        CefString(&settings.log_file) = lf;
+    }
 
     auto set_cef_path = [](cef_string_t* dest,
                            const std::filesystem::path& p) {

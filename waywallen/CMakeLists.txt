@@ -121,7 +121,7 @@ if(BUILD_WEWEB)
     #   libvk_swiftshader.so   — SwiftShader vulkan ICD; useless when
     #                            we drop the loader above.
     #   vk_swiftshader_icd.json — JSON registering the ICD;
-    set(_CEF_SKIP libvulkan.so.1 libvk_swiftshader.so vk_swiftshader_icd.json)
+    set(_CEF_SKIP) #libvulkan.so.1 libvk_swiftshader.so vk_swiftshader_icd.json)
     foreach(_f IN LISTS CEF_BINARY_FILES)
         if(NOT _f IN_LIST _CEF_SKIP)
             install(FILES ${CEF_BINARY_DIR}/${_f}

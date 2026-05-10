@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 
 #include "DmaBufFrame.hpp"
+#include "Presenter.hpp"
 
 struct GLFWwindow;
 
@@ -21,10 +22,10 @@ namespace weweb {
 // RenderFrame vkCmdBlitImage's owned → swapchain image and presents.
 //
 // No render pass / pipeline / shaders.
-class VulkanBlitter {
+class VulkanBlitter : public Presenter {
 public:
     VulkanBlitter();
-    ~VulkanBlitter();
+    ~VulkanBlitter() override;
 
     VulkanBlitter(const VulkanBlitter&) = delete;
     VulkanBlitter& operator=(const VulkanBlitter&) = delete;
@@ -32,31 +33,31 @@ public:
     // Bring up instance + surface + device + swapchain. Returns false on
     // failure (logged to stderr). After a successful Init, the window
     // hint must have been GLFW_NO_API.
-    bool Init(GLFWwindow* window);
+    bool Init(GLFWwindow* window) override;
 
     // Tear everything down. Idempotent.
-    void Shutdown();
+    void Shutdown() override;
 
     // Current swapchain extent (= the size CEF should render at).
-    std::uint32_t Width()  const { return extent_.width; }
-    std::uint32_t Height() const { return extent_.height; }
+    std::uint32_t Width()  const override { return extent_.width; }
+    std::uint32_t Height() const override { return extent_.height; }
 
     // Recreate the swapchain after a window resize. The caller must wait
     // until the new extent is non-zero (window is iconified ⇒ skip).
-    bool Resize();
+    bool Resize() override;
 
     // Import a CEF DMA-BUF frame, copy it onto our owned image. Must be
     // called synchronously from inside the OnAcceleratedPaint callback —
     // we do a CPU-side fence wait so the GPU is finished reading the
     // imported buffer before this returns (CEF then reclaims the FD).
     // Returns false on any Vulkan error; the frame is dropped.
-    bool AcceptDmaBuf(const DmaBufFrame& frame);
+    bool AcceptDmaBuf(const DmaBufFrame& frame) override;
 
     // Render one frame. Blits the latest owned image to the acquired
     // swapchain image. If no owned image yet (no CEF paint received)
     // presents a black frame. Returns false if the swapchain went
     // out-of-date — caller should Resize() before the next frame.
-    bool RenderFrame();
+    bool RenderFrame() override;
 
 private:
     bool CreateInstance();

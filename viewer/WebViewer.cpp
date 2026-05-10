@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -16,13 +17,15 @@
 #include "Common.hpp"
 #include "Manifest.hpp"
 
+#include "EglPresenter.hpp"
+#include "Presenter.hpp"
 #include "VulkanBlitter.hpp"
 
 namespace {
 
 struct ViewerCtx {
-    weweb::BrowserHost*  host{nullptr};
-    weweb::VulkanBlitter* blitter{nullptr};
+    weweb::BrowserHost* host{nullptr};
+    weweb::Presenter*   presenter{nullptr};
     bool need_swapchain_recreate{false};
 };
 
@@ -103,6 +106,9 @@ int main(int argc, char** argv) {
         .help("if non-zero, expose chrome devtools on this localhost port")
         .default_value(0)
         .scan<'i', int>();
+    p.add_argument("--presenter")
+        .help("present backend: egl (default) or vulkan")
+        .default_value(std::string("egl"));
 
     try {
         p.parse_args(argc, argv);
@@ -117,6 +123,13 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    auto presenter_name = p.get<std::string>("--presenter");
+    if (presenter_name != "vulkan" && presenter_name != "egl") {
+        std::cerr << "webviewer: --presenter must be 'vulkan' or 'egl', got '"
+                  << presenter_name << "'\n";
+        return 2;
+    }
+
     auto manifest_opt = weweb::LoadWebManifest(workshop_dir);
     if (!manifest_opt) return 2;
     auto& manifest = *manifest_opt;
@@ -125,16 +138,18 @@ int main(int argc, char** argv) {
     // initialising Ozone (clipboard, font fallback, …) and we run with
     // --ozone-platform=x11; matching the toolkit avoids cross-display
     // synchronization weirdness.
-    viewer::InitGlfwPlatformHint(/*force_x11=*/true);
+    viewer::InitGlfwPlatformHint(/*force_x11=*/false);
     if (!glfwInit()) {
         std::cerr << "webviewer: glfwInit failed\n";
         return 1;
     }
-    if (!glfwVulkanSupported()) {
+    if (presenter_name == "vulkan" && !glfwVulkanSupported()) {
         std::cerr << "webviewer: glfw says Vulkan is not supported\n";
         glfwTerminate();
         return 1;
     }
+    // EGL path manages its own GL context against the X11 window; we still
+    // want GLFW to leave the window context-less either way.
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     int w_width  = p.get<int>("--width");
@@ -148,8 +163,13 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    weweb::VulkanBlitter blitter;
-    if (!blitter.Init(window)) {
+    std::unique_ptr<weweb::Presenter> presenter;
+    if (presenter_name == "vulkan") {
+        presenter = std::make_unique<weweb::VulkanBlitter>();
+    } else {
+        presenter = std::make_unique<weweb::EglPresenter>();
+    }
+    if (!presenter->Init(window)) {
         glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
@@ -166,35 +186,36 @@ int main(int argc, char** argv) {
     }
 
     if (!host.Init(opts)) {
-        blitter.Shutdown();
+        presenter->Shutdown();
         glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
     }
 
-    // Hook DMA-BUF frames straight into the blitter's import path.
+    // Hook DMA-BUF frames straight into the presenter's import path.
     // The callback runs synchronously inside CefDoMessageLoopWork on the
     // main thread; FDs in `frame` are valid only for the duration.
+    weweb::Presenter* presenter_ptr = presenter.get();
     host.SetAcceleratedPaintCallback(
-        [&blitter](const weweb::DmaBufFrame& frame) {
-            blitter.AcceptDmaBuf(frame);
+        [presenter_ptr](const weweb::DmaBufFrame& frame) {
+            presenter_ptr->AcceptDmaBuf(frame);
         });
 
     // Open the wallpaper at the swapchain extent — CEF renders straight
     // into our swapchain-pixel space, no rescaling needed.
-    int initial_w = static_cast<int>(blitter.Width());
-    int initial_h = static_cast<int>(blitter.Height());
+    int initial_w = static_cast<int>(presenter->Width());
+    int initial_h = static_cast<int>(presenter->Height());
     if (!host.OpenWallpaper(manifest, workshop_dir, initial_w, initial_h)) {
         host.Shutdown();
-        blitter.Shutdown();
+        presenter->Shutdown();
         glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
     }
 
     ViewerCtx ctx;
-    ctx.host    = &host;
-    ctx.blitter = &blitter;
+    ctx.host      = &host;
+    ctx.presenter = presenter.get();
     glfwSetWindowUserPointer(window, &ctx);
     glfwSetFramebufferSizeCallback(window, OnFramebufferSize);
     glfwSetCursorPosCallback     (window, OnCursorPos);
@@ -220,12 +241,12 @@ int main(int argc, char** argv) {
             int fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
             if (fbw > 0 && fbh > 0) {
-                if (!blitter.Resize()) {
-                    std::cerr << "webviewer: blitter Resize failed\n";
+                if (!presenter->Resize()) {
+                    std::cerr << "webviewer: presenter Resize failed\n";
                     break;
                 }
-                host.OnResize(static_cast<int>(blitter.Width()),
-                              static_cast<int>(blitter.Height()));
+                host.OnResize(static_cast<int>(presenter->Width()),
+                              static_cast<int>(presenter->Height()));
                 ctx.need_swapchain_recreate = false;
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -235,13 +256,13 @@ int main(int argc, char** argv) {
 
         // Owned image was already updated synchronously inside Pump()
         // when CEF delivered an OnAcceleratedPaint frame.
-        if (!blitter.RenderFrame()) {
+        if (!presenter->RenderFrame()) {
             ctx.need_swapchain_recreate = true;
         }
     }
 
     host.Shutdown();
-    blitter.Shutdown();
+    presenter->Shutdown();
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

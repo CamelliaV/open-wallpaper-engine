@@ -20,17 +20,26 @@ if(BUILD_WESCENE AND BUILD_VIEWER)
     set_target_properties(SceneViewer PROPERTIES CXX_SCAN_FOR_MODULES ON)
 endif()
 
-# weweb web viewer. Vulkan presenter (DMA-BUF blit) lives next to WebViewer.cpp.
+# weweb web viewer. Vulkan / EGL presenters (DMA-BUF blit) live next to WebViewer.cpp.
 if(BUILD_WEWEB)
     find_package(Vulkan REQUIRED)
+    pkg_check_modules(WEWEB_EGL    REQUIRED IMPORTED_TARGET egl)
+    pkg_check_modules(WEWEB_GLES3  REQUIRED IMPORTED_TARGET glesv2)
+    pkg_check_modules(WEWEB_X11    REQUIRED IMPORTED_TARGET x11)
+    pkg_check_modules(WEWEB_WLEGL  REQUIRED IMPORTED_TARGET wayland-egl)
     add_executable(WebViewer
         WebViewer.cpp
-        VulkanBlitter.cpp)
+        VulkanBlitter.cpp
+        EglPresenter.cpp)
     target_link_libraries(WebViewer PRIVATE
         viewer-common
         owe-web-host
         PkgConfig::GLFW
         Vulkan::Vulkan
+        PkgConfig::WEWEB_EGL
+        PkgConfig::WEWEB_GLES3
+        PkgConfig::WEWEB_X11
+        PkgConfig::WEWEB_WLEGL
         argparse::argparse
         ${CEF_STANDARD_LIBS})
     set_target_properties(WebViewer PROPERTIES
