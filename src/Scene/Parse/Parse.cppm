@@ -14,6 +14,7 @@ export import :wp_particle_object;
 export import :wp_particle_parser;
 export import wescene.puppet;
 export import :wp_scene;
+export import :scene_stages;
 export import :wp_scene_parser;
 export import :wp_shader_parser;
 export import :wp_sound_object;

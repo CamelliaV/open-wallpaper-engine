@@ -1,0 +1,640 @@
+// wescene-test: consolidated CLI for the wescene-renderer test surface.
+//
+//   wescene-test scan    [...]   walk pkgs and parse + (optionally) validate
+//   wescene-test extract [...]   list or export a single asset from one pkg
+//
+// Replaces wpparse / wpshadercompile / wpdump / wpscan / wptexparse /
+// wpscript* (archived in tests/old/). Host-only: no Vulkan device, no
+// GLFW. Exit 0 iff every selected pkg parsed AND every requested
+// validator succeeded.
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+import wescene.parse;
+import wescene.fs;
+import wescene.pkg_fs;
+import wescene.scene;
+import wescene.types;
+
+#include "pkg_header.hpp"
+
+namespace fs = std::filesystem;
+using json   = nlohmann::json;
+
+namespace {
+
+constexpr const char* kDefaultWorkshopDir =
+#ifdef WAYWALLEN_WORKSHOP_DIR
+    WAYWALLEN_WORKSHOP_DIR
+#else
+    "workshop"
+#endif
+    ;
+
+constexpr const char* kDefaultAssetsDir =
+#ifdef WAYWALLEN_ASSETS_DIR
+    WAYWALLEN_ASSETS_DIR
+#else
+    ""
+#endif
+    ;
+
+// Workshops that hang or hard-crash deep parsers. Same list as wpparse.
+constexpr std::array<const char*, 1> kSkipIds = { "2435537849" };
+
+void TopUsage(const char* prog) {
+    std::fprintf(stderr,
+                 "usage: %s <subcommand> [options]\n"
+                 "\n"
+                 "Subcommands:\n"
+                 "  scan      Walk pkgs and run scene parse, optionally with per-asset\n"
+                 "            validators (--validate-tex / --validate-shader /\n"
+                 "            --validate-mdl). Filterable by --name and --pkgv.\n"
+                 "  extract   List entries of a single scene.pkg, or export one asset\n"
+                 "            file (text or binary) to stdout or -o FILE.\n"
+                 "\n"
+                 "Run `%s <subcommand> --help` for subcommand-specific options.\n",
+                 prog ? prog : "wescene-test", prog ? prog : "wescene-test");
+}
+
+// ---------------------------------------------------------------------------
+// shared helpers
+// ---------------------------------------------------------------------------
+
+std::string LowerCopy(std::string_view s) {
+    std::string out(s);
+    for (auto& c : out) c = (char)std::tolower((unsigned char)c);
+    return out;
+}
+
+bool EndsWith(std::string_view s, std::string_view suffix) {
+    return s.size() >= suffix.size() &&
+           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool StartsWith(std::string_view s, std::string_view prefix) {
+    return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
+}
+
+// Resolve a user-provided pkg argument. Accepts either a direct path to
+// scene.pkg or a directory that contains one. Returns empty on failure.
+std::string ResolvePkgPath(std::string_view arg) {
+    fs::path p { arg };
+    if (fs::is_directory(p)) p /= "scene.pkg";
+    if (! fs::exists(p) || ! fs::is_regular_file(p)) return {};
+    return p.string();
+}
+
+// Normalise an asset path to the in-pkg shape ("/scene.json"). Accepts
+// "/scene.json", "scene.json", "/assets/scene.json", "assets/scene.json".
+std::string NormalisePkgAssetPath(std::string_view arg) {
+    std::string p { arg };
+    if (StartsWith(p, "/assets/")) p.erase(0, 7);  // → "/scene.json"
+    else if (StartsWith(p, "assets/")) p.erase(0, 6); // → "/scene.json" — wait, 6 chars then ensure leading '/'
+    if (! p.empty() && p.front() != '/') p.insert(p.begin(), '/');
+    return p;
+}
+
+// ---------------------------------------------------------------------------
+// scan subcommand
+// ---------------------------------------------------------------------------
+
+struct ScanOptions {
+    std::string              workshop_dir = kDefaultWorkshopDir;
+    std::string              assets_dir   = kDefaultAssetsDir;
+    bool                     v_tex { false };
+    bool                     v_shader { false };
+    bool                     v_mdl { false };
+    std::vector<std::string> name_filters;
+    std::vector<unsigned>    pkgv_filters;
+    int                      limit { 0 };
+    bool                     quiet { false };
+};
+
+void ScanUsage(const char* prog) {
+    std::fprintf(stderr,
+                 "usage: %s scan [options]\n"
+                 "  --workshop-dir DIR   workshop root (children are <id>/scene.pkg) or a\n"
+                 "                       single pkg dir (DIR itself contains scene.pkg).\n"
+                 "                       (default: %s)\n"
+                 "  --assets DIR         shared engine assets, mounted at /assets fallback\n"
+                 "                       (default: %s)\n"
+                 "Validators (any combination):\n"
+                 "  --validate-tex       run WPTexImageParser on every /materials/**/*.tex\n"
+                 "  --validate-shader    run WPShaderParser::CompileMaterialShader on every\n"
+                 "                       /materials/**/*.json\n"
+                 "  --validate-mdl       run WPMdlParser::Parse on every /models/**/*.mdl\n"
+                 "  --validate-all       all of the above\n"
+                 "Filters (repeatable; multiple --name/--pkgv values OR together):\n"
+                 "  --name SUBSTR        only pkgs whose dir name contains SUBSTR (ci)\n"
+                 "  --pkgv N             only pkgs with PKGV stamp == N\n"
+                 "  --limit N            stop after N matched pkgs (default 0 = all)\n"
+                 "Misc:\n"
+                 "  --quiet              suppress per-asset OK lines; only FAIL + summary\n"
+                 "  -h, --help           this message\n",
+                 prog ? prog : "wescene-test",
+                 kDefaultWorkshopDir,
+                 *kDefaultAssetsDir ? kDefaultAssetsDir : "<unset>");
+}
+
+bool ParseScanArgs(int argc, char** argv, ScanOptions& opt, const char* prog) {
+    for (int i = 0; i < argc; ++i) {
+        std::string_view a = argv[i];
+        auto need_val = [&](std::string_view name) -> const char* {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "wescene-test scan: %s requires a value\n",
+                             std::string(name).c_str());
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--workshop-dir") {
+            if (auto* v = need_val(a)) opt.workshop_dir = v;
+            else return false;
+        } else if (a == "--assets") {
+            if (auto* v = need_val(a)) opt.assets_dir = v;
+            else return false;
+        } else if (a == "--validate-tex") {
+            opt.v_tex = true;
+        } else if (a == "--validate-shader") {
+            opt.v_shader = true;
+        } else if (a == "--validate-mdl") {
+            opt.v_mdl = true;
+        } else if (a == "--validate-all") {
+            opt.v_tex = opt.v_shader = opt.v_mdl = true;
+        } else if (a == "--name") {
+            if (auto* v = need_val(a)) opt.name_filters.emplace_back(v);
+            else return false;
+        } else if (a == "--pkgv") {
+            if (auto* v = need_val(a)) opt.pkgv_filters.push_back((unsigned)std::atoi(v));
+            else return false;
+        } else if (a == "--limit") {
+            if (auto* v = need_val(a)) opt.limit = std::atoi(v);
+            else return false;
+        } else if (a == "--quiet") {
+            opt.quiet = true;
+        } else if (a == "-h" || a == "--help") {
+            ScanUsage(prog);
+            std::exit(0);
+        } else {
+            std::fprintf(stderr, "wescene-test scan: unknown arg '%.*s'\n",
+                         (int)a.size(), a.data());
+            return false;
+        }
+    }
+    return true;
+}
+
+bool MatchesNameFilters(const std::string& dir_name, const std::vector<std::string>& filters) {
+    if (filters.empty()) return true;
+    const std::string lo = LowerCopy(dir_name);
+    for (const auto& f : filters) {
+        if (lo.find(LowerCopy(f)) != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool MatchesPkgvFilters(unsigned v, const std::vector<unsigned>& filters) {
+    if (filters.empty()) return true;
+    return std::find(filters.begin(), filters.end(), v) != filters.end();
+}
+
+struct Counters {
+    int parsed_ok { 0 };
+    int parsed_fail { 0 };
+    int tex_ok { 0 }, tex_fail { 0 };
+    int shader_ok { 0 }, shader_fail { 0 };
+    int mdl_ok { 0 }, mdl_fail { 0 };
+};
+
+// Runs scene parse base (FromJson + ExpandObjects + AdjustAuto). Cheap;
+// never touches glslang or scene-graph allocation.
+bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std::string& err) {
+    auto stream = vfs.Open("/assets/scene.json");
+    if (! stream) {
+        err = "scene.json not in pkg";
+        return false;
+    }
+    const std::string text = stream->ReadAllStr();
+    json              j;
+    try {
+        j = json::parse(text);
+    } catch (const std::exception& e) {
+        err = std::string("scene.json parse: ") + e.what();
+        return false;
+    }
+    owe::wpscene::WPScene sc;
+    if (! sc.FromJson(j, pkg_v)) {
+        err = "WPScene::FromJson returned false";
+        return false;
+    }
+    auto wp_objs = owe::ExpandObjects(j, vfs, pkg_v);
+    owe::AdjustAutoOrthoProjection(sc, wp_objs);
+    (void)wp_objs;
+    return true;
+}
+
+void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
+                      owe::fs::VFS& vfs, const std::string& pkg_id,
+                      Counters& c, bool quiet) {
+    owe::WPTexImageParser parser(&vfs);
+    constexpr std::string_view prefix = "/materials/";
+    constexpr std::string_view suffix = ".tex";
+    for (const auto& e : entries) {
+        if (! StartsWith(e.path, prefix) || ! EndsWith(e.path, suffix)) continue;
+        if (e.path.size() < prefix.size() + suffix.size()) continue;
+        // ParseHeader takes the bare name (no /materials/ prefix, no .tex
+        // suffix), matching WPMaterial.textures shape.
+        const std::string name = e.path.substr(prefix.size(),
+                                               e.path.size() - prefix.size() - suffix.size());
+        bool              ok   = false;
+        std::string       err;
+        try {
+            owe::ImageHeader h = parser.ParseHeader(name);
+            ok = (h.width > 0 && h.height > 0);
+            if (! ok) err = "header looks invalid (zero dim)";
+        } catch (const std::exception& ex) {
+            err = ex.what();
+        } catch (...) {
+            err = "unknown exception";
+        }
+        if (ok) {
+            ++c.tex_ok;
+            if (! quiet)
+                std::fprintf(stdout, "OK    %s tex %s\n", pkg_id.c_str(), e.path.c_str());
+        } else {
+            ++c.tex_fail;
+            std::fprintf(stdout, "FAIL  %s tex %s  %s\n", pkg_id.c_str(), e.path.c_str(),
+                         err.c_str());
+        }
+    }
+}
+
+void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
+                     owe::fs::VFS& vfs, const std::string& pkg_id,
+                     Counters& c, bool quiet) {
+    for (const auto& e : entries) {
+        if (! StartsWith(e.path, "/materials/") || ! EndsWith(e.path, ".json")) continue;
+        const std::string vfs_path = "/assets" + e.path;
+        auto              stream   = vfs.Open(vfs_path);
+        if (! stream) {
+            ++c.shader_fail;
+            std::fprintf(stdout, "FAIL  %s shader %s  cannot open\n", pkg_id.c_str(),
+                         e.path.c_str());
+            continue;
+        }
+        const std::string text = stream->ReadAllStr();
+        json              jmat;
+        try {
+            jmat = json::parse(text);
+        } catch (const std::exception& ex) {
+            ++c.shader_fail;
+            std::fprintf(stdout, "FAIL  %s shader %s  json: %s\n", pkg_id.c_str(),
+                         e.path.c_str(), ex.what());
+            continue;
+        }
+        owe::CompileMaterialShaderResult r;
+        try {
+            r = owe::WPShaderParser::CompileMaterialShader(jmat, vfs, pkg_id);
+        } catch (const std::exception& ex) {
+            r.ok    = false;
+            r.error = ex.what();
+        } catch (...) {
+            r.ok    = false;
+            r.error = "unknown exception";
+        }
+        if (r.ok) {
+            ++c.shader_ok;
+            if (! quiet)
+                std::fprintf(stdout, "OK    %s shader %s [%s]\n", pkg_id.c_str(),
+                             e.path.c_str(), r.shader_name.c_str());
+        } else {
+            ++c.shader_fail;
+            std::fprintf(stdout, "FAIL  %s shader %s [%s]  %s\n", pkg_id.c_str(),
+                         e.path.c_str(), r.shader_name.c_str(), r.error.c_str());
+        }
+    }
+}
+
+void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries,
+                  owe::fs::VFS& vfs, const std::string& pkg_id,
+                  Counters& c, bool quiet) {
+    for (const auto& e : entries) {
+        if (! EndsWith(e.path, ".mdl")) continue;
+        // WPMdlParser::Parse takes a path without /assets prefix.
+        std::string name(e.path.substr(1));
+        bool        ok = false;
+        std::string err;
+        try {
+            owe::WPMdl mdl;
+            ok = owe::WPMdlParser::Parse(name, vfs, mdl);
+            if (! ok) err = "WPMdlParser::Parse returned false";
+        } catch (const std::exception& ex) {
+            err = ex.what();
+        } catch (...) {
+            err = "unknown exception";
+        }
+        if (ok) {
+            ++c.mdl_ok;
+            if (! quiet)
+                std::fprintf(stdout, "OK    %s mdl %s\n", pkg_id.c_str(), e.path.c_str());
+        } else {
+            ++c.mdl_fail;
+            std::fprintf(stdout, "FAIL  %s mdl %s  %s\n", pkg_id.c_str(), e.path.c_str(),
+                         err.c_str());
+        }
+    }
+}
+
+bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c) {
+    const std::string pkg_id = pkg_dir.filename().string();
+
+    for (const auto* sk : kSkipIds) {
+        if (pkg_id == sk) {
+            std::fprintf(stderr, "SKIP  %s (in kSkipIds)\n", pkg_id.c_str());
+            return true;
+        }
+    }
+
+    const std::string pkg_path = (pkg_dir / "scene.pkg").string();
+    if (! fs::exists(pkg_path)) {
+        ++c.parsed_fail;
+        std::fprintf(stdout, "FAIL  %s parse  scene.pkg not found\n", pkg_id.c_str());
+        return false;
+    }
+
+    std::string                          version_stamp;
+    std::vector<owe::testing::PkgEntry>  entries;
+    if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
+        ++c.parsed_fail;
+        std::fprintf(stdout, "FAIL  %s parse  ReadPkgHeader\n", pkg_id.c_str());
+        return false;
+    }
+    const auto pkg_v = owe::wpscene::ParsePkgVersionStamp(version_stamp);
+
+    if (! MatchesPkgvFilters((unsigned)pkg_v, opt.pkgv_filters)) return true;
+
+    owe::fs::VFS vfs;
+    if (! opt.assets_dir.empty()) {
+        if (auto pfs = owe::fs::CreatePhysicalFs(opt.assets_dir)) {
+            vfs.Mount("/assets", std::move(pfs));
+        }
+    }
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    if (! wfs) {
+        ++c.parsed_fail;
+        std::fprintf(stdout, "FAIL  %s parse  WPPkgFs::CreatePkgFs\n", pkg_id.c_str());
+        return false;
+    }
+    vfs.Mount("/assets", std::move(wfs));
+
+    std::string parse_err;
+    bool        parse_ok = false;
+    try {
+        parse_ok = RunSceneParseBase(vfs, pkg_v, parse_err);
+    } catch (const std::exception& ex) {
+        parse_err = ex.what();
+    } catch (...) {
+        parse_err = "unknown exception";
+    }
+    if (parse_ok) {
+        ++c.parsed_ok;
+        if (! opt.quiet)
+            std::fprintf(stdout, "OK    %s parse  v=%u\n", pkg_id.c_str(), (unsigned)pkg_v);
+    } else {
+        ++c.parsed_fail;
+        std::fprintf(stdout, "FAIL  %s parse  v=%u  %s\n", pkg_id.c_str(), (unsigned)pkg_v,
+                     parse_err.c_str());
+    }
+
+    if (opt.v_tex)    ValidateTextures(entries, vfs, pkg_id, c, opt.quiet);
+    if (opt.v_shader) ValidateShaders(entries, vfs, pkg_id, c, opt.quiet);
+    if (opt.v_mdl)    ValidateMdls(entries, vfs, pkg_id, c, opt.quiet);
+
+    return parse_ok;
+}
+
+int CmdScan(int argc, char** argv, const char* prog) {
+    ScanOptions opt;
+    if (! ParseScanArgs(argc, argv, opt, prog)) {
+        ScanUsage(prog);
+        return 2;
+    }
+
+    if (! fs::exists(opt.workshop_dir) || ! fs::is_directory(opt.workshop_dir)) {
+        std::fprintf(stderr, "wescene-test scan: %s is not a directory\n",
+                     opt.workshop_dir.c_str());
+        return 1;
+    }
+
+    std::vector<fs::path> dirs;
+    if (fs::exists(fs::path(opt.workshop_dir) / "scene.pkg")) {
+        dirs.push_back(opt.workshop_dir);
+    } else {
+        for (auto& e : fs::directory_iterator(opt.workshop_dir)) {
+            if (! e.is_directory()) continue;
+            if (! fs::exists(e.path() / "scene.pkg")) continue;
+            const std::string id = e.path().filename().string();
+            if (! MatchesNameFilters(id, opt.name_filters)) continue;
+            dirs.push_back(e.path());
+        }
+        std::sort(dirs.begin(), dirs.end());
+        if (opt.limit > 0 && (int)dirs.size() > opt.limit) {
+            dirs.resize((size_t)opt.limit);
+        }
+    }
+
+    if (dirs.empty()) {
+        std::fprintf(stderr, "wescene-test scan: no matching pkgs\n");
+        return 1;
+    }
+
+    Counters c;
+    auto     t0 = std::chrono::steady_clock::now();
+
+    for (const auto& d : dirs) {
+        ProcessOnePkg(d, opt, c);
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+    std::fprintf(stderr,
+                 "wescene-test scan: %zu pkgs | parse %d/%d",
+                 dirs.size(), c.parsed_ok, c.parsed_ok + c.parsed_fail);
+    if (opt.v_tex)    std::fprintf(stderr, " | tex %d/%d",    c.tex_ok,    c.tex_ok + c.tex_fail);
+    if (opt.v_shader) std::fprintf(stderr, " | shader %d/%d", c.shader_ok, c.shader_ok + c.shader_fail);
+    if (opt.v_mdl)    std::fprintf(stderr, " | mdl %d/%d",    c.mdl_ok,    c.mdl_ok + c.mdl_fail);
+    std::fprintf(stderr, " | %lldms\n", (long long)ms);
+
+    const int total_fail =
+        c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail;
+    return total_fail == 0 ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
+// extract subcommand
+// ---------------------------------------------------------------------------
+
+void ExtractUsage(const char* prog) {
+    std::fprintf(stderr,
+                 "usage: %s extract <pkg> [<asset-path>] [-o FILE]\n"
+                 "\n"
+                 "  <pkg>         path to scene.pkg, or a directory containing one.\n"
+                 "  <asset-path>  in-pkg path to extract (e.g. '/scene.json',\n"
+                 "                'materials/foo.json', 'models/bar.mdl'). Optional;\n"
+                 "                if omitted, lists every entry one per line and exits.\n"
+                 "  -o FILE       write to FILE. Default: write to stdout.\n"
+                 "                Use '-' to force stdout.\n"
+                 "\n"
+                 "Examples:\n"
+                 "  %s extract workshop/123                      # list entries\n"
+                 "  %s extract workshop/123 /scene.json          # dump scene.json to stdout\n"
+                 "  %s extract workshop/123 materials/foo.tex -o foo.tex\n",
+                 prog ? prog : "wescene-test", prog ? prog : "wescene-test",
+                 prog ? prog : "wescene-test", prog ? prog : "wescene-test");
+}
+
+int CmdExtract(int argc, char** argv, const char* prog) {
+    std::string pkg_arg;
+    std::string asset_arg;
+    std::string out_file;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view a = argv[i];
+        if (a == "-h" || a == "--help") {
+            ExtractUsage(prog);
+            return 0;
+        } else if (a == "-o") {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "wescene-test extract: -o requires a value\n");
+                return 2;
+            }
+            out_file = argv[++i];
+        } else if (StartsWith(a, "-")) {
+            std::fprintf(stderr, "wescene-test extract: unknown flag '%.*s'\n",
+                         (int)a.size(), a.data());
+            return 2;
+        } else if (pkg_arg.empty()) {
+            pkg_arg = a;
+        } else if (asset_arg.empty()) {
+            asset_arg = a;
+        } else {
+            std::fprintf(stderr, "wescene-test extract: unexpected positional '%.*s'\n",
+                         (int)a.size(), a.data());
+            return 2;
+        }
+    }
+
+    if (pkg_arg.empty()) {
+        ExtractUsage(prog);
+        return 2;
+    }
+
+    const std::string pkg_path = ResolvePkgPath(pkg_arg);
+    if (pkg_path.empty()) {
+        std::fprintf(stderr, "wescene-test extract: '%s' is not a scene.pkg or directory containing one\n",
+                     pkg_arg.c_str());
+        return 1;
+    }
+
+    std::string                          version_stamp;
+    std::vector<owe::testing::PkgEntry>  entries;
+    if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
+        std::fprintf(stderr, "wescene-test extract: ReadPkgHeader failed on %s\n",
+                     pkg_path.c_str());
+        return 1;
+    }
+
+    // No asset path → list entries (sorted, one per line).
+    if (asset_arg.empty()) {
+        std::vector<std::string> paths;
+        paths.reserve(entries.size());
+        for (const auto& e : entries) paths.push_back(e.path);
+        std::sort(paths.begin(), paths.end());
+        std::fprintf(stderr, "wescene-test extract: %s (%s, %zu entries)\n",
+                     pkg_path.c_str(), version_stamp.c_str(), paths.size());
+        for (const auto& p : paths) std::fprintf(stdout, "%s\n", p.c_str());
+        return 0;
+    }
+
+    const std::string in_pkg_path = NormalisePkgAssetPath(asset_arg);
+    const std::string vfs_path    = "/assets" + in_pkg_path;
+
+    owe::fs::VFS vfs;
+    auto         wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    if (! wfs) {
+        std::fprintf(stderr, "wescene-test extract: WPPkgFs::CreatePkgFs failed on %s\n",
+                     pkg_path.c_str());
+        return 1;
+    }
+    vfs.Mount("/assets", std::move(wfs));
+
+    auto stream = vfs.Open(vfs_path);
+    if (! stream) {
+        std::fprintf(stderr, "wescene-test extract: '%s' not found in pkg\n",
+                     in_pkg_path.c_str());
+        return 1;
+    }
+
+    const std::string body = stream->ReadAllStr();
+
+    FILE* out = nullptr;
+    bool  close_out = false;
+    if (out_file.empty() || out_file == "-") {
+        out = stdout;
+    } else {
+        out = std::fopen(out_file.c_str(), "wb");
+        if (! out) {
+            std::fprintf(stderr, "wescene-test extract: cannot open '%s' for writing\n",
+                         out_file.c_str());
+            return 1;
+        }
+        close_out = true;
+    }
+
+    const size_t n = std::fwrite(body.data(), 1, body.size(), out);
+    if (close_out) std::fclose(out);
+    if (n != body.size()) {
+        std::fprintf(stderr, "wescene-test extract: short write (%zu of %zu bytes)\n",
+                     n, body.size());
+        return 1;
+    }
+
+    if (! out_file.empty() && out_file != "-") {
+        std::fprintf(stderr, "wescene-test extract: wrote %zu bytes to %s\n",
+                     body.size(), out_file.c_str());
+    }
+    return 0;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    const char* prog = argc > 0 ? argv[0] : "wescene-test";
+    if (argc < 2) {
+        TopUsage(prog);
+        return 2;
+    }
+    std::string_view sub = argv[1];
+    if (sub == "scan")    return CmdScan(argc - 2, argv + 2, prog);
+    if (sub == "extract") return CmdExtract(argc - 2, argv + 2, prog);
+    if (sub == "-h" || sub == "--help") {
+        TopUsage(prog);
+        return 0;
+    }
+    std::fprintf(stderr, "wescene-test: unknown subcommand '%.*s'\n",
+                 (int)sub.size(), sub.data());
+    TopUsage(prog);
+    return 2;
+}

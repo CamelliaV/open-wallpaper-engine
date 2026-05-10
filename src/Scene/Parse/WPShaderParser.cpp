@@ -1087,3 +1087,70 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         return compile(units, codes);
     }
 }
+
+CompileMaterialShaderResult
+WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::VFS& vfs,
+                                      std::string_view scene_id,
+                                      const Combos&    combos_override) {
+    CompileMaterialShaderResult r;
+
+    wpscene::WPMaterial mat;
+    if (! mat.FromJson(material_json)) {
+        r.error = "WPMaterial::FromJson failed";
+        return r;
+    }
+    r.shader_name = mat.shader;
+
+    if (mat.shader.empty()) {
+        r.error = "material has no shader name";
+        return r;
+    }
+
+    const std::string shader_path = "/assets/shaders/" + mat.shader;
+    std::string       vert_src    = fs::GetFileContent(vfs, shader_path + ".vert");
+    std::string       frag_src    = fs::GetFileContent(vfs, shader_path + ".frag");
+    if (vert_src.empty() || frag_src.empty()) {
+        r.error = "shader source missing: " + shader_path + ".{vert,frag}";
+        return r;
+    }
+
+    // Texture info: enabled flag from non-empty material.textures.
+    // composEnabled[3] would normally come from each .tex header
+    // (extraHeader.compoN). Skipping the header parse keeps this entry
+    // path lightweight; sprite-sheet / packed-channel materials may
+    // accordingly compile a different variant than the production path.
+    r.tex_info.reserve(mat.textures.size());
+    for (const auto& t : mat.textures) {
+        r.tex_info.push_back({ ! t.empty(), { false, false, false } });
+    }
+
+    // Combos: material's int combos -> string, then override wins.
+    // Inject defaults that ParseImageObj always sets.
+    for (const auto& kv : mat.combos) {
+        r.info.combos[kv.first] = std::to_string(kv.second);
+    }
+    for (const auto& kv : combos_override) {
+        r.info.combos[kv.first] = kv.second;
+    }
+    if (r.info.combos.find("BLENDMODE") == r.info.combos.end()) r.info.combos["BLENDMODE"] = "0";
+    if (r.info.combos.find("BONECOUNT") == r.info.combos.end()) r.info.combos["BONECOUNT"] = "1";
+
+    std::array<WPShaderUnit, 2> units {
+        WPShaderUnit { ShaderType::VERTEX,   std::move(vert_src), {} },
+        WPShaderUnit { ShaderType::FRAGMENT, std::move(frag_src), {} },
+    };
+
+    for (auto& u : units) {
+        u.src = WPShaderParser::PreShaderSrc(vfs, u.src, &r.info, r.tex_info);
+    }
+
+    InitGlslang();
+    const bool ok = WPShaderParser::CompileToSpv(
+        scene_id, std::span<WPShaderUnit>(units.data(), units.size()), r.spvs, vfs, &r.info,
+        r.tex_info);
+    FinalGlslang();
+
+    r.ok = ok;
+    if (! ok) r.error = "CompileToSpv failed";
+    return r;
+}

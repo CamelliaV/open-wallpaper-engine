@@ -30,24 +30,11 @@ using namespace Eigen;
 
 std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(p)); }
 
-struct ParseContext {
-    std::shared_ptr<Scene> scene;
-    WPShaderValueUpdater*  shader_updater;
-    i32                    ortho_w;
-    i32                    ortho_h;
-    fs::VFS*               vfs;
-
-    ShaderValueMap             global_base_uniforms;
-    std::shared_ptr<SceneNode> effect_camera_node;
-    std::shared_ptr<SceneNode> global_camera_node;
-    std::shared_ptr<SceneNode> global_perspective_camera_node;
-
-    // Lazily allocated; populated by `WireFieldScripts` as objects with
-    // script bindings come in. Installed onto the Scene at the end of
-    // parse via `owe::script::InstallScriptScene`. Stays null when
-    // no object in the scene has any script binding (image-only pkgs).
-    std::unique_ptr<owe::script::ScriptScene> script_scene;
-};
+// ParseContext, WPObjectVar, ProcessOpts and the stage entry points
+// (ExpandObjects / AdjustAutoOrthoProjection / BuildContext /
+// ProcessObjects / FinalizeScene) are exported from the
+// :scene_stages partition; their definitions live near the bottom of
+// this file.
 
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
 // MVP-supported transform fields (origin/scale/angles), creates a
@@ -88,10 +75,7 @@ void WireFieldScripts(ParseContext& context, SceneNode* node,
     }
 }
 
-using WPObjectVar = std::variant<wpscene::WPImageObject, wpscene::WPParticleObject,
-                                 wpscene::WPSoundObject, wpscene::WPLightObject,
-                                 wpscene::WPTextObject, wpscene::WPModelObject,
-                                 wpscene::WPCameraObject>;
+// WPObjectVar is exported from :scene_stages.
 
 namespace
 {
@@ -1399,101 +1383,100 @@ void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj,
 }
 } // namespace
 
-std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
-                                            fs::VFS& vfs, wavsen::audio::SoundManager& sm,
-                                            wpscene::SceneVersion pkg_version) {
-    nlohmann::json json;
-    if (! PARSE_JSON(buf, json)) return nullptr;
-    wpscene::WPScene sc;
-    sc.FromJson(json, pkg_version);
-    rstd_info("scene: pkg_version={} scene_json_version={}",
-             static_cast<unsigned>(pkg_version),
-             static_cast<unsigned>(sc.scene_json_version));
-    //	rstd_info(nlohmann::json(sc).dump(4));
+namespace owe
+{
 
-    ParseContext context;
-
+std::vector<WPObjectVar>
+ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v) {
     std::vector<WPObjectVar> wp_objs;
-
+    if (! json.contains("objects")) return wp_objs;
     for (auto& obj : json.at("objects")) {
         // Order matters: text/model/camera kinds coexist with null
         // image/particle/sound/light fields, so the renderer-supported
         // kinds get first pick. Falls through to the parsing-only kinds
         // (no rendering yet) so the data stays absorbed.
         if (obj.contains("image") && ! obj.at("image").is_null()) {
-            AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs, pkg_version);
+            AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs, v);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
-            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs, pkg_version);
+            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs, v);
         } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
-            AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs, pkg_version);
+            AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs, v);
         } else if (obj.contains("light") && ! obj.at("light").is_null()) {
-            AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs, pkg_version);
+            AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs, v);
         } else if (obj.contains("text") && ! obj.at("text").is_null()) {
-            AddWPObject<wpscene::WPTextObject>(wp_objs, obj, vfs, pkg_version);
+            AddWPObject<wpscene::WPTextObject>(wp_objs, obj, vfs, v);
         } else if (obj.contains("model") && ! obj.at("model").is_null()) {
-            AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs, pkg_version);
+            AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs, v);
         } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
-            AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs, pkg_version);
+            AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs, v);
         }
     }
+    return wp_objs;
+}
 
-    if (sc.general.orthogonalprojection.auto_) {
-        i32 w = 0, h = 0;
-        for (auto& obj : wp_objs) {
-            auto* img = std::get_if<wpscene::WPImageObject>(&obj);
-            if (img == nullptr) continue;
-            i32 size = (i32)(img->size.at(0) * img->size.at(1));
-            if (size > w * h) {
-                w = (i32)img->size.at(0);
-                h = (i32)img->size.at(1);
-            }
+void AdjustAutoOrthoProjection(wpscene::WPScene& sc, std::span<const WPObjectVar> wp_objs) {
+    if (! sc.general.orthogonalprojection.auto_) return;
+    i32 w = 0, h = 0;
+    for (const auto& obj : wp_objs) {
+        const auto* img = std::get_if<wpscene::WPImageObject>(&obj);
+        if (img == nullptr) continue;
+        i32 size = (i32)(img->size.at(0) * img->size.at(1));
+        if (size > w * h) {
+            w = (i32)img->size.at(0);
+            h = (i32)img->size.at(1);
         }
-        sc.general.orthogonalprojection.width  = w;
-        sc.general.orthogonalprojection.height = h;
     }
+    sc.general.orthogonalprojection.width  = w;
+    sc.general.orthogonalprojection.height = h;
+}
 
+ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::WPScene& sc) {
+    ParseContext context;
     InitContext(context, vfs, sc);
     ParseCamera(context, sc.general);
 
-    {
-        context.scene->renderTargets[SpecTex_Default.data()] = {
-            .width  = context.ortho_w,
-            .height = context.ortho_w,
-            .bind   = { .enable = true, .screen = true },
-        };
-        context.scene->renderTargets[WE_MIP_MAPPED_FRAME_BUFFER.data()] = {
-            .width      = context.ortho_w,
-            .height     = context.ortho_w,
-            .has_mipmap = true,
-            .bind       = { .enable = true, .name = SpecTex_Default.data() }
-        };
-    }
+    context.scene->renderTargets[SpecTex_Default.data()] = {
+        .width  = context.ortho_w,
+        .height = context.ortho_w,
+        .bind   = { .enable = true, .screen = true },
+    };
+    context.scene->renderTargets[WE_MIP_MAPPED_FRAME_BUFFER.data()] = {
+        .width      = context.ortho_w,
+        .height     = context.ortho_w,
+        .has_mipmap = true,
+        .bind       = { .enable = true, .name = SpecTex_Default.data() },
+    };
 
     context.scene->scene_id = scene_id;
+    return context;
+}
 
+void ProcessObjects(ParseContext& context, std::span<WPObjectVar> wp_objs,
+                    wavsen::audio::SoundManager* sm, ProcessOpts opts) {
     WPShaderParser::InitGlslang();
 
     for (WPObjectVar& obj : wp_objs) {
         std::visit(visitor::overload {
-                       [&context](wpscene::WPImageObject& obj) {
-                            ParseImageObj(context, obj);
+                       [&context, opts](wpscene::WPImageObject& obj) {
+                           if (opts.kinds & ProcessOpts::Image) ParseImageObj(context, obj);
                        },
-                       [&context](wpscene::WPParticleObject& obj) {
-                           ParseParticleObj(context, obj);
+                       [&context, opts](wpscene::WPParticleObject& obj) {
+                           if (opts.kinds & ProcessOpts::Particle) ParseParticleObj(context, obj);
                        },
-                       [&context, &sm](wpscene::WPSoundObject& obj) {
-                           WPSoundParser::Parse(obj, *context.vfs, sm);
+                       [&context, opts, sm](wpscene::WPSoundObject& obj) {
+                           if ((opts.kinds & ProcessOpts::Sound) && sm)
+                               WPSoundParser::Parse(obj, *context.vfs, *sm);
                        },
-                       [&context](wpscene::WPLightObject& obj) {
-                           ParseLightObj(context, obj);
+                       [&context, opts](wpscene::WPLightObject& obj) {
+                           if (opts.kinds & ProcessOpts::Light) ParseLightObj(context, obj);
                        },
                        // Stage A text-layer support: ParseTextObj loads the
                        // font, lays glyphs into a CPU-side atlas, and logs
                        // the resolved layout. Scene-graph emission is still
                        // pending Stage B (custom shader + atlas texture
                        // through the existing imageParser path).
-                       [&context](wpscene::WPTextObject& obj) {
-                           ParseTextObj(context, obj);
+                       [&context, opts](wpscene::WPTextObject& obj) {
+                           if (opts.kinds & ProcessOpts::Text) ParseTextObj(context, obj);
                        },
                        // .mdl model attachments and per-object camera markers
                        // remain absorption-only; see SceneSchema tests.
@@ -1504,14 +1487,36 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     }
 
     WPShaderParser::FinalGlslang();
+}
 
+std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
     // If any object during the visit installed a script binding, hand the
     // ScriptScene off to the Scene now. The renderer ticks it once per
-    // frame via owe::script::TickSceneScripts. Empty ScriptScenes
-    // are skipped so image-only pkgs don't pay any runtime cost.
+    // frame via owe::script::TickSceneScripts. Empty ScriptScenes are
+    // skipped so image-only pkgs don't pay any runtime cost.
     if (context.script_scene && ! context.script_scene->empty()) {
         owe::script::InstallScriptScene(*context.scene,
-                                              std::move(context.script_scene));
+                                        std::move(context.script_scene));
     }
     return context.scene;
+}
+
+} // namespace owe
+
+std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
+                                            fs::VFS& vfs, wavsen::audio::SoundManager& sm,
+                                            wpscene::SceneVersion pkg_version) {
+    nlohmann::json json;
+    if (! PARSE_JSON(buf, json)) return nullptr;
+    wpscene::WPScene sc;
+    sc.FromJson(json, pkg_version);
+    rstd_info("scene: pkg_version={} scene_json_version={}",
+              static_cast<unsigned>(pkg_version),
+              static_cast<unsigned>(sc.scene_json_version));
+
+    auto wp_objs = ExpandObjects(json, vfs, pkg_version);
+    AdjustAutoOrthoProjection(sc, wp_objs);
+    auto context = BuildContext(vfs, scene_id, sc);
+    ProcessObjects(context, wp_objs, &sm);
+    return FinalizeScene(context);
 }

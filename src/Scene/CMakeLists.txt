@@ -113,6 +113,7 @@ target_sources(owe-parse
          Parse/WPParticleParser.cppm
          Parse/WPPuppet.cppm
          Parse/WPScene.cppm
+         Parse/SceneStages.cppm
          Parse/WPSceneParser.cppm
          Parse/WPShaderParser.cppm
          Parse/WPSoundObject.cppm
