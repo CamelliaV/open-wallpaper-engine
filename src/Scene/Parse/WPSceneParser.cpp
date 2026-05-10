@@ -1586,6 +1586,15 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs,
         pp_mesh->AddMaterial(std::move(material));
         pp_node->AddMesh(pp_mesh);
 
+        // Camera name drives CustomShaderPass color-write mask: empty or
+        // "global" cameras strip the A bit (intent: swapchain ignores A
+        // for direct local display). But waywallen DMA-BUF forwarding
+        // negotiates COLOR_ALPHA_PREMUL; if A=0 reaches the consumer with
+        // non-zero RGB, KWin reads it as premultiplied-transparent and
+        // composites additively against the desktop -> washed-out tint.
+        // Anchor to the existing "effect" cam (2x2 ortho, identity for
+        // our NDC fullscreen quads) so A=1.0 from the shader survives.
+        pp_node->SetCamera("effect");
         context.shader_updater->SetNodeData(pp_node.get(), svData);
 
         pp->steps.emplace_back(ScenePostProcessPass {

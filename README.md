@@ -19,7 +19,7 @@ Made this for fun.
     - [x] Depth Parallax
 	- [x] ColorBlendMode
 	- [x] PBR light
-	- [ ] Global bloom
+	- [x] Global bloom
 - [x] Camera
 	- [x] Zoom
 	- [ ] Shake
