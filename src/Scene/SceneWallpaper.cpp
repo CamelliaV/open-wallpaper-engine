@@ -106,6 +106,8 @@ public:
 
     bool isGenGraphviz() const { return m_gen_graphviz; }
 
+    void setOnClearColor(ClearColorCallback cb) { m_clear_color_cb = std::move(cb); }
+
 private:
     void loadScene();
 
@@ -119,6 +121,7 @@ private:
     WPSceneParser                        m_scene_parser;
     std::unique_ptr<wavsen::audio::SoundManager> m_sound_manager;
     FirstFrameCallback                   m_first_frame_callback;
+    ClearColorCallback                   m_clear_color_cb;
 
     msgloop::MessageLoop<MainMsg>   m_main_loop;
     msgloop::MessageLoop<RenderMsg> m_render_loop;
@@ -438,6 +441,14 @@ void MainHandler::loadScene() {
         }
         scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, pkg_v);
         scene->vfs.reset(pVfs.release());
+
+        // Surface the parsed clear color before the scene is shipped
+        // off to the render thread; downstream callers (the daemon
+        // host) need the value to feed `set_config.clear_*`.
+        if (m_clear_color_cb) {
+            const auto& c = scene->clearColor;
+            m_clear_color_cb(c[0], c[1], c[2]);
+        }
     }
 
     auto rtx = m_render_loop.sender();
@@ -548,6 +559,10 @@ void SceneWallpaper::setPropertyString(std::string_view name, std::string value)
     (void)m_main_handler->mainSender().send(MainMsg { MainSetProperty {
         std::string(name), PropertyValue { std::move(value) } } });
 }
+void SceneWallpaper::setOnClearColor(ClearColorCallback cb) {
+    m_main_handler->setOnClearColor(std::move(cb));
+}
+
 void SceneWallpaper::setPropertyObject(std::string_view name, std::shared_ptr<void> value) {
     // Currently the only object property is the first-frame callback. Cast at
     // the API boundary so the typed message stays self-describing.

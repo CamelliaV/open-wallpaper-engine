@@ -410,6 +410,18 @@ int main(int argc, char** argv) {
     host.width  = opts.width;
     host.height = opts.height;
 
+    // Forward the scene's `general.clearcolor` to the daemon every
+    // time a scene loads. Alpha is forced to 1.0 — the rendered
+    // DMA-BUF is opaque; alpha only governs daemon-side letterbox bars.
+    wp.setOnClearColor([&host](float r, float g, float b) {
+        if (host.sock < 0) return;
+        if (int rc = ww_bridge_send_report_state_clear_color(
+                host.sock, r, g, b, 1.0f);
+            rc != 0) {
+            rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
+        }
+    });
+
     // Mute first so loadScene's SoundManager::init() short-circuits when
     // audio is disabled; the cubeb device + system output never open.
     if (!opts.enable_audio)
