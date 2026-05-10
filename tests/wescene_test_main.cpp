@@ -1,7 +1,10 @@
 // wescene-test: consolidated CLI for the wescene-renderer test surface.
 //
-//   wescene-test scan    [...]   walk pkgs and parse + (optionally) validate
-//   wescene-test extract [...]   list or export a single asset from one pkg
+//   wescene-test scan        [...]  walk pkgs and parse + (optionally) validate
+//   wescene-test extract     [...]  list or export a single asset from one pkg
+//   wescene-test rendergraph [pkg]  parse one pkg and dump the scene's predicted
+//                                   render-graph structure (RTs, scene-graph
+//                                   passes, image-effect chains, post-processes)
 //
 // Replaces wpparse / wpshadercompile / wpdump / wpscan / wptexparse /
 // wpscript* (archived in tests/old/). Host-only: no Vulkan device, no
@@ -15,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,9 +29,12 @@ import wescene.parse;
 import wescene.fs;
 import wescene.pkg_fs;
 import wescene.scene;
+import wescene.spec_texs;
 import wescene.types;
 import wavsen.audio;
 import rstd.log;
+import rstd.cppstd;
+import cppstd;
 
 #include "pkg_header.hpp"
 
@@ -60,11 +67,14 @@ void TopUsage(const char* prog) {
                  "usage: %s <subcommand> [options]\n"
                  "\n"
                  "Subcommands:\n"
-                 "  scan      Walk pkgs and run scene parse, optionally with per-asset\n"
-                 "            validators (--validate-tex / --validate-shader /\n"
-                 "            --validate-mdl). Filterable by --name and --pkgv.\n"
-                 "  extract   List entries of a single scene.pkg, or export one asset\n"
-                 "            file (text or binary) to stdout or -o FILE.\n"
+                 "  scan         Walk pkgs and run scene parse, optionally with per-asset\n"
+                 "               validators (--validate-tex / --validate-shader /\n"
+                 "               --validate-mdl). Filterable by --name and --pkgv.\n"
+                 "  extract      List entries of a single scene.pkg, or export one asset\n"
+                 "               file (text or binary) to stdout or -o FILE.\n"
+                 "  rendergraph  Parse one pkg fully and print the predicted render-graph:\n"
+                 "               render targets, scene-graph passes, image-effect chains,\n"
+                 "               and post-process steps. No Vulkan; pure structural dump.\n"
                  "\n"
                  "Run `%s <subcommand> --help` for subcommand-specific options.\n",
                  prog ? prog : "wescene-test", prog ? prog : "wescene-test");
@@ -652,6 +662,269 @@ int CmdExtract(int argc, char** argv, const char* prog) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// rendergraph subcommand
+// ---------------------------------------------------------------------------
+
+void RendergraphUsage(const char* prog) {
+    std::fprintf(stderr,
+                 "usage: %s rendergraph <pkg> [-o FILE]\n"
+                 "\n"
+                 "  <pkg>     path to scene.pkg, or a directory containing one.\n"
+                 "  -o FILE   write to FILE. Default: stdout. Use '-' to force stdout.\n"
+                 "\n"
+                 "Parses the pkg with WPSceneParser::Parse, then walks the resulting\n"
+                 "Scene state to print every pass that sceneToRenderGraph would emit,\n"
+                 "in execution order. Reports per pass: shader, output RT, color-write\n"
+                 "mask, blend mode, sampled textures. Reports image-effect chains in\n"
+                 "their resolved form (after SceneImageEffectLayer::ResolveEffect).\n"
+                 "Reports post-process chain (scene.post_processes) verbatim.\n"
+                 "\n"
+                 "Use this to spot pipeline-shape regressions without running the\n"
+                 "renderer end-to-end. Catches things like missing color-write A bit\n"
+                 "or post-processes failing to allocate when general.bloom=true.\n",
+                 prog ? prog : "wescene-test");
+}
+
+const char* BlendModeStr(owe::BlendMode m) {
+    switch (m) {
+        case owe::BlendMode::Disable:     return "disable";
+        case owe::BlendMode::Translucent: return "translucent";
+        case owe::BlendMode::Additive:    return "additive";
+        case owe::BlendMode::Normal:      return "normal";
+    }
+    return "?";
+}
+
+// Mirrors CustomShaderPass.cpp:294-297. Empty or "global*" cameras strip
+// the A_BIT - keep this in sync.
+const char* PredictColorMask(std::string_view camera) {
+    bool alpha = ! (camera.empty() || StartsWith(camera, "global"));
+    return alpha ? "RGBA" : "RGB";
+}
+
+void DumpPass(FILE* out, const std::string& tag, const owe::SceneNode& node,
+              std::string_view output_rt) {
+    auto* mesh = const_cast<owe::SceneNode&>(node).Mesh();
+    if (! mesh || ! mesh->Material()) {
+        std::fprintf(out, "  %s: <no mesh/material>\n", tag.c_str());
+        return;
+    }
+    auto* material = mesh->Material();
+    std::fprintf(out,
+                 "  %s shader=%-32s out=%-40s cam=%-12s mask=%s blend=%s\n",
+                 tag.c_str(),
+                 material->name.empty() ? "?" : material->name.c_str(),
+                 std::string(output_rt).c_str(),
+                 node.Camera().empty() ? "(empty)" : node.Camera().c_str(),
+                 PredictColorMask(node.Camera()),
+                 BlendModeStr(material->blenmode));
+    if (! material->textures.empty()) {
+        std::fprintf(out, "      textures:");
+        for (std::size_t i = 0; i < material->textures.size(); ++i) {
+            const auto& t = material->textures[i];
+            std::fprintf(out, " [%zu]=%s", i, t.empty() ? "(none)" : t.c_str());
+        }
+        std::fprintf(out, "\n");
+    }
+}
+
+void DumpRenderTargets(FILE* out, const owe::Scene& scene) {
+    std::fprintf(out, "Render targets (%zu):\n", scene.renderTargets.size());
+    std::vector<std::string> names;
+    names.reserve(scene.renderTargets.size());
+    for (const auto& [k, _] : scene.renderTargets) names.push_back(k);
+    std::sort(names.begin(), names.end());
+    for (const auto& n : names) {
+        const auto& rt = scene.renderTargets.at(n);
+        std::fprintf(out,
+                     "  %-48s %dx%d  bind=%s%s%s scale=%.3f%s%s\n",
+                     n.c_str(),
+                     rt.width, rt.height,
+                     rt.bind.enable ? "enable " : "",
+                     rt.bind.screen ? "screen " : "",
+                     rt.bind.name.empty() ? "" : ("name=" + rt.bind.name + " ").c_str(),
+                     rt.bind.scale,
+                     rt.has_mipmap ? " mipmap" : "",
+                     rt.allowReuse ? " reuse" : "");
+    }
+}
+
+void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
+    std::fprintf(out, "\nScene-graph passes (TraverseNode pre-order):\n");
+    std::function<void(owe::SceneNode*, int)> walk = [&](owe::SceneNode* n, int depth) {
+        if (n == nullptr) return;
+        // Mirror SceneToRenderGraph::ToGraphPass: only nodes with mesh+material emit.
+        auto* mesh = n->Mesh();
+        if (mesh && mesh->Material()) {
+            std::string tag = "[node id=" + std::to_string(n->ID()) +
+                              " depth=" + std::to_string(depth) + "]";
+            DumpPass(out, tag, *n, owe::SpecTex_Default);
+
+            // If the node's camera carries an image-effect chain, ResolveEffect
+            // and dump the resolved nodes. ResolveEffect mutates the layer; we
+            // don't reuse the scene for rendering so this is fine.
+            if (! n->Camera().empty() && scene.cameras.count(n->Camera())) {
+                auto& cam = scene.cameras.at(n->Camera());
+                if (cam->HasImgEffect()) {
+                    auto eff_layer = cam->GetImgEffect();
+                    eff_layer->ResolveEffect(scene.default_effect_mesh, "effect");
+                    std::fprintf(out, "    image-effect chain (%zu effects):\n",
+                                 eff_layer->EffectCount());
+                    for (std::size_t ei = 0; ei < eff_layer->EffectCount(); ++ei) {
+                        auto& eff = eff_layer->GetEffect(ei);
+                        std::size_t ni  = 0;
+                        for (auto cmd_it = eff->commands.begin(); cmd_it != eff->commands.end(); ++cmd_it) {
+                            std::fprintf(out, "      [eff %zu cmd] copy %s -> %s (afterpos=%d)\n",
+                                         ei, cmd_it->src.c_str(), cmd_it->dst.c_str(),
+                                         cmd_it->afterpos);
+                        }
+                        for (auto& enode : eff->nodes) {
+                            std::string tag2 = "[eff " + std::to_string(ei) +
+                                               " node " + std::to_string(ni++) + "]";
+                            DumpPass(out, "    " + tag2, *enode.sceneNode, enode.output);
+                        }
+                    }
+                }
+            }
+        }
+        for (auto& child : n->GetChildren()) walk(child.get(), depth + 1);
+    };
+    walk(scene.sceneGraph.get(), 0);
+}
+
+void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
+    std::fprintf(out, "\nPost-processes (scene.post_processes, %zu chain%s):\n",
+                 scene.post_processes.size(),
+                 scene.post_processes.size() == 1 ? "" : "s");
+    if (scene.post_processes.empty()) {
+        std::fprintf(out, "  (none)\n");
+        return;
+    }
+    for (std::size_t ci = 0; ci < scene.post_processes.size(); ++ci) {
+        const auto& pp = *scene.post_processes[ci];
+        std::fprintf(out, "  chain[%zu] name=\"%s\" steps=%zu\n",
+                     ci, pp.name.c_str(), pp.steps.size());
+        for (std::size_t si = 0; si < pp.steps.size(); ++si) {
+            const auto& step = pp.steps[si];
+            if (auto* sp = std::get_if<owe::ScenePostProcessPass>(&step)) {
+                std::string tag = "  [pp " + std::to_string(ci) +
+                                  ":" + std::to_string(si) + " draw]";
+                DumpPass(out, tag, *sp->node,
+                         sp->output.empty() ? std::string(owe::SpecTex_Default) : sp->output);
+            } else if (auto* cp = std::get_if<owe::ScenePostProcessCopy>(&step)) {
+                std::fprintf(out,
+                             "    [pp %zu:%zu copy] %s -> %s\n",
+                             ci, si, cp->src.c_str(), cp->dst.c_str());
+            }
+        }
+    }
+}
+
+int CmdRendergraph(int argc, char** argv, const char* prog) {
+    std::string pkg_arg;
+    std::string out_file;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view a = argv[i];
+        if (a == "-h" || a == "--help") {
+            RendergraphUsage(prog);
+            return 0;
+        } else if (a == "-o") {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "wescene-test rendergraph: -o requires a value\n");
+                return 2;
+            }
+            out_file = argv[++i];
+        } else if (StartsWith(a, "-")) {
+            std::fprintf(stderr, "wescene-test rendergraph: unknown flag '%.*s'\n",
+                         (int)a.size(), a.data());
+            return 2;
+        } else if (pkg_arg.empty()) {
+            pkg_arg = a;
+        } else {
+            std::fprintf(stderr, "wescene-test rendergraph: unexpected positional '%.*s'\n",
+                         (int)a.size(), a.data());
+            return 2;
+        }
+    }
+
+    if (pkg_arg.empty()) {
+        RendergraphUsage(prog);
+        return 2;
+    }
+
+    const std::string pkg_path = ResolvePkgPath(pkg_arg);
+    if (pkg_path.empty()) {
+        std::fprintf(stderr, "wescene-test rendergraph: '%s' is not a scene.pkg or directory containing one\n",
+                     pkg_arg.c_str());
+        return 1;
+    }
+
+    // Mount pkg over a physical-fs fallback (pkg shadows engine assets;
+    // matches viewer/daemon).
+    owe::fs::VFS vfs;
+    if (auto pfs = owe::fs::CreatePhysicalFs(kDefaultAssetsDir)) {
+        vfs.Mount("/assets", std::move(pfs));
+    }
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    if (! wfs) {
+        std::fprintf(stderr, "wescene-test rendergraph: WPPkgFs::CreatePkgFs failed on %s\n",
+                     pkg_path.c_str());
+        return 1;
+    }
+    vfs.Mount("/assets", std::move(wfs));
+
+    auto stream = vfs.Open("/assets/scene.json");
+    if (! stream) {
+        std::fprintf(stderr, "wescene-test rendergraph: scene.json not in pkg\n");
+        return 1;
+    }
+    const std::string text = stream->ReadAllStr();
+
+    // Detect pkg version from header so the parser dispatches correctly.
+    std::string                          version_stamp;
+    std::vector<owe::testing::PkgEntry>  entries;
+    if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
+        std::fprintf(stderr, "wescene-test rendergraph: ReadPkgHeader failed on %s\n",
+                     pkg_path.c_str());
+        return 1;
+    }
+    auto pkg_v = owe::wpscene::ParsePkgVersionStamp(version_stamp);
+
+    wavsen::audio::SoundManager sm;
+    owe::WPSceneParser          parser;
+    auto                        scene = parser.Parse(pkg_path, text, vfs, sm, pkg_v);
+    if (! scene) {
+        std::fprintf(stderr, "wescene-test rendergraph: WPSceneParser::Parse returned null\n");
+        return 1;
+    }
+
+    FILE* out       = stdout;
+    bool  close_out = false;
+    if (! out_file.empty() && out_file != "-") {
+        out = std::fopen(out_file.c_str(), "wb");
+        if (! out) {
+            std::fprintf(stderr, "wescene-test rendergraph: cannot open '%s' for writing\n",
+                         out_file.c_str());
+            return 1;
+        }
+        close_out = true;
+    }
+
+    std::fprintf(out, "wescene-test rendergraph\n");
+    std::fprintf(out, "  pkg     : %s\n", pkg_path.c_str());
+    std::fprintf(out, "  version : %s\n", version_stamp.c_str());
+    std::fprintf(out, "  ortho   : %dx%d\n", scene->ortho[0], scene->ortho[1]);
+    std::fprintf(out, "\n");
+
+    DumpRenderTargets(out, *scene);
+    DumpSceneGraphPasses(out, *scene);
+    DumpPostProcesses(out, *scene);
+
+    if (close_out) std::fclose(out);
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -665,8 +938,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::string_view sub = argv[1];
-    if (sub == "scan")    return CmdScan(argc - 2, argv + 2, prog);
-    if (sub == "extract") return CmdExtract(argc - 2, argv + 2, prog);
+    if (sub == "scan")        return CmdScan(argc - 2, argv + 2, prog);
+    if (sub == "extract")     return CmdExtract(argc - 2, argv + 2, prog);
+    if (sub == "rendergraph") return CmdRendergraph(argc - 2, argv + 2, prog);
     if (sub == "-h" || sub == "--help") {
         TopUsage(prog);
         return 0;
