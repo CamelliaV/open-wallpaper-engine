@@ -705,20 +705,43 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
     // prefix in GenReflect.
     auto sem_named = [](const std::string& name) { return " : " + name; };
 
+    // A `varying TYPE name[N];` consumes N consecutive location slots.
+    // Without this, a single-slot varying that follows an array-typed
+    // varying gets an aliased location and DXC rejects the struct
+    // ("stage output location #N already consumed").
+    auto array_slots = [](const std::string& arr) -> usize {
+        if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
+        usize n = 0;
+        for (usize i = 1; i + 1 < arr.size(); ++i) {
+            const char c = arr[i];
+            if (c < '0' || c > '9') return 1;
+            n = n * 10 + (usize)(c - '0');
+        }
+        return n > 0 ? n : 1;
+    };
+
     if (stage == ShaderType::VERTEX) {
         out += "struct WW_VSIn {\n";
-        for (usize i = 0; i < attrs.size(); ++i) {
-            out += "    [[vk::location(" + std::to_string(i) + ")]] " +
-                   ToHLSLType(attrs[i].type) + " " + attrs[i].name + attrs[i].array +
-                   sem_named(attrs[i].name) + ";\n";
+        {
+            usize loc = 0;
+            for (const auto& a : attrs) {
+                out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
+                       ToHLSLType(a.type) + " " + a.name + a.array +
+                       sem_named(a.name) + ";\n";
+                loc += array_slots(a.array);
+            }
         }
         out += "};\n";
         out += "struct WW_VSOut {\n";
         out += "    float4 _ww_sv_position : SV_Position;\n";
-        for (usize i = 0; i < varyings.size(); ++i) {
-            out += "    [[vk::location(" + std::to_string(i) + ")]] " +
-                   ToHLSLType(varyings[i].type) + " " + varyings[i].name +
-                   varyings[i].array + sem_named(varyings[i].name) + ";\n";
+        {
+            usize loc = 0;
+            for (const auto& v : varyings) {
+                out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
+                       ToHLSLType(v.type) + " " + v.name + v.array +
+                       sem_named(v.name) + ";\n";
+                loc += array_slots(v.array);
+            }
         }
         out += "};\n";
         out += "WW_VSOut main_vs(WW_VSIn _ww_in) {\n";
@@ -736,10 +759,14 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
     } else { // FRAGMENT
         out += "struct WW_PSIn {\n";
         out += "    float4 _ww_sv_position : SV_Position;\n";
-        for (usize i = 0; i < varyings.size(); ++i) {
-            out += "    [[vk::location(" + std::to_string(i) + ")]] " +
-                   ToHLSLType(varyings[i].type) + " " + varyings[i].name +
-                   varyings[i].array + sem_named(varyings[i].name) + ";\n";
+        {
+            usize loc = 0;
+            for (const auto& v : varyings) {
+                out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
+                       ToHLSLType(v.type) + " " + v.name + v.array +
+                       sem_named(v.name) + ";\n";
+                loc += array_slots(v.array);
+            }
         }
         out += "};\n";
         out += "float4 main_ps(WW_PSIn _ww_in) : SV_Target0 {\n";

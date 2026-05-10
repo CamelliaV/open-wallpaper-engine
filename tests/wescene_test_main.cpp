@@ -26,6 +26,8 @@ import wescene.fs;
 import wescene.pkg_fs;
 import wescene.scene;
 import wescene.types;
+import wavsen.audio;
+import rstd.log;
 
 #include "pkg_header.hpp"
 
@@ -116,6 +118,7 @@ struct ScanOptions {
     bool                     v_tex { false };
     bool                     v_shader { false };
     bool                     v_mdl { false };
+    bool                     full { false };
     std::vector<std::string> name_filters;
     std::vector<unsigned>    pkgv_filters;
     int                      limit { 0 };
@@ -130,6 +133,12 @@ void ScanUsage(const char* prog) {
                  "                       (default: %s)\n"
                  "  --assets DIR         shared engine assets, mounted at /assets fallback\n"
                  "                       (default: %s)\n"
+                 "Parse depth:\n"
+                 "  --full               run full WPSceneParser::Parse instead of the cheap\n"
+                 "                       FromJson+ExpandObjects+AdjustAuto base. Triggers\n"
+                 "                       per-image shader compile, bloom auto-injection,\n"
+                 "                       glslang init/finalize, etc. Slower but exercises\n"
+                 "                       every stage.\n"
                  "Validators (any combination):\n"
                  "  --validate-tex       run WPTexImageParser on every /materials/**/*.tex\n"
                  "  --validate-shader    run WPShaderParser::CompileMaterialShader on every\n"
@@ -173,6 +182,8 @@ bool ParseScanArgs(int argc, char** argv, ScanOptions& opt, const char* prog) {
             opt.v_mdl = true;
         } else if (a == "--validate-all") {
             opt.v_tex = opt.v_shader = opt.v_mdl = true;
+        } else if (a == "--full") {
+            opt.full = true;
         } else if (a == "--name") {
             if (auto* v = need_val(a)) opt.name_filters.emplace_back(v);
             else return false;
@@ -242,6 +253,28 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
     auto wp_objs = owe::ExpandObjects(j, vfs, pkg_v);
     owe::AdjustAutoOrthoProjection(sc, wp_objs);
     (void)wp_objs;
+    return true;
+}
+
+// Runs the full WPSceneParser::Parse pipeline: scene parse + per-image
+// shader compile + bloom auto-injection + scene-graph allocation.
+// SoundManager is default-constructed but never Init()'d so Sound
+// objects parse without opening an audio device.
+bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
+                       const std::string& pkg_id, std::string& err) {
+    auto stream = vfs.Open("/assets/scene.json");
+    if (! stream) {
+        err = "scene.json not in pkg";
+        return false;
+    }
+    const std::string           text = stream->ReadAllStr();
+    wavsen::audio::SoundManager sm;
+    owe::WPSceneParser          parser;
+    auto                        scene = parser.Parse(pkg_id, text, vfs, sm, pkg_v);
+    if (! scene) {
+        err = "WPSceneParser::Parse returned null";
+        return false;
+    }
     return true;
 }
 
@@ -402,7 +435,8 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c)
     std::string parse_err;
     bool        parse_ok = false;
     try {
-        parse_ok = RunSceneParseBase(vfs, pkg_v, parse_err);
+        parse_ok = opt.full ? RunSceneParseFull(vfs, pkg_v, pkg_id, parse_err)
+                            : RunSceneParseBase(vfs, pkg_v, parse_err);
     } catch (const std::exception& ex) {
         parse_err = ex.what();
     } catch (...) {
@@ -621,6 +655,10 @@ int CmdExtract(int argc, char** argv, const char* prog) {
 } // namespace
 
 int main(int argc, char** argv) {
+    static rstd::log::EnvLogger _logger;
+    rstd::log::set_logger(_logger);
+    rstd::log::set_max_level(_logger.filter());
+
     const char* prog = argc > 0 ? argv[0] : "wescene-test";
     if (argc < 2) {
         TopUsage(prog);
