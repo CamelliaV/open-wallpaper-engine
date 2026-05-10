@@ -135,14 +135,17 @@ bool VulkanBlitter::PickPhysicalDevice() {
             std::vector<VkExtensionProperties> exts(ecount);
             vkEnumerateDeviceExtensionProperties(pd, nullptr, &ecount, exts.data());
             bool has_swapchain = false, has_ext_mem_fd = false,
-                 has_dma_buf  = false, has_modifier   = false;
+                 has_dma_buf  = false, has_modifier   = false,
+                 has_fmt_list = false;
             for (auto& e : exts) {
                 if (std::strcmp(e.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0)             has_swapchain  = true;
                 if (std::strcmp(e.extensionName, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) == 0)    has_ext_mem_fd = true;
                 if (std::strcmp(e.extensionName, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME) == 0) has_dma_buf  = true;
                 if (std::strcmp(e.extensionName, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0) has_modifier = true;
+                if (std::strcmp(e.extensionName, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME) == 0)     has_fmt_list   = true;
             }
-            if (!has_swapchain || !has_ext_mem_fd || !has_dma_buf || !has_modifier) continue;
+            if (!has_swapchain || !has_ext_mem_fd || !has_dma_buf || !has_modifier
+                || !has_fmt_list) continue;
 
             phys_ = pd;
             queue_family_ = i;
@@ -167,6 +170,9 @@ bool VulkanBlitter::CreateDevice() {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
         VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+        // Required by VK_EXT_image_drm_format_modifier on Vulkan 1.1
+        // (promoted to core in 1.2). Validation rejects the device otherwise.
+        VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
         VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
     };
     VkDeviceCreateInfo ci{};
