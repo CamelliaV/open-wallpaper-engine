@@ -301,11 +301,13 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
         // suffix), matching WPMaterial.textures shape.
         const std::string name = e.path.substr(prefix.size(),
                                                e.path.size() - prefix.size() - suffix.size());
-        bool              ok   = false;
+        bool              ok    = false;
+        bool              video = false;
         std::string       err;
         try {
             owe::ImageHeader h = parser.ParseHeader(name);
             ok = (h.width > 0 && h.height > 0);
+            video = (h.type == owe::ImageType::VIDEO);
             if (! ok) err = "header looks invalid (zero dim)";
         } catch (const std::exception& ex) {
             err = ex.what();
@@ -314,8 +316,15 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
         }
         if (ok) {
             ++c.tex_ok;
-            if (! quiet)
-                std::fprintf(stdout, "OK    %s tex %s\n", pkg_id.c_str(), e.path.c_str());
+            if (! quiet) {
+                if (video) {
+                    std::fprintf(stdout, "OK    %s tex %s (video container)\n",
+                                 pkg_id.c_str(), e.path.c_str());
+                } else {
+                    std::fprintf(stdout, "OK    %s tex %s\n",
+                                 pkg_id.c_str(), e.path.c_str());
+                }
+            }
         } else {
             ++c.tex_fail;
             std::fprintf(stdout, "FAIL  %s tex %s  %s\n", pkg_id.c_str(), e.path.c_str(),

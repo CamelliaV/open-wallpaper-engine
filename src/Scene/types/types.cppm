@@ -51,6 +51,11 @@ enum class ImageType
     PFM     = 32,
     PICT    = 33,
     RAW     = 34,
+    // Wallpaper Engine "scene format" wallpapers may inline an MP4/WebM
+    // container as a .tex body. We extend ImageType past FreeImage's
+    // range (which stops at RAW=34) so the value can flow through the
+    // existing ImageHeader::type slot without colliding.
+    VIDEO   = 100,
 };
 std::string ToString(const ImageType&);
 
@@ -204,6 +209,17 @@ struct ImageData {
     i32          height { 0 };
     isize        size { 0 };
     ImageDataPtr data {};
+    /* Video-tex back-channel: when ImageHeader::type == VIDEO, the
+     * parser stashes the underlying pkg stream's lifetime here (opaque
+     * shared_ptr<void> — concrete type is owe::fs::IBinaryStream, owned
+     * by wescene.fs, which can't be referenced from this module without
+     * inducing a base→types→base build cycle). Consumers in the Vulkan
+     * layer static_pointer_cast it back. `data` stays empty in that
+     * case; the renderer side wraps {stream, offset, size} into an
+     * AVIOContext for libavformat. */
+    std::shared_ptr<void> videoStream;
+    isize                 videoOffset { 0 };
+    isize                 videoSize   { 0 };
     ImageData() = default;
 };
 

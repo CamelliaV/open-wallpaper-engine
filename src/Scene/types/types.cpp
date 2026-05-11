@@ -14,7 +14,7 @@ std::string ToString(const ImageType& type) {
 #define IMG(x) case ImageType::x: return #x;
     switch (type) {
         IMG(UNKNOWN); IMG(BMP); IMG(ICO); IMG(JPEG); IMG(JNG);
-        IMG(PNG);
+        IMG(PNG); IMG(VIDEO);
     default:
         std::fprintf(stderr, "[ERROR] Not valid image type: %d\n", (int)type);
         return "";

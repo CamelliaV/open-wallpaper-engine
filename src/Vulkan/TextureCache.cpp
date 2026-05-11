@@ -17,6 +17,8 @@ import rstd.cppstd;
 import cppstd;
 
 import wescene.types;
+import wescene.fs;
+import wavsen.video;
 
 using namespace owe;
 using namespace owe::vulkan;
@@ -475,6 +477,10 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
         return m_tex_map.at(image.key);
     }
 
+    if (image.header.type == ImageType::VIDEO) {
+        return CreateVideoTex(image);
+    }
+
     ImageSlots img_slots;
 
     if (! m_tex_cmd) allocateCmd();
@@ -600,6 +606,390 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
     return std::nullopt;
 }
 
+/* ===========================================================================
+ * Video-tex pipeline
+ *
+ * When WPTexImageParser detects an MP4 / WebM container inlined in a
+ * .tex body (header.type == ImageType::VIDEO), it doesn't decompress
+ * pixels — it stashes the pkg's IBinaryStream + byte range in
+ * ImageData. CreateTex routes those Images here:
+ *
+ *   1. We allocate a stable RGBA8 VkImage at (w,h), cleared to black,
+ *      and register it in m_tex_map under the Image's key so the rest
+ *      of the renderer (descriptor sets, sprite-anim fallback, etc.)
+ *      sees an ordinary single-slot texture.
+ *   2. We wrap the pkg stream in a wavsen::video::IInputStream that
+ *      clamps reads/seeks to [offset, offset+size). Lifetime: the
+ *      shared_ptr<owe::fs::IBinaryStream> lands inside the adapter and
+ *      stays alive as long as the VideoDecoder owns it.
+ *   3. We spin up a wavsen::video::VideoDecoder via open_from_stream in
+ *      sw-decode mode (no Producer → no extension prerequisites on
+ *      wescene's VkDevice). On Linux the avformat probe is happy with
+ *      ftyp/EBML at the head of the stream.
+ *   4. Each render tick PumpVideoTextures advances PTS and copies the
+ *      most recent decoded NV12 frame to the slot's VkImage via a
+ *      CPU NV12→RGBA conversion + the existing staging path. Higher
+ *      throughput options (shared-VkDevice + wavsen::video::YuvToRgba
+ *      compute) are a follow-up; CPU upload at 2800×1280×30fps is
+ *      ~600 MB/s host-side bandwidth — acceptable for first
+ *      iteration.
+ *
+ * ========================================================================= */
+
+namespace {
+
+// Wraps an owe::fs::IBinaryStream sub-range as a wavsen avio source.
+// Holds the underlying stream alive via shared_ptr so the .pkg file
+// handle survives until the decoder closes.
+class PkgRangedInputStream : public wavsen::video::IInputStream {
+public:
+    PkgRangedInputStream(std::shared_ptr<owe::fs::IBinaryStream> base,
+                         std::int64_t offset, std::int64_t length)
+        : m_base(std::move(base)), m_offset(offset), m_length(length) {}
+
+    int read(std::uint8_t* buf, int size) override {
+        if (!m_base || size <= 0) return 0;
+        if (m_cursor >= m_length) return 0; /* EOF — avio shim maps to AVERROR_EOF */
+        std::int64_t remain = m_length - m_cursor;
+        int take = size < remain ? size : static_cast<int>(remain);
+        m_base->SeekSet(static_cast<idx>(m_offset + m_cursor));
+        auto got = m_base->Read(buf, static_cast<usize>(take));
+        if (got == 0) return 0;
+        m_cursor += static_cast<std::int64_t>(got);
+        return static_cast<int>(got);
+    }
+
+    std::int64_t seek(std::int64_t offset, int whence) override {
+        constexpr int AVSEEK_SIZE = 0x10000;
+        if (whence == AVSEEK_SIZE) return m_length;
+        std::int64_t next;
+        switch (whence) {
+        case 0: /* SEEK_SET */ next = offset; break;
+        case 1: /* SEEK_CUR */ next = m_cursor + offset; break;
+        case 2: /* SEEK_END */ next = m_length + offset; break;
+        default: return -1;
+        }
+        if (next < 0 || next > m_length) return -1;
+        m_cursor = next;
+        return m_cursor;
+    }
+
+private:
+    std::shared_ptr<owe::fs::IBinaryStream> m_base;
+    std::int64_t                            m_offset { 0 };
+    std::int64_t                            m_length { 0 };
+    std::int64_t                            m_cursor { 0 };
+};
+
+/* BT.709 limited-range NV12 → RGBA8 per-pixel converter. Tight pixel
+ * loop; not vectorised. Input is `width*height` Y bytes followed by
+ * `width*height/2` interleaved UV bytes (4:2:0). Output is row-major
+ * RGBA8 sized `width*height*4`. */
+void Nv12ToRgba8(const std::uint8_t* nv12, std::uint32_t w, std::uint32_t h,
+                 std::uint8_t* rgba) {
+    const std::uint8_t* y_plane  = nv12;
+    const std::uint8_t* uv_plane = nv12 + static_cast<std::size_t>(w) * h;
+    for (std::uint32_t y = 0; y < h; ++y) {
+        for (std::uint32_t x = 0; x < w; ++x) {
+            int Y = y_plane[y * w + x];
+            int U = uv_plane[(y / 2) * w + (x & ~1u)];
+            int V = uv_plane[(y / 2) * w + (x & ~1u) + 1];
+            /* BT.709 limited-range conversion. */
+            int c = Y - 16;
+            int d = U - 128;
+            int e = V - 128;
+            int r = (1192 * c + 1634 * e) >> 10;
+            int g = (1192 * c - 198 * d - 487 * e) >> 10;
+            int b = (1192 * c + 2066 * d) >> 10;
+            r = r < 0 ? 0 : (r > 255 ? 255 : r);
+            g = g < 0 ? 0 : (g > 255 ? 255 : g);
+            b = b < 0 ? 0 : (b > 255 ? 255 : b);
+            std::size_t o = (static_cast<std::size_t>(y) * w + x) * 4;
+            rgba[o + 0] = static_cast<std::uint8_t>(r);
+            rgba[o + 1] = static_cast<std::uint8_t>(g);
+            rgba[o + 2] = static_cast<std::uint8_t>(b);
+            rgba[o + 3] = 255;
+        }
+    }
+}
+
+} // anonymous namespace
+
+struct TextureCache::VideoRegistry {
+    struct Slot {
+        std::string                                  key;       /* matches m_tex_map */
+        std::uint32_t                                width  { 0 };
+        std::uint32_t                                height { 0 };
+        /* RGBA8 target lives in m_tex_map[key].slots[0] (transferred
+         * during CreateVideoTex). Pump retrieves it via lookup so the
+         * single owner stays in the cache. */
+        VmaImageParameters                           image;     /* moved into m_tex_map */
+        std::unique_ptr<wavsen::video::VideoDecoder> decoder;
+        VmaBufferParameters                          staging;
+        std::vector<std::uint8_t>                    rgba_cpu;  /* scratch for NV12→RGBA */
+        wavsen::video::Nv12Frame                     nv12_scratch;
+        double                                       pts_acc  { 0.0 };
+        double                                       last_pts { -1.0 };
+        bool                                         have_frame { false };
+    };
+    std::vector<std::unique_ptr<Slot>> slots;
+};
+
+ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
+    if (image.slots.empty() || image.slots[0].mipmaps.empty()) return {};
+    auto& mip = image.slots[0].mipmaps[0];
+    if (!mip.videoStream || mip.videoSize <= 0 ||
+        mip.width <= 0 || mip.height <= 0) {
+        rstd_error("CreateVideoTex: incomplete video-tex slot for {}", image.key);
+        return {};
+    }
+
+    if (!m_video_registry) {
+        m_video_registry = std::make_unique<VideoRegistry>();
+    }
+    if (!m_tex_cmd) allocateCmd();
+
+    /* Pull the IBinaryStream back out of the opaque shared_ptr<void>
+     * the parser stored. The cast is safe because WPTexImageParser is
+     * the only writer and always populates with shared_ptr<IBinaryStream>
+     * via the converting constructor. */
+    std::shared_ptr<owe::fs::IBinaryStream> pkg_stream(
+        mip.videoStream,
+        static_cast<owe::fs::IBinaryStream*>(mip.videoStream.get()));
+
+    auto slot = std::make_unique<VideoRegistry::Slot>();
+    slot->key    = image.key;
+    /* NV12 chroma is 4:2:0 → both dims even. */
+    slot->width  = static_cast<std::uint32_t>(mip.width  | (mip.width  & 1));
+    slot->height = static_cast<std::uint32_t>(mip.height | (mip.height & 1));
+    if (slot->width  != static_cast<std::uint32_t>(mip.width))
+        slot->width  = static_cast<std::uint32_t>(mip.width + 1);
+    if (slot->height != static_cast<std::uint32_t>(mip.height))
+        slot->height = static_cast<std::uint32_t>(mip.height + 1);
+
+    /* 1) Allocate the stable RGBA8 target. */
+    VkSamplerCreateInfo sampler_info {
+        .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .pNext                   = nullptr,
+        .magFilter               = ToVkType(image.header.sample.magFilter),
+        .minFilter               = ToVkType(image.header.sample.minFilter),
+        .mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU            = ToVkType(image.header.sample.wrapS),
+        .addressModeV            = ToVkType(image.header.sample.wrapS),
+        .addressModeW            = ToVkType(image.header.sample.wrapT),
+        .anisotropyEnable        = false,
+        .maxAnisotropy           = 1.0f,
+        .compareEnable           = false,
+        .compareOp               = VK_COMPARE_OP_NEVER,
+        .minLod                  = 0.0f,
+        .maxLod                  = 1.0f,
+        .borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .unnormalizedCoordinates = false,
+    };
+    VkExtent3D ext { slot->width, slot->height, 1 };
+    auto img_opt = CreateImage(m_device, ext, /*miplevel=*/1u,
+                               VK_FORMAT_R8G8B8A8_UNORM, sampler_info,
+                               VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                               VK_IMAGE_USAGE_SAMPLED_BIT);
+    if (!img_opt) {
+        rstd_error("CreateVideoTex: VkImage allocation failed for {}", image.key);
+        return {};
+    }
+    slot->image = std::move(*img_opt);
+
+    /* Pre-allocate a persistent staging buffer big enough for one RGBA
+     * frame. Reused every pump cycle. */
+    const std::uint32_t rgba_bytes = slot->width * slot->height * 4u;
+    slot->rgba_cpu.resize(rgba_bytes, 0);
+    if (!CreateStagingBuffer(m_device.vma_allocator(), rgba_bytes,
+                             slot->staging)) {
+        rstd_error("CreateVideoTex: staging buffer alloc failed for {}", image.key);
+        return {};
+    }
+
+    /* 2) Initial layout: UNDEFINED → TRANSFER_DST → clear black →
+     * SHADER_READ_ONLY. Mirrors the one-shot pattern used by the
+     * existing TransImgLayout / CopyImageData helpers in this file. */
+    {
+        ImageParameters ip = ToImageParameters(slot->image);
+        VVK_CHECK(m_tex_cmd.Begin(VkCommandBufferBeginInfo {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        }));
+        VkImageSubresourceRange range {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0, .levelCount = 1,
+            .baseArrayLayer = 0, .layerCount = 1,
+        };
+        VkImageMemoryBarrier to_xfer {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image = ip.handle,
+            .subresourceRange = range,
+        };
+        m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  0, to_xfer);
+        VkClearColorValue clear { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } };
+        m_tex_cmd.ClearColorImage(ip.handle,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  &clear, range);
+        VkImageMemoryBarrier to_shader {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image = ip.handle,
+            .subresourceRange = range,
+        };
+        m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  0, to_shader);
+        VVK_CHECK(m_tex_cmd.End());
+        VkSubmitInfo si {
+            .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers    = m_tex_cmd.address(),
+        };
+        VVK_CHECK(m_device.graphics_queue().handle.Submit(si));
+        VVK_CHECK(m_device.handle().WaitIdle());
+    }
+
+    /* 3) Open the decoder. Sw mode for first iteration — sidesteps any
+     * Vulkan extension prerequisites on wescene's instance/device. */
+    auto stream = std::make_unique<PkgRangedInputStream>(
+        std::move(pkg_stream),
+        static_cast<std::int64_t>(mip.videoOffset),
+        static_cast<std::int64_t>(mip.videoSize));
+    wavsen::video::OpenOpts opts {};
+    opts.hwaccel = wavsen::video::HwAccel::None;
+    auto dec_r = wavsen::video::VideoDecoder::open_from_stream(
+        std::move(stream), slot->width, slot->height, /*loop=*/true,
+        /*vk=*/nullptr, opts);
+    if (dec_r.is_err()) {
+        rstd_error("CreateVideoTex: open_from_stream failed for {}: {}",
+                   image.key, dec_r.unwrap_err().message);
+        return {};
+    }
+    slot->decoder = std::move(dec_r).unwrap();
+
+    /* 4) Move VkImage ownership into m_tex_map[key] (the canonical
+     * texture cache) and keep VideoRegistry::Slot referencing it by
+     * key — Pump fetches via lookup. This avoids dual ownership of
+     * VmaImageParameters (move-only) while keeping the same VkImage
+     * handle stable across frames. */
+    ImageSlots img_slots {};
+    img_slots.slots.resize(1);
+    img_slots.slots[0] = std::move(slot->image);
+    m_tex_map[image.key] = std::move(img_slots);
+    m_video_registry->slots.push_back(std::move(slot));
+    return m_tex_map[image.key];
+}
+
+void TextureCache::PumpVideoTextures(double dt_seconds) {
+    if (!m_video_registry || m_video_registry->slots.empty()) return;
+    if (!m_tex_cmd) allocateCmd();
+
+    for (auto& up : m_video_registry->slots) {
+        auto& s = *up;
+        s.pts_acc += dt_seconds;
+
+        /* Drain decoded frames until we catch up to wall time. Cap to
+         * 4 frames per tick to avoid spiral-of-death on heavy stalls. */
+        bool got_new = false;
+        for (int i = 0; i < 4; ++i) {
+            if (s.last_pts >= 0.0 && s.last_pts > s.pts_acc) break;
+            auto r = s.decoder->next_frame(s.nv12_scratch);
+            if (r.is_err()) {
+                rstd_error("PumpVideoTextures[{}]: next_frame: {}",
+                           s.key, r.unwrap_err().message);
+                break;
+            }
+            auto kind = r.unwrap();
+            if (kind == wavsen::video::NextFrame::Eof) {
+                /* Decoder set loop=true at open; on EOF it auto-rewinds,
+                 * so a second call should yield data. Bail this tick. */
+                break;
+            }
+            s.last_pts = s.nv12_scratch.pts_seconds;
+            got_new = true;
+        }
+        if (!got_new && s.have_frame) continue; /* nothing to upload */
+
+        /* CPU NV12 → RGBA conversion. */
+        if (!s.nv12_scratch.data.empty()) {
+            Nv12ToRgba8(s.nv12_scratch.data.data(),
+                        s.nv12_scratch.width, s.nv12_scratch.height,
+                        s.rgba_cpu.data());
+        }
+        s.have_frame = true;
+
+        /* Copy into the staging buffer and submit a transfer. */
+        void* mapped = nullptr;
+        VVK_CHECK(s.staging.handle.MapMemory(&mapped));
+        std::memcpy(mapped, s.rgba_cpu.data(), s.rgba_cpu.size());
+        s.staging.handle.UnMapMemory();
+
+        auto it = m_tex_map.find(s.key);
+        if (it == m_tex_map.end() || it->second.slots.empty()) continue;
+        ImageParameters ip = ToImageParameters(it->second.slots[0]);
+        VVK_CHECK(m_tex_cmd.Begin(VkCommandBufferBeginInfo {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        }));
+        VkImageSubresourceRange range {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0, .levelCount = 1,
+            .baseArrayLayer = 0, .layerCount = 1,
+        };
+        VkImageMemoryBarrier to_xfer {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image = ip.handle,
+            .subresourceRange = range,
+        };
+        m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  0, to_xfer);
+        VkBufferImageCopy region {};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = VkExtent3D { s.width, s.height, 1 };
+        m_tex_cmd.CopyBufferToImage(*s.staging.handle, ip.handle,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    region);
+        VkImageMemoryBarrier to_shader {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image = ip.handle,
+            .subresourceRange = range,
+        };
+        m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  0, to_shader);
+        VVK_CHECK(m_tex_cmd.End());
+        VkSubmitInfo si {
+            .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers    = m_tex_cmd.address(),
+        };
+        VVK_CHECK(m_device.graphics_queue().handle.Submit(si));
+        VVK_CHECK(m_device.handle().WaitIdle());
+    }
+}
+
 TextureCache::TextureCache(const Device& device): m_device(device) {}
 
 TextureCache::~TextureCache() {};
@@ -608,6 +998,7 @@ void TextureCache::Clear() {
     m_tex_map.clear();
     m_query_texs.clear();
     m_query_map.clear();
+    if (m_video_registry) m_video_registry->slots.clear();
 }
 
 std::optional<ImageParameters> TextureCache::Query(std::string_view key, TextureKey content_hash,

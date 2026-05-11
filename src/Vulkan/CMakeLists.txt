@@ -38,7 +38,13 @@ target_sources(owe-vulkan
          Vulkan.cppm
          Vvk.cppm)
 target_link_libraries(owe-vulkan
-  PUBLIC wavsen::ffi::vulkan owe-types owe-shader-compile)
+  PUBLIC wavsen::ffi::vulkan owe-types owe-shader-compile
+  # owe-base supplies wescene.fs (IBinaryStream) needed by the
+  # video-tex AVIO shim; wavsen::video supplies the decoder + shared
+  # device API. Kept PRIVATE so owe-vulkan's public interface stays
+  # decoupled from base/parse — only the TU compiling TextureCache.cpp
+  # observes these modules.
+  PRIVATE owe-base wavsen::video)
 target_include_directories(owe-vulkan
   PUBLIC  .. ../Scene ../Scene/Swapchain ../Scene/Utils/include include
   PRIVATE ../Scene/Utils ../Scene/Utils/include/Utils .)

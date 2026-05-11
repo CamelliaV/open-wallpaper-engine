@@ -276,14 +276,30 @@ public:
 
     void RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) const;
 
+    /* Per-frame hook: advance every registered video-tex by `dt_seconds`,
+     * pull as many decoded frames as needed to catch up to wall PTS,
+     * convert NV12→RGBA on the CPU, and upload to the slot's stable
+     * VkImage. No-op if no video textures are registered. */
+    void PumpVideoTextures(double dt_seconds);
+
 private:
     std::optional<VmaImageParameters> CreateTex(TextureKey);
+    /* VIDEO-typed Image branch of CreateTex: registers a wavsen
+     * VideoDecoder + stable RGBA8 VkImage and returns an ImageSlotsRef
+     * pointing at that same VkImage so material binding is transparent. */
+    ImageSlotsRef                     CreateVideoTex(Image&);
     void                              allocateCmd();
     vvk::CommandBuffers               m_tex_cmds;
     vvk::CommandBuffer                m_tex_cmd;
 
     const Device&                m_device;
     Map<std::string, ImageSlots> m_tex_map;
+
+    /* Opaque pImpl for the active video-tex set. Defined inside
+     * TextureCache.cpp to keep wavsen.video out of the public
+     * wescene.vulkan module interface. */
+    struct VideoRegistry;
+    std::unique_ptr<VideoRegistry> m_video_registry;
 
     struct QueryTex {
         idx                index { 0 };

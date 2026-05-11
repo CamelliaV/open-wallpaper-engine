@@ -97,6 +97,11 @@ public:
 
     bool getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const;
 
+    /* Tick all registered video-tex decoders. No-op when no scene
+     * texture has been recognised as a VIDEO container. Invoked from
+     * SceneWallpaper's per-frame RenderDraw handler. */
+    void pumpVideoTextures(double dt_seconds);
+
     VkInstance       vkInstance() const;
     VkPhysicalDevice vkPhysicalDevice() const;
     VkDevice         vkDevice() const;

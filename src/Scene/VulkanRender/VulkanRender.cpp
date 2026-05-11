@@ -170,6 +170,11 @@ void VulkanRender::deviceUuid(uint8_t out[16]) const {
     std::memcpy(out, id.deviceUUID, 16);
 }
 
+void VulkanRender::pumpVideoTextures(double dt_seconds) {
+    if (!pImpl->m_inited || !pImpl->m_device) return;
+    pImpl->m_device->tex_cache().PumpVideoTextures(dt_seconds);
+}
+
 void VulkanRender::driverUuid(uint8_t out[16]) const {
     std::memset(out, 0, 16);
     if (!pImpl->m_inited || !pImpl->m_device) return;

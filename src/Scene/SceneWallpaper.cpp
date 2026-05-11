@@ -230,6 +230,10 @@ void RenderHandler::on(RenderDraw&&) {
         }
         m_scene->paritileSys->Emitt();
 
+        /* Advance video textures (no-op if none) before drawFrame so
+         * the new RGBA frame is sampled by the same render pass. */
+        m_render->pumpVideoTextures(frame_timer.IdeaTime() * m_speed);
+
         m_render->drawFrame(*m_scene);
 
         m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);

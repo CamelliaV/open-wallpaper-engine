@@ -63,6 +63,13 @@ ImageType DetectEmbeddedImageType(const unsigned char* data, usize size) {
     if (size >= 4 && ((data[0] == 'I' && data[1] == 'I' && data[2] == 0x2a && data[3] == 0x00) ||
                       (data[0] == 'M' && data[1] == 'M' && data[2] == 0x00 && data[3] == 0x2a)))
         return ImageType::TIFF;
+    // ISO BMFF / MP4 / MOV / 3GP — "....ftyp...." at offset 4. WE's scene
+    // wallpapers can inline an H.264/AAC mp4 here; the renderer side
+    // hands the bytes to wavsen::video::VideoDecoder.
+    if (size >= 12 && std::memcmp(data + 4, "ftyp", 4) == 0) return ImageType::VIDEO;
+    // Matroska / WebM EBML header.
+    if (size >= 4 && data[0] == 0x1A && data[1] == 0x45 &&
+        data[2] == 0xDF && data[3] == 0xA3) return ImageType::VIDEO;
     return ImageType::UNKNOWN;
 }
 
@@ -207,6 +214,36 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             i32 src_size = file.ReadInt32();
             if (src_size <= 0 || mipmap.width <= 0 || mipmap.height <= 0 || decompressed_size < 0)
                 return nullptr;
+
+            // Peek the first 16 bytes of the body so we can route MP4 /
+            // WebM containers into the video-tex path without ever
+            // pulling the (possibly hundreds of MiB) payload into RAM.
+            // The pkg's IBinaryStream is seekable, so we sniff, rewind,
+            // and either skip the body (video case) or read it normally.
+            if (ver.body_has_image_type()
+                && img.header.type == ImageType::UNKNOWN
+                && !LZ4_compressed
+                && src_size >= 16) {
+                idx body_off = file.Tell();
+                unsigned char sniff[16] {};
+                file.Read(sniff, sizeof(sniff));
+                ImageType maybe_video = DetectEmbeddedImageType(sniff, sizeof(sniff));
+                if (maybe_video == ImageType::VIDEO) {
+                    img.header.type   = ImageType::VIDEO;
+                    img.header.format = TextureFormat::RGBA8;
+                    /* Converting ctor: shared_ptr<IBinaryStream> →
+                     * shared_ptr<void>. Keeps the pkg stream alive for
+                     * the renderer's lifetime, without dragging
+                     * wescene.fs into wescene.types. */
+                    mipmap.videoStream = std::shared_ptr<void>(pfile);
+                    mipmap.videoOffset = body_off;
+                    mipmap.videoSize   = src_size;
+                    mipmap.size        = 0; /* signals "no CPU pixels" to TextureCache */
+                    file.SeekSet(body_off + src_size);
+                    continue;
+                }
+                file.SeekSet(body_off);
+            }
 
             char* result;
             result = new char[(usize)src_size];
@@ -380,6 +417,31 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         i32 width  = file.ReadInt32();
         i32 height = file.ReadInt32();
         SetHeaderPow2(header, width, height);
+        /* Sniff the body for a video container so the validator can
+         * report "video tex" without needing a full Parse(). Mirrors
+         * the peek in Parse() (line ~210). Cheap: 16 bytes + a
+         * SeekSet. */
+        if (ver.body_has_image_type() && header.type == ImageType::UNKNOWN) {
+            bool    lz4 = false;
+            int32_t decompressed_size = 0;
+            if (ver.body_has_lz4_prelude()) {
+                lz4 = file.ReadInt32() == 1;
+                decompressed_size = file.ReadInt32();
+            }
+            (void)decompressed_size;
+            i32 src_size = file.ReadInt32();
+            if (!lz4 && src_size >= 16) {
+                idx body_off = file.Tell();
+                unsigned char sniff[16] {};
+                file.Read(sniff, sizeof(sniff));
+                if (DetectEmbeddedImageType(sniff, sizeof(sniff))
+                    == ImageType::VIDEO) {
+                    header.type = ImageType::VIDEO;
+                    header.format = TextureFormat::RGBA8;
+                }
+                file.SeekSet(body_off);
+            }
+        }
     }
     return header;
 }
