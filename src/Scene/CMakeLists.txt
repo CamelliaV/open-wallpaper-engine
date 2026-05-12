@@ -44,6 +44,7 @@ target_sources(owe-base
          WPCommon.cppm
          WPJson.cppm
          WPPkgFs.cppm
+         nlohmann_json.cppm
          Utils/Utils.cppm
          MessageLoop/MessageLoop.cppm
          Timer/Timer.cppm
@@ -52,8 +53,8 @@ target_sources(owe-base
          Fs/Fs.cppm
          Scene/Scene.cppm)
 target_link_libraries(owe-base
-  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio owe-types
-  PRIVATE nlohmann_json ${LZ4_LIBRARIES}
+  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio owe-types nlohmann_json
+  PRIVATE ${LZ4_LIBRARIES}
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 target_include_directories(owe-base
   PUBLIC  .. . Utils/include

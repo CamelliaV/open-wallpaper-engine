@@ -1,10 +1,9 @@
 module;
 
-#include "WPJson.hpp"
 #include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_scene;
-import cppstd;
+import rstd.cppstd;
 import wescene.fs;
 
 export namespace owe

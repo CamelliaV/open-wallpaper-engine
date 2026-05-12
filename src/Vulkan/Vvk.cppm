@@ -1,6 +1,5 @@
 module;
 
-#include <cassert>
 #include <unistd.h>
 
 #include <rstd/macro.hpp>
@@ -14,7 +13,6 @@ import wescene.core;
 import rstd.log;
 import rstd.cppstd;
 import vulkan;
-import cppstd;
 import wescene.types;
 
 export namespace vvk
@@ -698,7 +696,7 @@ public:
     void PushDescriptorSetKHR(VkPipelineBindPoint bind_point, VkPipelineLayout layout,
                               uint32_t                         set,
                               Span<const VkWriteDescriptorSet> wsets) const noexcept {
-        assert(wsets[0].sType == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+        rstd_assert(wsets[0].sType == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
         dld->vkCmdPushDescriptorSetKHR(
             handle, bind_point, layout, set, wsets.size(), wsets.data());
     }

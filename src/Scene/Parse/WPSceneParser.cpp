@@ -2,22 +2,19 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include <nlohmann/json.hpp>
 
-#include "WPJson.hpp"
 
 #include "Utils/String.h"
 #include "Utils/Sha.hpp"
-#include <cmath>
-#include <Eigen/Dense>
 
 module wescene.parse;
+import eigen;
+import nlohmann.json;
 import wescene.spec_texs;
 import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.utils;
 import wescene.scene;
 import wescene.text;
@@ -587,7 +584,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         wpscene::WPImageEffect colorEffect;
         wpscene::WPMaterial    colorMat;
         nlohmann::json         json;
-        if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
+        if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
                          json))
             return;
         colorMat.FromJson(json);
@@ -1216,7 +1213,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
 
     // --- pointsize → px (empirical 4× — see earlier comment).
     constexpr float kPointsizeToPx = 4.0f;
-    std::uint32_t px = static_cast<std::uint32_t>(std::lroundf(obj.pointsize * kPointsizeToPx));
+    std::uint32_t px = static_cast<std::uint32_t>(std::round(obj.pointsize * kPointsizeToPx));
     if (px < 1) px = 1;
     if (px > 1024) px = 1024;
 
@@ -1556,7 +1553,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs,
                         std::string output_rt,
                         std::function<void(wpscene::WPMaterial&)> mutate = nullptr) -> bool {
         nlohmann::json jMat;
-        if (! PARSE_JSON(fs::GetFileContent(vfs, std::string("/assets/") + mat_relpath), jMat)) {
+        if (! owe::ParseJson(fs::GetFileContent(vfs, std::string("/assets/") + mat_relpath), jMat)) {
             rstd_error("bloom: parse material json failed: {}", mat_relpath);
             return false;
         }
@@ -1645,7 +1642,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                                             fs::VFS& vfs, wavsen::audio::SoundManager& sm,
                                             wpscene::SceneVersion pkg_version) {
     nlohmann::json json;
-    if (! PARSE_JSON(buf, json)) return nullptr;
+    if (! owe::ParseJson(buf, json)) return nullptr;
     wpscene::WPScene sc;
     sc.FromJson(json, pkg_version);
     rstd_info("scene: pkg_version={} scene_json_version={}",

@@ -1,9 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cassert>
 #include <cstdio>
-#include <cstring>
 #include "vk_mem_alloc.h"
 
 #include "Swapchain/ExSwapchain.hpp"
@@ -14,7 +12,6 @@ module wescene.vulkan;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 import wescene.types;
 import wescene.fs;
@@ -36,7 +33,7 @@ VkFormat ToVkType(TextureFormat tf) {
     case TextureFormat::RG8: return VK_FORMAT_R8G8_UNORM;
     case TextureFormat::RGB8: return VK_FORMAT_R8G8B8_UNORM;
     case TextureFormat::RGBA8: return VK_FORMAT_R8G8B8A8_UNORM;
-    default: assert(false); return VK_FORMAT_R8G8B8A8_UNORM;
+    default: rstd_assert(false); return VK_FORMAT_R8G8B8A8_UNORM;
     }
 }
 
@@ -538,7 +535,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
             {
                 void* v_data;
                 VVK_CHECK(buf.handle.MapMemory(&v_data));
-                memcpy(v_data, image_data.data.get(), (u32)image_data.size);
+                std::memcpy(v_data, image_data.data.get(), (u32)image_data.size);
                 buf.handle.UnMapMemory();
             }
             stage_bufs.emplace_back(std::move(buf));

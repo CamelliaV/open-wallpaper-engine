@@ -1,10 +1,9 @@
 module;
 
-#include "WPJson.hpp"
-#include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_light_object;
-import cppstd;
+import nlohmann.json;
+import rstd.cppstd;
 import wescene.fs;
 
 export import :wp_animation;

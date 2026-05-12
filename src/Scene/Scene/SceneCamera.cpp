@@ -1,11 +1,10 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <Eigen/Dense>
 module wescene.scene;
+import eigen;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.utils;
 
 using namespace owe;

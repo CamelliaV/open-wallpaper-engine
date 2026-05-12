@@ -1,12 +1,12 @@
 module;
 
-#include <cassert>
-#include <cstring>
+#include <rstd/macro.hpp>
+
 
 module wescene.scene;
 import wescene.core;
 import wescene.types;
-import cppstd;
+import rstd.cppstd;
 
 using namespace owe;
 
@@ -106,7 +106,7 @@ bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noex
 }
 
 bool SceneVertexArray::TrySetSize(usize new_size) noexcept {
-    assert(new_size <= m_capacity);
+    rstd_assert(new_size <= m_capacity);
     if (new_size > m_capacity) {
         return false;
     }

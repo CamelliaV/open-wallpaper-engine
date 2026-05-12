@@ -3,7 +3,7 @@ module;
 #include "Utils/String.h"  // STRTONUM macro (uses __SHORT_FILE__)
 
 export module wescene.spec_texs;
-import cppstd;
+import rstd.cppstd;
 
 #define BASE_GLTEX_NAMES(ext)                                                                      \
     "g_Texture0" #ext, "g_Texture1" #ext, "g_Texture2" #ext, "g_Texture3" #ext, "g_Texture4" #ext, \

@@ -1,16 +1,14 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cstring>
 
-#include <Eigen/Dense>
 
 module wescene.scene;
+import eigen;
 import wescene.spec_texs;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 using namespace owe;
 using namespace Eigen;
@@ -142,7 +140,7 @@ inline size_t GenRopeParticleData(std::span<const Particle>   particles,
         float in_ParticleTrailLength   = particles.size();
         float in_ParticleTrailPosition = i - 1;
 
-        Vector3f cp_vec = AngleAxisf(p.rotation[2] + M_PI / 2.0f, Vector3f::UnitZ()) *
+        Vector3f cp_vec = AngleAxisf(p.rotation[2] + rstd::f32_::consts::FRAC_PI_2, Vector3f::UnitZ()) *
                           Vector3f { 0.0f, size / 2.0f, 0.0f };
         Vector3f pos_vec = Vector3f { p.position } - Vector3f { pre_p.position };
 

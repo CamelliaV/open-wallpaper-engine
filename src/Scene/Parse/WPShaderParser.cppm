@@ -1,11 +1,11 @@
 module;
 
-#include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_shader_parser;
+import nlohmann.json;
 import wescene.core;
 import wescene.types;
-import cppstd;
+import rstd.cppstd;
 import wescene.shader_compile;
 import wescene.scene;
 import wescene.fs;

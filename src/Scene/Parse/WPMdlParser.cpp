@@ -1,7 +1,5 @@
 module;
 #include <rstd/macro.hpp>
-#include <cassert>
-#include <cstring>
 
 
 module wescene.parse;
@@ -10,7 +8,6 @@ import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.scene;
 import wescene.common;
 
@@ -25,7 +22,7 @@ WPPuppet::PlayMode ToPlayMode(std::string_view m) {
     if (m == "single") return WPPuppet::PlayMode::Single;
 
     rstd_error("unknown puppet animation play mode \"{}\"", m);
-    assert(m == "loop");
+    rstd_assert(m == "loop");
     return WPPuppet::PlayMode::Loop;
 }
 } // namespace
@@ -315,10 +312,10 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl) {
     std::array<float, 16> one_vert;
     auto                  to_one = [](const WPMdl::Vertex& in, decltype(one_vert)& out) {
         unsigned offset = 0;
-        memcpy(out.data() + 4 * (offset++), in.position.data(), sizeof(in.position));
-        memcpy(out.data() + 4 * (offset++), in.blend_indices.data(), sizeof(in.blend_indices));
-        memcpy(out.data() + 4 * (offset++), in.weight.data(), sizeof(in.weight));
-        memcpy(out.data() + 4 * (offset++), in.texcoord.data(), sizeof(in.texcoord));
+        std::memcpy(out.data() + 4 * (offset++), in.position.data(), sizeof(in.position));
+        std::memcpy(out.data() + 4 * (offset++), in.blend_indices.data(), sizeof(in.blend_indices));
+        std::memcpy(out.data() + 4 * (offset++), in.weight.data(), sizeof(in.weight));
+        std::memcpy(out.data() + 4 * (offset++), in.texcoord.data(), sizeof(in.texcoord));
     };
     for (unsigned i = 0; i < mdl.vertexs.size(); i++) {
         auto& v = mdl.vertexs[i];

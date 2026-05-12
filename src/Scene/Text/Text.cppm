@@ -1,9 +1,8 @@
 module;
 
-#include <cstdint>
 export module wescene.text;
 import wescene.types;
-import cppstd;
+import rstd.cppstd;
 import wescene.scene;
 
 export namespace owe::text

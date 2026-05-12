@@ -1,10 +1,10 @@
 module;
 
-#include <Eigen/Dense>
 
 export module wescene.shader_value_updater;
+import eigen;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import wescene.scene;
 
 import wescene.puppet;  // WPPuppetLayer

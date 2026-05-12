@@ -5,7 +5,6 @@ module;
 
 module wescene.scene_wallpaper;
 import wescene.types;
-import cppstd;
 import wescene.utils;
 import wescene.scene;
 

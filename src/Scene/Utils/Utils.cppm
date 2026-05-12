@@ -1,13 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-// Module purview content needs these std headers + a few internal classics.
-#include <cmath>
-#include <cstdlib>
-
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
-
 
 // Sha.hpp stays classic — utils::genSha1 is consumed by impl units that
 // need to spill blobs to /tmp for post-mortem inspection (Vulkan/Shader.cpp).
@@ -15,9 +8,9 @@ module;
 
 export module wescene.utils;
 import wescene.core;
+import eigen;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 export import wescene.types;
 
 // ---------- Module-purview entities ----------------------------------------
@@ -66,7 +59,7 @@ inline Eigen::Vector3d sph2cart(const Eigen::Vector3d& sph) noexcept {
 
 template<typename TFUNC>
 Eigen::Vector3d GenSphereSurface(TFUNC&& random) noexcept {
-    double azimuth   = 2.0 * EIGEN_PI * random();
+    double azimuth   = rstd::f64_::consts::TAU * random();
     double elevation = std::asin(2.0 * random() - 1.0);
     return sph2cart({ azimuth, elevation, 1.0 });
 }
@@ -169,7 +162,7 @@ struct is_std_array<std::array<T, N>> {
 // namespace; only visible to TUs that `import wescene.utils;`.
 export namespace Eigen
 {
-constexpr double Radians(double a) noexcept { return (a / 180.0f) * (double)EIGEN_PI; }
+constexpr double Radians(double a) noexcept { return (a / 180.0f) * rstd::f64_::consts::PI; }
 
 inline Matrix4d LookAt(Vector3d eye, Vector3d center, Vector3d up) noexcept {
     Vector3d camDir = center - eye;

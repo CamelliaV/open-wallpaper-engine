@@ -1,13 +1,11 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cassert>
 
 module wescene.pkg_fs;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 import wescene.fs;
 
@@ -18,7 +16,7 @@ namespace
 {
 std::string ReadSizedString(IBinaryStream& f) {
     idx ilen = f.ReadInt32();
-    assert(ilen >= 0);
+    rstd_assert(ilen >= 0);
 
     usize       len = (usize)ilen;
     std::string result;

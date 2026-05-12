@@ -1,13 +1,13 @@
 module;
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
-#include <ctime>
+#include <rstd/macro.hpp>
+
 
 module wescene.shader_value_updater;
+import eigen;
 import wescene.spec_texs;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import wescene.utils;
 import wescene.scene;
 
@@ -100,7 +100,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     // auto& shadervs = material->customShader.updateValueList;
     // const auto& valueSet = material->customShader.valueSet;
 
-    assert(exists(m_nodeUniformInfoMap, pNode));
+    rstd_assert(exists(m_nodeUniformInfoMap, pNode));
     const auto& info = m_nodeUniformInfoMap[pNode];
 
     bool hasNodeData = exists(m_nodeDataMap, pNode);
@@ -225,7 +225,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         unsigned                  i = 0;
         for (auto& l : m_scene->lights) {
             if (i == 4) break;
-            assert(l->node() != nullptr);
+            rstd_assert(l->node() != nullptr);
             const auto& trans = l->node()->Translate();
             std::copy(trans.begin(), trans.end(), lights.begin() + i * 4);
             if (i < 3) {

@@ -1,11 +1,10 @@
 module;
 
-#include <Eigen/Dense>
-#include <cmath>
 
 module wescene.scene;
+import eigen;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import wescene.utils;
 
 using namespace owe;

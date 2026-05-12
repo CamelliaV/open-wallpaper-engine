@@ -1,17 +1,13 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cstdint>
-#include <cstring>
-#include <cstdlib>
-#include <Eigen/Dense>
-#include <nlohmann/json.hpp>
 #include "quickjs.h"
 
 module wescene.script;
+import eigen;
+import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.scene;
 
 using nlohmann::json;

@@ -1,12 +1,10 @@
 module;
 
-#include <cstdint>
-#include <cstddef>
 
 
 export module wescene.types;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 export namespace owe
 {

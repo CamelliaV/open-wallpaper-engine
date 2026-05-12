@@ -5,7 +5,6 @@ module;
 module wescene.vulkan_render;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 

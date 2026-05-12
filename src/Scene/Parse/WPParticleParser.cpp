@@ -1,21 +1,17 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "WPJson.hpp"
 
 
-#include <nlohmann/json.hpp>
 
-#include <cmath>
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
 
 module wescene.parse;
+import eigen;
+import nlohmann.json;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.utils;
 import wescene.scene;
 
@@ -50,8 +46,8 @@ struct SingleRandom {
     float       max { 0.0f };
     float       exponent { 1.0f };
     static void ReadFromJson(const nlohmann::json& j, SingleRandom& r) {
-        GET_JSON_NAME_VALUE_NOWARN(j, "min", r.min);
-        GET_JSON_NAME_VALUE_NOWARN(j, "max", r.max);
+        owe::GetJsonValue(j, "min", r.min, false);
+        owe::GetJsonValue(j, "max", r.max, false);
     };
 };
 struct VecRandom {
@@ -60,8 +56,8 @@ struct VecRandom {
     float                exponent { 1.0f };
 
     static void ReadFromJson(const nlohmann::json& j, VecRandom& r) {
-        GET_JSON_NAME_VALUE_NOWARN(j, "min", r.min);
-        GET_JSON_NAME_VALUE_NOWARN(j, "max", r.max);
+        owe::GetJsonValue(j, "min", r.min, false);
+        owe::GetJsonValue(j, "max", r.max, false);
     };
 };
 struct TurbulentRandom {
@@ -78,16 +74,16 @@ struct TurbulentRandom {
     std::array<float, 3> up { 1.0f, 0.0f, 0.0f };
 
     static void ReadFromJson(const nlohmann::json& j, TurbulentRandom& r) {
-        GET_JSON_NAME_VALUE_NOWARN(j, "scale", r.scale);
-        GET_JSON_NAME_VALUE_NOWARN(j, "timescale", r.timescale);
-        GET_JSON_NAME_VALUE_NOWARN(j, "offset", r.offset);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmin", r.speedmin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmax", r.speedmax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemin", r.phasemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemax", r.phasemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "forward", r.forward);
-        GET_JSON_NAME_VALUE_NOWARN(j, "right", r.right);
-        GET_JSON_NAME_VALUE_NOWARN(j, "up", r.up);
+        owe::GetJsonValue(j, "scale", r.scale, false);
+        owe::GetJsonValue(j, "timescale", r.timescale, false);
+        owe::GetJsonValue(j, "offset", r.offset, false);
+        owe::GetJsonValue(j, "speedmin", r.speedmin, false);
+        owe::GetJsonValue(j, "speedmax", r.speedmax, false);
+        owe::GetJsonValue(j, "phasemin", r.phasemin, false);
+        owe::GetJsonValue(j, "phasemax", r.phasemax, false);
+        owe::GetJsonValue(j, "forward", r.forward, false);
+        owe::GetJsonValue(j, "right", r.right, false);
+        owe::GetJsonValue(j, "up", r.up, false);
     };
 };
 template<std::size_t N>
@@ -102,7 +98,7 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
     do {
         if (! wpj.contains("name")) break;
         std::string name;
-        GET_JSON_NAME_VALUE(wpj, "name", name);
+        owe::GetJsonValue(wpj, "name", name);
 
         if (name == "colorrandom") {
             VecRandom r;
@@ -149,7 +145,7 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
             };
         } else if (name == "rotationrandom") {
             VecRandom r;
-            r.max[2] = 2 * M_PI;
+            r.max[2] = rstd::f32_::consts::TAU;
             VecRandom::ReadFromJson(wpj, r);
             return [=](Particle& p, double) {
                 auto result = GenRandomVec3(r.min, r.max);
@@ -186,11 +182,11 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
                 // limit direction
                 {
                     double c     = result.dot(forward) / (result.norm() * forward.norm());
-                    float  a     = std::acos(c) / M_PI;
+                    float  a     = std::acos(c) / rstd::f32_::consts::PI;
                     float  scale = r.scale / 2.0f;
                     if (a > scale) {
                         auto axis = result.cross(forward).normalized();
-                        result    = AngleAxisf((a - a * scale) * M_PI, axis) * result;
+                        result    = AngleAxisf((a - a * scale) * rstd::f32_::consts::PI, axis) * result;
                     }
                 }
                 // offset
@@ -238,10 +234,10 @@ struct ValueChange {
 
     static auto ReadFromJson(const nlohmann::json& j) {
         ValueChange v;
-        GET_JSON_NAME_VALUE_NOWARN(j, "starttime", v.starttime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endtime", v.endtime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "startvalue", v.startvalue);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endvalue", v.endvalue);
+        owe::GetJsonValue(j, "starttime", v.starttime, false);
+        owe::GetJsonValue(j, "endtime", v.endtime, false);
+        owe::GetJsonValue(j, "startvalue", v.startvalue, false);
+        owe::GetJsonValue(j, "endvalue", v.endvalue, false);
         return v;
     }
 };
@@ -257,10 +253,10 @@ struct VecChange {
 
     static auto ReadFromJson(const nlohmann::json& j) {
         VecChange v;
-        GET_JSON_NAME_VALUE_NOWARN(j, "starttime", v.starttime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endtime", v.endtime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "startvalue", v.startvalue);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endvalue", v.endvalue);
+        owe::GetJsonValue(j, "starttime", v.starttime, false);
+        owe::GetJsonValue(j, "endtime", v.endtime, false);
+        owe::GetJsonValue(j, "startvalue", v.startvalue, false);
+        owe::GetJsonValue(j, "endvalue", v.endvalue, false);
         return v;
     }
 };
@@ -273,7 +269,7 @@ struct FrequencyValue {
     float scalemin { 0.0f };
     float scalemax { 1.0f };
     float phasemin { 0.0f };
-    float phasemax { static_cast<float>(2 * M_PI) };
+    float phasemax { static_cast<float>(rstd::f32_::consts::TAU) };
 
     struct StorageRandom {
         bool  reset { true };
@@ -292,14 +288,14 @@ struct FrequencyValue {
         } else if (name == "oscillateposition") {
             v.frequencymax = 5.0f;
         }
-        GET_JSON_NAME_VALUE_NOWARN(j, "frequencymin", v.frequencymin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "frequencymax", v.frequencymax);
+        owe::GetJsonValue(j, "frequencymin", v.frequencymin, false);
+        owe::GetJsonValue(j, "frequencymax", v.frequencymax, false);
         if (v.frequencymax == 0.0f) v.frequencymax = v.frequencymin;
-        GET_JSON_NAME_VALUE_NOWARN(j, "scalemin", v.scalemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "scalemax", v.scalemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemin", v.phasemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemax", v.phasemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "mask", v.mask);
+        owe::GetJsonValue(j, "scalemin", v.scalemin, false);
+        owe::GetJsonValue(j, "scalemax", v.scalemax, false);
+        owe::GetJsonValue(j, "phasemin", v.phasemin, false);
+        owe::GetJsonValue(j, "phasemax", v.phasemax, false);
+        owe::GetJsonValue(j, "mask", v.mask, false);
         return v;
     };
     inline void CheckAndResize(size_t s) {
@@ -311,20 +307,20 @@ struct FrequencyValue {
         if (st.reset) {
             st.frequency = Random::get(frequencymin, frequencymax);
             st.scale     = Random::get(scalemin, scalemax);
-            st.phase     = (float)Random::get((double)phasemin, phasemax + 2.0 * M_PI);
+            st.phase     = (float)Random::get((double)phasemin, phasemax + rstd::f64_::consts::TAU);
             st.reset     = false;
         }
     }
     inline double GetScale(uint32_t index, double time) {
         const auto& st = storage.at(index);
-        double      f  = st.frequency / (2.0f * M_PI);
-        double      w  = 2.0f * M_PI * f;
+        double      f  = st.frequency / (rstd::f32_::consts::TAU);
+        double      w  = rstd::f32_::consts::TAU * f;
         return algorism::lerp((std::cos(w * time + st.phase) + 1.0f) * 0.5f, scalemin, scalemax);
     }
     inline double GetMove(uint32_t index, double time, double timePass) {
         const auto& st = storage.at(index);
-        double      f  = st.frequency / (2.0f * M_PI);
-        double      w  = 2.0f * M_PI * f;
+        double      f  = st.frequency / (rstd::f32_::consts::TAU);
+        double      w  = rstd::f32_::consts::TAU * f;
         return -1.0f * st.scale * w * std::sin(w * time + st.phase) * timePass;
     }
 };
@@ -347,13 +343,13 @@ struct Turbulence {
 
     static auto ReadFromJson(const nlohmann::json& j) {
         Turbulence v;
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemin", v.phasemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemax", v.phasemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmin", v.speedmin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmax", v.speedmax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "timescale", v.timescale);
-        GET_JSON_NAME_VALUE_NOWARN(j, "mask", v.mask);
-        GET_JSON_NAME_VALUE_NOWARN(j, "scale", v.scale);
+        owe::GetJsonValue(j, "phasemin", v.phasemin, false);
+        owe::GetJsonValue(j, "phasemax", v.phasemax, false);
+        owe::GetJsonValue(j, "speedmin", v.speedmin, false);
+        owe::GetJsonValue(j, "speedmax", v.speedmax, false);
+        owe::GetJsonValue(j, "timescale", v.timescale, false);
+        owe::GetJsonValue(j, "mask", v.mask, false);
+        owe::GetJsonValue(j, "scale", v.scale, false);
         return v;
     };
 };
@@ -386,21 +382,21 @@ struct Vortex {
 
     static auto ReadFromJson(const nlohmann::json& j) {
         Vortex v;
-        GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
+        owe::GetJsonValue(j, "controlpoint", v.controlpoint, false);
         if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
         v.controlpoint %= 8;
 
-        GET_JSON_NAME_VALUE_NOWARN(j, "distanceinner", v.distanceinner);
-        GET_JSON_NAME_VALUE_NOWARN(j, "distanceouter", v.distanceouter);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedinner", v.speedinner);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedouter", v.speedouter);
+        owe::GetJsonValue(j, "distanceinner", v.distanceinner, false);
+        owe::GetJsonValue(j, "distanceouter", v.distanceouter, false);
+        owe::GetJsonValue(j, "speedinner", v.speedinner, false);
+        owe::GetJsonValue(j, "speedouter", v.speedouter, false);
 
         i32 _flags { 0 };
-        GET_JSON_NAME_VALUE_NOWARN(j, "flags", _flags);
+        owe::GetJsonValue(j, "flags", _flags, false);
         v.flags = EFlags(_flags);
 
-        GET_JSON_NAME_VALUE_NOWARN(j, "offset", v.offset);
-        GET_JSON_NAME_VALUE_NOWARN(j, "axis", v.axis);
+        owe::GetJsonValue(j, "offset", v.offset, false);
+        owe::GetJsonValue(j, "axis", v.axis, false);
 
         return v;
     };
@@ -419,14 +415,14 @@ struct ControlPointForce {
 
     static auto ReadFromJson(const nlohmann::json& j) {
         ControlPointForce v;
-        GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
+        owe::GetJsonValue(j, "controlpoint", v.controlpoint, false);
         if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
         v.controlpoint %= 8;
 
-        GET_JSON_NAME_VALUE_NOWARN(j, "scale", v.scale);
-        GET_JSON_NAME_VALUE_NOWARN(j, "threadhold", v.threshold);
+        owe::GetJsonValue(j, "scale", v.scale, false);
+        owe::GetJsonValue(j, "threadhold", v.threshold, false);
 
-        GET_JSON_NAME_VALUE_NOWARN(j, "offset", v.origin);
+        owe::GetJsonValue(j, "offset", v.origin, false);
         return v;
     };
 };
@@ -437,14 +433,14 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
     do {
         if (! wpj.contains("name")) break;
         std::string name;
-        GET_JSON_NAME_VALUE(wpj, "name", name);
+        owe::GetJsonValue(wpj, "name", name);
         if (name == "movement") {
             float drag { 0.0f };
             auto  speed = over.speed;
 
             std::array<float, 3> gravity { 0, 0, 0 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "drag", drag);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "gravity", gravity);
+            owe::GetJsonValue(wpj, "drag", drag, false);
+            owe::GetJsonValue(wpj, "gravity", gravity, false);
             Vector3d vecG = Vector3f(gravity.data()).cast<double>();
             return [=](const ParticleInfo& info) {
                 for (auto& p : info.particles) {
@@ -457,8 +453,8 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
         } else if (name == "angularmovement") {
             float                drag { 0.0f };
             std::array<float, 3> force { 0, 0, 0 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "drag", drag);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "force", force);
+            owe::GetJsonValue(wpj, "drag", drag, false);
+            owe::GetJsonValue(wpj, "force", force, false);
             Vector3d vecF = Vector3f(force.data()).cast<double>();
             return [=](const ParticleInfo& info) {
                 for (auto& p : info.particles) {
@@ -478,8 +474,8 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
 
         } else if (name == "alphafade") {
             float fadeintime { 0.5f }, fadeouttime { 0.5f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "fadeintime", fadeintime);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "fadeouttime", fadeouttime);
+            owe::GetJsonValue(wpj, "fadeintime", fadeintime, false);
+            owe::GetJsonValue(wpj, "fadeouttime", fadeouttime, false);
             return [fadeintime, fadeouttime](const ParticleInfo& info) {
                 for (auto& p : info.particles) {
                     auto life = PM::LifetimePos(p);

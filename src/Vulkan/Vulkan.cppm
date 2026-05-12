@@ -1,6 +1,5 @@
 module;
 
-#include <cassert>
 
 #include <unistd.h>
 
@@ -22,7 +21,6 @@ import wescene.core;
 export import :vvk;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.types;
 
 // Vulkan FFI: wavsen::ffi::vulkan exposes the full Vk symbol surface as

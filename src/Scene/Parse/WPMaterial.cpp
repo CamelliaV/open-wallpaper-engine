@@ -1,20 +1,18 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "WPJson.hpp"
 
-#include <nlohmann/json.hpp>
 
 module wescene.parse;
+import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 using namespace owe::wpscene;
 
 bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "name", name);
-    GET_JSON_NAME_VALUE(json, "index", index);
+    owe::GetJsonValue(json, "name", name);
+    owe::GetJsonValue(json, "index", index);
     return true;
 }
 
@@ -55,12 +53,12 @@ void WPMaterial::MergePass(const WPMaterialPass& p) {
 }
 
 bool WPMaterialPass::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+    owe::GetJsonValue(json, "id", id, false);
     if(json.contains("textures")) {
         for(const auto& jT:json.at("textures")) {
             std::string tex;
             if(!jT.is_null())
-                GET_JSON_VALUE(jT, tex);
+                owe::GetJsonValue(jT, tex);
             textures.push_back(tex);
         }
     }
@@ -73,8 +71,8 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
         for(const auto& jC:json.at("constantshadervalues").items()) {
             std::string name;
             std::vector<float> value;
-            GET_JSON_VALUE(jC.key(), name);
-            GET_JSON_VALUE(jC.value(), value);
+            owe::GetJsonValue(jC.key(), name);
+            owe::GetJsonValue(jC.value(), value);
             constantshadervalues[name] = value;
         }
     }
@@ -82,12 +80,12 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
         for(const auto& jC:json.at("combos").items()) {
             std::string name;
             int32_t value;
-            GET_JSON_VALUE(jC.key(), name);
-            GET_JSON_VALUE(jC.value(), value);
+            owe::GetJsonValue(jC.key(), name);
+            owe::GetJsonValue(jC.value(), value);
             combos[name] = value;
         }
     }
-    GET_JSON_NAME_VALUE_NOWARN(json, "target", target);
+    owe::GetJsonValue(json, "target", target, false);
     if(json.contains("bind")) {
         for(const auto& jB:json.at("bind")) {
             WPMaterialPassBindItem bindItem;
@@ -112,16 +110,16 @@ bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
         rstd_error("material no shader");
         return false;
     }
-	GET_JSON_NAME_VALUE(jContent, "blending", blending);
-	GET_JSON_NAME_VALUE(jContent, "cullmode", cullmode);
-	GET_JSON_NAME_VALUE(jContent, "depthtest", depthtest);
-	GET_JSON_NAME_VALUE(jContent, "depthwrite", depthwrite);
-	GET_JSON_NAME_VALUE(jContent, "shader", shader);
+	owe::GetJsonValue(jContent, "blending", blending);
+	owe::GetJsonValue(jContent, "cullmode", cullmode);
+	owe::GetJsonValue(jContent, "depthtest", depthtest);
+	owe::GetJsonValue(jContent, "depthwrite", depthwrite);
+	owe::GetJsonValue(jContent, "shader", shader);
     if(jContent.contains("textures")) {
         for(const auto& jT:jContent.at("textures")) {
             std::string tex;
             if(!jT.is_null())
-                GET_JSON_VALUE(jT, tex);
+                owe::GetJsonValue(jT, tex);
             textures.push_back(tex);
         }
     }
@@ -129,8 +127,8 @@ bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
         for(const auto& jC:jContent.at("constantshadervalues").items()) {
             std::string name;
             std::vector<float> value;
-            GET_JSON_VALUE(jC.key(), name);
-            GET_JSON_VALUE(jC.value(), value);
+            owe::GetJsonValue(jC.key(), name);
+            owe::GetJsonValue(jC.value(), value);
             constantshadervalues[name] = value;
         }
     }
@@ -138,8 +136,8 @@ bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
         for(const auto& jC:jContent.at("combos").items()) {
             std::string name;
             int32_t value;
-            GET_JSON_VALUE(jC.key(), name);
-            GET_JSON_VALUE(jC.value(), value);
+            owe::GetJsonValue(jC.key(), name);
+            owe::GetJsonValue(jC.value(), value);
             combos[name] = value;
         }
     }

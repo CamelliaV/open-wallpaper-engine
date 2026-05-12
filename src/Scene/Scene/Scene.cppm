@@ -2,10 +2,10 @@ module;
 
 #include <climits>
 
-#include <Eigen/Dense>
 export module wescene.scene;
+import eigen;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import wescene.types;
 
 export namespace owe

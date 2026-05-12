@@ -3,7 +3,7 @@ module;
 #include <sys/types.h>
 module wescene.parse;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import rstd.log;
 import rstd;  // rstd::io::Result / SeekFrom for IByteStream impl
 

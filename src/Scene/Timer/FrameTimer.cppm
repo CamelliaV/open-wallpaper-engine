@@ -3,7 +3,7 @@ module;
 
 export module wescene.timer:frame_timer;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 import :thread_timer;
 

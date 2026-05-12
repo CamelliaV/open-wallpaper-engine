@@ -1,8 +1,8 @@
 module;
 
-#include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_particle_parser;
+import nlohmann.json;
 import wescene.scene;
 import wescene.fs;
 

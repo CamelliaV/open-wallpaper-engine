@@ -1,13 +1,11 @@
 module;
 
-#include <cstdint>
-#include <cstddef>
 
-#include <nlohmann/json.hpp>
 
 export module wescene.script;
+import nlohmann.json;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import wescene.scene;
 
 export namespace owe::script

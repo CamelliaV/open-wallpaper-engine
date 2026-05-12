@@ -8,7 +8,6 @@ import wescene.spec_texs;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 

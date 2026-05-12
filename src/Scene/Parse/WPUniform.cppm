@@ -1,10 +1,8 @@
 module;
 
-#include "WPJson.hpp"
-#include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_uniform;
-import cppstd;
+import rstd.cppstd;
 import wescene.fs;
 
 import wescene.json;
@@ -40,25 +38,25 @@ struct WPUniformTex {
     std::unordered_map<std::string, int> require;
 
     bool FromJson(const nlohmann::json& json) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "material", material);
-        GET_JSON_NAME_VALUE_NOWARN(json, "label", label);
-        GET_JSON_NAME_VALUE_NOWARN(json, "default", default_);
+        owe::GetJsonValue(json, "material", material, false);
+        owe::GetJsonValue(json, "label", label, false);
+        owe::GetJsonValue(json, "default", default_, false);
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "mode", mode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "combo", combo);
+        owe::GetJsonValue(json, "mode", mode, false);
+        owe::GetJsonValue(json, "combo", combo, false);
         if (json.contains("components")) {
             for (const auto& el : json.at("components")) {
                 Component c;
-                GET_JSON_NAME_VALUE(el, "label", c.label);
-                GET_JSON_NAME_VALUE_NOWARN(el, "combo", c.combo);
+                owe::GetJsonValue(el, "label", c.label);
+                owe::GetJsonValue(el, "combo", c.combo, false);
                 components.push_back(c);
             }
         }
-        GET_JSON_NAME_VALUE_NOWARN(json, "requireany", requireany);
+        owe::GetJsonValue(json, "requireany", requireany, false);
         if (json.contains("require") && json.at("require").is_object()) {
             for (const auto& el : json.at("require").items()) {
                 int value { false };
-                GET_JSON_VALUE(el.value(), value);
+                owe::GetJsonValue(el.value(), value);
                 require[el.key()] = value;
             }
         }

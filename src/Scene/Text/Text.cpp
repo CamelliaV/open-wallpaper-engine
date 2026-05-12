@@ -1,11 +1,11 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cstdint>
-#include <cstring>
+
+#include <cctype>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <mutex>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -15,7 +15,6 @@ import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.scene;
 import wescene.shader_compile;
 

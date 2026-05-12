@@ -1,11 +1,6 @@
 module;
 
-#include <cassert>
 #include <cstdarg>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
 
 #include <rstd/macro.hpp>
 #include <dxc/dxcapi.h>
@@ -15,7 +10,6 @@ module;
 module wescene.shader_compile;
 import wescene.core;
 import wescene.types;
-import cppstd;
 import rstd.log;
 import rstd.cppstd;
 
@@ -53,7 +47,7 @@ inline VkShaderStageFlagBits ToVkType(owe::ShaderType s) {
     case ShaderType::FRAGMENT: return VK_SHADER_STAGE_FRAGMENT_BIT;
     case ShaderType::GEOMETRY: return VK_SHADER_STAGE_GEOMETRY_BIT;
     }
-    assert(false);
+    rstd_assert(false);
     return VK_SHADER_STAGE_VERTEX_BIT;
 }
 
@@ -64,7 +58,7 @@ inline VkShaderStageFlagBits ToVkType(SpvReflectShaderStageFlagBits s) {
     case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT:   return VK_SHADER_STAGE_VERTEX_BIT;
     case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT: return VK_SHADER_STAGE_FRAGMENT_BIT;
     case SPV_REFLECT_SHADER_STAGE_GEOMETRY_BIT: return VK_SHADER_STAGE_GEOMETRY_BIT;
-    default: assert(false); return VK_SHADER_STAGE_VERTEX_BIT;
+    default: rstd_assert(false); return VK_SHADER_STAGE_VERTEX_BIT;
     }
 }
 
@@ -73,7 +67,7 @@ inline owe::ShaderType FromSpvStage(SpvReflectShaderStageFlagBits s) {
     case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT:   return ShaderType::VERTEX;
     case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT: return ShaderType::FRAGMENT;
     case SPV_REFLECT_SHADER_STAGE_GEOMETRY_BIT: return ShaderType::GEOMETRY;
-    default: assert(false); return ShaderType::VERTEX;
+    default: rstd_assert(false); return ShaderType::VERTEX;
     }
 }
 
@@ -81,10 +75,10 @@ template<typename VEC, typename FUNC>
 bool EnumAllRef(VEC& vec, FUNC&& func) {
     unsigned count { 0 };
     auto result = func(&count, nullptr);
-    assert(result == SPV_REFLECT_RESULT_SUCCESS);
+    rstd_assert(result == SPV_REFLECT_RESULT_SUCCESS);
     vec.resize(count);
     result = func(&count, vec.data());
-    assert(result == SPV_REFLECT_RESULT_SUCCESS);
+    rstd_assert(result == SPV_REFLECT_RESULT_SUCCESS);
     return result == SPV_REFLECT_RESULT_SUCCESS;
 }
 
@@ -94,7 +88,7 @@ inline LPCWSTR DxcStageProfile(owe::ShaderType s) {
     case ShaderType::FRAGMENT: return L"ps_6_0";
     case ShaderType::GEOMETRY: return L"gs_6_0";
     }
-    assert(false);
+    rstd_assert(false);
     return L"vs_6_0";
 }
 
@@ -104,7 +98,7 @@ inline const char* DefaultEntryName(owe::ShaderType s) {
     case ShaderType::FRAGMENT: return "main_ps";
     case ShaderType::GEOMETRY: return "main_gs";
     }
-    assert(false);
+    rstd_assert(false);
     return "main";
 }
 

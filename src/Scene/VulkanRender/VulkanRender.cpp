@@ -4,9 +4,6 @@ module;
 
 #include "vvk/macros.hpp"
 
-#include <cassert>
-#include <cmath>
-#include <cstring>
 #include <unistd.h>
 
 #if ENABLE_RENDERDOC_API
@@ -18,7 +15,6 @@ import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.vulkan;
 import wescene.utils;
 import wescene.scene;
@@ -767,7 +763,7 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
                    m_passes.begin(),
                    [&rg](auto& id, auto& texs) {
                        auto* pass = rg.getPass(id);
-                       assert(pass != nullptr);
+                       rstd_assert(pass != nullptr);
                        VulkanPass* vpass = static_cast<VulkanPass*>(pass);
                        // rstd_info("----release tex");
                        for (auto& tex : texs) {

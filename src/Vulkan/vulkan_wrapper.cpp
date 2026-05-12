@@ -4,7 +4,6 @@ module;
 module wescene.vulkan;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.types;
 
 namespace vvk

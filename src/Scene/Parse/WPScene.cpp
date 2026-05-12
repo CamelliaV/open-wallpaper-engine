@@ -1,13 +1,11 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "WPJson.hpp"
 
-#include <charconv>
-#include <nlohmann/json.hpp>
 
 
 module wescene.parse;
+import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
 
@@ -40,29 +38,29 @@ SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root) {
 bool Orthogonalprojection::FromJson(const nlohmann::json& json) {
     if(json.is_null()) return false;
 	if(json.contains("auto")) {
-		GET_JSON_NAME_VALUE(json, "auto", auto_);
+		owe::GetJsonValue(json, "auto", auto_);
 	}
 	else {
-		GET_JSON_NAME_VALUE(json, "width", width);
-		GET_JSON_NAME_VALUE(json, "height", height);
+		owe::GetJsonValue(json, "width", width);
+		owe::GetJsonValue(json, "height", height);
 	}
     return true;
 }
 
 bool WPSceneCamera::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "center", center);
-    GET_JSON_NAME_VALUE(json, "eye", eye);
-    GET_JSON_NAME_VALUE(json, "up", up);
+    owe::GetJsonValue(json, "center", center);
+    owe::GetJsonValue(json, "eye", eye);
+    owe::GetJsonValue(json, "up", up);
     return true;
 }
 
 bool WPSceneLightConfig::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE_NOWARN(json, "directional", directional);
-    GET_JSON_NAME_VALUE_NOWARN(json, "directionalshadow", directionalshadow);
-    GET_JSON_NAME_VALUE_NOWARN(json, "point", point);
-    GET_JSON_NAME_VALUE_NOWARN(json, "pointshadow", pointshadow);
-    GET_JSON_NAME_VALUE_NOWARN(json, "spot", spot);
-    GET_JSON_NAME_VALUE_NOWARN(json, "spotshadow", spotshadow);
+    owe::GetJsonValue(json, "directional", directional, false);
+    owe::GetJsonValue(json, "directionalshadow", directionalshadow, false);
+    owe::GetJsonValue(json, "point", point, false);
+    owe::GetJsonValue(json, "pointshadow", pointshadow, false);
+    owe::GetJsonValue(json, "spot", spot, false);
+    owe::GetJsonValue(json, "spotshadow", spotshadow, false);
     return true;
 }
 
@@ -77,27 +75,27 @@ constexpr bool wants(SceneVersion v, SceneVersion gate) {
 }
 
 void parse_baseline(WPSceneGeneral& g, const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "ambientcolor", g.ambientcolor);
-    GET_JSON_NAME_VALUE(json, "skylightcolor", g.skylightcolor);
-    GET_JSON_NAME_VALUE(json, "clearcolor", g.clearcolor);
-    GET_JSON_NAME_VALUE_NOWARN(json, "clearenabled", g.clearenabled);
-    GET_JSON_NAME_VALUE_NOWARN(json, "camerafade", g.camerafade);
-    GET_JSON_NAME_VALUE_NOWARN(json, "camerapreview", g.camerapreview);
-    GET_JSON_NAME_VALUE(json, "cameraparallax", g.cameraparallax);
-    GET_JSON_NAME_VALUE(json, "cameraparallaxamount", g.cameraparallaxamount);
-    GET_JSON_NAME_VALUE(json, "cameraparallaxdelay", g.cameraparallaxdelay);
-    GET_JSON_NAME_VALUE(json, "cameraparallaxmouseinfluence", g.cameraparallaxmouseinfluence);
-    GET_JSON_NAME_VALUE_NOWARN(json, "zoom", g.zoom);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fov", g.fov);
-    GET_JSON_NAME_VALUE_NOWARN(json, "nearz", g.nearz);
-    GET_JSON_NAME_VALUE_NOWARN(json, "farz", g.farz);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloom", g.bloom);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomstrength", g.bloomstrength);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomthreshold", g.bloomthreshold);
-    GET_JSON_NAME_VALUE_NOWARN(json, "camerashake", g.camerashake);
-    GET_JSON_NAME_VALUE_NOWARN(json, "camerashakeamplitude", g.camerashakeamplitude);
-    GET_JSON_NAME_VALUE_NOWARN(json, "camerashakespeed", g.camerashakespeed);
-    GET_JSON_NAME_VALUE_NOWARN(json, "camerashakeroughness", g.camerashakeroughness);
+    owe::GetJsonValue(json, "ambientcolor", g.ambientcolor);
+    owe::GetJsonValue(json, "skylightcolor", g.skylightcolor);
+    owe::GetJsonValue(json, "clearcolor", g.clearcolor);
+    owe::GetJsonValue(json, "clearenabled", g.clearenabled, false);
+    owe::GetJsonValue(json, "camerafade", g.camerafade, false);
+    owe::GetJsonValue(json, "camerapreview", g.camerapreview, false);
+    owe::GetJsonValue(json, "cameraparallax", g.cameraparallax);
+    owe::GetJsonValue(json, "cameraparallaxamount", g.cameraparallaxamount);
+    owe::GetJsonValue(json, "cameraparallaxdelay", g.cameraparallaxdelay);
+    owe::GetJsonValue(json, "cameraparallaxmouseinfluence", g.cameraparallaxmouseinfluence);
+    owe::GetJsonValue(json, "zoom", g.zoom, false);
+    owe::GetJsonValue(json, "fov", g.fov, false);
+    owe::GetJsonValue(json, "nearz", g.nearz, false);
+    owe::GetJsonValue(json, "farz", g.farz, false);
+    owe::GetJsonValue(json, "bloom", g.bloom, false);
+    owe::GetJsonValue(json, "bloomstrength", g.bloomstrength, false);
+    owe::GetJsonValue(json, "bloomthreshold", g.bloomthreshold, false);
+    owe::GetJsonValue(json, "camerashake", g.camerashake, false);
+    owe::GetJsonValue(json, "camerashakeamplitude", g.camerashakeamplitude, false);
+    owe::GetJsonValue(json, "camerashakespeed", g.camerashakespeed, false);
+    owe::GetJsonValue(json, "camerashakeroughness", g.camerashakeroughness, false);
     if (json.contains("orthogonalprojection")) {
         const auto& ortho = json.at("orthogonalprojection");
         if (ortho.is_null())
@@ -110,45 +108,45 @@ void parse_baseline(WPSceneGeneral& g, const nlohmann::json& json) {
 }
 
 void parse_v10_plus(WPSceneGeneral& g, const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE_NOWARN(json, "hdr", g.hdr);
-    GET_JSON_NAME_VALUE_NOWARN(json, "norecompile", g.norecompile);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrfeather", g.bloomhdrfeather);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdriterations", g.bloomhdriterations);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrscatter", g.bloomhdrscatter);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrstrength", g.bloomhdrstrength);
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomhdrthreshold", g.bloomhdrthreshold);
+    owe::GetJsonValue(json, "hdr", g.hdr, false);
+    owe::GetJsonValue(json, "norecompile", g.norecompile, false);
+    owe::GetJsonValue(json, "bloomhdrfeather", g.bloomhdrfeather, false);
+    owe::GetJsonValue(json, "bloomhdriterations", g.bloomhdriterations, false);
+    owe::GetJsonValue(json, "bloomhdrscatter", g.bloomhdrscatter, false);
+    owe::GetJsonValue(json, "bloomhdrstrength", g.bloomhdrstrength, false);
+    owe::GetJsonValue(json, "bloomhdrthreshold", g.bloomhdrthreshold, false);
 }
 
 void parse_v20_plus(WPSceneGeneral& g, const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE_NOWARN(json, "bloomtint", g.bloomtint);
+    owe::GetJsonValue(json, "bloomtint", g.bloomtint, false);
 }
 
 void parse_v21_plus(WPSceneGeneral& g, const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE_NOWARN(json, "perspectiveoverridefov", g.perspectiveoverridefov);
-    GET_JSON_NAME_VALUE_NOWARN(json, "windenabled", g.windenabled);
-    GET_JSON_NAME_VALUE_NOWARN(json, "winddirection", g.winddirection);
-    GET_JSON_NAME_VALUE_NOWARN(json, "windstrength", g.windstrength);
-    GET_JSON_NAME_VALUE_NOWARN(json, "gravitydirection", g.gravitydirection);
-    GET_JSON_NAME_VALUE_NOWARN(json, "gravitystrength", g.gravitystrength);
+    owe::GetJsonValue(json, "perspectiveoverridefov", g.perspectiveoverridefov, false);
+    owe::GetJsonValue(json, "windenabled", g.windenabled, false);
+    owe::GetJsonValue(json, "winddirection", g.winddirection, false);
+    owe::GetJsonValue(json, "windstrength", g.windstrength, false);
+    owe::GetJsonValue(json, "gravitydirection", g.gravitydirection, false);
+    owe::GetJsonValue(json, "gravitystrength", g.gravitystrength, false);
 }
 
 void parse_v22_plus(WPSceneGeneral& g, const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE_NOWARN(json, "transparentsorting", g.transparentsorting);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistance", g.fogdistance);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancestart", g.fogdistancestart);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistanceend", g.fogdistanceend);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancecolor", g.fogdistancecolor);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistancestartdensity", g.fogdistancestartdensity);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogdistanceenddensity", g.fogdistanceenddensity);
+    owe::GetJsonValue(json, "transparentsorting", g.transparentsorting, false);
+    owe::GetJsonValue(json, "fogdistance", g.fogdistance, false);
+    owe::GetJsonValue(json, "fogdistancestart", g.fogdistancestart, false);
+    owe::GetJsonValue(json, "fogdistanceend", g.fogdistanceend, false);
+    owe::GetJsonValue(json, "fogdistancecolor", g.fogdistancecolor, false);
+    owe::GetJsonValue(json, "fogdistancestartdensity", g.fogdistancestartdensity, false);
+    owe::GetJsonValue(json, "fogdistanceenddensity", g.fogdistanceenddensity, false);
 }
 
 void parse_v23_plus(WPSceneGeneral& g, const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogheight", g.fogheight);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightstart", g.fogheightstart);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightend", g.fogheightend);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightcolor", g.fogheightcolor);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightstartdensity", g.fogheightstartdensity);
-    GET_JSON_NAME_VALUE_NOWARN(json, "fogheightenddensity", g.fogheightenddensity);
+    owe::GetJsonValue(json, "fogheight", g.fogheight, false);
+    owe::GetJsonValue(json, "fogheightstart", g.fogheightstart, false);
+    owe::GetJsonValue(json, "fogheightend", g.fogheightend, false);
+    owe::GetJsonValue(json, "fogheightcolor", g.fogheightcolor, false);
+    owe::GetJsonValue(json, "fogheightstartdensity", g.fogheightstartdensity, false);
+    owe::GetJsonValue(json, "fogheightenddensity", g.fogheightenddensity, false);
 }
 
 void parse_lightconfig(WPSceneGeneral& g, const nlohmann::json& json) {

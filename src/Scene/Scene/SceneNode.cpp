@@ -1,8 +1,8 @@
 module;
 
-#include <Eigen/Geometry>
 
 module wescene.scene;
+import eigen;
 
 using namespace owe;
 using namespace Eigen;

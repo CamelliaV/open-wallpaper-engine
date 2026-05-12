@@ -3,7 +3,7 @@ module;
 #include "effolkronium/random.hpp"
 
 export module wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 // NoCopyMove (global scope, matches the original NoCopyMove.hpp)
 export struct NoCopy {

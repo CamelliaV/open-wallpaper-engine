@@ -1,9 +1,6 @@
-module;
-
-#include <nlohmann/json_fwd.hpp>
-
 export module wescene.json;
-import cppstd;
+import rstd.cppstd;
+export import nlohmann.json;
 
 export namespace owe
 {
@@ -16,10 +13,15 @@ struct JsonTemplateTypeCheck {
 
 template<typename T>
 typename owe::JsonTemplateTypeCheck<T>::type
-GetJsonValue(const char* file, const char* func, int line, const nlohmann::json& json, T& value,
-             bool has_name, std::string_view name, bool warn);
+GetJsonValue(const nlohmann::json& json, T& value,
+             std::source_location loc = std::source_location::current());
 
-bool ParseJson(const char* file, const char* func, int line, const std::string& source,
-               nlohmann::json& result);
+template<typename T>
+typename owe::JsonTemplateTypeCheck<T>::type
+GetJsonValue(const nlohmann::json& json, std::string_view name, T& value, bool warn = true,
+             std::source_location loc = std::source_location::current());
+
+bool ParseJson(std::string_view source, nlohmann::json& result,
+               std::source_location loc = std::source_location::current());
 
 } // namespace owe

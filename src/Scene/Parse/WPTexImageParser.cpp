@@ -5,14 +5,12 @@ module;
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#include <cstring>
 
 module wescene.parse;
 import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.utils;
 import wescene.scene;
 import wescene.common;

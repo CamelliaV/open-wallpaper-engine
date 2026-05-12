@@ -10,7 +10,7 @@ export module wescene.shader_compile;
 import wescene.core;
 export import vulkan;
 import wescene.types;
-import cppstd;
+import rstd.cppstd;
 
 export namespace owe::vulkan
 {

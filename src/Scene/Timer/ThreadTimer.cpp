@@ -1,9 +1,10 @@
 module;
 
-#include <cassert>
+#include <rstd/macro.hpp>
+
 
 module wescene.timer;
-import cppstd;
+import rstd.cppstd;
 
 using namespace owe;
 using micros = std::chrono::microseconds;
@@ -33,7 +34,7 @@ void ThreadTimer::Start() {
 
 void ThreadTimer::Stop() {
     std::unique_lock<std::mutex> lock(m_op_mutex);
-    assert(std::this_thread::get_id() != m_timer_thread.get_id());
+    rstd_assert(std::this_thread::get_id() != m_timer_thread.get_id());
 
     if (! Running()) return;
     m_running = false;

@@ -1,10 +1,8 @@
 module;
 
-#include "WPJson.hpp"
-#include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_animation;
-import cppstd;
+import rstd.cppstd;
 import wescene.json;
 
 // Property-binding side channel.

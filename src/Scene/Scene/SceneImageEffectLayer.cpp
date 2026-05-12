@@ -1,12 +1,13 @@
 module;
 
-#include <cassert>
+#include <rstd/macro.hpp>
+
 
 module wescene.scene;
 import wescene.spec_texs;
 import wescene.core;
 import wescene.types;
-import cppstd;
+import rstd.cppstd;
 
 using namespace owe;
 
@@ -41,7 +42,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                 last_output = &(*it);
             }
 
-            assert(it->sceneNode->HasMaterial());
+            rstd_assert(it->sceneNode->HasMaterial());
 
             auto& material = *(it->sceneNode->Mesh()->Material());
             {

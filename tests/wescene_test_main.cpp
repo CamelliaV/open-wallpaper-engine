@@ -34,7 +34,6 @@ import wescene.types;
 import wavsen.audio;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 #include "pkg_header.hpp"
 

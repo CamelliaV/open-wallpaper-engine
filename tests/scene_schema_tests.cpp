@@ -25,7 +25,8 @@
 //
 // kParsedGeneralKeys / kParsedObjectKeys must be kept in sync with
 // src/Parse/WPScene.cpp and src/Parse/WP*Object.cpp respectively; when you
-// add a new GET_JSON_NAME_VALUE for a top-level field, list it here too.
+// add a new owe::GetJsonValue(json, "key", ...) call for a top-level field,
+// list it here too.
 
 #include <algorithm>
 #include <cstdint>

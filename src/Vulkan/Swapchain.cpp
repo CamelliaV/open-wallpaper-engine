@@ -8,7 +8,6 @@ module wescene.vulkan;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 using namespace owe::vulkan;
 

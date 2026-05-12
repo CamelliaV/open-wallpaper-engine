@@ -2,19 +2,16 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include <nlohmann/json.hpp>
-#include "WPJson.hpp"
 
 #include "Utils/String.h"
 
-#include <cassert>
 
 module wescene.parse;
+import nlohmann.json;
 import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.shader_compile;
 import wescene.scene;
 import wescene.common;
@@ -224,24 +221,24 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
         */
         if (line.find("// [COMBO]") != std::string::npos) {
             nlohmann::json combo_json;
-            if (PARSE_JSON(line.substr(line.find_first_of('{')), combo_json)) {
+            if (owe::ParseJson(line.substr(line.find_first_of('{')), combo_json)) {
                 if (combo_json.contains("combo")) {
                     std::string name;
                     int32_t     value = 0;
-                    GET_JSON_NAME_VALUE(combo_json, "combo", name);
-                    GET_JSON_NAME_VALUE(combo_json, "default", value);
+                    owe::GetJsonValue(combo_json, "combo", name);
+                    owe::GetJsonValue(combo_json, "default", value);
                     combos[name] = std::to_string(value);
                 }
             }
         } else if (line.find("uniform ") != std::string::npos) {
             if (line.find("// {") != std::string::npos) {
                 nlohmann::json sv_json;
-                if (PARSE_JSON(line.substr(line.find_first_of('{')), sv_json)) {
+                if (owe::ParseJson(line.substr(line.find_first_of('{')), sv_json)) {
                     std::vector<std::string> defines =
                         utils::SpliteString(line.substr(0, line.find_first_of(';')), ' ');
 
                     std::string material;
-                    GET_JSON_NAME_VALUE_NOWARN(sv_json, "material", material);
+                    owe::GetJsonValue(sv_json, "material", material, false);
                     if (! material.empty()) wpAliasDict[material] = defines.back();
 
                     ShaderValue sv;
@@ -275,17 +272,17 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
                             name = defines.back();
                             if (value.is_string()) {
                                 std::vector<float> v;
-                                GET_JSON_VALUE(value, v);
+                                owe::GetJsonValue(value, v);
                                 sv = std::span<const float>(v);
                             } else if (value.is_number()) {
                                 sv.setSize(1);
-                                GET_JSON_VALUE(value, sv[0]);
+                                owe::GetJsonValue(value, sv[0]);
                             }
                             shadervalues[name] = sv;
                         }
                         if (sv_json.contains("combo")) {
                             std::string name;
-                            GET_JSON_NAME_VALUE(sv_json, "combo", name);
+                            owe::GetJsonValue(sv_json, "combo", name);
                             combos[name] = "1";
                         }
                     }
@@ -896,7 +893,7 @@ inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream
     i32 ver = ReadSPVVesion(file);
 
     usize count = file.ReadUint32();
-    assert(count <= 16 && count >= 0);
+    rstd_assert(count <= 16 && count >= 0);
     if (count > 16) return false;
 
     codes.resize(count);
@@ -904,7 +901,7 @@ inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream
         auto& c = codes[i];
 
         u32 size = file.ReadUint32();
-        assert(size % 4 == 0);
+        rstd_assert(size % 4 == 0);
         if (size % 4 != 0) return false;
 
         c.resize(size / 4);

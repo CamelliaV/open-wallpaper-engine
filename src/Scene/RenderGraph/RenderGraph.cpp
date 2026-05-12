@@ -1,12 +1,13 @@
 module;
 
-#include <cassert>
+#include <rstd/macro.hpp>
+
 
 #include "RenderGraph/Pass.hpp"
 
 module wescene.rgraph;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 using namespace owe::rg;
 
@@ -81,7 +82,7 @@ TexNode* RenderGraphBuilder::createTexNode(const TexNode::Desc& desc, bool write
     } else {
         node = createNewTexNode(desc);
     }
-    assert(node != nullptr);
+    rstd_assert(node != nullptr);
     return node;
 }
 

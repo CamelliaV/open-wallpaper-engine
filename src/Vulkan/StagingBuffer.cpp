@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cstring>
 #include "vk_mem_alloc.h"
 #include "vvk/macros.hpp"
 
@@ -9,7 +8,6 @@ module wescene.vulkan;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 using namespace owe::vulkan;
 
@@ -107,7 +105,7 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
     auto newsize = m_stage_buf.req_size + nsize;
     std::vector<uint8_t> tmp;
     tmp.resize(newsize);
-    memcpy(tmp.data(), m_stage_raw, m_stage_buf.req_size);
+    std::memcpy(tmp.data(), m_stage_raw, m_stage_buf.req_size);
 
     m_stage_raw = nullptr;
     m_stage_buf.handle.UnMapMemory();
@@ -115,7 +113,7 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
 
     if (! CreateStagingBuffer(m_device.vma_allocator(), newsize, m_stage_buf)) return false;
     VVK_CHECK_BOOL_RE(mapStageBuf());
-    memcpy(m_stage_raw, tmp.data(), newsize);
+    std::memcpy(m_stage_raw, tmp.data(), newsize);
 
     m_gpu_buf.handle = nullptr;
     rstd_info("increase buffer size: {}", nsize);

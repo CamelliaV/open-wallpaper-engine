@@ -3,7 +3,7 @@ module;
 
 export module wescene.timer:thread_timer;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 export namespace owe
 {

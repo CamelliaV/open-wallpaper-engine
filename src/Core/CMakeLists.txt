@@ -7,9 +7,9 @@
 # ---------------------------------------------------------------------------
 add_library(owe-core STATIC)
 target_sources(owe-core
-  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Core.cppm)
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Core.cppm eigen.cppm)
 target_link_libraries(owe-core
-  PUBLIC rstd::rstd rstd.cppstd)
+  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen)
 target_compile_features(owe-core PUBLIC cxx_std_20)
 target_compile_options(owe-core PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-core PROPERTY POSITION_INDEPENDENT_CODE ON)

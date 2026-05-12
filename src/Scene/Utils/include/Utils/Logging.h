@@ -2,9 +2,9 @@
 
 // __SHORT_FILE__ — compile-time-trimmed __FILE__ that retains only the
 // segment after the last slash. Kept as a header (no module attachment)
-// because consumers rely on it inside macros (WPJson.hpp's GET_JSON_*
-// helpers, String.h's STRTONUM). Logging itself migrated to rstd's
-// rstd_info / rstd_error / etc. — `#include <rstd/macro.hpp>` for those.
+// because String.h's STRTONUM macro relies on it. Logging itself migrated
+// to rstd's rstd_info / rstd_error / etc. — `#include <rstd/macro.hpp>`
+// for those.
 //
 // Pulls <string>/<string_view> into the GMF so consumers' std::less<>
 // instantiations on std::string keys still resolve `operator<` cleanly

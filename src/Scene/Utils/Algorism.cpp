@@ -2,10 +2,9 @@ module;
 
 #include <cmath>
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
 
 module wescene.utils;
+import eigen;
 
 using namespace owe;
 using namespace Eigen;

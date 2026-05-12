@@ -3,7 +3,7 @@ module;
 
 export module wescene.rgraph:dependency_graph;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 export namespace owe::rg
 {

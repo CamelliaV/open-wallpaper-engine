@@ -1,11 +1,11 @@
 module;
 
-#include <cmath>
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
+#include <rstd/macro.hpp>
+
 module wescene.puppet;
+import eigen;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 using namespace owe;
 using namespace Eigen;
@@ -57,7 +57,7 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         auto&       affine = m_final_affines[i];
 
         affine = Affine3f::Identity();
-        assert(bone.parent < i || bone.noParent());
+        rstd_assert(bone.parent < i || bone.noParent());
         const Affine3f parent =
             bone.noParent() ? Affine3f::Identity() : m_final_affines[bone.parent];
 
@@ -71,7 +71,7 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         for (auto& layer : puppet_layer.m_layers) {
             auto& alayer = layer.anim_layer;
             if (layer.anim == nullptr || ! alayer.visible) continue;
-            assert(i < layer.anim->bframes_array.size());
+            rstd_assert(i < layer.anim->bframes_array.size());
             if (i >= layer.anim->bframes_array.size()) continue;
 
             auto&  info    = layer.interp_info;

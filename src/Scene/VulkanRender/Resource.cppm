@@ -5,7 +5,7 @@ module;
 
 export module wescene.vulkan_render:resource;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import wescene.vulkan;
 
 export namespace owe::vulkan

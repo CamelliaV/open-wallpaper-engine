@@ -5,7 +5,7 @@ module;
 
 export module wescene.scene_wallpaper;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 export import wescene.vulkan_render;
 

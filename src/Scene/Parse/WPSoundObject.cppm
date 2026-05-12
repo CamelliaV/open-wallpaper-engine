@@ -1,10 +1,8 @@
 module;
 
-#include "WPJson.hpp"
-#include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_sound_object;
-import cppstd;
+import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;
 
@@ -49,32 +47,32 @@ struct WPSoundObject {
     }
 
     bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
-        GET_JSON_NAME_VALUE(json, "volume", volume);
-        GET_JSON_NAME_VALUE(json, "playbackmode", playbackmode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "mintime", mintime);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxtime", maxtime);
-        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+        owe::GetJsonValue(json, "volume", volume);
+        owe::GetJsonValue(json, "playbackmode", playbackmode);
+        owe::GetJsonValue(json, "mintime", mintime, false);
+        owe::GetJsonValue(json, "maxtime", maxtime, false);
+        owe::GetJsonValue(json, "visible", visible, false);
+        owe::GetJsonValue(json, "name", name, false);
+        owe::GetJsonValue(json, "id", id, false);
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-        GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+        owe::GetJsonValue(json, "locktransforms", locktransforms, false);
+        owe::GetJsonValue(json, "muteineditor", muteineditor, false);
+        owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+        owe::GetJsonValue(json, "parent", parent, false);
+        owe::GetJsonValue(json, "dependencies", dependencies, false);
         if (json.contains("instance")) instance = json.at("instance");
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "startsilent", startsilent);
-        GET_JSON_NAME_VALUE_NOWARN(json, "blockalign", blockalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "spatialization", spatialization);
-        GET_JSON_NAME_VALUE_NOWARN(json, "queuemode", queuemode);
+        owe::GetJsonValue(json, "startsilent", startsilent, false);
+        owe::GetJsonValue(json, "blockalign", blockalign, false);
+        owe::GetJsonValue(json, "spatialization", spatialization, false);
+        owe::GetJsonValue(json, "queuemode", queuemode, false);
 
         if (! json.contains("sound") || ! json.at("sound").is_array()) {
             return false;
         }
         for (const auto& el : json.at("sound")) {
             std::string name;
-            GET_JSON_VALUE(el, name);
+            owe::GetJsonValue(el, name);
             if (! name.empty()) sound.push_back(name);
         }
         AbsorbAllFieldBindings(json, field_bindings);

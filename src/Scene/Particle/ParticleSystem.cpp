@@ -1,10 +1,11 @@
 module;
 
-#include <cassert>
+#include <rstd/macro.hpp>
+
 
 module wescene.scene;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 using namespace owe;
 
@@ -97,7 +98,7 @@ void ParticleSubSystem::Emitt() {
     };
 
     for (auto& inst : m_instances) {
-        assert(inst);
+        rstd_assert(inst);
 
         auto& bounded_data = inst->GetBoundedData();
 

@@ -2,7 +2,7 @@ module;
 
 module wescene.timer;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 
 using namespace owe;
 using micros = std::chrono::microseconds;

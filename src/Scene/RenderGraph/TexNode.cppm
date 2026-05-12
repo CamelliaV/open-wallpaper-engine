@@ -1,7 +1,7 @@
 module;
 
 export module wescene.rgraph:tex_node;
-import cppstd;
+import rstd.cppstd;
 
 import :dependency_graph;
 

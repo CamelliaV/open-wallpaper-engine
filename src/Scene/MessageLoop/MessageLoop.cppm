@@ -3,7 +3,6 @@ module;
 #include <rstd/macro.hpp>
 export module wescene.message_loop;
 import wescene.core;
-import cppstd;
 import rstd.log;
 import rstd.cppstd;
 

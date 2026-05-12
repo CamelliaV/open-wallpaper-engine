@@ -1,28 +1,27 @@
 module;
 
-#include "WPJson.hpp"
-#include <nlohmann/json.hpp>
 
 module wescene.parse;
-import cppstd;
+import nlohmann.json;
+import rstd.cppstd;
 
 namespace owe::wpscene {
 
 bool ParseAnimKeyframeTangent(const nlohmann::json& json, WPAnimKeyframeTangent& out) {
     if (! json.is_object()) return false;
-    GET_JSON_NAME_VALUE_NOWARN(json, "enabled", out.enabled);
-    GET_JSON_NAME_VALUE_NOWARN(json, "x", out.x);
-    GET_JSON_NAME_VALUE_NOWARN(json, "y", out.y);
-    GET_JSON_NAME_VALUE_NOWARN(json, "magic", out.magic);
+    owe::GetJsonValue(json, "enabled", out.enabled, false);
+    owe::GetJsonValue(json, "x", out.x, false);
+    owe::GetJsonValue(json, "y", out.y, false);
+    owe::GetJsonValue(json, "magic", out.magic, false);
     return true;
 }
 
 bool ParseAnimKeyframe(const nlohmann::json& json, WPAnimKeyframe& out) {
     if (! json.is_object()) return false;
-    GET_JSON_NAME_VALUE_NOWARN(json, "frame", out.frame);
-    GET_JSON_NAME_VALUE_NOWARN(json, "value", out.value);
-    GET_JSON_NAME_VALUE_NOWARN(json, "lockangle", out.lockangle);
-    GET_JSON_NAME_VALUE_NOWARN(json, "locklength", out.locklength);
+    owe::GetJsonValue(json, "frame", out.frame, false);
+    owe::GetJsonValue(json, "value", out.value, false);
+    owe::GetJsonValue(json, "lockangle", out.lockangle, false);
+    owe::GetJsonValue(json, "locklength", out.locklength, false);
     if (json.contains("front")) ParseAnimKeyframeTangent(json.at("front"), out.front);
     if (json.contains("back"))  ParseAnimKeyframeTangent(json.at("back"),  out.back);
     return true;
@@ -40,12 +39,12 @@ bool ParseAnimAxis(const nlohmann::json& json, std::vector<WPAnimKeyframe>& out)
 
 bool ParseAnimOptions(const nlohmann::json& json, WPAnimOptions& out) {
     if (! json.is_object()) return false;
-    GET_JSON_NAME_VALUE_NOWARN(json, "fps", out.fps);
-    GET_JSON_NAME_VALUE_NOWARN(json, "length", out.length);
-    GET_JSON_NAME_VALUE_NOWARN(json, "mode", out.mode);
-    GET_JSON_NAME_VALUE_NOWARN(json, "name", out.name);
-    GET_JSON_NAME_VALUE_NOWARN(json, "startpaused", out.startpaused);
-    GET_JSON_NAME_VALUE_NOWARN(json, "wraploop", out.wraploop);
+    owe::GetJsonValue(json, "fps", out.fps, false);
+    owe::GetJsonValue(json, "length", out.length, false);
+    owe::GetJsonValue(json, "mode", out.mode, false);
+    owe::GetJsonValue(json, "name", out.name, false);
+    owe::GetJsonValue(json, "startpaused", out.startpaused, false);
+    owe::GetJsonValue(json, "wraploop", out.wraploop, false);
     if (json.contains("smoothing")) out.smoothing = json.at("smoothing");
     if (json.contains("children"))  out.children  = json.at("children");
     if (json.contains("events"))    out.events    = json.at("events");
@@ -59,24 +58,25 @@ bool ParseAnimCurve(const nlohmann::json& json, WPAnimCurve& out) {
     if (json.contains("c1")) ParseAnimAxis(json.at("c1"), out.c1);
     if (json.contains("c2")) ParseAnimAxis(json.at("c2"), out.c2);
     if (json.contains("options")) ParseAnimOptions(json.at("options"), out.options);
-    GET_JSON_NAME_VALUE_NOWARN(json, "relative", out.relative);
+    owe::GetJsonValue(json, "relative", out.relative, false);
     return true;
 }
 
 std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindings& out) {
     if (! obj_json.is_object()) return 0;
     std::size_t n = 0;
-    for (const auto& [field_name, field_value] : obj_json.items()) {
+    for (const auto& el : obj_json.items()) {
+        const auto& field_value = el.value();
         if (! field_value.is_object()) continue;
         if (field_value.contains("animation")) {
             WPAnimCurve curve;
             if (ParseAnimCurve(field_value.at("animation"), curve)) {
-                out.animations[field_name] = std::move(curve);
+                out.animations[el.key()] = std::move(curve);
                 ++n;
             }
         }
         if (field_value.contains("scriptproperties")) {
-            out.scriptproperties[field_name] = field_value.at("scriptproperties");
+            out.scriptproperties[el.key()] = field_value.at("scriptproperties");
             ++n;
         }
         if (field_value.contains("script") && field_value.at("script").is_string()) {
@@ -88,7 +88,7 @@ std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindin
                 sb.initial_value = field_value.at("value");
             if (field_value.contains("user") && field_value.at("user").is_string())
                 sb.user = field_value.at("user").get<std::string>();
-            out.scripts[field_name] = std::move(sb);
+            out.scripts[el.key()] = std::move(sb);
             ++n;
         }
     }

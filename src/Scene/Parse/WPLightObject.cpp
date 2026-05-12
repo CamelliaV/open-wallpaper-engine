@@ -1,9 +1,8 @@
 module;
 
-#include "WPJson.hpp"
 
-#include <nlohmann/json.hpp>
 module wescene.parse;
+import nlohmann.json;
 
 using namespace owe::wpscene;
 
@@ -12,39 +11,39 @@ bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 }
 
 bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
-    GET_JSON_NAME_VALUE(json, "origin", origin);
-    GET_JSON_NAME_VALUE(json, "angles", angles);
-    GET_JSON_NAME_VALUE(json, "scale", scale);
-    GET_JSON_NAME_VALUE(json, "color", color);
-    GET_JSON_NAME_VALUE(json, "light", light);
-    GET_JSON_NAME_VALUE(json, "radius", radius);
-    GET_JSON_NAME_VALUE(json, "intensity", intensity);
-    GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-    GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-    GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
-    GET_JSON_NAME_VALUE_NOWARN(json, "shape", shape);
+    owe::GetJsonValue(json, "origin", origin);
+    owe::GetJsonValue(json, "angles", angles);
+    owe::GetJsonValue(json, "scale", scale);
+    owe::GetJsonValue(json, "color", color);
+    owe::GetJsonValue(json, "light", light);
+    owe::GetJsonValue(json, "radius", radius);
+    owe::GetJsonValue(json, "intensity", intensity);
+    owe::GetJsonValue(json, "visible", visible, false);
+    owe::GetJsonValue(json, "name", name, false);
+    owe::GetJsonValue(json, "id", id, false);
+    owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
+    owe::GetJsonValue(json, "shape", shape, false);
 
-    GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-    GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-    GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-    GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+    owe::GetJsonValue(json, "locktransforms", locktransforms, false);
+    owe::GetJsonValue(json, "muteineditor", muteineditor, false);
+    owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+    owe::GetJsonValue(json, "parent", parent, false);
 
-    GET_JSON_NAME_VALUE_NOWARN(json, "ledsource", ledsource);
-    GET_JSON_NAME_VALUE_NOWARN(json, "castshadow", castshadow);
-    GET_JSON_NAME_VALUE_NOWARN(json, "castvolumetrics", castvolumetrics);
-    GET_JSON_NAME_VALUE_NOWARN(json, "outercone", outercone);
-    GET_JSON_NAME_VALUE_NOWARN(json, "innercone", innercone);
-    GET_JSON_NAME_VALUE_NOWARN(json, "attenuation", attenuation);
-    GET_JSON_NAME_VALUE_NOWARN(json, "exponent", exponent);
-    GET_JSON_NAME_VALUE_NOWARN(json, "density", density);
-    GET_JSON_NAME_VALUE_NOWARN(json, "volumetricsexponent", volumetricsexponent);
-    GET_JSON_NAME_VALUE_NOWARN(json, "lightsourcesize", lightsourcesize);
-    GET_JSON_NAME_VALUE_NOWARN(json, "mindistance", mindistance);
-    GET_JSON_NAME_VALUE_NOWARN(json, "cascadedistance0", cascadedistance0);
-    GET_JSON_NAME_VALUE_NOWARN(json, "cascadedistance1", cascadedistance1);
-    GET_JSON_NAME_VALUE_NOWARN(json, "cascadedistance2", cascadedistance2);
-    GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+    owe::GetJsonValue(json, "ledsource", ledsource, false);
+    owe::GetJsonValue(json, "castshadow", castshadow, false);
+    owe::GetJsonValue(json, "castvolumetrics", castvolumetrics, false);
+    owe::GetJsonValue(json, "outercone", outercone, false);
+    owe::GetJsonValue(json, "innercone", innercone, false);
+    owe::GetJsonValue(json, "attenuation", attenuation, false);
+    owe::GetJsonValue(json, "exponent", exponent, false);
+    owe::GetJsonValue(json, "density", density, false);
+    owe::GetJsonValue(json, "volumetricsexponent", volumetricsexponent, false);
+    owe::GetJsonValue(json, "lightsourcesize", lightsourcesize, false);
+    owe::GetJsonValue(json, "mindistance", mindistance, false);
+    owe::GetJsonValue(json, "cascadedistance0", cascadedistance0, false);
+    owe::GetJsonValue(json, "cascadedistance1", cascadedistance1, false);
+    owe::GetJsonValue(json, "cascadedistance2", cascadedistance2, false);
+    owe::GetJsonValue(json, "dependencies", dependencies, false);
     if (json.contains("instance")) instance = json.at("instance");
     AbsorbAllFieldBindings(json, field_bindings);
     return true;

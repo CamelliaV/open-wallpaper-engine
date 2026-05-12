@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cassert>
 #include "Swapchain/ExSwapchain.hpp"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
@@ -11,7 +10,6 @@ import wescene.spec_texs;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 
@@ -65,7 +63,7 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
     auto& dst = m_desc.vk_dst;
 
     if (! (src.handle && dst.handle)) {
-        assert(src.handle && dst.handle);
+        rstd_assert(src.handle && dst.handle);
         return;
     }
 

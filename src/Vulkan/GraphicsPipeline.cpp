@@ -1,6 +1,7 @@
 module;
 
-#include <cassert>
+#include <rstd/macro.hpp>
+
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
@@ -9,7 +10,6 @@ import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 using namespace owe::vulkan;
 
@@ -22,7 +22,7 @@ inline VkShaderStageFlagBits ToVkType(owe::ShaderType stage) {
     case ShaderType::VERTEX: return VK_SHADER_STAGE_VERTEX_BIT;
     case ShaderType::FRAGMENT: return VK_SHADER_STAGE_FRAGMENT_BIT;
     case ShaderType::GEOMETRY: return VK_SHADER_STAGE_GEOMETRY_BIT;
-    default: assert(false); return VK_SHADER_STAGE_VERTEX_BIT;
+    default: rstd_assert(false); return VK_SHADER_STAGE_VERTEX_BIT;
     }
 }
 

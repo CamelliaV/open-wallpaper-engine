@@ -1,11 +1,11 @@
 module;
 
 
-#include <Eigen/Dense>
 
 export module wescene.parse:wp_mdl_parser;
+import eigen;
 import wescene.core;
-import cppstd;
+import rstd.cppstd;
 import wescene.fs;
 import wescene.scene;
 

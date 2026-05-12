@@ -1,10 +1,8 @@
 module;
 
-#include "WPJson.hpp"
-#include <nlohmann/json.hpp>
 
 export module wescene.parse:wp_misc_object;
-import cppstd;
+import rstd.cppstd;
 import wescene.fs;
 import wescene.json;
 export import :wp_animation;
@@ -77,48 +75,48 @@ struct WPTextObject {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
     bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-        GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
-        GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
-        GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-        GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-        GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+        owe::GetJsonValue(json, "id", id, false);
+        owe::GetJsonValue(json, "name", name, false);
+        owe::GetJsonValue(json, "origin", origin, false);
+        owe::GetJsonValue(json, "scale", scale, false);
+        owe::GetJsonValue(json, "angles", angles, false);
+        owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
+        owe::GetJsonValue(json, "visible", visible, false);
+        owe::GetJsonValue(json, "locktransforms", locktransforms, false);
+        owe::GetJsonValue(json, "muteineditor", muteineditor, false);
+        owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+        owe::GetJsonValue(json, "parent", parent, false);
+        owe::GetJsonValue(json, "dependencies", dependencies, false);
         if (json.contains("instance")) instance = json.at("instance");
 
         if (json.contains("text")) text = json.at("text");
         if (json.contains("font")) font = json.at("font");
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "pointsize", pointsize);
-        GET_JSON_NAME_VALUE_NOWARN(json, "padding", padding);
-        GET_JSON_NAME_VALUE_NOWARN(json, "horizontalalign", horizontalalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "verticalalign", verticalalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "anchor", anchor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "alignment", alignment);
+        owe::GetJsonValue(json, "pointsize", pointsize, false);
+        owe::GetJsonValue(json, "padding", padding, false);
+        owe::GetJsonValue(json, "horizontalalign", horizontalalign, false);
+        owe::GetJsonValue(json, "verticalalign", verticalalign, false);
+        owe::GetJsonValue(json, "anchor", anchor, false);
+        owe::GetJsonValue(json, "alignment", alignment, false);
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxrows", maxrows);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxwidth", maxwidth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limitrows", limitrows);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limitwidth", limitwidth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limituseellipsis", limituseellipsis);
+        owe::GetJsonValue(json, "maxrows", maxrows, false);
+        owe::GetJsonValue(json, "maxwidth", maxwidth, false);
+        owe::GetJsonValue(json, "limitrows", limitrows, false);
+        owe::GetJsonValue(json, "limitwidth", limitwidth, false);
+        owe::GetJsonValue(json, "limituseellipsis", limituseellipsis, false);
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "color", color);
-        GET_JSON_NAME_VALUE_NOWARN(json, "alpha", alpha);
-        GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
-        GET_JSON_NAME_VALUE_NOWARN(json, "colorBlendMode", colorBlendMode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "size", size);
-        GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
-        GET_JSON_NAME_VALUE_NOWARN(json, "copybackground", copybackground);
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "opaquebackground", opaquebackground);
-        GET_JSON_NAME_VALUE_NOWARN(json, "ledsource", ledsource);
-        GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
+        owe::GetJsonValue(json, "color", color, false);
+        owe::GetJsonValue(json, "alpha", alpha, false);
+        owe::GetJsonValue(json, "brightness", brightness, false);
+        owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);
+        owe::GetJsonValue(json, "size", size, false);
+        owe::GetJsonValue(json, "perspective", perspective, false);
+        owe::GetJsonValue(json, "copybackground", copybackground, false);
+        owe::GetJsonValue(json, "solid", solid, false);
+        owe::GetJsonValue(json, "opaquebackground", opaquebackground, false);
+        owe::GetJsonValue(json, "ledsource", ledsource, false);
+        owe::GetJsonValue(json, "backgroundcolor", backgroundcolor, false);
+        owe::GetJsonValue(json, "backgroundbrightness", backgroundbrightness, false);
         AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }
@@ -152,23 +150,23 @@ struct WPModelObject {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
     bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-        GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
-        GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
-        GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-        GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-        GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+        owe::GetJsonValue(json, "id", id, false);
+        owe::GetJsonValue(json, "name", name, false);
+        owe::GetJsonValue(json, "origin", origin, false);
+        owe::GetJsonValue(json, "scale", scale, false);
+        owe::GetJsonValue(json, "angles", angles, false);
+        owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
+        owe::GetJsonValue(json, "visible", visible, false);
+        owe::GetJsonValue(json, "locktransforms", locktransforms, false);
+        owe::GetJsonValue(json, "muteineditor", muteineditor, false);
+        owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+        owe::GetJsonValue(json, "parent", parent, false);
+        owe::GetJsonValue(json, "dependencies", dependencies, false);
         if (json.contains("instance")) instance = json.at("instance");
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "model", model);
-        GET_JSON_NAME_VALUE_NOWARN(json, "attachment", attachment);
-        GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
+        owe::GetJsonValue(json, "model", model, false);
+        owe::GetJsonValue(json, "attachment", attachment, false);
+        owe::GetJsonValue(json, "perspective", perspective, false);
         AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }
@@ -206,27 +204,27 @@ struct WPCameraObject {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
     bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-        GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
-        GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
-        GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-        GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-        GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+        owe::GetJsonValue(json, "id", id, false);
+        owe::GetJsonValue(json, "name", name, false);
+        owe::GetJsonValue(json, "origin", origin, false);
+        owe::GetJsonValue(json, "scale", scale, false);
+        owe::GetJsonValue(json, "angles", angles, false);
+        owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
+        owe::GetJsonValue(json, "visible", visible, false);
+        owe::GetJsonValue(json, "locktransforms", locktransforms, false);
+        owe::GetJsonValue(json, "muteineditor", muteineditor, false);
+        owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+        owe::GetJsonValue(json, "parent", parent, false);
+        owe::GetJsonValue(json, "dependencies", dependencies, false);
         if (json.contains("instance")) instance = json.at("instance");
 
-        GET_JSON_NAME_VALUE_NOWARN(json, "camera", camera);
-        GET_JSON_NAME_VALUE_NOWARN(json, "path", path);
-        GET_JSON_NAME_VALUE_NOWARN(json, "queuemode", queuemode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "fov", fov);
-        GET_JSON_NAME_VALUE_NOWARN(json, "zoom", zoom);
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
+        owe::GetJsonValue(json, "camera", camera, false);
+        owe::GetJsonValue(json, "path", path, false);
+        owe::GetJsonValue(json, "queuemode", queuemode, false);
+        owe::GetJsonValue(json, "fov", fov, false);
+        owe::GetJsonValue(json, "zoom", zoom, false);
+        owe::GetJsonValue(json, "solid", solid, false);
+        owe::GetJsonValue(json, "disablepropagation", disablepropagation, false);
         AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }

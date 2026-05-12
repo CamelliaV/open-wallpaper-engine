@@ -2,13 +2,11 @@ module;
 
 #include <rstd/macro.hpp>
 #include <cstdio>
-#include <cassert>
 
 export module wescene.fs;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 export namespace owe::fs
 {
@@ -208,7 +206,7 @@ public:
         return sizeInBytes * std::fread(buffer, sizeInBytes, 1, m_file);
     }
     virtual char* Gets(char* buffer, usize sizeStr) override {
-        assert(sizeStr < std::numeric_limits<int>::max());
+        rstd_assert(sizeStr < std::numeric_limits<int>::max());
         return std::fgets(buffer, (int)sizeStr, m_file);
     }
     virtual idx   Tell() const override { return std::ftell(m_file); }

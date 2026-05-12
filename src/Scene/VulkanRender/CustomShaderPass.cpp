@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cassert>
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
@@ -10,7 +9,6 @@ import wescene.spec_texs;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 import wescene.vulkan;
 import wescene.scene;
 
@@ -123,7 +121,7 @@ static void UpdateUniform(StagingBuffer* buf, const StagingBufferRef& bufref,
     size_t offset    = uni->second.offset;
     size_t type_size = sizeof(float) * uni->second.num;
     if (type_size != value_u8.size()) {
-        // assert(type_size == value_u8.size());
+        // rstd_assert(type_size == value_u8.size());
         ; // to do
     }
     buf->writeToBuf(bufref, value_u8, offset);
@@ -154,8 +152,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
     {
         auto& tex_name = m_desc.output;
-        assert(IsSpecTex(tex_name));
-        assert(scene.renderTargets.count(tex_name) > 0);
+        rstd_assert(IsSpecTex(tex_name));
+        rstd_assert(scene.renderTargets.count(tex_name) > 0);
         auto& rt = scene.renderTargets.at(tex_name);
         if (auto opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
             opt.has_value()) {
@@ -572,7 +570,7 @@ void CustomShaderPass::destory(const Device&, RenderingResources& rr) {
 }
 
 void CustomShaderPass::setDescTex(u32 index, std::string_view tex_key) {
-    assert(index < m_desc.textures.size());
+    rstd_assert(index < m_desc.textures.size());
     if (index >= m_desc.textures.size()) return;
     m_desc.textures[index] = tex_key;
 }

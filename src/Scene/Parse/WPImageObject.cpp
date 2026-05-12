@@ -1,26 +1,24 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "WPJson.hpp"
 
-#include <nlohmann/json.hpp>
 module wescene.parse;
+import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
-import cppstd;
 
 using namespace owe::wpscene;
 
 bool WPEffectCommand::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "command", command);
-    GET_JSON_NAME_VALUE(json, "target", target);
-    GET_JSON_NAME_VALUE(json, "source", source);
+    owe::GetJsonValue(json, "command", command);
+    owe::GetJsonValue(json, "target", target);
+    owe::GetJsonValue(json, "source", source);
     return true;
 }
 
 bool WPObjectInstance::FromJson(const nlohmann::json& json) {
     present = true;
-    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+    owe::GetJsonValue(json, "id", id, false);
     if (json.contains("combos") && json.at("combos").is_object()) {
         for (const auto& jC : json.at("combos").items()) {
             std::int32_t v { 0 };
@@ -43,10 +41,10 @@ bool WPObjectInstance::FromJson(const nlohmann::json& json) {
 }
 
 bool WPEffectFbo::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "name", name);
-    GET_JSON_NAME_VALUE(json, "format", format);
+    owe::GetJsonValue(json, "name", name);
+    owe::GetJsonValue(json, "format", format);
 
-    GET_JSON_NAME_VALUE(json, "scale", scale);
+    owe::GetJsonValue(json, "scale", scale);
     if(scale == 0) { 
         rstd_error("fbo scale can't be 0");
         scale = 1;
@@ -81,17 +79,17 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 
 bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     std::string filePath;
-    GET_JSON_NAME_VALUE(json, "file", filePath);
-    GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-    GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-    GET_JSON_NAME_VALUE_NOWARN(json, "username", username);
+    owe::GetJsonValue(json, "file", filePath);
+    owe::GetJsonValue(json, "visible", visible, false);
+    owe::GetJsonValue(json, "name", name, false);
+    owe::GetJsonValue(json, "username", username, false);
     if(this->IsEffectBlacklisted(filePath)) {
         //hide blacklisted effects
         visible = false;
     }
-	GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+	owe::GetJsonValue(json, "id", id, false);
     nlohmann::json jEffect;
-    if(!PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + filePath), jEffect))
+    if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + filePath), jEffect))
         return false;
     if(!FromFileJson(jEffect, vfs))
         return false;
@@ -113,8 +111,8 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
 }
 
 bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
-	GET_JSON_NAME_VALUE_NOWARN(json, "version", version);
-    GET_JSON_NAME_VALUE(json, "name", name);
+	owe::GetJsonValue(json, "version", version, false);
+    owe::GetJsonValue(json, "name", name);
     if(json.contains("fbos")) {
         for(auto& jF:json.at("fbos")) {
             WPEffectFbo fbo;
@@ -138,9 +136,9 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
                 return false;
             }
             std::string matPath;
-            GET_JSON_NAME_VALUE(jP, "material", matPath);
+            owe::GetJsonValue(jP, "material", matPath);
             nlohmann::json jMat;
-            if(!PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + matPath), jMat))
+            if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath), jMat))
                 return false;
             WPMaterial material;
             material.FromJson(jMat);
@@ -149,7 +147,7 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
             pass.FromJson(jP);
             passes.push_back(std::move(pass));
             if(jP.contains("compose"))
-	            GET_JSON_NAME_VALUE(jP, "compose", compose);
+	            owe::GetJsonValue(jP, "compose", compose);
         }
         if(compose) {
             if(passes.size() != 2) {
@@ -174,45 +172,45 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 }
 
 bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
-    GET_JSON_NAME_VALUE(json, "image", image);
-    GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-    GET_JSON_NAME_VALUE_NOWARN(json, "alignment", alignment);
+    owe::GetJsonValue(json, "image", image);
+    owe::GetJsonValue(json, "visible", visible, false);
+    owe::GetJsonValue(json, "alignment", alignment, false);
     nlohmann::json jImage;
-    if(!PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + image), jImage)) {
+    if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + image), jImage)) {
         rstd_error("Can't load image json: {}", image);
         return false;
     }
-    GET_JSON_NAME_VALUE_NOWARN(jImage, "fullscreen", fullscreen);
-	GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-	GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-	GET_JSON_NAME_VALUE_NOWARN(json, "colorBlendMode", colorBlendMode);
+    owe::GetJsonValue(jImage, "fullscreen", fullscreen, false);
+	owe::GetJsonValue(json, "name", name, false);
+	owe::GetJsonValue(json, "id", id, false);
+	owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);
 	if(!fullscreen) {
-		GET_JSON_NAME_VALUE(json, "origin", origin);	
-		GET_JSON_NAME_VALUE(json, "angles", angles);	
-		GET_JSON_NAME_VALUE(json, "scale", scale);	
-		GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
+		owe::GetJsonValue(json, "origin", origin);	
+		owe::GetJsonValue(json, "angles", angles);	
+		owe::GetJsonValue(json, "scale", scale);	
+		owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
 		if(jImage.contains("width")) {
 			int32_t w,h;
-			GET_JSON_NAME_VALUE(jImage, "width", w);	
-			GET_JSON_NAME_VALUE(jImage, "height", h);	
+			owe::GetJsonValue(jImage, "width", w);	
+			owe::GetJsonValue(jImage, "height", h);	
 			size = {(float)w, (float)h};
 		} else if(json.contains("size")) {
-			GET_JSON_NAME_VALUE(json, "size", size);	
+			owe::GetJsonValue(json, "size", size);	
 		} else {
 			size = {origin.at(0)*2, origin.at(1)*2};
 		}
     }
-    GET_JSON_NAME_VALUE_NOWARN(jImage, "nopadding", nopadding);
-    GET_JSON_NAME_VALUE_NOWARN(json, "color", color);
-    GET_JSON_NAME_VALUE_NOWARN(json, "alpha", alpha);
-    GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
+    owe::GetJsonValue(jImage, "nopadding", nopadding, false);
+    owe::GetJsonValue(json, "color", color, false);
+    owe::GetJsonValue(json, "alpha", alpha, false);
+    owe::GetJsonValue(json, "brightness", brightness, false);
 
-	GET_JSON_NAME_VALUE_NOWARN(jImage, "puppet", puppet);	
+	owe::GetJsonValue(jImage, "puppet", puppet, false);	
     if(jImage.contains("material")) {
         std::string matPath;
-		GET_JSON_NAME_VALUE(jImage, "material", matPath);	
+		owe::GetJsonValue(jImage, "material", matPath);	
         nlohmann::json jMat;
-        if(!PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) {
+        if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) {
             rstd_error("Can't load material json: {}", matPath);
             return false;
         }
@@ -231,39 +229,39 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     if(json.contains("animationlayers")) {
         for(const auto& jLayer:json.at("animationlayers")) {
              WPPuppetLayer::AnimationLayer layer;
-             GET_JSON_NAME_VALUE(jLayer, "animation", layer.id);
-             GET_JSON_NAME_VALUE(jLayer, "blend", layer.blend);
-             GET_JSON_NAME_VALUE(jLayer, "rate", layer.rate);
-             GET_JSON_NAME_VALUE_NOWARN(jLayer, "visible", layer.visible);
-             GET_JSON_NAME_VALUE_NOWARN(jLayer, "id", layer.layer_id);
-             GET_JSON_NAME_VALUE_NOWARN(jLayer, "name", layer.name);
-             GET_JSON_NAME_VALUE_NOWARN(jLayer, "additive", layer.additive);
-             GET_JSON_NAME_VALUE_NOWARN(jLayer, "blendin", layer.blendin);
-             GET_JSON_NAME_VALUE_NOWARN(jLayer, "blendout", layer.blendout);
-             GET_JSON_NAME_VALUE_NOWARN(jLayer, "blendtime", layer.blendtime);
+             owe::GetJsonValue(jLayer, "animation", layer.id);
+             owe::GetJsonValue(jLayer, "blend", layer.blend);
+             owe::GetJsonValue(jLayer, "rate", layer.rate);
+             owe::GetJsonValue(jLayer, "visible", layer.visible, false);
+             owe::GetJsonValue(jLayer, "id", layer.layer_id, false);
+             owe::GetJsonValue(jLayer, "name", layer.name, false);
+             owe::GetJsonValue(jLayer, "additive", layer.additive, false);
+             owe::GetJsonValue(jLayer, "blendin", layer.blendin, false);
+             owe::GetJsonValue(jLayer, "blendout", layer.blendout, false);
+             owe::GetJsonValue(jLayer, "blendtime", layer.blendtime, false);
              puppet_layers.push_back(layer);
         }
     }
     if(json.contains("config")) {
         const auto& jConf = json.at("config");
-        GET_JSON_NAME_VALUE_NOWARN(jConf, "passthrough", config.passthrough);
+        owe::GetJsonValue(jConf, "passthrough", config.passthrough, false);
     }
 
-    GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-    GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-    GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-    GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
-    GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
-    GET_JSON_NAME_VALUE_NOWARN(json, "copybackground", copybackground);
-    GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-    GET_JSON_NAME_VALUE_NOWARN(json, "opaquebackground", opaquebackground);
-    GET_JSON_NAME_VALUE_NOWARN(json, "clampuvs", clampuvs);
-    GET_JSON_NAME_VALUE_NOWARN(json, "castshadow", castshadow);
-    GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
-    GET_JSON_NAME_VALUE_NOWARN(json, "depthtest", depthtest);
-    GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
-    GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
-    GET_JSON_NAME_VALUE_NOWARN(json, "dependencies", dependencies);
+    owe::GetJsonValue(json, "locktransforms", locktransforms, false);
+    owe::GetJsonValue(json, "muteineditor", muteineditor, false);
+    owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+    owe::GetJsonValue(json, "parent", parent, false);
+    owe::GetJsonValue(json, "perspective", perspective, false);
+    owe::GetJsonValue(json, "copybackground", copybackground, false);
+    owe::GetJsonValue(json, "solid", solid, false);
+    owe::GetJsonValue(json, "opaquebackground", opaquebackground, false);
+    owe::GetJsonValue(json, "clampuvs", clampuvs, false);
+    owe::GetJsonValue(json, "castshadow", castshadow, false);
+    owe::GetJsonValue(json, "disablepropagation", disablepropagation, false);
+    owe::GetJsonValue(json, "depthtest", depthtest, false);
+    owe::GetJsonValue(json, "backgroundcolor", backgroundcolor, false);
+    owe::GetJsonValue(json, "backgroundbrightness", backgroundbrightness, false);
+    owe::GetJsonValue(json, "dependencies", dependencies, false);
     if (json.contains("instance") && json.at("instance").is_object()) {
         instance.FromJson(json.at("instance"));
     }
