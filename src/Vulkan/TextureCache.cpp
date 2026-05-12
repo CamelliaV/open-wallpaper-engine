@@ -861,15 +861,19 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
     }
 
     /* 3) Open the decoder. Sw mode for first iteration — sidesteps any
-     * Vulkan extension prerequisites on wescene's instance/device. */
-    auto stream = std::make_unique<PkgRangedInputStream>(
-        std::move(pkg_stream),
-        static_cast<std::int64_t>(mip.videoOffset),
-        static_cast<std::int64_t>(mip.videoSize));
+     * Vulkan extension prerequisites on wescene's instance/device. The
+     * factory hands out a fresh PkgRangedInputStream per trial; the
+     * captured shared_ptr keeps the underlying pkg file handle alive. */
+    auto factory = [pkg = pkg_stream,
+                    off = static_cast<std::int64_t>(mip.videoOffset),
+                    len = static_cast<std::int64_t>(mip.videoSize)]()
+        -> std::unique_ptr<wavsen::video::IInputStream> {
+        return std::make_unique<PkgRangedInputStream>(pkg, off, len);
+    };
     wavsen::video::OpenOpts opts {};
     opts.hwaccel = wavsen::video::HwAccel::None;
     auto dec_r = wavsen::video::VideoDecoder::open_from_stream(
-        std::move(stream), slot->width, slot->height, /*loop=*/true,
+        std::move(factory), slot->width, slot->height, /*loop=*/true,
         /*vk=*/nullptr, opts);
     if (dec_r.is_err()) {
         rstd_error("CreateVideoTex: open_from_stream failed for {}: {}",
