@@ -167,7 +167,9 @@ void LoadControlPoint(ParticleSubSystem& pSys, const wpscene::Particle& wp) {
     std::span<ParticleControlpoint> pcs = pSys.Controlpoints();
     usize                           s   = std::min(pcs.size(), wp.controlpoints.size());
     for (usize i = 0; i < s; i++) {
-        pcs[i].offset = Eigen::Vector3d { array_cast<double>(wp.controlpoints[i].offset).data() };
+        pcs[i].base_offset =
+            Eigen::Vector3d { array_cast<double>(wp.controlpoints[i].offset).data() };
+        pcs[i].offset = pcs[i].base_offset;
         pcs[i].link_mouse =
             wp.controlpoints[i].flags[wpscene::ParticleControlpoint::FlagEnum::link_mouse];
         pcs[i].worldspace =
@@ -1473,7 +1475,8 @@ void ProcessObjects(ParseContext& context, std::span<WPObjectVar> wp_objs,
                        },
                        [&context, opts, sm](wpscene::WPSoundObject& obj) {
                            if ((opts.kinds & ProcessOpts::Sound) && sm)
-                               WPSoundParser::Parse(obj, *context.vfs, *sm);
+                               WPSoundParser::Parse(obj, *context.vfs, *sm,
+                                                    context.scene.get());
                        },
                        [&context, opts](wpscene::WPLightObject& obj) {
                            if (opts.kinds & ProcessOpts::Light) ParseLightObj(context, obj);

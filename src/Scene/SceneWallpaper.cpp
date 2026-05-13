@@ -1,12 +1,14 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <fstream>
 
 module wescene.scene_wallpaper;
 import wescene.types;
 import wescene.utils;
 import wescene.scene;
 
+import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
 import wavsen.audio;
@@ -38,6 +40,10 @@ struct RenderSetFillMode {
 struct RenderSetSpeed {
     float speed;
 };
+struct RenderSetUserProperty {
+    std::string   key;
+    nlohmann::json property;
+};
 struct RenderStop {
     bool stop;
 };
@@ -53,7 +59,7 @@ struct RenderSwapchainReady {
 // type sits in namespace std.
 struct RenderMsg {
     std::variant<RenderInit, RenderSetScene, RenderSetFillMode, RenderSetSpeed,
-                 RenderStop, RenderDraw, RenderSwapchainReady>
+                 RenderSetUserProperty, RenderStop, RenderDraw, RenderSwapchainReady>
         v;
 };
 
@@ -79,6 +85,65 @@ struct MainSetProperty {
 struct MainMsg {
     std::variant<MainLoadScene, MainSetProperty, MainStop, MainFirstFrame> v;
 };
+
+namespace {
+
+nlohmann::json MakeUserPropertyDescriptor(nlohmann::json value) {
+    if (value.is_object() && value.contains("value")) return value;
+    nlohmann::json out = nlohmann::json::object();
+    out["value"] = std::move(value);
+    return out;
+}
+
+nlohmann::json ParseSettingJsonValue(std::string_view raw) {
+    auto parsed = nlohmann::json::parse(raw,
+                                        /*callback=*/nullptr,
+                                        /*allow_exceptions=*/false,
+                                        /*ignore_comments=*/true);
+    if (! parsed.is_discarded()) return parsed;
+    return std::string(raw);
+}
+
+nlohmann::json PropertyValueToUserProperty(const PropertyValue& value) {
+    nlohmann::json v;
+    if (auto* p = std::get_if<bool>(&value)) {
+        v = *p;
+    } else if (auto* p = std::get_if<int32_t>(&value)) {
+        v = *p;
+    } else if (auto* p = std::get_if<float>(&value)) {
+        v = *p;
+    } else if (auto* p = std::get_if<std::string>(&value)) {
+        v = ParseSettingJsonValue(*p);
+    } else {
+        v = nullptr;
+    }
+    return MakeUserPropertyDescriptor(std::move(v));
+}
+
+void MergeProjectUserProperties(
+    const std::filesystem::path& project_dir,
+    std::unordered_map<std::string, nlohmann::json>& out) {
+    const auto project_path = project_dir / "project.json";
+    std::ifstream is(project_path);
+    if (! is) return;
+
+    auto j = nlohmann::json::parse(is,
+                                   /*callback=*/nullptr,
+                                   /*allow_exceptions=*/false,
+                                   /*ignore_comments=*/true);
+    if (j.is_discarded()) return;
+    auto gen = j.find("general");
+    if (gen == j.end() || ! gen->is_object()) return;
+    auto props = gen->find("properties");
+    if (props == gen->end() || ! props->is_object()) return;
+
+    for (auto it = props->begin(); it != props->end(); ++it) {
+        if (out.contains(it.key())) continue;
+        out.emplace(it.key(), MakeUserPropertyDescriptor(it.value()));
+    }
+}
+
+} // namespace
 
 using MainSender   = msgloop::MessageLoop<MainMsg>::Sender;
 using RenderSender = msgloop::MessageLoop<RenderMsg>::Sender;
@@ -115,6 +180,7 @@ private:
     std::string m_source;
     std::string m_cache_path;
     bool        m_gen_graphviz { false };
+    std::unordered_map<std::string, nlohmann::json> m_user_properties;
 
     WPSceneParser                        m_scene_parser;
     std::unique_ptr<wavsen::audio::SoundManager> m_sound_manager;
@@ -138,6 +204,7 @@ public:
     void on(RenderSetScene&&);
     void on(RenderSetFillMode&&);
     void on(RenderSetSpeed&&);
+    void on(RenderSetUserProperty&&);
     void on(RenderStop&&);
     void on(RenderDraw&&);
     void on(RenderSwapchainReady&&);
@@ -208,6 +275,7 @@ void RenderHandler::on(RenderDraw&&) {
         m_scene->shaderValueUpdater->FrameBegin();
         {
             auto pos = m_mouse_pos.load();
+            m_scene->pointerPosition = pos;
             m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
         }
         // Drive any per-Scene scenescripts before particle emission.
@@ -224,6 +292,11 @@ void RenderHandler::on(RenderDraw&&) {
             fi.canvas_h  = static_cast<float>(m_scene->ortho[1]);
             fi.screen_w  = fi.canvas_w;
             fi.screen_h  = fi.canvas_h;
+            for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
+                float level = m_scene->audioAverage[i].load(std::memory_order_relaxed);
+                fi.audio_average[i] = level;
+                m_scene->audioAverage[i].store(level * 0.94f, std::memory_order_relaxed);
+            }
             owe::script::TickSceneScripts(*m_scene, fi);
         }
         m_scene->paritileSys->Emitt();
@@ -264,6 +337,10 @@ void RenderHandler::on(RenderSetScene&& m) {
 }
 
 void RenderHandler::on(RenderSetSpeed&& m) { m_speed = m.speed; }
+
+void RenderHandler::on(RenderSetUserProperty&& m) {
+    if (m_scene) owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
+}
 
 void RenderHandler::on(RenderInit&& m) {
     m_render->init(std::move(*m.info));
@@ -357,6 +434,11 @@ void MainHandler::on(MainSetProperty&& m) {
         if (auto* p = std::get_if<float>(&value)) {
             (void)m_render_loop.sender().send(RenderMsg { RenderSetSpeed { *p } });
         }
+    } else {
+        nlohmann::json prop = PropertyValueToUserProperty(value);
+        m_user_properties[property] = prop;
+        (void)m_render_loop.sender().send(RenderMsg { RenderSetUserProperty {
+            property, std::move(prop) } });
     }
 }
 
@@ -403,6 +485,7 @@ void MainHandler::loadScene() {
     std::string pkgEntry = pkgPath_fs.filename().replace_extension("json").native();
     std::string pkgDir   = pkgPath_fs.parent_path().native();
     std::string scene_id = pkgPath_fs.parent_path().filename().native();
+    MergeProjectUserProperties(pkgPath_fs.parent_path(), m_user_properties);
 
     // load pkgfile. Read pkg version stamp before move-mounting so we can
     // pass it to the scene parser; on fallback (loose dir) we have no
@@ -442,6 +525,9 @@ void MainHandler::loadScene() {
             return;
         }
         scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, pkg_v);
+        for (const auto& [key, prop] : m_user_properties) {
+            owe::script::SetSceneUserProperty(*scene, key, prop);
+        }
         scene->vfs.reset(pVfs.release());
 
         // Surface the parsed clear color before the scene is shipped

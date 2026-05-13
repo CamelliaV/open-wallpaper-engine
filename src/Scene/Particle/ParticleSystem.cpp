@@ -83,6 +83,21 @@ void ParticleSubSystem::Emitt() {
     double particleTime = frameTime * m_rate;
     m_time += particleTime;
 
+    const auto pointer = m_sys.scene.pointerPosition;
+    const Eigen::Vector3d pointer_world {
+        (static_cast<double>(pointer[0]) - 0.5) * static_cast<double>(m_sys.scene.ortho[0]),
+        (0.5 - static_cast<double>(pointer[1])) * static_cast<double>(m_sys.scene.ortho[1]),
+        0.0,
+    };
+    for (auto& cp : m_controlpoints) {
+        if (cp.link_mouse) cp.offset = cp.base_offset + pointer_world;
+    }
+
+    std::array<float, 16> audio_average {};
+    for (std::size_t i = 0; i < audio_average.size(); ++i) {
+        audio_average[i] = m_sys.scene.audioAverage[i].load(std::memory_order_relaxed);
+    }
+
     if (m_spawn_type == SpawnType::STATIC) {
         if (m_instances.empty()) m_instances.emplace_back(std::make_unique<ParticleInstance>());
     }
@@ -135,7 +150,11 @@ void ParticleSubSystem::Emitt() {
 
         if (! inst->IsDeath()) {
             for (auto& emittOp : m_emiters) {
-                emittOp(inst->ParticlesVec(), m_initializers, m_maxcount, particleTime);
+                emittOp(inst->ParticlesVec(),
+                        m_initializers,
+                        m_maxcount,
+                        particleTime,
+                        std::span<const float> { audio_average.data(), audio_average.size() });
             }
         }
 

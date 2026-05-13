@@ -608,6 +608,13 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
 }
 
 ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe, bool sort) {
+    ParticleAudioResponse audio_response {
+        .enable    = wpe.audioprocessingmode != 0,
+        .amount    = wpe.audioamount,
+        .exponent  = wpe.audioexponent,
+        .frequency = wpe.audiofrequency,
+        .bounds    = wpe.audiobounds,
+    };
     if (wpe.name == "boxrandom") {
         ParticleBoxEmitterArgs box;
         box.emitSpeed     = wpe.rate;
@@ -619,6 +626,8 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
         box.instantaneous = wpe.instantaneous;
         box.minSpeed      = wpe.speedmin;
         box.maxSpeed      = wpe.speedmax;
+        box.duration      = wpe.duration;
+        box.audio_response = audio_response;
         box.sort          = sort;
         return ParticleBoxEmitterArgs::MakeEmittOp(box);
     } else if (wpe.name == "sphererandom") {
@@ -633,9 +642,12 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
         sphere.instantaneous = wpe.instantaneous;
         sphere.minSpeed      = wpe.speedmin;
         sphere.maxSpeed      = wpe.speedmax;
+        sphere.duration      = wpe.duration;
+        sphere.audio_response = audio_response;
         sphere.sort          = sort;
         return ParticleSphereEmitterArgs::MakeEmittOp(sphere);
     } else
-        return [](std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t, float) {
+        return [](std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t, double,
+                  std::span<const float>) {
         };
 }

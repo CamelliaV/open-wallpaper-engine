@@ -74,7 +74,12 @@ bool Emitter::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "origin", origin, false);
     owe::GetJsonValue(json, "sign", sign, false);
     owe::GetJsonValue(json, "audioprocessingmode", audioprocessingmode, false);
+    owe::GetJsonValue(json, "audioamount", audioamount, false);
+    owe::GetJsonValue(json, "audioexponent", audioexponent, false);
+    owe::GetJsonValue(json, "audiofrequency", audiofrequency, false);
+    owe::GetJsonValue(json, "audiobounds", audiobounds, false);
     owe::GetJsonValue(json, "controlpoint", controlpoint, false);
+    owe::GetJsonValue(json, "duration", duration, false);
 
     if (controlpoint >= 8) rstd_error("wrong controlpoint {}", controlpoint);
     controlpoint = controlpoint % 8; // limited to 0-7
