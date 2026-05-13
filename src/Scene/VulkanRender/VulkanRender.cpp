@@ -504,7 +504,10 @@ void VulkanRender::Impl::drawFrameSwapchain() {
 
     auto& sem_present_done = m_sem_swap_finish_per_image[image_index];
 
-    VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    // Swapchain image is only written via FinPass blit/copy (TRANSFER).
+    // Waiting at COLOR_ATTACHMENT_OUTPUT lets the layout transition + transfer
+    // race the presentation engine's read → sync-validation WRITE_AFTER_READ.
+    VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     VkSubmitInfo         sub_info {
                 .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                 .pNext                = nullptr,

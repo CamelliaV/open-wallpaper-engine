@@ -77,7 +77,12 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
             .image               = m_desc.vk_present.handle,
             .subresourceRange    = sub,
         };
-        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        // srcStage = TRANSFER (not TOP_OF_PIPE) so the layout transition
+        // observes the swapchain acquire-semaphore wait, which the submit
+        // sets at the same TRANSFER stage. TOP_OF_PIPE would let the
+        // transition race the presentation engine's still-in-flight read
+        // (sync-validation WRITE_AFTER_READ).
+        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
                             VK_PIPELINE_STAGE_TRANSFER_BIT,
                             VK_DEPENDENCY_BY_REGION_BIT,
                             b);

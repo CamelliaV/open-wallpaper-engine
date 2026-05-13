@@ -55,7 +55,10 @@ void RecordCopyBuffer(const BufferParameters& dst_buf, const BufferParameters& s
         .sType         = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
         .pNext         = nullptr,
         .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT,
+        // INDEX_READ for the index-buffer use of this staging buffer;
+        // missing it triggered sync-validation READ_AFTER_WRITE at INDEX_INPUT.
+        .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT |
+                         VK_ACCESS_UNIFORM_READ_BIT,
         .buffer        = dst_buf.handle,
         .offset        = 0,
         .size          = VK_WHOLE_SIZE,
