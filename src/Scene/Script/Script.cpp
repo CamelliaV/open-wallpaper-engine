@@ -581,6 +581,82 @@ class Vec3 {
 }
 globalThis.Vec2 = Vec2;
 globalThis.Vec3 = Vec3;
+
+// --- thisLayer / thisScene stub ---------------------------------------------
+// Stand-in for the per-script SceneNode binding. Property reads return
+// sensible defaults; writes are silently accepted. A few well-known
+// methods (getParent / getTransformMatrix) return shaped values so
+// `parent.getTransformMatrix().m[13]` style accesses don't TypeError.
+function __wwCreateNodeStub() {
+    const props = {
+        origin:         new Vec3(0, 0, 0),
+        scale:          new Vec3(1, 1, 1),
+        angles:         new Vec3(0, 0, 0),
+        size:           new Vec3(100, 100, 0),
+        visible:        true,
+        verticalalign:  'center',
+        horizontalalign:'center',
+        alpha:          1,
+        brightness:     1,
+        color:          new Vec3(1, 1, 1),
+    };
+    // Identity 4x4 column-major matrix. m[13] is the y-translation slot
+    // some clock scripts read.
+    const identity = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+    const handler = {
+        get(target, key) {
+            if (key === 'getParent')           return () => __wwCreateNodeStub();
+            if (key === 'getTransformMatrix')  return () => ({ m: identity.slice() });
+            if (key === 'getChildren')         return () => [];
+            if (key === 'getName')             return () => '';
+            if (key === 'getLayer')            return (_n) => __wwCreateNodeStub();
+            if (key === 'getTextureAnimation') return () => __wwCreateTexAnimStub();
+            if (key in target) return target[key];
+            return undefined;
+        },
+        set(target, key, value) { target[key] = value; return true; },
+        has(target, key) { return key in target; },
+    };
+    return new Proxy(props, handler);
+}
+
+function __wwCreateTexAnimStub() {
+    let frame = 0, playing = false;
+    return {
+        play()     { playing = true;  },
+        stop()     { playing = false; },
+        pause()    { playing = false; },
+        setFrame(n){ frame = n | 0;   },
+        getFrame() { return frame;    },
+        isPlaying(){ return playing;  },
+    };
+}
+globalThis.thisLayer = __wwCreateNodeStub();
+globalThis.thisScene = __wwCreateNodeStub();
+
+// Hook used by the C++ side to swap the stub for a real per-script binding.
+globalThis.__wwBindLayer = function(obj) { globalThis.thisLayer = obj; };
+globalThis.__wwBindScene = function(obj) { globalThis.thisScene = obj; };
+
+// --- MediaPlaybackEvent enum ------------------------------------------------
+globalThis.MediaPlaybackEvent = Object.freeze({
+    PLAYBACK_STOPPED: 0,
+    PLAYBACK_PLAYING: 1,
+    PLAYBACK_PAUSED:  2,
+});
+
+// --- shared --- cross-script object scripts mutate freely.
+if (! globalThis.shared) globalThis.shared = {};
+
+// --- localStorage --- in-memory Map; not persisted across runs.
+if (! globalThis.localStorage) {
+    const _ls = new Map();
+    globalThis.localStorage = {
+        get: (k) => _ls.has(k) ? _ls.get(k) : undefined,
+        set: (k, v) => { _ls.set(k, v); },
+        remove: (k) => { _ls.delete(k); },
+    };
+}
 )JS";
 
 void InstallEngineGlobal(JSContext* ctx) {
@@ -629,6 +705,53 @@ void InstallEngineGlobal(JSContext* ctx) {
     JS_FreeValue(ctx, global);
 }
 
+// --- Built-in ES modules ----------------------------------------------------
+// Scripts `import * as M from 'M'`. QuickJS calls our loader with the
+// bare name; we return a precompiled JSModuleDef built from the source
+// below. Add an entry to extend (e.g. WEColor / WEEasing) once needed.
+struct BuiltinModule {
+    const char* name;
+    const char* source;
+};
+
+static constexpr const char* kWEMathSrc = R"JS(
+export function mix(a, b, t) { return a + (b - a) * t; }
+export function lerp(a, b, t) { return a + (b - a) * t; }
+export function clamp(x, lo, hi) {
+    return Math.max(lo, Math.min(hi, x));
+}
+export function saturate(x) { return Math.max(0, Math.min(1, x)); }
+export function smoothstep(edge0, edge1, x) {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+}
+export function step(edge, x) { return x < edge ? 0 : 1; }
+export function sign(x) { return Math.sign(x); }
+export function fract(x) { return x - Math.floor(x); }
+)JS";
+
+static constexpr BuiltinModule kBuiltinModules[] = {
+    { "WEMath", kWEMathSrc },
+};
+
+JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*) {
+    for (const auto& m : kBuiltinModules) {
+        if (std::strcmp(m.name, module_name) != 0) continue;
+        JSValue compiled = JS_Eval(ctx, m.source, std::strlen(m.source),
+                                   module_name,
+                                   JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+        if (JS_IsException(compiled)) {
+            // JS_Eval already set the pending exception; QuickJS propagates.
+            return nullptr;
+        }
+        JSModuleDef* def = static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(compiled));
+        // Don't free `compiled` — the pointer is the live module def.
+        return def;
+    }
+    JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
+    return nullptr;
+}
+
 }  // namespace
 
 // --- JsRuntime methods ------------------------------------------------------
@@ -649,6 +772,11 @@ JsRuntime::JsRuntime() : m_impl(std::make_unique<Impl>()) {
     // response style scripts in the corpus.
     JS_SetMaxStackSize(m_impl->rt, 0);
     JS_SetContextOpaque(m_impl->ctx, &m_impl->host);
+    // Built-in ES modules (WEMath, …). Resolves bare `import 'WEMath'`
+    // against the kBuiltinModules table; unknown names raise
+    // ReferenceError via the loader.
+    JS_SetModuleLoaderFunc(m_impl->rt, /*normalize=*/nullptr,
+                           BuiltinModuleLoader, /*opaque=*/nullptr);
     InstallEngineGlobal(m_impl->ctx);
 }
 

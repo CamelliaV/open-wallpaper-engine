@@ -22,4 +22,5 @@ build-*
 /rstd
 /third_party/rstd
 /assets
+/record
 /CMakeUserPresets.json

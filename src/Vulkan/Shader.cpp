@@ -1,7 +1,5 @@
 module;
 
-#include <cstdarg>
-
 #include <rstd/macro.hpp>
 #include <dxc/dxcapi.h>
 #include <spirv_reflect.h>
@@ -20,19 +18,14 @@ namespace
 {
 // Spill a payload to /tmp/<sha1> for post-mortem inspection. Returns the
 // written path so callers can mention it in the error message.
-std::string logToTmpfileWithSha1(std::span<const char> in, const char* fmt, ...) {
-    std::va_list          args;
+std::string logToTmpfileWithSha1(std::span<const char> in) {
     std::string           name   = utils::genSha1(in);
     std::filesystem::path fspath = std::filesystem::temp_directory_path() / name;
     std::string           path   = fspath.native();
-    auto*                 file   = std::fopen(path.c_str(), "w+");
+    auto*                 file   = std::fopen(path.c_str(), "wb");
     if (! file) return path;
-    {
-        va_start(args, fmt);
-        std::vfprintf(file, fmt, args);
-        va_end(args);
-    }
-    std::fprintf(file, "\n");
+    std::fwrite(in.data(), 1, in.size(), file);
+    std::fputc('\n', file);
     std::fclose(file);
     return path;
 }
@@ -319,8 +312,7 @@ bool owe::vulkan::Preprocess(std::string_view src, std::string& out) {
     ComPtr<IDxcBlobUtf8> errors(errors_raw);
     if (errors && errors->GetStringLength() > 0) {
         if (failed) {
-            std::string tmp_name = logToTmpfileWithSha1(std::string(src), "%.*s",
-                                                        static_cast<int>(src.size()), src);
+            std::string tmp_name = logToTmpfileWithSha1(src);
             rstd_error("dxc(preprocess): {}",
                       std::string_view(errors->GetStringPointer(),
                                        errors->GetStringLength()));
@@ -419,7 +411,7 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  com
             // warnings ride at WARN. The temp-file path is only useful
             // when the compile actually failed.
             if (compile_failed) {
-                std::string tmp_name = logToTmpfileWithSha1(unit.src, "%s", unit.src.c_str());
+                std::string tmp_name = logToTmpfileWithSha1(unit.src);
                 rstd_error("dxc(compile): {}",
                           std::string_view(errors->GetStringPointer(),
                                            errors->GetStringLength()));
