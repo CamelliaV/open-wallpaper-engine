@@ -1,8 +1,6 @@
 // waywallen-weweb-renderer — CEF (Wallpaper Engine *web*) host
 // subprocess.
 
-#include "BridgeProducerCore.hpp"
-#include "WebProducerDevice.hpp"
 #include "BrowserHost.hpp"
 #include "DmaBufFrame.hpp"
 #include "Manifest.hpp"
@@ -25,12 +23,14 @@
 
 #include <sys/prctl.h>
 #include <sys/socket.h>
-#include <vulkan/vulkan.h>
 
 #include <nlohmann/json.hpp>
 
 import rstd.cppstd;
 import rstd.log;
+import vulkan;
+import waywallen.bridge_producer_core;
+import waywallen.web_producer_device;
 
 namespace
 {

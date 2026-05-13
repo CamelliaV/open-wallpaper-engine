@@ -1,23 +1,33 @@
 include(FetchContent)
 
 find_package(waywallen-bridge REQUIRED)
-find_package(Vulkan REQUIRED)
 
-add_library(waywallen-bridge-producer OBJECT
-    BridgeProducerCore.cpp
+add_library(waywallen-bridge-producer STATIC)
+target_sources(waywallen-bridge-producer
+    PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+        BridgeProducerCore.cppm
 )
+target_sources(waywallen-bridge-producer PRIVATE BridgeProducerCore.cpp)
 target_include_directories(waywallen-bridge-producer PUBLIC .)
 target_link_libraries(waywallen-bridge-producer
     PUBLIC
         waywallen::bridge
-        Vulkan::Vulkan
+        wavsen::ffi::vulkan
+        rstd.cppstd
 )
 target_compile_features(waywallen-bridge-producer PUBLIC cxx_std_20)
+set_target_properties(waywallen-bridge-producer PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_SCAN_FOR_MODULES ON)
 
 add_executable(waywallen-wescene-renderer
     scene_main.cpp
-    BridgeExSwapchain.cpp
 )
+target_sources(waywallen-wescene-renderer
+    PRIVATE FILE_SET cxx_modules TYPE CXX_MODULES FILES
+        BridgeExSwapchain.cppm
+)
+target_sources(waywallen-wescene-renderer PRIVATE BridgeExSwapchain.cpp)
 
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
 set_target_properties(waywallen-wescene-renderer PROPERTIES
@@ -39,6 +49,7 @@ target_link_libraries(waywallen-wescene-renderer
         waywallen::bridge
         waywallen-bridge-producer
         argparse::argparse
+        rstd.cppstd
 )
 
 target_compile_options(waywallen-wescene-renderer PRIVATE
@@ -55,9 +66,12 @@ install(TARGETS waywallen-wescene-renderer
 # plugin (wallpaper_engine.lua) advertises both wp_types.
 if(BUILD_WEWEB)
     # Headless Vulkan producer device (DMA-BUF import + bridge-slot blit).
-    add_library(waywallen-web-producer-device STATIC
-        WebProducerDevice.cpp
+    add_library(waywallen-web-producer-device STATIC)
+    target_sources(waywallen-web-producer-device
+        PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            WebProducerDevice.cppm
     )
+    target_sources(waywallen-web-producer-device PRIVATE WebProducerDevice.cpp)
     target_include_directories(waywallen-web-producer-device
         PUBLIC
             .
@@ -65,9 +79,13 @@ if(BUILD_WEWEB)
     )
     target_link_libraries(waywallen-web-producer-device
         PUBLIC
-            Vulkan::Vulkan
+            wavsen::ffi::vulkan
+            rstd.cppstd
     )
     target_compile_features(waywallen-web-producer-device PUBLIC cxx_std_20)
+    set_target_properties(waywallen-web-producer-device PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_SCAN_FOR_MODULES ON)
 
     add_executable(waywallen-weweb-renderer
         web_main.cpp
@@ -98,7 +116,7 @@ if(BUILD_WEWEB)
             waywallen-bridge-producer
             waywallen-web-producer-device
             argparse::argparse
-            Vulkan::Vulkan
+            wavsen::ffi::vulkan
             rstd::rstd
             rstd.cppstd
     )

@@ -1,10 +1,11 @@
-#include "EglPresenter.hpp"
+module;
 
-#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
 
 #define GLFW_EXPOSE_NATIVE_X11
 #define GLFW_EXPOSE_NATIVE_WAYLAND
@@ -12,6 +13,12 @@
 #include <GLFW/glfw3native.h>
 
 #include <wayland-egl.h>
+
+#include "DmaBufFrame.hpp"
+
+module viewer.web;
+
+import rstd.cppstd;
 
 namespace weweb
 {

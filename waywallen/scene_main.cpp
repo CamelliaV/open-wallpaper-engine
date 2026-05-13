@@ -1,8 +1,6 @@
 // waywallen-wescene-renderer — wescene (Wallpaper Engine scene) host
 // subprocess.
 
-#include "BridgeExSwapchain.hpp"
-
 #include <rstd/macro.hpp>
 
 #include <waywallen-bridge/bridge.h>
@@ -24,6 +22,7 @@
 import rstd.cppstd;
 import rstd.log;
 import wescene.scene_wallpaper;
+import waywallen.bridge_ex_swapchain;
 
 namespace
 {

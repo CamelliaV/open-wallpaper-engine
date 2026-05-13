@@ -1,10 +1,11 @@
 module;
 #include <rstd/macro.hpp>
-#include "Swapchain/ExSwapchain.hpp"
 
 #include "vvk/macros.hpp"
 
+#include <cstdint>
 #include <unistd.h>
+#include <vulkan/vulkan.h>
 
 #if ENABLE_RENDERDOC_API
 #    include "RenderDoc.h"

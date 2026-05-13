@@ -1,5 +1,4 @@
 module;
-#include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:custom_shader_pass;
 import wescene.core;

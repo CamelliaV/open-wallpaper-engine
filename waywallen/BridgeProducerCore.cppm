@@ -23,18 +23,17 @@
 //   - `drainPendingDirective` / `acquireSlot` / `submitSlot` are
 //     producer-thread-only (the thread that submits the blit).
 
-#pragma once
+module;
 
 #include <waywallen-bridge/bridge.h>
 #include <waywallen-bridge/pool.h>
 
-#include <atomic>
-#include <cstdint>
-#include <functional>
-#include <mutex>
-#include <vulkan/vulkan.h>
+export module waywallen.bridge_producer_core;
 
-namespace ww_wescene
+import rstd.cppstd;
+import vulkan;
+
+export namespace ww_wescene
 {
 
 // Snapshot fired by `setOnReadyChanged` whenever applyDirective resolves
@@ -57,7 +56,7 @@ public:
     BridgeProducerCore(ww_pool_t* pool, int sock);
     ~BridgeProducerCore();
 
-    BridgeProducerCore(const BridgeProducerCore&) = delete;
+    BridgeProducerCore(const BridgeProducerCore&)            = delete;
     BridgeProducerCore& operator=(const BridgeProducerCore&) = delete;
 
     // Stash a directive received from the daemon. Safe to call from any
@@ -96,7 +95,7 @@ public:
     // Producer-thread-only. Returns the next slot's VkImage handle and
     // (optionally) its dimensions. Returns false when the pool has no
     // slots applied yet.
-    bool acquireSlot(VkImage* out_image,
+    bool acquireSlot(VkImage*  out_image,
                      uint32_t* out_width  = nullptr,
                      uint32_t* out_height = nullptr);
 
@@ -110,10 +109,10 @@ public:
     // responsible for any happens-before they need (typical pattern:
     // call from inside the producer thread right after
     // drainPendingDirective).
-    bool     ready() const {
+    bool ready() const {
         return m_slot_count > 0 && m_export_format != VK_FORMAT_UNDEFINED;
     }
-    uint32_t width()  const { return m_width; }
+    uint32_t width() const { return m_width; }
     uint32_t height() const { return m_height; }
     VkFormat format() const { return m_export_format; }
     uint32_t fourcc() const { return m_fourcc; }
@@ -137,9 +136,9 @@ private:
     std::mutex          m_pending_mu;
     ww_pool_directive_t m_pending_directive {};
 
-    std::mutex            m_cb_mu;
-    std::function<void()> m_on_first_negotiated;
-    bool                  m_first_negotiated_done { false };
+    std::mutex                                   m_cb_mu;
+    std::function<void()>                        m_on_first_negotiated;
+    bool                                         m_first_negotiated_done { false };
     std::function<void(const BridgeReadyEvent&)> m_on_ready_changed;
 
     uint32_t m_slot_count { 0 };

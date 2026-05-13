@@ -1,5 +1,4 @@
 module;
-#include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:pass_common;
 import rstd.cppstd;

@@ -1,6 +1,5 @@
 module;
 
-#include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render;
 import wescene.types;

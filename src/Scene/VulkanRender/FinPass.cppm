@@ -1,6 +1,5 @@
 module;
 
-#include "Swapchain/ExSwapchain.hpp"
 
 export module wescene.vulkan_render:fin_pass;
 import wescene.spec_texs;

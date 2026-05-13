@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Swapchain/ExSwapchain.hpp"
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;

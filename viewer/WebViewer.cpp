@@ -1,25 +1,15 @@
 // weweb standalone GLFW + Vulkan + CEF (OSR) viewer.
 
-#include <chrono>
-#include <cstdint>
-#include <filesystem>
-#include <iostream>
-#include <memory>
-#include <stdexcept>
-#include <string>
-#include <thread>
-
 #include <GLFW/glfw3.h>
 
 #include <argparse/argparse.hpp>
 
 #include "BrowserHost.hpp"
-#include "Common.hpp"
 #include "Manifest.hpp"
 
-#include "EglPresenter.hpp"
-#include "Presenter.hpp"
-#include "VulkanBlitter.hpp"
+import rstd.cppstd;
+import viewer.common;
+import viewer.web;
 
 namespace {
 

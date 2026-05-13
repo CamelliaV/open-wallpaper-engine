@@ -1,30 +1,18 @@
 // BridgeExSwapchain — `owe::ExSwapchain` adapter over
-// BridgeProducerCore for the wescene host.
-//
-// All bridge protocol work (directive stash, applyDirective, slot
-// acquisition, frame_ready emission) lives in BridgeProducerCore. This
-// header is a thin shim that maps the core's API into the
-// `owe::ExSwapchain` virtual surface VulkanRender expects:
-//
-//   acquireRenderTarget(ImageParameters&) → core.acquireSlot(VkImage*)
-//   submitRendered(int)                   → core.submitSlot(int)
-//   poll()                                → core.drainPendingDirective()
-//   ready() / format() / width() / height() → forwarded to core
-//
-// Threading model and lifecycle are unchanged — see core for details.
-// Producers that don't need wescene-vulkan-runtime (e.g. weweb) consume
-// the core directly.
+// BridgeProducerCore for the wescene host. See header notes that used
+// to live in the classic .hpp.
 
-#pragma once
+module;
 
-#include "BridgeProducerCore.hpp"
-#include "Swapchain/ExSwapchain.hpp"
+#include <waywallen-bridge/pool.h>
 
-#include <cstdint>
-#include <functional>
-#include <vulkan/vulkan.h>
+export module waywallen.bridge_ex_swapchain;
 
-namespace ww_wescene
+import rstd.cppstd;
+import wescene.vulkan;
+import waywallen.bridge_producer_core;
+
+export namespace ww_wescene
 {
 
 class BridgeExSwapchain : public owe::ExSwapchain {
@@ -43,8 +31,6 @@ public:
         m_core.setOnFirstNegotiated(std::move(cb));
     }
 
-    // ExSwapchain interface ---------------------------------------------
-
     void poll() override { m_core.drainPendingDirective(); }
 
     bool acquireRenderTarget(owe::vulkan::ImageParameters& out) override;
@@ -53,7 +39,7 @@ public:
         m_core.submitSlot(producer_sync_fd);
     }
 
-    unsigned width() const override  { return m_core.width(); }
+    unsigned width() const override { return m_core.width(); }
     unsigned height() const override { return m_core.height(); }
     VkFormat format() const override { return m_core.format(); }
 
@@ -69,19 +55,18 @@ public:
 
     void setOnReadyChanged(
         std::function<void(const owe::ExSwapchainReadyEvent&)> cb) override {
-        if (!cb) {
+        if (! cb) {
             m_core.setOnReadyChanged({});
             return;
         }
-        m_core.setOnReadyChanged(
-            [cb = std::move(cb)](const BridgeReadyEvent& e) {
-                cb(owe::ExSwapchainReadyEvent {
-                    .ready  = e.ready,
-                    .width  = e.width,
-                    .height = e.height,
-                    .format = e.format,
-                });
+        m_core.setOnReadyChanged([cb = std::move(cb)](const BridgeReadyEvent& e) {
+            cb(owe::ExSwapchainReadyEvent {
+                .ready  = e.ready,
+                .width  = e.width,
+                .height = e.height,
+                .format = e.format,
             });
+        });
     }
 
 private:

@@ -1,14 +1,16 @@
 // WebProducerDevice — headless Vulkan producer used by
 // `waywallen-weweb-renderer`.
 
-#pragma once
+module;
 
 #include "DmaBufFrame.hpp"
 
-#include <cstdint>
-#include <vulkan/vulkan.h>
+export module waywallen.web_producer_device;
 
-namespace ww_wescene
+import rstd.cppstd;
+import vulkan;
+
+export namespace ww_wescene
 {
 
 class WebProducerDevice {
@@ -16,7 +18,7 @@ public:
     WebProducerDevice();
     ~WebProducerDevice();
 
-    WebProducerDevice(const WebProducerDevice&) = delete;
+    WebProducerDevice(const WebProducerDevice&)            = delete;
     WebProducerDevice& operator=(const WebProducerDevice&) = delete;
 
     // Build instance + pick first device with the required extensions
@@ -29,10 +31,10 @@ public:
 
     // Vulkan handles (caller-owned by this class) — bridge consumes
     // these via `ww_pool_vulkan_init_t`.
-    VkInstance       Instance()    const { return instance_; }
-    VkPhysicalDevice Physical()    const { return phys_; }
-    VkDevice         Device()      const { return device_; }
-    VkQueue          Queue()       const { return queue_; }
+    VkInstance       Instance() const { return instance_; }
+    VkPhysicalDevice Physical() const { return phys_; }
+    VkDevice         Device() const { return device_; }
+    VkQueue          Queue() const { return queue_; }
     uint32_t         QueueFamily() const { return queue_family_; }
 
     // 16-byte UUIDs from VkPhysicalDeviceIDProperties; valid post-Init.
@@ -44,12 +46,12 @@ public:
     // `image` before destruction — `BlitToSlot` ensures that with a
     // CPU-side fence wait before returning.
     struct ImportedFrame {
-        VkImage        image  { VK_NULL_HANDLE };
+        VkImage        image { VK_NULL_HANDLE };
         VkDeviceMemory memory { VK_NULL_HANDLE };
-        uint32_t       width  { 0 };
+        uint32_t       width { 0 };
         uint32_t       height { 0 };
         VkFormat       format { VK_FORMAT_UNDEFINED };
-        bool           ok     { false };
+        bool           ok { false };
     };
 
     // Import a CEF DMA-BUF as a temporary VkImage. The plane FD is
@@ -70,9 +72,7 @@ public:
     // success returns a sync_file fd suitable for
     // `ww_bridge_pool_submit_slot` (caller hands ownership to bridge);
     // returns -1 on failure.
-    int BlitToSlot(const ImportedFrame& imp,
-                   VkImage              slot_image,
-                   VkExtent2D           slot_extent);
+    int BlitToSlot(const ImportedFrame& imp, VkImage slot_image, VkExtent2D slot_extent);
 
 private:
     bool CreateInstance();
@@ -83,23 +83,23 @@ private:
 
     uint32_t FindMemoryType(uint32_t bits, VkMemoryPropertyFlags props) const;
 
-    VkInstance                       instance_     { VK_NULL_HANDLE };
-    VkPhysicalDevice                 phys_         { VK_NULL_HANDLE };
-    VkPhysicalDeviceMemoryProperties mem_props_    {};
-    VkDevice                         device_       { VK_NULL_HANDLE };
+    VkInstance                       instance_ { VK_NULL_HANDLE };
+    VkPhysicalDevice                 phys_ { VK_NULL_HANDLE };
+    VkPhysicalDeviceMemoryProperties mem_props_ {};
+    VkDevice                         device_ { VK_NULL_HANDLE };
     uint32_t                         queue_family_ { 0 };
-    VkQueue                          queue_        { VK_NULL_HANDLE };
+    VkQueue                          queue_ { VK_NULL_HANDLE };
 
-    uint8_t  device_uuid_[16] {};
-    uint8_t  driver_uuid_[16] {};
+    uint8_t device_uuid_[16] {};
+    uint8_t driver_uuid_[16] {};
 
-    VkCommandPool   cmd_pool_   { VK_NULL_HANDLE };
-    VkCommandBuffer blit_cmd_   { VK_NULL_HANDLE };
+    VkCommandPool   cmd_pool_ { VK_NULL_HANDLE };
+    VkCommandBuffer blit_cmd_ { VK_NULL_HANDLE };
     VkFence         blit_fence_ { VK_NULL_HANDLE };
-    VkSemaphore     blit_sem_   { VK_NULL_HANDLE };
+    VkSemaphore     blit_sem_ { VK_NULL_HANDLE };
 
     PFN_vkGetMemoryFdPropertiesKHR pfn_GetMemoryFdProperties_ { nullptr };
-    PFN_vkGetSemaphoreFdKHR        pfn_GetSemaphoreFd_        { nullptr };
+    PFN_vkGetSemaphoreFdKHR        pfn_GetSemaphoreFd_ { nullptr };
 };
 
 } // namespace ww_wescene

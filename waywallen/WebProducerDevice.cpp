@@ -1,10 +1,14 @@
-#include "WebProducerDevice.hpp"
+module;
 
-#include <algorithm>
 #include <cstdio>
-#include <cstring>
 #include <unistd.h>
-#include <vector>
+
+#include "DmaBufFrame.hpp"
+
+module waywallen.web_producer_device;
+
+import rstd.cppstd;
+import vulkan;
 
 namespace ww_wescene
 {

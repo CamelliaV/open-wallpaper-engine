@@ -1,13 +1,12 @@
 module;
 #include <vulkan/vulkan.h>
 
-#include "Swapchain/ExSwapchain.hpp"
-
 export module wescene.scene_wallpaper;
 import wescene.core;
 import rstd.cppstd;
 
 export import wescene.vulkan_render;
+export import wescene.vulkan;
 
 export namespace owe
 {
@@ -85,11 +84,5 @@ private:
     bool                         m_offscreen { false };
     std::unique_ptr<MainHandler> m_main_handler;
 };
-
-// `TexTiling` is declared in the classic header `Swapchain/ExSwapchain.hpp`
-// which is still consumed by ExSwapchain backends. Re-export it from the
-// module purview so a single `import wescene.scene_wallpaper;` lets
-// consumers reach `owe::TexTiling::OPTIMAL`.
-using ::owe::TexTiling;
 
 } // namespace owe

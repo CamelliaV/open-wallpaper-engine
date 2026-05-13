@@ -7,11 +7,6 @@ module;
 // below). vk_mem_alloc.h still needs the raw vulkan.h declarations, so we
 // let it pull them in transitively.
 #include "vk_mem_alloc.h"
-// ExSwapchain / TripleSwapchain are classic public headers (consumed by
-// SceneWallpaperSurface.hpp). LocalExSwapchain inherits from ExSwapchain;
-// the base class stays global-attached, the derived is module-attached.
-#include "Swapchain/ExSwapchain.hpp"
-#include "Swapchain/TripleSwapchain.hpp"
 
 // Macros only — VVK_CHECK family.
 #include "vvk/macros.hpp"
@@ -47,6 +42,152 @@ export import wescene.shader_compile;
 
 export namespace owe
 {
+
+// ---------- ExSwapchain (formerly Swapchain/ExSwapchain.hpp) ----------
+
+namespace vulkan
+{
+
+struct ImageParameters {
+    VkImage     handle {};
+    VkImageView view {};
+    VkSampler   sampler {};
+    VkExtent3D  extent {};
+    uint32_t    mipmap_level { 1 };
+
+    ImageParameters()  = default;
+    ~ImageParameters() = default;
+};
+
+} // namespace vulkan
+
+// Snapshot of the negotiated buffer set the producer should render into.
+// Fired by ExSwapchain implementations whenever readiness flips or the
+// negotiated extent/format changes.
+struct ExSwapchainReadyEvent {
+    bool     ready;
+    unsigned width;
+    unsigned height;
+    VkFormat format;
+};
+
+enum class TexTiling
+{
+    OPTIMAL,
+    LINEAR
+};
+
+// Per-slot DMA-BUF descriptor surfaced to the IPC layer. Local backend
+// fills these from its self-allocated `ExImageParameters`; bridge backend
+// keeps them empty (the bridge already published the metadata via
+// `bind_buffers` itself).
+struct ExHandle {
+    int         fd { -1 };
+    int32_t     width { 0 };
+    int32_t     height { 0 };
+    std::size_t size { 0 };
+
+    uint32_t drm_fourcc { 0 };
+    uint64_t drm_modifier { 0 };
+    uint64_t plane0_offset { 0 };
+    uint32_t plane0_stride { 0 };
+
+    ExHandle() = default;
+    ExHandle(int id): m_id(id) {};
+
+    int32_t id() const { return m_id; }
+
+private:
+    int32_t m_id { 0 };
+};
+
+template<typename T>
+class TripleSwapchain {
+public:
+    virtual ~TripleSwapchain() = default;
+
+    TripleSwapchain(const TripleSwapchain&)            = delete;
+    TripleSwapchain& operator=(const TripleSwapchain&) = delete;
+    TripleSwapchain(TripleSwapchain&&)                 = delete;
+    TripleSwapchain& operator=(TripleSwapchain&&)      = delete;
+
+    T* eatFrame() {
+        if (! dirty().exchange(false)) return nullptr;
+        presented() = ready().exchange(presented());
+        return presented();
+    }
+    void renderFrame() {
+        inprogress() = ready().exchange(inprogress());
+        dirty().exchange(true);
+    }
+    T* getInprogress() { return inprogress(); }
+
+    std::array<T*, 3> snapshot_all_slots() {
+        return { presented().load(), ready().load(), inprogress().load() };
+    }
+
+    virtual unsigned width() const  = 0;
+    virtual unsigned height() const = 0;
+
+protected:
+    TripleSwapchain() = default;
+
+    virtual std::atomic<T*>& presented()  = 0;
+    virtual std::atomic<T*>& ready()      = 0;
+    virtual std::atomic<T*>& inprogress() = 0;
+
+private:
+    std::atomic<bool>& dirty() { return m_dirty; };
+    std::atomic<bool>  m_dirty { false };
+};
+
+// Producer-side abstraction over the offscreen swapchain. Two
+// implementations exist:
+//   - LocalExSwapchain: self-allocates 3 DMA-BUF-backed VkImages via the
+//     Vulkan TextureCache; the standalone viewers and any in-process host
+//     drive bind_buffers / frame_ready themselves and consume `eatFrame()`
+//     / `snapshot_all_slots()`.
+//   - BridgeExSwapchain: wraps a `ww_pool_t`; bridge owns the slot images
+//     and emits bind_buffers / frame_ready itself when the host calls
+//     `submitRendered`.
+class ExSwapchain {
+public:
+    virtual ~ExSwapchain() = default;
+
+    ExSwapchain(const ExSwapchain&)            = delete;
+    ExSwapchain& operator=(const ExSwapchain&) = delete;
+    ExSwapchain(ExSwapchain&&)                 = delete;
+    ExSwapchain& operator=(ExSwapchain&&)      = delete;
+
+    virtual void poll() {}
+
+    virtual bool acquireRenderTarget(vulkan::ImageParameters& out) = 0;
+
+    virtual void submitRendered(int acquire_sync_fd) = 0;
+
+    virtual int takeLastFrameSyncFd() { return -1; }
+
+    virtual ExHandle* eatFrame() { return nullptr; }
+    virtual std::array<ExHandle*, 3> snapshot_all_slots() {
+        return { nullptr, nullptr, nullptr };
+    }
+
+    virtual unsigned width() const  = 0;
+    virtual unsigned height() const = 0;
+    virtual VkFormat format() const = 0;
+
+    virtual VkImageLayout producerOutputLayout() const = 0;
+
+    virtual uint32_t releaseTargetQueueFamily() const = 0;
+
+    virtual bool ready() const = 0;
+
+    virtual void
+    setOnReadyChanged(std::function<void(const ExSwapchainReadyEvent&)>) = 0;
+
+protected:
+    ExSwapchain() = default;
+};
 
 namespace vulkan
 {

@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Swapchain/ExSwapchain.hpp"
 
 module wescene.scene_wallpaper;
 import wescene.types;

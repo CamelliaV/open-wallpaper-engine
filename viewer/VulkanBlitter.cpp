@@ -1,12 +1,18 @@
-#include "VulkanBlitter.hpp"
+module;
 
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
-#include <limits>
 #include <unistd.h>
 
+#include "DmaBufFrame.hpp"
+
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+
+module viewer.web;
+
+import rstd.cppstd;
+import vulkan;
 
 namespace weweb {
 

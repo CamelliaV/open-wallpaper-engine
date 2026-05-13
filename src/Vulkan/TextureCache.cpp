@@ -4,7 +4,6 @@ module;
 #include <cstdio>
 #include "vk_mem_alloc.h"
 
-#include "Swapchain/ExSwapchain.hpp"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 

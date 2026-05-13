@@ -1,20 +1,13 @@
-#include <iostream>
-#include <set>
-#include <fstream>
-#include <cstdlib>
-#include <chrono>
-#include <thread>
-
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#include <atomic>
-#include "arg.hpp"
-#include "Common.hpp"
 
+#include <argparse/argparse.hpp>
 
+import rstd.cppstd;
 import rstd.log;
 import wescene.scene_wallpaper;
 import wescene.utils;
+import viewer.common;
 
 using namespace std;
 
@@ -54,8 +47,8 @@ int main(int argc, char** argv) {
     rstd::log::set_max_level(_logger.filter());
 
     argparse::ArgumentParser program("scene-viewer");
-    setAndParseArg(program, argc, argv);
-    auto [w_width, w_height] = program.get<Resolution>(OPT_RESOLUTION);
+    viewer::setAndParseArg(program, argc, argv);
+    auto [w_width, w_height] = program.get<viewer::Resolution>(viewer::OPT_RESOLUTION);
 
     viewer::InitGlfwPlatformHint(/*force_x11=*/false);
     glfwInit();
@@ -73,10 +66,10 @@ int main(int argc, char** argv) {
     data.height = w_height;
 
     owe::RenderInitInfo info;
-    info.enable_valid_layer = program.get<bool>(OPT_VALID_LAYER);
+    info.enable_valid_layer = program.get<bool>(viewer::OPT_VALID_LAYER);
     info.width              = w_width;
     info.height             = w_height;
-    info.msaa_samples       = program.get<uint32_t>(OPT_MSAA);
+    info.msaa_samples       = program.get<uint32_t>(viewer::OPT_MSAA);
 
     auto& sf_info = info.surface_info;
     {
@@ -102,12 +95,12 @@ int main(int argc, char** argv) {
 
     psw->init();
     psw->initVulkan(std::move(info));
-    psw->setPropertyString(owe::PROPERTY_ASSETS, program.get<std::string>(ARG_ASSETS));
-    psw->setPropertyString(owe::PROPERTY_SOURCE, program.get<std::string>(ARG_SCENE));
-    psw->setPropertyBool(owe::PROPERTY_GRAPHIVZ, program.get<bool>(OPT_GRAPHVIZ));
-    psw->setPropertyInt32(owe::PROPERTY_FPS, program.get<int32_t>(OPT_FPS));
+    psw->setPropertyString(owe::PROPERTY_ASSETS, program.get<std::string>(viewer::ARG_ASSETS));
+    psw->setPropertyString(owe::PROPERTY_SOURCE, program.get<std::string>(viewer::ARG_SCENE));
+    psw->setPropertyBool(owe::PROPERTY_GRAPHIVZ, program.get<bool>(viewer::OPT_GRAPHVIZ));
+    psw->setPropertyInt32(owe::PROPERTY_FPS, program.get<int32_t>(viewer::OPT_FPS));
 
-    std::string cache_path = program.get<std::string>(OPT_CACHE_PATH);
+    std::string cache_path = program.get<std::string>(viewer::OPT_CACHE_PATH);
     if (cache_path.empty()) cache_path = owe::platform::GetCachePath("wescene-renderer");
     psw->setPropertyString(owe::PROPERTY_CACHE_PATH, cache_path);
 
