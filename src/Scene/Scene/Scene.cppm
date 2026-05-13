@@ -537,6 +537,12 @@ public:
     const auto& GetChildren() const { return m_children; }
     auto&       GetChildren() { return m_children; }
 
+    const std::string& Name() const { return m_name; }
+    SceneNode*         Parent() const { return m_parent; }
+
+    // BFS over self + descendants; returns first node whose Name() matches.
+    SceneNode* FindByName(std::string_view name);
+
     i32& ID() { return m_id; }
 
 private:

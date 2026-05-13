@@ -44,3 +44,11 @@ void SceneNode::MarkTransDirty() {
         }
     }
 }
+
+SceneNode* SceneNode::FindByName(std::string_view name) {
+    if (m_name == name) return this;
+    for (auto& child : m_children) {
+        if (auto* hit = child->FindByName(name)) return hit;
+    }
+    return nullptr;
+}

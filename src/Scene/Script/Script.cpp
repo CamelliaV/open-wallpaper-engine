@@ -314,6 +314,15 @@ struct EngineHostState {
     FrameInputs               inputs;
     JSValue                   audio_buffer { JS_UNDEFINED };
     bool                      audio_buffer_built { false };
+    // Cached `globalThis.Vec3` ctor, populated lazily on first node access.
+    // Used by the SceneNode wrapper to hand back Vec3 instances so scripts
+    // can call `.add` / `.subtract` on `thisLayer.origin`.
+    JSValue                   vec3_ctor { JS_UNDEFINED };
+    // The original JS-side `thisLayer` / `thisScene` stubs, captured at
+    // bootstrap. Per-script binding restores them when a script has no
+    // backing SceneNode.
+    JSValue                   default_layer { JS_UNDEFINED };
+    JSValue                   default_scene { JS_UNDEFINED };
 };
 
 // ---------------------------------------------------------------------------
@@ -332,6 +341,11 @@ struct FieldScript::Impl {
     ScriptValue       last_value;
     bool              alive { true };
     bool              error_logged { false };
+    // Layer-B: the SceneNode this script's `thisLayer` resolves to. Null →
+    // fall back to the generic JS stub. `wrapped_layer` caches the JSValue
+    // wrapper so per-frame swap doesn't reallocate.
+    owe::SceneNode*   node { nullptr };
+    JSValue           wrapped_layer { JS_UNDEFINED };
 };
 
 FieldScript::FieldScript() : m_impl(std::make_unique<Impl>()) {}
@@ -356,6 +370,9 @@ struct JsRuntime::Impl {
     std::vector<std::unique_ptr<FieldScript>>           scripts;
     // Set of error-logged shas to log once.
     std::unordered_set<std::string>                     errored;
+    // Scene root for `thisScene`. Wrapped lazily; freed in dtor.
+    owe::SceneNode*                                     scene_root { nullptr };
+    JSValue                                             wrapped_scene { JS_UNDEFINED };
 
     void LogError(JSContext* c, std::string_view sha, const char* what) {
         if (errored.contains(std::string(sha))) return;
@@ -752,6 +769,241 @@ JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*)
     return nullptr;
 }
 
+// --- Layer-B: SceneNode wrapper class ---------------------------------------
+// `thisLayer` / `thisScene` resolve to instances of WWLayer. The class holds
+// the SceneNode pointer in JS_GetOpaque; lifetime is owned by Scene, the
+// finalizer is a no-op (we don't dereference on free, just drop the ref).
+
+static JSClassID s_layer_class_id = 0;
+
+void LayerFinalizer(JSRuntime*, JSValue) {
+    // SceneNode is owned by Scene; nothing to free here.
+}
+
+JSClassDef s_layer_class_def {
+    .class_name = "WWLayer",
+    .finalizer  = LayerFinalizer,
+};
+
+inline owe::SceneNode* GetLayerNode(JSValueConst v) {
+    return static_cast<owe::SceneNode*>(JS_GetOpaque(v, s_layer_class_id));
+}
+
+JSValue WrapLayerNode(JSContext* ctx, owe::SceneNode* node) {
+    JSValue obj = JS_NewObjectClass(ctx, s_layer_class_id);
+    if (JS_IsException(obj)) return obj;
+    JS_SetOpaque(obj, node);
+    return obj;
+}
+
+inline JSValue MakeVec3(JSContext* ctx, double x, double y, double z) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (JS_IsUndefined(host->vec3_ctor)) {
+        JSValue g       = JS_GetGlobalObject(ctx);
+        host->vec3_ctor = JS_GetPropertyStr(ctx, g, "Vec3");
+        JS_FreeValue(ctx, g);
+    }
+    JSValue args[3] {
+        JS_NewFloat64(ctx, x),
+        JS_NewFloat64(ctx, y),
+        JS_NewFloat64(ctx, z),
+    };
+    JSValue r = JS_CallConstructor(ctx, host->vec3_ctor, 3, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    JS_FreeValue(ctx, args[2]);
+    return r;
+}
+
+inline bool ReadXYZ(JSContext* ctx, JSValueConst v, double& x, double& y, double& z) {
+    if (! JS_IsObject(v)) return false;
+    JSValue jx = JS_GetPropertyStr(ctx, v, "x");
+    JSValue jy = JS_GetPropertyStr(ctx, v, "y");
+    JSValue jz = JS_GetPropertyStr(ctx, v, "z");
+    bool ok = (JS_ToFloat64(ctx, &x, jx) == 0)
+            && (JS_ToFloat64(ctx, &y, jy) == 0)
+            && (JS_ToFloat64(ctx, &z, jz) == 0);
+    JS_FreeValue(ctx, jx);
+    JS_FreeValue(ctx, jy);
+    JS_FreeValue(ctx, jz);
+    return ok;
+}
+
+// --- property accessors -----------------------------------------------------
+
+JSValue NodeGetOrigin(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    auto v = n->Translate();
+    return MakeVec3(ctx, v.x(), v.y(), v.z());
+}
+JSValue NodeSetOrigin(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    double x = 0, y = 0, z = 0;
+    if (! ReadXYZ(ctx, val, x, y, z)) return JS_UNDEFINED;
+    n->SetTranslate({ float(x), float(y), float(z) });
+    return JS_UNDEFINED;
+}
+JSValue NodeGetScale(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    auto v = n->Scale();
+    return MakeVec3(ctx, v.x(), v.y(), v.z());
+}
+JSValue NodeSetScale(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    double x = 0, y = 0, z = 0;
+    if (! ReadXYZ(ctx, val, x, y, z)) return JS_UNDEFINED;
+    n->SetScale({ float(x), float(y), float(z) });
+    return JS_UNDEFINED;
+}
+JSValue NodeGetAngles(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    auto v = n->Rotation();
+    return MakeVec3(ctx, v.x(), v.y(), v.z());
+}
+JSValue NodeSetAngles(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    double x = 0, y = 0, z = 0;
+    if (! ReadXYZ(ctx, val, x, y, z)) return JS_UNDEFINED;
+    n->SetRotation({ float(x), float(y), float(z) });
+    return JS_UNDEFINED;
+}
+
+// Stubs — properties scripts read but writing them would force RG rebuild.
+JSValue NodeGetSize(JSContext* ctx, JSValueConst)         { return MakeVec3(ctx, 100, 100, 0); }
+JSValue NodeGetVisible(JSContext*, JSValueConst)          { return JS_TRUE; }
+JSValue NodeGetAlpha(JSContext* ctx, JSValueConst)        { return JS_NewFloat64(ctx, 1.0); }
+JSValue NodeGetBrightness(JSContext* ctx, JSValueConst)   { return JS_NewFloat64(ctx, 1.0); }
+JSValue NodeGetColor(JSContext* ctx, JSValueConst)        { return MakeVec3(ctx, 1, 1, 1); }
+JSValue NodeGetVAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(ctx, "center"); }
+JSValue NodeGetHAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(ctx, "center"); }
+JSValue NodeSetIgnore(JSContext*, JSValueConst, JSValueConst) { return JS_UNDEFINED; }
+
+// --- methods ----------------------------------------------------------------
+
+// Always return SOMETHING — many scripts cache `parent = thisLayer.getParent()`
+// at init time and dereference it later without a null check. When there's
+// no real parent (root layer or unbound node), hand back the default JS
+// stub so `parent.origin` etc. silently no-op instead of TypeError'ing.
+JSValue NodeGetParent(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* n = GetLayerNode(this_val);
+    if (n && n->Parent()) return WrapLayerNode(ctx, n->Parent());
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    return JS_DupValue(ctx, host->default_layer);
+}
+
+JSValue NodeGetTransformMatrix(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto*   n   = GetLayerNode(this_val);
+    JSValue m   = JS_NewArray(ctx);
+    JSValue obj = JS_NewObject(ctx);
+    if (n) {
+        n->UpdateTrans();
+        const auto& mat = n->ModelTrans();  // Eigen Matrix4d column-major
+        for (int i = 0; i < 16; ++i) {
+            JS_DefinePropertyValueUint32(ctx, m, i,
+                                         JS_NewFloat64(ctx, mat.data()[i]),
+                                         JS_PROP_C_W_E);
+        }
+    } else {
+        constexpr double id[16] { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+        for (int i = 0; i < 16; ++i) {
+            JS_DefinePropertyValueUint32(ctx, m, i, JS_NewFloat64(ctx, id[i]),
+                                         JS_PROP_C_W_E);
+        }
+    }
+    JS_DefinePropertyValueStr(ctx, obj, "m", m, JS_PROP_C_W_E);
+    return obj;
+}
+
+JSValue NodeGetChildren(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    return JS_NewArray(ctx);
+}
+
+JSValue NodeGetName(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_NewString(ctx, "");
+    return JS_NewStringLen(ctx, n->Name().data(), n->Name().size());
+}
+
+JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto* n    = GetLayerNode(this_val);
+    if (! n || argc < 1) return JS_DupValue(ctx, host->default_layer);
+    const char* name = JS_ToCString(ctx, argv[0]);
+    if (! name) return JS_DupValue(ctx, host->default_layer);
+    owe::SceneNode* hit = n->FindByName(name);
+    JS_FreeCString(ctx, name);
+    return hit ? WrapLayerNode(ctx, hit) : JS_DupValue(ctx, host->default_layer);
+}
+
+JSValue NodeGetTextureAnimation(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    // Delegate to the JS-side stub factory installed by the bootstrap;
+    // when the texture-animation subsystem is real, this is the point
+    // that swaps in a backed object.
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue f = JS_GetPropertyStr(ctx, g, "__wwCreateTexAnimStub");
+    JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 0, nullptr);
+    JS_FreeValue(ctx, f);
+    JS_FreeValue(ctx, g);
+    return r;
+}
+
+const JSCFunctionListEntry s_layer_proto_funcs[] = {
+    JS_CGETSET_DEF("origin",          NodeGetOrigin,  NodeSetOrigin),
+    JS_CGETSET_DEF("scale",           NodeGetScale,   NodeSetScale),
+    JS_CGETSET_DEF("angles",          NodeGetAngles,  NodeSetAngles),
+    JS_CGETSET_DEF("size",            NodeGetSize,    NodeSetIgnore),
+    JS_CGETSET_DEF("visible",         NodeGetVisible, NodeSetIgnore),
+    JS_CGETSET_DEF("alpha",           NodeGetAlpha,   NodeSetIgnore),
+    JS_CGETSET_DEF("brightness",      NodeGetBrightness, NodeSetIgnore),
+    JS_CGETSET_DEF("color",           NodeGetColor,   NodeSetIgnore),
+    JS_CGETSET_DEF("verticalalign",   NodeGetVAlign,  NodeSetIgnore),
+    JS_CGETSET_DEF("horizontalalign", NodeGetHAlign,  NodeSetIgnore),
+    JS_CFUNC_DEF("getParent",           0, NodeGetParent),
+    JS_CFUNC_DEF("getTransformMatrix",  0, NodeGetTransformMatrix),
+    JS_CFUNC_DEF("getChildren",         0, NodeGetChildren),
+    JS_CFUNC_DEF("getName",             0, NodeGetName),
+    JS_CFUNC_DEF("getLayer",            1, NodeGetLayer),
+    JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
+};
+
+void InitLayerClass(JSContext* ctx, JSRuntime* rt) {
+    if (s_layer_class_id == 0) JS_NewClassID(rt, &s_layer_class_id);
+    JS_NewClass(rt, s_layer_class_id, &s_layer_class_def);
+    JSValue proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, proto, s_layer_proto_funcs,
+                                sizeof(s_layer_proto_funcs) /
+                                    sizeof(s_layer_proto_funcs[0]));
+    JS_SetClassProto(ctx, s_layer_class_id, proto);
+}
+
+// Stash the bootstrap's `thisLayer` / `thisScene` stubs for restore.
+void CaptureDefaultBindings(JSContext* ctx) {
+    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JSValue g    = JS_GetGlobalObject(ctx);
+    host->default_layer = JS_GetPropertyStr(ctx, g, "thisLayer");
+    host->default_scene = JS_GetPropertyStr(ctx, g, "thisScene");
+    JS_FreeValue(ctx, g);
+}
+
+// Write `globalThis.thisLayer = val`. `val` is duplicated; ownership of
+// the original ref stays with the caller.
+void BindThisLayer(JSContext* ctx, JSValueConst val) {
+    JSValue g = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, g, "thisLayer", JS_DupValue(ctx, val));
+    JS_FreeValue(ctx, g);
+}
+void BindThisScene(JSContext* ctx, JSValueConst val) {
+    JSValue g = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, g, "thisScene", JS_DupValue(ctx, val));
+    JS_FreeValue(ctx, g);
+}
+
 }  // namespace
 
 // --- JsRuntime methods ------------------------------------------------------
@@ -777,7 +1029,12 @@ JsRuntime::JsRuntime() : m_impl(std::make_unique<Impl>()) {
     // ReferenceError via the loader.
     JS_SetModuleLoaderFunc(m_impl->rt, /*normalize=*/nullptr,
                            BuiltinModuleLoader, /*opaque=*/nullptr);
+    InitLayerClass(m_impl->ctx, m_impl->rt);
     InstallEngineGlobal(m_impl->ctx);
+    // Bootstrap created stub `thisLayer` / `thisScene` on globalThis.
+    // Capture them now so per-script binding can fall back to the stub
+    // when no SceneNode is provided.
+    CaptureDefaultBindings(m_impl->ctx);
 }
 
 JsRuntime::~JsRuntime() {
@@ -789,11 +1046,21 @@ JsRuntime::~JsRuntime() {
             JS_FreeValue(m_impl->ctx, fs->m_impl->update_fn);
             JS_FreeValue(m_impl->ctx, fs->m_impl->module_ns);
             JS_FreeValue(m_impl->ctx, fs->m_impl->current_value);
+            if (! JS_IsUndefined(fs->m_impl->wrapped_layer))
+                JS_FreeValue(m_impl->ctx, fs->m_impl->wrapped_layer);
         }
     }
     m_impl->scripts.clear();
     for (auto& [_sha, ns] : m_impl->ns_by_sha) JS_FreeValue(m_impl->ctx, ns);
     m_impl->ns_by_sha.clear();
+    if (! JS_IsUndefined(m_impl->wrapped_scene))
+        JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
+    if (! JS_IsUndefined(m_impl->host.vec3_ctor))
+        JS_FreeValue(m_impl->ctx, m_impl->host.vec3_ctor);
+    if (! JS_IsUndefined(m_impl->host.default_layer))
+        JS_FreeValue(m_impl->ctx, m_impl->host.default_layer);
+    if (! JS_IsUndefined(m_impl->host.default_scene))
+        JS_FreeValue(m_impl->ctx, m_impl->host.default_scene);
     if (m_impl->host.audio_buffer_built) {
         JS_FreeValue(m_impl->ctx, m_impl->host.audio_buffer);
         m_impl->host.audio_buffer_built = false;
@@ -807,12 +1074,27 @@ void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
     if (m_impl->host.audio_buffer_built) RefreshAudioBuffer(m_impl->ctx);
 }
 
+void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
+    if (! m_impl || ! m_impl->ctx) return;
+    if (! JS_IsUndefined(m_impl->wrapped_scene))
+        JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
+    m_impl->scene_root    = root;
+    m_impl->wrapped_scene = root ? WrapLayerNode(m_impl->ctx, root) : JS_UNDEFINED;
+    if (! JS_IsUndefined(m_impl->wrapped_scene))
+        BindThisScene(m_impl->ctx, m_impl->wrapped_scene);
+}
+
 void JsRuntime::TickAll() {
     JSContext* ctx = m_impl->ctx;
     for (auto& fs : m_impl->scripts) {
         auto* I = fs->m_impl.get();
         if (! I->alive) continue;
         if (JS_IsUndefined(I->update_fn)) continue;
+        // Swap `thisLayer` to this script's bound node before update. When
+        // unbound, restore the original stub captured at bootstrap.
+        BindThisLayer(ctx,
+                      JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer
+                                                       : I->wrapped_layer);
         JSValue ret;
         if (I->update_takes_arg) {
             JSValue args[1] = { JS_DupValue(ctx, I->current_value) };
@@ -861,9 +1143,16 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
                                         std::string_view script_sha,
                                         FieldKind        field_kind_in,
                                         const json&      properties_config,
-                                        const json&      initial_value) {
+                                        const json&      initial_value,
+                                        owe::SceneNode*  node) {
     JSContext* ctx = m_impl->ctx;
     if (! ctx) return nullptr;
+
+    // Wrap `node` (if any) up front. Bind it as `thisLayer` for the
+    // duration of module eval + init so module-body top-level statements
+    // like `let parent = thisLayer.getParent()` see the real node.
+    JSValue wrapped = node ? WrapLayerNode(ctx, node) : JS_UNDEFINED;
+    BindThisLayer(ctx, JS_IsUndefined(wrapped) ? m_impl->host.default_layer : wrapped);
 
     // 1. Compile (and import) the module if not seen before. The compile
     //    step is COMPILE_ONLY so we can grab the JSModuleDef pointer and
@@ -880,6 +1169,7 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
         if (JS_IsException(compiled)) {
             m_impl->LogError(ctx, script_sha, "compile failed");
             JS_FreeValue(ctx, compiled);
+            if (! JS_IsUndefined(wrapped)) JS_FreeValue(ctx, wrapped);
             return nullptr;
         }
         JSModuleDef* m = static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(compiled));
@@ -887,6 +1177,7 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
         if (JS_IsException(ev)) {
             m_impl->LogError(ctx, script_sha, "module eval failed");
             JS_FreeValue(ctx, ev);
+            if (! JS_IsUndefined(wrapped)) JS_FreeValue(ctx, wrapped);
             return nullptr;
         }
         JS_FreeValue(ctx, ev);
@@ -902,6 +1193,8 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     I->sha            = sha_str;
     I->kind           = (field_kind_in == FieldKind::Unknown) ? FieldKind::Scalar : field_kind_in;
     I->module_ns      = ns;  // owns one ref now
+    I->node           = node;
+    I->wrapped_layer  = wrapped;  // takes ownership; freed in JsRuntime dtor
 
     // 3. Wire scriptProperties._hostValues from the per-binding config so
     //    `scriptProperties.foo` returns the configured value (resolving

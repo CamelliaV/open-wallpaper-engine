@@ -101,11 +101,19 @@ public:
     ~JsRuntime();
 
     // Returns nullptr on hard compile/init failure (logs once).
+    // `node` (nullable) is the SceneNode the script will see as `thisLayer`
+    // inside init/update. When null, `thisLayer` falls back to a generic
+    // stub (the JS-side default created at bootstrap).
     FieldScript* MakeFieldScript(std::string_view source,
                                  std::string_view script_sha,
                                  FieldKind        field_kind,
                                  const nlohmann::json& properties_config,
-                                 const nlohmann::json& initial_value);
+                                 const nlohmann::json& initial_value,
+                                 owe::SceneNode*  node = nullptr);
+
+    // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`
+    // searches from this node. Call once per scene after parsing finishes.
+    void SetSceneRoot(owe::SceneNode* root);
 
     // Push one frame's worth of host state into the runtime. The next
     // FieldScript::Update call will see these values via `engine.*`.

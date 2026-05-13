@@ -66,7 +66,7 @@ void WireFieldScripts(ParseContext& context, SceneNode* node,
         }
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
         auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties,
-                                       sb.initial_value);
+                                       sb.initial_value, node);
         if (! fs) continue;
         ss.AddActuator({ fs, script::MakeNodeTransformApply(node, tgt) });
     }
@@ -1349,7 +1349,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
         auto*       fs  = ss.runtime().MakeFieldScript(sb.source, sha,
                                                         script::FieldKind::String,
-                                                        sb.properties, sb.initial_value);
+                                                        sb.properties, sb.initial_value,
+                                                        sp_node.get());
         if (fs) {
             ss.AddActuator({
                 fs,
@@ -1499,6 +1500,10 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
     // frame via owe::script::TickSceneScripts. Empty ScriptScenes are
     // skipped so image-only pkgs don't pay any runtime cost.
     if (context.script_scene && ! context.script_scene->empty()) {
+        // Hand the scene root to the JS runtime so `thisScene.getLayer(name)`
+        // can resolve against the live graph. The renderer also ticks the
+        // ScriptScene once per frame via owe::script::TickSceneScripts.
+        context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.get());
         owe::script::InstallScriptScene(*context.scene,
                                         std::move(context.script_scene));
     }
