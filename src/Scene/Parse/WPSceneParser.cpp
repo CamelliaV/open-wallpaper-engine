@@ -1192,8 +1192,11 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
 
     text::FontCache::ResolvedBlob resolved;
     if (! font_name.empty()) {
+        // scene.json's `font` is a pkg-relative path, e.g. `fonts/2.ttf` or
+        // `fonts/workshop/<id>/X.otf`. The pkg mounts at /assets so the full
+        // VFS path is /assets/<font_name>.
         std::string vfs_path =
-            "/assets/fonts/" + std::filesystem::path(font_name).filename().string();
+            (std::filesystem::path("/assets") / font_name).lexically_normal().native();
         std::string blob_str = fs::GetFileContent(*context.vfs, vfs_path);
         if (! blob_str.empty()) {
             auto bytes = std::make_shared<std::vector<std::byte>>(blob_str.size());
