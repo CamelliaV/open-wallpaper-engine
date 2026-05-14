@@ -11,7 +11,6 @@
 
 #include <argparse/argparse.hpp>
 
-#include <dlfcn.h>
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
@@ -48,23 +47,6 @@ struct Options {
 [[noreturn]] void die(const std::string& msg) {
     rstd_error("waywallen-wescene-renderer: {}", msg);
     std::exit(1);
-}
-
-using BridgeLogCallback = void (*)(unsigned, const char*, void*);
-
-void set_bridge_log_callback(BridgeLogCallback cb, void* user) {
-    using Fn = void (*)(BridgeLogCallback, void*);
-    auto* sym = ::dlsym(RTLD_DEFAULT, "ww_bridge_set_log_callback");
-    auto  fn  = reinterpret_cast<Fn>(sym);
-    if (fn) fn(cb, user);
-}
-
-int send_report_state_clear_color(int sock, float r, float g, float b, float a) {
-    using Fn = int (*)(int, float, float, float, float);
-    auto* sym = ::dlsym(RTLD_DEFAULT, "ww_bridge_send_report_state_clear_color");
-    auto  fn  = reinterpret_cast<Fn>(sym);
-    if (! fn) return 0;
-    return fn(sock, r, g, b, a);
 }
 
 Options parse_args(int argc, char** argv) {
@@ -344,8 +326,8 @@ int main(int argc, char** argv) {
     rstd::log::set_logger(_logger);
     rstd::log::set_max_level(_logger.filter());
 
-    set_bridge_log_callback(
-        [](unsigned level, const char* msg, void*) {
+    ww_bridge_set_log_callback(
+        [](ww_bridge_log_level_t level, const char* msg, void*) {
             constexpr rstd::log::Level kMap[4] = {
                 rstd::log::Level::Debug,
                 rstd::log::Level::Info,
@@ -447,7 +429,7 @@ int main(int argc, char** argv) {
     // DMA-BUF is opaque; alpha only governs daemon-side letterbox bars.
     wp.setOnClearColor([&host](float r, float g, float b) {
         if (host.sock < 0) return;
-        if (int rc = send_report_state_clear_color(host.sock, r, g, b, 1.0f);
+        if (int rc = ww_bridge_send_report_state_clear_color(host.sock, r, g, b, 1.0f);
             rc != 0) {
             rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
         }
