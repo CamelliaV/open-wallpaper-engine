@@ -64,10 +64,11 @@ struct FrameInputs {
     float        canvas_h { 1080.0f };
     float        screen_w { 1920.0f };
     float        screen_h { 1080.0f };
-    // 16-bin (left+right averaged) audio buffer, populated by the audio
+    // 64-bin (left+right averaged) audio buffer, populated by the audio
     // chain. Values are typically 0..1 with peaks above. Length is fixed
-    // at 16 in MVP regardless of the script-requested resolution.
-    std::array<float, 16> audio_average {};
+    // at 64 regardless of the script-requested resolution; scripts
+    // requesting 16 just use the first 16 entries.
+    std::array<float, 64> audio_average {};
 };
 
 // --- script properties (configuration) --------------------------------------
