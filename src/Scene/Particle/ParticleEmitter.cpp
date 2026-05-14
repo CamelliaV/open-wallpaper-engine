@@ -1,5 +1,7 @@
 module;
 
+#include <algorithm>
+#include <cmath>
 
 module wescene.scene;
 import eigen;
@@ -66,6 +68,30 @@ inline u32 Emitt(std::vector<Particle>& particles, u32 num, u32 maxcount, bool s
     return i + 1;
 }
 
+inline float AudioResponseScale(std::span<const float> audio, const ParticleAudioResponse& ar) {
+    if (! ar.enable || audio.empty()) return 1.0f;
+
+    const auto clamp_idx = [audio](float v) {
+        auto idx = static_cast<int>(std::round(v));
+        idx      = std::max(0, std::min(idx, static_cast<int>(audio.size()) - 1));
+        return static_cast<std::size_t>(idx);
+    };
+    auto first = clamp_idx(ar.frequency[0]);
+    auto last  = clamp_idx(ar.frequency[1]);
+    if (last < first) std::swap(first, last);
+
+    float sum = 0.0f;
+    for (std::size_t i = first; i <= last; ++i) sum += std::max(0.0f, audio[i]);
+    float level = sum / static_cast<float>(last - first + 1);
+
+    const float lo = std::min(ar.bounds[0], ar.bounds[1]);
+    const float hi = std::max(ar.bounds[0], ar.bounds[1]);
+    if (hi > lo) level = (level - lo) / (hi - lo);
+    level = std::clamp(level, 0.0f, 1.0f);
+    level = std::pow(level, std::max(0.001f, ar.exponent));
+    return std::max(0.0f, 1.0f + level * ar.amount);
+}
+
 inline Particle Spwan(GenParticleOp gen, std::vector<ParticleInitOp>& inis, double duration) {
     auto particle = gen();
     for (auto& el : inis) el(particle, duration);
@@ -87,10 +113,15 @@ inline void ApplySign(Eigen::Vector3d& p, int32_t x, int32_t y, int32_t z) noexc
 
 ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
     double timer { 0.0f };
-    return [a, timer](std::vector<Particle>&       ps,
-                      std::vector<ParticleInitOp>& inis,
-                      u32                          maxcount,
-                      double                       timepass) mutable {
+    double elapsed { 0.0f };
+    return [a, timer, elapsed](std::vector<Particle>&       ps,
+                               std::vector<ParticleInitOp>& inis,
+                               u32                          maxcount,
+                               double                       timepass,
+                               std::span<const float>       audio_average) mutable {
+        elapsed += timepass;
+        if (a.duration > 0.0f && elapsed > a.duration) return;
+
         timer += timepass;
         auto GenBox = [&]() {
             Eigen::Vector3d pos;
@@ -105,11 +136,13 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
             ParticleModify::Move(p, a.orgin[0], a.orgin[1], a.orgin[2]);
             return p;
         };
-        u32 emit_num = GetEmitNum(timer, a.emitSpeed);
+        float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
+        if (emit_speed <= 0.0f) return;
+        u32 emit_num = GetEmitNum(timer, emit_speed);
         emit_num     = a.one_per_frame ? 1 : emit_num;
         emit_num     = a.instantaneous > 0 && ps.empty() ? a.instantaneous : emit_num;
         Emitt(ps, emit_num, maxcount, a.sort, [&]() {
-            return Spwan(GenBox, inis, 1.0f / a.emitSpeed);
+            return Spwan(GenBox, inis, 1.0f / emit_speed);
         });
     };
 }
@@ -117,10 +150,15 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
 ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs a) {
     using namespace Eigen;
     double timer { 0.0f };
-    return [a, timer](std::vector<Particle>&       ps,
-                      std::vector<ParticleInitOp>& inis,
-                      u32                          maxcount,
-                      double                       timepass) mutable {
+    double elapsed { 0.0f };
+    return [a, timer, elapsed](std::vector<Particle>&       ps,
+                               std::vector<ParticleInitOp>& inis,
+                               u32                          maxcount,
+                               double                       timepass,
+                               std::span<const float>       audio_average) mutable {
+        elapsed += timepass;
+        if (a.duration > 0.0f && elapsed > a.duration) return;
+
         timer += timepass;
         auto GenSphere = [&]() {
             auto   p = Particle();
@@ -140,11 +178,13 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
             ParticleModify::Move(p, Eigen::Vector3f { a.orgin.data() }.cast<double>());
             return p;
         };
-        u32 emit_num = GetEmitNum(timer, a.emitSpeed);
+        float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
+        if (emit_speed <= 0.0f) return;
+        u32 emit_num = GetEmitNum(timer, emit_speed);
         emit_num     = a.one_per_frame ? 1 : emit_num;
         emit_num     = a.instantaneous > 0 && ps.empty() ? a.instantaneous : emit_num;
         Emitt(ps, emit_num, maxcount, a.sort, [&]() {
-            return Spwan(GenSphere, inis, 1.0f / a.emitSpeed);
+            return Spwan(GenSphere, inis, 1.0f / emit_speed);
         });
     };
 }

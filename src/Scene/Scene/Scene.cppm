@@ -630,6 +630,7 @@ struct Particle {
 struct ParticleControlpoint {
     bool            link_mouse { false };
     bool            worldspace { false };
+    Eigen::Vector3d base_offset { 0, 0, 0 };
     Eigen::Vector3d offset { 0, 0, 0 };
 };
 
@@ -644,7 +645,16 @@ using ParticleInitOp = std::function<void(Particle&, double)>;
 using ParticleOperatorOp = std::function<void(const ParticleInfo&)>;
 
 using ParticleEmittOp = std::function<void(std::vector<Particle>&, std::vector<ParticleInitOp>&,
-                                           uint32_t maxcount, double timepass)>;
+                                           uint32_t maxcount, double timepass,
+                                           std::span<const float> audio_average)>;
+
+struct ParticleAudioResponse {
+    bool                 enable { false };
+    float                amount { 1.0f };
+    float                exponent { 1.0f };
+    std::array<float, 2> frequency { 0.0f, 15.0f };
+    std::array<float, 2> bounds { 0.0f, 1.0f };
+};
 
 struct ParticleBoxEmitterArgs {
     std::array<float, 3> directions;
@@ -657,6 +667,8 @@ struct ParticleBoxEmitterArgs {
     u32                  instantaneous;
     float                minSpeed;
     float                maxSpeed;
+    float                duration { 0.0f };
+    ParticleAudioResponse audio_response;
 
     static ParticleEmittOp MakeEmittOp(ParticleBoxEmitterArgs);
 };
@@ -673,6 +685,8 @@ struct ParticleSphereEmitterArgs {
     u32                    instantaneous;
     float                  minSpeed;
     float                  maxSpeed;
+    float                  duration { 0.0f };
+    ParticleAudioResponse  audio_response;
 
     static ParticleEmittOp MakeEmittOp(ParticleSphereEmitterArgs);
 };
@@ -1082,6 +1096,9 @@ public:
     std::unique_ptr<ParticleSystem> paritileSys;
 
     SceneCamera* activeCamera;
+
+    std::array<float, 2> pointerPosition { 0.5f, 0.5f };
+    std::array<std::atomic<float>, 16> audioAverage {};
 
     i32                  ortho[2] { 1920, 1080 };
     std::array<float, 3> clearColor { 1.0f, 1.0f, 1.0f };

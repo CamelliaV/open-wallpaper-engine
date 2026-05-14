@@ -119,6 +119,11 @@ public:
     // FieldScript::Update call will see these values via `engine.*`.
     void SetFrameInputs(const FrameInputs& fi);
 
+    // Patch one Wallpaper Engine user property into engine.userProperties.
+    // `property` should be the descriptor object shape used by project.json
+    // (`{value: ...}` plus optional metadata).
+    void SetUserProperty(std::string_view key, const nlohmann::json& property);
+
     // Drive every alive FieldScript once. Invokes their cached `update`
     // export and stores the coerced return into FieldScript::last_value().
     // Exceptions are caught and logged once per script_sha.
@@ -206,5 +211,10 @@ void InstallScriptScene(owe::Scene&             scene,
 // drives one frame. No-op when no ScriptScene is installed (image-only
 // pkgs, scenes without script bindings).
 void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi);
+
+// Patch `engine.userProperties` on the ScriptScene attached to `scene`.
+// No-op when the scene has no script runtime.
+void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
+                          const nlohmann::json& property);
 
 } // namespace owe::script

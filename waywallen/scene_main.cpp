@@ -11,6 +11,7 @@
 
 #include <argparse/argparse.hpp>
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
@@ -41,11 +42,29 @@ struct Options {
     std::string render_node;
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
     uint32_t    msaa_samples { 1 };
+    std::vector<std::pair<std::string, std::string>> initial_user_properties;
 };
 
 [[noreturn]] void die(const std::string& msg) {
     rstd_error("waywallen-wescene-renderer: {}", msg);
     std::exit(1);
+}
+
+using BridgeLogCallback = void (*)(unsigned, const char*, void*);
+
+void set_bridge_log_callback(BridgeLogCallback cb, void* user) {
+    using Fn = void (*)(BridgeLogCallback, void*);
+    auto* sym = ::dlsym(RTLD_DEFAULT, "ww_bridge_set_log_callback");
+    auto  fn  = reinterpret_cast<Fn>(sym);
+    if (fn) fn(cb, user);
+}
+
+int send_report_state_clear_color(int sock, float r, float g, float b, float a) {
+    using Fn = int (*)(int, float, float, float, float);
+    auto* sym = ::dlsym(RTLD_DEFAULT, "ww_bridge_send_report_state_clear_color");
+    auto  fn  = reinterpret_cast<Fn>(sym);
+    if (! fn) return 0;
+    return fn(sock, r, g, b, a);
 }
 
 Options parse_args(int argc, char** argv) {
@@ -94,6 +113,16 @@ const char* kv_get(const ww_kv_list_t& kv, const char* key) {
             return kv.data[i].value;
     }
     return nullptr;
+}
+
+bool is_native_setting(const char* key) {
+    if (! key) return true;
+    return std::strcmp(key, "volume") == 0 ||
+           std::strcmp(key, "fps") == 0 ||
+           std::strcmp(key, "test_pattern") == 0 ||
+           std::strcmp(key, "enable_audio") == 0 ||
+           std::strcmp(key, "render_node") == 0 ||
+           std::strcmp(key, "msaa") == 0;
 }
 
 // Parse a setting string as f32; falls back to `def` on parse error
@@ -233,9 +262,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 // through PROPERTY_TEST_PATTERN; runtime toggling not
                 // wired (would require respawn). Log and ignore.
             } else {
-                rstd_warn("waywallen-wescene-renderer: ApplySettings: "
-                          "wescene has no setting '{}'; ignoring",
-                          static_cast<const char*>(key));
+                if (s.wp) s.wp->setPropertyString(key, val);
             }
         }
         ww_bridge_setting_changed_free(&as);
@@ -317,15 +344,15 @@ int main(int argc, char** argv) {
     rstd::log::set_logger(_logger);
     rstd::log::set_max_level(_logger.filter());
 
-    ww_bridge_set_log_callback(
-        [](ww_bridge_log_level_t level, const char* msg, void*) {
+    set_bridge_log_callback(
+        [](unsigned level, const char* msg, void*) {
             constexpr rstd::log::Level kMap[4] = {
                 rstd::log::Level::Debug,
                 rstd::log::Level::Info,
                 rstd::log::Level::Warn,
                 rstd::log::Level::Error,
             };
-            auto lvl = kMap[(unsigned)level <= 3u ? (unsigned)level : 3u];
+            auto lvl = kMap[level <= 3u ? level : 3u];
             auto args = rstd::fmt::Arguments::make("{}", msg);
             rstd::log::Record rec {
                 rstd::log::Metadata { lvl, {} }, args,
@@ -398,6 +425,12 @@ int main(int argc, char** argv) {
             unsigned long n = std::strtoul(v, &end, 10);
             if (end != v) opts.msaa_samples = static_cast<uint32_t>(n);
         }
+        for (uint32_t i = 0; i < init.settings.count; ++i) {
+            const char* key = init.settings.data[i].key;
+            const char* val = init.settings.data[i].value;
+            if (! key || ! val || is_native_setting(key)) continue;
+            opts.initial_user_properties.emplace_back(key, val);
+        }
 
         ww_bridge_init_free(&init);
     }
@@ -414,8 +447,7 @@ int main(int argc, char** argv) {
     // DMA-BUF is opaque; alpha only governs daemon-side letterbox bars.
     wp.setOnClearColor([&host](float r, float g, float b) {
         if (host.sock < 0) return;
-        if (int rc = ww_bridge_send_report_state_clear_color(
-                host.sock, r, g, b, 1.0f);
+        if (int rc = send_report_state_clear_color(host.sock, r, g, b, 1.0f);
             rc != 0) {
             rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
         }
@@ -427,6 +459,9 @@ int main(int argc, char** argv) {
         wp.setPropertyBool(owe::PROPERTY_MUTED, true);
     if (!opts.initial_assets.empty())
         wp.setPropertyString(owe::PROPERTY_ASSETS, opts.initial_assets);
+    for (const auto& [key, value] : opts.initial_user_properties) {
+        wp.setPropertyString(key, value);
+    }
     if (!opts.initial_scene.empty())
         wp.setPropertyString(owe::PROPERTY_SOURCE, opts.initial_scene);
     if (opts.initial_fps)

@@ -73,11 +73,16 @@ public:
     float                  speedmin { 0 };
     float                  speedmax { 0 };
     u32                    audioprocessingmode { 0 };
+    float                  audioamount { 1.0f };
+    float                  audioexponent { 1.0f };
+    std::array<float, 2>   audiofrequency { 0.0f, 15.0f };
+    std::array<float, 2>   audiobounds { 0.0f, 1.0f };
     i32                    controlpoint { 0 };
     i32                    id;
     EFlags                 flags;
     std::string            name;
     float                  rate { 5.0f };
+    float                  duration { 0.0f };
 };
 
 class ParticleChild;

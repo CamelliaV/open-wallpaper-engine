@@ -1074,6 +1074,26 @@ void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
     if (m_impl->host.audio_buffer_built) RefreshAudioBuffer(m_impl->ctx);
 }
 
+void JsRuntime::SetUserProperty(std::string_view key, const json& property) {
+    if (! m_impl || ! m_impl->ctx) return;
+    std::string key_str { key };
+    JSContext*  ctx = m_impl->ctx;
+    JSValue     global = JS_GetGlobalObject(ctx);
+    JSValue     engine = JS_GetPropertyStr(ctx, global, "engine");
+    JSValue     props  = JS_GetPropertyStr(ctx, engine, "userProperties");
+    if (! JS_IsObject(props)) {
+        JS_FreeValue(ctx, props);
+        props = JS_NewObject(ctx);
+        JS_DefinePropertyValueStr(ctx, engine, "userProperties",
+                                  JS_DupValue(ctx, props), JS_PROP_C_W_E);
+    }
+    JS_DefinePropertyValueStr(ctx, props, key_str.c_str(),
+                              JsonToJs(ctx, property), JS_PROP_C_W_E);
+    JS_FreeValue(ctx, props);
+    JS_FreeValue(ctx, engine);
+    JS_FreeValue(ctx, global);
+}
+
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
     if (! m_impl || ! m_impl->ctx) return;
     if (! JS_IsUndefined(m_impl->wrapped_scene))
@@ -1329,6 +1349,13 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi) {
     auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
     if (! ss) return;
     ss->Tick(fi);
+}
+
+void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
+                          const nlohmann::json& property) {
+    auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
+    if (! ss) return;
+    ss->runtime().SetUserProperty(key, property);
 }
 
 }  // namespace owe::script

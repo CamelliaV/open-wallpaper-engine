@@ -1,8 +1,11 @@
 module;
 
+#include <algorithm>
+#include <cmath>
 #include <sys/types.h>
 module wescene.parse;
 import wescene.core;
+import wescene.scene;
 import rstd.cppstd;
 import rstd.log;
 import rstd;  // rstd::io::Result / SeekFrom for IByteStream impl
@@ -73,6 +76,12 @@ public:
     };
     WPSoundStream(const std::vector<std::string>& paths, fs::VFS& vfs, Config c)
         : vfs(vfs), m_config(c), m_soundPaths(paths) {};
+    WPSoundStream(const std::vector<std::string>& paths, fs::VFS& vfs, Config c,
+                  std::array<std::atomic<float>, 16>* audio_average)
+        : vfs(vfs),
+          m_config(c),
+          m_soundPaths(paths),
+          m_audioAverage(audio_average) {};
     virtual ~WPSoundStream() = default;
 
     uint64_t next_pcm(void* pData, uint32_t frameCount) override {
@@ -88,6 +97,7 @@ public:
             Switch();
             frameReads = m_curActive ? m_curActive->next_pcm(pData, frameCount) : 0;
         }
+        UpdateAudioAverage(pData, frameReads);
         // volume
         {
             float*     pData_float = static_cast<float*>(pData);
@@ -127,12 +137,39 @@ public:
             n);
     }
     uint32_t LoopIndex() {
-        m_curIndex++;
-        if (m_curIndex == m_soundPaths.size()) m_curIndex = 0;
-        return m_curIndex;
+        const uint32_t n = static_cast<uint32_t>(m_soundPaths.size());
+        if (n == 0) return 0;
+        if (m_config.mode == PlaybackMode::Random) {
+            return Random::get<uint32_t>(0, n - 1);
+        }
+        uint32_t idx = m_curIndex;
+        m_curIndex   = (m_curIndex + 1) % n;
+        return idx;
     }
 
 private:
+    void UpdateAudioAverage(const void* pData, uint64_t frameReads) {
+        if (! m_audioAverage || frameReads == 0 || m_desc.channels == 0) return;
+
+        const float* samples = static_cast<const float*>(pData);
+        const auto   total   = static_cast<std::size_t>(frameReads * m_desc.channels);
+        if (total == 0) return;
+
+        for (std::size_t bin = 0; bin < m_audioAverage->size(); ++bin) {
+            const auto begin = bin * total / m_audioAverage->size();
+            const auto end   = (bin + 1) * total / m_audioAverage->size();
+            if (end <= begin) continue;
+
+            float sum = 0.0f;
+            for (std::size_t i = begin; i < end; ++i) sum += std::abs(samples[i]);
+            float level = std::clamp(sum / static_cast<float>(end - begin), 0.0f, 1.0f);
+
+            auto& slot = (*m_audioAverage)[bin];
+            const float old = slot.load(std::memory_order_relaxed);
+            slot.store(std::max(old * 0.75f, level), std::memory_order_relaxed);
+        }
+    }
+
     fs::VFS& vfs;
     Config   m_config;
     Desc     m_desc;
@@ -141,15 +178,17 @@ private:
 
     const std::vector<std::string>             m_soundPaths;
     std::unique_ptr<wavsen::audio::SoundStream> m_curActive;
+    std::array<std::atomic<float>, 16>*          m_audioAverage { nullptr };
 };
 
 void WPSoundParser::Parse(const wpscene::WPSoundObject& obj, fs::VFS& vfs,
-                          wavsen::audio::SoundManager& sm) {
+                          wavsen::audio::SoundManager& sm, Scene* scene) {
     WPSoundStream::Config config { .maxtime = obj.maxtime,
                                    .mintime = obj.mintime,
                                    .volume  = obj.volume > 1.0f ? 1.0f : obj.volume,
                                    .mode    = ToPlaybackMode(obj.playbackmode) };
 
-    auto ss = std::make_unique<WPSoundStream>(obj.sound, vfs, config);
+    auto* audio_average = scene ? &scene->audioAverage : nullptr;
+    auto ss = std::make_unique<WPSoundStream>(obj.sound, vfs, config, audio_average);
     sm.mount(std::move(ss));
 }
