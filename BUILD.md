@@ -4,19 +4,14 @@
 
 | Dependency | Version | Notes |
 |------------|---------|-------|
-| Clang      | recent  | required — the top-level `CMakeLists.txt` aborts on non-Clang unless `-DWAYWALLEN_ALLOW_NONCLANG=ON` |
-| lld        | matching clang | the `_clang-base` preset wires `CMAKE_LINKER=lld` |
+| Clang      | 21+  | required — the top-level `CMakeLists.txt` aborts on non-Clang unless `-DWAYWALLEN_ALLOW_NONCLANG=ON` |
 | CMake      | 3.28+   | C++20 module scanning |
 | Ninja      | recent  | generator pinned in the presets |
 | pkg-config | -       | |
 | Vulkan SDK | ≥ 1.1   | loader + headers; `glslangValidator` only needed if you tweak shaders |
 | GLFW3      | -       | required by `SceneViewer` / `WebViewer` (`BUILD_VIEWER`) |
-| Freetype   | -       | |
-| OpenGL     | -       | |
 | liblz4     | -       | `.pkg` decompression |
 | EGL / GLESv2 / X11 / wayland-egl | - | `BUILD_WEWEB` viewer only (`WebViewer.cpp` presenters) |
-
-All other deps (Eigen, nlohmann_json, cubeb, SPIRV-Reflect, DXC, argparse, rstd, wavsen, QuickJS-NG, CEF) come in through `deps.json` via the `fetchdeps()` driver in `cmake/FetchDeps.cmake` — see [FetchDeps](#fetchdeps) below.
 
 ## Build, install, run
 
@@ -36,9 +31,6 @@ cmake --install build/clang-release --prefix install
 | `BUILD_WEWEB`   | `ON`  | the CEF-backed web renderer (`owe-web-host` + `WebViewer` + `waywallen-weweb-renderer`); pulls in the CEF archive |
 | `BUILD_WAYWALLEN` | `ON` | the waywallen host subprocesses under `waywallen/` |
 | `BUILD_VIEWER`  | `ON` if `glfw3` is found | the standalone GLFW viewers under `viewer/` |
-| `BUILD_TESTS`   | `OFF` | the gtest suite under `tests/` (needs `BUILD_WESCENE`); enable CTest with `--preset clang-debug` and `ctest --preset clang-debug` |
-| `ENABLE_RENDERDOC` | `OFF` | RenderDoc in-application API hooks |
-| `WAYWALLEN_ALLOW_NONCLANG` | `OFF` | bypass the top-level Clang check |
 
 ## Output layout
 
