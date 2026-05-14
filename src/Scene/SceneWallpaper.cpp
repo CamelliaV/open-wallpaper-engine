@@ -194,7 +194,11 @@ private:
 
 class RenderHandler {
 public:
-    explicit RenderHandler(MainHandler& main): m_main(main) {}
+    explicit RenderHandler(MainHandler& main): m_main(main) {
+        // Best-effort: a failing init just leaves snapshots returning false
+        // and audio_average at zeros — wallpapers still render fine.
+        (void)m_audio_capture.init();
+    }
     ~RenderHandler() {
         m_render->destroy();
         rstd_info("render handler deleted");
@@ -258,6 +262,8 @@ private:
     // nulling this out at shutdown lets the callback short-circuit so the
     // render channel can actually reach Err on recv().
     std::shared_ptr<RenderSender> m_swapchain_tx;
+
+    wavsen::audio::AudioCapture m_audio_capture;
 };
 
 // ---- RenderHandler message handlers ----------------------------------------
@@ -292,10 +298,19 @@ void RenderHandler::on(RenderDraw&&) {
             fi.canvas_h  = static_cast<float>(m_scene->ortho[1]);
             fi.screen_w  = fi.canvas_w;
             fi.screen_h  = fi.canvas_h;
-            for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
-                float level = m_scene->audioAverage[i].load(std::memory_order_relaxed);
-                fi.audio_average[i] = level;
-                m_scene->audioAverage[i].store(level * 0.94f, std::memory_order_relaxed);
+            wavsen::audio::AudioSpectrum spec;
+            m_audio_capture.snapshot(spec);
+            fi.audio_average = spec.bins;
+            // Layer pkg-internal audio response (WPSoundParser-driven) on
+            // top of the system monitor capture so wallpapers with embedded
+            // music still react. Scene::audioAverage is sized 16; only the
+            // first 16 bins overlay.
+            for (std::size_t i = 0; i < m_scene->audioAverage.size(); ++i) {
+                const float local = m_scene->audioAverage[i].load(
+                    std::memory_order_relaxed);
+                fi.audio_average[i] = std::max(fi.audio_average[i], local);
+                m_scene->audioAverage[i].store(local * 0.94f,
+                                                std::memory_order_relaxed);
             }
             owe::script::TickSceneScripts(*m_scene, fi);
         }

@@ -165,7 +165,7 @@ target_sources(owe-render
          VulkanRender/FinPass.cppm
          VulkanRender/PrePass.cppm)
 target_link_libraries(owe-render
-  PUBLIC owe-vulkan owe-parse owe-script)
+  PUBLIC owe-vulkan owe-parse owe-script wavsen::audio)
 target_include_directories(owe-render
   PUBLIC  .. . Swapchain Utils/include RenderGraph/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
