@@ -40,14 +40,6 @@
       }
     },
     {
-      "name": "clang-release-renderdoc",
-      "displayName": "Clang · Release + RenderDoc hooks",
-      "inherits": "clang-release",
-      "cacheVariables": {
-        "ENABLE_RENDERDOC": "ON"
-      }
-    },
-    {
       "name": "clang-release-no-host",
       "displayName": "Clang · Release without waywallen-renderer host",
       "inherits": "clang-release",
@@ -60,7 +52,6 @@
     { "name": "clang-debug",            "configurePreset": "clang-debug" },
     { "name": "clang-release",          "configurePreset": "clang-release" },
     { "name": "clang-relwithdebinfo",   "configurePreset": "clang-relwithdebinfo" },
-    { "name": "clang-release-renderdoc","configurePreset": "clang-release-renderdoc" },
     { "name": "clang-release-no-host",  "configurePreset": "clang-release-no-host" }
   ],
   "testPresets": [

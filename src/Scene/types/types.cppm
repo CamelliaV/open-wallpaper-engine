@@ -177,6 +177,9 @@ public:
     }
     const auto& GetCurFrame() const { return m_frames.at((usize)m_curFrame); }
     void        AppendFrame(const SpriteFrame& frame) { m_frames.push_back(frame); }
+    // Read a specific frame without advancing the internal cursor. Used by
+    // the script-driven setFrame() override path.
+    const SpriteFrame& GetFrame(idx i) const { return m_frames.at((usize)i); }
 
     usize numFrames() const { return m_frames.size(); }
 

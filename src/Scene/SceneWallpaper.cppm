@@ -46,6 +46,10 @@ public:
     void play();
     void pause();
     void mouseInput(double x, double y);
+    // button: 0=left, 1=right, 2=middle (GLFW numbering). down=true on
+    // press, false on release.
+    void mouseButton(int button, bool down);
+    void mouseEnter(bool in_window);
 
     void setPropertyBool(std::string_view, bool);
     void setPropertyInt32(std::string_view, int32_t);

@@ -259,10 +259,28 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             && s.width > 0 && s.height > 0) {
             s.wp->mouseInput(static_cast<double>(pm.x) / s.width,
                              static_cast<double>(pm.y) / s.height);
+            // The bridge has no explicit enter/leave; treat every motion
+            // event as proof the cursor is inside.
+            s.wp->mouseEnter(true);
         }
         break;
     }
-    case WW_EVT_IN_POINTER_BUTTON:
+    case WW_EVT_IN_POINTER_BUTTON: {
+        ww_bridge_pointer_button_t pb {};
+        if (ww_bridge_pointer_button_from_control(&msg, &pb) == 0 && s.wp) {
+            // Linux BTN_* → SceneWallpaper button index (0=L, 1=R, 2=M),
+            // matching the GLFW numbering scripts expect.
+            int idx = -1;
+            switch (pb.button) {
+                case 0x110: idx = 0; break;  // BTN_LEFT
+                case 0x111: idx = 1; break;  // BTN_RIGHT
+                case 0x112: idx = 2; break;  // BTN_MIDDLE
+                default: break;
+            }
+            if (idx >= 0) s.wp->mouseButton(idx, pb.state != 0);
+        }
+        break;
+    }
     case WW_EVT_IN_POINTER_AXIS:
         break;
     case WW_EVT_IN_SET_FPS:

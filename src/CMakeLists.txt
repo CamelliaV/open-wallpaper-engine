@@ -8,12 +8,6 @@ find_package(Vulkan REQUIRED)
 find_package(Freetype REQUIRED)
 pkg_check_modules(LZ4 REQUIRED liblz4)
 
-option(ENABLE_RENDERDOC "Build with renderdoc api" OFF)
-
-if(ENABLE_RENDERDOC)
-  add_compile_definitions(ENABLE_RENDERDOC_API=1)
-endif()
-
 include(TestBigEndian)
 test_big_endian(ENDIAN)
 if(ENDIAN)

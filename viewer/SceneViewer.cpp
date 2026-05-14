@@ -23,16 +23,23 @@ struct UserData {
 extern "C" {
 void framebuffer_size_callback(GLFWwindow*, int width, int height) {}
 
-void mouse_button_callback(GLFWwindow* win, int button, int action, int mods) {
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-        UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
-        // data->psw->setPropertyString(owe::PROPERTY_SOURCE,
-    }
+void mouse_button_callback(GLFWwindow* win, int button, int action, int /*mods*/) {
+    UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
+    if (! data || ! data->psw) return;
+    // GLFW button numbering (0=left, 1=right, 2=middle) matches WE.
+    if (action == GLFW_PRESS)   data->psw->mouseButton(button, true);
+    if (action == GLFW_RELEASE) data->psw->mouseButton(button, false);
 }
 
 void cursor_position_callback(GLFWwindow* win, double xpos, double ypos) {
     UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
     data->psw->mouseInput(xpos / data->width, ypos / data->height);
+}
+
+void cursor_enter_callback(GLFWwindow* win, int entered) {
+    UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
+    if (! data || ! data->psw) return;
+    data->psw->mouseEnter(entered != 0);
 }
 }
 
@@ -109,6 +116,7 @@ int main(int argc, char** argv) {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
+    glfwSetCursorEnterCallback(window, cursor_enter_callback);
 
     // Bulk-scan path: WP_COMPILE_ONLY=N waits N seconds after scene load
     // to let the async shader-compile pass drain, then exits. Skips the

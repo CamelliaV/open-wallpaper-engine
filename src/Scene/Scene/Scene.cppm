@@ -522,6 +522,45 @@ public:
     void        SetTranslate(Eigen::Vector3f v) { m_translate = v; }
     void        SetScale(Eigen::Vector3f v)     { m_scale = v; }
 
+    // Local content size (image / text bbox). Zero means "unknown"; scripts
+    // reading `thisLayer.size` then fall back to the legacy 100×100 stub.
+    const auto& Size() const { return m_size; }
+    void        SetSize(Eigen::Vector2f v) { m_size = v; }
+
+    // Script-driven per-frame overrides. The renderer's shader-value updater
+    // pushes these as g_UserAlpha / g_Brightness / g_Color4 only when the
+    // matching *_overridden flag is set — otherwise the material's baked
+    // constValue from parse time stands.
+    //
+    // visible folds into alpha: false → effective alpha 0, true → m_user_alpha.
+    bool   IsAlphaOverridden() const { return m_alpha_overridden; }
+    float  EffectiveAlpha() const { return m_visible ? m_user_alpha : 0.0f; }
+    bool   Visible() const { return m_visible; }
+    float  UserAlpha() const { return m_user_alpha; }
+    void   SetVisible(bool v) { m_visible = v; m_alpha_overridden = true; }
+    void   SetUserAlpha(float v) { m_user_alpha = v; m_alpha_overridden = true; }
+
+    bool   IsBrightnessOverridden() const { return m_brightness_overridden; }
+    float  Brightness() const { return m_brightness; }
+    void   SetBrightness(float v) { m_brightness = v; m_brightness_overridden = true; }
+
+    bool                   IsColorOverridden() const { return m_color_overridden; }
+    const Eigen::Vector3f& Color() const { return m_color; }
+    void                   SetColor(Eigen::Vector3f v) { m_color = v; m_color_overridden = true; }
+
+    // Per-texture-slot script-driven sprite-animation override. Wallpaper
+    // Engine's setFrame(n) / play() / stop() control map onto these:
+    //   current_frame >= 0  → renderer pins to that frame, ignoring elapsed-
+    //                         time advancement.
+    //   playing == false    → renderer holds the current auto-advance frame.
+    //   default { -1, true }→ regular auto-advance.
+    struct TextureAnimatorState {
+        int  current_frame { -1 };
+        bool playing { true };
+    };
+    TextureAnimatorState&       TexAnim() { return m_tex_anim; }
+    const TextureAnimatorState& TexAnim() const { return m_tex_anim; }
+
     void CopyTrans(const SceneNode& node) {
         m_translate = node.m_translate;
         m_scale     = node.m_scale;
@@ -557,6 +596,16 @@ private:
     Eigen::Vector3f m_translate { 0.0f, 0.0f, 0.0f };
     Eigen::Vector3f m_scale { 1.0f, 1.0f, 1.0f };
     Eigen::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
+    Eigen::Vector2f m_size { 0.0f, 0.0f };
+
+    bool            m_visible { true };
+    float           m_user_alpha { 1.0f };
+    bool            m_alpha_overridden { false };
+    float           m_brightness { 1.0f };
+    bool            m_brightness_overridden { false };
+    Eigen::Vector3f m_color { 1.0f, 1.0f, 1.0f };
+    bool            m_color_overridden { false };
+    TextureAnimatorState m_tex_anim {};
 
     std::shared_ptr<SceneMesh> m_mesh;
 

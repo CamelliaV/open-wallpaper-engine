@@ -310,6 +310,18 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
 // snapshot the engine.* getters consult on each call.
 // ---------------------------------------------------------------------------
 
+// One scheduled engine.setTimeout / setInterval entry. fn is an owned ref;
+// dead entries are tombstoned during sweep and compacted afterwards so
+// callbacks that schedule more callbacks don't iterate over invalid storage.
+struct DeferredCb {
+    uint32_t handle;
+    double   fire_at;     // engine.runtime seconds when due
+    double   interval_s;  // for setInterval; 0 for setTimeout
+    JSValue  fn;          // owned
+    bool     repeating;
+    bool     dead;
+};
+
 struct EngineHostState {
     FrameInputs               inputs;
     JSValue                   audio_buffer { JS_UNDEFINED };
@@ -323,6 +335,15 @@ struct EngineHostState {
     // backing SceneNode.
     JSValue                   default_layer { JS_UNDEFINED };
     JSValue                   default_scene { JS_UNDEFINED };
+    // engine.setTimeout / setInterval queue. Swept once per frame in
+    // JsRuntime::TickAll before the script update loop runs.
+    std::vector<DeferredCb>   deferred;
+    uint32_t                  next_handle { 1 };
+    // localStorage backing. Values are JSON-serialised strings so we can
+    // round-trip arbitrary script values through the persistence file.
+    // Empty `ls_path` means in-memory only (the legacy bootstrap shape).
+    std::unordered_map<std::string, std::string> ls_data;
+    std::string                                  ls_path;
 };
 
 // ---------------------------------------------------------------------------
@@ -346,6 +367,9 @@ struct FieldScript::Impl {
     // wrapper so per-frame swap doesn't reallocate.
     owe::SceneNode*   node { nullptr };
     JSValue           wrapped_layer { JS_UNDEFINED };
+    // Per-script cursor-inside-bbox state used to edge-detect
+    // cursorEnter / cursorLeave between frames.
+    bool              cursor_inside { false };
 };
 
 FieldScript::FieldScript() : m_impl(std::make_unique<Impl>()) {}
@@ -475,10 +499,296 @@ void RefreshAudioBuffer(JSContext* ctx) {
     JS_FreeValue(ctx, buf);
 }
 
-// engine.setTimeout / setInterval — out of MVP scope; return -1 to signal
-// "never fires", so script init paths complete and update() runs.
-JSValue EngineNoop(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    return JS_NewInt32(ctx, -1);
+// Cancel CFunction returned by setTimeout / setInterval. data[0] holds the
+// deferred handle ID; invoking it tombstones the corresponding entry. The
+// corpus uses both `clearTimeout(handle)` and `handle()` self-cancel forms,
+// so handle is itself a callable.
+JSValue EngineCancelDeferred(JSContext* ctx, JSValueConst /*this_val*/,
+                              int /*argc*/, JSValueConst* /*argv*/,
+                              int /*magic*/, JSValue* data) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    int32_t h = 0;
+    JS_ToInt32(ctx, &h, data[0]);
+    for (auto& d : host->deferred) {
+        if (d.handle == uint32_t(h)) { d.dead = true; break; }
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue MakeCancelFn(JSContext* ctx, uint32_t handle) {
+    JSValue data[1] = { JS_NewInt32(ctx, int32_t(handle)) };
+    JSValue fn = JS_NewCFunctionData(ctx, EngineCancelDeferred,
+                                     /*length=*/0, /*magic=*/0,
+                                     /*data_len=*/1, data);
+    JS_FreeValue(ctx, data[0]);
+    return fn;
+}
+
+JSValue EngineSetTimerImpl(JSContext* ctx, int argc, JSValueConst* argv,
+                            bool repeating) {
+    if (argc < 1 || ! JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
+    auto*  host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    double ms   = 0.0;
+    if (argc >= 2) JS_ToFloat64(ctx, &ms, argv[1]);
+    double   interval_s = ms / 1000.0;
+    uint32_t h          = host->next_handle++;
+    host->deferred.push_back(DeferredCb {
+        .handle     = h,
+        .fire_at    = host->inputs.runtime + interval_s,
+        .interval_s = interval_s,
+        .fn         = JS_DupValue(ctx, argv[0]),
+        .repeating  = repeating,
+        .dead       = false,
+    });
+    return MakeCancelFn(ctx, h);
+}
+
+JSValue EngineSetTimeout(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    return EngineSetTimerImpl(ctx, argc, argv, false);
+}
+JSValue EngineSetInterval(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    return EngineSetTimerImpl(ctx, argc, argv, true);
+}
+
+// Accepts either the cancel function (calls it) or any other value (ignored
+// — old corpus shape sometimes hardcodes -1 from the previous noop).
+JSValue EngineClearDeferred(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc == 0) return JS_UNDEFINED;
+    if (JS_IsFunction(ctx, argv[0])) {
+        JSValue r = JS_Call(ctx, argv[0], JS_UNDEFINED, 0, nullptr);
+        JS_FreeValue(ctx, r);
+    }
+    return JS_UNDEFINED;
+}
+
+// --- localStorage backing ---------------------------------------------------
+// Three CFunctions wired onto globalThis.localStorage. Values round-trip
+// through JSON.stringify/parse: scripts get JSON-restorable types only
+// (primitives, plain objects, arrays). Vec3 instances become plain
+// {x,y,z} objects without `.add` / `.subtract` methods — corpus scripts
+// that round-trip Vec3 through localStorage must re-wrap; none observed
+// in the surveyed corpus.
+//
+// Writes flush to disk synchronously when a persistence path is set.
+// The file format is a flat JSON object: {"k1": "json string", ...}.
+
+namespace { struct PersistedLocalStorage {}; }
+
+void FlushLocalStorage(EngineHostState* host) {
+    if (host->ls_path.empty()) return;
+    nlohmann::json out = nlohmann::json::object();
+    for (const auto& [k, v] : host->ls_data) out[k] = v;
+    // ofstream defaults to ios_base::out | trunc, which is what we want.
+    std::ofstream f(host->ls_path);
+    if (! f) {
+        rstd_warn("localStorage flush: cannot open {}", host->ls_path);
+        return;
+    }
+    f << out.dump();
+}
+
+void LoadLocalStorage(EngineHostState* host) {
+    host->ls_data.clear();
+    if (host->ls_path.empty()) return;
+    std::ifstream f(host->ls_path);
+    if (! f) return;
+    nlohmann::json doc;
+    try {
+        f >> doc;
+    } catch (const std::exception& e) {
+        rstd_warn("localStorage load: bad JSON in {}: {}", host->ls_path, e.what());
+        return;
+    }
+    if (! doc.is_object()) return;
+    for (auto it = doc.begin(); it != doc.end(); ++it) {
+        if (it.value().is_string()) host->ls_data[it.key()] = it.value().get<std::string>();
+    }
+}
+
+JSValue LocalStorageGet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_UNDEFINED;
+    const char* key = JS_ToCString(ctx, argv[0]);
+    if (! key) return JS_UNDEFINED;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto it    = host->ls_data.find(key);
+    JS_FreeCString(ctx, key);
+    if (it == host->ls_data.end()) return JS_UNDEFINED;
+    const auto& s = it->second;
+    return JS_ParseJSON(ctx, s.data(), s.size(), "<localStorage>");
+}
+
+JSValue LocalStorageSet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 2) return JS_UNDEFINED;
+    const char* key = JS_ToCString(ctx, argv[0]);
+    if (! key) return JS_UNDEFINED;
+    JSValue     jv  = JS_JSONStringify(ctx, argv[1], JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException(jv) || JS_IsUndefined(jv)) {
+        JS_FreeValue(ctx, jv);
+        JS_FreeCString(ctx, key);
+        return JS_UNDEFINED;
+    }
+    const char* s    = JS_ToCString(ctx, jv);
+    auto*       host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (s) host->ls_data[key] = s;
+    if (s) JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, jv);
+    JS_FreeCString(ctx, key);
+    FlushLocalStorage(host);
+    return JS_UNDEFINED;
+}
+
+JSValue LocalStorageRemove(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_UNDEFINED;
+    const char* key  = JS_ToCString(ctx, argv[0]);
+    if (! key) return JS_UNDEFINED;
+    auto*       host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    host->ls_data.erase(key);
+    JS_FreeCString(ctx, key);
+    FlushLocalStorage(host);
+    return JS_UNDEFINED;
+}
+
+void InstallLocalStorage(JSContext* ctx) {
+    JSValue g  = JS_GetGlobalObject(ctx);
+    JSValue ls = JS_NewObject(ctx);
+    JS_DefinePropertyValueStr(ctx, ls, "get",
+        JS_NewCFunction(ctx, LocalStorageGet, "get", 1), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, ls, "set",
+        JS_NewCFunction(ctx, LocalStorageSet, "set", 2), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, ls, "remove",
+        JS_NewCFunction(ctx, LocalStorageRemove, "remove", 1), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, g, "localStorage", ls, JS_PROP_C_W_E);
+    JS_FreeValue(ctx, g);
+}
+
+// Project (cursor_x, cursor_y) — normalised canvas coords with y-down —
+// into the same units the scene uses for SceneNode origins / sizes.
+// SceneWallpaper feeds canvas_w / canvas_h matching the active camera's
+// ortho rect, so cursor_pixel_x is in scene-units along X.
+struct CursorWorld {
+    double  x { 0 }, y { 0 };
+};
+
+CursorWorld CursorToWorld(const FrameInputs& fi) {
+    return CursorWorld {
+        .x = double(fi.cursor_x) * double(fi.canvas_w),
+        // The cursor's Y comes in top-down (GLFW / canvas pixels). Scene
+        // graph layers are positioned with Y also top-down (image
+        // `origin[1]` is verbatim from scene.json, no inversion in the
+        // parser today). Match that — don't flip.
+        .y = double(fi.cursor_y) * double(fi.canvas_h),
+    };
+}
+
+bool HitTestNode(owe::SceneNode* n, const CursorWorld& c) {
+    if (! n) return false;
+    n->UpdateTrans();
+    Eigen::Matrix4d m = n->ModelTrans();
+    Eigen::Vector2f sz = n->Size();
+    if (sz.x() == 0.0f && sz.y() == 0.0f) sz = Eigen::Vector2f { 100.0f, 100.0f };
+    double hx = sz.x() * 0.5, hy = sz.y() * 0.5;
+    Eigen::Vector4d corners[4] = {
+        { -hx, -hy, 0, 1 }, { hx, -hy, 0, 1 },
+        {  hx,  hy, 0, 1 }, { -hx, hy, 0, 1 },
+    };
+    double minx = 1e30, miny = 1e30, maxx = -1e30, maxy = -1e30;
+    for (auto& corner : corners) {
+        Eigen::Vector4d w = m * corner;
+        minx = std::min(minx, w.x()); maxx = std::max(maxx, w.x());
+        miny = std::min(miny, w.y()); maxy = std::max(maxy, w.y());
+    }
+    return c.x >= minx && c.x <= maxx && c.y >= miny && c.y <= maxy;
+}
+
+// Build the event object passed to cursor callbacks. WE scripts read
+// event.worldPosition (a Vec2 in scene units) and event.button (0/1/2).
+JSValue MakeCursorEvent(JSContext* ctx, const CursorWorld& c, int button) {
+    JSValue ev = JS_NewObject(ctx);
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JSValue wp;
+    if (! JS_IsUndefined(host->vec3_ctor)) {
+        JSValue args[3] {
+            JS_NewFloat64(ctx, c.x), JS_NewFloat64(ctx, c.y), JS_NewFloat64(ctx, 0)
+        };
+        wp = JS_CallConstructor(ctx, host->vec3_ctor, 3, args);
+        for (auto& a : args) JS_FreeValue(ctx, a);
+    } else {
+        wp = JS_NewObject(ctx);
+        JS_DefinePropertyValueStr(ctx, wp, "x", JS_NewFloat64(ctx, c.x), JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, wp, "y", JS_NewFloat64(ctx, c.y), JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, wp, "z", JS_NewFloat64(ctx, 0), JS_PROP_C_W_E);
+    }
+    JS_DefinePropertyValueStr(ctx, ev, "worldPosition", wp, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, ev, "button", JS_NewInt32(ctx, button), JS_PROP_C_W_E);
+    return ev;
+}
+
+// Invoke `name` on the script's module namespace if exported, passing one
+// event arg. `thisLayer` should already be bound to the script's node by
+// the caller. Exceptions are caught and logged once per sha.
+void InvokeCursorCallback(JSContext* ctx, JSValue ns, const char* name,
+                          JSValue ev, JsRuntime::Impl* rt, std::string_view sha) {
+    JSValue fn = JS_GetPropertyStr(ctx, ns, name);
+    if (JS_IsFunction(ctx, fn)) {
+        JSValue arg = JS_DupValue(ctx, ev);
+        JSValue r   = JS_Call(ctx, fn, JS_UNDEFINED, 1, &arg);
+        JS_FreeValue(ctx, arg);
+        if (JS_IsException(r)) {
+            rt->LogError(ctx, sha, name);
+            JS_FreeValue(ctx, r);
+        } else {
+            JS_FreeValue(ctx, r);
+        }
+    }
+    JS_FreeValue(ctx, fn);
+}
+
+// Fire any deferred callbacks whose fire_at has passed. Called by TickAll
+// before the script update loop. Repeating callbacks reschedule against
+// their previous fire_at so steady-state drift is bounded.
+void SweepDeferred(JSContext* ctx, EngineHostState* host) {
+    const double now = host->inputs.runtime;
+    // Iterate by index; callbacks may push_back new entries.
+    for (size_t i = 0; i < host->deferred.size(); ++i) {
+        if (host->deferred[i].dead) continue;
+        while (! host->deferred[i].dead && host->deferred[i].fire_at <= now) {
+            JSValue fn  = JS_DupValue(ctx, host->deferred[i].fn);
+            JSValue ret = JS_Call(ctx, fn, JS_UNDEFINED, 0, nullptr);
+            JS_FreeValue(ctx, fn);
+            if (JS_IsException(ret)) {
+                JSValue exc = JS_GetException(ctx);
+                const char* msg = JS_ToCString(ctx, exc);
+                rstd_error("script timer callback threw: {}",
+                           msg ? msg : "<no message>");
+                if (msg) JS_FreeCString(ctx, msg);
+                JS_FreeValue(ctx, exc);
+                host->deferred[i].dead = true;
+            }
+            JS_FreeValue(ctx, ret);
+            if (host->deferred[i].dead) break;
+            if (! host->deferred[i].repeating) {
+                host->deferred[i].dead = true;
+                break;
+            }
+            host->deferred[i].fire_at += host->deferred[i].interval_s;
+            // Guard against zero-interval intervals starving the loop.
+            if (host->deferred[i].interval_s <= 0.0) {
+                host->deferred[i].dead = true;
+                break;
+            }
+        }
+    }
+    // Compact dead entries.
+    for (auto& d : host->deferred) {
+        if (d.dead && ! JS_IsUndefined(d.fn)) {
+            JS_FreeValue(ctx, d.fn);
+            d.fn = JS_UNDEFINED;
+        }
+    }
+    host->deferred.erase(
+        std::remove_if(host->deferred.begin(), host->deferred.end(),
+                       [](const DeferredCb& d) { return d.dead; }),
+        host->deferred.end());
 }
 
 // engine.registerAsset(...) — return the first arg unchanged so chained
@@ -665,15 +975,8 @@ globalThis.MediaPlaybackEvent = Object.freeze({
 // --- shared --- cross-script object scripts mutate freely.
 if (! globalThis.shared) globalThis.shared = {};
 
-// --- localStorage --- in-memory Map; not persisted across runs.
-if (! globalThis.localStorage) {
-    const _ls = new Map();
-    globalThis.localStorage = {
-        get: (k) => _ls.has(k) ? _ls.get(k) : undefined,
-        set: (k, v) => { _ls.set(k, v); },
-        remove: (k) => { _ls.delete(k); },
-    };
-}
+// localStorage is installed from C++ in InstallEngineGlobal so it can
+// optionally persist to a JSON file under cache_path keyed by scene_id.
 )JS";
 
 void InstallEngineGlobal(JSContext* ctx) {
@@ -714,12 +1017,29 @@ void InstallEngineGlobal(JSContext* ctx) {
                                    JS_PROP_C_W_E);
     };
     define_fn("registerAudioBuffers", EngineRegisterAudioBuffers, 1);
-    define_fn("setTimeout",           EngineNoop, 2);
-    define_fn("setInterval",          EngineNoop, 2);
+    define_fn("setTimeout",           EngineSetTimeout,    2);
+    define_fn("setInterval",          EngineSetInterval,   2);
+    define_fn("clearTimeout",         EngineClearDeferred, 1);
+    define_fn("clearInterval",        EngineClearDeferred, 1);
     define_fn("registerAsset",        EngineRegisterAsset, 1);
+
+    // A handful of corpus scripts call setTimeout/clearTimeout bare (no
+    // `engine.` prefix). Mirror onto globalThis so they resolve.
+    auto alias_to_global = [&](const char* name) {
+        JSValue f = JS_GetPropertyStr(ctx, engine, name);
+        JS_DefinePropertyValueStr(ctx, global, name, f, JS_PROP_C_W_E);
+    };
+    alias_to_global("setTimeout");
+    alias_to_global("setInterval");
+    alias_to_global("clearTimeout");
+    alias_to_global("clearInterval");
 
     JS_FreeValue(ctx, engine);
     JS_FreeValue(ctx, global);
+
+    // C++-backed localStorage. Replaces the in-memory JS Map; values
+    // persist to a JSON file when JsRuntime::SetPersistence is called.
+    InstallLocalStorage(ctx);
 }
 
 // --- Built-in ES modules ----------------------------------------------------
@@ -738,13 +1058,19 @@ export function clamp(x, lo, hi) {
     return Math.max(lo, Math.min(hi, x));
 }
 export function saturate(x) { return Math.max(0, Math.min(1, x)); }
-export function smoothstep(edge0, edge1, x) {
+function smoothstep_impl(edge0, edge1, x) {
     const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
     return t * t * (3 - 2 * t);
 }
+// Corpus uses both casings; smoothStep (camelCase) is by far the more
+// common form (~165 callsites vs lowercase).
+export const smoothstep = smoothstep_impl;
+export const smoothStep = smoothstep_impl;
 export function step(edge, x) { return x < edge ? 0 : 1; }
 export function sign(x) { return Math.sign(x); }
 export function fract(x) { return x - Math.floor(x); }
+export function deg2rad(d) { return d * (Math.PI / 180); }
+export function rad2deg(r) { return r * (180 / Math.PI); }
 )JS";
 
 static constexpr BuiltinModule kBuiltinModules[] = {
@@ -875,11 +1201,62 @@ JSValue NodeSetAngles(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
 }
 
 // Stubs — properties scripts read but writing them would force RG rebuild.
-JSValue NodeGetSize(JSContext* ctx, JSValueConst)         { return MakeVec3(ctx, 100, 100, 0); }
-JSValue NodeGetVisible(JSContext*, JSValueConst)          { return JS_TRUE; }
-JSValue NodeGetAlpha(JSContext* ctx, JSValueConst)        { return JS_NewFloat64(ctx, 1.0); }
-JSValue NodeGetBrightness(JSContext* ctx, JSValueConst)   { return JS_NewFloat64(ctx, 1.0); }
-JSValue NodeGetColor(JSContext* ctx, JSValueConst)        { return MakeVec3(ctx, 1, 1, 1); }
+JSValue NodeGetSize(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return MakeVec3(ctx, 100, 100, 0);
+    const auto& s = n->Size();
+    // Zero is the parser's "unknown" sentinel (particle/light nodes never
+    // set it). Fall back to the legacy 100×100 the bootstrap stub returned.
+    if (s.x() == 0.0f && s.y() == 0.0f) return MakeVec3(ctx, 100, 100, 0);
+    return MakeVec3(ctx, s.x(), s.y(), 0);
+}
+JSValue NodeGetVisible(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    return JS_NewBool(ctx, n ? n->Visible() : true);
+}
+JSValue NodeSetVisible(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (n) n->SetVisible(JS_ToBool(ctx, val) != 0);
+    return JS_UNDEFINED;
+}
+JSValue NodeGetAlpha(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    return JS_NewFloat64(ctx, n ? n->UserAlpha() : 1.0);
+}
+JSValue NodeSetAlpha(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    double a = 1.0;
+    JS_ToFloat64(ctx, &a, val);
+    n->SetUserAlpha(float(a));
+    return JS_UNDEFINED;
+}
+JSValue NodeGetBrightness(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    return JS_NewFloat64(ctx, n ? n->Brightness() : 1.0);
+}
+JSValue NodeSetBrightness(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    double b = 1.0;
+    JS_ToFloat64(ctx, &b, val);
+    n->SetBrightness(float(b));
+    return JS_UNDEFINED;
+}
+JSValue NodeGetColor(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return MakeVec3(ctx, 1, 1, 1);
+    const auto& c = n->Color();
+    return MakeVec3(ctx, c.x(), c.y(), c.z());
+}
+JSValue NodeSetColor(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    double x = 0, y = 0, z = 0;
+    if (! ReadXYZ(ctx, val, x, y, z)) return JS_UNDEFINED;
+    n->SetColor({ float(x), float(y), float(z) });
+    return JS_UNDEFINED;
+}
 JSValue NodeGetVAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(ctx, "center"); }
 JSValue NodeGetHAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(ctx, "center"); }
 JSValue NodeSetIgnore(JSContext*, JSValueConst, JSValueConst) { return JS_UNDEFINED; }
@@ -920,8 +1297,18 @@ JSValue NodeGetTransformMatrix(JSContext* ctx, JSValueConst this_val, int, JSVal
     return obj;
 }
 
-JSValue NodeGetChildren(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    return JS_NewArray(ctx);
+JSValue NodeGetChildren(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* n = GetLayerNode(this_val);
+    JSValue arr = JS_NewArray(ctx);
+    if (! n) return arr;
+    uint32_t i = 0;
+    for (const auto& child : n->GetChildren()) {
+        if (! child) continue;
+        JS_DefinePropertyValueUint32(ctx, arr, i++,
+                                     WrapLayerNode(ctx, child.get()),
+                                     JS_PROP_C_W_E);
+    }
+    return arr;
 }
 
 JSValue NodeGetName(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
@@ -941,16 +1328,95 @@ JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     return hit ? WrapLayerNode(ctx, hit) : JS_DupValue(ctx, host->default_layer);
 }
 
-JSValue NodeGetTextureAnimation(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    // Delegate to the JS-side stub factory installed by the bootstrap;
-    // when the texture-animation subsystem is real, this is the point
-    // that swaps in a backed object.
-    JSValue g = JS_GetGlobalObject(ctx);
-    JSValue f = JS_GetPropertyStr(ctx, g, "__wwCreateTexAnimStub");
-    JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 0, nullptr);
-    JS_FreeValue(ctx, f);
-    JS_FreeValue(ctx, g);
-    return r;
+// --- WWTextureAnimation -----------------------------------------------------
+// Wraps a SceneNode*'s TextureAnimatorState. Slot 0 only — every workshop
+// script that touches `getTextureAnimation()` in the corpus uses the primary
+// (diffuse) texture animation; multi-slot would need a different API shape.
+
+static JSClassID s_texanim_class_id = 0;
+
+JSClassDef s_texanim_class_def {
+    .class_name = "WWTextureAnimation",
+    .finalizer  = nullptr,  // SceneNode owns the state
+};
+
+inline owe::SceneNode* GetTexAnimNode(JSValueConst v) {
+    return static_cast<owe::SceneNode*>(JS_GetOpaque(v, s_texanim_class_id));
+}
+
+JSValue TexAnimPlay(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* n = GetTexAnimNode(this_val)) {
+        auto& a = n->TexAnim();
+        a.current_frame = -1;
+        a.playing       = true;
+    }
+    return JS_UNDEFINED;
+}
+JSValue TexAnimStop(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* n = GetTexAnimNode(this_val)) n->TexAnim().playing = false;
+    return JS_UNDEFINED;
+}
+JSValue TexAnimPause(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* n = GetTexAnimNode(this_val)) n->TexAnim().playing = false;
+    return JS_UNDEFINED;
+}
+JSValue TexAnimSetFrame(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_UNDEFINED;
+    auto* n = GetTexAnimNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    int32_t f = 0;
+    JS_ToInt32(ctx, &f, argv[0]);
+    if (f < 0) f = 0;
+    n->TexAnim().current_frame = f;
+    n->TexAnim().playing       = false;
+    return JS_UNDEFINED;
+}
+JSValue TexAnimGetFrame(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* n = GetTexAnimNode(this_val);
+    if (! n) return JS_NewInt32(ctx, 0);
+    const int f = n->TexAnim().current_frame;
+    return JS_NewInt32(ctx, f < 0 ? 0 : f);
+}
+JSValue TexAnimIsPlaying(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* n = GetTexAnimNode(this_val);
+    return JS_NewBool(ctx, n ? n->TexAnim().playing : false);
+}
+
+const JSCFunctionListEntry s_texanim_proto_funcs[] = {
+    JS_CFUNC_DEF("play",      0, TexAnimPlay),
+    JS_CFUNC_DEF("stop",      0, TexAnimStop),
+    JS_CFUNC_DEF("pause",     0, TexAnimPause),
+    JS_CFUNC_DEF("setFrame",  1, TexAnimSetFrame),
+    JS_CFUNC_DEF("getFrame",  0, TexAnimGetFrame),
+    JS_CFUNC_DEF("isPlaying", 0, TexAnimIsPlaying),
+};
+
+void InitTexAnimClass(JSContext* ctx, JSRuntime* rt) {
+    if (s_texanim_class_id == 0) JS_NewClassID(rt, &s_texanim_class_id);
+    JS_NewClass(rt, s_texanim_class_id, &s_texanim_class_def);
+    JSValue proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, proto, s_texanim_proto_funcs,
+                                sizeof(s_texanim_proto_funcs) /
+                                    sizeof(s_texanim_proto_funcs[0]));
+    JS_SetClassProto(ctx, s_texanim_class_id, proto);
+}
+
+JSValue NodeGetTextureAnimation(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) {
+        // Unbound (default) layer — fall back to the JS-side stub so reads
+        // like .getFrame() don't TypeError.
+        JSValue g = JS_GetGlobalObject(ctx);
+        JSValue f = JS_GetPropertyStr(ctx, g, "__wwCreateTexAnimStub");
+        JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 0, nullptr);
+        JS_FreeValue(ctx, f);
+        JS_FreeValue(ctx, g);
+        return r;
+    }
+    JSValue obj = JS_NewObjectClass(ctx, s_texanim_class_id);
+    if (JS_IsException(obj)) return obj;
+    JS_SetOpaque(obj, n);
+    return obj;
 }
 
 const JSCFunctionListEntry s_layer_proto_funcs[] = {
@@ -958,10 +1424,10 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("scale",           NodeGetScale,   NodeSetScale),
     JS_CGETSET_DEF("angles",          NodeGetAngles,  NodeSetAngles),
     JS_CGETSET_DEF("size",            NodeGetSize,    NodeSetIgnore),
-    JS_CGETSET_DEF("visible",         NodeGetVisible, NodeSetIgnore),
-    JS_CGETSET_DEF("alpha",           NodeGetAlpha,   NodeSetIgnore),
-    JS_CGETSET_DEF("brightness",      NodeGetBrightness, NodeSetIgnore),
-    JS_CGETSET_DEF("color",           NodeGetColor,   NodeSetIgnore),
+    JS_CGETSET_DEF("visible",         NodeGetVisible,    NodeSetVisible),
+    JS_CGETSET_DEF("alpha",           NodeGetAlpha,      NodeSetAlpha),
+    JS_CGETSET_DEF("brightness",      NodeGetBrightness, NodeSetBrightness),
+    JS_CGETSET_DEF("color",           NodeGetColor,      NodeSetColor),
     JS_CGETSET_DEF("verticalalign",   NodeGetVAlign,  NodeSetIgnore),
     JS_CGETSET_DEF("horizontalalign", NodeGetHAlign,  NodeSetIgnore),
     JS_CFUNC_DEF("getParent",           0, NodeGetParent),
@@ -1030,6 +1496,7 @@ JsRuntime::JsRuntime() : m_impl(std::make_unique<Impl>()) {
     JS_SetModuleLoaderFunc(m_impl->rt, /*normalize=*/nullptr,
                            BuiltinModuleLoader, /*opaque=*/nullptr);
     InitLayerClass(m_impl->ctx, m_impl->rt);
+    InitTexAnimClass(m_impl->ctx, m_impl->rt);
     InstallEngineGlobal(m_impl->ctx);
     // Bootstrap created stub `thisLayer` / `thisScene` on globalThis.
     // Capture them now so per-script binding can fall back to the stub
@@ -1065,6 +1532,10 @@ JsRuntime::~JsRuntime() {
         JS_FreeValue(m_impl->ctx, m_impl->host.audio_buffer);
         m_impl->host.audio_buffer_built = false;
     }
+    for (auto& d : m_impl->host.deferred) {
+        if (! JS_IsUndefined(d.fn)) JS_FreeValue(m_impl->ctx, d.fn);
+    }
+    m_impl->host.deferred.clear();
     if (m_impl->ctx) JS_FreeContext(m_impl->ctx);
     if (m_impl->rt) JS_FreeRuntime(m_impl->rt);
 }
@@ -1094,6 +1565,11 @@ void JsRuntime::SetUserProperty(std::string_view key, const json& property) {
     JS_FreeValue(ctx, global);
 }
 
+void JsRuntime::SetPersistence(std::string path) {
+    m_impl->host.ls_path = std::move(path);
+    LoadLocalStorage(&m_impl->host);
+}
+
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
     if (! m_impl || ! m_impl->ctx) return;
     if (! JS_IsUndefined(m_impl->wrapped_scene))
@@ -1106,6 +1582,60 @@ void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
 
 void JsRuntime::TickAll() {
     JSContext* ctx = m_impl->ctx;
+    SweepDeferred(ctx, &m_impl->host);
+
+    // Cursor event dispatch. For every script bound to a SceneNode, hit-
+    // test the cursor against the node's world AABB and fire any of
+    // cursorEnter/Leave/Move/Down/Up/Click that the script's module
+    // exports. Runs before update() so update can react to state writes
+    // the callbacks made this frame.
+    const CursorWorld cursor      = CursorToWorld(m_impl->host.inputs);
+    const bool        in_window   = m_impl->host.inputs.cursor_in_window;
+    const uint32_t    btn_pressed = m_impl->host.inputs.mouse_buttons_pressed;
+    const uint32_t    btn_release = m_impl->host.inputs.mouse_buttons_released;
+    JSValue           ev_shared   = JS_UNDEFINED;
+    auto              ensure_ev   = [&](int button) -> JSValue {
+        if (! JS_IsUndefined(ev_shared)) JS_FreeValue(ctx, ev_shared);
+        ev_shared = MakeCursorEvent(ctx, cursor, button);
+        return ev_shared;
+    };
+    for (auto& fs : m_impl->scripts) {
+        auto* I = fs->m_impl.get();
+        if (! I->alive || ! I->node) continue;
+        const bool now_inside = in_window && HitTestNode(I->node, cursor);
+        BindThisLayer(ctx, JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer
+                                                            : I->wrapped_layer);
+        if (now_inside != I->cursor_inside) {
+            InvokeCursorCallback(ctx, I->module_ns,
+                                 now_inside ? "cursorEnter" : "cursorLeave",
+                                 ensure_ev(-1), m_impl.get(), I->sha);
+            I->cursor_inside = now_inside;
+        }
+        if (now_inside) {
+            InvokeCursorCallback(ctx, I->module_ns, "cursorMove",
+                                 ensure_ev(-1), m_impl.get(), I->sha);
+        }
+        if (btn_pressed && now_inside) {
+            for (int b = 0; b < 3; ++b) {
+                if (btn_pressed & (1u << b)) {
+                    InvokeCursorCallback(ctx, I->module_ns, "cursorDown",
+                                         ensure_ev(b), m_impl.get(), I->sha);
+                    InvokeCursorCallback(ctx, I->module_ns, "cursorClick",
+                                         ensure_ev(b), m_impl.get(), I->sha);
+                }
+            }
+        }
+        if (btn_release && now_inside) {
+            for (int b = 0; b < 3; ++b) {
+                if (btn_release & (1u << b)) {
+                    InvokeCursorCallback(ctx, I->module_ns, "cursorUp",
+                                         ensure_ev(b), m_impl.get(), I->sha);
+                }
+            }
+        }
+    }
+    if (! JS_IsUndefined(ev_shared)) JS_FreeValue(ctx, ev_shared);
+
     for (auto& fs : m_impl->scripts) {
         auto* I = fs->m_impl.get();
         if (! I->alive) continue;
@@ -1356,6 +1886,12 @@ void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
     auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
     if (! ss) return;
     ss->runtime().SetUserProperty(key, property);
+}
+
+void SetScenePersistence(owe::Scene& scene, std::string path) {
+    auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
+    if (! ss) return;
+    ss->runtime().SetPersistence(std::move(path));
 }
 
 }  // namespace owe::script

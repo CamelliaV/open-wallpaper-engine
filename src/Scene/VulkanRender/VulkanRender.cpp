@@ -7,10 +7,6 @@ module;
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 
-#if ENABLE_RENDERDOC_API
-#    include "RenderDoc.h"
-#endif
-
 module wescene.vulkan_render;
 import wescene.core;
 import wescene.types;
@@ -372,9 +368,6 @@ bool VulkanRender::Impl::initRes() {
     }
     if (! CreateRenderingResource(m_rendering_resources)) return false;
 
-#if ENABLE_RENDERDOC_API
-    load_renderdoc_api();
-#endif
     return true;
 }
 
@@ -449,14 +442,6 @@ void VulkanRender::Impl::DestroyRenderingResource(RenderingResources& rr) {}
 void VulkanRender::Impl::drawFrame(Scene& scene) {
     if (! (m_inited && m_pass_loaded)) return;
 
-        // rstd_info("used ram: {}m", (m_device->GetUsage()/1024.0f)/1024.0f);
-
-#if ENABLE_RENDERDOC_API
-    if (rdoc_api)
-        rdoc_api->StartFrameCapture(
-            RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE((VkInstance)m_instance.inst()), NULL);
-#endif
-
     if (m_instance.offscreen()) {
         drawFrameOffscreen();
     } else {
@@ -464,12 +449,6 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
     }
 
     if (m_redraw_cb) m_redraw_cb();
-
-#if ENABLE_RENDERDOC_API
-    if (rdoc_api)
-        rdoc_api->EndFrameCapture(
-            RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE((VkInstance)m_instance.inst()), NULL);
-#endif
 }
 
 void VulkanRender::Impl::drawFrameSwapchain() {

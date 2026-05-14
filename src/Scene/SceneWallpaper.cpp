@@ -226,6 +226,27 @@ public:
         m_mouse_pos.store(std::array { (float)x, (float)y });
     }
 
+    // Edge-events for the cursor button stream. Each call from the input
+    // thread sets/clears the held bit and records the edge so the next
+    // TickSceneScripts can fire cursorDown/Up. fetch_or guards against
+    // press-release-press coalescing between ticks (rare).
+    void setMouseButton(int button, bool down) {
+        if (button < 0 || button > 31) return;
+        const uint32_t mask = 1u << button;
+        if (down) {
+            m_buttons_down.fetch_or(mask);
+            m_buttons_pressed.fetch_or(mask);
+        } else {
+            m_buttons_down.fetch_and(~mask);
+            m_buttons_released.fetch_or(mask);
+        }
+    }
+    void setMouseInWindow(bool in) { m_cursor_in_window.store(in); }
+    uint32_t buttonsDown() const { return m_buttons_down.load(); }
+    uint32_t consumePressed() { return m_buttons_pressed.exchange(0); }
+    uint32_t consumeReleased() { return m_buttons_released.exchange(0); }
+    bool     cursorInWindow() const { return m_cursor_in_window.load(); }
+
     void setSenders(RenderSender render_tx, MainSender main_tx) {
         m_render_tx.emplace(std::move(render_tx));
         m_main_tx.emplace(std::move(main_tx));
@@ -254,6 +275,10 @@ private:
     FillMode                              m_fillmode { FillMode::ASPECTCROP };
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
+    std::atomic<uint32_t>             m_buttons_down { 0 };
+    std::atomic<uint32_t>             m_buttons_pressed { 0 };
+    std::atomic<uint32_t>             m_buttons_released { 0 };
+    std::atomic<bool>                 m_cursor_in_window { false };
 
     std::optional<RenderSender> m_render_tx;
     std::optional<MainSender>   m_main_tx;
@@ -298,6 +323,15 @@ void RenderHandler::on(RenderDraw&&) {
             fi.canvas_h  = static_cast<float>(m_scene->ortho[1]);
             fi.screen_w  = fi.canvas_w;
             fi.screen_h  = fi.canvas_h;
+            {
+                auto pos = m_mouse_pos.load();
+                fi.cursor_x = pos[0];
+                fi.cursor_y = pos[1];
+            }
+            fi.cursor_in_window       = cursorInWindow();
+            fi.mouse_buttons_down     = buttonsDown();
+            fi.mouse_buttons_pressed  = consumePressed();
+            fi.mouse_buttons_released = consumeReleased();
             wavsen::audio::AudioSpectrum spec;
             m_audio_capture.snapshot(spec);
             fi.audio_average = spec.bins;
@@ -543,6 +577,14 @@ void MainHandler::loadScene() {
         for (const auto& [key, prop] : m_user_properties) {
             owe::script::SetSceneUserProperty(*scene, key, prop);
         }
+        if (! m_cache_path.empty() && scene) {
+            std::filesystem::path ls_dir = std::filesystem::path(m_cache_path) /
+                                            "script_localstorage";
+            std::error_code ec;
+            std::filesystem::create_directories(ls_dir, ec);
+            std::string ls_file = (ls_dir / (scene_id + ".json")).native();
+            owe::script::SetScenePersistence(*scene, std::move(ls_file));
+        }
         scene->vfs.reset(pVfs.release());
 
         // Surface the parsed clear color before the scene is shipped
@@ -644,6 +686,14 @@ void SceneWallpaper::pause() {
 
 void SceneWallpaper::mouseInput(double x, double y) {
     m_main_handler->renderHandler()->setMousePos(x, y);
+}
+
+void SceneWallpaper::mouseButton(int button, bool down) {
+    m_main_handler->renderHandler()->setMouseButton(button, down);
+}
+
+void SceneWallpaper::mouseEnter(bool in_window) {
+    m_main_handler->renderHandler()->setMouseInWindow(in_window);
 }
 
 void SceneWallpaper::setPropertyBool(std::string_view name, bool value) {

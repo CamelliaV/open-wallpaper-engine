@@ -75,6 +75,13 @@ target_link_libraries(scene_schema_tests PRIVATE wescene_test_lib GTest::gtest_m
 add_executable(tex_schema_tests tex_schema_tests.cpp)
 target_link_libraries(tex_schema_tests PRIVATE wescene_test_lib GTest::gtest_main)
 
+# JS runtime tests: setTimeout/setInterval/clearTimeout/clearInterval and
+# SceneNode wrapper surface. Stands separately from wescene_test_lib so
+# it can pull owe-script directly.
+add_executable(script_runtime_tests script_runtime_tests.cpp)
+target_link_libraries(script_runtime_tests PRIVATE owe-script GTest::gtest_main)
+set_target_properties(script_runtime_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 # Per-version deep tests live in tests/version/<category>_<version>_test.cpp.
 # Each is a tiny gtest TU built into the same binary so the corpus + gtest
 # fixture machinery is amortised across them.
@@ -109,4 +116,9 @@ gtest_discover_tests(
     tex_schema_tests
     PROPERTIES TIMEOUT 60
     DISCOVERY_TIMEOUT 60
+)
+gtest_discover_tests(
+    script_runtime_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
 )

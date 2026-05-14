@@ -631,6 +631,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                                                  Vector3f(wpimgobj.scale.data()),
                                                  Vector3f(wpimgobj.angles.data()));
     LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
+    spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->ID() = wpimgobj.id;
 
     SceneMaterial     material;
@@ -1332,9 +1333,10 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                                Vector3f(obj.scale.data()),
                                                Vector3f(obj.angles.data()));
     sp_node->ID() = obj.id;
-    LoadAlignment(*sp_node,
-                  obj.alignment,
-                  { text_w + 2.0f * style.padding, text_h + 2.0f * style.padding });
+    const float text_bbox_w = text_w + 2.0f * style.padding;
+    const float text_bbox_h = text_h + 2.0f * style.padding;
+    LoadAlignment(*sp_node, obj.alignment, { text_bbox_w, text_bbox_h });
+    sp_node->SetSize({ text_bbox_w, text_bbox_h });
     sp_node->AddMesh(sp_mesh);
 
     WPShaderValueData svData;

@@ -69,6 +69,15 @@ struct FrameInputs {
     // at 64 regardless of the script-requested resolution; scripts
     // requesting 16 just use the first 16 entries.
     std::array<float, 64> audio_average {};
+    // Cursor state. (cursor_x, cursor_y) is normalised canvas coords:
+    // x ∈ [0,1] left-to-right, y ∈ [0,1] top-to-bottom. button bits use
+    // GLFW numbering (left=0, right=1, middle=2). down is held-state,
+    // pressed/released are edge events for this frame only.
+    float    cursor_x { 0.0f }, cursor_y { 0.0f };
+    bool     cursor_in_window { false };
+    uint32_t mouse_buttons_down { 0 };
+    uint32_t mouse_buttons_pressed { 0 };
+    uint32_t mouse_buttons_released { 0 };
 };
 
 // --- script properties (configuration) --------------------------------------
@@ -115,6 +124,11 @@ public:
     // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`
     // searches from this node. Call once per scene after parsing finishes.
     void SetSceneRoot(owe::SceneNode* root);
+
+    // Wire localStorage to a JSON file. Existing keys load synchronously;
+    // subsequent script writes flush back to the file. Pass an empty
+    // string to revert to in-memory-only behaviour.
+    void SetPersistence(std::string path);
 
     // Push one frame's worth of host state into the runtime. The next
     // FieldScript::Update call will see these values via `engine.*`.
@@ -217,5 +231,9 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi);
 // No-op when the scene has no script runtime.
 void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
                           const nlohmann::json& property);
+
+// Forward `SetPersistence` to the ScriptScene attached to `scene`. No-op
+// when the scene has no script runtime.
+void SetScenePersistence(owe::Scene& scene, std::string path);
 
 } // namespace owe::script

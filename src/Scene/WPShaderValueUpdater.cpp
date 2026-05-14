@@ -211,8 +211,23 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         updateOp(G_PARALLAXPOSITION, std::array { para[0], para[1] });
     }
 
+    const auto& anim_override = pNode->TexAnim();
     for (auto& [i, sp] : sprites) {
-        const auto& f      = sp.GetAnimateFrame(m_scene->frameTime);
+        // Script-driven override:
+        //   current_frame >= 0  → pin to that frame
+        //   playing == false    → freeze on current auto-advance frame
+        //   else                → normal time-driven advance
+        const SpriteFrame* fp = nullptr;
+        if (anim_override.current_frame >= 0 && sp.numFrames() > 0) {
+            const i32 idx = i32(anim_override.current_frame) %
+                            i32(sp.numFrames());
+            fp = &sp.GetFrame(idx);
+        } else if (! anim_override.playing && sp.numFrames() > 0) {
+            fp = &sp.GetCurFrame();
+        } else {
+            fp = &sp.GetAnimateFrame(m_scene->frameTime);
+        }
+        const auto& f      = *fp;
         auto        grot   = WE_GLTEX_ROTATION_NAMES[i];
         auto        gtrans = WE_GLTEX_TRANSLATION_NAMES[i];
         updateOp(grot, std::array { f.xAxis[0], f.xAxis[1], f.yAxis[0], f.yAxis[1] });
@@ -236,6 +251,24 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         }
         updateOp(G_LP, lights);
         updateOp(G_LCP, lights_color);
+    }
+
+    // Script-driven per-frame overrides. updateOp overlays the material's
+    // baked constValue for this draw; we only push when the script has
+    // actually written to avoid clobbering the bake.
+    if (pNode->IsAlphaOverridden()) {
+        const float eff_alpha = pNode->EffectiveAlpha();
+        updateOp("g_UserAlpha", eff_alpha);
+        if (pNode->IsColorOverridden()) {
+            const auto& c = pNode->Color();
+            updateOp("g_Color4", std::array<float, 4> { c.x(), c.y(), c.z(), eff_alpha });
+        }
+    } else if (pNode->IsColorOverridden()) {
+        const auto& c = pNode->Color();
+        updateOp("g_Color4", std::array<float, 4> { c.x(), c.y(), c.z(), 1.0f });
+    }
+    if (pNode->IsBrightnessOverridden()) {
+        updateOp("g_Brightness", pNode->Brightness());
     }
 }
 
