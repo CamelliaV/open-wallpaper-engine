@@ -201,13 +201,11 @@ JSValue JsonToJs(JSContext* ctx, const json& j) {
     }
 }
 
-// Resolve a config value: strings like {"user":"name","value":X} flatten to
-// the value (we don't yet plumb engine.userProperties), everything else is
-// passed through. Mirrors the contract in the API doc.
+// Resolve a config value. {"user":"name","value":X} stays as-is — the
+// bootstrap getter resolves it lazily against engine.userProperties at
+// access time, so SetUserProperty calls after parse propagate.
+// Everything else passes through.
 JSValue ResolveConfigValue(JSContext* ctx, const json& v) {
-    if (v.is_object() && v.contains("value") && v.contains("user")) {
-        return JsonToJs(ctx, v.at("value"));
-    }
     return JsonToJs(ctx, v);
 }
 
@@ -391,6 +389,7 @@ struct JsRuntime::Impl {
     // imported once per runtime, exposing one shared namespace. A
     // FieldScript holds a JS_DupValue of the namespace.
     std::unordered_map<std::string, JSValue>            ns_by_sha;
+    std::uint64_t                                       next_module_serial { 0 };
     std::vector<std::unique_ptr<FieldScript>>           scripts;
     // Set of error-logged shas to log once.
     std::unordered_set<std::string>                     errored;
@@ -842,9 +841,29 @@ globalThis.createScriptProperties = function () {
   // .finish() returns a Proxy. Property reads:
   //   - scriptProperties.<name> : look up in _hostValues (filled by C++),
   //                               else default value from descriptor.
+  //   When _hostValues[name] is a {user, value} pair, resolve at access
+  //   time against engine.userProperties so SetUserProperty calls made
+  //   after parse propagate.
   builder.finish = function () {
     const _hostValues = builder._hostValues || {};
     const target = {};
+    const unwrapUserProp = (h) => {
+      if (h === undefined || h === null) return undefined;
+      if (typeof h !== 'object' || !('user' in h) || !('value' in h)) return h;
+      const u = engine.userProperties[h.user];
+      if (u !== undefined) {
+        // project.json stores user props as { type, value, ... }; pluck
+        // .value when present, else use the bare value directly.
+        if (typeof u === 'object' && u !== null && 'value' in u) return u.value;
+        return u;
+      }
+      return h.value;
+    };
+    // WE substitutes user-prop values verbatim, even when the user's
+    // slider range is wider than the script's declared range — corpus
+    // wallpapers (e.g. workshop 3327063360) wire `min:-1,max:1` sliders
+    // into scripts declaring `min:0,max:1` and rely on the negative
+    // values reaching the formula to shift origin off-parent.
     for (const d of _props) {
       if (d && d.name) {
         Object.defineProperty(target, d.name, {
@@ -852,7 +871,7 @@ globalThis.createScriptProperties = function () {
           configurable: true,
           get() {
             if (Object.prototype.hasOwnProperty.call(_hostValues, d.name))
-              return _hostValues[d.name];
+              return unwrapUserProp(_hostValues[d.name]);
             return d.value;
           },
         });
@@ -1704,15 +1723,18 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     JSValue wrapped = node ? WrapLayerNode(ctx, node) : JS_UNDEFINED;
     BindThisLayer(ctx, JS_IsUndefined(wrapped) ? m_impl->host.default_layer : wrapped);
 
-    // 1. Compile (and import) the module if not seen before. The compile
-    //    step is COMPILE_ONLY so we can grab the JSModuleDef pointer and
-    //    invoke EvalFunction once.
-    JSValue ns;
-    auto    sha_str = std::string(script_sha);
-    if (auto it = m_impl->ns_by_sha.find(sha_str); it != m_impl->ns_by_sha.end()) {
-        ns = JS_DupValue(ctx, it->second);
-    } else {
-        std::string fname = "scripts/" + sha_str + ".js";
+    // 1. Compile + evaluate the module fresh per FieldScript. Caching by
+    //    source-sha would share `scriptProperties._hostValues` across all
+    //    instances using the same source — workshop wallpapers commonly
+    //    reuse the position-template script across many layers (each with
+    //    distinct {user, value} bindings), so a shared _hostValues makes
+    //    every instance read whichever binding was wired last.
+    JSValue       ns;
+    auto          sha_str = std::string(script_sha);
+    std::uint64_t uniq    = m_impl->next_module_serial++;
+    std::string   fname   = "scripts/" + sha_str + "-" +
+                              std::to_string(uniq) + ".js";
+    {
         JSValue compiled = JS_Eval(ctx, source.data(), source.size(),
                                    fname.c_str(),
                                    JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
@@ -1732,7 +1754,6 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
         }
         JS_FreeValue(ctx, ev);
         ns = JS_GetModuleNamespace(ctx, m);
-        m_impl->ns_by_sha.emplace(sha_str, JS_DupValue(ctx, ns));
     }
 
     // 2. Build the FieldScript handle.

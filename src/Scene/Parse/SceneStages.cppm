@@ -47,6 +47,18 @@ struct ParseContext {
     // bindings come in. Installed onto the Scene by FinalizeScene.
     // Stays null when no object has any script binding.
     std::unique_ptr<owe::script::ScriptScene> script_scene;
+
+    // ID → (parent_id, node) for every parseable object. Filled by each
+    // ParseXObj. FinalizeScene re-parents nodes with non-zero parent_id
+    // from the scene root onto their actual parent. WE wallpapers use
+    // this to position child layers relative to a script-driven parent
+    // (e.g. workshop 3327063360's "Audio Bars" hardcoded at (-155, 322)
+    // is parent=4995, the "总组件" centre).
+    struct NodeRef {
+        std::uint32_t              parent_id { 0 };
+        std::shared_ptr<SceneNode> node;
+    };
+    std::unordered_map<std::int32_t, NodeRef> node_id_map;
 };
 
 struct ProcessOpts {

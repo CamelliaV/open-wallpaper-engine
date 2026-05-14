@@ -924,6 +924,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
     WireFieldScripts(context, spImgNode.get(), wpimgobj.field_bindings);
+    context.node_id_map[wpimgobj.id] = { wpimgobj.parent, spImgNode };
     context.scene->sceneGraph->AppendChild(spImgNode);
 }
 
@@ -1112,8 +1113,10 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     WireFieldScripts(context, spNode.get(), wppartobj.field_bindings);
     if (is_child)
         child_ptr.node_parent->AppendChild(spNode);
-    else
+    else {
+        context.node_id_map[wppartobj.id] = { wppartobj.parent, spNode };
         context.scene->sceneGraph->AppendChild(spNode);
+    }
 }
 
 void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
@@ -1127,6 +1130,7 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     auto& light = *(context.scene->lights.back());
     light.setNode(node);
 
+    context.node_id_map[light_obj.id] = { light_obj.parent, node };
     context.scene->sceneGraph->AppendChild(node);
 }
 
@@ -1369,6 +1373,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         }
     }
 
+    context.node_id_map[obj.id] = { obj.parent, sp_node };
     context.scene->sceneGraph->AppendChild(sp_node);
 
     rstd_info("text '{}': initial=\"{}\" px={} peak_quads={} bbox={}x{}{} ({})",
@@ -1503,6 +1508,30 @@ void ProcessObjects(ParseContext& context, std::span<WPObjectVar> wp_objs,
 }
 
 std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
+    // Re-parent objects with a non-zero `parent` ID from the scene root
+    // onto their declared parent. Layers in scene.json arrive flat with
+    // their parent recorded as an object ID; this pass connects them up
+    // so child transforms compose properly.
+    auto& root_children = context.scene->sceneGraph->GetChildren();
+    int reparented = 0, missing_parent = 0;
+    for (const auto& [id, ref] : context.node_id_map) {
+        if (ref.parent_id == 0 || ! ref.node) continue;
+        auto pit = context.node_id_map.find(
+            static_cast<std::int32_t>(ref.parent_id));
+        if (pit == context.node_id_map.end() || ! pit->second.node) {
+            missing_parent++;
+            continue;
+        }
+        auto* raw = ref.node.get();
+        root_children.remove_if([&](const std::shared_ptr<SceneNode>& p) {
+            return p.get() == raw;
+        });
+        pit->second.node->AppendChild(ref.node);
+        reparented++;
+    }
+    rstd_info("reparent: {}/{} nodes attached to non-root parents ({} missing)",
+              reparented, context.node_id_map.size(), missing_parent);
+
     // If any object during the visit installed a script binding, hand the
     // ScriptScene off to the Scene now. The renderer ticks it once per
     // frame via owe::script::TickSceneScripts. Empty ScriptScenes are
@@ -1665,6 +1694,69 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     auto wp_objs = ExpandObjects(json, vfs, pkg_version);
     AdjustAutoOrthoProjection(sc, wp_objs);
     auto context = BuildContext(vfs, scene_id, sc);
+
+    // Pre-create bare SceneNodes for transform-only "container" layers —
+    // scene.json objects with an id/parent/transform but no image,
+    // particle, sound, light, text, model, or camera field. WE wallpapers
+    // use these as positionable groups for child layers (e.g. workshop
+    // 3327063360's "组件" / "帧率位置"). Without them, ParseImageObj's
+    // children can't find their parent in node_id_map and stay at the
+    // scene root.
+    if (json.contains("objects")) {
+        auto has_kind = [](const nlohmann::json& o) {
+            for (const char* k :
+                 { "image", "particle", "sound", "light", "text", "model", "camera" }) {
+                if (o.contains(k) && ! o.at(k).is_null()) return true;
+            }
+            return false;
+        };
+        // AddWPObject filters wpobj.visible==false. For container layers
+        // used as parents (e.g. workshop 3327063360's "Media Info (ROUND)"
+        // with visible:{value:false}), this strips them from the scene
+        // graph and their children land at root. Pre-create a bare node
+        // when visibility resolves to false at parse-time so reparenting
+        // can chain through.
+        auto skipped_by_parser = [](const nlohmann::json& o) {
+            if (! o.contains("visible")) return false;
+            const auto& v = o.at("visible");
+            if (v.is_boolean()) return v.get<bool>() == false;
+            if (v.is_object() && v.contains("value") && v.at("value").is_boolean())
+                return v.at("value").get<bool>() == false;
+            return false;
+        };
+        for (const auto& o : json.at("objects")) {
+            if (! o.is_object() || ! o.contains("id")) continue;
+            if (has_kind(o) && ! skipped_by_parser(o)) continue;
+            std::int32_t  id     = o.at("id").get<std::int32_t>();
+            std::uint32_t parent = 0;
+            if (o.contains("parent")) parent = o.at("parent").get<std::uint32_t>();
+            std::array<float, 3> origin { 0, 0, 0 }, scale { 1, 1, 1 }, angles { 0, 0, 0 };
+            if (o.contains("origin") && o.at("origin").is_string()) {
+                std::sscanf(o.at("origin").get<std::string>().c_str(), "%f %f %f",
+                            &origin[0], &origin[1], &origin[2]);
+            }
+            if (o.contains("scale") && o.at("scale").is_string()) {
+                std::sscanf(o.at("scale").get<std::string>().c_str(), "%f %f %f",
+                            &scale[0], &scale[1], &scale[2]);
+            }
+            if (o.contains("angles") && o.at("angles").is_string()) {
+                std::sscanf(o.at("angles").get<std::string>().c_str(), "%f %f %f",
+                            &angles[0], &angles[1], &angles[2]);
+            }
+            auto node = std::make_shared<SceneNode>(Vector3f(origin.data()),
+                                                     Vector3f(scale.data()),
+                                                     Vector3f(angles.data()));
+            node->ID() = id;
+            // Field bindings on container layers (e.g. scripted origin)
+            // still need wiring.
+            wpscene::WPFieldBindings fb;
+            wpscene::AbsorbAllFieldBindings(o, fb);
+            WireFieldScripts(context, node.get(), fb);
+            context.node_id_map[id] = { parent, node };
+            context.scene->sceneGraph->AppendChild(node);
+        }
+    }
+
     ProcessObjects(context, wp_objs, &sm);
     if (sc.general.bloom && ! sc.general.hdr) {
         BuildBloomPostProcess(context, vfs, sc.general);

@@ -512,15 +512,19 @@ public:
     void        AppendChild(std::shared_ptr<SceneNode> sub) {
                sub->m_parent = this;
                m_children.push_back(sub);
+               // Stale ModelTrans on the child (cached without this new
+               // parent context) would persist for the rest of the frame
+               // otherwise — force a recompute on next UpdateTrans.
+               sub->MarkTransDirty();
     }
     Eigen::Matrix4d GetLocalTrans() const;
 
     const auto& Translate() const { return m_translate; }
     const auto& Rotation() const { return m_rotation; }
     const auto& Scale() const { return m_scale; }
-    void        SetRotation(Eigen::Vector3f v) { m_rotation = v; }
-    void        SetTranslate(Eigen::Vector3f v) { m_translate = v; }
-    void        SetScale(Eigen::Vector3f v)     { m_scale = v; }
+    void        SetRotation(Eigen::Vector3f v) { m_rotation = v; MarkTransDirty(); }
+    void        SetTranslate(Eigen::Vector3f v) { m_translate = v; MarkTransDirty(); }
+    void        SetScale(Eigen::Vector3f v)     { m_scale = v; MarkTransDirty(); }
 
     // Local content size (image / text bbox). Zero means "unknown"; scripts
     // reading `thisLayer.size` then fall back to the legacy 100×100 stub.
@@ -565,6 +569,7 @@ public:
         m_translate = node.m_translate;
         m_scale     = node.m_scale;
         m_rotation  = node.m_rotation;
+        MarkTransDirty();
     }
 
     void            UpdateTrans();

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 
+import eigen;
 import nlohmann.json;
 import wescene.scene;
 import wescene.script;
@@ -658,6 +659,131 @@ TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
     // expected: 50 + 50*100 + 3142*10000 + 180*1e9
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v,
               50.0 + 50.0 * 100 + 3142.0 * 10000 + 180.0 * 1e9);
+}
+
+// ---------------------------------------------------------------------------
+// Workshop 3327063360 repro: scripted-origin layer should land at canvas
+// center when scriptProperties.{x,y} fall back to their declared 0.5.
+
+TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
+    // ResolveConfigValue stores the {user, value} wrapper verbatim; the
+    // bootstrap getter unwraps at access time. SetUserProperty in
+    // between should win.
+    JsRuntime rt;
+    nlohmann::json properties = nlohmann::json::parse(
+        R"({"x":{"user":"x1","value":0.5}})");
+    rt.SetUserProperty("x1",
+                       nlohmann::json::parse(R"({"type":"slider","value":-0.665})"));
+    FrameInputs fi {};
+    fi.canvas_w = 3840.0f; fi.canvas_h = 2160.0f;
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export var scriptProperties = createScriptProperties()
+              .addSlider({ name: 'x', value: 0.5, min: 0, max: 1 })
+              .finish();
+            export function update() { return scriptProperties.x; }
+        )JS",
+        "test/user_prop_override", FieldKind::Scalar,
+        properties, nlohmann::json(0), nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    // User value passes through verbatim — WE doesn't clamp, even when the
+    // user's slider range (e.g. project.json [-1,1]) exceeds the script's
+    // declared range. Workshop 3327063360 relies on this: x1=-0.665 fed
+    // into `scriptProperties.x * canvasSize.x` produces a negative offset
+    // that shifts the Clock cluster off the master-component origin.
+    EXPECT_NEAR(std::get<ScalarValue>(fs->last_value()).v, -0.665, 1e-4);
+}
+
+TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
+    JsRuntime rt;
+    nlohmann::json properties = nlohmann::json::parse(
+        R"({"x":{"user":"missing","value":0.5}})");
+    FrameInputs fi {};
+    fi.canvas_w = 3840.0f; fi.canvas_h = 2160.0f;
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export var scriptProperties = createScriptProperties()
+              .addSlider({ name: 'x', value: 0.5, min: 0, max: 1 })
+              .finish();
+            export function update() { return scriptProperties.x; }
+        )JS",
+        "test/user_prop_fallback", FieldKind::Scalar,
+        properties, nlohmann::json(0), nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_NEAR(std::get<ScalarValue>(fs->last_value()).v, 0.5, 1e-4);
+}
+
+TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    fi.canvas_w = 3840.0f;
+    fi.canvas_h = 2160.0f;
+    rt.SetFrameInputs(fi);
+
+    nlohmann::json properties = nlohmann::json::parse(
+        R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})");
+
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            'use strict';
+            export var scriptProperties = createScriptProperties()
+              .addSlider({ name: 'x', label: 'X', value: 0.5, min: 0, max: 1 })
+              .addSlider({ name: 'y', label: 'Y', value: 0.5, min: 0, max: 1 })
+              .finish();
+            export function update(value) {
+                value.x = scriptProperties.x * engine.canvasSize.x;
+                value.y = scriptProperties.y * engine.canvasSize.y;
+                return value;
+            }
+        )JS",
+        "test/workshop_3327_repro", FieldKind::Vec3,
+        properties,
+        nlohmann::json("1315.0 1419.0 0.0"),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    ASSERT_TRUE(std::holds_alternative<Vec3Value>(fs->last_value()));
+    const auto& v = std::get<Vec3Value>(fs->last_value());
+    EXPECT_NEAR(v.x, 1920.0, 0.5);
+    EXPECT_NEAR(v.y, 1080.0, 0.5);
+}
+
+TEST(SceneNodeTrans, SetTranslateRecomputesModelTrans) {
+    owe::SceneNode parent;
+    parent.SetTranslate({ 100.0f, 200.0f, 0.0f });
+    auto child = std::make_shared<owe::SceneNode>();
+    child->SetTranslate({ 10.0f, 20.0f, 0.0f });
+    parent.AppendChild(child);
+
+    child->UpdateTrans();
+    Eigen::Matrix4d m1 = child->ModelTrans();
+    EXPECT_DOUBLE_EQ(m1(0, 3), 110.0);  // world x
+    EXPECT_DOUBLE_EQ(m1(1, 3), 220.0);  // world y
+
+    // Mutate the parent and re-read the child without explicit dirty.
+    parent.SetTranslate({ 500.0f, 600.0f, 0.0f });
+    child->UpdateTrans();
+    Eigen::Matrix4d m2 = child->ModelTrans();
+    EXPECT_DOUBLE_EQ(m2(0, 3), 510.0);
+    EXPECT_DOUBLE_EQ(m2(1, 3), 620.0);
+}
+
+TEST(SceneNodeTrans, SetScaleAndRotationMarkDirty) {
+    owe::SceneNode n;
+    n.UpdateTrans();
+    // After first UpdateTrans the cache is clean.
+    n.SetScale({ 2.0f, 2.0f, 1.0f });
+    n.UpdateTrans();
+    Eigen::Matrix4d m = n.ModelTrans();
+    EXPECT_DOUBLE_EQ(m(0, 0), 2.0);
+    EXPECT_DOUBLE_EQ(m(1, 1), 2.0);
 }
 
 TEST(ScriptNodeSize, UnsetFallsBackTo100x100) {
