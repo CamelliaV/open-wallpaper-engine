@@ -354,6 +354,11 @@ void RenderHandler::on(RenderDraw&&) {
          * the new RGBA frame is sampled by the same render pass. */
         m_render->pumpVideoTextures(frame_timer.IdeaTime() * m_speed);
 
+        /* Upload any glyph rects the actuators added this tick. Runs after
+         * TickSceneScripts (which calls FontFace::Populate) and before
+         * drawFrame so newly-rasterised glyphs are visible the same frame. */
+        m_render->pumpFontAtlases(*m_scene);
+
         m_render->drawFrame(*m_scene);
 
         m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);

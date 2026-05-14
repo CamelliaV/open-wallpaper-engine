@@ -100,6 +100,14 @@ public:
      * SceneWallpaper's per-frame RenderDraw handler. */
     void pumpVideoTextures(double dt_seconds);
 
+    /* For every FontFace in scene.font_cache with non-empty DirtyRects,
+     * coalesce to one AABB and vkCmdCopyBufferToImage into the face's
+     * atlas VkImage. Skips faces whose VkImage hasn't been created yet
+     * (CreateTex runs lazily on first material bind — those pixels reach
+     * the GPU through the aliased Image::mip.data instead). Clears each
+     * face's dirty_rects regardless. */
+    void pumpFontAtlases(Scene& scene);
+
     VkInstance       vkInstance() const;
     VkPhysicalDevice vkPhysicalDevice() const;
     VkDevice         vkDevice() const;

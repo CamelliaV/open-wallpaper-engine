@@ -24,11 +24,16 @@ namespace owe::text
 namespace
 {
 
-constexpr std::uint32_t kAtlasInitialDim { 1024 };
-constexpr std::uint32_t kAtlasMaxDim { 2048 };
+// Fixed per-FontFace atlas. With lazy populate (no JS-literal scrape, no ASCII
+// sweep), the realistic upper bound for one face is ~200 glyphs × ~60²px,
+// which fits in 1024² R8 (1MB CPU + 1MB GPU) with slack. Overflow falls back
+// to the white-cell tofu branch — no atlas growth, no descriptor-set
+// invalidation hazard.
+constexpr std::uint32_t kAtlasDim { 1024 };
 
-// 1px white cell at (0,0) so a single-channel atlas can also serve solid-fill
-// quads (e.g. the opaquebackground rectangle). Not exposed via Glyph().
+// 4×4 white cell at (0,0) so a single-channel atlas can also serve solid-fill
+// quads (e.g. opaquebackground rectangle) and as a tofu fallback when the
+// atlas overflows.
 constexpr std::uint32_t kWhiteCellSize { 4 };
 
 class FtLibrary {
@@ -94,10 +99,9 @@ struct FontFace::Impl {
     FT_Face                                 face { nullptr };
     std::uint32_t                           pixel_size { 0 };
 
-    std::uint32_t                          atlas_w { 0 };
-    std::uint32_t                          atlas_h { 0 };
-    std::vector<std::uint8_t>              atlas;
-    bool                                   dirty { false };
+    std::uint32_t             atlas_w { kAtlasDim };
+    std::uint32_t             atlas_h { kAtlasDim };
+    std::vector<std::uint8_t> atlas;
 
     // Shelf packer state: pen advances along the current shelf, falls to a
     // new shelf when the next glyph won't fit horizontally.
@@ -107,12 +111,24 @@ struct FontFace::Impl {
 
     std::unordered_map<std::uint32_t, GlyphInfo> glyphs;
 
+    // Pixel-coord rects pushed by Populate() — drained once per frame by
+    // the renderer to vkCmdCopyBufferToImage just the changed regions.
+    std::vector<AtlasDirtyRect> dirty_rects;
+
+    // Set by FontCache::GetFace; consumed by the renderer's per-frame
+    // atlas-commit hook to look the face's VkImage up by URL.
+    std::string atlas_url;
+
     ~Impl() {
         if (face != nullptr) FT_Done_Face(face);
     }
 
+    Impl() {
+        atlas.assign(static_cast<std::size_t>(atlas_w) * atlas_h, 0);
+        SeedWhiteCell();
+    }
+
     void SeedWhiteCell() {
-        if (atlas_w == 0) return;
         for (std::uint32_t y = 0; y < kWhiteCellSize; ++y) {
             for (std::uint32_t x = 0; x < kWhiteCellSize; ++x) {
                 atlas[y * atlas_w + x] = 0xFF;
@@ -121,42 +137,22 @@ struct FontFace::Impl {
         pen_x   = kWhiteCellSize + 1;
         pen_y   = 0;
         shelf_h = kWhiteCellSize;
-        dirty   = true;
+        dirty_rects.push_back({ 0, 0, kWhiteCellSize, kWhiteCellSize });
     }
-
-    bool EnsureAtlas() {
-        if (atlas_w != 0) return true;
-        atlas_w = kAtlasInitialDim;
-        atlas_h = kAtlasInitialDim;
-        atlas.assign(static_cast<std::size_t>(atlas_w) * atlas_h, 0);
-        SeedWhiteCell();
-        return true;
-    }
-
-    // Atlas is intentionally non-growing: UVs are baked into vertex buffers
-    // at parse time, so changing atlas_w/atlas_h after the first text object
-    // in a shared face would invalidate every previously-emitted glyph quad.
-    // On overflow we fall back to a tofu glyph (see Glyph()).
-    bool GrowAtlas() { return false; }
 
     bool ReserveSlot(std::uint32_t w, std::uint32_t h, std::uint32_t& out_x,
                      std::uint32_t& out_y) {
-        while (true) {
-            if (pen_x + w > atlas_w) {
-                pen_y += shelf_h + 1;
-                pen_x   = 0;
-                shelf_h = 0;
-            }
-            if (pen_y + h > atlas_h) {
-                if (! GrowAtlas()) return false;
-                continue;
-            }
-            out_x = pen_x;
-            out_y = pen_y;
-            pen_x += w + 1;
-            if (h > shelf_h) shelf_h = h;
-            return true;
+        if (pen_x + w > atlas_w) {
+            pen_y += shelf_h + 1;
+            pen_x   = 0;
+            shelf_h = 0;
         }
+        if (pen_y + h > atlas_h) return false;
+        out_x = pen_x;
+        out_y = pen_y;
+        pen_x += w + 1;
+        if (h > shelf_h) shelf_h = h;
+        return true;
     }
 
     void Blit(std::uint32_t x, std::uint32_t y, std::uint32_t w, std::uint32_t h,
@@ -190,59 +186,61 @@ std::span<const std::uint8_t> FontFace::AtlasPixels() const {
     return std::span<const std::uint8_t>(m_impl->atlas);
 }
 
-bool FontFace::AtlasDirty() const noexcept { return m_impl->dirty; }
-void FontFace::ClearDirty() noexcept { m_impl->dirty = false; }
+std::span<const AtlasDirtyRect> FontFace::DirtyRects() const noexcept {
+    return m_impl->dirty_rects;
+}
+void FontFace::ClearDirtyRects() noexcept { m_impl->dirty_rects.clear(); }
+const std::string& FontFace::AtlasUrl() const noexcept { return m_impl->atlas_url; }
 
-const GlyphInfo* FontFace::Glyph(std::uint32_t codepoint) {
+const GlyphInfo* FontFace::Lookup(std::uint32_t codepoint) const noexcept {
     auto& impl = *m_impl;
     if (auto it = impl.glyphs.find(codepoint); it != impl.glyphs.end()) {
         return &it->second;
     }
-    if (impl.face == nullptr) return nullptr;
-    impl.EnsureAtlas();
+    return nullptr;
+}
 
-    FT_UInt glyph_index = FT_Get_Char_Index(impl.face, codepoint);
-    // glyph_index 0 is .notdef and is still a valid renderable glyph for tofu.
-    if (FT_Load_Glyph(impl.face, glyph_index, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) {
-        return nullptr;
+void FontFace::Populate(std::span<const std::uint32_t> codepoints) {
+    auto& impl = *m_impl;
+    if (impl.face == nullptr) return;
+    for (std::uint32_t codepoint : codepoints) {
+        if (impl.glyphs.find(codepoint) != impl.glyphs.end()) continue;
+
+        FT_UInt glyph_index = FT_Get_Char_Index(impl.face, codepoint);
+        if (FT_Load_Glyph(impl.face, glyph_index, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) {
+            continue;
+        }
+        FT_GlyphSlot g = impl.face->glyph;
+        GlyphInfo    gi {};
+        gi.pixel_w   = g->bitmap.width;
+        gi.pixel_h   = g->bitmap.rows;
+        gi.bearing_x = static_cast<float>(g->bitmap_left);
+        gi.bearing_y = static_cast<float>(g->bitmap_top);
+        gi.advance_x = static_cast<float>(g->advance.x) / 64.0f;
+
+        if (gi.pixel_w == 0 || gi.pixel_h == 0) {
+            gi.atlas_x = 0;
+            gi.atlas_y = 0;
+            impl.glyphs.emplace(codepoint, gi);
+            continue;
+        }
+
+        if (! impl.ReserveSlot(gi.pixel_w, gi.pixel_h, gi.atlas_x, gi.atlas_y)) {
+            // Atlas full → tofu mapped to the white cell. Cache the fallback so
+            // we don't FT_Load the same codepoint every frame.
+            gi.atlas_x = 0;
+            gi.atlas_y = 0;
+            gi.pixel_w = kWhiteCellSize;
+            gi.pixel_h = kWhiteCellSize;
+            impl.glyphs.emplace(codepoint, gi);
+            continue;
+        }
+
+        impl.Blit(gi.atlas_x, gi.atlas_y, gi.pixel_w, gi.pixel_h, g->bitmap.buffer,
+                  static_cast<std::uint32_t>(g->bitmap.pitch));
+        impl.dirty_rects.push_back({ gi.atlas_x, gi.atlas_y, gi.pixel_w, gi.pixel_h });
+        impl.glyphs.emplace(codepoint, gi);
     }
-    FT_GlyphSlot g = impl.face->glyph;
-    GlyphInfo    gi {};
-    gi.pixel_w   = g->bitmap.width;
-    gi.pixel_h   = g->bitmap.rows;
-    gi.bearing_x = static_cast<float>(g->bitmap_left);
-    gi.bearing_y = static_cast<float>(g->bitmap_top);
-    gi.advance_x = static_cast<float>(g->advance.x) / 64.0f;
-
-    if (gi.pixel_w == 0 || gi.pixel_h == 0) {
-        // E.g. space — no bitmap. Still a valid cached entry.
-        gi.atlas_x = 0;
-        gi.atlas_y = 0;
-        auto [it, _] = impl.glyphs.emplace(codepoint, gi);
-        return &it->second;
-    }
-
-    if (! impl.ReserveSlot(gi.pixel_w, gi.pixel_h, gi.atlas_x, gi.atlas_y)) {
-        // Atlas full. Return tofu-equivalent: the .notdef rect mapped to white
-        // cell (1×1). Better than nullptr — caller still gets a positioned box.
-        gi.atlas_x = 0;
-        gi.atlas_y = 0;
-        gi.pixel_w = kWhiteCellSize;
-        gi.pixel_h = kWhiteCellSize;
-        auto [it, _] = impl.glyphs.emplace(codepoint, gi);
-        return &it->second;
-    }
-
-    impl.Blit(gi.atlas_x,
-              gi.atlas_y,
-              gi.pixel_w,
-              gi.pixel_h,
-              g->bitmap.buffer,
-              static_cast<std::uint32_t>(g->bitmap.pitch));
-    impl.dirty = true;
-
-    auto [it, _] = impl.glyphs.emplace(codepoint, gi);
-    return &it->second;
 }
 
 // -- FontCache ------------------------------------------------------------
@@ -262,18 +260,18 @@ struct FontCache::Impl {
         }
     };
     std::unordered_map<Key, std::unique_ptr<FontFace>, KeyHash> faces;
-    // Keep blobs alive for the cache lifetime so FT_Face's pointer into them
-    // stays valid.
-    std::vector<std::shared_ptr<std::vector<std::byte>>> blobs;
 };
 
 FontCache::FontCache(): m_impl(std::make_unique<Impl>()) {}
 FontCache::~FontCache() = default;
 
-FontFace* FontCache::GetFace(std::span<const std::byte> blob, std::uint32_t pixel_size) {
-    if (blob.empty() || pixel_size == 0) return nullptr;
+FontFace* FontCache::GetFace(std::shared_ptr<std::vector<std::byte>> blob,
+                             std::uint32_t                            pixel_size) {
+    if (! blob || blob->empty() || pixel_size == 0) return nullptr;
 
-    Impl::Key key { HashBlob(blob), pixel_size };
+    auto blob_span = std::span<const std::byte>(blob->data(), blob->size());
+    auto blob_hash = HashBlob(blob_span);
+    Impl::Key key { blob_hash, pixel_size };
     if (auto it = m_impl->faces.find(key); it != m_impl->faces.end()) {
         return it->second.get();
     }
@@ -283,8 +281,8 @@ FontFace* FontCache::GetFace(std::span<const std::byte> blob, std::uint32_t pixe
 
     auto face = std::make_unique<FontFace>();
     if (FT_New_Memory_Face(lib,
-                           reinterpret_cast<const FT_Byte*>(blob.data()),
-                           static_cast<FT_Long>(blob.size()),
+                           reinterpret_cast<const FT_Byte*>(blob_span.data()),
+                           static_cast<FT_Long>(blob_span.size()),
                            0,
                            &face->m_impl->face) != 0) {
         rstd_error("FT_New_Memory_Face failed");
@@ -294,11 +292,34 @@ FontFace* FontCache::GetFace(std::span<const std::byte> blob, std::uint32_t pixe
         rstd_error("FT_Set_Pixel_Sizes failed (px={})", pixel_size);
         return nullptr;
     }
+    // Keep the bytes alive for the face's lifetime: FT_Face holds raw
+    // pointers into this buffer and dereferences them on every glyph load.
+    face->m_impl->blob       = std::move(blob);
     face->m_impl->pixel_size = pixel_size;
+    face->m_impl->atlas_url  = "_text_atlas_" + std::to_string(blob_hash) + "_" +
+                              std::to_string(pixel_size);
 
     auto* raw           = face.get();
     m_impl->faces[key]  = std::move(face);
     return raw;
+}
+
+std::vector<FontFace*> FontCache::Faces() const {
+    std::vector<FontFace*> out;
+    out.reserve(m_impl->faces.size());
+    for (auto& [_k, f] : m_impl->faces) out.push_back(f.get());
+    return out;
+}
+
+FontCache& EnsureSceneFontCache(owe::Scene& scene) {
+    if (! scene.font_cache) {
+        scene.font_cache = { new FontCache(),
+                              [](void* p) noexcept { delete static_cast<FontCache*>(p); } };
+    }
+    return *static_cast<FontCache*>(scene.font_cache.get());
+}
+FontCache* SceneFontCache(owe::Scene& scene) noexcept {
+    return static_cast<FontCache*>(scene.font_cache.get());
 }
 
 FontCache::ResolvedBlob FontCache::ResolveSystemFont(std::string_view name, bool fallback_to_any) {
@@ -411,9 +432,12 @@ std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face,
     mip.height  = img->header.height;
     mip.size    = static_cast<owe::isize>(pix.size());
 
-    auto* buf = new std::uint8_t[pix.size()];
-    std::memcpy(buf, pix.data(), pix.size());
-    mip.data  = owe::ImageDataPtr(buf, [](std::uint8_t* p) { delete[] p; });
+    // Alias the face's live CPU atlas (no memcpy). The renderer's first
+    // CreateTex call samples whatever pixels are present at that moment, so
+    // glyphs the actuator Populated between parse-time and the first draw
+    // are picked up. The face is scene-owned and outlives the Image.
+    mip.data = owe::ImageDataPtr(const_cast<std::uint8_t*>(pix.data()),
+                                  [](std::uint8_t*) noexcept {});
 
     return img;
 }
@@ -511,7 +535,6 @@ bool ContainsSubstring(std::string_view s, std::string_view what) noexcept {
 } // namespace
 
 struct TextLayouter::Impl {
-    std::unique_ptr<FontCache>            cache;
     FontFace*                             face { nullptr };
     std::shared_ptr<owe::SceneMesh> mesh;
     TextLayoutStyle                       style;
@@ -529,9 +552,9 @@ struct TextLayouter::Impl {
     std::vector<float>         colors;
     std::vector<std::uint32_t> indices;
 
-    Impl(std::unique_ptr<FontCache> c, FontFace* f,
-         std::shared_ptr<owe::SceneMesh> m, TextLayoutStyle s, std::size_t pq)
-        : cache(std::move(c)), face(f), mesh(std::move(m)), style(std::move(s)),
+    Impl(FontFace* f, std::shared_ptr<owe::SceneMesh> m, TextLayoutStyle s,
+         std::size_t pq)
+        : face(f), mesh(std::move(m)), style(std::move(s)),
           peak_quads(pq), metrics(face->Metrics()) {
         positions.assign(pq * 4 * 3, 0.0f);
         texcoords.assign(pq * 4 * 2, 0.0f);
@@ -540,12 +563,11 @@ struct TextLayouter::Impl {
     }
 };
 
-TextLayouter::TextLayouter(std::unique_ptr<FontCache>            cache,
-                           FontFace*                             face,
+TextLayouter::TextLayouter(FontFace*                             face,
                            std::shared_ptr<owe::SceneMesh> mesh,
                            TextLayoutStyle                       style,
                            std::size_t                           peak_quads)
-    : m_impl(std::make_unique<Impl>(std::move(cache), face, std::move(mesh),
+    : m_impl(std::make_unique<Impl>(face, std::move(mesh),
                                     std::move(style), peak_quads)) {}
 
 TextLayouter::~TextLayouter() = default;
@@ -567,10 +589,13 @@ void TextLayouter::SetText(std::string_view utf8) {
             lines.emplace_back();
             continue;
         }
-        const auto* gi = im.face->Glyph(cp);
+        const auto* gi = im.face->Lookup(cp);
         if (gi == nullptr) {
+            // Actuator is expected to Populate() before SetText, so this only
+            // fires for codepoints that genuinely failed to rasterise (e.g.
+            // missing in the font). Log-once keeps log noise bounded.
             if (! im.missing_glyph_logged) {
-                rstd_info("text: codepoint U+{:04X} not in pre-rasterised set, skipping",
+                rstd_info("text: codepoint U+{:04X} not rasterised, skipping",
                          cp);
                 im.missing_glyph_logged = true;
             }

@@ -150,11 +150,13 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         }
         m_desc.vk_textures[i] = img_slots;
     }
+    bool out_force_clear { false };
     {
         auto& tex_name = m_desc.output;
         rstd_assert(IsSpecTex(tex_name));
         rstd_assert(scene.renderTargets.count(tex_name) > 0);
-        auto& rt = scene.renderTargets.at(tex_name);
+        auto& rt        = scene.renderTargets.at(tex_name);
+        out_force_clear = rt.force_clear;
         if (auto opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
             opt.has_value()) {
             m_desc.vk_output = opt.value();
@@ -300,6 +302,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             m_desc.blending = color_blend.blendEnable;
 
             SetAttachmentLoadOp(blendmode, loadOp);
+            if (out_force_clear) loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         }
         auto opt = CreateRenderPass(device.handle(),
                                     VK_FORMAT_R8G8B8A8_UNORM,
@@ -433,10 +436,16 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
 
     {
-        auto& sc           = scene.clearColor;
-        m_desc.clear_value = VkClearValue {
-            .color = { sc[0], sc[1], sc[2], 1.0f },
-        };
+        if (out_force_clear) {
+            // Per-layer compose RTs want a transparent reset every frame —
+            // not the scene's opaque clear color.
+            m_desc.clear_value = VkClearValue { .color = { 0.0f, 0.0f, 0.0f, 0.0f } };
+        } else {
+            auto& sc           = scene.clearColor;
+            m_desc.clear_value = VkClearValue {
+                .color = { sc[0], sc[1], sc[2], 1.0f },
+            };
+        }
     }
     for (auto& tex : releaseTexs()) {
         device.tex_cache().MarkShareReady(tex);

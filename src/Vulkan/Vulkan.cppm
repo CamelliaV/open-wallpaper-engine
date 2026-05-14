@@ -421,6 +421,15 @@ public:
      * VkImage. No-op if no video textures are registered. */
     void PumpVideoTextures(double dt_seconds);
 
+    /* vkCmdCopyBufferToImage a sub-rect of `atlas` into the VkImage stored
+     * under `key`. Returns false if `key` has no entry yet (the VkImage
+     * hasn't been allocated — CreateTex hasn't run); caller may retry
+     * next frame. */
+    bool UploadFontAtlasRegion(const std::string& key,
+                               const std::uint8_t* atlas, std::uint32_t atlas_w,
+                               std::uint32_t x, std::uint32_t y,
+                               std::uint32_t w, std::uint32_t h);
+
 private:
     std::optional<VmaImageParameters> CreateTex(TextureKey);
     /* VIDEO-typed Image branch of CreateTex: registers a wavsen

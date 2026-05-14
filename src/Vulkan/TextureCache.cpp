@@ -990,6 +990,87 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
     }
 }
 
+bool TextureCache::UploadFontAtlasRegion(const std::string& key,
+                                         const std::uint8_t* atlas,
+                                         std::uint32_t       atlas_w,
+                                         std::uint32_t x, std::uint32_t y,
+                                         std::uint32_t w, std::uint32_t h) {
+    if (w == 0 || h == 0) return true;
+    auto it = m_tex_map.find(key);
+    if (it == m_tex_map.end() || it->second.slots.empty()) return false;
+
+    ImageParameters ip = ToImageParameters(it->second.slots[0]);
+
+    // Tightly-packed staging buffer for the AABB. Allocating per-call keeps
+    // this code path independent of the video-tex ring; atlas pumps are
+    // small (a handful of glyphs per frame) so cost is negligible.
+    const std::uint32_t bytes = w * h;
+    VmaBufferParameters stage;
+    if (! CreateStagingBuffer(m_device.vma_allocator(), bytes, stage)) return false;
+
+    {
+        void* v = nullptr;
+        VVK_CHECK(stage.handle.MapMemory(&v));
+        auto* dst = static_cast<std::uint8_t*>(v);
+        for (std::uint32_t row = 0; row < h; ++row) {
+            std::memcpy(dst + row * w, atlas + (y + row) * atlas_w + x, w);
+        }
+        stage.handle.UnMapMemory();
+    }
+
+    if (! m_tex_cmd) allocateCmd();
+    VVK_CHECK(m_tex_cmd.Begin(VkCommandBufferBeginInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    }));
+    VkImageSubresourceRange range {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0, .levelCount = 1,
+        .baseArrayLayer = 0, .layerCount = 1,
+    };
+    VkImageMemoryBarrier to_xfer {
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .oldLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image         = ip.handle,
+        .subresourceRange = range,
+    };
+    m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              0, to_xfer);
+    VkBufferImageCopy region {};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset                 = VkOffset3D { (int32_t)x, (int32_t)y, 0 };
+    region.imageExtent                 = VkExtent3D { w, h, 1 };
+    m_tex_cmd.CopyBufferToImage(*stage.handle, ip.handle,
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
+    VkImageMemoryBarrier to_shader {
+        .sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image         = ip.handle,
+        .subresourceRange = range,
+    };
+    m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              0, to_shader);
+    VVK_CHECK(m_tex_cmd.End());
+    VkSubmitInfo si {
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers    = m_tex_cmd.address(),
+    };
+    VVK_CHECK(m_device.graphics_queue().handle.Submit(si));
+    VVK_CHECK(m_device.handle().WaitIdle());
+    return true;
+}
+
 TextureCache::TextureCache(const Device& device): m_device(device) {}
 
 TextureCache::~TextureCache() {};

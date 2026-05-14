@@ -120,6 +120,14 @@ struct SceneRenderTarget {
                            TextureFilter::LINEAR,
                            TextureFilter::LINEAR };
     Bind          bind {};
+
+    // Force VK_ATTACHMENT_LOAD_OP_CLEAR with transparent clear color on
+    // every pass that writes to this RT. Needed for per-layer compose RTs
+    // where the only writer is a Translucent draw and so the default
+    // load-op (LOAD) would leak the previous frame's pixels through —
+    // visible as ghosting when the rendered string changes (e.g. clock
+    // text "12:00" → "12:01" leaves "12:00"'s glyphs underneath).
+    bool          force_clear { false };
 };
 
 // ============================================================================
@@ -1138,6 +1146,13 @@ public:
     using ScriptDeleterFn = void (*)(void*) noexcept;
     std::unique_ptr<void, ScriptDeleterFn> script_scene { nullptr,
                                                           [](void*) noexcept {} };
+
+    // Scene-owned text::FontCache. Multiple text objects with matching
+    // (font_blob, pixel_size) share a FontFace + its 1024² atlas. Populated
+    // lazily by ParseTextObj via text::EnsureSceneFontCache.
+    using FontCacheDeleterFn = void (*)(void*) noexcept;
+    std::unique_ptr<void, FontCacheDeleterFn> font_cache { nullptr,
+                                                           [](void*) noexcept {} };
 
     std::string scene_id { "unknown_id" };
 

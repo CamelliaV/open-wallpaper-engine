@@ -16,6 +16,7 @@ import wescene.vulkan;
 import wescene.utils;
 import wescene.scene;
 import wescene.spec_texs;
+import wescene.text;
 
 import wescene.rgraph;
 
@@ -166,6 +167,43 @@ void VulkanRender::deviceUuid(uint8_t out[16]) const {
 void VulkanRender::pumpVideoTextures(double dt_seconds) {
     if (!pImpl->m_inited || !pImpl->m_device) return;
     pImpl->m_device->tex_cache().PumpVideoTextures(dt_seconds);
+}
+
+void VulkanRender::pumpFontAtlases(Scene& scene) {
+    if (!pImpl->m_inited || !pImpl->m_device) return;
+    auto* fc = owe::text::SceneFontCache(scene);
+    if (fc == nullptr) return;
+    auto& tex = pImpl->m_device->tex_cache();
+    for (auto* face : fc->Faces()) {
+        if (face == nullptr) continue;
+        auto rects = face->DirtyRects();
+        if (rects.empty()) continue;
+        // Coalesce all dirty rects into one AABB. Typical: ≤ a handful of
+        // glyph slots per frame, so a single upload covering the union beats
+        // submitting one copy per rect.
+        std::uint32_t min_x = rects[0].x;
+        std::uint32_t min_y = rects[0].y;
+        std::uint32_t max_x = rects[0].x + rects[0].w;
+        std::uint32_t max_y = rects[0].y + rects[0].h;
+        for (auto& r : rects.subspan(1)) {
+            if (r.x < min_x) min_x = r.x;
+            if (r.y < min_y) min_y = r.y;
+            const std::uint32_t rx2 = r.x + r.w;
+            const std::uint32_t ry2 = r.y + r.h;
+            if (rx2 > max_x) max_x = rx2;
+            if (ry2 > max_y) max_y = ry2;
+        }
+        const auto fm     = face->Metrics();
+        const auto pixels = face->AtlasPixels();
+        (void)tex.UploadFontAtlasRegion(face->AtlasUrl(),
+                                        pixels.data(), fm.atlas_w,
+                                        min_x, min_y,
+                                        max_x - min_x, max_y - min_y);
+        // Clear regardless: if VkImage didn't exist yet, the pixels are
+        // already in the CPU buffer that CreateTex aliases on its first
+        // call. Re-uploading would just duplicate work.
+        face->ClearDirtyRects();
+    }
 }
 
 void VulkanRender::driverUuid(uint8_t out[16]) const {

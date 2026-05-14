@@ -1227,10 +1227,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     if (px < 1) px = 1;
     if (px > 1024) px = 1024;
 
-    auto cache = std::make_unique<text::FontCache>();
-    auto blob_view =
-        std::span<const std::byte>(resolved.bytes->data(), resolved.bytes->size());
-    auto* face = cache->GetFace(blob_view, px);
+    auto& font_cache = text::EnsureSceneFontCache(*context.scene);
+    auto* face       = font_cache.GetFace(resolved.bytes, px);
     if (face == nullptr) {
         rstd_error("text '{}': FreeType failed to open '{}'",
                   obj.name, resolved.source);
@@ -1243,32 +1241,33 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         return;
     }
 
-    // --- pre-rasterise glyph set. Atlas snapshot below freezes coverage;
-    //     SetText() at runtime can only reuse cached glyphs. For script-
-    //     bound text we widen to printable ASCII so common clock/label
-    //     outputs always have glyphs.
+    // Populate the seed text's glyphs up front so the first SetText has the
+    // initial layout's bbox. Runtime SetText calls (from the script actuator)
+    // do their own Populate of the latest string each tick.
     {
         auto seed = text::DecodeUtf8(s_text);
-        for (auto cp : seed) face->Glyph(cp);
-        if (has_text_script) {
-            for (std::uint32_t cp = 0x20; cp <= 0x7Eu; ++cp) face->Glyph(cp);
-        }
+        face->Populate(seed);
     }
 
-    // --- snapshot atlas + register
-    std::string atlas_url =
-        std::string("_text_atlas_") + std::to_string(obj.id) + "_" + getAddr(face);
-    auto atlas_img = text::BuildAtlasImage(*face, atlas_url);
-    if (! atlas_img) {
-        rstd_error("text '{}': atlas snapshot failed", obj.name);
-        return;
-    }
-    EnsureTextImageParser(*context.scene).Register(atlas_url, atlas_img);
-    {
+    // --- atlas-texture registration. The face's atlas is fixed at 1024² R8;
+    // we snapshot whatever the CPU buffer holds right now (seed glyphs + the
+    // white cell) and register it with the imageParser. TextureCache::CreateTex
+    // will pick this up on first material bind, allocating the VkImage at
+    // 1024². Subsequent glyph adds emit dirty rects which the renderer
+    // re-uploads each frame via TextureCache::PumpFontAtlases.
+    const std::string& atlas_url = face->AtlasUrl();
+    if (! context.scene->textures.contains(atlas_url)) {
+        auto atlas_img = text::BuildAtlasImage(*face, atlas_url);
+        if (! atlas_img) {
+            rstd_error("text '{}': atlas snapshot failed", obj.name);
+            return;
+        }
+        EnsureTextImageParser(*context.scene).Register(atlas_url, atlas_img);
         SceneTexture stex;
         stex.url    = atlas_url;
         stex.sample = atlas_img->header.sample;
         context.scene->textures[atlas_url] = stex;
+        face->ClearDirtyRects();
     }
 
     // --- mesh capacity. Static text exactly fits its initial layout;
@@ -1320,15 +1319,15 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     style.padding = static_cast<float>(obj.padding);
 
     auto layouter = std::make_shared<text::TextLayouter>(
-        std::move(cache), face, sp_mesh, style, peak_quads);
+        face, sp_mesh, style, peak_quads);
     layouter->SetText(s_text);
 
     float text_w = layouter->TextWidth();
     float text_h = layouter->TextHeight();
     if (text_w <= 0.0f || text_h <= 0.0f) {
-        // Initial text was empty / all unknown glyphs but a script binding
-        // is expected to populate it. Fake a 1×1 bbox so SceneNode/parallax
-        // still set up correctly.
+        // Empty seed (scripted-only text). Fake a 1×1 bbox so SceneNode /
+        // parallax setup still works; the runtime actuator scales the
+        // compose node to actual text dims each tick.
         text_w = 1.0f;
         text_h = 1.0f;
     }
@@ -1343,15 +1342,167 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     sp_node->SetSize({ text_bbox_w, text_bbox_h });
     sp_node->AddMesh(sp_mesh);
 
+    // sp_node renders into the layer's private ortho RT. Parallax must NOT
+    // apply at this stage — the world-space mouse vector would shift glyphs
+    // inside ppong_a, but the compose pass samples a fixed UV window, so the
+    // shift would manifest as the text appearing to drift in the wrong frame
+    // of reference. Parallax goes on compose_node below (world-space quad).
     WPShaderValueData svData;
-    svData.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
     context.shader_updater->SetNodeData(sp_node.get(), svData);
 
-    // Transform-style script bindings (origin/scale/angles).
-    WireFieldScripts(context, sp_node.get(), obj.field_bindings);
+    // --- per-layer compose -------------------------------------------------
+    // Render the glyphs into a private bbox-sized RT via an ortho camera
+    // that maps text-mesh pixel coords 1:1 onto the RT, then composite that
+    // RT onto _rt_default with a Translucent fullscreen-quad pass.
+    //
+    // Two sibling nodes:
+    //   * sp_node — text glyphs, layer camera, identity world transform,
+    //               appended at scene root (NOT in node_id_map → never
+    //               reparented; parent-chain world translation would
+    //               otherwise leak through modelTrans and push the glyph
+    //               quads past the layer camera's [-bbox/2, +bbox/2]
+    //               ortho range, producing post-VS clip outside NDC).
+    //   * compose_node — fullscreen quad sampling ppong_a, Translucent
+    //               blend, world-positioned. node_id_map registers IT for
+    //               parent-chain reparenting + script transforms.
+    auto compose_node = std::make_shared<SceneNode>();
+    // Layer RT must be a worst-case sandbox: runtime SetText may expand the
+    // glyph bbox well past the seed (clock/date/locale strings). Bound by
+    // canvas so we don't waste VRAM, and floor at the parse-time bbox so a
+    // narrow runtime string still fits without clipping artifacts.
+    const float layer_max_w = std::min<float>(context.scene->ortho[0], 1024.0f);
+    const float layer_max_h = std::min<float>(context.scene->ortho[1], 256.0f);
+    const i32   layer_w     = std::max<i32>(1, (i32)std::max(text_bbox_w, layer_max_w));
+    const i32   layer_h     = std::max<i32>(1, (i32)std::max(text_bbox_h, layer_max_h));
+    {
+        auto&             scene = *context.scene;
+        const std::string addr  = getAddr(sp_node.get());
+        const std::string ppong_a =
+            std::string(WE_EFFECT_PPONG_PREFIX_A) + addr;
 
-    // --- text-content actuator. Captures a shared_ptr<TextLayouter> so
-    //     the layouter stays alive for the lifetime of ScriptScene.
+        // Per-layer ortho camera. effect_camera_node sits at origin so the
+        // view matrix is identity; ortho extents = bbox so glyph pixel
+        // coords (centered around 0) map directly to [-1, +1] NDC.
+        scene.cameras[addr] =
+            std::make_shared<SceneCamera>(layer_w, layer_h, -1.0f, 1.0f);
+        scene.cameras.at(addr)->AttatchNode(context.effect_camera_node);
+
+        scene.renderTargets[ppong_a] = {
+            .width       = layer_w,
+            .height      = layer_h,
+            .allowReuse  = true,
+            .force_clear = true,
+        };
+
+        // Empty SceneImageEffectLayer so SceneToRenderGraph::ToGraphPass
+        // routes sp_node's output to ppong_a (FirstTarget()) without
+        // emitting any extra effect passes (m_effects is empty).
+        auto layer = std::make_shared<SceneImageEffectLayer>(
+            sp_node.get(), (float)layer_w, (float)layer_h, ppong_a, ppong_a);
+        scene.cameras.at(addr)->AttatchImgEffect(layer);
+
+        // Compose quad — sized to the visible text bbox in world space, with
+        // UVs subsampling just the central portion of ppong_a where the
+        // glyphs actually live (the rest of the RT is transparent slack).
+        // Scripted texts mutate text_w/text_h each frame, so the mesh is
+        // dynamic and rebuilt by the actuator below.
+        compose_node->CopyTrans(*sp_node);
+        compose_node->ID() = obj.id;
+        auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/has_text_script);
+        GenCardMesh(*compose_mesh, { (uint16_t)layer_w, (uint16_t)layer_h });
+
+        nlohmann::json pt_json;
+        if (! owe::ParseJson(
+                fs::GetFileContent(*context.vfs,
+                                   "/assets/materials/util/effectpassthrough.json"),
+                pt_json)) {
+            rstd_error("text '{}': parse effectpassthrough.json failed",
+                       obj.name);
+            return;
+        }
+        wpscene::WPMaterial pt_mat;
+        if (! pt_mat.FromJson(pt_json)) {
+            rstd_error("text '{}': WPMaterial::FromJson failed", obj.name);
+            return;
+        }
+        if (pt_mat.textures.empty()) pt_mat.textures.push_back(ppong_a);
+        else pt_mat.textures[0] = ppong_a;
+
+        SceneMaterial     compose_mat;
+        WPShaderValueData compose_sv;
+        WPShaderInfo      compose_si;
+        compose_si.baseConstSvs = context.global_base_uniforms;
+        // genericimage3 multiplies samples by g_Color4 / g_UserAlpha /
+        // g_Brightness — they default to zero when uninitialised, blacking
+        // out the composite. Seed neutral values so the layer RT passes
+        // through; per-text color/alpha lives in the glyph vertex color
+        // attribute on sp_node already.
+        compose_si.baseConstSvs["g_Color4"]     = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+        compose_si.baseConstSvs["g_UserAlpha"]  = 1.0f;
+        compose_si.baseConstSvs["g_Brightness"] = 1.0f;
+        if (! LoadMaterial(*context.vfs, pt_mat, &scene, compose_node.get(),
+                           &compose_mat, &compose_sv, &compose_si)) {
+            rstd_error("text '{}': compose LoadMaterial failed", obj.name);
+            return;
+        }
+        LoadConstvalue(compose_mat, pt_mat, compose_si);
+        compose_mat.blenmode = BlendMode::Translucent;
+        compose_mesh->AddMaterial(std::move(compose_mat));
+        compose_node->AddMesh(compose_mesh);
+        compose_sv.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        context.shader_updater->SetNodeData(compose_node.get(), compose_sv);
+
+        // Move sp_node into layer space — identity transform so the glyph
+        // mesh renders at the ortho origin.
+        sp_node->CopyTrans(SceneNode());
+        sp_node->SetCamera(addr);
+    }
+
+    // Transform-style script bindings (origin/scale/angles) animate the
+    // composite quad in world space, not the layer-space glyph node.
+    WireFieldScripts(context, compose_node.get(), obj.field_bindings);
+
+    // Per-frame compose-quad rebuild: world card sized to current text
+    // bbox; UVs subsample the central text region of ppong_a (since the
+    // ortho is layer-sized but glyphs occupy only text-bbox in the
+    // middle).
+    auto rebuild_compose = [compose_node_w = compose_node.get(),
+                             layer_w, layer_h](float tw, float th) {
+        if (tw <= 0.0f) tw = 1.0f;
+        if (th <= 0.0f) th = 1.0f;
+        const float hx    = tw * 0.5f;
+        const float hy    = th * 0.5f;
+        const std::array<float, 12> pos {
+            -hx, -hy, 0.0f,
+            -hx, +hy, 0.0f,
+            +hx, -hy, 0.0f,
+            +hx, +hy, 0.0f,
+        };
+        const float u_half = 0.5f * std::min(1.0f, tw / float(layer_w));
+        const float v_half = 0.5f * std::min(1.0f, th / float(layer_h));
+        const float u_l    = 0.5f - u_half;
+        const float u_r    = 0.5f + u_half;
+        const float v_t    = 0.5f - v_half;
+        const float v_b    = 0.5f + v_half;
+        const std::array<float, 8> uv {
+            u_l, v_b,
+            u_l, v_t,
+            u_r, v_b,
+            u_r, v_t,
+        };
+        auto* mesh = compose_node_w->Mesh();
+        if (mesh == nullptr) return;
+        auto& v = mesh->GetVertexArray(0);
+        v.SetVertex(WE_IN_POSITION, pos);
+        v.SetVertex(WE_IN_TEXCOORD, uv);
+        mesh->SetDirty();
+    };
+    rebuild_compose(text_w, text_h);
+
+    // --- text-content actuator. Captures the layouter + a closure that
+    // re-rasterises new codepoints, lays them out, and rebuilds the
+    // compose quad to the new text dims. Runs on the render thread, which
+    // is also the JS thread — no synchronization needed.
     if (has_text_script) {
         const auto& sb = text_binding_it->second;
         if (! context.script_scene)
@@ -1365,16 +1516,26 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         if (fs) {
             ss.AddActuator({
                 fs,
-                [layouter](const script::ScriptValue& v) {
-                    if (auto* p = std::get_if<script::StringValue>(&v))
+                [layouter, face, rebuild_compose](const script::ScriptValue& v) {
+                    if (auto* p = std::get_if<script::StringValue>(&v)) {
+                        face->Populate(text::DecodeUtf8(p->s));
                         layouter->SetText(p->s);
+                        rebuild_compose(layouter->TextWidth(),
+                                        layouter->TextHeight());
+                    }
                 },
             });
         }
     }
 
-    context.node_id_map[obj.id] = { obj.parent, sp_node };
+    // sp_node renders glyphs to its private RT and must stay outside the
+    // parent chain. compose_node owns the world position and goes through
+    // the normal reparent path — appended in scene.json order so later
+    // foreground layers (e.g. wood overlay) can occlude it as the wallpaper
+    // designed.
     context.scene->sceneGraph->AppendChild(sp_node);
+    context.node_id_map[obj.id] = { obj.parent, compose_node };
+    context.scene->sceneGraph->AppendChild(compose_node);
 
     rstd_info("text '{}': initial=\"{}\" px={} peak_quads={} bbox={}x{}{} ({})",
              obj.name,
@@ -1702,6 +1863,13 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     // 3327063360's "组件" / "帧率位置"). Without them, ParseImageObj's
     // children can't find their parent in node_id_map and stay at the
     // scene root.
+    //
+    // Containers are appended to the scene-graph root AFTER ProcessObjects
+    // so background/image layers traverse first; otherwise their
+    // genericimage{2,3} effect chains (which sample `_rt_default`)
+    // topo-sort behind whatever text/overlay node wrote the first
+    // `_rt_default` version, producing a bg-on-top-of-text frame.
+    std::vector<std::shared_ptr<SceneNode>> deferred_containers;
     if (json.contains("objects")) {
         auto has_kind = [](const nlohmann::json& o) {
             for (const char* k :
@@ -1730,19 +1898,31 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             std::int32_t  id     = o.at("id").get<std::int32_t>();
             std::uint32_t parent = 0;
             if (o.contains("parent")) parent = o.at("parent").get<std::uint32_t>();
+            // Read transform fields. Each may be a plain string ("x y z")
+            // or a {script, scriptproperties, value} wrapper for scripted
+            // bindings; in the latter case the `value` sub-field holds the
+            // pre-script fallback. Without seeding from `value`, scripted
+            // containers stay at (0,0,0) / (1,1,1) on every frame before
+            // the first script tick — child layers then land at the canvas
+            // origin and their compose quads clip outside NDC.
+            auto read_vec3 = [&](const char* key, std::array<float, 3>& out) {
+                if (! o.contains(key)) return;
+                const auto& v = o.at(key);
+                std::string s;
+                if (v.is_string()) {
+                    s = v.get<std::string>();
+                } else if (v.is_object() && v.contains("value")
+                           && v.at("value").is_string()) {
+                    s = v.at("value").get<std::string>();
+                } else {
+                    return;
+                }
+                std::sscanf(s.c_str(), "%f %f %f", &out[0], &out[1], &out[2]);
+            };
             std::array<float, 3> origin { 0, 0, 0 }, scale { 1, 1, 1 }, angles { 0, 0, 0 };
-            if (o.contains("origin") && o.at("origin").is_string()) {
-                std::sscanf(o.at("origin").get<std::string>().c_str(), "%f %f %f",
-                            &origin[0], &origin[1], &origin[2]);
-            }
-            if (o.contains("scale") && o.at("scale").is_string()) {
-                std::sscanf(o.at("scale").get<std::string>().c_str(), "%f %f %f",
-                            &scale[0], &scale[1], &scale[2]);
-            }
-            if (o.contains("angles") && o.at("angles").is_string()) {
-                std::sscanf(o.at("angles").get<std::string>().c_str(), "%f %f %f",
-                            &angles[0], &angles[1], &angles[2]);
-            }
+            read_vec3("origin", origin);
+            read_vec3("scale",  scale);
+            read_vec3("angles", angles);
             auto node = std::make_shared<SceneNode>(Vector3f(origin.data()),
                                                      Vector3f(scale.data()),
                                                      Vector3f(angles.data()));
@@ -1753,11 +1933,14 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             wpscene::AbsorbAllFieldBindings(o, fb);
             WireFieldScripts(context, node.get(), fb);
             context.node_id_map[id] = { parent, node };
-            context.scene->sceneGraph->AppendChild(node);
+            deferred_containers.push_back(node);
         }
     }
 
     ProcessObjects(context, wp_objs, &sm);
+    for (auto& node : deferred_containers) {
+        context.scene->sceneGraph->AppendChild(node);
+    }
     if (sc.general.bloom && ! sc.general.hdr) {
         BuildBloomPostProcess(context, vfs, sc.general);
     }

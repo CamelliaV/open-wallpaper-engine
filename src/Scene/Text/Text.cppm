@@ -78,6 +78,16 @@ struct FontMetrics {
     std::uint32_t atlas_h { 0 };
 };
 
+// Pixel-coord AABB inside the atlas — emitted by Populate() for each glyph
+// it rasterised this call. The renderer coalesces these into per-frame
+// vkCmdCopyBufferToImage regions.
+struct AtlasDirtyRect {
+    std::uint32_t x { 0 };
+    std::uint32_t y { 0 };
+    std::uint32_t w { 0 };
+    std::uint32_t h { 0 };
+};
+
 class FontFace {
 public:
     FontFace();
@@ -87,16 +97,24 @@ public:
     FontFace(const FontFace&)            = delete;
     FontFace& operator=(const FontFace&) = delete;
 
-    // Returns a stable pointer into the internal cache. Lazily rasterises
-    // missing glyphs into the atlas; returns nullptr only on hard FreeType
-    // failure (rare — even .notdef is normally available as glyph index 0).
-    const GlyphInfo* Glyph(std::uint32_t codepoint);
-    FontMetrics      Metrics() const;
-    // R8 atlas, row-major, atlas_w * atlas_h bytes. Stable across Glyph()
-    // calls until the dirty flag is cleared and the next miss happens.
+    // Rasterise every codepoint that isn't already in the atlas. Synchronous
+    // (FreeType is fast). Each newly-blitted glyph appends an AtlasDirtyRect
+    // for the next frame's GPU upload.
+    void Populate(std::span<const std::uint32_t> codepoints);
+
+    // Pure read of the cached metrics; nullptr if the codepoint hasn't been
+    // Populate()'d yet. No FreeType / atlas mutation.
+    const GlyphInfo* Lookup(std::uint32_t codepoint) const noexcept;
+
+    FontMetrics                  Metrics() const;
     std::span<const std::uint8_t> AtlasPixels() const;
-    bool                          AtlasDirty() const noexcept;
-    void                          ClearDirty() noexcept;
+
+    std::span<const AtlasDirtyRect> DirtyRects() const noexcept;
+    void                            ClearDirtyRects() noexcept;
+
+    // Stable URL identifying this face's atlas in the renderer's texture
+    // cache. Set by FontCache::GetFace at first registration.
+    const std::string& AtlasUrl() const noexcept;
 
 private:
     friend class FontCache;
@@ -112,9 +130,15 @@ public:
     FontCache& operator=(const FontCache&) = delete;
 
     // Acquires (or reuses) a face for the given font blob at the given pixel
-    // size. The blob is hashed for keying, then kept alive internally.
-    // Returns nullptr if FreeType cannot open the blob.
-    FontFace* GetFace(std::span<const std::byte> blob, std::uint32_t pixel_size);
+    // size. The shared_ptr keeps the blob alive for the face's lifetime so
+    // FreeType's pointers into it stay valid. Returns nullptr if FreeType
+    // cannot open the blob.
+    FontFace* GetFace(std::shared_ptr<std::vector<std::byte>> blob,
+                      std::uint32_t                            pixel_size);
+
+    // Iterate every face the cache currently owns (used by the renderer's
+    // per-frame atlas-commit hook).
+    std::vector<FontFace*> Faces() const;
 
     struct ResolvedBlob {
         std::shared_ptr<std::vector<std::byte>> bytes;
@@ -136,6 +160,12 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
+// Lazy accessor for the scene-owned FontCache. The cache lives behind the
+// opaque `Scene::font_cache` pointer so wescene.scene doesn't have to depend
+// on this module.
+FontCache& EnsureSceneFontCache(owe::Scene& scene);
+FontCache* SceneFontCache(owe::Scene& scene) noexcept;
+
 // Snapshot the face's atlas pixels into a renderer-consumable Image (R8,
 // single slot, single mipmap, LINEAR/CLAMP_TO_EDGE sampler). The returned
 // Image owns its pixel buffer; the FontFace can subsequently mutate or be
@@ -153,16 +183,10 @@ std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face,
 std::shared_ptr<owe::SceneShader> GetTextSceneShader();
 
 // --- TextLayouter -----------------------------------------------------------
-// Holds everything needed to lay out a string of glyphs into a SceneMesh:
-// the FontCache (so the Face stays alive), the Face, the layout style, and
-// the mesh whose vertex/index arrays the layouter rewrites in-place when
-// SetText() is called from a script actuator.
-//
-// Glyph coverage is fixed at construction: every codepoint in `initial_text`
-// AND every codepoint in `pre_raster_alphabet` is rasterised before the
-// initial layout, then the atlas is snapshot and registered with the scene.
-// SetText() draws only with these pre-rasterised glyphs; codepoints outside
-// the set are dropped (logged once per layouter).
+// Lays out a UTF-8 string of glyphs into a SceneMesh's vertex / index arrays.
+// SetText() only reads from the face's atlas via Lookup(); the caller is
+// expected to have Populated() the codepoints first (the runtime actuator
+// does this on every script tick).
 //
 // Mesh capacity is fixed at construction (`peak_quads`). SetText() that
 // would exceed it gets clamped + logged.
@@ -182,14 +206,14 @@ struct TextLayoutStyle {
 
 class TextLayouter {
 public:
-    // The layouter takes ownership of `cache` so `face` outlives the mesh.
-    // `mesh` must already have its SceneVertexArray/SceneIndexArray sized
-    // to peak_quads * 4 vertices and peak_quads * 6 indices.
-    TextLayouter(std::unique_ptr<FontCache>          cache,
-                 FontFace*                           face,
+    // `face` must outlive the layouter (held non-owning; the scene-owned
+    // FontCache keeps it alive). `mesh` must already have its
+    // SceneVertexArray/SceneIndexArray sized to peak_quads * 4 vertices and
+    // peak_quads * 6 indices.
+    TextLayouter(FontFace*                       face,
                  std::shared_ptr<owe::SceneMesh> mesh,
-                 TextLayoutStyle                     style,
-                 std::size_t                         peak_quads);
+                 TextLayoutStyle                 style,
+                 std::size_t                     peak_quads);
     ~TextLayouter();
     TextLayouter(const TextLayouter&)            = delete;
     TextLayouter& operator=(const TextLayouter&) = delete;
