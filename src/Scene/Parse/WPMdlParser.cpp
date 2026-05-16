@@ -335,6 +335,17 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         }
     }
     
+    // V21 bones at the first hierarchy level encode their bind position in
+    // world (puppet-local) space directly, not as a local-from-parent offset.
+    // The convention is that parent==0 means "rooted on the anchor bone with
+    // no offset accumulation"; real parent chains use parent>=1.
+    if (mdl.mdlv >= 21) {
+        for (unsigned i = 1; i < mdl.puppet->bones.size(); ++i) {
+            auto& b = mdl.puppet->bones[i];
+            if (b.parent == 0) b.parent = 0xFFFFFFFFu;
+        }
+    }
+
     mdl.puppet->prepared();
 
     rstd_info("read puppet: mdlv: {}, nmdls: {}, mdla: {}, bones: {}, anims: {}",
