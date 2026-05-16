@@ -583,8 +583,9 @@ public:
     void            UpdateTrans();
     Eigen::Matrix4d ModelTrans() const { return m_trans; };
 
-    SceneMesh* Mesh() { return m_mesh.get(); }
-    bool       HasMaterial() const { return m_mesh && m_mesh->Material() != nullptr; };
+    SceneMesh*                        Mesh() { return m_mesh.get(); }
+    const std::shared_ptr<SceneMesh>& MeshShared() const { return m_mesh; }
+    bool HasMaterial() const { return m_mesh && m_mesh->Material() != nullptr; };
 
     const auto& GetChildren() const { return m_children; }
     auto&       GetChildren() { return m_children; }

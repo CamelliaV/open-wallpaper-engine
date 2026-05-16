@@ -342,6 +342,9 @@ struct EngineHostState {
     // Empty `ls_path` means in-memory only (the legacy bootstrap shape).
     std::unordered_map<std::string, std::string> ls_data;
     std::string                                  ls_path;
+    // The script currently running. createLayer pops clones from this
+    // FieldScript's clone_queue. Set around every init/update/cursor invoke.
+    FieldScript* active_field_script { nullptr };
 };
 
 // ---------------------------------------------------------------------------
@@ -368,6 +371,10 @@ struct FieldScript::Impl {
     // Per-script cursor-inside-bbox state used to edge-detect
     // cursorEnter / cursorLeave between frames.
     bool              cursor_inside { false };
+    // Pre-spawned SceneNode clones available to thisScene.createLayer.
+    // Populated by WireFieldScripts for audio-bar style scripts; popped
+    // from the front each createLayer call.
+    std::vector<owe::SceneNode*> clone_queue;
 };
 
 FieldScript::FieldScript() : m_impl(std::make_unique<Impl>()) {}
@@ -901,6 +908,9 @@ globalThis.engine.isScreensaver = false;
 // these methods covers the audio-responsive cluster (1023 instances).
 class Vec2 {
   constructor(x, y) {
+    // Single-number arg splats to both components (WE convention,
+    // e.g. `new Vec2(0.5)` => Vec2(0.5, 0.5)).
+    if (typeof x === 'number' && y === undefined) { this.x = x; this.y = x; return; }
     this.x = (typeof x === 'number') ? x : 0;
     this.y = (typeof y === 'number') ? y : 0;
   }
@@ -908,11 +918,18 @@ class Vec2 {
   subtract(o) { return new Vec2(this.x - (o.x ?? o), this.y - (o.y ?? o)); }
   multiply(o) { return new Vec2(this.x * (o.x ?? o), this.y * (o.y ?? o)); }
   divide(o)   { return new Vec2(this.x / (o.x ?? o), this.y / (o.y ?? o)); }
+  copy()      { return new Vec2(this.x, this.y); }
+  clone()     { return new Vec2(this.x, this.y); }
+  length()    { return Math.sqrt(this.x*this.x + this.y*this.y); }
 }
 class Vec3 {
   constructor(x, y, z) {
     if (typeof x === 'object' && x !== null) {
       this.x = x.x ?? 0; this.y = x.y ?? 0; this.z = x.z ?? 0;
+    } else if (typeof x === 'number' && y === undefined && z === undefined) {
+      // Single-number arg splats to all three components (WE convention,
+      // e.g. `new Vec3(scriptProperties.barWidth)` => Vec3(5,5,5)).
+      this.x = x; this.y = x; this.z = x;
     } else {
       this.x = (typeof x === 'number') ? x : 0;
       this.y = (typeof y === 'number') ? y : 0;
@@ -923,6 +940,8 @@ class Vec3 {
   subtract(o) { return new Vec3(this.x - (o.x ?? o), this.y - (o.y ?? o), this.z - (o.z ?? o)); }
   multiply(o) { return new Vec3(this.x * (o.x ?? o), this.y * (o.y ?? o), this.z * (o.z ?? o)); }
   divide(o)   { return new Vec3(this.x / (o.x ?? o), this.y / (o.y ?? o), this.z / (o.z ?? o)); }
+  copy()      { return new Vec3(this.x, this.y, this.z); }
+  clone()     { return new Vec3(this.x, this.y, this.z); }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z); }
 }
 globalThis.Vec2 = Vec2;
@@ -1347,6 +1366,32 @@ JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     return hit ? WrapLayerNode(ctx, hit) : JS_DupValue(ctx, host->default_layer);
 }
 
+// thisScene.createLayer(model_path) — WE-style runtime layer spawn. The
+// model path is ignored: parser-side pre-spawned a queue of SceneNode clones
+// (one per expected createLayer call) when the script binding showed the
+// audio-bar pattern. Pop the next clone here; fall back to the default
+// stub when no clones remain so the script's caller still gets an object.
+JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/,
+                             JSValueConst* /*argv*/) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto* fs   = host->active_field_script;
+    if (! fs || fs->m_impl->clone_queue.empty())
+        return JS_DupValue(ctx, host->default_layer);
+    owe::SceneNode* node = fs->m_impl->clone_queue.front();
+    fs->m_impl->clone_queue.erase(fs->m_impl->clone_queue.begin());
+    return WrapLayerNode(ctx, node);
+}
+
+// thisScene.getLayerIndex(layer) / sortLayer(layer, idx). owe doesn't have
+// a draw-order layer index that scripts can mutate at runtime; return 0
+// and no-op so audio-bar style scripts complete init without error.
+JSValue NodeSceneGetLayerIndex(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    return JS_NewInt32(ctx, 0);
+}
+JSValue NodeSceneSortLayer(JSContext*, JSValueConst, int, JSValueConst*) {
+    return JS_UNDEFINED;
+}
+
 // --- WWTextureAnimation -----------------------------------------------------
 // Wraps a SceneNode*'s TextureAnimatorState. Slot 0 only — every workshop
 // script that touches `getTextureAnimation()` in the corpus uses the primary
@@ -1455,6 +1500,9 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getName",             0, NodeGetName),
     JS_CFUNC_DEF("getLayer",            1, NodeGetLayer),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
+    JS_CFUNC_DEF("createLayer",         1, NodeSceneCreateLayer),
+    JS_CFUNC_DEF("getLayerIndex",       1, NodeSceneGetLayerIndex),
+    JS_CFUNC_DEF("sortLayer",           2, NodeSceneSortLayer),
 };
 
 void InitLayerClass(JSContext* ctx, JSRuntime* rt) {
@@ -1624,6 +1672,7 @@ void JsRuntime::TickAll() {
         const bool now_inside = in_window && HitTestNode(I->node, cursor);
         BindThisLayer(ctx, JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer
                                                             : I->wrapped_layer);
+        m_impl->host.active_field_script = fs.get();
         if (now_inside != I->cursor_inside) {
             InvokeCursorCallback(ctx, I->module_ns,
                                  now_inside ? "cursorEnter" : "cursorLeave",
@@ -1664,6 +1713,7 @@ void JsRuntime::TickAll() {
         BindThisLayer(ctx,
                       JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer
                                                        : I->wrapped_layer);
+        m_impl->host.active_field_script = fs.get();
         JSValue ret;
         if (I->update_takes_arg) {
             JSValue args[1] = { JS_DupValue(ctx, I->current_value) };
@@ -1686,6 +1736,7 @@ void JsRuntime::TickAll() {
         I->last_value = CoerceReturn(ctx, ret, I->kind);
         JS_FreeValue(ctx, ret);
     }
+    m_impl->host.active_field_script = nullptr;
 }
 
 void JsRuntime::ForEachScript(EachFn fn, void* user) {
@@ -1713,7 +1764,8 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
                                         FieldKind        field_kind_in,
                                         const json&      properties_config,
                                         const json&      initial_value,
-                                        owe::SceneNode*  node) {
+                                        owe::SceneNode*  node,
+                                        std::vector<owe::SceneNode*> clones) {
     JSContext* ctx = m_impl->ctx;
     if (! ctx) return nullptr;
 
@@ -1766,6 +1818,7 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     I->module_ns      = ns;  // owns one ref now
     I->node           = node;
     I->wrapped_layer  = wrapped;  // takes ownership; freed in JsRuntime dtor
+    I->clone_queue    = std::move(clones);
 
     // 3. Wire scriptProperties._hostValues from the per-binding config so
     //    `scriptProperties.foo` returns the configured value (resolving
@@ -1786,15 +1839,19 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     JS_FreeValue(ctx, sp);
 
     // 4. If the module exports `init`, call it with the initial value
-    //    coerced to match the bound field's expected JS shape.
+    //    coerced to match the bound field's expected JS shape. Mark this
+    //    fs as the active script so init-time createLayer calls pop from
+    //    its clone_queue.
     JSValue init_fn = JS_GetPropertyStr(ctx, ns, "init");
     JSValue init_arg = CoerceInitialValue(ctx, initial_value, I->kind);
     if (JS_IsFunction(ctx, init_fn)) {
+        m_impl->host.active_field_script = fs.get();
         JSValue r = JS_Call(ctx, init_fn, JS_UNDEFINED, 1, &init_arg);
         if (JS_IsException(r)) {
             m_impl->LogError(ctx, script_sha, "init threw");
         }
         JS_FreeValue(ctx, r);
+        m_impl->host.active_field_script = nullptr;
     }
     JS_FreeValue(ctx, init_fn);
 
@@ -1831,7 +1888,17 @@ ScriptScene::~ScriptScene() = default;
 
 JsRuntime& ScriptScene::runtime() noexcept { return m_impl->rt; }
 void       ScriptScene::AddActuator(Actuator a) { m_impl->actuators.push_back(a); }
-bool       ScriptScene::empty() const noexcept { return m_impl->actuators.empty(); }
+// Empty = no scripts AND no actuators. Visibility-bound side-effect-only
+// scripts (audio bar fanout) don't register an actuator but still need
+// their TickAll to run, so emptiness must also consult the runtime.
+bool       ScriptScene::empty() const noexcept {
+    if (! m_impl->actuators.empty()) return false;
+    bool has_script = false;
+    m_impl->rt.ForEachScript(
+        [](script::FieldScript*, void* u) { *static_cast<bool*>(u) = true; },
+        &has_script);
+    return ! has_script;
+}
 
 std::function<void(const ScriptValue&)>
 MakeNodeTransformApply(owe::SceneNode* node, NodeTransformTarget target) {

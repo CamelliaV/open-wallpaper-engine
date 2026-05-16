@@ -66,6 +66,10 @@ public:
     void SetTexelSize(float x, float y) override;
 
     void SetNodeData(void*, const WPShaderValueData&);
+    // Replicate the shader-value record from src to dst. Used when scripts
+    // clone a SceneNode at parse time (audio-bar fanout) so the clones
+    // pick up the template's parallaxDepth / puppet binding / RT links.
+    void CopyNodeData(void* src, void* dst);
     void SetCameraParallax(const WPCameraParallax& value) { m_parallax = value; }
 
     void SetScreenSize(i32 w, i32 h) override { m_screen_size = { (float)w, (float)h }; }

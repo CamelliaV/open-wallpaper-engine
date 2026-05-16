@@ -276,4 +276,10 @@ void WPShaderValueUpdater::SetNodeData(void* nodeAddr, const WPShaderValueData& 
     m_nodeDataMap[nodeAddr] = data;
 }
 
+void WPShaderValueUpdater::CopyNodeData(void* src, void* dst) {
+    auto it = m_nodeDataMap.find(src);
+    if (it == m_nodeDataMap.end()) return;
+    m_nodeDataMap[dst] = it->second;
+}
+
 void WPShaderValueUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y }; }

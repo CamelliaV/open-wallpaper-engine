@@ -119,7 +119,8 @@ public:
                                  FieldKind        field_kind,
                                  const nlohmann::json& properties_config,
                                  const nlohmann::json& initial_value,
-                                 owe::SceneNode*  node = nullptr);
+                                 owe::SceneNode*  node = nullptr,
+                                 std::vector<owe::SceneNode*> clones = {});
 
     // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`
     // searches from this node. Call once per scene after parsing finishes.

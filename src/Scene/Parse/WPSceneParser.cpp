@@ -33,22 +33,76 @@ std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(
 // :scene_stages partition; their definitions live near the bottom of
 // this file.
 
+namespace
+{
+// Detect the WE audio-bar fanout pattern: scripts that bind a layer's
+// `visible` field, call engine.registerAudioBuffers(N), and then create
+// N-1 sibling layers in init() via thisScene.createLayer(...). owe doesn't
+// have a runtime model parser, so we pre-spawn the N-1 SceneNode clones at
+// parse time (sharing the template's mesh + shader-value record) and hand
+// them to the script through FieldScript::clone_queue.
+//
+// Returns N (resolution) when the source matches the pattern, otherwise 0.
+unsigned DetectAudioFanoutCount(std::string_view src) {
+    auto pos = src.find("registerAudioBuffers");
+    if (pos == std::string_view::npos) return 0;
+    if (src.find("createLayer") == std::string_view::npos) return 0;
+    pos += std::string_view("registerAudioBuffers").size();
+    while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t')) ++pos;
+    if (pos >= src.size() || src[pos] != '(') return 0;
+    ++pos;
+    while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t')) ++pos;
+    unsigned n = 0;
+    while (pos < src.size() && src[pos] >= '0' && src[pos] <= '9') {
+        n = n * 10 + unsigned(src[pos] - '0');
+        ++pos;
+    }
+    return n;
+}
+
+std::vector<owe::SceneNode*>
+SpawnLayerClones(ParseContext& context, SceneNode* tmpl, unsigned count) {
+    std::vector<owe::SceneNode*> out;
+    if (! tmpl || count == 0) return out;
+    out.reserve(count);
+    for (unsigned i = 0; i < count; ++i) {
+        auto clone = std::make_shared<SceneNode>(tmpl->Translate(), tmpl->Scale(),
+                                                  tmpl->Rotation(), tmpl->Name());
+        clone->SetSize(tmpl->Size());
+        if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
+        clone->AddMesh(tmpl->MeshShared());
+        clone->ID() = -((i32)i + 1);  // negative IDs reserved for clones
+        context.shader_updater->CopyNodeData(tmpl, clone.get());
+        out.push_back(clone.get());
+        context.scene->sceneGraph->AppendChild(clone);
+    }
+    return out;
+}
+}
+
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
-// MVP-supported transform fields (origin/scale/angles), creates a
-// FieldScript + closure-based Actuator. Other fields are skipped here;
-// field-specific paths (notably text content) wire their own actuators
-// inline at the parse site.
+// supported fields, creates a FieldScript + closure-based Actuator. Text
+// bindings are wired by ParseTextObj's own call site (with the layouter
+// closure); other side-effect-only bindings (`visible`) get the script
+// without an actuator so update() still drives layer mutations.
 void WireFieldScripts(ParseContext& context, SceneNode* node,
                       const wpscene::WPFieldBindings& fb) {
     if (! node || fb.scripts.empty()) return;
-    if (! context.script_scene)
+    if (! context.script_scene) {
         context.script_scene = std::make_unique<script::ScriptScene>();
+        // Bind thisScene to the scene root *before* any init() runs, so
+        // scripts that call thisScene.createLayer / getLayerIndex / sortLayer
+        // inside init() see the C++ wrapper instead of the bootstrap stub.
+        // FinalizeScene re-applies this with the same root.
+        context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.get());
+    }
     auto& ss = *context.script_scene;
     auto& rt = ss.runtime();
 
     for (const auto& [field, sb] : fb.scripts) {
         script::NodeTransformTarget tgt;
         script::FieldKind           kind;
+        bool                        has_actuator = true;
         if (field == "origin") {
             tgt  = script::NodeTransformTarget::Translate;
             kind = script::FieldKind::Vec3;
@@ -58,17 +112,27 @@ void WireFieldScripts(ParseContext& context, SceneNode* node,
         } else if (field == "angles") {
             tgt  = script::NodeTransformTarget::Rotation;
             kind = script::FieldKind::Vec3;
+        } else if (field == "visible") {
+            // Side-effect-only script bound to visibility. update() may
+            // drive other layers via createLayer + property writes; we
+            // don't write a return value back to the node.
+            kind         = script::FieldKind::Bool;
+            has_actuator = false;
         } else {
-            // Recognised but no transform actuator (alpha/color/visible/
-            // text/rate/intensity/...). Field-specific call sites wire
-            // those themselves with their own apply closure.
+            // text/alpha/color/rate/intensity/... — wired elsewhere or
+            // not yet supported.
             continue;
         }
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
+        std::vector<owe::SceneNode*> clones;
+        if (unsigned n = DetectAudioFanoutCount(sb.source); n > 1) {
+            clones = SpawnLayerClones(context, node, n - 1);
+        }
         auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties,
-                                       sb.initial_value, node);
+                                       sb.initial_value, node, std::move(clones));
         if (! fs) continue;
-        ss.AddActuator({ fs, script::MakeNodeTransformApply(node, tgt) });
+        if (has_actuator)
+            ss.AddActuator({ fs, script::MakeNodeTransformApply(node, tgt) });
     }
 }
 
