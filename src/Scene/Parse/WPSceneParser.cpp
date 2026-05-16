@@ -1402,7 +1402,21 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     sp_node->ID() = obj.id;
     const float text_bbox_w = text_w + 2.0f * style.padding;
     const float text_bbox_h = text_h + 2.0f * style.padding;
-    LoadAlignment(*sp_node, obj.alignment, { text_bbox_w, text_bbox_h });
+    // WE text objects use horizontalalign+verticalalign as the bbox anchor on
+    // origin. The image-style `alignment` field (default "center") is only a
+    // fallback for older texts that lack h/valign — using it unconditionally
+    // forced every left/right text to render centered on origin, clipping the
+    // half that extended past it (e.g. workshop/2413184772 calendar).
+    std::string anchor = obj.alignment;
+    if (! obj.horizontalalign.empty() || ! obj.verticalalign.empty()) {
+        anchor.clear();
+        anchor += obj.horizontalalign;
+        if (! obj.verticalalign.empty()) {
+            if (! anchor.empty()) anchor += ' ';
+            anchor += obj.verticalalign;
+        }
+    }
+    LoadAlignment(*sp_node, anchor, { text_bbox_w, text_bbox_h });
     sp_node->SetSize({ text_bbox_w, text_bbox_h });
     sp_node->AddMesh(sp_mesh);
 
