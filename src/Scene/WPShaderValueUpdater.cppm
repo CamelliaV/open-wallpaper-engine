@@ -32,6 +32,12 @@ struct WPUniformInfo {
     bool has_SCREEN { false };
     bool has_LP { false };
 
+    // WE audio-bar shaders. Each pair is a (Left, Right) float[N] array
+    // selected by the shader's RESOLUTION combo at compile time.
+    bool has_audio_16_l { false }, has_audio_16_r { false };
+    bool has_audio_32_l { false }, has_audio_32_r { false };
+    bool has_audio_64_l { false }, has_audio_64_r { false };
+
     struct Tex {
         bool has_resolution { false };
         bool has_mipmap { false };
@@ -72,6 +78,11 @@ public:
     void CopyNodeData(void* src, void* dst);
     void SetCameraParallax(const WPCameraParallax& value) { m_parallax = value; }
 
+    // Push the current 64-bin spectrum snapshot. Renderer calls this once
+    // per frame before drawFrame. Used to fill `g_AudioSpectrum{16,32,64}{Left,Right}`
+    // shader uniforms in UpdateUniforms.
+    void SetAudioSpectrum(std::span<const float, 64> bins) override;
+
     void SetScreenSize(i32 w, i32 h) override { m_screen_size = { (float)w, (float)h }; }
 
 private:
@@ -88,6 +99,10 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> m_last_mouse_input_time;
 
     std::array<float, 2> m_screen_size { 1920, 1080 };
+
+    // Latest 64-bin spectrum, pushed by SetAudioSpectrum() once per frame.
+    // Downsampled in-place on the way out to fill 16/32 resolution arrays.
+    std::array<float, 64> m_audio_bins {};
 
     Map<void*, WPShaderValueData> m_nodeDataMap;
     Map<void*, WPUniformInfo>     m_nodeUniformInfoMap;

@@ -70,6 +70,16 @@ inline constexpr std::string_view G_BONES { "g_Bones" };
 inline constexpr std::string_view G_SCREEN { "g_Screen" };
 inline constexpr std::string_view G_PARALLAXPOSITION { "g_ParallaxPosition" };
 
+// WE audio-bar shaders read one of three (Left, Right) array pairs depending
+// on the chosen Frequency Resolution combo. owe sources from wavsen's 64-bin
+// log-spaced spectrum; we downsample to 16/32 by averaging neighboring bins.
+inline constexpr std::string_view G_AUDIO_SPEC_16_L { "g_AudioSpectrum16Left" };
+inline constexpr std::string_view G_AUDIO_SPEC_16_R { "g_AudioSpectrum16Right" };
+inline constexpr std::string_view G_AUDIO_SPEC_32_L { "g_AudioSpectrum32Left" };
+inline constexpr std::string_view G_AUDIO_SPEC_32_R { "g_AudioSpectrum32Right" };
+inline constexpr std::string_view G_AUDIO_SPEC_64_L { "g_AudioSpectrum64Left" };
+inline constexpr std::string_view G_AUDIO_SPEC_64_R { "g_AudioSpectrum64Right" };
+
 inline constexpr std::string_view SpecTex_Default { "_rt_default" };
 inline constexpr std::string_view SpecTex_Link { "_rt_link_" };
 

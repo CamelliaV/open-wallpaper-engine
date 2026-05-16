@@ -346,6 +346,11 @@ void RenderHandler::on(RenderDraw&&) {
                 m_scene->audioAverage[i].store(local * 0.94f,
                                                 std::memory_order_relaxed);
             }
+            // Push the merged spectrum to the shader updater so audio-bar
+            // shaders (Simple_Audio_Bars and friends) see live data through
+            // g_AudioSpectrum{16,32,64}{Left,Right}.
+            m_scene->shaderValueUpdater->SetAudioSpectrum(
+                std::span<const float, 64>(fi.audio_average));
             owe::script::TickSceneScripts(*m_scene, fi);
         }
         m_scene->paritileSys->Emitt();

@@ -72,6 +72,12 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp&
     info.has_TEXELSIZEHALF    = existsOp(G_TEXELSIZEHALF);
     info.has_SCREEN           = existsOp(G_SCREEN);
     info.has_LP               = existsOp(G_LP);
+    info.has_audio_16_l       = existsOp(G_AUDIO_SPEC_16_L);
+    info.has_audio_16_r       = existsOp(G_AUDIO_SPEC_16_R);
+    info.has_audio_32_l       = existsOp(G_AUDIO_SPEC_32_L);
+    info.has_audio_32_r       = existsOp(G_AUDIO_SPEC_32_R);
+    info.has_audio_64_l       = existsOp(G_AUDIO_SPEC_64_L);
+    info.has_audio_64_r       = existsOp(G_AUDIO_SPEC_64_R);
 
     std::accumulate(begin(info.texs), end(info.texs), 0, [&existsOp](unsigned index, auto& value) {
         value.has_resolution = existsOp(WE_GLTEX_RESOLUTION_NAMES[index]);
@@ -270,6 +276,26 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     if (pNode->IsBrightnessOverridden()) {
         updateOp("g_Brightness", pNode->Brightness());
     }
+
+    // WE audio-bar shaders. std140 array stride is 16 bytes per element, so
+    // pack each amplitude into the .x slot of a vec4 and leave .yzw at zero.
+    // wavsen's mono FFT feeds both Left and Right with the same data.
+    auto push_audio = [&](std::string_view name, unsigned out_n) {
+        std::vector<float> packed(out_n * 4, 0.0f);
+        const unsigned ratio = 64 / out_n;  // 4, 2, 1 for 16/32/64
+        for (unsigned i = 0; i < out_n; ++i) {
+            float acc = 0.0f;
+            for (unsigned k = 0; k < ratio; ++k) acc += m_audio_bins[i * ratio + k];
+            packed[i * 4] = acc / float(ratio);
+        }
+        updateOp(name, std::span<const float>(packed));
+    };
+    if (info.has_audio_16_l) push_audio(G_AUDIO_SPEC_16_L, 16);
+    if (info.has_audio_16_r) push_audio(G_AUDIO_SPEC_16_R, 16);
+    if (info.has_audio_32_l) push_audio(G_AUDIO_SPEC_32_L, 32);
+    if (info.has_audio_32_r) push_audio(G_AUDIO_SPEC_32_R, 32);
+    if (info.has_audio_64_l) push_audio(G_AUDIO_SPEC_64_L, 64);
+    if (info.has_audio_64_r) push_audio(G_AUDIO_SPEC_64_R, 64);
 }
 
 void WPShaderValueUpdater::SetNodeData(void* nodeAddr, const WPShaderValueData& data) {
@@ -283,3 +309,7 @@ void WPShaderValueUpdater::CopyNodeData(void* src, void* dst) {
 }
 
 void WPShaderValueUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y }; }
+
+void WPShaderValueUpdater::SetAudioSpectrum(std::span<const float, 64> bins) {
+    std::copy(bins.begin(), bins.end(), m_audio_bins.begin());
+}

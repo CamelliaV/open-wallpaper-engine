@@ -1098,6 +1098,7 @@ public:
     virtual void MouseInput(double x, double y) = 0;
     virtual void SetTexelSize(float x, float y) = 0;
     virtual void SetScreenSize(i32 w, i32 h)    = 0;
+    virtual void SetAudioSpectrum(std::span<const float, 64> bins) = 0;
 };
 
 // ============================================================================
