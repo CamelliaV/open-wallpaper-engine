@@ -1,23 +1,32 @@
 {
   "pkg": {
-    "file_count": 151,
+    "file_count": 94,
     "has_scene_json": true,
-    "version": "PKGV0018"
+    "version": "PKGV0021"
   },
   "puppets": [
     {
       "anim_tracks": [
         {
-          "bone_track_count": 30,
-          "fps": 2.5,
-          "id": 53,
-          "length": 30,
-          "mode": 1,
+          "bone_track_count": 11,
+          "fps": 60.0,
+          "id": 1046,
+          "length": 180,
+          "mode": 0,
           "name": "动画 1",
-          "total_bone_frames": 930
+          "total_bone_frames": 1991
+        },
+        {
+          "bone_track_count": 11,
+          "fps": 60.0,
+          "id": 273408,
+          "length": 240,
+          "mode": 0,
+          "name": "动画 2",
+          "total_bone_frames": 2651
         }
       ],
-      "anims": 1,
+      "anims": 2,
       "bone_tree": [
         {
           "parent": 4294967295,
@@ -25,7 +34,7 @@
             1.0,
             1.0,
             1.0,
-            5.5189208984375
+            -439.0563049316406
           ]
         },
         {
@@ -34,7 +43,79 @@
             1.0,
             1.0,
             1.0,
-            271.759765625
+            -91.95372009277344
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            213.49661254882813
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            224.60533142089844
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            220.44277954101563
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            131.37998962402344
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            134.16818237304688
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            340.1397476196289
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            170.10400390625
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            315.2822265625
           ]
         },
         {
@@ -43,7 +124,79 @@
             1.0,
             1.0,
             1.0,
-            327.6046142578125
+            415.33350372314453
+          ]
+        }
+      ],
+      "bones": 11,
+      "index_count": 7952,
+      "mat_json_file": "materials/HUANG.json",
+      "mdla": 6,
+      "mdls": 3,
+      "mdlv": 21,
+      "ok": true,
+      "part_count": 11,
+      "path": "/models/HUANG_puppet.mdl",
+      "vert_extra_count": 4243,
+      "vertex_count": 4243
+    },
+    {
+      "anim_tracks": [
+        {
+          "bone_track_count": 41,
+          "fps": 60.0,
+          "id": 86,
+          "length": 360,
+          "mode": 0,
+          "name": "动画 1",
+          "total_bone_frames": 14801
+        },
+        {
+          "bone_track_count": 41,
+          "fps": 60.0,
+          "id": 107776,
+          "length": 180,
+          "mode": 0,
+          "name": "动画 2",
+          "total_bone_frames": 7421
+        },
+        {
+          "bone_track_count": 41,
+          "fps": 60.0,
+          "id": 165632,
+          "length": 180,
+          "mode": 0,
+          "name": "动画 3",
+          "total_bone_frames": 7421
+        }
+      ],
+      "anims": 3,
+      "bone_tree": [
+        {
+          "parent": 4294967295,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -138.81048583984375
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            161.9971923828125
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            679.1570739746094
           ]
         },
         {
@@ -52,106 +205,133 @@
             1.0,
             1.0,
             1.0,
-            316.18798828125
+            -1584.0748291015625
           ]
         },
         {
-          "parent": 3,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            255.38623046875
+            -1539.4793701171875
           ]
         },
         {
-          "parent": 4,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            229.1629638671875
+            -188.0755615234375
           ]
         },
         {
-          "parent": 5,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            1485.62451171875
+            -358.617919921875
           ]
         },
         {
-          "parent": 3,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            232.363525390625
+            177.07763671875
           ]
         },
         {
-          "parent": 7,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            305.8900146484375
+            -753.07373046875
           ]
         },
         {
-          "parent": 8,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            1757.4326171875
+            6.80694580078125
           ]
         },
         {
-          "parent": 9,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -132.061767578125
+            149.6749267578125
           ]
         },
         {
-          "parent": 10,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -169.210693359375
+            -73.24755859375
           ]
         },
         {
-          "parent": 11,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -222.40185546875
+            36.46028518676758
           ]
         },
         {
-          "parent": 12,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -215.30908203125
+            588.095947265625
           ]
         },
         {
-          "parent": 13,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -209.990966796875
+            -791.4659423828125
+          ]
+        },
+        {
+          "parent": 14,
+          "transform_col_sums": [
+            1.070549137890339,
+            0.9240803644061089,
+            1.0,
+            441.070068359375
+          ]
+        },
+        {
+          "parent": 14,
+          "transform_col_sums": [
+            1.0638308227062225,
+            0.9318068325519562,
+            1.0,
+            462.60667419433594
+          ]
+        },
+        {
+          "parent": 14,
+          "transform_col_sums": [
+            0.977044390514493,
+            1.0224403869360685,
+            1.0,
+            480.8000030517578
           ]
         },
         {
@@ -160,52 +340,25 @@
             1.0,
             1.0,
             1.0,
-            -174.52978515625
+            439.4880065917969
           ]
         },
         {
-          "parent": 15,
+          "parent": 14,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -3963.1256103515625
+            463.9678649902344
           ]
         },
         {
-          "parent": 16,
+          "parent": 2,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -1204.5186767578125
-          ]
-        },
-        {
-          "parent": 3,
-          "transform_col_sums": [
-            1.0,
-            1.0,
-            1.0,
-            -206.3861083984375
-          ]
-        },
-        {
-          "parent": 18,
-          "transform_col_sums": [
-            1.0,
-            1.0,
-            1.0,
-            88.6986083984375
-          ]
-        },
-        {
-          "parent": 19,
-          "transform_col_sums": [
-            1.0,
-            1.0,
-            1.0,
-            1625.803466796875
+            434.32763671875
           ]
         },
         {
@@ -214,43 +367,124 @@
             1.0,
             1.0,
             1.0,
-            -272.7705078125
+            -482.94029998779297
           ]
         },
         {
-          "parent": 21,
+          "parent": 20,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -167.384033203125
+            -494.6581268310547
           ]
         },
         {
-          "parent": 22,
+          "parent": 20,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -203.9197998046875
+            -527.3789291381836
           ]
         },
         {
-          "parent": 23,
+          "parent": 20,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -243.63330078125
+            -535.56103515625
           ]
         },
         {
-          "parent": 24,
+          "parent": 20,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            -2101.753662109375
+            -436.56263732910156
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            30.554443359375
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -254.5533447265625
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -1356.8682556152344
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -873.5266418457031
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -1100.8900756835938
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -1183.6348266601563
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -1090.5899047851563
+          ]
+        },
+        {
+          "parent": 2,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -353.6742935180664
+          ]
+        },
+        {
+          "parent": 5,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -319.72906494140625
           ]
         },
         {
@@ -259,48 +493,66 @@
             1.0,
             1.0,
             1.0,
-            379.0787353515625
+            33.181640625
           ]
         },
         {
-          "parent": 5,
+          "parent": 19,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            2874.74755859375
+            -53.0482177734375
           ]
         },
         {
-          "parent": 27,
+          "parent": 0,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            22.85205078125
+            -464.218017578125
           ]
         },
         {
-          "parent": 5,
+          "parent": 0,
           "transform_col_sums": [
             1.0,
             1.0,
             1.0,
-            2087.0361328125
+            394.0426025390625
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            -227.45654296875
+          ]
+        },
+        {
+          "parent": 0,
+          "transform_col_sums": [
+            1.0,
+            1.0,
+            1.0,
+            441.3876953125
           ]
         }
       ],
-      "bones": 30,
-      "index_count": 3962,
-      "mat_json_file": "materials/拼图2.json",
-      "mdla": 3,
-      "mdls": 2,
-      "mdlv": 16,
+      "bones": 41,
+      "index_count": 15127,
+      "mat_json_file": "materials/RENWU.json",
+      "mdla": 6,
+      "mdls": 3,
+      "mdlv": 21,
       "ok": true,
-      "part_count": 0,
-      "path": "/models/拼图2_puppet.mdl",
-      "vert_extra_count": 0,
-      "vertex_count": 2332
+      "part_count": 41,
+      "path": "/models/RENWU_puppet.mdl",
+      "vert_extra_count": 8146,
+      "vertex_count": 8146
     }
   ],
   "scene": {
@@ -313,24 +565,50 @@
       "compo2": 0,
       "compo3": 0,
       "count": 1,
-      "format": 2,
-      "height": 2816,
-      "image_type": -1,
+      "format": 4,
+      "height": 1024,
+      "image_type": 13,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 2760,
-      "map_width": 2110,
+      "map_height": 795,
+      "map_width": 1789,
       "min_filter": 0,
-      "mipmap_larger": true,
+      "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/3.tex",
+      "path": "/materials/HUANG.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 2112,
+      "width": 2048,
+      "wrap_s": 0,
+      "wrap_t": 0
+    },
+    {
+      "compo1": 0,
+      "compo2": 0,
+      "compo3": 0,
+      "count": 1,
+      "format": 4,
+      "height": 4096,
+      "image_type": 13,
+      "is_sprite": false,
+      "mag_filter": 0,
+      "map_height": 3000,
+      "map_width": 4000,
+      "min_filter": 0,
+      "mipmap_larger": false,
+      "mipmap_pow2": false,
+      "ok": true,
+      "path": "/materials/RENWU.tex",
+      "sprite_frames": 0,
+      "texb": 3,
+      "texi": 1,
+      "texs": 0,
+      "texv": 5,
+      "width": 4096,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -366,23 +644,23 @@
       "compo3": 0,
       "count": 1,
       "format": 6,
-      "height": 1000,
+      "height": 1500,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
+      "map_height": 1500,
+      "map_width": 2000,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/blend_mask_059888c9.tex",
+      "path": "/materials/masks/foliagesway_mask_1188e903.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 1375,
+      "width": 2000,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -392,17 +670,95 @@
       "compo3": 0,
       "count": 1,
       "format": 6,
-      "height": 1080,
+      "height": 351,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1080,
-      "map_width": 1920,
+      "map_height": 351,
+      "map_width": 894,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/blur_combine_mask_04222c7f.tex",
+      "path": "/materials/masks/pulse__mask_10d0d88a.tex",
+      "sprite_frames": 0,
+      "texb": 3,
+      "texi": 1,
+      "texs": 0,
+      "texv": 5,
+      "width": 894,
+      "wrap_s": 0,
+      "wrap_t": 0
+    },
+    {
+      "compo1": 0,
+      "compo2": 0,
+      "compo3": 0,
+      "count": 1,
+      "format": 6,
+      "height": 1500,
+      "image_type": -1,
+      "is_sprite": false,
+      "mag_filter": 0,
+      "map_height": 1500,
+      "map_width": 2000,
+      "min_filter": 0,
+      "mipmap_larger": false,
+      "mipmap_pow2": false,
+      "ok": true,
+      "path": "/materials/masks/pulse__mask_48862c3b.tex",
+      "sprite_frames": 0,
+      "texb": 3,
+      "texi": 1,
+      "texs": 0,
+      "texv": 5,
+      "width": 2000,
+      "wrap_s": 0,
+      "wrap_t": 0
+    },
+    {
+      "compo1": 0,
+      "compo2": 0,
+      "compo3": 0,
+      "count": 1,
+      "format": 6,
+      "height": 1500,
+      "image_type": -1,
+      "is_sprite": false,
+      "mag_filter": 0,
+      "map_height": 1500,
+      "map_width": 2000,
+      "min_filter": 0,
+      "mipmap_larger": false,
+      "mipmap_pow2": false,
+      "ok": true,
+      "path": "/materials/masks/pulse__mask_89dbf865.tex",
+      "sprite_frames": 0,
+      "texb": 3,
+      "texi": 1,
+      "texs": 0,
+      "texv": 5,
+      "width": 2000,
+      "wrap_s": 0,
+      "wrap_t": 0
+    },
+    {
+      "compo1": 0,
+      "compo2": 0,
+      "compo3": 0,
+      "count": 1,
+      "format": 6,
+      "height": 256,
+      "image_type": -1,
+      "is_sprite": false,
+      "mag_filter": 0,
+      "map_height": 256,
+      "map_width": 1920,
+      "min_filter": 0,
+      "mipmap_larger": false,
+      "mipmap_pow2": true,
+      "ok": true,
+      "path": "/materials/masks/pulse__mask_a59703be.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
@@ -418,84 +774,6 @@
       "compo3": 0,
       "count": 1,
       "format": 5,
-      "height": 1000,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/fire_mask_4caa79df.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1375,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 6,
-      "height": 1000,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/iris_mask_7a94d495.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1375,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 6,
-      "height": 1000,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/nitro_mask_2632bbbc.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1375,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 6,
       "height": 1080,
       "image_type": -1,
       "is_sprite": false,
@@ -506,7 +784,7 @@
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/opacity_mask_14ca5c67.tex",
+      "path": "/materials/masks/waterflow_mask_03f49de6.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
@@ -522,23 +800,23 @@
       "compo3": 0,
       "count": 1,
       "format": 6,
-      "height": 1380,
+      "height": 1500,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1380,
-      "map_width": 1055,
+      "map_height": 1500,
+      "map_width": 2000,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/opacity_mask_818f532e.tex",
+      "path": "/materials/masks/waterwaves_mask_13499454.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 1055,
+      "width": 2000,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -548,23 +826,23 @@
       "compo3": 0,
       "count": 1,
       "format": 6,
-      "height": 1000,
+      "height": 1500,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
+      "map_height": 1500,
+      "map_width": 2000,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/pulse__mask_5a62b9fc.tex",
+      "path": "/materials/masks/waterwaves_mask_32506d6d.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 1375,
+      "width": 2000,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -574,23 +852,23 @@
       "compo3": 0,
       "count": 1,
       "format": 6,
-      "height": 1000,
+      "height": 1500,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
+      "map_height": 1500,
+      "map_width": 2000,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/pulse__mask_5db1cfed.tex",
+      "path": "/materials/masks/waterwaves_mask_644109ca.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 1375,
+      "width": 2000,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -600,127 +878,23 @@
       "compo3": 0,
       "count": 1,
       "format": 6,
-      "height": 1000,
+      "height": 1500,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
+      "map_height": 1500,
+      "map_width": 2000,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/shake_mask_04a444ec.tex",
+      "path": "/materials/masks/waterwaves_mask_7960f885.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 1375,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 5,
-      "height": 1000,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/shake_mask_0c8a3f5c.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1375,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 5,
-      "height": 1000,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/shake_mask_935ed27b.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1375,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 5,
-      "height": 1380,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1380,
-      "map_width": 1055,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/waterflow_mask_4e543308.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1055,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 5,
-      "height": 1000,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/waterflow_mask_e067ddbc.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1375,
+      "width": 2000,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -730,49 +904,23 @@
       "compo3": 0,
       "count": 1,
       "format": 6,
-      "height": 1000,
+      "height": 1500,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
+      "map_height": 1500,
+      "map_width": 2000,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/masks/waterwaves_mask_50b707b8.tex",
+      "path": "/materials/masks/waterwaves_mask_d2bf0f41.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 1375,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 6,
-      "height": 1000,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 1000,
-      "map_width": 1375,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/masks/waterwaves_mask_eee0ac00.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 1375,
+      "width": 2000,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -782,127 +930,49 @@
       "compo3": 0,
       "count": 1,
       "format": 4,
-      "height": 256,
+      "height": 2048,
+      "image_type": 13,
+      "is_sprite": false,
+      "mag_filter": 0,
+      "map_height": 1080,
+      "map_width": 1920,
+      "min_filter": 0,
+      "mipmap_larger": false,
+      "mipmap_pow2": false,
+      "ok": true,
+      "path": "/materials/workshop/2098390419/clouds2.tex",
+      "sprite_frames": 0,
+      "texb": 3,
+      "texi": 1,
+      "texs": 0,
+      "texv": 5,
+      "width": 2048,
+      "wrap_s": 0,
+      "wrap_t": 0
+    },
+    {
+      "compo1": 0,
+      "compo2": 0,
+      "compo3": 0,
+      "count": 1,
+      "format": 4,
+      "height": 128,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 256,
-      "map_width": 256,
+      "map_height": 128,
+      "map_width": 128,
       "min_filter": 0,
       "mipmap_larger": false,
       "mipmap_pow2": true,
       "ok": true,
-      "path": "/materials/workshop/2778097794/214024lkks1h2qhzjtp0lp.tex",
+      "path": "/materials/workshop/2914579837/particle/[CITYPNG.COM]Golden Sparkle Light Star HD PNG-128.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 256,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 6,
-      "height": 64,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 64,
-      "map_width": 64,
-      "min_filter": 0,
-      "mipmap_larger": false,
-      "mipmap_pow2": true,
-      "ok": true,
-      "path": "/materials/workshop/2778097794/masks/blur_combine_mask_c2ef8b26.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 64,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 2,
-      "height": 2176,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 2160,
-      "map_width": 3840,
-      "min_filter": 0,
-      "mipmap_larger": true,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/上下光.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 3840,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 2,
-      "height": 2176,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 2160,
-      "map_width": 3840,
-      "min_filter": 0,
-      "mipmap_larger": true,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/人物光.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 3840,
-      "wrap_s": 0,
-      "wrap_t": 0
-    },
-    {
-      "compo1": 0,
-      "compo2": 0,
-      "compo3": 0,
-      "count": 1,
-      "format": 2,
-      "height": 4032,
-      "image_type": -1,
-      "is_sprite": false,
-      "mag_filter": 0,
-      "map_height": 4000,
-      "map_width": 5500,
-      "min_filter": 0,
-      "mipmap_larger": true,
-      "mipmap_pow2": false,
-      "ok": true,
-      "path": "/materials/拼图2.tex",
-      "sprite_frames": 0,
-      "texb": 3,
-      "texi": 1,
-      "texs": 0,
-      "texv": 5,
-      "width": 5504,
+      "width": 128,
       "wrap_s": 0,
       "wrap_t": 0
     },
@@ -913,7 +983,7 @@
       "count": 1,
       "format": 4,
       "height": 4096,
-      "image_type": 2,
+      "image_type": 13,
       "is_sprite": false,
       "mag_filter": 0,
       "map_height": 2160,
@@ -922,7 +992,7 @@
       "mipmap_larger": false,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/未标题-1.tex",
+      "path": "/materials/图层 1.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
@@ -938,26 +1008,26 @@
       "compo3": 0,
       "count": 1,
       "format": 2,
-      "height": 1216,
+      "height": 496,
       "image_type": -1,
       "is_sprite": false,
       "mag_filter": 0,
-      "map_height": 1202,
-      "map_width": 3128,
+      "map_height": 489,
+      "map_width": 3840,
       "min_filter": 0,
       "mipmap_larger": true,
       "mipmap_pow2": false,
       "ok": true,
-      "path": "/materials/横刀光.tex",
+      "path": "/materials/图层 5.tex",
       "sprite_frames": 0,
       "texb": 3,
       "texi": 1,
       "texs": 0,
       "texv": 5,
-      "width": 3136,
+      "width": 3840,
       "wrap_s": 0,
       "wrap_t": 0
     }
   ],
-  "workshop_dir": "2854277071"
+  "workshop_dir": "3400879974"
 }

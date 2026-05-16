@@ -496,6 +496,8 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err) {
         jm["mat_json_file"] = mdl.mat_json_file;
         jm["vertex_count"]  = static_cast<int>(mdl.vertexs.size());
         jm["index_count"]   = static_cast<int>(mdl.indices.size());
+        jm["vert_extra_count"] = static_cast<int>(mdl.vert_extras.size());
+        jm["part_count"]    = static_cast<int>(mdl.parts.size());
         jm["bones"]         = ok && mdl.puppet ? static_cast<int>(mdl.puppet->bones.size()) : 0;
         jm["anims"]         = ok && mdl.puppet ? static_cast<int>(mdl.puppet->anims.size()) : 0;
         if (ok && mdl.puppet) {

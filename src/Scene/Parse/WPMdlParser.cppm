@@ -32,6 +32,19 @@ struct WPMdl {
     std::vector<Vertex>                  vertexs;
     std::vector<std::array<uint16_t, 3>> indices;
 
+    // MDLV21+ inline section between indices and MDLS.
+    struct VertExtra {
+        std::array<float, 2> uv2;
+        uint32_t             pad;
+    };
+    struct Part {
+        uint32_t id;
+        uint32_t start;
+        uint32_t size;
+    };
+    std::vector<VertExtra> vert_extras;
+    std::vector<Part>      parts;
+
     // std::vector<Eigen::Matrix<float, 3, 4>> bones;
     std::shared_ptr<WPPuppet> puppet;
     // combo

@@ -54,7 +54,9 @@
       "mdls": 2,
       "mdlv": 17,
       "ok": true,
+      "part_count": 0,
       "path": "/models/10_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 141
     },
     {
@@ -106,7 +108,9 @@
       "mdls": 2,
       "mdlv": 17,
       "ok": true,
+      "part_count": 0,
       "path": "/models/8_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 135
     },
     {
@@ -158,7 +162,9 @@
       "mdls": 2,
       "mdlv": 17,
       "ok": true,
+      "part_count": 0,
       "path": "/models/9_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 165
     }
   ],

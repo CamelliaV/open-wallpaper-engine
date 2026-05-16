@@ -90,7 +90,9 @@
       "mdls": 2,
       "mdlv": 16,
       "ok": true,
+      "part_count": 0,
       "path": "/models/拼图_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 530
     }
   ],

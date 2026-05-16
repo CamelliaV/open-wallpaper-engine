@@ -54,7 +54,9 @@
       "mdls": 1,
       "mdlv": 13,
       "ok": true,
+      "part_count": 0,
       "path": "/models/Man_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 341
     },
     {
@@ -106,7 +108,9 @@
       "mdls": 1,
       "mdlv": 13,
       "ok": true,
+      "part_count": 0,
       "path": "/models/arm_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 355
     },
     {
@@ -185,7 +189,9 @@
       "mdls": 1,
       "mdlv": 13,
       "ok": true,
+      "part_count": 0,
       "path": "/models/leg 2_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 319
     },
     {
@@ -246,7 +252,9 @@
       "mdls": 1,
       "mdlv": 13,
       "ok": true,
+      "part_count": 0,
       "path": "/models/leg_puppet.mdl",
+      "vert_extra_count": 0,
       "vertex_count": 356
     }
   ],

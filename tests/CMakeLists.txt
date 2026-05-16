@@ -51,6 +51,10 @@ target_compile_definitions(
 add_executable(version_tests version_tests.cpp)
 target_link_libraries(version_tests PRIVATE wescene_test_lib GTest::gtest_main)
 
+# Thin CLI to regenerate fixture JSONs via DumpWorkshop.
+add_executable(wpdump wpdump_main.cpp)
+target_link_libraries(wpdump PRIVATE wescene_test_lib)
+
 # Consolidated CLI: walks pkgs, runs scene parse; --validate-{tex,shader,mdl}
 # add per-asset checks; --name / --pkgv / --limit filter the pkg set.
 add_executable(wescene-test wescene_test_main.cpp)

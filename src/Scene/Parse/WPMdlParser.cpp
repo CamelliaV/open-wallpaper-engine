@@ -109,6 +109,53 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         for (auto& v : id) v = f.ReadUint16();
     }
 
+    // MDLV21+ inserts an anonymous block between indices and MDLS:
+    //   u8 flag1=1 | u32 section_count=1 | u32 payload=12*vertex_num |
+    //     { f32 u, f32 v, u32 0 }[vertex_num]
+    //   u8 flag2=1 | u32 parts_bytes (mult of 16) |
+    //     { u32 id, u32 0, u32 start, u32 size }[parts_bytes/16]
+    if (mdl.mdlv >= 21) {
+        uint8_t flag1 = f.ReadUint8();
+        if (flag1 != 1) {
+            rstd_error("mdlv{} extras flag1 expected 1, got {}", mdl.mdlv, flag1);
+            return false;
+        }
+        uint32_t section_count = f.ReadUint32();
+        if (section_count != 1) {
+            rstd_error("mdlv{} extras section_count expected 1, got {}", mdl.mdlv, section_count);
+            return false;
+        }
+        uint32_t payload_size = f.ReadUint32();
+        if (payload_size != 12u * vertex_num) {
+            rstd_error("mdlv{} extras payload size {} != 12*{}", mdl.mdlv, payload_size, vertex_num);
+            return false;
+        }
+        mdl.vert_extras.resize(vertex_num);
+        for (auto& ve : mdl.vert_extras) {
+            ve.uv2[0] = f.ReadFloat();
+            ve.uv2[1] = f.ReadFloat();
+            ve.pad    = f.ReadUint32();
+        }
+        uint8_t flag2 = f.ReadUint8();
+        if (flag2 != 1) {
+            rstd_error("mdlv{} extras flag2 expected 1, got {}", mdl.mdlv, flag2);
+            return false;
+        }
+        uint32_t parts_bytes = f.ReadUint32();
+        if (parts_bytes % 16 != 0) {
+            rstd_error("mdlv{} parts byte count {} not %% 16", mdl.mdlv, parts_bytes);
+            return false;
+        }
+        uint32_t parts_num = parts_bytes / 16;
+        mdl.parts.resize(parts_num);
+        for (auto& part : mdl.parts) {
+            part.id    = f.ReadUint32();
+            (void)f.ReadUint32(); // reserved 0
+            part.start = f.ReadUint32();
+            part.size  = f.ReadUint32();
+        }
+    }
+
     mdl.mdls = ReadMDLVesion(f);
 
     size_t bones_file_end = f.ReadUint32();
