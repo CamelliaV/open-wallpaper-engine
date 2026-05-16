@@ -11,11 +11,11 @@
 //   4. EXPECT_EQs the two json values, falling back to a JSON Patch
 //      diff (RFC 6902) for a precise field-level error report.
 //
-// To regenerate a fixture after a parser change, build wpdump and rerun
+// To regenerate a fixture after a parser change, build wpvalid and rerun
 // it for the workshop in question:
 //
-//     ninja -C build wpdump
-//     ./build/tests/wpdump workshop/<id> tests/fixtures/<category>/<v>/<id>.json
+//     ninja -C build wpvalid
+//     ./build/tests/wpvalid workshop/<id> tests/fixtures/<category>/<v>/<id>.json
 //
 // The DEFINE_FIXTURE_TEST_SUITE macro keeps the per-version cpp files
 // down to a single declaration each.

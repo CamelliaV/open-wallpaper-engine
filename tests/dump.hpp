@@ -12,7 +12,7 @@
 //   * puppets: every .mdl file in the pkg, parsed via WPMdlParser, with
 //     MDLV/MDLS/MDLA version stamps and bone/anim counts
 //
-// The same library backs both `wpdump` (CLI that writes the snapshot to
+// The same library backs both `wpvalid` (CLI that writes the snapshot to
 // stdout for fixture seeding) and `verify_dump` (CTest binary that
 // regenerates the snapshot and compares it against a checked-in fixture).
 

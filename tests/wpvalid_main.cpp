@@ -1,6 +1,6 @@
 // Thin CLI around DumpWorkshop: regenerate fixture snapshots.
 //
-//   wpdump <workshop_dir> [out.json]
+//   wpvalid <workshop_dir> [out.json]
 //
 // If out.json is omitted the snapshot is written to stdout. Exit code is
 // non-zero when DumpWorkshop reports an error.
@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
     std::string err;
     auto        snap = owe::testing::DumpWorkshop(argv[1], err);
     if (! err.empty()) {
-        std::fprintf(stderr, "wpdump: %s\n", err.c_str());
+        std::fprintf(stderr, "wpvalid: %s\n", err.c_str());
         return 1;
     }
 
@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
     if (argc == 3) {
         std::ofstream out(argv[2]);
         if (! out) {
-            std::fprintf(stderr, "wpdump: cannot open %s for writing\n", argv[2]);
+            std::fprintf(stderr, "wpvalid: cannot open %s for writing\n", argv[2]);
             return 1;
         }
         out << dump << "\n";

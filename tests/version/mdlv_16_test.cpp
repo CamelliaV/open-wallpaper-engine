@@ -1,9 +1,4 @@
 // Deep test for mdlv_16.
-//
-// Auto-seeded by Iter 4/5. To regenerate after a deliberate parser change:
-//     ninja -C build wpdump
-//     ./build/tests/wpdump workshop/2664591394 \
-//         tests/fixtures/mdlv_16/2664591394.json
 
 #include "fixture_helpers.hpp"
 

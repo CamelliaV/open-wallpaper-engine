@@ -1,8 +1,4 @@
 // Deep test for scene.pkg version PKGV0021.
-//
-// To regenerate after a deliberate parser change:
-//     ninja -C build wpdump
-//     ./build/tests/wpdump workshop/<id> tests/fixtures/pkgv_0021/<id>.json
 
 #include "fixture_helpers.hpp"
 

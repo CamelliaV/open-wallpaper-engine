@@ -1,12 +1,4 @@
 // Deep test for .mdl version stamp MDLV0014.
-//
-// Pins workshops that ship at least one MDLV 14 puppet so any change in
-// WPMdlParser bone-tree or animation track parsing surfaces here.
-//
-// To regenerate after a deliberate parser change:
-//     ninja -C build wpdump
-//     ./build/tests/wpdump workshop/<id> \
-//         tests/fixtures/mdlv_14/<id>.json
 
 #include "fixture_helpers.hpp"
 

@@ -1,9 +1,4 @@
 // Deep test for mdlv_21.
-//
-// To regenerate after a deliberate parser change:
-//     ninja -C build/user-clang-debug wpdump
-//     ./build/user-clang-debug/tests/wpdump workshop/3400879974 \
-//         tests/fixtures/mdlv_21/3400879974.json
 
 #include "fixture_helpers.hpp"
 
