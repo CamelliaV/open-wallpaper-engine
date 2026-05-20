@@ -794,17 +794,20 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     std::string stage3 = StripUniforms(stage2);
 
     // File-scope `const TYPE NAME[N] = { ... };` (e.g. WE bokeh's `kernel`)
-    // lands as a `$Globals` cbuffer member under DXC unless it's `static
+    // and `const TYPE NAME = ...;` (e.g. WE color_grading's `colorMatrix`)
+    // land as `$Globals` cbuffer members under DXC unless they're `static
     // const`. We don't allocate or bind a $Globals descriptor, so a draw
     // hits an unbound descriptor and the GPU hangs (validation reports
-    // "$Globals at Binding 4 never updated"). Promote line-start `const`
-    // array decls to `static const` so DXC inlines them as a constant
-    // table instead of materializing through the cbuffer.
+    // "$Globals at Binding N never updated"). Promote line-start `const`
+    // decls (followed by `[` array or `=` initializer) to `static const`
+    // so DXC keeps them as per-invocation statics instead of materializing
+    // through the cbuffer. Initializers may reference cbuffer uniforms;
+    // HLSL static initializers run at entry and can read those.
     {
-        static const std::regex re_const_arr(
-            R"((^|\n)const[ \t]+([\w]+)[ \t]+(\w+)[ \t]*\[)",
+        static const std::regex re_const_decl(
+            R"((^|\n)const[ \t]+([\w]+)[ \t]+(\w+)[ \t]*([\[=]))",
             std::regex::ECMAScript);
-        stage3 = std::regex_replace(stage3, re_const_arr, "$1static const $2 $3[");
+        stage3 = std::regex_replace(stage3, re_const_decl, "$1static const $2 $3$4");
     }
 
     std::vector<IODecl> attrs, varyings;
