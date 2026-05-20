@@ -442,12 +442,19 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
             owe::GetJsonValue(wpj, "drag", drag, false);
             owe::GetJsonValue(wpj, "gravity", gravity, false);
             Vector3d vecG = Vector3f(gravity.data()).cast<double>();
+            // Symplectic (semi-implicit) Euler: every force op updates v from
+            // the current position; ParticleSubSystem::Emitt applies the
+            // x += v_new * dt integration once after all operators are done.
+            // Keeping MoveByTime inside `movement` here would mix position
+            // updates with force updates and silently fall back to explicit
+            // Euler for any force op listed after `movement` in the JSON
+            // (e.g. controlpointattract), which diverges in central force
+            // fields and makes orbital trails wobble apart.
             return [=](const ParticleInfo& info) {
                 for (auto& p : info.particles) {
                     Vector3d acc =
                         algorism::DragForce(PM::GetVelocity(p).cast<double>(), drag) + vecG;
                     PM::Accelerate(p, speed * acc, info.time_pass);
-                    PM::MoveByTime(p, info.time_pass);
                 }
             };
         } else if (name == "angularmovement") {
@@ -461,7 +468,6 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
                     Vector3d acc =
                         algorism::DragForce(PM::GetAngular(p).cast<double>(), drag) + vecF;
                     PM::AngularAccelerate(p, acc, info.time_pass);
-                    PM::RotateByTime(p, info.time_pass);
                 }
             };
         } else if (name == "sizechange") {

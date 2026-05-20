@@ -224,6 +224,17 @@ void ParticleSubSystem::Emitt() {
             op(info);
         });
 
+        // Symplectic Euler position integration: every force op above has
+        // updated `velocity` based on the start-of-frame position. Apply the
+        // position step once with the final velocity so attract/drag/gravity
+        // composition stays energy-stable across frames regardless of the
+        // order operators appear in the source JSON.
+        for (auto& p : info.particles) {
+            if (! ParticleModify::LifetimeOk(p)) continue;
+            ParticleModify::MoveByTime(p, info.time_pass);
+            ParticleModify::RotateByTime(p, info.time_pass);
+        }
+
         if (m_trail_length > 0) {
             auto& trails = inst->TrailsVec();
             for (usize si = 0; si < info.particles.size(); si++) {
