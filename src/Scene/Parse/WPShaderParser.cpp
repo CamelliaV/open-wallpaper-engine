@@ -157,6 +157,15 @@ float pow(int a, float b) { return pow(float(a), b); }
 float pow(float a, int b) { return pow(a, float(b)); }
 float pow(int a, int b)   { return pow(float(a), float(b)); }
 
+// HLSL math intrinsics with no direct GLSL equivalent.
+float log10(float x) { return log(x) / log(10.0); }
+vec2  log10(vec2  x) { return log(x) / log(10.0); }
+vec3  log10(vec3  x) { return log(x) / log(10.0); }
+vec4  log10(vec4  x) { return log(x) / log(10.0); }
+// HLSL's clip() discards the fragment when its scalar arg is < 0.
+// GLSL has no `discard` expression; emit it as a guarded statement.
+#define clip(x) if ((x) < 0.0) discard
+
 // PerformLighting_V1 / _V2 are referenced by WE's generic4/genericparticle
 // shaders but their bodies are normally injected by WE's HLSL toolchain
 // based on `LIGHTS_*` combos and the per-light uniform set. We don't have
