@@ -267,12 +267,11 @@ struct SceneMaterialCustomShader {
 
 struct SceneMaterial {
 public:
-    SceneMaterial()                     = default;
-    SceneMaterial(const SceneMaterial&) = default;
-    SceneMaterial(SceneMaterial&& o)
-        : name(std::move(o.name)),
-          textures(std::move(o.textures)),
-          defines(std::move(o.defines)) {};
+    SceneMaterial()                                = default;
+    SceneMaterial(const SceneMaterial&)            = default;
+    SceneMaterial(SceneMaterial&&) noexcept        = default;
+    SceneMaterial& operator=(const SceneMaterial&) = default;
+    SceneMaterial& operator=(SceneMaterial&&)      = default;
 
     std::string              name;
     std::vector<std::string> textures;
@@ -290,11 +289,29 @@ public:
 
 class SceneMesh {
 public:
+    // Per-part draw ranges into one submesh's index array. When empty, the
+    // submesh is drawn as one DrawIndexed call covering all its indices; when
+    // populated (V21 puppets with parts[] block), one DrawIndexed call is
+    // issued per range in vector order — matching the file's z-order. All
+    // ranges in a submesh share the submesh's material slot.
+    struct DrawRange {
+        uint32_t first_index;
+        uint32_t index_count;
+    };
+
+    // = glTF "primitive": one vertex-stream set + one index array + one
+    // material slot. A SceneMesh holds >= 1 Submesh; today most paths emit
+    // exactly one (single-slot compat); WPSceneParser will emit N for
+    // .mdl meshes with mesh_count > 1.
+    struct Submesh {
+        std::vector<SceneVertexArray> vertex_arrays;
+        std::vector<SceneIndexArray>  index_arrays;
+        std::vector<DrawRange>        draw_ranges;
+        uint32_t                      material_slot { 0 };
+    };
+
     SceneMesh(bool dynamic = false): m_dynamic(dynamic), m_dirty(false),
                                      m_data(std::make_shared<Data>()) {}
-
-    std::size_t VertexCount() const { return m_data->vertexArrays.size(); }
-    std::size_t IndexCount() const { return m_data->indexArrays.size(); }
 
     MeshPrimitive Primitive() const { return m_primitive; }
     uint32_t      PointSize() const { return m_pointSize; }
@@ -307,54 +324,74 @@ public:
     uint32_t ID() const { return m_id; };
     void     SetID(uint32_t v) { m_id = v; };
 
-    const SceneVertexArray& GetVertexArray(const std::size_t index) const {
-        return m_data->vertexArrays[index];
-    }
-    const SceneIndexArray& GetIndexArray(const std::size_t index) const {
-        return m_data->indexArrays[index];
-    }
-
-    SceneVertexArray& GetVertexArray(const std::size_t index) {
-        return m_data->vertexArrays[index];
-    }
-    SceneIndexArray& GetIndexArray(const std::size_t index) {
-        return m_data->indexArrays[index];
-    }
-
-    void AddIndexArray(SceneIndexArray&& array) {
-        m_data->indexArrays.emplace_back(std::move(array));
-    }
-    void AddVertexArray(SceneVertexArray&& array) {
-        m_data->vertexArrays.emplace_back(std::move(array));
-    }
-    void AddMaterial(SceneMaterial&& material) {
-        m_material = std::make_shared<SceneMaterial>(material);
-    }
-
     void SetPrimitive(MeshPrimitive v) { m_primitive = v; }
     void SetPointSize(uint32_t v) { m_pointSize = v; }
 
-    SceneMaterial* Material() { return m_material.get(); }
+    // ---- New submesh API ----
+    const std::vector<Submesh>& Submeshes() const { return m_data->submeshes; }
+    std::vector<Submesh>&       Submeshes() { return m_data->submeshes; }
+
+    // Materials are per-mesh-instance, NOT shared via ChangeMeshDataFrom — same
+    // contract as the legacy m_material field.
+    const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const {
+        return m_materials;
+    }
+    std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() { return m_materials; }
+
+    // ---- Legacy single-slot compat (routes through submeshes[0] / materials[0]) ----
+    std::size_t VertexCount() const { return submesh0().vertex_arrays.size(); }
+    std::size_t IndexCount() const { return submesh0().index_arrays.size(); }
+
+    const SceneVertexArray& GetVertexArray(const std::size_t index) const {
+        return submesh0().vertex_arrays[index];
+    }
+    const SceneIndexArray& GetIndexArray(const std::size_t index) const {
+        return submesh0().index_arrays[index];
+    }
+    SceneVertexArray& GetVertexArray(const std::size_t index) {
+        return ensureSubmesh0().vertex_arrays[index];
+    }
+    SceneIndexArray& GetIndexArray(const std::size_t index) {
+        return ensureSubmesh0().index_arrays[index];
+    }
+
+    void AddIndexArray(SceneIndexArray&& array) {
+        ensureSubmesh0().index_arrays.emplace_back(std::move(array));
+    }
+    void AddVertexArray(SceneVertexArray&& array) {
+        ensureSubmesh0().vertex_arrays.emplace_back(std::move(array));
+    }
+    void AddMaterial(SceneMaterial&& material) {
+        m_materials.push_back(std::make_shared<SceneMaterial>(std::move(material)));
+    }
+
+    SceneMaterial* Material() {
+        return m_materials.empty() ? nullptr : m_materials[0].get();
+    }
 
     void ChangeMeshDataFrom(const SceneMesh& o) { m_data = o.m_data; }
 
-    // Optional per-part draw ranges into the (single) index array. When empty,
-    // the mesh is drawn as one DrawIndexed call covering all indices. When
-    // populated (V21 puppets with parts[] block), one DrawIndexed call is
-    // issued per range in vector order — matching the file's z-order.
-    struct DrawRange {
-        uint32_t first_index;
-        uint32_t index_count;
-    };
-    const std::vector<DrawRange>& DrawRanges() const { return m_data->drawRanges; }
-    void SetDrawRanges(std::vector<DrawRange> ranges) { m_data->drawRanges = std::move(ranges); }
+    const std::vector<DrawRange>& DrawRanges() const {
+        static const std::vector<DrawRange> kEmpty;
+        return m_data->submeshes.empty() ? kEmpty : m_data->submeshes[0].draw_ranges;
+    }
+    void SetDrawRanges(std::vector<DrawRange> ranges) {
+        ensureSubmesh0().draw_ranges = std::move(ranges);
+    }
 
 private:
     struct Data {
-        std::vector<SceneVertexArray> vertexArrays;
-        std::vector<SceneIndexArray>  indexArrays;
-        std::vector<DrawRange>        drawRanges;
+        std::vector<Submesh> submeshes;
     };
+
+    Submesh& ensureSubmesh0() {
+        if (m_data->submeshes.empty()) m_data->submeshes.emplace_back();
+        return m_data->submeshes[0];
+    }
+    const Submesh& submesh0() const {
+        static const Submesh kEmpty;
+        return m_data->submeshes.empty() ? kEmpty : m_data->submeshes[0];
+    }
 
     uint32_t          m_id { std::numeric_limits<uint32_t>::max() };
     MeshPrimitive     m_primitive { MeshPrimitive::TRIANGLE };
@@ -362,8 +399,8 @@ private:
     bool              m_dynamic;
     std::atomic<bool> m_dirty;
 
-    std::shared_ptr<Data>          m_data;
-    std::shared_ptr<SceneMaterial> m_material;
+    std::shared_ptr<Data>                       m_data;       // shared via ChangeMeshDataFrom
+    std::vector<std::shared_ptr<SceneMaterial>> m_materials;  // per-instance
 };
 
 // ============================================================================
