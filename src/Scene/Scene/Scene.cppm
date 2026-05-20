@@ -204,6 +204,12 @@ public:
     bool SetVertex(std::string_view name, std::span<const float> data) noexcept;
     bool SetVertexs(std::size_t index, std::span<const float> data) noexcept;
 
+    // Drops the active size to zero without releasing capacity. Subsequent
+    // SetVertexs calls regrow it. Used by per-frame dynamic geners (rope
+    // particles) so the high-water mark from a previous frame doesn't keep
+    // VertexCount() inflated when fewer segments are emitted this frame.
+    void ResetSize() noexcept;
+
     bool GetOption(std::string_view) const;
     void SetOption(std::string_view, bool);
 

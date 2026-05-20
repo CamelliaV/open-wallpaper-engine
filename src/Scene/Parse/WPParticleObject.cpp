@@ -47,8 +47,6 @@ bool ParticleControlpoint::FromJson(const nlohmann::json& json) {
 
 bool ParticleRender::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "name", name);
-    // ropetrail require subdivition, replaced
-    if (name == "ropetrail") name = "spritetrail";
 
     if (sstart_with(name, "rope")) {
         owe::GetJsonValue(json, "subdivision", subdivision, false);

@@ -105,6 +105,8 @@ bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noex
     return false;
 }
 
+void SceneVertexArray::ResetSize() noexcept { m_size = 0; }
+
 bool SceneVertexArray::TrySetSize(usize new_size) noexcept {
     rstd_assert(new_size <= m_capacity);
     if (new_size > m_capacity) {

@@ -329,10 +329,20 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         pipeline.toDefault();
         const bool has_index =
             m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
+        // Rope/spline particles feed one vertex per trail segment into a
+        // geometry shader that subdivides via cubic Bezier — input topology
+        // must be POINT_LIST. Detected via the WE_PRENDER_ROPE option set on
+        // the first vertex array by SetRopeParticleMesh.
+        const bool rope_topology =
+            ! submesh.vertex_arrays.empty() &&
+            submesh.vertex_arrays[0].GetOption(WE_PRENDER_ROPE);
+        VkPrimitiveTopology topology = rope_topology
+                                            ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+                                            : (has_index ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+                                                         : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP);
         pipeline.addDescriptorSetInfo(spanone { descriptor_info })
             .setColorBlendStates(spanone { color_blend })
-            .setTopology(has_index ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-                                   : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
+            .setTopology(topology)
             .addInputBindingDescription(bind_descriptions)
             .addInputAttributeDescription(attr_descriptions)
             .setSampleCount(m_desc.samples);
@@ -393,6 +403,10 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                         if (! dyn_buf->writeToBuf(buf,
                                                   { (uint8_t*)indice.Data(), indice.DataSizeOf() }))
                             return;
+                    } else if (! sm.vertex_arrays.empty()) {
+                        // No index buffer (e.g. POINT_LIST for GS-driven rope):
+                        // draw_count comes from the first vertex array.
+                        draw_count = (u32)sm.vertex_arrays[0].VertexCount();
                     }
                 }
             };

@@ -198,14 +198,14 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
     if (thick_format) {
         specs.push_back(VAttr::TexCoordVec4C2);
         specs.push_back(VAttr::TexCoordVec4C3);
-        specs.push_back(VAttr::TexCoordC4);
     } else {
         specs.push_back(VAttr::TexCoordVec3C2);
-        specs.push_back(VAttr::TexCoordC3);
     }
     specs.push_back(VAttr::Color);
-    mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count * 4));
-    mesh.AddIndexArray(SceneIndexArray(count * 6));
+    // GS-driven path: one vertex per trail segment, no quad fan-out and no
+    // index buffer — the geometry shader expands a single point input into
+    // 4 + 2*TRAILSUBDIVISION strip vertices via cubic Bezier.
+    mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count));
     mesh.GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
 }
@@ -1123,6 +1123,14 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
         };
         shaderInfo.combos["THICKFORMAT"]   = "1";
         shaderInfo.combos["TRAILRENDERER"] = "1";
+    }
+    if (render_rope) {
+        // genericropeparticle.geom branches on TRAILSUBDIVISION when present;
+        // 0 = no subdivision (straight quad per segment), positive = cubic
+        // Bezier subdivided into N+1 quads.
+        i32 subdiv = (i32)std::round(wppartRenderer.subdivision);
+        if (subdiv < 0) subdiv = 0;
+        shaderInfo.combos["TRAILSUBDIVISION"] = std::to_string(subdiv);
     }
 
     if (! particle_obj.flags[wpscene::Particle::FlagEnum::spritenoframeblending]) {

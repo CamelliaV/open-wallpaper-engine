@@ -95,113 +95,95 @@ inline usize GenParticleData(std::span<const std::unique_ptr<ParticleInstance>> 
     return i;
 }
 
-inline size_t GenRopeParticleData(std::span<const Particle>   particles,
-                                  const ParticleRawGenSpecOp& specOp, WPGOption opt,
-                                  SceneVertexArray& sv) {
-    /*
-    attribute vec4 a_PositionVec4;
-    attribute vec4 a_TexCoordVec4;
-    attribute vec4 a_TexCoordVec4C1;
+// Emit one vertex per consecutive trail segment for a single particle history
+// (one ParticleInstance worth). The geometry shader expands each point into a
+// strip via cubic Bezier (see genericropeparticle.geom). Returns the number of
+// segment vertices emitted; vertices land at [base_index, base_index+ret).
+inline size_t GenRopeParticleDataOne(std::span<const Particle>   particles,
+                                     const ParticleRawGenSpecOp& specOp, WPGOption opt,
+                                     SceneVertexArray& sv, size_t base_index) {
+    const auto one_size = sv.OneSize();
+    std::array<float, 32> v {};
+    size_t emitted = 0;
 
-    #if THICKFORMAT
-    attribute vec4 a_TexCoordVec4C2;
-    attribute vec4 a_TexCoordVec4C3;
-    attribute vec2 a_TexCoordC4;
-    #else
-    attribute vec3 a_TexCoordVec3C2;
-    attribute vec2 a_TexCoordC3;
-    #endif
-
-    attribute vec4 a_Color;
-
-    #define in_ParticleTrailLength (a_TexCoordVec4.w)
-    #define in_ParticleTrailPosition (a_TexCoordVec4C1.w)
-    */
-    std::array<float, 32 * 4> storage;
-
-    float* data = storage.data();
-
-    const auto one_size   = sv.OneSize();
-    const auto totle_size = one_size * 4;
-    unsigned       i { 0 };
-    for (const auto& p : particles) {
-        if (i == 0) {
-            i++;
-            continue;
-        }
+    for (size_t i = 1; i < particles.size(); i++) {
+        const auto& p     = particles[i];
+        const auto& pre_p = particles[i - 1];
         if (! ParticleModify::LifetimeOk(p)) break;
+        if (! ParticleModify::LifetimeOk(pre_p)) continue;
 
-        const auto& pre_p  = particles[i - 1];
-        float       size   = p.size / 2.0f;
-        std::size_t offset = 0;
-
+        float size     = p.size / 2.0f;
         float lifetime = p.lifetime;
         specOp(p, { &lifetime });
-        float in_ParticleTrailLength   = particles.size();
-        float in_ParticleTrailPosition = i - 1;
 
-        Vector3f cp_vec = AngleAxisf(p.rotation[2] + rstd::f32_::consts::FRAC_PI_2, Vector3f::UnitZ()) *
+        const float in_ParticleTrailLength   = (float)particles.size();
+        const float in_ParticleTrailPosition = (float)(i - 1);
+
+        Vector3f cp_vec  = AngleAxisf(p.rotation[2] + rstd::f32_::consts::FRAC_PI_2,
+                                      Vector3f::UnitZ()) *
                           Vector3f { 0.0f, size / 2.0f, 0.0f };
         Vector3f pos_vec = Vector3f { p.position } - Vector3f { pre_p.position };
+        cp_vec = pos_vec.normalized().dot(cp_vec) > 0 ? cp_vec : -1.0f * cp_vec;
 
-        cp_vec       = pos_vec.normalized().dot(cp_vec) > 0 ? cp_vec : -1.0f * cp_vec;
-        auto&    sp  = pre_p;
-        auto&    ep  = p;
-        Vector3f scp = Vector3f { sp.position } + cp_vec;
-        Vector3f ecp = Vector3f { ep.position } - cp_vec;
+        Vector3f scp = Vector3f { pre_p.position } + cp_vec;
+        Vector3f ecp = Vector3f { p.position } - cp_vec;
 
-        // a_PositionVec4: start pos
-        AssignVertexTimes({ data + offset, totle_size },
-                          std::array { sp.position[0], sp.position[1], sp.position[2], size },
-                          4);
-        offset += 4;
-        // a_TexCoordVec4: end pos
-        AssignVertexTimes(
-            { data + offset, totle_size },
-            std::array { ep.position[0], ep.position[1], ep.position[2], in_ParticleTrailLength },
-            4);
-        offset += 4;
-
-        // a_TexCoordVec4C1: cp start pos
-        AssignVertexTimes({ data + offset, totle_size },
-                          std::array { scp[0], scp[1], scp[2], in_ParticleTrailPosition },
-                          4);
-        offset += 4;
-
+        size_t off = 0;
+        // a_PositionVec4: (startPos, sizeStart)
+        v[off++] = pre_p.position[0];
+        v[off++] = pre_p.position[1];
+        v[off++] = pre_p.position[2];
+        v[off++] = size;
+        // a_TexCoordVec4: (endPos, trailLength)
+        v[off++] = p.position[0];
+        v[off++] = p.position[1];
+        v[off++] = p.position[2];
+        v[off++] = in_ParticleTrailLength;
+        // a_TexCoordVec4C1: (CPStart, trailPosition)
+        v[off++] = scp[0];
+        v[off++] = scp[1];
+        v[off++] = scp[2];
+        v[off++] = in_ParticleTrailPosition;
         if (opt.thick_format) {
-            // a_TexCoordVec4C2: cp end pos, size_end
-            AssignVertexTimes(
-                { data + offset, totle_size }, std::array { ecp[0], ecp[1], ecp[2], size }, 4);
-            offset += 4;
-            // a_TexCoordVec4C3: color_end
-            AssignVertexTimes({ data + offset, totle_size },
-                              std::array { p.color[0], p.color[1], p.color[2], p.alpha },
-                              4);
-            offset += 4;
-            // a_TexCoordC4
-            std::array t { 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-            AssignVertex({ data + offset, totle_size }, t, 4);
-            offset += 4;
+            // a_TexCoordVec4C2: (CPEnd, sizeEnd)
+            v[off++] = ecp[0];
+            v[off++] = ecp[1];
+            v[off++] = ecp[2];
+            v[off++] = size;
+            // a_TexCoordVec4C3: end color
+            v[off++] = p.color[0];
+            v[off++] = p.color[1];
+            v[off++] = p.color[2];
+            v[off++] = p.alpha;
         } else {
-            // a_TexCoordVec3C2: cp end pos
-            AssignVertexTimes(
-                { data + offset, totle_size }, std::array { ecp[0], ecp[1], ecp[2] }, 4);
-            offset += 4;
-
-            // a_TexCoordC3
-            std::array t { 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-            AssignVertex({ data + offset, totle_size }, t, 4);
-            offset += 4;
+            // a_TexCoordVec3C2: CPEnd
+            v[off++] = ecp[0];
+            v[off++] = ecp[1];
+            v[off++] = ecp[2];
         }
+        // a_Color: start color
+        v[off++] = pre_p.color[0];
+        v[off++] = pre_p.color[1];
+        v[off++] = pre_p.color[2];
+        v[off++] = pre_p.alpha;
 
-        // a_Color
-        AssignVertexTimes({ data + offset, totle_size },
-                          std::array { p.color[0], p.color[1], p.color[2], p.alpha },
-                          4);
-
-        sv.SetVertexs((i++) * 4, { data, totle_size });
+        rstd_assert(off == one_size);
+        sv.SetVertexs(base_index + emitted, { v.data(), one_size });
+        emitted++;
     }
-    return i == 0 ? 0 : i - 1;
+    return emitted;
+}
+
+inline size_t GenRopeParticleData(std::span<const std::unique_ptr<ParticleInstance>> instances,
+                                  const ParticleRawGenSpecOp& specOp, WPGOption opt,
+                                  SceneVertexArray& sv) {
+    size_t total = 0;
+    for (const auto& inst : instances) {
+        if (inst->IsNoLiveParticle()) continue;
+        total +=
+            GenRopeParticleDataOne(inst->Particles(), specOp, opt, sv, total);
+    }
+    return total;
 }
 
 inline void updateIndexArray(uint32_t index, size_t count, SceneIndexArray& iarray) noexcept {
@@ -228,24 +210,25 @@ inline void updateIndexArray(uint32_t index, size_t count, SceneIndexArray& iarr
 void WPParticleRawGener::GenGLData(std::span<const std::unique_ptr<ParticleInstance>> instances,
                                    SceneMesh& mesh, ParticleRawGenSpecOp& specOp) {
     auto& sv = mesh.GetVertexArray(0);
-    auto& si = mesh.GetIndexArray(0);
 
     WPGOption opt;
-
     opt.thick_format = sv.GetOption(WE_CB_THICK_FORMAT);
 
-    usize particle_num { 0 };
+    if (sv.GetOption(WE_PRENDER_ROPE)) {
+        // Rope/spline: one vertex per segment, drawn as POINT_LIST, expanded
+        // by the geometry shader. No index buffer (SetRopeParticleMesh skips
+        // index allocation). Reset the active size before regen so the
+        // segment count for this frame isn't masked by a previous frame's
+        // high-water mark.
+        sv.ResetSize();
+        GenRopeParticleData(instances, specOp, opt, sv);
+        return;
+    }
 
-    /*
-    if (sv.GetOption(WE_PRENDER_ROPE))
-        particle_num = GenRopeParticleData(particles, specOp, opt, sv);
-    else
-    */
-    particle_num += GenParticleData(instances, specOp, opt, sv);
+    usize particle_num = GenParticleData(instances, specOp, opt, sv);
 
-    // rstd_info("num: {}", particle_num);
-
-    u32 indexNum = (u32)(si.DataCount() / 6);
+    auto& si       = mesh.GetIndexArray(0);
+    u32   indexNum = (u32)(si.DataCount() / 6);
     if (particle_num > indexNum) {
         updateIndexArray(indexNum, particle_num, si);
     }
