@@ -79,9 +79,17 @@ Pass `--remote-debugging-port 9222` to expose Chrome DevTools on `http://127.0.0
 	- [x] Control Points
         - [ ] Mouse Follow
 	- [x] Children
-    - [ ] Audio Response
-- [x] Puppet warp
+    - [x] Audio Response
+- [x] Puppet
+    - [x] Mesh
+    - [x] Skeleton
+    - [x] Animation
+    - [ ] Bone simulation
+    - [ ] Morph (MDMP)
+	- [ ] Attachments (MDAT)
+	- [ ] Mesh masks
 - [ ] 3D model
-- [ ] Timeline animations
+	- [x] Parse
+	- [ ] Render
 - [x] Scenescript  
 - [ ] User Properties
