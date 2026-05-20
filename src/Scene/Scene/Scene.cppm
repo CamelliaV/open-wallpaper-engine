@@ -320,10 +320,22 @@ public:
 
     void ChangeMeshDataFrom(const SceneMesh& o) { m_data = o.m_data; }
 
+    // Optional per-part draw ranges into the (single) index array. When empty,
+    // the mesh is drawn as one DrawIndexed call covering all indices. When
+    // populated (V21 puppets with parts[] block), one DrawIndexed call is
+    // issued per range in vector order — matching the file's z-order.
+    struct DrawRange {
+        uint32_t first_index;
+        uint32_t index_count;
+    };
+    const std::vector<DrawRange>& DrawRanges() const { return m_data->drawRanges; }
+    void SetDrawRanges(std::vector<DrawRange> ranges) { m_data->drawRanges = std::move(ranges); }
+
 private:
     struct Data {
         std::vector<SceneVertexArray> vertexArrays;
         std::vector<SceneIndexArray>  indexArrays;
+        std::vector<DrawRange>        drawRanges;
     };
 
     uint32_t          m_id { std::numeric_limits<uint32_t>::max() };

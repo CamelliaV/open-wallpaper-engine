@@ -559,7 +559,16 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     }
     if (m_desc.index_buf) {
         cmd.BindIndexBuffer(gpu_buf, m_desc.index_buf.offset, VK_INDEX_TYPE_UINT32);
-        cmd.DrawIndexed(m_desc.draw_count, 1, 0, 0, 0);
+        const auto& ranges = m_desc.node->Mesh()->DrawRanges();
+        if (ranges.empty()) {
+            cmd.DrawIndexed(m_desc.draw_count, 1, 0, 0, 0);
+        } else {
+            // Per-part drawing — preserves the file's z-order so later parts
+            // overdraw earlier ones (eyelid over pupil during blink).
+            for (const auto& r : ranges) {
+                cmd.DrawIndexed(r.index_count, 1, r.first_index, 0, 0);
+            }
+        }
     } else {
         cmd.Draw(m_desc.draw_count, 1, 0, 0);
     }

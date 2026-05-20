@@ -678,15 +678,20 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     if (! hasEffect && isCompose) return;
 
     std::unique_ptr<WPMdl> puppet;
+    bool has_bones = false;
+    bool has_mesh  = false;
     if (! wpimgobj.puppet.empty()) {
         puppet = std::make_unique<WPMdl>();
         if (! WPMdlParser::Parse(wpimgobj.puppet, vfs, *puppet)) {
             rstd_error("parse puppet failed: {}", wpimgobj.puppet);
             puppet = nullptr;
-        }
-        else if (puppet->puppet->bones.size() == 0){
-            rstd_error("puppet has no bones: {}", wpimgobj.puppet);
-            puppet = nullptr;
+        } else {
+            has_bones = (puppet->puppet && puppet->puppet->bones.size() > 0);
+            has_mesh  = (! puppet->meshes.empty() && ! puppet->meshes[0].positions.empty());
+            if (! has_bones && ! has_mesh) {
+                rstd_error("puppet has no mesh data: {}", wpimgobj.puppet);
+                puppet = nullptr;
+            }
         }
     }
 
@@ -706,7 +711,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     {
         if (! hasEffect) {
             svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
-            if (puppet) {
+            if (puppet && has_bones) {
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
             }
         }
@@ -771,22 +776,27 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
 
         if (puppet) {
+            const auto& mdl_mesh = puppet->meshes[0];
             if (hasEffect) {
                 GenCardMesh(
                     mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
-                WPMdlParser::GenPuppetMesh(effct_final_mesh, *puppet);
+                WPMdlParser::GenMeshFromMdl(effct_final_mesh, mdl_mesh);
 
-                wpscene::WPImageEffect puppet_effect;
-                wpscene::WPMaterial    puppet_mat;
-                puppet_mat             = wpimgobj.material;
-                puppet_mat.textures[0] = "";
-                WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
-                puppet_effect.materials.push_back(puppet_mat);
-                wpimgobj.effects.push_back(puppet_effect);
+                if (has_bones) {
+                    wpscene::WPImageEffect puppet_effect;
+                    wpscene::WPMaterial    puppet_mat;
+                    puppet_mat             = wpimgobj.material;
+                    puppet_mat.textures[0] = "";
+                    WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
+                    puppet_effect.materials.push_back(puppet_mat);
+                    wpimgobj.effects.push_back(puppet_effect);
+                }
             } else {
-                svData.puppet_layer = WPPuppetLayer(puppet->puppet);
-                svData.puppet_layer.prepared(wpimgobj.puppet_layers);
-                WPMdlParser::GenPuppetMesh(mesh, *puppet);
+                if (has_bones) {
+                    svData.puppet_layer = WPPuppetLayer(puppet->puppet);
+                    svData.puppet_layer.prepared(wpimgobj.puppet_layers);
+                }
+                WPMdlParser::GenMeshFromMdl(mesh, mdl_mesh);
             }
         }
         if (! puppet) {
