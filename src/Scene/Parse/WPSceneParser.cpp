@@ -1077,7 +1077,11 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     auto& vfs          = *context.vfs;
 
     auto wppartRenderer = particle_obj.renderers.at(0);
-    bool render_rope    = sstart_with(wppartRenderer.name, "rope");
+    // GS HLSL synth for genericropeparticle.geom is not yet implemented under
+    // glslang (see plan wiggly-fluttering-zephyr). Until it lands, route rope
+    // particles through the sprite path so the wallpaper at least renders
+    // without a GS compile failure.
+    bool render_rope    = false && sstart_with(wppartRenderer.name, "rope");
     bool hastrail       = send_with(wppartRenderer.name, "trail");
 
     if (render_rope) particle_obj.material.shader = "genericropeparticle";
