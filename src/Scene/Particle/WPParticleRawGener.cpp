@@ -95,81 +95,71 @@ inline usize GenParticleData(std::span<const std::unique_ptr<ParticleInstance>> 
     return i;
 }
 
-// Emit one vertex per consecutive trail segment for a single particle history
-// (one ParticleInstance worth). The geometry shader expands each point into a
-// strip via cubic Bezier (see genericropeparticle.geom). Returns the number of
-// segment vertices emitted; vertices land at [base_index, base_index+ret).
-inline size_t GenRopeParticleDataOne(std::span<const Particle>   particles,
-                                     const ParticleRawGenSpecOp& specOp, WPGOption opt,
-                                     SceneVertexArray& sv, size_t base_index) {
+// Emit one VS-input vertex per consecutive pair of trail-history samples for a
+// single live rope-head particle. Each emitted vertex carries the segment's
+// endpoints + Catmull-Rom neighbour positions as splineCP0/CP1 (the vert shader
+// derives the GS-side tangents from them). Returns the number of segment
+// vertices emitted; vertices land at [base_index, base_index+ret).
+inline size_t GenRopeParticleSegments(const Particle& p, const ParticleTrail& trail,
+                                      const ParticleRawGenSpecOp& specOp, WPGOption opt,
+                                      SceneVertexArray& sv, size_t base_index) {
     const auto one_size = sv.OneSize();
     std::array<float, 32> v {};
     size_t emitted = 0;
 
-    for (size_t i = 1; i < particles.size(); i++) {
-        const auto& p     = particles[i];
-        const auto& pre_p = particles[i - 1];
-        if (! ParticleModify::LifetimeOk(p)) break;
-        if (! ParticleModify::LifetimeOk(pre_p)) continue;
+    if (trail.len < 2) return 0;
 
-        float size     = p.size / 2.0f;
-        float lifetime = p.lifetime;
-        specOp(p, { &lifetime });
+    float size     = p.size / 2.0f;
+    float lifetime = p.lifetime;
+    specOp(p, { &lifetime });
 
-        const float in_ParticleTrailLength   = (float)particles.size();
-        const float in_ParticleTrailPosition = (float)(i - 1);
+    const float in_ParticleTrailLength = (float)trail.len;
 
-        // Catmull-Rom-shaped Bezier control points for the GS subdivision: feed
-        // the two neighbouring history positions as splineCP0/CP1 so the vert
-        // shader derives tangents (pre - prev_prev) and (cur - next). The GS
-        // hardcoded 0.15 factor lines up with Catmull-Rom tension 0.5
-        // (theoretical 1/6 ≈ 0.167). Boundary segments fall back to the segment
-        // endpoint itself, which makes that side flat.
-        const auto& prev_prev_p = (i >= 2) ? particles[i - 2] : pre_p;
-        const auto& next_p      = (i + 1 < particles.size()) ? particles[i + 1] : p;
-        Vector3f    scp         = Vector3f { prev_prev_p.position };
-        Vector3f    ecp         = Vector3f { next_p.position };
+    // trail.At(0) = oldest, At(len-1) = newest. Segments connect (j-1) -> j.
+    for (uint16_t j = 1; j < trail.len; j++) {
+        Vector3f pre_pos = trail.At((uint16_t)(j - 1));
+        Vector3f cur_pos = trail.At(j);
+        // Catmull-Rom neighbour samples for the cubic-Bezier subdivision; the
+        // GS hardcoded 0.15 factor matches Catmull-Rom tension 0.5 (theoretical
+        // 1/6 ≈ 0.167). At the trail endpoints fall back to the segment ends
+        // so those boundary spans render flat.
+        Vector3f scp = (j >= 2) ? trail.At((uint16_t)(j - 2)) : pre_pos;
+        Vector3f ecp = (j + 1 < trail.len) ? trail.At((uint16_t)(j + 1)) : cur_pos;
+
+        const float in_ParticleTrailPosition = (float)(j - 1);
 
         size_t off = 0;
-        // a_PositionVec4: (startPos, sizeStart)
-        v[off++] = pre_p.position[0];
-        v[off++] = pre_p.position[1];
-        v[off++] = pre_p.position[2];
+        v[off++] = pre_pos[0];
+        v[off++] = pre_pos[1];
+        v[off++] = pre_pos[2];
         v[off++] = size;
-        // a_TexCoordVec4: (endPos, trailLength)
-        v[off++] = p.position[0];
-        v[off++] = p.position[1];
-        v[off++] = p.position[2];
+        v[off++] = cur_pos[0];
+        v[off++] = cur_pos[1];
+        v[off++] = cur_pos[2];
         v[off++] = in_ParticleTrailLength;
-        // a_TexCoordVec4C1: (CPStart, trailPosition)
         v[off++] = scp[0];
         v[off++] = scp[1];
         v[off++] = scp[2];
         v[off++] = in_ParticleTrailPosition;
         if (opt.thick_format) {
-            // a_TexCoordVec4C2: (CPEnd, sizeEnd)
             v[off++] = ecp[0];
             v[off++] = ecp[1];
             v[off++] = ecp[2];
             v[off++] = size;
-            // a_TexCoordVec4C3: end color
             v[off++] = p.color[0];
             v[off++] = p.color[1];
             v[off++] = p.color[2];
             v[off++] = p.alpha;
         } else {
-            // a_TexCoordVec3C2: CPEnd (VAttr slot is FLOAT4 for alignment; .w
-            // unused by the shader).
             v[off++] = ecp[0];
             v[off++] = ecp[1];
             v[off++] = ecp[2];
             v[off++] = 0.0f;
         }
-        // a_Color: start color
-        v[off++] = pre_p.color[0];
-        v[off++] = pre_p.color[1];
-        v[off++] = pre_p.color[2];
-        v[off++] = pre_p.alpha;
+        v[off++] = p.color[0];
+        v[off++] = p.color[1];
+        v[off++] = p.color[2];
+        v[off++] = p.alpha;
 
         rstd_assert(off == one_size);
         sv.SetVertexs(base_index + emitted, { v.data(), one_size });
@@ -184,8 +174,14 @@ inline size_t GenRopeParticleData(std::span<const std::unique_ptr<ParticleInstan
     size_t total = 0;
     for (const auto& inst : instances) {
         if (inst->IsNoLiveParticle()) continue;
-        total +=
-            GenRopeParticleDataOne(inst->Particles(), specOp, opt, sv, total);
+        auto particles = inst->Particles();
+        auto trails    = inst->Trails();
+        const size_t n = std::min(particles.size(), trails.size());
+        for (size_t si = 0; si < n; si++) {
+            if (! ParticleModify::LifetimeOk(particles[si])) continue;
+            total += GenRopeParticleSegments(
+                particles[si], trails[si], specOp, opt, sv, total);
+        }
     }
     return total;
 }

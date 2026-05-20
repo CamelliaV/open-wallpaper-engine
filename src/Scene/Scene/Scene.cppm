@@ -1028,6 +1028,33 @@ enum class ParticleAnimationMode
 
 class ParticleSystem;
 
+// Per-slot trail history for rope-head particles. positions[head] is the
+// newest; len counts valid samples (0..capacity). Capacity is decided by the
+// SubSystem and is the same for every slot in one instance.
+struct ParticleTrail {
+    std::vector<Eigen::Vector3f> positions;
+    uint16_t                     head { 0 };
+    uint16_t                     len { 0 };
+
+    void Reset() noexcept {
+        head = 0;
+        len  = 0;
+    }
+    void Push(const Eigen::Vector3f& p) noexcept {
+        if (positions.empty()) return;
+        head            = (uint16_t)((head + 1) % positions.size());
+        positions[head] = p;
+        if (len < positions.size()) len++;
+    }
+    // Returns oldest -> newest sample at logical index i in [0, len).
+    Eigen::Vector3f At(uint16_t i) const noexcept {
+        // newest is at head; oldest is len-1 back from head.
+        auto cap = (uint16_t)positions.size();
+        auto idx = (uint16_t)((head + cap - (len - 1 - i)) % cap);
+        return positions[idx];
+    }
+};
+
 class ParticleInstance : NoCopy, NoMove {
 public:
     struct BoundedData {
@@ -1049,13 +1076,19 @@ public:
     std::span<const Particle> Particles() const;
     std::vector<Particle>&    ParticlesVec();
 
+    // Parallel to ParticlesVec(); each slot has its own ring buffer of past
+    // positions. SubSystem allocates capacity at construction (0 = no trail).
+    std::span<const ParticleTrail> Trails() const;
+    std::vector<ParticleTrail>&    TrailsVec();
+
     BoundedData& GetBoundedData();
 
 private:
-    bool                  m_is_death { false };
-    bool                  m_no_live_particle { false };
-    std::vector<Particle> m_particles;
-    BoundedData           m_bounded_data;
+    bool                        m_is_death { false };
+    bool                        m_no_live_particle { false };
+    std::vector<Particle>       m_particles;
+    std::vector<ParticleTrail>  m_trails;
+    BoundedData                 m_bounded_data;
 };
 
 class ParticleSubSystem : NoCopy, NoMove {
@@ -1071,7 +1104,7 @@ public:
 public:
     ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, uint32_t maxcount,
                       double rate, u32 maxcount_instance, double probability, SpawnType type,
-                      ParticleRawGenSpecOp specOp);
+                      ParticleRawGenSpecOp specOp, u32 trail_length = 0);
     ~ParticleSubSystem();
 
     void Emitt();
@@ -1111,6 +1144,10 @@ private:
     u32       m_maxcount_instance { 1 };
     double    m_probability { 1.0f };
     SpawnType m_spawn_type { SpawnType::STATIC };
+    u32       m_trail_length { 0 };
+
+public:
+    u32 TrailLength() const { return m_trail_length; }
 };
 
 // ============================================================================

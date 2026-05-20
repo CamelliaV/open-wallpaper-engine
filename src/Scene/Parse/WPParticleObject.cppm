@@ -44,6 +44,9 @@ public:
     float       length { 0.05f };
     float       maxlength { 10.0f };
     float       subdivision { 3.0f };
+    // Trail history depth per rope-head particle (= number of trail nodes).
+    // Only consumed by rope/trail renderers; default matches WE behaviour.
+    i32         segments { 16 };
 };
 
 class Initializer {

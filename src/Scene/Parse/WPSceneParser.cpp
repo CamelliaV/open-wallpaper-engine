@@ -248,7 +248,12 @@ void LoadOperator(ParticleSubSystem& pSys, const wpscene::Particle& wp,
 }
 void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp, float count,
                  bool render_rope) {
-    bool sort = render_rope;
+    // Sort was used by the rope generator to keep adjacent-particle pairs
+    // packed at the front of m_particles[]. With per-particle trail history
+    // each slot is independent, so sort is unnecessary and would shuffle the
+    // slot<->trail mapping mid-frame.
+    (void)render_rope;
+    bool sort = false;
     for (const auto& em : wp.emitters) {
         auto newEm = em;
         newEm.rate *= count;
@@ -1168,12 +1173,27 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     (void)hasSprite;
 
     bool thick_format = material.hasSprite || (hastrail && ! render_rope);
+    // Trail history depth per rope-head particle. Clamp to [2, 256] so a buggy
+    // renderer spec can't allocate gigabytes; segments<2 would produce zero
+    // segments anyway.
+    u32  trail_length = 0;
+    if (render_rope) {
+        i32 seg = wppartRenderer.segments;
+        if (seg < 2) seg = 2;
+        if (seg > 256) seg = 256;
+        trail_length = (u32)seg;
+    }
     {
+        // Rope mesh capacity = maxcount * (trail_length-1) since each live
+        // particle produces (trail_length-1) GS-input segments. Non-rope path
+        // is unchanged: per-particle quad fan-out.
         u32 mesh_maxcount = maxcount * (u32)child_ptr.max_instancecount;
-        if (render_rope)
-            SetRopeParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format);
-        else
+        if (render_rope) {
+            u32 rope_segs = mesh_maxcount * (trail_length - 1);
+            SetRopeParticleMesh(mesh, particle_obj, rope_segs, thick_format);
+        } else {
             SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format);
+        }
     }
 
     auto particleSub = std::make_unique<ParticleSubSystem>(
@@ -1196,7 +1216,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                 lifetime = (1.0f - (p.lifetime / p.init.lifetime)) * sequencemultiplier;
                 break;
             }
-        });
+        },
+        trail_length);
 
     LoadEmitter(*particleSub, particle_obj, override.count, render_rope);
     LoadInitializer(*particleSub, particle_obj, override);

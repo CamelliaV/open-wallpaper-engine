@@ -14,6 +14,7 @@ void ParticleInstance::Refresh() {
     SetNoLiveParticle(false);
     GetBoundedData() = {};
     ParticlesVec().clear();
+    TrailsVec().clear();
 }
 
 bool ParticleInstance::IsDeath() const { return m_is_death; }
@@ -25,12 +26,15 @@ void ParticleInstance::SetNoLiveParticle(bool v) { m_no_live_particle = v; };
 std::span<const Particle> ParticleInstance::Particles() const { return m_particles; };
 std::vector<Particle>&    ParticleInstance::ParticlesVec() { return m_particles; };
 
+std::span<const ParticleTrail> ParticleInstance::Trails() const { return m_trails; };
+std::vector<ParticleTrail>&    ParticleInstance::TrailsVec() { return m_trails; };
+
 ParticleInstance::BoundedData& ParticleInstance::GetBoundedData() { return m_bounded_data; }
 
 ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm,
                                      uint32_t maxcount, double rate, u32 maxcount_instance,
                                      double probability, SpawnType type,
-                                     ParticleRawGenSpecOp specOp)
+                                     ParticleRawGenSpecOp specOp, u32 trail_length)
     : m_sys(p),
       m_mesh(sm),
       m_maxcount(maxcount),
@@ -39,7 +43,8 @@ ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMes
       m_time(0),
       m_maxcount_instance(maxcount_instance),
       m_probability(probability),
-      m_spawn_type(type) {};
+      m_spawn_type(type),
+      m_trail_length(trail_length) {};
 
 ParticleSubSystem::~ParticleSubSystem() = default;
 
@@ -171,6 +176,18 @@ void ParticleSubSystem::Emitt() {
 
         bool  has_live = false;
         isize i        = -1;
+        // Keep the trail buffer parallel to the particle slot count, and
+        // reset the trail any time a slot transitions to a fresh particle.
+        if (m_trail_length > 0) {
+            auto& trails = inst->TrailsVec();
+            if (trails.size() < info.particles.size()) {
+                trails.resize(info.particles.size());
+            }
+            for (auto& t : trails) {
+                if (t.positions.size() != m_trail_length)
+                    t.positions.assign(m_trail_length, Eigen::Vector3f::Zero());
+            }
+        }
         for (auto& p : info.particles) {
             i++;
 
@@ -181,6 +198,7 @@ void ParticleSubSystem::Emitt() {
                         child->Type() == SpawnType::EVENT_SPAWN)
                         spawn_inst(*inst, *child, i);
                 }
+                if (m_trail_length > 0) inst->TrailsVec()[i].Reset();
             }
 
             ParticleModify::MarkOld(p);
@@ -205,6 +223,15 @@ void ParticleSubSystem::Emitt() {
         std::for_each(m_operators.begin(), m_operators.end(), [&info](ParticleOperatorOp& op) {
             op(info);
         });
+
+        if (m_trail_length > 0) {
+            auto& trails = inst->TrailsVec();
+            for (usize si = 0; si < info.particles.size(); si++) {
+                auto& p = info.particles[si];
+                if (! ParticleModify::LifetimeOk(p)) continue;
+                trails[si].Push(Eigen::Vector3f { p.position });
+            }
+        }
     }
 
     m_mesh->SetDirty();

@@ -54,6 +54,7 @@ bool ParticleRender::FromJson(const nlohmann::json& json) {
     if (name == "spritetrail" || name == "ropetrail") {
         owe::GetJsonValue(json, "length", length, false);
         owe::GetJsonValue(json, "maxlength", maxlength, false);
+        owe::GetJsonValue(json, "segments", segments, false);
     }
     return true;
 }
