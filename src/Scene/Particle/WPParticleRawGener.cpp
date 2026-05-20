@@ -158,10 +158,12 @@ inline size_t GenRopeParticleDataOne(std::span<const Particle>   particles,
             v[off++] = p.color[2];
             v[off++] = p.alpha;
         } else {
-            // a_TexCoordVec3C2: CPEnd
+            // a_TexCoordVec3C2: CPEnd (VAttr slot is FLOAT4 for alignment; .w
+            // unused by the shader).
             v[off++] = ecp[0];
             v[off++] = ecp[1];
             v[off++] = ecp[2];
+            v[off++] = 0.0f;
         }
         // a_Color: start color
         v[off++] = pre_p.color[0];

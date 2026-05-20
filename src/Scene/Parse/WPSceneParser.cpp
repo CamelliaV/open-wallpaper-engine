@@ -1121,8 +1121,14 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
             (float)in_SegmentUVTimeOffset,
             (float)in_SegmentMaxCount,
         };
-        shaderInfo.combos["THICKFORMAT"]   = "1";
         shaderInfo.combos["TRAILRENDERER"] = "1";
+        // THICKFORMAT in genericropeparticle.{vert,geom} adds per-end size /
+        // color attributes (TexCoordVec4C2 + TexCoordVec4C3). ropetrail has a
+        // single rope color per segment, so it stays on the thin layout
+        // (TexCoordVec3C2 for the spline CP only). spritetrail uses the per-
+        // vertex velocity in TexCoordVec4C1.w + thick layout for the trail
+        // tangent / fade-in logic.
+        if (! render_rope) shaderInfo.combos["THICKFORMAT"] = "1";
     }
     if (render_rope) {
         // genericropeparticle.geom branches on TRAILSUBDIVISION when present;
@@ -1161,7 +1167,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     bool  hasSprite          = material.hasSprite;
     (void)hasSprite;
 
-    bool thick_format = material.hasSprite || hastrail;
+    bool thick_format = material.hasSprite || (hastrail && ! render_rope);
     {
         u32 mesh_maxcount = maxcount * (u32)child_ptr.max_instancecount;
         if (render_rope)
