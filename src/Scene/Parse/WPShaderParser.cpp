@@ -112,9 +112,69 @@ static constexpr const char* pre_shader_tail_frag = R"(
 // uses its own minimal prologue in PreShaderHeader.
 static constexpr const char* pre_shader_tail_geom = R"()";
 
-// HLSL prologue used when type==GEOMETRY (the .geom is upstream HLSL).
-// Implementation deferred until VS/FS path is verified end-to-end.
-static constexpr const char* pre_shader_code_gs_hlsl = R"(// (TODO) GS HLSL prologue
+// HLSL prologue used when type==GEOMETRY. WE's .geom source is a hybrid:
+// GLSL-flavoured top-level `in vec4 X;` / `out vec4 X;` decls + HLSL-style
+// `[maxvertexcount] void main() { ... IN[0].X ... v.Y = ...; OUT.Append(v); }`
+// body. We feed it to glslang's HLSL frontend (EShSourceHlsl); this prologue
+// bridges GLSL types/builtins to HLSL and Finalprocessor strips the `in`/`out`
+// lines + emits `struct WW_VSOut/WW_PSIn` + `cbuffer ww_Uniforms` + replaces
+// `void main()` with the GS entry signature.
+static constexpr const char* pre_shader_code_gs_hlsl = R"(// auto-generated WE→HLSL prologue (GS)
+#define HLSL 1
+#define GLSL 0
+#define highp
+#define mediump
+#define lowp
+#define vec2 float2
+#define vec3 float3
+#define vec4 float4
+#define ivec2 int2
+#define ivec3 int3
+#define ivec4 int4
+#define mat2 float2x2
+#define mat3 float3x3
+#define mat4 float4x4
+#define mat2x2 float2x2
+#define mat3x3 float3x3
+#define mat4x4 float4x4
+#define mat2x3 float3x2
+#define mat2x4 float4x2
+#define mat3x2 float2x3
+#define mat3x4 float4x3
+#define mat4x2 float2x4
+#define mat4x3 float3x4
+#define CAST2(x)   ((float2)(x))
+#define CAST3(x)   ((float3)(x))
+#define CAST4(x)   ((float4)(x))
+#define CAST3X3(x) ((float3x3)(x))
+#define mix(a,b,t) lerp((a),(b),(t))
+#define fract      frac
+#define atan(a,b)  atan2((a),(b))
+#define dFdx       ddx
+#define dFdy(x)    (-ddy(x))
+
+// WE writes mul(vec, matrix); HLSL native mul wants matrix-first. Same
+// _ww_mul overload trick as the DXC era — function overloads cover both
+// orderings without macro recursion.
+float2   _ww_mul(float2   v, float2x2 M) { return mul(M, v); }
+float3   _ww_mul(float3   v, float3x3 M) { return mul(M, v); }
+float4   _ww_mul(float4   v, float4x4 M) { return mul(M, v); }
+float2x2 _ww_mul(float2x2 A, float2x2 B) { return mul(B, A); }
+float3x3 _ww_mul(float3x3 A, float3x3 B) { return mul(B, A); }
+float4x4 _ww_mul(float4x4 A, float4x4 B) { return mul(B, A); }
+float2   _ww_mul(float2x2 M, float2   v) { return mul(v, M); }
+float3   _ww_mul(float3x3 M, float3   v) { return mul(v, M); }
+float4   _ww_mul(float4x4 M, float4   v) { return mul(v, M); }
+float3   _ww_mul(float4   v, float3x4 M) { return mul(M, v); }
+float3   _ww_mul(float3x4 M, float4   v) { return mul(M, v); }
+#define mul _ww_mul
+
+// `gl_Position` is the SV_Position struct field's GLSL name; rename to the
+// canonical struct field name so `IN[0].gl_Position` / `v.gl_Position` both
+// resolve correctly.
+#define gl_Position _ww_sv_position
+#define PS_INPUT    WW_PSIn
+
 __SHADER_PLACEHOLD__
 
 )";
@@ -419,6 +479,30 @@ inline std::string ToGLSLType(std::string_view t) {
     return std::string(t);
 }
 
+// Inverse of ToGLSLType: bridge GLSL aliases back to HLSL canonical names
+// (used by the GS synth which feeds HLSL to glslang's HLSL frontend).
+inline std::string ToHLSLType(std::string_view t) {
+    if (t == "vec2") return "float2";
+    if (t == "vec3") return "float3";
+    if (t == "vec4") return "float4";
+    if (t == "ivec2") return "int2";
+    if (t == "ivec3") return "int3";
+    if (t == "ivec4") return "int4";
+    if (t == "uvec2") return "uint2";
+    if (t == "uvec3") return "uint3";
+    if (t == "uvec4") return "uint4";
+    if (t == "mat2" || t == "mat2x2") return "float2x2";
+    if (t == "mat3" || t == "mat3x3") return "float3x3";
+    if (t == "mat4" || t == "mat4x4") return "float4x4";
+    if (t == "mat2x3") return "float3x2";
+    if (t == "mat2x4") return "float4x2";
+    if (t == "mat3x2") return "float2x3";
+    if (t == "mat3x4") return "float4x3";
+    if (t == "mat4x2") return "float2x4";
+    if (t == "mat4x3") return "float3x4";
+    return std::string(t);
+}
+
 struct IODecl {
     char        storage; // 'a' for attribute, 'v' for varying, 'i' for GS `in`, 'o' for GS `out'
     std::string type;    // GLSL type as captured (vec2/vec4/mat3/...)
@@ -602,46 +686,142 @@ struct SynthOutput {
     std::string post;
 };
 
+inline usize ArraySlots(const std::string& arr) {
+    if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
+    usize n = 0;
+    for (usize i = 1; i + 1 < arr.size(); ++i) {
+        const char c = arr[i];
+        if (c < '0' || c > '9') return 1;
+        n = n * 10 + (usize)(c - '0');
+    }
+    return n > 0 ? n : 1;
+}
+
 // Build `layout(location=N) in/out TYPE NAME[arr];` declarations from a
 // list of IO decls, with locations assigned alphabetically so neighbouring
 // stages agree without explicit coordination. `is_input` picks the storage
 // qualifier (in vs out). Returns the joined block.
 inline std::string EmitStageIOLayout(std::vector<IODecl> decls, bool is_input) {
-    // gl_Position is a GLSL builtin; never re-declare it.
-    decls.erase(std::remove_if(decls.begin(), decls.end(),
-                               [](const IODecl& d) { return d.name == "gl_Position"; }),
+    // gl_Position is a GLSL builtin; never re-declare it. _ww_sv_position is
+    // the GS-side macro alias for the same slot.
+    decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
+                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                }),
                 decls.end());
     std::sort(decls.begin(), decls.end(),
               [](const IODecl& a, const IODecl& b) { return a.name < b.name; });
-    auto array_slots = [](const std::string& arr) -> usize {
-        if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
-        usize n = 0;
-        for (usize i = 1; i + 1 < arr.size(); ++i) {
-            const char c = arr[i];
-            if (c < '0' || c > '9') return 1;
-            n = n * 10 + (usize)(c - '0');
-        }
-        return n > 0 ? n : 1;
-    };
     const char* qual = is_input ? "in" : "out";
     std::string out;
     usize       loc = 0;
     for (const auto& d : decls) {
         out += "layout(location = " + std::to_string(loc) + ") " + qual + " " +
                ToGLSLType(d.type) + " " + d.name + d.array + ";\n";
-        loc += array_slots(d.array);
+        loc += ArraySlots(d.array);
     }
     return out;
 }
 
+// HLSL-side struct emission for the GS synth. Each non-position field gets
+// `[[vk::location(N)]]` and a name-as-semantic so SPIRV-Reflect picks up the
+// same VS/FS names through the GS-emitted SPIR-V.
+inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> decls) {
+    decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
+                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                }),
+                decls.end());
+    std::sort(decls.begin(), decls.end(),
+              [](const IODecl& a, const IODecl& b) { return a.name < b.name; });
+    std::string out;
+    out += "struct ";
+    out += name;
+    out += " {\n";
+    out += "    float4 _ww_sv_position : SV_Position;\n";
+    usize loc = 0;
+    for (const auto& d : decls) {
+        out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
+               ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
+        loc += ArraySlots(d.array);
+    }
+    out += "};\n";
+    return out;
+}
+
+// Find a literal `void main()` call in `src` (no regex). Replace with the GS
+// entry-point signature. Returns the modified source unchanged if no match.
+inline std::string RewriteGSMain(std::string src) {
+    static constexpr std::string_view marker { "void main()" };
+    static constexpr std::string_view repl {
+        "void main_gs(point WW_VSOut IN[1], inout TriangleStream<WW_PSIn> OUT)"
+    };
+    if (auto pos = src.find(marker); pos != std::string::npos) {
+        src.replace(pos, marker.size(), repl);
+    }
+    return src;
+}
+
 inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
                                   const WPPreprocessorInfo* next) {
-    // GS path stays HLSL-flavoured for now (the .geom is upstream HLSL); the
-    // GS-specific synth will land in a follow-up. For this turn just hand the
-    // raw GS source back without splicing in anything.
+    // GS: feed glslang's HLSL frontend. Strip GLSL-style top-level `in`/`out`
+    // decls, emit HLSL structs (WW_VSOut/WW_PSIn) + ww_Uniforms cbuffer, and
+    // rewrite `void main()` to the entry signature `point WW_VSOut IN[1],
+    // inout TriangleStream<WW_PSIn> OUT`.
     if (unit.stage == ShaderType::GEOMETRY) {
-        std::regex re_hold(SHADER_PLACEHOLD.data());
-        return std::regex_replace(unit.src, re_hold, std::string {});
+        auto [io_decls, stripped] = ScanAndStripIO(unit.src);
+        std::string body          = StripUniforms(stripped);
+
+        std::vector<IODecl> in_decls, out_decls;
+        Set<std::string>    in_seen, out_seen;
+        auto add_in  = [&](const IODecl& d) {
+            if (in_seen.insert(d.name).second) in_decls.push_back(d);
+        };
+        auto add_out = [&](const IODecl& d) {
+            if (out_seen.insert(d.name).second) out_decls.push_back(d);
+        };
+        for (const auto& d : io_decls) {
+            if (d.storage == 'i')      add_in(d);
+            else if (d.storage == 'o') add_out(d);
+        }
+        if (pre)  for (auto& [k, v] : pre->output) {
+            if (auto d = ParseIODecl(v); d) add_in(*d);
+        }
+        if (next) for (auto& [k, v] : next->input) {
+            if (auto d = ParseIODecl(v); d) add_out(*d);
+        }
+
+        std::string synth;
+        synth += "\n// === auto-generated GS stage I/O (HLSL) ===\n";
+        synth += EmitGSHLSLStruct("WW_VSOut", std::move(in_decls));
+        synth += EmitGSHLSLStruct("WW_PSIn",  std::move(out_decls));
+
+        // Cross-stage uniform union as an HLSL cbuffer matching VS/FS UBO
+        // layout (binding=0, set=0). std140 / column-major matches the
+        // glslang GLSL-side block; uploader writes one buffer used by all
+        // stages.
+        Map<std::string, std::string> uniforms_union;
+        auto absorb = [&](const Map<std::string, std::string>& m) {
+            for (const auto& [k, v] : m) uniforms_union.try_emplace(k, v);
+        };
+        absorb(unit.preprocess_info.uniforms);
+        if (pre)  absorb(pre->uniforms);
+        if (next) absorb(next->uniforms);
+        if (! uniforms_union.empty()) {
+            synth += "\n// === auto-generated shared uniforms (HLSL) ===\n";
+            synth += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
+            for (const auto& [name, ty] : uniforms_union) {
+                std::string base_ty = ty;
+                std::string array;
+                if (auto pos = ty.find('['); pos != std::string::npos) {
+                    base_ty = ty.substr(0, pos);
+                    array   = ty.substr(pos);
+                }
+                synth += "    " + ToHLSLType(base_ty) + " " + name + array + ";\n";
+            }
+            synth += "};\n";
+        }
+
+        body = RewriteGSMain(std::move(body));
+        std::regex  re_hold(SHADER_PLACEHOLD.data());
+        return std::regex_replace(body, re_hold, synth);
     }
 
     // Strip `attribute/varying` lines and collect them as structured decls.
