@@ -124,7 +124,7 @@ target_sources(owe-parse
          Text/Text.cppm)
 target_link_libraries(owe-parse
   PUBLIC owe-base owe-shader-compile owe-script
-  PRIVATE nlohmann_json ${LZ4_LIBRARIES} Freetype::Freetype)
+  PRIVATE nlohmann_json ${LZ4_LIBRARIES} Freetype::Freetype PkgConfig::FONTCONFIG)
 target_include_directories(owe-parse
   PUBLIC  .. . Utils/include
   PRIVATE Utils Utils/include/Utils Scene Particle)

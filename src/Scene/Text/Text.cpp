@@ -9,6 +9,8 @@ module;
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+
+#include <fontconfig/fontconfig.h>
 module wescene.text;
 import wescene.spec_texs;
 import wescene.core;
@@ -322,6 +324,43 @@ FontCache* SceneFontCache(owe::Scene& scene) noexcept {
     return static_cast<FontCache*>(scene.font_cache.get());
 }
 
+// WE references system fonts as `systemfont_<lowercased-windows-name>`,
+// e.g. `systemfont_arial`. On Linux those exact files don't exist; fontconfig
+// has an alias table that maps Windows family names (Arial, Courier New, …)
+// to whatever the user actually has installed. Strip the prefix and ask fc.
+static std::filesystem::path ResolveViaFontconfig(std::string_view name) {
+    constexpr std::string_view kPrefix = "systemfont_";
+    // Match on the basename — scenes occasionally prefix a dir.
+    std::string base = std::filesystem::path(name).filename().native();
+    if (base.size() <= kPrefix.size() ||
+        std::string_view(base).substr(0, kPrefix.size()) != kPrefix) {
+        return {};
+    }
+    std::string family = base.substr(kPrefix.size());
+    if (family.empty()) return {};
+    family[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(family[0])));
+
+    if (! FcInit()) return {};
+    FcPattern* pat = FcNameParse(reinterpret_cast<const FcChar8*>(family.c_str()));
+    if (pat == nullptr) return {};
+    FcConfigSubstitute(nullptr, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+    FcResult   res   = FcResultNoMatch;
+    FcPattern* match = FcFontMatch(nullptr, pat, &res);
+    FcPatternDestroy(pat);
+    if (match == nullptr || res != FcResultMatch) {
+        if (match != nullptr) FcPatternDestroy(match);
+        return {};
+    }
+    FcChar8* file = nullptr;
+    std::filesystem::path out;
+    if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file != nullptr) {
+        out = std::filesystem::path(reinterpret_cast<const char*>(file));
+    }
+    FcPatternDestroy(match);
+    return out;
+}
+
 FontCache::ResolvedBlob FontCache::ResolveSystemFont(std::string_view name, bool fallback_to_any) {
     namespace fs = std::filesystem;
 
@@ -335,6 +374,10 @@ FontCache::ResolvedBlob FontCache::ResolveSystemFont(std::string_view name, bool
     if (! name.empty()) {
         // Direct path?
         if (auto rb = try_load(fs::path(name)); rb.bytes) return rb;
+        // WE's systemfont_<family> alias → fontconfig.
+        if (auto p = ResolveViaFontconfig(name); ! p.empty()) {
+            if (auto rb = try_load(p); rb.bytes) return rb;
+        }
         // Bare filename: search common roots.
         std::vector<fs::path> roots { "/usr/share/fonts", "/usr/local/share/fonts" };
         if (auto* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr) {

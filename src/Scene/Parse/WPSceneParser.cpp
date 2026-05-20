@@ -1285,7 +1285,13 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     }
 
     text::FontCache::ResolvedBlob resolved;
-    if (! font_name.empty()) {
+    // `systemfont_<family>` is WE's alias for a host system font — never exists
+    // in the pkg, so skip the VFS round-trip and let fontconfig resolve it.
+    // Some scenes write it with a leading dir (e.g. `fonts/systemfont_arial`),
+    // so match on the basename.
+    const bool is_systemfont =
+        std::filesystem::path(font_name).filename().native().starts_with("systemfont_");
+    if (! font_name.empty() && ! is_systemfont) {
         // scene.json's `font` is a pkg-relative path, e.g. `fonts/2.ttf` or
         // `fonts/workshop/<id>/X.otf`. The pkg mounts at /assets so the full
         // VFS path is /assets/<font_name>.

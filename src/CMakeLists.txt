@@ -7,6 +7,7 @@ find_package(Threads REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(Freetype REQUIRED)
 pkg_check_modules(LZ4 REQUIRED liblz4)
+pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 
 include(TestBigEndian)
 test_big_endian(ENDIAN)
