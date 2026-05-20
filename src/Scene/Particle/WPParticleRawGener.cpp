@@ -119,14 +119,16 @@ inline size_t GenRopeParticleDataOne(std::span<const Particle>   particles,
         const float in_ParticleTrailLength   = (float)particles.size();
         const float in_ParticleTrailPosition = (float)(i - 1);
 
-        Vector3f cp_vec  = AngleAxisf(p.rotation[2] + rstd::f32_::consts::FRAC_PI_2,
-                                      Vector3f::UnitZ()) *
-                          Vector3f { 0.0f, size / 2.0f, 0.0f };
-        Vector3f pos_vec = Vector3f { p.position } - Vector3f { pre_p.position };
-        cp_vec = pos_vec.normalized().dot(cp_vec) > 0 ? cp_vec : -1.0f * cp_vec;
-
-        Vector3f scp = Vector3f { pre_p.position } + cp_vec;
-        Vector3f ecp = Vector3f { p.position } - cp_vec;
+        // Catmull-Rom-shaped Bezier control points for the GS subdivision: feed
+        // the two neighbouring history positions as splineCP0/CP1 so the vert
+        // shader derives tangents (pre - prev_prev) and (cur - next). The GS
+        // hardcoded 0.15 factor lines up with Catmull-Rom tension 0.5
+        // (theoretical 1/6 ≈ 0.167). Boundary segments fall back to the segment
+        // endpoint itself, which makes that side flat.
+        const auto& prev_prev_p = (i >= 2) ? particles[i - 2] : pre_p;
+        const auto& next_p      = (i + 1 < particles.size()) ? particles[i + 1] : p;
+        Vector3f    scp         = Vector3f { prev_prev_p.position };
+        Vector3f    ecp         = Vector3f { next_p.position };
 
         size_t off = 0;
         // a_PositionVec4: (startPos, sizeStart)
