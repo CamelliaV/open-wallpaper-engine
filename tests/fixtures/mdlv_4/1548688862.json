@@ -15,6 +15,7 @@
       "mdlv": 4,
       "ok": false,
       "part_count": 0,
+      "parts": [],
       "path": "/models/neongrid/neongrid.mdl",
       "vert_extra_count": 0,
       "vertex_count": 0
@@ -29,6 +30,7 @@
       "mdlv": 4,
       "ok": false,
       "part_count": 0,
+      "parts": [],
       "path": "/models/neonsun/neonsun.mdl",
       "vert_extra_count": 0,
       "vertex_count": 0

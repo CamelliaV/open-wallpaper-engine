@@ -13,14 +13,63 @@
           "id": 35,
           "length": 29,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": true,
+              "i": 1,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 2,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 3,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 4,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 5,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 6,
+              "p": false,
+              "s": false
+            }
+          ],
           "name": "动画 1",
           "total_bone_frames": 210
         }
       ],
       "anims": 1,
+      "attachment_count": 0,
+      "attachments": [],
       "bone_tree": [
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -29,7 +78,16 @@
           ]
         },
         {
-          "parent": 0,
+          "anim_parent": 0,
+          "bind_parent": 0,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -38,7 +96,16 @@
           ]
         },
         {
-          "parent": 1,
+          "anim_parent": 1,
+          "bind_parent": 1,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -47,7 +114,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 2,
+          "bind_parent": 2,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -56,7 +132,16 @@
           ]
         },
         {
-          "parent": 1,
+          "anim_parent": 1,
+          "bind_parent": 1,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -65,7 +150,16 @@
           ]
         },
         {
-          "parent": 4,
+          "anim_parent": 4,
+          "bind_parent": 4,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -74,7 +168,16 @@
           ]
         },
         {
-          "parent": 1,
+          "anim_parent": 1,
+          "bind_parent": 1,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -91,6 +194,7 @@
       "mdlv": 16,
       "ok": true,
       "part_count": 0,
+      "parts": [],
       "path": "/models/拼图_puppet.mdl",
       "vert_extra_count": 0,
       "vertex_count": 530

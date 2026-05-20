@@ -11,11 +11,12 @@
 //   4. EXPECT_EQs the two json values, falling back to a JSON Patch
 //      diff (RFC 6902) for a precise field-level error report.
 //
-// To regenerate a fixture after a parser change, build wpvalid and rerun
-// it for the workshop in question:
+// To regenerate a fixture after a parser change, build wescene-test and
+// rerun its `valid` subcommand for the workshop in question:
 //
-//     ninja -C build wpvalid
-//     ./build/tests/wpvalid workshop/<id> tests/fixtures/<category>/<v>/<id>.json
+//     ninja -C build wescene-test
+//     ./build/tests/wescene-test valid workshop/<id> \
+//         -o tests/fixtures/<category>/<v>/<id>.json
 //
 // The DEFINE_FIXTURE_TEST_SUITE macro keeps the per-version cpp files
 // down to a single declaration each.
@@ -28,7 +29,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include "dump.hpp"
+#include "corpus.hpp"
 
 namespace owe::testing {
 

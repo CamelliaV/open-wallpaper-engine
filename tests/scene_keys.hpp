@@ -2,7 +2,8 @@
 //
 // Walks every workshop/<id>/scene.pkg under workshop_root, extracts the
 // raw scene.json from the pkg, and aggregates per-pkg-version statistics
-// of every key path observed in the json tree. Sister tool to wpvalid:
+// of every key path observed in the json tree. Sister tool to
+// `wescene-test valid`:
 // where dump.cpp produces structured field snapshots, this captures the
 // raw key shape so unknown fields surface even when no parser touches
 // them yet.

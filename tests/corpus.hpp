@@ -87,4 +87,23 @@ private:
     std::set<int>              mdla_versions_;
 };
 
+// Gates which sections DumpWorkshop emits. Defaults preserve the historic
+// "do everything except shader compile" behavior so Corpus/version_tests
+// fixtures don't shift. `scan --json-dir` passes its --validate-* flags
+// through to limit the dump scope.
+struct DumpFlags {
+    bool tex { true };       // emit "textures" array (ReadTexMeta)
+    bool shader { false };   // emit "shaders" array (CompileMaterialShader)
+    bool mdl { true };       // emit "puppets" array
+    bool mdl_full { true };  // puppets entries via full WPMdlParser::Parse;
+                             // false ⇒ just the WPMdlHeader fields
+};
+
+// Per-workshop JSON snapshot used by `wescene-test valid`, by
+// `wescene-test scan --json-dir`, and by Corpus to index versions.
+// On failure returns a json object with `{"error": "..."}` and `err`
+// is set to the same message.
+nlohmann::json DumpWorkshop(const std::string& workshop_dir, std::string& err,
+                            DumpFlags flags = {});
+
 } // namespace owe::testing

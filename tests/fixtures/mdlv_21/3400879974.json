@@ -13,23 +13,98 @@
           "id": 1046,
           "length": 180,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": false,
+              "i": 0,
+              "p": true,
+              "s": false
+            }
+          ],
           "name": "动画 1",
           "total_bone_frames": 1991
         },
         {
           "bone_track_count": 11,
           "fps": 60.0,
-          "id": 273408,
+          "id": 1068,
           "length": 240,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": false,
+              "i": 2,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 3,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 4,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 5,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 6,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 7,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 8,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 9,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 10,
+              "p": true,
+              "s": false
+            }
+          ],
           "name": "动画 2",
           "total_bone_frames": 2651
         }
       ],
       "anims": 2,
+      "attachment_count": 0,
+      "attachments": [],
       "bone_tree": [
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -38,7 +113,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -431.93255615234375,
+            25.872175216674805,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -47,7 +131,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -466.14306640625,
+            26.167526245117188,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -56,7 +149,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -472.5924377441406,
+            28.162384033203125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -65,7 +167,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -482.9843444824219,
+            29.73096466064453,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -74,7 +185,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -462.893798828125,
+            28.029359817504883,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -83,7 +203,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -473.5799255371094,
+            26.346256256103516,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -92,7 +221,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -469.3397216796875,
+            22.96094512939453,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -101,7 +239,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -462.23675537109375,
+            29.652585983276367,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -110,7 +257,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            -470.2042236328125,
+            39.103065490722656,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -119,7 +275,16 @@
           ]
         },
         {
-          "parent": 1,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -136,6 +301,63 @@
       "mdlv": 21,
       "ok": true,
       "part_count": 11,
+      "parts": [
+        {
+          "id": 6,
+          "size": 438,
+          "start": 0
+        },
+        {
+          "id": 1,
+          "size": 9135,
+          "start": 438
+        },
+        {
+          "id": 0,
+          "size": 0,
+          "start": 9573
+        },
+        {
+          "id": 2,
+          "size": 630,
+          "start": 9573
+        },
+        {
+          "id": 3,
+          "size": 591,
+          "start": 10203
+        },
+        {
+          "id": 4,
+          "size": 609,
+          "start": 10794
+        },
+        {
+          "id": 5,
+          "size": 606,
+          "start": 11403
+        },
+        {
+          "id": 10,
+          "size": 1206,
+          "start": 12009
+        },
+        {
+          "id": 7,
+          "size": 495,
+          "start": 13215
+        },
+        {
+          "id": 8,
+          "size": 429,
+          "start": 13710
+        },
+        {
+          "id": 9,
+          "size": 9717,
+          "start": 14139
+        }
+      ],
       "path": "/models/HUANG_puppet.mdl",
       "vert_extra_count": 4243,
       "vertex_count": 4243
@@ -148,32 +370,197 @@
           "id": 86,
           "length": 360,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": true,
+              "i": 15,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": true,
+              "i": 16,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": false,
+              "i": 17,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": true,
+              "i": 18,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 19,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": false,
+              "i": 21,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": true,
+              "i": 22,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": false,
+              "i": 23,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": false,
+              "i": 24,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 25,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": false,
+              "i": 26,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 27,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 35,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 36,
+              "p": true,
+              "s": false
+            }
+          ],
           "name": "动画 1",
           "total_bone_frames": 14801
         },
         {
           "bone_track_count": 41,
           "fps": 60.0,
-          "id": 107776,
+          "id": 421,
           "length": 180,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": false,
+              "i": 1,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 2,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 11,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 13,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": false,
+              "i": 37,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": true,
+              "i": 38,
+              "p": true,
+              "s": true
+            },
+            {
+              "a": false,
+              "i": 39,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 40,
+              "p": true,
+              "s": false
+            }
+          ],
           "name": "动画 2",
           "total_bone_frames": 7421
         },
         {
           "bone_track_count": 41,
           "fps": 60.0,
-          "id": 165632,
+          "id": 647,
           "length": 180,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": true,
+              "i": 11,
+              "p": true,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 13,
+              "p": true,
+              "s": false
+            }
+          ],
           "name": "动画 3",
           "total_bone_frames": 7421
         }
       ],
       "anims": 3,
+      "attachment_count": 1,
+      "attachments": [
+        {
+          "name": "YAN"
+        }
+      ],
       "bone_tree": [
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            35.358154296875,
+            -51.684326171875,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -182,7 +569,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            760.0929565429688,
+            -906.309814453125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -191,7 +587,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            706.4434814453125,
+            -997.6040649414063,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -200,7 +605,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            743.649658203125,
+            -170.69189453125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -209,7 +623,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            643.682861328125,
+            -143.6021728515625,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -218,7 +641,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            702.1581420898438,
+            -232.67044067382813,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -227,7 +659,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            673.4271240234375,
+            -161.90866088867188,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -236,7 +677,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            715.951416015625,
+            -227.75173950195313,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -245,7 +695,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            582.3609008789063,
+            -182.08935546875,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -254,7 +713,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            705.8245849609375,
+            -166.72494506835938,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -263,7 +731,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            588.839111328125,
+            -341.4231872558594,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -272,7 +749,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            732.1204833984375,
+            -206.2891845703125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -281,7 +767,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -290,7 +785,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            759.5316162109375,
+            -282.2618713378906,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -299,7 +803,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -308,7 +821,16 @@
           ]
         },
         {
-          "parent": 14,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            100.37713623046875,
+            -340.3018798828125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.070549137890339,
             0.9240803644061089,
@@ -317,7 +839,16 @@
           ]
         },
         {
-          "parent": 14,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            92.8782958984375,
+            -345.4083251953125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0638308227062225,
             0.9318068325519562,
@@ -326,7 +857,16 @@
           ]
         },
         {
-          "parent": 14,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            101.93499755859375,
+            -357.07806396484375,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             0.977044390514493,
             1.0224403869360685,
@@ -335,7 +875,16 @@
           ]
         },
         {
-          "parent": 14,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            97.43328857421875,
+            -355.45880126953125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -344,7 +893,16 @@
           ]
         },
         {
-          "parent": 14,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            99.78219604492188,
+            -352.1231384277344,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -353,7 +911,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -362,7 +929,16 @@
           ]
         },
         {
-          "parent": 20,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            1282.0693359375,
+            -309.7483825683594,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -371,7 +947,16 @@
           ]
         },
         {
-          "parent": 20,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            1267.0693359375,
+            -303.80706787109375,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -380,7 +965,16 @@
           ]
         },
         {
-          "parent": 20,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            1293.535400390625,
+            -291.8164367675781,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -389,7 +983,16 @@
           ]
         },
         {
-          "parent": 20,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            1266.8812255859375,
+            -309.4271545410156,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -398,7 +1001,16 @@
           ]
         },
         {
-          "parent": 20,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            1272.963134765625,
+            -314.4949951171875,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -407,7 +1019,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            692.1566772460938,
+            -168.6957244873047,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -416,7 +1037,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            694.7489013671875,
+            -164.0232391357422,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -425,7 +1055,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            678.7347412109375,
+            -154.1654052734375,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -434,7 +1073,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            502.7313232421875,
+            -315.634033203125,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -443,7 +1091,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            491.25494384765625,
+            -325.07733154296875,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -452,7 +1109,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            744.4177856445313,
+            -105.69195556640625,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -461,7 +1127,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            677.8158569335938,
+            -143.79925537109375,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -470,7 +1145,16 @@
           ]
         },
         {
-          "parent": 2,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            741.83349609375,
+            -201.36441040039063,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -479,7 +1163,16 @@
           ]
         },
         {
-          "parent": 5,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            422.2958068847656,
+            -103.8104248046875,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -488,7 +1181,16 @@
           ]
         },
         {
-          "parent": 25,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            731.81201171875,
+            -209.06443786621094,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -497,7 +1199,16 @@
           ]
         },
         {
-          "parent": 19,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            482.4036865234375,
+            -283.4940185546875,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -506,7 +1217,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -515,7 +1235,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            634.8067016601563,
+            -1253.2044677734375,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -524,7 +1253,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": true,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -533,7 +1271,16 @@
           ]
         },
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            727.717529296875,
+            -861.0308837890625,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -550,6 +1297,213 @@
       "mdlv": 21,
       "ok": true,
       "part_count": 41,
+      "parts": [
+        {
+          "id": 29,
+          "size": 1971,
+          "start": 0
+        },
+        {
+          "id": 28,
+          "size": 1704,
+          "start": 1971
+        },
+        {
+          "id": 30,
+          "size": 1725,
+          "start": 3675
+        },
+        {
+          "id": 4,
+          "size": 1086,
+          "start": 5400
+        },
+        {
+          "id": 32,
+          "size": 2934,
+          "start": 6486
+        },
+        {
+          "id": 31,
+          "size": 2058,
+          "start": 9420
+        },
+        {
+          "id": 6,
+          "size": 1128,
+          "start": 11478
+        },
+        {
+          "id": 3,
+          "size": 1233,
+          "start": 12606
+        },
+        {
+          "id": 8,
+          "size": 1854,
+          "start": 13839
+        },
+        {
+          "id": 34,
+          "size": 1017,
+          "start": 15693
+        },
+        {
+          "id": 1,
+          "size": 918,
+          "start": 16710
+        },
+        {
+          "id": 7,
+          "size": 1968,
+          "start": 17628
+        },
+        {
+          "id": 2,
+          "size": 1869,
+          "start": 19596
+        },
+        {
+          "id": 40,
+          "size": 210,
+          "start": 21465
+        },
+        {
+          "id": 0,
+          "size": 75,
+          "start": 21675
+        },
+        {
+          "id": 11,
+          "size": 942,
+          "start": 21750
+        },
+        {
+          "id": 12,
+          "size": 0,
+          "start": 22692
+        },
+        {
+          "id": 38,
+          "size": 777,
+          "start": 22692
+        },
+        {
+          "id": 9,
+          "size": 1821,
+          "start": 23469
+        },
+        {
+          "id": 10,
+          "size": 4953,
+          "start": 25290
+        },
+        {
+          "id": 5,
+          "size": 1314,
+          "start": 30243
+        },
+        {
+          "id": 13,
+          "size": 1128,
+          "start": 31557
+        },
+        {
+          "id": 14,
+          "size": 0,
+          "start": 32685
+        },
+        {
+          "id": 15,
+          "size": 810,
+          "start": 32685
+        },
+        {
+          "id": 16,
+          "size": 726,
+          "start": 33495
+        },
+        {
+          "id": 36,
+          "size": 222,
+          "start": 34221
+        },
+        {
+          "id": 17,
+          "size": 873,
+          "start": 34443
+        },
+        {
+          "id": 18,
+          "size": 588,
+          "start": 35316
+        },
+        {
+          "id": 19,
+          "size": 798,
+          "start": 35904
+        },
+        {
+          "id": 20,
+          "size": 0,
+          "start": 36702
+        },
+        {
+          "id": 21,
+          "size": 891,
+          "start": 36702
+        },
+        {
+          "id": 22,
+          "size": 906,
+          "start": 37593
+        },
+        {
+          "id": 35,
+          "size": 135,
+          "start": 38499
+        },
+        {
+          "id": 23,
+          "size": 867,
+          "start": 38634
+        },
+        {
+          "id": 24,
+          "size": 528,
+          "start": 39501
+        },
+        {
+          "id": 25,
+          "size": 1074,
+          "start": 40029
+        },
+        {
+          "id": 27,
+          "size": 777,
+          "start": 41103
+        },
+        {
+          "id": 37,
+          "size": 192,
+          "start": 41880
+        },
+        {
+          "id": 39,
+          "size": 687,
+          "start": 42072
+        },
+        {
+          "id": 33,
+          "size": 1956,
+          "start": 42759
+        },
+        {
+          "id": 26,
+          "size": 666,
+          "start": 44715
+        }
+      ],
       "path": "/models/RENWU_puppet.mdl",
       "vert_extra_count": 8146,
       "vertex_count": 8146

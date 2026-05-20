@@ -26,7 +26,6 @@ FetchContent_MakeAvailable(googletest)
 # scene-parse probe + pkg-header parser. Linked by every gtest binary
 # and by wescene-test.
 add_library(wescene_test_lib STATIC
-    dump.cpp
     corpus.cpp
     scene_keys.cpp
     scene_parse_probe.cpp
@@ -51,12 +50,9 @@ target_compile_definitions(
 add_executable(version_tests version_tests.cpp)
 target_link_libraries(version_tests PRIVATE wescene_test_lib GTest::gtest_main)
 
-# Thin CLI to regenerate fixture JSONs via DumpWorkshop.
-add_executable(wpvalid wpvalid_main.cpp)
-target_link_libraries(wpvalid PRIVATE wescene_test_lib)
-
 # Consolidated CLI: walks pkgs, runs scene parse; --validate-{tex,shader,mdl}
 # add per-asset checks; --name / --pkgv / --limit filter the pkg set.
+# `valid` subcommand regenerates fixture JSONs via DumpWorkshop.
 add_executable(wescene-test wescene_test_main.cpp)
 target_link_libraries(wescene-test PRIVATE wescene_test_lib)
 set_target_properties(wescene-test PROPERTIES CXX_SCAN_FOR_MODULES ON)

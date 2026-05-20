@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -35,6 +36,7 @@ import wavsen.audio;
 import rstd.log;
 import rstd.cppstd;
 
+#include "corpus.hpp"
 #include "pkg_header.hpp"
 
 namespace fs = std::filesystem;
@@ -58,8 +60,9 @@ constexpr const char* kDefaultAssetsDir =
 #endif
     ;
 
-// Workshops that hang or hard-crash deep parsers. Same list as wpparse.
-constexpr std::array<const char*, 1> kSkipIds = { "2435537849" };
+// Workshops that hang or hard-crash deep parsers. Keep in sync with
+// corpus.cpp's kSkipIds (same intent, different container).
+constexpr std::array<const char*, 2> kSkipIds = { "2435537849", "3346715292" };
 
 void TopUsage(const char* prog) {
     std::fprintf(stderr,
@@ -67,13 +70,16 @@ void TopUsage(const char* prog) {
                  "\n"
                  "Subcommands:\n"
                  "  scan         Walk pkgs and run scene parse, optionally with per-asset\n"
-                 "               validators (--validate-tex / --validate-shader /\n"
-                 "               --validate-mdl). Filterable by --name and --pkgv.\n"
+                 "               passes (--parse-tex / --parse-shader / --parse-mdl).\n"
+                 "               Filterable by --name and --pkgv.\n"
                  "  extract      List entries of a single scene.pkg, or export one asset\n"
                  "               file (text or binary) to stdout or -o FILE.\n"
                  "  rendergraph  Parse one pkg fully and print the predicted render-graph:\n"
                  "               render targets, scene-graph passes, image-effect chains,\n"
                  "               and post-process steps. No Vulkan; pure structural dump.\n"
+                 "  valid        Run DumpWorkshop on one pkg and emit the JSON fixture\n"
+                 "               snapshot (to stdout or a file). Used to regenerate the\n"
+                 "               checked-in fixtures under tests/fixtures/.\n"
                  "\n"
                  "Run `%s <subcommand> --help` for subcommand-specific options.\n",
                  prog ? prog : "wescene-test", prog ? prog : "wescene-test");
@@ -124,14 +130,17 @@ std::string NormalisePkgAssetPath(std::string_view arg) {
 struct ScanOptions {
     std::string              workshop_dir = kDefaultWorkshopDir;
     std::string              assets_dir   = kDefaultAssetsDir;
-    bool                     v_tex { false };
-    bool                     v_shader { false };
-    bool                     v_mdl { false };
+    bool                     p_tex { false };
+    bool                     p_shader { false };
+    bool                     p_mdl { false };       // header-only by default
+    bool                     p_mdl_full { false };  // upgrade to full WPMdlParser::Parse
     bool                     full { false };
     std::vector<std::string> name_filters;
     std::vector<unsigned>    pkgv_filters;
     int                      limit { 0 };
     bool                     quiet { false };
+    std::string              json_out;              // empty = no single JSON file (--json)
+    std::string              json_dir;              // empty = no per-workshop dump dir (--json-dir)
 };
 
 void ScanUsage(const char* prog) {
@@ -148,18 +157,28 @@ void ScanUsage(const char* prog) {
                  "                       per-image shader compile, bloom auto-injection,\n"
                  "                       glslang init/finalize, etc. Slower but exercises\n"
                  "                       every stage.\n"
-                 "Validators (any combination):\n"
-                 "  --validate-tex       run WPTexImageParser on every /materials/**/*.tex\n"
-                 "  --validate-shader    run WPShaderParser::CompileMaterialShader on every\n"
+                 "Parse passes (any combination; also drives --json-dir's per-workshop\n"
+                 "section emission):\n"
+                 "  --parse-tex          run WPTexImageParser on every /materials/**/*.tex\n"
+                 "  --parse-shader       run WPShaderParser::CompileMaterialShader on every\n"
                  "                       /materials/**/*.json\n"
-                 "  --validate-mdl       run WPMdlParser::Parse on every /models/**/*.mdl\n"
-                 "  --validate-all       all of the above\n"
+                 "  --parse-mdl          run WPMdlParser::ParseHeader on every /models/**/*.mdl;\n"
+                 "                       fast, doesn't touch vertex/index/bone data.\n"
+                 "  --parse-mdl-full     upgrade --parse-mdl to full WPMdlParser::Parse;\n"
+                 "                       slow, some workshops are known to hang/reject.\n"
+                 "  --parse-all          --parse-tex + --parse-shader + --parse-mdl\n"
+                 "                       (header-only; pair with --parse-mdl-full for body)\n"
                  "Filters (repeatable; multiple --name/--pkgv values OR together):\n"
                  "  --name SUBSTR        only pkgs whose dir name contains SUBSTR (ci)\n"
                  "  --pkgv N             only pkgs with PKGV stamp == N\n"
                  "  --limit N            stop after N matched pkgs (default 0 = all)\n"
                  "Misc:\n"
                  "  --quiet              suppress per-asset OK lines; only FAIL + summary\n"
+                 "  --json FILE          additionally write structured validator results to\n"
+                 "                       FILE (single JSON document with pkgs[] + summary).\n"
+                 "  --json-dir DIR       additionally write per-workshop DumpWorkshop snapshots\n"
+                 "                       to DIR/<id>.json (same format as `wescene-test valid`).\n"
+                 "                       Mutually exclusive with --json.\n"
                  "  -h, --help           this message\n",
                  prog ? prog : "wescene-test",
                  kDefaultWorkshopDir,
@@ -183,14 +202,17 @@ bool ParseScanArgs(int argc, char** argv, ScanOptions& opt, const char* prog) {
         } else if (a == "--assets") {
             if (auto* v = need_val(a)) opt.assets_dir = v;
             else return false;
-        } else if (a == "--validate-tex") {
-            opt.v_tex = true;
-        } else if (a == "--validate-shader") {
-            opt.v_shader = true;
-        } else if (a == "--validate-mdl") {
-            opt.v_mdl = true;
-        } else if (a == "--validate-all") {
-            opt.v_tex = opt.v_shader = opt.v_mdl = true;
+        } else if (a == "--parse-tex") {
+            opt.p_tex = true;
+        } else if (a == "--parse-shader") {
+            opt.p_shader = true;
+        } else if (a == "--parse-mdl") {
+            opt.p_mdl = true;
+        } else if (a == "--parse-mdl-full") {
+            opt.p_mdl = true;
+            opt.p_mdl_full = true;
+        } else if (a == "--parse-all") {
+            opt.p_tex = opt.p_shader = opt.p_mdl = true;
         } else if (a == "--full") {
             opt.full = true;
         } else if (a == "--name") {
@@ -204,6 +226,12 @@ bool ParseScanArgs(int argc, char** argv, ScanOptions& opt, const char* prog) {
             else return false;
         } else if (a == "--quiet") {
             opt.quiet = true;
+        } else if (a == "--json") {
+            if (auto* v = need_val(a)) opt.json_out = v;
+            else return false;
+        } else if (a == "--json-dir") {
+            if (auto* v = need_val(a)) opt.json_dir = v;
+            else return false;
         } else if (a == "-h" || a == "--help") {
             ScanUsage(prog);
             std::exit(0);
@@ -212,6 +240,10 @@ bool ParseScanArgs(int argc, char** argv, ScanOptions& opt, const char* prog) {
                          (int)a.size(), a.data());
             return false;
         }
+    }
+    if (! opt.json_out.empty() && ! opt.json_dir.empty()) {
+        std::fprintf(stderr, "wescene-test scan: --json and --json-dir are mutually exclusive\n");
+        return false;
     }
     return true;
 }
@@ -289,7 +321,7 @@ bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
 
 void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
                       owe::fs::VFS& vfs, const std::string& pkg_id,
-                      Counters& c, bool quiet) {
+                      Counters& c, bool quiet, json* sink) {
     owe::WPTexImageParser parser(&vfs);
     constexpr std::string_view prefix = "/materials/";
     constexpr std::string_view suffix = ".tex";
@@ -329,12 +361,21 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
             std::fprintf(stdout, "FAIL  %s tex %s  %s\n", pkg_id.c_str(), e.path.c_str(),
                          err.c_str());
         }
+        if (sink) {
+            json entry { {"path", e.path}, {"ok", ok} };
+            if (ok) {
+                if (video) entry["video"] = true;
+            } else {
+                entry["error"] = err;
+            }
+            sink->push_back(std::move(entry));
+        }
     }
 }
 
 void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
                      owe::fs::VFS& vfs, const std::string& pkg_id,
-                     Counters& c, bool quiet) {
+                     Counters& c, bool quiet, json* sink) {
     for (const auto& e : entries) {
         if (! StartsWith(e.path, "/materials/") || ! EndsWith(e.path, ".json")) continue;
         const std::string vfs_path = "/assets" + e.path;
@@ -343,6 +384,8 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
             ++c.shader_fail;
             std::fprintf(stdout, "FAIL  %s shader %s  cannot open\n", pkg_id.c_str(),
                          e.path.c_str());
+            if (sink) sink->push_back({ {"path", e.path}, {"ok", false},
+                                        {"error", "cannot open"} });
             continue;
         }
         const std::string text = stream->ReadAllStr();
@@ -353,6 +396,8 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
             ++c.shader_fail;
             std::fprintf(stdout, "FAIL  %s shader %s  json: %s\n", pkg_id.c_str(),
                          e.path.c_str(), ex.what());
+            if (sink) sink->push_back({ {"path", e.path}, {"ok", false},
+                                        {"error", std::string("json: ") + ex.what()} });
             continue;
         }
         owe::CompileMaterialShaderResult r;
@@ -375,12 +420,18 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
             std::fprintf(stdout, "FAIL  %s shader %s [%s]  %s\n", pkg_id.c_str(),
                          e.path.c_str(), r.shader_name.c_str(), r.error.c_str());
         }
+        if (sink) {
+            json entry { {"path", e.path}, {"ok", r.ok},
+                         {"shader_name", r.shader_name} };
+            if (! r.ok) entry["error"] = r.error;
+            sink->push_back(std::move(entry));
+        }
     }
 }
 
 void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries,
                   owe::fs::VFS& vfs, const std::string& pkg_id,
-                  Counters& c, bool quiet) {
+                  Counters& c, bool quiet, json* sink) {
     for (const auto& e : entries) {
         if (! EndsWith(e.path, ".mdl")) continue;
         // WPMdlParser::Parse takes a path without /assets prefix.
@@ -405,15 +456,83 @@ void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries,
             std::fprintf(stdout, "FAIL  %s mdl %s  %s\n", pkg_id.c_str(), e.path.c_str(),
                          err.c_str());
         }
+        if (sink) {
+            json entry { {"path", e.path}, {"ok", ok} };
+            if (! ok) entry["error"] = err;
+            sink->push_back(std::move(entry));
+        }
     }
 }
 
-bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c) {
+std::string FormatMdlFlag(uint32_t flag) {
+    std::string out;
+    out.reserve(8 * 4 + 3);
+    for (int i = 0; i < 4; ++i) {
+        if (i) out.push_back('|');
+        const uint8_t b = static_cast<uint8_t>((flag >> (i * 8)) & 0xFFu);
+        for (int bit = 7; bit >= 0; --bit) out.push_back((b & (1u << bit)) ? '1' : '0');
+    }
+    return out;
+}
+
+void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries,
+                        owe::fs::VFS& vfs, const std::string& pkg_id,
+                        Counters& c, bool quiet, json* sink) {
+    for (const auto& e : entries) {
+        if (! EndsWith(e.path, ".mdl")) continue;
+        std::string name(e.path.substr(1));
+        owe::WPMdlHeader h;
+        bool             ok = false;
+        std::string      err;
+        try {
+            ok = owe::WPMdlParser::ParseHeader(name, vfs, h);
+            if (! ok) err = "ParseHeader returned false";
+        } catch (const std::exception& ex) {
+            err = ex.what();
+        } catch (...) {
+            err = "unknown exception";
+        }
+        if (ok) {
+            ++c.mdl_ok;
+            if (! quiet)
+                std::fprintf(stdout, "OK    %s mdl-header %s  mdlv=%d mesh=%u flag=%s\n",
+                             pkg_id.c_str(), e.path.c_str(),
+                             h.mdlv, h.mesh_count, FormatMdlFlag(h.mdl_flag).c_str());
+        } else {
+            ++c.mdl_fail;
+            std::fprintf(stdout, "FAIL  %s mdl-header %s  %s\n", pkg_id.c_str(), e.path.c_str(),
+                         err.c_str());
+        }
+        if (sink) {
+            json entry { {"path", e.path}, {"ok", ok} };
+            if (ok) {
+                entry["mdlv"]       = h.mdlv;
+                entry["mesh_count"] = h.mesh_count;
+                json flag_arr = json::array();
+                for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {
+                    uint8_t b = static_cast<uint8_t>((h.mdl_flag >> (byte_idx * 8)) & 0xFFu);
+                    std::string bits(8, '0');
+                    for (int i = 0; i < 8; ++i)
+                        if (b & (1u << (7 - i))) bits[i] = '1';
+                    flag_arr.push_back(std::move(bits));
+                }
+                entry["flag"] = std::move(flag_arr);
+            } else {
+                entry["error"] = err;
+            }
+            sink->push_back(std::move(entry));
+        }
+    }
+}
+
+bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
+                   json* pkgs_arr) {
     const std::string pkg_id = pkg_dir.filename().string();
 
     for (const auto* sk : kSkipIds) {
         if (pkg_id == sk) {
             std::fprintf(stderr, "SKIP  %s (in kSkipIds)\n", pkg_id.c_str());
+            if (pkgs_arr) pkgs_arr->push_back({ {"id", pkg_id}, {"skipped", true} });
             return true;
         }
     }
@@ -422,6 +541,10 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c)
     if (! fs::exists(pkg_path)) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  scene.pkg not found\n", pkg_id.c_str());
+        if (pkgs_arr) pkgs_arr->push_back({
+            {"id", pkg_id},
+            {"parse", { {"ok", false}, {"error", "scene.pkg not found"} }},
+        });
         return false;
     }
 
@@ -430,6 +553,10 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c)
     if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  ReadPkgHeader\n", pkg_id.c_str());
+        if (pkgs_arr) pkgs_arr->push_back({
+            {"id", pkg_id},
+            {"parse", { {"ok", false}, {"error", "ReadPkgHeader"} }},
+        });
         return false;
     }
     const auto pkg_v = owe::wpscene::ParsePkgVersionStamp(version_stamp);
@@ -446,6 +573,10 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c)
     if (! wfs) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  WPPkgFs::CreatePkgFs\n", pkg_id.c_str());
+        if (pkgs_arr) pkgs_arr->push_back({
+            {"id", pkg_id}, {"pkg_version", (unsigned)pkg_v},
+            {"parse", { {"ok", false}, {"error", "WPPkgFs::CreatePkgFs"} }},
+        });
         return false;
     }
     vfs.Mount("/assets", std::move(wfs));
@@ -470,9 +601,53 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c)
                      parse_err.c_str());
     }
 
-    if (opt.v_tex)    ValidateTextures(entries, vfs, pkg_id, c, opt.quiet);
-    if (opt.v_shader) ValidateShaders(entries, vfs, pkg_id, c, opt.quiet);
-    if (opt.v_mdl)    ValidateMdls(entries, vfs, pkg_id, c, opt.quiet);
+    json  pkg_obj;
+    json* tex_sink    = nullptr;
+    json* shader_sink = nullptr;
+    json* mdl_sink    = nullptr;
+    if (pkgs_arr) {
+        pkg_obj["id"]          = pkg_id;
+        pkg_obj["pkg_version"] = (unsigned)pkg_v;
+        pkg_obj["parse"]       = parse_ok ? json { {"ok", true} }
+                                          : json { {"ok", false}, {"error", parse_err} };
+        if (opt.p_tex)    { pkg_obj["textures"] = json::array(); tex_sink    = &pkg_obj["textures"]; }
+        if (opt.p_shader) { pkg_obj["shaders"]  = json::array(); shader_sink = &pkg_obj["shaders"]; }
+        if (opt.p_mdl) {
+            const char* key = opt.p_mdl_full ? "mdls" : "mdls_header";
+            pkg_obj[key] = json::array();
+            mdl_sink     = &pkg_obj[key];
+        }
+    }
+
+    if (opt.p_tex)    ValidateTextures(entries, vfs, pkg_id, c, opt.quiet, tex_sink);
+    if (opt.p_shader) ValidateShaders(entries, vfs, pkg_id, c, opt.quiet, shader_sink);
+    if (opt.p_mdl) {
+        if (opt.p_mdl_full) ValidateMdls(entries, vfs, pkg_id, c, opt.quiet, mdl_sink);
+        else                ValidateMdlsHeader(entries, vfs, pkg_id, c, opt.quiet, mdl_sink);
+    }
+
+    if (pkgs_arr) pkgs_arr->push_back(std::move(pkg_obj));
+
+    // --json-dir: write a per-workshop snapshot. Sections are gated by the
+    // same --parse-* flags as scan's text/sink output.
+    if (! opt.json_dir.empty()) {
+        owe::testing::DumpFlags df {
+            .tex      = opt.p_tex,
+            .shader   = opt.p_shader,
+            .mdl      = opt.p_mdl,
+            .mdl_full = opt.p_mdl_full,
+        };
+        std::string derr;
+        json snap = owe::testing::DumpWorkshop(pkg_dir.string(), derr, df);
+        if (! derr.empty()) {
+            snap = json { {"workshop_dir", pkg_id}, {"error", derr} };
+        }
+        const auto out_path = fs::path(opt.json_dir) / (pkg_id + ".json");
+        std::ofstream ofs(out_path);
+        if (ofs) ofs << snap.dump(2) << "\n";
+        else std::fprintf(stderr, "wescene-test scan: cannot write %s\n",
+                          out_path.string().c_str());
+    }
 
     return parse_ok;
 }
@@ -488,6 +663,16 @@ int CmdScan(int argc, char** argv, const char* prog) {
         std::fprintf(stderr, "wescene-test scan: %s is not a directory\n",
                      opt.workshop_dir.c_str());
         return 1;
+    }
+
+    if (! opt.json_dir.empty()) {
+        std::error_code ec;
+        fs::create_directories(opt.json_dir, ec);
+        if (ec || ! fs::is_directory(opt.json_dir)) {
+            std::fprintf(stderr, "wescene-test scan: cannot create --json-dir '%s': %s\n",
+                         opt.json_dir.c_str(), ec.message().c_str());
+            return 1;
+        }
     }
 
     std::vector<fs::path> dirs;
@@ -512,11 +697,18 @@ int CmdScan(int argc, char** argv, const char* prog) {
         return 1;
     }
 
+    json  doc;
+    json* pkgs_arr = nullptr;
+    if (! opt.json_out.empty()) {
+        doc["pkgs"] = json::array();
+        pkgs_arr    = &doc["pkgs"];
+    }
+
     Counters c;
     auto     t0 = std::chrono::steady_clock::now();
 
     for (const auto& d : dirs) {
-        ProcessOnePkg(d, opt, c);
+        ProcessOnePkg(d, opt, c, pkgs_arr);
     }
 
     auto t1 = std::chrono::steady_clock::now();
@@ -525,10 +717,34 @@ int CmdScan(int argc, char** argv, const char* prog) {
     std::fprintf(stderr,
                  "wescene-test scan: %zu pkgs | parse %d/%d",
                  dirs.size(), c.parsed_ok, c.parsed_ok + c.parsed_fail);
-    if (opt.v_tex)    std::fprintf(stderr, " | tex %d/%d",    c.tex_ok,    c.tex_ok + c.tex_fail);
-    if (opt.v_shader) std::fprintf(stderr, " | shader %d/%d", c.shader_ok, c.shader_ok + c.shader_fail);
-    if (opt.v_mdl)    std::fprintf(stderr, " | mdl %d/%d",    c.mdl_ok,    c.mdl_ok + c.mdl_fail);
+    if (opt.p_tex)    std::fprintf(stderr, " | tex %d/%d",    c.tex_ok,    c.tex_ok + c.tex_fail);
+    if (opt.p_shader) std::fprintf(stderr, " | shader %d/%d", c.shader_ok, c.shader_ok + c.shader_fail);
+    if (opt.p_mdl)    std::fprintf(stderr, " | %s %d/%d",
+                                   opt.p_mdl_full ? "mdl" : "mdl-header",
+                                   c.mdl_ok, c.mdl_ok + c.mdl_fail);
     std::fprintf(stderr, " | %lldms\n", (long long)ms);
+
+    if (pkgs_arr) {
+        json summary;
+        summary["pkgs"]  = dirs.size();
+        summary["ms"]    = (long long)ms;
+        summary["parse"] = { {"ok", c.parsed_ok}, {"fail", c.parsed_fail} };
+        if (opt.p_tex)    summary["tex"]    = { {"ok", c.tex_ok},    {"fail", c.tex_fail} };
+        if (opt.p_shader) summary["shader"] = { {"ok", c.shader_ok}, {"fail", c.shader_fail} };
+        if (opt.p_mdl) {
+            const char* key = opt.p_mdl_full ? "mdl" : "mdl-header";
+            summary[key] = { {"ok", c.mdl_ok}, {"fail", c.mdl_fail} };
+        }
+        doc["summary"] = std::move(summary);
+
+        std::ofstream out(opt.json_out);
+        if (! out) {
+            std::fprintf(stderr, "wescene-test scan: cannot open --json file '%s'\n",
+                         opt.json_out.c_str());
+            return 1;
+        }
+        out << doc.dump(2) << "\n";
+    }
 
     const int total_fail =
         c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail;
@@ -933,6 +1149,72 @@ int CmdRendergraph(int argc, char** argv, const char* prog) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// valid subcommand
+// ---------------------------------------------------------------------------
+
+void ValidUsage(const char* prog) {
+    std::fprintf(stderr,
+                 "usage: %s valid <workshop_dir> [-o OUT.json]\n"
+                 "  Runs DumpWorkshop on one pkg directory and writes a deterministic\n"
+                 "  JSON snapshot. With no -o the snapshot goes to stdout.\n",
+                 prog ? prog : "wescene-test");
+}
+
+int CmdValid(int argc, char** argv, const char* prog) {
+    std::string workshop_dir;
+    std::string out_file;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view a = argv[i];
+        if (a == "-o") {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "wescene-test valid: -o requires a value\n");
+                return 2;
+            }
+            out_file = argv[++i];
+        } else if (a == "-h" || a == "--help") {
+            ValidUsage(prog);
+            return 0;
+        } else if (! a.empty() && a.front() == '-') {
+            std::fprintf(stderr, "wescene-test valid: unknown arg '%.*s'\n",
+                         (int)a.size(), a.data());
+            return 2;
+        } else if (workshop_dir.empty()) {
+            workshop_dir = a;
+        } else {
+            std::fprintf(stderr, "wescene-test valid: stray positional '%.*s'\n",
+                         (int)a.size(), a.data());
+            return 2;
+        }
+    }
+    if (workshop_dir.empty()) {
+        ValidUsage(prog);
+        return 2;
+    }
+
+    std::string err;
+    auto        snap = owe::testing::DumpWorkshop(workshop_dir, err);
+    if (! err.empty()) {
+        std::fprintf(stderr, "wescene-test valid: %s\n", err.c_str());
+        return 1;
+    }
+
+    const std::string dump = snap.dump(2);
+    if (! out_file.empty()) {
+        std::ofstream out(out_file);
+        if (! out) {
+            std::fprintf(stderr, "wescene-test valid: cannot open %s for writing\n",
+                         out_file.c_str());
+            return 1;
+        }
+        out << dump << "\n";
+    } else {
+        std::fwrite(dump.data(), 1, dump.size(), stdout);
+        std::fputc('\n', stdout);
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -949,6 +1231,7 @@ int main(int argc, char** argv) {
     if (sub == "scan")        return CmdScan(argc - 2, argv + 2, prog);
     if (sub == "extract")     return CmdExtract(argc - 2, argv + 2, prog);
     if (sub == "rendergraph") return CmdRendergraph(argc - 2, argv + 2, prog);
+    if (sub == "valid")       return CmdValid(argc - 2, argv + 2, prog);
     if (sub == "-h" || sub == "--help") {
         TopUsage(prog);
         return 0;

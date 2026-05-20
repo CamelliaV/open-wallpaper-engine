@@ -13,14 +13,45 @@
           "id": 482,
           "length": 179,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": true,
+              "i": 0,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 1,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 2,
+              "p": false,
+              "s": false
+            }
+          ],
           "name": "抖腿2",
           "total_bone_frames": 540
         }
       ],
       "anims": 1,
+      "attachment_count": 0,
+      "attachments": [],
       "bone_tree": [
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -29,7 +60,16 @@
           ]
         },
         {
-          "parent": 0,
+          "anim_parent": 0,
+          "bind_parent": 0,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -38,7 +78,16 @@
           ]
         },
         {
-          "parent": 1,
+          "anim_parent": 1,
+          "bind_parent": 1,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -55,6 +104,7 @@
       "mdlv": 17,
       "ok": true,
       "part_count": 0,
+      "parts": [],
       "path": "/models/10_puppet.mdl",
       "vert_extra_count": 0,
       "vertex_count": 141
@@ -67,14 +117,45 @@
           "id": 453,
           "length": 359,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": true,
+              "i": 0,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 1,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 2,
+              "p": false,
+              "s": false
+            }
+          ],
           "name": "弹琴",
           "total_bone_frames": 1080
         }
       ],
       "anims": 1,
+      "attachment_count": 0,
+      "attachments": [],
       "bone_tree": [
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -83,7 +164,16 @@
           ]
         },
         {
-          "parent": 0,
+          "anim_parent": 0,
+          "bind_parent": 0,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -92,7 +182,16 @@
           ]
         },
         {
-          "parent": 1,
+          "anim_parent": 1,
+          "bind_parent": 1,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -109,6 +208,7 @@
       "mdlv": 17,
       "ok": true,
       "part_count": 0,
+      "parts": [],
       "path": "/models/8_puppet.mdl",
       "vert_extra_count": 0,
       "vertex_count": 135
@@ -121,14 +221,45 @@
           "id": 474,
           "length": 179,
           "mode": 0,
+          "moved_bones": [
+            {
+              "a": true,
+              "i": 0,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 1,
+              "p": false,
+              "s": false
+            },
+            {
+              "a": true,
+              "i": 2,
+              "p": false,
+              "s": false
+            }
+          ],
           "name": "动画 2",
           "total_bone_frames": 540
         }
       ],
       "anims": 1,
+      "attachment_count": 0,
+      "attachments": [],
       "bone_tree": [
         {
-          "parent": 4294967295,
+          "anim_parent": 4294967295,
+          "bind_parent": 4294967295,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -137,7 +268,16 @@
           ]
         },
         {
-          "parent": 0,
+          "anim_parent": 0,
+          "bind_parent": 0,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -146,7 +286,16 @@
           ]
         },
         {
-          "parent": 1,
+          "anim_parent": 1,
+          "bind_parent": 1,
+          "centroid_offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "has_file_skin_pivot": true,
+          "has_sim_json": false,
+          "name": "",
           "transform_col_sums": [
             1.0,
             1.0,
@@ -163,6 +312,7 @@
       "mdlv": 17,
       "ok": true,
       "part_count": 0,
+      "parts": [],
       "path": "/models/9_puppet.mdl",
       "vert_extra_count": 0,
       "vertex_count": 165
