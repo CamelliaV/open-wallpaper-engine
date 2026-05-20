@@ -420,9 +420,9 @@ struct ControlPointForce {
         v.controlpoint %= 8;
 
         owe::GetJsonValue(j, "scale", v.scale, false);
-        owe::GetJsonValue(j, "threadhold", v.threshold, false);
+        owe::GetJsonValue(j, "threshold", v.threshold, false);
 
-        owe::GetJsonValue(j, "offset", v.origin, false);
+        owe::GetJsonValue(j, "origin", v.origin, false);
         return v;
     };
 };
@@ -587,8 +587,6 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
                 }
             };
         } else if (name == "controlpointattract") {
-            break;
-
             ControlPointForce c = ControlPointForce::ReadFromJson(wpj);
             return [=](const ParticleInfo& info) {
                 Vector3d offset = info.controlpoints[c.controlpoint].offset +
