@@ -120,6 +120,12 @@ static constexpr const char* pre_shader_tail_geom = R"()";
 // lines + emits `struct WW_VSOut/WW_PSIn` + `cbuffer ww_Uniforms` + replaces
 // `void main()` with the GS entry signature.
 static constexpr const char* pre_shader_code_gs_hlsl = R"(// auto-generated WE→HLSL prologue (GS)
+// glslang's HLSL frontend defaults to row-major matrix packing in SPIR-V
+// (RowMajor decoration on cbuffer members). The VS/FS GLSL synth emits a
+// std140 UBO with default column-major matrices and the C++ uploader writes
+// column-major data, so a row-major GS reads the transpose. Force column-
+// major packing here so the GS sees the same matrix as the rest.
+#pragma pack_matrix(column_major)
 #define HLSL 1
 #define GLSL 0
 #define highp
@@ -153,9 +159,14 @@ static constexpr const char* pre_shader_code_gs_hlsl = R"(// auto-generated WE�
 #define dFdx       ddx
 #define dFdy(x)    (-ddy(x))
 
-// WE writes mul(vec, matrix); HLSL native mul wants matrix-first. Same
-// _ww_mul overload trick as the DXC era — function overloads cover both
-// orderings without macro recursion.
+// glslang's HLSL frontend always tags cbuffer matrices `RowMajor` in SPIR-V
+// regardless of `#pragma pack_matrix` or `column_major` qualifiers (verified
+// on glslang 16.3.0). With column-major data uploaded from C++ (Eigen
+// default), the shader's effective matrix is the transpose of the source.
+// HLSL `mul(M, v)` lowers (via glslang) to `OpVectorTimesMatrix V M`, which
+// combined with the implicit transpose yields `source_M * V` — exactly the
+// transform WE intends. `_ww_mul` swaps WE's vec-first `mul(v, M)` to that
+// form.
 float2   _ww_mul(float2   v, float2x2 M) { return mul(M, v); }
 float3   _ww_mul(float3   v, float3x3 M) { return mul(M, v); }
 float4   _ww_mul(float4   v, float4x4 M) { return mul(M, v); }
@@ -166,7 +177,17 @@ float2   _ww_mul(float2x2 M, float2   v) { return mul(v, M); }
 float3   _ww_mul(float3x3 M, float3   v) { return mul(v, M); }
 float4   _ww_mul(float4x4 M, float4   v) { return mul(v, M); }
 float3   _ww_mul(float4   v, float3x4 M) { return mul(M, v); }
-float3   _ww_mul(float3x4 M, float4   v) { return mul(M, v); }
+float3   _ww_mul(float3x4 M, float4   v) { return mul(v, M); }
+float    _ww_mul(float a, float b)        { return a * b; }
+float2   _ww_mul(float a, float2 b)       { return a * b; }
+float3   _ww_mul(float a, float3 b)       { return a * b; }
+float4   _ww_mul(float a, float4 b)       { return a * b; }
+float2   _ww_mul(float2 a, float b)       { return a * b; }
+float3   _ww_mul(float3 a, float b)       { return a * b; }
+float4   _ww_mul(float4 a, float b)       { return a * b; }
+float    _ww_mul(float2 a, float2 b)      { return dot(a, b); }
+float    _ww_mul(float3 a, float3 b)      { return dot(a, b); }
+float    _ww_mul(float4 a, float4 b)      { return dot(a, b); }
 #define mul _ww_mul
 
 // `gl_Position` is the SV_Position struct field's GLSL name; rename to the
@@ -760,7 +781,8 @@ inline std::string RewriteGSMain(std::string src) {
 }
 
 inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
-                                  const WPPreprocessorInfo* next) {
+                                  const WPPreprocessorInfo* next,
+                                  const Map<std::string, std::string>* uniforms_union_in = nullptr) {
     // GS: feed glslang's HLSL frontend. Strip GLSL-style top-level `in`/`out`
     // decls, emit HLSL structs (WW_VSOut/WW_PSIn) + ww_Uniforms cbuffer, and
     // rewrite `void main()` to the entry signature `point WW_VSOut IN[1],
@@ -797,13 +819,17 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         // layout (binding=0, set=0). std140 / column-major matches the
         // glslang GLSL-side block; uploader writes one buffer used by all
         // stages.
-        Map<std::string, std::string> uniforms_union;
-        auto absorb = [&](const Map<std::string, std::string>& m) {
-            for (const auto& [k, v] : m) uniforms_union.try_emplace(k, v);
-        };
-        absorb(unit.preprocess_info.uniforms);
-        if (pre)  absorb(pre->uniforms);
-        if (next) absorb(next->uniforms);
+        Map<std::string, std::string> uniforms_union_local;
+        if (! uniforms_union_in) {
+            auto absorb = [&](const Map<std::string, std::string>& m) {
+                for (const auto& [k, v] : m) uniforms_union_local.try_emplace(k, v);
+            };
+            absorb(unit.preprocess_info.uniforms);
+            if (pre)  absorb(pre->uniforms);
+            if (next) absorb(next->uniforms);
+        }
+        const Map<std::string, std::string>& uniforms_union =
+            uniforms_union_in ? *uniforms_union_in : uniforms_union_local;
         if (! uniforms_union.empty()) {
             synth += "\n// === auto-generated shared uniforms (HLSL) ===\n";
             synth += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
@@ -814,7 +840,18 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
                     base_ty = ty.substr(0, pos);
                     array   = ty.substr(pos);
                 }
-                synth += "    " + ToHLSLType(base_ty) + " " + name + array + ";\n";
+                std::string hlsl_ty = ToHLSLType(base_ty);
+                // glslang's HLSL frontend defaults to row-major SPIR-V
+                // decoration for cbuffer matrices regardless of
+                // `#pragma pack_matrix`. Force column-major per member so
+                // the GS reads the same matrix the VS/FS GLSL UBO sees.
+                bool is_matrix =
+                    hlsl_ty == "float2x2" || hlsl_ty == "float3x3" || hlsl_ty == "float4x4" ||
+                    hlsl_ty == "float2x3" || hlsl_ty == "float2x4" || hlsl_ty == "float3x2" ||
+                    hlsl_ty == "float3x4" || hlsl_ty == "float4x2" || hlsl_ty == "float4x3";
+                if (is_matrix) synth += "    column_major ";
+                else           synth += "    ";
+                synth += hlsl_ty + " " + name + array + ";\n";
             }
             synth += "};\n";
         }
@@ -866,13 +903,19 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     }
 
     // Cross-stage uniform union → single std140 UBO at (set=0, binding=0).
-    Map<std::string, std::string> uniforms_union; // name -> "TYPE[arr]"
-    auto absorb = [&](const Map<std::string, std::string>& m) {
-        for (const auto& [k, v] : m) uniforms_union.try_emplace(k, v);
-    };
-    absorb(unit.preprocess_info.uniforms);
-    if (pre)  absorb(pre->uniforms);
-    if (next) absorb(next->uniforms);
+    // Uses the global union from CompileToSpv when provided so VS / GS / FS
+    // all see the same UBO layout (alphabetical, identical offsets).
+    Map<std::string, std::string> uniforms_union_local;
+    if (! uniforms_union_in) {
+        auto absorb = [&](const Map<std::string, std::string>& m) {
+            for (const auto& [k, v] : m) uniforms_union_local.try_emplace(k, v);
+        };
+        absorb(unit.preprocess_info.uniforms);
+        if (pre)  absorb(pre->uniforms);
+        if (next) absorb(next->uniforms);
+    }
+    const Map<std::string, std::string>& uniforms_union =
+        uniforms_union_in ? *uniforms_union_in : uniforms_union_local;
 
     std::string uniform_block;
     if (! uniforms_union.empty()) {
@@ -1097,6 +1140,19 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
     });
 
     auto compile = [](std::span<WPShaderUnit> units, std::vector<ShaderCode>& codes) {
+        // Build the cross-stage uniform union UP FRONT over ALL stages. Doing
+        // this per-unit with just pre/next neighbours misses any uniform that
+        // lives on a non-adjacent stage (e.g. FS-only `g_Brightness` not seen
+        // by VS in a 3-stage VS→GS→FS chain), which results in different UBO
+        // sizes per stage and the runtime allocating a buffer too small for
+        // the longest stage.
+        Map<std::string, std::string> uniforms_union;
+        for (auto& unit : units) {
+            for (const auto& [name, ty] : unit.preprocess_info.uniforms) {
+                uniforms_union.try_emplace(name, ty);
+            }
+        }
+
         std::vector<vulkan::ShaderCompUnit> vunits(units.size());
         for (usize i = 0; i < units.size(); i++) {
             auto&               unit     = units[i];
@@ -1105,7 +1161,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
             WPPreprocessorInfo* post_info =
                 i + 1 < units.size() ? &units[i + 1].preprocess_info : nullptr;
 
-            unit.src = Finalprocessor(unit, pre_info, post_info);
+            unit.src = Finalprocessor(unit, pre_info, post_info, &uniforms_union);
 
             vunit.src   = unit.src;
             vunit.stage = unit.stage;
