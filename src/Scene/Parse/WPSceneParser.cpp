@@ -348,16 +348,33 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
 
     std::string shaderPath("/assets/shaders/" + wpmat.shader);
 
-    std::array sd_units { WPShaderUnit {
-                              .stage           = ShaderType::VERTEX,
-                              .src             = fs::GetFileContent(vfs, shaderPath + ".vert"),
-                              .preprocess_info = {},
-                          },
-                          WPShaderUnit {
-                              .stage           = ShaderType::FRAGMENT,
-                              .src             = fs::GetFileContent(vfs, shaderPath + ".frag"),
-                              .preprocess_info = {},
-                          } };
+    std::vector<WPShaderUnit> sd_units;
+    sd_units.push_back({
+        .stage           = ShaderType::VERTEX,
+        .src             = fs::GetFileContent(vfs, shaderPath + ".vert"),
+        .preprocess_info = {},
+    });
+    // Optional geometry stage: only `genericropeparticle` is wired through
+    // GS today (cubic-Bezier subdivision). Other shaders that ship a .geom
+    // (e.g. `genericparticle`) expect a different vertex layout / topology
+    // that the rope mesh path doesn't yet produce, so leave them on the
+    // no-GS branch until that work lands.
+    if (wpmat.shader == "genericropeparticle") {
+        if (std::string geom_src = fs::GetFileContent(vfs, shaderPath + ".geom");
+            ! geom_src.empty()) {
+            sd_units.push_back({
+                .stage           = ShaderType::GEOMETRY,
+                .src             = std::move(geom_src),
+                .preprocess_info = {},
+            });
+            pWPShaderInfo->combos["GS_ENABLED"] = "1";
+        }
+    }
+    sd_units.push_back({
+        .stage           = ShaderType::FRAGMENT,
+        .src             = fs::GetFileContent(vfs, shaderPath + ".frag"),
+        .preprocess_info = {},
+    });
 
     std::vector<WPShaderTexInfo>                 texinfos;
     std::unordered_map<std::string, ImageHeader> texHeaders;
@@ -485,8 +502,10 @@ const auto& f1     = texh.spriteAnim.GetCurFrame();
 
     material.blenmode = ParseBlendMode(wpmat.blending);
 
+    // FS is always the last unit (VS may be followed by optional GS, then FS).
+    const auto& fs_active = sd_units.back().preprocess_info.active_tex_slots;
     for (unsigned i = 0; i < material.textures.size(); i++) {
-        if (! exists(sd_units[1].preprocess_info.active_tex_slots, i)) material.textures[i].clear();
+        if (! exists(fs_active, i)) material.textures[i].clear();
     }
 
     for (const auto& el : pWPShaderInfo->baseConstSvs) {

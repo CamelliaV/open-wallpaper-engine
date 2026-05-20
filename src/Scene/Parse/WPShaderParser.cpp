@@ -153,15 +153,20 @@ float    _ww_mul(float4 a, float4 b) { return dot(a, b); }
 #define texture(t, uv)             texSample2D((t), (uv))
 #define textureLod(t, uv, lod)     texSample2DLod((t), (uv), (lod))
 
-// Stage I/O is plumbed by the synthesizer (Finalprocessor). It strips
-// every `attribute|varying TYPE NAME;` line from the user source and
-// re-emits canonical `static TYPE NAME;` declarations of its own — that
+__SHADER_TAIL__
+__SHADER_PLACEHOLD__
+
+)";
+
+// Tail for VS/FS: stage I/O is plumbed by the synthesizer (Finalprocessor).
+// It strips every `attribute|varying TYPE NAME;` line from the user source
+// and re-emits canonical `static TYPE NAME;` declarations of its own — that
 // way #if-gated decls don't desync from compile-time visibility, and
 // vert/frag stages get the same union of names. The keywords themselves
 // MUST NOT be #define'd here; if they were, the synthesizer's regex
 // would still match the unsubstituted text but DXC would see the
 // substituted text, drifting the two views apart.
-
+static constexpr const char* pre_shader_tail_vs_fs = R"(
 static float4 gl_Position;
 static float4 gl_FragCoord;
 static float4 glOutColor;
@@ -170,9 +175,21 @@ static float4 glOutColor;
 // Rename the user's main() so a synthesized HLSL entry point can wrap it.
 // The wrapper (main_vs / main_ps) is appended in Finalprocessor.
 #define main shader_main
+)";
 
-__SHADER_PLACEHOLD__
-
+// Tail for GS: the user source uses GLSL-style top-level `in TYPE NAME;` /
+// `out TYPE NAME;` decls and accesses position as `IN[0].gl_Position` /
+// `v.gl_Position`. Finalprocessor strips the `in`/`out` lines and emits
+// a `[maxvertexcount] void main_gs(point WW_VSOut IN[1], inout
+// TriangleStream<WW_PSIn> OUT)` wrapper. The struct field for the
+// hardware position keeps the VS/FS name `_ww_sv_position` (semantic
+// SV_Position); `#define gl_Position _ww_sv_position` rewrites user
+// reads/writes to that field. The user's `void main()` is renamed to
+// `void main_gs` by Finalprocessor (not via `#define main` here, since
+// the parameter list must be injected together with the rename).
+static constexpr const char* pre_shader_tail_gs = R"(
+#define gl_Position _ww_sv_position
+#define PS_INPUT WW_PSIn
 )";
 
 inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
@@ -398,7 +415,8 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         src = std::move(with_prologue);
     }
 
-    std::regex re_io(R"((^|\n)\s*(attribute|varying)\s+([\w]+)\s+(\w+)\s*[;\[])",
+    // GS source uses `in`/`out` storage classes; VS/FS use `attribute`/`varying`.
+    std::regex re_io(R"((^|\n)\s*(attribute|varying|in|out)\s+([\w]+)\s+(\w+)\s*[;\[])",
                      std::regex::ECMAScript);
     for (auto it = std::sregex_iterator(src.begin(), src.end(), re_io);
          it != std::sregex_iterator();
@@ -407,9 +425,11 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         const auto& storage = mc[2];
         const auto& name    = mc[4];
         // attribute-in-vertex and varying-in-fragment both behave as inputs;
-        // varying-in-vertex behaves as output.
+        // varying-in-vertex behaves as output. GS: `in` is input (from VS),
+        // `out` is output (to FS).
         bool is_input = (storage == "attribute") ||
-                        (storage == "varying" && type == ShaderType::FRAGMENT);
+                        (storage == "varying" && type == ShaderType::FRAGMENT) ||
+                        (storage == "in" && type == ShaderType::GEOMETRY);
         if (is_input) {
             process_info.input[name] = mc[0].str();
         } else {
@@ -483,11 +503,18 @@ inline std::string ToHLSLType(std::string_view t) {
 }
 
 struct IODecl {
-    char        storage; // 'a' for attribute, 'v' for varying
+    char        storage; // 'a' for attribute, 'v' for varying, 'i' for GS `in`, 'o' for GS `out'
     std::string type;    // GLSL type as captured (vec2/vec4/mat3/...)
     std::string name;
     std::string array;   // "[N]" or empty
 };
+
+inline char StorageCharFor(const std::string& storage_word) {
+    if (storage_word == "attribute") return 'a';
+    if (storage_word == "in")        return 'i';
+    if (storage_word == "out")       return 'o';
+    return 'v'; // varying
+}
 
 struct SamplerDecl {
     std::string sampler_type; // "sampler2D" / "samplerCube" / ...
@@ -597,7 +624,7 @@ inline std::string StripUniforms(const std::string& src) {
 // arrays through; trailing optional whitespace before `;` is permitted.
 inline const std::regex& IORegex() {
     static const std::regex re(
-        R"((^|\n)[ \t]*(attribute|varying)[ \t]+([\w]+)[ \t]+(\w+)[ \t]*(\[[^\]]*\])?[ \t]*;)",
+        R"((^|\n)[ \t]*(attribute|varying|in|out)[ \t]+([\w]+)[ \t]+(\w+)[ \t]*(\[[^\]]*\])?[ \t]*;)",
         std::regex::ECMAScript);
     return re;
 }
@@ -605,7 +632,7 @@ inline const std::regex& IORegex() {
 inline std::optional<IODecl> ParseIODecl(const std::string& line) {
     std::smatch mc;
     if (! std::regex_search(line, mc, IORegex())) return std::nullopt;
-    return IODecl { mc[2].str() == "attribute" ? 'a' : 'v',
+    return IODecl { StorageCharFor(mc[2].str()),
                     mc[3].str(),
                     mc[4].str(),
                     mc[5].matched ? mc[5].str() : "" };
@@ -640,7 +667,7 @@ inline std::pair<std::vector<IODecl>, std::string> ScanAndStripIO(const std::str
         out.append(src, keep_start, keep_len);
         cursor = match_end;
 
-        decls.push_back({ mc[2].str() == "attribute" ? 'a' : 'v',
+        decls.push_back({ StorageCharFor(mc[2].str()),
                           mc[3].str(),
                           mc[4].str(),
                           mc[5].matched ? mc[5].str() : "" });
@@ -657,6 +684,42 @@ struct SynthOutput {
     std::string pre;
     std::string post;
 };
+
+// Build a `struct NAME { float4 _ww_sv_position : SV_Position; ... };` from
+// a list of IO declarations (gl_Position skipped — it's already represented
+// as the SV_Position field). Locations are assigned alphabetically so
+// neighbouring stages agree without explicit coordination.
+inline std::string EmitStageIOStruct(std::string_view name, std::vector<IODecl> decls) {
+    decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
+                    return d.name == "gl_Position";
+                }),
+                decls.end());
+    std::sort(decls.begin(), decls.end(),
+              [](const IODecl& a, const IODecl& b) { return a.name < b.name; });
+    auto array_slots = [](const std::string& arr) -> usize {
+        if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
+        usize n = 0;
+        for (usize i = 1; i + 1 < arr.size(); ++i) {
+            const char c = arr[i];
+            if (c < '0' || c > '9') return 1;
+            n = n * 10 + (usize)(c - '0');
+        }
+        return n > 0 ? n : 1;
+    };
+    std::string out;
+    out += "struct ";
+    out += name;
+    out += " {\n";
+    out += "    float4 _ww_sv_position : SV_Position;\n";
+    usize loc = 0;
+    for (const auto& d : decls) {
+        out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
+               ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
+        loc += array_slots(d.array);
+    }
+    out += "};\n";
+    return out;
+}
 
 // Emit the synthesized HLSL entry-point that wraps the user's renamed
 // shader_main(). Builds:
@@ -677,6 +740,18 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
                                        std::vector<IODecl> varyings) {
     SynthOutput so;
     if (stage == ShaderType::GEOMETRY) return so;
+
+    // gl_Position propagates between stages via the SV_Position field, not as
+    // a normal location-indexed varying. If a neighbour (the GS) declared
+    // `in/out vec4 gl_Position;` it would otherwise land here as an extra
+    // struct field colliding with `_ww_sv_position : SV_Position`.
+    auto drop_gl_position = [](std::vector<IODecl>& v) {
+        v.erase(std::remove_if(v.begin(), v.end(),
+                               [](const IODecl& d) { return d.name == "gl_Position"; }),
+                v.end());
+    };
+    drop_gl_position(attrs);
+    drop_gl_position(varyings);
 
     auto by_name = [](const IODecl& a, const IODecl& b) { return a.name < b.name; };
     std::sort(attrs.begin(), attrs.end(), by_name);
@@ -810,21 +885,57 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         stage3 = std::regex_replace(stage3, re_const_decl, "$1static const $2 $3$4");
     }
 
-    std::vector<IODecl> attrs, varyings;
-    Set<std::string>    seen;
-    auto add = [&](const IODecl& d) {
-        if (! seen.insert(d.name).second) return;
-        if (d.storage == 'a') attrs.push_back(d);
-        else                  varyings.push_back(d);
-    };
-    for (const auto& d : io_decls) add(d);
-    auto add_from_line = [&](const std::string& line) {
-        if (auto d = ParseIODecl(line); d) add(*d);
-    };
-    if (pre)  for (auto& [k, v] : pre->output) add_from_line(v);
-    if (next) for (auto& [k, v] : next->input) add_from_line(v);
+    SynthOutput synth;
+    std::string gs_body; // GS only: source with `void main()` rewritten
+    if (unit.stage == ShaderType::GEOMETRY) {
+        // GS-side I/O: input struct (WW_VSOut) from pre->output + user `in`
+        // decls; output struct (WW_PSIn) from next->input + user `out` decls.
+        std::vector<IODecl> in_decls, out_decls;
+        Set<std::string>    in_seen, out_seen;
+        auto add_in = [&](const IODecl& d) {
+            if (in_seen.insert(d.name).second) in_decls.push_back(d);
+        };
+        auto add_out = [&](const IODecl& d) {
+            if (out_seen.insert(d.name).second) out_decls.push_back(d);
+        };
+        for (const auto& d : io_decls) {
+            if (d.storage == 'i')      add_in(d);
+            else if (d.storage == 'o') add_out(d);
+        }
+        if (pre) for (auto& [k, v] : pre->output) {
+            if (auto d = ParseIODecl(v); d) add_in(*d);
+        }
+        if (next) for (auto& [k, v] : next->input) {
+            if (auto d = ParseIODecl(v); d) add_out(*d);
+        }
 
-    auto synth = SynthesizeHLSLEntry(unit.stage, std::move(attrs), std::move(varyings));
+        synth.pre += "\n// === auto-generated GS stage I/O ===\n";
+        synth.pre += EmitStageIOStruct("WW_VSOut", std::move(in_decls));
+        synth.pre += EmitStageIOStruct("WW_PSIn", std::move(out_decls));
+
+        // Replace the user's `void main()` with the GS entry signature.
+        // The [maxvertexcount(...)] attribute on the preceding line stays.
+        static const std::regex re_main(R"(\bvoid\s+main\s*\(\s*\))");
+        gs_body = std::regex_replace(
+            stage3, re_main,
+            "void main_gs(point WW_VSOut IN[1], inout TriangleStream<WW_PSIn> OUT)");
+    } else {
+        std::vector<IODecl> attrs, varyings;
+        Set<std::string>    seen;
+        auto add = [&](const IODecl& d) {
+            if (! seen.insert(d.name).second) return;
+            if (d.storage == 'a') attrs.push_back(d);
+            else                  varyings.push_back(d);
+        };
+        for (const auto& d : io_decls) add(d);
+        auto add_from_line = [&](const std::string& line) {
+            if (auto d = ParseIODecl(line); d) add(*d);
+        };
+        if (pre)  for (auto& [k, v] : pre->output) add_from_line(v);
+        if (next) for (auto& [k, v] : next->input) add_from_line(v);
+
+        synth = SynthesizeHLSLEntry(unit.stage, std::move(attrs), std::move(varyings));
+    }
 
     // Build the cross-stage uniform union. Map<> iterates sorted, so the
     // ordering is deterministic and matches between vert and frag.
@@ -873,9 +984,10 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         ++sampler_idx;
     }
 
-    std::regex  re_hold(SHADER_PLACEHOLD.data());
-    std::string with_decls =
-        std::regex_replace(stage3, re_hold, synth.pre + uniform_block + sampler_block);
+    const std::string& body = (unit.stage == ShaderType::GEOMETRY) ? gs_body : stage3;
+    std::regex         re_hold(SHADER_PLACEHOLD.data());
+    std::string        with_decls =
+        std::regex_replace(body, re_hold, synth.pre + uniform_block + sampler_block);
     return with_decls + synth.post;
 }
 
@@ -951,8 +1063,11 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
-    (void)type;
     std::string pre(pre_shader_code);
+    const char* tail = (type == ShaderType::GEOMETRY) ? pre_shader_tail_gs : pre_shader_tail_vs_fs;
+    if (auto pos = pre.find("__SHADER_TAIL__"); pos != std::string::npos) {
+        pre.replace(pos, std::string_view("__SHADER_TAIL__").size(), tail);
+    }
 
     std::string combo_defines;
     for (const auto& c : combos) {
@@ -1136,6 +1251,10 @@ WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::V
     const std::string shader_path = "/assets/shaders/" + mat.shader;
     std::string       vert_src    = fs::GetFileContent(vfs, shader_path + ".vert");
     std::string       frag_src    = fs::GetFileContent(vfs, shader_path + ".frag");
+    std::string       geom_src;
+    if (mat.shader == "genericropeparticle") {
+        geom_src = fs::GetFileContent(vfs, shader_path + ".geom");
+    }
     if (vert_src.empty() || frag_src.empty()) {
         r.error = "shader source missing: " + shader_path + ".{vert,frag}";
         return r;
@@ -1162,10 +1281,13 @@ WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::V
     if (r.info.combos.find("BLENDMODE") == r.info.combos.end()) r.info.combos["BLENDMODE"] = "0";
     if (r.info.combos.find("BONECOUNT") == r.info.combos.end()) r.info.combos["BONECOUNT"] = "1";
 
-    std::array<WPShaderUnit, 2> units {
-        WPShaderUnit { ShaderType::VERTEX,   std::move(vert_src), {} },
-        WPShaderUnit { ShaderType::FRAGMENT, std::move(frag_src), {} },
-    };
+    std::vector<WPShaderUnit> units;
+    units.push_back({ ShaderType::VERTEX, std::move(vert_src), {} });
+    if (! geom_src.empty()) {
+        units.push_back({ ShaderType::GEOMETRY, std::move(geom_src), {} });
+        r.info.combos["GS_ENABLED"] = "1";
+    }
+    units.push_back({ ShaderType::FRAGMENT, std::move(frag_src), {} });
 
     for (auto& u : units) {
         u.src = WPShaderParser::PreShaderSrc(vfs, u.src, &r.info, r.tex_info);
