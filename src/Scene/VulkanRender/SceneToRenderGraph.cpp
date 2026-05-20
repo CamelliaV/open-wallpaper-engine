@@ -128,9 +128,8 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
 
     if (node->Mesh() == nullptr) return;
     auto* mesh = node->Mesh();
-    if (mesh->Material() == nullptr) return;
-    auto* material   = mesh->Material();
-    auto* mshaderPtr = material->customShader.shader.get();
+    if (mesh->Submeshes().empty()) return;
+    const auto& slots = mesh->MaterialSlots();
 
     SceneImageEffectLayer* imgeff = nullptr;
     if (! node->Camera().empty()) {
@@ -141,60 +140,66 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
         }
     }
 
-    std::string passName = material->name;
+    for (uint32_t smi = 0; smi < mesh->Submeshes().size(); smi++) {
+        const auto& submesh = mesh->Submeshes()[smi];
+        if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) continue;
+        SceneMaterial* material = slots[submesh.material_slot].get();
+        std::string    passName = material->name;
 
-    rgraph.addPass<vulkan::CustomShaderPass>(
-        passName,
-        rg::PassNode::Type::CustomShader,
-        [material, node, &output, &imgId, &rgraph, &scene, &extra](
-            rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
-            const auto& pass = builder.workPassNode();
-            pdesc.node       = node;
-            pdesc.output     = output;
-            CheckAndSetSprite(scene, pdesc, material->textures);
-            for (usize i = 0; i < material->textures.size(); i++) {
-                const auto&  url = material->textures[i];
-                rg::TexNode* input { nullptr };
-                if (url.empty()) {
-                    pdesc.textures.emplace_back("");
-                    continue;
-                } else if (IsSpecLinkTex(url)) {
-                    auto id = ParseLinkTex(url);
-                    extra.link_info.push_back(
-                        DelayLinkInfo { .id = pass.ID(), .link_id = id, .tex_index = (i32)i });
-                    pdesc.textures.emplace_back("");
-                    continue;
-                } else {
-                    rg::TexNode::Desc desc;
-                    desc.key  = url;
-                    desc.name = url;
-                    desc.type = ! IsSpecTex(url) ? rg::TexNode::TexType::Imported
-                                                 : rg::TexNode::TexType::Temp;
-                    input     = builder.createTexNode(desc);
-                    if (IsSpecTex(url)) builder.markVirtualWrite(input);
-                    if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER))
-                        extra.use_mipmap_framebuffer = true;
+        rgraph.addPass<vulkan::CustomShaderPass>(
+            passName,
+            rg::PassNode::Type::CustomShader,
+            [material, node, smi, &output, &imgId, &rgraph, &scene, &extra](
+                rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
+                const auto& pass     = builder.workPassNode();
+                pdesc.node           = node;
+                pdesc.submesh_index  = smi;
+                pdesc.output         = output;
+                CheckAndSetSprite(scene, pdesc, material->textures);
+                for (usize i = 0; i < material->textures.size(); i++) {
+                    const auto&  url = material->textures[i];
+                    rg::TexNode* input { nullptr };
+                    if (url.empty()) {
+                        pdesc.textures.emplace_back("");
+                        continue;
+                    } else if (IsSpecLinkTex(url)) {
+                        auto id = ParseLinkTex(url);
+                        extra.link_info.push_back(
+                            DelayLinkInfo { .id = pass.ID(), .link_id = id, .tex_index = (i32)i });
+                        pdesc.textures.emplace_back("");
+                        continue;
+                    } else {
+                        rg::TexNode::Desc desc;
+                        desc.key  = url;
+                        desc.name = url;
+                        desc.type = ! IsSpecTex(url) ? rg::TexNode::TexType::Imported
+                                                     : rg::TexNode::TexType::Temp;
+                        input     = builder.createTexNode(desc);
+                        if (IsSpecTex(url)) builder.markVirtualWrite(input);
+                        if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER))
+                            extra.use_mipmap_framebuffer = true;
+                    }
+
+                    if (url == output) {
+                        builder.markSelfWrite(input);
+                        input = rg::addCopyPass(rgraph, input);
+                    }
+                    builder.read(input);
+                    pdesc.textures.emplace_back(input->key());
                 }
 
-                if (url == output) {
-                    builder.markSelfWrite(input);
-                    input = rg::addCopyPass(rgraph, input);
+                rg::TexNode* output_node { nullptr };
+                output_node =
+                    builder.createTexNode(rg::TexNode::Desc { .name = output.data(),
+                                                              .key  = output.data(),
+                                                              .type = rg::TexNode::TexType::Temp },
+                                          true);
+                builder.write(output_node);
+                if (output == SpecTex_Default) {
+                    extra.id_link_map[(usize)imgId] = output_node;
                 }
-                builder.read(input);
-                pdesc.textures.emplace_back(input->key());
-            }
-
-            rg::TexNode* output_node { nullptr };
-            output_node =
-                builder.createTexNode(rg::TexNode::Desc { .name = output.data(),
-                                                          .key  = output.data(),
-                                                          .type = rg::TexNode::TexType::Temp },
-                                      true);
-            builder.write(output_node);
-            if (output == SpecTex_Default) {
-                extra.id_link_map[(usize)imgId] = output_node;
-            }
-        });
+            });
+    }
 
     // load effect
     if (imgeff != nullptr) loadEffect(imgeff);

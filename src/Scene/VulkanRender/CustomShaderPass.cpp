@@ -190,12 +190,17 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
 
     SceneMesh& mesh = *(m_desc.node->Mesh());
+    if (mesh.Submeshes().empty() || m_desc.submesh_index >= mesh.Submeshes().size()) return;
+    const auto&    submesh = mesh.Submeshes()[m_desc.submesh_index];
+    const auto&    slots   = mesh.MaterialSlots();
+    if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
+    SceneMaterial& material_ref = *slots[submesh.material_slot];
 
     std::vector<Uni_ShaderSpv> spvs;
     DescriptorSetInfo          descriptor_info;
     ShaderReflected            ref;
     {
-        SceneShader& shader = *(mesh.Material()->customShader.shader);
+        SceneShader& shader = *(material_ref.customShader.shader);
 
         if (! GenReflect(shader.codes, spvs, ref)) {
             rstd_error("gen spv reflect failed, {}", shader.name);
@@ -236,12 +241,12 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         m_desc.dyn_vertex = mesh.Dynamic();
         m_desc.vertex_bufs.clear();
         m_desc.vertex_dyn_bufs.clear();
-        if (m_desc.dyn_vertex) m_desc.vertex_dyn_bufs.resize(mesh.VertexCount());
+        if (m_desc.dyn_vertex) m_desc.vertex_dyn_bufs.resize(submesh.vertex_arrays.size());
 
         auto& mc = device.mesh_cache();
 
-        for (unsigned i = 0; i < mesh.VertexCount(); i++) {
-            const auto& vertex    = mesh.GetVertexArray(i);
+        for (unsigned i = 0; i < submesh.vertex_arrays.size(); i++) {
+            const auto& vertex    = submesh.vertex_arrays[i];
             auto        attrs_map = vertex.GetAttrOffsetMap();
 
             VkVertexInputBindingDescription bind_desc {
@@ -277,8 +282,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             m_desc.draw_count += (u32)(vertex.DataSize() / vertex.OneSize());
         }
 
-        if (mesh.IndexCount() > 0) {
-            auto& indice      = mesh.GetIndexArray(0);
+        if (! submesh.index_arrays.empty()) {
+            auto& indice      = submesh.index_arrays[0];
             m_desc.draw_count = (u32)indice.DataCount();
             if (! m_desc.dyn_vertex) {
                 auto opt = mc.QueryOrUpload(
@@ -304,7 +309,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             if (alpha) colorMask |= VK_COLOR_COMPONENT_A_BIT;
             color_blend.colorWriteMask = colorMask;
 
-            auto blendmode = mesh.Material()->blenmode;
+            auto blendmode = material_ref.blenmode;
             SetBlend(blendmode, color_blend);
             m_desc.blending = color_blend.blendEnable;
 
@@ -365,23 +370,26 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         std::function<void()> update_dyn_buf_op;
         if (m_desc.dyn_vertex) {
             auto& mesh        = *m_desc.node->Mesh();
+            auto  smi         = m_desc.submesh_index;
             auto* dyn_buf     = rr.dyn_buf;
             auto& vertex_bufs = m_desc.vertex_dyn_bufs;
             auto& draw_count  = m_desc.draw_count;
             auto& index_buf   = m_desc.index_dyn_buf;
-            update_dyn_buf_op = [&mesh, &vertex_bufs, &draw_count, &index_buf, dyn_buf]() {
+            update_dyn_buf_op = [&mesh, smi, &vertex_bufs, &draw_count, &index_buf, dyn_buf]() {
                 if (mesh.Dirty().exchange(false)) {
-                    for (usize i = 0; i < mesh.VertexCount(); i++) {
-                        const auto& vertex = mesh.GetVertexArray(i);
+                    if (smi >= mesh.Submeshes().size()) return;
+                    const auto& sm = mesh.Submeshes()[smi];
+                    for (usize i = 0; i < sm.vertex_arrays.size(); i++) {
+                        const auto& vertex = sm.vertex_arrays[i];
                         auto&       buf    = vertex_bufs[i];
                         if (! dyn_buf->writeToBuf(buf,
                                                   { (uint8_t*)vertex.Data(), vertex.DataSizeOf() }))
                             return;
                     }
-                    if (mesh.IndexCount() > 0) {
-                        auto& indice = mesh.GetIndexArray(0);
-                        draw_count   = (u32)indice.RenderDataCount();
-                        auto& buf = index_buf;
+                    if (! sm.index_arrays.empty()) {
+                        const auto& indice = sm.index_arrays[0];
+                        draw_count         = (u32)indice.RenderDataCount();
+                        auto& buf          = index_buf;
                         if (! dyn_buf->writeToBuf(buf,
                                                   { (uint8_t*)indice.Data(), indice.DataSizeOf() }))
                             return;
@@ -430,8 +438,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         // memset uniform buf
         buf->fillBuf(*bufref, 0, bufref->size, 0);
         {
-            auto&      default_values = mesh.Material()->customShader.shader->default_uniforms;
-            auto&      const_values   = mesh.Material()->customShader.constValues;
+            auto&      default_values = material_ref.customShader.shader->default_uniforms;
+            auto&      const_values   = material_ref.customShader.constValues;
             std::array values_array   = { &default_values, &const_values };
             for (auto& values : values_array) {
                 for (auto& v : *values) {
@@ -585,7 +593,11 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
 
     const bool has_index = m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
     if (has_index) {
-        const auto& ranges = m_desc.node->Mesh()->DrawRanges();
+        const auto& submeshes = m_desc.node->Mesh()->Submeshes();
+        static const std::vector<SceneMesh::DrawRange> kEmpty;
+        const auto& ranges = (m_desc.submesh_index < submeshes.size())
+                                 ? submeshes[m_desc.submesh_index].draw_ranges
+                                 : kEmpty;
         if (ranges.empty()) {
             cmd.DrawIndexed(m_desc.draw_count, 1, 0, 0, 0);
         } else {

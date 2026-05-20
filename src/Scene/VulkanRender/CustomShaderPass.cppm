@@ -17,6 +17,9 @@ public:
     struct Desc {
         // in
         SceneNode*               node { nullptr };
+        // Which submesh of node->Mesh() this pass renders. SceneToRenderGraph
+        // emits one pass per (node, submesh).
+        uint32_t                 submesh_index { 0 };
         std::vector<std::string> textures;
         std::string              output;
         sprite_map_t             sprites_map;
