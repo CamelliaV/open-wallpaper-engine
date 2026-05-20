@@ -309,7 +309,21 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  com
         if (! shader.parse(GetDefaultResources(), default_version, profile, false,
                            forward_compat, kCompileMessages, includer)) {
             std::string tmp = logToTmpfileWithSha1(unit.src);
-            rstd_error("glslang(parse): {}", shader.getInfoLog());
+            // Strip WARNING lines; EShMsgSuppressWarnings doesn't actually
+            // omit them from the info log on this glslang build.
+            std::string log = shader.getInfoLog();
+            std::string filtered;
+            for (std::size_t i = 0, e = log.size(); i < e;) {
+                std::size_t nl = log.find('\n', i);
+                if (nl == std::string::npos) nl = e;
+                std::string_view line(log.data() + i, nl - i);
+                if (line.find("WARNING") == std::string_view::npos) {
+                    filtered.append(line);
+                    filtered.push_back('\n');
+                }
+                i = nl + 1;
+            }
+            rstd_error("glslang(parse): {}", filtered);
             if (const char* d = shader.getInfoDebugLog(); d && d[0])
                 rstd_error("glslang(parse debug): {}", d);
             rstd_error("shader source is at {}", tmp);

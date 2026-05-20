@@ -132,9 +132,45 @@ float mix(float a, float b, int   t) { return mix(a, b, float(t)); }
 float clamp(float a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
 float clamp(float a, int   lo, float hi) { return clamp(a, float(lo), hi); }
 float clamp(float a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
+float clamp(int   a, float lo, float hi) { return clamp(float(a), lo, hi); }
+float clamp(int   a, int   lo, float hi) { return clamp(float(a), float(lo), hi); }
+float clamp(int   a, float lo, int   hi) { return clamp(float(a), lo, float(hi)); }
 vec2  clamp(vec2  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
 vec3  clamp(vec3  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
 vec4  clamp(vec4  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
+vec2  clamp(vec2  a, int   lo, float hi) { return clamp(a, float(lo), hi); }
+vec3  clamp(vec3  a, int   lo, float hi) { return clamp(a, float(lo), hi); }
+vec4  clamp(vec4  a, int   lo, float hi) { return clamp(a, float(lo), hi); }
+vec2  clamp(vec2  a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
+vec3  clamp(vec3  a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
+vec4  clamp(vec4  a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
+
+// GLSL `pow(genType x, genType y)` requires both args same type. HLSL
+// auto-broadcasts the scalar. Add per-component-broadcast overloads.
+vec2 pow(vec2 a, float b) { return pow(a, vec2(b)); }
+vec3 pow(vec3 a, float b) { return pow(a, vec3(b)); }
+vec4 pow(vec4 a, float b) { return pow(a, vec4(b)); }
+vec2 pow(float a, vec2 b) { return pow(vec2(a), b); }
+vec3 pow(float a, vec3 b) { return pow(vec3(a), b); }
+vec4 pow(float a, vec4 b) { return pow(vec4(a), b); }
+float pow(int a, float b) { return pow(float(a), b); }
+float pow(float a, int b) { return pow(a, float(b)); }
+float pow(int a, int b)   { return pow(float(a), float(b)); }
+
+// PerformLighting_V1 / _V2 are referenced by WE's generic4/genericparticle
+// shaders but their bodies are normally injected by WE's HLSL toolchain
+// based on `LIGHTS_*` combos and the per-light uniform set. We don't have
+// that injection step; stub here so compilation succeeds. The stub is
+// "ambient lighting only" — the model is darker than WE but still visible.
+vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal, vec3 viewVector,
+                        vec3 specularTint, vec3 f0, float roughness, float metallic) {
+    return albedo * max(dot(normalize(normal), normalize(viewVector)), 0.0);
+}
+vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal, vec3 viewVector,
+                        vec3 specularTint, vec3 f0, float roughness, float metallic,
+                        float ao) {
+    return albedo * ao * max(dot(normalize(normal), normalize(viewVector)), 0.0);
+}
 
 // HLSL function-arg qualifiers. GLSL has `in` natively and uses `out`/
 // `inout` the same way; `uniform` as a param qualifier is HLSL-only and
