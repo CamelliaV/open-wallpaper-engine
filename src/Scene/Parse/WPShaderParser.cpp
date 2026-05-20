@@ -82,6 +82,12 @@ static constexpr const char* pre_shader_code = R"(#version 450 core
 // strip the matching lines, and re-emit canonical `layout(location=N)
 // in/out` and `uniform ww_Uniforms { ... }` blocks at the placeholder.
 
+// GLSL 450 reserves `sample` as a per-sample interpolation qualifier, but
+// some WE shaders use `sample` as a plain identifier name
+// (`vec4 sample = texture(...);`). Rewrite to a private name everywhere so
+// the user code parses.
+#define sample _ww_sample_var
+
 __SHADER_TAIL__
 __SHADER_PLACEHOLD__
 
