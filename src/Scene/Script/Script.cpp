@@ -345,6 +345,12 @@ struct EngineHostState {
     // The script currently running. createLayer pops clones from this
     // FieldScript's clone_queue. Set around every init/update/cursor invoke.
     FieldScript* active_field_script { nullptr };
+    // SceneNode -> text-content setter. Populated by text layers in the
+    // parser; consulted by NodeSetText so `thisLayer.text = "..."` reaches
+    // TextLayouter::SetText. Missing entry means the layer is not text-
+    // capable; writes silently no-op.
+    std::unordered_map<owe::SceneNode*,
+                       std::function<void(std::string_view)>> text_setters;
 };
 
 // ---------------------------------------------------------------------------
@@ -1299,6 +1305,25 @@ JSValue NodeGetVAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(
 JSValue NodeGetHAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(ctx, "center"); }
 JSValue NodeSetIgnore(JSContext*, JSValueConst, JSValueConst) { return JS_UNDEFINED; }
 
+// `text` is the only string-valued property on WWLayer. Most scripts only
+// write it (clock / date / locale formatters); GetText therefore returns
+// an empty string rather than tracking last-applied text state.
+JSValue NodeGetText(JSContext* ctx, JSValueConst) {
+    return JS_NewString(ctx, "");
+}
+JSValue NodeSetText(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  it   = host->text_setters.find(n);
+    if (it == host->text_setters.end()) return JS_UNDEFINED;
+    const char* s = JS_ToCString(ctx, val);
+    if (s == nullptr) return JS_UNDEFINED;
+    it->second(std::string_view(s));
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
+}
+
 // --- methods ----------------------------------------------------------------
 
 // Always return SOMETHING — many scripts cache `parent = thisLayer.getParent()`
@@ -1492,6 +1517,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("alpha",           NodeGetAlpha,      NodeSetAlpha),
     JS_CGETSET_DEF("brightness",      NodeGetBrightness, NodeSetBrightness),
     JS_CGETSET_DEF("color",           NodeGetColor,      NodeSetColor),
+    JS_CGETSET_DEF("text",            NodeGetText,    NodeSetText),
     JS_CGETSET_DEF("verticalalign",   NodeGetVAlign,  NodeSetIgnore),
     JS_CGETSET_DEF("horizontalalign", NodeGetHAlign,  NodeSetIgnore),
     JS_CFUNC_DEF("getParent",           0, NodeGetParent),
@@ -1741,6 +1767,12 @@ void JsRuntime::TickAll() {
 
 void JsRuntime::ForEachScript(EachFn fn, void* user) {
     for (auto& fs : m_impl->scripts) fn(fs.get(), user);
+}
+
+void JsRuntime::RegisterTextSetter(owe::SceneNode* node,
+                                   std::function<void(std::string_view)> setter) {
+    if (node == nullptr) return;
+    m_impl->host.text_setters[node] = std::move(setter);
 }
 
 // --- Module load + FieldScript construction ---------------------------------

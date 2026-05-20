@@ -191,7 +191,18 @@ json dump_object_common(const json& obj) {
     json o;
     o["id"]      = obj.value("id", -1);
     o["name"]    = obj.value("name", std::string {});
-    o["visible"] = obj.value("visible", true);
+    // `visible` is sometimes a {script, value} object (scripted property);
+    // json::value<bool> would throw type_error on that shape and tear down
+    // the entire scene dump. Unwrap when present, default to true.
+    if (obj.contains("visible")) {
+        const auto& v = obj.at("visible");
+        if (v.is_boolean()) o["visible"] = v.get<bool>();
+        else if (v.is_object() && v.contains("value") && v.at("value").is_boolean())
+            o["visible"] = v.at("value").get<bool>();
+        else o["visible"] = true;
+    } else {
+        o["visible"] = true;
+    }
     for (const char* key :
          { "origin", "scale", "angles", "size", "parallaxDepth", "alignment" }) {
         if (obj.contains(key)) o[key] = obj[key];

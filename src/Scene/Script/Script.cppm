@@ -151,6 +151,14 @@ public:
     using EachFn = void(*)(FieldScript*, void*);
     void ForEachScript(EachFn fn, void* user);
 
+    // Wire a text-content setter for a given SceneNode. When a script does
+    // `thisLayer.text = "..."` on a wrapper whose opaque is `node`, the JS
+    // setter dispatches into this callback. Used by text layers to receive
+    // text writes from scripts bound to non-text fields (e.g. clock
+    // scripts attached to `visible`).
+    void RegisterTextSetter(owe::SceneNode* node,
+                            std::function<void(std::string_view)> setter);
+
     // Same exposure rule as FieldScript::Impl above: opaque outside the
     // module, but visible to peer module impl files.
     struct Impl;

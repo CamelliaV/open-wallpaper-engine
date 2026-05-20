@@ -1255,6 +1255,13 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     // --- determine initial text + whether a script binding will rewrite it
     auto text_binding_it = obj.field_bindings.scripts.find("text");
     bool has_text_script = (text_binding_it != obj.field_bindings.scripts.end());
+    // Scripts can also drive `text` indirectly: a script attached to any
+    // other field (commonly `visible`) writes `thisLayer.text = "..."` from
+    // its update() side-effect (e.g. workshop 2283810443's clock). Treat
+    // those layers as scripted-text for mesh sizing + setter registration.
+    bool has_indirect_text_script =
+        ! has_text_script && ! obj.field_bindings.scripts.empty();
+    bool wants_dynamic_text = has_text_script || has_indirect_text_script;
 
     std::string s_text;
     if (obj.text.is_string()) {
@@ -1265,7 +1272,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         else if (obj.text.contains("text") && obj.text.at("text").is_string())
             s_text = obj.text.at("text").get<std::string>();
     }
-    if (s_text.empty() && ! has_text_script) return;
+    if (s_text.empty() && ! wants_dynamic_text) return;
 
     // --- font resolution: VFS first (WE shared /assets + pkg overlay),
     //     then host system font dirs.
@@ -1356,7 +1363,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     std::size_t initial_codepoints = text::DecodeUtf8(s_text).size();
     bool        has_bg             = obj.opaquebackground;
     std::size_t peak_quads;
-    if (has_text_script) {
+    if (wants_dynamic_text) {
         peak_quads = std::max<std::size_t>(initial_codepoints * 4, 64);
         if (has_bg) ++peak_quads;
     } else {
@@ -1364,7 +1371,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         if (peak_quads == 0) return;
     }
 
-    auto sp_mesh = std::make_shared<SceneMesh>(/*dynamic=*/has_text_script);
+    auto sp_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
     {
         SceneVertexArray vertex(
             MakeAttrSet({ VAttr::Position, VAttr::TexCoord, VAttr::Color }),
@@ -1498,7 +1505,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         // dynamic and rebuilt by the actuator below.
         compose_node->CopyTrans(*sp_node);
         compose_node->ID() = obj.id;
-        auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/has_text_script);
+        auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
         GenCardMesh(*compose_mesh, { (uint16_t)layer_w, (uint16_t)layer_h });
 
         nlohmann::json pt_json;
@@ -1593,6 +1600,11 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     // re-rasterises new codepoints, lays them out, and rebuilds the
     // compose quad to the new text dims. Runs on the render thread, which
     // is also the JS thread — no synchronization needed.
+    auto set_text = [layouter, face, rebuild_compose](std::string_view s) {
+        face->Populate(text::DecodeUtf8(s));
+        layouter->SetText(s);
+        rebuild_compose(layouter->TextWidth(), layouter->TextHeight());
+    };
     if (has_text_script) {
         const auto& sb = text_binding_it->second;
         if (! context.script_scene)
@@ -1606,16 +1618,24 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         if (fs) {
             ss.AddActuator({
                 fs,
-                [layouter, face, rebuild_compose](const script::ScriptValue& v) {
-                    if (auto* p = std::get_if<script::StringValue>(&v)) {
-                        face->Populate(text::DecodeUtf8(p->s));
-                        layouter->SetText(p->s);
-                        rebuild_compose(layouter->TextWidth(),
-                                        layouter->TextHeight());
-                    }
+                [set_text](const script::ScriptValue& v) {
+                    if (auto* p = std::get_if<script::StringValue>(&v))
+                        set_text(p->s);
                 },
             });
         }
+    }
+    // Scripts attached to non-text fields can mutate `thisLayer.text`
+    // directly. Register the setter so NodeSetText routes those writes
+    // back into the layouter. compose_node is the SceneNode every
+    // field-bound script's `thisLayer` resolves to (WireFieldScripts at
+    // line above).
+    if (wants_dynamic_text) {
+        if (! context.script_scene)
+            context.script_scene = std::make_unique<script::ScriptScene>();
+        context.script_scene->runtime().RegisterTextSetter(
+            compose_node.get(),
+            [set_text](std::string_view s) { set_text(s); });
     }
 
     // sp_node renders glyphs to its private RT and must stay outside the
@@ -1627,6 +1647,9 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     context.node_id_map[obj.id] = { obj.parent, compose_node };
     context.scene->sceneGraph->AppendChild(compose_node);
 
+    const char* scripted_tag = has_text_script        ? " [scripted]"
+                                : has_indirect_text_script ? " [scripted-indirect]"
+                                                          : "";
     rstd_info("text '{}': initial=\"{}\" px={} peak_quads={} bbox={}x{}{} ({})",
              obj.name,
              s_text,
@@ -1634,7 +1657,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
              peak_quads,
              static_cast<int>(text_w),
              static_cast<int>(text_h),
-             std::string_view(has_text_script ? " [scripted]" : ""),
+             std::string_view(scripted_tag),
              resolved.source);
 }
 
