@@ -121,7 +121,7 @@ public:
     // attribute streams whose SoA vectors are populated. Skinning combos must
     // be wired separately via AddPuppetShaderInfo / AddPuppetMatInfo when the
     // mesh has bone weights.
-    static void GenMeshFromMdl(SceneMesh& mesh, const WPMdl::Mesh& src);
+    static void GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src);
 };
 
 } // namespace owe

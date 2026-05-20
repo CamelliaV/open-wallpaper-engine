@@ -680,7 +680,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             puppet = nullptr;
         } else {
             has_bones = (puppet->puppet && puppet->puppet->bones.size() > 0);
-            has_mesh  = (! puppet->meshes.empty() && ! puppet->meshes[0].positions.empty());
+            has_mesh  = false;
+            for (const auto& m : puppet->meshes) {
+                if (! m.positions.empty()) {
+                    has_mesh = true;
+                    break;
+                }
+            }
             if (! has_bones && ! has_mesh) {
                 rstd_error("puppet has no mesh data: {}", wpimgobj.puppet);
                 puppet = nullptr;
@@ -769,11 +775,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
 
         if (puppet) {
-            const auto& mdl_mesh = puppet->meshes[0];
             if (hasEffect) {
                 GenCardMesh(
                     mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
-                WPMdlParser::GenMeshFromMdl(effct_final_mesh, mdl_mesh);
+                for (const auto& m : puppet->meshes) {
+                    if (m.positions.empty()) continue;
+                    effct_final_mesh.Submeshes().emplace_back();
+                    WPMdlParser::GenMeshFromMdl(effct_final_mesh.Submeshes().back(), m);
+                }
 
                 if (has_bones) {
                     wpscene::WPImageEffect puppet_effect;
@@ -789,7 +798,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     svData.puppet_layer = WPPuppetLayer(puppet->puppet);
                     svData.puppet_layer.prepared(wpimgobj.puppet_layers);
                 }
-                WPMdlParser::GenMeshFromMdl(mesh, mdl_mesh);
+                for (const auto& m : puppet->meshes) {
+                    if (m.positions.empty()) continue;
+                    mesh.Submeshes().emplace_back();
+                    WPMdlParser::GenMeshFromMdl(mesh.Submeshes().back(), m);
+                }
             }
         }
         if (! puppet) {

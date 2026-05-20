@@ -776,7 +776,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     return true;
 }
 
-void WPMdlParser::GenMeshFromMdl(SceneMesh& mesh, const WPMdl::Mesh& src) {
+void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src) {
     const size_t vert_num = src.positions.size();
     if (vert_num == 0) return;
 
@@ -831,21 +831,19 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh& mesh, const WPMdl::Mesh& src) {
         for (uint16_t v : tri) indices.push_back(v);
     }
 
-    mesh.AddVertexArray(std::move(vertex));
-    mesh.AddIndexArray(SceneIndexArray(std::span<const uint32_t>(indices)));
+    submesh.vertex_arrays.emplace_back(std::move(vertex));
+    submesh.index_arrays.emplace_back(SceneIndexArray(std::span<const uint32_t>(indices)));
 
     // V21 parts[] enumerates index sub-ranges in artist-chosen z-order. We
     // issue one DrawIndexed per range so each "part" is drawn as a separate
     // primitive batch, which lets later parts overdraw earlier ones (eyelid
     // covering pupil at peak blink) and leaves headroom for per-part state.
     if (! src.parts.empty()) {
-        std::vector<SceneMesh::DrawRange> ranges;
-        ranges.reserve(src.parts.size());
+        submesh.draw_ranges.reserve(src.parts.size());
         for (const auto& p : src.parts) {
             if (p.size == 0) continue;
-            ranges.push_back({ p.start, p.size });
+            submesh.draw_ranges.push_back({ p.start, p.size });
         }
-        mesh.SetDrawRanges(std::move(ranges));
     }
 }
 
