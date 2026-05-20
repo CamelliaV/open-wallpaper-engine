@@ -138,7 +138,9 @@ struct ScanOptions {
     std::vector<std::string> name_filters;
     std::vector<unsigned>    pkgv_filters;
     int                      limit { 0 };
+    int                      offset { 0 };
     bool                     quiet { false };
+    bool                     stop_on_fail { false };
     std::string              json_out;              // empty = no single JSON file (--json)
     std::string              json_dir;              // empty = no per-workshop dump dir (--json-dir)
 };
@@ -172,8 +174,12 @@ void ScanUsage(const char* prog) {
                  "  --name SUBSTR        only pkgs whose dir name contains SUBSTR (ci)\n"
                  "  --pkgv N             only pkgs with PKGV stamp == N\n"
                  "  --limit N            stop after N matched pkgs (default 0 = all)\n"
+                 "  --offset N           skip the first N matched pkgs before --limit applies\n"
+                 "                       (default 0). Use with --limit to chunk corpus runs.\n"
                  "Misc:\n"
                  "  --quiet              suppress per-asset OK lines; only FAIL + summary\n"
+                 "  --stop-on-fail       exit non-zero on the first per-asset failure so a\n"
+                 "                       wrapper loop can resume at the next --offset.\n"
                  "  --json FILE          additionally write structured validator results to\n"
                  "                       FILE (single JSON document with pkgs[] + summary).\n"
                  "  --json-dir DIR       additionally write per-workshop DumpWorkshop snapshots\n"
@@ -224,8 +230,13 @@ bool ParseScanArgs(int argc, char** argv, ScanOptions& opt, const char* prog) {
         } else if (a == "--limit") {
             if (auto* v = need_val(a)) opt.limit = std::atoi(v);
             else return false;
+        } else if (a == "--offset") {
+            if (auto* v = need_val(a)) opt.offset = std::atoi(v);
+            else return false;
         } else if (a == "--quiet") {
             opt.quiet = true;
+        } else if (a == "--stop-on-fail") {
+            opt.stop_on_fail = true;
         } else if (a == "--json") {
             if (auto* v = need_val(a)) opt.json_out = v;
             else return false;
@@ -687,6 +698,10 @@ int CmdScan(int argc, char** argv, const char* prog) {
             dirs.push_back(e.path());
         }
         std::sort(dirs.begin(), dirs.end());
+        if (opt.offset > 0) {
+            if ((size_t)opt.offset >= dirs.size()) dirs.clear();
+            else dirs.erase(dirs.begin(), dirs.begin() + opt.offset);
+        }
         if (opt.limit > 0 && (int)dirs.size() > opt.limit) {
             dirs.resize((size_t)opt.limit);
         }
@@ -707,9 +722,19 @@ int CmdScan(int argc, char** argv, const char* prog) {
     Counters c;
     auto     t0 = std::chrono::steady_clock::now();
 
+    size_t processed = 0;
     for (const auto& d : dirs) {
         ProcessOnePkg(d, opt, c, pkgs_arr);
+        ++processed;
+        if (opt.stop_on_fail &&
+            (c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail) > 0) {
+            std::fprintf(stderr,
+                         "wescene-test scan: --stop-on-fail after pkg '%s'\n",
+                         d.filename().string().c_str());
+            break;
+        }
     }
+    if (processed < dirs.size()) dirs.resize(processed);
 
     auto t1 = std::chrono::steady_clock::now();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();

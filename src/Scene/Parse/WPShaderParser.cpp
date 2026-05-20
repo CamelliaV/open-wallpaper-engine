@@ -59,6 +59,88 @@ static constexpr const char* pre_shader_code = R"(#version 450 core
 #define atan2(y,x)  atan((y),(x))
 #define fmod(a,b)   mod((a),(b))
 
+// HLSL type aliases. WE shaders freely mix `float2 v = ...` (HLSL) with
+// `vec2 v = ...` (GLSL); the GLSL frontend rejects the former without these.
+#define float2 vec2
+#define float3 vec3
+#define float4 vec4
+#define int2   ivec2
+#define int3   ivec3
+#define int4   ivec4
+#define uint2  uvec2
+#define uint3  uvec3
+#define uint4  uvec4
+#define bool2  bvec2
+#define bool3  bvec3
+#define bool4  bvec4
+#define float2x2 mat2
+#define float3x3 mat3
+#define float4x4 mat4
+#define float2x3 mat2x3
+#define float3x2 mat3x2
+#define float2x4 mat2x4
+#define float4x2 mat4x2
+#define float3x4 mat3x4
+#define float4x3 mat4x3
+
+// HLSL keywords that don't translate to GLSL but mostly appear as
+// modifiers on local declarations. Dropping them keeps the body parseable.
+#define static
+#define inline
+
+// HLSL-style implicit-conversion helpers for the common case of mixing an
+// int literal with a float/vector argument (e.g. `max(0, color.rgb)`). GLSL
+// does not auto-promote int→float when picking a function overload, so we
+// add the missing overloads here. Names shadow the builtins via overloading
+// (not macros), so calls inside these bodies resolve to the GLSL builtin.
+float max(int   a, float b) { return max(float(a), b); }
+float max(float a, int   b) { return max(a, float(b)); }
+vec2  max(int   a, vec2  b) { return max(vec2(float(a)), b); }
+vec3  max(int   a, vec3  b) { return max(vec3(float(a)), b); }
+vec4  max(int   a, vec4  b) { return max(vec4(float(a)), b); }
+vec2  max(vec2  a, int   b) { return max(a, vec2(float(b))); }
+vec3  max(vec3  a, int   b) { return max(a, vec3(float(b))); }
+vec4  max(vec4  a, int   b) { return max(a, vec4(float(b))); }
+float min(int   a, float b) { return min(float(a), b); }
+float min(float a, int   b) { return min(a, float(b)); }
+vec2  min(int   a, vec2  b) { return min(vec2(float(a)), b); }
+vec3  min(int   a, vec3  b) { return min(vec3(float(a)), b); }
+vec4  min(int   a, vec4  b) { return min(vec4(float(a)), b); }
+vec2  min(vec2  a, int   b) { return min(a, vec2(float(b))); }
+vec3  min(vec3  a, int   b) { return min(a, vec3(float(b))); }
+vec4  min(vec4  a, int   b) { return min(a, vec4(float(b))); }
+vec2  mix(vec2  a, vec2  b, int   t) { return mix(a, b, float(t)); }
+vec3  mix(vec3  a, vec3  b, int   t) { return mix(a, b, float(t)); }
+vec4  mix(vec4  a, vec4  b, int   t) { return mix(a, b, float(t)); }
+// HLSL silently truncates vec4 to vec3 when the other args are vec3 (some
+// WE shaders rely on this for `albedo.rgb = mix(albedo, newRGB, mask)`).
+// GLSL refuses; mirror HLSL's truncation.
+vec3  mix(vec4  a, vec3  b, vec3  t) { return mix(a.rgb, b, t); }
+vec3  mix(vec3  a, vec4  b, vec3  t) { return mix(a, b.rgb, t); }
+vec3  mix(vec4  a, vec3  b, float t) { return mix(a.rgb, b, t); }
+vec3  mix(vec3  a, vec4  b, float t) { return mix(a, b.rgb, t); }
+vec2  mix(vec3  a, vec2  b, float t) { return mix(a.rg,  b, t); }
+vec2  mix(vec2  a, vec3  b, float t) { return mix(a, b.rg,  t); }
+vec2  mix(vec4  a, vec2  b, float t) { return mix(a.rg,  b, t); }
+vec2  mix(vec2  a, vec4  b, float t) { return mix(a, b.rg,  t); }
+float mix(int   a, float b, float t) { return mix(float(a), b, t); }
+float mix(float a, int   b, float t) { return mix(a, float(b), t); }
+float mix(int   a, int   b, float t) { return mix(float(a), float(b), t); }
+float mix(int   a, float b, int   t) { return mix(float(a), b, float(t)); }
+float mix(float a, int   b, int   t) { return mix(a, float(b), float(t)); }
+float mix(float a, float b, int   t) { return mix(a, b, float(t)); }
+float clamp(float a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
+float clamp(float a, int   lo, float hi) { return clamp(a, float(lo), hi); }
+float clamp(float a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
+vec2  clamp(vec2  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
+vec3  clamp(vec3  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
+vec4  clamp(vec4  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
+
+// HLSL function-arg qualifiers. GLSL has `in` natively and uses `out`/
+// `inout` the same way; `uniform` as a param qualifier is HLSL-only and
+// has no GLSL analogue (drops to plain `in`).
+// (no #define for in/out/inout — they're shared)
+
 #define CAST2(x)   (vec2((x)))
 #define CAST3(x)   (vec3((x)))
 #define CAST4(x)   (vec4((x)))
