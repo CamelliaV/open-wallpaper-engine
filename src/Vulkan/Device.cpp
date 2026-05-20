@@ -161,7 +161,12 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         allocatorInfo.instance               = *inst.inst();
         VVK_CHECK_BOOL_RE(vvk::CreateVmaAllocator(allocatorInfo, device.m_allocator));
     }
-    device.m_tex_cache = std::make_unique<TextureCache>(device);
+    device.m_tex_cache  = std::make_unique<TextureCache>(device);
+    device.m_mesh_cache = std::make_unique<MeshCache>(device);
+    if (! device.m_mesh_cache->init()) {
+        rstd_error("MeshCache init failed");
+        return false;
+    }
     return true;
 }
 

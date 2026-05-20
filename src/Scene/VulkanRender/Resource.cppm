@@ -17,7 +17,8 @@ struct RenderingResources {
     vvk::Semaphore sem_export;
     vvk::Fence     fence_frame;
 
-    StagingBuffer* vertex_buf;
+    // Static vertex/index buffers are owned by Device::mesh_cache() now;
+    // only the per-rebuild dyn_buf lives here.
     StagingBuffer* dyn_buf;
 };
 

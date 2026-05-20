@@ -4,6 +4,7 @@ module;
 
 export module wescene.spec_texs;
 import rstd.cppstd;
+import wescene.types;
 
 #define BASE_GLTEX_NAMES(ext)                                                                      \
     "g_Texture0" #ext, "g_Texture1" #ext, "g_Texture2" #ext, "g_Texture3" #ext, "g_Texture4" #ext, \
@@ -49,6 +50,29 @@ inline constexpr std::string_view WE_IN_TEXCOORDC3 { "a_TexCoordC3" };
 inline constexpr std::string_view WE_IN_TEXCOORDC4 { "a_TexCoordC4" };
 inline constexpr std::string_view WE_CB_THICK_FORMAT { "THICKFORMAT" };
 inline constexpr std::string_view WE_PRENDER_ROPE { "PRENDER_ROPE" };
+
+// Compile-time (name, type) pair for declarative attribute layouts.
+struct VertexAttrSpec {
+    std::string_view name;
+    VertexType       type;
+};
+
+namespace VAttr {
+inline constexpr VertexAttrSpec Position       { WE_IN_POSITION,       VertexType::FLOAT3 };
+inline constexpr VertexAttrSpec PositionVec4   { WE_IN_POSITIONVEC4,   VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoord       { WE_IN_TEXCOORD,       VertexType::FLOAT2 };
+inline constexpr VertexAttrSpec TexCoordVec4   { WE_IN_TEXCOORDVEC4,   VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordVec4C1 { WE_IN_TEXCOORDVEC4C1, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordVec4C2 { WE_IN_TEXCOORDVEC4C2, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordVec4C3 { WE_IN_TEXCOORDVEC4C3, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordVec3C2 { WE_IN_TEXCOORDVEC3C2, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordC2     { WE_IN_TEXCOORDC2,     VertexType::FLOAT2 };
+inline constexpr VertexAttrSpec TexCoordC3     { WE_IN_TEXCOORDC3,     VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordC4     { WE_IN_TEXCOORDC4,     VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec Color          { WE_IN_COLOR,          VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec BlendIndices   { WE_IN_BLENDINDICES,   VertexType::UINT4 };
+inline constexpr VertexAttrSpec BlendWeights   { WE_IN_BLENDWEIGHTS,   VertexType::FLOAT4 };
+} // namespace VAttr
 
 inline constexpr std::string_view G_M { "g_ModelMatrix" };
 inline constexpr std::string_view G_VP { "g_ViewProjectionMatrix" };

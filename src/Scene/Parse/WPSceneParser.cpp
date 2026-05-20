@@ -166,12 +166,7 @@ void GenCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
 	};
     // clang-format on
 
-    SceneVertexArray vertex(
-        {
-            { WE_IN_POSITION.data(), VertexType::FLOAT3 },
-            { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
-        },
-        4);
+    SceneVertexArray vertex(MakeAttrSet({ VAttr::Position, VAttr::TexCoord }), 4);
     vertex.SetVertex(WE_IN_POSITION, pos);
     vertex.SetVertex(WE_IN_TEXCOORD, texCoord);
     mesh.AddVertexArray(std::move(vertex));
@@ -180,16 +175,14 @@ void GenCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
 void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
                      bool thick_format) {
     (void)particle;
-    std::vector<SceneVertexArray::SceneVertexAttribute> attrs {
-        { WE_IN_POSITION.data(), VertexType::FLOAT3 },
-        { WE_IN_TEXCOORDVEC4.data(), VertexType::FLOAT4 },
-        { WE_IN_COLOR.data(), VertexType::FLOAT4 },
+    std::vector<VertexAttrSpec> specs {
+        VAttr::Position,
+        VAttr::TexCoordVec4,
+        VAttr::Color,
     };
-    if (thick_format) {
-        attrs.push_back({ WE_IN_TEXCOORDVEC4C1.data(), VertexType::FLOAT4 });
-    }
-    attrs.push_back({ WE_IN_TEXCOORDC2.data(), VertexType::FLOAT2 });
-    mesh.AddVertexArray(SceneVertexArray(attrs, count * 4));
+    if (thick_format) specs.push_back(VAttr::TexCoordVec4C1);
+    specs.push_back(VAttr::TexCoordC2);
+    mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count * 4));
     mesh.AddIndexArray(SceneIndexArray(count * 6));
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
 }
@@ -197,21 +190,21 @@ void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_
 void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
                          bool thick_format) {
     (void)particle;
-    std::vector<SceneVertexArray::SceneVertexAttribute> attrs {
-        { WE_IN_POSITIONVEC4.data(), VertexType::FLOAT4 },
-        { WE_IN_TEXCOORDVEC4.data(), VertexType::FLOAT4 },
-        { WE_IN_TEXCOORDVEC4C1.data(), VertexType::FLOAT4 },
+    std::vector<VertexAttrSpec> specs {
+        VAttr::PositionVec4,
+        VAttr::TexCoordVec4,
+        VAttr::TexCoordVec4C1,
     };
     if (thick_format) {
-        attrs.push_back({ WE_IN_TEXCOORDVEC4C2.data(), VertexType::FLOAT4 });
-        attrs.push_back({ WE_IN_TEXCOORDVEC4C3.data(), VertexType::FLOAT4 });
-        attrs.push_back({ WE_IN_TEXCOORDC4.data(), VertexType::FLOAT4 });
+        specs.push_back(VAttr::TexCoordVec4C2);
+        specs.push_back(VAttr::TexCoordVec4C3);
+        specs.push_back(VAttr::TexCoordC4);
     } else {
-        attrs.push_back({ WE_IN_TEXCOORDVEC3C2.data(), VertexType::FLOAT4 });
-        attrs.push_back({ WE_IN_TEXCOORDC3.data(), VertexType::FLOAT4 });
+        specs.push_back(VAttr::TexCoordVec3C2);
+        specs.push_back(VAttr::TexCoordC3);
     }
-    attrs.push_back({ WE_IN_COLOR.data(), VertexType::FLOAT4 });
-    mesh.AddVertexArray(SceneVertexArray(attrs, count * 4));
+    specs.push_back(VAttr::Color);
+    mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count * 4));
     mesh.AddIndexArray(SceneIndexArray(count * 6));
     mesh.GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
@@ -1361,11 +1354,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     auto sp_mesh = std::make_shared<SceneMesh>(/*dynamic=*/has_text_script);
     {
         SceneVertexArray vertex(
-            {
-                { WE_IN_POSITION.data(), VertexType::FLOAT3 },
-                { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
-                { WE_IN_COLOR.data(),    VertexType::FLOAT4 },
-            },
+            MakeAttrSet({ VAttr::Position, VAttr::TexCoord, VAttr::Color }),
             peak_quads * 4);
         sp_mesh->AddVertexArray(std::move(vertex));
         sp_mesh->AddIndexArray(SceneIndexArray(peak_quads * 6));

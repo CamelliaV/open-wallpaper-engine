@@ -74,7 +74,6 @@ struct VulkanRender::Impl {
     std::unique_ptr<FinPass> m_testpass { nullptr };
     ReDrawCB                 m_redraw_cb;
 
-    std::unique_ptr<StagingBuffer> m_vertex_buf { nullptr };
     std::unique_ptr<StagingBuffer> m_dyn_buf { nullptr };
 
     vvk::CommandBuffers m_cmds;
@@ -224,6 +223,9 @@ void VulkanRender::drawFrame(Scene& scene) { pImpl->drawFrame(scene); };
 void VulkanRender::clearLastRenderGraph() { pImpl->clearLastRenderGraph(); };
 void VulkanRender::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     pImpl->compileRenderGraph(scene, rg);
+}
+void VulkanRender::evictUnusedMeshes() {
+    if (auto* d = pImpl->m_device.get()) d->mesh_cache().evictUnused();
 };
 void VulkanRender::UpdateCameraFillMode(Scene& scene, owe::FillMode fill) {
     pImpl->UpdateCameraFillMode(scene, fill);
@@ -387,16 +389,11 @@ bool VulkanRender::Impl::initRes() {
         m_finpass->setPresentFormat(m_ex_swapchain->format());
     }
 
-    m_vertex_buf = std::make_unique<StagingBuffer>(*m_device,
-                                                   2 * 1024 * 1024,
-                                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                                                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    m_dyn_buf    = std::make_unique<StagingBuffer>(*m_device,
+    m_dyn_buf = std::make_unique<StagingBuffer>(*m_device,
                                                 2 * 1024 * 1024,
                                                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                                                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    if (! m_vertex_buf->allocate()) return false;
     if (! m_dyn_buf->allocate()) return false;
     {
         auto& pool = m_device->cmd_pool();
@@ -418,8 +415,8 @@ void VulkanRender::Impl::destroy() {
         for (auto& p : m_passes) {
             p->destory(*m_device, m_rendering_resources);
         }
-        m_vertex_buf->destroy();
         m_dyn_buf->destroy();
+        m_device->mesh_cache().destroy();
 
         m_device->Destroy();
     }
@@ -470,8 +467,7 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
         VVK_CHECK_BOOL_RE(m_device->handle().CreateSemaphore(ci, rr.sem_export));
     }
 
-    rr.vertex_buf = m_vertex_buf.get();
-    rr.dyn_buf    = m_dyn_buf.get();
+    rr.dyn_buf = m_dyn_buf.get();
     return true;
 }
 
@@ -760,11 +756,9 @@ void VulkanRender::Impl::clearLastRenderGraph() {
     }
     m_passes.clear();
     m_device->tex_cache().Clear();
+    m_device->mesh_cache().onRenderGraphCleared();
 
-    m_vertex_buf->destroy();
     m_dyn_buf->destroy();
-
-    m_vertex_buf->allocate();
     m_dyn_buf->allocate();
 }
 
@@ -810,7 +804,7 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     }));
-    m_vertex_buf->recordUpload(m_upload_cmd);
+    m_device->mesh_cache().recordPendingUploads(m_upload_cmd);
     VVK_CHECK_VOID_RE(m_upload_cmd.End());
     {
         VkSubmitInfo sub_info {

@@ -31,6 +31,7 @@ add_library(owe-vulkan STATIC
   StagingBuffer.cpp
   GraphicsPipeline.cpp
   TextureCache.cpp
+  MeshCache.cpp
   vulkan_wrapper.cpp
   Vma.cpp)
 target_sources(owe-vulkan

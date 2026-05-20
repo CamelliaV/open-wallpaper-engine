@@ -1,12 +1,14 @@
 module;
 
 #include <climits>
+#include <initializer_list>
 
 export module wescene.scene;
 import eigen;
 import wescene.core;
 import rstd.cppstd;
 import wescene.types;
+import wescene.spec_texs;
 
 export namespace owe
 {
@@ -237,6 +239,22 @@ private:
 
     uint32_t m_id;
 };
+
+// Build a SceneVertexAttribute vector from compile-time VertexAttrSpec literals.
+// Lets callsites write `MakeAttrSet({VAttr::Position, VAttr::TexCoord})` instead
+// of hand-typing string/type pairs.
+inline std::vector<SceneVertexArray::SceneVertexAttribute>
+MakeAttrSet(std::span<const VertexAttrSpec> specs) {
+    std::vector<SceneVertexArray::SceneVertexAttribute> out;
+    out.reserve(specs.size());
+    for (auto& s : specs) out.push_back({ std::string(s.name), s.type });
+    return out;
+}
+
+inline std::vector<SceneVertexArray::SceneVertexAttribute>
+MakeAttrSet(std::initializer_list<VertexAttrSpec> specs) {
+    return MakeAttrSet(std::span<const VertexAttrSpec>(specs.begin(), specs.size()));
+}
 
 // ============================================================================
 // SceneMaterial.h

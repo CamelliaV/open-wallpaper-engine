@@ -234,7 +234,11 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     std::vector<VkVertexInputAttributeDescription> attr_descriptions;
     {
         m_desc.dyn_vertex = mesh.Dynamic();
-        m_desc.vertex_bufs.resize(mesh.VertexCount());
+        m_desc.vertex_bufs.clear();
+        m_desc.vertex_dyn_bufs.clear();
+        if (m_desc.dyn_vertex) m_desc.vertex_dyn_bufs.resize(mesh.VertexCount());
+
+        auto& mc = device.mesh_cache();
 
         for (unsigned i = 0; i < mesh.VertexCount(); i++) {
             const auto& vertex    = mesh.GetVertexArray(i);
@@ -260,28 +264,31 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                 };
                 attr_descriptions.push_back(attr_desc);
             }
-            {
-                auto& buf = m_desc.vertex_bufs[i];
-                if (! m_desc.dyn_vertex) {
-                    if (! rr.vertex_buf->allocateSubRef(vertex.CapacitySizeOf(), buf)) return;
-                    if (! rr.vertex_buf->writeToBuf(buf, { (uint8_t*)vertex.Data(), buf.size }))
-                        return;
-                } else {
-                    if (! rr.dyn_buf->allocateSubRef(vertex.CapacitySizeOf(), buf)) return;
-                }
+            if (! m_desc.dyn_vertex) {
+                auto opt = mc.QueryOrUpload(
+                    { &vertex, 0 },
+                    { (const uint8_t*)vertex.Data(), vertex.CapacitySizeOf() });
+                if (! opt) return;
+                m_desc.vertex_bufs.push_back(std::move(*opt));
+            } else {
+                auto& buf = m_desc.vertex_dyn_bufs[i];
+                if (! rr.dyn_buf->allocateSubRef(vertex.CapacitySizeOf(), buf)) return;
             }
             m_desc.draw_count += (u32)(vertex.DataSize() / vertex.OneSize());
         }
 
         if (mesh.IndexCount() > 0) {
-            auto&  indice     = mesh.GetIndexArray(0);
+            auto& indice      = mesh.GetIndexArray(0);
             m_desc.draw_count = (u32)indice.DataCount();
-            auto& buf         = m_desc.index_buf;
             if (! m_desc.dyn_vertex) {
-                if (! rr.vertex_buf->allocateSubRef(indice.CapacitySizeof(), buf)) return;
-                if (! rr.vertex_buf->writeToBuf(buf, { (uint8_t*)indice.Data(), buf.size })) return;
+                auto opt = mc.QueryOrUpload(
+                    { &indice, 0 },
+                    { (const uint8_t*)indice.Data(), indice.CapacitySizeof() });
+                if (! opt) return;
+                m_desc.index_buf = std::move(*opt);
             } else {
-                if (! rr.dyn_buf->allocateSubRef(indice.CapacitySizeof(), buf)) return;
+                if (! rr.dyn_buf->allocateSubRef(indice.CapacitySizeof(), m_desc.index_dyn_buf))
+                    return;
             }
         }
     }
@@ -315,10 +322,12 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         descriptor_info.push_descriptor = true;
         GraphicsPipeline pipeline;
         pipeline.toDefault();
+        const bool has_index =
+            m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
         pipeline.addDescriptorSetInfo(spanone { descriptor_info })
             .setColorBlendStates(spanone { color_blend })
-            .setTopology(m_desc.index_buf ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-                                          : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
+            .setTopology(has_index ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+                                   : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
             .addInputBindingDescription(bind_descriptions)
             .addInputAttributeDescription(attr_descriptions)
             .setSampleCount(m_desc.samples);
@@ -357,9 +366,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         if (m_desc.dyn_vertex) {
             auto& mesh        = *m_desc.node->Mesh();
             auto* dyn_buf     = rr.dyn_buf;
-            auto& vertex_bufs = m_desc.vertex_bufs;
+            auto& vertex_bufs = m_desc.vertex_dyn_bufs;
             auto& draw_count  = m_desc.draw_count;
-            auto& index_buf   = m_desc.index_buf;
+            auto& index_buf   = m_desc.index_dyn_buf;
             update_dyn_buf_op = [&mesh, &vertex_bufs, &draw_count, &index_buf, dyn_buf]() {
                 if (mesh.Dirty().exchange(false)) {
                     for (usize i = 0; i < mesh.VertexCount(); i++) {
@@ -551,14 +560,31 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     cmd.SetViewport(0, viewport);
     cmd.SetScissor(0, scissor);
 
-    auto gpu_buf = m_desc.dyn_vertex ? rr.dyn_buf->gpuBuf() : rr.vertex_buf->gpuBuf();
-
-    for (usize i = 0; i < m_desc.vertex_bufs.size(); i++) {
-        auto& buf = m_desc.vertex_bufs[i];
-        cmd.BindVertexBuffers((u32)i, 1, &gpu_buf, &buf.offset);
+    if (m_desc.dyn_vertex) {
+        auto gpu_buf = rr.dyn_buf->gpuBuf();
+        for (usize i = 0; i < m_desc.vertex_dyn_bufs.size(); i++) {
+            auto& buf = m_desc.vertex_dyn_bufs[i];
+            cmd.BindVertexBuffers((u32)i, 1, &gpu_buf, &buf.offset);
+        }
+        if (m_desc.index_dyn_buf) {
+            cmd.BindIndexBuffer(gpu_buf, m_desc.index_dyn_buf.offset, VK_INDEX_TYPE_UINT32);
+        }
+    } else {
+        for (usize i = 0; i < m_desc.vertex_bufs.size(); i++) {
+            auto&        mref = m_desc.vertex_bufs[i];
+            VkBuffer     vb   = mref.buffer();
+            VkDeviceSize off  = mref.offset();
+            cmd.BindVertexBuffers((u32)i, 1, &vb, &off);
+        }
+        if (m_desc.index_buf) {
+            VkBuffer     ib  = m_desc.index_buf.buffer();
+            VkDeviceSize off = m_desc.index_buf.offset();
+            cmd.BindIndexBuffer(ib, off, VK_INDEX_TYPE_UINT32);
+        }
     }
-    if (m_desc.index_buf) {
-        cmd.BindIndexBuffer(gpu_buf, m_desc.index_buf.offset, VK_INDEX_TYPE_UINT32);
+
+    const bool has_index = m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
+    if (has_index) {
         const auto& ranges = m_desc.node->Mesh()->DrawRanges();
         if (ranges.empty()) {
             cmd.DrawIndexed(m_desc.draw_count, 1, 0, 0, 0);
@@ -578,13 +604,14 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
 
 void CustomShaderPass::destory(const Device&, RenderingResources& rr) {
     m_desc.update_op = {};
-    {
-        auto& buf = m_desc.dyn_vertex ? rr.dyn_buf : rr.vertex_buf;
-        for (auto& bufref : m_desc.vertex_bufs) {
-            buf->unallocateSubRef(bufref);
-        }
-    }
+    for (auto& bufref : m_desc.vertex_dyn_bufs) rr.dyn_buf->unallocateSubRef(bufref);
+    if (m_desc.index_dyn_buf) rr.dyn_buf->unallocateSubRef(m_desc.index_dyn_buf);
     rr.dyn_buf->unallocateSubRef(m_desc.ubo_buf);
+    // Static MeshBufferRef values dec their refcount via destructor when
+    // m_desc.vertex_bufs / m_desc.index_buf go out of scope; clear here to
+    // release the slot eagerly so a follow-up evictUnused can free.
+    m_desc.vertex_bufs.clear();
+    m_desc.index_buf = {};
 }
 
 void CustomShaderPass::setDescTex(u32 index, std::string_view tex_key) {

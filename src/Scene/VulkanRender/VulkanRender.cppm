@@ -84,6 +84,10 @@ public:
 
     void clearLastRenderGraph();
     void compileRenderGraph(Scene&, rg::RenderGraph&);
+    // Free unreferenced MeshCache entries. Call when the scene set changes
+    // (RenderSetScene); skip for swapchain-only rebuilds where the same
+    // SceneMesh set survives.
+    void evictUnusedMeshes();
     void UpdateCameraFillMode(Scene&, owe::FillMode);
 
     bool onSwapchainReady(unsigned width, unsigned height);

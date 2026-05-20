@@ -33,8 +33,12 @@ public:
 
         // bufs
         bool                          dyn_vertex { false };
-        std::vector<StagingBufferRef> vertex_bufs;
-        StagingBufferRef              index_buf;
+        // Static mesh: cached in Device::mesh_cache() across render-graph rebuilds.
+        std::vector<MeshBufferRef>    vertex_bufs;
+        MeshBufferRef                 index_buf;
+        // Dynamic mesh: re-allocated from dyn_buf each rebuild.
+        std::vector<StagingBufferRef> vertex_dyn_bufs;
+        StagingBufferRef              index_dyn_buf;
         StagingBufferRef              ubo_buf;
 
         // pipeline

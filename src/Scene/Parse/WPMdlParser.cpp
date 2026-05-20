@@ -780,36 +780,36 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh& mesh, const WPMdl::Mesh& src) {
     const size_t vert_num = src.positions.size();
     if (vert_num == 0) return;
 
-    using Attr = SceneVertexArray::SceneVertexAttribute;
     // Build the attribute list in a stable order. Skinning attrs come early so
     // a puppet vertex layout matches what WE shaders historically expect.
-    std::vector<Attr> attrs;
+    std::vector<VertexAttrSpec> specs;
     std::vector<std::function<void(size_t, float*)>> packers;
 
     // Position is always present (the parser would have failed otherwise).
-    attrs.push_back(Attr { std::string(WE_IN_POSITION), VertexType::FLOAT3 });
+    specs.push_back(VAttr::Position);
     packers.push_back([&src](size_t i, float* dst) {
         std::memcpy(dst, src.positions[i].data(), sizeof(src.positions[i]));
     });
     if (! src.blend_indices.empty()) {
-        attrs.push_back(Attr { std::string(WE_IN_BLENDINDICES), VertexType::UINT4 });
+        specs.push_back(VAttr::BlendIndices);
         packers.push_back([&src](size_t i, float* dst) {
             std::memcpy(dst, src.blend_indices[i].data(), sizeof(src.blend_indices[i]));
         });
     }
     if (! src.blend_weights.empty()) {
-        attrs.push_back(Attr { std::string(WE_IN_BLENDWEIGHTS), VertexType::FLOAT4 });
+        specs.push_back(VAttr::BlendWeights);
         packers.push_back([&src](size_t i, float* dst) {
             std::memcpy(dst, src.blend_weights[i].data(), sizeof(src.blend_weights[i]));
         });
     }
     if (! src.texcoords.empty()) {
-        attrs.push_back(Attr { std::string(WE_IN_TEXCOORD), VertexType::FLOAT2 });
+        specs.push_back(VAttr::TexCoord);
         packers.push_back([&src](size_t i, float* dst) {
             std::memcpy(dst, src.texcoords[i].data(), sizeof(src.texcoords[i]));
         });
     }
 
+    auto attrs = MakeAttrSet(specs);
     SceneVertexArray vertex(attrs, vert_num);
 
     size_t stride_floats = 0;

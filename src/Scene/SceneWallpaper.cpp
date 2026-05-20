@@ -388,6 +388,10 @@ void RenderHandler::on(RenderSetFillMode&& m) {
 void RenderHandler::on(RenderSetScene&& m) {
     m_scene = std::move(m.scene);
     if (m_rg) m_render->clearLastRenderGraph();
+    // Drop cached mesh buffers from the previous scene before building the
+    // new graph. Swapchain-resize rebuilds (RenderSwapchainReady) reuse the
+    // same SceneMesh set, so evict is intentionally not called there.
+    m_render->evictUnusedMeshes();
     m_rg = sceneToRenderGraph(*m_scene);
 
     if (m_main.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");

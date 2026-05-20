@@ -465,6 +465,8 @@ private:
 
 class PipelineParameters;
 
+class MeshCache;
+
 class Device : NoCopy, NoMove {
 public:
     Device();
@@ -491,6 +493,7 @@ public:
     bool supportExt(std::string_view) const;
 
     TextureCache& tex_cache() const { return *m_tex_cache; }
+    MeshCache&    mesh_cache() const { return *m_mesh_cache; }
 
     VkDeviceSize GetUsage() const;
 
@@ -515,6 +518,7 @@ private:
     VkExtent2D m_extent { 1, 1 };
 
     std::unique_ptr<TextureCache> m_tex_cache;
+    std::unique_ptr<MeshCache>    m_mesh_cache;
 };
 
 // ---------- Util.hpp ----------
@@ -592,6 +596,99 @@ private:
 
     VmaBufferParameters m_stage_buf;
     VmaBufferParameters m_gpu_buf;
+};
+
+// ---------- MeshCache.hpp ----------
+
+// Key identifying one mesh data block (vertex array or index array). We key
+// by pointer because SceneVertexArray/SceneIndexArray addresses are stable
+// across the owning SceneMesh's lifetime, and SceneMesh::ChangeMeshDataFrom
+// shares the underlying arrays via shared_ptr — so identical content shows
+// up as the same pointer automatically.
+struct MeshCacheKey {
+    const void* array_ptr { nullptr };
+    uint64_t    generation { 0 };
+
+    bool operator==(const MeshCacheKey& o) const noexcept {
+        return array_ptr == o.array_ptr && generation == o.generation;
+    }
+};
+
+struct MeshCacheKeyHash {
+    size_t operator()(const MeshCacheKey& k) const noexcept {
+        return std::hash<const void*>()(k.array_ptr) ^
+               (std::hash<uint64_t>()(k.generation) * 0x9E3779B97F4A7C15ULL);
+    }
+};
+
+class MeshCache;
+
+// RAII handle into MeshCache. Does NOT cache the VkBuffer — StagingBuffer's
+// increaseBuf may invalidate it. Callers resolve buffer() at execute time.
+class MeshBufferRef {
+public:
+    MeshBufferRef() = default;
+    MeshBufferRef(MeshCache* owner, MeshCacheKey key, VkDeviceSize offset, VkDeviceSize size);
+    ~MeshBufferRef();
+
+    MeshBufferRef(const MeshBufferRef&)            = delete;
+    MeshBufferRef& operator=(const MeshBufferRef&) = delete;
+
+    MeshBufferRef(MeshBufferRef&& o) noexcept;
+    MeshBufferRef& operator=(MeshBufferRef&& o) noexcept;
+
+    explicit operator bool() const noexcept { return m_owner != nullptr && m_size > 0; }
+
+    VkBuffer     buffer() const noexcept;
+    VkDeviceSize offset() const noexcept { return m_offset; }
+    VkDeviceSize size() const noexcept { return m_size; }
+
+private:
+    MeshCache*   m_owner { nullptr };
+    MeshCacheKey m_key {};
+    VkDeviceSize m_offset { 0 };
+    VkDeviceSize m_size { 0 };
+};
+
+class MeshCache : NoCopy, NoMove {
+public:
+    explicit MeshCache(const Device&);
+    ~MeshCache();
+
+    bool init();
+    void destroy();
+
+    // Hit: refcount++, returns ref to existing sub-allocation.
+    // Miss: allocateSubRef + writeToBuf, marks dirty, returns fresh ref.
+    std::optional<MeshBufferRef> QueryOrUpload(MeshCacheKey               key,
+                                               std::span<const uint8_t>  data,
+                                               VkDeviceSize              alignment = 4);
+
+    // Called by ~MeshBufferRef; refcount--, no immediate free.
+    void release(MeshCacheKey key);
+
+    // Current GPU buffer handle. May change across increaseBuf in QueryOrUpload.
+    VkBuffer gpuBuf() const;
+
+    // Flushes any pending writes to GPU. No-op if nothing dirty since last flush.
+    bool recordPendingUploads(vvk::CommandBuffer& cmd);
+
+    // No-op for now; reserved as the hook downstream wires to clearLastRenderGraph.
+    void onRenderGraphCleared();
+
+    // Releases refcount==0 entries from the underlying StagingBuffer.
+    void evictUnused();
+
+private:
+    struct Entry {
+        StagingBufferRef ref;
+        uint32_t         refcount { 0 };
+    };
+
+    const Device&                                              m_device;
+    std::unique_ptr<StagingBuffer>                             m_buf;
+    std::unordered_map<MeshCacheKey, Entry, MeshCacheKeyHash>  m_map;
+    bool                                                       m_dirty { false };
 };
 
 // ---------- GraphicsPipeline.hpp ----------
