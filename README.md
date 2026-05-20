@@ -77,7 +77,7 @@ Pass `--remote-debugging-port 9222` to expose Chrome DevTools on `http://127.0.0
 	- [x] Initializers
 	- [x] Operators
 	- [x] Control Points
-        - [ ] Mouse Follow
+        - [x] Mouse Follow
 	- [x] Children
     - [x] Audio Response
 - [x] Puppet

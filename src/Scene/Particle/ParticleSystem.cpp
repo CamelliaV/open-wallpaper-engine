@@ -154,7 +154,8 @@ void ParticleSubSystem::Emitt() {
                         m_initializers,
                         m_maxcount,
                         particleTime,
-                        std::span<const float> { audio_average.data(), audio_average.size() });
+                        std::span<const float> { audio_average.data(), audio_average.size() },
+                        std::span<const ParticleControlpoint> { m_controlpoints });
             }
         }
 

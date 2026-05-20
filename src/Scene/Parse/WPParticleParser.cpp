@@ -627,6 +627,7 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
         box.minSpeed      = wpe.speedmin;
         box.maxSpeed      = wpe.speedmax;
         box.duration      = wpe.duration;
+        box.controlpoint  = wpe.controlpoint;
         box.audio_response = audio_response;
         box.sort          = sort;
         return ParticleBoxEmitterArgs::MakeEmittOp(box);
@@ -643,11 +644,12 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
         sphere.minSpeed      = wpe.speedmin;
         sphere.maxSpeed      = wpe.speedmax;
         sphere.duration      = wpe.duration;
+        sphere.controlpoint  = wpe.controlpoint;
         sphere.audio_response = audio_response;
         sphere.sort          = sort;
         return ParticleSphereEmitterArgs::MakeEmittOp(sphere);
     } else
         return [](std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t, double,
-                  std::span<const float>) {
+                  std::span<const float>, std::span<const ParticleControlpoint>) {
         };
 }

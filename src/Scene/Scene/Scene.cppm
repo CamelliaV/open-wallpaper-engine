@@ -774,9 +774,10 @@ struct ParticleInfo {
 using ParticleInitOp = std::function<void(Particle&, double)>;
 using ParticleOperatorOp = std::function<void(const ParticleInfo&)>;
 
-using ParticleEmittOp = std::function<void(std::vector<Particle>&, std::vector<ParticleInitOp>&,
-                                           uint32_t maxcount, double timepass,
-                                           std::span<const float> audio_average)>;
+using ParticleEmittOp =
+    std::function<void(std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t maxcount,
+                       double timepass, std::span<const float> audio_average,
+                       std::span<const ParticleControlpoint> controlpoints)>;
 
 struct ParticleAudioResponse {
     bool                 enable { false };
@@ -798,6 +799,7 @@ struct ParticleBoxEmitterArgs {
     float                minSpeed;
     float                maxSpeed;
     float                duration { 0.0f };
+    int32_t              controlpoint { 0 };
     ParticleAudioResponse audio_response;
 
     static ParticleEmittOp MakeEmittOp(ParticleBoxEmitterArgs);
@@ -816,6 +818,7 @@ struct ParticleSphereEmitterArgs {
     float                  minSpeed;
     float                  maxSpeed;
     float                  duration { 0.0f };
+    int32_t                controlpoint { 0 };
     ParticleAudioResponse  audio_response;
 
     static ParticleEmittOp MakeEmittOp(ParticleSphereEmitterArgs);

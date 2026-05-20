@@ -111,19 +111,38 @@ inline void ApplySign(Eigen::Vector3d& p, int32_t x, int32_t y, int32_t z) noexc
 }
 } // namespace
 
+// Resolve emitter spawn origin in particle-local space. wpe.origin is the
+// authored offset; controlpoints[N].offset adds the runtime cp delta (mouse
+// follow for link_mouse cps, etc).
+inline Eigen::Vector3d ResolveEmitterOrigin(std::span<const ParticleControlpoint> cps,
+                                            int32_t                               cp_index,
+                                            const std::array<float, 3>&           authored) {
+    Eigen::Vector3d o {
+        static_cast<double>(authored[0]),
+        static_cast<double>(authored[1]),
+        static_cast<double>(authored[2]),
+    };
+    if (cp_index >= 0 && static_cast<std::size_t>(cp_index) < cps.size()) {
+        o += cps[cp_index].offset;
+    }
+    return o;
+}
+
 ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
     double timer { 0.0f };
     double elapsed { 0.0f };
-    return [a, timer, elapsed](std::vector<Particle>&       ps,
-                               std::vector<ParticleInitOp>& inis,
-                               u32                          maxcount,
-                               double                       timepass,
-                               std::span<const float>       audio_average) mutable {
+    return [a, timer, elapsed](std::vector<Particle>&                ps,
+                               std::vector<ParticleInitOp>&          inis,
+                               u32                                   maxcount,
+                               double                                timepass,
+                               std::span<const float>                audio_average,
+                               std::span<const ParticleControlpoint> cps) mutable {
         elapsed += timepass;
         if (a.duration > 0.0f && elapsed > a.duration) return;
 
         timer += timepass;
-        auto GenBox = [&]() {
+        Eigen::Vector3d origin = ResolveEmitterOrigin(cps, a.controlpoint, a.orgin);
+        auto            GenBox = [&]() {
             Eigen::Vector3d pos;
             for (int32_t i = 0; i < 3; i++)
                 pos[i] = algorism::lerp(Random::get(-1.0, 1.0), a.minDistance[i], a.maxDistance[i]);
@@ -133,7 +152,7 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
             ParticleModify::ChangeVelocity(p,
                                            Random::get(a.minSpeed, a.maxSpeed) * pos.normalized());
 
-            ParticleModify::Move(p, a.orgin[0], a.orgin[1], a.orgin[2]);
+            ParticleModify::Move(p, origin);
             return p;
         };
         float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
@@ -151,16 +170,18 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
     using namespace Eigen;
     double timer { 0.0f };
     double elapsed { 0.0f };
-    return [a, timer, elapsed](std::vector<Particle>&       ps,
-                               std::vector<ParticleInitOp>& inis,
-                               u32                          maxcount,
-                               double                       timepass,
-                               std::span<const float>       audio_average) mutable {
+    return [a, timer, elapsed](std::vector<Particle>&                ps,
+                               std::vector<ParticleInitOp>&          inis,
+                               u32                                   maxcount,
+                               double                                timepass,
+                               std::span<const float>                audio_average,
+                               std::span<const ParticleControlpoint> cps) mutable {
         elapsed += timepass;
         if (a.duration > 0.0f && elapsed > a.duration) return;
 
         timer += timepass;
-        auto GenSphere = [&]() {
+        Eigen::Vector3d origin    = ResolveEmitterOrigin(cps, a.controlpoint, a.orgin);
+        auto            GenSphere = [&]() {
             auto   p = Particle();
             double r = algorism::lerp(
                 std::pow(Random::get(0.0, 1.0), 1.0 / 3.0), a.minDistance, a.maxDistance);
@@ -175,7 +196,7 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
             ParticleModify::ChangeVelocity(p,
                                            Random::get(a.minSpeed, a.maxSpeed) * sp.normalized());
 
-            ParticleModify::Move(p, Eigen::Vector3f { a.orgin.data() }.cast<double>());
+            ParticleModify::Move(p, origin);
             return p;
         };
         float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
