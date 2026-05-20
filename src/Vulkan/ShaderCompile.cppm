@@ -67,10 +67,17 @@ enum class VulkanTarget : unsigned
     Vulkan_1_3,
 };
 
+enum class SourceLang : unsigned
+{
+    Glsl,
+    Hlsl,
+};
+
 struct ShaderCompUnit {
     ShaderType  stage;
     std::string src;
-    std::string entry_point; // if empty, "main_<stage>" is used.
+    std::string entry_point; // if empty, "main" (GLSL) or "main_<stage>" (HLSL).
+    SourceLang  lang { SourceLang::Glsl };
 };
 
 struct ShaderCompOpt {
@@ -82,11 +89,16 @@ bool CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits,
                                const ShaderCompOpt&            opt,
                                std::vector<Uni_ShaderSpv>&     spvs);
 
-// Run DXC in -P (preprocess-only) mode. Expands every `#if`, `#include`
-// and `#define` so downstream regex passes see only live declarations
-// with macros already resolved (e.g. `g_Bones[BONECOUNT]` becomes
-// `g_Bones[4]`, `#if SKINNING=0` blocks vanish entirely). On failure
-// returns false and leaves `out` untouched.
-bool Preprocess(std::string_view src, std::string& out);
+// Expand every `#if`, `#include` and `#define` in `src` so downstream
+// regex passes see only live declarations with macros already resolved
+// (e.g. `g_Bones[BONECOUNT]` becomes `g_Bones[4]`, `#if SKINNING=0`
+// blocks vanish entirely). `lang` selects glslang's GLSL vs HLSL
+// preprocessor. On failure returns false and leaves `out` untouched.
+bool Preprocess(std::string_view src, ShaderType stage, SourceLang lang, std::string& out);
+
+// glslang::InitializeProcess / FinalizeProcess wrappers. Init must be
+// called once before any compile; Finalize at shutdown.
+void InitProcess();
+void FinalizeProcess();
 
 } // namespace owe::vulkan

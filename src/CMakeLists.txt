@@ -19,12 +19,6 @@ set(warn_opts
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wno-unused-variable
     CACHE INTERNAL "")
 
-# DXC's dxcapi.h sits under <dxc_SOURCE_DIR>/include. The dxcompiler target
-# does not always export this include path correctly when consumed via
-# add_subdirectory; force-republish via FetchContent_GetProperties.
-include(FetchContent)
-FetchContent_GetProperties(dxc SOURCE_DIR _dxc_source_dir)
-
 add_subdirectory(Core)
 add_subdirectory(Vulkan)
 add_subdirectory(Scene)

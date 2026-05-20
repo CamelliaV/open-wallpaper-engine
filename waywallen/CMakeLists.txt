@@ -175,5 +175,3 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/renderers/wescene.toml
     DESTINATION share/waywallen/renderers
 )
 
-install(FILES $<TARGET_FILE:dxcompiler>
-        DESTINATION ${CMAKE_INSTALL_LIBDIR})

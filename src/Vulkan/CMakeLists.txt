@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# owe-shader-compile (host-only DXC + SPIRV-Reflect)
+# owe-shader-compile (host-only glslang + SPIRV-Reflect)
 # ---------------------------------------------------------------------------
 
 add_library(owe-shader-compile STATIC Shader.cpp)
@@ -7,13 +7,10 @@ target_sources(owe-shader-compile
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES ShaderCompile.cppm)
 target_link_libraries(owe-shader-compile
   PUBLIC rstd::rstd rstd.cppstd owe-types wavsen::ffi::vulkan
-  PRIVATE dxcompiler spirv-reflect-static)
+  PRIVATE glslang SPIRV glslang-default-resource-limits spirv-reflect-static)
 target_include_directories(owe-shader-compile
   PUBLIC  .. ../Scene/Utils/include
   PRIVATE ../Scene/Utils ../Scene/Utils/include/Utils .)
-if(_dxc_source_dir)
-  target_include_directories(owe-shader-compile PRIVATE ${_dxc_source_dir}/include)
-endif()
 target_compile_options(owe-shader-compile PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-shader-compile PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-shader-compile PROPERTY CXX_SCAN_FOR_MODULES ON)

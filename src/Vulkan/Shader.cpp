@@ -1,8 +1,11 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <dxc/dxcapi.h>
 #include <spirv_reflect.h>
+
+#include <glslang/Public/ShaderLang.h>
+#include <glslang/Public/ResourceLimits.h>
+#include <SPIRV/GlslangToSpv.h>
 
 #include "Utils/Sha.hpp"
 module wescene.shader_compile;
@@ -29,10 +32,6 @@ std::string logToTmpfileWithSha1(std::span<const char> in) {
     std::fclose(file);
     return path;
 }
-} // namespace
-
-namespace
-{
 
 inline VkShaderStageFlagBits ToVkType(owe::ShaderType s) {
     switch (s) {
@@ -75,98 +74,46 @@ bool EnumAllRef(VEC& vec, FUNC&& func) {
     return result == SPV_REFLECT_RESULT_SUCCESS;
 }
 
-inline LPCWSTR DxcStageProfile(owe::ShaderType s) {
+inline EShLanguage ToEShLanguage(owe::ShaderType s) {
     switch (s) {
-    case ShaderType::VERTEX:   return L"vs_6_0";
-    case ShaderType::FRAGMENT: return L"ps_6_0";
-    case ShaderType::GEOMETRY: return L"gs_6_0";
+    case ShaderType::VERTEX:   return EShLangVertex;
+    case ShaderType::FRAGMENT: return EShLangFragment;
+    case ShaderType::GEOMETRY: return EShLangGeometry;
     }
     rstd_assert(false);
-    return L"vs_6_0";
+    return EShLangVertex;
 }
 
-inline const char* DefaultEntryName(owe::ShaderType s) {
+inline glslang::EShTargetClientVersion ToClientVersion(VulkanTarget t) {
+    switch (t) {
+    case VulkanTarget::Vulkan_1_0: return glslang::EShTargetVulkan_1_0;
+    case VulkanTarget::Vulkan_1_1: return glslang::EShTargetVulkan_1_1;
+    case VulkanTarget::Vulkan_1_2: return glslang::EShTargetVulkan_1_2;
+    case VulkanTarget::Vulkan_1_3: return glslang::EShTargetVulkan_1_3;
+    }
+    return glslang::EShTargetVulkan_1_1;
+}
+
+inline glslang::EShTargetLanguageVersion ToSpvVersion(VulkanTarget t) {
+    // Pair Vulkan target with the matching SPIR-V version. See
+    // https://github.com/KhronosGroup/glslang/blob/main/StandAlone/StandAlone.cpp
+    switch (t) {
+    case VulkanTarget::Vulkan_1_0: return glslang::EShTargetSpv_1_0;
+    case VulkanTarget::Vulkan_1_1: return glslang::EShTargetSpv_1_3;
+    case VulkanTarget::Vulkan_1_2: return glslang::EShTargetSpv_1_5;
+    case VulkanTarget::Vulkan_1_3: return glslang::EShTargetSpv_1_6;
+    }
+    return glslang::EShTargetSpv_1_3;
+}
+
+inline const char* DefaultEntryName(SourceLang lang, owe::ShaderType s) {
+    if (lang == SourceLang::Glsl) return "main";
     switch (s) {
     case ShaderType::VERTEX:   return "main_vs";
     case ShaderType::FRAGMENT: return "main_ps";
     case ShaderType::GEOMETRY: return "main_gs";
     }
-    rstd_assert(false);
     return "main";
-}
-
-inline LPCWSTR TargetEnvFlag(VulkanTarget target) {
-    switch (target) {
-    case VulkanTarget::Vulkan_1_0: return L"-fspv-target-env=vulkan1.0";
-    case VulkanTarget::Vulkan_1_1: return L"-fspv-target-env=vulkan1.1";
-    case VulkanTarget::Vulkan_1_2: return L"-fspv-target-env=vulkan1.2";
-    case VulkanTarget::Vulkan_1_3: return L"-fspv-target-env=vulkan1.3";
-    }
-    return L"-fspv-target-env=vulkan1.1";
-}
-
-// DXC takes wide-string args. WE shaders are pure-ASCII identifiers, so a
-// straight char→wchar_t widening is sufficient.
-inline std::wstring ToWide(std::string_view s) {
-    std::wstring w;
-    w.reserve(s.size());
-    for (auto c : s) w.push_back(static_cast<wchar_t>(c));
-    return w;
-}
-
-// COM helper: scope-bound Release on any IDxc* pointer.
-template<typename T>
-struct ComRelease {
-    void operator()(T* p) const noexcept {
-        if (p) p->Release();
-    }
-};
-template<typename T>
-using ComPtr = std::unique_ptr<T, ComRelease<T>>;
-
-// IDxcUtils / IDxcCompiler3 / DefaultIncludeHandler are COM thread-affine
-// but otherwise reusable across compile calls — DXC has no per-call state
-// that would invalidate them. Cached per thread; raw pointers returned
-// are non-owning (lifetime tied to the thread_local ComPtr).
-struct DxcCtx {
-    IDxcUtils*          utils;
-    IDxcCompiler3*      compiler;
-    IDxcIncludeHandler* default_include;
-};
-
-inline DxcCtx GetDxcCtx() {
-    static thread_local ComPtr<IDxcUtils>          tl_utils;
-    static thread_local ComPtr<IDxcCompiler3>      tl_compiler;
-    static thread_local ComPtr<IDxcIncludeHandler> tl_include;
-
-    if (! tl_utils) {
-        IDxcUtils* raw = nullptr;
-        HRESULT    hr  = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&raw));
-        if (FAILED(hr) || ! raw) {
-            rstd_error("dxc: DxcCreateInstance(DxcUtils) failed: 0x{:x}", (unsigned long)hr);
-            return {};
-        }
-        tl_utils.reset(raw);
-    }
-    if (! tl_compiler) {
-        IDxcCompiler3* raw = nullptr;
-        HRESULT        hr  = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&raw));
-        if (FAILED(hr) || ! raw) {
-            rstd_error("dxc: DxcCreateInstance(DxcCompiler) failed: 0x{:x}", (unsigned long)hr);
-            return {};
-        }
-        tl_compiler.reset(raw);
-    }
-    if (! tl_include) {
-        IDxcIncludeHandler* raw = nullptr;
-        tl_utils->CreateDefaultIncludeHandler(&raw);
-        if (! raw) {
-            rstd_error("dxc: CreateDefaultIncludeHandler failed");
-            return {};
-        }
-        tl_include.reset(raw);
-    }
-    return { tl_utils.get(), tl_compiler.get(), tl_include.get() };
 }
 
 } // namespace
@@ -178,13 +125,9 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
         spv_reflect::ShaderModule spv_ref(code, SPV_REFLECT_MODULE_FLAG_NO_COPY);
         VkShaderStageFlagBits     stage = ::ToVkType(spv_ref.GetShaderStage());
         {
-            Uni_ShaderSpv spv  = std::make_unique<ShaderSpv>();
-            spv->stage         = ::FromSpvStage(spv_ref.GetShaderStage());
-            spv->spirv         = code;
-            // SPIRV-Reflect gives us the entry-point name baked into the
-            // module — use it so the pipeline's pName matches what DXC
-            // produced (e.g. "main_vs" / "main_ps") instead of defaulting
-            // to "main" and tripping VUID-VkPipelineShaderStageCreateInfo.
+            Uni_ShaderSpv spv = std::make_unique<ShaderSpv>();
+            spv->stage        = ::FromSpvStage(spv_ref.GetShaderStage());
+            spv->spirv        = code;
             if (const char* ep = spv_ref.GetEntryPointName(); ep && ep[0] != '\0') {
                 spv->entry_point = ep;
             }
@@ -217,8 +160,7 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
             if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
                 auto& block      = b.block;
                 auto  block_name = std::string(block.name).empty() ? bind_name : block.name;
-                ref.blocks.push_back(ShaderReflected::Block { //.index = i,
-                                                              .size       = block.size,
+                ref.blocks.push_back(ShaderReflected::Block { .size       = block.size,
                                                               .name       = block.name,
                                                               .member_map = {} });
                 auto& ref_block = ref.blocks.front();
@@ -230,10 +172,8 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                 for (u32 i = 0; i < block.member_count; i++) {
                     auto&                           unif = block.members[i];
                     ShaderReflected::BlockedUniform bunif {};
-                    {
-                        bunif.size   = unif.size;
-                        bunif.offset = unif.offset;
-                    }
+                    bunif.size   = unif.size;
+                    bunif.offset = unif.offset;
                     ref_block.member_map[unif.name] = bunif;
                 }
             } else if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
@@ -265,10 +205,9 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                 rinput.location = input.location;
                 rinput.format   = ::ToVkType(input.format);
 
-                // DXC names input vars `in.var.<SEMANTIC>`. The synthesizer
-                // sets the semantic to the original attribute name (a_X),
-                // so stripping the `in.var.` prefix yields a key the C++
-                // vertex-buffer setup can match against `attrs_map`.
+                // Strip HLSL semantic-prefixed names (`in.var.<SEMANTIC>`)
+                // if any survived — current GLSL path produces bare attribute
+                // names like `a_Position`.
                 std::string_view name = input.name;
                 if (name.starts_with("in.var.")) name.remove_prefix(7);
                 ref.input_location_map[std::string(name)] = rinput;
@@ -278,179 +217,146 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
     return true;
 }
 
-bool owe::vulkan::Preprocess(std::string_view src, std::string& out) {
-    DxcCtx ctx = GetDxcCtx();
-    if (! ctx.compiler) return false;
+void owe::vulkan::InitProcess() { glslang::InitializeProcess(); }
+void owe::vulkan::FinalizeProcess() { glslang::FinalizeProcess(); }
 
-    // -P alone (no filename) writes the preprocessed text to DXC_OUT_HLSL.
-    std::vector<LPCWSTR> args { L"-P" };
+namespace
+{
 
-    DxcBuffer source_buf {};
-    source_buf.Ptr      = src.data();
-    source_buf.Size     = src.size();
-    source_buf.Encoding = DXC_CP_UTF8;
+// Configure a TShader for our Vulkan target. The user shader has already
+// gone through PreShaderHeader (combo `#define`s + GLSL prologue + the
+// __SHADER_PLACEHOLD__ slot for synthesized layouts) so glslang sees
+// fully resolved source.
+void ConfigureShader(glslang::TShader& shader, SourceLang lang, VulkanTarget target,
+                     const char* entry) {
+    glslang::EShSource src_lang =
+        (lang == SourceLang::Hlsl) ? glslang::EShSourceHlsl : glslang::EShSourceGlsl;
+    shader.setEnvInput(src_lang, shader.getStage(), glslang::EShClientVulkan, 100);
+    shader.setEnvClient(glslang::EShClientVulkan, ToClientVersion(target));
+    shader.setEnvTarget(glslang::EShTargetSpv, ToSpvVersion(target));
+    shader.setEntryPoint(entry);
+    shader.setSourceEntryPoint(entry);
+    // We emit explicit `layout(location=N)` and `layout(set=B, binding=K)`
+    // ourselves from Finalprocessor, so glslang's auto-binding stays off.
+    shader.setAutoMapLocations(false);
+    shader.setAutoMapBindings(false);
+    // Be lenient about combinations of #version / unset clip ranges in WE
+    // shaders — they mostly look like GLSL 110 desktop with Vulkan semantics
+    // grafted on top.
+    shader.setEnvInputVulkanRulesRelaxed();
+}
 
-    IDxcResult* result_raw = nullptr;
-    HRESULT     hr         = ctx.compiler->Compile(&source_buf,
-                                       args.data(),
-                                       static_cast<UINT32>(args.size()),
-                                       ctx.default_include,
-                                       IID_PPV_ARGS(&result_raw));
-    if (FAILED(hr) || ! result_raw) {
-        rstd_error("dxc(preprocess): IDxcCompiler3::Compile failed: 0x{:x}",
-                  (unsigned long)hr);
+constexpr EShMessages kCompileMessages = static_cast<EShMessages>(
+    EShMsgSpvRules | EShMsgVulkanRules | EShMsgRelaxedErrors | EShMsgSuppressWarnings |
+    EShMsgKeepUncalled);
+
+} // namespace
+
+bool owe::vulkan::Preprocess(std::string_view src, ShaderType stage, SourceLang lang,
+                             std::string& out) {
+    glslang::TShader shader(ToEShLanguage(stage));
+    std::string      src_copy(src);
+    const char*      data    = src_copy.c_str();
+    const int        len     = (int)src_copy.size();
+    const char*      name    = "ww";
+    shader.setStringsWithLengthsAndNames(&data, &len, &name, 1);
+    ConfigureShader(shader, lang, VulkanTarget::Vulkan_1_1,
+                    DefaultEntryName(lang, stage));
+
+    const int               default_version = 110;
+    const EProfile          profile         = ECoreProfile;
+    const bool              forward_compat  = false;
+    glslang::TShader::ForbidIncluder includer;
+
+    std::string preprocessed;
+    bool ok = shader.preprocess(GetDefaultResources(), default_version, profile,
+                                false, forward_compat, kCompileMessages,
+                                &preprocessed, includer);
+    if (! ok) {
+        std::string tmp = logToTmpfileWithSha1(src);
+        rstd_error("glslang(preprocess): {}", shader.getInfoLog());
+        rstd_error("shader source is at {}", tmp);
         return false;
     }
-    ComPtr<IDxcResult> result(result_raw);
-
-    HRESULT compile_status = E_FAIL;
-    result->GetStatus(&compile_status);
-    const bool failed = FAILED(compile_status);
-
-    IDxcBlobUtf8* errors_raw = nullptr;
-    result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors_raw), nullptr);
-    ComPtr<IDxcBlobUtf8> errors(errors_raw);
-    if (errors && errors->GetStringLength() > 0) {
-        if (failed) {
-            std::string tmp_name = logToTmpfileWithSha1(src);
-            rstd_error("dxc(preprocess): {}",
-                      std::string_view(errors->GetStringPointer(),
-                                       errors->GetStringLength()));
-            rstd_error("shader source is at {}", tmp_name);
-        } else {
-            rstd_warn("dxc(preprocess): {}",
-                     std::string_view(errors->GetStringPointer(),
-                                      errors->GetStringLength()));
-        }
-    }
-    if (failed) return false;
-
-    IDxcBlobUtf8* hlsl_raw = nullptr;
-    result->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(&hlsl_raw), nullptr);
-    ComPtr<IDxcBlobUtf8> hlsl(hlsl_raw);
-    if (! hlsl || hlsl->GetStringLength() == 0) {
-        rstd_error("dxc(preprocess): no preprocessed output");
-        return false;
-    }
-
-    out.assign(hlsl->GetStringPointer(), hlsl->GetStringLength());
+    out = std::move(preprocessed);
     return true;
 }
 
 bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  compUnits,
-                                                  const ShaderCompOpt&        opt,
-                                                  std::vector<Uni_ShaderSpv>& spvs) {
-    DxcCtx ctx = GetDxcCtx();
-    if (! ctx.compiler) return false;
-
+                                            const ShaderCompOpt&        opt,
+                                            std::vector<Uni_ShaderSpv>& spvs) {
     spvs.clear();
     spvs.reserve(compUnits.size());
 
     for (const auto& unit : compUnits) {
-        const std::wstring entry =
-            ToWide(unit.entry_point.empty() ? DefaultEntryName(unit.stage) : unit.entry_point);
+        const std::string  entry_str = unit.entry_point.empty()
+                                           ? DefaultEntryName(unit.lang, unit.stage)
+                                           : unit.entry_point;
+        const char*        entry     = entry_str.c_str();
 
-        std::vector<LPCWSTR> args;
-        args.push_back(L"-T");        args.push_back(DxcStageProfile(unit.stage));
-        args.push_back(L"-E");        args.push_back(entry.c_str());
-        args.push_back(L"-spirv");
-        args.push_back(TargetEnvFlag(opt.target));
-        // Pack matrices column-major to match the C++ side's glm uploads.
-        args.push_back(L"-Zpc");
-        // Force std140 cbuffer layout. Default DX packing lets scalars
-        // share a 16-byte slot which Vulkan's default cbuffer layout
-        // doesn't allow — RADV reads such cbuffers inconsistently and
-        // SPIRV-Cross outright rejects them ("Buffer block cannot be
-        // expressed as any of std430, std140, scalar"). std140 also
-        // matches what the C++ uploader was originally written for under
-        // glslang, so reflection-reported offsets line up with what the
-        // host data structure expects.
-        args.push_back(L"-fvk-use-gl-layout");
-        // No -fvk-bind-globals: WPShaderParser strips `uniform TYPE NAME;`
-        // declarations and re-emits them as members of an explicit shared
-        // `cbuffer ww_Uniforms` at [[vk::binding(0, 0)]] with the cross-
-        // stage union of names in alphabetic order. That keeps VS and FS
-        // looking at the same cbuffer layout — under -fvk-bind-globals
-        // each stage's $Globals had a different field set and FS-only
-        // uniforms (g_Brightness, g_UserAlpha) read as zero because the
-        // C++ uploader laid out the buffer per-VS-reflection.
-        if (opt.optimize) {
-            args.push_back(L"-O3");
-        } else {
-            args.push_back(L"-Od");
-        }
+        glslang::TShader shader(ToEShLanguage(unit.stage));
+        const char* data = unit.src.c_str();
+        const int   len  = (int)unit.src.size();
+        const char* name = "ww";
+        shader.setStringsWithLengthsAndNames(&data, &len, &name, 1);
+        ConfigureShader(shader, unit.lang, opt.target, entry);
 
-        DxcBuffer source_buf {};
-        source_buf.Ptr      = unit.src.data();
-        source_buf.Size     = unit.src.size();
-        source_buf.Encoding = DXC_CP_UTF8;
+        const int               default_version = 110;
+        const EProfile          profile         = ECoreProfile;
+        const bool              forward_compat  = false;
+        glslang::TShader::ForbidIncluder includer;
 
-        IDxcResult* result_raw = nullptr;
-        HRESULT     hr         = ctx.compiler->Compile(&source_buf,
-                                       args.data(),
-                                       static_cast<UINT32>(args.size()),
-                                       ctx.default_include,
-                                       IID_PPV_ARGS(&result_raw));
-        if (FAILED(hr) || ! result_raw) {
-            rstd_error("dxc(compile): IDxcCompiler3::Compile failed: 0x{:x}", (unsigned long)hr);
-            return false;
-        }
-        ComPtr<IDxcResult> result(result_raw);
-
-        IDxcBlobUtf8* errors_raw = nullptr;
-        result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors_raw), nullptr);
-        ComPtr<IDxcBlobUtf8> errors(errors_raw);
-
-        HRESULT compile_status = E_FAIL;
-        result->GetStatus(&compile_status);
-        const bool compile_failed = FAILED(compile_status);
-
-        if (errors && errors->GetStringLength() > 0) {
-            // The errors blob from DXC carries both warnings and errors.
-            // Only escalate to ERROR severity on actual compile failure;
-            // warnings ride at WARN. The temp-file path is only useful
-            // when the compile actually failed.
-            if (compile_failed) {
-                std::string tmp_name = logToTmpfileWithSha1(unit.src);
-                rstd_error("dxc(compile): {}",
-                          std::string_view(errors->GetStringPointer(),
-                                           errors->GetStringLength()));
-                rstd_error("shader source is at {}", tmp_name);
-            } else {
-                rstd_warn("dxc(compile): {}",
-                         std::string_view(errors->GetStringPointer(),
-                                          errors->GetStringLength()));
-            }
-        }
-
-        if (compile_failed) {
+        if (! shader.parse(GetDefaultResources(), default_version, profile, false,
+                           forward_compat, kCompileMessages, includer)) {
+            std::string tmp = logToTmpfileWithSha1(unit.src);
+            rstd_error("glslang(parse): {}", shader.getInfoLog());
+            if (const char* d = shader.getInfoDebugLog(); d && d[0])
+                rstd_error("glslang(parse debug): {}", d);
+            rstd_error("shader source is at {}", tmp);
             return false;
         }
 
-        IDxcBlob* spv_blob_raw = nullptr;
-        result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&spv_blob_raw), nullptr);
-        ComPtr<IDxcBlob> spv_blob(spv_blob_raw);
-        if (! spv_blob || spv_blob->GetBufferSize() == 0) {
-            rstd_error("dxc(compile): no SPIR-V output produced");
+        glslang::TProgram program;
+        program.addShader(&shader);
+        if (! program.link(kCompileMessages)) {
+            std::string tmp = logToTmpfileWithSha1(unit.src);
+            rstd_error("glslang(link): {}", program.getInfoLog());
+            rstd_error("shader source is at {}", tmp);
             return false;
         }
+
+        glslang::TIntermediate* intermediate =
+            program.getIntermediate(ToEShLanguage(unit.stage));
+        if (! intermediate) {
+            rstd_error("glslang(intermediate): no intermediate for stage");
+            return false;
+        }
+
+        glslang::SpvOptions spv_opts;
+        spv_opts.validate          = true;
+        spv_opts.generateDebugInfo = false;
+        spv_opts.disableOptimizer  = ! opt.optimize;
+        spv::SpvBuildLogger logger;
 
         Uni_ShaderSpv spv = std::make_unique<ShaderSpv>();
         spv->stage        = unit.stage;
-        spv->entry_point  = unit.entry_point.empty() ? DefaultEntryName(unit.stage)
-                                                     : unit.entry_point;
-        const u32* word_ptr = static_cast<const u32*>(spv_blob->GetBufferPointer());
-        const usize words   = spv_blob->GetBufferSize() / sizeof(u32);
-        spv->spirv.assign(word_ptr, word_ptr + words);
+        spv->entry_point  = entry_str;
+        glslang::GlslangToSpv(*intermediate, spv->spirv, &logger, &spv_opts);
 
-        // Debug: dump compiled SPIR-V to /tmp for inspection. Toggled via
-        // env var WP_DUMP_SPIRV=1.
+        if (auto msgs = logger.getAllMessages(); ! msgs.empty()) {
+            rstd_warn("glslang(spv): {}", msgs);
+        }
+        if (spv->spirv.empty()) {
+            rstd_error("glslang(spv): no SPIR-V output produced");
+            return false;
+        }
+
         if (std::getenv("WP_DUMP_SPIRV")) {
             static int  dump_idx  = 0;
             std::string base      = "/tmp/ww_dump_" + std::to_string(dump_idx++) + "_" +
-                                    std::string(DefaultEntryName(unit.stage));
+                                    entry_str;
             std::string spv_path  = base + ".spv";
-            std::string src_path  = base + ".hlsl";
+            std::string src_path  = base + ".glsl";
             if (auto* f = std::fopen(spv_path.c_str(), "wb")) {
                 std::fwrite(spv->spirv.data(), sizeof(u32), spv->spirv.size(), f);
                 std::fclose(f);
@@ -459,7 +365,7 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  com
                 std::fwrite(unit.src.data(), 1, unit.src.size(), f);
                 std::fclose(f);
             }
-            rstd_info("dumped SPIR-V + HLSL: {}.{{spv,hlsl}}", base);
+            rstd_info("dumped SPIR-V + source: {}.{{spv,glsl}}", base);
         }
 
         spvs.emplace_back(std::move(spv));
