@@ -302,7 +302,7 @@ DebugUtilsMessenger Instance::CreateDebugUtilsMessenger(
 VkResult Device::Create(Device& device, VkPhysicalDevice physical_device,
                         Span<const VkDeviceQueueCreateInfo> queues_ci,
                         Span<const char*> enabled_extensions, const void* next,
-                        DeviceDispatch& dld) {
+                        DeviceDispatch& dld, const VkPhysicalDeviceFeatures* enabled_features) {
     const VkDeviceCreateInfo ci {
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext                   = next,
@@ -313,7 +313,7 @@ VkResult Device::Create(Device& device, VkPhysicalDevice physical_device,
         .ppEnabledLayerNames     = nullptr,
         .enabledExtensionCount   = enabled_extensions.size(),
         .ppEnabledExtensionNames = enabled_extensions.data(),
-        .pEnabledFeatures        = nullptr,
+        .pEnabledFeatures        = enabled_features,
     };
     VkDevice vkdevice;
     VkResult res = dld.vkCreateDevice(physical_device, &ci, nullptr, &vkdevice);
@@ -484,6 +484,10 @@ VkPhysicalDeviceProperties PhysicalDevice::GetProperties() const noexcept {
 
 void PhysicalDevice::GetProperties2KHR(VkPhysicalDeviceProperties2KHR& props) const noexcept {
     dld->vkGetPhysicalDeviceProperties2KHR(handle, &props);
+}
+
+void PhysicalDevice::GetFeatures2KHR(VkPhysicalDeviceFeatures2KHR& feats) const noexcept {
+    dld->vkGetPhysicalDeviceFeatures2KHR(handle, &feats);
 }
 
 VkResult PhysicalDevice::EnumerateDeviceExtensionProperties(

@@ -127,12 +127,25 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
             return s.c_str();
         });
     bool rq_surface = ! inst.offscreen();
+
+    // Opt in to optional features the renderer actually uses. Geometry
+    // shaders drive the genericropeparticle spline subdivision; without
+    // pEnabledFeatures.geometryShader=VK_TRUE, the driver rejects a
+    // pipeline with a GS stage.
+    VkPhysicalDeviceFeatures2KHR supported2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR };
+    device.m_gpu.GetFeatures2KHR(supported2);
+    VkPhysicalDeviceFeatures enabled {};
+    enabled.geometryShader    = supported2.features.geometryShader;
+    enabled.sampleRateShading = supported2.features.sampleRateShading;
+    enabled.samplerAnisotropy = supported2.features.samplerAnisotropy;
+
     VVK_CHECK_BOOL_RE(vvk::Device::Create(device.m_device,
                                           *device.m_gpu,
                                           device.ChooseDeviceQueue(*inst.surface()),
                                           tested_exts_c,
                                           nullptr,
-                                          device.dld));
+                                          device.dld,
+                                          &enabled));
 
     device.m_graphics_queue.handle =
         device.m_device.GetQueue(device.m_graphics_queue.family_index);

@@ -599,7 +599,8 @@ public:
     static VkResult Create(Device&, VkPhysicalDevice physical_device,
                            Span<const VkDeviceQueueCreateInfo> queues_ci,
                            Span<const char*> enabled_extensions, const void* next,
-                           DeviceDispatch& dispatch);
+                           DeviceDispatch& dispatch,
+                           const VkPhysicalDeviceFeatures* enabled_features = nullptr);
 
     Queue GetQueue(uint32_t family_index) const noexcept;
 
