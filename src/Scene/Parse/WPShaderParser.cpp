@@ -691,7 +691,11 @@ struct SynthOutput {
 // neighbouring stages agree without explicit coordination.
 inline std::string EmitStageIOStruct(std::string_view name, std::vector<IODecl> decls) {
     decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
-                    return d.name == "gl_Position";
+                    // _ww_sv_position is the SV_Position field's name; the GS
+                    // source's `in/out vec4 gl_Position;` is macro-rewritten to
+                    // that name during DXC -P, so it shows up in the cross-stage
+                    // IO set and would collide if emitted as a separate field.
+                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
                 }),
                 decls.end());
     std::sort(decls.begin(), decls.end(),
@@ -744,14 +748,17 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
     // gl_Position propagates between stages via the SV_Position field, not as
     // a normal location-indexed varying. If a neighbour (the GS) declared
     // `in/out vec4 gl_Position;` it would otherwise land here as an extra
-    // struct field colliding with `_ww_sv_position : SV_Position`.
-    auto drop_gl_position = [](std::vector<IODecl>& v) {
-        v.erase(std::remove_if(v.begin(), v.end(),
-                               [](const IODecl& d) { return d.name == "gl_Position"; }),
+    // struct field colliding with `_ww_sv_position : SV_Position`. The GS
+    // prologue rewrites `gl_Position` to `_ww_sv_position` via `#define`,
+    // so its post-preprocess name also needs filtering here.
+    auto drop_position = [](std::vector<IODecl>& v) {
+        v.erase(std::remove_if(v.begin(), v.end(), [](const IODecl& d) {
+                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                }),
                 v.end());
     };
-    drop_gl_position(attrs);
-    drop_gl_position(varyings);
+    drop_position(attrs);
+    drop_position(varyings);
 
     auto by_name = [](const IODecl& a, const IODecl& b) { return a.name < b.name; };
     std::sort(attrs.begin(), attrs.end(), by_name);
