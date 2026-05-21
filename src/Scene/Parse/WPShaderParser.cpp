@@ -918,9 +918,9 @@ inline std::string EmitStageIOLayout(std::vector<IODecl> decls, bool is_input) {
     return out;
 }
 
-// HLSL-side struct emission for the GS synth. Each non-position field gets
-// `[[vk::location(N)]]` and a name-as-semantic so SPIRV-Reflect picks up the
-// same VS/FS names through the GS-emitted SPIR-V.
+// HLSL-side struct emission for the GS synth. Drops `[[vk::location(N)]]`
+// for the same reason as EmitVSFSStruct — glslang's HLSL frontend collapses
+// every element of an explicitly-located array onto the same Location.
 inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> decls) {
     decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
                     return d.name == "gl_Position" || d.name == "_ww_sv_position";
@@ -933,11 +933,9 @@ inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> d
     out += name;
     out += " {\n";
     out += "    float4 _ww_sv_position : SV_Position;\n";
-    usize loc = 0;
     for (const auto& d : decls) {
-        out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
-               ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
-        loc += ArraySlots(d.array);
+        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array +
+               " : " + d.name + ";\n";
     }
     out += "};\n";
     return out;
@@ -947,6 +945,13 @@ inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> d
 // but the SV_Position field is included only when the struct represents a
 // VS output / FS input (HLSL needs it for rasterizer setup); attributes
 // (VS input) don't carry it.
+//
+// No `[[vk::location(N)]]` is emitted. glslang's HLSL frontend has a known
+// bug: `[[vk::location(N)]] TYPE FIELD[K]` puts every element of the array
+// at Location N (instead of N, N+1, …, N+K-1). Dropping the explicit
+// attribute lets glslang auto-assign sequential locations in declaration
+// order. Both VS and FS sort fields alphabetically over the same
+// cross-stage union, so the location assignment is stable across stages.
 inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> decls,
                                   bool include_sv_position) {
     decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
@@ -962,11 +967,9 @@ inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> dec
     if (include_sv_position) {
         out += "    float4 _ww_sv_position : SV_Position;\n";
     }
-    usize loc = 0;
     for (const auto& d : decls) {
-        out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
-               ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
-        loc += ArraySlots(d.array);
+        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array +
+               " : " + d.name + ";\n";
     }
     out += "};\n";
     return out;
