@@ -306,6 +306,25 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
     std::string::size_type linePos = std::string::npos;
 
     while (linePos = input.find("#include", pos), linePos != std::string::npos) {
+        // Skip `//#include ...` and other lines where `#include` sits
+        // inside a comment / trailing context. Walk back to the start of
+        // the line and require it to be whitespace-only up to `#`.
+        std::string::size_type line_start = input.rfind('\n', linePos);
+        line_start = (line_start == std::string::npos) ? 0 : line_start + 1;
+        bool is_comment = false;
+        for (auto i = line_start; i < linePos; ++i) {
+            char c = input[i];
+            if (c == ' ' || c == '\t') continue;
+            is_comment = true;
+            break;
+        }
+        if (is_comment) {
+            auto next = linePos + std::string_view("#include").size();
+            output.append(input.substr(pos, next - pos));
+            pos = next;
+            continue;
+        }
+
         auto lineEnd  = input.find_first_of('\n', linePos);
         auto lineSize = lineEnd - linePos;
         auto lineStr  = input.substr(linePos, lineSize);
@@ -1289,6 +1308,29 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
         if (inc == std::string::npos) {
             newsrc.append(src, cursor, std::string::npos);
             break;
+        }
+        // Skip `//#include ...` (commented-out line) — some WE community
+        // shaders leave dead includes like `//#include "common.hlsli"`. Scan
+        // back to the start of this line; if anything before `#include` is
+        // non-whitespace, the directive isn't a real one.
+        usize line_start = src.rfind('\n', inc);
+        line_start = (line_start == std::string::npos) ? 0 : line_start + 1;
+        bool is_comment = false;
+        for (usize i = line_start; i < inc; ++i) {
+            char c = src[i];
+            if (c == ' ' || c == '\t') continue;
+            // Common comment marker; anything else non-whitespace is also
+            // not a valid directive start.
+            is_comment = true;
+            break;
+        }
+        if (is_comment) {
+            // Advance past this `#include` token but keep the comment text
+            // verbatim in the output.
+            auto next = inc + std::string_view("#include").size();
+            newsrc.append(src, cursor, next - cursor);
+            cursor = next;
+            continue;
         }
         // Copy up to the include line.
         newsrc.append(src, cursor, inc - cursor);
