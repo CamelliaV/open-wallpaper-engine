@@ -88,14 +88,29 @@ void ParticleSubSystem::Emitt() {
     double particleTime = frameTime * m_rate;
     m_time += particleTime;
 
-    const auto pointer = m_sys.scene.pointerPosition;
-    const Eigen::Vector3d pointer_world {
-        (static_cast<double>(pointer[0]) - 0.5) * static_cast<double>(m_sys.scene.ortho[0]),
-        (0.5 - static_cast<double>(pointer[1])) * static_cast<double>(m_sys.scene.ortho[1]),
+    // Cursor in canvas-absolute world coords. The "global" camera lives at
+    // (ortho_w/2, ortho_h/2) with width=ortho_w (SceneCamera::Ortho uses
+    // [-w/2, +w/2]), so the visible world spans [0, ortho_w] x [0, ortho_h]
+    // with Y pointing up. Pointer is [0..1] with Y down -> flip Y.
+    const auto            pointer = m_sys.scene.pointerPosition;
+    const Eigen::Vector3d mouse_world {
+        static_cast<double>(pointer[0]) * static_cast<double>(m_sys.scene.ortho[0]),
+        (1.0 - static_cast<double>(pointer[1])) * static_cast<double>(m_sys.scene.ortho[1]),
         0.0,
     };
+    // Particle a_Position is consumed by the vertex shader in local space and
+    // then transformed by g_ModelMatrix (the owner node's world transform).
+    // To make a link_mouse cp track the cursor in world, push the cursor
+    // through the owner node's inverse model first.
+    Eigen::Vector3d mouse_local = mouse_world;
+    if (auto node = m_owner_node.lock()) {
+        node->UpdateTrans();
+        Eigen::Matrix4d m_inv = node->ModelTrans().inverse();
+        Eigen::Vector4d v     = m_inv * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
+        mouse_local           = v.head<3>();
+    }
     for (auto& cp : m_controlpoints) {
-        if (cp.link_mouse) cp.offset = cp.base_offset + pointer_world;
+        if (cp.link_mouse) cp.offset = cp.base_offset + mouse_local;
     }
 
     std::array<float, 16> audio_average {};

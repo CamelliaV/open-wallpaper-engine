@@ -1132,12 +1132,19 @@ public:
     std::span<const ParticleControlpoint> Controlpoints() const;
     std::span<ParticleControlpoint>       Controlpoints();
 
+    // The SceneNode this subsystem renders through. Held weakly because
+    // the node lives in the scene graph (shared_ptr there); used at
+    // Emitt() time to map world-space inputs (link_mouse cursor) into
+    // the particle's local emit space via the node's inverse model.
+    void SetOwnerNode(std::weak_ptr<SceneNode> n) { m_owner_node = std::move(n); }
+
     SpawnType Type() const;
     u32       MaxInstanceCount() const;
 
 private:
     ParticleSystem&            m_sys;
     std::shared_ptr<SceneMesh> m_mesh;
+    std::weak_ptr<SceneNode>   m_owner_node;
     std::vector<ParticleEmittOp> m_emiters;
 
     std::vector<ParticleInitOp>     m_initializers;
