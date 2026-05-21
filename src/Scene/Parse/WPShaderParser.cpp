@@ -27,216 +27,177 @@ using namespace owe;
 namespace
 {
 
-// GLSL prologue. WE shaders use a hybrid GLSL/HLSL dialect: `vec*` / `mat*`
-// types, `mul(v, M)`, `texSample2D`, `attribute` / `varying`, `gl_Position`,
-// `gl_FragColor`. Targeting glslang in GLSL mode lets us keep all of those
-// natively — only HLSL-leaning macros (`saturate`, `lerp`, `frac`, `mul`
-// argument order, `CAST*`, `mix` aliasing, etc.) need bridging.
+// HLSL prologue. WE shaders are written in a hybrid dialect that already
+// uses HLSL idioms (mul, texSample2D, float2/3/4, saturate, lerp, frac,
+// [maxvertexcount], OUT.Append); only the residual GLSL bits (vec*, mat*,
+// attribute, varying, gl_*) need bridging. Routing VS/FS through glslang's
+// HLSL frontend lets the parser handle implicit conversions HLSL allows
+// (scalar→vec broadcast on assignment, bool→float, etc.) — which would
+// otherwise fault in glslang's strict GLSL mode.
 //
 // Pipeline: this prologue + the user source is fed through glslang's own
-// preprocessor (TShader::preprocess) which expands every #if/#include/
-// #define. Then a regex pass extracts surviving `attribute`/`varying`/
+// preprocessor (TShader::preprocess) which expands every #if / #include /
+// #define. Then a regex pass extracts the surviving `attribute`/`varying`/
 // `uniform` declarations (live code only — combo-gated dead branches are
-// gone), and Finalprocessor strips them and re-emits explicit GLSL
-// layouts: a shared `layout(set=0, binding=0, std140) uniform ww_Uniforms`
-// block (cross-stage union, alphabetically ordered), per-sampler
-// `layout(set=0, binding=N) uniform sampler2D` decls, and
-// `layout(location=N) in/out` redeclarations for `attribute`/`varying`.
-static constexpr const char* pre_shader_code = R"(#version 450 core
-// auto-generated WE→GLSL prologue
-#define HLSL 0
-#define GLSL 1
+// gone) and Finalprocessor strips them, then re-emits canonical
+// `static TYPE NAME;` decls + a paired Texture2D/SamplerState block + a
+// shared cbuffer ww_Uniforms + an HLSL entry-point wrapper (main_vs /
+// main_ps) that shuffles between the static globals and the
+// SV_*-annotated entry struct.
+static constexpr const char* pre_shader_code = R"(// auto-generated WE→HLSL prologue
+// glslang's HLSL frontend defaults to row-major matrix packing in SPIR-V
+// (RowMajor decoration on cbuffer members). The C++ uploader writes
+// column-major data (Eigen default), so force column-major packing here.
+#pragma pack_matrix(column_major)
+#define HLSL 1
+#define GLSL 0
 #define highp
 #define mediump
 #define lowp
 
-// HLSL-leaning intrinsics that aren't GLSL builtins.
-#define saturate(x) clamp((x), 0.0, 1.0)
-#define lerp(a,b,t) mix((a),(b),(t))
-#define frac        fract
-#define ddx         dFdx
-#define ddy         dFdy
-#define atan2(y,x)  atan((y),(x))
-#define fmod(a,b)   mod((a),(b))
+#define vec2 float2
+#define vec3 float3
+#define vec4 float4
+#define ivec2 int2
+#define ivec3 int3
+#define ivec4 int4
+#define uvec2 uint2
+#define uvec3 uint3
+#define uvec4 uint4
+#define bvec2 bool2
+#define bvec3 bool3
+#define bvec4 bool4
+#define mat2 float2x2
+#define mat3 float3x3
+#define mat4 float4x4
+// GLSL `matCxR` declares C columns × R rows. HLSL `floatRxC` declares R rows
+// × C columns — the indices are swapped. With column-major packing the
+// in-memory layout matches and `mul(M, v)` produces the same result, so the
+// macros transpose the type-name indices and leave semantics alone.
+#define mat2x2 float2x2
+#define mat3x3 float3x3
+#define mat4x4 float4x4
+#define mat2x3 float3x2
+#define mat2x4 float4x2
+#define mat3x2 float2x3
+#define mat3x4 float4x3
+#define mat4x2 float2x4
+#define mat4x3 float3x4
 
-// HLSL type aliases. WE shaders freely mix `float2 v = ...` (HLSL) with
-// `vec2 v = ...` (GLSL); the GLSL frontend rejects the former without these.
-#define float2 vec2
-#define float3 vec3
-#define float4 vec4
-#define int2   ivec2
-#define int3   ivec3
-#define int4   ivec4
-#define uint2  uvec2
-#define uint3  uvec3
-#define uint4  uvec4
-#define bool2  bvec2
-#define bool3  bvec3
-#define bool4  bvec4
-#define float2x2 mat2
-#define float3x3 mat3
-#define float4x4 mat4
-#define float2x3 mat2x3
-#define float3x2 mat3x2
-#define float2x4 mat2x4
-#define float4x2 mat4x2
-#define float3x4 mat3x4
-#define float4x3 mat4x3
+#define CAST2(x) ((float2)(x))
+#define CAST3(x) ((float3)(x))
+#define CAST4(x) ((float4)(x))
+#define CAST3X3(x) ((float3x3)(x))
 
-// HLSL keywords that don't translate to GLSL but mostly appear as
-// modifiers on local declarations. Dropping them keeps the body parseable.
-#define static
-#define inline
+#define mix(a,b,t) lerp((a),(b),(t))
+#define fract frac
+#define atan(a,b) atan2((a),(b))
+#define dFdx ddx
+#define dFdy(x) (-ddy(x))
+// Note: GLSL `mod(a,b)` and HLSL `fmod(a,b)` differ for negative arguments
+// (mod uses floor, fmod uses trunc). We don't macro-rewrite either — WE
+// shaders that need `mod` typically supply their own definition, and the
+// rest call `fmod` directly. Mapping `mod`→`fmod` via macro mangled user
+// `float mod(...)` declarations.
+// HLSL has saturate, mul, lerp, frac, ddx/ddy, fwidth, max, min, clip, log10,
+// pow as builtins — most of the C++-side overload workarounds needed for the
+// GLSL frontend disappear here.
 
-// HLSL-style implicit-conversion helpers for the common case of mixing an
-// int literal with a float/vector argument (e.g. `max(0, color.rgb)`). GLSL
-// does not auto-promote int→float when picking a function overload, so we
-// add the missing overloads here. Names shadow the builtins via overloading
-// (not macros), so calls inside these bodies resolve to the GLSL builtin.
-float max(int   a, float b) { return max(float(a), b); }
-float max(float a, int   b) { return max(a, float(b)); }
-vec2  max(int   a, vec2  b) { return max(vec2(float(a)), b); }
-vec3  max(int   a, vec3  b) { return max(vec3(float(a)), b); }
-vec4  max(int   a, vec4  b) { return max(vec4(float(a)), b); }
-vec2  max(vec2  a, int   b) { return max(a, vec2(float(b))); }
-vec3  max(vec3  a, int   b) { return max(a, vec3(float(b))); }
-vec4  max(vec4  a, int   b) { return max(a, vec4(float(b))); }
-float min(int   a, float b) { return min(float(a), b); }
-float min(float a, int   b) { return min(a, float(b)); }
-vec2  min(int   a, vec2  b) { return min(vec2(float(a)), b); }
-vec3  min(int   a, vec3  b) { return min(vec3(float(a)), b); }
-vec4  min(int   a, vec4  b) { return min(vec4(float(a)), b); }
-vec2  min(vec2  a, int   b) { return min(a, vec2(float(b))); }
-vec3  min(vec3  a, int   b) { return min(a, vec3(float(b))); }
-vec4  min(vec4  a, int   b) { return min(a, vec4(float(b))); }
-vec2  mix(vec2  a, vec2  b, int   t) { return mix(a, b, float(t)); }
-vec3  mix(vec3  a, vec3  b, int   t) { return mix(a, b, float(t)); }
-vec4  mix(vec4  a, vec4  b, int   t) { return mix(a, b, float(t)); }
-// HLSL silently truncates vec4 to vec3 when the other args are vec3 (some
-// WE shaders rely on this for `albedo.rgb = mix(albedo, newRGB, mask)`).
-// GLSL refuses; mirror HLSL's truncation.
-vec3  mix(vec4  a, vec3  b, vec3  t) { return mix(a.rgb, b, t); }
-vec3  mix(vec3  a, vec4  b, vec3  t) { return mix(a, b.rgb, t); }
-vec3  mix(vec4  a, vec3  b, float t) { return mix(a.rgb, b, t); }
-vec3  mix(vec3  a, vec4  b, float t) { return mix(a, b.rgb, t); }
-vec2  mix(vec3  a, vec2  b, float t) { return mix(a.rg,  b, t); }
-vec2  mix(vec2  a, vec3  b, float t) { return mix(a, b.rg,  t); }
-vec2  mix(vec4  a, vec2  b, float t) { return mix(a.rg,  b, t); }
-vec2  mix(vec2  a, vec4  b, float t) { return mix(a, b.rg,  t); }
-float mix(int   a, float b, float t) { return mix(float(a), b, t); }
-float mix(float a, int   b, float t) { return mix(a, float(b), t); }
-float mix(int   a, int   b, float t) { return mix(float(a), float(b), t); }
-float mix(int   a, float b, int   t) { return mix(float(a), b, float(t)); }
-float mix(float a, int   b, int   t) { return mix(a, float(b), float(t)); }
-float mix(float a, float b, int   t) { return mix(a, b, float(t)); }
-float clamp(float a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
-float clamp(float a, int   lo, float hi) { return clamp(a, float(lo), hi); }
-float clamp(float a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
-float clamp(int   a, float lo, float hi) { return clamp(float(a), lo, hi); }
-float clamp(int   a, int   lo, float hi) { return clamp(float(a), float(lo), hi); }
-float clamp(int   a, float lo, int   hi) { return clamp(float(a), lo, float(hi)); }
-vec2  clamp(vec2  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
-vec3  clamp(vec3  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
-vec4  clamp(vec4  a, int   lo, int   hi) { return clamp(a, float(lo), float(hi)); }
-vec2  clamp(vec2  a, int   lo, float hi) { return clamp(a, float(lo), hi); }
-vec3  clamp(vec3  a, int   lo, float hi) { return clamp(a, float(lo), hi); }
-vec4  clamp(vec4  a, int   lo, float hi) { return clamp(a, float(lo), hi); }
-vec2  clamp(vec2  a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
-vec3  clamp(vec3  a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
-vec4  clamp(vec4  a, float lo, int   hi) { return clamp(a, lo, float(hi)); }
-
-// GLSL `pow(genType x, genType y)` requires both args same type. HLSL
-// auto-broadcasts the scalar. Add per-component-broadcast overloads.
-vec2 pow(vec2 a, float b) { return pow(a, vec2(b)); }
-vec3 pow(vec3 a, float b) { return pow(a, vec3(b)); }
-vec4 pow(vec4 a, float b) { return pow(a, vec4(b)); }
-vec2 pow(float a, vec2 b) { return pow(vec2(a), b); }
-vec3 pow(float a, vec3 b) { return pow(vec3(a), b); }
-vec4 pow(float a, vec4 b) { return pow(vec4(a), b); }
-float pow(int a, float b) { return pow(float(a), b); }
-float pow(float a, int b) { return pow(a, float(b)); }
-float pow(int a, int b)   { return pow(float(a), float(b)); }
-
-// HLSL math intrinsics with no direct GLSL equivalent.
-float log10(float x) { return log(x) / log(10.0); }
-vec2  log10(vec2  x) { return log(x) / log(10.0); }
-vec3  log10(vec3  x) { return log(x) / log(10.0); }
-vec4  log10(vec4  x) { return log(x) / log(10.0); }
-// HLSL's clip() discards the fragment when its scalar arg is < 0.
-// GLSL has no `discard` expression; emit it as a guarded statement.
-#define clip(x) if ((x) < 0.0) discard
-
-// PerformLighting_V1 / _V2 are referenced by WE's generic4/genericparticle
-// shaders but their bodies are normally injected by WE's HLSL toolchain
-// based on `LIGHTS_*` combos and the per-light uniform set. We don't have
-// that injection step; stub here so compilation succeeds. The stub is
-// "ambient lighting only" — the model is darker than WE but still visible.
-vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal, vec3 viewVector,
-                        vec3 specularTint, vec3 f0, float roughness, float metallic) {
-    return albedo * max(dot(normalize(normal), normalize(viewVector)), 0.0);
-}
-vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal, vec3 viewVector,
-                        vec3 specularTint, vec3 f0, float roughness, float metallic,
-                        float ao) {
-    return albedo * ao * max(dot(normalize(normal), normalize(viewVector)), 0.0);
-}
-
-// HLSL function-arg qualifiers. GLSL has `in` natively and uses `out`/
-// `inout` the same way; `uniform` as a param qualifier is HLSL-only and
-// has no GLSL analogue (drops to plain `in`).
-// (no #define for in/out/inout — they're shared)
-
-#define CAST2(x)   (vec2((x)))
-#define CAST3(x)   (vec3((x)))
-#define CAST4(x)   (vec4((x)))
-#define CAST3X3(x) (mat3((x)))
-
-// WE writes `mul(vec, matrix)` (row-vector / vec-first). GLSL's `*`
-// between a matrix and column-vector wants matrix-first. The macro flips
-// the operand order; with column-major matrices uploaded from the C++
-// side, the result matches what WE expects.
-#define mul(x, y) ((y) * (x))
-
-// WE-dialect texture sampling. GLSL has `texture()` natively; the rest
-// are just shorthand aliases.
-#define texSample2D(t, uv)         texture((t), (uv))
-#define texSample2DLod(t, uv, lod) textureLod((t), (uv), (lod))
+// WE shaders write `mul(vec, matrix)` (HLSL vector-first row-vector
+// convention). The C++ side uploads matrices designed for GLSL-style
+// column-vector multiply (`MVP * v`). Under HLSL native semantics this
+// would compute `transpose(M) * v`, transposing every transform. Overload
+// `_ww_mul` for each common type combination — each overload calls HLSL
+// native `mul` with operands swapped — then `#define mul _ww_mul` redirects.
+float2   _ww_mul(float2   v, float2x2 M) { return mul(M, v); }
+float3   _ww_mul(float3   v, float3x3 M) { return mul(M, v); }
+float4   _ww_mul(float4   v, float4x4 M) { return mul(M, v); }
+float2x2 _ww_mul(float2x2 A, float2x2 B) { return mul(B, A); }
+float3x3 _ww_mul(float3x3 A, float3x3 B) { return mul(B, A); }
+float4x4 _ww_mul(float4x4 A, float4x4 B) { return mul(B, A); }
+float2   _ww_mul(float2x2 M, float2   v) { return mul(v, M); }
+float3   _ww_mul(float3x3 M, float3   v) { return mul(v, M); }
+float4   _ww_mul(float4x4 M, float4   v) { return mul(v, M); }
+// Rectangular variants (`mat4x3 g_Bones[]` → HLSL float3x4). Vec-first and
+// matrix-first WE callsites both appear; without explicit overloads, HLSL's
+// implicit truncations make several candidates match and the resolver
+// reports ambiguity.
+float3   _ww_mul(float4   v, float3x4 M) { return mul(M, v); }
+float3   _ww_mul(float3x4 M, float4   v) { return mul(M, v); }
+// Scalar passthroughs.
+float    _ww_mul(float a, float b)   { return a * b; }
+float2   _ww_mul(float a, float2 b)  { return a * b; }
+float3   _ww_mul(float a, float3 b)  { return a * b; }
+float4   _ww_mul(float a, float4 b)  { return a * b; }
+float2   _ww_mul(float2 a, float b)  { return a * b; }
+float3   _ww_mul(float3 a, float b)  { return a * b; }
+float4   _ww_mul(float4 a, float b)  { return a * b; }
+// Vector-vector: HLSL `mul(v, v)` returns dot product.
+float    _ww_mul(float2 a, float2 b) { return dot(a, b); }
+float    _ww_mul(float3 a, float3 b) { return dot(a, b); }
+float    _ww_mul(float4 a, float4 b) { return dot(a, b); }
+#define mul _ww_mul
 
 // `uniform`, `attribute`, `varying` are intentionally NOT #define'd here.
-// glslang's preprocess pass runs over this prologue; stripping any of
-// them to empty would prevent the post-preprocess regex in Finalprocessor
-// from finding live declarations. We let the keywords survive preprocess,
-// strip the matching lines, and re-emit canonical `layout(location=N)
-// in/out` and `uniform ww_Uniforms { ... }` blocks at the placeholder.
+// glslang's preprocess pass runs over this prologue; if any of them were
+// stripped to empty, the post-preprocess regex in Finalprocessor wouldn't
+// find live declarations. We let the keywords survive preprocess, strip
+// the matching lines, and re-emit canonical `static TYPE NAME;` decls +
+// `cbuffer ww_Uniforms` + Texture2D/SamplerState pairs at the placeholder.
 
-// GLSL 450 reserves `sample` as a per-sample interpolation qualifier, but
-// some WE shaders use `sample` as a plain identifier name
-// (`vec4 sample = texture(...);`). Rewrite to a private name everywhere so
-// the user code parses.
-#define sample _ww_sample_var
+// WE-dialect texture sampling. Each `uniform sampler2D NAME` becomes a
+// `Texture2D<float4> NAME;` + paired `SamplerState NAME_ww_sampler;` in
+// the Finalprocessor synth block; texSample2D thus expands to
+// `NAME.Sample(NAME_ww_sampler, uv)`. The `texture()` overloads accept
+// vec2/vec3/vec4 UV (HLSL Sample takes float2 — the auto-truncation
+// matches what WE shaders rely on for `texture(g_T, v_TexCoord)` when
+// v_TexCoord is vec4).
+#define texSample2D(t, uv)         ((t).Sample(t##_ww_sampler, (uv)))
+#define texSample2DLod(t, uv, lod) ((t).SampleLevel(t##_ww_sampler, (uv), (lod)))
+#define texture(t, uv)             texSample2D((t), (uv))
+#define textureLod(t, uv, lod)     texSample2DLod((t), (uv), (lod))
+
+// PerformLighting_V1 is referenced by WE's generic4/genericparticle PBR
+// shaders but its body is normally injected by WE's HLSL toolchain based
+// on `LIGHTS_*` combos. We don't have that injection step; stub here so
+// compilation succeeds. The stub is "albedo × view-aligned shading" —
+// darker than WE but visible.
+float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
+                          float3 specularTint, float3 f0, float roughness, float metallic) {
+    return albedo * max(dot(normalize(normal), normalize(viewVector)), 0.0);
+}
+float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
+                          float3 specularTint, float3 f0, float roughness, float metallic,
+                          float ao) {
+    return albedo * ao * max(dot(normalize(normal), normalize(viewVector)), 0.0);
+}
 
 __SHADER_TAIL__
 __SHADER_PLACEHOLD__
 
 )";
 
-// Vertex-stage tail: nothing — `gl_Position` and `gl_VertexIndex` are GLSL
-// builtins, and user code writes them directly.
-static constexpr const char* pre_shader_tail_vert = R"()";
-
-// Fragment-stage tail: WE writes `gl_FragColor = color;` (GLSL 1.20-style
-// builtin). Modern GLSL 450 core requires an explicit user-declared
-// output. Finalprocessor emits `layout(location=0) out vec4 glOutColor;`
-// at the placeholder; this macro aliases `gl_FragColor` to it.
-static constexpr const char* pre_shader_tail_frag = R"(
-#define gl_FragColor glOutColor
+// VS/FS tail: stage I/O is plumbed by the Finalprocessor synthesizer. It
+// strips every `attribute|varying TYPE NAME;` line and re-emits canonical
+// `static TYPE NAME;` decls; combo-gated `#if` branches drop their decls
+// at preprocess time, so vert/frag stages get a matching live name set.
+// The keywords MUST NOT be #define'd here; if they were, the regex would
+// see unsubstituted text but the HLSL parser would see the substituted
+// text, drifting the two views apart.
+static constexpr const char* pre_shader_tail_vert = R"(
+static float4 gl_Position;
+// Rename the user's main() so a synthesized HLSL entry point can wrap it.
+// The wrapper (main_vs) is appended in Finalprocessor.
+#define main shader_main
 )";
 
-// Geometry-stage tail: the .geom in assets is authored as DXC-style HLSL
-// (`[maxvertexcount]`, `TriangleStream<T>::Append`, `IN[N].field`). We
-// route GS units to glslang's HLSL frontend (EShSourceHlsl). No bridging
-// macros are needed because the prologue is GLSL-only — the HLSL path
-// uses its own minimal prologue in PreShaderHeader.
+static constexpr const char* pre_shader_tail_frag = R"(
+static float4 gl_FragCoord;
+static float4 glOutColor;
+#define gl_FragColor glOutColor
+#define main shader_main
+)";
+
 static constexpr const char* pre_shader_tail_geom = R"()";
 
 // HLSL prologue used when type==GEOMETRY. WE's .geom source is a hybrid:
@@ -541,8 +502,9 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     // …) expand, and `#include`s (already inlined in PreShaderSrc, but
     // harmless to re-run) get handled. The regex extraction below then sees
     // only live declarations.
-    vulkan::SourceLang lang =
-        (type == ShaderType::GEOMETRY) ? vulkan::SourceLang::Hlsl : vulkan::SourceLang::Glsl;
+    // All stages route through glslang's HLSL frontend. Bridging macros in
+    // the prologue turn GLSL types/intrinsics into HLSL equivalents.
+    vulkan::SourceLang lang = vulkan::SourceLang::Hlsl;
     std::string src;
     if (! vulkan::Preprocess(with_prologue, type, lang, src)) {
         // Fall through: subsequent compile will fail loudly with the same
@@ -894,6 +856,104 @@ inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> d
     return out;
 }
 
+// HLSL-side struct emission for VS/FS entry points. Same as the GS variant
+// but the SV_Position field is included only when the struct represents a
+// VS output / FS input (HLSL needs it for rasterizer setup); attributes
+// (VS input) don't carry it.
+inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> decls,
+                                  bool include_sv_position) {
+    decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
+                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                }),
+                decls.end());
+    std::sort(decls.begin(), decls.end(),
+              [](const IODecl& a, const IODecl& b) { return a.name < b.name; });
+    std::string out;
+    out += "struct ";
+    out += name;
+    out += " {\n";
+    if (include_sv_position) {
+        out += "    float4 _ww_sv_position : SV_Position;\n";
+    }
+    usize loc = 0;
+    for (const auto& d : decls) {
+        out += "    [[vk::location(" + std::to_string(loc) + ")]] " +
+               ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
+        loc += ArraySlots(d.array);
+    }
+    out += "};\n";
+    return out;
+}
+
+// Emit the HLSL synth block (pre = decls / structs / cbuffer / samplers,
+// post = entry-point wrapper) for VS or FS. Locations are alphabetical so
+// vert/frag stages agree without explicit coordination — both are called
+// with the same cross-stage varying union.
+inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> attrs,
+                                       std::vector<IODecl> varyings) {
+    SynthOutput so;
+    if (stage == ShaderType::GEOMETRY) return so;
+
+    // gl_Position propagates via the SV_Position field, not a regular slot.
+    // Filter both names (the GS prologue rewrites `gl_Position` to
+    // `_ww_sv_position`, so its post-preprocess form needs filtering too).
+    auto drop_position = [](std::vector<IODecl>& v) {
+        v.erase(std::remove_if(v.begin(), v.end(), [](const IODecl& d) {
+                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                }),
+                v.end());
+    };
+    drop_position(attrs);
+    drop_position(varyings);
+
+    auto by_name = [](const IODecl& a, const IODecl& b) { return a.name < b.name; };
+    std::sort(attrs.begin(), attrs.end(), by_name);
+    std::sort(varyings.begin(), varyings.end(), by_name);
+
+    // Static globals so the user shader body resolves `a_Position`,
+    // `v_TexCoord`, etc. regardless of #if-branch visibility — the wrapper
+    // copies from/to the entry struct.
+    so.pre += "\n// === auto-generated stage I/O statics ===\n";
+    for (const auto& d : attrs) {
+        so.pre += "static " + ToHLSLType(d.type) + " " + d.name + d.array + ";\n";
+    }
+    for (const auto& d : varyings) {
+        so.pre += "static " + ToHLSLType(d.type) + " " + d.name + d.array + ";\n";
+    }
+
+    std::string& out = so.post;
+    out += "\n// === auto-generated entry point ===\n";
+    if (stage == ShaderType::VERTEX) {
+        out += EmitVSFSStruct("WW_VSIn",  attrs,    /*sv_pos=*/false);
+        out += EmitVSFSStruct("WW_VSOut", varyings, /*sv_pos=*/true);
+        out += "WW_VSOut main_vs(WW_VSIn _ww_in) {\n";
+        for (const auto& a : attrs) {
+            out += "    " + a.name + " = _ww_in." + a.name + ";\n";
+        }
+        out += "    shader_main();\n";
+        out += "    WW_VSOut _ww_out;\n";
+        out += "    _ww_out._ww_sv_position = gl_Position;\n";
+        for (const auto& v : varyings) {
+            if (v.name == "gl_Position" || v.name == "_ww_sv_position") continue;
+            out += "    _ww_out." + v.name + " = " + v.name + ";\n";
+        }
+        out += "    return _ww_out;\n";
+        out += "}\n";
+    } else { // FRAGMENT
+        out += EmitVSFSStruct("WW_PSIn", varyings, /*sv_pos=*/true);
+        out += "float4 main_ps(WW_PSIn _ww_in) : SV_Target0 {\n";
+        out += "    gl_FragCoord = _ww_in._ww_sv_position;\n";
+        for (const auto& v : varyings) {
+            if (v.name == "gl_Position" || v.name == "_ww_sv_position") continue;
+            out += "    " + v.name + " = _ww_in." + v.name + ";\n";
+        }
+        out += "    shader_main();\n";
+        out += "    return glOutColor;\n";
+        out += "}\n";
+    }
+    return so;
+}
+
 // Find a literal `void main()` call in `src` (no regex). Replace with the GS
 // entry-point signature. Returns the modified source unchanged if no match.
 inline std::string RewriteGSMain(std::string src) {
@@ -1016,22 +1076,14 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     if (pre)  for (auto& [k, v] : pre->output) add_from_line(v);
     if (next) for (auto& [k, v] : next->input) add_from_line(v);
 
-    std::string io_block;
-    if (unit.stage == ShaderType::VERTEX) {
-        io_block += "// === auto-generated stage I/O (GLSL) ===\n";
-        io_block += EmitStageIOLayout(std::move(attrs), /*is_input=*/true);
-        io_block += EmitStageIOLayout(std::move(varyings), /*is_input=*/false);
-    } else { // FRAGMENT
-        io_block += "// === auto-generated stage I/O (GLSL) ===\n";
-        io_block += EmitStageIOLayout(std::move(varyings), /*is_input=*/true);
-        // FS output: WE writes `gl_FragColor = color;` (aliased to glOutColor
-        // by the FS prologue). Declare the slot here.
-        io_block += "layout(location = 0) out vec4 glOutColor;\n";
-    }
+    // Synthesize the HLSL entry point: static globals for every attr /
+    // varying, WW_VSIn/WW_VSOut/WW_PSIn structs, and a main_vs / main_ps
+    // wrapper that copies between the struct and the statics.
+    SynthOutput synth = SynthesizeHLSLEntry(unit.stage, attrs, varyings);
 
-    // Cross-stage uniform union → single std140 UBO at (set=0, binding=0).
+    // Cross-stage uniform union → single HLSL cbuffer at (set=0, binding=0).
     // Uses the global union from CompileToSpv when provided so VS / GS / FS
-    // all see the same UBO layout (alphabetical, identical offsets).
+    // all see the same offsets (alphabetical, identical layout).
     Map<std::string, std::string> uniforms_union_local;
     if (! uniforms_union_in) {
         auto absorb = [&](const Map<std::string, std::string>& m) {
@@ -1046,8 +1098,8 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
 
     std::string uniform_block;
     if (! uniforms_union.empty()) {
-        uniform_block += "\n// === auto-generated shared uniforms ===\n";
-        uniform_block += "layout(set = 0, binding = 0, std140) uniform ww_Uniforms {\n";
+        uniform_block += "\n// === auto-generated shared uniforms (HLSL) ===\n";
+        uniform_block += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
         for (const auto& [name, ty] : uniforms_union) {
             std::string base_ty = ty;
             std::string array;
@@ -1055,28 +1107,49 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
                 base_ty = ty.substr(0, pos);
                 array   = ty.substr(pos);
             }
-            uniform_block += "    " + ToGLSLType(base_ty) + " " + name + array + ";\n";
+            std::string hlsl_ty = ToHLSLType(base_ty);
+            // glslang's HLSL frontend defaults to row-major SPIR-V decoration
+            // for cbuffer matrices regardless of `#pragma pack_matrix`. Force
+            // column-major per member so the C++ uploader's column-major data
+            // is interpreted correctly.
+            bool is_matrix =
+                hlsl_ty == "float2x2" || hlsl_ty == "float3x3" || hlsl_ty == "float4x4" ||
+                hlsl_ty == "float2x3" || hlsl_ty == "float2x4" || hlsl_ty == "float3x2" ||
+                hlsl_ty == "float3x4" || hlsl_ty == "float4x2" || hlsl_ty == "float4x3";
+            if (is_matrix) uniform_block += "    column_major ";
+            else           uniform_block += "    ";
+            uniform_block += hlsl_ty + " " + name + array + ";\n";
         }
         uniform_block += "};\n";
     }
 
-    // One `layout(set=0, binding=N) uniform sampler2D NAME;` per unique
-    // sampler. Bindings start at 1 (binding 0 holds ww_Uniforms).
+    // Texture2D + paired SamplerState per stripped sampler. Bindings start
+    // at 1 (binding 0 holds the ww_Uniforms cbuffer). `vk::combinedImageSampler`
+    // marks the pair as a single descriptor on the Vulkan side.
     Set<std::string> sampler_seen;
     std::string      sampler_block;
-    if (! sampler_decls.empty()) sampler_block += "\n// === auto-generated samplers ===\n";
+    if (! sampler_decls.empty()) sampler_block += "\n// === auto-generated samplers (HLSL) ===\n";
     usize sampler_idx = 1;
     for (const auto& s : sampler_decls) {
         if (! sampler_seen.insert(s.name).second) continue;
-        sampler_block += "layout(set = 0, binding = " + std::to_string(sampler_idx) +
-                         ") uniform " + s.sampler_type + " " + s.name + ";\n";
+        const char* tex_ty   = HLSLSamplerType(s.sampler_type);
+        const char* state_ty = HLSLSamplerStateType(s.sampler_type);
+        sampler_block += "[[vk::combinedImageSampler]][[vk::binding(" +
+                         std::to_string(sampler_idx) + ", 0)]] " +
+                         tex_ty + " " + s.name + ";\n";
+        sampler_block += "[[vk::combinedImageSampler]][[vk::binding(" +
+                         std::to_string(sampler_idx) + ", 0)]] " +
+                         state_ty + " " + s.name + "_ww_sampler;\n";
         ++sampler_idx;
     }
 
+    // Splice synth.pre into the placeholder slot, then append synth.post
+    // (which contains the entry-point wrapper that has to follow the user's
+    // shader_main()).
     std::regex  re_hold(SHADER_PLACEHOLD.data());
     std::string with_decls =
-        std::regex_replace(stage3, re_hold, io_block + uniform_block + sampler_block);
-    return with_decls;
+        std::regex_replace(stage3, re_hold, synth.pre + uniform_block + sampler_block);
+    return with_decls + synth.post;
 }
 
 inline std::string GenSha1(std::span<const WPShaderUnit> units) {
@@ -1151,7 +1224,7 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
-    // GS routes through the HLSL frontend; VS/FS through the GLSL prologue.
+    // All stages route through glslang's HLSL frontend.
     std::string pre;
     if (type == ShaderType::GEOMETRY) {
         pre = pre_shader_code_gs_hlsl;
@@ -1292,8 +1365,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
 
             vunit.src   = unit.src;
             vunit.stage = unit.stage;
-            vunit.lang  = (unit.stage == ShaderType::GEOMETRY) ? vulkan::SourceLang::Hlsl
-                                                                : vulkan::SourceLang::Glsl;
+            vunit.lang  = vulkan::SourceLang::Hlsl;
         }
 
         vulkan::ShaderCompOpt opt;
