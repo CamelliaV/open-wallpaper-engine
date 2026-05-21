@@ -495,6 +495,60 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
     return NposToZero(pos);
 }
 
+// Comment out stray `#endif` directives with no matching `#if`. A class of
+// WE-shipped community shader templates (audio_bars / dot_matrix / sine_wave
+// variants — 244 of the corpus failures pre-fix) has one extra `#endif`
+// past the file's last `#if`. WE's HLSL toolchain tolerates this; glslang
+// rejects it as a preprocess error. Stack-walk the source, and when
+// `#endif` would pop an empty stack, comment the line instead.
+inline std::string BalanceConditionals(std::string src) {
+    auto is_id_char = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               (c >= '0' && c <= '9') || c == '_';
+    };
+    auto starts_with_word = [&](std::string_view s, std::string_view w) {
+        if (s.size() < w.size()) return false;
+        if (s.substr(0, w.size()) != w) return false;
+        if (s.size() == w.size()) return true;
+        return ! is_id_char(s[w.size()]);
+    };
+
+    int         depth = 0;
+    std::string out;
+    out.reserve(src.size() + 32);
+    usize cursor = 0;
+    while (cursor < src.size()) {
+        usize eol = src.find('\n', cursor);
+        if (eol == std::string::npos) eol = src.size();
+        std::string_view line(src.data() + cursor, eol - cursor);
+
+        // Trim leading whitespace to find the directive start.
+        usize s = 0;
+        while (s < line.size() && (line[s] == ' ' || line[s] == '\t')) ++s;
+        bool stray_endif = false;
+        if (s < line.size() && line[s] == '#') {
+            usize t = s + 1;
+            while (t < line.size() && (line[t] == ' ' || line[t] == '\t')) ++t;
+            std::string_view rest = line.substr(t);
+            if (starts_with_word(rest, "if") || starts_with_word(rest, "ifdef") ||
+                starts_with_word(rest, "ifndef")) {
+                ++depth;
+            } else if (starts_with_word(rest, "endif")) {
+                if (depth == 0) stray_endif = true;
+                else --depth;
+            }
+        }
+
+        if (stray_endif) {
+            out.append("// (ww stray-endif) ");
+        }
+        out.append(line);
+        if (eol < src.size()) out.push_back('\n');
+        cursor = eol + 1;
+    }
+    return out;
+}
+
 inline std::string Preprocessor(const std::string& in_src, ShaderType type, const Combos& combos,
                                 WPPreprocessorInfo& process_info) {
     std::string with_prologue = owe::WPShaderParser::PreShaderHeader(in_src, combos, type);
@@ -505,6 +559,8 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         std::regex re_require("(^|\r?\n)#require (.+)(\r?\n)");
         with_prologue = std::regex_replace(with_prologue, re_require, "$1//#require $2$3");
     }
+
+    with_prologue = BalanceConditionals(std::move(with_prologue));
 
     // Run glslang's own preprocessor: every `#if SKINNING` / `#if FOG_COMPUTED
     // && (...)` / `#if BLENDMODE == 0` block resolves, combo names (BONECOUNT,
