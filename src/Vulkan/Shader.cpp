@@ -176,10 +176,24 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                     bunif.offset = unif.offset;
                     ref_block.member_map[unif.name] = bunif;
                 }
-            } else if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+            } else if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+                       b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
+                // Our HLSL synth emits `Texture2D + SamplerState` at the same
+                // binding with `[[vk::combinedImageSampler]]`. glslang doesn't
+                // expand that attribute into an OpTypeSampledImage; SPIRV-Reflect
+                // sees SAMPLED_IMAGE (the Texture2D half) accessed and the
+                // SamplerState as unaccessed. Bind it as a VK combined image
+                // sampler — per Vulkan 1.0 §14.5.2 a COMBINED_IMAGE_SAMPLER
+                // descriptor is legal to access via either OpTypeSampledImage
+                // or separate OpTypeImage/OpTypeSampler.
                 vkbinding.binding         = b.binding;
                 vkbinding.descriptorCount = 1;
                 vkbinding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            } else if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER) {
+                // The paired SamplerState half of the combined image sampler
+                // pair — already covered by the SAMPLED_IMAGE entry at the
+                // same binding.
+                continue;
             } else {
                 rstd_error("unknown DescriptorBinding {}", (int)b.descriptor_type);
                 return false;
@@ -205,11 +219,15 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                 rinput.location = input.location;
                 rinput.format   = ::ToVkType(input.format);
 
-                // Strip HLSL semantic-prefixed names (`in.var.<SEMANTIC>`)
-                // if any survived — current GLSL path produces bare attribute
-                // names like `a_Position`.
+                // Strip HLSL struct-prefixed names. glslang HLSL emits VS
+                // inputs as `<entry_param_name>.<field>` (e.g. our wrapper's
+                // `_ww_in.a_Position`). DXC used `in.var.<SEMANTIC>`. C++
+                // vertex-buffer layout matches by bare attribute name
+                // (`a_Position`), so strip everything up to the final `.`.
                 std::string_view name = input.name;
-                if (name.starts_with("in.var.")) name.remove_prefix(7);
+                if (auto dot = name.rfind('.'); dot != std::string_view::npos) {
+                    name.remove_prefix(dot + 1);
+                }
                 ref.input_location_map[std::string(name)] = rinput;
             }
         }
