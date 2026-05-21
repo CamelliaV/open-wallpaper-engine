@@ -64,7 +64,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         swap_pp();
     }
     if (last_output != nullptr) {
-        last_output->output = SpecTex_Default;
+        last_output->output = m_final_target;
         auto& mesh          = *(last_output->sceneNode->Mesh());
         auto& material      = *mesh.Material();
         {

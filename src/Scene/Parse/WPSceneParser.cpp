@@ -658,7 +658,12 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
 
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
-    if (! wpimgobj.visible) return;
+    // Invisible image layers are kept in the scene tree because their composite
+    // may be sampled by other layers via `_rt_imageLayerComposite_<id>`. The
+    // render-graph builder decides whether to actually emit passes for them.
+    if (! wpimgobj.visible) {
+        context.scene->initial_invisible_ids.insert(wpimgobj.id);
+    }
 
     auto& vfs = *context.vfs;
 
@@ -683,16 +688,16 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         if (wpeffobj.visible) count_eff++;
     }
     bool hasEffect = count_eff > 0;
-    // skip no effect fullscreen layer
-    if (! hasEffect && wpimgobj.fullscreen) return;
+    // skip no effect fullscreen layer (visible only — no-effect invisible
+    // link sources are out of scope; see plan TODO)
+    if (! hasEffect && wpimgobj.fullscreen && wpimgobj.visible) return;
 
     bool hasPuppet = ! wpimgobj.puppet.empty();
     (void)hasPuppet;
 
     bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
-    // skip no effect compose layer
-    // it's not the correct behaviour, but do it for now
-    if (! hasEffect && isCompose) return;
+    // skip no effect compose layer (visible only)
+    if (! hasEffect && isCompose && wpimgobj.visible) return;
 
     std::unique_ptr<WPMdl> puppet;
     bool has_bones = false;
@@ -1729,7 +1734,12 @@ void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj,
         rstd_error("parse scene object failed, name: {}", wpobj.name);
         return;
     }
-    if (! wpobj.visible) return;
+    // Image objects keep going even when visible=false: another layer's
+    // material may reference them via `_rt_imageLayerComposite_<id>`. The
+    // render-graph builder later decides whether to actually emit passes.
+    if constexpr (! std::is_same_v<T, wpscene::WPImageObject>) {
+        if (! wpobj.visible) return;
+    }
     objs.push_back(wpobj);
 }
 } // namespace

@@ -447,6 +447,8 @@ public:
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
     SceneNode&  FinalNode() const { return *m_final_node; }
     void        SetFinalBlend(BlendMode m) { m_final_blend = m; }
+    void        SetFinalTarget(std::string t) { m_final_target = std::move(t); }
+    const auto& FinalTarget() const { return m_final_target; }
 
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
@@ -459,6 +461,7 @@ private:
     std::unique_ptr<SceneMesh> m_final_mesh;
     std::unique_ptr<SceneNode> m_final_node;
     BlendMode                  m_final_blend;
+    std::string                m_final_target { SpecTex_Default };
 
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
 };
@@ -1240,6 +1243,11 @@ public:
 
     std::unordered_map<std::string, std::shared_ptr<SceneCamera>> cameras;
     std::unordered_map<std::string, std::vector<std::string>>     linkedCameras;
+
+    // WE layer IDs whose source object had `visible: false` at parse time.
+    // Render-graph build uses this to route invisible-but-link-referenced
+    // layers into a private `_rt_link_<id>` RT instead of `_rt_default`.
+    Set<i32> initial_invisible_ids;
 
     std::vector<std::unique_ptr<SceneLight>> lights;
 

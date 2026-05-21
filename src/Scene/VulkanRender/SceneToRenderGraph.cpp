@@ -197,6 +197,8 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                 builder.write(output_node);
                 if (output == SpecTex_Default) {
                     extra.id_link_map[(usize)imgId] = output_node;
+                } else if (IsSpecLinkTex(output)) {
+                    extra.id_link_map[(usize)ParseLinkTex(output)] = output_node;
                 }
             });
     }
@@ -205,12 +207,77 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
     if (imgeff != nullptr) loadEffect(imgeff);
 }
 
+// Walk the SceneNode subtree (plus its imgeff's effect nodes) and collect every
+// WE layer id referenced as `_rt_link_<id>` by any material's texture slot.
+static void CollectLinkedIds(SceneNode* node, Scene& scene, Set<i32>& out) {
+    if (node == nullptr) return;
+    auto inspect_material = [&](const SceneMaterial& mat) {
+        for (auto& t : mat.textures) {
+            if (IsSpecLinkTex(t)) out.insert((i32)ParseLinkTex(t));
+        }
+    };
+    if (node->HasMaterial()) inspect_material(*node->Mesh()->Material());
+    if (! node->Camera().empty()) {
+        auto it = scene.cameras.find(node->Camera());
+        if (it != scene.cameras.end() && it->second->HasImgEffect()) {
+            auto& eff_layer = it->second->GetImgEffect();
+            for (usize i = 0; i < eff_layer->EffectCount(); i++) {
+                auto& eff = eff_layer->GetEffect(i);
+                for (auto& n : eff->nodes) {
+                    if (n.sceneNode && n.sceneNode->HasMaterial())
+                        inspect_material(*n.sceneNode->Mesh()->Material());
+                }
+            }
+        }
+    }
+    for (auto& c : node->GetChildren()) CollectLinkedIds(c.get(), scene, out);
+}
+
 std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     std::unique_ptr<rg::RenderGraph> rgraph = std::make_unique<rg::RenderGraph>();
     ExtraInfo                        extra { .rgraph = rgraph.get(), .scene = &scene };
+
+    // Pass A: walk the scene tree (and post-process step nodes) once, collecting
+    // every WE layer id that any material binds via `_rt_link_<id>`. This is the
+    // delay-resolve step replacing a JSON pre-scan.
+    Set<i32> linked_ids;
+    CollectLinkedIds(scene.sceneGraph.get(), scene, linked_ids);
+    for (auto& pp : scene.post_processes) {
+        for (auto& step : pp->steps) {
+            if (auto* sp = std::get_if<ScenePostProcessPass>(&step)) {
+                CollectLinkedIds(sp->node.get(), scene, linked_ids);
+            }
+        }
+    }
+
+    // Pass B: emit passes. For parse-time-invisible layers, drop the ones with
+    // no link consumer; route the remaining ones into a private `_rt_link_<id>`
+    // RT instead of `_rt_default`.
     TraverseNode(
-        [&extra](SceneNode* node) {
-            ToGraphPass(node, SpecTex_Default, node->ID(), extra);
+        [&extra, &scene, &linked_ids](SceneNode* node) {
+            const i32 nid = node->ID();
+            const bool init_invisible = scene.initial_invisible_ids.count(nid) != 0;
+            if (init_invisible) {
+                if (linked_ids.count(nid) == 0) return;
+                std::string link_key = GenLinkTex((idx)nid);
+                if (! node->Camera().empty()) {
+                    auto cit = scene.cameras.find(node->Camera());
+                    if (cit != scene.cameras.end() && cit->second->HasImgEffect()) {
+                        cit->second->GetImgEffect()->SetFinalTarget(link_key);
+                    }
+                }
+                if (scene.renderTargets.count(link_key) == 0) {
+                    auto sz = node->Size();
+                    scene.renderTargets[link_key] = {
+                        .width      = sz.x() > 0 ? (i32)sz.x() : scene.ortho[0],
+                        .height     = sz.y() > 0 ? (i32)sz.y() : scene.ortho[1],
+                        .allowReuse = false,
+                    };
+                }
+                ToGraphPass(node, link_key, nid, extra);
+            } else {
+                ToGraphPass(node, SpecTex_Default, nid, extra);
+            }
         },
         scene.sceneGraph.get());
 
