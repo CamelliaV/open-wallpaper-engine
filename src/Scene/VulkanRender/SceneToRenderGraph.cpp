@@ -98,6 +98,10 @@ struct ExtraInfo {
     std::vector<DelayLinkInfo> link_info {};
     rg::RenderGraph*           rgraph { nullptr };
     Scene*                     scene { nullptr };
+    // Result of Pass A; non-null during Pass B. Only layer IDs in this set
+    // actually have downstream link consumers, so we skip id_link_map writes
+    // for non-referenced layers.
+    const Set<i32>*            linked_ids { nullptr };
     bool                       use_mipmap_framebuffer { false };
 };
 
@@ -195,10 +199,16 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                                                               .type = rg::TexNode::TexType::Temp },
                                           true);
                 builder.write(output_node);
+                auto record_link_source = [&](i32 id) {
+                    if (extra.linked_ids == nullptr ||
+                        extra.linked_ids->count(id) != 0) {
+                        extra.id_link_map[(usize)id] = output_node;
+                    }
+                };
                 if (output == SpecTex_Default) {
-                    extra.id_link_map[(usize)imgId] = output_node;
+                    record_link_source(imgId);
                 } else if (IsSpecLinkTex(output)) {
-                    extra.id_link_map[(usize)ParseLinkTex(output)] = output_node;
+                    record_link_source((i32)ParseLinkTex(output));
                 }
             });
     }
@@ -249,6 +259,7 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
             }
         }
     }
+    extra.linked_ids = &linked_ids;
 
     // Pass B: emit passes. For parse-time-invisible layers, drop the ones with
     // no link consumer; route the remaining ones into a private `_rt_link_<id>`
