@@ -10,6 +10,8 @@ import wescene.shader_compile;
 import wescene.scene;
 import wescene.fs;
 
+export import :wp_uniform;
+
 export namespace owe
 
 {
@@ -26,6 +28,12 @@ struct WPShaderInfo {
     ShaderValueMap   baseConstSvs;
     WPAliasValueDict alias;
     WPDefaultTexs    defTexs;
+
+    // Full annotation metadata. Renderer reads `combos / svs / defTexs /
+    // alias` on the hot path; the editor / material UI and the user-property
+    // bridge for `u_*` uniforms read `combo_defs / scalar_uniforms`.
+    std::vector<wpscene::WPCombo>      combo_defs;
+    std::vector<wpscene::WPUniformVar> scalar_uniforms;
 };
 
 struct WPPreprocessorInfo {
@@ -64,6 +72,12 @@ struct CompileMaterialShaderResult {
     std::string                  error;
     std::string                  shader_name;
 };
+
+// Per-stage shader-annotation parser. Implementation lives in
+// WPShaderParser_Pegtl.cpp; declaration here so the rest of the parse
+// module sees it. Not exported — internal helper.
+void ParseWPShader(const std::string& src, WPShaderInfo* info,
+                   const std::vector<WPShaderTexInfo>& texinfos);
 
 class WPShaderParser {
 public:

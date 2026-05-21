@@ -1245,6 +1245,15 @@ public:
 
     std::vector<std::unique_ptr<SceneLight>> lights;
 
+    // user-property key → list of (material pointer, GLSL uniform name) pairs
+    // pulled out of every material's shader-side `u_*` annotations during
+    // parse. Reads sit at `WPUniformVar::material` (UI key) / `name` (GLSL
+    // identifier). Lets a future RenderSetUserProperty handler push the new
+    // value into the affected materials' `customShader.constValues` without
+    // a per-frame walk over the scene tree.
+    Map<std::string, std::vector<std::pair<class SceneMaterial*, std::string>>>
+        shader_user_var_index;
+
     std::shared_ptr<SceneNode>           sceneGraph;
     std::unique_ptr<IShaderValueUpdater> shaderValueUpdater;
     std::unique_ptr<IImageParser>        imageParser;

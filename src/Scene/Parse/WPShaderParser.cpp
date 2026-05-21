@@ -27,6 +27,152 @@ using namespace owe;
 namespace
 {
 
+// Lightweight scanners for GLSL declaration lines. Each WE shader decl is
+// line-scoped so a hand-written scan is enough.
+
+inline bool DLisWs(char c)    { return c == ' ' || c == '\t'; }
+inline bool DLisWord(char c)  { return std::isalnum((unsigned char)c) || c == '_'; }
+
+struct DeclMatch {
+    std::size_t start;        // offset of leading newline (or 0 at file start)
+    std::size_t end;          // one past trailing `;`
+    std::size_t keep_prefix;  // number of bytes from start to preserve when stripping
+    std::string_view storage; // attribute/varying/in/out/uniform
+    std::string_view type;
+    std::string_view name;
+    std::string_view array;   // "[N]" or empty
+};
+
+// Try to match `[ws]<storage_kw> <type> <name>[opt-array][ws];` starting at
+// `line_start`. The match is anchored — leading non-whitespace bytes fail it.
+// Returned offsets are absolute into `src`.
+inline std::optional<DeclMatch>
+TryParseDeclLine(std::string_view src, std::size_t line_start,
+                 std::initializer_list<std::string_view> storage_kws) {
+    std::size_t p = line_start;
+    while (p < src.size() && DLisWs(src[p])) ++p;
+    if (p == src.size()) return std::nullopt;
+
+    // Match a storage keyword.
+    std::string_view tail = src.substr(p);
+    std::string_view kw;
+    for (auto k : storage_kws) {
+        if (tail.size() >= k.size() && tail.substr(0, k.size()) == k &&
+            (tail.size() == k.size() || DLisWs(tail[k.size()]))) {
+            kw = k;
+            break;
+        }
+    }
+    if (kw.empty()) return std::nullopt;
+    p += kw.size();
+
+    auto skip_ws = [&]() { while (p < src.size() && DLisWs(src[p])) ++p; };
+    auto read_ident = [&](std::string_view& out) {
+        std::size_t s = p;
+        while (p < src.size() && DLisWord(src[p])) ++p;
+        if (p == s) return false;
+        out = src.substr(s, p - s);
+        return true;
+    };
+
+    skip_ws();
+    std::string_view type;
+    if (! read_ident(type)) return std::nullopt;
+    skip_ws();
+    std::string_view name;
+    if (! read_ident(name)) return std::nullopt;
+    skip_ws();
+
+    std::string_view array {};
+    if (p < src.size() && src[p] == '[') {
+        std::size_t s = p;
+        while (p < src.size() && src[p] != ']') ++p;
+        if (p == src.size()) return std::nullopt;
+        ++p;
+        array = src.substr(s, p - s);
+        skip_ws();
+    }
+
+    if (p == src.size() || src[p] != ';') return std::nullopt;
+    ++p;
+
+    DeclMatch m;
+    m.start       = line_start;
+    m.end         = p;
+    // Caller decides whether to keep the newline as a strip-anchor — supply
+    // a default of 0 when line_start is already past the newline.
+    m.keep_prefix = 0;
+    m.storage     = kw;
+    m.type        = type;
+    m.name        = name;
+    m.array       = array;
+    return m;
+}
+
+// Iterate every line and try to parse a decl. Caller provides the storage
+// keywords of interest. Yields one DeclMatch per matching line; `keep_prefix`
+// is set to 1 when a leading newline exists at that position (so callers that
+// strip the decl line keep the newline as a paragraph anchor).
+template<typename Fn>
+inline void ForEachDeclLine(std::string_view src,
+                            std::initializer_list<std::string_view> storage_kws,
+                            Fn&& fn) {
+    std::size_t pos = 0;
+    while (pos <= src.size()) {
+        std::size_t line_start = pos;
+        std::size_t prefix     = 0;
+        if (line_start > 0 && src[line_start - 1] == '\n') {
+            // Keep leading newline when caller strips the decl line.
+            prefix = 1;
+        }
+        if (auto m = TryParseDeclLine(src, line_start, storage_kws)) {
+            DeclMatch out = *m;
+            // Adjust to anchor on the line's leading newline (matches the
+            // (^|\n) capture group behavior the old regex relied on).
+            if (line_start > 0 && src[line_start - 1] == '\n') {
+                out.start       = line_start - 1;
+                out.keep_prefix = 1;
+            } else {
+                out.start       = line_start;
+                out.keep_prefix = 0;
+            }
+            (void)prefix;
+            fn(out);
+        }
+        auto nl = src.find('\n', pos);
+        if (nl == std::string_view::npos) break;
+        pos = nl + 1;
+    }
+}
+
+inline bool IsSamplerType(std::string_view t) {
+    return t == "sampler2D" || t == "sampler3D" || t == "samplerCube" ||
+           t == "sampler2DComparison" || t == "sampler2DShadow";
+}
+
+// Replace every occurrence of `needle` in `body` with `repl`. The placeholder
+// names used by the shader synth pipeline are unique tokens
+// (`__SHADER_PLACEHOLD__`), so naive substring substitution is safe.
+inline std::string ReplaceAll(std::string body, std::string_view needle,
+                              std::string_view repl) {
+    if (needle.empty()) return body;
+    std::string out;
+    out.reserve(body.size());
+    std::size_t pos = 0;
+    while (true) {
+        auto next = body.find(needle, pos);
+        if (next == std::string::npos) {
+            out.append(body, pos, std::string::npos);
+            break;
+        }
+        out.append(body, pos, next - pos);
+        out.append(repl);
+        pos = next + needle.size();
+    }
+    return out;
+}
+
+
 // HLSL prologue. WE shaders are written in a hybrid dialect that already
 // uses HLSL idioms (mul, texSample2D, float2/3/4, saturate, lerp, frac,
 // [maxvertexcount], OUT.Append); only the residual GLSL bits (vec*, mat*,
@@ -349,177 +495,78 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
     return output;
 }
 
-inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
-                          const std::vector<WPShaderTexInfo>& texinfos) {
-    auto& combos       = pWPShaderInfo->combos;
-    auto& wpAliasDict  = pWPShaderInfo->alias;
-    auto& shadervalues = pWPShaderInfo->svs;
-    auto& defTexs      = pWPShaderInfo->defTexs;
-    idx   texcount     = std::ssize(texinfos);
+// ParseWPShader implementation moved to WPShaderParser_Pegtl.cpp.
+// Declaration is reachable through wescene.parse via the same module.
 
-    // pos start of line
-    std::string::size_type pos = 0, lineEnd = std::string::npos;
-    while ((lineEnd = src.find_first_of(('\n'), pos)), true) {
-        const auto clineEnd = lineEnd;
-        const auto line     = src.substr(pos, lineEnd - pos);
-
-        /*
-        if(line.find("attribute ") != std::string::npos || line.find("in ") != std::string::npos) {
-            update_pos = true;
-        }
-        */
-        if (line.find("// [COMBO]") != std::string::npos) {
-            nlohmann::json combo_json;
-            if (owe::ParseJson(line.substr(line.find_first_of('{')), combo_json)) {
-                if (combo_json.contains("combo")) {
-                    std::string name;
-                    int32_t     value = 0;
-                    owe::GetJsonValue(combo_json, "combo", name);
-                    owe::GetJsonValue(combo_json, "default", value);
-                    combos[name] = std::to_string(value);
-                }
-            }
-        } else if (line.find("uniform ") != std::string::npos) {
-            if (line.find("// {") != std::string::npos) {
-                nlohmann::json sv_json;
-                if (owe::ParseJson(line.substr(line.find_first_of('{')), sv_json)) {
-                    std::vector<std::string> defines =
-                        utils::SpliteString(line.substr(0, line.find_first_of(';')), ' ');
-
-                    std::string material;
-                    owe::GetJsonValue(sv_json, "material", material, false);
-                    if (! material.empty()) wpAliasDict[material] = defines.back();
-
-                    ShaderValue sv;
-                    std::string name  = defines.back();
-                    bool        istex = name.compare(0, 9, "g_Texture") == 0;
-                    if (istex) {
-                        wpscene::WPUniformTex wput;
-                        wput.FromJson(sv_json);
-                        i32 index { 0 };
-                        STRTONUM(name.substr(9), index);
-                        if (! wput.default_.empty()) defTexs.push_back({ index, wput.default_ });
-                        if (! wput.combo.empty()) {
-                            if (index >= texcount)
-                                combos[wput.combo] = "0";
-                            else
-                                combos[wput.combo] = "1";
-                        }
-                        if (index < texcount && texinfos[(usize)index].enabled) {
-                            auto& compos = texinfos[(usize)index].composEnabled;
-
-                            usize num = std::min(std::size(compos), std::size(wput.components));
-                            for (usize i = 0; i < num; i++) {
-                                if (compos[i]) combos[wput.components[i].combo] = "1";
-                            }
-                        }
-
-                    } else {
-                        if (sv_json.contains("default")) {
-                            auto        value = sv_json.at("default");
-                            ShaderValue sv;
-                            name = defines.back();
-                            if (value.is_string()) {
-                                std::vector<float> v;
-                                owe::GetJsonValue(value, v);
-                                sv = std::span<const float>(v);
-                            } else if (value.is_number()) {
-                                sv.setSize(1);
-                                owe::GetJsonValue(value, sv[0]);
-                            }
-                            shadervalues[name] = sv;
-                        }
-                        if (sv_json.contains("combo")) {
-                            std::string name;
-                            owe::GetJsonValue(sv_json, "combo", name);
-                            combos[name] = "1";
-                        }
-                    }
-                    if (defines.back()[0] != 'g') {
-                        rstd_info("PreShaderSrc User shadervalue not supported");
-                    }
-                }
-            }
-        }
-
-        // end
-        if (line.find("void main()") != std::string::npos || clineEnd == std::string::npos) {
-            break;
-        }
-        pos = lineEnd + 1;
-    }
-}
-
+// Find a safe spot in `src` to splice an `#include` line into. The chosen
+// position lies after every top-level `attribute/varying/uniform/struct`
+// declaration, before `void main(`, and outside any `#if/#endif` block.
+// Returns 0 when no preceding decls are found or the source has multiple
+// entry points (post-include shaders we can't reason about).
 inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
-    /* rule:
-    after attribute/varying/uniform/struct
-    befor any func
-    not in {}
-    not in #if #endif
-    */
     (void)startPos;
 
-    auto NposToZero = [](usize p) {
-        return p == std::string::npos ? 0 : p;
-    };
-    auto search = [](const std::string& p, usize pos, const auto& re) {
-        auto        startpos = p.begin() + (isize)pos;
-        std::smatch match;
-        if (startpos < p.end() && std::regex_search(startpos, p.end(), match, re)) {
-            return pos + (usize)match.position();
-        }
-        return std::string::npos;
-    };
-    auto searchLast = [](const std::string& p, const auto& re) {
-        auto        startpos = p.begin();
-        std::smatch match;
-        while (startpos < p.end() && std::regex_search(startpos, p.end(), match, re)) {
-            startpos++;
-            startpos += match.position();
-        }
-        return startpos >= p.end() ? std::string::npos : usize(startpos - p.begin());
-    };
-    auto nextLinePos = [](const std::string& p, usize pos) {
-        return p.find_first_of('\n', pos) + 1;
-    };
+    const usize main_pos = src.find("void main(");
+    if (main_pos == std::string::npos) return 0;
+    if (src.find("void main(", main_pos + 2) != std::string::npos) return 0;
 
-    usize mainPos  = src.find("void main(");
-    bool  two_main = src.find("void main(", mainPos + 2) != std::string::npos;
-    if (two_main) return 0;
+    // Walk lines; track:
+    //   after_pos   — first byte of the line right after the last decl
+    //                  (attribute / varying / uniform / struct)
+    //   if_ranges   — every (start, end) of `#if` ... `#endif`, used to bump
+    //                  after_pos past the enclosing region if it landed inside.
+    usize                                     after_pos = std::string::npos;
+    std::vector<std::pair<usize, usize>>      if_ranges;
+    std::vector<usize>                        if_stack;
+    constexpr std::array<std::string_view, 4> kKws { "attribute", "varying",
+                                                     "uniform", "struct" };
 
-    usize pos;
-    {
-        const std::regex reAfters(R"(\n(attribute|varying|uniform|struct) )");
-        usize            afterPos = searchLast(src, reAfters);
-        if (afterPos != std::string::npos) {
-            afterPos = nextLinePos(src, afterPos + 1);
-        }
-        pos = std::min({ NposToZero(afterPos), mainPos });
-    }
-    {
-        std::stack<usize> ifStack;
-        usize             nowPos { 0 };
-        const std::regex  reIfs(R"((#if|#endif))");
-        while (true) {
-            auto p = search(src, nowPos + 1, reIfs);
-            if (p > mainPos || p == std::string::npos) break;
-            if (src.substr(p, 3) == "#if") {
-                ifStack.push(p);
-            } else {
-                if (ifStack.empty()) break;
-                usize ifp = ifStack.top();
-                ifStack.pop();
-                usize endp = p;
-                if (pos > ifp && pos <= endp) {
-                    pos = nextLinePos(src, endp + 1);
+    usize line_start = 0;
+    while (line_start < src.size() && line_start < main_pos) {
+        usize nl = src.find('\n', line_start);
+        if (nl == std::string::npos) nl = src.size();
+        if (nl > main_pos) nl = main_pos;
+
+        // Trim leading whitespace.
+        usize p = line_start;
+        while (p < nl && (src[p] == ' ' || src[p] == '\t')) ++p;
+
+        // Match `#if` / `#endif` (only at top of trimmed line).
+        if (p < nl && src[p] == '#') {
+            std::string_view rest(src.data() + p, nl - p);
+            if (rest.size() >= 3 && rest.substr(0, 3) == "#if") {
+                if_stack.push_back(line_start);
+            } else if (rest.size() >= 6 && rest.substr(0, 6) == "#endif") {
+                if (! if_stack.empty()) {
+                    usize start = if_stack.back();
+                    if_stack.pop_back();
+                    // `end` is one past this line's newline.
+                    usize end = (nl < src.size()) ? nl + 1 : nl;
+                    if_ranges.emplace_back(start, end);
                 }
             }
-            nowPos = p;
+        } else if (p < nl) {
+            for (auto kw : kKws) {
+                if (nl - p >= kw.size() + 1 &&
+                    src.compare(p, kw.size(), kw) == 0 &&
+                    (src[p + kw.size()] == ' ' || src[p + kw.size()] == '\t')) {
+                    // Decl line found — set after_pos to the next line's start.
+                    after_pos = (nl < src.size()) ? nl + 1 : nl;
+                    break;
+                }
+            }
         }
-        pos = std::min({ pos, mainPos });
+
+        if (nl >= src.size()) break;
+        line_start = nl + 1;
     }
 
-    return NposToZero(pos);
+    usize pos = (after_pos == std::string::npos) ? 0 : std::min(after_pos, main_pos);
+    // If `pos` landed inside any `#if/#endif` span, push it past the block.
+    for (const auto& [s, e] : if_ranges) {
+        if (pos > s && pos <= e) pos = e;
+    }
+    return std::min(pos, main_pos);
 }
 
 // Comment out stray `#endif` directives with no matching `#if`. A class of
@@ -580,11 +627,29 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
                                 WPPreprocessorInfo& process_info) {
     std::string with_prologue = owe::WPShaderParser::PreShaderHeader(in_src, combos, type);
 
-    // #require is a WE-specific extension marker, not a real preprocessor
-    // directive. Comment it out before passing to glslang's preprocessor.
+    // `#require` is a WE-specific marker, not a real preprocessor directive.
+    // Comment out each occurrence (line must start with `#require`).
     {
-        std::regex re_require("(^|\r?\n)#require (.+)(\r?\n)");
-        with_prologue = std::regex_replace(with_prologue, re_require, "$1//#require $2$3");
+        std::string out;
+        out.reserve(with_prologue.size());
+        std::size_t pos = 0;
+        while (pos < with_prologue.size()) {
+            std::size_t line_start = pos;
+            // Line must begin at start of file or right after a newline; the
+            // outer loop guarantees that since we only step past '\n'.
+            constexpr std::string_view kReq { "#require " };
+            if (with_prologue.compare(line_start, kReq.size(), kReq) == 0) {
+                out.append("//");
+            }
+            std::size_t nl = with_prologue.find('\n', pos);
+            if (nl == std::string::npos) {
+                out.append(with_prologue, pos, std::string::npos);
+                break;
+            }
+            out.append(with_prologue, pos, nl + 1 - pos);
+            pos = nl + 1;
+        }
+        with_prologue = std::move(out);
     }
 
     with_prologue = BalanceConditionals(std::move(with_prologue));
@@ -606,66 +671,36 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     }
 
     // GS source uses `in`/`out` storage classes; VS/FS use `attribute`/`varying`.
-    std::regex re_io(R"((^|\n)\s*(attribute|varying|in|out)\s+([\w]+)\s+(\w+)\s*[;\[])",
-                     std::regex::ECMAScript);
-    for (auto it = std::sregex_iterator(src.begin(), src.end(), re_io);
-         it != std::sregex_iterator();
-         it++) {
-        std::smatch mc      = *it;
-        const auto& storage = mc[2];
-        const auto& name    = mc[4];
+    ForEachDeclLine(src, { "attribute", "varying", "in", "out" }, [&](const DeclMatch& m) {
         // attribute-in-vertex and varying-in-fragment both behave as inputs;
         // varying-in-vertex behaves as output. GS: `in` is input (from VS),
         // `out` is output (to FS).
-        bool is_input = (storage == "attribute") ||
-                        (storage == "varying" && type == ShaderType::FRAGMENT) ||
-                        (storage == "in" && type == ShaderType::GEOMETRY);
-        if (is_input) {
-            process_info.input[name] = mc[0].str();
-        } else {
-            process_info.output[name] = mc[0].str();
+        bool is_input = (m.storage == "attribute") ||
+                        (m.storage == "varying" && type == ShaderType::FRAGMENT) ||
+                        (m.storage == "in" && type == ShaderType::GEOMETRY);
+        std::string line(src.substr(m.start, m.end - m.start));
+        std::string name(m.name);
+        if (is_input) process_info.input[name]  = std::move(line);
+        else          process_info.output[name] = std::move(line);
+    });
+
+    // Non-sampler uniform decls feed Finalprocessor's shared cbuffer.
+    // Sampler-typed uniforms are emitted as Texture/SamplerState pairs and
+    // captured in active_tex_slots instead.
+    ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
+        if (IsSamplerType(m.type)) {
+            // Track active sampler slot if it's a `g_TextureN`.
+            constexpr std::string_view kTex { "g_Texture" };
+            if (m.name.size() > kTex.size() && m.name.substr(0, kTex.size()) == kTex) {
+                std::string_view num = m.name.substr(kTex.size());
+                unsigned slot = 0;
+                auto [ptr, ec] = std::from_chars(num.data(), num.data() + num.size(), slot);
+                if (ec == std::errc()) process_info.active_tex_slots.insert(slot);
+            }
+            return;
         }
-    }
-
-    // Capture non-sampler uniform declarations so Finalprocessor can emit
-    // a single shared cbuffer with the cross-stage union. Each stage's
-    // captured types must match (vert and frag must declare the same
-    // `g_Foo` with the same type) — WE shaders honor this convention.
-    std::regex re_uniform(
-        R"((^|\n)[ \t]*uniform[ \t]+([\w]+)[ \t]+(\w+)[ \t]*(\[[^\]]*\])?[ \t]*;)",
-        std::regex::ECMAScript);
-    for (auto it = std::sregex_iterator(src.begin(), src.end(), re_uniform);
-         it != std::sregex_iterator();
-         ++it) {
-        std::smatch mc   = *it;
-        std::string ty   = mc[2].str();
-        std::string name = mc[3].str();
-        // Skip sampler types; those are handled by ScanAndStripSamplers
-        // and emitted as Texture2D + SamplerState pairs.
-        if (ty == "sampler2D" || ty == "sampler3D" || ty == "samplerCube" ||
-            ty == "sampler2DComparison" || ty == "sampler2DShadow")
-            continue;
-        std::string array = mc[4].matched ? mc[4].str() : "";
-        process_info.uniforms[name] = ty + array;
-    }
-
-    // Any g_TextureN slot that survives preprocess for any sampler variant
-    // (sampler2D, sampler2DComparison/Shadow, samplerCube, sampler3D) gets
-    // recorded. Comparison/shadow first so the shorter `sampler2D` alternative
-    // doesn't swallow the `Comparison` suffix.
-    std::regex re_tex(
-        R"(uniform\s+(?:sampler2DComparison|sampler2DShadow|samplerCube|sampler2D|sampler3D)\s+g_Texture(\d+))",
-        std::regex::ECMAScript);
-    for (auto it = std::sregex_iterator(src.begin(), src.end(), re_tex);
-         it != std::sregex_iterator();
-         it++) {
-        std::smatch mc  = *it;
-        auto        str = mc[1].str();
-        unsigned        slot;
-        auto [ptr, ec] { std::from_chars(str.c_str(), str.c_str() + str.size(), slot) };
-        if (ec != std::errc()) continue;
-        process_info.active_tex_slots.insert(slot);
-    }
+        process_info.uniforms[std::string(m.name)] = std::string(m.type) + std::string(m.array);
+    });
     return src;
 }
 
@@ -730,38 +765,19 @@ struct SamplerDecl {
     std::string name;
 };
 
-inline const std::regex& SamplerRegex() {
-    // Order matters: regex alternation matches the FIRST alternative,
-    // so longer-prefix names must come before shorter ones — otherwise
-    // `sampler2D` swallows `sampler2DComparison` and the trailing
-    // `Comparison` text breaks the match.
-    static const std::regex re(
-        R"((^|\n)[ \t]*uniform[ \t]+(sampler2DComparison|sampler2DShadow|samplerCube|sampler2D|sampler3D)[ \t]+(\w+)[ \t]*;)",
-        std::regex::ECMAScript);
-    return re;
-}
-
 inline std::pair<std::vector<SamplerDecl>, std::string>
 ScanAndStripSamplers(const std::string& src) {
     std::vector<SamplerDecl> decls;
     std::string              out;
     out.reserve(src.size());
-
-    auto       it     = std::sregex_iterator(src.begin(), src.end(), SamplerRegex());
-    const auto end    = std::sregex_iterator();
-    usize      cursor = 0;
-    for (; it != end; ++it) {
-        std::smatch mc          = *it;
-        const usize match_start = mc.position(0);
-        const usize match_end   = match_start + mc.length(0);
-        const usize keep_len    = mc[1].length(); // keep the leading newline
-
-        out.append(src, cursor, match_start - cursor);
-        out.append(src, match_start, keep_len);
-        cursor = match_end;
-
-        decls.push_back({ mc[2].str(), mc[3].str() });
-    }
+    usize cursor = 0;
+    ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
+        if (! IsSamplerType(m.type)) return;
+        out.append(src, cursor, m.start - cursor);
+        out.append(src, m.start, m.keep_prefix);
+        cursor = m.end;
+        decls.push_back({ std::string(m.type), std::string(m.name) });
+    });
     out.append(src, cursor, std::string::npos);
     return { std::move(decls), std::move(out) };
 }
@@ -792,95 +808,53 @@ inline bool IsSamplerCombinedImage(std::string_view glsl) {
     return true;
 }
 
-// Match `uniform TYPE NAME[opt-array];` for any TYPE (we filter samplers
-// out by name in the caller). Used to strip uniform decls from the
-// source so we can re-emit them as members of a shared cbuffer.
-inline const std::regex& UniformRegex() {
-    static const std::regex re(
-        R"((^|\n)[ \t]*uniform[ \t]+([\w]+)[ \t]+(\w+)[ \t]*(\[[^\]]*\])?[ \t]*;)",
-        std::regex::ECMAScript);
-    return re;
-}
-
-// Strip every `uniform TYPE NAME;` declaration from the source. The
-// caller will re-emit them as cbuffer members. Returns the stripped
-// source. Sampler-typed uniforms are stripped here too (they were
-// already handled by ScanAndStripSamplers, this is idempotent if
-// they've already been removed from the input).
+// Strip every `uniform TYPE NAME;` declaration (including samplers — already
+// stripped by ScanAndStripSamplers when called in sequence, idempotent). The
+// caller re-emits them as members of a shared cbuffer.
 inline std::string StripUniforms(const std::string& src) {
     std::string out;
     out.reserve(src.size());
-
-    auto       it     = std::sregex_iterator(src.begin(), src.end(), UniformRegex());
-    const auto end    = std::sregex_iterator();
-    usize      cursor = 0;
-    for (; it != end; ++it) {
-        std::smatch mc          = *it;
-        const usize match_start = mc.position(0);
-        const usize match_end   = match_start + mc.length(0);
-        const usize keep_len    = mc[1].length(); // keep the leading newline
-
-        out.append(src, cursor, match_start - cursor);
-        out.append(src, match_start, keep_len);
-        cursor = match_end;
-    }
+    usize cursor = 0;
+    ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
+        out.append(src, cursor, m.start - cursor);
+        out.append(src, m.start, m.keep_prefix);
+        cursor = m.end;
+    });
     out.append(src, cursor, std::string::npos);
     return out;
 }
 
-// Regex used by both the source-stripping pass and the cross-stage
-// re-parse. (^|\n) anchors at line start; trailing optional `[N]` lets
-// arrays through; trailing optional whitespace before `;` is permitted.
-inline const std::regex& IORegex() {
-    static const std::regex re(
-        R"((^|\n)[ \t]*(attribute|varying|in|out)[ \t]+([\w]+)[ \t]+(\w+)[ \t]*(\[[^\]]*\])?[ \t]*;)",
-        std::regex::ECMAScript);
-    return re;
-}
-
 inline std::optional<IODecl> ParseIODecl(const std::string& line) {
-    std::smatch mc;
-    if (! std::regex_search(line, mc, IORegex())) return std::nullopt;
-    return IODecl { StorageCharFor(mc[2].str()),
-                    mc[3].str(),
-                    mc[4].str(),
-                    mc[5].matched ? mc[5].str() : "" };
+    // Skip leading newline / CR that the capture loops preserved as an anchor.
+    std::size_t start = 0;
+    while (start < line.size() && (line[start] == '\n' || line[start] == '\r')) ++start;
+    auto m = TryParseDeclLine(line, start, { "attribute", "varying", "in", "out" });
+    if (! m) return std::nullopt;
+    return IODecl { StorageCharFor(std::string(m->storage)),
+                    std::string(m->type),
+                    std::string(m->name),
+                    std::string(m->array) };
 }
 
-// Pull all `attribute|varying TYPE NAME;` declarations out of the source
-// (returning them as structured IODecls) and produce a copy of the
-// source with those lines removed. Stripping is essential: `attribute`
-// and `varying` are not HLSL keywords, and we re-emit canonical `static`
-// decls so the synthesized entry point doesn't drift from what DXC's
-// preprocessor actually compiled (combo-gated `#if` branches drop their
-// declarations at compile time).
+// Pull all `attribute|varying|in|out TYPE NAME;` decls out, return them
+// structured + a copy of the source with the lines removed. Stripping is
+// essential: `attribute`/`varying` are not HLSL keywords; the entry-point
+// synthesizer re-emits canonical `static TYPE NAME;` decls so it never
+// drifts from what DXC's preprocessor actually compiled.
 inline std::pair<std::vector<IODecl>, std::string> ScanAndStripIO(const std::string& src) {
     std::vector<IODecl> decls;
     std::string         out;
     out.reserve(src.size());
-
-    auto       it      = std::sregex_iterator(src.begin(), src.end(), IORegex());
-    const auto end     = std::sregex_iterator();
-    usize      cursor  = 0;
-    for (; it != end; ++it) {
-        std::smatch mc          = *it;
-        const usize match_start = mc.position(0);
-        const usize match_end   = match_start + mc.length(0);
-
-        // Keep the leading newline (mc[1]) — it's part of the match but
-        // not the declaration we're stripping.
-        const usize keep_start = match_start;
-        const usize keep_len   = mc[1].length();
-
-        out.append(src, cursor, keep_start - cursor);
-        out.append(src, keep_start, keep_len);
-        cursor = match_end;
-
-        decls.push_back({ StorageCharFor(mc[2].str()),
-                          mc[3].str(),
-                          mc[4].str(),
-                          mc[5].matched ? mc[5].str() : "" });
-    }
+    usize cursor = 0;
+    ForEachDeclLine(src, { "attribute", "varying", "in", "out" }, [&](const DeclMatch& m) {
+        out.append(src, cursor, m.start - cursor);
+        out.append(src, m.start, m.keep_prefix);
+        cursor = m.end;
+        decls.push_back({ StorageCharFor(std::string(m.storage)),
+                          std::string(m.type),
+                          std::string(m.name),
+                          std::string(m.array) });
+    });
     out.append(src, cursor, std::string::npos);
     return { std::move(decls), std::move(out) };
 }
@@ -1213,8 +1187,7 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         }
 
         body = RewriteGSMain(std::move(body));
-        std::regex  re_hold(SHADER_PLACEHOLD.data());
-        return std::regex_replace(body, re_hold, synth);
+        return ReplaceAll(std::move(body), SHADER_PLACEHOLD, synth);
     }
 
     // Strip `attribute/varying` lines and collect them as structured decls.
@@ -1294,9 +1267,8 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     // Splice synth.pre into the placeholder slot, then append synth.post
     // (which contains the entry-point wrapper that has to follow the user's
     // shader_main()).
-    std::regex  re_hold(SHADER_PLACEHOLD.data());
     std::string with_decls =
-        std::regex_replace(stage3, re_hold, synth.pre + uniform_block + sampler_block);
+        ReplaceAll(stage3, SHADER_PLACEHOLD, synth.pre + uniform_block + sampler_block);
     return with_decls + synth.post;
 }
 

@@ -98,6 +98,7 @@ add_library(owe-parse STATIC
   Parse/WPScene.cpp
   Parse/WPSceneParser.cpp
   Parse/WPShaderParser.cpp
+  Parse/WPShaderAnnot.cpp
   Parse/WPSoundParser.cpp
   Parse/WPTexImageParser.cpp
   Text/Text.cpp)

@@ -63,6 +63,13 @@ set_target_properties(wescene-test PROPERTIES CXX_SCAN_FOR_MODULES ON)
 add_executable(scene_parse_tests scene_parse_tests.cpp)
 target_link_libraries(scene_parse_tests PRIVATE wescene_test_lib GTest::gtest_main)
 
+# Unit coverage for the PEGTL-based shader annotation parser. Verifies
+# preprocessor nesting, dead-branch skip, numeric #define, comment
+# handling, and full [COMBO] / texture / scalar / u_* schemas.
+add_executable(wpshader_parse_tests wpshader_parse_tests.cpp)
+target_link_libraries(wpshader_parse_tests PRIVATE owe-parse GTest::gtest_main)
+set_target_properties(wpshader_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 # Schema reverse coverage: asserts the parser doesn't read keys that
 # never appear in the corpus, and prints unparsed-but-common keys per
 # pkg version as a TODO list for future refactor passes.
@@ -106,6 +113,11 @@ gtest_discover_tests(
     scene_parse_tests
     PROPERTIES TIMEOUT 60
     DISCOVERY_TIMEOUT 60
+)
+gtest_discover_tests(
+    wpshader_parse_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
 )
 gtest_discover_tests(
     scene_schema_tests

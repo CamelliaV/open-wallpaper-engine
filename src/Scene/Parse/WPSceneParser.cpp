@@ -322,10 +322,22 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
             // an effect-local fbo registered with a non-conventional name
             // (e.g. WE DOF's `_rt__coc_<addr>`) — already a valid RT.
         } else {
-            // unsupported special tex (light cookie, etc.).
-            // Drop the binding so it's skipped instead of looked up as a
-            // missing texture.
-            rstd_warn("ignoring unsupported special tex \"{}\"", name);
+            // Known engine-internal RTs we don't (yet) produce: silent-skip
+            // so corpus shaders that declare them inside a dead `#if` branch
+            // (e.g. `#if LIGHTS_SHADOW_MAPPING`) don't flood the log. The
+            // annotation collector picks defaults up unconditionally; the
+            // following glslang preprocess strips the dead branch, but the
+            // textures slot still carries the default name when it lands
+            // here.
+            static constexpr std::array<std::string_view, 4> kSilentUnimpl {
+                "_rt_shadowAtlas",
+                "_rt_volumetricsBack",
+                "_rt_volumetricsSingle",
+                "_rt_Reflection",
+            };
+            bool silent = false;
+            for (auto s : kSilentUnimpl) if (name == s) { silent = true; break; }
+            if (! silent) rstd_warn("ignoring unsupported special tex \"{}\"", name);
             name.clear();
         }
     }
@@ -518,6 +530,28 @@ const auto& f1     = texh.spriteAnim.GetCurFrame();
     }
     material.customShader = materialShader;
     material.name         = wpmat.shader;
+
+    // u_* user-variable uniforms register into the scene-wide index so a
+    // future user-property write can land back on this material's
+    // constValues. Default values seed constValues now so the cbuffer has a
+    // sane initial slot even before the host pushes a user property.
+    for (const auto& var : pWPShaderInfo->scalar_uniforms) {
+        if (! var.is_user || var.material.empty()) continue;
+        pScene->shader_user_var_index[var.material].push_back({ pMaterial, var.name });
+        if (! var.default_value.is_null()) {
+            ShaderValue sv;
+            const auto& v = var.default_value;
+            if (v.is_string()) {
+                std::vector<float> tmp;
+                owe::GetJsonValue(v, tmp);
+                sv = std::span<const float>(tmp);
+            } else if (v.is_number()) {
+                sv.setSize(1);
+                owe::GetJsonValue(v, sv[0]);
+            }
+            if (sv.size() > 0) material.customShader.constValues[var.name] = sv;
+        }
+    }
 
     return true;
 }
