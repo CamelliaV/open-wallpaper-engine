@@ -217,6 +217,26 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
     if (imgeff != nullptr) loadEffect(imgeff);
 }
 
+// Bottom-up prune: drop SceneNodes whose WE layer id is in
+// `initial_invisible_ids` but not in `linked_ids`, and whose own subtree has
+// already been emptied by the recursion. Parents that still hold a surviving
+// descendant stay even when invisible — removing them would orphan the
+// surviving child's transform chain.
+static bool PruneUnusedInvisible(SceneNode* node, Scene& scene,
+                                  const Set<i32>& linked_ids) {
+    auto& children = node->GetChildren();
+    for (auto it = children.begin(); it != children.end();) {
+        if (! PruneUnusedInvisible(it->get(), scene, linked_ids)) {
+            it = children.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    const i32 nid = node->ID();
+    return ! (scene.initial_invisible_ids.count(nid) != 0 &&
+              linked_ids.count(nid) == 0 && children.empty());
+}
+
 // Walk the SceneNode subtree (plus its imgeff's effect nodes) and collect every
 // WE layer id referenced as `_rt_link_<id>` by any material's texture slot.
 static void CollectLinkedIds(SceneNode* node, Scene& scene, Set<i32>& out) {
@@ -260,6 +280,11 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
         }
     }
     extra.linked_ids = &linked_ids;
+
+    // Drop SceneNodes that were kept around only because the parser stopped
+    // dropping invisible image objects at parse time. Most corpora have ~25x
+    // more parse-time-invisible layers than ones actually link-referenced.
+    PruneUnusedInvisible(scene.sceneGraph.get(), scene, linked_ids);
 
     // Pass B: emit passes. For parse-time-invisible layers, drop the ones with
     // no link consumer; route the remaining ones into a private `_rt_link_<id>`
