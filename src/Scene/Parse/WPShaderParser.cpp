@@ -1057,6 +1057,95 @@ inline std::string RewriteGSMain(std::string src) {
     return src;
 }
 
+// std140 base alignment + size for one element (not the array — caller
+// scales). HLSL form (`floatRxC`, `floatN`, scalars). Unknown types fall back
+// to vec4-equivalent which is always safely-aligned, never under-padded.
+struct Std140Layout {
+    std::size_t align;
+    std::size_t size;
+};
+inline Std140Layout Std140Base(std::string_view hlsl_base) {
+    if (hlsl_base == "float" || hlsl_base == "int" ||
+        hlsl_base == "uint"  || hlsl_base == "bool")
+        return { 4, 4 };
+    if (hlsl_base == "float2" || hlsl_base == "int2" || hlsl_base == "uint2")
+        return { 8, 8 };
+    if (hlsl_base == "float3" || hlsl_base == "int3" || hlsl_base == "uint3")
+        return { 16, 12 };
+    if (hlsl_base == "float4" || hlsl_base == "int4" || hlsl_base == "uint4")
+        return { 16, 16 };
+    // column_major float<R>x<C> = C columns of vec<R>, each padded to 16
+    // bytes by std140 → 16*C bytes total.
+    if (hlsl_base.size() == 8 && hlsl_base.substr(0, 5) == "float" &&
+        hlsl_base[6] == 'x' &&
+        hlsl_base[5] >= '2' && hlsl_base[5] <= '4' &&
+        hlsl_base[7] >= '2' && hlsl_base[7] <= '4') {
+        std::size_t cols = (std::size_t)(hlsl_base[7] - '0');
+        return { 16, cols * 16 };
+    }
+    return { 16, 16 };
+}
+
+inline std::size_t ParseArrayCount(std::string_view arr) {
+    if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
+    std::string_view inner = arr.substr(1, arr.size() - 2);
+    std::size_t n = 0;
+    for (char c : inner) {
+        if (c == ' ' || c == '\t') continue;
+        if (c < '0' || c > '9') return 1;
+        n = n * 10 + (std::size_t)(c - '0');
+    }
+    return n == 0 ? 1 : n;
+}
+
+// Emit `cbuffer ww_Uniforms { ... };` body with explicit std140 `:packoffset`
+// per member. glslang's HLSL frontend hard-codes HLSL cbuffer packing on
+// HLSL sources (see ShaderLang.cpp `setHlslOffsets` when EShSourceHlsl);
+// without `packoffset`, scalars get packed into the trailing padding of
+// vec3 / vec3[] members, and the C++ uploader (which writes contiguous
+// `stride*N` blocks) silently corrupts those neighbours. Annotating each
+// member with the std140 (register, component) overrides the auto-packing.
+inline std::string EmitCBufferStd140(const Map<std::string, std::string>& uniforms_union) {
+    std::string out;
+    out += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
+    std::size_t offset = 0;
+    for (const auto& [name, ty] : uniforms_union) {
+        std::string base_ty = ty;
+        std::string array;
+        if (auto pos = ty.find('['); pos != std::string::npos) {
+            base_ty = ty.substr(0, pos);
+            array   = ty.substr(pos);
+        }
+        std::string hlsl_ty = ToHLSLType(base_ty);
+        std::size_t n       = ParseArrayCount(array);
+        Std140Layout L      = Std140Base(hlsl_ty);
+        std::size_t member_align = (n > 1) ? std::size_t(16) : L.align;
+        std::size_t member_size  = (n > 1)
+                                     ? ((L.size + 15) & ~std::size_t(15)) * n
+                                     : L.size;
+        offset = (offset + member_align - 1) & ~(member_align - 1);
+        std::size_t reg  = offset / 16;
+        std::size_t comp = (offset % 16) / 4;
+        const char  letter = "xyzw"[comp];
+        const bool is_matrix =
+            hlsl_ty == "float2x2" || hlsl_ty == "float3x3" || hlsl_ty == "float4x4" ||
+            hlsl_ty == "float2x3" || hlsl_ty == "float2x4" || hlsl_ty == "float3x2" ||
+            hlsl_ty == "float3x4" || hlsl_ty == "float4x2" || hlsl_ty == "float4x3";
+        out += "    ";
+        if (is_matrix) out += "column_major ";
+        out += hlsl_ty + " " + name + array;
+        out += " : packoffset(c" + std::to_string(reg);
+        if (comp != 0) {
+            out += ".";
+            out += letter;
+        }
+        out += ");\n";
+        offset += member_size;
+    }
+    out += "};\n";
+    return out;
+}
+
 inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
                                   const WPPreprocessorInfo* next,
                                   const Map<std::string, std::string>* uniforms_union_in = nullptr) {
@@ -1108,29 +1197,8 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         const Map<std::string, std::string>& uniforms_union =
             uniforms_union_in ? *uniforms_union_in : uniforms_union_local;
         if (! uniforms_union.empty()) {
-            synth += "\n// === auto-generated shared uniforms (HLSL) ===\n";
-            synth += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
-            for (const auto& [name, ty] : uniforms_union) {
-                std::string base_ty = ty;
-                std::string array;
-                if (auto pos = ty.find('['); pos != std::string::npos) {
-                    base_ty = ty.substr(0, pos);
-                    array   = ty.substr(pos);
-                }
-                std::string hlsl_ty = ToHLSLType(base_ty);
-                // glslang's HLSL frontend defaults to row-major SPIR-V
-                // decoration for cbuffer matrices regardless of
-                // `#pragma pack_matrix`. Force column-major per member so
-                // the GS reads the same matrix the VS/FS GLSL UBO sees.
-                bool is_matrix =
-                    hlsl_ty == "float2x2" || hlsl_ty == "float3x3" || hlsl_ty == "float4x4" ||
-                    hlsl_ty == "float2x3" || hlsl_ty == "float2x4" || hlsl_ty == "float3x2" ||
-                    hlsl_ty == "float3x4" || hlsl_ty == "float4x2" || hlsl_ty == "float4x3";
-                if (is_matrix) synth += "    column_major ";
-                else           synth += "    ";
-                synth += hlsl_ty + " " + name + array + ";\n";
-            }
-            synth += "};\n";
+            synth += "\n// === auto-generated shared uniforms (HLSL, std140 via packoffset) ===\n";
+            synth += EmitCBufferStd140(uniforms_union);
         }
 
         body = RewriteGSMain(std::move(body));
@@ -1188,29 +1256,8 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
 
     std::string uniform_block;
     if (! uniforms_union.empty()) {
-        uniform_block += "\n// === auto-generated shared uniforms (HLSL) ===\n";
-        uniform_block += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
-        for (const auto& [name, ty] : uniforms_union) {
-            std::string base_ty = ty;
-            std::string array;
-            if (auto pos = ty.find('['); pos != std::string::npos) {
-                base_ty = ty.substr(0, pos);
-                array   = ty.substr(pos);
-            }
-            std::string hlsl_ty = ToHLSLType(base_ty);
-            // glslang's HLSL frontend defaults to row-major SPIR-V decoration
-            // for cbuffer matrices regardless of `#pragma pack_matrix`. Force
-            // column-major per member so the C++ uploader's column-major data
-            // is interpreted correctly.
-            bool is_matrix =
-                hlsl_ty == "float2x2" || hlsl_ty == "float3x3" || hlsl_ty == "float4x4" ||
-                hlsl_ty == "float2x3" || hlsl_ty == "float2x4" || hlsl_ty == "float3x2" ||
-                hlsl_ty == "float3x4" || hlsl_ty == "float4x2" || hlsl_ty == "float4x3";
-            if (is_matrix) uniform_block += "    column_major ";
-            else           uniform_block += "    ";
-            uniform_block += hlsl_ty + " " + name + array + ";\n";
-        }
-        uniform_block += "};\n";
+        uniform_block += "\n// === auto-generated shared uniforms (HLSL, std140 via packoffset) ===\n";
+        uniform_block += EmitCBufferStd140(uniforms_union);
     }
 
     // Texture2D + paired SamplerState per stripped sampler. Bindings start
