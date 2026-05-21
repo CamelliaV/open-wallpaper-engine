@@ -94,11 +94,20 @@ static constexpr const char* pre_shader_code = R"(// auto-generated WE→HLSL pr
 #define atan(a,b) atan2((a),(b))
 #define dFdx ddx
 #define dFdy(x) (-ddy(x))
-// Note: GLSL `mod(a,b)` and HLSL `fmod(a,b)` differ for negative arguments
-// (mod uses floor, fmod uses trunc). We don't macro-rewrite either — WE
-// shaders that need `mod` typically supply their own definition, and the
-// rest call `fmod` directly. Mapping `mod`→`fmod` via macro mangled user
-// `float mod(...)` declarations.
+
+// GLSL `mod(a, b)` is `a - b * floor(a / b)` and isn't an HLSL builtin
+// (HLSL has `fmod`, but it uses trunc for the quotient — different sign
+// behavior for negative args). Provide a `mod` function so shaders that
+// call it without supplying their own definition still compile. A macro
+// rewrite (`#define mod fmod`) was tried but mangled user `float mod(...)`
+// declarations.
+float  mod(float  a, float  b) { return a - b * floor(a / b); }
+float2 mod(float2 a, float2 b) { return a - b * floor(a / b); }
+float3 mod(float3 a, float3 b) { return a - b * floor(a / b); }
+float4 mod(float4 a, float4 b) { return a - b * floor(a / b); }
+float2 mod(float2 a, float  b) { return a - b * floor(a / b); }
+float3 mod(float3 a, float  b) { return a - b * floor(a / b); }
+float4 mod(float4 a, float  b) { return a - b * floor(a / b); }
 // HLSL has saturate, mul, lerp, frac, ddx/ddy, fwidth, max, min, clip, log10,
 // pow as builtins — most of the C++-side overload workarounds needed for the
 // GLSL frontend disappear here.
@@ -1204,21 +1213,41 @@ inline void SaveShaderToFile(std::span<const ShaderCode> codes, fs::IBinaryStrea
 std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
                                          WPShaderInfo*                       pWPShaderInfo,
                                          const std::vector<WPShaderTexInfo>& texinfos) {
-    std::string            newsrc(src);
-    std::string::size_type pos = 0;
-    std::string            include;
-    while (pos = src.find("#include", pos), pos != std::string::npos) {
-        auto begin = pos;
-        pos        = src.find_first_of('\n', pos);
-        newsrc.replace(begin, pos - begin, pos - begin, ' ');
-        include.append(src.substr(begin, pos - begin) + "\n");
-    }
-    include = LoadGlslInclude(vfs, include);
+    // Expand `#include "FILE"` in place: replace each include line with its
+    // resolved content (recursively expanded). Preserves the include's
+    // original position so a `struct Grid { ... }; #include "common.h"`
+    // pattern doesn't end up nesting the include's functions inside the
+    // struct body. ParseWPShader still runs over the resolved include text
+    // (for `// [COMBO]` / `uniform NAME // {json}` extraction) and over the
+    // user source (sans include directives).
+    std::string newsrc;
+    newsrc.reserve(src.size());
+    std::string all_includes;
 
-    ParseWPShader(include, pWPShaderInfo, texinfos);
+    usize cursor = 0;
+    while (true) {
+        auto inc = src.find("#include", cursor);
+        if (inc == std::string::npos) {
+            newsrc.append(src, cursor, std::string::npos);
+            break;
+        }
+        // Copy up to the include line.
+        newsrc.append(src, cursor, inc - cursor);
+        auto eol = src.find('\n', inc);
+        if (eol == std::string::npos) eol = src.size();
+        auto line = src.substr(inc, eol - inc);
+
+        // Resolve this one include (recursively) and splice in.
+        std::string expanded = LoadGlslInclude(vfs, line + "\n");
+        newsrc.append(expanded);
+        all_includes.append(expanded);
+
+        cursor = eol;
+    }
+
+    ParseWPShader(all_includes, pWPShaderInfo, texinfos);
     ParseWPShader(newsrc, pWPShaderInfo, texinfos);
 
-    newsrc.insert(FindIncludeInsertPos(newsrc, 0), include);
     return newsrc;
 }
 
