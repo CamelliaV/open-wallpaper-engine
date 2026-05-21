@@ -213,7 +213,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
             const Vector2f mouseCentered = Vector2f(&m_mousePos[0]) - Vector2f { 0.5f, 0.5f };
             para = Vector2f { 0.5f, 0.5f } +
                    (Scaling(1.0f, -1.0f) * mouseCentered) * m_parallax.mouseinfluence;
-        }        m_parallax.mouseinfluence;
+        }
         updateOp(G_PARALLAXPOSITION, std::array { para[0], para[1] });
     }
 
@@ -240,23 +240,30 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         updateOp(gtrans, std::array { f.x, f.y });
     }
 
+    // WE's `g_LightsPosition[4]` is a vec3 array; std140 pads to vec4 stride
+    // (16B) so the trailing scalar slot stays at 0.
     if (info.has_LP) {
-        std::array<float, 16> lights { 0 };
-        std::array<float, 12> lights_color { 0 };
-        unsigned                  i = 0;
+        constexpr unsigned kMaxLights = 4;
+        std::array<float, kMaxLights * 4> lights_pos { 0 };
+        std::array<float, 12>             lights_color_legacy { 0 };
+        unsigned i = 0;
         for (auto& l : m_scene->lights) {
-            if (i == 4) break;
+            if (i == kMaxLights) break;
+            if (! l->runtimeVisible()) { i++; continue; }
             rstd_assert(l->node() != nullptr);
             const auto& trans = l->node()->Translate();
-            std::copy(trans.begin(), trans.end(), lights.begin() + i * 4);
+            lights_pos[i * 4 + 0] = trans.x();
+            lights_pos[i * 4 + 1] = trans.y();
+            lights_pos[i * 4 + 2] = trans.z();
+            lights_pos[i * 4 + 3] = 0.0f;
             if (i < 3) {
-                const auto& color = l->premultipliedColor();
-                std::copy(color.begin(), color.end(), lights_color.begin() + i * 4);
+                const auto& cp = l->premultipliedColor();
+                std::copy(cp.begin(), cp.end(), lights_color_legacy.begin() + i * 4);
             }
             i++;
         }
-        updateOp(G_LP, lights);
-        updateOp(G_LCP, lights_color);
+        updateOp(G_LP, lights_pos);
+        updateOp(G_LCP, lights_color_legacy);
     }
 
     // Script-driven per-frame overrides. updateOp overlays the material's

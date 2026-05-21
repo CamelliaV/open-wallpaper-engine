@@ -322,7 +322,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
             // an effect-local fbo registered with a non-conventional name
             // (e.g. WE DOF's `_rt__coc_<addr>`) — already a valid RT.
         } else {
-            // unsupported special tex (shadow atlas, light cookie, ...).
+            // unsupported special tex (light cookie, etc.).
             // Drop the binding so it's skipped instead of looked up as a
             // missing texture.
             rstd_warn("ignoring unsupported special tex \"{}\"", name);
@@ -1264,11 +1264,38 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
                                             Vector3f(light_obj.scale.data()),
                                             Vector3f(light_obj.angles.data()));
 
-    context.scene->lights.emplace_back(std::make_unique<SceneLight>(
-        Vector3f(light_obj.color.data()), light_obj.radius, light_obj.intensity));
+    SceneLight::Desc desc;
+    if (light_obj.light == "spot") {
+        desc.type = SceneLightType::Spot;
+    } else if (light_obj.light == "directional") {
+        desc.type = SceneLightType::Directional;
+    } else {
+        desc.type = SceneLightType::Point;  // default + "point"
+    }
+    desc.color             = Vector3f(light_obj.color.data());
+    desc.radius            = light_obj.radius;
+    desc.intensity         = light_obj.intensity;
+    desc.exponent          = light_obj.exponent;
+    desc.attenuation       = light_obj.attenuation;
+    desc.mindistance       = light_obj.mindistance;
+    // WE cone fields are full angles in degrees; convert to cos(half-angle).
+    const float kDegToRad     = 3.14159265358979323846f / 180.0f;
+    desc.inner_cone_cos       = std::cos(light_obj.innercone * 0.5f * kDegToRad);
+    desc.outer_cone_cos       = std::cos(light_obj.outercone * 0.5f * kDegToRad);
+    desc.light_source_size    = light_obj.lightsourcesize;
+    desc.cascade_distances[0] = light_obj.cascadedistance0;
+    desc.cascade_distances[1] = light_obj.cascadedistance1;
+    desc.cascade_distances[2] = light_obj.cascadedistance2;
+    desc.cast_shadow          = light_obj.castshadow;
+    desc.cast_volumetrics     = light_obj.castvolumetrics;
 
+    context.scene->lights.emplace_back(std::make_unique<SceneLight>(desc));
     auto& light = *(context.scene->lights.back());
     light.setNode(node);
+    light.setRuntimeVisible(light_obj.visible);
+    if (! light_obj.visible_user_key.empty()) {
+        light.setVisibleUserKey(light_obj.visible_user_key);
+    }
 
     context.node_id_map[light_obj.id] = { light_obj.parent, node };
     context.scene->sceneGraph->AppendChild(node);

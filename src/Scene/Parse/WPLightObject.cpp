@@ -19,6 +19,12 @@ bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion 
     owe::GetJsonValue(json, "radius", radius);
     owe::GetJsonValue(json, "intensity", intensity);
     owe::GetJsonValue(json, "visible", visible, false);
+    if (json.contains("visible") && json.at("visible").is_object()) {
+        const auto& jv = json.at("visible");
+        if (jv.contains("user") && jv.at("user").is_string()) {
+            visible_user_key = jv.at("user").get<std::string>();
+        }
+    }
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "id", id, false);
     owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);

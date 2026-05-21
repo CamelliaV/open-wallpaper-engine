@@ -623,7 +623,7 @@ void TextLayouter::SetText(std::string_view utf8) {
 
     auto codepoints = DecodeUtf8(utf8);
 
-    // Phase 1: split into lines and look up pre-rasterised glyph metrics.
+    // Split into lines and look up pre-rasterised glyph metrics.
     std::vector<TextLineRunGI> lines;
     lines.emplace_back();
     std::size_t total_glyph_quads = 0;

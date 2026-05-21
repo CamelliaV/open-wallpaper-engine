@@ -114,17 +114,40 @@ static void UpdateUniform(StagingBuffer* buf, const StagingBufferRef& bufref,
                                   value.size() * sizeof(ShaderValue::value_type) };
     auto               uni = block.member_map.find(name);
     if (uni == block.member_map.end()) {
-        // log
         return;
     }
 
-    size_t offset    = uni->second.offset;
-    size_t type_size = sizeof(float) * uni->second.num;
-    if (type_size != value_u8.size()) {
-        // rstd_assert(type_size == value_u8.size());
-        ; // to do
+    const size_t offset    = uni->second.offset;
+    const size_t refl_size = uni->second.size;
+    if (refl_size != value_u8.size()) {
+        rstd_warn("uniform \"{}\" size mismatch: reflected {} bytes, uploader {} bytes",
+                  name, refl_size, value_u8.size());
     }
     buf->writeToBuf(bufref, value_u8, offset);
+}
+
+// Sanity-check the reflected cbuffer: members in `block.member_map` must not
+// overlap. An overlap means glslang packed two members at conflicting std140
+// offsets — uploader writes will clobber neighbouring slots (the failure mode
+// the EmitCBufferStd140 helper was added to prevent).
+static void CheckBlockOverlap(const ShaderReflected::Block& block,
+                              std::string_view shader_name) {
+    struct Span { std::size_t off; std::size_t end; std::string_view name; };
+    std::vector<Span> spans;
+    spans.reserve(block.member_map.size());
+    for (const auto& [n, u] : block.member_map) {
+        if (u.size == 0) continue;
+        spans.push_back({ u.offset, u.offset + u.size, n });
+    }
+    std::sort(spans.begin(), spans.end(),
+              [](const Span& a, const Span& b) { return a.off < b.off; });
+    for (std::size_t i = 1; i < spans.size(); ++i) {
+        if (spans[i].off < spans[i - 1].end) {
+            rstd_warn("cbuffer overlap in \"{}\": \"{}\"[{}..{}) overlaps \"{}\"[{}..{})",
+                      shader_name, spans[i - 1].name, spans[i - 1].off, spans[i - 1].end,
+                      spans[i].name, spans[i].off, spans[i].end);
+        }
+    }
 }
 
 void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
@@ -206,6 +229,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             rstd_error("gen spv reflect failed, {}", shader.name);
             return;
         }
+        for (const auto& blk : ref.blocks) CheckBlockOverlap(blk, shader.name);
 
         auto& bindings = descriptor_info.bindings;
         bindings.resize(ref.binding_map.size());

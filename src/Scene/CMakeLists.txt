@@ -51,6 +51,7 @@ target_sources(owe-base
          Timer/ThreadTimer.cppm
          Timer/FrameTimer.cppm
          Fs/Fs.cppm
+         Lighting/Lighting.cppm
          Scene/Scene.cppm)
 target_link_libraries(owe-base
   PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio owe-types nlohmann_json

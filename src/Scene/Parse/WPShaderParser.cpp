@@ -166,6 +166,11 @@ float    _ww_mul(float4 a, float4 b) { return dot(a, b); }
 // v_TexCoord is vec4).
 #define texSample2D(t, uv)         ((t).Sample(t##_ww_sampler, (uv)))
 #define texSample2DLod(t, uv, lod) ((t).SampleLevel(t##_ww_sampler, (uv), (lod)))
+// SampleCmpLevelZero handles the depth-compare semantics that `sampler2DComparison`
+// implies in GLSL; the paired sampler is a SamplerComparisonState (see
+// HLSLSamplerStateType in WPShaderParser.cpp). uv.xy is the atlas coord,
+// uv.z is the depth to compare against.
+#define texSample2DCompare(t, uv, ref) ((t).SampleCmpLevelZero(t##_ww_sampler, (uv), (ref)))
 #define texture(t, uv)             texSample2D((t), (uv))
 #define textureLod(t, uv, lod)     texSample2DLod((t), (uv), (lod))
 
@@ -644,7 +649,13 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         process_info.uniforms[name] = ty + array;
     }
 
-    std::regex re_tex(R"(uniform\s+sampler2D\s+g_Texture(\d+))", std::regex::ECMAScript);
+    // Any g_TextureN slot that survives preprocess for any sampler variant
+    // (sampler2D, sampler2DComparison/Shadow, samplerCube, sampler3D) gets
+    // recorded. Comparison/shadow first so the shorter `sampler2D` alternative
+    // doesn't swallow the `Comparison` suffix.
+    std::regex re_tex(
+        R"(uniform\s+(?:sampler2DComparison|sampler2DShadow|samplerCube|sampler2D|sampler3D)\s+g_Texture(\d+))",
+        std::regex::ECMAScript);
     for (auto it = std::sregex_iterator(src.begin(), src.end(), re_tex);
          it != std::sregex_iterator();
          it++) {

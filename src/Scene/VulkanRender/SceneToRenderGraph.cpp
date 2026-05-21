@@ -8,6 +8,7 @@ import wescene.spec_texs;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
+import eigen;
 import wescene.vulkan;
 import wescene.scene;
 
@@ -179,7 +180,9 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                         desc.type = ! IsSpecTex(url) ? rg::TexNode::TexType::Imported
                                                      : rg::TexNode::TexType::Temp;
                         input     = builder.createTexNode(desc);
-                        if (IsSpecTex(url)) builder.markVirtualWrite(input);
+                        if (IsSpecTex(url)) {
+                            builder.markVirtualWrite(input);
+                        }
                         if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER))
                             extra.use_mipmap_framebuffer = true;
                     }

@@ -33,6 +33,9 @@ public:
     float                radius { 1000.0f };
     float                intensity { 1.0f };
     bool                 visible { true };
+    // Populated when `visible` is `{user: "<key>", value: <bool>}`. Empty if
+    // the field is a plain boolean literal.
+    std::string          visible_user_key;
 
     // Common cross-kind metadata.
     bool                 locktransforms { false };

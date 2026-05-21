@@ -2003,9 +2003,28 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi) {
 
 void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
                           const nlohmann::json& property) {
-    auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
-    if (! ss) return;
-    ss->runtime().SetUserProperty(key, property);
+    if (auto* ss = static_cast<ScriptScene*>(scene.script_scene.get()); ss != nullptr) {
+        ss->runtime().SetUserProperty(key, property);
+    }
+    // WE field-binding fanout: lights whose `visible` field is tied to
+    // `engine.userProperties[key]` flip runtime visibility here. Scene-only
+    // (no JS) wallpapers also need this, so it runs unconditionally.
+    bool have_bool = false;
+    bool v = false;
+    if (property.is_object() && property.contains("value") &&
+        property.at("value").is_boolean()) {
+        v = property.at("value").get<bool>();
+        have_bool = true;
+    } else if (property.is_boolean()) {
+        v = property.get<bool>();
+        have_bool = true;
+    }
+    if (have_bool) {
+        const std::string key_s { key };
+        for (auto& lp : scene.lights) {
+            if (lp && lp->visibleUserKey() == key_s) lp->setRuntimeVisible(v);
+        }
+    }
 }
 
 void SetScenePersistence(owe::Scene& scene, std::string path) {
