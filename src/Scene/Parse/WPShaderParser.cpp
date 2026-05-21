@@ -98,9 +98,11 @@ static constexpr const char* pre_shader_code = R"(// auto-generated WE→HLSL pr
 // GLSL `mod(a, b)` is `a - b * floor(a / b)` and isn't an HLSL builtin
 // (HLSL has `fmod`, but it uses trunc for the quotient — different sign
 // behavior for negative args). Provide a `mod` function so shaders that
-// call it without supplying their own definition still compile. A macro
-// rewrite (`#define mod fmod`) was tried but mangled user `float mod(...)`
-// declarations.
+// call it without supplying their own definition still compile. A few WE
+// shaders ship their own `float mod(float, float)`; PreShaderHeader scans
+// the user source and `#define`s `WW_USER_MOD` before this block when so,
+// so our definitions are skipped to avoid redefinition errors.
+#ifndef WW_USER_MOD
 float  mod(float  a, float  b) { return a - b * floor(a / b); }
 float2 mod(float2 a, float2 b) { return a - b * floor(a / b); }
 float3 mod(float3 a, float3 b) { return a - b * floor(a / b); }
@@ -108,6 +110,7 @@ float4 mod(float4 a, float4 b) { return a - b * floor(a / b); }
 float2 mod(float2 a, float  b) { return a - b * floor(a / b); }
 float3 mod(float3 a, float  b) { return a - b * floor(a / b); }
 float4 mod(float4 a, float  b) { return a - b * floor(a / b); }
+#endif
 // HLSL has saturate, mul, lerp, frac, ddx/ddy, fwidth, max, min, clip, log10,
 // pow as builtins — most of the C++-side overload workarounds needed for the
 // GLSL frontend disappear here.
@@ -1320,6 +1323,29 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
         if (auto pos = pre.find("__SHADER_TAIL__"); pos != std::string::npos) {
             pre.replace(pos, std::string_view("__SHADER_TAIL__").size(), tail);
         }
+    }
+
+    // If user shader defines its own `mod(...)` at file scope, gate out the
+    // prologue's mod overloads to avoid redefinition errors. Substring scan
+    // is good enough — function decls always start with one of these tokens
+    // followed by a space and `mod(`.
+    static constexpr std::string_view kModSentinels[] = {
+        "\nfloat mod(", "\nfloat2 mod(", "\nfloat3 mod(", "\nfloat4 mod(",
+        "\nvec2 mod(",  "\nvec3 mod(",   "\nvec4 mod(",
+    };
+    bool user_mod = false;
+    for (auto needle : kModSentinels) {
+        if (src.find(needle) != std::string::npos ||
+            (src.size() >= needle.size() - 1 &&
+             std::string_view(src).substr(0, needle.size() - 1) == needle.substr(1))) {
+            user_mod = true;
+            break;
+        }
+    }
+    if (user_mod) {
+        // Inject #define ahead of the prologue text so the #ifndef guard
+        // around our `mod` overloads sees it during glslang preprocess.
+        pre = "#define WW_USER_MOD 1\n" + pre;
     }
 
     std::string combo_defines;

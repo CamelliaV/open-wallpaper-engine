@@ -24,6 +24,17 @@ std::string ReadSizedString(IBinaryStream& f) {
     f.Read(result.data(), len);
     return result;
 }
+
+// WE pkgs were authored on Windows where NTFS is case-insensitive; some
+// shaders reference `effects/foo` while the pkg stores `Effects/foo`. Lower
+// every path going through the map so lookups match regardless of case.
+std::string LowerPath(std::string_view p) {
+    std::string s(p);
+    for (auto& c : s) {
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    }
+    return s;
+}
 } // namespace
 
 std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
@@ -48,19 +59,21 @@ std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
     idx headerSize   = pkg.Tell();
     for (auto& el : pkgfiles) {
         el.offset += headerSize;
-        pkgfs->m_files.insert({ el.path, el });
+        pkgfs->m_files.insert({ LowerPath(el.path), el });
     }
     return pkgfs;
 }
 
-bool WPPkgFs::Contains(std::string_view path) const { return m_files.count(std::string(path)) > 0; }
+bool WPPkgFs::Contains(std::string_view path) const {
+    return m_files.count(LowerPath(path)) > 0;
+}
 
 std::shared_ptr<IBinaryStream> WPPkgFs::Open(std::string_view path) {
     auto pkg = fs::CreateCBinaryStream(m_pkgPath);
     if (! pkg) return nullptr;
-    if (Contains(path)) {
-        const auto& file = m_files.at(std::string(path));
-        return std::make_shared<LimitedBinaryStream>(pkg, file.offset, file.length);
+    auto it = m_files.find(LowerPath(path));
+    if (it != m_files.end()) {
+        return std::make_shared<LimitedBinaryStream>(pkg, it->second.offset, it->second.length);
     }
     return nullptr;
 }
