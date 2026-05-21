@@ -529,8 +529,8 @@ std::shared_ptr<owe::SceneShader> CompileTextShader() {
     using namespace owe::vulkan;
 
     std::array<ShaderCompUnit, 2> units {
-        ShaderCompUnit { owe::ShaderType::VERTEX,   kTextShaderHlsl, "main_vs" },
-        ShaderCompUnit { owe::ShaderType::FRAGMENT, kTextShaderHlsl, "main_ps" },
+        ShaderCompUnit { owe::ShaderType::VERTEX,   kTextShaderHlsl, "main_vs", SourceLang::Hlsl },
+        ShaderCompUnit { owe::ShaderType::FRAGMENT, kTextShaderHlsl, "main_ps", SourceLang::Hlsl },
     };
     ShaderCompOpt opt {};
     opt.target   = VulkanTarget::Vulkan_1_1;
