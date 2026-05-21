@@ -15,10 +15,9 @@
   {
     "dest": "build/_flatpak_deps/nlohmann_json-src",
     "disable-shallow-clone": false,
-    "tag": "v3.11.3",
-    "commit": "9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
-    "type": "git",
-    "url": "https://github.com/nlohmann/json.git",
+    "type": "archive",
+    "url": "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz",
+    "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
     "x-cmake": {
       "name": "nlohmann_json",
       "exclude_from_all": true
@@ -73,7 +72,7 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": false,
-    "commit": "d7d7ed61860f27d92f5091fb1f6ed19dc6037784",
+    "commit": "cd773c9883b20aef14e53dfaf51b5914bc8801f5",
     "type": "git",
     "url": "https://github.com/hypengw/rstd.git",
     "x-cmake": {
@@ -82,7 +81,7 @@
     }
   },
   {
-    "commit": "642b1cc6dfc90810d43105c2182e22257eb21333",
+    "commit": "f07da89d273e42863bd494bb1f8798be0cc71abc",
     "dest": "build/_flatpak_deps/wavsen-src",
     "disable-shallow-clone": true,
     "type": "git",
