@@ -22,6 +22,7 @@ SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
 
 void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                                           std::string_view effect_cam) {
+    if (m_resolved) return;
     std::string_view ppong_a = m_pingpong_a, ppong_b = m_pingpong_b;
     auto             swap_pp = [&ppong_a, &ppong_b]() {
         std::swap(ppong_a, ppong_b);
@@ -74,4 +75,5 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             mesh.ChangeMeshDataFrom(*m_final_mesh);
         }
     }
+    m_resolved = true;
 }

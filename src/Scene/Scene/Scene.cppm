@@ -440,16 +440,24 @@ public:
     SceneImageEffectLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
                           std::string_view pingpong_b);
 
-    void AddEffect(const std::shared_ptr<SceneImageEffect>& node) { m_effects.push_back(node); }
+    void AddEffect(const std::shared_ptr<SceneImageEffect>& node) {
+        m_effects.push_back(node);
+        m_resolved = false;
+    }
     std::size_t EffectCount() const { return m_effects.size(); }
     auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
     const auto& FirstTarget() const { return m_pingpong_a; }
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
     SceneNode&  FinalNode() const { return *m_final_node; }
-    void        SetFinalBlend(BlendMode m) { m_final_blend = m; }
-    void        SetFinalTarget(std::string t) { m_final_target = std::move(t); }
+    void        SetFinalBlend(BlendMode m) { m_final_blend = m; m_resolved = false; }
+    void        SetFinalTarget(std::string t) {
+        m_final_target = std::move(t);
+        m_resolved     = false;
+    }
     const auto& FinalTarget() const { return m_final_target; }
 
+    // Idempotent: second and later calls are no-ops until any of the
+    // mutating setters above (or AddEffect) flips m_resolved back to false.
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
 private:
@@ -462,6 +470,7 @@ private:
     std::unique_ptr<SceneNode> m_final_node;
     BlendMode                  m_final_blend;
     std::string                m_final_target { SpecTex_Default };
+    bool                       m_resolved { false };
 
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
 };
