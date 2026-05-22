@@ -120,6 +120,125 @@ nlohmann::json PropertyValueToUserProperty(const PropertyValue& value) {
     return MakeUserPropertyDescriptor(std::move(v));
 }
 
+// Parse a "r g b" / "r g b a" / "x y z w ..." space-separated float string into
+// a small float vector. Trailing / leading whitespace is tolerated. Returns
+// false when no numbers parse — caller treats as coercion failure.
+bool ParseFloatList(std::string_view s, std::vector<float>& out) {
+    out.clear();
+    std::size_t i = 0;
+    while (i < s.size()) {
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
+        if (i >= s.size()) break;
+        std::size_t start = i;
+        while (i < s.size() && s[i] != ' ' && s[i] != '\t') ++i;
+        std::string tok(s.substr(start, i - start));
+        try {
+            out.push_back(std::stof(tok));
+        } catch (...) {
+            return false;
+        }
+    }
+    return ! out.empty();
+}
+
+// Coerce a project.json property entry into a ShaderValue. Returns ok=false
+// (with skip_reason) for combo / texture / unsupported types — the handler
+// logs and skips those.
+struct UserPropertyCoerceResult {
+    bool        ok { false };
+    ShaderValue value;
+    const char* skip_reason { nullptr };
+};
+
+UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
+    UserPropertyCoerceResult r;
+
+    // Pull the explicit type if present; project.json properties always have
+    // one, but inline {"value": ...} descriptors don't.
+    std::string type;
+    if (prop.is_object() && prop.contains("type") && prop.at("type").is_string()) {
+        type = prop.at("type").get<std::string>();
+    }
+
+    // Combo / texture / file paths can't write a uniform.
+    if (type == "combo") {
+        r.skip_reason = "combo type — live #define recompile not implemented";
+        return r;
+    }
+    if (type == "texture" || type == "replacetexture" || type == "file" ||
+        type == "textinput") {
+        r.skip_reason = "non-uniform property type";
+        return r;
+    }
+
+    // Find the raw value.
+    const nlohmann::json* val_ptr = &prop;
+    if (prop.is_object() && prop.contains("value")) val_ptr = &prop.at("value");
+    const nlohmann::json& v = *val_ptr;
+
+    if (type == "color") {
+        std::vector<float> nums;
+        if (v.is_string() && ParseFloatList(v.get<std::string>(), nums) && nums.size() >= 3) {
+            r.ok    = true;
+            r.value = ShaderValue(std::span<const float>(nums));
+            return r;
+        }
+        r.skip_reason = "color value not a 'r g b[ a]' float string";
+        return r;
+    }
+
+    // Fallback inference when type is missing.
+    if (v.is_boolean()) {
+        r.ok    = true;
+        float f = v.get<bool>() ? 1.0f : 0.0f;
+        r.value = ShaderValue(f);
+        return r;
+    }
+    if (v.is_number()) {
+        r.ok    = true;
+        r.value = ShaderValue(v.get<float>());
+        return r;
+    }
+    if (v.is_string()) {
+        std::vector<float> nums;
+        if (ParseFloatList(v.get<std::string>(), nums)) {
+            if (nums.size() == 1) {
+                r.ok    = true;
+                r.value = ShaderValue(nums[0]);
+                return r;
+            }
+            r.ok    = true;
+            r.value = ShaderValue(std::span<const float>(nums));
+            return r;
+        }
+        r.skip_reason = "string value isn't parseable as float list";
+        return r;
+    }
+    r.skip_reason = "unsupported JSON value shape";
+    return r;
+}
+
+// Push a user-property value to every material whose shader declared a
+// `u_*` uniform with this material-key. Sets the per-material dirty flag so
+// CustomShaderPass picks the new value up next frame.
+void ApplyUserPropertyToShaders(Scene& scene, const std::string& key,
+                                const nlohmann::json& prop) {
+    auto it = scene.shader_user_var_index.find(key);
+    if (it == scene.shader_user_var_index.end()) return;
+
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok) {
+        rstd_warn("user property '{}' skipped: {}",
+                  key, coerced.skip_reason ? coerced.skip_reason : "unknown");
+        return;
+    }
+    for (auto& [material, uniform_name] : it->second) {
+        if (! material) continue;
+        material->customShader.constValues[uniform_name] = coerced.value;
+        material->customShader.dirty = true;
+    }
+}
+
 void MergeProjectUserProperties(
     const std::filesystem::path& project_dir,
     std::unordered_map<std::string, nlohmann::json>& out) {
@@ -402,7 +521,9 @@ void RenderHandler::on(RenderSetScene&& m) {
 void RenderHandler::on(RenderSetSpeed&& m) { m_speed = m.speed; }
 
 void RenderHandler::on(RenderSetUserProperty&& m) {
-    if (m_scene) owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
+    if (! m_scene) return;
+    owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
+    ApplyUserPropertyToShaders(*m_scene, m.key, m.property);
 }
 
 void RenderHandler::on(RenderInit&& m) {
@@ -612,6 +733,13 @@ void MainHandler::loadScene() {
 
     auto rtx = m_render_loop.sender();
     (void)rtx.send(RenderMsg { RenderSetScene { scene } });
+    // First-frame default push: now that the render thread owns the scene,
+    // replay every collected user property (project.json defaults + any
+    // mutations the host already pushed during scene load) so the shader
+    // cbuffer matches what the host UI displays.
+    for (const auto& [key, prop] : m_user_properties) {
+        (void)rtx.send(RenderMsg { RenderSetUserProperty { key, prop } });
+    }
     // draw first frame
     (void)rtx.send(RenderMsg { RenderDraw {} });
 }

@@ -273,6 +273,11 @@ MakeAttrSet(std::initializer_list<VertexAttrSpec> specs) {
 struct SceneMaterialCustomShader {
     std::shared_ptr<SceneShader> shader;
     ShaderValues                 constValues;
+    // Set when constValues was mutated outside of prepare()/parse — e.g. a
+    // RenderSetUserProperty handler writing a new user-property value. The
+    // pass's per-frame update_op picks this up, re-writes the affected cbuffer
+    // members, and clears the flag.
+    bool                         dirty { false };
 };
 
 struct SceneMaterial {

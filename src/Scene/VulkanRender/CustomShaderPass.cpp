@@ -452,7 +452,19 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                             node,
                             &sprites,
                             &vk_textures,
-                            update_dyn_buf_op]() {
+                            update_dyn_buf_op,
+                            mat = &material_ref]() {
+            // Re-push constValues when the host wrote a new user property since
+            // the last frame. Same-thread mutation (RenderHandler runs on the
+            // render loop), so no atomic needed.
+            if (mat->customShader.dirty) {
+                for (auto& v : mat->customShader.constValues) {
+                    if (exists(block.member_map, v.first)) {
+                        UpdateUniform(buf, *bufref, block, v.first, v.second);
+                    }
+                }
+                mat->customShader.dirty = false;
+            }
             auto update_unf_op = [&block, buf, bufref](std::string_view       name,
                                                        owe::ShaderValue value) {
                 UpdateUniform(buf, *bufref, block, name, value);
@@ -486,6 +498,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                     }
                 }
             }
+            // const_values was just fully written — clear any pending re-push
+            // request from a prior RenderSetUserProperty.
+            material_ref.customShader.dirty = false;
         }
         m_desc.update_op();
     }
