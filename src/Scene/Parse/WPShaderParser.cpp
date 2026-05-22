@@ -1,10 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
-
-
 #include "Utils/String.h"
-
 
 module wescene.parse;
 import nlohmann.json;
@@ -16,6 +13,7 @@ import wescene.shader_compile;
 import wescene.scene;
 import wescene.common;
 import wescene.utils;
+import :shader_lex;
 
 static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 
@@ -27,11 +25,8 @@ using namespace owe;
 namespace
 {
 
-// Lightweight scanners for GLSL declaration lines. Each WE shader decl is
-// line-scoped so a hand-written scan is enough.
-
-inline bool DLisWs(char c)    { return c == ' ' || c == '\t'; }
-inline bool DLisWord(char c)  { return std::isalnum((unsigned char)c) || c == '_'; }
+// Decl scanners over GLSL declaration lines. Each WE shader decl is
+// line-scoped; the Cursor primitives in :shader_lex do all char-level work.
 
 struct DeclMatch {
     std::size_t start;        // offset of leading newline (or 0 at file start)
@@ -43,105 +38,63 @@ struct DeclMatch {
     std::string_view array;   // "[N]" or empty
 };
 
-// Try to match `[ws]<storage_kw> <type> <name>[opt-array][ws];` starting at
-// `line_start`. The match is anchored — leading non-whitespace bytes fail it.
-// Returned offsets are absolute into `src`.
+// Try to match `[ws]<storage_kw> <type> <name>[opt-array][ws];` on the line
+// starting at `line_start`. Anchored — leading non-whitespace fails it.
 inline std::optional<DeclMatch>
 TryParseDeclLine(std::string_view src, std::size_t line_start,
                  std::initializer_list<std::string_view> storage_kws) {
-    std::size_t p = line_start;
-    while (p < src.size() && DLisWs(src[p])) ++p;
-    if (p == src.size()) return std::nullopt;
+    std::size_t line_end = src.find('\n', line_start);
+    if (line_end == std::string_view::npos) line_end = src.size();
+    shader_lex::Cursor c(src.substr(line_start, line_end - line_start));
+    c.SkipHSpace();
 
-    // Match a storage keyword.
-    std::string_view tail = src.substr(p);
     std::string_view kw;
     for (auto k : storage_kws) {
-        if (tail.size() >= k.size() && tail.substr(0, k.size()) == k &&
-            (tail.size() == k.size() || DLisWs(tail[k.size()]))) {
-            kw = k;
-            break;
-        }
+        auto s = c.Save();
+        if (c.MatchKeyword(k)) { kw = k; break; }
+        c.Restore(s);
     }
     if (kw.empty()) return std::nullopt;
-    p += kw.size();
-
-    auto skip_ws = [&]() { while (p < src.size() && DLisWs(src[p])) ++p; };
-    auto read_ident = [&](std::string_view& out) {
-        std::size_t s = p;
-        while (p < src.size() && DLisWord(src[p])) ++p;
-        if (p == s) return false;
-        out = src.substr(s, p - s);
-        return true;
-    };
-
-    skip_ws();
-    std::string_view type;
-    if (! read_ident(type)) return std::nullopt;
-    skip_ws();
-    std::string_view name;
-    if (! read_ident(name)) return std::nullopt;
-    skip_ws();
-
-    std::string_view array {};
-    if (p < src.size() && src[p] == '[') {
-        std::size_t s = p;
-        while (p < src.size() && src[p] != ']') ++p;
-        if (p == src.size()) return std::nullopt;
-        ++p;
-        array = src.substr(s, p - s);
-        skip_ws();
-    }
-
-    if (p == src.size() || src[p] != ';') return std::nullopt;
-    ++p;
+    c.SkipHSpace();
+    auto type = c.ReadIdent(); if (! type) return std::nullopt;
+    c.SkipHSpace();
+    auto name = c.ReadIdent(); if (! name) return std::nullopt;
+    c.SkipHSpace();
+    auto array = c.ReadArraySuffix();
+    c.SkipHSpace();
+    if (! c.MatchChar(';')) return std::nullopt;
 
     DeclMatch m;
     m.start       = line_start;
-    m.end         = p;
-    // Caller decides whether to keep the newline as a strip-anchor — supply
-    // a default of 0 when line_start is already past the newline.
+    m.end         = line_start + c.Pos();
     m.keep_prefix = 0;
     m.storage     = kw;
-    m.type        = type;
-    m.name        = name;
-    m.array       = array;
+    m.type        = *type;
+    m.name        = *name;
+    m.array       = array.value_or(std::string_view{});
     return m;
 }
 
-// Iterate every line and try to parse a decl. Caller provides the storage
-// keywords of interest. Yields one DeclMatch per matching line; `keep_prefix`
-// is set to 1 when a leading newline exists at that position (so callers that
-// strip the decl line keep the newline as a paragraph anchor).
+// Iterate every line; yield one DeclMatch per matching line. `keep_prefix`
+// is 1 when a leading newline exists (so callers stripping decl lines keep
+// the newline as a paragraph anchor).
 template<typename Fn>
 inline void ForEachDeclLine(std::string_view src,
                             std::initializer_list<std::string_view> storage_kws,
                             Fn&& fn) {
-    std::size_t pos = 0;
-    while (pos <= src.size()) {
-        std::size_t line_start = pos;
-        std::size_t prefix     = 0;
-        if (line_start > 0 && src[line_start - 1] == '\n') {
-            // Keep leading newline when caller strips the decl line.
-            prefix = 1;
-        }
-        if (auto m = TryParseDeclLine(src, line_start, storage_kws)) {
+    shader_lex::LineWalker w(src);
+    for (; ! w.Done(); w.Step()) {
+        if (auto m = TryParseDeclLine(src, w.LineStart(), storage_kws)) {
             DeclMatch out = *m;
-            // Adjust to anchor on the line's leading newline (matches the
-            // (^|\n) capture group behavior the old regex relied on).
-            if (line_start > 0 && src[line_start - 1] == '\n') {
-                out.start       = line_start - 1;
+            if (w.LineStart() > 0) {
+                out.start       = w.LineStart() - 1;
                 out.keep_prefix = 1;
             } else {
-                out.start       = line_start;
+                out.start       = w.LineStart();
                 out.keep_prefix = 0;
             }
-            (void)prefix;
             fn(out);
         }
-        auto nl = src.find('\n', pos);
-        if (nl == std::string_view::npos) break;
-        pos = nl + 1;
     }
 }
 
@@ -452,46 +405,39 @@ __SHADER_PLACEHOLD__
 )";
 
 inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
-    std::string::size_type pos = 0;
-    std::string            output;
-    std::string::size_type linePos = std::string::npos;
+    std::string output;
+    output.reserve(input.size());
+    std::size_t pos = 0;
+    shader_lex::LineWalker w(input);
+    for (; ! w.Done(); w.Step()) {
+        shader_lex::Cursor c(input);
+        c.SeekTo(w.LineStart());
+        if (! c.MatchHashDirective("include")) continue;
 
-    while (linePos = input.find("#include", pos), linePos != std::string::npos) {
-        // Skip `//#include ...` and other lines where `#include` sits
-        // inside a comment / trailing context. Walk back to the start of
-        // the line and require it to be whitespace-only up to `#`.
-        std::string::size_type line_start = input.rfind('\n', linePos);
-        line_start = (line_start == std::string::npos) ? 0 : line_start + 1;
-        bool is_comment = false;
-        for (auto i = line_start; i < linePos; ++i) {
-            char c = input[i];
-            if (c == ' ' || c == '\t') continue;
-            is_comment = true;
-            break;
-        }
-        if (is_comment) {
-            auto next = linePos + std::string_view("#include").size();
-            output.append(input.substr(pos, next - pos));
-            pos = next;
+        // Emit everything up to the directive line, then resolve the include
+        // and append the recursively-expanded body. Bytes after the directive
+        // on the same line (rare in practice) are skipped — matching the
+        // original behavior.
+        output.append(input, pos, w.LineStart() - pos);
+        std::string line = input.substr(w.LineStart(), w.LineEnd() - w.LineStart());
+        auto in_p = line.find_first_of('\"');
+        auto in_e = line.find_last_of('\"');
+        if (in_p == std::string::npos || in_e == std::string::npos || in_e <= in_p) {
+            // Malformed include — preserve verbatim.
+            output.append(line);
+            pos = w.LineEnd();
             continue;
         }
-
-        auto lineEnd  = input.find_first_of('\n', linePos);
-        auto lineSize = lineEnd - linePos;
-        auto lineStr  = input.substr(linePos, lineSize);
-        output.append(input.substr(pos, linePos - pos));
-
-        auto inP         = lineStr.find_first_of('\"') + 1;
-        auto inE         = lineStr.find_last_of('\"');
-        auto includeName = lineStr.substr(inP, inE - inP);
-        auto includeSrc  = fs::GetFileContent(vfs, "/assets/shaders/" + includeName);
-        output.append("\n//-----include " + includeName + "\n");
+        std::string includeName = line.substr(in_p + 1, in_e - in_p - 1);
+        std::string includeSrc  = fs::GetFileContent(vfs, "/assets/shaders/" + includeName);
+        output.append("\n//-----include ");
+        output.append(includeName);
+        output.append("\n");
         output.append(LoadGlslInclude(vfs, includeSrc));
         output.append("\n//-----include end\n");
-
-        pos = lineEnd;
+        pos = w.LineEnd();
     }
-    output.append(input.substr(pos));
+    output.append(input, pos, std::string::npos);
     return output;
 }
 
@@ -504,65 +450,57 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
 // Returns 0 when no preceding decls are found or the source has multiple
 // entry points (post-include shaders we can't reason about).
 inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
+    using shader_lex::PpKind;
     (void)startPos;
 
     const usize main_pos = src.find("void main(");
     if (main_pos == std::string::npos) return 0;
     if (src.find("void main(", main_pos + 2) != std::string::npos) return 0;
 
-    // Walk lines; track:
-    //   after_pos   — first byte of the line right after the last decl
-    //                  (attribute / varying / uniform / struct)
-    //   if_ranges   — every (start, end) of `#if` ... `#endif`, used to bump
-    //                  after_pos past the enclosing region if it landed inside.
-    usize                                     after_pos = std::string::npos;
-    std::vector<std::pair<usize, usize>>      if_ranges;
-    std::vector<usize>                        if_stack;
+    usize after_pos = std::string::npos;
+    std::vector<std::pair<usize, usize>> if_ranges;
+    std::vector<usize>                   if_stack;
     constexpr std::array<std::string_view, 4> kKws { "attribute", "varying",
                                                      "uniform", "struct" };
 
-    usize line_start = 0;
-    while (line_start < src.size() && line_start < main_pos) {
-        usize nl = src.find('\n', line_start);
-        if (nl == std::string::npos) nl = src.size();
-        if (nl > main_pos) nl = main_pos;
+    shader_lex::LineWalker w(src);
+    for (; ! w.Done(); w.Step()) {
+        if (w.LineStart() >= main_pos) break;
+        usize line_end = std::min(w.LineEnd(), main_pos);
 
-        // Trim leading whitespace.
-        usize p = line_start;
-        while (p < nl && (src[p] == ' ' || src[p] == '\t')) ++p;
+        shader_lex::Cursor c(src);
+        c.SeekTo(w.LineStart());
+        c.SkipHSpace();
+        if (c.Eof() || c.Pos() >= line_end) continue;
 
-        // Match `#if` / `#endif` (only at top of trimmed line).
-        if (p < nl && src[p] == '#') {
-            std::string_view rest(src.data() + p, nl - p);
-            if (rest.size() >= 3 && rest.substr(0, 3) == "#if") {
-                if_stack.push_back(line_start);
-            } else if (rest.size() >= 6 && rest.substr(0, 6) == "#endif") {
+        if (c.Peek() == '#') {
+            shader_lex::Cursor cc(src);
+            cc.SeekTo(w.LineStart());
+            auto kind = shader_lex::ClassifyPreproc(cc);
+            if (kind == PpKind::If || kind == PpKind::Ifdef || kind == PpKind::Ifndef) {
+                if_stack.push_back(w.LineStart());
+            } else if (kind == PpKind::Endif) {
                 if (! if_stack.empty()) {
                     usize start = if_stack.back();
                     if_stack.pop_back();
-                    // `end` is one past this line's newline.
-                    usize end = (nl < src.size()) ? nl + 1 : nl;
+                    usize end = (w.LineEnd() < src.size()) ? w.LineEnd() + 1 : w.LineEnd();
                     if_ranges.emplace_back(start, end);
                 }
             }
-        } else if (p < nl) {
+        } else {
             for (auto kw : kKws) {
-                if (nl - p >= kw.size() + 1 &&
-                    src.compare(p, kw.size(), kw) == 0 &&
-                    (src[p + kw.size()] == ' ' || src[p + kw.size()] == '\t')) {
-                    // Decl line found — set after_pos to the next line's start.
-                    after_pos = (nl < src.size()) ? nl + 1 : nl;
+                shader_lex::Cursor probe(src);
+                probe.SeekTo(c.Pos());
+                if (probe.MatchKeyword(kw) && probe.Pos() < line_end &&
+                    shader_lex::IsHSpace(src[probe.Pos()])) {
+                    after_pos = (w.LineEnd() < src.size()) ? w.LineEnd() + 1 : w.LineEnd();
                     break;
                 }
             }
         }
-
-        if (nl >= src.size()) break;
-        line_start = nl + 1;
     }
 
     usize pos = (after_pos == std::string::npos) ? 0 : std::min(after_pos, main_pos);
-    // If `pos` landed inside any `#if/#endif` span, push it past the block.
     for (const auto& [s, e] : if_ranges) {
         if (pos > s && pos <= e) pos = e;
     }
@@ -576,49 +514,26 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
 // rejects it as a preprocess error. Stack-walk the source, and when
 // `#endif` would pop an empty stack, comment the line instead.
 inline std::string BalanceConditionals(std::string src) {
-    auto is_id_char = [](char c) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-               (c >= '0' && c <= '9') || c == '_';
-    };
-    auto starts_with_word = [&](std::string_view s, std::string_view w) {
-        if (s.size() < w.size()) return false;
-        if (s.substr(0, w.size()) != w) return false;
-        if (s.size() == w.size()) return true;
-        return ! is_id_char(s[w.size()]);
-    };
-
+    using shader_lex::PpKind;
     int         depth = 0;
     std::string out;
     out.reserve(src.size() + 32);
-    usize cursor = 0;
-    while (cursor < src.size()) {
-        usize eol = src.find('\n', cursor);
-        if (eol == std::string::npos) eol = src.size();
-        std::string_view line(src.data() + cursor, eol - cursor);
-
-        // Trim leading whitespace to find the directive start.
-        usize s = 0;
-        while (s < line.size() && (line[s] == ' ' || line[s] == '\t')) ++s;
+    shader_lex::LineWalker w(src);
+    for (; ! w.Done(); w.Step()) {
+        shader_lex::Cursor c(src);
+        c.SeekTo(w.LineStart());
+        auto kind = shader_lex::ClassifyPreproc(c);
         bool stray_endif = false;
-        if (s < line.size() && line[s] == '#') {
-            usize t = s + 1;
-            while (t < line.size() && (line[t] == ' ' || line[t] == '\t')) ++t;
-            std::string_view rest = line.substr(t);
-            if (starts_with_word(rest, "if") || starts_with_word(rest, "ifdef") ||
-                starts_with_word(rest, "ifndef")) {
-                ++depth;
-            } else if (starts_with_word(rest, "endif")) {
-                if (depth == 0) stray_endif = true;
-                else --depth;
-            }
+        switch (kind) {
+        case PpKind::If:
+        case PpKind::Ifdef:
+        case PpKind::Ifndef: ++depth; break;
+        case PpKind::Endif:  if (depth == 0) stray_endif = true; else --depth; break;
+        default: break;
         }
-
-        if (stray_endif) {
-            out.append("// (ww stray-endif) ");
-        }
-        out.append(line);
-        if (eol < src.size()) out.push_back('\n');
-        cursor = eol + 1;
+        if (stray_endif) out.append("// (ww stray-endif) ");
+        out.append(src, w.LineStart(), w.LineEnd() - w.LineStart());
+        if (w.LineEnd() < src.size()) out.push_back('\n');
     }
     return out;
 }
@@ -628,26 +543,21 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     std::string with_prologue = owe::WPShaderParser::PreShaderHeader(in_src, combos, type);
 
     // `#require` is a WE-specific marker, not a real preprocessor directive.
-    // Comment out each occurrence (line must start with `#require`).
+    // Prefix `//` to neutralize it. Allowed leading horizontal whitespace.
     {
         std::string out;
         out.reserve(with_prologue.size());
-        std::size_t pos = 0;
-        while (pos < with_prologue.size()) {
-            std::size_t line_start = pos;
-            // Line must begin at start of file or right after a newline; the
-            // outer loop guarantees that since we only step past '\n'.
-            constexpr std::string_view kReq { "#require " };
-            if (with_prologue.compare(line_start, kReq.size(), kReq) == 0) {
+        shader_lex::LineWalker w(with_prologue);
+        for (; ! w.Done(); w.Step()) {
+            shader_lex::Cursor c(with_prologue);
+            c.SeekTo(w.LineStart());
+            auto saved = c.Save();
+            if (c.MatchHashDirective("require")) {
                 out.append("//");
             }
-            std::size_t nl = with_prologue.find('\n', pos);
-            if (nl == std::string::npos) {
-                out.append(with_prologue, pos, std::string::npos);
-                break;
-            }
-            out.append(with_prologue, pos, nl + 1 - pos);
-            pos = nl + 1;
+            c.Restore(saved);
+            out.append(with_prologue, w.LineStart(), w.LineEnd() - w.LineStart());
+            if (w.LineEnd() < with_prologue.size()) out.push_back('\n');
         }
         with_prologue = std::move(out);
     }
@@ -827,7 +737,7 @@ inline std::string StripUniforms(const std::string& src) {
 inline std::optional<IODecl> ParseIODecl(const std::string& line) {
     // Skip leading newline / CR that the capture loops preserved as an anchor.
     std::size_t start = 0;
-    while (start < line.size() && (line[start] == '\n' || line[start] == '\r')) ++start;
+    while (start < line.size() && shader_lex::IsVSpace(line[start])) ++start;
     auto m = TryParseDeclLine(line, start, { "attribute", "varying", "in", "out" });
     if (! m) return std::nullopt;
     return IODecl { StorageCharFor(std::string(m->storage)),
@@ -1336,48 +1246,23 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
     std::string all_includes;
 
     usize cursor = 0;
-    while (true) {
-        auto inc = src.find("#include", cursor);
-        if (inc == std::string::npos) {
-            newsrc.append(src, cursor, std::string::npos);
-            break;
-        }
-        // Skip `//#include ...` (commented-out line) — some WE community
-        // shaders leave dead includes like `//#include "common.hlsli"`. Scan
-        // back to the start of this line; if anything before `#include` is
-        // non-whitespace, the directive isn't a real one.
-        usize line_start = src.rfind('\n', inc);
-        line_start = (line_start == std::string::npos) ? 0 : line_start + 1;
-        bool is_comment = false;
-        for (usize i = line_start; i < inc; ++i) {
-            char c = src[i];
-            if (c == ' ' || c == '\t') continue;
-            // Common comment marker; anything else non-whitespace is also
-            // not a valid directive start.
-            is_comment = true;
-            break;
-        }
-        if (is_comment) {
-            // Advance past this `#include` token but keep the comment text
-            // verbatim in the output.
-            auto next = inc + std::string_view("#include").size();
-            newsrc.append(src, cursor, next - cursor);
-            cursor = next;
-            continue;
-        }
-        // Copy up to the include line.
-        newsrc.append(src, cursor, inc - cursor);
-        auto eol = src.find('\n', inc);
-        if (eol == std::string::npos) eol = src.size();
-        auto line = src.substr(inc, eol - inc);
+    shader_lex::LineWalker w(src);
+    for (; ! w.Done(); w.Step()) {
+        shader_lex::Cursor c(src);
+        c.SeekTo(w.LineStart());
+        if (! c.MatchHashDirective("include")) continue;
 
-        // Resolve this one include (recursively) and splice in.
+        // Copy bytes up to this line, then splice in the recursively-expanded
+        // include body. The newline after the directive stays as part of the
+        // splice (we step the outer cursor to LineEnd).
+        newsrc.append(src, cursor, w.LineStart() - cursor);
+        std::string line     = src.substr(w.LineStart(), w.LineEnd() - w.LineStart());
         std::string expanded = LoadGlslInclude(vfs, line + "\n");
         newsrc.append(expanded);
         all_includes.append(expanded);
-
-        cursor = eol;
+        cursor = w.LineEnd();
     }
+    newsrc.append(src, cursor, std::string::npos);
 
     ParseWPShader(all_includes, pWPShaderInfo, texinfos);
     ParseWPShader(newsrc, pWPShaderInfo, texinfos);
