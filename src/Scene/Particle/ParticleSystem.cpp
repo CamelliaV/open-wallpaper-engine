@@ -251,11 +251,28 @@ void ParticleSubSystem::Emitt() {
         }
 
         if (m_trail_length > 0) {
+            // A link_mouse controlpoint drives the rope as a cursor trail:
+            // the per-particle position is the spawn cursor and never moves
+            // (no velocity initializer, drag=0), so sampling p.position
+            // collapses the trail to a single point and the GS divides by
+            // zero -> NaN. Record the cp's current world-local offset so
+            // every frame contributes a fresh cursor sample.
+            Eigen::Vector3f trail_sample;
+            bool            use_cursor_trail = false;
+            for (auto const& cp : m_controlpoints) {
+                if (cp.link_mouse) {
+                    trail_sample     = cp.offset.cast<float>();
+                    use_cursor_trail = true;
+                    break;
+                }
+            }
             auto& trails = inst->TrailsVec();
             for (usize si = 0; si < info.particles.size(); si++) {
                 auto& p = info.particles[si];
                 if (! ParticleModify::LifetimeOk(p)) continue;
-                trails[si].Push(Eigen::Vector3f { p.position });
+                trails[si].Push(use_cursor_trail
+                                    ? trail_sample
+                                    : Eigen::Vector3f { p.position });
             }
         }
     }
