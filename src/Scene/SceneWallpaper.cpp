@@ -465,22 +465,25 @@ void RenderHandler::on(RenderDraw&&) {
             fi.mouse_buttons_pressed  = consumePressed();
             fi.mouse_buttons_released = consumeReleased();
             wavsen::audio::AudioSpectrum spec;
-            m_audio_capture.snapshot(spec);
+            const bool primed = m_audio_capture.snapshot(spec);
+            // Treat as silence if wavsen hasn't published recently. Without
+            // this, a disconnected sink / suspended pipeline leaves the
+            // last snapshot frozen and bars stick at the last live value.
+            // 250 ms grace covers the worst-case pipewire batching (quantum
+            // ~21 ms + FFT trigger half-window) by ~10×.
+            constexpr std::int64_t kStaleMs = 250;
+            const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now().time_since_epoch())
+                                    .count();
+            const bool stale = ! primed
+                            || spec.publish_ms == 0
+                            || (now_ms - spec.publish_ms) > kStaleMs;
+            if (stale) spec.bins.fill(0.0f);
             fi.audio_average = spec.bins;
-            // Layer pkg-internal audio response (WPSoundParser-driven) on
-            // top of the system monitor capture so wallpapers with embedded
-            // music still react. Scene::audioAverage is sized 16; only the
-            // first 16 bins overlay.
-            for (std::size_t i = 0; i < m_scene->audioAverage.size(); ++i) {
-                const float local = m_scene->audioAverage[i].load(
-                    std::memory_order_relaxed);
-                fi.audio_average[i] = std::max(fi.audio_average[i], local);
-                m_scene->audioAverage[i].store(local * 0.94f,
-                                                std::memory_order_relaxed);
-            }
-            // Push the merged spectrum to the shader updater so audio-bar
-            // shaders (Simple_Audio_Bars and friends) see live data through
-            // g_AudioSpectrum{16,32,64}{Left,Right}.
+            // pkg-internal music plays through the system sink, so wavsen's
+            // monitor capture already picks it up; no need to overlay
+            // Scene::audioAverage (driven by WPSoundParser). audioAverage
+            // remains a particle-only signal — see ParticleSystem.
             m_scene->shaderValueUpdater->SetAudioSpectrum(
                 std::span<const float, 64>(fi.audio_average));
             owe::script::TickSceneScripts(*m_scene, fi);
