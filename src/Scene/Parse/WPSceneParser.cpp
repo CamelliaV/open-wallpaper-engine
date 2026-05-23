@@ -531,13 +531,16 @@ const auto& f1     = texh.spriteAnim.GetCurFrame();
     material.customShader = materialShader;
     material.name         = wpmat.shader;
 
-    // u_* user-variable uniforms register into the scene-wide index so a
-    // future user-property write can land back on this material's
-    // constValues. Default values seed constValues now so the cbuffer has a
-    // sane initial slot even before the host pushes a user property.
+    // u_* user-variable uniforms: stage records into pWPShaderInfo so the
+    // caller can register them into `Scene::shader_user_var_index` AFTER
+    // moving `material` into a shared_ptr. Registering here would store a
+    // stack-local pointer, freed once `AddMaterial(std::move(material))`
+    // runs — a use-after-free as soon as ApplyUserPropertyToShaders fires.
+    // Default values still seed constValues here; the values get carried
+    // along by the move into the shared_ptr.
     for (const auto& var : pWPShaderInfo->scalar_uniforms) {
         if (! var.is_user || var.material.empty()) continue;
-        pScene->shader_user_var_index[var.material].push_back({ pMaterial, var.name });
+        pWPShaderInfo->user_var_staging.push_back({ var.material, var.name, var.default_value });
         if (! var.default_value.is_null()) {
             ShaderValue sv;
             const auto& v = var.default_value;
@@ -554,6 +557,46 @@ const auto& f1     = texh.spriteAnim.GetCurFrame();
     }
 
     return true;
+}
+
+// Register a (material, shader-info, wpmat) triple into the scene-wide user
+// variable index. Must be called AFTER the SceneMaterial has been moved into
+// a shared_ptr (e.g. `mesh->AddMaterial(std::move(local))`) and `stable_mat`
+// points to `mesh->Material()` / `m_materials.back().get()`. Wires up:
+//   (1) Direct-route u_* whose shader annotation's `material` field is the
+//       wallpaper-level project.json key (the legacy convention).
+//   (2) Instance-bound effect-internal keys from
+//       `wpmat.constantshadervalues_user`, mapped through `info.alias` to
+//       the GLSL uniform name.
+void RegisterShaderUserVarIndex(Scene* pScene, SceneMaterial* stable_mat,
+                                const wpscene::WPMaterial& wpmat,
+                                const WPShaderInfo&        info) {
+    if (! pScene || ! stable_mat) return;
+    for (const auto& rec : info.user_var_staging) {
+        pScene->shader_user_var_index[rec.material].push_back({ stable_mat, rec.name });
+    }
+    for (const auto& [effect_key, wallpaper_key] : wpmat.constantshadervalues_user) {
+        // Resolve effect-internal key → GLSL uniform name via alias.
+        // LoadConstvalue's fallback search (alias entry whose value, after
+        // dropping the leading "u_", matches the key) is honored here too.
+        std::string glname;
+        if (auto it = info.alias.find(effect_key); it != info.alias.end()) {
+            glname = it->second;
+        } else {
+            for (const auto& el : info.alias) {
+                if (el.second.size() > 2 && el.second.substr(2) == effect_key) {
+                    glname = el.second;
+                    break;
+                }
+            }
+        }
+        if (glname.empty()) {
+            rstd_warn("user binding '{}' → no shader uniform with material='{}'",
+                      wallpaper_key, effect_key);
+            continue;
+        }
+        pScene->shader_user_var_index[wallpaper_key].push_back({ stable_mat, glname });
+    }
 }
 
 void LoadAlignment(SceneNode& node, std::string_view align, Vector2f size) {
@@ -881,6 +924,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         material.blenmode = BlendMode::Normal;
     }
     mesh.AddMaterial(std::move(material));
+    RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(),
+                               wpimgobj.material, shaderInfo);
     spImgNode->AddMesh(spMesh);
 
     context.shader_updater->SetNodeData(spImgNode.get(), svData);
@@ -1053,6 +1098,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     }
                 }
                 spMesh->AddMaterial(std::move(material));
+                RegisterShaderUserVarIndex(context.scene.get(), spMesh->Material(),
+                                           wpmat, wpEffShaderInfo);
                 spEffNode->AddMesh(spMesh);
 
                 context.shader_updater->SetNodeData(spEffNode.get(), svData);
@@ -1265,6 +1312,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     LoadControlPoint(*particleSub, particle_obj);
 
     mesh.AddMaterial(std::move(material));
+    RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(),
+                               particle_obj.material, shaderInfo);
     spNode->AddMesh(spMesh);
     context.shader_updater->SetNodeData(spNode.get(), svData);
 
@@ -1672,6 +1721,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         LoadConstvalue(compose_mat, pt_mat, compose_si);
         compose_mat.blenmode = BlendMode::Translucent;
         compose_mesh->AddMaterial(std::move(compose_mat));
+        RegisterShaderUserVarIndex(&scene, compose_mesh->Material(), pt_mat, compose_si);
         compose_node->AddMesh(compose_mesh);
         compose_sv.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         context.shader_updater->SetNodeData(compose_node.get(), compose_sv);
@@ -2029,6 +2079,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs,
         auto pp_mesh = std::make_shared<SceneMesh>();
         pp_mesh->ChangeMeshDataFrom(scene.default_effect_mesh);
         pp_mesh->AddMaterial(std::move(material));
+        RegisterShaderUserVarIndex(&scene, pp_mesh->Material(), wpmat, wpShaderInfo);
         pp_node->AddMesh(pp_mesh);
 
         // Camera name drives CustomShaderPass color-write mask: empty or

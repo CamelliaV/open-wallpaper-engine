@@ -23,6 +23,7 @@ import rstd.cppstd;
 import rstd.log;
 import wescene.scene_wallpaper;
 import waywallen.bridge_ex_swapchain;
+import nlohmann.json;
 
 namespace
 {
@@ -95,16 +96,6 @@ const char* kv_get(const ww_kv_list_t& kv, const char* key) {
             return kv.data[i].value;
     }
     return nullptr;
-}
-
-bool is_native_setting(const char* key) {
-    if (! key) return true;
-    return std::strcmp(key, "volume") == 0 ||
-           std::strcmp(key, "fps") == 0 ||
-           std::strcmp(key, "test_pattern") == 0 ||
-           std::strcmp(key, "enable_audio") == 0 ||
-           std::strcmp(key, "render_node") == 0 ||
-           std::strcmp(key, "msaa") == 0;
 }
 
 // Parse a setting string as f32; falls back to `def` on parse error
@@ -192,11 +183,20 @@ struct HostState {
     owe::SceneWallpaper*     wp { nullptr };
 
     // Render-target extent. Pointer events arrive in pixel coords from
-    // the consumer display; 
+    // the consumer display;
     uint32_t width { 0 };
     uint32_t height { 0 };
 
     std::atomic<bool> shutdown { false };
+
+    // Daemon enforces "Ready before any ReportState" during the spawn
+    // handshake; the scene-load path can fire `setOnClearColor` (and
+    // thus a ReportState send) earlier than `ww_bridge_pool_advertise_caps`
+    // (which is what actually triggers Ready). Stash any clear-colour
+    // emitted before Ready, and flush after advertise_caps succeeds.
+    std::mutex                                clear_mu;
+    bool                                      clear_ready_published { false };
+    std::optional<std::array<float, 3>>       clear_pending;
 };
 
 void signal_shutdown(HostState& s) {
@@ -425,11 +425,36 @@ int main(int argc, char** argv) {
             unsigned long n = std::strtoul(v, &end, 10);
             if (end != v) opts.msaa_samples = static_cast<uint32_t>(n);
         }
-        for (uint32_t i = 0; i < init.settings.count; ++i) {
-            const char* key = init.settings.data[i].key;
-            const char* val = init.settings.data[i].value;
-            if (! key || ! val || is_native_setting(key)) continue;
-            opts.initial_user_properties.emplace_back(key, val);
+        // Per-item user-property overrides arrive as a raw JSON object
+        // (the DB column verbatim) — decoupled from the schema-validated
+        // plugin settings above so no name collision is possible.
+        if (init.user_properties && *init.user_properties) {
+            auto parsed = nlohmann::json::parse(init.user_properties,
+                                                /*cb*/ nullptr,
+                                                /*allow_ex*/ false,
+                                                /*ignore_comments*/ true);
+            if (parsed.is_object()) {
+                // Iterator form: nlohmann's `items()` structured-binding
+                // dispatch chases `std::get` through ADL, which doesn't
+                // resolve cleanly when both this TU and nlohmann_json are
+                // imported as C++20 modules.
+                for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+                    const std::string& k = it.key();
+                    const auto&        v = it.value();
+                    // SceneWallpaper::setPropertyString already accepts the
+                    // wire-string forms WE properties take (numbers
+                    // serialised as decimal, booleans as "true"/"false",
+                    // colour as "r g b[ a]"). Encode non-string values
+                    // through nlohmann::json's printer.
+                    std::string sval;
+                    if (v.is_string())      sval = v.get<std::string>();
+                    else if (v.is_boolean()) sval = v.get<bool>() ? "true" : "false";
+                    else                    sval = v.dump();
+                    opts.initial_user_properties.emplace_back(k, sval);
+                }
+            } else if (! parsed.is_discarded()) {
+                rstd_warn("init.user_properties is not a JSON object; ignored");
+            }
         }
 
         ww_bridge_init_free(&init);
@@ -447,6 +472,13 @@ int main(int argc, char** argv) {
     // DMA-BUF is opaque; alpha only governs daemon-side letterbox bars.
     wp.setOnClearColor([&host](float r, float g, float b) {
         if (host.sock < 0) return;
+        std::scoped_lock _(host.clear_mu);
+        if (! host.clear_ready_published) {
+            // Daemon will reject ReportState received before Ready; stash
+            // the latest value and replay after advertise_caps fires.
+            host.clear_pending = std::array<float, 3> { r, g, b };
+            return;
+        }
         if (int rc = ww_bridge_send_report_state_clear_color(host.sock, r, g, b, 1.0f);
             rc != 0) {
             rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
@@ -571,6 +603,23 @@ int main(int argc, char** argv) {
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
     rstd_info("waywallen-wescene-renderer: ready, advertise sent to daemon");
+
+    // Flip the clear-colour gate now that Ready has been emitted. Replay
+    // any value the scene-load callback stashed during init.
+    {
+        std::scoped_lock _(host.clear_mu);
+        host.clear_ready_published = true;
+        if (host.clear_pending && host.sock >= 0) {
+            auto c = *host.clear_pending;
+            if (int rc = ww_bridge_send_report_state_clear_color(
+                    host.sock, c[0], c[1], c[2], 1.0f);
+                rc != 0) {
+                rstd_warn("waywallen-wescene-renderer: pending report_state(clear_color) "
+                          "flush failed ({})", rc);
+            }
+            host.clear_pending.reset();
+        }
+    }
 
     std::thread reader([&]() { reader_loop(host); });
 

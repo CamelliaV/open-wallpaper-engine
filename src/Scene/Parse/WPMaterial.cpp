@@ -29,6 +29,9 @@ void WPMaterialPass::Update(const WPMaterialPass& p) {
     for(const auto& el:p.constantshadervalues) {
         constantshadervalues[el.first] = el.second;
     }
+    for(const auto& el:p.constantshadervalues_user) {
+        constantshadervalues_user[el.first] = el.second;
+    }
     for(const auto& el:p.combos) {
         combos[el.first] = el.second;
     }
@@ -46,6 +49,9 @@ void WPMaterial::MergePass(const WPMaterialPass& p) {
     }
     for(const auto& el:p.constantshadervalues) {
         constantshadervalues[el.first] = el.second;
+    }
+    for(const auto& el:p.constantshadervalues_user) {
+        constantshadervalues_user[el.first] = el.second;
     }
     for(const auto& el:p.combos) {
         combos[el.first] = el.second;
@@ -74,6 +80,13 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
             owe::GetJsonValue(jC.key(), name);
             owe::GetJsonValue(jC.value(), value);
             constantshadervalues[name] = value;
+            // Capture scene.json instance-level user binding so the parser can
+            // bridge effect-internal keys ("Opacity") to wallpaper-level
+            // project.json keys ("luzopacidad").
+            if (jC.value().is_object() && jC.value().contains("user") &&
+                jC.value().at("user").is_string()) {
+                constantshadervalues_user[name] = jC.value().at("user").get<std::string>();
+            }
         }
     }
     if(json.contains("combos")) {
@@ -130,6 +143,10 @@ bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
             owe::GetJsonValue(jC.key(), name);
             owe::GetJsonValue(jC.value(), value);
             constantshadervalues[name] = value;
+            if (jC.value().is_object() && jC.value().contains("user") &&
+                jC.value().at("user").is_string()) {
+                constantshadervalues_user[name] = jC.value().at("user").get<std::string>();
+            }
         }
     }
     if(jContent.contains("combos")) {

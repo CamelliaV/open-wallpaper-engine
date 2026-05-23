@@ -46,6 +46,11 @@ public:
 
         // pipeline
         VkClearValue       clear_value;
+        // When non-null this pass tracks `scene.clearColor` per-frame
+        // (re-syncing `clear_value.color` from the array each execute);
+        // null means the pass owns a hard-coded clear (e.g. effect-layer
+        // ppong RTs that always reset transparent).
+        const std::array<float, 3>* clear_value_src { nullptr };
         bool               blending { false };
         vvk::Framebuffer   fb;
         PipelineParameters pipeline;

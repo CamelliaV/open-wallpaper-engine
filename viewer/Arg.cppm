@@ -17,6 +17,7 @@ inline constexpr std::string_view OPT_FPS         = "--fps";
 inline constexpr std::string_view OPT_RESOLUTION  = "--resolution";
 inline constexpr std::string_view OPT_CACHE_PATH  = "--cache-path";
 inline constexpr std::string_view OPT_MSAA        = "--msaa";
+inline constexpr std::string_view OPT_USER_PROPS  = "--user-properties";
 
 struct Resolution {
     unsigned w;
@@ -61,6 +62,13 @@ inline void setAndParseArg(argparse::ArgumentParser& arg, int argc, char** argv)
         .default_value<std::uint32_t>(1u)
         .nargs(1)
         .scan<'i', std::uint32_t>();
+
+    arg.add_argument("-P", OPT_USER_PROPS)
+        .help("Path to a JSON file mapping project.json property keys to "
+              "user-edited values (e.g. {\"schemecolor\":\"1 0 0\","
+              "\"audio\":true}). Applied before scene load.")
+        .default_value(std::string())
+        .nargs(1);
 
     arg.add_argument("-R", OPT_RESOLUTION)
         .help("Set the resolution, eg. 1920x1080")

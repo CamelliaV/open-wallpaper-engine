@@ -509,12 +509,17 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         if (out_force_clear) {
             // Per-layer compose RTs want a transparent reset every frame —
             // not the scene's opaque clear color.
-            m_desc.clear_value = VkClearValue { .color = { 0.0f, 0.0f, 0.0f, 0.0f } };
+            m_desc.clear_value     = VkClearValue { .color = { 0.0f, 0.0f, 0.0f, 0.0f } };
+            m_desc.clear_value_src = nullptr;
         } else {
             auto& sc           = scene.clearColor;
             m_desc.clear_value = VkClearValue {
                 .color = { sc[0], sc[1], sc[2], 1.0f },
             };
+            // Track the live scene.clearColor: per-frame re-sync in
+            // execute() picks up live edits (e.g. `schemecolor` user
+            // property changes) without a render-graph rebuild.
+            m_desc.clear_value_src = &scene.clearColor;
         }
     }
     for (auto& tex : releaseTexs()) {
@@ -525,6 +530,17 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
 
 void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     if (m_desc.update_op) m_desc.update_op();
+
+    // Re-sync clear_value from the live scene.clearColor when this pass
+    // tracks the scene clear (i.e. not a per-layer transparent reset).
+    // Cheap: a 3-float copy per pass per frame.
+    if (m_desc.clear_value_src) {
+        const auto& sc       = *m_desc.clear_value_src;
+        m_desc.clear_value.color.float32[0] = sc[0];
+        m_desc.clear_value.color.float32[1] = sc[1];
+        m_desc.clear_value.color.float32[2] = sc[2];
+        m_desc.clear_value.color.float32[3] = 1.0f;
+    }
 
     auto&                   cmd    = rr.command;
     auto&                   outext = m_desc.vk_output.extent;

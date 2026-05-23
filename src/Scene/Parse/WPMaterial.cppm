@@ -29,6 +29,12 @@ public:
     std::vector<nlohmann::json>                         usertextures;  // PKGV0018+; polymorphic
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
+    // scene.json instance-level user binding:
+    //   "constantshadervalues": { "Opacity": {"user":"luzopacidad","value":1} }
+    // Maps effect-internal material key → wallpaper-level project.json key.
+    // The fallback `value` is already extracted into `constantshadervalues`
+    // by GetJsonValue's auto-unwrap.
+    std::unordered_map<std::string, std::string>        constantshadervalues_user;
     std::string                                         target;
     std::vector<WPMaterialPassBindItem>                 bind;
 };
@@ -46,6 +52,7 @@ public:
     std::vector<std::string>                            textures;
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
+    std::unordered_map<std::string, std::string>        constantshadervalues_user;
 
     bool use_puppet { false };
 };

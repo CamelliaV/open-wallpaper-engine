@@ -22,6 +22,17 @@ using WPAliasValueDict = Map<std::string, std::string>;
 
 using WPDefaultTexs = std::vector<std::pair<i32, std::string>>;
 
+// Staged direct-route u_* uniforms (shader annotation's `material` field
+// equals the wallpaper-level project.json key). LoadMaterial fills this
+// during compile; the caller registers it into `Scene::shader_user_var_index`
+// AFTER `AddMaterial` so the stored pointer references the shared_ptr-owned
+// SceneMaterial, not the stack-local one being moved.
+struct UserVarRecord {
+    std::string    material;        // project.json key (== shader annotation's material)
+    std::string    name;            // GLSL identifier (e.g. "u_Brightness")
+    nlohmann::json default_value;   // raw default from annotation; may be null
+};
+
 struct WPShaderInfo {
     Combos           combos;
     ShaderValueMap   svs;
@@ -34,6 +45,11 @@ struct WPShaderInfo {
     // bridge for `u_*` uniforms read `combo_defs / scalar_uniforms`.
     std::vector<wpscene::WPCombo>      combo_defs;
     std::vector<wpscene::WPUniformVar> scalar_uniforms;
+
+    // Filled by LoadMaterial for the direct-binding u_* route. The
+    // scene-instance-level user-binding route (effect-key → wallpaper-key)
+    // is registered separately from `WPMaterial::constantshadervalues_user`.
+    std::vector<UserVarRecord> user_var_staging;
 };
 
 struct WPPreprocessorInfo {

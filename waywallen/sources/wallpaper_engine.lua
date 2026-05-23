@@ -121,6 +121,69 @@ function M.scan(ctx)
     return entries
 end
 
+-- Lazy cache for WE's English UI i18n table. Keys like
+-- `ui_browse_properties_scheme_color` map to friendly labels
+-- ("Scheme color"). One library root ⇒ one cache slot; `false` means
+-- "looked up and not found" so we don't retry on every WallpaperGet.
+local _locale_cache = {}
+
+local LOCALE_REL = "/steamapps/common/wallpaper_engine/locale/ui_en-us.json"
+
+local function load_locale(ctx, library_root)
+    if library_root == nil or library_root == "" then return nil end
+    if _locale_cache[library_root] ~= nil then
+        return _locale_cache[library_root] or nil
+    end
+    local path = library_root .. LOCALE_REL
+    if not ctx.file_exists(path) then
+        _locale_cache[library_root] = false
+        return nil
+    end
+    local content = ctx.read_file(path)
+    if not content then
+        _locale_cache[library_root] = false
+        return nil
+    end
+    local parsed = ctx.json_parse(content)
+    if type(parsed) ~= "table" then
+        _locale_cache[library_root] = false
+        return nil
+    end
+    _locale_cache[library_root] = parsed
+    return parsed
+end
+
+-- Called on demand by WallpaperGet to surface the per-wallpaper
+-- editable property schema (`general.properties` from `project.json`).
+-- Returns a JSON string or nil when the wallpaper has no properties.
+function M.properties(entry, ctx)
+    if not entry.library_root or not entry.external_id then return nil end
+    local proj = entry.library_root .. WORKSHOP .. "/" .. entry.external_id .. "/project.json"
+    if not ctx.file_exists(proj) then return nil end
+    local content = ctx.read_file(proj)
+    if not content then return nil end
+    local parsed = ctx.json_parse(content)
+    if not parsed or type(parsed) ~= "table" then return nil end
+    local props = parsed.general and parsed.general.properties or nil
+    if not props or type(props) ~= "table" or next(props) == nil then return nil end
+
+    -- Resolve `text` from WE's UI locale when it's a known i18n key.
+    -- Author-written labels (free text) miss the lookup and stay as-is.
+    local locale = load_locale(ctx, entry.library_root)
+    if locale then
+        for _, v in pairs(props) do
+            if type(v) == "table" and type(v.text) == "string" then
+                local mapped = locale[v.text]
+                if type(mapped) == "string" and mapped ~= "" then
+                    v.text = mapped
+                end
+            end
+        end
+    end
+
+    return ctx.json_encode(props)
+end
+
 -- SPAWN_VERSION 3: daemon calls this at WallpaperApply time to build
 -- the renderer's CLI argv. `assets` is derived from the Steam library
 -- root; `workshop_id` is the entry's external_id verbatim.

@@ -8,6 +8,7 @@ import rstd.log;
 import wescene.scene_wallpaper;
 import wescene.utils;
 import viewer.common;
+import nlohmann.json;
 
 using namespace std;
 
@@ -110,6 +111,40 @@ int main(int argc, char** argv) {
     std::string cache_path = program.get<std::string>(viewer::OPT_CACHE_PATH);
     if (cache_path.empty()) cache_path = owe::platform::GetCachePath("wescene-renderer");
     psw->setPropertyString(owe::PROPERTY_CACHE_PATH, cache_path);
+
+    // Apply --user-properties FILE before the scene loads so the first
+    // frame already reflects the user's edits. Mirrors the daemon path
+    // (Init.user_properties): JSON object whose values can be strings,
+    // numbers, or booleans; setPropertyString already parses both.
+    if (auto up_path = program.get<std::string>(viewer::OPT_USER_PROPS); ! up_path.empty()) {
+        std::ifstream is(up_path);
+        if (! is) {
+            std::cerr << "--user-properties: cannot open '" << up_path << "'\n";
+            return 1;
+        }
+        std::stringstream ss;
+        ss << is.rdbuf();
+        auto parsed = nlohmann::json::parse(ss.str(),
+                                            /*cb*/ nullptr,
+                                            /*allow_ex*/ false,
+                                            /*ignore_comments*/ true);
+        if (! parsed.is_object()) {
+            std::cerr << "--user-properties: '" << up_path
+                      << "' is not a JSON object\n";
+            return 1;
+        }
+        // Iterator form: `items()` structured-binding chases std::get
+        // through ADL, which doesn't resolve under modules.
+        for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+            const std::string& k = it.key();
+            const auto&        v = it.value();
+            std::string sval;
+            if (v.is_string())       sval = v.get<std::string>();
+            else if (v.is_boolean()) sval = v.get<bool>() ? "true" : "false";
+            else                     sval = v.dump();
+            psw->setPropertyString(k, sval);
+        }
+    }
 
     glfwSetWindowUserPointer(window, &data);
 
