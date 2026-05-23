@@ -15,14 +15,11 @@
 // allow-list bumps required, but the new instance must still satisfy
 // the invariants below or it fails immediately.
 
-#include <set>
-#include <string>
-#include <vector>
-
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include "corpus.hpp"
+import rstd.cppstd;
+import wescene.testing.corpus;
 
 using owe::testing::Corpus;
 

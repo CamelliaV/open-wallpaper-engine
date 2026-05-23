@@ -1,9 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <cstdio>
-#include <filesystem>
-#include <string>
-
+import rstd.cppstd;
 import eigen;
 import nlohmann.json;
 import wescene.scene;

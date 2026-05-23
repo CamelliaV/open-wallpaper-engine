@@ -1,10 +1,6 @@
-module;
-
-#include <cmath>
-
-
 module wescene.utils;
 import eigen;
+import rstd.cppstd;
 
 using namespace owe;
 using namespace Eigen;
@@ -79,11 +75,11 @@ double algorism::PerlinNoise(double x, double y, double z) noexcept {
         150, 254, 138, 236, 205, 93,  222, 114, 67,  29,  24,  72,  243, 141, 128, 195, 78,  66,
         215, 61,  156, 180
     };
-    int X = (int)floor(x) & 255, Y = (int)floor(y) & 255, Z = (int)floor(z) & 255;
+    int X = (int)std::floor(x) & 255, Y = (int)std::floor(y) & 255, Z = (int)std::floor(z) & 255;
 
-    x -= floor(x);
-    y -= floor(y);
-    z -= floor(z);
+    x -= std::floor(x);
+    y -= std::floor(y);
+    z -= std::floor(z);
 
     double u = algorism::PerlinEase(x), v = algorism::PerlinEase(y), w = algorism::PerlinEase(z);
 

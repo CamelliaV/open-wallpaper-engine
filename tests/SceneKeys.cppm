@@ -1,18 +1,42 @@
-#include "scene_keys.hpp"
+// scene.json key-path scanner.
+//
+// Walks every workshop/<id>/scene.pkg under workshop_root, extracts the
+// raw scene.json from the pkg, and aggregates per-pkg-version statistics
+// of every key path observed in the json tree.
 
-#include <cstdint>
+module;
+
 #include <cstdio>
-#include <filesystem>
-#include <map>
-#include <set>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
-#include "pkg_header.hpp"
+#include <nlohmann/json.hpp>
 
+export module wescene.testing.scene_keys;
+
+import rstd.cppstd;
 import wescene.pkg_fs;
 import wescene.fs;
+import wescene.testing.pkg_header;
+
+export namespace owe::testing {
+
+// Returns:
+//   {
+//     "<pkg_version>": {
+//       "total_scenes": <int>,
+//       "keys": {
+//         "<dot.path[].with.brackets>": {
+//           "present_in":  <int>,
+//           "occurrences": <int>,
+//           "value_types": ["object", "array", "string", ...]
+//         },
+//         ...
+//       }
+//     },
+//     ...
+//   }
+nlohmann::json ScanSceneKeys(const std::string& workshop_root);
+
+} // namespace owe::testing
 
 namespace owe::testing {
 
@@ -38,8 +62,6 @@ const char* TypeName(json::value_t t) {
     return "unknown";
 }
 
-// Per-scene observation: count of hits per path, plus the set of value_t
-// names seen at that path within this scene.
 struct LocalObs {
     int                            occurrences { 0 };
     std::set<std::string>          types;
@@ -68,7 +90,6 @@ void Walk(const json& node, std::string& path, LocalMap& out) {
     }
 }
 
-// Global aggregation: per pkg-version → per path → stats.
 struct KeyStats {
     std::uint64_t         present_in { 0 };
     std::uint64_t         occurrences { 0 };

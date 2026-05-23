@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <fstream>
 
 module wescene.scene_wallpaper;
 import wescene.types;
@@ -729,6 +728,7 @@ void MainHandler::loadScene() {
             const auto& c = scene->clearColor;
             m_clear_color_cb(c[0], c[1], c[2]);
         }
+
     }
 
     auto rtx = m_render_loop.sender();

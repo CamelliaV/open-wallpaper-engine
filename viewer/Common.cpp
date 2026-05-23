@@ -1,7 +1,5 @@
 module;
 
-#include <filesystem>
-
 #include <GLFW/glfw3.h>
 
 module viewer.common;

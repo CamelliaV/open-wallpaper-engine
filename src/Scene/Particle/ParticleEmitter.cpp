@@ -1,8 +1,3 @@
-module;
-
-#include <algorithm>
-#include <cmath>
-
 module wescene.scene;
 import eigen;
 import wescene.core;

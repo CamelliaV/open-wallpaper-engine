@@ -1,13 +1,47 @@
-#include "scene_parse_probe.hpp"
+// Per-workshop probe of WPScene::FromJson with explicit pkg version.
 
-#include <algorithm>
-#include <cstdint>
-#include <filesystem>
+module;
+
 #include <nlohmann/json.hpp>
 
+export module wescene.testing.scene_parse_probe;
+
+import rstd.cppstd;
 import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;
+
+export namespace owe::testing {
+
+struct SceneParseResult {
+    bool        ok { false };
+    std::string error;
+    // pkg_version: integer parsed from "PKGV00xx"; 0 means unknown / loose dir.
+    std::uint16_t pkg_version { 0 };
+    // scene_json_version: scene.json's own top-level "version" field; 0 if absent.
+    std::uint16_t scene_json_version { 0 };
+};
+
+// Reads workshop_dir/scene.pkg, mounts a transient VFS, parses scene.json
+// via WPScene::FromJson(json, pkg_version). All failures (missing pkg,
+// missing scene.json, json parse error, FromJson returning false) come
+// back as ok=false with a populated `error`.
+SceneParseResult ProbeSceneParse(const std::string& workshop_dir);
+
+struct WorkshopProbe {
+    std::string id;            // workshop directory name (steam id)
+    std::string dir;           // absolute workshop directory
+    std::string pkg_stamp;     // raw "PKGV00xx" string from pkg header
+    std::uint16_t pkg_version; // ParsePkgVersionStamp(pkg_stamp); 0 on error
+};
+
+// Light-weight enumerator: walks `workshop_root` for direct subdirectories
+// containing `scene.pkg`, reads only the version stamp, and returns a
+// sorted list. Does NOT call DumpWorkshop / WPMdlParser / WPTexImageParser
+// — safe to use even when the corpus has a workshop that crashes those.
+std::vector<WorkshopProbe> EnumerateWorkshopProbes(const std::string& workshop_root);
+
+} // namespace owe::testing
 
 namespace owe::testing {
 

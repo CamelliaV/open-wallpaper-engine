@@ -2,11 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include <cctype>
-#include <cstddef>
-#include <filesystem>
-#include <fstream>
-
 #include <ft2build.h>
 #include FT_FREETYPE_H
 

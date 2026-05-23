@@ -1,18 +1,115 @@
-#include "corpus.hpp"
+// Test corpus index.
+//
+// Walks workshop/* once, dumps every entry that has a scene.pkg via
+// DumpWorkshop, and exposes lookup-by-version slices that the gtest
+// fixtures parameterise on. The corpus is built lazily on first access
+// (Meyer's singleton) so it's safe to call from INSTANTIATE_TEST_SUITE_P
+// at static-init time.
+//
+// Skipped workshops (e.g. ones that hang WPMdlParser::Parse) are listed
+// in kSkipIds and never parsed.
 
-#include <algorithm>
-#include <cstdint>
+module;
+
 #include <cstdio>
-#include <filesystem>
-#include <string>
-#include <vector>
 
-#include "pkg_header.hpp"
+#include <nlohmann/json.hpp>
 
+export module wescene.testing.corpus;
+
+import rstd.cppstd;
 import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;
 import wescene.types;
+import wescene.testing.pkg_header;
+
+export namespace owe::testing {
+
+struct WorkshopEntry {
+    std::string    id;
+    std::string    dir;
+    nlohmann::json snapshot;
+};
+
+class Corpus {
+public:
+    // Returns the singleton, building it on first access.
+    static const Corpus& instance();
+
+    // All entries successfully dumped.
+    const std::vector<WorkshopEntry>& entries() const { return entries_; }
+
+    // Sorted unique sets of every version stamp observed across the corpus.
+    // These drive INSTANTIATE_TEST_SUITE_P value lists.
+    const std::set<std::string>& pkg_versions() const { return pkg_versions_; }
+    const std::set<int>&         texv_versions() const { return texv_versions_; }
+    const std::set<int>&         texi_versions() const { return texi_versions_; }
+    const std::set<int>&         texb_versions() const { return texb_versions_; }
+    const std::set<int>&         texs_versions() const { return texs_versions_; }
+    const std::set<int>&         tex_formats() const { return tex_formats_; }
+    const std::set<int>&         mdlv_versions() const { return mdlv_versions_; }
+    const std::set<int>&         mdls_versions() const { return mdls_versions_; }
+    const std::set<int>&         mdla_versions() const { return mdla_versions_; }
+
+    // Slice accessors.
+    struct PkgRef {
+        const WorkshopEntry* workshop;
+    };
+    struct TexRef {
+        const WorkshopEntry* workshop;
+        const nlohmann::json* tex;
+    };
+    struct MdlRef {
+        const WorkshopEntry* workshop;
+        const nlohmann::json* mdl;
+    };
+
+    std::vector<PkgRef> workshops_with_pkg(const std::string& pkgv) const;
+    std::vector<TexRef> textures_with_texv(int v) const;
+    std::vector<TexRef> textures_with_texi(int v) const;
+    std::vector<TexRef> textures_with_texb(int v) const;
+    std::vector<TexRef> textures_with_texs(int v) const;
+    std::vector<TexRef> textures_with_format(int v) const;
+    std::vector<MdlRef> mdls_with_mdlv(int v) const;
+    std::vector<MdlRef> mdls_with_mdls(int v) const;
+    std::vector<MdlRef> mdls_with_mdla(int v) const;
+
+private:
+    Corpus();
+    void build();
+
+    std::vector<WorkshopEntry> entries_;
+    std::set<std::string>      pkg_versions_;
+    std::set<int>              texv_versions_;
+    std::set<int>              texi_versions_;
+    std::set<int>              texb_versions_;
+    std::set<int>              texs_versions_;
+    std::set<int>              tex_formats_;
+    std::set<int>              mdlv_versions_;
+    std::set<int>              mdls_versions_;
+    std::set<int>              mdla_versions_;
+};
+
+// Gates which sections DumpWorkshop emits. Defaults preserve the historic
+// "do everything except shader compile" behavior so Corpus/version_tests
+// fixtures don't shift.
+struct DumpFlags {
+    bool tex { true };       // emit "textures" array (ReadTexMeta)
+    bool shader { false };   // emit "shaders" array (CompileMaterialShader)
+    bool mdl { true };       // emit "puppets" array
+    bool mdl_full { true };  // puppets entries via full WPMdlParser::Parse;
+                             // false ⇒ just the WPMdlHeader fields
+};
+
+// Per-workshop JSON snapshot used by `wescene-test valid`, by
+// `wescene-test scan --json-dir`, and by Corpus to index versions.
+// On failure returns a json object with `{"error": "..."}` and `err`
+// is set to the same message.
+nlohmann::json DumpWorkshop(const std::string& workshop_dir, std::string& err,
+                            DumpFlags flags = {});
+
+} // namespace owe::testing
 
 namespace owe::testing {
 
@@ -21,9 +118,7 @@ namespace {
 namespace fs = std::filesystem;
 using json   = nlohmann::json;
 
-// Workshops that hang or crash the dumper. Listed here so the corpus
-// build never blocks. Tracked as Iter A in the test roadmap (fix
-// WPMdlParser::Parse's missing EOF guard).
+// Workshops that hang or crash the dumper.
 const std::set<std::string> kSkipIds {
     "2435537849",
     "3346715292",
@@ -40,18 +135,12 @@ constexpr const char* kWorkshopDirMacro =
 #endif
     ;
 
-// --- texture header reader ---------------------------------------------------
-//
-// Delegates to WPTexImageParser::ParseHeader so we exercise the same
-// production code path the renderer uses. ParseHeader fills ImageHeader,
-// including sprite frame counts (numFrames()) when isSprite is true.
-
 struct TexMeta {
     std::string path;
     int32_t     texv { 0 };
     int32_t     texi { 0 };
     int32_t     texb { 0 };
-    int32_t     texs { 0 };  // 0 == absent (non-sprite); else 2 or 3 in observed corpus
+    int32_t     texs { 0 };
     int32_t     compo1 { 0 };
     int32_t     compo2 { 0 };
     int32_t     compo3 { 0 };
@@ -77,8 +166,6 @@ TexMeta ReadTexMeta(owe::fs::VFS& vfs, const std::string& pkg_path) {
     TexMeta meta;
     meta.path = pkg_path;
 
-    // ParseHeader takes a "name" without /assets/materials/ prefix or
-    // .tex suffix, so strip both before passing it through.
     constexpr std::string_view prefix = "/materials/";
     constexpr std::string_view suffix = ".tex";
     if (pkg_path.compare(0, prefix.size(), prefix) != 0) return meta;
@@ -125,8 +212,6 @@ TexMeta ReadTexMeta(owe::fs::VFS& vfs, const std::string& pkg_path) {
     meta.ok            = (meta.texv > 0 && meta.width > 0 && meta.height > 0);
     return meta;
 }
-
-// --- helpers -----------------------------------------------------------------
 
 bool ends_with(std::string_view s, std::string_view suffix) {
     return s.size() >= suffix.size() &&
@@ -182,8 +267,6 @@ json dump_effect_fbo(const owe::wpscene::WPEffectFbo& f) {
     };
 }
 
-// Pull the universal transform-ish fields straight off the raw object
-// json so unknown subtypes (light/particle/sound) still produce a row.
 // Field types in scene.json are inconsistent (origin can be either an
 // array of floats or a "x y z" string), so we copy the raw value through
 // instead of forcing a particular C++ type.
@@ -312,9 +395,8 @@ json dump_image_object(const json& obj, owe::fs::VFS& vfs) {
     out["material"]       = dump_material(img.material);
     out["effect_count"]   = static_cast<int>(img.effects.size());
     // WPImageEffect::id and ::version are left uninitialised by the
-    // parser when the source json omits them, so dumping their raw
-    // value produces stack garbage. Skip them — what we really care
-    // about is the structural shape (name + sub-counts + materials).
+    // parser when the source json omits them, so dumping their raw value
+    // produces stack garbage. Skip them.
     json effs = json::array();
     for (const auto& e : img.effects) {
         json je;
@@ -378,7 +460,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         return out;
     }
 
-    // ---- pkg header --------------------------------------------------------
     std::string           pkg_version;
     std::vector<PkgEntry> pkg_entries;
     if (! ReadPkgHeader(pkg_path, pkg_version, pkg_entries)) {
@@ -399,7 +480,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
     jpkg["file_count"]  = static_cast<int>(pkg_entries.size());
     jpkg["has_scene_json"] = has_scene_json;
 
-    // ---- mount VFS ---------------------------------------------------------
     owe::fs::VFS vfs;
     auto pfs = owe::fs::CreatePhysicalFs(workshop_dir);
     auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
@@ -411,7 +491,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
     vfs.Mount("/assets", std::move(wfs));
     if (pfs) vfs.Mount("/assets", std::move(pfs));
 
-    // ---- scene.json --------------------------------------------------------
     if (has_scene_json) {
         auto stream = vfs.Open("/assets/scene.json");
         if (stream) {
@@ -434,9 +513,8 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                 };
                 // cameraparallaxamount/delay/mouseinfluence are undefaulted
                 // floats in WPSceneGeneral, so when the source scene.json
-                // omits them the parser leaves stack garbage. Only emit
-                // them when cameraparallax is enabled (in which case the
-                // source must supply real values).
+                // omits them the parser leaves stack garbage. Only emit them
+                // when cameraparallax is enabled.
                 json jgen = {
                     { "clearcolor", scene.general.clearcolor },
                     { "ambientcolor", scene.general.ambientcolor },
@@ -454,7 +532,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                         scene.general.cameraparallaxmouseinfluence;
                 }
                 jscene["general"] = std::move(jgen);
-                // ---- objects ----
                 json jobjects = json::array();
                 if (j.contains("objects") && j["objects"].is_array()) {
                     for (const auto& obj : j["objects"]) {
@@ -484,7 +561,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         }
     }
 
-    // ---- textures ----------------------------------------------------------
     if (flags.tex) {
         json jtex = json::array();
         for (const auto& e : pkg_entries) {
@@ -523,7 +599,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         out["textures"] = std::move(jtex);
     }
 
-    // ---- shaders -----------------------------------------------------------
     if (flags.shader) {
         json jsh = json::array();
         for (const auto& e : pkg_entries) {
@@ -566,7 +641,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         out["shaders"] = std::move(jsh);
     }
 
-    // ---- puppets / mdls ----------------------------------------------------
     if (! flags.mdl) return out;
 
     auto emit_flag = [](uint32_t flag) {
@@ -650,9 +724,6 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         jm["bones"]         = ok && mdl.puppet ? static_cast<int>(mdl.puppet->bones.size()) : 0;
         jm["anims"]         = ok && mdl.puppet ? static_cast<int>(mdl.puppet->anims.size()) : 0;
         if (ok && mdl.puppet) {
-            // Bone tree: parent index per bone + a translation hash (sum of
-            // the four matrix columns) so a parser regression that flips
-            // sign / column order or drops a bone is caught immediately.
             json bones = json::array();
             for (const auto& b : mdl.puppet->bones) {
                 json jb;
@@ -764,7 +835,6 @@ void Corpus::build() {
 
         WorkshopEntry e { std::move(id), d.string(), std::move(snap) };
 
-        // Harvest version stamps for the parameter generators.
         if (e.snapshot.contains("pkg"))
             pkg_versions_.insert(e.snapshot["pkg"].value("version", std::string {}));
         if (e.snapshot.contains("textures")) {

@@ -11,14 +11,10 @@
 // WPMdlParser / WPTexImageParser too, which can hit unrelated assertions
 // on rare .mdl inputs and would mask scene.json regressions.
 
-#include <cstdint>
-#include <set>
-#include <string>
-#include <vector>
-
 #include <gtest/gtest.h>
 
-#include "scene_parse_probe.hpp"
+import rstd.cppstd;
+import wescene.testing.scene_parse_probe;
 
 namespace {
 

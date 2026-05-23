@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cstdio>
 #include "vk_mem_alloc.h"
 
 #include "Utils/AutoDeletor.hpp"

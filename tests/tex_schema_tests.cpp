@@ -1,21 +1,8 @@
 // .tex format schema reverse-coverage report.
 
-#include <algorithm>
-#include <cstdint>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <map>
-#include <memory>
-#include <set>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <vector>
-
 #include <gtest/gtest.h>
 
+import rstd.cppstd;
 import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;

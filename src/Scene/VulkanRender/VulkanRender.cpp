@@ -3,7 +3,6 @@ module;
 
 #include "vvk/macros.hpp"
 
-#include <cstdint>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 

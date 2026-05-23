@@ -11,19 +11,6 @@
 // GLFW. Exit 0 iff every selected pkg parsed AND every requested
 // validator succeeded.
 
-#include <algorithm>
-#include <array>
-#include <cctype>
-#include <chrono>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <functional>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <nlohmann/json.hpp>
 
 import wescene.parse;
@@ -35,9 +22,8 @@ import wescene.types;
 import wavsen.audio;
 import rstd.log;
 import rstd.cppstd;
-
-#include "corpus.hpp"
-#include "pkg_header.hpp"
+import wescene.testing.corpus;
+import wescene.testing.pkg_header;
 
 namespace fs = std::filesystem;
 using json   = nlohmann::json;

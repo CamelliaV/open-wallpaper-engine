@@ -25,11 +25,13 @@ FetchContent_MakeAvailable(googletest)
 # Shared test-side library: corpus index + dump + scene-key scanner +
 # scene-parse probe + pkg-header parser. Linked by every gtest binary
 # and by wescene-test.
-add_library(wescene_test_lib STATIC
-    corpus.cpp
-    scene_keys.cpp
-    scene_parse_probe.cpp
-    pkg_header.cpp)
+add_library(wescene_test_lib STATIC)
+target_sources(wescene_test_lib
+    PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+        PkgHeader.cppm
+        SceneParseProbe.cppm
+        SceneKeys.cppm
+        Corpus.cppm)
 target_link_libraries(
     wescene_test_lib
     PUBLIC
@@ -38,7 +40,6 @@ target_link_libraries(
         owe-base
         nlohmann_json::nlohmann_json
 )
-target_include_directories(wescene_test_lib PUBLIC .)
 target_compile_features(wescene_test_lib PUBLIC cxx_std_20)
 set_target_properties(wescene_test_lib PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_definitions(
@@ -49,6 +50,7 @@ target_compile_definitions(
 
 add_executable(version_tests version_tests.cpp)
 target_link_libraries(version_tests PRIVATE wescene_test_lib GTest::gtest_main)
+set_target_properties(version_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Consolidated CLI: walks pkgs, runs scene parse; --validate-{tex,shader,mdl}
 # add per-asset checks; --name / --pkgv / --limit filter the pkg set.
@@ -62,6 +64,7 @@ set_target_properties(wescene-test PROPERTIES CXX_SCAN_FOR_MODULES ON)
 # mask scene.json parse regressions.
 add_executable(scene_parse_tests scene_parse_tests.cpp)
 target_link_libraries(scene_parse_tests PRIVATE wescene_test_lib GTest::gtest_main)
+set_target_properties(scene_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Unit coverage for the WE shader annotation parser. Verifies dead-branch
 # tolerance, comment handling, and the [COMBO] / texture / scalar / u_*
@@ -82,12 +85,14 @@ set_target_properties(shader_lex_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 # pkg version as a TODO list for future refactor passes.
 add_executable(scene_schema_tests scene_schema_tests.cpp)
 target_link_libraries(scene_schema_tests PRIVATE wescene_test_lib GTest::gtest_main)
+set_target_properties(scene_schema_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Same idea, applied to the binary .tex container's (texv, texi, texb,
 # texs) sub-version tuples. Asserts every observed tuple parses and is
 # in the supported set documented by WPTexFormatVersion.
 add_executable(tex_schema_tests tex_schema_tests.cpp)
 target_link_libraries(tex_schema_tests PRIVATE wescene_test_lib GTest::gtest_main)
+set_target_properties(tex_schema_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # JS runtime tests: setTimeout/setInterval/clearTimeout/clearInterval and
 # SceneNode wrapper surface. Stands separately from wescene_test_lib so
@@ -96,26 +101,21 @@ add_executable(script_runtime_tests script_runtime_tests.cpp)
 target_link_libraries(script_runtime_tests PRIVATE owe-script GTest::gtest_main)
 set_target_properties(script_runtime_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
-# Per-version deep tests live in tests/version/<category>_<version>_test.cpp.
-# Each is a tiny gtest TU built into the same binary so the corpus + gtest
-# fixture machinery is amortised across them.
-file(GLOB version_test_srcs CONFIGURE_DEPENDS "version/*_test.cpp")
-if(version_test_srcs)
-    add_executable(deep_version_tests ${version_test_srcs})
-    target_link_libraries(deep_version_tests PRIVATE wescene_test_lib GTest::gtest_main)
-    target_include_directories(deep_version_tests PRIVATE .)
-endif()
+# Per-version deep tests: one big TEST_P file. The fixture macro stamps
+# out one TEST_P + INSTANTIATE_TEST_SUITE_P per category (pkg / texb /
+# mdlv / format).
+add_executable(deep_version_tests deep_version_tests.cpp)
+target_link_libraries(deep_version_tests PRIVATE wescene_test_lib GTest::gtest_main)
+set_target_properties(deep_version_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Use gtest_discover_tests so each TEST_P instance becomes its own ctest
 # entry, runnable individually with `ctest -R ScenePkgVersionTest`.
 include(GoogleTest)
-if(TARGET deep_version_tests)
-    gtest_discover_tests(
-        deep_version_tests
-        PROPERTIES TIMEOUT 30
-        DISCOVERY_TIMEOUT 60
-    )
-endif()
+gtest_discover_tests(
+    deep_version_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
 gtest_discover_tests(
     scene_parse_tests
     PROPERTIES TIMEOUT 60

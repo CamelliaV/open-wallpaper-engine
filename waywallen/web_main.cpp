@@ -19,8 +19,6 @@
 #include <signal.h>
 #include <string.h>
 
-#include <filesystem> // for std::filesystem::read_symlink (not exported by cppstd)
-
 #include <sys/prctl.h>
 #include <sys/socket.h>
 

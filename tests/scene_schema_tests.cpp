@@ -28,19 +28,11 @@
 // add a new owe::GetJsonValue(json, "key", ...) call for a top-level field,
 // list it here too.
 
-#include <algorithm>
-#include <cstdint>
-#include <iostream>
-#include <map>
-#include <set>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include "scene_keys.hpp"
+import rstd.cppstd;
+import wescene.testing.scene_keys;
 
 namespace {
 

@@ -1,7 +1,5 @@
 module;
 
-#include <algorithm>
-#include <cmath>
 #include <sys/types.h>
 module wescene.parse;
 import wescene.core;
