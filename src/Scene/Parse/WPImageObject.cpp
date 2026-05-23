@@ -251,6 +251,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     owe::GetJsonValue(json, "muteineditor", muteineditor, false);
     owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
     owe::GetJsonValue(json, "parent", parent, false);
+    owe::GetJsonValue(json, "attachment", attachment, false);
     owe::GetJsonValue(json, "perspective", perspective, false);
     owe::GetJsonValue(json, "copybackground", copybackground, false);
     owe::GetJsonValue(json, "solid", solid, false);

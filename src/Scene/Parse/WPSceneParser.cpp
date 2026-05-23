@@ -1130,7 +1130,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
     WireFieldScripts(context, spImgNode, wpimgobj.field_bindings);
-    context.node_id_map[wpimgobj.id] = { wpimgobj.parent, spImgNode };
+    context.node_id_map[wpimgobj.id] = {
+        wpimgobj.parent,
+        spImgNode,
+        (puppet && puppet->puppet) ? puppet->puppet : nullptr,
+        wpimgobj.attachment,
+    };
 }
 
 struct ParticleChildPtr {
@@ -2009,6 +2014,7 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
         if (rit == context.node_id_map.end() || ! rit->second.node) continue;
         auto& ref = rit->second;
         SceneNode* parent_node = context.scene->sceneGraph.get();
+        const ParseContext::NodeRef* parent_ref = nullptr;
         if (ref.parent_id != 0) {
             auto pit = context.node_id_map.find(
                 static_cast<std::int32_t>(ref.parent_id));
@@ -2017,6 +2023,38 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
                 continue;
             }
             parent_node = pit->second.node.get();
+            parent_ref  = &pit->second;
+        }
+        // MDAT bone-anchor: if the child carries `attachment = "<name>"` and
+        // the parent owns a puppet with a matching MDAT entry, offset the
+        // child by the attachment's local-space translation (e.g. forehead
+        // bangs anchored to the head bone of the character body puppet).
+        // Bone-following animation is deliberately omitted — static bind
+        // position is enough for the visible-frame placement; sim bones do
+        // not drift far from bind in practice.
+        if (! ref.attachment.empty() && parent_ref && parent_ref->puppet) {
+            const auto& puppet = *parent_ref->puppet;
+            const auto& atts   = puppet.attachments;
+            auto ait = std::find_if(atts.begin(), atts.end(),
+                                    [&](const auto& a) { return a.name == ref.attachment; });
+            if (ait != atts.end() && ait->bone_index < puppet.bones.size()) {
+                // Walk the original on-file parent chain to compose the
+                // anchored bone's puppet-local bind. ApplyMDLS3CentroidPivot
+                // has already flattened bind_parent / anim_parent for the
+                // skinning path; file_parent is preserved for this lookup.
+                Eigen::Affine3f bone_world = Eigen::Affine3f::Identity();
+                std::vector<uint32_t> chain;
+                uint32_t bi = ait->bone_index;
+                while (bi != WPPuppet::NO_PARENT && bi < puppet.bones.size()) {
+                    chain.push_back(bi);
+                    bi = puppet.bones[bi].file_parent;
+                }
+                for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+                    bone_world = bone_world * puppet.bones[*it].local_bind;
+                }
+                Eigen::Affine3f anchor = bone_world * ait->local_xform;
+                ref.node->SetTranslate(ref.node->Translate() + anchor.translation());
+            }
         }
         parent_node->AppendChild(ref.node);
         attached++;

@@ -39,6 +39,11 @@ public:
         Eigen::Affine3f local_bind { Eigen::Affine3f::Identity() };
         uint32_t        bind_parent { NO_PARENT };
         uint32_t        anim_parent { NO_PARENT };
+        // Original on-file parent index. bind_parent / anim_parent are
+        // rewritten to NO_PARENT by ApplyMDLS3CentroidPivot for the
+        // skinning pose path, but MDAT attachment resolution needs the
+        // un-flattened chain to compute the bone's puppet-local pose.
+        uint32_t        file_parent { NO_PARENT };
 
         // Per-bone WE bone_simulation JSON (spring/damping/gravity for
         // hair/cloth). Captured raw; evaluation hook is TBD.
@@ -77,12 +82,14 @@ public:
     };
 
     // Named locator/anchor parsed from the MDAT section between MDLS and MDLA.
-    // 64-byte payload kept opaque; interpretation (likely a 4x4 affine or pos+euler)
-    // depends on attachment-side wiring that doesn't exist yet.
+    // 64-byte payload is a column-major 4x4 affine transform in the anchored
+    // bone's local space; `unk` is the bone index this attachment is wired to.
+    // Consumed by WPImageObject `attachment = "<name>"` to position child
+    // images at named bone offsets (e.g. bangs under a head bone).
     struct Attachment {
-        uint16_t                     unk { 0 };  // hexpat MDAT Attachment.unk
-        std::string                  name;
-        std::array<std::uint8_t, 64> data {};
+        uint16_t        bone_index { 0 };  // hexpat MDAT Attachment.unk
+        std::string     name;
+        Eigen::Affine3f local_xform { Eigen::Affine3f::Identity() };
     };
     struct BoneFrame {
         Eigen::Vector3f position;
@@ -207,6 +214,13 @@ public:
     std::vector<Animation>     anims;
     std::vector<Attachment>    attachments;
     std::optional<IkConfig>    ik_config;
+
+    // MDLV21 puppets store bones as world-anchored (each `local_bind.t` is
+    // a puppet-local position, not parent-relative) and sprite vertices live
+    // at `bind.t + vertex_centroid_offset`. Skinning needs to flatten the
+    // parent chain and pivot scale/rotation around the centroid; MDLV22+
+    // uses standard chain LBS. Set at parse time from `header.mdlv`.
+    bool                       world_anchored_bones { false };
 
     std::span<const Eigen::Affine3f> genFrame(WPPuppetLayer&, double time) noexcept;
     void                             prepared();

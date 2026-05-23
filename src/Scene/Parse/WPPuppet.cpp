@@ -20,9 +20,15 @@ void WPPuppet::prepared() {
     for (unsigned i = 0; i < bones.size(); i++) {
         auto& b = bones[i];
         rstd_assert(b.bind_parent < i || b.noBindParent());
-        b.world_bind =
-            (b.noBindParent() ? Affine3f::Identity() : bones[b.bind_parent].world_bind) *
-            b.local_bind;
+        // Root sprite bones fold vertex_centroid_offset into world_bind so
+        // anim transforms naturally pivot around the sprite centroid.
+        // Chain bones keep parent.world_bind * local_bind.
+        if (b.noBindParent()) {
+            b.world_bind = b.local_bind;
+            b.world_bind.pretranslate(b.vertex_centroid_offset);
+        } else {
+            b.world_bind = bones[b.bind_parent].world_bind * b.local_bind;
+        }
         b.inv_bind = b.world_bind.inverse();
     }
     for (auto& anim : anims) {
@@ -44,26 +50,40 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
 
     puppet_layer.updateInterpolation(time);
 
-    // Re-enable TRS skinning. WE's official DXBC capture shows pure-translation
-    // g_Bones, but that's a snapshot — at blink frames (frame.scale.y → 0.02)
-    // WE must temporarily upload TRS matrices to produce the visible squash
-    // effect. Pure-translation can only shift a bone's whole sprite as a unit
-    // (no shape change); compression requires non-identity row1 so vertices
-    // within the sprite get differential treatment. LBS triangle stretching at
-    // bone boundaries is the unavoidable cost.
+    // TRS skinning is required: WE puppets animate scale (e.g. blink uses
+    // frame.scale.y → ~0). A pure-translation g_Bones would shift the
+    // whole sprite as a unit; intra-sprite compression needs non-identity
+    // linear so vertices within the sprite get differential treatment.
+    // Standard LBS: per-bone local affine = T(pos) · R(quat) · Diag(scale).
+    // Chained through parent's anim transform, then M_skin = A_world · inv_bind.
+    // WE anim convention: frame[0] is the bone's bind pose. The bind anchor
+    // (pos/quat/scale) is the per-bone initial value; replace/additive layers
+    // shift it via deltas-from-frame[0]. `global_blend` is the residual bind
+    // weight after prepared() consumes replace-layer stacking — bind contributes
+    // `bind.X * global_blend` and each replace layer adds `layer.blend * frame_base.X`,
+    // so non-replaced bones stay at bind, and replaced ones at frame_base anchor.
     for (unsigned i = 0; i < m_final_affines.size(); i++) {
         const auto& bone   = bones[i];
         auto&       affine = m_final_affines[i];
 
-        affine = Affine3f::Identity();
         rstd_assert(bone.anim_parent < i || bone.noAnimParent());
         const Affine3f parent =
             bone.noAnimParent() ? Affine3f::Identity() : m_final_affines[bone.anim_parent];
 
+        // Bind state. vco is a fixed render-time pivot offset for root sprite
+        // bones (matches world_bind's pretranslate in prepared()) and is added
+        // to trans AFTER the layer blend below — folding it into bind_pos here
+        // would multiply by global_blend / cur_blend and shift the sprite for
+        // partial-replace blends.
+        const Quaterniond bind_quat { bone.local_bind.linear().cast<double>() };
+
         Vector3f    trans { bone.local_bind.translation() * global_blend };
         Vector3f    scale { Vector3f::Ones() * global_blend };
-        Quaterniond quat { Quaterniond::Identity() };
-        Quaterniond ident { Quaterniond::Identity() };
+        // quat absorbs R_bind directly (instead of a separate affine.rotate(R_bind)
+        // + inv_bind cancel). Each layer multiplies in its frame delta from frame[0];
+        // bind_quat is preserved because deltas at frame[0] are identity.
+        Quaterniond quat { bind_quat };
+        const Quaterniond ident { Quaterniond::Identity() };
 
         for (auto& layer : puppet_layer.m_layers) {
             auto& alayer = layer.anim_layer;
@@ -77,7 +97,7 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             auto& frame_b    = track.frames[(usize)info.frame_b];
 
             double t     = info.t;
-            double one_t = 1.0f - info.t;
+            double one_t = 1.0 - info.t;
 
             auto frame_a_quat_delta = frame_a.quaternion * frame_base.quaternion.conjugate();
             auto frame_b_quat_delta = frame_b.quaternion * frame_base.quaternion.conjugate();
@@ -86,50 +106,28 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             auto scale_a_delta = frame_a.scale - frame_base.scale;
             auto scale_b_delta = frame_b.scale - frame_base.scale;
 
+            quat *= frame_a_quat_delta.slerp(t, frame_b_quat_delta)
+                        .slerp(1.0 - alayer.blend, ident);
             if (alayer.additive) {
-                // Additive: only contribute the per-frame delta from the
-                // anim's own neutral pose (frame[0]). The replace-layer
-                // base translation/scale/rotation is untouched.
                 trans += alayer.blend * (pos_a_delta * one_t + pos_b_delta * t);
                 scale += alayer.blend * (scale_a_delta * one_t + scale_b_delta * t);
-                quat *= frame_a_quat_delta.slerp(t, frame_b_quat_delta)
-                            .slerp(1.0 - alayer.blend, ident);
             } else {
-                quat *= frame_a_quat_delta.slerp(t, frame_b_quat_delta).slerp(
-                            1.0 - alayer.blend, ident) *
-                        frame_base.quaternion.slerp(1.0 - layer.blend, ident);
                 trans += (layer.blend * frame_base.position) +
                          (alayer.blend * (pos_a_delta * one_t + pos_b_delta * t));
                 scale += (layer.blend * frame_base.scale) +
                          (alayer.blend * (scale_a_delta * one_t + scale_b_delta * t));
             }
         }
-        // V21 sprites scale around their vertex centroid (puppet-world), not
-        // around bone.local_bind.t. The file stores bone.local_bind.t at an
-        // anchor offset from the actual sprite; vertices weighted to bone i
-        // are clustered at bind.t + centroid_offset. Compose T(centroid) * R*S
-        // * T(-centroid) by adding centroid_offset on the pretranslate side
-        // and subtracting it after inv_bind. For older MDL versions the offset
-        // is zero, no-op.
-        //
-        // Also conjugate the anim transform by the bone's bind rotation: WE
-        // applies scale/angle in the sprite's bind-local frame. We extract R_bind
-        // from local_bind.linear() and insert it before R_anim; inv_bind already
-        // contains R_bind^-1 on the right side, so the form becomes
-        // T(eff) * R_bind * R_anim * S_anim * R_bind^-1 * T(-bind.t - c).
-        // For bones with no bind rotation this is a no-op.
-        const Matrix3f R_bind = bones[i].local_bind.linear();
-        Vector3f effective_trans = trans + bones[i].vertex_centroid_offset;
-        affine.pretranslate(effective_trans);
-        affine.rotate(R_bind);
-        affine.rotate(quat.slerp(global_blend, ident).cast<float>());
+        if (bone.noBindParent()) trans += bone.vertex_centroid_offset;
+        affine = Affine3f::Identity();
+        affine.pretranslate(trans);
+        affine.rotate(quat.cast<float>());
         affine.scale(scale);
         affine = parent * affine;
     }
 
     for (unsigned i = 0; i < m_final_affines.size(); i++) {
         m_final_affines[i] *= bones[i].inv_bind.matrix();
-        m_final_affines[i].translate(-bones[i].vertex_centroid_offset);
     }
     return m_final_affines;
 }
@@ -140,8 +138,11 @@ static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInf
     cur          = std::fmod(cur, max_time);
     double _rate = cur / frame_time;
 
+    // `length` is the number of intervals; the track stores `length + 1`
+    // frame samples (frame[0]..frame[length], where frame[length] closes
+    // the loop). frame_b = frame_a + 1 is always in-range.
     info.frame_a = ((unsigned)_rate) % length;
-    info.frame_b = (info.frame_a + 1) % length;
+    info.frame_b = info.frame_a + 1;
     info.t       = _rate - (double)info.frame_a;
 }
 
@@ -153,8 +154,10 @@ WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
     if (mode == PlayMode::Loop || mode == PlayMode::Single) {
         genInterpolationInfo(_info, _cur_time, (u32)length, frame_time, max_time);
     } else if (mode == PlayMode::Mirror) {
-        const auto _get_frame = [this](auto f) {
-            return f >= length ? (length - 1) - (f - length) : f;
+        // Frames 0..length stored; mirror cycle is 0,1,..,length,length-1,..,0
+        // (2*length intervals). Map any f in [0, 2*length] back into [0, length].
+        const auto _get_frame = [this](auto f) -> idx {
+            return f <= length ? f : (2 * length - f);
         };
         genInterpolationInfo(_info, _cur_time, (u32)length * 2, frame_time, max_time * 2.0f);
         _info.frame_a = _get_frame(_info.frame_a);

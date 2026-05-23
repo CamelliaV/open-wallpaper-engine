@@ -280,6 +280,7 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
         }
         bone.bind_parent = file_parent;
         bone.anim_parent = file_parent;
+        bone.file_parent = file_parent;
 
         uint32_t size = f.ReadUint32();
         if (size != 64) {
@@ -313,38 +314,48 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
             uint32_t pair1 = f.ReadUint32();
             (void)pair0; (void)pair1;
 
+            // extras_flag==2 means an IK config block follows. The hexpat
+            // schema is verified against only one corpus sample and breaks
+            // for other puppets (3669680904's rw_puppet reads 992K of garbage
+            // before tripping a downstream bone curve assert). The trailer
+            // (has_offset_trans / has_index / has_depth) sits past the IK
+            // block but isn't consumed render-side, so when IK is present we
+            // skip the whole MDLS body and let the end_offset rescue at the
+            // bottom of this function position the cursor for MDAT/MDLA.
             if (extras_flag == 2) {
-                ParseIkConfig(f, mdl.puppet->ik_config.emplace());
+                f.SeekSet(end_offset);
             } else if (extras_flag != 0) {
                 rstd_info("MDLSv{} unexpected extras_flag {}", mdl.mdls, extras_flag);
             }
         }
 
-        uint8_t has_offset_trans = f.ReadUint8();
-        if (has_offset_trans) {
-            for (unsigned i = 0; i < bones_num; ++i) {
-                auto& b = mdl.puppet->bones[i];
-                b.has_file_skin_pivot = true;
-                b.file_skin_pivot.x() = f.ReadFloat();
-                b.file_skin_pivot.y() = f.ReadFloat();
-                b.file_skin_pivot.z() = f.ReadFloat();
-                for (int r = 0; r < 4; ++r) {
-                    for (int c = 0; c < 4; ++c) {
-                        b.file_skin_mat(r, c) = f.ReadFloat();
+        // Parse the per-bone metadata trailer only when no IK block forced
+        // the cursor to end_offset above.
+        if (static_cast<uint32_t>(f.Tell()) < end_offset) {
+            uint8_t has_offset_trans = f.ReadUint8();
+            if (has_offset_trans) {
+                for (unsigned i = 0; i < bones_num; ++i) {
+                    auto& b = mdl.puppet->bones[i];
+                    b.has_file_skin_pivot = true;
+                    b.file_skin_pivot.x() = f.ReadFloat();
+                    b.file_skin_pivot.y() = f.ReadFloat();
+                    b.file_skin_pivot.z() = f.ReadFloat();
+                    for (auto col : b.file_skin_mat.colwise()) {
+                        for (auto& v : col) v = f.ReadFloat();
                     }
                 }
             }
-        }
 
-        uint8_t has_index = f.ReadUint8();
-        if (has_index) {
-            for (unsigned i = 0; i < bones_num; ++i) f.ReadUint32();
-        }
+            uint8_t has_index = f.ReadUint8();
+            if (has_index) {
+                for (unsigned i = 0; i < bones_num; ++i) f.ReadUint32();
+            }
 
-        if (mdl.mdls >= 3) {
-            uint8_t has_depth = f.ReadUint8();
-            if (has_depth) {
-                for (unsigned i = 0; i < bones_num; ++i) (void)f.ReadUint32();
+            if (mdl.mdls >= 3) {
+                uint8_t has_depth = f.ReadUint8();
+                if (has_depth) {
+                    for (unsigned i = 0; i < bones_num; ++i) (void)f.ReadUint32();
+                }
             }
         }
     }
@@ -365,9 +376,14 @@ void ParseMDAT(fs::MemBinaryStream& f, WPMdl& mdl) {
     auto& attachments        = mdl.puppet->attachments;
     attachments.resize(num_attachments);
     for (auto& att : attachments) {
-        att.unk  = f.ReadUint16();
-        att.name = f.ReadStr();
-        for (auto& b : att.data) b = f.ReadUint8();
+        att.bone_index = f.ReadUint16();
+        att.name       = f.ReadStr();
+        // 64-byte payload = column-major 4x4 affine in the anchored bone's
+        // local space (linear 3x3 in cols 0-2, translation in col 3).
+        att.local_xform = Eigen::Affine3f::Identity();
+        for (auto col : att.local_xform.matrix().colwise()) {
+            for (auto& v : col) v = f.ReadFloat();
+        }
     }
     if (end_offset > 0 && static_cast<uint32_t>(f.Tell()) != end_offset) {
         f.SeekSet(end_offset);
@@ -516,8 +532,9 @@ bool ParseMDLA(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag,
     uint32_t anim_num = f.ReadUint32();
     auto& anims = mdl.puppet->anims;
     anims.resize(anim_num);
+    bool ok = true;
     for (auto& anim : anims) {
-        if (! ParseAnimation(f, anim, mdl.mdla, path)) return false;
+        if (! ParseAnimation(f, anim, mdl.mdla, path)) { ok = false; break; }
     }
 
     if (end_offset > 0 && static_cast<uint32_t>(f.Tell()) != end_offset) {
@@ -525,7 +542,7 @@ bool ParseMDLA(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag,
                   static_cast<uint32_t>(f.Tell()), end_offset, std::string(path));
         f.SeekSet(end_offset);
     }
-    return true;
+    return ok;
 }
 
 void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh) {
@@ -619,21 +636,18 @@ bool ParseMDLE(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag) {
     return true;
 }
 
-// Skeleton convention changed at MDLS v3 (correlates with MDLV21 in the
-// observed corpus, but MDLS is the real signal):
-//   - bone.local_bind, frame.position all live in a shared "compact"
-//     model space; the file's parent index produces double-translation
-//     if composed, so flatten both bind_parent and anim_parent.
-//   - Each per-bone sprite is scaled around its vertex centroid (not
-//     bone.t); precompute that centroid as an offset for genFrame to
-//     bake into the bone's translation. (Matches WE DXBC hash
-//     84b2d428-... which emits pure-translation g_Bones with row0/1/2
-//     identity at rest and scaled rows during eye-blink frames.)
+// MDLS v3+ vertex-centroid offsets per bone. MDLV21 puppets need the parent
+// chain flattened and the centroid_offset bracketed around scale/rotation
+// in genFrame (bones are world-anchored, sprite lives at bind.t + vco).
+// MDLV22+ keeps file_parent intact for chain LBS; `vertex_centroid_offset`
+// is still computed but not consumed by the chain path.
 void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
     if (mdl.meshes.empty()) return;
-    for (auto& b : mdl.puppet->bones) {
-        b.bind_parent = WPPuppet::NO_PARENT;
-        b.anim_parent = WPPuppet::NO_PARENT;
+    if (mdl.puppet->world_anchored_bones) {
+        for (auto& b : mdl.puppet->bones) {
+            b.bind_parent = WPPuppet::NO_PARENT;
+            b.anim_parent = WPPuppet::NO_PARENT;
+        }
     }
     const size_t nbones = mdl.puppet->bones.size();
     std::vector<Eigen::Vector3d> sum_pos(nbones, Eigen::Vector3d::Zero());
@@ -750,7 +764,16 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     }
     if (peek_block_magic(f, "MDLA")) {
         std::string tag = consume_tag();
-        if (! ParseMDLA(f, mdl, tag, str_path)) return false;
+        // MDLA body's verified schema doesn't cover every puppet (rw_puppet
+        // in 3669680904 trips a garbage BoneFrameCurve byte_size). Treat a
+        // failure as fatal-to-animation only: clear any partially populated
+        // anims so the puppet stays at bind pose, then jump to MDLA end via
+        // the rescue inside ParseMDLA. Bones + mesh are still usable.
+        if (! ParseMDLA(f, mdl, tag, str_path)) {
+            if (mdl.puppet) mdl.puppet->anims.clear();
+            rstd_info("MDLA parse aborted for {}; puppet keeps bind pose only",
+                      str_path);
+        }
     }
     if (peek_block_magic(f, "MDMP")) {
         std::string tag = consume_tag();
@@ -774,6 +797,10 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
             uint8_t b = f.ReadUint8();
             if (b != 0) { f.SeekSet(save); break; }
         }
+    }
+
+    if (mdl.puppet) {
+        mdl.puppet->world_anchored_bones = (mdl.header.mdlv == 21);
     }
 
     if (mdl.mdls >= 3) ApplyMDLS3CentroidPivot(mdl);

@@ -13,6 +13,8 @@ import wescene.script;
 import wescene.shader_value_updater;
 import wescene.types;
 
+import wescene.puppet;
+
 import :wp_image_object;
 import :wp_light_object;
 import :wp_misc_object;
@@ -57,6 +59,13 @@ struct ParseContext {
     struct NodeRef {
         std::uint32_t              parent_id { 0 };
         std::shared_ptr<SceneNode> node;
+        // Carried for cross-node wiring at FinalizeScene attach time.
+        // `puppet` populated for image objects that own an MDL skeleton,
+        // so a child layer with `attachment = "<name>"` can resolve the
+        // matching MDAT entry on its parent's puppet (no second lookup
+        // pass needed). Both nullable.
+        std::shared_ptr<WPPuppet>  puppet;
+        std::string                attachment;
     };
     std::unordered_map<std::int32_t, NodeRef> node_id_map;
     // Scene.json declaration order. Reparenting in this order keeps each

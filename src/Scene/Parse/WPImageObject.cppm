@@ -123,6 +123,13 @@ public:
     std::string                                puppet;
     std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
 
+    // PKGV0019+ named anchor on the parent's puppet (MDAT attachment). The
+    // owning image renders at the parent puppet's bone[attachment.bone_index]
+    // offset by attachment.local_xform (see WPPuppet::Attachment). Empty
+    // string means no bone anchoring; the image inherits parent transform
+    // directly.
+    std::string                                attachment;
+
     // Per-field property-binding side channel; populated when scalar
     // fields (origin/scale/alpha/...) carry an `animation` curve or a
     // `scriptproperties` subtree. See WPAnimation.cppm.
