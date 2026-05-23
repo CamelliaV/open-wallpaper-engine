@@ -8,10 +8,10 @@
 #include <rstd/macro.hpp>
 
 #include <waywallen-bridge/bridge.h>
-#include <waywallen-bridge/extent_resolve.h>
 #include <waywallen-bridge/pool.h>
 #include <waywallen-bridge/probe_vk.h>
 #include <waywallen-bridge/protocol_bits.h>
+#include <waywallen-bridge/resolution.h>
 
 #include <argparse/argparse.hpp>
 
@@ -380,15 +380,27 @@ int main(int argc, char** argv) {
             die(std::string(reason) + " rc=" + std::to_string(rc));
         }
 
-        // Web wallpapers don't have a fixed native resolution — use the
-        // hardcoded 1920×1080 default as the "native" extent_resolve
-        // argument so AUTO modes pick the host's preference.
+        // Web wallpapers don't have a fixed native resolution; the
+        // `resolution` setting drives the actual extent against a
+        // 16:9 baseline (compositor handles final letterbox / scale
+        // on present). Schema disallows ORIGIN, so any invalid kv
+        // falls back to 1080p.
         {
-            uint32_t native_w = opts.width;
-            uint32_t native_h = opts.height;
-            ww_resolve_extent(init.extent_w, init.extent_h, init.extent_mode,
-                              native_w, native_h,
-                              &opts.width, &opts.height);
+            uint32_t resolution = static_cast<uint32_t>(WW_RESOLUTION_1080P);
+            if (const char* v = kv_get(init.settings, "resolution"); v && *v) {
+                char* end = nullptr;
+                unsigned long n = std::strtoul(v, &end, 10);
+                uint32_t parsed = (end != v)
+                    ? ww_resolution_sanitize(static_cast<uint32_t>(n))
+                    : static_cast<uint32_t>(WW_RESOLUTION_1080P);
+                resolution = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
+                    ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
+                    : parsed;
+            }
+            opts.width  = 16;
+            opts.height = 9;
+            ww_resolution_apply_cap(resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE,
+                                    &opts.width, &opts.height);
         }
         opts.initial_fps    = parse_u32(kv_get(init.settings, "fps"),
                                         opts.initial_fps);

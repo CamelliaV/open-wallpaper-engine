@@ -4,10 +4,10 @@
 #include <rstd/macro.hpp>
 
 #include <waywallen-bridge/bridge.h>
-#include <waywallen-bridge/extent_resolve.h>
 #include <waywallen-bridge/pool.h>
 #include <waywallen-bridge/probe_vk.h>
 #include <waywallen-bridge/protocol_bits.h>
+#include <waywallen-bridge/resolution.h>
 
 #include <argparse/argparse.hpp>
 
@@ -383,19 +383,28 @@ int main(int argc, char** argv) {
             die(std::string(reason) + " rc=" + std::to_string(rc));
         }
 
-        // SPAWN_VERSION 3: scene .pkg path + assets + workshop_id all
-        // arrive via CLI argv (already parsed into opts.{initial_scene,
-        // initial_assets, workshop_id}). Init carries only extent +
-        // settings kv. Wescene scenes don't ship a fixed native
-        // resolution (every scene is designed to scale), so we treat
-        // the host's compiled-in `opts.{width,height}` defaults as
-        // the "native" size that `ww_resolve_extent` resolves against.
+        // Scene .pkg path + assets + workshop_id arrive via CLI argv
+        // (already parsed into opts.{initial_scene, initial_assets,
+        // workshop_id}). Init carries only the resolved settings kv;
+        // render extent is driven by the `resolution` setting against
+        // a 16:9 baseline (scenes have no fixed native size; the
+        // compositor handles final letterbox / scale on present).
         {
-            uint32_t native_w = opts.width;
-            uint32_t native_h = opts.height;
-            ww_resolve_extent(init.extent_w, init.extent_h, init.extent_mode,
-                              native_w, native_h,
-                              &opts.width, &opts.height);
+            uint32_t resolution = static_cast<uint32_t>(WW_RESOLUTION_1080P);
+            if (const char* v = kv_get(init.settings, "resolution"); v && *v) {
+                char* end = nullptr;
+                unsigned long n = std::strtoul(v, &end, 10);
+                uint32_t parsed = (end != v)
+                    ? ww_resolution_sanitize(static_cast<uint32_t>(n))
+                    : static_cast<uint32_t>(WW_RESOLUTION_1080P);
+                resolution = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
+                    ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
+                    : parsed;
+            }
+            opts.width  = 16;
+            opts.height = 9;
+            ww_resolution_apply_cap(resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE,
+                                    &opts.width, &opts.height);
         }
         if (const char* v = kv_get(init.settings, "fps"); v && *v) {
             char* end = nullptr;
