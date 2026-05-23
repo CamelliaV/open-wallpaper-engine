@@ -101,8 +101,14 @@ private:
     std::array<float, 2> m_screen_size { 1920, 1080 };
 
     // Latest 64-bin spectrum, pushed by SetAudioSpectrum() once per frame.
-    // Downsampled in-place on the way out to fill 16/32 resolution arrays.
     std::array<float, 64> m_audio_bins {};
+
+    // Per-frame visual bands derived from m_audio_bins with pink-tilt
+    // weighting + asymmetric EMA, ready for std140 packing in UpdateUniforms.
+    // Doubles as persistent smoothing state across frames.
+    std::array<float, 16> m_audio_visual_16 {};
+    std::array<float, 32> m_audio_visual_32 {};
+    std::array<float, 64> m_audio_visual_64 {};
 
     Map<void*, WPShaderValueData> m_nodeDataMap;
     Map<void*, WPUniformInfo>     m_nodeUniformInfoMap;
