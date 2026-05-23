@@ -234,17 +234,20 @@ void LoadControlPoint(ParticleSubSystem& pSys, const wpscene::Particle& wp) {
             wp.controlpoints[i].flags[wpscene::ParticleControlpoint::FlagEnum::worldspace];
     }
 }
-void LoadInitializer(ParticleSubSystem& pSys, const wpscene::Particle& wp,
-                     const wpscene::ParticleInstanceoverride& over) {
+void LoadInitializer(
+    ParticleSubSystem& pSys, const wpscene::Particle& wp,
+    std::shared_ptr<wpscene::ParticleInstanceoverride> over_state) {
     for (const auto& ini : wp.initializers) {
         pSys.AddInitializer(WPParticleParser::genParticleInitOp(ini));
     }
-    if (over.enabled) pSys.AddInitializer(WPParticleParser::genOverrideInitOp(over));
+    if (over_state->enabled)
+        pSys.AddInitializer(WPParticleParser::genOverrideInitOp(over_state));
 }
-void LoadOperator(ParticleSubSystem& pSys, const wpscene::Particle& wp,
-                  const wpscene::ParticleInstanceoverride& over) {
+void LoadOperator(
+    ParticleSubSystem& pSys, const wpscene::Particle& wp,
+    std::shared_ptr<wpscene::ParticleInstanceoverride> over_state) {
     for (const auto& op : wp.operators) {
-        pSys.AddOperator(WPParticleParser::genParticleOperatorOp(op, over));
+        pSys.AddOperator(WPParticleParser::genParticleOperatorOp(op, over_state));
     }
 }
 void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp, float count,
@@ -1327,7 +1330,11 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     // emitter origins (and propagated to grandchildren).
     Eigen::Vector3f node_world_scale = child_ptr.world_scale.cwiseProduct(spNode->Scale());
 
-    wpscene::ParticleInstanceoverride override = wppartobj.instanceoverride;
+    // shared_ptr so RenderSetUserProperty can mutate the override at runtime
+    // and the new value is observed by every initializer / operator closure.
+    auto override_state =
+        std::make_shared<wpscene::ParticleInstanceoverride>(wppartobj.instanceoverride);
+    auto& override = *override_state;
 
     auto& particle_obj = *p_particle_obj;
     auto& vfs          = *context.vfs;
@@ -1474,9 +1481,15 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     LoadEmitter(*particleSub, particle_obj, override.count, render_rope,
                 is_child ? child_data.controlpointstartindex : 0,
                 node_world_scale);
-    LoadInitializer(*particleSub, particle_obj, override);
-    LoadOperator(*particleSub, particle_obj, override);
+    LoadInitializer(*particleSub, particle_obj, override_state);
+    LoadOperator(*particleSub, particle_obj, override_state);
     LoadControlPoint(*particleSub, particle_obj);
+
+    // Register every {user:"<key>", value:...} binding on instanceoverride
+    // so RenderSetUserProperty can mutate the shared state at runtime.
+    for (const auto& [field, key] : override.bindings) {
+        context.scene->particle_user_var_index[key].push_back({ override_state, field });
+    }
 
     mesh.AddMaterial(std::move(material));
     RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(),
@@ -2400,7 +2413,11 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             wpscene::WPFieldBindings fb;
             wpscene::AbsorbAllFieldBindings(o, fb);
             WireFieldScripts(context, node, fb);
-            context.node_id_map[id] = { parent, node };
+            std::string attachment;
+            if (o.contains("attachment") && o.at("attachment").is_string()) {
+                attachment = o.at("attachment").get<std::string>();
+            }
+            context.node_id_map[id] = { parent, node, nullptr, std::move(attachment) };
         }
     }
 

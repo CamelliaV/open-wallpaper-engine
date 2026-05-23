@@ -98,20 +98,36 @@ bool Emitter::FromJson(const nlohmann::json& json) {
 
 bool ParticleInstanceoverride::FromJosn(const nlohmann::json& json) {
     enabled = true;
-    owe::GetJsonValue(json, "alpha", alpha, false);
-    owe::GetJsonValue(json, "size", size, false);
-    owe::GetJsonValue(json, "lifetime", lifetime, false);
-    owe::GetJsonValue(json, "rate", rate, false);
-    owe::GetJsonValue(json, "speed", speed, false);
-    owe::GetJsonValue(json, "count", count, false);
-    owe::GetJsonValue(json, "brightness", brightness, false);
+
+    // {"user":"<key>","value":...} indirection -> record the key for the
+    // live user-property pipeline. The value still parses normally via
+    // GetJsonValue (which already looks through the `value` wrapper).
+    auto bind = [&](const char* field) {
+        if (! json.contains(field)) return;
+        const auto& sub = json.at(field);
+        if (! sub.is_object()) return;
+        auto it = sub.find("user");
+        if (it != sub.end() && it->is_string()) {
+            bindings[field] = it->get<std::string>();
+        }
+    };
+
+    owe::GetJsonValue(json, "alpha", alpha, false);          bind("alpha");
+    owe::GetJsonValue(json, "size", size, false);            bind("size");
+    owe::GetJsonValue(json, "lifetime", lifetime, false);    bind("lifetime");
+    owe::GetJsonValue(json, "rate", rate, false);            bind("rate");
+    owe::GetJsonValue(json, "speed", speed, false);          bind("speed");
+    owe::GetJsonValue(json, "count", count, false);          bind("count");
+    owe::GetJsonValue(json, "brightness", brightness, false); bind("brightness");
     owe::GetJsonValue(json, "id", id, false);
     if (json.contains("color")) {
         owe::GetJsonValue(json, "color", color);
         overColor = true;
+        bind("color");
     } else if (json.contains("colorn")) {
         owe::GetJsonValue(json, "colorn", colorn);
         overColorn = true;
+        bind("colorn");
     }
     {
         const char* cp_keys[]    = { "controlpoint0", "controlpoint1", "controlpoint2",
@@ -123,7 +139,9 @@ bool ParticleInstanceoverride::FromJosn(const nlohmann::json& json) {
                                      "controlpointangle6", "controlpointangle7" };
         for (int i = 0; i < 8; ++i) {
             owe::GetJsonValue(json, cp_keys[i], controlpoint[i], false);
+            bind(cp_keys[i]);
             owe::GetJsonValue(json, cpa_keys[i], controlpointangle[i], false);
+            bind(cpa_keys[i]);
         }
     }
     return true;

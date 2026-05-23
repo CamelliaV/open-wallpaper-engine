@@ -200,17 +200,21 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
     };
 }
 
-ParticleInitOp WPParticleParser::genOverrideInitOp(const wpscene::ParticleInstanceoverride& over) {
-    return [=](Particle& p, double) {
-        PM::MutiplyInitLifeTime(p, over.lifetime);
-        PM::MutiplyInitAlpha(p, over.alpha);
-        PM::MutiplyInitSize(p, over.size);
-        PM::MutiplyVelocity(p, over.speed);
-        if (over.overColor) {
+ParticleInitOp WPParticleParser::genOverrideInitOp(
+    std::shared_ptr<const wpscene::ParticleInstanceoverride> over) {
+    return [over = std::move(over)](Particle& p, double) {
+        PM::MutiplyInitLifeTime(p, over->lifetime);
+        PM::MutiplyInitAlpha(p, over->alpha);
+        PM::MutiplyInitSize(p, over->size);
+        PM::MutiplyVelocity(p, over->speed);
+        if (over->overColor) {
             PM::InitColor(
-                p, over.color[0] / 255.0f, over.color[1] / 255.0f, over.color[2] / 255.0f);
-        } else if (over.overColorn) {
-            PM::MutiplyInitColor(p, over.colorn[0], over.colorn[1], over.colorn[2]);
+                p, over->color[0] / 255.0f, over->color[1] / 255.0f, over->color[2] / 255.0f);
+        } else if (over->overColorn) {
+            // `colorn` = "color (normalized)" -> absolute 0..1 RGB override
+            // (matches WE editor behaviour: picking red in the UI yields a
+            // red trail regardless of the base colorrandom initializer).
+            PM::InitColor(p, over->colorn[0], over->colorn[1], over->colorn[2]);
         }
     };
 }
@@ -428,15 +432,15 @@ struct ControlPointForce {
 };
 
 ParticleOperatorOp
-WPParticleParser::genParticleOperatorOp(const nlohmann::json&                    wpj,
-                                        const wpscene::ParticleInstanceoverride& over) {
+WPParticleParser::genParticleOperatorOp(
+    const nlohmann::json&                                   wpj,
+    std::shared_ptr<const wpscene::ParticleInstanceoverride> over_state) {
     do {
         if (! wpj.contains("name")) break;
         std::string name;
         owe::GetJsonValue(wpj, "name", name);
         if (name == "movement") {
             float drag { 0.0f };
-            auto  speed = over.speed;
 
             std::array<float, 3> gravity { 0, 0, 0 };
             owe::GetJsonValue(wpj, "drag", drag, false);
@@ -450,7 +454,8 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
             // Euler for any force op listed after `movement` in the JSON
             // (e.g. controlpointattract), which diverges in central force
             // fields and makes orbital trails wobble apart.
-            return [=](const ParticleInfo& info) {
+            return [drag, vecG, over_state](const ParticleInfo& info) {
+                auto speed = over_state->speed;
                 for (auto& p : info.particles) {
                     Vector3d acc =
                         algorism::DragForce(PM::GetVelocity(p).cast<double>(), drag) + vecG;
@@ -472,8 +477,8 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
             };
         } else if (name == "sizechange") {
             auto vc        = ValueChange::ReadFromJson(wpj);
-            auto size_over = over.size;
-            return [vc, size_over](const ParticleInfo& info) {
+            return [vc, over_state](const ParticleInfo& info) {
+                auto size_over = over_state->size;
                 for (auto& p : info.particles)
                     PM::MutiplySize(p, size_over * FadeValueChange(PM::LifetimePos(p), vc));
             };

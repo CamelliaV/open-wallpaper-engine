@@ -164,6 +164,14 @@ public:
     // string format. Captured into static arrays of array<float,3>.
     std::array<std::array<float, 3>, 8> controlpoint {};
     std::array<std::array<float, 3>, 8> controlpointangle {};
+
+    // field name (e.g. "alpha", "size", "color", "colorn", "lifetime",
+    // "rate", "speed", "count", "brightness") -> user-property key when the
+    // scene.json value is wrapped in `{"user":"<key>","value":...}`. The
+    // owning particle subsystem keeps the override behind a shared_ptr so
+    // RenderSetUserProperty can mutate the relevant field at runtime and the
+    // change is picked up by every initializer/operator captured closure.
+    std::unordered_map<std::string, std::string> bindings;
 };
 
 class WPParticleObject {

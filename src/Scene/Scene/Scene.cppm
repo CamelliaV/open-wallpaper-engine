@@ -1314,6 +1314,20 @@ public:
     Map<std::string, std::vector<std::pair<class SceneMaterial*, std::string>>>
         shader_user_var_index;
 
+    // user-property key → list of (override state, field name) pairs for the
+    // particle layers whose instanceoverride was authored as `{user:"<key>"}`.
+    // Mutated by RenderSetUserProperty; the shared_ptr is also captured by
+    // every initializer / operator closure on the relevant subsystem. The
+    // state is type-erased because the real type
+    // `owe::wpscene::ParticleInstanceoverride` is attached to wescene.parse,
+    // which already imports wescene.scene — pulling it in here would create
+    // a cycle.
+    struct ParticleOverrideBinding {
+        std::shared_ptr<void> state;
+        std::string           field;
+    };
+    Map<std::string, std::vector<ParticleOverrideBinding>> particle_user_var_index;
+
     // Scene-tree root. After parse handoff to the render thread, the tree
     // shape under `sceneGraph` is immutable until Scene destruction (see the
     // invariant on SceneNode). Render-graph build is read-only; script ticks

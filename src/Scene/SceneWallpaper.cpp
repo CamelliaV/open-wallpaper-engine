@@ -252,6 +252,63 @@ void ApplyUserPropertyToShaders(Scene& scene, const std::string& key,
     }
 }
 
+// Push a user-property value into every particle subsystem whose
+// instanceoverride was authored as `{user:"<key>", value:...}` for one of
+// its fields. The override sits behind a shared_ptr; mutating it through the
+// scene-wide binding index is observed by every initializer / operator
+// closure on next emission.
+void ApplyUserPropertyToParticles(Scene& scene, const std::string& key,
+                                  const nlohmann::json& prop) {
+    auto it = scene.particle_user_var_index.find(key);
+    if (it == scene.particle_user_var_index.end()) return;
+
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok) return;
+
+    auto write_scalar = [&](float& dst) {
+        if (coerced.value.size() >= 1) dst = coerced.value[0];
+    };
+    auto write_vec3 = [&](std::array<float, 3>& dst, float scale) {
+        if (coerced.value.size() < 3) return;
+        dst = { coerced.value[0] * scale, coerced.value[1] * scale,
+                coerced.value[2] * scale };
+    };
+
+    for (auto& b : it->second) {
+        if (! b.state) continue;
+        auto* st = static_cast<owe::wpscene::ParticleInstanceoverride*>(b.state.get());
+        const std::string& f = b.field;
+        if (f == "alpha")       write_scalar(st->alpha);
+        else if (f == "size")   write_scalar(st->size);
+        else if (f == "lifetime") write_scalar(st->lifetime);
+        else if (f == "rate")   write_scalar(st->rate);
+        else if (f == "speed")  write_scalar(st->speed);
+        else if (f == "count")  write_scalar(st->count);
+        else if (f == "brightness") write_scalar(st->brightness);
+        else if (f == "color")  {
+            // `color` is 0..255 in the JSON; the init op divides by 255.
+            write_vec3(st->color, 255.0f);
+            st->overColor = true;
+        }
+        else if (f == "colorn") {
+            write_vec3(st->colorn, 1.0f);
+            st->overColorn = true;
+        }
+        else if (f.starts_with("controlpoint") && ! f.starts_with("controlpointangle")) {
+            int idx = -1;
+            try { idx = std::stoi(f.substr(std::string_view("controlpoint").size())); }
+            catch (...) {}
+            if (idx >= 0 && idx < 8) write_vec3(st->controlpoint[idx], 1.0f);
+        }
+        else if (f.starts_with("controlpointangle")) {
+            int idx = -1;
+            try { idx = std::stoi(f.substr(std::string_view("controlpointangle").size())); }
+            catch (...) {}
+            if (idx >= 0 && idx < 8) write_vec3(st->controlpointangle[idx], 1.0f);
+        }
+    }
+}
+
 void MergeProjectUserProperties(
     const std::filesystem::path& project_dir,
     std::unordered_map<std::string, nlohmann::json>& out) {
@@ -540,6 +597,7 @@ void RenderHandler::on(RenderSetUserProperty&& m) {
     if (! m_scene) return;
     owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
     ApplyUserPropertyToShaders(*m_scene, m.key, m.property);
+    ApplyUserPropertyToParticles(*m_scene, m.key, m.property);
 }
 
 void RenderHandler::on(RenderInit&& m) {
