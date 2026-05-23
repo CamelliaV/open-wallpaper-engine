@@ -899,13 +899,32 @@ globalThis.createScriptProperties = function () {
   builder._hostValues = {};
   return builder;
 };
+// WE editor exposes a real console; renderer scripts that log diagnostics
+// touch it from init/update. Provide a no-op shim so unguarded calls
+// don't throw ReferenceError mid module-body — that would leave the
+// remaining const/let declarations in TDZ and break unrelated callbacks.
+if (! globalThis.console) {
+    const __noop = function() {};
+    globalThis.console = {
+        log: __noop, info: __noop, warn: __noop, error: __noop,
+        debug: __noop, trace: __noop, dir: __noop, assert: __noop,
+        group: __noop, groupCollapsed: __noop, groupEnd: __noop,
+    };
+}
+
 // engine.userProperties is a plain object the host can mutate.
 if (! globalThis.engine) globalThis.engine = {};
 globalThis.engine.userProperties = {};
 globalThis.engine.AUDIO_RESOLUTION_16 = 16;
 globalThis.engine.AUDIO_RESOLUTION_32 = 32;
-globalThis.engine.isRunningInEditor = false;
-globalThis.engine.isScreensaver = false;
+// WE exposes these as zero-arg query functions; some scripts call them
+// (`engine.isRunningInEditor()`), others read as boolean. Provide a
+// callable that also coerces to false when accessed as a value (the
+// function object is truthy, but scripts that use `if (engine.isRunningInEditor)`
+// still see truthy → they branch into the "running in editor" path. The
+// corpus only ever calls it, so callable-form is the safer default).
+globalThis.engine.isRunningInEditor = function() { return false; };
+globalThis.engine.isScreensaver     = function() { return false; };
 
 // --- Vec2 / Vec3 ---
 // Pure-JS implementations of WE's vector types. The corpus relies on
@@ -982,6 +1001,8 @@ function __wwCreateNodeStub() {
             if (key === 'getName')             return () => '';
             if (key === 'getLayer')            return (_n) => __wwCreateNodeStub();
             if (key === 'getTextureAnimation') return () => __wwCreateTexAnimStub();
+            if (key === 'getAnimation')        return ()   => __wwCreateAnimationStub();
+            if (key === 'getAnimationLayer')   return (_n) => __wwCreateAnimationStub();
             if (key in target) return target[key];
             return undefined;
         },
@@ -1002,8 +1023,36 @@ function __wwCreateTexAnimStub() {
         isPlaying(){ return playing;  },
     };
 }
+// Sprite-image / puppet-bone animation handle. `rate` is read+written by
+// scripts that vary playback speed via a slider; play/stop/isPlaying are
+// the bare minimum so cursor-driven puppet animation scripts don't crash.
+function __wwCreateAnimationStub() {
+    let playing = false;
+    const o = {
+        rate: 1,
+        play()     { playing = true;  },
+        stop()     { playing = false; },
+        pause()    { playing = false; },
+        isPlaying(){ return playing;  },
+    };
+    return o;
+}
+globalThis.__wwCreateAnimationStub = __wwCreateAnimationStub;
 globalThis.thisLayer = __wwCreateNodeStub();
 globalThis.thisScene = __wwCreateNodeStub();
+
+// `input` is the WE-global cursor / input state. Scripts often guard with
+// `if (input && input.cursorWorldPosition)` so a populated stub is fine;
+// values stay at zero until the host wires real cursor data.
+globalThis.input = {
+    cursorWorldPosition:  new Vec3(0, 0, 0),
+    cursorLocalPosition:  new Vec3(0, 0, 0),
+    cursorScreenPosition: new Vec2(0, 0),
+    mouseButtonsDown:     0,
+    mouseButtonsPressed:  0,
+    mouseButtonsReleased: 0,
+    inWindow:             false,
+};
 
 // Hook used by the C++ side to swap the stub for a real per-script binding.
 globalThis.__wwBindLayer = function(obj) { globalThis.thisLayer = obj; };
@@ -1508,6 +1557,19 @@ JSValue NodeGetTextureAnimation(JSContext* ctx, JSValueConst this_val, int, JSVa
     return obj;
 }
 
+// Sprite-image .getAnimation() and puppet-bone .getAnimationLayer(name).
+// Renderer doesn't yet expose either through the C-class, so route both
+// through the JS-side __wwCreateAnimationStub which gives scripts a
+// no-op handle with `rate` / play / stop / isPlaying.
+JSValue NodeGetAnimationStub(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue f = JS_GetPropertyStr(ctx, g, "__wwCreateAnimationStub");
+    JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 0, nullptr);
+    JS_FreeValue(ctx, f);
+    JS_FreeValue(ctx, g);
+    return r;
+}
+
 const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("origin",          NodeGetOrigin,  NodeSetOrigin),
     JS_CGETSET_DEF("scale",           NodeGetScale,   NodeSetScale),
@@ -1526,6 +1588,8 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getName",             0, NodeGetName),
     JS_CFUNC_DEF("getLayer",            1, NodeGetLayer),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
+    JS_CFUNC_DEF("getAnimation",        0, NodeGetAnimationStub),
+    JS_CFUNC_DEF("getAnimationLayer",   1, NodeGetAnimationStub),
     JS_CFUNC_DEF("createLayer",         1, NodeSceneCreateLayer),
     JS_CFUNC_DEF("getLayerIndex",       1, NodeSceneGetLayerIndex),
     JS_CFUNC_DEF("sortLayer",           2, NodeSceneSortLayer),
