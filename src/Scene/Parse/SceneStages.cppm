@@ -59,6 +59,12 @@ struct ParseContext {
         std::shared_ptr<SceneNode> node;
     };
     std::unordered_map<std::int32_t, NodeRef> node_id_map;
+    // Scene.json declaration order. Reparenting in this order keeps each
+    // container's children in the order they appeared in scene.json (so
+    // layer 28 stays the first child of layer 79). Iterating the unordered
+    // map directly would scramble z-order and let the background overwrite
+    // foreground layers.
+    std::vector<std::int32_t> node_id_order;
 };
 
 struct ProcessOpts {

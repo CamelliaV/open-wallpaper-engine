@@ -457,7 +457,6 @@ public:
     auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
     const auto& FirstTarget() const { return m_pingpong_a; }
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
-    SceneNode&  FinalNode() const { return *m_final_node; }
     void        SetFinalBlend(BlendMode m) { m_final_blend = m; m_resolved = false; }
     void        SetFinalTarget(std::string t) {
         m_final_target = std::move(t);
@@ -476,7 +475,6 @@ private:
 
     bool fullscreen { false };
     std::unique_ptr<SceneMesh> m_final_mesh;
-    std::unique_ptr<SceneNode> m_final_node;
     BlendMode                  m_final_blend;
     std::string                m_final_target { SpecTex_Default };
     bool                       m_resolved { false };
@@ -556,8 +554,12 @@ public:
     Eigen::Vector3d GetPosition() const;
     Eigen::Vector3d GetDirection() const;
 
-    Eigen::Matrix4d GetViewMatrix() const;
-    Eigen::Matrix4d GetViewProjectionMatrix() const;
+    // Lazy: recomputes from m_node->ModelTrans() on every call. Cheap when
+    // the attached node hasn't moved (UpdateTrans early-exits on clean
+    // m_dirty), correctness-keeping when scripts / parent-chain attachment
+    // shift the node between frames.
+    Eigen::Matrix4d GetViewMatrix();
+    Eigen::Matrix4d GetViewProjectionMatrix();
 
     std::shared_ptr<SceneNode> GetAttachedNode() const { return m_node; }
 
@@ -592,6 +594,28 @@ private:
 // SceneNode.h
 // ============================================================================
 
+// Lifetime invariant — tree topology is frozen post-parse.
+//
+// `m_children` / `m_parent` are written only during parse-time construction
+// (WPSceneParser AppendChild / SpawnLayerClones). Once `Scene` is shipped to
+// the render thread via `RenderSetScene`, no code adds, removes, or reorders
+// nodes. The only exception is `SetParentAnchor`, used by
+// SceneImageEffectLayer::ResolveEffect to re-anchor an effect's composite
+// node onto its layer's worldNode for transform inheritance — both nodes
+// are parse-time creations and survive for the Scene's lifetime, so the
+// re-anchor never dangles.
+//
+// post-parse mutations restricted to render thread: m_translate / m_scale /
+// m_rotation, m_visible, m_user_alpha, m_brightness, m_color, m_tex_anim,
+// m_dirty (all driven by script ticks and shader-value updates).
+//
+// Practical consequence: every non-owning `SceneNode*` reference held by
+// downstream subsystems (FieldScript::Impl::node, EngineHostState::text_setters,
+// SceneImageEffectLayer::m_worldNode, SceneCamera::m_node, m_parent itself)
+// is valid for the Scene's lifetime by construction. The dtor's parent
+// back-link clearing below is a defence against Scene teardown ordering,
+// where a child held by an external shared_ptr (e.g. SceneCamera::m_node)
+// can outlive its parent inside the std::list destructor.
 class SceneNode : NoCopy, NoMove {
 public:
     SceneNode()
@@ -607,6 +631,18 @@ public:
           m_translate(translate),
           m_scale(scale),
           m_rotation(rotation) {};
+
+    // Scene-teardown safety: an external holder (SceneCamera::m_node,
+    // ParticleSubSystem::m_owner_node.lock(), actuator closures) can keep a
+    // child alive past its parent's destruction while the std::list is being
+    // torn down. Clear the back-link so the survivor's UpdateTrans /
+    // HitTestNode falls back to local trans instead of dereferencing freed
+    // memory.
+    ~SceneNode() {
+        for (auto& c : m_children) {
+            if (c) c->m_parent = nullptr;
+        }
+    }
 
     const auto& Camera() const { return m_cameraName; }
     void        SetCamera(const std::string& name) { m_cameraName = name; }
@@ -687,6 +723,12 @@ public:
     const std::string& Name() const { return m_name; }
     SceneNode*         Parent() const { return m_parent; }
 
+    // Anchor for transform-only inheritance. The node does NOT join `p`'s
+    // children, so TraverseNode never visits it through `p`. Used for the
+    // SceneImageEffectLayer composite quad: the quad needs spImgNode's
+    // world transform but must not be rendered twice in scene-tree traversal.
+    void SetParentAnchor(SceneNode* p) { m_parent = p; MarkTransDirty(); }
+
     // BFS over self + descendants; returns first node whose Name() matches.
     SceneNode* FindByName(std::string_view name);
 
@@ -719,6 +761,9 @@ private:
 
     std::string m_cameraName;
 
+    // Raw back-link. Safe because tree topology is frozen post-parse (see
+    // class header) and the dtor clears children's m_parent before any
+    // out-of-order teardown can dereference a stale pointer.
     SceneNode* m_parent { nullptr };
 
     std::list<std::shared_ptr<SceneNode>> m_children;
@@ -1243,10 +1288,15 @@ public:
     std::unordered_map<std::string, std::shared_ptr<SceneCamera>> cameras;
     std::unordered_map<std::string, std::vector<std::string>>     linkedCameras;
 
-    // WE layer IDs whose source object had `visible: false` at parse time.
-    // Render-graph build uses this to route invisible-but-link-referenced
-    // layers into a private `_rt_link_<id>` RT instead of `_rt_default`.
-    Set<i32> initial_invisible_ids;
+    // WE layer IDs the render-graph build may elide when nothing links to
+    // them, or route to `_rt_link_<id>` when something does. Two flavours
+    // land here:
+    //   * `visible: false` at parse time (user-hidden layer that may still
+    //     act as a link source for another layer's composite).
+    //   * no-effect fullscreen / compose layers (recurring identity
+    //     passthrough on `_rt_default` — only useful as a link snapshot
+    //     point if referenced).
+    Set<i32> elidable_layer_ids;
 
     std::vector<std::unique_ptr<SceneLight>> lights;
 
@@ -1259,6 +1309,10 @@ public:
     Map<std::string, std::vector<std::pair<class SceneMaterial*, std::string>>>
         shader_user_var_index;
 
+    // Scene-tree root. After parse handoff to the render thread, the tree
+    // shape under `sceneGraph` is immutable until Scene destruction (see the
+    // invariant on SceneNode). Render-graph build is read-only; script ticks
+    // only mutate per-node transform / visibility fields.
     std::shared_ptr<SceneNode>           sceneGraph;
     std::unique_ptr<IShaderValueUpdater> shaderValueUpdater;
     std::unique_ptr<IImageParser>        imageParser;

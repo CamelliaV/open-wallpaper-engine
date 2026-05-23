@@ -70,9 +70,11 @@ static TexNode::Desc createTexDesc(std::string path) {
 }
 } // namespace owe::rg
 
-static void TraverseNode(const std::function<void(SceneNode*)>& func, SceneNode* node) {
+static void TraverseNode(const std::function<void(SceneNode*)>& func, SceneNode* node,
+                         const Set<i32>* skip_subtree_ids = nullptr) {
+    if (skip_subtree_ids != nullptr && skip_subtree_ids->count(node->ID()) != 0) return;
     func(node);
-    for (auto& child : node->GetChildren()) TraverseNode(func, child.get());
+    for (auto& child : node->GetChildren()) TraverseNode(func, child.get(), skip_subtree_ids);
 }
 
 static void CheckAndSetSprite(Scene& scene, vulkan::CustomShaderPass::Desc& desc,
@@ -220,24 +222,29 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
     if (imgeff != nullptr) loadEffect(imgeff);
 }
 
-// Bottom-up prune: drop SceneNodes whose WE layer id is in
-// `initial_invisible_ids` but not in `linked_ids`, and whose own subtree has
-// already been emptied by the recursion. Parents that still hold a surviving
-// descendant stay even when invisible — removing them would orphan the
-// surviving child's transform chain.
-static bool PruneUnusedInvisible(SceneNode* node, Scene& scene,
-                                  const Set<i32>& linked_ids) {
-    auto& children = node->GetChildren();
-    for (auto it = children.begin(); it != children.end();) {
-        if (! PruneUnusedInvisible(it->get(), scene, linked_ids)) {
-            it = children.erase(it);
-        } else {
-            ++it;
-        }
+// Bottom-up collect: identify SceneNode subtrees whose every node is in
+// `elidable_layer_ids` and not in `linked_ids` (i.e. nothing in the subtree
+// needs to emit). Returns true when this subtree is fully skippable; only
+// then is `node->ID()` added to `out_skip` so the emit walk can short-circuit
+// at the root of the skippable subtree without descending. Does NOT mutate
+// the scene tree — the tree topology is frozen after parse handoff (see the
+// invariant on SceneNode in Scene.cppm).
+static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene,
+                                    const Set<i32>& linked_ids,
+                                    Set<i32>&       out_skip) {
+    bool all_children_skippable = true;
+    for (auto& c : node->GetChildren()) {
+        if (! CollectEmitSkipSubtrees(c.get(), scene, linked_ids, out_skip))
+            all_children_skippable = false;
     }
-    const i32 nid = node->ID();
-    return ! (scene.initial_invisible_ids.count(nid) != 0 &&
-              linked_ids.count(nid) == 0 && children.empty());
+    const i32  nid            = node->ID();
+    const bool self_skippable = scene.elidable_layer_ids.count(nid) != 0 &&
+                                linked_ids.count(nid) == 0;
+    if (self_skippable && all_children_skippable) {
+        out_skip.insert(nid);
+        return true;
+    }
+    return false;
 }
 
 // Walk the SceneNode subtree (plus its imgeff's effect nodes) and collect every
@@ -284,19 +291,22 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     }
     extra.linked_ids = &linked_ids;
 
-    // Drop SceneNodes that were kept around only because the parser stopped
-    // dropping invisible image objects at parse time. Most corpora have ~25x
-    // more parse-time-invisible layers than ones actually link-referenced.
-    PruneUnusedInvisible(scene.sceneGraph.get(), scene, linked_ids);
+    // Skip subtrees the parser tagged as elidable (user-hidden, or no-effect
+    // identity passthrough layers) when nothing in the subtree links anything.
+    // Most corpora have ~25x more elidable layers than link-referenced ones;
+    // the skip set lets the emit walk short-circuit without mutating the tree.
+    Set<i32> emit_skip_subtree_ids;
+    CollectEmitSkipSubtrees(scene.sceneGraph.get(), scene, linked_ids,
+                            emit_skip_subtree_ids);
 
-    // Pass B: emit passes. For parse-time-invisible layers, drop the ones with
-    // no link consumer; route the remaining ones into a private `_rt_link_<id>`
-    // RT instead of `_rt_default`.
+    // Pass B: emit passes. For elidable layers with a link consumer, route
+    // into a private `_rt_link_<id>` RT instead of `_rt_default`; elidable
+    // layers without a link consumer fall through and emit nothing.
     TraverseNode(
         [&extra, &scene, &linked_ids](SceneNode* node) {
             const i32 nid = node->ID();
-            const bool init_invisible = scene.initial_invisible_ids.count(nid) != 0;
-            if (init_invisible) {
+            const bool elidable = scene.elidable_layer_ids.count(nid) != 0;
+            if (elidable) {
                 if (linked_ids.count(nid) == 0) return;
                 std::string link_key = GenLinkTex((idx)nid);
                 if (! node->Camera().empty()) {
@@ -318,7 +328,8 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
                 ToGraphPass(node, SpecTex_Default, nid, extra);
             }
         },
-        scene.sceneGraph.get());
+        scene.sceneGraph.get(),
+        &emit_skip_subtree_ids);
 
     // Emit global post-process passes after the main scene-graph traversal.
     // Each step is either a CustomShaderPass (built on the synthetic node's

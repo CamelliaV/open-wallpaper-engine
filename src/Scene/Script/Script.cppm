@@ -202,8 +202,12 @@ struct Actuator {
 
 // Build the closure that drives a SceneNode transform field. Encapsulates
 // the Vec3/Vec2/Scalar/Bool coercion table so callers stay one-liners.
+// Captures `node` as shared_ptr — the tree-topology invariant in Scene.cppm
+// already guarantees the node lives for the Scene's lifetime, so this is
+// belt-and-suspenders for Scene-teardown ordering, not protection against
+// runtime tree mutation.
 std::function<void(const ScriptValue&)>
-MakeNodeTransformApply(owe::SceneNode* node, NodeTransformTarget target);
+MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget target);
 
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
 // populated by the parser, attached to the Scene as an opaque pointer

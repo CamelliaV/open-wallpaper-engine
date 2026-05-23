@@ -41,6 +41,7 @@ constexpr uint32_t singile_bone_frame = 4 * 9;
 
 // Compute per-vertex byte stride from a layout flag bitset. Position is
 // always emitted (12 bytes), other attributes are gated by their bits.
+// UV2 implies a regular UV slot in addition to the UV2 slot.
 uint32_t compute_vertex_stride(uint32_t flag) {
     uint32_t s = 12;
     if (flag & MDL_FLAG_NORMAL)      s += 12;
@@ -48,7 +49,7 @@ uint32_t compute_vertex_stride(uint32_t flag) {
     if (flag & MDL_FLAG_EXTRA4)      s += 4;
     if (flag & MDL_FLAG_SKIN_BLEND)  s += 16;
     if (flag & MDL_FLAG_SKIN_WEIGHT) s += 16;
-    if (flag & MDL_FLAG_UV)          s += 8;
+    if (flag & (MDL_FLAG_UV | MDL_FLAG_UV2)) s += 8;
     if (flag & MDL_FLAG_UV2)         s += 8;
     return s;
 }
@@ -104,7 +105,7 @@ bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header,
     if (mesh_flag & MDL_FLAG_EXTRA4)      mesh.extra4.resize(vertex_num);
     if (mesh_flag & MDL_FLAG_SKIN_BLEND)  mesh.blend_indices.resize(vertex_num);
     if (mesh_flag & MDL_FLAG_SKIN_WEIGHT) mesh.blend_weights.resize(vertex_num);
-    if (mesh_flag & MDL_FLAG_UV)          mesh.texcoords.resize(vertex_num);
+    if (mesh_flag & (MDL_FLAG_UV | MDL_FLAG_UV2)) mesh.texcoords.resize(vertex_num);
     if (mesh_flag & MDL_FLAG_UV2)         mesh.texcoord2.resize(vertex_num);
 
     for (uint32_t i = 0; i < vertex_num; ++i) {
@@ -124,7 +125,7 @@ bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header,
         if (mesh_flag & MDL_FLAG_SKIN_WEIGHT) {
             for (auto& v : mesh.blend_weights[i]) v = f.ReadFloat();
         }
-        if (mesh_flag & MDL_FLAG_UV) {
+        if (mesh_flag & (MDL_FLAG_UV | MDL_FLAG_UV2)) {
             for (auto& v : mesh.texcoords[i]) v = f.ReadFloat();
         }
         if (mesh_flag & MDL_FLAG_UV2) {
@@ -273,9 +274,9 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
 
         uint32_t file_parent = f.ReadUint32();
         if (file_parent >= i && file_parent != WPPuppet::NO_PARENT) {
-            rstd_error("mdl wrong bone parent index {} (i={}) in {}",
-                       file_parent, i, std::string(path));
-            return false;
+            rstd_info("mdl bone[{}] forward parent {} in {}; treating as root",
+                      i, file_parent, std::string(path));
+            file_parent = WPPuppet::NO_PARENT;
         }
         bone.bind_parent = file_parent;
         bone.anim_parent = file_parent;
@@ -400,10 +401,6 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim,
                     int mdla_ver, std::string_view path) {
     anim.id           = f.ReadInt32();
     anim.unk_after_id = f.ReadUint32();
-    if (anim.id <= 0) {
-        rstd_error("wrong anime id {}", anim.id);
-        return false;
-    }
 
     anim.name = f.ReadStr();
     if (anim.name.empty()) anim.name = f.ReadStr();
@@ -644,39 +641,53 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
     auto v_to_e = [](const std::array<float, 3>& p) {
         return Eigen::Vector3d { p[0], p[1], p[2] };
     };
-    const auto& m0 = mdl.meshes[0];
-    if (m0.blend_indices.empty() || m0.blend_weights.empty()) return;
-    if (! m0.indices.empty()) {
-        for (const auto& tri : m0.indices) {
-            if (tri[0] >= m0.positions.size() || tri[1] >= m0.positions.size() ||
-                tri[2] >= m0.positions.size()) continue;
-            Eigen::Vector3d p0 = v_to_e(m0.positions[tri[0]]);
-            Eigen::Vector3d p1 = v_to_e(m0.positions[tri[1]]);
-            Eigen::Vector3d p2 = v_to_e(m0.positions[tri[2]]);
-            Eigen::Vector3d centroid_tri = (p0 + p1 + p2) / 3.0;
-            double area = 0.5 * (p1 - p0).cross(p2 - p0).norm();
-            if (area <= 0.0) continue;
-            for (int k = 0; k < 3; ++k) {
-                if (m0.blend_weights[tri[k]][0] <= 0.0f) continue;
-                uint32_t bi = m0.blend_indices[tri[k]][0];
-                if (bi >= nbones) continue;
-                sum_pos[bi] += centroid_tri * (area / 3.0);
-                sum_w[bi]   += area / 3.0;
+
+    // Multi-mesh puppets (mesh_count > 1) may distribute skin data across
+    // sub-meshes; accumulate centroid contributions from every mesh that has
+    // bone indices. Meshes that only carry SKIN_BLEND (no SKIN_WEIGHT) follow
+    // the WE 1-bone rigid convention: implicit weight 1.0 on slot 0.
+    auto contribute = [&](const WPMdl::Mesh& m) {
+        if (m.blend_indices.empty()) return;
+        const bool has_w = ! m.blend_weights.empty();
+        auto weight = [&](size_t vi, int k) -> float {
+            if (! has_w) return k == 0 ? 1.0f : 0.0f;
+            return m.blend_weights[vi][k];
+        };
+        if (! m.indices.empty()) {
+            for (const auto& tri : m.indices) {
+                if (tri[0] >= m.positions.size() || tri[1] >= m.positions.size() ||
+                    tri[2] >= m.positions.size()) continue;
+                Eigen::Vector3d p0 = v_to_e(m.positions[tri[0]]);
+                Eigen::Vector3d p1 = v_to_e(m.positions[tri[1]]);
+                Eigen::Vector3d p2 = v_to_e(m.positions[tri[2]]);
+                Eigen::Vector3d centroid_tri = (p0 + p1 + p2) / 3.0;
+                double area = 0.5 * (p1 - p0).cross(p2 - p0).norm();
+                if (area <= 0.0) continue;
+                for (int k = 0; k < 3; ++k) {
+                    if (weight(tri[k], 0) <= 0.0f) continue;
+                    uint32_t bi = m.blend_indices[tri[k]][0];
+                    if (bi >= nbones) continue;
+                    sum_pos[bi] += centroid_tri * (area / 3.0);
+                    sum_w[bi]   += area / 3.0;
+                }
             }
-        }
-    } else {
-        for (size_t vi = 0; vi < m0.positions.size(); ++vi) {
-            Eigen::Vector3d p = v_to_e(m0.positions[vi]);
-            for (int k = 0; k < 4; ++k) {
-                float w = m0.blend_weights[vi][k];
-                uint32_t bi = m0.blend_indices[vi][k];
-                if (w > 0.0f && bi < nbones) {
-                    sum_pos[bi] += p * (double)w;
-                    sum_w[bi]   += (double)w;
+        } else {
+            const int slots = has_w ? 4 : 1;
+            for (size_t vi = 0; vi < m.positions.size(); ++vi) {
+                Eigen::Vector3d p = v_to_e(m.positions[vi]);
+                for (int k = 0; k < slots; ++k) {
+                    float w = weight(vi, k);
+                    uint32_t bi = m.blend_indices[vi][k];
+                    if (w > 0.0f && bi < nbones) {
+                        sum_pos[bi] += p * (double)w;
+                        sum_w[bi]   += (double)w;
+                    }
                 }
             }
         }
-    }
+    };
+    for (const auto& m : mdl.meshes) contribute(m);
+
     for (size_t i = 0; i < nbones; ++i) {
         if (sum_w[i] > 0.0) {
             Eigen::Vector3f centroid = (sum_pos[i] / sum_w[i]).cast<float>();
@@ -795,11 +806,17 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
         packers.push_back([&src](size_t i, float* dst) {
             std::memcpy(dst, src.blend_indices[i].data(), sizeof(src.blend_indices[i]));
         });
-    }
-    if (! src.blend_weights.empty()) {
+        // SKIN_BLEND without SKIN_WEIGHT is the WE 1-bone rigid convention;
+        // emit synthetic [1,0,0,0] so the SKINNING shader path always has
+        // valid weights to read.
         specs.push_back(VAttr::BlendWeights);
-        packers.push_back([&src](size_t i, float* dst) {
-            std::memcpy(dst, src.blend_weights[i].data(), sizeof(src.blend_weights[i]));
+        const bool has_w = ! src.blend_weights.empty();
+        packers.push_back([&src, has_w](size_t i, float* dst) {
+            if (has_w) {
+                std::memcpy(dst, src.blend_weights[i].data(), sizeof(src.blend_weights[i]));
+            } else {
+                dst[0] = 1.0f; dst[1] = 0.0f; dst[2] = 0.0f; dst[3] = 0.0f;
+            }
         });
     }
     if (! src.texcoords.empty()) {

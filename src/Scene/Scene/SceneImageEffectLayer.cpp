@@ -17,8 +17,7 @@ SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
     : m_worldNode(node),
       m_pingpong_a(pingpong_a),
       m_pingpong_b(pingpong_b),
-      m_final_mesh(std::make_unique<SceneMesh>()),
-      m_final_node(std::make_unique<SceneNode>()) {};
+      m_final_mesh(std::make_unique<SceneMesh>()) {};
 
 void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                                           std::string_view effect_cam) {
@@ -68,12 +67,13 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         last_output->output = m_final_target;
         auto& mesh          = *(last_output->sceneNode->Mesh());
         auto& material      = *mesh.Material();
-        {
-            material.blenmode = m_final_blend;
-            last_output->sceneNode->SetCamera(std::string());
-            last_output->sceneNode->CopyTrans(*m_final_node);
-            mesh.ChangeMeshDataFrom(*m_final_mesh);
-        }
+        material.blenmode = m_final_blend;
+        last_output->sceneNode->SetCamera(std::string());
+        // Anchor to the layer's primary SceneNode so the composite quad
+        // inherits the layer's world transform (including any container
+        // parent chain) via ModelTrans. Identity local — no CopyTrans dance.
+        last_output->sceneNode->SetParentAnchor(m_worldNode);
+        mesh.ChangeMeshDataFrom(*m_final_mesh);
     }
     m_resolved = true;
 }

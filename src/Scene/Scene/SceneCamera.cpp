@@ -24,30 +24,36 @@ Vector3d SceneCamera::GetDirection() const {
     return -Vector3d::UnitZ();
 }
 
-Matrix4d SceneCamera::GetViewMatrix() const { return m_viewMat; }
+Matrix4d SceneCamera::GetViewMatrix() {
+    CalculateViewProjectionMatrix();
+    return m_viewMat;
+}
 
-Matrix4d SceneCamera::GetViewProjectionMatrix() const { return m_viewProjectionMat; }
+Matrix4d SceneCamera::GetViewProjectionMatrix() {
+    CalculateViewProjectionMatrix();
+    return m_viewProjectionMat;
+}
 
 void SceneCamera::CalculateViewProjectionMatrix() {
-    {
-        if (m_node) {
-            Affine3d nodeTrans(m_node->GetLocalTrans());
-            Vector3d eye    = nodeTrans * Vector3d::Zero();
-            Vector3d center = nodeTrans * (-Vector3d::UnitZ());
-            Vector3d up     = Vector3d::UnitY();
-            m_viewMat       = LookAt(eye, center, up);
-        } else
-            m_viewMat = Matrix4d::Identity();
-    };
+    if (m_node) {
+        // view = inv(node.ModelTrans()) so the layer-local frame maps to
+        // view origin regardless of where the node sits in the world (parent
+        // chain + local translate / scale / rotate). With LookAt-only the
+        // node's local scale would leak into clip space and a 9× scaled
+        // layer would only see 1/9 of its quad inside the ortho viewport.
+        m_node->UpdateTrans();
+        m_viewMat = m_node->ModelTrans().inverse();
+    } else
+        m_viewMat = Matrix4d::Identity();
 
     if (m_perspective) {
         m_viewProjectionMat =
             Perspective(Radians(m_fov), m_aspect, m_nearClip, m_farClip) * m_viewMat;
     } else {
-        double left         = -m_width / 2.0f;
-        double right        = m_width / 2.0f;
-        double bottom       = -m_height / 2.0f;
-        double up           = m_height / 2.0f;
+        double left   = -m_width / 2.0f;
+        double right  = m_width / 2.0f;
+        double bottom = -m_height / 2.0f;
+        double up     = m_height / 2.0f;
         m_viewProjectionMat = Ortho(left, right, bottom, up, m_nearClip, m_farClip) * m_viewMat;
     }
 }
@@ -60,5 +66,4 @@ void SceneCamera::AttatchNode(std::shared_ptr<SceneNode> node) {
         return;
     }
     m_node = node;
-    Update();
 }

@@ -1933,8 +1933,8 @@ bool       ScriptScene::empty() const noexcept {
 }
 
 std::function<void(const ScriptValue&)>
-MakeNodeTransformApply(owe::SceneNode* node, NodeTransformTarget target) {
-    return [node, target](const ScriptValue& v) {
+MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget target) {
+    return [node = std::move(node), target](const ScriptValue& v) {
         if (! node) return;
         if (std::holds_alternative<std::monostate>(v)) return;
 
