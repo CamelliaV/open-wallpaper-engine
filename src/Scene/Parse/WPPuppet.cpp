@@ -20,12 +20,14 @@ void WPPuppet::prepared() {
     for (unsigned i = 0; i < bones.size(); i++) {
         auto& b = bones[i];
         rstd_assert(b.bind_parent < i || b.noBindParent());
-        // Root sprite bones fold vertex_centroid_offset into world_bind so
-        // anim transforms naturally pivot around the sprite centroid.
-        // Chain bones keep parent.world_bind * local_bind.
+        // vco bracket only applies to world-anchored puppets (MDLV21): each bone
+        // is its own sprite root, and anim pivots around vertex_centroid_offset.
+        // Chain LBS (MDLV22+) keeps strict parent.world_bind * local_bind.
         if (b.noBindParent()) {
             b.world_bind = b.local_bind;
-            b.world_bind.pretranslate(b.vertex_centroid_offset);
+            if (world_anchored_bones) {
+                b.world_bind.pretranslate(b.vertex_centroid_offset);
+            }
         } else {
             b.world_bind = bones[b.bind_parent].world_bind * b.local_bind;
         }
@@ -118,7 +120,9 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
                          (alayer.blend * (scale_a_delta * one_t + scale_b_delta * t));
             }
         }
-        if (bone.noBindParent()) trans += bone.vertex_centroid_offset;
+        if (bone.noBindParent() && world_anchored_bones) {
+            trans += bone.vertex_centroid_offset;
+        }
         affine = Affine3f::Identity();
         affine.pretranslate(trans);
         affine.rotate(quat.cast<float>());
