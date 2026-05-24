@@ -69,7 +69,7 @@ Pass `--remote-debugging-port 9222` to expose Chrome DevTools on `http://127.0.0
 - [x] Audio
 	- [x] Loop
 	- [ ] Random
-	- [ ] Visualization
+	- [x] Visualization
 - [x] Particle System
 	- [x] Renderers
 	- [x] Emitters
