@@ -251,7 +251,10 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     case WW_EVT_IN_PLAY:
+        if (s.wp) s.wp->play();
+        break;
     case WW_EVT_IN_PAUSE:
+        if (s.wp) s.wp->pause();
         break;
     case WW_EVT_IN_POINTER_MOTION: {
         ww_bridge_pointer_motion_t pm {};

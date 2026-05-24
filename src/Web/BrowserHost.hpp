@@ -103,6 +103,10 @@ public:
     // SetWindowlessFrameRate; CEF clamps to [1, ?]. 0 ⇒ no-op.
     void SetFrameRate(int fps);
 
+    // CEF's WasHidden(bool): in OSR mode, true stops the renderer from
+    // generating frames. Used to honor daemon pause/play.
+    void SetPaused(bool paused);
+
     // Inject `applyUserProperties({key: {value: <value>}})` into the
     // main frame so the page's wallpaperPropertyListener observes the
     // change. Mirrors the shape of the initial-load snippet

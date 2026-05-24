@@ -231,7 +231,10 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     case WW_EVT_IN_PLAY:
+        if (s.host) s.host->SetPaused(false);
+        break;
     case WW_EVT_IN_PAUSE:
+        if (s.host) s.host->SetPaused(true);
         break;
     case WW_EVT_IN_POINTER_MOTION: {
         // Daemon transforms display-local coords into renderer-tex

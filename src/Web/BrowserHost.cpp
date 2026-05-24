@@ -221,6 +221,12 @@ void BrowserHost::SetFrameRate(int fps) {
     if (b && b->GetHost()) b->GetHost()->SetWindowlessFrameRate(fps);
 }
 
+void BrowserHost::SetPaused(bool paused) {
+    if (!impl_->client) return;
+    auto b = impl_->client->GetBrowser();
+    if (b && b->GetHost()) b->GetHost()->WasHidden(paused);
+}
+
 void BrowserHost::ApplyUserProperty(std::string_view      key,
                                     const nlohmann::json& value) {
     if (!impl_->client) return;
