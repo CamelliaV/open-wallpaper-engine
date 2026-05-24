@@ -323,6 +323,11 @@ public:
         std::vector<SceneIndexArray>  index_arrays;
         std::vector<DrawRange>        draw_ranges;
         uint32_t                      material_slot { 0 };
+        // Non-empty value redirects this submesh's pass output to the
+        // named RT (instead of the SceneNode's default). Used by puppet
+        // clipping-mask submeshes to write into a shared `_rt_puppet_mask`
+        // that the main puppet pass samples via g_Texture8.
+        std::string                   output_override;
     };
 
     SceneMesh(bool dynamic = false): m_dynamic(dynamic), m_dirty(false),

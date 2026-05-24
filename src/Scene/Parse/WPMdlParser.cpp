@@ -891,6 +891,20 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     }
 }
 
+void WPMdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
+                                        std::span<const uint32_t> clip_part_indices) {
+    GenMeshFromMdl(submesh, src);
+    // `clip_part_indices` are positions in src.parts[] (0-based), not `part.id`.
+    std::vector<SceneMesh::DrawRange> ranges;
+    for (uint32_t idx : clip_part_indices) {
+        if (idx >= src.parts.size()) continue;
+        const auto& p = src.parts[idx];
+        if (p.size == 0) continue;
+        ranges.push_back({ p.start, p.size });
+    }
+    submesh.draw_ranges = std::move(ranges);
+}
+
 void WPMdlParser::AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl) {
     info.combos["SKINNING"]  = "1";
     info.combos["BONECOUNT"] = std::to_string(mdl.puppet->bones.size());

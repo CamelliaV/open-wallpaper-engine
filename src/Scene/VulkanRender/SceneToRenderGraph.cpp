@@ -152,16 +152,21 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
         if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) continue;
         SceneMaterial* material = slots[submesh.material_slot].get();
         std::string    passName = material->name;
+        // Per-submesh output override (clipping-mask submeshes write into a
+        // shared RT that the main puppet pass samples via g_Texture8).
+        std::string_view pass_output = submesh.output_override.empty()
+                                           ? output
+                                           : std::string_view(submesh.output_override);
 
         rgraph.addPass<vulkan::CustomShaderPass>(
             passName,
             rg::PassNode::Type::CustomShader,
-            [material, node, smi, &output, &imgId, &rgraph, &scene, &extra](
+            [material, node, smi, pass_output, &output, &imgId, &rgraph, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
                 const auto& pass     = builder.workPassNode();
                 pdesc.node           = node;
                 pdesc.submesh_index  = smi;
-                pdesc.output         = output;
+                pdesc.output         = std::string(pass_output);
                 CheckAndSetSprite(scene, pdesc, material->textures);
                 for (usize i = 0; i < material->textures.size(); i++) {
                     const auto&  url = material->textures[i];
@@ -189,7 +194,7 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                             extra.use_mipmap_framebuffer = true;
                     }
 
-                    if (url == output) {
+                    if (url == pass_output) {
                         builder.markSelfWrite(input);
                         input = rg::addCopyPass(rgraph, input);
                     }
@@ -198,11 +203,12 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                 }
 
                 rg::TexNode* output_node { nullptr };
-                output_node =
-                    builder.createTexNode(rg::TexNode::Desc { .name = output.data(),
-                                                              .key  = output.data(),
-                                                              .type = rg::TexNode::TexType::Temp },
-                                          true);
+                std::string  pass_output_s(pass_output);
+                output_node = builder.createTexNode(
+                    rg::TexNode::Desc { .name = pass_output_s,
+                                        .key  = pass_output_s,
+                                        .type = rg::TexNode::TexType::Temp },
+                    true);
                 builder.write(output_node);
                 auto record_link_source = [&](i32 id) {
                     if (extra.linked_ids == nullptr ||
@@ -210,10 +216,10 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                         extra.id_link_map[(usize)id] = output_node;
                     }
                 };
-                if (output == SpecTex_Default) {
+                if (pass_output == SpecTex_Default) {
                     record_link_source(imgId);
-                } else if (IsSpecLinkTex(output)) {
-                    record_link_source((i32)ParseLinkTex(output));
+                } else if (IsSpecLinkTex(pass_output)) {
+                    record_link_source((i32)ParseLinkTex(pass_output));
                 }
             });
     }

@@ -824,6 +824,30 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->ID() = wpimgobj.id;
 
+    // Puppet clipping masks: register the half-res shared RT here; per-mask
+    // submeshes (pre-pass + clipped main) are emitted below after the base
+    // material/mesh are built. Main material stays unmodified — only the
+    // clipped-main submesh gets a CLIPPINGTARGET combo + g_Texture8 binding.
+    constexpr std::string_view PUPPET_MASK_RT = "_rt_puppet_mask";
+    bool puppet_has_masks = false;
+    if (puppet) {
+        for (const auto& pmesh : puppet->meshes) {
+            if (! pmesh.masks.empty()) { puppet_has_masks = true; break; }
+        }
+    }
+    if (puppet_has_masks && ! hasEffect &&
+        context.scene->renderTargets.count(std::string(PUPPET_MASK_RT)) == 0) {
+        SceneRenderTarget rt {};
+        rt.width        = 2;
+        rt.height       = 2;
+        rt.allowReuse   = true;
+        rt.force_clear  = true;
+        rt.bind.enable  = true;
+        rt.bind.screen  = true;
+        rt.bind.scale   = 0.5f;
+        context.scene->renderTargets[std::string(PUPPET_MASK_RT)] = rt;
+    }
+
     SceneMaterial     material;
     WPShaderValueData svData;
 
@@ -942,6 +966,108 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     mesh.AddMaterial(std::move(material));
     RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(),
                                wpimgobj.material, shaderInfo);
+
+    // Puppet clipping masks: each MaskBlock becomes a pair of submeshes.
+    // 1) Pre-pass: clippingmaskimage4 over `part_ids_b` (mask shape mesh)
+    //    writes the mask RT.
+    // 2) Clipped main: a clone of the main material with CLIPPINGTARGET combo
+    //    + g_Texture8 = mask RT, draw range = `part_ids_a` (the clipped parts).
+    // The original main submesh has all `part_ids_a` parts removed so the
+    // clipped region is only drawn through the masked variant.
+    if (puppet && ! hasEffect && has_bones && puppet_has_masks) {
+        // `part_ids_a` indexes into pmesh.parts[] (position), not part.id.
+        std::set<uint32_t> clipped_indices;
+        for (const auto& pmesh : puppet->meshes) {
+            for (const auto& mb : pmesh.masks) {
+                for (auto idx : mb.part_ids_a) clipped_indices.insert(idx);
+            }
+        }
+        // Rebuild main submeshes' draw_ranges: drop any part whose position
+        // index is in `part_ids_a` of any mask block.
+        if (! clipped_indices.empty()) {
+            size_t smi = 0;
+            for (const auto& pmesh : puppet->meshes) {
+                if (pmesh.positions.empty()) continue;
+                if (smi >= mesh.Submeshes().size()) break;
+                std::vector<SceneMesh::DrawRange> kept;
+                kept.reserve(pmesh.parts.size());
+                for (size_t i = 0; i < pmesh.parts.size(); ++i) {
+                    const auto& p = pmesh.parts[i];
+                    if (p.size == 0) continue;
+                    if (clipped_indices.count((uint32_t)i) != 0) continue;
+                    kept.push_back({ p.start, p.size });
+                }
+                mesh.Submeshes()[smi].draw_ranges = std::move(kept);
+                ++smi;
+            }
+        }
+
+        const std::string albedo_tex =
+            wpimgobj.material.textures.empty() ? std::string {}
+                                               : wpimgobj.material.textures[0];
+        for (const auto& pmesh : puppet->meshes) {
+            for (const auto& mb : pmesh.masks) {
+                // (1) mask pre-pass submesh
+                wpscene::WPMaterial mask_wpmat;
+                mask_wpmat.shader     = "clippingmaskimage4";
+                mask_wpmat.blending   = "translucent";
+                mask_wpmat.depthtest  = "disabled";
+                mask_wpmat.depthwrite = "disabled";
+                mask_wpmat.cullmode   = "nocull";
+                mask_wpmat.textures.resize(2);
+                mask_wpmat.textures[0] = albedo_tex;
+                mask_wpmat.textures[1] = mb.mat_json;
+                WPMdlParser::AddPuppetMatInfo(mask_wpmat, *puppet);
+
+                SceneMaterial     mask_scene_mat;
+                WPShaderValueData mask_svData;
+                WPShaderInfo      mask_shaderInfo;
+                mask_shaderInfo.baseConstSvs = baseConstSvs;
+                if (! LoadMaterial(vfs, mask_wpmat, context.scene.get(),
+                                   spImgNode.get(), &mask_scene_mat, &mask_svData,
+                                   &mask_shaderInfo)) {
+                    rstd_warn("load mask pre-pass material failed for '{}'",
+                              wpimgobj.name);
+                    continue;
+                }
+                uint32_t pre_slot = (uint32_t)mesh.MaterialSlots().size();
+                mesh.AddMaterial(std::move(mask_scene_mat));
+                mesh.Submeshes().emplace_back();
+                auto& pre_sm = mesh.Submeshes().back();
+                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm, pmesh, mb.part_ids_b);
+                pre_sm.material_slot    = pre_slot;
+                pre_sm.output_override  = std::string(PUPPET_MASK_RT);
+
+                // (2) clipped-main submesh: main material + CLIPPINGTARGET
+                wpscene::WPMaterial clip_wpmat = wpimgobj.material;
+                clip_wpmat.combos["CLIPPINGTARGET"] = 1;
+                clip_wpmat.combos["CLIPPINGUVS"]    = 1;
+                if (clip_wpmat.textures.size() < 9) clip_wpmat.textures.resize(9);
+                clip_wpmat.textures[8] = std::string(PUPPET_MASK_RT);
+                WPMdlParser::AddPuppetMatInfo(clip_wpmat, *puppet);
+
+                SceneMaterial     clip_scene_mat;
+                WPShaderValueData clip_svData;
+                WPShaderInfo      clip_shaderInfo;
+                clip_shaderInfo.baseConstSvs = baseConstSvs;
+                if (! LoadMaterial(vfs, clip_wpmat, context.scene.get(),
+                                   spImgNode.get(), &clip_scene_mat, &clip_svData,
+                                   &clip_shaderInfo)) {
+                    rstd_warn("load clipped main material failed for '{}'",
+                              wpimgobj.name);
+                    continue;
+                }
+                LoadConstvalue(clip_scene_mat, clip_wpmat, clip_shaderInfo);
+                uint32_t clip_slot = (uint32_t)mesh.MaterialSlots().size();
+                mesh.AddMaterial(std::move(clip_scene_mat));
+                mesh.Submeshes().emplace_back();
+                auto& clip_sm = mesh.Submeshes().back();
+                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm, pmesh, mb.part_ids_a);
+                clip_sm.material_slot = clip_slot;
+            }
+        }
+    }
+
     spImgNode->AddMesh(spMesh);
 
     context.shader_updater->SetNodeData(spImgNode.get(), svData);
