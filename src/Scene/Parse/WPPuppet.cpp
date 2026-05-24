@@ -229,10 +229,13 @@ std::span<const Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
     return m_puppet->genFrame(*this, time);
 }
 
-void WPPuppetLayer::updateInterpolation(double time) noexcept {
+void WPPuppetLayer::updateInterpolation(double elapsed) noexcept {
+    double delta   = (m_last_elapsed < 0.0) ? 0.0 : (elapsed - m_last_elapsed);
+    bool   advance = (m_last_elapsed < 0.0) || (delta > 0.0);
+    if (advance) m_last_elapsed = elapsed;
     for (auto& layer : m_layers) {
         if (layer) {
-            layer.anim_layer.cur_time += time * layer.anim_layer.rate;
+            if (advance) layer.anim_layer.cur_time += delta * layer.anim_layer.rate;
             layer.interp_info = layer.anim->getInterpolationInfo(&(layer.anim_layer.cur_time));
         }
     }
