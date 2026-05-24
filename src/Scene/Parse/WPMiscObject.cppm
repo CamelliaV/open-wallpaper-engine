@@ -57,6 +57,9 @@ struct WPTextObject {
     bool                 limitwidth { false };
     bool                 limituseellipsis { false };
 
+    // `visible:{user:"<key>",value:bool}` -> key.
+    std::string          visible_user_key;
+
     // Visual/material overlap with image kind.
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
     float                alpha { 1.0f };
@@ -82,6 +85,11 @@ struct WPTextObject {
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
         owe::GetJsonValue(json, "visible", visible, false);
+        if (json.contains("visible") && json.at("visible").is_object()) {
+            const auto& jv = json.at("visible");
+            if (jv.contains("user") && jv.at("user").is_string())
+                visible_user_key = jv.at("user").get<std::string>();
+        }
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
@@ -146,6 +154,8 @@ struct WPModelObject {
     std::string          attachment;
     bool                 perspective { false };
 
+    std::string          visible_user_key;
+
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
@@ -157,6 +167,11 @@ struct WPModelObject {
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
         owe::GetJsonValue(json, "visible", visible, false);
+        if (json.contains("visible") && json.at("visible").is_object()) {
+            const auto& jv = json.at("visible");
+            if (jv.contains("user") && jv.at("user").is_string())
+                visible_user_key = jv.at("user").get<std::string>();
+        }
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
@@ -200,6 +215,8 @@ struct WPCameraObject {
     bool                 solid { false };
     bool                 disablepropagation { false };
 
+    std::string          visible_user_key;
+
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
@@ -211,6 +228,11 @@ struct WPCameraObject {
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
         owe::GetJsonValue(json, "visible", visible, false);
+        if (json.contains("visible") && json.at("visible").is_object()) {
+            const auto& jv = json.at("visible");
+            if (jv.contains("user") && jv.at("user").is_string())
+                visible_user_key = jv.at("user").get<std::string>();
+        }
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);

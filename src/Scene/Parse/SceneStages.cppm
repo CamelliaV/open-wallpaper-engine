@@ -91,8 +91,12 @@ struct ProcessOpts {
 // Walks json["objects"] and instantiates one WPObjectVar per recognised
 // kind via FromJson. Pure JSON deserialisation plus per-object VFS
 // reads (for image/material refs); no Scene / glslang touched.
+// `user_props` (nullable) lets `visible:{user:"<key>"}` resolve to the
+// host's current bool, so layers toggled off in the UI are pruned at
+// parse time.
 std::vector<WPObjectVar>
-ExpandObjects(const nlohmann::json&, fs::VFS&, wpscene::SceneVersion);
+ExpandObjects(const nlohmann::json&, fs::VFS&, wpscene::SceneVersion,
+              const std::unordered_map<std::string, nlohmann::json>* user_props = nullptr);
 
 // If general.orthogonalprojection.auto_, replaces width/height with the
 // largest image object's size.

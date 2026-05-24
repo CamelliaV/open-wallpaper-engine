@@ -42,6 +42,9 @@ struct WPSoundObject {
     bool                     spatialization { false };    // PKGV0023+
     std::string              queuemode;                   // PKGV0020+
 
+    // `visible:{user:"<key>",value:bool}` -> key.
+    std::string              visible_user_key;
+
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
@@ -52,6 +55,11 @@ struct WPSoundObject {
         owe::GetJsonValue(json, "mintime", mintime, false);
         owe::GetJsonValue(json, "maxtime", maxtime, false);
         owe::GetJsonValue(json, "visible", visible, false);
+        if (json.contains("visible") && json.at("visible").is_object()) {
+            const auto& jv = json.at("visible");
+            if (jv.contains("user") && jv.at("user").is_string())
+                visible_user_key = jv.at("user").get<std::string>();
+        }
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "id", id, false);
 

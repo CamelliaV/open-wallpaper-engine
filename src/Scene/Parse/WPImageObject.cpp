@@ -174,6 +174,11 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     owe::GetJsonValue(json, "image", image);
     owe::GetJsonValue(json, "visible", visible, false);
+    if (json.contains("visible") && json.at("visible").is_object()) {
+        const auto& jv = json.at("visible");
+        if (jv.contains("user") && jv.at("user").is_string())
+            visible_user_key = jv.at("user").get<std::string>();
+    }
     owe::GetJsonValue(json, "alignment", alignment, false);
     nlohmann::json jImage;
     if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + image), jImage)) {

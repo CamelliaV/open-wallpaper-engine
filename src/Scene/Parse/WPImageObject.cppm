@@ -134,6 +134,9 @@ public:
     // fields (origin/scale/alpha/...) carry an `animation` curve or a
     // `scriptproperties` subtree. See WPAnimation.cppm.
     WPFieldBindings                            field_bindings;
+
+    // `visible:{user:"<key>",value:bool}` -> key.
+    std::string                                visible_user_key;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPEffectFbo, name, scale);

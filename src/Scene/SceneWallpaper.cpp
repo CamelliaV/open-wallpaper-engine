@@ -309,6 +309,31 @@ void ApplyUserPropertyToParticles(Scene& scene, const std::string& key,
     }
 }
 
+// Walk the scene tree once and flip SceneNode::SetVisible for every node
+// whose `VisibleUserKey()` matches `key`. Cheap — tree is frozen post-parse
+// and typically < a few hundred nodes.
+void ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
+                                       const nlohmann::json& prop) {
+    bool have_bool = false;
+    bool v         = false;
+    if (prop.is_object() && prop.contains("value") && prop.at("value").is_boolean()) {
+        v         = prop.at("value").get<bool>();
+        have_bool = true;
+    } else if (prop.is_boolean()) {
+        v         = prop.get<bool>();
+        have_bool = true;
+    }
+    if (! have_bool) return;
+    if (! scene.sceneGraph) return;
+
+    std::function<void(SceneNode*)> walk = [&](SceneNode* n) {
+        if (! n) return;
+        if (n->VisibleUserKey() == key) n->SetVisible(v);
+        for (auto& c : n->GetChildren()) walk(c.get());
+    };
+    walk(scene.sceneGraph.get());
+}
+
 void MergeProjectUserProperties(
     const std::filesystem::path& project_dir,
     std::unordered_map<std::string, nlohmann::json>& out) {
@@ -598,6 +623,7 @@ void RenderHandler::on(RenderSetUserProperty&& m) {
     owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
     ApplyUserPropertyToShaders(*m_scene, m.key, m.property);
     ApplyUserPropertyToParticles(*m_scene, m.key, m.property);
+    ApplyUserPropertyToNodeVisibility(*m_scene, m.key, m.property);
 }
 
 void RenderHandler::on(RenderInit&& m) {
@@ -802,7 +828,12 @@ void MainHandler::loadScene() {
             rstd_error("Not supported scene type");
             return;
         }
+        // Hand the (already-merged project.json defaults + any host-supplied
+        // overrides) user-property map to the parser so visible-binding
+        // pruning sees the user's saved values, not the scene.json defaults.
+        m_scene_parser.SetUserProperties(&m_user_properties);
         scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, pkg_v);
+        m_scene_parser.SetUserProperties(nullptr);
         // Apply a user-property override on `schemecolor` to the freshly-
         // parsed scene clear color so the host callback below publishes
         // the user's value (not the project.json default). The render

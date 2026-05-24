@@ -826,6 +826,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->ID() = wpimgobj.id;
+    if (! wpimgobj.visible_user_key.empty())
+        spImgNode->SetVisibleUserKey(wpimgobj.visible_user_key);
 
     // Puppet clipping masks: register the half-res shared RT here; per-mask
     // submeshes (pre-pass + clipped main) are emitted below after the base
@@ -1323,6 +1325,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
         spNode         = std::make_shared<SceneNode>(Vector3f(wppartobj.origin.data()),
                                              Vector3f(wppartobj.scale.data()),
                                              Vector3f(wppartobj.angles.data()));
+        if (! wppartobj.visible_user_key.empty())
+            spNode->SetVisibleUserKey(wppartobj.visible_user_key);
     }
 
     // Effective world scale at this SceneNode: parent's world scale times
@@ -1914,6 +1918,8 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     // Transform-style script bindings (origin/scale/angles) animate the
     // composite quad in world space, not the layer-space glyph node.
     WireFieldScripts(context, compose_node, obj.field_bindings);
+    if (! obj.visible_user_key.empty())
+        compose_node->SetVisibleUserKey(obj.visible_user_key);
 
     // Per-frame compose-quad rebuild: world card sized to current text
     // bbox; UVs subsample the central text region of ppong_a (since the
@@ -2016,13 +2022,27 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
              resolved.source);
 }
 
+// `visible:{user:"<key>",value:bool}` resolves against `user_props`'s
+// current bool when present. Lets a host that pre-loaded UI overrides
+// (project.json defaults already merged in) prune layers the user has
+// toggled off without round-tripping through RenderSetUserProperty.
 template<typename T>
 void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj, fs::VFS& vfs,
-                 wpscene::SceneVersion v) {
+                 wpscene::SceneVersion v,
+                 const std::unordered_map<std::string, nlohmann::json>* user_props) {
     T wpobj;
     if (! wpobj.FromJson(json_obj, vfs, v)) {
         rstd_error("parse scene object failed, name: {}", wpobj.name);
         return;
+    }
+    if (user_props != nullptr && ! wpobj.visible_user_key.empty()) {
+        if (auto it = user_props->find(wpobj.visible_user_key);
+            it != user_props->end()) {
+            const nlohmann::json* v_ptr = &it->second;
+            if (it->second.is_object() && it->second.contains("value"))
+                v_ptr = &it->second.at("value");
+            if (v_ptr->is_boolean()) wpobj.visible = v_ptr->get<bool>();
+        }
     }
     // Image objects keep going even when visible=false: another layer's
     // material may reference them via `_rt_imageLayerComposite_<id>`. The
@@ -2038,7 +2058,8 @@ namespace owe
 {
 
 std::vector<WPObjectVar>
-ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v) {
+ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v,
+              const std::unordered_map<std::string, nlohmann::json>* user_props) {
     std::vector<WPObjectVar> wp_objs;
     if (! json.contains("objects")) return wp_objs;
     for (auto& obj : json.at("objects")) {
@@ -2047,19 +2068,19 @@ ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v)
         // kinds get first pick. Falls through to the parsing-only kinds
         // (no rendering yet) so the data stays absorbed.
         if (obj.contains("image") && ! obj.at("image").is_null()) {
-            AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs, v);
+            AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs, v, user_props);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
-            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs, v);
+            AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs, v, user_props);
         } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
-            AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs, v);
+            AddWPObject<wpscene::WPSoundObject>(wp_objs, obj, vfs, v, user_props);
         } else if (obj.contains("light") && ! obj.at("light").is_null()) {
-            AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs, v);
+            AddWPObject<wpscene::WPLightObject>(wp_objs, obj, vfs, v, user_props);
         } else if (obj.contains("text") && ! obj.at("text").is_null()) {
-            AddWPObject<wpscene::WPTextObject>(wp_objs, obj, vfs, v);
+            AddWPObject<wpscene::WPTextObject>(wp_objs, obj, vfs, v, user_props);
         } else if (obj.contains("model") && ! obj.at("model").is_null()) {
-            AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs, v);
+            AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs, v, user_props);
         } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
-            AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs, v);
+            AddWPObject<wpscene::WPCameraObject>(wp_objs, obj, vfs, v, user_props);
         }
     }
     return wp_objs;
@@ -2361,7 +2382,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
               static_cast<unsigned>(pkg_version),
               static_cast<unsigned>(sc.scene_json_version));
 
-    auto wp_objs = ExpandObjects(json, vfs, pkg_version);
+    auto wp_objs = ExpandObjects(json, vfs, pkg_version, m_user_properties);
     AdjustAutoOrthoProjection(sc, wp_objs);
     auto context = BuildContext(vfs, scene_id, sc);
 

@@ -199,6 +199,9 @@ public:
     nlohmann::json           particlesrc;       // PKGV0001+; always null in corpus
     std::array<float, 3>     controlpoint { 0.0f, 0.0f, 0.0f };  // PKGV0019+
     WPFieldBindings          field_bindings;
+
+    // `visible:{user:"<key>",value:bool}` -> key; empty for plain literals.
+    std::string              visible_user_key;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);

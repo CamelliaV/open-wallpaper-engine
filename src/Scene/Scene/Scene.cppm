@@ -687,6 +687,12 @@ public:
     void   SetVisible(bool v) { m_visible = v; m_alpha_overridden = true; }
     void   SetUserAlpha(float v) { m_user_alpha = v; m_alpha_overridden = true; }
 
+    // Recorded when the layer's `visible` field is authored as
+    // `{user:"<key>", value:bool}`. The render handler walks the tree on
+    // RenderSetUserProperty and flips SetVisible(value) for matching nodes.
+    const std::string& VisibleUserKey() const { return m_visible_user_key; }
+    void               SetVisibleUserKey(std::string k) { m_visible_user_key = std::move(k); }
+
     bool   IsBrightnessOverridden() const { return m_brightness_overridden; }
     float  Brightness() const { return m_brightness; }
     void   SetBrightness(float v) { m_brightness = v; m_brightness_overridden = true; }
@@ -754,6 +760,7 @@ private:
     Eigen::Vector2f m_size { 0.0f, 0.0f };
 
     bool            m_visible { true };
+    std::string     m_visible_user_key {};
     float           m_user_alpha { 1.0f };
     bool            m_alpha_overridden { false };
     float           m_brightness { 1.0f };
