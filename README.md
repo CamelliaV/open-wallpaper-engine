@@ -16,12 +16,12 @@ Build first — see [BUILD.md](BUILD.md). Examples below assume the `clang-relea
 
 ### Standalone viewer
 
-`SceneViewer` is a GLFW + Vulkan window that loads a Wallpaper Engine `pkg` directly. Point it at the engine `assets/` directory (this checkout has one at the project root) and a `scene.pkg`:
+`SceneViewer` is a GLFW + Vulkan window that loads a Wallpaper Engine `pkg` directly. Point it at the Wallpaper Engine's `assets/` directory and a `scene.pkg`:
 
 ```bash
 ./build/clang-release/viewer/SceneViewer \
-    assets/ \
-    workshop/<id>/scene.pkg
+    <wallpaper engine installed dir>/assets/ \
+    <steamapps dir>/workshop/<id>/scene.pkg
 ```
 
 Flags (see `viewer/arg.hpp`):
@@ -40,13 +40,10 @@ Flags (see `viewer/arg.hpp`):
 
 ```bash
 ./build/clang-release/viewer/WebViewer \
-    workshop/<id> \
+    <steamapps dir>/workshop/<id> \
     --width 1920 --height 1080 \
     --presenter egl     # egl (default) or vulkan
 ```
-
-Pass `--remote-debugging-port 9222` to expose Chrome DevTools on `http://127.0.0.1:9222`.
-
 
 ## Feature list
 
