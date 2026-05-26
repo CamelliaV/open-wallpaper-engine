@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <cstdio>
 
 export module wescene.common;
 import wescene.core;

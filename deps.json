@@ -14,7 +14,6 @@
   },
   {
     "dest": "build/_flatpak_deps/nlohmann_json-src",
-    "disable-shallow-clone": false,
     "type": "archive",
     "url": "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz",
     "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
@@ -27,20 +26,20 @@
     "commit": "a37dadd1ed5949ab0accd7087b7c5c57800eab43",
     "dest": "build/_flatpak_deps/cubeb-src",
     "disable-shallow-clone": true,
+    "disable-submodules": true,
     "type": "git",
     "url": "https://github.com/mozilla/cubeb.git",
     "x-cmake": {
       "name": "cubeb",
-      "exclude_from_all": true
+      "exclude_from_all": true,
+      "find_package_args": "GLOBAL"
     }
   },
   {
     "dest": "build/_flatpak_deps/spirv_reflect-src",
-    "disable-shallow-clone": false,
-    "tag": "vulkan-sdk-1.4.321.0",
-    "commit": "e55086b044225f9b511ae44dbf9b079d3625943f",
-    "type": "git",
-    "url": "https://github.com/KhronosGroup/SPIRV-Reflect.git",
+    "type": "archive",
+    "sha256": "254ed36128e7abe8fb12ef804319d0790e059093c116e9fe55d4003880515f85",
+    "url": "https://github.com/KhronosGroup/SPIRV-Reflect/archive/refs/tags/vulkan-sdk-1.4.321.0.tar.gz",
     "x-cmake": {
       "name": "spirv_reflect",
       "exclude_from_all": true
@@ -72,7 +71,7 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": false,
-    "commit": "036d65a66790f0635fa22cd31f3a24610b717502",
+    "commit": "629bda81eb98856ca023f0f87f57dde8d22b4823",
     "type": "git",
     "url": "https://github.com/hypengw/rstd.git",
     "x-cmake": {
@@ -81,7 +80,7 @@
     }
   },
   {
-    "commit": "609676c524e3c2364dfb46c0f0f8c601f346102a",
+    "commit": "a8f3b7c38c19eb499fb137129a1a3bdb2ebd7edf",
     "dest": "build/_flatpak_deps/wavsen-src",
     "disable-shallow-clone": true,
     "type": "git",
