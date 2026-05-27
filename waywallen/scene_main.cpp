@@ -421,7 +421,7 @@ int main(int argc, char** argv) {
         opts.initial_volume =
             parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
         // identity=true: respawn-only. Reflected into PROPERTY_MUTED below
-        // so SoundManager::init() short-circuits and no cubeb device opens.
+        // so SoundManager::init() short-circuits and no audio device opens.
         opts.enable_audio =
             parse_bool(kv_get(init.settings, "enable_audio"), true);
         // CLI `--render-node` wins over Init kv (mirroring mpv/video).
@@ -498,7 +498,7 @@ int main(int argc, char** argv) {
     });
 
     // Mute first so loadScene's SoundManager::init() short-circuits when
-    // audio is disabled; the cubeb device + system output never open.
+    // audio is disabled; the audio device + system output never open.
     if (!opts.enable_audio)
         wp.setPropertyBool(owe::PROPERTY_MUTED, true);
     if (!opts.initial_assets.empty())

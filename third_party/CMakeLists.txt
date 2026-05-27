@@ -10,8 +10,7 @@ add_subdirectory(glad)
 
 # ------------------------------------------------------------------
 # JSON-driven FetchContent for eigen, nlohmann_json, spirv_reflect,
-# glslang, cubeb. To enable the flatpak-aware dependency provider,
-# pass:
+# glslang. To enable the flatpak-aware dependency provider, pass:
 #   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=cmake/FetchDepsProvider.cmake
 # ------------------------------------------------------------------
 include(${CMAKE_SOURCE_DIR}/cmake/FetchDeps.cmake)
@@ -47,13 +46,6 @@ set(BUILD_EXTERNAL          OFF CACHE INTERNAL "")
 set(GLSLANG_TESTS           OFF CACHE INTERNAL "")
 set(BUILD_TESTING           OFF CACHE INTERNAL "")
 
-# cubeb
-set(BUILD_TESTS OFF)
-set(BUILD_TOOLS OFF)
-set(BUNDLE_SPEEX ON)
-set(USE_SANITIZERS OFF)
-set(USE_WINMM OFF)
-
 fetchdeps(${CMAKE_SOURCE_DIR}/deps.json)
 
 # Post-fetch setup for eigen (header-only, source_subdir=cmake-noop).
@@ -61,9 +53,8 @@ add_library(eigen INTERFACE)
 add_library(Eigen3::Eigen ALIAS eigen)
 target_include_directories(eigen SYSTEM INTERFACE ${eigen_SOURCE_DIR})
 
-# Audio output is now handled by wavsen::audio (cubeb-backed). cubeb
-# itself is fetched via deps.json above and consumed transitively through
-# wavsen — no post-fetch shim needed here.
+# Audio output is handled by wavsen::audio (pulse/pipewire-backed,
+# selectable via WAVSEN_AUDIO_BACKEND in the wavsen subtree).
 
 # Promote CEF source dir to global scope so weweb/cmake/cef.cmake can
 # reach it via add_subdirectory from the project root. fetchdeps()

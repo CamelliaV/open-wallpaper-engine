@@ -23,19 +23,6 @@
     }
   },
   {
-    "commit": "a37dadd1ed5949ab0accd7087b7c5c57800eab43",
-    "dest": "build/_flatpak_deps/cubeb-src",
-    "disable-shallow-clone": true,
-    "disable-submodules": true,
-    "type": "git",
-    "url": "https://github.com/mozilla/cubeb.git",
-    "x-cmake": {
-      "name": "cubeb",
-      "exclude_from_all": true,
-      "find_package_args": "GLOBAL"
-    }
-  },
-  {
     "dest": "build/_flatpak_deps/spirv_reflect-src",
     "type": "archive",
     "sha256": "254ed36128e7abe8fb12ef804319d0790e059093c116e9fe55d4003880515f85",
