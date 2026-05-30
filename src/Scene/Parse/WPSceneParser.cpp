@@ -784,6 +784,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     bool hasEffect = count_eff > 0;
     bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
 
+    if (wpimgobj.image == "models/util/projectlayer.json") return;
+
     // No-effect fullscreen / compose layers contribute nothing on their own
     // (they just sample `_rt_default` and write it back). Mark as elidable
     // so the render-graph builder drops them when unreferenced, or routes
