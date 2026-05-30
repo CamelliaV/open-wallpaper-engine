@@ -30,9 +30,11 @@ target_sources(waywallen-wescene-renderer
 target_sources(waywallen-wescene-renderer PRIVATE BridgeExSwapchain.cpp)
 
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
+# Bin installs under share/waywallen/plugins/<id>/bin (5 levels below
+# the prefix); reach the shared libs in <prefix>/lib.
 set_target_properties(waywallen-wescene-renderer PROPERTIES
     CXX_SCAN_FOR_MODULES ON
-    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../../../../../lib"
 )
 
 target_include_directories(waywallen-wescene-renderer
@@ -56,8 +58,11 @@ target_compile_options(waywallen-wescene-renderer PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
+# Single installable plugin providing the scene renderer + WE source,
+# plus the web renderer when BUILD_WEWEB. Folder name == plugin id.
+set(_OWE_PLUGIN_DIR share/waywallen/plugins/org.waywallen.open-wallpaper-engine)
 install(TARGETS waywallen-wescene-renderer
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RUNTIME DESTINATION ${_OWE_PLUGIN_DIR}/bin
 )
 
 # weweb-renderer host bin — gated on BUILD_WEWEB (which also gates the
@@ -125,7 +130,10 @@ if(BUILD_WEWEB)
     )
     weweb_stage_cef_runtime(waywallen-weweb-renderer)
 
-    set(_WEWEB_INSTALL_DIR share/waywallen/weweb)
+    # weweb bin + CEF runtime sit flat in the plugin dir (beside the
+    # wescene `bin/` subdir) so the weweb bin's `$ORIGIN` rpath resolves
+    # libcef.so etc.
+    set(_WEWEB_INSTALL_DIR ${_OWE_PLUGIN_DIR})
     install(TARGETS waywallen-weweb-renderer
         RUNTIME DESTINATION ${_WEWEB_INSTALL_DIR}
     )
@@ -158,20 +166,63 @@ if(BUILD_WEWEB)
                 DESTINATION ${_WEWEB_INSTALL_DIR})
         endif()
     endforeach()
-    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/renderers/weweb.toml
-        DESTINATION share/waywallen/renderers
-    )
 endif()
 
-install(DIRECTORY
-    ${CMAKE_CURRENT_SOURCE_DIR}/sources/
-    DESTINATION share/waywallen/sources
-    FILES_MATCHING PATTERN "*.lua"
+# --- Generate the plugin manifest -----------------------------------------
+# The `[renderers.weweb-renderer]` block is spliced in only when BUILD_WEWEB;
+# `files` is externalised to files.txt (assembled at configure time below).
+set(OWE_PLUGIN_VERSION 0.1.2)
+set(_OWE_PLUGIN_SRC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.waywallen.open-wallpaper-engine)
+if(BUILD_WEWEB)
+    file(READ ${_OWE_PLUGIN_SRC}/weweb-renderer.toml.in OWE_WEWEB_BLOCK)
+else()
+    set(OWE_WEWEB_BLOCK "")
+endif()
+configure_file(
+    ${_OWE_PLUGIN_SRC}/plugin.toml.in
+    ${CMAKE_CURRENT_BINARY_DIR}/owe-plugin.toml
+    @ONLY
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/owe-plugin.toml
+    DESTINATION ${_OWE_PLUGIN_DIR}
+    RENAME plugin.toml
+)
+install(FILES ${_OWE_PLUGIN_SRC}/wallpaper_engine.lua
+    DESTINATION ${_OWE_PLUGIN_DIR}
 )
 
-# Skip weweb.toml unless BUILD_WEWEB — daemon would fail to spawn the
-# bin if the manifest were installed without its target.
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/renderers/wescene.toml
-    DESTINATION share/waywallen/renderers
+# files.txt — the required per-plugin manifest, assembled at configure
+# time from the known install set (no install-time directory scan). The
+# CEF locale paks are the one set we don't list by hand; glob the CEF
+# source dir (a fixed vendored tree) to enumerate them.
+set(_OWE_FILES
+    plugin.toml
+    wallpaper_engine.lua
+    bin/waywallen-wescene-renderer
+)
+if(BUILD_WEWEB)
+    list(APPEND _OWE_FILES waywallen-weweb-renderer)
+    foreach(_f IN LISTS CEF_BINARY_FILES)
+        if(NOT _f IN_LIST _CEF_SKIP)
+            list(APPEND _OWE_FILES ${_f})
+        endif()
+    endforeach()
+    foreach(_f IN LISTS CEF_RESOURCE_FILES)
+        if(_f STREQUAL "locales")
+            file(GLOB _owe_paks RELATIVE ${CEF_RESOURCE_DIR}/locales
+                ${CEF_RESOURCE_DIR}/locales/*.pak)
+            list(TRANSFORM _owe_paks PREPEND "locales/")
+            list(APPEND _OWE_FILES ${_owe_paks})
+        else()
+            list(APPEND _OWE_FILES ${_f})
+        endif()
+    endforeach()
+endif()
+list(SORT _OWE_FILES)
+string(JOIN "\n" _owe_files_txt ${_OWE_FILES})
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/owe-files.txt "${_owe_files_txt}\n")
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/owe-files.txt
+    DESTINATION ${_OWE_PLUGIN_DIR}
+    RENAME files.txt
 )
 
