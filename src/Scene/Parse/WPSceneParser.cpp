@@ -892,6 +892,17 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         LoadConstvalue(material, wpimgobj.material, shaderInfo);
     }
 
+    // Whether the layer's base texture is point-sampled (noInterpolation).
+    // Captured here because `material` is moved into the mesh below, well
+    // before the effect ping-pong RTs are created.
+    bool point_source = false;
+    if (! material.textures.empty()) {
+        auto& textures = context.scene->textures;
+        auto  it       = textures.find(material.textures.front());
+        point_source =
+            it != textures.end() && it->second.sample.magFilter == TextureFilter::NEAREST;
+    }
+
     for (const auto& cs : wpimgobj.material.constantshadervalues) {
         const auto&               name  = cs.first;
         const std::vector<float>& value = cs.second;
@@ -1125,6 +1136,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             };
             if (wpimgobj.fullscreen) {
                 scene.renderTargets[effect_ppong_a].bind = { .enable = true, .screen = true };
+            }
+            // Point-art images (noInterpolation) must stay point-sampled through
+            // the whole effect chain. 
+            if (point_source) {
+                auto& s     = scene.renderTargets[effect_ppong_a].sample;
+                s.magFilter = s.minFilter = TextureFilter::NEAREST;
             }
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
         }
