@@ -434,6 +434,18 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
         output.append(includeName);
         output.append("\n");
         output.append(LoadGlslInclude(vfs, includeSrc));
+        // WE shaders routinely pass a vector opacity (opacity * mask) to the
+        // scalar ApplyBlending, relying on fxc's implicit vector->scalar
+        // truncation. glslang's HLSL frontend won't truncate at the call, so
+        // emit forwarding overloads right after the definition. Gate on the
+        // directly-loaded file (not the recursively-expanded body) so a parent
+        // header that nests common_blending.h doesn't re-inject the overloads.
+        if (includeSrc.find("ApplyBlending(const int") != std::string::npos) {
+            output.append(
+                "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec2 o) { return ApplyBlending(bm, A, B, o.x); }"
+                "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec3 o) { return ApplyBlending(bm, A, B, o.x); }"
+                "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec4 o) { return ApplyBlending(bm, A, B, o.x); }\n");
+        }
         output.append("\n//-----include end\n");
         pos = w.LineEnd();
     }
