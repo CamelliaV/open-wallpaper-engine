@@ -109,6 +109,7 @@ function M.scan(ctx)
                         library_root = steam_root,
                         description  = project and project.description or nil,
                         tags         = (project and project.tags) or {},
+                        content_rating = project and project.contentrating or nil,
                         external_id  = workshop_id,
                         metadata     = {},
                     })
