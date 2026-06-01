@@ -101,7 +101,6 @@ function M.scan(ctx)
                 local wp_type, resource = classify(ctx, dir, project, project_type)
                 if wp_type and resource then
                     table.insert(entries, {
-                        id           = workshop_id,
                         name         = (project and project.title) or ("Workshop " .. workshop_id),
                         wp_type      = wp_type,
                         resource     = resource,
