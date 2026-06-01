@@ -52,12 +52,42 @@ unsigned DetectAudioFanoutCount(std::string_view src) {
     if (pos >= src.size() || src[pos] != '(') return 0;
     ++pos;
     while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t')) ++pos;
-    unsigned n = 0;
-    while (pos < src.size() && src[pos] >= '0' && src[pos] <= '9') {
-        n = n * 10 + unsigned(src[pos] - '0');
-        ++pos;
+
+    auto is_digit = [](char c) { return c >= '0' && c <= '9'; };
+    auto is_ident = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+               c == '_' || c == '$';
+    };
+    auto read_num = [&](usize p) -> unsigned {
+        unsigned n = 0;
+        while (p < src.size() && is_digit(src[p])) n = n * 10 + unsigned(src[p++] - '0');
+        return n;
+    };
+
+    // Numeric literal: registerAudioBuffers(64).
+    if (pos < src.size() && is_digit(src[pos])) return read_num(pos);
+
+    // Variable: registerAudioBuffers(audioBuffer) with `var audioBuffer = 64`
+    // earlier (the common WE audio-bar template). Resolve the first
+    // `<ident> = <number>` assignment to that name. We don't run JS, so this
+    // only handles a literal-initialized count (always 16/32/64 in practice).
+    if (pos >= src.size() || ! is_ident(src[pos]) || is_digit(src[pos])) return 0;
+    usize e = pos;
+    while (e < src.size() && is_ident(src[e])) ++e;
+    std::string_view name = src.substr(pos, e - pos);
+    for (usize p = 0; (p = src.find(name, p)) != std::string_view::npos; p += name.size()) {
+        const bool lb = (p == 0) || ! is_ident(src[p - 1]);
+        const usize a = p + name.size();
+        const bool rb = (a >= src.size()) || ! is_ident(src[a]);
+        if (! lb || ! rb) continue;
+        usize q = a;
+        while (q < src.size() && (src[q] == ' ' || src[q] == '\t')) ++q;
+        if (q >= src.size() || src[q] != '=') continue;
+        ++q;
+        while (q < src.size() && (src[q] == ' ' || src[q] == '\t')) ++q;
+        if (q < src.size() && is_digit(src[q])) return read_num(q);
     }
-    return n;
+    return 0;
 }
 
 std::vector<owe::SceneNode*>
