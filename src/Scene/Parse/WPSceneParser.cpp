@@ -338,6 +338,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
             name = GenLinkTex((u32)wpid) + suffix;
         } else if (sstart_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
         } else if (sstart_with(name, WE_SHADOW_ATLAS_PREFIX)) {
+            name.clear();
         } else if (sstart_with(name, WE_BLOOM_MIP_PREFIX)) {
         } else if (sstart_with(name, WE_REFLECTION_PREFIX)) {
         } else if (sstart_with(name, WE_EFFECT_PPONG_PREFIX)) {
