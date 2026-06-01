@@ -28,21 +28,12 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
     };
     auto default_node = SceneNode();
 
-    const std::string self_link = GenLinkTex(m_worldNode->ID());
-    auto resolve_self = [&](std::string_view t) -> std::string_view {
-        if (t == self_link || t == self_link + "_a") return m_pingpong_a;
-        if (t == self_link + "_b") return m_pingpong_b;
-        return {};
-    };
-
     SceneImageEffectNode* last_output { nullptr };
     for (auto& eff : m_effects) {
         for (auto& cmd : eff->commands) {
             if (sstart_with(cmd.src, WE_EFFECT_PPONG_PREFIX_A)) cmd.src = ppong_a;
-            else if (auto r = resolve_self(cmd.src); ! r.empty()) cmd.src = r;
 
             if (sstart_with(cmd.dst, WE_EFFECT_PPONG_PREFIX_A)) cmd.dst = ppong_a;
-            else if (auto r = resolve_self(cmd.dst); ! r.empty()) cmd.dst = r;
         }
         for (auto it = eff->nodes.begin(); it != eff->nodes.end(); it++) {
             if (sstart_with(it->output, WE_EFFECT_PPONG_PREFIX_B) ||
@@ -62,10 +53,13 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             }
 
             auto& texs = material.textures;
-            for (auto& t : texs) {
-                if (sstart_with(t, WE_EFFECT_PPONG_PREFIX_A)) t = ppong_a;
-                else if (auto r = resolve_self(t); ! r.empty()) t = std::string(r);
-            }
+            std::replace_if(
+                texs.begin(),
+                texs.end(),
+                [](auto& t) {
+                    return sstart_with(t, WE_EFFECT_PPONG_PREFIX_A);
+                },
+                ppong_a);
         }
         swap_pp();
     }

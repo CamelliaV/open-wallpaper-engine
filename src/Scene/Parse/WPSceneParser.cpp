@@ -354,18 +354,12 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
         } else if (sstart_with(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX)) {
             rstd_info("link tex \"{}\"", name);
             int         wpid { -1 };
-            // Keep the `_a`/`_b` suffix: for a layer's own effect chain it
-            // selects the ping-pong half (base = `_a`); ResolveEffect resolves
-            // it against the owning layer. Cross-layer reads ignore it (the
-            // link copy overwrites the binding regardless).
-            std::regex  reImgId { R"(_rt_imageLayerComposite_([0-9]+)(_[ab])?)" };
+            std::regex  reImgId { R"(_rt_imageLayerComposite_([0-9]+))" };
             std::smatch match;
-            std::string suffix;
             if (std::regex_search(name, match, reImgId)) {
                 STRTONUM(std::string(match[1]), wpid);
-                suffix = match[2].str();
             }
-            name = GenLinkTex((u32)wpid) + suffix;
+            name = GenLinkTex((u32)wpid);
         } else if (sstart_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
         } else if (sstart_with(name, WE_SHADOW_ATLAS_PREFIX)) {
             name.clear();
@@ -379,7 +373,13 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
             // an effect-local fbo registered with a non-conventional name
             // (e.g. WE DOF's `_rt__coc_<addr>`) — already a valid RT.
         } else {
-
+            // Known engine-internal RTs we don't (yet) produce: silent-skip
+            // so corpus shaders that declare them inside a dead `#if` branch
+            // (e.g. `#if LIGHTS_SHADOW_MAPPING`) don't flood the log. The
+            // annotation collector picks defaults up unconditionally; the
+            // following glslang preprocess strips the dead branch, but the
+            // textures slot still carries the default name when it lands
+            // here.
             static constexpr std::array<std::string_view, 4> kSilentUnimpl {
                 "_rt_volumetricsBack",
                 "_rt_volumetricsSingle",
