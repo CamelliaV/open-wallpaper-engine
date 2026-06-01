@@ -1166,8 +1166,32 @@ export function deg2rad(d) { return d * (Math.PI / 180); }
 export function rad2deg(r) { return r * (180 / Math.PI); }
 )JS";
 
+// WE's `WEVector` module. Corpus only exercises `angleVector2` (degrees ->
+// unit Vec2, the circular audio-bar layout in workshop 3365654061); the script
+// recomputes the same layout manually as (cos(deg), sin(deg))*radius, which
+// pins the units/axes. Other helpers are unambiguous vector math, added so
+// future scripts don't trip the loader. Extend once corpus needs more.
+static constexpr const char* kWEVectorSrc = R"JS(
+function v2(x, y) { return new globalThis.Vec2(x, y); }
+export function angleVector2(angle) {
+    const r = angle * Math.PI / 180;
+    return v2(Math.cos(r), Math.sin(r));
+}
+export function magnitude(v) { return Math.sqrt(v.x*v.x + v.y*v.y); }
+export function normalize(v) {
+    const m = Math.sqrt(v.x*v.x + v.y*v.y) || 1;
+    return v2(v.x / m, v.y / m);
+}
+export function dot(a, b) { return a.x*b.x + a.y*b.y; }
+export function distance(a, b) {
+    const dx = a.x - b.x, dy = a.y - b.y;
+    return Math.sqrt(dx*dx + dy*dy);
+}
+)JS";
+
 static constexpr BuiltinModule kBuiltinModules[] = {
     { "WEMath", kWEMathSrc },
+    { "WEVector", kWEVectorSrc },
 };
 
 JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*) {
