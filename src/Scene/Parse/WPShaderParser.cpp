@@ -758,6 +758,47 @@ inline std::optional<IODecl> ParseIODecl(const std::string& line) {
                     std::string(m->array) };
 }
 
+// (base, components) for a scalar / vector type. Recognizes HLSL (floatN /
+// intN / uintN / boolN) and GLSL (vecN / ivecN / uvecN / bvecN) spellings, plus
+// the scalar forms. components==0 means "don't widen" (matrices, unknown).
+struct ScalarVec {
+    std::string_view base;
+    unsigned         comps { 0 };
+};
+inline ScalarVec DecomposeVecType(std::string_view t) {
+    if (t.find('x') != std::string_view::npos) return {}; // floatRxC matrix
+    auto suffixed = [&](std::string_view base) -> ScalarVec {
+        if (t == base) return { base, 1 };
+        if (t.size() == base.size() + 1 && t.substr(0, base.size()) == base) {
+            char c = t.back();
+            if (c >= '2' && c <= '4') return { base, unsigned(c - '0') };
+        }
+        return {};
+    };
+    for (std::string_view base : { std::string_view("float"), std::string_view("int"),
+                                   std::string_view("uint"), std::string_view("bool") }) {
+        if (auto r = suffixed(base); r.comps) return r;
+    }
+    // GLSL vector spellings normalize to the matching HLSL base kind.
+    if (t == "vec2" || t == "vec3" || t == "vec4")    return { "float", unsigned(t.back() - '0') };
+    if (t == "ivec2" || t == "ivec3" || t == "ivec4") return { "int",   unsigned(t.back() - '0') };
+    if (t == "uvec2" || t == "uvec3" || t == "uvec4") return { "uint",  unsigned(t.back() - '0') };
+    if (t == "bvec2" || t == "bvec3" || t == "bvec4") return { "bool",  unsigned(t.back() - '0') };
+    return {};
+}
+
+// WE links a varying by name across stages; when the same name is declared with
+// different widths (e.g. VS `vec4 v_TexCoord` but FS `vec2 v_TexCoord` that
+// still reads `.zw`), the producing stage's wider type is the real interface and
+// the narrow consumer just swizzles a subset. fxc tolerates this; glslang
+// rejects the out-of-range swizzle. Pick the wider type (same base kind) so both
+// stages agree. Falls back to `a` when the types aren't comparable vectors.
+inline std::string WiderType(const std::string& a, const std::string& b) {
+    ScalarVec da = DecomposeVecType(a), db = DecomposeVecType(b);
+    if (da.comps == 0 || db.comps == 0 || da.base != db.base) return a;
+    return db.comps > da.comps ? b : a;
+}
+
 // Pull all `attribute|varying|in|out TYPE NAME;` decls out, return them
 // structured + a copy of the source with the lines removed. Stripping is
 // essential: `attribute`/`varying` are not HLSL keywords; the entry-point
@@ -1065,13 +1106,14 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         std::string body          = StripUniforms(stripped);
 
         std::vector<IODecl> in_decls, out_decls;
-        Set<std::string>    in_seen, out_seen;
-        auto add_in  = [&](const IODecl& d) {
-            if (in_seen.insert(d.name).second) in_decls.push_back(d);
+        auto add_to = [](std::vector<IODecl>& v, const IODecl& d) {
+            for (auto& e : v) {
+                if (e.name == d.name) { e.type = WiderType(e.type, d.type); return; }
+            }
+            v.push_back(d);
         };
-        auto add_out = [&](const IODecl& d) {
-            if (out_seen.insert(d.name).second) out_decls.push_back(d);
-        };
+        auto add_in  = [&](const IODecl& d) { add_to(in_decls, d); };
+        auto add_out = [&](const IODecl& d) { add_to(out_decls, d); };
         for (const auto& d : io_decls) {
             if (d.storage == 'i')      add_in(d);
             else if (d.storage == 'o') add_out(d);
@@ -1127,11 +1169,12 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     // (everything else). The cross-stage union ensures vert and frag pick
     // identical location indices alphabetically.
     std::vector<IODecl> attrs, varyings;
-    Set<std::string>    seen;
     auto add = [&](const IODecl& d) {
-        if (! seen.insert(d.name).second) return;
-        if (d.storage == 'a') attrs.push_back(d);
-        else                  varyings.push_back(d);
+        std::vector<IODecl>& v = (d.storage == 'a') ? attrs : varyings;
+        for (auto& e : v) {
+            if (e.name == d.name) { e.type = WiderType(e.type, d.type); return; }
+        }
+        v.push_back(d);
     };
     for (const auto& d : io_decls) add(d);
     auto add_from_line = [&](const std::string& line) {
