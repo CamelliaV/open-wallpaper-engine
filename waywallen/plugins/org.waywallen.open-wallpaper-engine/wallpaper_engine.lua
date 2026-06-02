@@ -7,6 +7,11 @@ local M = {}
 local WE_APPID   = "431960"
 local WORKSHOP   = "/steamapps/workshop/content/" .. WE_APPID
 local ASSETS_REL = "/steamapps/common/wallpaper_engine/assets"
+-- WE's bundled wallpapers (`defaultprojects`) and user-authored ones
+-- (`myprojects`) live beside the workshop content, keyed by folder name
+-- instead of a numeric workshop id.
+local PROJECTS_REL = "/steamapps/common/wallpaper_engine/projects"
+local LOCAL_DIRS   = { "defaultprojects", "myprojects" }
 
 local VIDEO_EXTS = { mp4 = true, webm = true, mkv = true, avi = true, mov = true }
 
@@ -30,12 +35,15 @@ function M.auto_detect(ctx)
         home .. "/.steam/steam",
         home .. "/.local/share/Steam",
         home .. "/.var/app/com.valvesoftware.Steam/data/Steam",
+        home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam",
     }
     local found, seen = {}, {}
     for _, root in ipairs(candidates) do
-        -- A Steam library qualifies iff WE workshop lives under it,
-        -- so we don't auto-register Steam roots without WE installed.
-        if not seen[root] and ctx.file_exists(root .. WORKSHOP) then
+        -- A Steam library qualifies iff WE content lives under it (either
+        -- workshop subscriptions or the bundled/local projects), so we
+        -- don't auto-register Steam roots without WE installed.
+        if not seen[root] and (ctx.file_exists(root .. WORKSHOP)
+            or ctx.file_exists(root .. PROJECTS_REL)) then
             seen[root] = true
             table.insert(found, root)
         end
@@ -80,6 +88,39 @@ local function classify(ctx, dir, project, project_type)
     return nil, nil
 end
 
+-- Scan one container of project folders (workshop content or a local
+-- `projects/*` dir) and append a wallpaper entry per recognized folder.
+-- `name_prefix` is the fallback title prefix when project.json has none.
+local function scan_container(ctx, steam_root, container, name_prefix, entries)
+    if not ctx.file_exists(container) then return end
+    for _, dir in ipairs(ctx.list_dirs(container)) do
+        local id = ctx.basename(dir) or dir
+        local project = nil
+        local project_path = dir .. "/project.json"
+        if ctx.file_exists(project_path) then
+            local content = ctx.read_file(project_path)
+            if content then project = ctx.json_parse(content) end
+        end
+        local project_type = project and project.type and string.lower(project.type) or nil
+
+        local wp_type, resource = classify(ctx, dir, project, project_type)
+        if wp_type and resource then
+            table.insert(entries, {
+                name         = (project and project.title) or (name_prefix .. id),
+                wp_type      = wp_type,
+                resource     = resource,
+                preview      = pick_preview(ctx, dir, project),
+                library_root = steam_root,
+                description  = project and project.description or nil,
+                tags         = (project and project.tags) or {},
+                content_rating = project and project.contentrating or nil,
+                external_id  = id,
+                metadata     = {},
+            })
+        end
+    end
+end
+
 function M.scan(ctx)
     local entries = {}
 
@@ -88,32 +129,10 @@ function M.scan(ctx)
         if not ctx.file_exists(workshop) then
             ctx.log("wallpaper_engine: no WE workshop under " .. steam_root)
         else
-            for _, dir in ipairs(ctx.list_dirs(workshop)) do
-                local workshop_id = ctx.basename(dir) or dir
-                local project = nil
-                local project_path = dir .. "/project.json"
-                if ctx.file_exists(project_path) then
-                    local content = ctx.read_file(project_path)
-                    if content then project = ctx.json_parse(content) end
-                end
-                local project_type = project and project.type and string.lower(project.type) or nil
-
-                local wp_type, resource = classify(ctx, dir, project, project_type)
-                if wp_type and resource then
-                    table.insert(entries, {
-                        name         = (project and project.title) or ("Workshop " .. workshop_id),
-                        wp_type      = wp_type,
-                        resource     = resource,
-                        preview      = pick_preview(ctx, dir, project),
-                        library_root = steam_root,
-                        description  = project and project.description or nil,
-                        tags         = (project and project.tags) or {},
-                        content_rating = project and project.contentrating or nil,
-                        external_id  = workshop_id,
-                        metadata     = {},
-                    })
-                end
-            end
+            scan_container(ctx, steam_root, workshop, "Workshop ", entries)
+        end
+        for _, name in ipairs(LOCAL_DIRS) do
+            scan_container(ctx, steam_root, steam_root .. PROJECTS_REL .. "/" .. name, "", entries)
         end
     end
 
@@ -156,9 +175,17 @@ end
 -- Called on demand by WallpaperGet to surface the per-wallpaper
 -- editable property schema (`general.properties` from `project.json`).
 -- Returns a JSON string or nil when the wallpaper has no properties.
+-- The project dir is the folder holding project.json. For web the
+-- resource is that folder; for scene/video it's a file inside it.
+local function project_dir_of(entry)
+    if entry.wp_type == "web" then return entry.resource end
+    return entry.resource and entry.resource:match("^(.*)/[^/]+$") or nil
+end
+
 function M.properties(entry, ctx)
-    if not entry.library_root or not entry.external_id then return nil end
-    local proj = entry.library_root .. WORKSHOP .. "/" .. entry.external_id .. "/project.json"
+    local dir = project_dir_of(entry)
+    if not dir then return nil end
+    local proj = dir .. "/project.json"
     if not ctx.file_exists(proj) then return nil end
     local content = ctx.read_file(proj)
     if not content then return nil end
