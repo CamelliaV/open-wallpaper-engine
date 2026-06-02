@@ -104,7 +104,9 @@ SpawnLayerClones(ParseContext& context, SceneNode* tmpl, unsigned count) {
         clone->ID() = -((i32)i + 1);  // negative IDs reserved for clones
         context.shader_updater->CopyNodeData(tmpl, clone.get());
         out.push_back(clone.get());
-        context.scene->sceneGraph->AppendChild(clone);
+        // Defer attachment to FinalizeScene so the clones land at the
+        // template's z-position (right after it), not at the root front.
+        context.layer_clones[tmpl->ID()].push_back(std::move(clone));
     }
     return out;
 }
@@ -1763,13 +1765,28 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     }
 
     // --- mesh capacity. Static text exactly fits its initial layout;
-    //     dynamic (script-bound) text reserves headroom so SetText can
-    //     accommodate a moderately longer string without realloc.
+    //     dynamic (script-bound) text reserves headroom so SetText can grow
+    //     the string at runtime without reallocating GPU buffers.
     std::size_t initial_codepoints = text::DecodeUtf8(s_text).size();
     bool        has_bg             = obj.opaquebackground;
     std::size_t peak_quads;
     if (wants_dynamic_text) {
-        peak_quads = std::max<std::size_t>(initial_codepoints * 4, 64);
+        // The glyph mesh renders into the layer RT (sized below to the same
+        // ceiling), so the only quads that can ever be visible are those that
+        // fit the RT grid. Budget to that cap — terminal/log scripts (e.g.
+        // 2268178377) append unbounded text but the layouter clips everything
+        // past the RT anyway. Conservative narrow-glyph advance avoids
+        // undercounting columns for tight fonts.
+        const auto& fm  = face->Metrics();
+        const float adv = std::max(1.0f, static_cast<float>(fm.pixel_size) * 0.25f);
+        const float lh  = fm.line_height > 1.0f ? fm.line_height
+                                                : static_cast<float>(fm.pixel_size);
+        const float rt_w = std::min<float>(static_cast<float>(context.scene->ortho[0]), 1024.0f);
+        const float rt_h = std::min<float>(static_cast<float>(context.scene->ortho[1]), 256.0f);
+        const std::size_t cols = static_cast<std::size_t>(std::ceil(rt_w / adv));
+        const std::size_t rows = static_cast<std::size_t>(std::ceil(rt_h / std::max(1.0f, lh)));
+        const std::size_t rt_cap = std::clamp<std::size_t>(cols * rows, 64, 16384);
+        peak_quads = std::max<std::size_t>(initial_codepoints * 4, rt_cap);
         if (has_bg) ++peak_quads;
     } else {
         peak_quads = initial_codepoints + (has_bg ? 1u : 0u);
@@ -2264,6 +2281,15 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
         }
         parent_node->AppendChild(ref.node);
         attached++;
+
+        // Attach this layer's fanout clones (audio bars) right after it, so
+        // all bars sit at the template's z-position in the parent child list.
+        if (auto cit = context.layer_clones.find(id); cit != context.layer_clones.end()) {
+            for (auto& clone : cit->second) {
+                parent_node->AppendChild(clone);
+                attached++;
+            }
+        }
     }
     rstd_info("attach: {}/{} nodes ({} missing parents)",
               attached, context.node_id_map.size(), missing_parent);

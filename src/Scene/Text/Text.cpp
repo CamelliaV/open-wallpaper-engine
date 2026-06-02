@@ -582,6 +582,7 @@ struct TextLayouter::Impl {
     float        last_text_w { 0.0f };
     float        last_text_h { 0.0f };
     bool         missing_glyph_logged { false };
+    bool         truncate_logged { false };
 
     // Scratch buffers reused across SetText calls — avoids reallocs for
     // every script tick. Sized at construction to peak capacity.
@@ -647,8 +648,14 @@ void TextLayouter::SetText(std::string_view utf8) {
     bool has_bg = im.style.opaquebackground;
     std::size_t total_quads = total_glyph_quads + (has_bg ? 1u : 0u);
     if (total_quads > im.peak_quads) {
-        rstd_info("text: {} quads exceed peak capacity {}, truncating",
-                 total_quads, im.peak_quads);
+        // Off-RT overflow only — the layouter emits top-to-bottom, so the
+        // dropped tail quads are below the layer RT's visible window. Log-once
+        // keeps a runaway terminal/log script from spamming every frame.
+        if (! im.truncate_logged) {
+            rstd_info("text: {} quads exceed peak capacity {}, truncating tail",
+                     total_quads, im.peak_quads);
+            im.truncate_logged = true;
+        }
         total_quads = im.peak_quads;
         if (has_bg && total_glyph_quads + 1 > im.peak_quads)
             total_glyph_quads = im.peak_quads - 1;
