@@ -21,19 +21,29 @@ inline constexpr std::array WE_GLTEX_TRANSLATION_NAMES { BASE_GLTEX_NAMES(Transl
 inline constexpr std::array WE_GLTEX_MIPMAPINFO_NAMES { BASE_GLTEX_NAMES(MipMapInfo) };
 
 inline constexpr std::string_view WE_SPEC_PREFIX { "_rt_" };
+// --- Names that originate from Wallpaper Engine content
 inline constexpr std::string_view WE_IMAGE_LAYER_COMPOSITE_PREFIX { "_rt_imageLayerComposite_" };
+inline constexpr std::string_view WE_FULL_COMPO_BUFFER_PREFIX { "_rt_FullCompoBuffer" };
 inline constexpr std::string_view WE_HALF_COMPO_BUFFER_PREFIX { "_rt_HalfCompoBuffer" };
 inline constexpr std::string_view WE_QUARTER_COMPO_BUFFER_PREFIX { "_rt_QuarterCompoBuffer" };
-inline constexpr std::string_view WE_FULL_COMPO_BUFFER_PREFIX { "_rt_FullCompoBuffer" };
+inline constexpr std::string_view WE_EIGHT_COMPO_BUFFER_PREFIX { "_rt_EightBuffer" };
 inline constexpr std::string_view WE_MIP_MAPPED_FRAME_BUFFER { "_rt_MipMappedFrameBuffer" };
-// Recognized WE engine RTs, not yet produced (shadow / bloom / reflection).
+// Other WE engine RTs seen in the assets.
 inline constexpr std::string_view WE_SHADOW_ATLAS_PREFIX { "_rt_shadowAtlas" };
-inline constexpr std::string_view WE_BLOOM_MIP_PREFIX { "_rt_bloom_mip" };
 inline constexpr std::string_view WE_REFLECTION_PREFIX { "_rt_Reflection" };
+inline constexpr std::string_view WE_VOLUMETRICS_PREFIX { "_rt_volumetrics" };
+inline constexpr std::string_view WE_QUARTER_FORCE_RG_PREFIX { "_rt_QuarterForceRG" };
+inline constexpr std::string_view WE_BLOOM_PREFIX { "_rt_Bloom" };
+inline constexpr std::string_view WE_QUARTER_FRAME_BUFFER_PREFIX { "_rt_QuarterFrameBuffer" };
+inline constexpr std::string_view WE_EIGHTH_FRAME_BUFFER_PREFIX { "_rt_EighthFrameBuffer" };
 
-inline constexpr std::string_view WE_EFFECT_PPONG_PREFIX { "_rt_effect_pingpong_" };
-inline constexpr std::string_view WE_EFFECT_PPONG_PREFIX_A { "_rt_effect_pingpong_a_" };
-inline constexpr std::string_view WE_EFFECT_PPONG_PREFIX_B { "_rt_effect_pingpong_b_" };
+// --- Names coined by owe ---
+inline constexpr std::string_view OWE_EFFECT_PPONG_PREFIX { "_rt_effect_pingpong_" };
+inline constexpr std::string_view OWE_EFFECT_PPONG_PREFIX_A { "_rt_effect_pingpong_a_" };
+inline constexpr std::string_view OWE_EFFECT_PPONG_PREFIX_B { "_rt_effect_pingpong_b_" };
+inline constexpr std::string_view OWE_BLOOM_MIP_PREFIX { "_rt_bloom_mip" };
+inline constexpr std::string_view SpecTex_Default { "_rt_default" };
+inline constexpr std::string_view SpecTex_Link { "_rt_link_" };
 
 inline constexpr std::string_view WE_IN_POSITION { "a_Position" };
 inline constexpr std::string_view WE_IN_TEXCOORD { "a_TexCoord" };
@@ -108,8 +118,6 @@ inline constexpr std::string_view G_AUDIO_SPEC_32_R { "g_AudioSpectrum32Right" }
 inline constexpr std::string_view G_AUDIO_SPEC_64_L { "g_AudioSpectrum64Left" };
 inline constexpr std::string_view G_AUDIO_SPEC_64_R { "g_AudioSpectrum64Right" };
 
-inline constexpr std::string_view SpecTex_Default { "_rt_default" };
-inline constexpr std::string_view SpecTex_Link { "_rt_link_" };
 
 inline bool IsSpecTex(const std::string_view name) {
     return name.starts_with(WE_SPEC_PREFIX);
@@ -126,6 +134,22 @@ inline std::uint32_t ParseLinkTex(const std::string_view name) {
 }
 inline std::string GenLinkTex(std::ptrdiff_t id) {
     return std::string(SpecTex_Link) + std::to_string(id);
+}
+
+inline bool IsImageLayerComposite(const std::string_view name) {
+    return name.starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
+}
+// Parse <id> from `_rt_imageLayerComposite_<id>[_a|_b]`; nullopt when it isn't a
+// composite ref or no id digits follow the prefix.
+inline std::optional<std::uint32_t> ParseImageLayerCompositeId(const std::string_view name) {
+    if (! IsImageLayerComposite(name)) return std::nullopt;
+    const std::string_view rest = name.substr(WE_IMAGE_LAYER_COMPOSITE_PREFIX.size());
+    std::size_t            i    = 0;
+    std::uint32_t          id   = 0;
+    for (; i < rest.size() && rest[i] >= '0' && rest[i] <= '9'; ++i)
+        id = id * 10u + std::uint32_t(rest[i] - '0');
+    if (i == 0) return std::nullopt;
+    return id;
 }
 
 } // namespace owe

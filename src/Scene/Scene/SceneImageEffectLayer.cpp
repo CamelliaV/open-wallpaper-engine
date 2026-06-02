@@ -31,12 +31,12 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
     SceneImageEffectNode* last_output { nullptr };
     for (auto& eff : m_effects) {
         for (auto& cmd : eff->commands) {
-            if (sstart_with(cmd.src, WE_EFFECT_PPONG_PREFIX_A)) cmd.src = ppong_a;
+            if (sstart_with(cmd.src, OWE_EFFECT_PPONG_PREFIX_A)) cmd.src = ppong_a;
 
-            if (sstart_with(cmd.dst, WE_EFFECT_PPONG_PREFIX_A)) cmd.dst = ppong_a;
+            if (sstart_with(cmd.dst, OWE_EFFECT_PPONG_PREFIX_A)) cmd.dst = ppong_a;
         }
         for (auto it = eff->nodes.begin(); it != eff->nodes.end(); it++) {
-            if (sstart_with(it->output, WE_EFFECT_PPONG_PREFIX_B) ||
+            if (sstart_with(it->output, OWE_EFFECT_PPONG_PREFIX_B) ||
                 it->output == SpecTex_Default) {
                 it->output  = ppong_b;
                 last_output = &(*it);
@@ -57,7 +57,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                 texs.begin(),
                 texs.end(),
                 [](auto& t) {
-                    return sstart_with(t, WE_EFFECT_PPONG_PREFIX_A);
+                    return sstart_with(t, OWE_EFFECT_PPONG_PREFIX_A);
                 },
                 ppong_a);
         }

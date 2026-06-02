@@ -351,42 +351,30 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
                 name = "_rt_ParticleRefract";
             }
             */
-        } else if (sstart_with(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX)) {
+        } else if (auto wpid = ParseImageLayerCompositeId(name)) {
             rstd_info("link tex \"{}\"", name);
-            int         wpid { -1 };
-            std::regex  reImgId { R"(_rt_imageLayerComposite_([0-9]+))" };
-            std::smatch match;
-            if (std::regex_search(name, match, reImgId)) {
-                STRTONUM(std::string(match[1]), wpid);
-            }
-            name = GenLinkTex((u32)wpid);
+            name = GenLinkTex(*wpid);
         } else if (sstart_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
         } else if (sstart_with(name, WE_SHADOW_ATLAS_PREFIX)) {
             name.clear();
-        } else if (sstart_with(name, WE_BLOOM_MIP_PREFIX)) {
+        } else if (sstart_with(name, OWE_BLOOM_MIP_PREFIX)) {
         } else if (sstart_with(name, WE_REFLECTION_PREFIX)) {
-        } else if (sstart_with(name, WE_EFFECT_PPONG_PREFIX)) {
+        } else if (sstart_with(name, OWE_EFFECT_PPONG_PREFIX)) {
         } else if (sstart_with(name, WE_HALF_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_FULL_COMPO_BUFFER_PREFIX)) {
+        } else if (sstart_with(name, WE_EIGHT_COMPO_BUFFER_PREFIX)) {
+        } else if (sstart_with(name, WE_VOLUMETRICS_PREFIX) ||
+                   sstart_with(name, WE_QUARTER_FORCE_RG_PREFIX) ||
+                   sstart_with(name, WE_BLOOM_PREFIX) ||
+                   sstart_with(name, WE_QUARTER_FRAME_BUFFER_PREFIX) ||
+                   sstart_with(name, WE_EIGHTH_FRAME_BUFFER_PREFIX)) {
+            name.clear();
         } else if (scene.renderTargets.count(name) > 0) {
             // an effect-local fbo registered with a non-conventional name
             // (e.g. WE DOF's `_rt__coc_<addr>`) — already a valid RT.
         } else {
-            // Known engine-internal RTs we don't (yet) produce: silent-skip
-            // so corpus shaders that declare them inside a dead `#if` branch
-            // (e.g. `#if LIGHTS_SHADOW_MAPPING`) don't flood the log. The
-            // annotation collector picks defaults up unconditionally; the
-            // following glslang preprocess strips the dead branch, but the
-            // textures slot still carries the default name when it lands
-            // here.
-            static constexpr std::array<std::string_view, 4> kSilentUnimpl {
-                "_rt_volumetricsBack",
-                "_rt_volumetricsSingle",
-            };
-            bool silent = false;
-            for (auto s : kSilentUnimpl) if (name == s) { silent = true; break; }
-            if (! silent) rstd_warn("ignoring unsupported special tex \"{}\"", name);
+            rstd_warn("ignoring unsupported special tex \"{}\"", name);
             name.clear();
         }
     }
@@ -1149,8 +1137,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
         spImgNode->SetCamera(nodeAddr);
         std::string effect_ppong_a, effect_ppong_b;
-        effect_ppong_a = WE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
-        effect_ppong_b = WE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
+        effect_ppong_a = OWE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
+        effect_ppong_b = OWE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
         // set image effect
         auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
             spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
@@ -1247,7 +1235,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
             for (usize i_mat = 0; i_mat < wpeffobj.materials.size(); i_mat++) {
                 wpscene::WPMaterial wpmat = wpeffobj.materials.at(i_mat);
-                std::string         matOutRT { WE_EFFECT_PPONG_PREFIX_B };
+                std::string         matOutRT { OWE_EFFECT_PPONG_PREFIX_B };
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
                     wpmat.MergePass(wppass);
@@ -1259,6 +1247,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                             matOutRT = fboMap.at(wppass.target);
                         }
                     }
+                }
+                // A layer's own effect referencing its composite
+                // (`_rt_imageLayerComposite_<self>[_a|_b]`) wants this layer's
+                // running chain result.
+                for (auto& t : wpmat.textures) {
+                    if (ParseImageLayerCompositeId(t) == static_cast<std::uint32_t>(wpimgobj.id))
+                        t = effect_ppong_a;
                 }
                 if (wpmat.textures.size() == 0) wpmat.textures.resize(1);
                 if (wpmat.textures.at(0).empty()) {
@@ -1885,7 +1880,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         auto&             scene = *context.scene;
         const std::string addr  = getAddr(sp_node.get());
         const std::string ppong_a =
-            std::string(WE_EFFECT_PPONG_PREFIX_A) + addr;
+            std::string(OWE_EFFECT_PPONG_PREFIX_A) + addr;
 
         // Per-layer ortho camera. effect_camera_node sits at origin so the
         // view matrix is identity; ortho extents = bbox so glyph pixel
