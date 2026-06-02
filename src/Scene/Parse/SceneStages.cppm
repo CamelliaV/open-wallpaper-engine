@@ -74,6 +74,12 @@ struct ParseContext {
     // map directly would scramble z-order and let the background overwrite
     // foreground layers.
     std::vector<std::int32_t> node_id_order;
+
+    // Audio-bar fanout clones, keyed by their template layer's id. Held here
+    // (not appended to the graph at spawn time) so FinalizeScene can attach
+    // them right after the template node — keeping all bars at the template's
+    // z-position instead of jumping to the front of the root child list.
+    std::unordered_map<std::int32_t, std::vector<std::shared_ptr<SceneNode>>> layer_clones;
 };
 
 struct ProcessOpts {

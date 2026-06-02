@@ -3,6 +3,7 @@ module;
 
 module wescene.scene;
 import eigen;
+import rstd.cppstd;
 
 using namespace owe;
 using namespace Eigen;
@@ -11,9 +12,12 @@ Matrix4d SceneNode::GetLocalTrans() const {
     Affine3d trans = Affine3d::Identity();
     trans.prescale(m_scale.cast<double>());
 
-    trans.prerotate(AngleAxis<double>(m_rotation.x(), Vector3d::UnitX())); // x
-    trans.prerotate(AngleAxis<double>(m_rotation.y(), Vector3d::UnitY())); // y
-    trans.prerotate(AngleAxis<double>(m_rotation.z(), Vector3d::UnitZ())); // z
+    // m_rotation carries WE `angles` in degrees (static parse, JS setter, and
+    // script actuators all feed degrees); AngleAxis wants radians.
+    constexpr double kDegToRad = rstd::f64_::consts::PI / 180.0;
+    trans.prerotate(AngleAxis<double>(m_rotation.x() * kDegToRad, Vector3d::UnitX())); // x
+    trans.prerotate(AngleAxis<double>(m_rotation.y() * kDegToRad, Vector3d::UnitY())); // y
+    trans.prerotate(AngleAxis<double>(m_rotation.z() * kDegToRad, Vector3d::UnitZ())); // z
 
     trans.pretranslate(m_translate.cast<double>());
 

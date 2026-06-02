@@ -1594,7 +1594,7 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     desc.attenuation       = light_obj.attenuation;
     desc.mindistance       = light_obj.mindistance;
     // WE cone fields are full angles in degrees; convert to cos(half-angle).
-    const float kDegToRad     = 3.14159265358979323846f / 180.0f;
+    const float kDegToRad     = rstd::f32_::consts::PI / 180.0f;
     desc.inner_cone_cos       = std::cos(light_obj.innercone * 0.5f * kDegToRad);
     desc.outer_cone_cos       = std::cos(light_obj.outercone * 0.5f * kDegToRad);
     desc.light_source_size    = light_obj.lightsourcesize;
