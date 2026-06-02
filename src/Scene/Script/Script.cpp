@@ -1302,18 +1302,21 @@ JSValue NodeSetScale(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     n->SetScale({ float(x), float(y), float(z) });
     return JS_UNDEFINED;
 }
+// The JS angles API is in degrees; SceneNode::m_rotation is radians.
+constexpr double kRadToDeg = 180.0 / rstd::f64_::consts::PI;
+constexpr double kDegToRad = rstd::f64_::consts::PI / 180.0;
 JSValue NodeGetAngles(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return JS_UNDEFINED;
     auto v = n->Rotation();
-    return MakeVec3(ctx, v.x(), v.y(), v.z());
+    return MakeVec3(ctx, v.x() * kRadToDeg, v.y() * kRadToDeg, v.z() * kRadToDeg);
 }
 JSValue NodeSetAngles(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return JS_UNDEFINED;
     double x = 0, y = 0, z = 0;
     if (! ReadXYZ(ctx, val, x, y, z)) return JS_UNDEFINED;
-    n->SetRotation({ float(x), float(y), float(z) });
+    n->SetRotation({ float(x * kDegToRad), float(y * kDegToRad), float(z * kDegToRad) });
     return JS_UNDEFINED;
 }
 
@@ -2026,11 +2029,14 @@ MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget
         if (! node) return;
         if (std::holds_alternative<std::monostate>(v)) return;
 
+        // Script angle values are degrees; node rotation is radians. Read the
+        // current rotation back as degrees so partial (Vec2 / scalar) updates
+        // compose in the same unit the script works in.
         Eigen::Vector3f current = [&] {
             switch (target) {
             case NodeTransformTarget::Translate: return node->Translate();
             case NodeTransformTarget::Scale:     return node->Scale();
-            case NodeTransformTarget::Rotation:  return node->Rotation();
+            case NodeTransformTarget::Rotation:  return Eigen::Vector3f { node->Rotation() * float(kRadToDeg) };
             }
             return Eigen::Vector3f { 0.0f, 0.0f, 0.0f };
         }();
@@ -2060,7 +2066,7 @@ MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget
         switch (target) {
         case NodeTransformTarget::Translate: node->SetTranslate(next); break;
         case NodeTransformTarget::Scale:     node->SetScale(next); break;
-        case NodeTransformTarget::Rotation:  node->SetRotation(next); break;
+        case NodeTransformTarget::Rotation:  node->SetRotation(next * float(kDegToRad)); break;
         }
     };
 }
