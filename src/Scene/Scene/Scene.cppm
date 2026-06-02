@@ -552,6 +552,16 @@ public:
     void SetAspect(double aspect) { m_aspect = aspect; }
     void SetFov(double value) { m_fov = value; }
 
+    // Explicit eye/center/up view, used by perspective scenes (general
+    // isOrtho==false) whose camera is given in WE world units rather than the
+    // 2D pixel-space node placement. Once set, the view comes from LookAt and
+    // the attached node (if any) is ignored.
+    void SetLookAt(const Eigen::Vector3d& eye, const Eigen::Vector3d& center,
+                   const Eigen::Vector3d& up) {
+        m_eye = eye; m_center = center; m_up = up; m_lookat = true;
+    }
+    bool IsLookAt() const { return m_lookat; }
+
     void  AttatchImgEffect(std::shared_ptr<SceneImageEffectLayer> eff) { m_imgEffect = eff; }
     bool  HasImgEffect() const { return (bool)m_imgEffect; }
     auto& GetImgEffect() { return m_imgEffect; }
@@ -575,6 +585,10 @@ public:
         m_nearClip    = cam.m_nearClip;
         m_farClip     = cam.m_farClip;
         m_perspective = cam.m_perspective;
+        m_lookat      = cam.m_lookat;
+        m_eye         = cam.m_eye;
+        m_center      = cam.m_center;
+        m_up          = cam.m_up;
     }
 
 private:
@@ -587,6 +601,11 @@ private:
     double m_farClip { 1000.0f };
     double m_fov { 45.0f };
     bool   m_perspective;
+
+    bool            m_lookat { false };
+    Eigen::Vector3d m_eye { Eigen::Vector3d::Zero() };
+    Eigen::Vector3d m_center { -Eigen::Vector3d::UnitZ() };
+    Eigen::Vector3d m_up { Eigen::Vector3d::UnitY() };
 
     Eigen::Matrix4d m_viewMat { Eigen::Matrix4d::Identity() };
     Eigen::Matrix4d m_viewProjectionMat { Eigen::Matrix4d::Identity() };

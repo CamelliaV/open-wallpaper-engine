@@ -11,6 +11,7 @@ using namespace owe;
 using namespace Eigen;
 
 Vector3d SceneCamera::GetPosition() const {
+    if (m_lookat) return m_eye;
     if (m_node) {
         return Affine3d(m_node->GetLocalTrans()) * Vector3d::Zero();
     }
@@ -18,6 +19,7 @@ Vector3d SceneCamera::GetPosition() const {
 }
 
 Vector3d SceneCamera::GetDirection() const {
+    if (m_lookat) return (m_center - m_eye).normalized();
     if (m_node) {
         return (m_node->GetLocalTrans() * Vector4d(0.0f, 0.0f, -1.0f, 0.0f)).head<3>();
     }
@@ -35,7 +37,9 @@ Matrix4d SceneCamera::GetViewProjectionMatrix() {
 }
 
 void SceneCamera::CalculateViewProjectionMatrix() {
-    if (m_node) {
+    if (m_lookat) {
+        m_viewMat = LookAt(m_eye, m_center, m_up);
+    } else if (m_node) {
         // view = inv(node.ModelTrans()) so the layer-local frame maps to
         // view origin regardless of where the node sits in the world (parent
         // chain + local translate / scale / rotate). With LookAt-only the
@@ -65,5 +69,6 @@ void SceneCamera::AttatchNode(std::shared_ptr<SceneNode> node) {
         rstd_error("Attach a null node to camera");
         return;
     }
-    m_node = node;
+    m_node   = node;
+    m_lookat = false; // node-based view takes over from any explicit LookAt
 }

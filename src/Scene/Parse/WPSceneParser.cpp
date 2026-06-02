@@ -699,8 +699,9 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
 
 // parse
 
-void ParseCamera(ParseContext& context, wpscene::WPSceneGeneral& general) {
-    auto& scene = *context.scene;
+void ParseCamera(ParseContext& context, wpscene::WPScene& sc) {
+    auto& scene   = *context.scene;
+    auto& general = sc.general;
     // effect camera
     scene.cameras["effect"]    = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
     context.effect_camera_node = std::make_shared<SceneNode>(); // at 0,0,0
@@ -731,6 +732,50 @@ void ParseCamera(ParseContext& context, wpscene::WPSceneGeneral& general) {
     context.global_perspective_camera_node = std::make_shared<SceneNode>(cperori, cscale, cangle);
     scene.cameras["global_perspective"]->AttatchNode(context.global_perspective_camera_node);
     scene.sceneGraph->AppendChild(context.global_perspective_camera_node);
+
+    // Perspective scene (orthogonalprojection==null). The content is authored
+    // in WE world units around the origin and viewed by an explicit eye/center
+    // camera, not the 2D pixel-space placement above. Drive global_perspective
+    // from scene.camera + general.fov and make it the active camera so every
+    // layer (and its composite) renders under the same world-space view.
+    if (! general.isOrtho) {
+        auto&    per = *scene.cameras.at("global_perspective");
+        Vector3d eye { sc.camera.eye[0], sc.camera.eye[1], sc.camera.eye[2] };
+        Vector3d center { sc.camera.center[0], sc.camera.center[1], sc.camera.center[2] };
+        Vector3d up { sc.camera.up[0], sc.camera.up[1], sc.camera.up[2] };
+        per.SetLookAt(eye, center, up);
+        per.SetFov(general.perspectiveoverridefov > 0.0f ? general.perspectiveoverridefov
+                                                         : general.fov);
+        per.SetAspect((double)context.ortho_w / (double)context.ortho_h);
+        scene.activeCamera = scene.cameras.at("global_perspective").get();
+    }
+}
+
+// The scene's camera entity (objects[] with a non-null `camera` field) is the
+// authoritative runtime camera for a perspective scene — its origin/angles/fov
+// are in WE world units, the same space the layers are authored in. (The
+// top-level scene.camera eye/center is only the editor's saved viewport and
+// sits much farther back; ParseCamera seeds it as a fallback.) Drive
+// global_perspective from this node so every layer composites under it.
+void ParseCameraObj(ParseContext& context, wpscene::WPCameraObject& cam) {
+    auto& scene = *context.scene;
+    auto  it    = scene.cameras.find("global_perspective");
+    if (it == scene.cameras.end()) return;
+    // Only take over when ParseCamera already made the perspective camera
+    // active (general.isOrtho == false). A 2D scene can still carry an editor
+    // camera marker; leave its ortho camera untouched.
+    if (scene.activeCamera != it->second.get()) return;
+
+    Vector3f origin { cam.origin[0], cam.origin[1], cam.origin[2] };
+    Vector3f angles { cam.angles[0], cam.angles[1], cam.angles[2] };
+    auto     node = std::make_shared<SceneNode>(origin, Vector3f::Ones(), angles);
+    scene.sceneGraph->AppendChild(node);
+
+    auto& per = *it->second;
+    per.AttatchNode(node); // node-based view, clears the scene.camera LookAt seed
+    if (cam.fov > 0.0f) per.SetFov(cam.fov);
+    per.SetAspect((double)context.ortho_w / (double)context.ortho_h);
+    scene.activeCamera = &per;
 }
 
 void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
@@ -2168,7 +2213,7 @@ void AdjustAutoOrthoProjection(wpscene::WPScene& sc, std::span<const WPObjectVar
 ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::WPScene& sc) {
     ParseContext context;
     InitContext(context, vfs, sc);
-    ParseCamera(context, sc.general);
+    ParseCamera(context, sc);
 
     context.scene->renderTargets[SpecTex_Default.data()] = {
         .width  = context.ortho_w,
@@ -2217,7 +2262,9 @@ void ProcessObjects(ParseContext& context, std::span<WPObjectVar> wp_objs,
                        // .mdl model attachments and per-object camera markers
                        // remain absorption-only; see SceneSchema tests.
                        [](wpscene::WPModelObject&) {},
-                       [](wpscene::WPCameraObject&) {},
+                       [&context](wpscene::WPCameraObject& obj) {
+                           ParseCameraObj(context, obj);
+                       },
                    },
                    obj);
     }

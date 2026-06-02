@@ -716,7 +716,8 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene&   scene,
         gCam.SetWidth(sw);
         gCam.SetHeight(sh);
         gPerCam.SetAspect(sAspect);
-        gPerCam.SetFov(algorism::CalculatePersperctiveFov(1000.0f, gCam.Height()));
+        if (! gPerCam.IsLookAt())
+            gPerCam.SetFov(algorism::CalculatePersperctiveFov(1000.0f, gCam.Height()));
         break;
     case FillMode::ASPECTFIT:
         if (fboAspect < sAspect) {
@@ -728,7 +729,8 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene&   scene,
             gCam.SetHeight(sh);
         }
         gPerCam.SetAspect(fboAspect);
-        gPerCam.SetFov(algorism::CalculatePersperctiveFov(1000.0f, gCam.Height()));
+        if (! gPerCam.IsLookAt())
+            gPerCam.SetFov(algorism::CalculatePersperctiveFov(1000.0f, gCam.Height()));
         break;
     case FillMode::ASPECTCROP:
     default:
@@ -741,7 +743,8 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene&   scene,
             gCam.SetHeight(sh);
         }
         gPerCam.SetAspect(fboAspect);
-        gPerCam.SetFov(algorism::CalculatePersperctiveFov(1000.0f, gCam.Height()));
+        if (! gPerCam.IsLookAt())
+            gPerCam.SetFov(algorism::CalculatePersperctiveFov(1000.0f, gCam.Height()));
         break;
     }
     gCam.Update();
