@@ -56,7 +56,7 @@ set_target_properties(version_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 # add per-asset checks; --name / --pkgv / --limit filter the pkg set.
 # `valid` subcommand regenerates fixture JSONs via DumpWorkshop.
 add_executable(wescene-test wescene_test_main.cpp)
-target_link_libraries(wescene-test PRIVATE wescene_test_lib)
+target_link_libraries(wescene-test PRIVATE wescene_test_lib argparse::argparse)
 set_target_properties(wescene-test PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Regression net for the version-aware WPScene::FromJson path.

@@ -11,7 +11,10 @@
 // GLFW. Exit 0 iff every selected pkg parsed AND every requested
 // validator succeeded.
 
+#include <argparse/argparse.hpp>
 #include <nlohmann/json.hpp>
+
+#include <regex>
 
 import wescene.parse;
 import wescene.fs;
@@ -49,27 +52,6 @@ constexpr const char* kDefaultAssetsDir =
 // Workshops that hang or hard-crash deep parsers. Keep in sync with
 // corpus.cpp's kSkipIds (same intent, different container).
 constexpr std::array<const char*, 2> kSkipIds = { "2435537849", "3346715292" };
-
-void TopUsage(const char* prog) {
-    std::fprintf(stderr,
-                 "usage: %s <subcommand> [options]\n"
-                 "\n"
-                 "Subcommands:\n"
-                 "  scan         Walk pkgs and run scene parse, optionally with per-asset\n"
-                 "               passes (--parse-tex / --parse-shader / --parse-mdl).\n"
-                 "               Filterable by --name and --pkgv.\n"
-                 "  extract      List entries of a single scene.pkg, or export one asset\n"
-                 "               file (text or binary) to stdout or -o FILE.\n"
-                 "  rendergraph  Parse one pkg fully and print the predicted render-graph:\n"
-                 "               render targets, scene-graph passes, image-effect chains,\n"
-                 "               and post-process steps. No Vulkan; pure structural dump.\n"
-                 "  valid        Run DumpWorkshop on one pkg and emit the JSON fixture\n"
-                 "               snapshot (to stdout or a file). Used to regenerate the\n"
-                 "               checked-in fixtures under tests/fixtures/.\n"
-                 "\n"
-                 "Run `%s <subcommand> --help` for subcommand-specific options.\n",
-                 prog ? prog : "wescene-test", prog ? prog : "wescene-test");
-}
 
 // ---------------------------------------------------------------------------
 // shared helpers
@@ -131,118 +113,74 @@ struct ScanOptions {
     std::string              json_dir;              // empty = no per-workshop dump dir (--json-dir)
 };
 
-void ScanUsage(const char* prog) {
-    std::fprintf(stderr,
-                 "usage: %s scan [options]\n"
-                 "  --workshop-dir DIR   workshop root (children are <id>/scene.pkg) or a\n"
-                 "                       single pkg dir (DIR itself contains scene.pkg).\n"
-                 "                       (default: %s)\n"
-                 "  --assets DIR         shared engine assets, mounted at /assets fallback\n"
-                 "                       (default: %s)\n"
-                 "Parse depth:\n"
-                 "  --full               run full WPSceneParser::Parse instead of the cheap\n"
-                 "                       FromJson+ExpandObjects+AdjustAuto base. Triggers\n"
-                 "                       per-image shader compile, bloom auto-injection,\n"
-                 "                       glslang init/finalize, etc. Slower but exercises\n"
-                 "                       every stage.\n"
-                 "Parse passes (any combination; also drives --json-dir's per-workshop\n"
-                 "section emission):\n"
-                 "  --parse-tex          run WPTexImageParser on every /materials/**/*.tex\n"
-                 "  --parse-shader       run WPShaderParser::CompileMaterialShader on every\n"
-                 "                       /materials/**/*.json\n"
-                 "  --parse-mdl          run WPMdlParser::ParseHeader on every /models/**/*.mdl;\n"
-                 "                       fast, doesn't touch vertex/index/bone data.\n"
-                 "  --parse-mdl-full     upgrade --parse-mdl to full WPMdlParser::Parse;\n"
-                 "                       slow, some workshops are known to hang/reject.\n"
-                 "  --parse-all          --parse-tex + --parse-shader + --parse-mdl\n"
-                 "                       (header-only; pair with --parse-mdl-full for body)\n"
-                 "Filters (repeatable; multiple --name/--pkgv values OR together):\n"
-                 "  --name SUBSTR        only pkgs whose dir name contains SUBSTR (ci)\n"
-                 "  --pkgv N             only pkgs with PKGV stamp == N\n"
-                 "  --limit N            stop after N matched pkgs (default 0 = all)\n"
-                 "  --offset N           skip the first N matched pkgs before --limit applies\n"
-                 "                       (default 0). Use with --limit to chunk corpus runs.\n"
-                 "Misc:\n"
-                 "  --quiet              suppress per-asset OK lines; only FAIL + summary\n"
-                 "  --stop-on-fail       exit non-zero on the first per-asset failure so a\n"
-                 "                       wrapper loop can resume at the next --offset.\n"
-                 "  --json FILE          additionally write structured validator results to\n"
-                 "                       FILE (single JSON document with pkgs[] + summary).\n"
-                 "  --json-dir DIR       additionally write per-workshop DumpWorkshop snapshots\n"
-                 "                       to DIR/<id>.json (same format as `wescene-test valid`).\n"
-                 "                       Mutually exclusive with --json.\n"
-                 "  -h, --help           this message\n",
-                 prog ? prog : "wescene-test",
-                 kDefaultWorkshopDir,
-                 *kDefaultAssetsDir ? kDefaultAssetsDir : "<unset>");
+void AddScanArgs(argparse::ArgumentParser& p) {
+    p.add_description("Walk pkgs and run scene parse, optionally with per-asset passes.");
+    p.add_argument("--workshop-dir")
+        .default_value(std::string(kDefaultWorkshopDir))
+        .help("workshop root (children are <id>/scene.pkg) or a single pkg dir");
+    p.add_argument("--assets")
+        .default_value(std::string(kDefaultAssetsDir))
+        .help("shared engine assets, mounted at /assets fallback");
+    p.add_argument("--full").flag().help(
+        "run full WPSceneParser::Parse (shader compile, bloom inject, glslang) "
+        "instead of the cheap FromJson+ExpandObjects+AdjustAuto base");
+    p.add_argument("--parse-tex").flag().help(
+        "run WPTexImageParser on every /materials/**/*.tex");
+    p.add_argument("--parse-shader").flag().help(
+        "run WPShaderParser::CompileMaterialShader on every /materials/**/*.json");
+    p.add_argument("--parse-mdl").flag().help(
+        "run WPMdlParser::ParseHeader on every /models/**/*.mdl (header-only)");
+    p.add_argument("--parse-mdl-full").flag().help(
+        "upgrade --parse-mdl to full WPMdlParser::Parse (slow; some hang/reject)");
+    p.add_argument("--parse-all").flag().help(
+        "--parse-tex + --parse-shader + --parse-mdl (header-only)");
+    p.add_argument("--name")
+        .append()
+        .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
+    p.add_argument("--pkgv")
+        .append()
+        .scan<'i', unsigned>()
+        .help("only pkgs with PKGV stamp == N; repeatable, OR'd");
+    p.add_argument("--limit")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("stop after N matched pkgs (default 0 = all)");
+    p.add_argument("--offset")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("skip the first N matched pkgs before --limit applies");
+    p.add_argument("--quiet").flag().help(
+        "suppress per-asset OK lines; only FAIL + summary");
+    p.add_argument("--stop-on-fail").flag().help(
+        "exit non-zero on the first per-asset failure (resume at next --offset)");
+    auto& sink = p.add_mutually_exclusive_group();
+    sink.add_argument("--json")
+        .default_value(std::string())
+        .help("write structured validator results to FILE (pkgs[] + summary)");
+    sink.add_argument("--json-dir")
+        .default_value(std::string())
+        .help("write per-workshop DumpWorkshop snapshots to DIR/<id>.json");
 }
 
-bool ParseScanArgs(int argc, char** argv, ScanOptions& opt, const char* prog) {
-    for (int i = 0; i < argc; ++i) {
-        std::string_view a = argv[i];
-        auto need_val = [&](std::string_view name) -> const char* {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "wescene-test scan: %s requires a value\n",
-                             std::string(name).c_str());
-                return nullptr;
-            }
-            return argv[++i];
-        };
-        if (a == "--workshop-dir") {
-            if (auto* v = need_val(a)) opt.workshop_dir = v;
-            else return false;
-        } else if (a == "--assets") {
-            if (auto* v = need_val(a)) opt.assets_dir = v;
-            else return false;
-        } else if (a == "--parse-tex") {
-            opt.p_tex = true;
-        } else if (a == "--parse-shader") {
-            opt.p_shader = true;
-        } else if (a == "--parse-mdl") {
-            opt.p_mdl = true;
-        } else if (a == "--parse-mdl-full") {
-            opt.p_mdl = true;
-            opt.p_mdl_full = true;
-        } else if (a == "--parse-all") {
-            opt.p_tex = opt.p_shader = opt.p_mdl = true;
-        } else if (a == "--full") {
-            opt.full = true;
-        } else if (a == "--name") {
-            if (auto* v = need_val(a)) opt.name_filters.emplace_back(v);
-            else return false;
-        } else if (a == "--pkgv") {
-            if (auto* v = need_val(a)) opt.pkgv_filters.push_back((unsigned)std::atoi(v));
-            else return false;
-        } else if (a == "--limit") {
-            if (auto* v = need_val(a)) opt.limit = std::atoi(v);
-            else return false;
-        } else if (a == "--offset") {
-            if (auto* v = need_val(a)) opt.offset = std::atoi(v);
-            else return false;
-        } else if (a == "--quiet") {
-            opt.quiet = true;
-        } else if (a == "--stop-on-fail") {
-            opt.stop_on_fail = true;
-        } else if (a == "--json") {
-            if (auto* v = need_val(a)) opt.json_out = v;
-            else return false;
-        } else if (a == "--json-dir") {
-            if (auto* v = need_val(a)) opt.json_dir = v;
-            else return false;
-        } else if (a == "-h" || a == "--help") {
-            ScanUsage(prog);
-            std::exit(0);
-        } else {
-            std::fprintf(stderr, "wescene-test scan: unknown arg '%.*s'\n",
-                         (int)a.size(), a.data());
-            return false;
-        }
-    }
-    if (! opt.json_out.empty() && ! opt.json_dir.empty()) {
-        std::fprintf(stderr, "wescene-test scan: --json and --json-dir are mutually exclusive\n");
-        return false;
-    }
-    return true;
+ScanOptions ReadScanOptions(const argparse::ArgumentParser& a) {
+    ScanOptions opt;
+    opt.workshop_dir = a.get<std::string>("--workshop-dir");
+    opt.assets_dir   = a.get<std::string>("--assets");
+    const bool all   = a.get<bool>("--parse-all");
+    opt.full         = a.get<bool>("--full");
+    opt.p_mdl_full   = a.get<bool>("--parse-mdl-full");
+    opt.p_tex        = all || a.get<bool>("--parse-tex");
+    opt.p_shader     = all || a.get<bool>("--parse-shader");
+    opt.p_mdl        = all || opt.p_mdl_full || a.get<bool>("--parse-mdl");
+    if (auto v = a.present<std::vector<std::string>>("--name")) opt.name_filters = *v;
+    if (auto v = a.present<std::vector<unsigned>>("--pkgv")) opt.pkgv_filters = *v;
+    opt.limit        = a.get<int>("--limit");
+    opt.offset       = a.get<int>("--offset");
+    opt.quiet        = a.get<bool>("--quiet");
+    opt.stop_on_fail = a.get<bool>("--stop-on-fail");
+    opt.json_out     = a.get<std::string>("--json");
+    opt.json_dir     = a.get<std::string>("--json-dir");
+    return opt;
 }
 
 bool MatchesNameFilters(const std::string& dir_name, const std::vector<std::string>& filters) {
@@ -649,13 +587,7 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
     return parse_ok;
 }
 
-int CmdScan(int argc, char** argv, const char* prog) {
-    ScanOptions opt;
-    if (! ParseScanArgs(argc, argv, opt, prog)) {
-        ScanUsage(prog);
-        return 2;
-    }
-
+int CmdScan(const ScanOptions& opt) {
     if (! fs::exists(opt.workshop_dir) || ! fs::is_directory(opt.workshop_dir)) {
         std::fprintf(stderr, "wescene-test scan: %s is not a directory\n",
                      opt.workshop_dir.c_str());
@@ -766,59 +698,23 @@ int CmdScan(int argc, char** argv, const char* prog) {
 // extract subcommand
 // ---------------------------------------------------------------------------
 
-void ExtractUsage(const char* prog) {
-    std::fprintf(stderr,
-                 "usage: %s extract <pkg> [<asset-path>] [-o FILE]\n"
-                 "\n"
-                 "  <pkg>         path to scene.pkg, or a directory containing one.\n"
-                 "  <asset-path>  in-pkg path to extract (e.g. '/scene.json',\n"
-                 "                'materials/foo.json', 'models/bar.mdl'). Optional;\n"
-                 "                if omitted, lists every entry one per line and exits.\n"
-                 "  -o FILE       write to FILE. Default: write to stdout.\n"
-                 "                Use '-' to force stdout.\n"
-                 "\n"
-                 "Examples:\n"
-                 "  %s extract workshop/123                      # list entries\n"
-                 "  %s extract workshop/123 /scene.json          # dump scene.json to stdout\n"
-                 "  %s extract workshop/123 materials/foo.tex -o foo.tex\n",
-                 prog ? prog : "wescene-test", prog ? prog : "wescene-test",
-                 prog ? prog : "wescene-test", prog ? prog : "wescene-test");
+void AddExtractArgs(argparse::ArgumentParser& p) {
+    p.add_description(
+        "List entries of a single scene.pkg, or export one asset to stdout/-o FILE.");
+    p.add_argument("pkg").help("path to scene.pkg, or a directory containing one");
+    p.add_argument("asset")
+        .nargs(argparse::nargs_pattern::optional)
+        .default_value(std::string())
+        .help("in-pkg path to extract (e.g. /scene.json). Omit to list all entries.");
+    p.add_argument("-o", "--output")
+        .default_value(std::string())
+        .help("write to FILE (default stdout; '-' forces stdout)");
 }
 
-int CmdExtract(int argc, char** argv, const char* prog) {
-    std::string pkg_arg;
-    std::string asset_arg;
-    std::string out_file;
-    for (int i = 0; i < argc; ++i) {
-        std::string_view a = argv[i];
-        if (a == "-h" || a == "--help") {
-            ExtractUsage(prog);
-            return 0;
-        } else if (a == "-o") {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "wescene-test extract: -o requires a value\n");
-                return 2;
-            }
-            out_file = argv[++i];
-        } else if (StartsWith(a, "-")) {
-            std::fprintf(stderr, "wescene-test extract: unknown flag '%.*s'\n",
-                         (int)a.size(), a.data());
-            return 2;
-        } else if (pkg_arg.empty()) {
-            pkg_arg = a;
-        } else if (asset_arg.empty()) {
-            asset_arg = a;
-        } else {
-            std::fprintf(stderr, "wescene-test extract: unexpected positional '%.*s'\n",
-                         (int)a.size(), a.data());
-            return 2;
-        }
-    }
-
-    if (pkg_arg.empty()) {
-        ExtractUsage(prog);
-        return 2;
-    }
+int CmdExtract(const argparse::ArgumentParser& a) {
+    const std::string pkg_arg   = a.get<std::string>("pkg");
+    const std::string asset_arg = a.get<std::string>("asset");
+    const std::string out_file  = a.get<std::string>("--output");
 
     const std::string pkg_path = ResolvePkgPath(pkg_arg);
     if (pkg_path.empty()) {
@@ -898,27 +794,347 @@ int CmdExtract(int argc, char** argv, const char* prog) {
 }
 
 // ---------------------------------------------------------------------------
+// grep subcommand
+// ---------------------------------------------------------------------------
+
+struct GrepOptions {
+    enum class Mode { Context, Only, Files, Count };
+
+    std::string              workshop_dir = kDefaultWorkshopDir;
+    std::string              pattern;
+    std::vector<std::string> name_filters;
+    std::string              path_filter;          // substring (ci); empty = ".json" suffix
+    bool                     search_all { false };  // search every entry, not just .json
+    bool                     icase { false };
+    int                      limit { 0 };
+    int                      offset { 0 };
+    Mode                     mode { Mode::Context };
+    bool                     json_out { false };
+    int                      snippet { 48 };        // flat-mode char window (no -A/-B/-C)
+    int                      before { 0 };           // -B: lines of leading context
+    int                      after { 0 };            // -A: lines of trailing context
+
+    bool line_context() const { return before > 0 || after > 0; }
+};
+
+void AddGrepArgs(argparse::ArgumentParser& p) {
+    p.add_description(
+        "Regex-search (ECMAScript / std::regex) the text entries inside each pkg's "
+        "VFS. By default only .json entries are searched (scene.json + every "
+        "materials/**.json + effects/**.json).");
+    p.add_argument("pattern").help("ECMAScript / std::regex pattern");
+    p.add_argument("--workshop-dir")
+        .default_value(std::string(kDefaultWorkshopDir))
+        .help("workshop root (children are <id>/scene.pkg) or a single pkg dir");
+    p.add_argument("--name")
+        .append()
+        .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
+    p.add_argument("--limit")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("stop after N matched pkgs (default 0 = all)");
+    p.add_argument("--offset")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("skip the first N matched pkgs before --limit applies");
+    p.add_argument("--path-filter")
+        .default_value(std::string())
+        .help("only search in-pkg paths containing SUBSTR (ci); overrides .json gate");
+    p.add_argument("--all-text").flag().help(
+        "search every entry, not just .json (combine with --path-filter)");
+    p.add_argument("-i", "--ignore-case").flag().help("case-insensitive match");
+    p.add_argument("--snippet")
+        .default_value(GrepOptions {}.snippet)
+        .scan<'i', int>()
+        .help("chars of context around a match in the flat default mode "
+              "(ignored when -A/-B/-C is set)");
+    p.add_argument("-A", "--after")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("print N lines after each match (grep -A); switches default mode to "
+              "line context with <path>:<lineno>: prefixes");
+    p.add_argument("-B", "--before")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("print N lines before each match (grep -B)");
+    p.add_argument("-C", "--around")
+        .default_value(0)
+        .scan<'i', int>()
+        .help("print N lines before AND after each match (grep -C)");
+    p.add_argument("--json").flag().help(
+        "structured array of {id, path, matches[]}");
+    auto& mode = p.add_mutually_exclusive_group();
+    mode.add_argument("-o", "--only-matching").flag().help(
+        "print only the matched substring, one per line");
+    mode.add_argument("-l", "--files-with-matches").flag().help(
+        "print <id>\\t<path> once per matching entry");
+    mode.add_argument("-c", "--count").flag().help(
+        "print <id>\\t<count> per pkg with at least one match");
+}
+
+GrepOptions ReadGrepOptions(const argparse::ArgumentParser& a) {
+    GrepOptions opt;
+    opt.pattern      = a.get<std::string>("pattern");
+    opt.workshop_dir = a.get<std::string>("--workshop-dir");
+    if (auto v = a.present<std::vector<std::string>>("--name")) opt.name_filters = *v;
+    opt.path_filter = a.get<std::string>("--path-filter");
+    opt.search_all  = a.get<bool>("--all-text");
+    opt.icase       = a.get<bool>("--ignore-case");
+    opt.limit       = a.get<int>("--limit");
+    opt.offset      = a.get<int>("--offset");
+    opt.snippet     = a.get<int>("--snippet");
+    const int around = a.get<int>("--around");
+    opt.before      = std::max(a.get<int>("--before"), around);
+    opt.after       = std::max(a.get<int>("--after"), around);
+    opt.json_out    = a.get<bool>("--json");
+    if (a.get<bool>("--only-matching")) opt.mode = GrepOptions::Mode::Only;
+    else if (a.get<bool>("--files-with-matches")) opt.mode = GrepOptions::Mode::Files;
+    else if (a.get<bool>("--count")) opt.mode = GrepOptions::Mode::Count;
+    return opt;
+}
+
+// Decide whether an in-pkg entry path is in scope for grep.
+bool GrepWantPath(const std::string& path, const GrepOptions& opt) {
+    const std::string lo = LowerCopy(path);
+    if (! opt.path_filter.empty() &&
+        lo.find(LowerCopy(opt.path_filter)) == std::string::npos)
+        return false;
+    if (opt.search_all) return true;
+    if (! opt.path_filter.empty()) return true;  // explicit filter overrides .json default
+    return EndsWith(lo, ".json");
+}
+
+// One match's surrounding window, flattened to a single line.
+std::string GrepContext(const std::string& text, std::size_t pos, std::size_t len, int ctx) {
+    const std::size_t start = pos > (std::size_t)ctx ? pos - (std::size_t)ctx : 0;
+    const std::size_t end   = std::min(text.size(), pos + len + (std::size_t)ctx);
+    std::string       s     = text.substr(start, end - start);
+    for (auto& ch : s)
+        if (ch == '\n' || ch == '\r' || ch == '\t') ch = ' ';
+    return s;
+}
+
+// Max chars of a single source line printed in line-context mode. WE pkg JSON
+// is mostly pretty-printed; the cap only bites on minified scene.json or
+// inlined "script" strings, where the flat default mode is the better tool.
+constexpr int kGrepLineCap = 400;
+
+// Byte offset where each line starts; starts[i] = first byte of line i.
+std::vector<std::size_t> GrepLineStarts(const std::string& text) {
+    std::vector<std::size_t> starts { 0 };
+    for (std::size_t i = 0; i < text.size(); ++i)
+        if (text[i] == '\n') starts.push_back(i + 1);
+    return starts;
+}
+
+// 0-based index of the line containing byte position pos.
+std::size_t GrepLineOf(const std::vector<std::size_t>& starts, std::size_t pos) {
+    auto it = std::upper_bound(starts.begin(), starts.end(), pos);
+    return (std::size_t)(it - starts.begin()) - 1;
+}
+
+// Line `idx` text, newline/CR stripped and capped to kGrepLineCap chars.
+std::string GrepLineText(const std::string& text,
+                         const std::vector<std::size_t>& starts, std::size_t idx) {
+    const std::size_t s = starts[idx];
+    std::size_t       e = (idx + 1 < starts.size()) ? starts[idx + 1] - 1 : text.size();
+    if (e > s && text[e - 1] == '\r') --e;
+    std::string line = text.substr(s, e - s);
+    if (line.size() > (std::size_t)kGrepLineCap)
+        line = line.substr(0, (std::size_t)kGrepLineCap) + " …";
+    return line;
+}
+
+// grep -A/-B/-C style emission: filename + line numbers + surrounding lines.
+// Match lines use a ':' separator, context lines '-'; overlapping windows are
+// merged and distinct windows separated by a "--" line (as in grep).
+void GrepPrintLineContext(const std::string& pkg_id, const std::string& path,
+                          const std::string& text,
+                          const std::vector<std::size_t>& match_pos,
+                          const GrepOptions& opt) {
+    const auto      starts = GrepLineStarts(text);
+    const int       nlines = (int)starts.size();
+    std::set<int>   match_lines;
+    for (auto p : match_pos) match_lines.insert((int)GrepLineOf(starts, p));
+
+    std::vector<std::pair<int, int>> ranges;  // inclusive [lo, hi] line indices
+    for (int ml : match_lines) {               // std::set iterates in order
+        const int lo = std::max(0, ml - opt.before);
+        const int hi = std::min(nlines - 1, ml + opt.after);
+        if (! ranges.empty() && lo <= ranges.back().second + 1)
+            ranges.back().second = std::max(ranges.back().second, hi);
+        else
+            ranges.push_back({ lo, hi });
+    }
+    for (std::size_t ri = 0; ri < ranges.size(); ++ri) {
+        if (ri) std::fprintf(stdout, "--\n");
+        for (int ln = ranges[ri].first; ln <= ranges[ri].second; ++ln) {
+            const char sep = match_lines.count(ln) ? ':' : '-';
+            std::fprintf(stdout, "%s\t%s%c%d%c %s\n", pkg_id.c_str(), path.c_str(),
+                         sep, ln + 1, sep,
+                         GrepLineText(text, starts, (std::size_t)ln).c_str());
+        }
+    }
+}
+
+// Collect pkg dirs under workshop_dir applying name filters + offset/limit.
+// Mirrors CmdScan's selection so grep and scan agree on which pkgs match.
+std::vector<fs::path> CollectGrepPkgs(const GrepOptions& opt) {
+    std::vector<fs::path> dirs;
+    if (fs::exists(fs::path(opt.workshop_dir) / "scene.pkg")) {
+        dirs.push_back(opt.workshop_dir);
+        return dirs;
+    }
+    for (auto& e : fs::directory_iterator(opt.workshop_dir)) {
+        if (! e.is_directory()) continue;
+        if (! fs::exists(e.path() / "scene.pkg")) continue;
+        if (! MatchesNameFilters(e.path().filename().string(), opt.name_filters)) continue;
+        dirs.push_back(e.path());
+    }
+    std::sort(dirs.begin(), dirs.end());
+    if (opt.offset > 0) {
+        if ((size_t)opt.offset >= dirs.size()) dirs.clear();
+        else dirs.erase(dirs.begin(), dirs.begin() + opt.offset);
+    }
+    if (opt.limit > 0 && (int)dirs.size() > opt.limit) dirs.resize((size_t)opt.limit);
+    return dirs;
+}
+
+int CmdGrep(const GrepOptions& opt) {
+    if (! fs::exists(opt.workshop_dir) || ! fs::is_directory(opt.workshop_dir)) {
+        std::fprintf(stderr, "wescene-test grep: %s is not a directory\n",
+                     opt.workshop_dir.c_str());
+        return 1;
+    }
+
+    std::regex re;
+    try {
+        auto flags = std::regex::ECMAScript;
+        if (opt.icase) flags |= std::regex::icase;
+        re = std::regex(opt.pattern, flags);
+    } catch (const std::regex_error& ex) {
+        std::fprintf(stderr, "wescene-test grep: bad pattern: %s\n", ex.what());
+        return 2;
+    }
+
+    const auto dirs = CollectGrepPkgs(opt);
+    if (dirs.empty()) {
+        std::fprintf(stderr, "wescene-test grep: no matching pkgs\n");
+        return 1;
+    }
+
+    json  doc      = json::array();
+    long  n_match  = 0;
+    int   n_files  = 0;
+    int   n_pkgs   = 0;
+
+    for (const auto& d : dirs) {
+        const std::string pkg_id   = d.filename().string();
+        const std::string pkg_path = (d / "scene.pkg").string();
+
+        std::string                         version_stamp;
+        std::vector<owe::testing::PkgEntry> entries;
+        if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
+            std::fprintf(stderr, "wescene-test grep: ReadPkgHeader failed on %s\n",
+                         pkg_id.c_str());
+            continue;
+        }
+
+        owe::fs::VFS vfs;
+        auto         wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
+        if (! wfs) {
+            std::fprintf(stderr, "wescene-test grep: CreatePkgFs failed on %s\n",
+                         pkg_id.c_str());
+            continue;
+        }
+        vfs.Mount("/assets", std::move(wfs));
+
+        std::vector<std::string> paths;
+        paths.reserve(entries.size());
+        for (const auto& e : entries)
+            if (GrepWantPath(e.path, opt)) paths.push_back(e.path);
+        std::sort(paths.begin(), paths.end());
+
+        int pkg_count = 0;
+        for (const auto& p : paths) {
+            auto stream = vfs.Open("/assets" + p);
+            if (! stream) continue;
+            const std::string text = stream->ReadAllStr();
+
+            std::vector<std::pair<std::size_t, std::size_t>> matches;  // (pos, len)
+            for (auto it = std::sregex_iterator(text.begin(), text.end(), re);
+                 it != std::sregex_iterator(); ++it)
+                matches.emplace_back((std::size_t)it->position(), (std::size_t)it->length());
+            if (matches.empty()) continue;
+
+            n_match += (long)matches.size();
+            pkg_count += (int)matches.size();
+            ++n_files;
+
+            if (opt.json_out) {
+                json file_matches = json::array();
+                for (const auto& [pos, len] : matches)
+                    file_matches.push_back(GrepContext(text, pos, len, opt.snippet));
+                doc.push_back({ {"id", pkg_id}, {"path", p}, {"matches", file_matches} });
+                continue;
+            }
+
+            switch (opt.mode) {
+                case GrepOptions::Mode::Context:
+                    if (opt.line_context()) {
+                        std::vector<std::size_t> mp;
+                        mp.reserve(matches.size());
+                        for (const auto& [pos, len] : matches) mp.push_back(pos);
+                        GrepPrintLineContext(pkg_id, p, text, mp, opt);
+                    } else {
+                        for (const auto& [pos, len] : matches)
+                            std::fprintf(stdout, "%s\t%s\t%s\n", pkg_id.c_str(), p.c_str(),
+                                         GrepContext(text, pos, len, opt.snippet).c_str());
+                    }
+                    break;
+                case GrepOptions::Mode::Only:
+                    for (const auto& [pos, len] : matches)
+                        std::fprintf(stdout, "%s\n", text.substr(pos, len).c_str());
+                    break;
+                case GrepOptions::Mode::Files:
+                    std::fprintf(stdout, "%s\t%s\n", pkg_id.c_str(), p.c_str());
+                    break;
+                case GrepOptions::Mode::Count:
+                    break;  // accumulated, printed per pkg below
+            }
+        }
+
+        if (pkg_count > 0) {
+            ++n_pkgs;
+            if (! opt.json_out && opt.mode == GrepOptions::Mode::Count)
+                std::fprintf(stdout, "%s\t%d\n", pkg_id.c_str(), pkg_count);
+        }
+    }
+
+    if (opt.json_out) {
+        std::fprintf(stdout, "%s\n", doc.dump(2).c_str());
+    }
+    std::fprintf(stderr,
+                 "wescene-test grep: %ld match%s in %d file%s across %d/%zu pkg%s\n",
+                 n_match, n_match == 1 ? "" : "es", n_files, n_files == 1 ? "" : "s",
+                 n_pkgs, dirs.size(), dirs.size() == 1 ? "" : "s");
+    return n_match > 0 ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
 // rendergraph subcommand
 // ---------------------------------------------------------------------------
 
-void RendergraphUsage(const char* prog) {
-    std::fprintf(stderr,
-                 "usage: %s rendergraph <pkg> [-o FILE]\n"
-                 "\n"
-                 "  <pkg>     path to scene.pkg, or a directory containing one.\n"
-                 "  -o FILE   write to FILE. Default: stdout. Use '-' to force stdout.\n"
-                 "\n"
-                 "Parses the pkg with WPSceneParser::Parse, then walks the resulting\n"
-                 "Scene state to print every pass that sceneToRenderGraph would emit,\n"
-                 "in execution order. Reports per pass: shader, output RT, color-write\n"
-                 "mask, blend mode, sampled textures. Reports image-effect chains in\n"
-                 "their resolved form (after SceneImageEffectLayer::ResolveEffect).\n"
-                 "Reports post-process chain (scene.post_processes) verbatim.\n"
-                 "\n"
-                 "Use this to spot pipeline-shape regressions without running the\n"
-                 "renderer end-to-end. Catches things like missing color-write A bit\n"
-                 "or post-processes failing to allocate when general.bloom=true.\n",
-                 prog ? prog : "wescene-test");
+void AddRendergraphArgs(argparse::ArgumentParser& p) {
+    p.add_description(
+        "Parse one pkg with WPSceneParser::Parse and print every pass "
+        "sceneToRenderGraph would emit, in execution order: shader, output RT, "
+        "color-write mask, blend mode, sampled textures, resolved image-effect "
+        "chains, and the post-process chain. No Vulkan; pure structural dump.");
+    p.add_argument("pkg").help("path to scene.pkg, or a directory containing one");
+    p.add_argument("-o", "--output")
+        .default_value(std::string())
+        .help("write to FILE (default stdout; '-' forces stdout)");
 }
 
 const char* BlendModeStr(owe::BlendMode m) {
@@ -1056,37 +1272,9 @@ void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
     }
 }
 
-int CmdRendergraph(int argc, char** argv, const char* prog) {
-    std::string pkg_arg;
-    std::string out_file;
-    for (int i = 0; i < argc; ++i) {
-        std::string_view a = argv[i];
-        if (a == "-h" || a == "--help") {
-            RendergraphUsage(prog);
-            return 0;
-        } else if (a == "-o") {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "wescene-test rendergraph: -o requires a value\n");
-                return 2;
-            }
-            out_file = argv[++i];
-        } else if (StartsWith(a, "-")) {
-            std::fprintf(stderr, "wescene-test rendergraph: unknown flag '%.*s'\n",
-                         (int)a.size(), a.data());
-            return 2;
-        } else if (pkg_arg.empty()) {
-            pkg_arg = a;
-        } else {
-            std::fprintf(stderr, "wescene-test rendergraph: unexpected positional '%.*s'\n",
-                         (int)a.size(), a.data());
-            return 2;
-        }
-    }
-
-    if (pkg_arg.empty()) {
-        RendergraphUsage(prog);
-        return 2;
-    }
+int CmdRendergraph(const argparse::ArgumentParser& a) {
+    const std::string pkg_arg  = a.get<std::string>("pkg");
+    const std::string out_file = a.get<std::string>("--output");
 
     const std::string pkg_path = ResolvePkgPath(pkg_arg);
     if (pkg_path.empty()) {
@@ -1164,44 +1352,19 @@ int CmdRendergraph(int argc, char** argv, const char* prog) {
 // valid subcommand
 // ---------------------------------------------------------------------------
 
-void ValidUsage(const char* prog) {
-    std::fprintf(stderr,
-                 "usage: %s valid <workshop_dir> [-o OUT.json]\n"
-                 "  Runs DumpWorkshop on one pkg directory and writes a deterministic\n"
-                 "  JSON snapshot. With no -o the snapshot goes to stdout.\n",
-                 prog ? prog : "wescene-test");
+void AddValidArgs(argparse::ArgumentParser& p) {
+    p.add_description(
+        "Run DumpWorkshop on one pkg directory and write a deterministic JSON "
+        "snapshot (used to regenerate the checked-in fixtures under tests/fixtures/).");
+    p.add_argument("workshop_dir").help("pkg directory to snapshot");
+    p.add_argument("-o", "--output")
+        .default_value(std::string())
+        .help("write snapshot to FILE (default stdout)");
 }
 
-int CmdValid(int argc, char** argv, const char* prog) {
-    std::string workshop_dir;
-    std::string out_file;
-    for (int i = 0; i < argc; ++i) {
-        std::string_view a = argv[i];
-        if (a == "-o") {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "wescene-test valid: -o requires a value\n");
-                return 2;
-            }
-            out_file = argv[++i];
-        } else if (a == "-h" || a == "--help") {
-            ValidUsage(prog);
-            return 0;
-        } else if (! a.empty() && a.front() == '-') {
-            std::fprintf(stderr, "wescene-test valid: unknown arg '%.*s'\n",
-                         (int)a.size(), a.data());
-            return 2;
-        } else if (workshop_dir.empty()) {
-            workshop_dir = a;
-        } else {
-            std::fprintf(stderr, "wescene-test valid: stray positional '%.*s'\n",
-                         (int)a.size(), a.data());
-            return 2;
-        }
-    }
-    if (workshop_dir.empty()) {
-        ValidUsage(prog);
-        return 2;
-    }
+int CmdValid(const argparse::ArgumentParser& a) {
+    const std::string workshop_dir = a.get<std::string>("workshop_dir");
+    const std::string out_file     = a.get<std::string>("--output");
 
     std::string err;
     auto        snap = owe::testing::DumpWorkshop(workshop_dir, err);
@@ -1233,22 +1396,48 @@ int main(int argc, char** argv) {
     rstd::log::set_logger(_logger);
     rstd::log::set_max_level(_logger.filter());
 
-    const char* prog = argc > 0 ? argv[0] : "wescene-test";
-    if (argc < 2) {
-        TopUsage(prog);
+    argparse::ArgumentParser program("wescene-test", "1.0",
+                                     argparse::default_arguments::help);
+    program.add_description(
+        "Consolidated CLI for the wescene-renderer test surface. Host-only: no "
+        "Vulkan device, no GLFW.");
+
+    argparse::ArgumentParser scan("scan");
+    AddScanArgs(scan);
+    argparse::ArgumentParser extract("extract");
+    AddExtractArgs(extract);
+    argparse::ArgumentParser grep("grep");
+    AddGrepArgs(grep);
+    argparse::ArgumentParser rendergraph("rendergraph");
+    AddRendergraphArgs(rendergraph);
+    argparse::ArgumentParser valid("valid");
+    AddValidArgs(valid);
+
+    program.add_subparser(scan);
+    program.add_subparser(extract);
+    program.add_subparser(grep);
+    program.add_subparser(rendergraph);
+    program.add_subparser(valid);
+
+    try {
+        program.parse_args(argc, argv);
+    } catch (const std::exception& err) {
+        std::cerr << err.what() << "\n";
+        if (program.is_subcommand_used("scan"))             std::cerr << scan;
+        else if (program.is_subcommand_used("extract"))     std::cerr << extract;
+        else if (program.is_subcommand_used("grep"))        std::cerr << grep;
+        else if (program.is_subcommand_used("rendergraph")) std::cerr << rendergraph;
+        else if (program.is_subcommand_used("valid"))       std::cerr << valid;
+        else                                                std::cerr << program;
         return 2;
     }
-    std::string_view sub = argv[1];
-    if (sub == "scan")        return CmdScan(argc - 2, argv + 2, prog);
-    if (sub == "extract")     return CmdExtract(argc - 2, argv + 2, prog);
-    if (sub == "rendergraph") return CmdRendergraph(argc - 2, argv + 2, prog);
-    if (sub == "valid")       return CmdValid(argc - 2, argv + 2, prog);
-    if (sub == "-h" || sub == "--help") {
-        TopUsage(prog);
-        return 0;
-    }
-    std::fprintf(stderr, "wescene-test: unknown subcommand '%.*s'\n",
-                 (int)sub.size(), sub.data());
-    TopUsage(prog);
+
+    if (program.is_subcommand_used("scan"))        return CmdScan(ReadScanOptions(scan));
+    if (program.is_subcommand_used("extract"))     return CmdExtract(extract);
+    if (program.is_subcommand_used("grep"))        return CmdGrep(ReadGrepOptions(grep));
+    if (program.is_subcommand_used("rendergraph")) return CmdRendergraph(rendergraph);
+    if (program.is_subcommand_used("valid"))       return CmdValid(valid);
+
+    std::cerr << program;
     return 2;
 }
