@@ -258,6 +258,26 @@ void BrowserHost::ApplyUserProperty(std::string_view      key,
         0);
 }
 
+void BrowserHost::PushAudioData(const float* data, std::size_t count) {
+    if (!impl_->client || !data || count == 0) return;
+    auto b = impl_->client->GetBrowser();
+    if (!b) return;
+    auto frame = b->GetMainFrame();
+    if (!frame) return;
+
+    std::string snippet;
+    snippet.reserve(count * 8 + 64);
+    snippet += "(function(){if(!window.__weweb_pushAudio)return;window.__weweb_pushAudio([";
+    char buf[32];
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i) snippet += ',';
+        std::snprintf(buf, sizeof(buf), "%.4f", static_cast<double>(data[i]));
+        snippet += buf;
+    }
+    snippet += "]);})();";
+    frame->ExecuteJavaScript(snippet, "weweb://internal/push_audio.js", 0);
+}
+
 bool BrowserHost::ShouldExit() const {
     return impl_->should_exit.load();
 }

@@ -2,11 +2,13 @@
 
 #include "include/cef_app.h"
 #include "include/cef_browser_process_handler.h"
+#include "include/cef_render_process_handler.h"
 
 namespace weweb {
 
 class AppHandler : public CefApp,
-                   public CefBrowserProcessHandler {
+                   public CefBrowserProcessHandler,
+                   public CefRenderProcessHandler {
 public:
     AppHandler();
 
@@ -18,11 +20,21 @@ public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
         return this;
     }
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override {
+        return this;
+    }
     void OnBeforeCommandLineProcessing(const CefString& process_type,
                                        CefRefPtr<CefCommandLine> cmd) override;
 
     // CefBrowserProcessHandler.
     void OnContextInitialized() override;
+
+    // CefRenderProcessHandler. Runs in the render process before any page
+    // script — installs the WE web audio API (wallpaperRegisterAudioListener
+    // + the __weweb_pushAudio dispatcher the browser process feeds).
+    void OnContextCreated(CefRefPtr<CefBrowser> browser,
+                          CefRefPtr<CefFrame> frame,
+                          CefRefPtr<CefV8Context> context) override;
 
 private:
     bool m_mute_audio { false };

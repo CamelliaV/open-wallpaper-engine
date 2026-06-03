@@ -72,6 +72,7 @@ if(BUILD_WEWEB)
         viewer-common
         viewer-web
         owe-web-host
+        wavsen::audio
         PkgConfig::GLFW
         Vulkan::Vulkan
         argparse::argparse

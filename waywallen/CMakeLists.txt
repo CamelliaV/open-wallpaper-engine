@@ -122,6 +122,7 @@ if(BUILD_WEWEB)
             waywallen-web-producer-device
             argparse::argparse
             wavsen::ffi::vulkan
+            wavsen::audio
             rstd::rstd
             rstd.cppstd
     )

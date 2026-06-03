@@ -8,6 +8,7 @@
 #include "Manifest.hpp"
 
 import rstd.cppstd;
+import wavsen.audio;
 import viewer.common;
 import viewer.web;
 
@@ -213,11 +214,32 @@ int main(int argc, char** argv) {
     glfwSetScrollCallback        (window, OnScroll);
     glfwSetWindowFocusCallback   (window, OnFocus);
 
+    // Audio-response capture (system default-sink monitor → page listeners).
+    wavsen::audio::AudioCapture audio_capture;
+    if (!audio_capture.init()) {
+        std::cerr << "webviewer: audio capture init failed; "
+                     "audio response disabled\n";
+    }
+    wavsen::audio::AudioSpectrum audio_spec;
+    unsigned audio_tick = 0;
+
     // Main loop. ~60Hz nominal. CefDoMessageLoopWork is cheap; the
     // Vulkan FIFO present pacing also throttles us.
     while (!glfwWindowShouldClose(window) && !host.ShouldExit()) {
         glfwPollEvents();
         host.Pump();
+
+        // ~30 Hz audio push; wavsen is mono 64-bin, WE web wants 128 (L+R).
+        if (audio_capture.is_inited() && (audio_tick++ & 1u) == 0) {
+            if (audio_capture.snapshot(audio_spec)) {
+                std::array<float, 128> arr{};
+                for (std::size_t i = 0; i < 64; ++i) {
+                    arr[i]      = audio_spec.bins[i];
+                    arr[64 + i] = audio_spec.bins[i];
+                }
+                host.PushAudioData(arr.data(), arr.size());
+            }
+        }
 
         // CEF's internal pacing in OSR shared-texture mode goes quiet
         // after the first paint until something on the page is dirty.

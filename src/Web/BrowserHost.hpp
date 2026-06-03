@@ -113,6 +113,12 @@ public:
     // (`BuildPropertyListenerSnippet`) but with a single-key patch.
     void ApplyUserProperty(std::string_view key, const nlohmann::json& value);
 
+    // Feed one audio-response frame to the page. `data` is the WE web layout
+    // (typically 128 floats: 64 left + 64 right, ~0..1). Dispatched to every
+    // wallpaperRegisterAudioListener callback via __weweb_pushAudio. No-op
+    // until the page's V8 context exists. Call from the Pump thread.
+    void PushAudioData(const float* data, std::size_t count);
+
     // True once the browser has been closed (close button, JS-driven
     // close, etc.).
     bool ShouldExit() const;

@@ -27,6 +27,7 @@
 import rstd.cppstd;
 import rstd.log;
 import vulkan;
+import wavsen.audio;
 import waywallen.bridge_producer_core;
 import waywallen.web_producer_device;
 
@@ -532,6 +533,17 @@ int main(int argc, char** argv) {
 
     std::thread reader([&]() { reader_loop(state); });
 
+    // Audio-response capture: taps the system default-sink monitor and feeds
+    // the page's wallpaperRegisterAudioListener callbacks. Best-effort — a
+    // failed init just means audio-reactive pages stay idle.
+    wavsen::audio::AudioCapture audio_capture;
+    if (!audio_capture.init()) {
+        rstd_warn("waywallen-weweb-renderer: audio capture init failed; "
+                  "audio response disabled");
+    }
+    wavsen::audio::AudioSpectrum audio_spec;
+    unsigned audio_tick = 0;
+
     while (!state.shutdown.load(std::memory_order_acquire) &&
            !host.ShouldExit()) {
         drain_settings(state);
@@ -540,6 +552,21 @@ int main(int argc, char** argv) {
         // (see project memory: CEF 147 OSR + DMA-BUF). Dedup happens
         // inside CEF at windowless_frame_rate.
         host.Invalidate();
+
+        // Push audio every other tick (~30 Hz, matching WE's audio cadence).
+        // wavsen is mono 64-bin; WE web expects 128 (64 L + 64 R), so the
+        // bins are duplicated into both halves.
+        if (audio_capture.is_inited() && (audio_tick++ & 1u) == 0) {
+            if (audio_capture.snapshot(audio_spec)) {
+                std::array<float, 128> arr {};
+                for (std::size_t i = 0; i < 64; ++i) {
+                    arr[i]      = audio_spec.bins[i];
+                    arr[64 + i] = audio_spec.bins[i];
+                }
+                host.PushAudioData(arr.data(), arr.size());
+            }
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
