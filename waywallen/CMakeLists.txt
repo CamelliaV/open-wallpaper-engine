@@ -174,7 +174,7 @@ endif()
 # --- Generate the plugin manifest -----------------------------------------
 # The `[renderers.weweb-renderer]` block is spliced in only when BUILD_WEWEB;
 # `files` is externalised to files.txt (assembled at configure time below).
-set(OWE_PLUGIN_VERSION 0.1.3)
+set(OWE_PLUGIN_VERSION 0.1.4)
 set(_OWE_PLUGIN_SRC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.waywallen.open-wallpaper-engine)
 if(BUILD_WEWEB)
     file(READ ${_OWE_PLUGIN_SRC}/weweb-renderer.toml.in OWE_WEWEB_BLOCK)
