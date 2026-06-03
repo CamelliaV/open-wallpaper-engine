@@ -3,7 +3,7 @@
 # dir beside the CEF runtime (libcef.so etc.) so its `$ORIGIN` rpath
 # resolves them. web wp_type entries come from the source component above.
 [renderers.weweb-renderer]
-bin = "waywallen-weweb-renderer"
+bin = "../../../../bin/weweb/waywallen-weweb-renderer"
 types = ["web"]
 priority = 100
 spawn_version = 5

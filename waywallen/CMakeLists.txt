@@ -30,11 +30,11 @@ target_sources(waywallen-wescene-renderer
 target_sources(waywallen-wescene-renderer PRIVATE BridgeExSwapchain.cpp)
 
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
-# Bin installs under share/waywallen/plugins/<id>/bin (5 levels below
-# the prefix); reach the shared libs in <prefix>/lib.
+# ELF binaries install to <prefix>/bin (share/ ELF trips distro
+# permission limits); $ORIGIN/../lib reaches the shared libs.
 set_target_properties(waywallen-wescene-renderer PROPERTIES
     CXX_SCAN_FOR_MODULES ON
-    INSTALL_RPATH "$ORIGIN;$ORIGIN/../../../../../lib"
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
 )
 
 target_include_directories(waywallen-wescene-renderer
@@ -62,7 +62,7 @@ target_compile_options(waywallen-wescene-renderer PRIVATE
 # plus the web renderer when BUILD_WEWEB. Folder name == plugin id.
 set(_OWE_PLUGIN_DIR share/waywallen/plugins/org.waywallen.open-wallpaper-engine)
 install(TARGETS waywallen-wescene-renderer
-    RUNTIME DESTINATION ${_OWE_PLUGIN_DIR}/bin
+    RUNTIME DESTINATION bin
 )
 
 # weweb-renderer host bin — gated on BUILD_WEWEB (which also gates the
@@ -96,11 +96,13 @@ if(BUILD_WEWEB)
         web_main.cpp
     )
     target_compile_features(waywallen-weweb-renderer PRIVATE cxx_std_20)
-    # Install layout: <prefix>/share/waywallen/weweb/{bin, libcef.so, ...}.
+    # Install layout: <prefix>/bin/weweb/{waywallen-weweb-renderer, libcef.so, ...}.
+    # $ORIGIN finds libcef.so (same dir); $ORIGIN/../../lib reaches the
+    # workspace shared libs (waywallen::bridge / wavsen / rstd) in <prefix>/lib.
     set_target_properties(waywallen-weweb-renderer PROPERTIES
         CXX_SCAN_FOR_MODULES ON
         BUILD_RPATH   "$ORIGIN"
-        INSTALL_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib"
         BUILD_WITH_INSTALL_RPATH ON
     )
     target_include_directories(waywallen-weweb-renderer
@@ -131,10 +133,10 @@ if(BUILD_WEWEB)
     )
     weweb_stage_cef_runtime(waywallen-weweb-renderer)
 
-    # weweb bin + CEF runtime sit flat in the plugin dir (beside the
-    # wescene `bin/` subdir) so the weweb bin's `$ORIGIN` rpath resolves
-    # libcef.so etc.
-    set(_WEWEB_INSTALL_DIR ${_OWE_PLUGIN_DIR})
+    # weweb bin + CEF runtime install to <prefix>/bin/weweb (out of
+    # share/ for the ELF permission limit); the weweb bin's `$ORIGIN`
+    # rpath resolves libcef.so etc. in the same folder.
+    set(_WEWEB_INSTALL_DIR bin/weweb)
     install(TARGETS waywallen-weweb-renderer
         RUNTIME DESTINATION ${_WEWEB_INSTALL_DIR}
     )
@@ -196,26 +198,28 @@ install(FILES ${_OWE_PLUGIN_SRC}/wallpaper_engine.lua
 # time from the known install set (no install-time directory scan). The
 # CEF locale paks are the one set we don't list by hand; glob the CEF
 # source dir (a fixed vendored tree) to enumerate them.
+# Bin paths are relative to the plugin dir (share/.../<id>) and point at
+# <prefix>/bin — four levels up — since ELF installs there, not in share.
 set(_OWE_FILES
     plugin.toml
     wallpaper_engine.lua
-    bin/waywallen-wescene-renderer
+    ../../../../bin/waywallen-wescene-renderer
 )
 if(BUILD_WEWEB)
-    list(APPEND _OWE_FILES waywallen-weweb-renderer)
+    list(APPEND _OWE_FILES ../../../../bin/weweb/waywallen-weweb-renderer)
     foreach(_f IN LISTS CEF_BINARY_FILES)
         if(NOT _f IN_LIST _CEF_SKIP)
-            list(APPEND _OWE_FILES ${_f})
+            list(APPEND _OWE_FILES ../../../../bin/weweb/${_f})
         endif()
     endforeach()
     foreach(_f IN LISTS CEF_RESOURCE_FILES)
         if(_f STREQUAL "locales")
             file(GLOB _owe_paks RELATIVE ${CEF_RESOURCE_DIR}/locales
                 ${CEF_RESOURCE_DIR}/locales/*.pak)
-            list(TRANSFORM _owe_paks PREPEND "locales/")
+            list(TRANSFORM _owe_paks PREPEND "../../../../bin/weweb/locales/")
             list(APPEND _OWE_FILES ${_owe_paks})
         else()
-            list(APPEND _OWE_FILES ${_f})
+            list(APPEND _OWE_FILES ../../../../bin/weweb/${_f})
         endif()
     endforeach()
 endif()

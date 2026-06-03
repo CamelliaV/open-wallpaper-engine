@@ -17,7 +17,7 @@ version = "@OWE_PLUGIN_VERSION@"
 lua = "wallpaper_engine.lua"
 
 [renderers.wescene-renderer]
-bin = "bin/waywallen-wescene-renderer"
+bin = "../../../../bin/waywallen-wescene-renderer"
 types = ["scene"]
 priority = 100
 spawn_version = 5
