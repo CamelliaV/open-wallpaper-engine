@@ -20,7 +20,6 @@ lua = "wallpaper_engine.lua"
 bin = "bin/waywallen-wescene-renderer"
 types = ["scene"]
 priority = 100
-version = "@OWE_PLUGIN_VERSION@"
 spawn_version = 5
 extras = ["assets", "workshop_id"]
 events = ["pointer"]

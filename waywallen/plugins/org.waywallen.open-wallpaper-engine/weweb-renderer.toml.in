@@ -6,7 +6,6 @@
 bin = "waywallen-weweb-renderer"
 types = ["web"]
 priority = 100
-version = "0.1.2"
 spawn_version = 5
 extras = ["workshop_id"]
 events = ["pointer"]
