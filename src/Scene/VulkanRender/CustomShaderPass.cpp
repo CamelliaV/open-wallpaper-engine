@@ -187,21 +187,11 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         } else
             return;
 
-        // Map sample_count → VkSampleCountFlagBits. 1=disabled.
-        m_desc.samples = VK_SAMPLE_COUNT_1_BIT;
-        switch (rt.sample_count) {
-        case 2:  m_desc.samples = VK_SAMPLE_COUNT_2_BIT;  break;
-        case 4:  m_desc.samples = VK_SAMPLE_COUNT_4_BIT;  break;
-        case 8:  m_desc.samples = VK_SAMPLE_COUNT_8_BIT;  break;
-        case 16: m_desc.samples = VK_SAMPLE_COUNT_16_BIT; break;
-        case 32: m_desc.samples = VK_SAMPLE_COUNT_32_BIT; break;
-        case 64: m_desc.samples = VK_SAMPLE_COUNT_64_BIT; break;
-        default: break;
-        }
+        m_desc.samples = ToVkSampleCount(rt.sample_count);
         if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
             // MSAA twin needs its own cache key — Query() resolves by name,
             // not by TextureKey content_hash.
-            std::string twin_name = tex_name + "::msaa" + std::to_string((unsigned)m_desc.samples);
+            std::string twin_name = MsaaTwinName(tex_name, m_desc.samples);
             if (auto opt = device.tex_cache().Query(
                     twin_name, ToTexKeyMsaa(rt, m_desc.samples), /*persist*/ true);
                 opt.has_value()) {
