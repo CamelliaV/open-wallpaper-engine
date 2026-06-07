@@ -199,6 +199,12 @@ JSValue JsonToJs(JSContext* ctx, const json& j) {
     }
 }
 
+JSValue UserPropertyValueToJs(JSContext* ctx, const json& property) {
+    if (property.is_object() && property.contains("value"))
+        return JsonToJs(ctx, property.at("value"));
+    return JsonToJs(ctx, property);
+}
+
 // Resolve a config value. {"user":"name","value":X} stays as-is — the
 // bootstrap getter resolves it lazily against engine.userProperties at
 // access time, so SetUserProperty calls after parse propagate.
@@ -340,6 +346,7 @@ struct EngineHostState {
     // TextLayouter::SetText. Missing entry means the layer is not text-
     // capable; writes silently no-op.
     std::unordered_map<owe::SceneNode*, std::function<void(std::string_view)>> text_setters;
+    owe::SceneNode* scene_root { nullptr };
 };
 
 // ---------------------------------------------------------------------------
@@ -1220,8 +1227,21 @@ JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*)
 
 static JSClassID s_layer_class_id = 0;
 
-void LayerFinalizer(JSRuntime*, JSValue) {
-    // SceneNode is owned by Scene; nothing to free here.
+struct LayerHandle {
+    EngineHostState* host { nullptr };
+    owe::SceneNode*  node { nullptr };
+    std::string      name;
+};
+
+owe::SceneNode* ResolveLayerNode(LayerHandle* h) {
+    if (! h) return nullptr;
+    if (h->node) return h->node;
+    if (! h->host || ! h->host->scene_root || h->name.empty()) return nullptr;
+    return h->host->scene_root->FindByName(h->name);
+}
+
+void LayerFinalizer(JSRuntime*, JSValue v) {
+    delete static_cast<LayerHandle*>(JS_GetOpaque(v, s_layer_class_id));
 }
 
 JSClassDef s_layer_class_def {
@@ -1230,13 +1250,22 @@ JSClassDef s_layer_class_def {
 };
 
 inline owe::SceneNode* GetLayerNode(JSValueConst v) {
-    return static_cast<owe::SceneNode*>(JS_GetOpaque(v, s_layer_class_id));
+    return ResolveLayerNode(static_cast<LayerHandle*>(JS_GetOpaque(v, s_layer_class_id)));
 }
 
 JSValue WrapLayerNode(JSContext* ctx, owe::SceneNode* node) {
     JSValue obj = JS_NewObjectClass(ctx, s_layer_class_id);
     if (JS_IsException(obj)) return obj;
-    JS_SetOpaque(obj, node);
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JS_SetOpaque(obj, new LayerHandle { .host = host, .node = node });
+    return obj;
+}
+
+JSValue WrapLayerName(JSContext* ctx, std::string name) {
+    JSValue obj = JS_NewObjectClass(ctx, s_layer_class_id);
+    if (JS_IsException(obj)) return obj;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JS_SetOpaque(obj, new LayerHandle { .host = host, .node = nullptr, .name = std::move(name) });
     return obj;
 }
 
@@ -1456,9 +1485,10 @@ JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     if (! n || argc < 1) return JS_DupValue(ctx, host->default_layer);
     const char* name = JS_ToCString(ctx, argv[0]);
     if (! name) return JS_DupValue(ctx, host->default_layer);
-    owe::SceneNode* hit = n->FindByName(name);
+    std::string     layer_name { name };
+    owe::SceneNode* hit = n->FindByName(layer_name);
     JS_FreeCString(ctx, name);
-    return hit ? WrapLayerNode(ctx, hit) : JS_DupValue(ctx, host->default_layer);
+    return hit ? WrapLayerNode(ctx, hit) : WrapLayerName(ctx, std::move(layer_name));
 }
 
 // thisScene.createLayer(model_path) — WE-style runtime layer spawn. The
@@ -1483,6 +1513,23 @@ JSValue NodeSceneGetLayerIndex(JSContext* ctx, JSValueConst, int, JSValueConst*)
     return JS_NewInt32(ctx, 0);
 }
 JSValue NodeSceneSortLayer(JSContext*, JSValueConst, int, JSValueConst*) { return JS_UNDEFINED; }
+
+JSValue NodePlay(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* n = GetLayerNode(this_val)) n->Play();
+    return JS_UNDEFINED;
+}
+JSValue NodeStop(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* n = GetLayerNode(this_val)) n->Stop();
+    return JS_UNDEFINED;
+}
+JSValue NodePause(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* n = GetLayerNode(this_val)) n->Pause();
+    return JS_UNDEFINED;
+}
+JSValue NodeIsPlaying(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* n = GetLayerNode(this_val);
+    return JS_NewBool(ctx, n ? n->IsPlaying() : false);
+}
 
 // --- WWTextureAnimation -----------------------------------------------------
 // Wraps a SceneNode*'s TextureAnimatorState. Slot 0 only — every workshop
@@ -1609,6 +1656,10 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("createLayer", 1, NodeSceneCreateLayer),
     JS_CFUNC_DEF("getLayerIndex", 1, NodeSceneGetLayerIndex),
     JS_CFUNC_DEF("sortLayer", 2, NodeSceneSortLayer),
+    JS_CFUNC_DEF("play", 0, NodePlay),
+    JS_CFUNC_DEF("stop", 0, NodeStop),
+    JS_CFUNC_DEF("pause", 0, NodePause),
+    JS_CFUNC_DEF("isPlaying", 0, NodeIsPlaying),
 };
 
 void InitLayerClass(JSContext* ctx, JSRuntime* rt) {
@@ -1731,6 +1782,30 @@ void JsRuntime::SetUserProperty(std::string_view key, const json& property) {
             ctx, engine, "userProperties", JS_DupValue(ctx, props), JS_PROP_C_W_E);
     }
     JS_DefinePropertyValueStr(ctx, props, key_str.c_str(), JsonToJs(ctx, property), JS_PROP_C_W_E);
+
+    JSValue changed = JS_NewObject(ctx);
+    JS_DefinePropertyValueStr(
+        ctx, changed, key_str.c_str(), UserPropertyValueToJs(ctx, property), JS_PROP_C_W_E);
+    for (auto& fs : m_impl->scripts) {
+        auto* I = fs->m_impl.get();
+        if (! I->alive) continue;
+        JSValue fn = JS_GetPropertyStr(ctx, I->module_ns, "applyUserProperties");
+        if (JS_IsFunction(ctx, fn)) {
+            BindThisLayer(ctx,
+                          JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer
+                                                           : I->wrapped_layer);
+            m_impl->host.active_field_script = fs.get();
+            JSValue arg                      = JS_DupValue(ctx, changed);
+            JSValue r                        = JS_Call(ctx, fn, JS_UNDEFINED, 1, &arg);
+            JS_FreeValue(ctx, arg);
+            if (JS_IsException(r)) m_impl->LogError(ctx, I->sha, "applyUserProperties threw");
+            JS_FreeValue(ctx, r);
+        }
+        JS_FreeValue(ctx, fn);
+    }
+    m_impl->host.active_field_script = nullptr;
+    JS_FreeValue(ctx, changed);
+
     JS_FreeValue(ctx, props);
     JS_FreeValue(ctx, engine);
     JS_FreeValue(ctx, global);
@@ -1744,8 +1819,9 @@ void JsRuntime::SetPersistence(std::string path) {
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
     if (! m_impl || ! m_impl->ctx) return;
     if (! JS_IsUndefined(m_impl->wrapped_scene)) JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
-    m_impl->scene_root    = root;
-    m_impl->wrapped_scene = root ? WrapLayerNode(m_impl->ctx, root) : JS_UNDEFINED;
+    m_impl->scene_root      = root;
+    m_impl->host.scene_root = root;
+    m_impl->wrapped_scene   = root ? WrapLayerNode(m_impl->ctx, root) : JS_UNDEFINED;
     if (! JS_IsUndefined(m_impl->wrapped_scene)) BindThisScene(m_impl->ctx, m_impl->wrapped_scene);
 }
 

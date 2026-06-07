@@ -315,6 +315,19 @@ void ApplyUserPropertyToParticles(Scene& scene, const std::string& key,
     }
 }
 
+void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key,
+                                    const nlohmann::json& prop) {
+    auto it = scene.sound_volume_user_index.find(key);
+    if (it == scene.sound_volume_user_index.end()) return;
+
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok || coerced.value.size() < 1) return;
+    const float volume = std::clamp(coerced.value[0], 0.0f, 1.0f);
+    for (auto& control : it->second) {
+        if (control) control->SetVolume(volume);
+    }
+}
+
 // Walk the scene tree once and flip SceneNode::SetVisible for every node
 // whose `VisibleUserKey()` matches `key`. Cheap — tree is frozen post-parse
 // and typically < a few hundred nodes.
@@ -626,6 +639,7 @@ void RenderHandler::on(RenderSetUserProperty&& m) {
     owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
     ApplyUserPropertyToShaders(*m_scene, m.key, m.property);
     ApplyUserPropertyToParticles(*m_scene, m.key, m.property);
+    ApplyUserPropertyToSoundVolume(*m_scene, m.key, m.property);
     ApplyUserPropertyToNodeVisibility(*m_scene, m.key, m.property);
 }
 

@@ -19,6 +19,9 @@ namespace wpscene
 struct WPSoundObject {
     std::int32_t             id { 0 };
     std::string              playbackmode { "loop" };
+    std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3>     angles { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
     float                    maxtime { 10.0f };
     float                    mintime { 0.0f };
     float                    volume { 1.0f };
@@ -43,6 +46,7 @@ struct WPSoundObject {
 
     // `visible:{user:"<key>",value:bool}` -> key.
     std::string visible_user_key;
+    std::string volume_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
@@ -50,7 +54,15 @@ struct WPSoundObject {
 
     bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "volume", volume);
+        if (json.contains("volume") && json.at("volume").is_object()) {
+            const auto& jv = json.at("volume");
+            if (jv.contains("user") && jv.at("user").is_string())
+                volume_user_key = jv.at("user").get<std::string>();
+        }
         owe::GetJsonValue(json, "playbackmode", playbackmode);
+        owe::GetJsonValue(json, "origin", origin, false);
+        owe::GetJsonValue(json, "angles", angles, false);
+        owe::GetJsonValue(json, "scale", scale, false);
         owe::GetJsonValue(json, "mintime", mintime, false);
         owe::GetJsonValue(json, "maxtime", maxtime, false);
         owe::GetJsonValue(json, "visible", visible, false);

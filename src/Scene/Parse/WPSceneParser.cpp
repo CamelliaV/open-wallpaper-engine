@@ -1620,6 +1620,25 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     }
 }
 
+void ParseSoundObj(ParseContext& context, wpscene::WPSoundObject& obj,
+                   wavsen::audio::SoundManager& sm) {
+    auto node  = std::make_shared<SceneNode>(Vector3f(obj.origin.data()),
+                                             Vector3f(obj.scale.data()),
+                                             Vector3f(obj.angles.data()),
+                                             obj.name);
+    node->ID() = obj.id;
+    if (! obj.visible) node->SetVisible(false);
+    if (! obj.visible_user_key.empty()) node->SetVisibleUserKey(obj.visible_user_key);
+
+    auto control = WPSoundParser::Parse(obj, *context.vfs, sm, context.scene.get());
+    node->SetSoundControl(control);
+    if (control && ! obj.volume_user_key.empty())
+        context.scene->sound_volume_user_index[obj.volume_user_key].push_back(control);
+
+    WireFieldScripts(context, node, obj.field_bindings);
+    context.node_id_map[obj.id] = { obj.parent, node };
+}
+
 void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     auto node = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
                                             Vector3f(light_obj.scale.data()),
@@ -2235,7 +2254,7 @@ void ProcessObjects(ParseContext& context, std::span<WPObjectVar> wp_objs,
                        },
                        [&context, opts, sm](wpscene::WPSoundObject& obj) {
                            if ((opts.kinds & ProcessOpts::Sound) && sm)
-                               WPSoundParser::Parse(obj, *context.vfs, *sm, context.scene.get());
+                               ParseSoundObj(context, obj, *sm);
                        },
                        [&context, opts](wpscene::WPLightObject& obj) {
                            if (opts.kinds & ProcessOpts::Light) ParseLightObj(context, obj);

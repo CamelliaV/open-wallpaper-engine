@@ -616,6 +616,17 @@ private:
     std::shared_ptr<SceneImageEffectLayer> m_imgEffect { nullptr };
 };
 
+class SceneSoundControl {
+public:
+    virtual ~SceneSoundControl() = default;
+
+    virtual void Play()                  = 0;
+    virtual void Stop()                  = 0;
+    virtual void Pause()                 = 0;
+    virtual bool IsPlaying() const       = 0;
+    virtual void SetVolume(float volume) = 0;
+};
+
 // ============================================================================
 // SceneNode.h
 // ============================================================================
@@ -756,6 +767,34 @@ public:
     TextureAnimatorState&       TexAnim() { return m_tex_anim; }
     const TextureAnimatorState& TexAnim() const { return m_tex_anim; }
 
+    void Play() {
+        if (m_sound_control) {
+            m_sound_control->Play();
+            return;
+        }
+        m_layer_playing = true;
+    }
+    void Stop() {
+        if (m_sound_control) {
+            m_sound_control->Stop();
+            return;
+        }
+        m_layer_playing = false;
+    }
+    void Pause() {
+        if (m_sound_control) {
+            m_sound_control->Pause();
+            return;
+        }
+        m_layer_playing = false;
+    }
+    bool IsPlaying() const {
+        if (m_sound_control) return m_sound_control->IsPlaying();
+        return m_layer_playing;
+    }
+    void SetSoundControl(std::shared_ptr<SceneSoundControl> c) { m_sound_control = std::move(c); }
+    SceneSoundControl* SoundControl() const { return m_sound_control.get(); }
+
     void CopyTrans(const SceneNode& node) {
         m_translate = node.m_translate;
         m_scale     = node.m_scale;
@@ -804,15 +843,17 @@ private:
     Eigen::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
     Eigen::Vector2f m_size { 0.0f, 0.0f };
 
-    bool                 m_visible { true };
-    std::string          m_visible_user_key {};
-    float                m_user_alpha { 1.0f };
-    bool                 m_alpha_overridden { false };
-    float                m_brightness { 1.0f };
-    bool                 m_brightness_overridden { false };
-    Eigen::Vector3f      m_color { 1.0f, 1.0f, 1.0f };
-    bool                 m_color_overridden { false };
-    TextureAnimatorState m_tex_anim {};
+    bool                               m_visible { true };
+    std::string                        m_visible_user_key {};
+    float                              m_user_alpha { 1.0f };
+    bool                               m_alpha_overridden { false };
+    float                              m_brightness { 1.0f };
+    bool                               m_brightness_overridden { false };
+    Eigen::Vector3f                    m_color { 1.0f, 1.0f, 1.0f };
+    bool                               m_color_overridden { false };
+    TextureAnimatorState               m_tex_anim {};
+    bool                               m_layer_playing { true };
+    std::shared_ptr<SceneSoundControl> m_sound_control;
 
     std::shared_ptr<SceneMesh> m_mesh;
 
@@ -1378,6 +1419,8 @@ public:
         std::string           field;
     };
     Map<std::string, std::vector<ParticleOverrideBinding>> particle_user_var_index;
+
+    Map<std::string, std::vector<std::shared_ptr<SceneSoundControl>>> sound_volume_user_index;
 
     // Scene-tree root. After parse handoff to the render thread, the tree
     // shape under `sceneGraph` is immutable until Scene destruction (see the

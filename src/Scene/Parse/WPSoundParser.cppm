@@ -11,8 +11,8 @@ export namespace owe
 
 class WPSoundParser {
 public:
-    static void Parse(const wpscene::WPSoundObject&, fs::VFS&, wavsen::audio::SoundManager&,
-                      Scene*);
+    static std::shared_ptr<SceneSoundControl> Parse(const wpscene::WPSoundObject&, fs::VFS&,
+                                                    wavsen::audio::SoundManager&, Scene*);
 };
 
 } // namespace owe

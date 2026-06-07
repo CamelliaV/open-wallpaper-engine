@@ -697,6 +697,40 @@ TEST(ScriptNodeChildren, WalksSceneNodeChildren) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 2000 + 10 + 20);
 }
 
+TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
+    auto root = std::make_shared<owe::SceneNode>();
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    rt.SetSceneRoot(root.get());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let late;
+            export function init() {
+                late = thisScene.getLayer("late-sound");
+                late.stop();
+            }
+            export function applyUserProperties(changed) {
+                if (changed.go) late.play();
+            }
+            export function update() { return late.isPlaying() ? 1 : 0; }
+        )JS",
+        "test/lazy_layer_lookup",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        root.get());
+    ASSERT_NE(fs, nullptr);
+
+    auto late = std::make_shared<owe::SceneNode>(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "late-sound");
+    root->AppendChild(late);
+    rt.SetUserProperty("go", nlohmann::json::parse(R"({"type":"bool","value":true})"));
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
 TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
     // ~165 corpus callsites use camelCase smoothStep; lowercase exists too.
     JsRuntime   rt;
@@ -790,6 +824,26 @@ TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
 
     rt.TickAll();
     EXPECT_NEAR(std::get<ScalarValue>(fs->last_value()).v, 0.5, 1e-4);
+}
+
+TEST(ScriptUserProperty, ApplyUserPropertiesReceivesUnwrappedValue) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = MakeProbe(rt,
+                         "test/apply_user_properties_value",
+                         R"JS(
+        let seen = 0;
+        export function applyUserProperties(changed) {
+            if (changed.music === "5") seen = 1;
+        }
+        export function update() { return seen; }
+    )JS");
+    ASSERT_NE(fs, nullptr);
+
+    rt.SetUserProperty("music", nlohmann::json::parse(R"({"type":"combo","value":"5"})"));
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
 TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
