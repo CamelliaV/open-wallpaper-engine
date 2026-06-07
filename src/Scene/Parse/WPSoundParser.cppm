@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.parse:wp_sound_parser;
 import wavsen.audio;
 import wescene.scene;
@@ -16,4 +15,4 @@ public:
                       Scene*);
 };
 
-}
+} // namespace owe

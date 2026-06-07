@@ -35,7 +35,7 @@ std::string logToTmpfileWithSha1(std::span<const char> in) {
 
 inline VkShaderStageFlagBits ToVkType(owe::ShaderType s) {
     switch (s) {
-    case ShaderType::VERTEX:   return VK_SHADER_STAGE_VERTEX_BIT;
+    case ShaderType::VERTEX: return VK_SHADER_STAGE_VERTEX_BIT;
     case ShaderType::FRAGMENT: return VK_SHADER_STAGE_FRAGMENT_BIT;
     case ShaderType::GEOMETRY: return VK_SHADER_STAGE_GEOMETRY_BIT;
     }
@@ -47,7 +47,7 @@ inline VkFormat ToVkType(SpvReflectFormat type) { return static_cast<VkFormat>(t
 
 inline VkShaderStageFlagBits ToVkType(SpvReflectShaderStageFlagBits s) {
     switch (s) {
-    case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT:   return VK_SHADER_STAGE_VERTEX_BIT;
+    case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT: return VK_SHADER_STAGE_VERTEX_BIT;
     case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT: return VK_SHADER_STAGE_FRAGMENT_BIT;
     case SPV_REFLECT_SHADER_STAGE_GEOMETRY_BIT: return VK_SHADER_STAGE_GEOMETRY_BIT;
     default: rstd_assert(false); return VK_SHADER_STAGE_VERTEX_BIT;
@@ -56,7 +56,7 @@ inline VkShaderStageFlagBits ToVkType(SpvReflectShaderStageFlagBits s) {
 
 inline owe::ShaderType FromSpvStage(SpvReflectShaderStageFlagBits s) {
     switch (s) {
-    case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT:   return ShaderType::VERTEX;
+    case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT: return ShaderType::VERTEX;
     case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT: return ShaderType::FRAGMENT;
     case SPV_REFLECT_SHADER_STAGE_GEOMETRY_BIT: return ShaderType::GEOMETRY;
     default: rstd_assert(false); return ShaderType::VERTEX;
@@ -66,7 +66,7 @@ inline owe::ShaderType FromSpvStage(SpvReflectShaderStageFlagBits s) {
 template<typename VEC, typename FUNC>
 bool EnumAllRef(VEC& vec, FUNC&& func) {
     unsigned count { 0 };
-    auto result = func(&count, nullptr);
+    auto     result = func(&count, nullptr);
     rstd_assert(result == SPV_REFLECT_RESULT_SUCCESS);
     vec.resize(count);
     result = func(&count, vec.data());
@@ -76,7 +76,7 @@ bool EnumAllRef(VEC& vec, FUNC&& func) {
 
 inline EShLanguage ToEShLanguage(owe::ShaderType s) {
     switch (s) {
-    case ShaderType::VERTEX:   return EShLangVertex;
+    case ShaderType::VERTEX: return EShLangVertex;
     case ShaderType::FRAGMENT: return EShLangFragment;
     case ShaderType::GEOMETRY: return EShLangGeometry;
     }
@@ -109,7 +109,7 @@ inline glslang::EShTargetLanguageVersion ToSpvVersion(VulkanTarget t) {
 inline const char* DefaultEntryName(SourceLang lang, owe::ShaderType s) {
     if (lang == SourceLang::Glsl) return "main";
     switch (s) {
-    case ShaderType::VERTEX:   return "main_vs";
+    case ShaderType::VERTEX: return "main_vs";
     case ShaderType::FRAGMENT: return "main_ps";
     case ShaderType::GEOMETRY: return "main_gs";
     }
@@ -119,7 +119,7 @@ inline const char* DefaultEntryName(SourceLang lang, owe::ShaderType s) {
 } // namespace
 
 bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
-                                   std::vector<Uni_ShaderSpv>& spvs, ShaderReflected& ref) {
+                             std::vector<Uni_ShaderSpv>& spvs, ShaderReflected& ref) {
     spvs.clear();
     for (const auto& code : codes) {
         spv_reflect::ShaderModule spv_ref(code, SPV_REFLECT_MODULE_FLAG_NO_COPY);
@@ -160,9 +160,8 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
             if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
                 auto& block      = b.block;
                 auto  block_name = std::string(block.name).empty() ? bind_name : block.name;
-                ref.blocks.push_back(ShaderReflected::Block { .size       = block.size,
-                                                              .name       = block.name,
-                                                              .member_map = {} });
+                ref.blocks.push_back(ShaderReflected::Block {
+                    .size = block.size, .name = block.name, .member_map = {} });
                 auto& ref_block = ref.blocks.front();
 
                 vkbinding.binding         = b.binding;
@@ -172,8 +171,8 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                 for (u32 i = 0; i < block.member_count; i++) {
                     auto&                           unif = block.members[i];
                     ShaderReflected::BlockedUniform bunif {};
-                    bunif.size   = unif.size;
-                    bunif.offset = unif.offset;
+                    bunif.size                      = unif.size;
+                    bunif.offset                    = unif.offset;
                     ref_block.member_map[unif.name] = bunif;
                 }
             } else if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
@@ -264,9 +263,9 @@ void ConfigureShader(glslang::TShader& shader, SourceLang lang, VulkanTarget tar
     shader.setEnvInputVulkanRulesRelaxed();
 }
 
-constexpr EShMessages kCompileMessages = static_cast<EShMessages>(
-    EShMsgSpvRules | EShMsgVulkanRules | EShMsgRelaxedErrors | EShMsgSuppressWarnings |
-    EShMsgKeepUncalled);
+constexpr EShMessages kCompileMessages =
+    static_cast<EShMessages>(EShMsgSpvRules | EShMsgVulkanRules | EShMsgRelaxedErrors |
+                             EShMsgSuppressWarnings | EShMsgKeepUncalled);
 
 } // namespace
 
@@ -274,22 +273,26 @@ bool owe::vulkan::Preprocess(std::string_view src, ShaderType stage, SourceLang 
                              std::string& out) {
     glslang::TShader shader(ToEShLanguage(stage));
     std::string      src_copy(src);
-    const char*      data    = src_copy.c_str();
-    const int        len     = (int)src_copy.size();
-    const char*      name    = "ww";
+    const char*      data = src_copy.c_str();
+    const int        len  = (int)src_copy.size();
+    const char*      name = "ww";
     shader.setStringsWithLengthsAndNames(&data, &len, &name, 1);
-    ConfigureShader(shader, lang, VulkanTarget::Vulkan_1_1,
-                    DefaultEntryName(lang, stage));
+    ConfigureShader(shader, lang, VulkanTarget::Vulkan_1_1, DefaultEntryName(lang, stage));
 
-    const int               default_version = 110;
-    const EProfile          profile         = ECoreProfile;
-    const bool              forward_compat  = false;
+    const int                        default_version = 110;
+    const EProfile                   profile         = ECoreProfile;
+    const bool                       forward_compat  = false;
     glslang::TShader::ForbidIncluder includer;
 
     std::string preprocessed;
-    bool ok = shader.preprocess(GetDefaultResources(), default_version, profile,
-                                false, forward_compat, kCompileMessages,
-                                &preprocessed, includer);
+    bool        ok = shader.preprocess(GetDefaultResources(),
+                                       default_version,
+                                       profile,
+                                       false,
+                                       forward_compat,
+                                       kCompileMessages,
+                                       &preprocessed,
+                                       includer);
     if (! ok) {
         std::string tmp = logToTmpfileWithSha1(src);
         rstd_error("glslang(preprocess): {}", shader.getInfoLog());
@@ -300,32 +303,36 @@ bool owe::vulkan::Preprocess(std::string_view src, ShaderType stage, SourceLang 
     return true;
 }
 
-bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  compUnits,
-                                            const ShaderCompOpt&        opt,
-                                            std::vector<Uni_ShaderSpv>& spvs) {
+bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits,
+                                            const ShaderCompOpt&            opt,
+                                            std::vector<Uni_ShaderSpv>&     spvs) {
     spvs.clear();
     spvs.reserve(compUnits.size());
 
     for (const auto& unit : compUnits) {
-        const std::string  entry_str = unit.entry_point.empty()
-                                           ? DefaultEntryName(unit.lang, unit.stage)
-                                           : unit.entry_point;
-        const char*        entry     = entry_str.c_str();
+        const std::string entry_str =
+            unit.entry_point.empty() ? DefaultEntryName(unit.lang, unit.stage) : unit.entry_point;
+        const char* entry = entry_str.c_str();
 
         glslang::TShader shader(ToEShLanguage(unit.stage));
-        const char* data = unit.src.c_str();
-        const int   len  = (int)unit.src.size();
-        const char* name = "ww";
+        const char*      data = unit.src.c_str();
+        const int        len  = (int)unit.src.size();
+        const char*      name = "ww";
         shader.setStringsWithLengthsAndNames(&data, &len, &name, 1);
         ConfigureShader(shader, unit.lang, opt.target, entry);
 
-        const int               default_version = 110;
-        const EProfile          profile         = ECoreProfile;
-        const bool              forward_compat  = false;
+        const int                        default_version = 110;
+        const EProfile                   profile         = ECoreProfile;
+        const bool                       forward_compat  = false;
         glslang::TShader::ForbidIncluder includer;
 
-        if (! shader.parse(GetDefaultResources(), default_version, profile, false,
-                           forward_compat, kCompileMessages, includer)) {
+        if (! shader.parse(GetDefaultResources(),
+                           default_version,
+                           profile,
+                           false,
+                           forward_compat,
+                           kCompileMessages,
+                           includer)) {
             std::string tmp = logToTmpfileWithSha1(unit.src);
             // Strip WARNING lines; EShMsgSuppressWarnings doesn't actually
             // omit them from the info log on this glslang build.
@@ -357,8 +364,7 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  com
             return false;
         }
 
-        glslang::TIntermediate* intermediate =
-            program.getIntermediate(ToEShLanguage(unit.stage));
+        glslang::TIntermediate* intermediate = program.getIntermediate(ToEShLanguage(unit.stage));
         if (! intermediate) {
             rstd_error("glslang(intermediate): no intermediate for stage");
             return false;
@@ -384,11 +390,10 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit>  com
         }
 
         if (std::getenv("WP_DUMP_SPIRV")) {
-            static int  dump_idx  = 0;
-            std::string base      = "/tmp/ww_dump_" + std::to_string(dump_idx++) + "_" +
-                                    entry_str;
-            std::string spv_path  = base + ".spv";
-            std::string src_path  = base + ".glsl";
+            static int  dump_idx = 0;
+            std::string base     = "/tmp/ww_dump_" + std::to_string(dump_idx++) + "_" + entry_str;
+            std::string spv_path = base + ".spv";
+            std::string src_path = base + ".glsl";
             if (auto* f = std::fopen(spv_path.c_str(), "wb")) {
                 std::fwrite(spv->spirv.data(), sizeof(u32), spv->spirv.size(), f);
                 std::fclose(f);

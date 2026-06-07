@@ -33,16 +33,15 @@ public:
     template<class F>
     void start(F&& on_message) {
         if (m_thread.joinable()) return;
-        m_thread = std::thread(
-            [this, fn = std::forward<F>(on_message)]() mutable {
-                rstd_info("{} loop started", m_name);
-                while (true) {
-                    auto r = m_rx->recv();
-                    if (! r.is_ok()) break;
-                    fn(std::move(r).unwrap());
-                }
-                rstd_info("{} loop stopped", m_name);
-            });
+        m_thread = std::thread([this, fn = std::forward<F>(on_message)]() mutable {
+            rstd_info("{} loop started", m_name);
+            while (true) {
+                auto r = m_rx->recv();
+                if (! r.is_ok()) break;
+                fn(std::move(r).unwrap());
+            }
+            rstd_info("{} loop stopped", m_name);
+        });
     }
 
     /// Drops the engine-side Sender and joins. Any external Sender clones

@@ -126,12 +126,14 @@ inline Eigen::Vector3d ResolveEmitterOrigin(std::span<const ParticleControlpoint
 ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
     double timer { 0.0f };
     double elapsed { 0.0f };
-    return [a, timer, elapsed](std::vector<Particle>&                ps,
-                               std::vector<ParticleInitOp>&          inis,
-                               u32                                   maxcount,
-                               double                                timepass,
-                               std::span<const float>                audio_average,
-                               std::span<const ParticleControlpoint> cps) mutable {
+    return [a, timer, elapsed](std::vector<Particle>&       ps,
+                               std::vector<ParticleInitOp>& inis,
+                               u32                          maxcount,
+                               double                       timepass,
+                               std::span<const float>
+                                   audio_average,
+                               std::span<const ParticleControlpoint>
+                                   cps) mutable {
         elapsed += timepass;
         if (a.duration > 0.0f && elapsed > a.duration) return;
 
@@ -165,12 +167,14 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
     using namespace Eigen;
     double timer { 0.0f };
     double elapsed { 0.0f };
-    return [a, timer, elapsed](std::vector<Particle>&                ps,
-                               std::vector<ParticleInitOp>&          inis,
-                               u32                                   maxcount,
-                               double                                timepass,
-                               std::span<const float>                audio_average,
-                               std::span<const ParticleControlpoint> cps) mutable {
+    return [a, timer, elapsed](std::vector<Particle>&       ps,
+                               std::vector<ParticleInitOp>& inis,
+                               u32                          maxcount,
+                               double                       timepass,
+                               std::span<const float>
+                                   audio_average,
+                               std::span<const ParticleControlpoint>
+                                   cps) mutable {
         elapsed += timepass;
         if (a.duration > 0.0f && elapsed > a.duration) return;
 

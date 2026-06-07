@@ -17,7 +17,8 @@ import wescene.pkg_fs;
 import wescene.fs;
 import wescene.testing.pkg_header;
 
-export namespace owe::testing {
+export namespace owe::testing
+{
 
 // Returns:
 //   {
@@ -38,9 +39,11 @@ nlohmann::json ScanSceneKeys(const std::string& workshop_root);
 
 } // namespace owe::testing
 
-namespace owe::testing {
+namespace owe::testing
+{
 
-namespace {
+namespace
+{
 
 namespace fs = std::filesystem;
 using json   = nlohmann::json;
@@ -48,23 +51,23 @@ using json   = nlohmann::json;
 const char* TypeName(json::value_t t) {
     using vt = json::value_t;
     switch (t) {
-    case vt::null:            return "null";
-    case vt::object:          return "object";
-    case vt::array:           return "array";
-    case vt::string:          return "string";
-    case vt::boolean:         return "boolean";
-    case vt::number_integer:  return "number_integer";
+    case vt::null: return "null";
+    case vt::object: return "object";
+    case vt::array: return "array";
+    case vt::string: return "string";
+    case vt::boolean: return "boolean";
+    case vt::number_integer: return "number_integer";
     case vt::number_unsigned: return "number_unsigned";
-    case vt::number_float:    return "number_float";
-    case vt::binary:          return "binary";
-    case vt::discarded:       return "discarded";
+    case vt::number_float: return "number_float";
+    case vt::binary: return "binary";
+    case vt::discarded: return "discarded";
     }
     return "unknown";
 }
 
 struct LocalObs {
-    int                            occurrences { 0 };
-    std::set<std::string>          types;
+    int                   occurrences { 0 };
+    std::set<std::string> types;
 };
 using LocalMap = std::unordered_map<std::string, LocalObs>;
 
@@ -97,22 +100,21 @@ struct KeyStats {
 };
 
 struct VersionAgg {
-    std::uint64_t                    total_scenes { 0 };
-    std::map<std::string, KeyStats>  keys;
+    std::uint64_t                   total_scenes { 0 };
+    std::map<std::string, KeyStats> keys;
 };
 
 void Merge(VersionAgg& agg, const LocalMap& local) {
     agg.total_scenes += 1;
     for (const auto& [path, obs] : local) {
         auto& dst = agg.keys[path];
-        dst.present_in  += 1;
+        dst.present_in += 1;
         dst.occurrences += static_cast<std::uint64_t>(obs.occurrences);
         for (const auto& t : obs.types) dst.value_types.insert(t);
     }
 }
 
-bool ScanOneWorkshop(const fs::path& workshop_dir,
-                     std::map<std::string, VersionAgg>& by_version) {
+bool ScanOneWorkshop(const fs::path& workshop_dir, std::map<std::string, VersionAgg>& by_version) {
     const std::string id       = workshop_dir.filename().string();
     const std::string pkg_path = (workshop_dir / "scene.pkg").string();
 
@@ -179,8 +181,8 @@ json AggToJson(const std::map<std::string, VersionAgg>& by_version) {
             jk["value_types"] = std::move(jtypes);
             jkeys[path]       = std::move(jk);
         }
-        jv["keys"]    = std::move(jkeys);
-        out[version]  = std::move(jv);
+        jv["keys"]   = std::move(jkeys);
+        out[version] = std::move(jv);
     }
     return out;
 }

@@ -7,10 +7,8 @@ namespace owe
 {
 template<typename TDeleter>
 struct AutoDeleter {
-	AutoDeleter(TDeleter&& del):m_del(std::move(del)) {}
-	~AutoDeleter() {
-		m_del();
-	}
-	TDeleter m_del;
+    AutoDeleter(TDeleter&& del): m_del(std::move(del)) {}
+    ~AutoDeleter() { m_del(); }
+    TDeleter m_del;
 };
-}
+} // namespace owe

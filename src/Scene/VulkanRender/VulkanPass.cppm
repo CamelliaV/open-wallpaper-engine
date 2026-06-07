@@ -2,7 +2,6 @@ module;
 
 #include "RenderGraph/Pass.hpp"
 
-
 export module wescene.vulkan_render:vulkan_pass;
 import rstd.cppstd;
 import wescene.vulkan;

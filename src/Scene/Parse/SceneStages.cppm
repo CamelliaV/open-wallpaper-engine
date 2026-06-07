@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.parse:scene_stages;
 import nlohmann.json;
 
@@ -25,10 +24,10 @@ import :wp_sound_object;
 export namespace owe
 {
 
-using WPObjectVar = std::variant<wpscene::WPImageObject, wpscene::WPParticleObject,
-                                 wpscene::WPSoundObject, wpscene::WPLightObject,
-                                 wpscene::WPTextObject, wpscene::WPModelObject,
-                                 wpscene::WPCameraObject>;
+using WPObjectVar =
+    std::variant<wpscene::WPImageObject, wpscene::WPParticleObject, wpscene::WPSoundObject,
+                 wpscene::WPLightObject, wpscene::WPTextObject, wpscene::WPModelObject,
+                 wpscene::WPCameraObject>;
 
 // Per-Parse state. Built by BuildContext, mutated by ProcessObjects,
 // finalized by FinalizeScene. Holding it as a public struct lets the
@@ -64,8 +63,8 @@ struct ParseContext {
         // so a child layer with `attachment = "<name>"` can resolve the
         // matching MDAT entry on its parent's puppet (no second lookup
         // pass needed). Both nullable.
-        std::shared_ptr<WPPuppet>  puppet;
-        std::string                attachment;
+        std::shared_ptr<WPPuppet> puppet;
+        std::string               attachment;
     };
     std::unordered_map<std::int32_t, NodeRef> node_id_map;
     // Scene.json declaration order. Reparenting in this order keeps each
@@ -83,7 +82,8 @@ struct ParseContext {
 };
 
 struct ProcessOpts {
-    enum Kind : unsigned {
+    enum Kind : unsigned
+    {
         Image    = 1u << 0,
         Particle = 1u << 1,
         Sound    = 1u << 2,
@@ -106,19 +106,17 @@ ExpandObjects(const nlohmann::json&, fs::VFS&, wpscene::SceneVersion,
 
 // If general.orthogonalprojection.auto_, replaces width/height with the
 // largest image object's size.
-void AdjustAutoOrthoProjection(wpscene::WPScene&,
-                               std::span<const WPObjectVar>);
+void AdjustAutoOrthoProjection(wpscene::WPScene&, std::span<const WPObjectVar>);
 
 // Allocates Scene + cameras + base uniforms + the two default render
 // targets (SpecTex_Default, WE_MIP_MAPPED_FRAME_BUFFER).
-ParseContext BuildContext(fs::VFS&, std::string_view scene_id,
-                          wpscene::WPScene&);
+ParseContext BuildContext(fs::VFS&, std::string_view scene_id, wpscene::WPScene&);
 
 // Per-object dispatch. Brackets glslang init/finalize around the visit
 // loop. opts.kinds masks which kinds run; default is all-kinds. Sound
 // dispatch additionally requires sm non-null.
-void ProcessObjects(ParseContext&, std::span<WPObjectVar>,
-                    wavsen::audio::SoundManager* sm, ProcessOpts opts = {});
+void ProcessObjects(ParseContext&, std::span<WPObjectVar>, wavsen::audio::SoundManager* sm,
+                    ProcessOpts opts = {});
 
 // Installs the lazily-built ScriptScene onto the Scene (if any) and
 // returns the now-frozen Scene.

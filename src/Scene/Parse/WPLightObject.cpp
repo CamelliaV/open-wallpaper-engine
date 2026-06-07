@@ -1,6 +1,5 @@
 module;
 
-
 module wescene.parse;
 import nlohmann.json;
 

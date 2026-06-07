@@ -2,7 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-
 module wescene.scene;
 import wescene.core;
 import wescene.types;

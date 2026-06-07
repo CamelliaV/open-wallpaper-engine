@@ -78,8 +78,8 @@ inline void setAndParseArg(argparse::ArgumentParser& arg, int argc, char** argv)
         .append()
         .action([](const std::string& value) {
             const std::regex re_res(R"(([0-9]+)x([0-9]+))");
-            std::smatch       match;
-            unsigned          width = 1280, height = 720;
+            std::smatch      match;
+            unsigned         width = 1280, height = 720;
             if (std::regex_match(value, match, re_res)) {
                 const std::string w_str = match[1].str(), h_str = match[2].str();
                 std::from_chars(w_str.c_str(), w_str.c_str() + w_str.length(), width);

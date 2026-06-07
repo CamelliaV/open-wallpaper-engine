@@ -28,7 +28,7 @@ void mouse_button_callback(GLFWwindow* win, int button, int action, int /*mods*/
     UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
     if (! data || ! data->psw) return;
     // GLFW button numbering (0=left, 1=right, 2=middle) matches WE.
-    if (action == GLFW_PRESS)   data->psw->mouseButton(button, true);
+    if (action == GLFW_PRESS) data->psw->mouseButton(button, true);
     if (action == GLFW_RELEASE) data->psw->mouseButton(button, false);
 }
 
@@ -129,8 +129,7 @@ int main(int argc, char** argv) {
                                             /*allow_ex*/ false,
                                             /*ignore_comments*/ true);
         if (! parsed.is_object()) {
-            std::cerr << "--user-properties: '" << up_path
-                      << "' is not a JSON object\n";
+            std::cerr << "--user-properties: '" << up_path << "' is not a JSON object\n";
             return 1;
         }
         // Iterator form: `items()` structured-binding chases std::get
@@ -138,10 +137,13 @@ int main(int argc, char** argv) {
         for (auto it = parsed.begin(); it != parsed.end(); ++it) {
             const std::string& k = it.key();
             const auto&        v = it.value();
-            std::string sval;
-            if (v.is_string())       sval = v.get<std::string>();
-            else if (v.is_boolean()) sval = v.get<bool>() ? "true" : "false";
-            else                     sval = v.dump();
+            std::string        sval;
+            if (v.is_string())
+                sval = v.get<std::string>();
+            else if (v.is_boolean())
+                sval = v.get<bool>() ? "true" : "false";
+            else
+                sval = v.dump();
             psw->setPropertyString(k, sval);
         }
     }

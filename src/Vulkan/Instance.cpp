@@ -19,10 +19,10 @@ constexpr std::array base_inst_exts { Extension { true, VK_EXT_DEBUG_UTILS_EXTEN
 namespace
 {
 
-VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT      messageSeverity,
-                                     VkDebugUtilsMessageTypeFlagsEXT             /*messageType*/,
+VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                                     VkDebugUtilsMessageTypeFlagsEXT /*messageType*/,
                                      const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-                                     void*                                       /*pUserData*/) {
+                                     void* /*pUserData*/) {
     VkBool32 result = VK_FALSE;
     if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
         result |= VK_TRUE;
@@ -44,9 +44,9 @@ vvk::DebugUtilsMessenger SetupDebugCallback(vvk::Instance& instance) {
                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT,
-        .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                       VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                       VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+        .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = DebugUtilsMessengerCallback,
         .pUserData       = nullptr,
     });
@@ -64,10 +64,9 @@ VkResult CreatInstance(vvk::Instance* inst, std::span<const std::string_view> ex
     };
 
     std::vector<const char*> extension_names_c;
-    std::transform(
-        exts.begin(), exts.end(), std::back_inserter(extension_names_c), [](auto& ext) {
-            return ext.data();
-        });
+    std::transform(exts.begin(), exts.end(), std::back_inserter(extension_names_c), [](auto& ext) {
+        return ext.data();
+    });
 
     std::vector<const char*> layer_names_c;
     std::transform(
@@ -104,9 +103,9 @@ bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
         VkPhysicalDeviceIDProperties device_id_props {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, .pNext = NULL
         };
-        VkPhysicalDeviceProperties2 props2 {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &device_id_props
-        };
+        VkPhysicalDeviceProperties2 props2 { .sType =
+                                                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                             .pNext = &device_id_props };
         d.GetProperties2KHR(props2);
         auto& props = props2.properties;
         if (uuid.size() > 0) {
@@ -162,8 +161,7 @@ bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
             bool ok = inst.supportExt(ext.name);
             if (ok) exts.insert(std::string(ext.name));
             if (ext.required && ! ok) {
-                rstd_error("required vulkan instance extension \"{}\" is not supported",
-                          ext.name);
+                rstd_error("required vulkan instance extension \"{}\" is not supported", ext.name);
                 return false;
             }
         }
@@ -176,8 +174,7 @@ bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
             bool ok = inst.supportLayer(layer.name);
             if (ok) layers.insert(std::string(layer.name));
             if (layer.required && ! ok) {
-                rstd_error("required vulkan instance layer \"{}\" is not supported",
-                          layer.name);
+                rstd_error("required vulkan instance layer \"{}\" is not supported", layer.name);
                 return false;
             }
         }

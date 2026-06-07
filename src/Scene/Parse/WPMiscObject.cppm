@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.parse:wp_misc_object;
 import rstd.cppstd;
 import wescene.fs;
@@ -32,33 +31,33 @@ struct WPTextObject {
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     bool                 visible { true };
 
-    bool                 locktransforms { false };
-    bool                 muteineditor { false };
-    bool                 nointerpolation { false };
-    std::uint32_t        parent { 0 };
+    bool                      locktransforms { false };
+    bool                      muteineditor { false };
+    bool                      nointerpolation { false };
+    std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json       instance;
-    WPFieldBindings      field_bindings;
+    nlohmann::json            instance;
+    WPFieldBindings           field_bindings;
 
     // Text-specific.
-    nlohmann::json       text;        // string | {script: ...} | {value: ...}
-    nlohmann::json       font;        // string | {value: ...}
-    float                pointsize { 12.0f };
-    std::uint32_t        padding { 0 };
-    std::string          horizontalalign;
-    std::string          verticalalign;
-    std::string          anchor;
-    std::string          alignment { "center" };
+    nlohmann::json text; // string | {script: ...} | {value: ...}
+    nlohmann::json font; // string | {value: ...}
+    float          pointsize { 12.0f };
+    std::uint32_t  padding { 0 };
+    std::string    horizontalalign;
+    std::string    verticalalign;
+    std::string    anchor;
+    std::string    alignment { "center" };
 
     // Text-flow controls (PKGV0018+).
-    std::uint32_t        maxrows { 0 };
-    float                maxwidth { 0.0f };
-    bool                 limitrows { false };
-    bool                 limitwidth { false };
-    bool                 limituseellipsis { false };
+    std::uint32_t maxrows { 0 };
+    float         maxwidth { 0.0f };
+    bool          limitrows { false };
+    bool          limitwidth { false };
+    bool          limituseellipsis { false };
 
     // `visible:{user:"<key>",value:bool}` -> key.
-    std::string          visible_user_key;
+    std::string visible_user_key;
 
     // Visual/material overlap with image kind.
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
@@ -142,19 +141,19 @@ struct WPModelObject {
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     bool                 visible { true };
 
-    bool                 locktransforms { false };
-    bool                 muteineditor { false };
-    bool                 nointerpolation { false };
-    std::uint32_t        parent { 0 };
+    bool                      locktransforms { false };
+    bool                      muteineditor { false };
+    bool                      nointerpolation { false };
+    std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json       instance;
-    WPFieldBindings      field_bindings;
+    nlohmann::json            instance;
+    WPFieldBindings           field_bindings;
 
-    std::string          model;
-    std::string          attachment;
-    bool                 perspective { false };
+    std::string model;
+    std::string attachment;
+    bool        perspective { false };
 
-    std::string          visible_user_key;
+    std::string visible_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
@@ -199,23 +198,23 @@ struct WPCameraObject {
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     bool                 visible { true };
 
-    bool                 locktransforms { false };
-    bool                 muteineditor { false };
-    bool                 nointerpolation { false };
-    std::uint32_t        parent { 0 };
+    bool                      locktransforms { false };
+    bool                      muteineditor { false };
+    bool                      nointerpolation { false };
+    std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json       instance;
-    WPFieldBindings      field_bindings;
+    nlohmann::json            instance;
+    WPFieldBindings           field_bindings;
 
-    std::string          camera;        // camera name reference
-    std::string          path;          // animation path .json
-    std::string          queuemode;
-    float                fov { 50.0f };
-    float                zoom { 1.0f };
-    bool                 solid { false };
-    bool                 disablepropagation { false };
+    std::string camera; // camera name reference
+    std::string path;   // animation path .json
+    std::string queuemode;
+    float       fov { 50.0f };
+    float       zoom { 1.0f };
+    bool        solid { false };
+    bool        disablepropagation { false };
 
-    std::string          visible_user_key;
+    std::string visible_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);

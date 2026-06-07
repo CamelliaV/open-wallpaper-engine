@@ -5,7 +5,6 @@ module;
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-
 module wescene.parse;
 import wescene.core;
 import wescene.types;
@@ -54,8 +53,7 @@ char* Lz4Decompress(const char* src, int size, int decompressed_size) {
 ImageType DetectEmbeddedImageType(const unsigned char* data, usize size) {
     if (size >= 8 && std::memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) return ImageType::PNG;
     if (size >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff) return ImageType::JPEG;
-    if (size >= 6 && (std::memcmp(data, "GIF87a", 6) == 0 ||
-                      std::memcmp(data, "GIF89a", 6) == 0))
+    if (size >= 6 && (std::memcmp(data, "GIF87a", 6) == 0 || std::memcmp(data, "GIF89a", 6) == 0))
         return ImageType::GIF;
     if (size >= 2 && data[0] == 'B' && data[1] == 'M') return ImageType::BMP;
     if (size >= 4 && ((data[0] == 'I' && data[1] == 'I' && data[2] == 0x2a && data[3] == 0x00) ||
@@ -66,8 +64,8 @@ ImageType DetectEmbeddedImageType(const unsigned char* data, usize size) {
     // hands the bytes to wavsen::video::VideoDecoder.
     if (size >= 12 && std::memcmp(data + 4, "ftyp", 4) == 0) return ImageType::VIDEO;
     // Matroska / WebM EBML header.
-    if (size >= 4 && data[0] == 0x1A && data[1] == 0x45 &&
-        data[2] == 0xDF && data[3] == 0xA3) return ImageType::VIDEO;
+    if (size >= 4 && data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3)
+        return ImageType::VIDEO;
     return ImageType::UNKNOWN;
 }
 
@@ -104,8 +102,8 @@ TextureFormat ToTexFormate(int type) {
 // caller can decide whether to bail or attempt a best-effort read.
 WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
     WPTexFormatVersion v;
-    v.texv = ReadTexVesion(file);
-    v.texi = ReadTexVesion(file);
+    v.texv                         = ReadTexVesion(file);
+    v.texi                         = ReadTexVesion(file);
     header.extraHeader["texv"].val = v.texv;
     header.extraHeader["texi"].val = v.texi;
 
@@ -144,7 +142,7 @@ WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
 
     file.ReadInt32(); // unknown
 
-    v.texb = ReadTexVesion(file);
+    v.texb                         = ReadTexVesion(file);
     header.extraHeader["texb"].val = v.texb;
 
     header.count = file.ReadInt32();
@@ -154,7 +152,9 @@ WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
 
     if (v.texv != 5 || v.texi != 1 || v.texb < 1 || v.texb > 4) {
         rstd_error("WPTexImageParser: unsupported version texv={} texi={} texb={}",
-                  v.texv, v.texi, v.texb);
+                   v.texv,
+                   v.texi,
+                   v.texb);
     }
     return v;
 }
@@ -218,11 +218,9 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             // pulling the (possibly hundreds of MiB) payload into RAM.
             // The pkg's IBinaryStream is seekable, so we sniff, rewind,
             // and either skip the body (video case) or read it normally.
-            if (ver.body_has_image_type()
-                && img.header.type == ImageType::UNKNOWN
-                && !LZ4_compressed
-                && src_size >= 16) {
-                idx body_off = file.Tell();
+            if (ver.body_has_image_type() && img.header.type == ImageType::UNKNOWN &&
+                ! LZ4_compressed && src_size >= 16) {
+                idx           body_off = file.Tell();
                 unsigned char sniff[16] {};
                 file.Read(sniff, sizeof(sniff));
                 ImageType maybe_video = DetectEmbeddedImageType(sniff, sizeof(sniff));
@@ -265,8 +263,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             // ship containerised PNG/JPEG with image_type=-1 still decode.
             ImageType embedded = img.header.type;
             if (ver.body_has_image_type() && embedded == ImageType::UNKNOWN) {
-                embedded = DetectEmbeddedImageType((const unsigned char*)result,
-                                                   (usize)src_size);
+                embedded = DetectEmbeddedImageType((const unsigned char*)result, (usize)src_size);
             }
             if (ver.body_has_image_type() && embedded != ImageType::UNKNOWN) {
                 int32_t w, h, n;
@@ -279,10 +276,10 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 }
                 img.header.type   = embedded;
                 img.header.format = TextureFormat::RGBA8;
-                mipmap.data = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
+                mipmap.data       = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
                     stbi_image_free((unsigned char*)data);
                 });
-                src_size    = w * h * 4;
+                src_size          = w * h * 4;
             } else {
                 mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* data) {
                     delete[] data;
@@ -347,8 +344,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         // with the structural fields we already populated; sprite-frame
         // info is best-effort anyway in our renderer pipeline.
         if (ver.texs < 1 || ver.texs > 3) {
-            rstd_error("WPTexImageParser: unsupported texs version {} for {}",
-                      ver.texs, name);
+            rstd_error("WPTexImageParser: unsupported texs version {} for {}", ver.texs, name);
             return header;
         }
         int32_t framecount = file.ReadInt32();
@@ -367,17 +363,21 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             // image whose mip section was empty. All three previously
             // tripped vector::operator[]'s assertion. Skip the frame's
             // remaining bytes so subsequent frames stay aligned.
-            const auto bad_id =
-                sf.imageId < 0 ||
-                static_cast<usize>(sf.imageId) >= imageDatas.size() ||
-                imageDatas[static_cast<usize>(sf.imageId)].size() < 2;
+            const auto bad_id = sf.imageId < 0 ||
+                                static_cast<usize>(sf.imageId) >= imageDatas.size() ||
+                                imageDatas[static_cast<usize>(sf.imageId)].size() < 2;
             if (bad_id) {
-                rstd_error("WPTexImageParser: invalid sprite frame imageId={} (image_count={}) in {}",
-                          sf.imageId, imageDatas.size(), name);
-                file.ReadFloat();              // frametime
-                for (int j = 0; j < 6; ++j) {  // x, y, xAxis[0..1], yAxis[0..1]
-                    if (ver.sprite_frame_coords_int()) file.ReadInt32();
-                    else                                file.ReadFloat();
+                rstd_error(
+                    "WPTexImageParser: invalid sprite frame imageId={} (image_count={}) in {}",
+                    sf.imageId,
+                    imageDatas.size(),
+                    name);
+                file.ReadFloat();             // frametime
+                for (int j = 0; j < 6; ++j) { // x, y, xAxis[0..1], yAxis[0..1]
+                    if (ver.sprite_frame_coords_int())
+                        file.ReadInt32();
+                    else
+                        file.ReadFloat();
                 }
                 continue;
             }
@@ -420,21 +420,20 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
          * the peek in Parse() (line ~210). Cheap: 16 bytes + a
          * SeekSet. */
         if (ver.body_has_image_type() && header.type == ImageType::UNKNOWN) {
-            bool    lz4 = false;
+            bool    lz4               = false;
             int32_t decompressed_size = 0;
             if (ver.body_has_lz4_prelude()) {
-                lz4 = file.ReadInt32() == 1;
+                lz4               = file.ReadInt32() == 1;
                 decompressed_size = file.ReadInt32();
             }
             (void)decompressed_size;
             i32 src_size = file.ReadInt32();
-            if (!lz4 && src_size >= 16) {
-                idx body_off = file.Tell();
+            if (! lz4 && src_size >= 16) {
+                idx           body_off = file.Tell();
                 unsigned char sniff[16] {};
                 file.Read(sniff, sizeof(sniff));
-                if (DetectEmbeddedImageType(sniff, sizeof(sniff))
-                    == ImageType::VIDEO) {
-                    header.type = ImageType::VIDEO;
+                if (DetectEmbeddedImageType(sniff, sizeof(sniff)) == ImageType::VIDEO) {
+                    header.type   = ImageType::VIDEO;
                     header.format = TextureFormat::RGBA8;
                 }
                 file.SeekSet(body_off);

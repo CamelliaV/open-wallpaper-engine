@@ -37,8 +37,8 @@ VkSurfaceFormatKHR chooseSwapSurfaceFormat(std::span<const VkSurfaceFormatKHR> a
     }
     auto& format = availableFormats[0];
     rstd_info("swapchain format: {}, color space: {}",
-             vvk::ToString(format.format),
-             vvk::ToString(format.colorSpace));
+              vvk::ToString(format.format),
+              vvk::ToString(format.colorSpace));
     return format;
 }
 

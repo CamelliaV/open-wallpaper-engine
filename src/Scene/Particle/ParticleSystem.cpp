@@ -2,7 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-
 module wescene.scene;
 import wescene.core;
 import rstd.cppstd;
@@ -270,9 +269,7 @@ void ParticleSubSystem::Emitt() {
             for (usize si = 0; si < info.particles.size(); si++) {
                 auto& p = info.particles[si];
                 if (! ParticleModify::LifetimeOk(p)) continue;
-                trails[si].Push(use_cursor_trail
-                                    ? trail_sample
-                                    : Eigen::Vector3f { p.position });
+                trails[si].Push(use_cursor_trail ? trail_sample : Eigen::Vector3f { p.position });
             }
         }
     }

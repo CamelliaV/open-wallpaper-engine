@@ -1,6 +1,5 @@
 module;
 
-
 #include <unistd.h>
 
 // Vk types/enumerators/PFN typedefs flow in via `import vulkan;` (purview
@@ -34,7 +33,6 @@ export import wescene.shader_compile;
 // =================================================================
 // Layer 1: vvk:: low-level Vulkan C++ wrapper
 // =================================================================
-
 
 // =================================================================
 // Layer 2: owe::vulkan:: high-level wrapper
@@ -167,10 +165,8 @@ public:
 
     virtual int takeLastFrameSyncFd() { return -1; }
 
-    virtual ExHandle* eatFrame() { return nullptr; }
-    virtual std::array<ExHandle*, 3> snapshot_all_slots() {
-        return { nullptr, nullptr, nullptr };
-    }
+    virtual ExHandle*                eatFrame() { return nullptr; }
+    virtual std::array<ExHandle*, 3> snapshot_all_slots() { return { nullptr, nullptr, nullptr }; }
 
     virtual unsigned width() const  = 0;
     virtual unsigned height() const = 0;
@@ -182,8 +178,7 @@ public:
 
     virtual bool ready() const = 0;
 
-    virtual void
-    setOnReadyChanged(std::function<void(const ExSwapchainReadyEvent&)>) = 0;
+    virtual void setOnReadyChanged(std::function<void(const ExSwapchainReadyEvent&)>) = 0;
 
 protected:
     ExSwapchain() = default;
@@ -217,8 +212,7 @@ public:
     void Destroy();
 
     static bool Create(Instance&, std::span<const Extension>, std::span<const InstanceLayer>);
-    bool        ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
-                                     std::span<const std::uint8_t> uuid = {});
+    bool ChoosePhysicalDevice(const CheckGpuOp& checkgpu, std::span<const std::uint8_t> uuid = {});
 
     const vvk::Instance&       inst() const;
     const vvk::PhysicalDevice& gpu() const;
@@ -275,7 +269,7 @@ struct VmaImageParameters : NoCopy {
     vvk::ImageView view;
     vvk::Sampler   sampler;
     VkExtent3D     extent;
-    unsigned           mipmap_level { 1 };
+    unsigned       mipmap_level { 1 };
 
     VmaImageParameters();
     ~VmaImageParameters();
@@ -291,7 +285,7 @@ struct ExImageParameters : NoCopy {
     vvk::ImageView view;
     vvk::Sampler   sampler;
     VkExtent3D     extent;
-    unsigned           mipmap_level { 1 };
+    unsigned       mipmap_level { 1 };
     int            fd { 0 };
 
     uint32_t drm_fourcc { 0 };
@@ -386,12 +380,12 @@ enum class TexUsage
 using TexHash = std::size_t;
 
 struct TextureKey {
-    i32           width;
-    i32           height;
-    TexUsage      usage;
-    TextureFormat format;
-    TextureSample sample;
-    unsigned          mipmap_level { 1 };
+    i32                   width;
+    i32                   height;
+    TexUsage              usage;
+    TextureFormat         format;
+    TextureSample         sample;
+    unsigned              mipmap_level { 1 };
     VkSampleCountFlagBits samples { VK_SAMPLE_COUNT_1_BIT };
 
     static TexHash HashValue(const TextureKey&);
@@ -425,9 +419,8 @@ public:
      * under `key`. Returns false if `key` has no entry yet (the VkImage
      * hasn't been allocated — CreateTex hasn't run); caller may retry
      * next frame. */
-    bool UploadFontAtlasRegion(const std::string& key,
-                               const std::uint8_t* atlas, std::uint32_t atlas_w,
-                               std::uint32_t x, std::uint32_t y,
+    bool UploadFontAtlasRegion(const std::string& key, const std::uint8_t* atlas,
+                               std::uint32_t atlas_w, std::uint32_t x, std::uint32_t y,
                                std::uint32_t w, std::uint32_t h);
 
 private:
@@ -435,10 +428,10 @@ private:
     /* VIDEO-typed Image branch of CreateTex: registers a wavsen
      * VideoDecoder + stable RGBA8 VkImage and returns an ImageSlotsRef
      * pointing at that same VkImage so material binding is transparent. */
-    ImageSlotsRef                     CreateVideoTex(Image&);
-    void                              allocateCmd();
-    vvk::CommandBuffers               m_tex_cmds;
-    vvk::CommandBuffer                m_tex_cmd;
+    ImageSlotsRef       CreateVideoTex(Image&);
+    void                allocateCmd();
+    vvk::CommandBuffers m_tex_cmds;
+    vvk::CommandBuffer  m_tex_cmd;
 
     const Device&                m_device;
     Map<std::string, ImageSlots> m_tex_map;
@@ -478,17 +471,17 @@ public:
 
     void Destroy();
 
-    const auto&   graphics_queue() const { return m_graphics_queue; }
-    const auto&   present_queue() const { return m_present_queue; }
-    const auto&   device() const { return m_device; }
-    const auto&   handle() const { return m_device; }
-    const auto&   gpu() const { return m_gpu; }
-    const auto&   limits() const { return m_limits; }
-    const auto&   vma_allocator() const { return *m_allocator; }
-    const auto&   cmd_pool() const { return m_command_pool; }
-    const auto&   swapchain() const { return m_swapchain; }
-    const auto&   out_extent() const { return m_extent; }
-    void          set_out_extent(VkExtent2D v) { m_extent = v; }
+    const auto& graphics_queue() const { return m_graphics_queue; }
+    const auto& present_queue() const { return m_present_queue; }
+    const auto& device() const { return m_device; }
+    const auto& handle() const { return m_device; }
+    const auto& gpu() const { return m_gpu; }
+    const auto& limits() const { return m_limits; }
+    const auto& vma_allocator() const { return *m_allocator; }
+    const auto& cmd_pool() const { return m_command_pool; }
+    const auto& swapchain() const { return m_swapchain; }
+    const auto& out_extent() const { return m_extent; }
+    void        set_out_extent(VkExtent2D v) { m_extent = v; }
 
     bool supportExt(std::string_view) const;
 
@@ -660,9 +653,8 @@ public:
 
     // Hit: refcount++, returns ref to existing sub-allocation.
     // Miss: allocateSubRef + writeToBuf, marks dirty, returns fresh ref.
-    std::optional<MeshBufferRef> QueryOrUpload(MeshCacheKey               key,
-                                               std::span<const uint8_t>  data,
-                                               VkDeviceSize              alignment = 4);
+    std::optional<MeshBufferRef> QueryOrUpload(MeshCacheKey key, std::span<const uint8_t> data,
+                                               VkDeviceSize alignment = 4);
 
     // Called by ~MeshBufferRef; refcount--, no immediate free.
     void release(MeshCacheKey key);
@@ -685,10 +677,10 @@ private:
         uint32_t         refcount { 0 };
     };
 
-    const Device&                                              m_device;
-    std::unique_ptr<StagingBuffer>                             m_buf;
-    std::unordered_map<MeshCacheKey, Entry, MeshCacheKeyHash>  m_map;
-    bool                                                       m_dirty { false };
+    const Device&                                             m_device;
+    std::unique_ptr<StagingBuffer>                            m_buf;
+    std::unordered_map<MeshCacheKey, Entry, MeshCacheKeyHash> m_map;
+    bool                                                      m_dirty { false };
 };
 
 // ---------- GraphicsPipeline.hpp ----------
@@ -729,7 +721,7 @@ public:
     GraphicsPipeline& addDescriptorSetInfo(std::span<const DescriptorSetInfo>);
     GraphicsPipeline& addStage(Uni_ShaderSpv&&);
     GraphicsPipeline&
-    addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
+        addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
     GraphicsPipeline& addInputBindingDescription(std::span<const VkVertexInputBindingDescription>);
     GraphicsPipeline& setTopology(VkPrimitiveTopology);
     GraphicsPipeline& setSampleCount(VkSampleCountFlagBits);
@@ -843,8 +835,7 @@ public:
     uint32_t      releaseTargetQueueFamily() const override { return VK_QUEUE_FAMILY_IGNORED; }
     bool          ready() const override { return true; }
 
-    void setOnReadyChanged(
-        std::function<void(const ::owe::ExSwapchainReadyEvent&)> cb) override {
+    void setOnReadyChanged(std::function<void(const ::owe::ExSwapchainReadyEvent&)> cb) override {
         if (cb) {
             ::owe::ExSwapchainReadyEvent e {
                 .ready  = true,
@@ -862,17 +853,16 @@ protected:
     std::atomic<::owe::ExHandle*>& inprogress() override { return m_inprogress; }
 
 private:
-    std::array<LocalExHandle, 3>        m_handles;
+    std::array<LocalExHandle, 3>  m_handles;
     std::atomic<::owe::ExHandle*> m_presented { nullptr };
     std::atomic<::owe::ExHandle*> m_ready { nullptr };
     std::atomic<::owe::ExHandle*> m_inprogress { nullptr };
-    VkExtent2D                          m_extent;
-    std::atomic<int>                    m_last_sync_fd { -1 };
+    VkExtent2D                    m_extent;
+    std::atomic<int>              m_last_sync_fd { -1 };
 };
 
 inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& device, unsigned w,
-                                                                unsigned      h,
-                                                                VkImageTiling tiling) {
+                                                                unsigned h, VkImageTiling tiling) {
     std::array<LocalExHandle, 3> handles;
     for (auto& handle : handles) {
         if (auto rv = device.tex_cache().CreateExTex(w, h, VK_FORMAT_R8G8B8A8_UNORM, tiling);
@@ -885,4 +875,4 @@ inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& de
 }
 
 } // namespace vulkan
-} // namespace owe (export)
+} // namespace owe

@@ -30,8 +30,8 @@ using Uni_ShaderSpv = std::unique_ptr<ShaderSpv>;
 
 struct ShaderReflected {
     struct BlockedUniform {
-        int    block_index;
-        unsigned offset;
+        int         block_index;
+        unsigned    offset;
         std::size_t size { 0 };
         std::size_t num { 1 };
     };
@@ -53,9 +53,8 @@ struct ShaderReflected {
     Map<std::string, Input> input_location_map;
 };
 
-bool GenReflect(std::span<const std::vector<unsigned int>> codes,
-                std::vector<Uni_ShaderSpv>&                spvs,
-                ShaderReflected&                           ref);
+bool GenReflect(std::span<const std::vector<unsigned int>> codes, std::vector<Uni_ShaderSpv>& spvs,
+                ShaderReflected& ref);
 
 // ---------- ShaderComp.hpp ----------
 
@@ -85,9 +84,8 @@ struct ShaderCompOpt {
     bool         optimize { false };
 };
 
-bool CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits,
-                               const ShaderCompOpt&            opt,
-                               std::vector<Uni_ShaderSpv>&     spvs);
+bool CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> compUnits, const ShaderCompOpt& opt,
+                               std::vector<Uni_ShaderSpv>& spvs);
 
 // Expand every `#if`, `#include` and `#define` in `src` so downstream
 // regex passes see only live declarations with macros already resolved

@@ -24,9 +24,9 @@ public:
     virtual std::uint32_t Width() const  = 0;
     virtual std::uint32_t Height() const = 0;
 
-    virtual bool Resize()                                  = 0;
+    virtual bool Resize()                               = 0;
     virtual bool AcceptDmaBuf(const DmaBufFrame& frame) = 0;
-    virtual bool RenderFrame()                             = 0;
+    virtual bool RenderFrame()                          = 0;
 };
 
 } // namespace weweb

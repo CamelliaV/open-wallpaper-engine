@@ -40,7 +40,7 @@ struct RenderSetSpeed {
     float speed;
 };
 struct RenderSetUserProperty {
-    std::string   key;
+    std::string    key;
     nlohmann::json property;
 };
 struct RenderStop {
@@ -73,8 +73,7 @@ struct MainFirstFrame {};
 // Property values stay in a small variant so we don't need a separate
 // message kind per property.
 using PropertyValue =
-    std::variant<bool, int32_t, float, std::string,
-                 std::shared_ptr<FirstFrameCallback>>;
+    std::variant<bool, int32_t, float, std::string, std::shared_ptr<FirstFrameCallback>>;
 
 struct MainSetProperty {
     std::string   key;
@@ -85,12 +84,13 @@ struct MainMsg {
     std::variant<MainLoadScene, MainSetProperty, MainStop, MainFirstFrame> v;
 };
 
-namespace {
+namespace
+{
 
 nlohmann::json MakeUserPropertyDescriptor(nlohmann::json value) {
     if (value.is_object() && value.contains("value")) return value;
     nlohmann::json out = nlohmann::json::object();
-    out["value"] = std::move(value);
+    out["value"]       = std::move(value);
     return out;
 }
 
@@ -164,8 +164,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
         r.skip_reason = "combo type — live #define recompile not implemented";
         return r;
     }
-    if (type == "texture" || type == "replacetexture" || type == "file" ||
-        type == "textinput") {
+    if (type == "texture" || type == "replacetexture" || type == "file" || type == "textinput") {
         r.skip_reason = "non-uniform property type";
         return r;
     }
@@ -220,8 +219,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
 // Push a user-property value to every material whose shader declared a
 // `u_*` uniform with this material-key. Sets the per-material dirty flag so
 // CustomShaderPass picks the new value up next frame.
-void ApplyUserPropertyToShaders(Scene& scene, const std::string& key,
-                                const nlohmann::json& prop) {
+void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nlohmann::json& prop) {
     // Well-known property `schemecolor` is WE's accent color; in owe it
     // maps to the scene-level clear color (used as the background fill
     // by every non-effect render pass). Update it directly on the
@@ -242,13 +240,14 @@ void ApplyUserPropertyToShaders(Scene& scene, const std::string& key,
     auto coerced = CoerceUserPropertyValue(prop);
     if (! coerced.ok) {
         rstd_warn("user property '{}' skipped: {}",
-                  key, coerced.skip_reason ? coerced.skip_reason : "unknown");
+                  key,
+                  coerced.skip_reason ? coerced.skip_reason : "unknown");
         return;
     }
     for (auto& [material, uniform_name] : it->second) {
         if (! material) continue;
         material->customShader.constValues[uniform_name] = coerced.value;
-        material->customShader.dirty = true;
+        material->customShader.dirty                     = true;
     }
 }
 
@@ -270,40 +269,47 @@ void ApplyUserPropertyToParticles(Scene& scene, const std::string& key,
     };
     auto write_vec3 = [&](std::array<float, 3>& dst, float scale) {
         if (coerced.value.size() < 3) return;
-        dst = { coerced.value[0] * scale, coerced.value[1] * scale,
-                coerced.value[2] * scale };
+        dst = { coerced.value[0] * scale, coerced.value[1] * scale, coerced.value[2] * scale };
     };
 
     for (auto& b : it->second) {
         if (! b.state) continue;
-        auto* st = static_cast<owe::wpscene::ParticleInstanceoverride*>(b.state.get());
-        const std::string& f = b.field;
-        if (f == "alpha")       write_scalar(st->alpha);
-        else if (f == "size")   write_scalar(st->size);
-        else if (f == "lifetime") write_scalar(st->lifetime);
-        else if (f == "rate")   write_scalar(st->rate);
-        else if (f == "speed")  write_scalar(st->speed);
-        else if (f == "count")  write_scalar(st->count);
-        else if (f == "brightness") write_scalar(st->brightness);
-        else if (f == "color")  {
+        auto*              st = static_cast<owe::wpscene::ParticleInstanceoverride*>(b.state.get());
+        const std::string& f  = b.field;
+        if (f == "alpha")
+            write_scalar(st->alpha);
+        else if (f == "size")
+            write_scalar(st->size);
+        else if (f == "lifetime")
+            write_scalar(st->lifetime);
+        else if (f == "rate")
+            write_scalar(st->rate);
+        else if (f == "speed")
+            write_scalar(st->speed);
+        else if (f == "count")
+            write_scalar(st->count);
+        else if (f == "brightness")
+            write_scalar(st->brightness);
+        else if (f == "color") {
             // `color` is 0..255 in the JSON; the init op divides by 255.
             write_vec3(st->color, 255.0f);
             st->overColor = true;
-        }
-        else if (f == "colorn") {
+        } else if (f == "colorn") {
             write_vec3(st->colorn, 1.0f);
             st->overColorn = true;
-        }
-        else if (f.starts_with("controlpoint") && ! f.starts_with("controlpointangle")) {
+        } else if (f.starts_with("controlpoint") && ! f.starts_with("controlpointangle")) {
             int idx = -1;
-            try { idx = std::stoi(f.substr(std::string_view("controlpoint").size())); }
-            catch (...) {}
+            try {
+                idx = std::stoi(f.substr(std::string_view("controlpoint").size()));
+            } catch (...) {
+            }
             if (idx >= 0 && idx < 8) write_vec3(st->controlpoint[idx], 1.0f);
-        }
-        else if (f.starts_with("controlpointangle")) {
+        } else if (f.starts_with("controlpointangle")) {
             int idx = -1;
-            try { idx = std::stoi(f.substr(std::string_view("controlpointangle").size())); }
-            catch (...) {}
+            try {
+                idx = std::stoi(f.substr(std::string_view("controlpointangle").size()));
+            } catch (...) {
+            }
             if (idx >= 0 && idx < 8) write_vec3(st->controlpointangle[idx], 1.0f);
         }
     }
@@ -334,10 +340,9 @@ void ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
     walk(scene.sceneGraph.get());
 }
 
-void MergeProjectUserProperties(
-    const std::filesystem::path& project_dir,
-    std::unordered_map<std::string, nlohmann::json>& out) {
-    const auto project_path = project_dir / "project.json";
+void MergeProjectUserProperties(const std::filesystem::path&                     project_dir,
+                                std::unordered_map<std::string, nlohmann::json>& out) {
+    const auto    project_path = project_dir / "project.json";
     std::ifstream is(project_path);
     if (! is) return;
 
@@ -390,16 +395,16 @@ private:
 
     bool m_inited { false };
 
-    std::string m_assets;
-    std::string m_source;
-    std::string m_cache_path;
-    bool        m_gen_graphviz { false };
+    std::string                                     m_assets;
+    std::string                                     m_source;
+    std::string                                     m_cache_path;
+    bool                                            m_gen_graphviz { false };
     std::unordered_map<std::string, nlohmann::json> m_user_properties;
 
-    WPSceneParser                        m_scene_parser;
+    WPSceneParser                                m_scene_parser;
     std::unique_ptr<wavsen::audio::SoundManager> m_sound_manager;
-    FirstFrameCallback                   m_first_frame_callback;
-    ClearColorCallback                   m_clear_color_cb;
+    FirstFrameCallback                           m_first_frame_callback;
+    ClearColorCallback                           m_clear_color_cb;
 
     msgloop::MessageLoop<MainMsg>   m_main_loop;
     msgloop::MessageLoop<RenderMsg> m_render_loop;
@@ -429,16 +434,14 @@ public:
 
     ExSwapchain* exSwapchain() const { return m_render->exSwapchain(); }
     int          takeLastFrameSyncFd() { return m_render->takeLastFrameSyncFd(); }
-    bool getDrmRenderNode(uint32_t& major, uint32_t& minor) const {
+    bool         getDrmRenderNode(uint32_t& major, uint32_t& minor) const {
         return m_render->getDrmRenderNode(major, minor);
     }
     vulkan::VulkanRender* render() const { return m_render.get(); }
 
     bool renderInited() const { return m_render->inited(); }
 
-    void setMousePos(double x, double y) {
-        m_mouse_pos.store(std::array { (float)x, (float)y });
-    }
+    void setMousePos(double x, double y) { m_mouse_pos.store(std::array { (float)x, (float)y }); }
 
     // Edge-events for the cursor button stream. Each call from the input
     // thread sets/clears the held bit and records the edge so the next
@@ -455,7 +458,7 @@ public:
             m_buttons_released.fetch_or(mask);
         }
     }
-    void setMouseInWindow(bool in) { m_cursor_in_window.store(in); }
+    void     setMouseInWindow(bool in) { m_cursor_in_window.store(in); }
     uint32_t buttonsDown() const { return m_buttons_down.load(); }
     uint32_t consumePressed() { return m_buttons_pressed.exchange(0); }
     uint32_t consumeReleased() { return m_buttons_released.exchange(0); }
@@ -476,7 +479,8 @@ public:
         m_main_tx.reset();
     }
 
-    FrameTimer frame_timer { [] {} };
+    FrameTimer frame_timer { [] {
+    } };
     FpsCounter fps_counter;
 
 private:
@@ -519,7 +523,7 @@ void RenderHandler::on(RenderDraw&&) {
     if (m_rg) {
         m_scene->shaderValueUpdater->FrameBegin();
         {
-            auto pos = m_mouse_pos.load();
+            auto pos                 = m_mouse_pos.load();
             m_scene->pointerPosition = pos;
             m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
         }
@@ -538,7 +542,7 @@ void RenderHandler::on(RenderDraw&&) {
             fi.screen_w  = fi.canvas_w;
             fi.screen_h  = fi.canvas_h;
             {
-                auto pos = m_mouse_pos.load();
+                auto pos    = m_mouse_pos.load();
                 fi.cursor_x = pos[0];
                 fi.cursor_y = pos[1];
             }
@@ -547,19 +551,18 @@ void RenderHandler::on(RenderDraw&&) {
             fi.mouse_buttons_pressed  = consumePressed();
             fi.mouse_buttons_released = consumeReleased();
             wavsen::audio::AudioSpectrum spec;
-            const bool primed = m_audio_capture.snapshot(spec);
+            const bool                   primed = m_audio_capture.snapshot(spec);
             // Treat as silence if wavsen hasn't published recently. Without
             // this, a disconnected sink / suspended pipeline leaves the
             // last snapshot frozen and bars stick at the last live value.
             // 250 ms grace covers the worst-case pipewire batching (quantum
             // ~21 ms + FFT trigger half-window) by ~10×.
             constexpr std::int64_t kStaleMs = 250;
-            const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    std::chrono::steady_clock::now().time_since_epoch())
-                                    .count();
-            const bool stale = ! primed
-                            || spec.publish_ms == 0
-                            || (now_ms - spec.publish_ms) > kStaleMs;
+            const auto             now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                std::chrono::steady_clock::now().time_since_epoch())
+                                                .count();
+            const bool             stale =
+                ! primed || spec.publish_ms == 0 || (now_ms - spec.publish_ms) > kStaleMs;
             if (stale) spec.bins.fill(0.0f);
             fi.audio_average = spec.bins;
             // pkg-internal music plays through the system sink, so wavsen's
@@ -638,12 +641,12 @@ void RenderHandler::on(RenderInit&& m) {
     // round-trip it through this message.
     if (auto* sw = m_render->exSwapchain()) {
         if (m_render_tx) {
-            m_swapchain_tx = std::make_shared<RenderSender>(*m_render_tx);
+            m_swapchain_tx                   = std::make_shared<RenderSender>(*m_render_tx);
             std::weak_ptr<RenderSender> weak = m_swapchain_tx;
             sw->setOnReadyChanged([weak](const ExSwapchainReadyEvent& e) {
                 if (auto tx = weak.lock()) {
-                    (void)tx->send(RenderMsg { RenderSwapchainReady {
-                        e.ready, e.width, e.height } });
+                    (void)tx->send(
+                        RenderMsg { RenderSwapchainReady { e.ready, e.width, e.height } });
                 }
             });
         }
@@ -699,8 +702,7 @@ void MainHandler::on(MainSetProperty&& m) {
         }
     } else if (property == PROPERTY_FILLMODE) {
         if (auto* p = std::get_if<int32_t>(&value)) {
-            (void)m_render_loop.sender().send(
-                RenderMsg { RenderSetFillMode { (FillMode)*p } });
+            (void)m_render_loop.sender().send(RenderMsg { RenderSetFillMode { (FillMode)*p } });
         }
     } else if (property == PROPERTY_GRAPHIVZ) {
         if (auto* p = std::get_if<bool>(&value)) m_gen_graphviz = *p;
@@ -719,7 +721,7 @@ void MainHandler::on(MainSetProperty&& m) {
             (void)m_render_loop.sender().send(RenderMsg { RenderSetSpeed { *p } });
         }
     } else {
-        nlohmann::json prop = PropertyValueToUserProperty(value);
+        nlohmann::json prop         = PropertyValueToUserProperty(value);
         m_user_properties[property] = prop;
         // `schemecolor` doubles as the wallpaper-level accent color and as
         // the scene clear/background colour in owe. When it changes, push
@@ -741,8 +743,8 @@ void MainHandler::on(MainSetProperty&& m) {
                 }
             }
         }
-        (void)m_render_loop.sender().send(RenderMsg { RenderSetUserProperty {
-            property, std::move(prop) } });
+        (void)m_render_loop.sender().send(
+            RenderMsg { RenderSetUserProperty { property, std::move(prop) } });
     }
 }
 
@@ -839,8 +841,7 @@ void MainHandler::loadScene() {
         // the user's value (not the project.json default). The render
         // thread re-applies it idempotently when it runs the first-frame
         // RenderSetUserProperty replay.
-        if (auto it = m_user_properties.find("schemecolor");
-            it != m_user_properties.end()) {
+        if (auto it = m_user_properties.find("schemecolor"); it != m_user_properties.end()) {
             const nlohmann::json* v_ptr = &it->second;
             if (it->second.is_object() && it->second.contains("value"))
                 v_ptr = &it->second.at("value");
@@ -858,8 +859,8 @@ void MainHandler::loadScene() {
             owe::script::SetSceneUserProperty(*scene, key, prop);
         }
         if (! m_cache_path.empty() && scene) {
-            std::filesystem::path ls_dir = std::filesystem::path(m_cache_path) /
-                                            "script_localstorage";
+            std::filesystem::path ls_dir =
+                std::filesystem::path(m_cache_path) / "script_localstorage";
             std::error_code ec;
             std::filesystem::create_directories(ls_dir, ec);
             std::string ls_file = (ls_dir / (scene_id + ".json")).native();
@@ -874,7 +875,6 @@ void MainHandler::loadScene() {
             const auto& c = scene->clearColor;
             m_clear_color_cb(c[0], c[1], c[2]);
         }
-
     }
 
     auto rtx = m_render_loop.sender();
@@ -898,11 +898,18 @@ bool MainHandler::init() {
     m_render_handler->setSenders(m_render_loop.sender(), m_main_loop.sender());
 
     m_main_loop.start([this](MainMsg&& m) {
-        std::visit([this](auto&& v) { on(std::move(v)); }, std::move(m.v));
+        std::visit(
+            [this](auto&& v) {
+                on(std::move(v));
+            },
+            std::move(m.v));
     });
     m_render_loop.start([this](RenderMsg&& m) {
-        std::visit([this](auto&& v) { m_render_handler->on(std::move(v)); },
-                   std::move(m.v));
+        std::visit(
+            [this](auto&& v) {
+                m_render_handler->on(std::move(v));
+            },
+            std::move(m.v));
     });
 
     {
@@ -941,7 +948,8 @@ MainHandler::~MainHandler() {
     //      the render thread already gone, so destroy() is single-threaded.
     if (m_render_handler) {
         m_render_handler->frame_timer.Stop();
-        m_render_handler->frame_timer.SetCallback([] {});
+        m_render_handler->frame_timer.SetCallback([] {
+        });
         m_render_handler->clearSenders();
     }
     m_render_loop.stop();
@@ -961,8 +969,7 @@ bool SceneWallpaper::init() { return m_main_handler->init(); }
 void SceneWallpaper::initVulkan(RenderInitInfo info) {
     m_offscreen = info.offscreen;
     auto sp     = std::make_shared<RenderInitInfo>(std::move(info));
-    (void)m_main_handler->renderSender().send(
-        RenderMsg { RenderInit { std::move(sp) } });
+    (void)m_main_handler->renderSender().send(RenderMsg { RenderInit { std::move(sp) } });
 }
 
 void SceneWallpaper::play() {
@@ -985,20 +992,20 @@ void SceneWallpaper::mouseEnter(bool in_window) {
 }
 
 void SceneWallpaper::setPropertyBool(std::string_view name, bool value) {
-    (void)m_main_handler->mainSender().send(MainMsg {
-        MainSetProperty { std::string(name), PropertyValue { value } } });
+    (void)m_main_handler->mainSender().send(
+        MainMsg { MainSetProperty { std::string(name), PropertyValue { value } } });
 }
 void SceneWallpaper::setPropertyInt32(std::string_view name, int32_t value) {
-    (void)m_main_handler->mainSender().send(MainMsg {
-        MainSetProperty { std::string(name), PropertyValue { value } } });
+    (void)m_main_handler->mainSender().send(
+        MainMsg { MainSetProperty { std::string(name), PropertyValue { value } } });
 }
 void SceneWallpaper::setPropertyFloat(std::string_view name, float value) {
-    (void)m_main_handler->mainSender().send(MainMsg {
-        MainSetProperty { std::string(name), PropertyValue { value } } });
+    (void)m_main_handler->mainSender().send(
+        MainMsg { MainSetProperty { std::string(name), PropertyValue { value } } });
 }
 void SceneWallpaper::setPropertyString(std::string_view name, std::string value) {
-    (void)m_main_handler->mainSender().send(MainMsg { MainSetProperty {
-        std::string(name), PropertyValue { std::move(value) } } });
+    (void)m_main_handler->mainSender().send(
+        MainMsg { MainSetProperty { std::string(name), PropertyValue { std::move(value) } } });
 }
 void SceneWallpaper::setOnClearColor(ClearColorCallback cb) {
     m_main_handler->setOnClearColor(std::move(cb));
@@ -1009,9 +1016,10 @@ void SceneWallpaper::setPropertyObject(std::string_view name, std::shared_ptr<vo
     // the API boundary so the typed message stays self-describing.
     if (name == PROPERTY_FIRST_FRAME_CALLBACK) {
         std::shared_ptr<FirstFrameCallback> cb {
-            value, reinterpret_cast<FirstFrameCallback*>(value.get()) };
-        (void)m_main_handler->mainSender().send(MainMsg { MainSetProperty {
-            std::string(name), PropertyValue { std::move(cb) } } });
+            value, reinterpret_cast<FirstFrameCallback*>(value.get())
+        };
+        (void)m_main_handler->mainSender().send(
+            MainMsg { MainSetProperty { std::string(name), PropertyValue { std::move(cb) } } });
     }
 }
 
@@ -1023,10 +1031,8 @@ ExSwapchain* SceneWallpaper::exSwapchain() const {
     return m_main_handler->renderHandler()->exSwapchain();
 }
 
-bool SceneWallpaper::getDrmRenderNode(uint32_t& out_major,
-                                      uint32_t& out_minor) const {
-    return m_main_handler->renderHandler()->getDrmRenderNode(out_major,
-                                                              out_minor);
+bool SceneWallpaper::getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const {
+    return m_main_handler->renderHandler()->getDrmRenderNode(out_major, out_minor);
 }
 
 bool SceneWallpaper::waitVulkanInited(uint32_t timeout_ms) {

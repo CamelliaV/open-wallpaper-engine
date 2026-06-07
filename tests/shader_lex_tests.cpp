@@ -33,13 +33,13 @@ TEST(ShaderLex, SkipHSpaceDoesNotCrossNewline) {
 TEST(ShaderLex, ReadIdent) {
     {
         Cursor c("abc123 rest");
-        auto id = c.ReadIdent();
+        auto   id = c.ReadIdent();
         ASSERT_TRUE(id);
         EXPECT_EQ(*id, "abc123");
     }
     {
         Cursor c("_x");
-        auto id = c.ReadIdent();
+        auto   id = c.ReadIdent();
         ASSERT_TRUE(id);
         EXPECT_EQ(*id, "_x");
     }
@@ -78,21 +78,21 @@ TEST(ShaderLex, MatchKeywordRespectsIdentBoundary) {
 TEST(ShaderLex, ReadArraySuffix) {
     {
         Cursor c("[42] rest");
-        auto a = c.ReadArraySuffix();
+        auto   a = c.ReadArraySuffix();
         ASSERT_TRUE(a);
         EXPECT_EQ(*a, "[42]");
         EXPECT_EQ(c.Pos(), 4u);
     }
     {
         Cursor c("[]");
-        auto a = c.ReadArraySuffix();
+        auto   a = c.ReadArraySuffix();
         ASSERT_TRUE(a);
         EXPECT_EQ(*a, "[]");
     }
     {
         // Bracket content is not validated by ReadArraySuffix.
         Cursor c("[N+1]");
-        auto a = c.ReadArraySuffix();
+        auto   a = c.ReadArraySuffix();
         ASSERT_TRUE(a);
         EXPECT_EQ(*a, "[N+1]");
     }
@@ -146,7 +146,7 @@ TEST(ShaderLex, MatchHashDirective) {
 
 TEST(ShaderLex, LineWalkerBasic) {
     std::string_view src = "line1\nline2\nline3";
-    LineWalker w(src);
+    LineWalker       w(src);
     ASSERT_FALSE(w.Done());
     EXPECT_EQ(w.Line(), "line1");
     EXPECT_EQ(w.LineStart(), 0u);
@@ -161,23 +161,26 @@ TEST(ShaderLex, LineWalkerBasic) {
 
 TEST(ShaderLex, LineWalkerEmptyLines) {
     LineWalker w("a\n\nb");
-    EXPECT_EQ(w.Line(), "a"); w.Step();
-    EXPECT_EQ(w.Line(), "");  w.Step();
-    EXPECT_EQ(w.Line(), "b"); w.Step();
+    EXPECT_EQ(w.Line(), "a");
+    w.Step();
+    EXPECT_EQ(w.Line(), "");
+    w.Step();
+    EXPECT_EQ(w.Line(), "b");
+    w.Step();
     EXPECT_TRUE(w.Done());
 }
 
 TEST(ShaderLex, LineWalkerMasksBlockCommentLines) {
     // The `uniform` inside a multi-line block comment must not be visible to
     // LineWalker::Line() so annotation collectors skip it.
-    std::string_view src =
-        "alpha\n"
-        "/* hidden\n"
-        " uniform vec4 g_X;\n"
-        "*/\n"
-        "after";
-    LineWalker w(src);
-    EXPECT_EQ(w.Line(), "alpha"); w.Step();
+    std::string_view src = "alpha\n"
+                           "/* hidden\n"
+                           " uniform vec4 g_X;\n"
+                           "*/\n"
+                           "after";
+    LineWalker       w(src);
+    EXPECT_EQ(w.Line(), "alpha");
+    w.Step();
     // Line that opens block — still visible (content before `/*`).
     EXPECT_EQ(w.Line().find("uniform"), std::string_view::npos);
     w.Step();
@@ -191,32 +194,64 @@ TEST(ShaderLex, LineWalkerMasksBlockCommentLines) {
 
 TEST(ShaderLex, LexerKinds) {
     Lexer lx("  uniform vec4 g_X[3]; // tail\n#include \"x.h\"\n/* blk */");
-    auto t = lx.Next();  EXPECT_EQ(t.kind, TokenKind::HSpace); EXPECT_EQ(t.text, "  ");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Ident);  EXPECT_EQ(t.text, "uniform");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::HSpace);
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Ident);  EXPECT_EQ(t.text, "vec4");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::HSpace);
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Ident);  EXPECT_EQ(t.text, "g_X");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Punct);  EXPECT_EQ(t.text, "[");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Int);    EXPECT_EQ(t.text, "3");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Punct);  EXPECT_EQ(t.text, "]");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Punct);  EXPECT_EQ(t.text, ";");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::HSpace);
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::LineComment); EXPECT_EQ(t.text, "// tail");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Newline);
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Hash);
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Ident);  EXPECT_EQ(t.text, "include");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::HSpace);
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::String); EXPECT_EQ(t.text, "\"x.h\"");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Newline);
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::BlockComment); EXPECT_EQ(t.text, "/* blk */");
-    t = lx.Next();       EXPECT_EQ(t.kind, TokenKind::Eof);
+    auto  t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::HSpace);
+    EXPECT_EQ(t.text, "  ");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Ident);
+    EXPECT_EQ(t.text, "uniform");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::HSpace);
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Ident);
+    EXPECT_EQ(t.text, "vec4");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::HSpace);
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Ident);
+    EXPECT_EQ(t.text, "g_X");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Punct);
+    EXPECT_EQ(t.text, "[");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Int);
+    EXPECT_EQ(t.text, "3");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Punct);
+    EXPECT_EQ(t.text, "]");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Punct);
+    EXPECT_EQ(t.text, ";");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::HSpace);
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::LineComment);
+    EXPECT_EQ(t.text, "// tail");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Newline);
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Hash);
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Ident);
+    EXPECT_EQ(t.text, "include");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::HSpace);
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::String);
+    EXPECT_EQ(t.text, "\"x.h\"");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Newline);
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::BlockComment);
+    EXPECT_EQ(t.text, "/* blk */");
+    t = lx.Next();
+    EXPECT_EQ(t.kind, TokenKind::Eof);
 }
 
 TEST(ShaderLex, LexerPeekDoesNotAdvance) {
     Lexer lx("abc def");
-    auto p1 = lx.Peek();
-    auto p2 = lx.Peek();
+    auto  p1 = lx.Peek();
+    auto  p2 = lx.Peek();
     EXPECT_EQ(p1.kind, p2.kind);
     EXPECT_EQ(p1.offset, p2.offset);
     EXPECT_EQ(p1.text, "abc");
@@ -227,9 +262,9 @@ TEST(ShaderLex, LexerPeekDoesNotAdvance) {
 
 TEST(ShaderLex, LexerSaveRestore) {
     Lexer lx("alpha beta");
-    (void)lx.Next();              // alpha
+    (void)lx.Next(); // alpha
     auto s = lx.Save();
-    auto t = lx.Next();           // HSpace
+    auto t = lx.Next(); // HSpace
     EXPECT_EQ(t.kind, TokenKind::HSpace);
     lx.Restore(s);
     EXPECT_EQ(lx.Next().kind, TokenKind::HSpace);
@@ -237,20 +272,22 @@ TEST(ShaderLex, LexerSaveRestore) {
 
 TEST(ShaderLex, LexerUnterminatedStringTerminatesAtEol) {
     Lexer lx("\"oops\n");
-    auto t = lx.Next();
+    auto  t = lx.Next();
     EXPECT_EQ(t.kind, TokenKind::String);
-    EXPECT_EQ(t.text, "\"oops");   // no closing quote consumed
+    EXPECT_EQ(t.text, "\"oops"); // no closing quote consumed
     EXPECT_EQ(lx.Next().kind, TokenKind::Newline);
 }
 
 TEST(ShaderLex, ClassifyPreproc) {
-    auto cls = [](std::string_view s) { return ClassifyPreproc(Cursor(s)); };
-    EXPECT_EQ(cls("#if X"),       PpKind::If);
-    EXPECT_EQ(cls("#ifdef X"),    PpKind::Ifdef);
-    EXPECT_EQ(cls("  # endif"),   PpKind::Endif);
+    auto cls = [](std::string_view s) {
+        return ClassifyPreproc(Cursor(s));
+    };
+    EXPECT_EQ(cls("#if X"), PpKind::If);
+    EXPECT_EQ(cls("#ifdef X"), PpKind::Ifdef);
+    EXPECT_EQ(cls("  # endif"), PpKind::Endif);
     EXPECT_EQ(cls("#define X 1"), PpKind::Define);
-    EXPECT_EQ(cls("#require X"),  PpKind::Require);
+    EXPECT_EQ(cls("#require X"), PpKind::Require);
     EXPECT_EQ(cls("#include \"x\""), PpKind::Include);
-    EXPECT_EQ(cls("int x;"),      PpKind::None);
-    EXPECT_EQ(cls("#unknown"),    PpKind::Other);
+    EXPECT_EQ(cls("int x;"), PpKind::None);
+    EXPECT_EQ(cls("#unknown"), PpKind::Other);
 }

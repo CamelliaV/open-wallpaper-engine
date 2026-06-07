@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.parse:wp_uniform;
 import rstd.cppstd;
 import wescene.fs;
@@ -21,12 +20,12 @@ struct WPUniformTex {
         std::string label;
         std::string combo;
     };
-    std::string material;       // unique key for material override
-    std::string label;          // editor display name
-    std::string default_;       // default texture path or `_rt_*`
-    std::string mode;           // opacitymask / rgbmask / flowmask
-    std::string combo;          // bound? `#define <IDENT> 1` else 0
-    std::array<float, 4> paintdefaultcolor { 0, 0, 0, 1.0f };
+    std::string                          material; // unique key for material override
+    std::string                          label;    // editor display name
+    std::string                          default_; // default texture path or `_rt_*`
+    std::string                          mode;     // opacitymask / rgbmask / flowmask
+    std::string                          combo;    // bound? `#define <IDENT> 1` else 0
+    std::array<float, 4>                 paintdefaultcolor { 0, 0, 0, 1.0f };
     std::vector<Component>               components;
     bool                                 requireany { false };
     std::unordered_map<std::string, int> require;
@@ -36,10 +35,10 @@ struct WPUniformTex {
     bool        nonremovable { false };
     std::string group;
     bool        linked { false };
-    std::string format;          // "normalmap" etc.
+    std::string format; // "normalmap" etc.
     bool        formatcombo { false };
     bool        direction { false };
-    std::string conversion;      // "startdelta" etc.
+    std::string conversion; // "startdelta" etc.
     int         order { 0 };
 
     bool FromJson(const nlohmann::json& json) {
@@ -82,17 +81,17 @@ struct WPUniformTex {
 // Scalar / vec / color / UV uniform metadata. Covers `g_*` user-controlled
 // scalars (e.g. `g_Brightness`) and `u_*` user-variable convention.
 struct WPUniformVar {
-    std::string    name;             // GLSL identifier (e.g. "g_Brightness")
-    std::string    material;         // UI key for editor / project bindings
-    std::string    label;
-    std::string    group;
-    std::string    type;             // "color" | "" (UV picker uses position:true)
-    bool           position { false };
-    bool           linked { false };
-    bool           nobindings { false };
-    bool           is_user { false };  // true iff name starts with "u_"
+    std::string          name;     // GLSL identifier (e.g. "g_Brightness")
+    std::string          material; // UI key for editor / project bindings
+    std::string          label;
+    std::string          group;
+    std::string          type; // "color" | "" (UV picker uses position:true)
+    bool                 position { false };
+    bool                 linked { false };
+    bool                 nobindings { false };
+    bool                 is_user { false }; // true iff name starts with "u_"
     std::array<float, 2> range { 0.0f, 1.0f };
-    bool           has_range { false };
+    bool                 has_range { false };
 
     // Default value as raw JSON. Host coerces to float / vec2 / vec3 / vec4
     // depending on uniform type at upload time.
@@ -108,8 +107,7 @@ struct WPUniformVar {
         owe::GetJsonValue(json, "position", position, false);
         owe::GetJsonValue(json, "linked", linked, false);
         owe::GetJsonValue(json, "nobindings", nobindings, false);
-        if (json.contains("range") && json.at("range").is_array() &&
-            json.at("range").size() >= 2) {
+        if (json.contains("range") && json.at("range").is_array() && json.at("range").size() >= 2) {
             range[0]  = json.at("range").at(0).get<float>();
             range[1]  = json.at("range").at(1).get<float>();
             has_range = true;
@@ -125,12 +123,12 @@ struct WPUniformVar {
 // `#define`'d in the GLSL prologue, with value `default_` (or whichever
 // option the user picked in the editor).
 struct WPCombo {
-    std::string material;            // editor display name
-    std::string combo;               // IDENT injected as #define
-    std::string type;                // "options" | "" (checkbox)
-    int         default_ { 0 };
-    std::unordered_map<std::string, int> options;  // label → value (combo box mode)
-    std::unordered_map<std::string, int> require;  // gating combos
+    std::string                          material; // editor display name
+    std::string                          combo;    // IDENT injected as #define
+    std::string                          type;     // "options" | "" (checkbox)
+    int                                  default_ { 0 };
+    std::unordered_map<std::string, int> options; // label → value (combo box mode)
+    std::unordered_map<std::string, int> require; // gating combos
 
     bool FromJson(const nlohmann::json& json) {
         owe::GetJsonValue(json, "material", material, false);

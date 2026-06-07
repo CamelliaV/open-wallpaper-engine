@@ -123,8 +123,7 @@ void AppHandler::OnContextInitialized() {
     // Browser is created from BrowserHost::OpenWallpaper; nothing to do here.
 }
 
-void AppHandler::OnContextCreated(CefRefPtr<CefBrowser> /*browser*/,
-                                  CefRefPtr<CefFrame> frame,
+void AppHandler::OnContextCreated(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFrame> frame,
                                   CefRefPtr<CefV8Context> /*context*/) {
     if (! frame || ! frame->IsMain()) return;
 

@@ -79,12 +79,12 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         // partial-replace blends.
         const Quaterniond bind_quat { bone.local_bind.linear().cast<double>() };
 
-        Vector3f    trans { bone.local_bind.translation() * global_blend };
-        Vector3f    scale { Vector3f::Ones() * global_blend };
+        Vector3f trans { bone.local_bind.translation() * global_blend };
+        Vector3f scale { Vector3f::Ones() * global_blend };
         // quat absorbs R_bind directly (instead of a separate affine.rotate(R_bind)
         // + inv_bind cancel). Each layer multiplies in its frame delta from frame[0];
         // bind_quat is preserved because deltas at frame[0] are identity.
-        Quaterniond quat { bind_quat };
+        Quaterniond       quat { bind_quat };
         const Quaterniond ident { Quaterniond::Identity() };
 
         for (auto& layer : puppet_layer.m_layers) {
@@ -103,13 +103,13 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
 
             auto frame_a_quat_delta = frame_a.quaternion * frame_base.quaternion.conjugate();
             auto frame_b_quat_delta = frame_b.quaternion * frame_base.quaternion.conjugate();
-            auto pos_a_delta   = frame_a.position - frame_base.position;
-            auto pos_b_delta   = frame_b.position - frame_base.position;
-            auto scale_a_delta = frame_a.scale - frame_base.scale;
-            auto scale_b_delta = frame_b.scale - frame_base.scale;
+            auto pos_a_delta        = frame_a.position - frame_base.position;
+            auto pos_b_delta        = frame_b.position - frame_base.position;
+            auto scale_a_delta      = frame_a.scale - frame_base.scale;
+            auto scale_b_delta      = frame_b.scale - frame_base.scale;
 
-            quat *= frame_a_quat_delta.slerp(t, frame_b_quat_delta)
-                        .slerp(1.0 - alayer.blend, ident);
+            quat *=
+                frame_a_quat_delta.slerp(t, frame_b_quat_delta).slerp(1.0 - alayer.blend, ident);
             if (alayer.additive) {
                 trans += alayer.blend * (pos_a_delta * one_t + pos_b_delta * t);
                 scale += alayer.blend * (scale_a_delta * one_t + scale_b_delta * t);
@@ -173,7 +173,7 @@ WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
 
 void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
     m_layers.resize(alayers.size());
-    double& blend = m_global_blend;
+    double& blend       = m_global_blend;
     double& total_blend = m_total_blend;
 
     // Only REPLACE layers (additive=false) contribute to the total_blend
@@ -181,11 +181,12 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
     // Skip layers whose animation isn't actually in the puppet so missing
     // editor-residue refs don't dilute the survivors.
     const auto& anims = m_puppet->anims;
-    total_blend = 0.0;
+    total_blend       = 0.0;
     for (int i = 0; i < alayers.size(); i++) {
         if (! alayers[i].visible || alayers[i].additive) continue;
-        bool exists = std::any_of(anims.begin(), anims.end(),
-                                  [&](const auto& a) { return a.id == alayers[i].id; });
+        bool exists = std::any_of(anims.begin(), anims.end(), [&](const auto& a) {
+            return a.id == alayers[i].id;
+        });
         if (exists) total_blend += alayers[i].blend;
     }
 
@@ -199,7 +200,7 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
             });
             bool ok = it != anims.end() && layer.visible;
 
-            double &total_blend = m_total_blend;
+            double& total_blend = m_total_blend;
 
             if (ok) {
                 if (layer.additive) {
@@ -207,14 +208,10 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
                     // genFrame consumes it as a delta scale, not a normalized
                     // replace weight.
                     cur_blend = layer.blend;
-                }
-                else if (total_blend > 1.0)
-                {
+                } else if (total_blend > 1.0) {
                     cur_blend = layer.blend / total_blend;
-                    blend = 0.0;
-                }
-                else
-                {
+                    blend     = 0.0;
+                } else {
                     cur_blend = blend * layer.blend;
                     blend *= 1.0f - layer.blend;
                     blend = blend < 0.0f ? 0.0f : blend;

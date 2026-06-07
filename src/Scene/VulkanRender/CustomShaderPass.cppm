@@ -16,7 +16,7 @@ class CustomShaderPass : public VulkanPass {
 public:
     struct Desc {
         // in
-        SceneNode*               node { nullptr };
+        SceneNode* node { nullptr };
         // Which submesh of node->Mesh() this pass renders. SceneToRenderGraph
         // emits one pass per (node, submesh).
         uint32_t                 submesh_index { 0 };
@@ -31,30 +31,30 @@ public:
         ImageParameters            vk_output;
         // MSAA twin (color attachment) when output RT has sample_count>1.
         // Empty handle means no MSAA; framebuffer attaches only vk_output.
-        ImageParameters            vk_output_msaa;
-        VkSampleCountFlagBits      samples { VK_SAMPLE_COUNT_1_BIT };
+        ImageParameters       vk_output_msaa;
+        VkSampleCountFlagBits samples { VK_SAMPLE_COUNT_1_BIT };
 
         // bufs
-        bool                          dyn_vertex { false };
+        bool dyn_vertex { false };
         // Static mesh: cached in Device::mesh_cache() across render-graph rebuilds.
-        std::vector<MeshBufferRef>    vertex_bufs;
-        MeshBufferRef                 index_buf;
+        std::vector<MeshBufferRef> vertex_bufs;
+        MeshBufferRef              index_buf;
         // Dynamic mesh: re-allocated from dyn_buf each rebuild.
         std::vector<StagingBufferRef> vertex_dyn_bufs;
         StagingBufferRef              index_dyn_buf;
         StagingBufferRef              ubo_buf;
 
         // pipeline
-        VkClearValue       clear_value;
+        VkClearValue clear_value;
         // When non-null this pass tracks `scene.clearColor` per-frame
         // (re-syncing `clear_value.color` from the array each execute);
         // null means the pass owns a hard-coded clear (e.g. effect-layer
         // ppong RTs that always reset transparent).
         const std::array<float, 3>* clear_value_src { nullptr };
-        bool               blending { false };
-        vvk::Framebuffer   fb;
-        PipelineParameters pipeline;
-        u32                draw_count { 0 };
+        bool                        blending { false };
+        vvk::Framebuffer            fb;
+        PipelineParameters          pipeline;
+        u32                         draw_count { 0 };
 
         // uniforms
         std::function<void()> update_op;

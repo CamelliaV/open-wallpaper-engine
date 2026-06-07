@@ -1,6 +1,6 @@
 module;
 
-#include "Utils/String.h"  // STRTONUM macro (uses __SHORT_FILE__)
+#include "Utils/String.h" // STRTONUM macro (uses __SHORT_FILE__)
 
 export module wescene.spec_texs;
 import rstd.cppstd;
@@ -71,21 +71,22 @@ struct VertexAttrSpec {
     VertexType       type;
 };
 
-namespace VAttr {
-inline constexpr VertexAttrSpec Position       { WE_IN_POSITION,       VertexType::FLOAT3 };
-inline constexpr VertexAttrSpec PositionVec4   { WE_IN_POSITIONVEC4,   VertexType::FLOAT4 };
-inline constexpr VertexAttrSpec TexCoord       { WE_IN_TEXCOORD,       VertexType::FLOAT2 };
-inline constexpr VertexAttrSpec TexCoordVec4   { WE_IN_TEXCOORDVEC4,   VertexType::FLOAT4 };
+namespace VAttr
+{
+inline constexpr VertexAttrSpec Position { WE_IN_POSITION, VertexType::FLOAT3 };
+inline constexpr VertexAttrSpec PositionVec4 { WE_IN_POSITIONVEC4, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoord { WE_IN_TEXCOORD, VertexType::FLOAT2 };
+inline constexpr VertexAttrSpec TexCoordVec4 { WE_IN_TEXCOORDVEC4, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4C1 { WE_IN_TEXCOORDVEC4C1, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4C2 { WE_IN_TEXCOORDVEC4C2, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4C3 { WE_IN_TEXCOORDVEC4C3, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec3C2 { WE_IN_TEXCOORDVEC3C2, VertexType::FLOAT4 };
-inline constexpr VertexAttrSpec TexCoordC2     { WE_IN_TEXCOORDC2,     VertexType::FLOAT2 };
-inline constexpr VertexAttrSpec TexCoordC3     { WE_IN_TEXCOORDC3,     VertexType::FLOAT4 };
-inline constexpr VertexAttrSpec TexCoordC4     { WE_IN_TEXCOORDC4,     VertexType::FLOAT4 };
-inline constexpr VertexAttrSpec Color          { WE_IN_COLOR,          VertexType::FLOAT4 };
-inline constexpr VertexAttrSpec BlendIndices   { WE_IN_BLENDINDICES,   VertexType::UINT4 };
-inline constexpr VertexAttrSpec BlendWeights   { WE_IN_BLENDWEIGHTS,   VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordC2 { WE_IN_TEXCOORDC2, VertexType::FLOAT2 };
+inline constexpr VertexAttrSpec TexCoordC3 { WE_IN_TEXCOORDC3, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordC4 { WE_IN_TEXCOORDC4, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec Color { WE_IN_COLOR, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec BlendIndices { WE_IN_BLENDINDICES, VertexType::UINT4 };
+inline constexpr VertexAttrSpec BlendWeights { WE_IN_BLENDWEIGHTS, VertexType::FLOAT4 };
 } // namespace VAttr
 
 inline constexpr std::string_view G_M { "g_ModelMatrix" };
@@ -118,13 +119,8 @@ inline constexpr std::string_view G_AUDIO_SPEC_32_R { "g_AudioSpectrum32Right" }
 inline constexpr std::string_view G_AUDIO_SPEC_64_L { "g_AudioSpectrum64Left" };
 inline constexpr std::string_view G_AUDIO_SPEC_64_R { "g_AudioSpectrum64Right" };
 
-
-inline bool IsSpecTex(const std::string_view name) {
-    return name.starts_with(WE_SPEC_PREFIX);
-}
-inline bool IsSpecLinkTex(const std::string_view name) {
-    return name.starts_with(SpecTex_Link);
-}
+inline bool IsSpecTex(const std::string_view name) { return name.starts_with(WE_SPEC_PREFIX); }
+inline bool IsSpecLinkTex(const std::string_view name) { return name.starts_with(SpecTex_Link); }
 inline std::uint32_t ParseLinkTex(const std::string_view name) {
     std::string sid { name };
     sid = sid.substr(9);

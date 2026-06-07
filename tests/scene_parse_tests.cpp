@@ -16,7 +16,8 @@
 import rstd.cppstd;
 import wescene.testing.scene_parse_probe;
 
-namespace {
+namespace
+{
 
 const std::vector<owe::testing::WorkshopProbe>& AllWorkshopProbes() {
     static const auto v = owe::testing::EnumerateWorkshopProbes(WAYWALLEN_WORKSHOP_DIR);
@@ -47,15 +48,16 @@ TEST_P(ScenePkgVersionParseTest, AllWorkshopsParseAtExplicitVersion) {
 
         auto r = owe::testing::ProbeSceneParse(p.dir);
         EXPECT_TRUE(r.ok) << "ProbeSceneParse failed: " << r.error;
-        EXPECT_EQ(r.pkg_version, p.pkg_version)
-            << "pkg_version mismatch for " << p.id;
+        EXPECT_EQ(r.pkg_version, p.pkg_version) << "pkg_version mismatch for " << p.id;
     }
     EXPECT_GT(hits, 0u) << "no workshops for " << stamp;
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    All, ScenePkgVersionParseTest, ::testing::ValuesIn(ObservedPkgVersionStamps()),
-    [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
+INSTANTIATE_TEST_SUITE_P(All, ScenePkgVersionParseTest,
+                         ::testing::ValuesIn(ObservedPkgVersionStamps()),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;
+                         });
 
 TEST(SceneParseSmoke, EnumeratesNonEmpty) {
     EXPECT_FALSE(AllWorkshopProbes().empty());

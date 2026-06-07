@@ -3,7 +3,8 @@
 #include <cstdint>
 #include <functional>
 
-namespace weweb {
+namespace weweb
+{
 
 // One DMA-BUF plane as delivered by CEF's OnAcceleratedPaint. The `fd` is
 // borrowed: it is only valid for the lifetime of the synchronous
@@ -11,15 +12,16 @@ namespace weweb {
 // when the callback returns. Receivers that need to keep the FD must
 // dup() it.
 struct DmaBufPlane {
-    int      fd      {-1};
-    uint32_t stride  {0};
-    uint64_t offset  {0};
-    uint64_t size    {0};
+    int      fd { -1 };
+    uint32_t stride { 0 };
+    uint64_t offset { 0 };
+    uint64_t size { 0 };
 };
 
-enum class DmaBufFormat : int {
-    BGRA8_UNORM = 0,    // CEF_COLOR_TYPE_BGRA_8888 — chunked layout B,G,R,A
-    RGBA8_UNORM = 1,    // CEF_COLOR_TYPE_RGBA_8888
+enum class DmaBufFormat : int
+{
+    BGRA8_UNORM = 0, // CEF_COLOR_TYPE_BGRA_8888 — chunked layout B,G,R,A
+    RGBA8_UNORM = 1, // CEF_COLOR_TYPE_RGBA_8888
 };
 
 // Snapshot of a CEF accelerated-paint frame, expressed without any CEF
@@ -31,17 +33,17 @@ enum class DmaBufFormat : int {
 // is functionally equivalent to `DRM_FORMAT_MOD_LINEAR` (stride matches
 // width*bpp exactly, no tiling padding).
 struct DmaBufFrame {
-    DmaBufPlane  planes[4]   {};
-    int          plane_count {0};
-    uint64_t     modifier    {0};
-    DmaBufFormat format      {DmaBufFormat::BGRA8_UNORM};
+    DmaBufPlane  planes[4] {};
+    int          plane_count { 0 };
+    uint64_t     modifier { 0 };
+    DmaBufFormat format { DmaBufFormat::BGRA8_UNORM };
 
     // Dimensions of the underlying GPU buffer (= "coded size").
-    int          coded_width  {0};
-    int          coded_height {0};
+    int coded_width { 0 };
+    int coded_height { 0 };
     // Visible portion (typically equals coded for our use case).
-    int          visible_width  {0};
-    int          visible_height {0};
+    int visible_width { 0 };
+    int visible_height { 0 };
 };
 
 // Synchronous receiver for accelerated-paint frames. Defined here so
@@ -49,4 +51,4 @@ struct DmaBufFrame {
 // reference one canonical type.
 using AcceleratedPaintCallback = std::function<void(const DmaBufFrame&)>;
 
-}  // namespace weweb
+} // namespace weweb

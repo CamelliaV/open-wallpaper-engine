@@ -1,7 +1,5 @@
 module;
 
-
-
 export module wescene.script;
 import nlohmann.json;
 import wescene.core;
@@ -35,13 +33,14 @@ struct BoolValue {
     bool v { false };
 };
 
-using ScriptValue = std::variant<std::monostate, ScalarValue, BoolValue,
-                                  Vec2Value, Vec3Value, ColorValue, StringValue>;
+using ScriptValue = std::variant<std::monostate, ScalarValue, BoolValue, Vec2Value, Vec3Value,
+                                 ColorValue, StringValue>;
 
 // What kind of value a FieldScript is expected to produce. Set at parse
 // time based on the field name's well-known type — see the per-field-kind
 // table in the API doc.
-enum class FieldKind {
+enum class FieldKind
+{
     Unknown,
     Scalar,
     Bool,
@@ -57,13 +56,13 @@ enum class FieldKind {
 // `JsRuntime::TickFieldScripts` once per frame. Mirrors the engine.* fields
 // the audio-response cluster (and the parallax cluster) actually read.
 struct FrameInputs {
-    float        frametime { 0.0f };  // seconds since last frame
-    float        runtime { 0.0f };    // seconds since wallpaper start
-    float        time_of_day { 0.0f }; // 0..1, 0=midnight, 0.5=noon
-    float        canvas_w { 1920.0f };
-    float        canvas_h { 1080.0f };
-    float        screen_w { 1920.0f };
-    float        screen_h { 1080.0f };
+    float frametime { 0.0f };   // seconds since last frame
+    float runtime { 0.0f };     // seconds since wallpaper start
+    float time_of_day { 0.0f }; // 0..1, 0=midnight, 0.5=noon
+    float canvas_w { 1920.0f };
+    float canvas_h { 1080.0f };
+    float screen_w { 1920.0f };
+    float screen_h { 1080.0f };
     // 64-bin (left+right averaged) audio buffer, populated by the audio
     // chain. Values are typically 0..1 with peaks above. Length is fixed
     // at 64 regardless of the script-requested resolution; scripts
@@ -87,14 +86,23 @@ struct FrameInputs {
 // per-binding `scriptproperties` config from scene.json before exposing
 // the resulting `scriptProperties.<name>` accessors back to the script.
 struct PropDescriptor {
-    enum class Kind { Slider, Checkbox, Text, Combo, Color, Delimiter, Other };
-    Kind        kind { Kind::Other };
-    std::string name;
-    std::string label;
-    nlohmann::json default_value;  // captured verbatim
-    double      min { 0.0 };
-    double      max { 1.0 };
-    bool        integer { false };
+    enum class Kind
+    {
+        Slider,
+        Checkbox,
+        Text,
+        Combo,
+        Color,
+        Delimiter,
+        Other
+    };
+    Kind           kind { Kind::Other };
+    std::string    name;
+    std::string    label;
+    nlohmann::json default_value; // captured verbatim
+    double         min { 0.0 };
+    double         max { 1.0 };
+    bool           integer { false };
 };
 
 // --- runtime ----------------------------------------------------------------
@@ -114,12 +122,10 @@ public:
     // `node` (nullable) is the SceneNode the script will see as `thisLayer`
     // inside init/update. When null, `thisLayer` falls back to a generic
     // stub (the JS-side default created at bootstrap).
-    FieldScript* MakeFieldScript(std::string_view source,
-                                 std::string_view script_sha,
-                                 FieldKind        field_kind,
-                                 const nlohmann::json& properties_config,
-                                 const nlohmann::json& initial_value,
-                                 owe::SceneNode*  node = nullptr,
+    FieldScript* MakeFieldScript(std::string_view source, std::string_view script_sha,
+                                 FieldKind field_kind, const nlohmann::json& properties_config,
+                                 const nlohmann::json&        initial_value,
+                                 owe::SceneNode*              node   = nullptr,
                                  std::vector<owe::SceneNode*> clones = {});
 
     // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`
@@ -148,7 +154,7 @@ public:
     // Walk every live FieldScript created by this runtime. Caller-provided
     // function gets a non-owning pointer; the renderer uses this to push
     // last_value() into per-field actuators.
-    using EachFn = void(*)(FieldScript*, void*);
+    using EachFn = void (*)(FieldScript*, void*);
     void ForEachScript(EachFn fn, void* user);
 
     // Wire a text-content setter for a given SceneNode. When a script does
@@ -156,8 +162,7 @@ public:
     // setter dispatches into this callback. Used by text layers to receive
     // text writes from scripts bound to non-text fields (e.g. clock
     // scripts attached to `visible`).
-    void RegisterTextSetter(owe::SceneNode* node,
-                            std::function<void(std::string_view)> setter);
+    void RegisterTextSetter(owe::SceneNode* node, std::function<void(std::string_view)> setter);
 
     // Same exposure rule as FieldScript::Impl above: opaque outside the
     // module, but visible to peer module impl files.
@@ -170,10 +175,10 @@ public:
     FieldScript();
     ~FieldScript();
 
-    FieldKind         field_kind() const noexcept;
+    FieldKind          field_kind() const noexcept;
     const ScriptValue& last_value() const noexcept;
-    bool              alive() const noexcept;
-    std::string_view  script_sha() const noexcept;
+    bool               alive() const noexcept;
+    std::string_view   script_sha() const noexcept;
 
     // Impl is intentionally exposed inside the wescene.script module so
     // JsRuntime::Impl (in the same module) can mutate it directly. Treated
@@ -186,10 +191,11 @@ public:
 
 // Where on a SceneNode the transform-style script value should be written.
 // Used by MakeNodeTransformApply to manufacture the corresponding closure.
-enum class NodeTransformTarget {
-    Translate,  // Vec3 → SceneNode m_translate (origin field)
-    Scale,      // Vec3 → SceneNode m_scale (scale field)
-    Rotation,   // Vec3 → SceneNode m_rotation (angles field)
+enum class NodeTransformTarget
+{
+    Translate, // Vec3 → SceneNode m_translate (origin field)
+    Scale,     // Vec3 → SceneNode m_scale (scale field)
+    Rotation,  // Vec3 → SceneNode m_rotation (angles field)
 };
 
 // One write-back binding from script.last_value() to whatever subsystem
@@ -206,8 +212,8 @@ struct Actuator {
 // already guarantees the node lives for the Scene's lifetime, so this is
 // belt-and-suspenders for Scene-teardown ordering, not protection against
 // runtime tree mutation.
-std::function<void(const ScriptValue&)>
-MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget target);
+std::function<void(const ScriptValue&)> MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node,
+                                                               NodeTransformTarget target);
 
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
 // populated by the parser, attached to the Scene as an opaque pointer
@@ -217,9 +223,9 @@ public:
     ScriptScene();
     ~ScriptScene();
 
-    JsRuntime&                  runtime() noexcept;
-    void                        AddActuator(Actuator a);
-    bool                        empty() const noexcept;
+    JsRuntime& runtime() noexcept;
+    void       AddActuator(Actuator a);
+    bool       empty() const noexcept;
 
     // Push the host's per-frame state, drive every FieldScript, drain
     // results into actuators. Call once per frame, before the renderer
@@ -232,8 +238,7 @@ public:
 
 // Attach a ScriptScene to a Scene via the opaque-pointer slot. Takes
 // ownership; replaces any previous attachment.
-void InstallScriptScene(owe::Scene&             scene,
-                        std::unique_ptr<ScriptScene>  ss);
+void InstallScriptScene(owe::Scene& scene, std::unique_ptr<ScriptScene> ss);
 
 // Convenience tick: looks up the ScriptScene attached to `scene` and
 // drives one frame. No-op when no ScriptScene is installed (image-only
@@ -242,8 +247,7 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi);
 
 // Patch `engine.userProperties` on the ScriptScene attached to `scene`.
 // No-op when the scene has no script runtime.
-void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
-                          const nlohmann::json& property);
+void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const nlohmann::json& property);
 
 // Forward `SetPersistence` to the ScriptScene attached to `scene`. No-op
 // when the scene has no script runtime.

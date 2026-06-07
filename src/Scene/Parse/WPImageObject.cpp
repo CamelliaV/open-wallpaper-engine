@@ -22,8 +22,11 @@ bool WPObjectInstance::FromJson(const nlohmann::json& json) {
     if (json.contains("combos") && json.at("combos").is_object()) {
         for (const auto& jC : json.at("combos").items()) {
             std::int32_t v { 0 };
-            try { v = jC.value().get<std::int32_t>(); }
-            catch (...) { continue; }
+            try {
+                v = jC.value().get<std::int32_t>();
+            } catch (...) {
+                continue;
+            }
             combos.emplace(jC.key(), v);
         }
     }
@@ -45,7 +48,7 @@ bool WPEffectFbo::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "format", format);
 
     owe::GetJsonValue(json, "scale", scale);
-    if(scale == 0) { 
+    if (scale == 0) {
         rstd_error("fbo scale can't be 0");
         scale = 1;
     }
@@ -53,26 +56,25 @@ bool WPEffectFbo::FromJson(const nlohmann::json& json) {
 }
 
 // Define and initialize the static property
-const std::unordered_set<std::string> WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS = 
-{
+const std::unordered_set<std::string> WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS = {
     "2799421411" // Audio Responsive Oscilloscope   --  causes vulcan deadlock
 };
 
 bool WPImageEffect::IsEffectBlacklisted(const std::string& filePath) {
-    
     std::filesystem::path path(filePath);
     // Check if the path has a parent path
     if (path.has_parent_path()) {
         path = path.parent_path();
-        if(path.has_parent_path()) {
-            std::string effectId = path.parent_path().filename().string();
+        if (path.has_parent_path()) {
+            std::string effectId   = path.parent_path().filename().string();
             std::string parentPath = path.parent_path().string();
-            return WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.find(effectId) != WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.end();
+            return WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.find(effectId) !=
+                   WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.end();
         }
     }
     return false;
 }
-    
+
 bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
@@ -83,49 +85,47 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     owe::GetJsonValue(json, "visible", visible, false);
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "username", username, false);
-    if(this->IsEffectBlacklisted(filePath)) {
-        //hide blacklisted effects
+    if (this->IsEffectBlacklisted(filePath)) {
+        // hide blacklisted effects
         visible = false;
     }
-	owe::GetJsonValue(json, "id", id, false);
+    owe::GetJsonValue(json, "id", id, false);
     nlohmann::json jEffect;
-    if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + filePath), jEffect))
-        return false;
-    if(!FromFileJson(jEffect, vfs))
-        return false;
+    if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + filePath), jEffect)) return false;
+    if (! FromFileJson(jEffect, vfs)) return false;
 
-    if(json.contains("passes")) {
+    if (json.contains("passes")) {
         const auto& jPasses = json.at("passes");
-        if(jPasses.size() > passes.size()) {
+        if (jPasses.size() > passes.size()) {
             rstd_error("passes is not injective");
             return false;
         }
         int32_t i = 0;
-        for(const auto& jP:jPasses) {
+        for (const auto& jP : jPasses) {
             WPMaterialPass pass;
             pass.FromJson(jP);
-            passes[i++].Update(pass); 
+            passes[i++].Update(pass);
         }
     }
     return true;
 }
 
 bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
-	owe::GetJsonValue(json, "version", version, false);
+    owe::GetJsonValue(json, "version", version, false);
     owe::GetJsonValue(json, "name", name);
-    if(json.contains("fbos")) {
-        for(auto& jF:json.at("fbos")) {
+    if (json.contains("fbos")) {
+        for (auto& jF : json.at("fbos")) {
             WPEffectFbo fbo;
             fbo.FromJson(jF);
             fbos.push_back(std::move(fbo));
         }
     }
-    if(json.contains("passes")) {
+    if (json.contains("passes")) {
         const auto& jEPasses = json.at("passes");
-        bool compose {false};
-        for(const auto& jP:jEPasses) {
-            if(!jP.contains("material")) {
-                if(jP.contains("command")) {
+        bool        compose { false };
+        for (const auto& jP : jEPasses) {
+            if (! jP.contains("material")) {
+                if (jP.contains("command")) {
                     WPEffectCommand cmd;
                     cmd.FromJson(jP);
                     cmd.afterpos = passes.size();
@@ -138,27 +138,29 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
             std::string matPath;
             owe::GetJsonValue(jP, "material", matPath);
             nlohmann::json jMat;
-            if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath), jMat))
-                return false;
+            if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) return false;
             WPMaterial material;
             material.FromJson(jMat);
             materials.push_back(std::move(material));
             WPMaterialPass pass;
             pass.FromJson(jP);
             passes.push_back(std::move(pass));
-            if(jP.contains("compose"))
-	            owe::GetJsonValue(jP, "compose", compose);
+            if (jP.contains("compose")) owe::GetJsonValue(jP, "compose", compose);
         }
-        if(compose) {
-            if(passes.size() != 2) {
+        if (compose) {
+            if (passes.size() != 2) {
                 rstd_error("effect compose option error");
                 return false;
             }
-            WPEffectFbo fbo; {fbo.name = "_rt_FullCompoBuffer1"; fbo.scale = 1;}
+            WPEffectFbo fbo;
+            {
+                fbo.name  = "_rt_FullCompoBuffer1";
+                fbo.scale = 1;
+            }
             fbos.push_back(fbo);
-            passes.at(0).bind.push_back({ "previous", 0});
+            passes.at(0).bind.push_back({ "previous", 0 });
             passes.at(0).target = "_rt_FullCompoBuffer1";
-            passes.at(1).bind.push_back({"_rt_FullCompoBuffer1", 0});
+            passes.at(1).bind.push_back({ "_rt_FullCompoBuffer1", 0 });
         }
     } else {
         rstd_error("no passes in effect file");
@@ -181,41 +183,41 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     }
     owe::GetJsonValue(json, "alignment", alignment, false);
     nlohmann::json jImage;
-    if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + image), jImage)) {
+    if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + image), jImage)) {
         rstd_error("Can't load image json: {}", image);
         return false;
     }
     owe::GetJsonValue(jImage, "fullscreen", fullscreen, false);
-	owe::GetJsonValue(json, "name", name, false);
-	owe::GetJsonValue(json, "id", id, false);
-	owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);
-	if(!fullscreen) {
-		owe::GetJsonValue(json, "origin", origin);	
-		owe::GetJsonValue(json, "angles", angles);	
-		owe::GetJsonValue(json, "scale", scale);	
-		owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
-		if(jImage.contains("width")) {
-			int32_t w,h;
-			owe::GetJsonValue(jImage, "width", w);	
-			owe::GetJsonValue(jImage, "height", h);	
-			size = {(float)w, (float)h};
-		} else if(json.contains("size")) {
-			owe::GetJsonValue(json, "size", size);	
-		} else {
-			size = {origin.at(0)*2, origin.at(1)*2};
-		}
+    owe::GetJsonValue(json, "name", name, false);
+    owe::GetJsonValue(json, "id", id, false);
+    owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);
+    if (! fullscreen) {
+        owe::GetJsonValue(json, "origin", origin);
+        owe::GetJsonValue(json, "angles", angles);
+        owe::GetJsonValue(json, "scale", scale);
+        owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
+        if (jImage.contains("width")) {
+            int32_t w, h;
+            owe::GetJsonValue(jImage, "width", w);
+            owe::GetJsonValue(jImage, "height", h);
+            size = { (float)w, (float)h };
+        } else if (json.contains("size")) {
+            owe::GetJsonValue(json, "size", size);
+        } else {
+            size = { origin.at(0) * 2, origin.at(1) * 2 };
+        }
     }
     owe::GetJsonValue(jImage, "nopadding", nopadding, false);
     owe::GetJsonValue(json, "color", color, false);
     owe::GetJsonValue(json, "alpha", alpha, false);
     owe::GetJsonValue(json, "brightness", brightness, false);
 
-	owe::GetJsonValue(jImage, "puppet", puppet, false);	
-    if(jImage.contains("material")) {
+    owe::GetJsonValue(jImage, "puppet", puppet, false);
+    if (jImage.contains("material")) {
         std::string matPath;
-		owe::GetJsonValue(jImage, "material", matPath);	
+        owe::GetJsonValue(jImage, "material", matPath);
         nlohmann::json jMat;
-        if(!owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) {
+        if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) {
             rstd_error("Can't load material json: {}", matPath);
             return false;
         }
@@ -224,30 +226,30 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
         rstd_info("image object no material");
         return false;
     }
-    if(json.contains("effects")) {
-        for(const auto& jE:json.at("effects")) {
+    if (json.contains("effects")) {
+        for (const auto& jE : json.at("effects")) {
             WPImageEffect wpeff;
             wpeff.FromJson(jE, vfs);
             effects.push_back(std::move(wpeff));
         }
     }
-    if(json.contains("animationlayers")) {
-        for(const auto& jLayer:json.at("animationlayers")) {
-             WPPuppetLayer::AnimationLayer layer;
-             owe::GetJsonValue(jLayer, "animation", layer.id);
-             owe::GetJsonValue(jLayer, "blend", layer.blend);
-             owe::GetJsonValue(jLayer, "rate", layer.rate);
-             owe::GetJsonValue(jLayer, "visible", layer.visible, false);
-             owe::GetJsonValue(jLayer, "id", layer.layer_id, false);
-             owe::GetJsonValue(jLayer, "name", layer.name, false);
-             owe::GetJsonValue(jLayer, "additive", layer.additive, false);
-             owe::GetJsonValue(jLayer, "blendin", layer.blendin, false);
-             owe::GetJsonValue(jLayer, "blendout", layer.blendout, false);
-             owe::GetJsonValue(jLayer, "blendtime", layer.blendtime, false);
-             puppet_layers.push_back(layer);
+    if (json.contains("animationlayers")) {
+        for (const auto& jLayer : json.at("animationlayers")) {
+            WPPuppetLayer::AnimationLayer layer;
+            owe::GetJsonValue(jLayer, "animation", layer.id);
+            owe::GetJsonValue(jLayer, "blend", layer.blend);
+            owe::GetJsonValue(jLayer, "rate", layer.rate);
+            owe::GetJsonValue(jLayer, "visible", layer.visible, false);
+            owe::GetJsonValue(jLayer, "id", layer.layer_id, false);
+            owe::GetJsonValue(jLayer, "name", layer.name, false);
+            owe::GetJsonValue(jLayer, "additive", layer.additive, false);
+            owe::GetJsonValue(jLayer, "blendin", layer.blendin, false);
+            owe::GetJsonValue(jLayer, "blendout", layer.blendout, false);
+            owe::GetJsonValue(jLayer, "blendtime", layer.blendtime, false);
+            puppet_layers.push_back(layer);
         }
     }
-    if(json.contains("config")) {
+    if (json.contains("config")) {
         const auto& jConf = json.at("config");
         owe::GetJsonValue(jConf, "passthrough", config.passthrough, false);
     }

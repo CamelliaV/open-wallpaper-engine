@@ -1,7 +1,5 @@
 module;
 
-
-
 export module wescene.puppet;
 import eigen;
 import wescene.core;
@@ -33,7 +31,7 @@ public:
     // silhouette (bones are already world-anchored) but keeps the file's parent
     // chain for animation, so eye/lash bones still inherit their parent's blink.
     struct Bone {
-        std::string     name;
+        std::string name;
         // hexpat MDLS Bone.sim_type: 0=static, 1=physics target, 3=IK chain.
         int32_t         sim_type { 0 };
         Eigen::Affine3f local_bind { Eigen::Affine3f::Identity() };
@@ -43,7 +41,7 @@ public:
         // rewritten to NO_PARENT by ApplyMDLS3CentroidPivot for the
         // skinning pose path, but MDAT attachment resolution needs the
         // un-flattened chain to compute the bone's puppet-local pose.
-        uint32_t        file_parent { NO_PARENT };
+        uint32_t file_parent { NO_PARENT };
 
         // Per-bone WE bone_simulation JSON (spring/damping/gravity for
         // hair/cloth). Captured raw; evaluation hook is TBD.
@@ -87,7 +85,7 @@ public:
     // Consumed by WPImageObject `attachment = "<name>"` to position child
     // images at named bone offsets (e.g. bangs under a head bone).
     struct Attachment {
-        uint16_t        bone_index { 0 };  // hexpat MDAT Attachment.unk
+        uint16_t        bone_index { 0 }; // hexpat MDAT Attachment.unk
         std::string     name;
         Eigen::Affine3f local_xform { Eigen::Affine3f::Identity() };
     };
@@ -105,7 +103,7 @@ public:
     // on Animation when V22+ shows up, not as variants over this one.
     struct BoneTrack {
         uint32_t               bone_index { 0 };
-        int32_t                unk { 0 };           // hexpat BoneTrack.unk
+        int32_t                unk { 0 }; // hexpat BoneTrack.unk
         std::vector<BoneFrame> frames;
     };
 
@@ -150,19 +148,19 @@ public:
         std::vector<BoneTrack> bone_tracks;
 
         // mdla>=3 trans block (presence gated by trans_flag).
-        std::optional<AnimTrans>    trans;
+        std::optional<AnimTrans> trans;
         // mdla>=3 per-bone blend curves (size == bone_tracks.size() when present).
         std::vector<BoneFrameCurve> blend_curves;
         // mdla>=4 timed events.
-        std::vector<AnimV4Event>    v4_events;
+        std::vector<AnimV4Event> v4_events;
         // mdla>=5 anim AABB.
-        std::array<float, 3>        aabb_min {};
-        std::array<float, 3>        aabb_max {};
-        bool                        has_aabb { false };
+        std::array<float, 3> aabb_min {};
+        std::array<float, 3> aabb_max {};
+        bool                 has_aabb { false };
         // mdla==6 per-bone scalar curves (same shape as blend_curves).
         std::vector<BoneFrameCurve> scalar_curves;
         // Trailing event list (all mdla versions).
-        std::vector<AnimEvent>      events;
+        std::vector<AnimEvent> events;
 
         // prepared
         double max_time;
@@ -178,13 +176,13 @@ public:
     // MDLS v3 IK chain configuration. Schema derived from a single corpus
     // sample (hexpat MDLSBlock extras_flag==2 path); fields kept raw.
     struct BoneDir {
-        uint32_t              bone_id;
-        std::array<float, 3>  dir;
+        uint32_t             bone_id;
+        std::array<float, 3> dir;
     };
     struct ChainBoneDir {
-        uint16_t              chain_id;
-        uint32_t              bone_id;
-        std::array<float, 3>  dir;
+        uint16_t             chain_id;
+        uint32_t             bone_id;
+        std::array<float, 3> dir;
     };
     struct BoneCond {
         uint16_t cnt;
@@ -193,34 +191,34 @@ public:
         uint32_t val;
     };
     struct IkConfig {
-        Eigen::Matrix4f                 chain_a_target { Eigen::Matrix4f::Identity() };
-        uint8_t                         ik_version { 0 };
-        std::array<uint32_t, 2>         ik_header {};
-        Eigen::Matrix4f                 chain_b_target { Eigen::Matrix4f::Identity() };
-        std::array<uint8_t, 7>          ik_flags {};
-        std::array<Eigen::Vector3f, 6>  pole_targets {};
-        std::vector<BoneDir>            rest_rotations;
-        std::vector<ChainBoneDir>       ik_targets;
-        std::optional<BoneDir>          ik_target_root;
-        BoneCond                        ik_constraint {};
+        Eigen::Matrix4f                      chain_a_target { Eigen::Matrix4f::Identity() };
+        uint8_t                              ik_version { 0 };
+        std::array<uint32_t, 2>              ik_header {};
+        Eigen::Matrix4f                      chain_b_target { Eigen::Matrix4f::Identity() };
+        std::array<uint8_t, 7>               ik_flags {};
+        std::array<Eigen::Vector3f, 6>       pole_targets {};
+        std::vector<BoneDir>                 rest_rotations;
+        std::vector<ChainBoneDir>            ik_targets;
+        std::optional<BoneDir>               ik_target_root;
+        BoneCond                             ik_constraint {};
         std::array<std::vector<uint32_t>, 2> ik_bone_lists;
-        uint32_t                        ik_chain_count { 0 };
-        std::array<float, 2>            ik_chain_length {};
-        std::vector<uint32_t>           ik_chain_bones;
+        uint32_t                             ik_chain_count { 0 };
+        std::array<float, 2>                 ik_chain_length {};
+        std::vector<uint32_t>                ik_chain_bones;
     };
 
 public:
-    std::vector<Bone>          bones;
-    std::vector<Animation>     anims;
-    std::vector<Attachment>    attachments;
-    std::optional<IkConfig>    ik_config;
+    std::vector<Bone>       bones;
+    std::vector<Animation>  anims;
+    std::vector<Attachment> attachments;
+    std::optional<IkConfig> ik_config;
 
     // MDLV21 puppets store bones as world-anchored (each `local_bind.t` is
     // a puppet-local position, not parent-relative) and sprite vertices live
     // at `bind.t + vertex_centroid_offset`. Skinning needs to flatten the
     // parent chain and pivot scale/rotation around the centroid; MDLV22+
     // uses standard chain LBS. Set at parse time from `header.mdlv`.
-    bool                       world_anchored_bones { false };
+    bool world_anchored_bones { false };
 
     std::span<const Eigen::Affine3f> genFrame(WPPuppetLayer&, double time) noexcept;
     void                             prepared();
@@ -240,15 +238,15 @@ public:
     bool hasPuppet() const { return (bool)m_puppet; };
 
     struct AnimationLayer {
-        i32         id { 0 };          // animation file id (PKGV0001+)
-        double      rate { 1.0f };
-        double      blend { 1.0f };
-        bool        visible { true };
-        double      cur_time { 0.0f };
+        i32    id { 0 }; // animation file id (PKGV0001+)
+        double rate { 1.0f };
+        double blend { 1.0f };
+        bool   visible { true };
+        double cur_time { 0.0f };
 
         // Schema-only absorption (renderer reads only id/rate/blend/visible).
-        i32         layer_id { 0 };    // animationlayers[].id (was unread)
-        std::string name;              // animationlayers[].name (was unread)
+        i32         layer_id { 0 };     // animationlayers[].id (was unread)
+        std::string name;               // animationlayers[].name (was unread)
         bool        additive { false }; // PKGV0019+; blend operator
         bool        blendin { false };  // PKGV0021+
         bool        blendout { false }; // PKGV0021+

@@ -12,15 +12,15 @@
 
 #include "OsrRenderHandler.hpp"
 
-namespace weweb {
+namespace weweb
+{
 
 class ClientHandler : public CefClient,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
                       public CefDisplayHandler {
 public:
-    explicit ClientHandler(nlohmann::json user_props,
-                           CefRefPtr<OsrRenderHandler> render_handler);
+    explicit ClientHandler(nlohmann::json user_props, CefRefPtr<OsrRenderHandler> render_handler);
 
     // Called from BrowserHost — fired once when the browser closes.
     void SetCloseCallback(std::function<void()> cb);
@@ -31,11 +31,9 @@ public:
 
     // CefClient.
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-    CefRefPtr<CefLoadHandler>     GetLoadHandler()     override { return this; }
-    CefRefPtr<CefDisplayHandler>  GetDisplayHandler()  override { return this; }
-    CefRefPtr<CefRenderHandler>   GetRenderHandler()   override {
-        return render_handler_;
-    }
+    CefRefPtr<CefLoadHandler>     GetLoadHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler>  GetDisplayHandler() override { return this; }
+    CefRefPtr<CefRenderHandler>   GetRenderHandler() override { return render_handler_; }
 
     // CefLifeSpanHandler.
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
@@ -43,26 +41,22 @@ public:
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
 
     // CefLoadHandler.
-    void OnLoadEnd(CefRefPtr<CefBrowser> browser,
-                   CefRefPtr<CefFrame> frame,
+    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                    int httpStatusCode) override;
 
     // CefDisplayHandler.
-    bool OnConsoleMessage(CefRefPtr<CefBrowser> browser,
-                          cef_log_severity_t level,
-                          const CefString& message,
-                          const CefString& source,
-                          int line) override;
+    bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level,
+                          const CefString& message, const CefString& source, int line) override;
 
 private:
-    nlohmann::json user_props_;
+    nlohmann::json              user_props_;
     CefRefPtr<OsrRenderHandler> render_handler_;
-    CefRefPtr<CefBrowser> browser_;
-    std::function<void()> close_cb_;
-    std::atomic<bool> property_injected_{false};
+    CefRefPtr<CefBrowser>       browser_;
+    std::function<void()>       close_cb_;
+    std::atomic<bool>           property_injected_ { false };
 
     IMPLEMENT_REFCOUNTING(ClientHandler);
     DISALLOW_COPY_AND_ASSIGN(ClientHandler);
 };
 
-}  // namespace weweb
+} // namespace weweb

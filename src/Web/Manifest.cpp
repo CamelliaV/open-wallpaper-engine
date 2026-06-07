@@ -4,9 +4,11 @@
 #include <cstdio>
 #include <fstream>
 
-namespace weweb {
+namespace weweb
+{
 
-namespace {
+namespace
+{
 
 std::string LowerAscii(std::string s) {
     for (auto& c : s) {
@@ -15,12 +17,12 @@ std::string LowerAscii(std::string s) {
     return s;
 }
 
-}  // namespace
+} // namespace
 
 std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop_dir) {
-    auto pj_path = workshop_dir / "project.json";
+    auto          pj_path = workshop_dir / "project.json";
     std::ifstream is(pj_path);
-    if (!is) {
+    if (! is) {
         std::fprintf(stderr, "weweb: cannot open %s\n", pj_path.c_str());
         return std::nullopt;
     }
@@ -37,24 +39,21 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
     }
 
     auto type_it = j.find("type");
-    if (type_it == j.end() || !type_it->is_string()) {
-        std::fprintf(stderr,
-                     "weweb: %s is missing a string \"type\" field\n",
-                     pj_path.c_str());
+    if (type_it == j.end() || ! type_it->is_string()) {
+        std::fprintf(stderr, "weweb: %s is missing a string \"type\" field\n", pj_path.c_str());
         return std::nullopt;
     }
     // WE corpus has both "web" and "Web" for the type field; fold case.
     std::string type = LowerAscii(type_it->get<std::string>());
     if (type != "web") {
-        std::fprintf(stderr,
-                     "weweb: %s has type=\"%s\", expected \"web\"\n",
-                     pj_path.c_str(), type.c_str());
+        std::fprintf(
+            stderr, "weweb: %s has type=\"%s\", expected \"web\"\n", pj_path.c_str(), type.c_str());
         return std::nullopt;
     }
 
     WebManifest m;
-    m.entry_html = j.value("file",  std::string{"index.html"});
-    m.title      = j.value("title", std::string{"Wallpaper"});
+    m.entry_html = j.value("file", std::string { "index.html" });
+    m.title      = j.value("title", std::string { "Wallpaper" });
 
     if (auto pv = j.find("preview"); pv != j.end() && pv->is_string()) {
         m.preview = pv->get<std::string>();
@@ -70,4 +69,4 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
     return m;
 }
 
-}  // namespace weweb
+} // namespace weweb

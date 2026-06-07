@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.timer:frame_timer;
 import wescene.core;
 import rstd.cppstd;

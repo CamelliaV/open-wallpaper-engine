@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.pkg_fs;
 import wescene.core;
 import rstd.cppstd;

@@ -29,13 +29,13 @@ namespace
 // line-scoped; the Cursor primitives in :shader_lex do all char-level work.
 
 struct DeclMatch {
-    std::size_t start;        // offset of leading newline (or 0 at file start)
-    std::size_t end;          // one past trailing `;`
-    std::size_t keep_prefix;  // number of bytes from start to preserve when stripping
-    std::string_view storage; // attribute/varying/in/out/uniform
+    std::size_t      start;       // offset of leading newline (or 0 at file start)
+    std::size_t      end;         // one past trailing `;`
+    std::size_t      keep_prefix; // number of bytes from start to preserve when stripping
+    std::string_view storage;     // attribute/varying/in/out/uniform
     std::string_view type;
     std::string_view name;
-    std::string_view array;   // "[N]" or empty
+    std::string_view array; // "[N]" or empty
 };
 
 // Try to match `[ws]<storage_kw> <type> <name>[opt-array][ws];` on the line
@@ -51,14 +51,19 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
     std::string_view kw;
     for (auto k : storage_kws) {
         auto s = c.Save();
-        if (c.MatchKeyword(k)) { kw = k; break; }
+        if (c.MatchKeyword(k)) {
+            kw = k;
+            break;
+        }
         c.Restore(s);
     }
     if (kw.empty()) return std::nullopt;
     c.SkipHSpace();
-    auto type = c.ReadIdent(); if (! type) return std::nullopt;
+    auto type = c.ReadIdent();
+    if (! type) return std::nullopt;
     c.SkipHSpace();
-    auto name = c.ReadIdent(); if (! name) return std::nullopt;
+    auto name = c.ReadIdent();
+    if (! name) return std::nullopt;
     c.SkipHSpace();
     auto array = c.ReadArraySuffix();
     c.SkipHSpace();
@@ -71,7 +76,7 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
     m.storage     = kw;
     m.type        = *type;
     m.name        = *name;
-    m.array       = array.value_or(std::string_view{});
+    m.array       = array.value_or(std::string_view {});
     return m;
 }
 
@@ -79,9 +84,8 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
 // is 1 when a leading newline exists (so callers stripping decl lines keep
 // the newline as a paragraph anchor).
 template<typename Fn>
-inline void ForEachDeclLine(std::string_view src,
-                            std::initializer_list<std::string_view> storage_kws,
-                            Fn&& fn) {
+inline void ForEachDeclLine(std::string_view                        src,
+                            std::initializer_list<std::string_view> storage_kws, Fn&& fn) {
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
         if (auto m = TryParseDeclLine(src, w.LineStart(), storage_kws)) {
@@ -106,8 +110,7 @@ inline bool IsSamplerType(std::string_view t) {
 // Replace every occurrence of `needle` in `body` with `repl`. The placeholder
 // names used by the shader synth pipeline are unique tokens
 // (`__SHADER_PLACEHOLD__`), so naive substring substitution is safe.
-inline std::string ReplaceAll(std::string body, std::string_view needle,
-                              std::string_view repl) {
+inline std::string ReplaceAll(std::string body, std::string_view needle, std::string_view repl) {
     if (needle.empty()) return body;
     std::string out;
     out.reserve(body.size());
@@ -124,7 +127,6 @@ inline std::string ReplaceAll(std::string body, std::string_view needle,
     }
     return out;
 }
-
 
 // HLSL prologue. WE shaders are written in a hybrid dialect that already
 // uses HLSL idioms (mul, texSample2D, float2/3/4, saturate, lerp, frac,
@@ -407,7 +409,7 @@ __SHADER_PLACEHOLD__
 inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
     std::string output;
     output.reserve(input.size());
-    std::size_t pos = 0;
+    std::size_t            pos = 0;
     shader_lex::LineWalker w(input);
     for (; ! w.Done(); w.Step()) {
         shader_lex::Cursor c(input);
@@ -420,8 +422,8 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
         // original behavior.
         output.append(input, pos, w.LineStart() - pos);
         std::string line = input.substr(w.LineStart(), w.LineEnd() - w.LineStart());
-        auto in_p = line.find_first_of('\"');
-        auto in_e = line.find_last_of('\"');
+        auto        in_p = line.find_first_of('\"');
+        auto        in_e = line.find_last_of('\"');
         if (in_p == std::string::npos || in_e == std::string::npos || in_e <= in_p) {
             // Malformed include — preserve verbatim.
             output.append(line);
@@ -441,10 +443,12 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
         // directly-loaded file (not the recursively-expanded body) so a parent
         // header that nests common_blending.h doesn't re-inject the overloads.
         if (includeSrc.find("ApplyBlending(const int") != std::string::npos) {
-            output.append(
-                "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec2 o) { return ApplyBlending(bm, A, B, o.x); }"
-                "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec3 o) { return ApplyBlending(bm, A, B, o.x); }"
-                "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec4 o) { return ApplyBlending(bm, A, B, o.x); }\n");
+            output.append("\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec2 o) { "
+                          "return ApplyBlending(bm, A, B, o.x); }"
+                          "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec3 o) { "
+                          "return ApplyBlending(bm, A, B, o.x); }"
+                          "\nvec3 ApplyBlending(const int bm, in vec3 A, in vec3 B, in vec4 o) { "
+                          "return ApplyBlending(bm, A, B, o.x); }\n");
         }
         output.append("\n//-----include end\n");
         pos = w.LineEnd();
@@ -469,11 +473,10 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
     if (main_pos == std::string::npos) return 0;
     if (src.find("void main(", main_pos + 2) != std::string::npos) return 0;
 
-    usize after_pos = std::string::npos;
-    std::vector<std::pair<usize, usize>> if_ranges;
-    std::vector<usize>                   if_stack;
-    constexpr std::array<std::string_view, 4> kKws { "attribute", "varying",
-                                                     "uniform", "struct" };
+    usize                                     after_pos = std::string::npos;
+    std::vector<std::pair<usize, usize>>      if_ranges;
+    std::vector<usize>                        if_stack;
+    constexpr std::array<std::string_view, 4> kKws { "attribute", "varying", "uniform", "struct" };
 
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
@@ -534,13 +537,18 @@ inline std::string BalanceConditionals(std::string src) {
     for (; ! w.Done(); w.Step()) {
         shader_lex::Cursor c(src);
         c.SeekTo(w.LineStart());
-        auto kind = shader_lex::ClassifyPreproc(c);
+        auto kind        = shader_lex::ClassifyPreproc(c);
         bool stray_endif = false;
         switch (kind) {
         case PpKind::If:
         case PpKind::Ifdef:
         case PpKind::Ifndef: ++depth; break;
-        case PpKind::Endif:  if (depth == 0) stray_endif = true; else --depth; break;
+        case PpKind::Endif:
+            if (depth == 0)
+                stray_endif = true;
+            else
+                --depth;
+            break;
         default: break;
         }
         if (stray_endif) out.append("// (ww stray-endif) ");
@@ -584,7 +592,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     // All stages route through glslang's HLSL frontend. Bridging macros in
     // the prologue turn GLSL types/intrinsics into HLSL equivalents.
     vulkan::SourceLang lang = vulkan::SourceLang::Hlsl;
-    std::string src;
+    std::string        src;
     if (! vulkan::Preprocess(with_prologue, type, lang, src)) {
         // Fall through: subsequent compile will fail loudly with the same
         // diagnostics. Keep with_prologue so the failing path matches what
@@ -597,13 +605,15 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         // attribute-in-vertex and varying-in-fragment both behave as inputs;
         // varying-in-vertex behaves as output. GS: `in` is input (from VS),
         // `out` is output (to FS).
-        bool is_input = (m.storage == "attribute") ||
-                        (m.storage == "varying" && type == ShaderType::FRAGMENT) ||
-                        (m.storage == "in" && type == ShaderType::GEOMETRY);
+        bool        is_input = (m.storage == "attribute") ||
+                               (m.storage == "varying" && type == ShaderType::FRAGMENT) ||
+                               (m.storage == "in" && type == ShaderType::GEOMETRY);
         std::string line(src.substr(m.start, m.end - m.start));
         std::string name(m.name);
-        if (is_input) process_info.input[name]  = std::move(line);
-        else          process_info.output[name] = std::move(line);
+        if (is_input)
+            process_info.input[name] = std::move(line);
+        else
+            process_info.output[name] = std::move(line);
     });
 
     // Non-sampler uniform decls feed Finalprocessor's shared cbuffer.
@@ -614,9 +624,9 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
             // Track active sampler slot if it's a `g_TextureN`.
             constexpr std::string_view kTex { "g_Texture" };
             if (m.name.size() > kTex.size() && m.name.substr(0, kTex.size()) == kTex) {
-                std::string_view num = m.name.substr(kTex.size());
-                unsigned slot = 0;
-                auto [ptr, ec] = std::from_chars(num.data(), num.data() + num.size(), slot);
+                std::string_view num  = m.name.substr(kTex.size());
+                unsigned         slot = 0;
+                auto [ptr, ec]        = std::from_chars(num.data(), num.data() + num.size(), slot);
                 if (ec == std::errc()) process_info.active_tex_slots.insert(slot);
             }
             return;
@@ -672,13 +682,13 @@ struct IODecl {
     char        storage; // 'a' for attribute, 'v' for varying, 'i' for GS `in`, 'o' for GS `out'
     std::string type;    // GLSL type as captured (vec2/vec4/mat3/...)
     std::string name;
-    std::string array;   // "[N]" or empty
+    std::string array; // "[N]" or empty
 };
 
 inline char StorageCharFor(const std::string& storage_word) {
     if (storage_word == "attribute") return 'a';
-    if (storage_word == "in")        return 'i';
-    if (storage_word == "out")       return 'o';
+    if (storage_word == "in") return 'i';
+    if (storage_word == "out") return 'o';
     return 'v'; // varying
 }
 
@@ -705,20 +715,18 @@ ScanAndStripSamplers(const std::string& src) {
 }
 
 inline const char* HLSLSamplerType(std::string_view glsl) {
-    if (glsl == "sampler2D")   return "Texture2D<float4>";
-    if (glsl == "sampler3D")   return "Texture3D<float4>";
+    if (glsl == "sampler2D") return "Texture2D<float4>";
+    if (glsl == "sampler3D") return "Texture3D<float4>";
     if (glsl == "samplerCube") return "TextureCube<float4>";
     // GLSL shadow / comparison samplers: scalar-result texture with a
     // SamplerComparisonState. We bind a Texture2D<float> and a paired
     // SamplerComparisonState (the latter chosen via HLSLSamplerStateType).
-    if (glsl == "sampler2DComparison" || glsl == "sampler2DShadow")
-        return "Texture2D<float>";
+    if (glsl == "sampler2DComparison" || glsl == "sampler2DShadow") return "Texture2D<float>";
     return "Texture2D<float4>";
 }
 
 inline const char* HLSLSamplerStateType(std::string_view glsl) {
-    if (glsl == "sampler2DComparison" || glsl == "sampler2DShadow")
-        return "SamplerComparisonState";
+    if (glsl == "sampler2DComparison" || glsl == "sampler2DShadow") return "SamplerComparisonState";
     return "SamplerState";
 }
 
@@ -775,15 +783,17 @@ inline ScalarVec DecomposeVecType(std::string_view t) {
         }
         return {};
     };
-    for (std::string_view base : { std::string_view("float"), std::string_view("int"),
-                                   std::string_view("uint"), std::string_view("bool") }) {
+    for (std::string_view base : { std::string_view("float"),
+                                   std::string_view("int"),
+                                   std::string_view("uint"),
+                                   std::string_view("bool") }) {
         if (auto r = suffixed(base); r.comps) return r;
     }
     // GLSL vector spellings normalize to the matching HLSL base kind.
-    if (t == "vec2" || t == "vec3" || t == "vec4")    return { "float", unsigned(t.back() - '0') };
-    if (t == "ivec2" || t == "ivec3" || t == "ivec4") return { "int",   unsigned(t.back() - '0') };
-    if (t == "uvec2" || t == "uvec3" || t == "uvec4") return { "uint",  unsigned(t.back() - '0') };
-    if (t == "bvec2" || t == "bvec3" || t == "bvec4") return { "bool",  unsigned(t.back() - '0') };
+    if (t == "vec2" || t == "vec3" || t == "vec4") return { "float", unsigned(t.back() - '0') };
+    if (t == "ivec2" || t == "ivec3" || t == "ivec4") return { "int", unsigned(t.back() - '0') };
+    if (t == "uvec2" || t == "uvec3" || t == "uvec4") return { "uint", unsigned(t.back() - '0') };
+    if (t == "bvec2" || t == "bvec3" || t == "bvec4") return { "bool", unsigned(t.back() - '0') };
     return {};
 }
 
@@ -849,18 +859,21 @@ inline usize ArraySlots(const std::string& arr) {
 inline std::string EmitStageIOLayout(std::vector<IODecl> decls, bool is_input) {
     // gl_Position is a GLSL builtin; never re-declare it. _ww_sv_position is
     // the GS-side macro alias for the same slot.
-    decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
-                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
-                }),
+    decls.erase(std::remove_if(decls.begin(),
+                               decls.end(),
+                               [](const IODecl& d) {
+                                   return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                               }),
                 decls.end());
-    std::sort(decls.begin(), decls.end(),
-              [](const IODecl& a, const IODecl& b) { return a.name < b.name; });
+    std::sort(decls.begin(), decls.end(), [](const IODecl& a, const IODecl& b) {
+        return a.name < b.name;
+    });
     const char* qual = is_input ? "in" : "out";
     std::string out;
     usize       loc = 0;
     for (const auto& d : decls) {
-        out += "layout(location = " + std::to_string(loc) + ") " + qual + " " +
-               ToGLSLType(d.type) + " " + d.name + d.array + ";\n";
+        out += "layout(location = " + std::to_string(loc) + ") " + qual + " " + ToGLSLType(d.type) +
+               " " + d.name + d.array + ";\n";
         loc += ArraySlots(d.array);
     }
     return out;
@@ -870,20 +883,22 @@ inline std::string EmitStageIOLayout(std::vector<IODecl> decls, bool is_input) {
 // for the same reason as EmitVSFSStruct — glslang's HLSL frontend collapses
 // every element of an explicitly-located array onto the same Location.
 inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> decls) {
-    decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
-                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
-                }),
+    decls.erase(std::remove_if(decls.begin(),
+                               decls.end(),
+                               [](const IODecl& d) {
+                                   return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                               }),
                 decls.end());
-    std::sort(decls.begin(), decls.end(),
-              [](const IODecl& a, const IODecl& b) { return a.name < b.name; });
+    std::sort(decls.begin(), decls.end(), [](const IODecl& a, const IODecl& b) {
+        return a.name < b.name;
+    });
     std::string out;
     out += "struct ";
     out += name;
     out += " {\n";
     out += "    float4 _ww_sv_position : SV_Position;\n";
     for (const auto& d : decls) {
-        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array +
-               " : " + d.name + ";\n";
+        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
     }
     out += "};\n";
     return out;
@@ -902,12 +917,15 @@ inline std::string EmitGSHLSLStruct(std::string_view name, std::vector<IODecl> d
 // cross-stage union, so the location assignment is stable across stages.
 inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> decls,
                                   bool include_sv_position) {
-    decls.erase(std::remove_if(decls.begin(), decls.end(), [](const IODecl& d) {
-                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
-                }),
+    decls.erase(std::remove_if(decls.begin(),
+                               decls.end(),
+                               [](const IODecl& d) {
+                                   return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                               }),
                 decls.end());
-    std::sort(decls.begin(), decls.end(),
-              [](const IODecl& a, const IODecl& b) { return a.name < b.name; });
+    std::sort(decls.begin(), decls.end(), [](const IODecl& a, const IODecl& b) {
+        return a.name < b.name;
+    });
     std::string out;
     out += "struct ";
     out += name;
@@ -916,8 +934,7 @@ inline std::string EmitVSFSStruct(std::string_view name, std::vector<IODecl> dec
         out += "    float4 _ww_sv_position : SV_Position;\n";
     }
     for (const auto& d : decls) {
-        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array +
-               " : " + d.name + ";\n";
+        out += "    " + ToHLSLType(d.type) + " " + d.name + d.array + " : " + d.name + ";\n";
     }
     out += "};\n";
     return out;
@@ -936,15 +953,19 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
     // Filter both names (the GS prologue rewrites `gl_Position` to
     // `_ww_sv_position`, so its post-preprocess form needs filtering too).
     auto drop_position = [](std::vector<IODecl>& v) {
-        v.erase(std::remove_if(v.begin(), v.end(), [](const IODecl& d) {
-                    return d.name == "gl_Position" || d.name == "_ww_sv_position";
-                }),
+        v.erase(std::remove_if(v.begin(),
+                               v.end(),
+                               [](const IODecl& d) {
+                                   return d.name == "gl_Position" || d.name == "_ww_sv_position";
+                               }),
                 v.end());
     };
     drop_position(attrs);
     drop_position(varyings);
 
-    auto by_name = [](const IODecl& a, const IODecl& b) { return a.name < b.name; };
+    auto by_name = [](const IODecl& a, const IODecl& b) {
+        return a.name < b.name;
+    };
     std::sort(attrs.begin(), attrs.end(), by_name);
     std::sort(varyings.begin(), varyings.end(), by_name);
 
@@ -962,7 +983,7 @@ inline SynthOutput SynthesizeHLSLEntry(ShaderType stage, std::vector<IODecl> att
     std::string& out = so.post;
     out += "\n// === auto-generated entry point ===\n";
     if (stage == ShaderType::VERTEX) {
-        out += EmitVSFSStruct("WW_VSIn",  attrs,    /*sv_pos=*/false);
+        out += EmitVSFSStruct("WW_VSIn", attrs, /*sv_pos=*/false);
         out += EmitVSFSStruct("WW_VSOut", varyings, /*sv_pos=*/true);
         out += "WW_VSOut main_vs(WW_VSIn _ww_in) {\n";
         for (const auto& a : attrs) {
@@ -1013,21 +1034,15 @@ struct Std140Layout {
     std::size_t size;
 };
 inline Std140Layout Std140Base(std::string_view hlsl_base) {
-    if (hlsl_base == "float" || hlsl_base == "int" ||
-        hlsl_base == "uint"  || hlsl_base == "bool")
+    if (hlsl_base == "float" || hlsl_base == "int" || hlsl_base == "uint" || hlsl_base == "bool")
         return { 4, 4 };
-    if (hlsl_base == "float2" || hlsl_base == "int2" || hlsl_base == "uint2")
-        return { 8, 8 };
-    if (hlsl_base == "float3" || hlsl_base == "int3" || hlsl_base == "uint3")
-        return { 16, 12 };
-    if (hlsl_base == "float4" || hlsl_base == "int4" || hlsl_base == "uint4")
-        return { 16, 16 };
+    if (hlsl_base == "float2" || hlsl_base == "int2" || hlsl_base == "uint2") return { 8, 8 };
+    if (hlsl_base == "float3" || hlsl_base == "int3" || hlsl_base == "uint3") return { 16, 12 };
+    if (hlsl_base == "float4" || hlsl_base == "int4" || hlsl_base == "uint4") return { 16, 16 };
     // column_major float<R>x<C> = C columns of vec<R>, each padded to 16
     // bytes by std140 → 16*C bytes total.
-    if (hlsl_base.size() == 8 && hlsl_base.substr(0, 5) == "float" &&
-        hlsl_base[6] == 'x' &&
-        hlsl_base[5] >= '2' && hlsl_base[5] <= '4' &&
-        hlsl_base[7] >= '2' && hlsl_base[7] <= '4') {
+    if (hlsl_base.size() == 8 && hlsl_base.substr(0, 5) == "float" && hlsl_base[6] == 'x' &&
+        hlsl_base[5] >= '2' && hlsl_base[5] <= '4' && hlsl_base[7] >= '2' && hlsl_base[7] <= '4') {
         std::size_t cols = (std::size_t)(hlsl_base[7] - '0');
         return { 16, cols * 16 };
     }
@@ -1037,7 +1052,7 @@ inline Std140Layout Std140Base(std::string_view hlsl_base) {
 inline std::size_t ParseArrayCount(std::string_view arr) {
     if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
     std::string_view inner = arr.substr(1, arr.size() - 2);
-    std::size_t n = 0;
+    std::size_t      n     = 0;
     for (char c : inner) {
         if (c == ' ' || c == '\t') continue;
         if (c < '0' || c > '9') return 1;
@@ -1064,18 +1079,16 @@ inline std::string EmitCBufferStd140(const Map<std::string, std::string>& unifor
             base_ty = ty.substr(0, pos);
             array   = ty.substr(pos);
         }
-        std::string hlsl_ty = ToHLSLType(base_ty);
-        std::size_t n       = ParseArrayCount(array);
-        Std140Layout L      = Std140Base(hlsl_ty);
-        std::size_t member_align = (n > 1) ? std::size_t(16) : L.align;
-        std::size_t member_size  = (n > 1)
-                                     ? ((L.size + 15) & ~std::size_t(15)) * n
-                                     : L.size;
-        offset = (offset + member_align - 1) & ~(member_align - 1);
-        std::size_t reg  = offset / 16;
-        std::size_t comp = (offset % 16) / 4;
-        const char  letter = "xyzw"[comp];
-        const bool is_matrix =
+        std::string  hlsl_ty      = ToHLSLType(base_ty);
+        std::size_t  n            = ParseArrayCount(array);
+        Std140Layout L            = Std140Base(hlsl_ty);
+        std::size_t  member_align = (n > 1) ? std::size_t(16) : L.align;
+        std::size_t  member_size  = (n > 1) ? ((L.size + 15) & ~std::size_t(15)) * n : L.size;
+        offset                    = (offset + member_align - 1) & ~(member_align - 1);
+        std::size_t reg           = offset / 16;
+        std::size_t comp          = (offset % 16) / 4;
+        const char  letter        = "xyzw"[comp];
+        const bool  is_matrix =
             hlsl_ty == "float2x2" || hlsl_ty == "float3x3" || hlsl_ty == "float4x4" ||
             hlsl_ty == "float2x3" || hlsl_ty == "float2x4" || hlsl_ty == "float3x2" ||
             hlsl_ty == "float3x4" || hlsl_ty == "float4x2" || hlsl_ty == "float4x3";
@@ -1094,9 +1107,10 @@ inline std::string EmitCBufferStd140(const Map<std::string, std::string>& unifor
     return out;
 }
 
-inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
-                                  const WPPreprocessorInfo* next,
-                                  const Map<std::string, std::string>* uniforms_union_in = nullptr) {
+inline std::string
+Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
+               const WPPreprocessorInfo*            next,
+               const Map<std::string, std::string>* uniforms_union_in = nullptr) {
     // GS: feed glslang's HLSL frontend. Strip GLSL-style top-level `in`/`out`
     // decls, emit HLSL structs (WW_VSOut/WW_PSIn) + ww_Uniforms cbuffer, and
     // rewrite `void main()` to the entry signature `point WW_VSOut IN[1],
@@ -1106,29 +1120,40 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         std::string body          = StripUniforms(stripped);
 
         std::vector<IODecl> in_decls, out_decls;
-        auto add_to = [](std::vector<IODecl>& v, const IODecl& d) {
+        auto                add_to = [](std::vector<IODecl>& v, const IODecl& d) {
             for (auto& e : v) {
-                if (e.name == d.name) { e.type = WiderType(e.type, d.type); return; }
+                if (e.name == d.name) {
+                    e.type = WiderType(e.type, d.type);
+                    return;
+                }
             }
             v.push_back(d);
         };
-        auto add_in  = [&](const IODecl& d) { add_to(in_decls, d); };
-        auto add_out = [&](const IODecl& d) { add_to(out_decls, d); };
+        auto add_in = [&](const IODecl& d) {
+            add_to(in_decls, d);
+        };
+        auto add_out = [&](const IODecl& d) {
+            add_to(out_decls, d);
+        };
         for (const auto& d : io_decls) {
-            if (d.storage == 'i')      add_in(d);
-            else if (d.storage == 'o') add_out(d);
+            if (d.storage == 'i')
+                add_in(d);
+            else if (d.storage == 'o')
+                add_out(d);
         }
-        if (pre)  for (auto& [k, v] : pre->output) {
-            if (auto d = ParseIODecl(v); d) add_in(*d);
-        }
-        if (next) for (auto& [k, v] : next->input) {
-            if (auto d = ParseIODecl(v); d) add_out(*d);
-        }
+        if (pre)
+            for (auto& [k, v] : pre->output) {
+                if (auto d = ParseIODecl(v); d) add_in(*d);
+            }
+        if (next)
+            for (auto& [k, v] : next->input) {
+                if (auto d = ParseIODecl(v); d) add_out(*d);
+            }
 
         std::string synth;
         synth += "\n// === auto-generated GS stage I/O (HLSL) ===\n";
         synth += EmitGSHLSLStruct("WW_VSOut", std::move(in_decls));
-        synth += EmitGSHLSLStruct("WW_PSIn",  std::move(out_decls));
+        synth += EmitGSHLSLStruct("WW_PSIn", std::move(out_decls));
 
         // Cross-stage uniform union as an HLSL cbuffer matching VS/FS UBO
         // layout (binding=0, set=0). std140 / column-major matches the
@@ -1140,7 +1165,7 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
                 for (const auto& [k, v] : m) uniforms_union_local.try_emplace(k, v);
             };
             absorb(unit.preprocess_info.uniforms);
-            if (pre)  absorb(pre->uniforms);
+            if (pre) absorb(pre->uniforms);
             if (next) absorb(next->uniforms);
         }
         const Map<std::string, std::string>& uniforms_union =
@@ -1169,10 +1194,13 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     // (everything else). The cross-stage union ensures vert and frag pick
     // identical location indices alphabetically.
     std::vector<IODecl> attrs, varyings;
-    auto add = [&](const IODecl& d) {
+    auto                add = [&](const IODecl& d) {
         std::vector<IODecl>& v = (d.storage == 'a') ? attrs : varyings;
         for (auto& e : v) {
-            if (e.name == d.name) { e.type = WiderType(e.type, d.type); return; }
+            if (e.name == d.name) {
+                e.type = WiderType(e.type, d.type);
+                return;
+            }
         }
         v.push_back(d);
     };
@@ -1180,8 +1208,10 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     auto add_from_line = [&](const std::string& line) {
         if (auto d = ParseIODecl(line); d) add(*d);
     };
-    if (pre)  for (auto& [k, v] : pre->output) add_from_line(v);
-    if (next) for (auto& [k, v] : next->input) add_from_line(v);
+    if (pre)
+        for (auto& [k, v] : pre->output) add_from_line(v);
+    if (next)
+        for (auto& [k, v] : next->input) add_from_line(v);
 
     // Synthesize the HLSL entry point: static globals for every attr /
     // varying, WW_VSIn/WW_VSOut/WW_PSIn structs, and a main_vs / main_ps
@@ -1197,7 +1227,7 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
             for (const auto& [k, v] : m) uniforms_union_local.try_emplace(k, v);
         };
         absorb(unit.preprocess_info.uniforms);
-        if (pre)  absorb(pre->uniforms);
+        if (pre) absorb(pre->uniforms);
         if (next) absorb(next->uniforms);
     }
     const Map<std::string, std::string>& uniforms_union =
@@ -1205,7 +1235,8 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
 
     std::string uniform_block;
     if (! uniforms_union.empty()) {
-        uniform_block += "\n// === auto-generated shared uniforms (HLSL, std140 via packoffset) ===\n";
+        uniform_block +=
+            "\n// === auto-generated shared uniforms (HLSL, std140 via packoffset) ===\n";
         uniform_block += EmitCBufferStd140(uniforms_union);
     }
 
@@ -1221,11 +1252,10 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
         const char* tex_ty   = HLSLSamplerType(s.sampler_type);
         const char* state_ty = HLSLSamplerStateType(s.sampler_type);
         sampler_block += "[[vk::combinedImageSampler]][[vk::binding(" +
-                         std::to_string(sampler_idx) + ", 0)]] " +
-                         tex_ty + " " + s.name + ";\n";
+                         std::to_string(sampler_idx) + ", 0)]] " + tex_ty + " " + s.name + ";\n";
         sampler_block += "[[vk::combinedImageSampler]][[vk::binding(" +
-                         std::to_string(sampler_idx) + ", 0)]] " +
-                         state_ty + " " + s.name + "_ww_sampler;\n";
+                         std::to_string(sampler_idx) + ", 0)]] " + state_ty + " " + s.name +
+                         "_ww_sampler;\n";
         ++sampler_idx;
     }
 
@@ -1300,7 +1330,7 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
     newsrc.reserve(src.size());
     std::string all_includes;
 
-    usize cursor = 0;
+    usize                  cursor = 0;
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
         shader_lex::Cursor c(src);
@@ -1333,8 +1363,8 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
         pre = pre_shader_code_gs_hlsl;
     } else {
         pre = pre_shader_code;
-        const char* tail = (type == ShaderType::FRAGMENT) ? pre_shader_tail_frag
-                                                          : pre_shader_tail_vert;
+        const char* tail =
+            (type == ShaderType::FRAGMENT) ? pre_shader_tail_frag : pre_shader_tail_vert;
         if (auto pos = pre.find("__SHADER_TAIL__"); pos != std::string::npos) {
             pre.replace(pos, std::string_view("__SHADER_TAIL__").size(), tail);
         }
@@ -1398,11 +1428,11 @@ namespace
 // applied, regex extraction not yet run) so a replay through the full
 // pipeline exercises every transform downstream.
 nlohmann::json BuildShaderRecord(std::string_view scene_id, std::span<const WPShaderUnit> units,
-                                 const WPShaderInfo*                  shader_info,
-                                 std::span<const WPShaderTexInfo>     texs) {
+                                 const WPShaderInfo*              shader_info,
+                                 std::span<const WPShaderTexInfo> texs) {
     auto stage_name = [](ShaderType s) -> const char* {
         switch (s) {
-        case ShaderType::VERTEX:   return "VERTEX";
+        case ShaderType::VERTEX: return "VERTEX";
         case ShaderType::FRAGMENT: return "FRAGMENT";
         case ShaderType::GEOMETRY: return "GEOMETRY";
         }
@@ -1426,10 +1456,11 @@ nlohmann::json BuildShaderRecord(std::string_view scene_id, std::span<const WPSh
 
     nlohmann::json js_texs = nlohmann::json::array();
     for (const auto& t : texs) {
-        js_texs.push_back({ { "enabled", t.enabled },
-                            { "compos",
-                              nlohmann::json::array(
-                                  { t.composEnabled[0], t.composEnabled[1], t.composEnabled[2] }) } });
+        js_texs.push_back(
+            { { "enabled", t.enabled },
+              { "compos",
+                nlohmann::json::array(
+                    { t.composEnabled[0], t.composEnabled[1], t.composEnabled[2] }) } });
     }
     rec["tex_infos"] = std::move(js_texs);
 
@@ -1458,7 +1489,8 @@ void MaybeRecordCompile(std::string_view scene_id, std::span<const WPShaderUnit>
 
 bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderUnit> units,
                                   std::vector<ShaderCode>& codes, fs::VFS& vfs,
-                                  WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs) {
+                                  WPShaderInfo*                    shader_info,
+                                  std::span<const WPShaderTexInfo> texs) {
     MaybeRecordCompile(scene_id, units, shader_info, texs);
 
     std::for_each(units.begin(), units.end(), [shader_info](auto& unit) {
@@ -1538,8 +1570,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
 
 CompileMaterialShaderResult
 WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::VFS& vfs,
-                                      std::string_view scene_id,
-                                      const Combos&    combos_override) {
+                                      std::string_view scene_id, const Combos& combos_override) {
     CompileMaterialShaderResult r;
 
     wpscene::WPMaterial mat;
@@ -1600,9 +1631,13 @@ WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::V
     }
 
     InitGlslang();
-    const bool ok = WPShaderParser::CompileToSpv(
-        scene_id, std::span<WPShaderUnit>(units.data(), units.size()), r.spvs, vfs, &r.info,
-        r.tex_info);
+    const bool ok =
+        WPShaderParser::CompileToSpv(scene_id,
+                                     std::span<WPShaderUnit>(units.data(), units.size()),
+                                     r.spvs,
+                                     vfs,
+                                     &r.info,
+                                     r.tex_info);
     FinalGlslang();
 
     r.ok = ok;

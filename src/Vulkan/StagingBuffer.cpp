@@ -11,10 +11,12 @@ import rstd.cppstd;
 
 using namespace owe::vulkan;
 
-#define CHECK_REF(ref, act)                                                  \
-    if (! ref) {                                                             \
+#define CHECK_REF(ref, act)                                                   \
+    if (! ref) {                                                              \
         rstd_error("stage ref not available, index {}", ref.m_virtual_index); \
-        { act; }                                                             \
+        {                                                                     \
+            act;                                                              \
+        }                                                                     \
     }
 
 StagingBuffer::StagingBuffer(const Device& d, VkDeviceSize size, VkBufferUsageFlags usage)
@@ -28,10 +30,10 @@ std::optional<VmaBufferParameters> CreateGpuBuffer(VmaAllocator allocator, VkBuf
     do {
         VmaBufferParameters buffer;
         VkBufferCreateInfo  ci {
-             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-             .pNext = nullptr,
-             .size  = size,
-             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .size  = size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
         };
         buffer.req_size                  = ci.size;
         VmaAllocationCreateInfo vma_info = {};
@@ -95,17 +97,17 @@ StagingBuffer::VirtualBlock* StagingBuffer::newVirtualBlock(VkDeviceSize nsize) 
     block.enabled = true;
 
     rstd_info("new buffer block({:#x}), size: {}, index: {} / {}",
-             reinterpret_cast<std::uintptr_t>(this),
-             block.size,
-             block.index,
-             m_virtual_blocks.size());
+              reinterpret_cast<std::uintptr_t>(this),
+              block.size,
+              block.index,
+              m_virtual_blocks.size());
     return &block;
 }
 bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
     if (m_stage_raw == nullptr) {
         VVK_CHECK_BOOL_RE(mapStageBuf());
     }
-    auto newsize = m_stage_buf.req_size + nsize;
+    auto                 newsize = m_stage_buf.req_size + nsize;
     std::vector<uint8_t> tmp;
     tmp.resize(newsize);
     std::memcpy(tmp.data(), m_stage_raw, m_stage_buf.req_size);

@@ -301,8 +301,8 @@ DebugUtilsMessenger Instance::CreateDebugUtilsMessenger(
 }
 VkResult Device::Create(Device& device, VkPhysicalDevice physical_device,
                         Span<const VkDeviceQueueCreateInfo> queues_ci,
-                        Span<const char*> enabled_extensions, const void* next,
-                        DeviceDispatch& dld, const VkPhysicalDeviceFeatures* enabled_features) {
+                        Span<const char*> enabled_extensions, const void* next, DeviceDispatch& dld,
+                        const VkPhysicalDeviceFeatures* enabled_features) {
     const VkDeviceCreateInfo ci {
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext                   = next,
@@ -411,7 +411,7 @@ VkResult Device::CreateSemaphore(const VkSemaphoreCreateInfo& ci, Semaphore& sm)
 }
 
 VkResult Device::GetSemaphoreFdKHR(const VkSemaphoreGetFdInfoKHR& gi, int* fd) const noexcept {
-    if (!dld->vkGetSemaphoreFdKHR) return VK_ERROR_EXTENSION_NOT_PRESENT;
+    if (! dld->vkGetSemaphoreFdKHR) return VK_ERROR_EXTENSION_NOT_PRESENT;
     return dld->vkGetSemaphoreFdKHR(handle, &gi, fd);
 }
 

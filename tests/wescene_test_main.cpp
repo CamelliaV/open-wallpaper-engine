@@ -31,7 +31,8 @@ import wescene.testing.pkg_header;
 namespace fs = std::filesystem;
 using json   = nlohmann::json;
 
-namespace {
+namespace
+{
 
 constexpr const char* kDefaultWorkshopDir =
 #ifdef WAYWALLEN_WORKSHOP_DIR
@@ -85,8 +86,10 @@ std::string ResolvePkgPath(std::string_view arg) {
 // "/scene.json", "scene.json", "/assets/scene.json", "assets/scene.json".
 std::string NormalisePkgAssetPath(std::string_view arg) {
     std::string p { arg };
-    if (StartsWith(p, "/assets/")) p.erase(0, 7);  // → "/scene.json"
-    else if (StartsWith(p, "assets/")) p.erase(0, 6); // → "/scene.json" — wait, 6 chars then ensure leading '/'
+    if (StartsWith(p, "/assets/"))
+        p.erase(0, 7); // → "/scene.json"
+    else if (StartsWith(p, "assets/"))
+        p.erase(0, 6); // → "/scene.json" — wait, 6 chars then ensure leading '/'
     if (! p.empty() && p.front() != '/') p.insert(p.begin(), '/');
     return p;
 }
@@ -100,8 +103,8 @@ struct ScanOptions {
     std::string              assets_dir   = kDefaultAssetsDir;
     bool                     p_tex { false };
     bool                     p_shader { false };
-    bool                     p_mdl { false };       // header-only by default
-    bool                     p_mdl_full { false };  // upgrade to full WPMdlParser::Parse
+    bool                     p_mdl { false };      // header-only by default
+    bool                     p_mdl_full { false }; // upgrade to full WPMdlParser::Parse
     bool                     full { false };
     std::vector<std::string> name_filters;
     std::vector<unsigned>    pkgv_filters;
@@ -109,8 +112,8 @@ struct ScanOptions {
     int                      offset { 0 };
     bool                     quiet { false };
     bool                     stop_on_fail { false };
-    std::string              json_out;              // empty = no single JSON file (--json)
-    std::string              json_dir;              // empty = no per-workshop dump dir (--json-dir)
+    std::string              json_out; // empty = no single JSON file (--json)
+    std::string              json_dir; // empty = no per-workshop dump dir (--json-dir)
 };
 
 void AddScanArgs(argparse::ArgumentParser& p) {
@@ -124,35 +127,33 @@ void AddScanArgs(argparse::ArgumentParser& p) {
     p.add_argument("--full").flag().help(
         "run full WPSceneParser::Parse (shader compile, bloom inject, glslang) "
         "instead of the cheap FromJson+ExpandObjects+AdjustAuto base");
-    p.add_argument("--parse-tex").flag().help(
-        "run WPTexImageParser on every /materials/**/*.tex");
-    p.add_argument("--parse-shader").flag().help(
-        "run WPShaderParser::CompileMaterialShader on every /materials/**/*.json");
-    p.add_argument("--parse-mdl").flag().help(
-        "run WPMdlParser::ParseHeader on every /models/**/*.mdl (header-only)");
-    p.add_argument("--parse-mdl-full").flag().help(
-        "upgrade --parse-mdl to full WPMdlParser::Parse (slow; some hang/reject)");
-    p.add_argument("--parse-all").flag().help(
-        "--parse-tex + --parse-shader + --parse-mdl (header-only)");
-    p.add_argument("--name")
-        .append()
-        .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
-    p.add_argument("--pkgv")
-        .append()
-        .scan<'i', unsigned>()
-        .help("only pkgs with PKGV stamp == N; repeatable, OR'd");
-    p.add_argument("--limit")
-        .default_value(0)
-        .scan<'i', int>()
-        .help("stop after N matched pkgs (default 0 = all)");
+    p.add_argument("--parse-tex").flag().help("run WPTexImageParser on every /materials/**/*.tex");
+    p.add_argument("--parse-shader")
+        .flag()
+        .help("run WPShaderParser::CompileMaterialShader on every /materials/**/*.json");
+    p.add_argument("--parse-mdl")
+        .flag()
+        .help("run WPMdlParser::ParseHeader on every /models/**/*.mdl (header-only)");
+    p.add_argument("--parse-mdl-full")
+        .flag()
+        .help("upgrade --parse-mdl to full WPMdlParser::Parse (slow; some hang/reject)");
+    p.add_argument("--parse-all")
+        .flag()
+        .help("--parse-tex + --parse-shader + --parse-mdl (header-only)");
+    p.add_argument("--name").append().help(
+        "only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
+    p.add_argument("--pkgv").append().scan<'i', unsigned>().help(
+        "only pkgs with PKGV stamp == N; repeatable, OR'd");
+    p.add_argument("--limit").default_value(0).scan<'i', int>().help(
+        "stop after N matched pkgs (default 0 = all)");
     p.add_argument("--offset")
         .default_value(0)
         .scan<'i', int>()
         .help("skip the first N matched pkgs before --limit applies");
-    p.add_argument("--quiet").flag().help(
-        "suppress per-asset OK lines; only FAIL + summary");
-    p.add_argument("--stop-on-fail").flag().help(
-        "exit non-zero on the first per-asset failure (resume at next --offset)");
+    p.add_argument("--quiet").flag().help("suppress per-asset OK lines; only FAIL + summary");
+    p.add_argument("--stop-on-fail")
+        .flag()
+        .help("exit non-zero on the first per-asset failure (resume at next --offset)");
     auto& sink = p.add_mutually_exclusive_group();
     sink.add_argument("--json")
         .default_value(std::string())
@@ -254,10 +255,9 @@ bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
     return true;
 }
 
-void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
-                      owe::fs::VFS& vfs, const std::string& pkg_id,
-                      Counters& c, bool quiet, json* sink) {
-    owe::WPTexImageParser parser(&vfs);
+void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
+                      const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
+    owe::WPTexImageParser      parser(&vfs);
     constexpr std::string_view prefix = "/materials/";
     constexpr std::string_view suffix = ".tex";
     for (const auto& e : entries) {
@@ -265,15 +265,15 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
         if (e.path.size() < prefix.size() + suffix.size()) continue;
         // ParseHeader takes the bare name (no /materials/ prefix, no .tex
         // suffix), matching WPMaterial.textures shape.
-        const std::string name = e.path.substr(prefix.size(),
-                                               e.path.size() - prefix.size() - suffix.size());
-        bool              ok    = false;
-        bool              video = false;
-        std::string       err;
+        const std::string name =
+            e.path.substr(prefix.size(), e.path.size() - prefix.size() - suffix.size());
+        bool        ok    = false;
+        bool        video = false;
+        std::string err;
         try {
             owe::ImageHeader h = parser.ParseHeader(name);
-            ok = (h.width > 0 && h.height > 0);
-            video = (h.type == owe::ImageType::VIDEO);
+            ok                 = (h.width > 0 && h.height > 0);
+            video              = (h.type == owe::ImageType::VIDEO);
             if (! ok) err = "header looks invalid (zero dim)";
         } catch (const std::exception& ex) {
             err = ex.what();
@@ -284,20 +284,21 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
             ++c.tex_ok;
             if (! quiet) {
                 if (video) {
-                    std::fprintf(stdout, "OK    %s tex %s (video container)\n",
-                                 pkg_id.c_str(), e.path.c_str());
+                    std::fprintf(stdout,
+                                 "OK    %s tex %s (video container)\n",
+                                 pkg_id.c_str(),
+                                 e.path.c_str());
                 } else {
-                    std::fprintf(stdout, "OK    %s tex %s\n",
-                                 pkg_id.c_str(), e.path.c_str());
+                    std::fprintf(stdout, "OK    %s tex %s\n", pkg_id.c_str(), e.path.c_str());
                 }
             }
         } else {
             ++c.tex_fail;
-            std::fprintf(stdout, "FAIL  %s tex %s  %s\n", pkg_id.c_str(), e.path.c_str(),
-                         err.c_str());
+            std::fprintf(
+                stdout, "FAIL  %s tex %s  %s\n", pkg_id.c_str(), e.path.c_str(), err.c_str());
         }
         if (sink) {
-            json entry { {"path", e.path}, {"ok", ok} };
+            json entry { { "path", e.path }, { "ok", ok } };
             if (ok) {
                 if (video) entry["video"] = true;
             } else {
@@ -308,19 +309,19 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries,
     }
 }
 
-void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
-                     owe::fs::VFS& vfs, const std::string& pkg_id,
-                     Counters& c, bool quiet, json* sink) {
+void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
+                     const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
     for (const auto& e : entries) {
         if (! StartsWith(e.path, "/materials/") || ! EndsWith(e.path, ".json")) continue;
         const std::string vfs_path = "/assets" + e.path;
         auto              stream   = vfs.Open(vfs_path);
         if (! stream) {
             ++c.shader_fail;
-            std::fprintf(stdout, "FAIL  %s shader %s  cannot open\n", pkg_id.c_str(),
-                         e.path.c_str());
-            if (sink) sink->push_back({ {"path", e.path}, {"ok", false},
-                                        {"error", "cannot open"} });
+            std::fprintf(
+                stdout, "FAIL  %s shader %s  cannot open\n", pkg_id.c_str(), e.path.c_str());
+            if (sink)
+                sink->push_back(
+                    { { "path", e.path }, { "ok", false }, { "error", "cannot open" } });
             continue;
         }
         const std::string text = stream->ReadAllStr();
@@ -329,10 +330,15 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
             jmat = json::parse(text);
         } catch (const std::exception& ex) {
             ++c.shader_fail;
-            std::fprintf(stdout, "FAIL  %s shader %s  json: %s\n", pkg_id.c_str(),
-                         e.path.c_str(), ex.what());
-            if (sink) sink->push_back({ {"path", e.path}, {"ok", false},
-                                        {"error", std::string("json: ") + ex.what()} });
+            std::fprintf(stdout,
+                         "FAIL  %s shader %s  json: %s\n",
+                         pkg_id.c_str(),
+                         e.path.c_str(),
+                         ex.what());
+            if (sink)
+                sink->push_back({ { "path", e.path },
+                                  { "ok", false },
+                                  { "error", std::string("json: ") + ex.what() } });
             continue;
         }
         owe::CompileMaterialShaderResult r;
@@ -348,25 +354,30 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries,
         if (r.ok) {
             ++c.shader_ok;
             if (! quiet)
-                std::fprintf(stdout, "OK    %s shader %s [%s]\n", pkg_id.c_str(),
-                             e.path.c_str(), r.shader_name.c_str());
+                std::fprintf(stdout,
+                             "OK    %s shader %s [%s]\n",
+                             pkg_id.c_str(),
+                             e.path.c_str(),
+                             r.shader_name.c_str());
         } else {
             ++c.shader_fail;
-            std::fprintf(stdout, "FAIL  %s shader %s [%s]  %s\n", pkg_id.c_str(),
-                         e.path.c_str(), r.shader_name.c_str(), r.error.c_str());
+            std::fprintf(stdout,
+                         "FAIL  %s shader %s [%s]  %s\n",
+                         pkg_id.c_str(),
+                         e.path.c_str(),
+                         r.shader_name.c_str(),
+                         r.error.c_str());
         }
         if (sink) {
-            json entry { {"path", e.path}, {"ok", r.ok},
-                         {"shader_name", r.shader_name} };
+            json entry { { "path", e.path }, { "ok", r.ok }, { "shader_name", r.shader_name } };
             if (! r.ok) entry["error"] = r.error;
             sink->push_back(std::move(entry));
         }
     }
 }
 
-void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries,
-                  owe::fs::VFS& vfs, const std::string& pkg_id,
-                  Counters& c, bool quiet, json* sink) {
+void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
+                  const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
     for (const auto& e : entries) {
         if (! EndsWith(e.path, ".mdl")) continue;
         // WPMdlParser::Parse takes a path without /assets prefix.
@@ -384,15 +395,14 @@ void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries,
         }
         if (ok) {
             ++c.mdl_ok;
-            if (! quiet)
-                std::fprintf(stdout, "OK    %s mdl %s\n", pkg_id.c_str(), e.path.c_str());
+            if (! quiet) std::fprintf(stdout, "OK    %s mdl %s\n", pkg_id.c_str(), e.path.c_str());
         } else {
             ++c.mdl_fail;
-            std::fprintf(stdout, "FAIL  %s mdl %s  %s\n", pkg_id.c_str(), e.path.c_str(),
-                         err.c_str());
+            std::fprintf(
+                stdout, "FAIL  %s mdl %s  %s\n", pkg_id.c_str(), e.path.c_str(), err.c_str());
         }
         if (sink) {
-            json entry { {"path", e.path}, {"ok", ok} };
+            json entry { { "path", e.path }, { "ok", ok } };
             if (! ok) entry["error"] = err;
             sink->push_back(std::move(entry));
         }
@@ -410,12 +420,11 @@ std::string FormatMdlFlag(uint32_t flag) {
     return out;
 }
 
-void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries,
-                        owe::fs::VFS& vfs, const std::string& pkg_id,
-                        Counters& c, bool quiet, json* sink) {
+void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
+                        const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
     for (const auto& e : entries) {
         if (! EndsWith(e.path, ".mdl")) continue;
-        std::string name(e.path.substr(1));
+        std::string      name(e.path.substr(1));
         owe::WPMdlHeader h;
         bool             ok = false;
         std::string      err;
@@ -430,22 +439,29 @@ void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries,
         if (ok) {
             ++c.mdl_ok;
             if (! quiet)
-                std::fprintf(stdout, "OK    %s mdl-header %s  mdlv=%d mesh=%u flag=%s\n",
-                             pkg_id.c_str(), e.path.c_str(),
-                             h.mdlv, h.mesh_count, FormatMdlFlag(h.mdl_flag).c_str());
+                std::fprintf(stdout,
+                             "OK    %s mdl-header %s  mdlv=%d mesh=%u flag=%s\n",
+                             pkg_id.c_str(),
+                             e.path.c_str(),
+                             h.mdlv,
+                             h.mesh_count,
+                             FormatMdlFlag(h.mdl_flag).c_str());
         } else {
             ++c.mdl_fail;
-            std::fprintf(stdout, "FAIL  %s mdl-header %s  %s\n", pkg_id.c_str(), e.path.c_str(),
+            std::fprintf(stdout,
+                         "FAIL  %s mdl-header %s  %s\n",
+                         pkg_id.c_str(),
+                         e.path.c_str(),
                          err.c_str());
         }
         if (sink) {
-            json entry { {"path", e.path}, {"ok", ok} };
+            json entry { { "path", e.path }, { "ok", ok } };
             if (ok) {
                 entry["mdlv"]       = h.mdlv;
                 entry["mesh_count"] = h.mesh_count;
-                json flag_arr = json::array();
+                json flag_arr       = json::array();
                 for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {
-                    uint8_t b = static_cast<uint8_t>((h.mdl_flag >> (byte_idx * 8)) & 0xFFu);
+                    uint8_t     b = static_cast<uint8_t>((h.mdl_flag >> (byte_idx * 8)) & 0xFFu);
                     std::string bits(8, '0');
                     for (int i = 0; i < 8; ++i)
                         if (b & (1u << (7 - i))) bits[i] = '1';
@@ -460,14 +476,13 @@ void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries,
     }
 }
 
-bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
-                   json* pkgs_arr) {
+bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c, json* pkgs_arr) {
     const std::string pkg_id = pkg_dir.filename().string();
 
     for (const auto* sk : kSkipIds) {
         if (pkg_id == sk) {
             std::fprintf(stderr, "SKIP  %s (in kSkipIds)\n", pkg_id.c_str());
-            if (pkgs_arr) pkgs_arr->push_back({ {"id", pkg_id}, {"skipped", true} });
+            if (pkgs_arr) pkgs_arr->push_back({ { "id", pkg_id }, { "skipped", true } });
             return true;
         }
     }
@@ -476,22 +491,24 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
     if (! fs::exists(pkg_path)) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  scene.pkg not found\n", pkg_id.c_str());
-        if (pkgs_arr) pkgs_arr->push_back({
-            {"id", pkg_id},
-            {"parse", { {"ok", false}, {"error", "scene.pkg not found"} }},
-        });
+        if (pkgs_arr)
+            pkgs_arr->push_back({
+                { "id", pkg_id },
+                { "parse", { { "ok", false }, { "error", "scene.pkg not found" } } },
+            });
         return false;
     }
 
-    std::string                          version_stamp;
-    std::vector<owe::testing::PkgEntry>  entries;
+    std::string                         version_stamp;
+    std::vector<owe::testing::PkgEntry> entries;
     if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  ReadPkgHeader\n", pkg_id.c_str());
-        if (pkgs_arr) pkgs_arr->push_back({
-            {"id", pkg_id},
-            {"parse", { {"ok", false}, {"error", "ReadPkgHeader"} }},
-        });
+        if (pkgs_arr)
+            pkgs_arr->push_back({
+                { "id", pkg_id },
+                { "parse", { { "ok", false }, { "error", "ReadPkgHeader" } } },
+            });
         return false;
     }
     const auto pkg_v = owe::wpscene::ParsePkgVersionStamp(version_stamp);
@@ -508,10 +525,12 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
     if (! wfs) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  WPPkgFs::CreatePkgFs\n", pkg_id.c_str());
-        if (pkgs_arr) pkgs_arr->push_back({
-            {"id", pkg_id}, {"pkg_version", (unsigned)pkg_v},
-            {"parse", { {"ok", false}, {"error", "WPPkgFs::CreatePkgFs"} }},
-        });
+        if (pkgs_arr)
+            pkgs_arr->push_back({
+                { "id", pkg_id },
+                { "pkg_version", (unsigned)pkg_v },
+                { "parse", { { "ok", false }, { "error", "WPPkgFs::CreatePkgFs" } } },
+            });
         return false;
     }
     vfs.Mount("/assets", std::move(wfs));
@@ -532,7 +551,10 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
             std::fprintf(stdout, "OK    %s parse  v=%u\n", pkg_id.c_str(), (unsigned)pkg_v);
     } else {
         ++c.parsed_fail;
-        std::fprintf(stdout, "FAIL  %s parse  v=%u  %s\n", pkg_id.c_str(), (unsigned)pkg_v,
+        std::fprintf(stdout,
+                     "FAIL  %s parse  v=%u  %s\n",
+                     pkg_id.c_str(),
+                     (unsigned)pkg_v,
                      parse_err.c_str());
     }
 
@@ -543,22 +565,30 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
     if (pkgs_arr) {
         pkg_obj["id"]          = pkg_id;
         pkg_obj["pkg_version"] = (unsigned)pkg_v;
-        pkg_obj["parse"]       = parse_ok ? json { {"ok", true} }
-                                          : json { {"ok", false}, {"error", parse_err} };
-        if (opt.p_tex)    { pkg_obj["textures"] = json::array(); tex_sink    = &pkg_obj["textures"]; }
-        if (opt.p_shader) { pkg_obj["shaders"]  = json::array(); shader_sink = &pkg_obj["shaders"]; }
+        pkg_obj["parse"] =
+            parse_ok ? json { { "ok", true } } : json { { "ok", false }, { "error", parse_err } };
+        if (opt.p_tex) {
+            pkg_obj["textures"] = json::array();
+            tex_sink            = &pkg_obj["textures"];
+        }
+        if (opt.p_shader) {
+            pkg_obj["shaders"] = json::array();
+            shader_sink        = &pkg_obj["shaders"];
+        }
         if (opt.p_mdl) {
             const char* key = opt.p_mdl_full ? "mdls" : "mdls_header";
-            pkg_obj[key] = json::array();
-            mdl_sink     = &pkg_obj[key];
+            pkg_obj[key]    = json::array();
+            mdl_sink        = &pkg_obj[key];
         }
     }
 
-    if (opt.p_tex)    ValidateTextures(entries, vfs, pkg_id, c, opt.quiet, tex_sink);
+    if (opt.p_tex) ValidateTextures(entries, vfs, pkg_id, c, opt.quiet, tex_sink);
     if (opt.p_shader) ValidateShaders(entries, vfs, pkg_id, c, opt.quiet, shader_sink);
     if (opt.p_mdl) {
-        if (opt.p_mdl_full) ValidateMdls(entries, vfs, pkg_id, c, opt.quiet, mdl_sink);
-        else                ValidateMdlsHeader(entries, vfs, pkg_id, c, opt.quiet, mdl_sink);
+        if (opt.p_mdl_full)
+            ValidateMdls(entries, vfs, pkg_id, c, opt.quiet, mdl_sink);
+        else
+            ValidateMdlsHeader(entries, vfs, pkg_id, c, opt.quiet, mdl_sink);
     }
 
     if (pkgs_arr) pkgs_arr->push_back(std::move(pkg_obj));
@@ -573,15 +603,16 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
             .mdl_full = opt.p_mdl_full,
         };
         std::string derr;
-        json snap = owe::testing::DumpWorkshop(pkg_dir.string(), derr, df);
+        json        snap = owe::testing::DumpWorkshop(pkg_dir.string(), derr, df);
         if (! derr.empty()) {
-            snap = json { {"workshop_dir", pkg_id}, {"error", derr} };
+            snap = json { { "workshop_dir", pkg_id }, { "error", derr } };
         }
-        const auto out_path = fs::path(opt.json_dir) / (pkg_id + ".json");
+        const auto    out_path = fs::path(opt.json_dir) / (pkg_id + ".json");
         std::ofstream ofs(out_path);
-        if (ofs) ofs << snap.dump(2) << "\n";
-        else std::fprintf(stderr, "wescene-test scan: cannot write %s\n",
-                          out_path.string().c_str());
+        if (ofs)
+            ofs << snap.dump(2) << "\n";
+        else
+            std::fprintf(stderr, "wescene-test scan: cannot write %s\n", out_path.string().c_str());
     }
 
     return parse_ok;
@@ -589,8 +620,8 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
 
 int CmdScan(const ScanOptions& opt) {
     if (! fs::exists(opt.workshop_dir) || ! fs::is_directory(opt.workshop_dir)) {
-        std::fprintf(stderr, "wescene-test scan: %s is not a directory\n",
-                     opt.workshop_dir.c_str());
+        std::fprintf(
+            stderr, "wescene-test scan: %s is not a directory\n", opt.workshop_dir.c_str());
         return 1;
     }
 
@@ -598,8 +629,10 @@ int CmdScan(const ScanOptions& opt) {
         std::error_code ec;
         fs::create_directories(opt.json_dir, ec);
         if (ec || ! fs::is_directory(opt.json_dir)) {
-            std::fprintf(stderr, "wescene-test scan: cannot create --json-dir '%s': %s\n",
-                         opt.json_dir.c_str(), ec.message().c_str());
+            std::fprintf(stderr,
+                         "wescene-test scan: cannot create --json-dir '%s': %s\n",
+                         opt.json_dir.c_str(),
+                         ec.message().c_str());
             return 1;
         }
     }
@@ -617,8 +650,10 @@ int CmdScan(const ScanOptions& opt) {
         }
         std::sort(dirs.begin(), dirs.end());
         if (opt.offset > 0) {
-            if ((size_t)opt.offset >= dirs.size()) dirs.clear();
-            else dirs.erase(dirs.begin(), dirs.begin() + opt.offset);
+            if ((size_t)opt.offset >= dirs.size())
+                dirs.clear();
+            else
+                dirs.erase(dirs.begin(), dirs.begin() + opt.offset);
         }
         if (opt.limit > 0 && (int)dirs.size() > opt.limit) {
             dirs.resize((size_t)opt.limit);
@@ -644,8 +679,7 @@ int CmdScan(const ScanOptions& opt) {
     for (const auto& d : dirs) {
         ProcessOnePkg(d, opt, c, pkgs_arr);
         ++processed;
-        if (opt.stop_on_fail &&
-            (c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail) > 0) {
+        if (opt.stop_on_fail && (c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail) > 0) {
             std::fprintf(stderr,
                          "wescene-test scan: --stop-on-fail after pkg '%s'\n",
                          d.filename().string().c_str());
@@ -659,38 +693,43 @@ int CmdScan(const ScanOptions& opt) {
 
     std::fprintf(stderr,
                  "wescene-test scan: %zu pkgs | parse %d/%d",
-                 dirs.size(), c.parsed_ok, c.parsed_ok + c.parsed_fail);
-    if (opt.p_tex)    std::fprintf(stderr, " | tex %d/%d",    c.tex_ok,    c.tex_ok + c.tex_fail);
-    if (opt.p_shader) std::fprintf(stderr, " | shader %d/%d", c.shader_ok, c.shader_ok + c.shader_fail);
-    if (opt.p_mdl)    std::fprintf(stderr, " | %s %d/%d",
-                                   opt.p_mdl_full ? "mdl" : "mdl-header",
-                                   c.mdl_ok, c.mdl_ok + c.mdl_fail);
+                 dirs.size(),
+                 c.parsed_ok,
+                 c.parsed_ok + c.parsed_fail);
+    if (opt.p_tex) std::fprintf(stderr, " | tex %d/%d", c.tex_ok, c.tex_ok + c.tex_fail);
+    if (opt.p_shader)
+        std::fprintf(stderr, " | shader %d/%d", c.shader_ok, c.shader_ok + c.shader_fail);
+    if (opt.p_mdl)
+        std::fprintf(stderr,
+                     " | %s %d/%d",
+                     opt.p_mdl_full ? "mdl" : "mdl-header",
+                     c.mdl_ok,
+                     c.mdl_ok + c.mdl_fail);
     std::fprintf(stderr, " | %lldms\n", (long long)ms);
 
     if (pkgs_arr) {
         json summary;
         summary["pkgs"]  = dirs.size();
         summary["ms"]    = (long long)ms;
-        summary["parse"] = { {"ok", c.parsed_ok}, {"fail", c.parsed_fail} };
-        if (opt.p_tex)    summary["tex"]    = { {"ok", c.tex_ok},    {"fail", c.tex_fail} };
-        if (opt.p_shader) summary["shader"] = { {"ok", c.shader_ok}, {"fail", c.shader_fail} };
+        summary["parse"] = { { "ok", c.parsed_ok }, { "fail", c.parsed_fail } };
+        if (opt.p_tex) summary["tex"] = { { "ok", c.tex_ok }, { "fail", c.tex_fail } };
+        if (opt.p_shader) summary["shader"] = { { "ok", c.shader_ok }, { "fail", c.shader_fail } };
         if (opt.p_mdl) {
             const char* key = opt.p_mdl_full ? "mdl" : "mdl-header";
-            summary[key] = { {"ok", c.mdl_ok}, {"fail", c.mdl_fail} };
+            summary[key]    = { { "ok", c.mdl_ok }, { "fail", c.mdl_fail } };
         }
         doc["summary"] = std::move(summary);
 
         std::ofstream out(opt.json_out);
         if (! out) {
-            std::fprintf(stderr, "wescene-test scan: cannot open --json file '%s'\n",
-                         opt.json_out.c_str());
+            std::fprintf(
+                stderr, "wescene-test scan: cannot open --json file '%s'\n", opt.json_out.c_str());
             return 1;
         }
         out << doc.dump(2) << "\n";
     }
 
-    const int total_fail =
-        c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail;
+    const int total_fail = c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail;
     return total_fail == 0 ? 0 : 1;
 }
 
@@ -699,8 +738,7 @@ int CmdScan(const ScanOptions& opt) {
 // ---------------------------------------------------------------------------
 
 void AddExtractArgs(argparse::ArgumentParser& p) {
-    p.add_description(
-        "List entries of a single scene.pkg, or export one asset to stdout/-o FILE.");
+    p.add_description("List entries of a single scene.pkg, or export one asset to stdout/-o FILE.");
     p.add_argument("pkg").help("path to scene.pkg, or a directory containing one");
     p.add_argument("asset")
         .nargs(argparse::nargs_pattern::optional)
@@ -718,16 +756,17 @@ int CmdExtract(const argparse::ArgumentParser& a) {
 
     const std::string pkg_path = ResolvePkgPath(pkg_arg);
     if (pkg_path.empty()) {
-        std::fprintf(stderr, "wescene-test extract: '%s' is not a scene.pkg or directory containing one\n",
+        std::fprintf(stderr,
+                     "wescene-test extract: '%s' is not a scene.pkg or directory containing one\n",
                      pkg_arg.c_str());
         return 1;
     }
 
-    std::string                          version_stamp;
-    std::vector<owe::testing::PkgEntry>  entries;
+    std::string                         version_stamp;
+    std::vector<owe::testing::PkgEntry> entries;
     if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
-        std::fprintf(stderr, "wescene-test extract: ReadPkgHeader failed on %s\n",
-                     pkg_path.c_str());
+        std::fprintf(
+            stderr, "wescene-test extract: ReadPkgHeader failed on %s\n", pkg_path.c_str());
         return 1;
     }
 
@@ -737,8 +776,11 @@ int CmdExtract(const argparse::ArgumentParser& a) {
         paths.reserve(entries.size());
         for (const auto& e : entries) paths.push_back(e.path);
         std::sort(paths.begin(), paths.end());
-        std::fprintf(stderr, "wescene-test extract: %s (%s, %zu entries)\n",
-                     pkg_path.c_str(), version_stamp.c_str(), paths.size());
+        std::fprintf(stderr,
+                     "wescene-test extract: %s (%s, %zu entries)\n",
+                     pkg_path.c_str(),
+                     version_stamp.c_str(),
+                     paths.size());
         for (const auto& p : paths) std::fprintf(stdout, "%s\n", p.c_str());
         return 0;
     }
@@ -749,30 +791,29 @@ int CmdExtract(const argparse::ArgumentParser& a) {
     owe::fs::VFS vfs;
     auto         wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) {
-        std::fprintf(stderr, "wescene-test extract: WPPkgFs::CreatePkgFs failed on %s\n",
-                     pkg_path.c_str());
+        std::fprintf(
+            stderr, "wescene-test extract: WPPkgFs::CreatePkgFs failed on %s\n", pkg_path.c_str());
         return 1;
     }
     vfs.Mount("/assets", std::move(wfs));
 
     auto stream = vfs.Open(vfs_path);
     if (! stream) {
-        std::fprintf(stderr, "wescene-test extract: '%s' not found in pkg\n",
-                     in_pkg_path.c_str());
+        std::fprintf(stderr, "wescene-test extract: '%s' not found in pkg\n", in_pkg_path.c_str());
         return 1;
     }
 
     const std::string body = stream->ReadAllStr();
 
-    FILE* out = nullptr;
+    FILE* out       = nullptr;
     bool  close_out = false;
     if (out_file.empty() || out_file == "-") {
         out = stdout;
     } else {
         out = std::fopen(out_file.c_str(), "wb");
         if (! out) {
-            std::fprintf(stderr, "wescene-test extract: cannot open '%s' for writing\n",
-                         out_file.c_str());
+            std::fprintf(
+                stderr, "wescene-test extract: cannot open '%s' for writing\n", out_file.c_str());
             return 1;
         }
         close_out = true;
@@ -781,14 +822,14 @@ int CmdExtract(const argparse::ArgumentParser& a) {
     const size_t n = std::fwrite(body.data(), 1, body.size(), out);
     if (close_out) std::fclose(out);
     if (n != body.size()) {
-        std::fprintf(stderr, "wescene-test extract: short write (%zu of %zu bytes)\n",
-                     n, body.size());
+        std::fprintf(
+            stderr, "wescene-test extract: short write (%zu of %zu bytes)\n", n, body.size());
         return 1;
     }
 
     if (! out_file.empty() && out_file != "-") {
-        std::fprintf(stderr, "wescene-test extract: wrote %zu bytes to %s\n",
-                     body.size(), out_file.c_str());
+        std::fprintf(
+            stderr, "wescene-test extract: wrote %zu bytes to %s\n", body.size(), out_file.c_str());
     }
     return 0;
 }
@@ -798,41 +839,43 @@ int CmdExtract(const argparse::ArgumentParser& a) {
 // ---------------------------------------------------------------------------
 
 struct GrepOptions {
-    enum class Mode { Context, Only, Files, Count };
+    enum class Mode
+    {
+        Context,
+        Only,
+        Files,
+        Count
+    };
 
     std::string              workshop_dir = kDefaultWorkshopDir;
     std::string              pattern;
     std::vector<std::string> name_filters;
     std::string              path_filter;          // substring (ci); empty = ".json" suffix
-    bool                     search_all { false };  // search every entry, not just .json
+    bool                     search_all { false }; // search every entry, not just .json
     bool                     icase { false };
     int                      limit { 0 };
     int                      offset { 0 };
     Mode                     mode { Mode::Context };
     bool                     json_out { false };
-    int                      snippet { 48 };        // flat-mode char window (no -A/-B/-C)
-    int                      before { 0 };           // -B: lines of leading context
-    int                      after { 0 };            // -A: lines of trailing context
+    int                      snippet { 48 }; // flat-mode char window (no -A/-B/-C)
+    int                      before { 0 };   // -B: lines of leading context
+    int                      after { 0 };    // -A: lines of trailing context
 
     bool line_context() const { return before > 0 || after > 0; }
 };
 
 void AddGrepArgs(argparse::ArgumentParser& p) {
-    p.add_description(
-        "Regex-search (ECMAScript / std::regex) the text entries inside each pkg's "
-        "VFS. By default only .json entries are searched (scene.json + every "
-        "materials/**.json + effects/**.json).");
+    p.add_description("Regex-search (ECMAScript / std::regex) the text entries inside each pkg's "
+                      "VFS. By default only .json entries are searched (scene.json + every "
+                      "materials/**.json + effects/**.json).");
     p.add_argument("pattern").help("ECMAScript / std::regex pattern");
     p.add_argument("--workshop-dir")
         .default_value(std::string(kDefaultWorkshopDir))
         .help("workshop root (children are <id>/scene.pkg) or a single pkg dir");
-    p.add_argument("--name")
-        .append()
-        .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
-    p.add_argument("--limit")
-        .default_value(0)
-        .scan<'i', int>()
-        .help("stop after N matched pkgs (default 0 = all)");
+    p.add_argument("--name").append().help(
+        "only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
+    p.add_argument("--limit").default_value(0).scan<'i', int>().help(
+        "stop after N matched pkgs (default 0 = all)");
     p.add_argument("--offset")
         .default_value(0)
         .scan<'i', int>()
@@ -840,8 +883,9 @@ void AddGrepArgs(argparse::ArgumentParser& p) {
     p.add_argument("--path-filter")
         .default_value(std::string())
         .help("only search in-pkg paths containing SUBSTR (ci); overrides .json gate");
-    p.add_argument("--all-text").flag().help(
-        "search every entry, not just .json (combine with --path-filter)");
+    p.add_argument("--all-text")
+        .flag()
+        .help("search every entry, not just .json (combine with --path-filter)");
     p.add_argument("-i", "--ignore-case").flag().help("case-insensitive match");
     p.add_argument("--snippet")
         .default_value(GrepOptions {}.snippet)
@@ -861,15 +905,17 @@ void AddGrepArgs(argparse::ArgumentParser& p) {
         .default_value(0)
         .scan<'i', int>()
         .help("print N lines before AND after each match (grep -C)");
-    p.add_argument("--json").flag().help(
-        "structured array of {id, path, matches[]}");
+    p.add_argument("--json").flag().help("structured array of {id, path, matches[]}");
     auto& mode = p.add_mutually_exclusive_group();
-    mode.add_argument("-o", "--only-matching").flag().help(
-        "print only the matched substring, one per line");
-    mode.add_argument("-l", "--files-with-matches").flag().help(
-        "print <id>\\t<path> once per matching entry");
-    mode.add_argument("-c", "--count").flag().help(
-        "print <id>\\t<count> per pkg with at least one match");
+    mode.add_argument("-o", "--only-matching")
+        .flag()
+        .help("print only the matched substring, one per line");
+    mode.add_argument("-l", "--files-with-matches")
+        .flag()
+        .help("print <id>\\t<path> once per matching entry");
+    mode.add_argument("-c", "--count")
+        .flag()
+        .help("print <id>\\t<count> per pkg with at least one match");
 }
 
 GrepOptions ReadGrepOptions(const argparse::ArgumentParser& a) {
@@ -877,30 +923,32 @@ GrepOptions ReadGrepOptions(const argparse::ArgumentParser& a) {
     opt.pattern      = a.get<std::string>("pattern");
     opt.workshop_dir = a.get<std::string>("--workshop-dir");
     if (auto v = a.present<std::vector<std::string>>("--name")) opt.name_filters = *v;
-    opt.path_filter = a.get<std::string>("--path-filter");
-    opt.search_all  = a.get<bool>("--all-text");
-    opt.icase       = a.get<bool>("--ignore-case");
-    opt.limit       = a.get<int>("--limit");
-    opt.offset      = a.get<int>("--offset");
-    opt.snippet     = a.get<int>("--snippet");
+    opt.path_filter  = a.get<std::string>("--path-filter");
+    opt.search_all   = a.get<bool>("--all-text");
+    opt.icase        = a.get<bool>("--ignore-case");
+    opt.limit        = a.get<int>("--limit");
+    opt.offset       = a.get<int>("--offset");
+    opt.snippet      = a.get<int>("--snippet");
     const int around = a.get<int>("--around");
-    opt.before      = std::max(a.get<int>("--before"), around);
-    opt.after       = std::max(a.get<int>("--after"), around);
-    opt.json_out    = a.get<bool>("--json");
-    if (a.get<bool>("--only-matching")) opt.mode = GrepOptions::Mode::Only;
-    else if (a.get<bool>("--files-with-matches")) opt.mode = GrepOptions::Mode::Files;
-    else if (a.get<bool>("--count")) opt.mode = GrepOptions::Mode::Count;
+    opt.before       = std::max(a.get<int>("--before"), around);
+    opt.after        = std::max(a.get<int>("--after"), around);
+    opt.json_out     = a.get<bool>("--json");
+    if (a.get<bool>("--only-matching"))
+        opt.mode = GrepOptions::Mode::Only;
+    else if (a.get<bool>("--files-with-matches"))
+        opt.mode = GrepOptions::Mode::Files;
+    else if (a.get<bool>("--count"))
+        opt.mode = GrepOptions::Mode::Count;
     return opt;
 }
 
 // Decide whether an in-pkg entry path is in scope for grep.
 bool GrepWantPath(const std::string& path, const GrepOptions& opt) {
     const std::string lo = LowerCopy(path);
-    if (! opt.path_filter.empty() &&
-        lo.find(LowerCopy(opt.path_filter)) == std::string::npos)
+    if (! opt.path_filter.empty() && lo.find(LowerCopy(opt.path_filter)) == std::string::npos)
         return false;
     if (opt.search_all) return true;
-    if (! opt.path_filter.empty()) return true;  // explicit filter overrides .json default
+    if (! opt.path_filter.empty()) return true; // explicit filter overrides .json default
     return EndsWith(lo, ".json");
 }
 
@@ -934,8 +982,8 @@ std::size_t GrepLineOf(const std::vector<std::size_t>& starts, std::size_t pos) 
 }
 
 // Line `idx` text, newline/CR stripped and capped to kGrepLineCap chars.
-std::string GrepLineText(const std::string& text,
-                         const std::vector<std::size_t>& starts, std::size_t idx) {
+std::string GrepLineText(const std::string& text, const std::vector<std::size_t>& starts,
+                         std::size_t idx) {
     const std::size_t s = starts[idx];
     std::size_t       e = (idx + 1 < starts.size()) ? starts[idx + 1] - 1 : text.size();
     if (e > s && text[e - 1] == '\r') --e;
@@ -949,16 +997,15 @@ std::string GrepLineText(const std::string& text,
 // Match lines use a ':' separator, context lines '-'; overlapping windows are
 // merged and distinct windows separated by a "--" line (as in grep).
 void GrepPrintLineContext(const std::string& pkg_id, const std::string& path,
-                          const std::string& text,
-                          const std::vector<std::size_t>& match_pos,
+                          const std::string& text, const std::vector<std::size_t>& match_pos,
                           const GrepOptions& opt) {
-    const auto      starts = GrepLineStarts(text);
-    const int       nlines = (int)starts.size();
-    std::set<int>   match_lines;
+    const auto    starts = GrepLineStarts(text);
+    const int     nlines = (int)starts.size();
+    std::set<int> match_lines;
     for (auto p : match_pos) match_lines.insert((int)GrepLineOf(starts, p));
 
-    std::vector<std::pair<int, int>> ranges;  // inclusive [lo, hi] line indices
-    for (int ml : match_lines) {               // std::set iterates in order
+    std::vector<std::pair<int, int>> ranges; // inclusive [lo, hi] line indices
+    for (int ml : match_lines) {             // std::set iterates in order
         const int lo = std::max(0, ml - opt.before);
         const int hi = std::min(nlines - 1, ml + opt.after);
         if (! ranges.empty() && lo <= ranges.back().second + 1)
@@ -970,8 +1017,13 @@ void GrepPrintLineContext(const std::string& pkg_id, const std::string& path,
         if (ri) std::fprintf(stdout, "--\n");
         for (int ln = ranges[ri].first; ln <= ranges[ri].second; ++ln) {
             const char sep = match_lines.count(ln) ? ':' : '-';
-            std::fprintf(stdout, "%s\t%s%c%d%c %s\n", pkg_id.c_str(), path.c_str(),
-                         sep, ln + 1, sep,
+            std::fprintf(stdout,
+                         "%s\t%s%c%d%c %s\n",
+                         pkg_id.c_str(),
+                         path.c_str(),
+                         sep,
+                         ln + 1,
+                         sep,
                          GrepLineText(text, starts, (std::size_t)ln).c_str());
         }
     }
@@ -993,8 +1045,10 @@ std::vector<fs::path> CollectGrepPkgs(const GrepOptions& opt) {
     }
     std::sort(dirs.begin(), dirs.end());
     if (opt.offset > 0) {
-        if ((size_t)opt.offset >= dirs.size()) dirs.clear();
-        else dirs.erase(dirs.begin(), dirs.begin() + opt.offset);
+        if ((size_t)opt.offset >= dirs.size())
+            dirs.clear();
+        else
+            dirs.erase(dirs.begin(), dirs.begin() + opt.offset);
     }
     if (opt.limit > 0 && (int)dirs.size() > opt.limit) dirs.resize((size_t)opt.limit);
     return dirs;
@@ -1002,8 +1056,8 @@ std::vector<fs::path> CollectGrepPkgs(const GrepOptions& opt) {
 
 int CmdGrep(const GrepOptions& opt) {
     if (! fs::exists(opt.workshop_dir) || ! fs::is_directory(opt.workshop_dir)) {
-        std::fprintf(stderr, "wescene-test grep: %s is not a directory\n",
-                     opt.workshop_dir.c_str());
+        std::fprintf(
+            stderr, "wescene-test grep: %s is not a directory\n", opt.workshop_dir.c_str());
         return 1;
     }
 
@@ -1023,10 +1077,10 @@ int CmdGrep(const GrepOptions& opt) {
         return 1;
     }
 
-    json  doc      = json::array();
-    long  n_match  = 0;
-    int   n_files  = 0;
-    int   n_pkgs   = 0;
+    json doc     = json::array();
+    long n_match = 0;
+    int  n_files = 0;
+    int  n_pkgs  = 0;
 
     for (const auto& d : dirs) {
         const std::string pkg_id   = d.filename().string();
@@ -1035,16 +1089,14 @@ int CmdGrep(const GrepOptions& opt) {
         std::string                         version_stamp;
         std::vector<owe::testing::PkgEntry> entries;
         if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
-            std::fprintf(stderr, "wescene-test grep: ReadPkgHeader failed on %s\n",
-                         pkg_id.c_str());
+            std::fprintf(stderr, "wescene-test grep: ReadPkgHeader failed on %s\n", pkg_id.c_str());
             continue;
         }
 
         owe::fs::VFS vfs;
         auto         wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
         if (! wfs) {
-            std::fprintf(stderr, "wescene-test grep: CreatePkgFs failed on %s\n",
-                         pkg_id.c_str());
+            std::fprintf(stderr, "wescene-test grep: CreatePkgFs failed on %s\n", pkg_id.c_str());
             continue;
         }
         vfs.Mount("/assets", std::move(wfs));
@@ -1061,9 +1113,10 @@ int CmdGrep(const GrepOptions& opt) {
             if (! stream) continue;
             const std::string text = stream->ReadAllStr();
 
-            std::vector<std::pair<std::size_t, std::size_t>> matches;  // (pos, len)
+            std::vector<std::pair<std::size_t, std::size_t>> matches; // (pos, len)
             for (auto it = std::sregex_iterator(text.begin(), text.end(), re);
-                 it != std::sregex_iterator(); ++it)
+                 it != std::sregex_iterator();
+                 ++it)
                 matches.emplace_back((std::size_t)it->position(), (std::size_t)it->length());
             if (matches.empty()) continue;
 
@@ -1075,32 +1128,34 @@ int CmdGrep(const GrepOptions& opt) {
                 json file_matches = json::array();
                 for (const auto& [pos, len] : matches)
                     file_matches.push_back(GrepContext(text, pos, len, opt.snippet));
-                doc.push_back({ {"id", pkg_id}, {"path", p}, {"matches", file_matches} });
+                doc.push_back({ { "id", pkg_id }, { "path", p }, { "matches", file_matches } });
                 continue;
             }
 
             switch (opt.mode) {
-                case GrepOptions::Mode::Context:
-                    if (opt.line_context()) {
-                        std::vector<std::size_t> mp;
-                        mp.reserve(matches.size());
-                        for (const auto& [pos, len] : matches) mp.push_back(pos);
-                        GrepPrintLineContext(pkg_id, p, text, mp, opt);
-                    } else {
-                        for (const auto& [pos, len] : matches)
-                            std::fprintf(stdout, "%s\t%s\t%s\n", pkg_id.c_str(), p.c_str(),
-                                         GrepContext(text, pos, len, opt.snippet).c_str());
-                    }
-                    break;
-                case GrepOptions::Mode::Only:
+            case GrepOptions::Mode::Context:
+                if (opt.line_context()) {
+                    std::vector<std::size_t> mp;
+                    mp.reserve(matches.size());
+                    for (const auto& [pos, len] : matches) mp.push_back(pos);
+                    GrepPrintLineContext(pkg_id, p, text, mp, opt);
+                } else {
                     for (const auto& [pos, len] : matches)
-                        std::fprintf(stdout, "%s\n", text.substr(pos, len).c_str());
-                    break;
-                case GrepOptions::Mode::Files:
-                    std::fprintf(stdout, "%s\t%s\n", pkg_id.c_str(), p.c_str());
-                    break;
-                case GrepOptions::Mode::Count:
-                    break;  // accumulated, printed per pkg below
+                        std::fprintf(stdout,
+                                     "%s\t%s\t%s\n",
+                                     pkg_id.c_str(),
+                                     p.c_str(),
+                                     GrepContext(text, pos, len, opt.snippet).c_str());
+                }
+                break;
+            case GrepOptions::Mode::Only:
+                for (const auto& [pos, len] : matches)
+                    std::fprintf(stdout, "%s\n", text.substr(pos, len).c_str());
+                break;
+            case GrepOptions::Mode::Files:
+                std::fprintf(stdout, "%s\t%s\n", pkg_id.c_str(), p.c_str());
+                break;
+            case GrepOptions::Mode::Count: break; // accumulated, printed per pkg below
             }
         }
 
@@ -1116,8 +1171,13 @@ int CmdGrep(const GrepOptions& opt) {
     }
     std::fprintf(stderr,
                  "wescene-test grep: %ld match%s in %d file%s across %d/%zu pkg%s\n",
-                 n_match, n_match == 1 ? "" : "es", n_files, n_files == 1 ? "" : "s",
-                 n_pkgs, dirs.size(), dirs.size() == 1 ? "" : "s");
+                 n_match,
+                 n_match == 1 ? "" : "es",
+                 n_files,
+                 n_files == 1 ? "" : "s",
+                 n_pkgs,
+                 dirs.size(),
+                 dirs.size() == 1 ? "" : "s");
     return n_match > 0 ? 0 : 1;
 }
 
@@ -1126,11 +1186,10 @@ int CmdGrep(const GrepOptions& opt) {
 // ---------------------------------------------------------------------------
 
 void AddRendergraphArgs(argparse::ArgumentParser& p) {
-    p.add_description(
-        "Parse one pkg with WPSceneParser::Parse and print every pass "
-        "sceneToRenderGraph would emit, in execution order: shader, output RT, "
-        "color-write mask, blend mode, sampled textures, resolved image-effect "
-        "chains, and the post-process chain. No Vulkan; pure structural dump.");
+    p.add_description("Parse one pkg with WPSceneParser::Parse and print every pass "
+                      "sceneToRenderGraph would emit, in execution order: shader, output RT, "
+                      "color-write mask, blend mode, sampled textures, resolved image-effect "
+                      "chains, and the post-process chain. No Vulkan; pure structural dump.");
     p.add_argument("pkg").help("path to scene.pkg, or a directory containing one");
     p.add_argument("-o", "--output")
         .default_value(std::string())
@@ -1139,10 +1198,10 @@ void AddRendergraphArgs(argparse::ArgumentParser& p) {
 
 const char* BlendModeStr(owe::BlendMode m) {
     switch (m) {
-        case owe::BlendMode::Disable:     return "disable";
-        case owe::BlendMode::Translucent: return "translucent";
-        case owe::BlendMode::Additive:    return "additive";
-        case owe::BlendMode::Normal:      return "normal";
+    case owe::BlendMode::Disable: return "disable";
+    case owe::BlendMode::Translucent: return "translucent";
+    case owe::BlendMode::Additive: return "additive";
+    case owe::BlendMode::Normal: return "normal";
     }
     return "?";
 }
@@ -1191,7 +1250,8 @@ void DumpRenderTargets(FILE* out, const owe::Scene& scene) {
         std::fprintf(out,
                      "  %-48s %dx%d  bind=%s%s%s scale=%.3f%s%s\n",
                      n.c_str(),
-                     rt.width, rt.height,
+                     rt.width,
+                     rt.height,
                      rt.bind.enable ? "enable " : "",
                      rt.bind.screen ? "screen " : "",
                      rt.bind.name.empty() ? "" : ("name=" + rt.bind.name + " ").c_str(),
@@ -1208,8 +1268,8 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
         // Mirror SceneToRenderGraph::ToGraphPass: only nodes with mesh+material emit.
         auto* mesh = n->Mesh();
         if (mesh && mesh->Material()) {
-            std::string tag = "[node id=" + std::to_string(n->ID()) +
-                              " depth=" + std::to_string(depth) + "]";
+            std::string tag =
+                "[node id=" + std::to_string(n->ID()) + " depth=" + std::to_string(depth) + "]";
             DumpPass(out, tag, *n, owe::SpecTex_Default);
 
             // If the node's camera carries an image-effect chain, ResolveEffect
@@ -1220,19 +1280,23 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
                 if (cam->HasImgEffect()) {
                     auto eff_layer = cam->GetImgEffect();
                     eff_layer->ResolveEffect(scene.default_effect_mesh, "effect");
-                    std::fprintf(out, "    image-effect chain (%zu effects):\n",
-                                 eff_layer->EffectCount());
+                    std::fprintf(
+                        out, "    image-effect chain (%zu effects):\n", eff_layer->EffectCount());
                     for (std::size_t ei = 0; ei < eff_layer->EffectCount(); ++ei) {
-                        auto& eff = eff_layer->GetEffect(ei);
+                        auto&       eff = eff_layer->GetEffect(ei);
                         std::size_t ni  = 0;
-                        for (auto cmd_it = eff->commands.begin(); cmd_it != eff->commands.end(); ++cmd_it) {
-                            std::fprintf(out, "      [eff %zu cmd] copy %s -> %s (afterpos=%d)\n",
-                                         ei, cmd_it->src.c_str(), cmd_it->dst.c_str(),
+                        for (auto cmd_it = eff->commands.begin(); cmd_it != eff->commands.end();
+                             ++cmd_it) {
+                            std::fprintf(out,
+                                         "      [eff %zu cmd] copy %s -> %s (afterpos=%d)\n",
+                                         ei,
+                                         cmd_it->src.c_str(),
+                                         cmd_it->dst.c_str(),
                                          cmd_it->afterpos);
                         }
                         for (auto& enode : eff->nodes) {
-                            std::string tag2 = "[eff " + std::to_string(ei) +
-                                               " node " + std::to_string(ni++) + "]";
+                            std::string tag2 = "[eff " + std::to_string(ei) + " node " +
+                                               std::to_string(ni++) + "]";
                             DumpPass(out, "    " + tag2, *enode.sceneNode, enode.output);
                         }
                     }
@@ -1245,7 +1309,8 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
 }
 
 void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
-    std::fprintf(out, "\nPost-processes (scene.post_processes, %zu chain%s):\n",
+    std::fprintf(out,
+                 "\nPost-processes (scene.post_processes, %zu chain%s):\n",
                  scene.post_processes.size(),
                  scene.post_processes.size() == 1 ? "" : "s");
     if (scene.post_processes.empty()) {
@@ -1254,19 +1319,24 @@ void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
     }
     for (std::size_t ci = 0; ci < scene.post_processes.size(); ++ci) {
         const auto& pp = *scene.post_processes[ci];
-        std::fprintf(out, "  chain[%zu] name=\"%s\" steps=%zu\n",
-                     ci, pp.name.c_str(), pp.steps.size());
+        std::fprintf(
+            out, "  chain[%zu] name=\"%s\" steps=%zu\n", ci, pp.name.c_str(), pp.steps.size());
         for (std::size_t si = 0; si < pp.steps.size(); ++si) {
             const auto& step = pp.steps[si];
             if (auto* sp = std::get_if<owe::ScenePostProcessPass>(&step)) {
-                std::string tag = "  [pp " + std::to_string(ci) +
-                                  ":" + std::to_string(si) + " draw]";
-                DumpPass(out, tag, *sp->node,
+                std::string tag =
+                    "  [pp " + std::to_string(ci) + ":" + std::to_string(si) + " draw]";
+                DumpPass(out,
+                         tag,
+                         *sp->node,
                          sp->output.empty() ? std::string(owe::SpecTex_Default) : sp->output);
             } else if (auto* cp = std::get_if<owe::ScenePostProcessCopy>(&step)) {
                 std::fprintf(out,
                              "    [pp %zu:%zu copy] %s -> %s\n",
-                             ci, si, cp->src.c_str(), cp->dst.c_str());
+                             ci,
+                             si,
+                             cp->src.c_str(),
+                             cp->dst.c_str());
             }
         }
     }
@@ -1278,8 +1348,10 @@ int CmdRendergraph(const argparse::ArgumentParser& a) {
 
     const std::string pkg_path = ResolvePkgPath(pkg_arg);
     if (pkg_path.empty()) {
-        std::fprintf(stderr, "wescene-test rendergraph: '%s' is not a scene.pkg or directory containing one\n",
-                     pkg_arg.c_str());
+        std::fprintf(
+            stderr,
+            "wescene-test rendergraph: '%s' is not a scene.pkg or directory containing one\n",
+            pkg_arg.c_str());
         return 1;
     }
 
@@ -1291,7 +1363,8 @@ int CmdRendergraph(const argparse::ArgumentParser& a) {
     }
     auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) {
-        std::fprintf(stderr, "wescene-test rendergraph: WPPkgFs::CreatePkgFs failed on %s\n",
+        std::fprintf(stderr,
+                     "wescene-test rendergraph: WPPkgFs::CreatePkgFs failed on %s\n",
                      pkg_path.c_str());
         return 1;
     }
@@ -1305,11 +1378,11 @@ int CmdRendergraph(const argparse::ArgumentParser& a) {
     const std::string text = stream->ReadAllStr();
 
     // Detect pkg version from header so the parser dispatches correctly.
-    std::string                          version_stamp;
-    std::vector<owe::testing::PkgEntry>  entries;
+    std::string                         version_stamp;
+    std::vector<owe::testing::PkgEntry> entries;
     if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
-        std::fprintf(stderr, "wescene-test rendergraph: ReadPkgHeader failed on %s\n",
-                     pkg_path.c_str());
+        std::fprintf(
+            stderr, "wescene-test rendergraph: ReadPkgHeader failed on %s\n", pkg_path.c_str());
         return 1;
     }
     auto pkg_v = owe::wpscene::ParsePkgVersionStamp(version_stamp);
@@ -1327,7 +1400,8 @@ int CmdRendergraph(const argparse::ArgumentParser& a) {
     if (! out_file.empty() && out_file != "-") {
         out = std::fopen(out_file.c_str(), "wb");
         if (! out) {
-            std::fprintf(stderr, "wescene-test rendergraph: cannot open '%s' for writing\n",
+            std::fprintf(stderr,
+                         "wescene-test rendergraph: cannot open '%s' for writing\n",
                          out_file.c_str());
             return 1;
         }
@@ -1377,8 +1451,8 @@ int CmdValid(const argparse::ArgumentParser& a) {
     if (! out_file.empty()) {
         std::ofstream out(out_file);
         if (! out) {
-            std::fprintf(stderr, "wescene-test valid: cannot open %s for writing\n",
-                         out_file.c_str());
+            std::fprintf(
+                stderr, "wescene-test valid: cannot open %s for writing\n", out_file.c_str());
             return 1;
         }
         out << dump << "\n";
@@ -1396,11 +1470,9 @@ int main(int argc, char** argv) {
     rstd::log::set_logger(_logger);
     rstd::log::set_max_level(_logger.filter());
 
-    argparse::ArgumentParser program("wescene-test", "1.0",
-                                     argparse::default_arguments::help);
-    program.add_description(
-        "Consolidated CLI for the wescene-renderer test surface. Host-only: no "
-        "Vulkan device, no GLFW.");
+    argparse::ArgumentParser program("wescene-test", "1.0", argparse::default_arguments::help);
+    program.add_description("Consolidated CLI for the wescene-renderer test surface. Host-only: no "
+                            "Vulkan device, no GLFW.");
 
     argparse::ArgumentParser scan("scan");
     AddScanArgs(scan);
@@ -1423,20 +1495,26 @@ int main(int argc, char** argv) {
         program.parse_args(argc, argv);
     } catch (const std::exception& err) {
         std::cerr << err.what() << "\n";
-        if (program.is_subcommand_used("scan"))             std::cerr << scan;
-        else if (program.is_subcommand_used("extract"))     std::cerr << extract;
-        else if (program.is_subcommand_used("grep"))        std::cerr << grep;
-        else if (program.is_subcommand_used("rendergraph")) std::cerr << rendergraph;
-        else if (program.is_subcommand_used("valid"))       std::cerr << valid;
-        else                                                std::cerr << program;
+        if (program.is_subcommand_used("scan"))
+            std::cerr << scan;
+        else if (program.is_subcommand_used("extract"))
+            std::cerr << extract;
+        else if (program.is_subcommand_used("grep"))
+            std::cerr << grep;
+        else if (program.is_subcommand_used("rendergraph"))
+            std::cerr << rendergraph;
+        else if (program.is_subcommand_used("valid"))
+            std::cerr << valid;
+        else
+            std::cerr << program;
         return 2;
     }
 
-    if (program.is_subcommand_used("scan"))        return CmdScan(ReadScanOptions(scan));
-    if (program.is_subcommand_used("extract"))     return CmdExtract(extract);
-    if (program.is_subcommand_used("grep"))        return CmdGrep(ReadGrepOptions(grep));
+    if (program.is_subcommand_used("scan")) return CmdScan(ReadScanOptions(scan));
+    if (program.is_subcommand_used("extract")) return CmdExtract(extract);
+    if (program.is_subcommand_used("grep")) return CmdGrep(ReadGrepOptions(grep));
     if (program.is_subcommand_used("rendergraph")) return CmdRendergraph(rendergraph);
-    if (program.is_subcommand_used("valid"))       return CmdValid(valid);
+    if (program.is_subcommand_used("valid")) return CmdValid(valid);
 
     std::cerr << program;
     return 2;

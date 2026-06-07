@@ -54,10 +54,10 @@ void SceneCamera::CalculateViewProjectionMatrix() {
         m_viewProjectionMat =
             Perspective(Radians(m_fov), m_aspect, m_nearClip, m_farClip) * m_viewMat;
     } else {
-        double left   = -m_width / 2.0f;
-        double right  = m_width / 2.0f;
-        double bottom = -m_height / 2.0f;
-        double up     = m_height / 2.0f;
+        double left         = -m_width / 2.0f;
+        double right        = m_width / 2.0f;
+        double bottom       = -m_height / 2.0f;
+        double up           = m_height / 2.0f;
         m_viewProjectionMat = Ortho(left, right, bottom, up, m_nearClip, m_farClip) * m_viewMat;
     }
 }

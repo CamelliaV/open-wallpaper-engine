@@ -24,9 +24,9 @@ class WPMaterialPass {
 public:
     bool                                                FromJson(const nlohmann::json&);
     void                                                Update(const WPMaterialPass&);
-    std::uint32_t                                       id { 0 };  // pass id (PKGV0001+)
+    std::uint32_t                                       id { 0 }; // pass id (PKGV0001+)
     std::vector<std::string>                            textures;
-    std::vector<nlohmann::json>                         usertextures;  // PKGV0018+; polymorphic
+    std::vector<nlohmann::json>                         usertextures; // PKGV0018+; polymorphic
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     // scene.json instance-level user binding:
@@ -34,22 +34,22 @@ public:
     // Maps effect-internal material key → wallpaper-level project.json key.
     // The fallback `value` is already extracted into `constantshadervalues`
     // by GetJsonValue's auto-unwrap.
-    std::unordered_map<std::string, std::string>        constantshadervalues_user;
-    std::string                                         target;
-    std::vector<WPMaterialPassBindItem>                 bind;
+    std::unordered_map<std::string, std::string> constantshadervalues_user;
+    std::string                                  target;
+    std::vector<WPMaterialPassBindItem>          bind;
 };
 
 class WPMaterial {
 public:
-    bool                                                FromJson(const nlohmann::json&);                  // legacy
-    bool                                                FromJson(const nlohmann::json&, SceneVersion);    // canonical
-    void                                                MergePass(const WPMaterialPass&);
-    std::string                                         blending { "translucent" };
-    std::string                                         cullmode { "nocull" };
-    std::string                                         shader;
-    std::string                                         depthtest { "disabled" };
-    std::string                                         depthwrite { "disabled" };
-    std::vector<std::string>                            textures;
+    bool                     FromJson(const nlohmann::json&);               // legacy
+    bool                     FromJson(const nlohmann::json&, SceneVersion); // canonical
+    void                     MergePass(const WPMaterialPass&);
+    std::string              blending { "translucent" };
+    std::string              cullmode { "nocull" };
+    std::string              shader;
+    std::string              depthtest { "disabled" };
+    std::string              depthwrite { "disabled" };
+    std::vector<std::string> textures;
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;

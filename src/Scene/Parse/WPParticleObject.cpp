@@ -2,7 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-
 module wescene.parse;
 import nlohmann.json;
 import wescene.core;
@@ -112,13 +111,20 @@ bool ParticleInstanceoverride::FromJosn(const nlohmann::json& json) {
         }
     };
 
-    owe::GetJsonValue(json, "alpha", alpha, false);          bind("alpha");
-    owe::GetJsonValue(json, "size", size, false);            bind("size");
-    owe::GetJsonValue(json, "lifetime", lifetime, false);    bind("lifetime");
-    owe::GetJsonValue(json, "rate", rate, false);            bind("rate");
-    owe::GetJsonValue(json, "speed", speed, false);          bind("speed");
-    owe::GetJsonValue(json, "count", count, false);          bind("count");
-    owe::GetJsonValue(json, "brightness", brightness, false); bind("brightness");
+    owe::GetJsonValue(json, "alpha", alpha, false);
+    bind("alpha");
+    owe::GetJsonValue(json, "size", size, false);
+    bind("size");
+    owe::GetJsonValue(json, "lifetime", lifetime, false);
+    bind("lifetime");
+    owe::GetJsonValue(json, "rate", rate, false);
+    bind("rate");
+    owe::GetJsonValue(json, "speed", speed, false);
+    bind("speed");
+    owe::GetJsonValue(json, "count", count, false);
+    bind("count");
+    owe::GetJsonValue(json, "brightness", brightness, false);
+    bind("brightness");
     owe::GetJsonValue(json, "id", id, false);
     if (json.contains("color")) {
         owe::GetJsonValue(json, "color", color);
@@ -130,13 +136,12 @@ bool ParticleInstanceoverride::FromJosn(const nlohmann::json& json) {
         bind("colorn");
     }
     {
-        const char* cp_keys[]    = { "controlpoint0", "controlpoint1", "controlpoint2",
-                                     "controlpoint3", "controlpoint4", "controlpoint5",
-                                     "controlpoint6", "controlpoint7" };
-        const char* cpa_keys[]   = { "controlpointangle0", "controlpointangle1",
-                                     "controlpointangle2", "controlpointangle3",
-                                     "controlpointangle4", "controlpointangle5",
-                                     "controlpointangle6", "controlpointangle7" };
+        const char* cp_keys[]  = { "controlpoint0", "controlpoint1", "controlpoint2",
+                                   "controlpoint3", "controlpoint4", "controlpoint5",
+                                   "controlpoint6", "controlpoint7" };
+        const char* cpa_keys[] = { "controlpointangle0", "controlpointangle1", "controlpointangle2",
+                                   "controlpointangle3", "controlpointangle4", "controlpointangle5",
+                                   "controlpointangle6", "controlpointangle7" };
         for (int i = 0; i < 8; ++i) {
             owe::GetJsonValue(json, cp_keys[i], controlpoint[i], false);
             bind(cp_keys[i]);

@@ -1,6 +1,5 @@
 module;
 
-
 module wescene.rgraph;
 import wescene.core;
 import rstd.cppstd;

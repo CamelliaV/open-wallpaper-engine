@@ -67,9 +67,7 @@ public:
     void queueDirective(const ww_pool_directive_t& directive);
 
     // True iff a queued directive is waiting to be applied.
-    bool hasPendingDirective() const {
-        return m_pending_valid.load(std::memory_order_acquire);
-    }
+    bool hasPendingDirective() const { return m_pending_valid.load(std::memory_order_acquire); }
 
     // One-shot callback fired from the producer thread the first time a
     // directive is successfully applied. Setting after the first
@@ -95,8 +93,7 @@ public:
     // Producer-thread-only. Returns the next slot's VkImage handle and
     // (optionally) its dimensions. Returns false when the pool has no
     // slots applied yet.
-    bool acquireSlot(VkImage*  out_image,
-                     uint32_t* out_width  = nullptr,
+    bool acquireSlot(VkImage* out_image, uint32_t* out_width = nullptr,
                      uint32_t* out_height = nullptr);
 
     // Producer-thread-only. Forwards `producer_sync_fd` to
@@ -109,9 +106,7 @@ public:
     // responsible for any happens-before they need (typical pattern:
     // call from inside the producer thread right after
     // drainPendingDirective).
-    bool ready() const {
-        return m_slot_count > 0 && m_export_format != VK_FORMAT_UNDEFINED;
-    }
+    bool     ready() const { return m_slot_count > 0 && m_export_format != VK_FORMAT_UNDEFINED; }
     uint32_t width() const { return m_width; }
     uint32_t height() const { return m_height; }
     VkFormat format() const { return m_export_format; }

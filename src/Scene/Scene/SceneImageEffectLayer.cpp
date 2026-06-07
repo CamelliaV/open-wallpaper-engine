@@ -2,7 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-
 module wescene.scene;
 import wescene.spec_texs;
 import wescene.core;
@@ -67,7 +66,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         last_output->output = m_final_target;
         auto& mesh          = *(last_output->sceneNode->Mesh());
         auto& material      = *mesh.Material();
-        material.blenmode = m_final_blend;
+        material.blenmode   = m_final_blend;
         last_output->sceneNode->SetCamera(std::string());
         // Anchor to the layer's primary SceneNode so the composite quad
         // inherits the layer's world transform (including any container

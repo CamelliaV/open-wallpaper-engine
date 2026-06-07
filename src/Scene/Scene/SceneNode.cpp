@@ -1,6 +1,5 @@
 module;
 
-
 module wescene.scene;
 import eigen;
 import rstd.cppstd;

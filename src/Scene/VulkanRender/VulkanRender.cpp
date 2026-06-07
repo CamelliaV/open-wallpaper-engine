@@ -105,19 +105,17 @@ int VulkanRender::takeLastFrameSyncFd() {
     return pImpl->m_ex_swapchain ? pImpl->m_ex_swapchain->takeLastFrameSyncFd() : -1;
 }
 
-bool VulkanRender::getDrmRenderNode(uint32_t& out_major,
-                                    uint32_t& out_minor) const {
-    if (!pImpl->m_inited || !pImpl->m_device) return false;
+bool VulkanRender::getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const {
+    if (! pImpl->m_inited || ! pImpl->m_device) return false;
     VkPhysicalDeviceDrmPropertiesEXT drm {};
     drm.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT;
     VkPhysicalDeviceProperties2KHR props {};
     props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
     props.pNext = &drm;
     pImpl->m_device->gpu().GetProperties2KHR(props);
-    if (!drm.hasRender) return false;
-    if (drm.renderMajor < 0 || drm.renderMinor < 0
-        || (uint64_t)drm.renderMajor > UINT32_MAX
-        || (uint64_t)drm.renderMinor > UINT32_MAX) {
+    if (! drm.hasRender) return false;
+    if (drm.renderMajor < 0 || drm.renderMinor < 0 || (uint64_t)drm.renderMajor > UINT32_MAX ||
+        (uint64_t)drm.renderMinor > UINT32_MAX) {
         return false;
     }
     out_major = static_cast<uint32_t>(drm.renderMajor);
@@ -126,33 +124,33 @@ bool VulkanRender::getDrmRenderNode(uint32_t& out_major,
 }
 
 VkInstance VulkanRender::vkInstance() const {
-    if (!pImpl->m_inited) return VK_NULL_HANDLE;
+    if (! pImpl->m_inited) return VK_NULL_HANDLE;
     return *pImpl->m_instance.inst();
 }
 
 VkPhysicalDevice VulkanRender::vkPhysicalDevice() const {
-    if (!pImpl->m_inited || !pImpl->m_device) return VK_NULL_HANDLE;
+    if (! pImpl->m_inited || ! pImpl->m_device) return VK_NULL_HANDLE;
     return *pImpl->m_device->gpu();
 }
 
 VkDevice VulkanRender::vkDevice() const {
-    if (!pImpl->m_inited || !pImpl->m_device) return VK_NULL_HANDLE;
+    if (! pImpl->m_inited || ! pImpl->m_device) return VK_NULL_HANDLE;
     return *pImpl->m_device->handle();
 }
 
 VkQueue VulkanRender::vkGraphicsQueue() const {
-    if (!pImpl->m_inited || !pImpl->m_device) return VK_NULL_HANDLE;
+    if (! pImpl->m_inited || ! pImpl->m_device) return VK_NULL_HANDLE;
     return *pImpl->m_device->graphics_queue().handle;
 }
 
 uint32_t VulkanRender::vkGraphicsQueueFamily() const {
-    if (!pImpl->m_inited || !pImpl->m_device) return 0;
+    if (! pImpl->m_inited || ! pImpl->m_device) return 0;
     return pImpl->m_device->graphics_queue().family_index;
 }
 
 void VulkanRender::deviceUuid(uint8_t out[16]) const {
     std::memset(out, 0, 16);
-    if (!pImpl->m_inited || !pImpl->m_device) return;
+    if (! pImpl->m_inited || ! pImpl->m_device) return;
     VkPhysicalDeviceIDPropertiesKHR id {};
     id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR;
     VkPhysicalDeviceProperties2KHR props {};
@@ -163,12 +161,12 @@ void VulkanRender::deviceUuid(uint8_t out[16]) const {
 }
 
 void VulkanRender::pumpVideoTextures(double dt_seconds) {
-    if (!pImpl->m_inited || !pImpl->m_device) return;
+    if (! pImpl->m_inited || ! pImpl->m_device) return;
     pImpl->m_device->tex_cache().PumpVideoTextures(dt_seconds);
 }
 
 void VulkanRender::pumpFontAtlases(Scene& scene) {
-    if (!pImpl->m_inited || !pImpl->m_device) return;
+    if (! pImpl->m_inited || ! pImpl->m_device) return;
     auto* fc = owe::text::SceneFontCache(scene);
     if (fc == nullptr) return;
     auto& tex = pImpl->m_device->tex_cache();
@@ -194,9 +192,12 @@ void VulkanRender::pumpFontAtlases(Scene& scene) {
         const auto fm     = face->Metrics();
         const auto pixels = face->AtlasPixels();
         (void)tex.UploadFontAtlasRegion(face->AtlasUrl(),
-                                        pixels.data(), fm.atlas_w,
-                                        min_x, min_y,
-                                        max_x - min_x, max_y - min_y);
+                                        pixels.data(),
+                                        fm.atlas_w,
+                                        min_x,
+                                        min_y,
+                                        max_x - min_x,
+                                        max_y - min_y);
         // Clear regardless: if VkImage didn't exist yet, the pixels are
         // already in the CPU buffer that CreateTex aliases on its first
         // call. Re-uploading would just duplicate work.
@@ -206,7 +207,7 @@ void VulkanRender::pumpFontAtlases(Scene& scene) {
 
 void VulkanRender::driverUuid(uint8_t out[16]) const {
     std::memset(out, 0, 16);
-    if (!pImpl->m_inited || !pImpl->m_device) return;
+    if (! pImpl->m_inited || ! pImpl->m_device) return;
     VkPhysicalDeviceIDPropertiesKHR id {};
     id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR;
     VkPhysicalDeviceProperties2KHR props {};
@@ -312,14 +313,16 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
     {
         // Map requested integer to a bit; clamp down to highest supported bit
         // not exceeding the request, given device's framebufferColorSampleCounts.
-        const uint32_t requested = info.msaa_samples == 0 ? 1u : info.msaa_samples;
-        const VkSampleCountFlags supported =
-            m_device->limits().framebufferColorSampleCounts;
-        VkSampleCountFlagBits chosen = VK_SAMPLE_COUNT_1_BIT;
+        const uint32_t           requested = info.msaa_samples == 0 ? 1u : info.msaa_samples;
+        const VkSampleCountFlags supported = m_device->limits().framebufferColorSampleCounts;
+        VkSampleCountFlagBits    chosen    = VK_SAMPLE_COUNT_1_BIT;
         constexpr std::array<VkSampleCountFlagBits, 6> ladder { {
-            VK_SAMPLE_COUNT_64_BIT, VK_SAMPLE_COUNT_32_BIT,
-            VK_SAMPLE_COUNT_16_BIT, VK_SAMPLE_COUNT_8_BIT,
-            VK_SAMPLE_COUNT_4_BIT,  VK_SAMPLE_COUNT_2_BIT,
+            VK_SAMPLE_COUNT_64_BIT,
+            VK_SAMPLE_COUNT_32_BIT,
+            VK_SAMPLE_COUNT_16_BIT,
+            VK_SAMPLE_COUNT_8_BIT,
+            VK_SAMPLE_COUNT_4_BIT,
+            VK_SAMPLE_COUNT_2_BIT,
         } };
         for (auto bit : ladder) {
             if ((uint32_t)bit <= requested && (supported & bit)) {
@@ -328,8 +331,7 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
             }
         }
         m_msaa_samples = chosen;
-        rstd_info("msaa requested={} actual={}",
-                  requested, (uint32_t)m_msaa_samples);
+        rstd_info("msaa requested={} actual={}", requested, (uint32_t)m_msaa_samples);
     }
 
     if (info.offscreen) {
@@ -342,7 +344,7 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
                 m_device->graphics_queue().family_index,
             };
             m_ex_swapchain = info.ex_swapchain_factory(h);
-            if (!m_ex_swapchain) {
+            if (! m_ex_swapchain) {
                 rstd_error("ex_swapchain_factory returned null");
                 return false;
             }
@@ -521,15 +523,15 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     // race the presentation engine's read → sync-validation WRITE_AFTER_READ.
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     VkSubmitInfo         sub_info {
-                .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .pNext                = nullptr,
-                .waitSemaphoreCount   = 1,
-                .pWaitSemaphores      = rr.sem_swap_wait_image.address(),
-                .pWaitDstStageMask    = &wait_dst_stage,
-                .commandBufferCount   = 1,
-                .pCommandBuffers      = rr.command.address(),
-                .signalSemaphoreCount = 1,
-                .pSignalSemaphores    = sem_present_done.address(),
+        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext                = nullptr,
+        .waitSemaphoreCount   = 1,
+        .pWaitSemaphores      = rr.sem_swap_wait_image.address(),
+        .pWaitDstStageMask    = &wait_dst_stage,
+        .commandBufferCount   = 1,
+        .pCommandBuffers      = rr.command.address(),
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores    = sem_present_done.address(),
     };
 
     VVK_CHECK_VOID_RE(m_device->present_queue().handle.Submit(sub_info, *rr.fence_frame));
@@ -548,7 +550,7 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 }
 void VulkanRender::Impl::drawFrameOffscreen() {
-    if (!m_ex_swapchain) return;
+    if (! m_ex_swapchain) return;
 
     // Drain any pending bridge directive *before* committing to a slot.
     // Previous frame's GPU work has fenced at the tail of the last
@@ -559,13 +561,13 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     // (FinPass.prepare runs from compileRenderGraph). FinPass itself is
     // format-agnostic now — vkCmdBlitImage handles cross-format channel
     // mapping, no rebuild needed on renegotiation.
-    if (!m_ex_swapchain->ready() || !m_finpass->prepared()) {
+    if (! m_ex_swapchain->ready() || ! m_finpass->prepared()) {
         return;
     }
 
     RenderingResources& rr = m_rendering_resources;
     ImageParameters     image;
-    if (!m_ex_swapchain->acquireRenderTarget(image)) {
+    if (! m_ex_swapchain->acquireRenderTarget(image)) {
         return;
     }
 
@@ -619,10 +621,11 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         VkResult vr = m_device->handle().GetSemaphoreFdKHR(gi, &sync_fd);
         if (vr != VK_SUCCESS) {
             static std::atomic<uint64_t> n_failed { 0 };
-            uint64_t k = n_failed.fetch_add(1, std::memory_order_relaxed);
+            uint64_t                     k = n_failed.fetch_add(1, std::memory_order_relaxed);
             if (k == 0 || (k & (k - 1)) == 0) { // 1st, 2nd, 4th, 8th...
                 rstd_error("VulkanRender: vkGetSemaphoreFdKHR failed (vr={}, count={})",
-                          (int)vr, (unsigned long long)(k + 1));
+                           (int)vr,
+                           (unsigned long long)(k + 1));
             }
             sync_fd = -1;
         } else if (sync_fd < 0) {
@@ -630,11 +633,11 @@ void VulkanRender::Impl::drawFrameOffscreen() {
             // means "the semaphore was unsignaled". Should not happen
             // because we just waited the fence; flag loudly.
             static std::atomic<uint64_t> n_unsig { 0 };
-            uint64_t k = n_unsig.fetch_add(1, std::memory_order_relaxed);
+            uint64_t                     k = n_unsig.fetch_add(1, std::memory_order_relaxed);
             if (k == 0 || (k & (k - 1)) == 0) {
                 rstd_error("VulkanRender: GetSemaphoreFdKHR returned fd=-1 "
-                          "(semaphore not signaled? count={})",
-                          (unsigned long long)(k + 1));
+                           "(semaphore not signaled? count={})",
+                           (unsigned long long)(k + 1));
             }
         }
     }
@@ -643,10 +646,10 @@ void VulkanRender::Impl::drawFrameOffscreen() {
 }
 
 bool VulkanRender::Impl::onSwapchainReady(unsigned width, unsigned height) {
-    if (!m_inited || !m_device) return false;
-    auto& cur = m_device->out_extent();
-    bool extent_changed = (width != cur.width) || (height != cur.height);
-    if (!extent_changed) {
+    if (! m_inited || ! m_device) return false;
+    auto& cur            = m_device->out_extent();
+    bool  extent_changed = (width != cur.width) || (height != cur.height);
+    if (! extent_changed) {
         // Format-only changes flow through ExSwapchain::format() and
         // are handled by drawFrameOffscreen's head check.
         return false;
@@ -684,10 +687,10 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
         if (! item.first.empty() && (rt.width * rt.height <= 4)) {
             rstd_error("wrong size for render target: {}", item.first);
         } else if (rt.has_mipmap) {
-            rt.mipmap_level =
-                std::max(3u,
-                         static_cast<unsigned>(std::floor(std::log2(std::min(rt.width, rt.height))))) -
-                2u;
+            rt.mipmap_level = std::max(3u,
+                                       static_cast<unsigned>(
+                                           std::floor(std::log2(std::min(rt.width, rt.height))))) -
+                              2u;
         }
     }
     if (m_msaa_samples != VK_SAMPLE_COUNT_1_BIT) {
@@ -699,8 +702,7 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
     scene.shaderValueUpdater->SetScreenSize((i32)ext.width, (i32)ext.height);
 }
 
-void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene&   scene,
-                                              owe::FillMode fillmode) {
+void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode fillmode) {
     using namespace owe;
     auto width  = m_device->out_extent().width;
     auto height = m_device->out_extent().height;

@@ -104,8 +104,8 @@ struct ExtraInfo {
     // Result of Pass A; non-null during Pass B. Only layer IDs in this set
     // actually have downstream link consumers, so we skip id_link_map writes
     // for non-referenced layers.
-    const Set<i32>*            linked_ids { nullptr };
-    bool                       use_mipmap_framebuffer { false };
+    const Set<i32>* linked_ids { nullptr };
+    bool            use_mipmap_framebuffer { false };
 };
 
 static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, ExtraInfo& extra) {
@@ -154,19 +154,18 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
         std::string    passName = material->name;
         // Per-submesh output override (clipping-mask submeshes write into a
         // shared RT that the main puppet pass samples via g_Texture8).
-        std::string_view pass_output = submesh.output_override.empty()
-                                           ? output
-                                           : std::string_view(submesh.output_override);
+        std::string_view pass_output =
+            submesh.output_override.empty() ? output : std::string_view(submesh.output_override);
 
         rgraph.addPass<vulkan::CustomShaderPass>(
             passName,
             rg::PassNode::Type::CustomShader,
             [material, node, smi, pass_output, &output, &imgId, &rgraph, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
-                const auto& pass     = builder.workPassNode();
-                pdesc.node           = node;
-                pdesc.submesh_index  = smi;
-                pdesc.output         = std::string(pass_output);
+                const auto& pass    = builder.workPassNode();
+                pdesc.node          = node;
+                pdesc.submesh_index = smi;
+                pdesc.output        = std::string(pass_output);
                 CheckAndSetSprite(scene, pdesc, material->textures);
                 for (usize i = 0; i < material->textures.size(); i++) {
                     const auto&  url = material->textures[i];
@@ -204,15 +203,14 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
 
                 rg::TexNode* output_node { nullptr };
                 std::string  pass_output_s(pass_output);
-                output_node = builder.createTexNode(
-                    rg::TexNode::Desc { .name = pass_output_s,
-                                        .key  = pass_output_s,
-                                        .type = rg::TexNode::TexType::Temp },
-                    true);
+                output_node =
+                    builder.createTexNode(rg::TexNode::Desc { .name = pass_output_s,
+                                                              .key  = pass_output_s,
+                                                              .type = rg::TexNode::TexType::Temp },
+                                          true);
                 builder.write(output_node);
                 auto record_link_source = [&](i32 id) {
-                    if (extra.linked_ids == nullptr ||
-                        extra.linked_ids->count(id) != 0) {
+                    if (extra.linked_ids == nullptr || extra.linked_ids->count(id) != 0) {
                         extra.id_link_map[(usize)id] = output_node;
                     }
                 };
@@ -235,17 +233,16 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
 // at the root of the skippable subtree without descending. Does NOT mutate
 // the scene tree — the tree topology is frozen after parse handoff (see the
 // invariant on SceneNode in Scene.cppm).
-static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene,
-                                    const Set<i32>& linked_ids,
-                                    Set<i32>&       out_skip) {
+static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32>& linked_ids,
+                                    Set<i32>& out_skip) {
     bool all_children_skippable = true;
     for (auto& c : node->GetChildren()) {
         if (! CollectEmitSkipSubtrees(c.get(), scene, linked_ids, out_skip))
             all_children_skippable = false;
     }
-    const i32  nid            = node->ID();
-    const bool self_skippable = scene.elidable_layer_ids.count(nid) != 0 &&
-                                linked_ids.count(nid) == 0;
+    const i32  nid = node->ID();
+    const bool self_skippable =
+        scene.elidable_layer_ids.count(nid) != 0 && linked_ids.count(nid) == 0;
     if (self_skippable && all_children_skippable) {
         out_skip.insert(nid);
         return true;
@@ -302,15 +299,14 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     // Most corpora have ~25x more elidable layers than link-referenced ones;
     // the skip set lets the emit walk short-circuit without mutating the tree.
     Set<i32> emit_skip_subtree_ids;
-    CollectEmitSkipSubtrees(scene.sceneGraph.get(), scene, linked_ids,
-                            emit_skip_subtree_ids);
+    CollectEmitSkipSubtrees(scene.sceneGraph.get(), scene, linked_ids, emit_skip_subtree_ids);
 
     // Pass B: emit passes. For elidable layers with a link consumer, route
     // into a private `_rt_link_<id>` RT instead of `_rt_default`; elidable
     // layers without a link consumer fall through and emit nothing.
     TraverseNode(
         [&extra, &scene, &linked_ids](SceneNode* node) {
-            const i32 nid = node->ID();
+            const i32  nid      = node->ID();
             const bool elidable = scene.elidable_layer_ids.count(nid) != 0;
             if (elidable) {
                 if (linked_ids.count(nid) == 0) return;
@@ -322,7 +318,7 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
                     }
                 }
                 if (scene.renderTargets.count(link_key) == 0) {
-                    auto sz = node->Size();
+                    auto sz                       = node->Size();
                     scene.renderTargets[link_key] = {
                         .width      = sz.x() > 0 ? (i32)sz.x() : scene.ortho[0],
                         .height     = sz.y() > 0 ? (i32)sz.y() : scene.ortho[1],
@@ -343,13 +339,11 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     for (auto& pp : scene.post_processes) {
         for (auto& step : pp->steps) {
             if (auto* sp = std::get_if<ScenePostProcessPass>(&step)) {
-                std::string_view target = sp->output.empty() ? SpecTex_Default
-                                                              : std::string_view(sp->output);
+                std::string_view target =
+                    sp->output.empty() ? SpecTex_Default : std::string_view(sp->output);
                 ToGraphPass(sp->node.get(), target, sp->node->ID(), extra);
             } else if (auto* cp = std::get_if<ScenePostProcessCopy>(&step)) {
-                rg::addCopyPass(*rgraph,
-                                rg::createTexDesc(cp->src),
-                                rg::createTexDesc(cp->dst));
+                rg::addCopyPass(*rgraph, rg::createTexDesc(cp->src), rg::createTexDesc(cp->dst));
             }
         }
     }

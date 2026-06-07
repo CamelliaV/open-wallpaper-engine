@@ -104,7 +104,7 @@ public:
 
     const Type* address() const noexcept { return std::addressof(handle); }
     const Type& operator*() const noexcept { return handle; }
-    explicit operator bool() const noexcept { return handle != nullptr; }
+    explicit    operator bool() const noexcept { return handle != nullptr; }
 
 protected:
     Type            handle = nullptr;
@@ -149,7 +149,7 @@ public:
 
     const Type* address() const noexcept { return std::addressof(handle); }
     const Type& operator*() const noexcept { return handle; }
-    explicit operator bool() const noexcept { return handle != nullptr; }
+    explicit    operator bool() const noexcept { return handle != nullptr; }
 
 protected:
     Type            handle = nullptr;
@@ -179,7 +179,7 @@ public:
 
     const Type* address() const noexcept { return std::addressof(handle); }
     const Type& operator*() const noexcept { return handle; }
-    explicit operator bool() const noexcept { return handle != nullptr; }
+    explicit    operator bool() const noexcept { return handle != nullptr; }
 
 protected:
     Type            handle = nullptr;
@@ -353,8 +353,7 @@ public:
     PoolAllocations() = default;
 
     explicit PoolAllocations(std::unique_ptr<AllocationType[]> allocations_, std::size_t num_,
-                             VkDevice device_, PoolType pool_,
-                             const DeviceDispatch& dld_) noexcept
+                             VkDevice device_, PoolType pool_, const DeviceDispatch& dld_) noexcept
         : allocations { std::move(allocations_) },
           num { num_ },
           device { device_ },
@@ -385,8 +384,8 @@ public:
 
     std::size_t           size() const noexcept { return num; }
     AllocationType const* data() const noexcept { return allocations.get(); }
-    AllocationType        operator[](std::size_t index) const noexcept { return allocations[index]; }
-    bool                  IsOutOfPoolMemory() const noexcept { return ! device; }
+    AllocationType operator[](std::size_t index) const noexcept { return allocations[index]; }
+    bool           IsOutOfPoolMemory() const noexcept { return ! device; }
 
 private:
     void Release() noexcept {
@@ -522,8 +521,7 @@ public:
 
     VkResult GetSurfaceFormatsKHR(VkSurfaceKHR surface, std::vector<VkSurfaceFormatKHR>&) const;
 
-    VkResult GetSurfacePresentModesKHR(VkSurfaceKHR surface,
-                                       std::vector<VkPresentModeKHR>&) const;
+    VkResult GetSurfacePresentModesKHR(VkSurfaceKHR surface, std::vector<VkPresentModeKHR>&) const;
 
     VkPhysicalDeviceMemoryProperties2
     GetMemoryProperties(void* next_structures = nullptr) const noexcept;
@@ -533,8 +531,7 @@ class CommandPool : public Handle<VkCommandPool, VkDevice, DeviceDispatch> {
     using Handle<VkCommandPool, VkDevice, DeviceDispatch>::Handle;
 
 public:
-    VkResult Allocate(std::size_t num_buffers, VkCommandBufferLevel level,
-                      CommandBuffers&) const;
+    VkResult Allocate(std::size_t num_buffers, VkCommandBufferLevel level, CommandBuffers&) const;
 };
 
 class DeviceMemory : public Handle<VkDeviceMemory, VkDevice, DeviceDispatch> {
@@ -599,15 +596,15 @@ public:
     static VkResult Create(Device&, VkPhysicalDevice physical_device,
                            Span<const VkDeviceQueueCreateInfo> queues_ci,
                            Span<const char*> enabled_extensions, const void* next,
-                           DeviceDispatch& dispatch,
+                           DeviceDispatch&                 dispatch,
                            const VkPhysicalDeviceFeatures* enabled_features = nullptr);
 
     Queue GetQueue(uint32_t family_index) const noexcept;
 
     VkMemoryRequirements GetImageMemoryRequirements(VkImage image) const noexcept;
 
-    VkSubresourceLayout GetImageSubresourceLayout(VkImage                   image,
-                                                  const VkImageSubresource& subresource) const noexcept;
+    VkSubresourceLayout
+    GetImageSubresourceLayout(VkImage image, const VkImageSubresource& subresource) const noexcept;
 
     VkResult GetImageDrmFormatModifierPropertiesEXT(
         VkImage image, VkImageDrmFormatModifierPropertiesEXT* props) const noexcept;
@@ -625,8 +622,7 @@ public:
     VkResult CreatePipelineLayout(const VkPipelineLayoutCreateInfo& ci,
                                   PipelineLayout&) const noexcept;
 
-    VkResult CreateSwapchainKHR(const VkSwapchainCreateInfoKHR& ci,
-                                SwapchainKHR&) const noexcept;
+    VkResult CreateSwapchainKHR(const VkSwapchainCreateInfoKHR& ci, SwapchainKHR&) const noexcept;
 
     VkResult CreateShaderModule(const VkShaderModuleCreateInfo& ci, ShaderModule&) const noexcept;
 
@@ -680,8 +676,7 @@ public:
         dld->vkCmdEndQuery(handle, query_pool, query);
     }
 
-    void BindDescriptorSets(VkPipelineBindPoint bind_point, VkPipelineLayout layout,
-                            uint32_t              first,
+    void BindDescriptorSets(VkPipelineBindPoint bind_point, VkPipelineLayout layout, uint32_t first,
                             Span<VkDescriptorSet> sets,
                             Span<uint32_t>        dynamic_offsets) const noexcept {
         dld->vkCmdBindDescriptorSets(handle,
@@ -694,12 +689,10 @@ public:
                                      dynamic_offsets.data());
     }
 
-    void PushDescriptorSetKHR(VkPipelineBindPoint bind_point, VkPipelineLayout layout,
-                              uint32_t                         set,
+    void PushDescriptorSetKHR(VkPipelineBindPoint bind_point, VkPipelineLayout layout, uint32_t set,
                               Span<const VkWriteDescriptorSet> wsets) const noexcept {
         rstd_assert(wsets[0].sType == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-        dld->vkCmdPushDescriptorSetKHR(
-            handle, bind_point, layout, set, wsets.size(), wsets.data());
+        dld->vkCmdPushDescriptorSetKHR(handle, bind_point, layout, set, wsets.size(), wsets.data());
     }
 
     void PushDescriptorSetWithTemplateKHR(VkDescriptorUpdateTemplateKHR update_template,
@@ -849,8 +842,7 @@ public:
     void PushConstants(VkPipelineLayout layout, VkShaderStageFlags flags,
                        const T& data) const noexcept {
         static_assert(std::is_trivially_copyable_v<T>, "<data> is not trivially copyable");
-        dld->vkCmdPushConstants(
-            handle, layout, flags, 0, static_cast<uint32_t>(sizeof(T)), &data);
+        dld->vkCmdPushConstants(handle, layout, flags, 0, static_cast<uint32_t>(sizeof(T)), &data);
     }
 
     void SetViewport(uint32_t first, Span<VkViewport> viewports) const noexcept {
@@ -865,8 +857,7 @@ public:
         dld->vkCmdSetBlendConstants(handle, blend_constants);
     }
 
-    void SetStencilCompareMask(VkStencilFaceFlags face_mask,
-                               uint32_t           compare_mask) const noexcept {
+    void SetStencilCompareMask(VkStencilFaceFlags face_mask, uint32_t compare_mask) const noexcept {
         dld->vkCmdSetStencilCompareMask(handle, face_mask, compare_mask);
     }
 
@@ -891,8 +882,7 @@ public:
     }
 
     void WaitEvents(Span<VkEvent> events, VkPipelineStageFlags src_stage_mask,
-                    VkPipelineStageFlags        dst_stage_mask,
-                    Span<VkMemoryBarrier>       memory_barriers,
+                    VkPipelineStageFlags dst_stage_mask, Span<VkMemoryBarrier> memory_barriers,
                     Span<VkBufferMemoryBarrier> buffer_barriers,
                     Span<VkImageMemoryBarrier>  image_barriers) const noexcept {
         dld->vkCmdWaitEvents(handle,
@@ -982,7 +972,7 @@ class VmaBuffer : public Handle<VkBuffer, VmaOwner, int> {
 
 public:
     VmaAllocation Allocation() const noexcept { return owner.allocation; }
-    VkResult MapMemory(void** data) const {
+    VkResult      MapMemory(void** data) const {
         return vmaMapMemory(owner.allocator, owner.allocation, data);
     }
     void UnMapMemory() { vmaUnmapMemory(owner.allocator, owner.allocation); }
@@ -993,7 +983,7 @@ class VmaImage : public Handle<VkImage, VmaOwner, int> {
 
 public:
     VmaAllocation Allocation() const noexcept { return owner.allocation; }
-    VkResult MapMemory(void** data) const {
+    VkResult      MapMemory(void** data) const {
         return vmaMapMemory(owner.allocator, owner.allocation, data);
     }
     void UnMapMemory() { vmaUnmapMemory(owner.allocator, owner.allocation); }
@@ -1010,8 +1000,7 @@ inline VkResult CreateVmaAllocator(const VmaAllocatorCreateInfo& ci,
 }
 
 inline VkResult CreateBuffer(const VmaAllocator& vma_allocator, const VkBufferCreateInfo& ci,
-                             const VmaAllocationCreateInfo& vma_info,
-                             VmaBuffer&                     buffer) noexcept {
+                             const VmaAllocationCreateInfo& vma_info, VmaBuffer& buffer) noexcept {
     VkBuffer object;
     VmaOwner owner;
     owner.allocator = vma_allocator;
@@ -1023,8 +1012,7 @@ inline VkResult CreateBuffer(const VmaAllocator& vma_allocator, const VkBufferCr
 }
 
 inline VkResult CreateImage(const VmaAllocator& vma_allocator, const VkImageCreateInfo& ci,
-                            const VmaAllocationCreateInfo& vma_info,
-                            VmaImage&                      vma_img) noexcept {
+                            const VmaAllocationCreateInfo& vma_info, VmaImage& vma_img) noexcept {
     VkImage  object;
     VmaOwner owner;
     owner.allocator = vma_allocator;
@@ -1035,4 +1023,4 @@ inline VkResult CreateImage(const VmaAllocator& vma_allocator, const VkImageCrea
     return res;
 }
 
-} // namespace vvk (export)
+} // namespace vvk

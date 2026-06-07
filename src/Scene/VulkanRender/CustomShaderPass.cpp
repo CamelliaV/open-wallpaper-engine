@@ -24,9 +24,9 @@ CustomShaderPass::CustomShaderPass(const Desc& desc) {
 CustomShaderPass::~CustomShaderPass() {}
 
 std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFormat format,
-                                                VkAttachmentLoadOp     loadOp,
-                                                VkImageLayout          finalLayout,
-                                                VkSampleCountFlagBits  samples) {
+                                                VkAttachmentLoadOp    loadOp,
+                                                VkImageLayout         finalLayout,
+                                                VkSampleCountFlagBits samples) {
     const bool has_resolve = (samples != VK_SAMPLE_COUNT_1_BIT);
 
     // attachment[0] is the color attachment. With MSAA it's the multisample
@@ -44,9 +44,8 @@ std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFor
     };
 
     if (loadOp == VK_ATTACHMENT_LOAD_OP_LOAD) {
-        color.initialLayout =
-            has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        color.initialLayout = has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                                          : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
     // attachment[1] is the resolve target (single-sample). loadOp DONT_CARE
@@ -122,7 +121,9 @@ static void UpdateUniform(StagingBuffer* buf, const StagingBufferRef& bufref,
     const size_t refl_size = uni->second.size;
     if (refl_size != value_u8.size()) {
         rstd_warn("uniform \"{}\" size mismatch: reflected {} bytes, uploader {} bytes",
-                  name, refl_size, value_u8.size());
+                  name,
+                  refl_size,
+                  value_u8.size());
     }
     buf->writeToBuf(bufref, value_u8, offset);
 }
@@ -131,22 +132,31 @@ static void UpdateUniform(StagingBuffer* buf, const StagingBufferRef& bufref,
 // overlap. An overlap means glslang packed two members at conflicting std140
 // offsets — uploader writes will clobber neighbouring slots (the failure mode
 // the EmitCBufferStd140 helper was added to prevent).
-static void CheckBlockOverlap(const ShaderReflected::Block& block,
-                              std::string_view shader_name) {
-    struct Span { std::size_t off; std::size_t end; std::string_view name; };
+static void CheckBlockOverlap(const ShaderReflected::Block& block, std::string_view shader_name) {
+    struct Span {
+        std::size_t      off;
+        std::size_t      end;
+        std::string_view name;
+    };
     std::vector<Span> spans;
     spans.reserve(block.member_map.size());
     for (const auto& [n, u] : block.member_map) {
         if (u.size == 0) continue;
         spans.push_back({ u.offset, u.offset + u.size, n });
     }
-    std::sort(spans.begin(), spans.end(),
-              [](const Span& a, const Span& b) { return a.off < b.off; });
+    std::sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) {
+        return a.off < b.off;
+    });
     for (std::size_t i = 1; i < spans.size(); ++i) {
         if (spans[i].off < spans[i - 1].end) {
             rstd_warn("cbuffer overlap in \"{}\": \"{}\"[{}..{}) overlaps \"{}\"[{}..{})",
-                      shader_name, spans[i - 1].name, spans[i - 1].off, spans[i - 1].end,
-                      spans[i].name, spans[i].off, spans[i].end);
+                      shader_name,
+                      spans[i - 1].name,
+                      spans[i - 1].off,
+                      spans[i - 1].end,
+                      spans[i].name,
+                      spans[i].off,
+                      spans[i].end);
         }
     }
 }
@@ -205,8 +215,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
 
     SceneMesh& mesh = *(m_desc.node->Mesh());
     if (mesh.Submeshes().empty() || m_desc.submesh_index >= mesh.Submeshes().size()) return;
-    const auto&    submesh = mesh.Submeshes()[m_desc.submesh_index];
-    const auto&    slots   = mesh.MaterialSlots();
+    const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
+    const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
     SceneMaterial& material_ref = *slots[submesh.material_slot];
 
@@ -286,8 +296,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             }
             if (! m_desc.dyn_vertex) {
                 auto opt = mc.QueryOrUpload(
-                    { &vertex, 0 },
-                    { (const uint8_t*)vertex.Data(), vertex.CapacitySizeOf() });
+                    { &vertex, 0 }, { (const uint8_t*)vertex.Data(), vertex.CapacitySizeOf() });
                 if (! opt) return;
                 m_desc.vertex_bufs.push_back(std::move(*opt));
             } else {
@@ -302,8 +311,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             m_desc.draw_count = (u32)indice.DataCount();
             if (! m_desc.dyn_vertex) {
                 auto opt = mc.QueryOrUpload(
-                    { &indice, 0 },
-                    { (const uint8_t*)indice.Data(), indice.CapacitySizeof() });
+                    { &indice, 0 }, { (const uint8_t*)indice.Data(), indice.CapacitySizeof() });
                 if (! opt) return;
                 m_desc.index_buf = std::move(*opt);
             } else {
@@ -349,12 +357,11 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         // must be POINT_LIST. Detected via the WE_PRENDER_ROPE option set on
         // the first vertex array by SetRopeParticleMesh.
         const bool rope_topology =
-            ! submesh.vertex_arrays.empty() &&
-            submesh.vertex_arrays[0].GetOption(WE_PRENDER_ROPE);
+            ! submesh.vertex_arrays.empty() && submesh.vertex_arrays[0].GetOption(WE_PRENDER_ROPE);
         VkPrimitiveTopology topology = rope_topology
-                                            ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-                                            : (has_index ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-                                                         : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP);
+                                           ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+                                           : (has_index ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+                                                        : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP);
         pipeline.addDescriptorSetInfo(spanone { descriptor_info })
             .setColorBlendStates(spanone { color_blend })
             .setTopology(topology)
@@ -367,7 +374,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
 
     {
-        const bool has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
+        const bool                 has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
         std::array<VkImageView, 2> views {
             has_msaa ? m_desc.vk_output_msaa.view : m_desc.vk_output.view,
             m_desc.vk_output.view,
@@ -456,7 +463,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                 }
                 mat->customShader.dirty = false;
             }
-            auto update_unf_op = [&block, buf, bufref](std::string_view       name,
+            auto update_unf_op = [&block, buf, bufref](std::string_view name,
                                                        owe::ShaderValue value) {
                 UpdateUniform(buf, *bufref, block, name, value);
             };
@@ -526,7 +533,7 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     // tracks the scene clear (i.e. not a per-layer transparent reset).
     // Cheap: a 3-float copy per pass per frame.
     if (m_desc.clear_value_src) {
-        const auto& sc       = *m_desc.clear_value_src;
+        const auto& sc                      = *m_desc.clear_value_src;
         m_desc.clear_value.color.float32[0] = sc[0];
         m_desc.clear_value.color.float32[1] = sc[1];
         m_desc.clear_value.color.float32[2] = sc[2];
@@ -552,13 +559,13 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
                                          img.view,
                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkWriteDescriptorSet  wset {
-             .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-             .pNext           = nullptr,
-             .dstSet          = {},
-             .dstBinding      = (uint32_t)binding,
-             .descriptorCount = 1,
-             .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .pImageInfo      = &desc_img,
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext           = nullptr,
+            .dstSet          = {},
+            .dstBinding      = (uint32_t)binding,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo      = &desc_img,
         };
         cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
 
@@ -597,9 +604,9 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
         cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
     }
 
-    const bool has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
+    const bool                  has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
     std::array<VkClearValue, 2> clears { m_desc.clear_value, VkClearValue {} };
-    VkRenderPassBeginInfo pass_begin_info {
+    VkRenderPassBeginInfo       pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext       = nullptr,
         .renderPass  = *m_desc.pipeline.pass,
@@ -653,7 +660,7 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
 
     const bool has_index = m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
     if (has_index) {
-        const auto& submeshes = m_desc.node->Mesh()->Submeshes();
+        const auto&                                    submeshes = m_desc.node->Mesh()->Submeshes();
         static const std::vector<SceneMesh::DrawRange> kEmpty;
         const auto& ranges = (m_desc.submesh_index < submeshes.size())
                                  ? submeshes[m_desc.submesh_index].draw_ranges

@@ -2,8 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-
-
 module wescene.parse;
 import nlohmann.json;
 import rstd.log;
@@ -11,23 +9,23 @@ import rstd.cppstd;
 
 using namespace owe::wpscene;
 
-namespace owe::wpscene {
+namespace owe::wpscene
+{
 
 SceneVersion ParsePkgVersionStamp(std::string_view stamp) {
     constexpr std::string_view kPrefix = "PKGV";
     if (stamp.size() < kPrefix.size() + 1) return kSceneVersionUnknown;
     if (stamp.substr(0, kPrefix.size()) != kPrefix) return kSceneVersionUnknown;
-    SceneVersion     v       = 0;
-    const char*      first   = stamp.data() + kPrefix.size();
-    const char*      last    = stamp.data() + stamp.size();
-    const auto [end, ec]     = std::from_chars(first, last, v);
+    SceneVersion v       = 0;
+    const char*  first   = stamp.data() + kPrefix.size();
+    const char*  last    = stamp.data() + stamp.size();
+    const auto [end, ec] = std::from_chars(first, last, v);
     if (ec != std::errc {} || end != last) return kSceneVersionUnknown;
     return v;
 }
 
 SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root) {
-    if (root.is_object() && root.contains("version") &&
-        root.at("version").is_number_unsigned()) {
+    if (root.is_object() && root.contains("version") && root.at("version").is_number_unsigned()) {
         return root.at("version").template get<SceneJsonVersion>();
     }
     return kSceneJsonVersionDefault;
@@ -36,14 +34,13 @@ SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root) {
 } // namespace owe::wpscene
 
 bool Orthogonalprojection::FromJson(const nlohmann::json& json) {
-    if(json.is_null()) return false;
-	if(json.contains("auto")) {
-		owe::GetJsonValue(json, "auto", auto_);
-	}
-	else {
-		owe::GetJsonValue(json, "width", width);
-		owe::GetJsonValue(json, "height", height);
-	}
+    if (json.is_null()) return false;
+    if (json.contains("auto")) {
+        owe::GetJsonValue(json, "auto", auto_);
+    } else {
+        owe::GetJsonValue(json, "width", width);
+        owe::GetJsonValue(json, "height", height);
+    }
     return true;
 }
 
@@ -64,7 +61,8 @@ bool WPSceneLightConfig::FromJson(const nlohmann::json& json) {
     return true;
 }
 
-namespace {
+namespace
+{
 
 // A single SceneVersion is the sole gate for "should we attempt to read
 // fields introduced in PKGVxxxx". An unknown version (loose dir mount,
@@ -172,21 +170,19 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, SceneVersion v) {
     return true;
 }
 
-bool WPScene::FromJson(const nlohmann::json& json) {
-    return FromJson(json, kSceneVersionUnknown);
-}
+bool WPScene::FromJson(const nlohmann::json& json) { return FromJson(json, kSceneVersionUnknown); }
 
 bool WPScene::FromJson(const nlohmann::json& json, SceneVersion v) {
     pkg_version        = v;
     scene_json_version = DetectSceneJsonVersion(json);
-    if(json.contains("camera")) {
+    if (json.contains("camera")) {
         // camera schema is identical across PKGV0001..PKGV0023; no version gate needed.
         camera.FromJson(json.at("camera"));
     } else {
         rstd_error("scene no camera");
         return false;
     }
-    if(json.contains("general")) {
+    if (json.contains("general")) {
         general.FromJson(json.at("general"), v);
     } else {
         rstd_error("scene no genera data");

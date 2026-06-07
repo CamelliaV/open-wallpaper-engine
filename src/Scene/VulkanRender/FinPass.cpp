@@ -12,10 +12,10 @@ using namespace owe::vulkan;
 FinPass::FinPass(const Desc&) {}
 FinPass::~FinPass() {}
 
-void FinPass::setPresent(ImageParameters img)        { m_desc.vk_present = img; }
+void FinPass::setPresent(ImageParameters img) { m_desc.vk_present = img; }
 void FinPass::setPresentLayout(VkImageLayout layout) { m_desc.present_layout = layout; }
-void FinPass::setPresentQueueIndex(uint32_t i)       { m_desc.present_queue_index = i; }
-void FinPass::setPresentFormat(VkFormat fmt)         { m_desc.present_format = fmt; }
+void FinPass::setPresentQueueIndex(uint32_t i) { m_desc.present_queue_index = i; }
+void FinPass::setPresentFormat(VkFormat fmt) { m_desc.present_format = fmt; }
 
 void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& /*rr*/) {
     auto tex_name = std::string(m_desc.result);
@@ -24,7 +24,7 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& /*
         return;
     }
     auto& rt  = scene.renderTargets.at(tex_name);
-    auto  opt = device.tex_cache().Query(tex_name, ToTexKey(rt), !rt.allowReuse);
+    auto  opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
     if (! opt.has_value()) {
         rstd_error("FinPass: TextureCache::Query(\"{}\") failed", tex_name);
         return;
@@ -34,8 +34,8 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& /*
 }
 
 void FinPass::execute(const Device& device, RenderingResources& rr) {
-    auto& cmd      = rr.command;
-    uint32_t gqf   = device.graphics_queue().family_index;
+    auto&    cmd = rr.command;
+    uint32_t gqf = device.graphics_queue().family_index;
 
     VkImageSubresourceRange sub {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -92,10 +92,9 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
         // Result is always R8G8B8A8_UNORM (screen RT). We can copy when
         // present matches that and dimensions are identical; otherwise
         // fall back to blit which handles size/format mismatch.
-        const bool can_copy =
-            m_desc.vk_result.extent.width  == m_desc.vk_present.extent.width &&
-            m_desc.vk_result.extent.height == m_desc.vk_present.extent.height &&
-            m_desc.present_format          == VK_FORMAT_R8G8B8A8_UNORM;
+        const bool can_copy = m_desc.vk_result.extent.width == m_desc.vk_present.extent.width &&
+                              m_desc.vk_result.extent.height == m_desc.vk_present.extent.height &&
+                              m_desc.present_format == VK_FORMAT_R8G8B8A8_UNORM;
 
         if (! m_path_logged) {
             rstd_info("FinPass: {}", can_copy ? "copy" : "blit");
@@ -108,8 +107,7 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
                 .srcOffset      = { 0, 0, 0 },
                 .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 .dstOffset      = { 0, 0, 0 },
-                .extent         = { m_desc.vk_result.extent.width,
-                                    m_desc.vk_result.extent.height, 1 },
+                .extent = { m_desc.vk_result.extent.width, m_desc.vk_result.extent.height, 1 },
             };
             cmd.CopyImage(m_desc.vk_result.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -160,7 +158,7 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
     }
 
     {
-        bool xfer = (m_desc.present_queue_index != gqf);
+        bool                 xfer = (m_desc.present_queue_index != gqf);
         VkImageMemoryBarrier b {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext               = nullptr,
@@ -169,8 +167,7 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
             .oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .newLayout           = m_desc.present_layout,
             .srcQueueFamilyIndex = xfer ? gqf : VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = xfer ? m_desc.present_queue_index
-                                        : VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = xfer ? m_desc.present_queue_index : VK_QUEUE_FAMILY_IGNORED,
             .image               = m_desc.vk_present.handle,
             .subresourceRange    = sub,
         };

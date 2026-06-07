@@ -28,8 +28,8 @@ bool Device::CheckGPU(vvk::PhysicalDevice gpu, std::span<const Extension> exts,
                       VkSurfaceKHR surface) {
     auto props = gpu.GetQueueFamilyProperties();
 
-    bool has_graphics_queue { false };
-    bool has_present_queue { false };
+    bool     has_graphics_queue { false };
+    bool     has_present_queue { false };
     unsigned index { 0 };
     for (auto& prop : props) {
         if (prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) has_graphics_queue = true;
@@ -115,8 +115,7 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
             bool ok = device.supportExt(ext.name);
             if (ok) tested_exts.insert(std::string(ext.name));
             if (ext.required && ! ok) {
-                rstd_error("required vulkan device extension \"{}\" is not supported",
-                          ext.name);
+                rstd_error("required vulkan device extension \"{}\" is not supported", ext.name);
                 return false;
             }
         }
@@ -147,9 +146,8 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
                                           device.dld,
                                           &enabled));
 
-    device.m_graphics_queue.handle =
-        device.m_device.GetQueue(device.m_graphics_queue.family_index);
-    device.m_present_queue.handle = device.m_device.GetQueue(device.m_present_queue.family_index);
+    device.m_graphics_queue.handle = device.m_device.GetQueue(device.m_graphics_queue.family_index);
+    device.m_present_queue.handle  = device.m_device.GetQueue(device.m_present_queue.family_index);
 
     if (rq_surface) {
         if (! Swapchain::Create(device, *inst.surface(), extent, device.m_swapchain)) {
@@ -158,12 +156,10 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         }
     }
     {
-        VkCommandPoolCreateInfo info {
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = device.m_graphics_queue.family_index
-        };
+        VkCommandPoolCreateInfo info { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                                       .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
+                                                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                                       .queueFamilyIndex = device.m_graphics_queue.family_index };
         VVK_CHECK_BOOL_RE(device.m_device.CreateCommandPool(info, device.m_command_pool));
     }
     {

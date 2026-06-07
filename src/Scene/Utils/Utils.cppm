@@ -101,12 +101,12 @@ inline Eigen::Vector3d CurlNoise(Eigen::Vector3d p) noexcept {
     using namespace Eigen;
     constexpr double e = 1e-5;
     Vector3d         dx(e, 0, 0), dy(0, e, 0), dz(0, 0, e);
-    Vector3d x0 = PerlinNoiseVec3(p - dx), x1 = PerlinNoiseVec3(p + dx),
-             y0 = PerlinNoiseVec3(p - dy), y1 = PerlinNoiseVec3(p + dy),
-             z0 = PerlinNoiseVec3(p - dz), z1 = PerlinNoiseVec3(p + dz);
-    double x = y1.z() - y0.z() - z1.y() + z0.y();
-    double y = z1.x() - z0.x() - x1.z() + x0.z();
-    double z = x1.y() - x0.y() - y1.x() + y0.x();
+    Vector3d         x0 = PerlinNoiseVec3(p - dx), x1 = PerlinNoiseVec3(p + dx),
+                     y0 = PerlinNoiseVec3(p - dy), y1 = PerlinNoiseVec3(p + dy),
+                     z0 = PerlinNoiseVec3(p - dz), z1 = PerlinNoiseVec3(p + dz);
+    double           x = y1.z() - y0.z() - z1.y() + z0.y();
+    double           y = z1.x() - z0.x() - x1.z() + x0.z();
+    double           z = x1.y() - x0.y() - y1.x() + y0.x();
     return Vector3d(x, y, z) / (2.0 * e);
 }
 } // namespace algorism
@@ -130,7 +130,7 @@ inline std::filesystem::path GetCachePath(std::string_view name) {
 }
 } // namespace platform
 
-} // namespace owe (export)
+} // namespace owe
 
 // ---------- Migrated from former Utils/{Hash,DynamicLibrary,Identity} -------
 
@@ -156,7 +156,7 @@ struct is_std_array<std::array<T, N>> {
 
 // DynamicLibrary lives in wescene.types now (re-exported above).
 
-} // namespace utils (export)
+} // namespace utils
 
 // Eigen helpers — were Utils/Eigen.h. Module-attached additions to the Eigen
 // namespace; only visible to TUs that `import wescene.utils;`.
@@ -170,11 +170,11 @@ inline Matrix4d LookAt(Vector3d eye, Vector3d center, Vector3d up) noexcept {
     Vector3d xAxis  = up.cross(zAxis).normalized();
     Vector3d yAxis  = zAxis.cross(xAxis).normalized();
 
-    Affine3d trans         = Affine3d::Identity();
-    trans.linear().col(0)  = xAxis;
-    trans.linear().col(1)  = yAxis;
-    trans.linear().col(2)  = zAxis;
-    trans                 *= Translation3d(-eye);
+    Affine3d trans        = Affine3d::Identity();
+    trans.linear().col(0) = xAxis;
+    trans.linear().col(1) = yAxis;
+    trans.linear().col(2) = zAxis;
+    trans *= Translation3d(-eye);
     return trans.matrix();
 }
 
@@ -202,4 +202,4 @@ inline Matrix4d Perspective(double fov, double aspect, double nearz, double farz
     trans.prescale(Vector3d(1.0f, 1.0f, -1.0f));
     return Ortho(-right, right, -top, top, nearz, farz) * trans.matrix();
 }
-} // namespace Eigen (export)
+} // namespace Eigen

@@ -3,38 +3,35 @@ module;
 export module wescene.parse:shader_lex;
 import rstd.cppstd;
 
-export namespace owe::shader_lex {
+export namespace owe::shader_lex
+{
 
-inline bool IsHSpace(char c)  { return c == ' ' || c == '\t'; }
-inline bool IsVSpace(char c)  { return c == '\n' || c == '\r'; }
+inline bool IsHSpace(char c) { return c == ' ' || c == '\t'; }
+inline bool IsVSpace(char c) { return c == '\n' || c == '\r'; }
 inline bool IsIdStart(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
-inline bool IsIdCont(char c)  {
-    return IsIdStart(c) || (c >= '0' && c <= '9');
-}
-inline bool IsDigit(char c)   { return c >= '0' && c <= '9'; }
+inline bool IsIdCont(char c) { return IsIdStart(c) || (c >= '0' && c <= '9'); }
+inline bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
 // Hand-rolled scanner over a string_view. Pos always points at the next byte
 // to consume; Skip*/Match*/Read* primitives advance on success and stay put
 // on failure so the caller can probe alternatives without explicit Save.
 class Cursor {
 public:
-    explicit Cursor(std::string_view src) noexcept : m_src(src), m_pos(0) {}
-    Cursor(std::string_view src, std::size_t pos) noexcept : m_src(src), m_pos(pos) {}
+    explicit Cursor(std::string_view src) noexcept: m_src(src), m_pos(0) {}
+    Cursor(std::string_view src, std::size_t pos) noexcept: m_src(src), m_pos(pos) {}
 
-    std::size_t      Pos()    const noexcept { return m_pos; }
+    std::size_t      Pos() const noexcept { return m_pos; }
     std::string_view Source() const noexcept { return m_src; }
-    bool             Eof()    const noexcept { return m_pos >= m_src.size(); }
+    bool             Eof() const noexcept { return m_pos >= m_src.size(); }
     char             Peek(std::size_t off = 0) const noexcept {
         return (m_pos + off < m_src.size()) ? m_src[m_pos + off] : '\0';
     }
     void SeekTo(std::size_t pos) noexcept { m_pos = pos > m_src.size() ? m_src.size() : pos; }
     void Advance(std::size_t n = 1) noexcept { SeekTo(m_pos + n); }
 
-    bool AtLineStart() const noexcept {
-        return m_pos == 0 || m_src[m_pos - 1] == '\n';
-    }
+    bool        AtLineStart() const noexcept { return m_pos == 0 || m_src[m_pos - 1] == '\n'; }
     std::size_t LineStart() const noexcept {
         if (m_pos == 0) return 0;
         auto nl = m_src.rfind('\n', m_pos - 1);
@@ -63,17 +60,25 @@ public:
     void SkipAllTrivia() noexcept {
         while (m_pos < m_src.size()) {
             char c = m_src[m_pos];
-            if (IsHSpace(c) || IsVSpace(c)) { ++m_pos; continue; }
+            if (IsHSpace(c) || IsVSpace(c)) {
+                ++m_pos;
+                continue;
+            }
             if (c == '/' && m_pos + 1 < m_src.size()) {
-                if (m_src[m_pos + 1] == '/') { SkipToEol(); continue; }
+                if (m_src[m_pos + 1] == '/') {
+                    SkipToEol();
+                    continue;
+                }
                 if (m_src[m_pos + 1] == '*') {
                     m_pos += 2;
                     while (m_pos + 1 < m_src.size() &&
-                           !(m_src[m_pos] == '*' && m_src[m_pos + 1] == '/')) {
+                           ! (m_src[m_pos] == '*' && m_src[m_pos + 1] == '/')) {
                         ++m_pos;
                     }
-                    if (m_pos + 1 < m_src.size()) m_pos += 2;
-                    else m_pos = m_src.size();
+                    if (m_pos + 1 < m_src.size())
+                        m_pos += 2;
+                    else
+                        m_pos = m_src.size();
                     continue;
                 }
             }
@@ -107,7 +112,10 @@ public:
     }
 
     bool MatchChar(char c) noexcept {
-        if (m_pos < m_src.size() && m_src[m_pos] == c) { ++m_pos; return true; }
+        if (m_pos < m_src.size() && m_src[m_pos] == c) {
+            ++m_pos;
+            return true;
+        }
         return false;
     }
     bool MatchPunct(std::string_view s) noexcept {
@@ -120,8 +128,7 @@ public:
     bool MatchKeyword(std::string_view kw) noexcept {
         if (m_pos + kw.size() > m_src.size()) return false;
         if (m_src.substr(m_pos, kw.size()) != kw) return false;
-        if (m_pos + kw.size() < m_src.size() && IsIdCont(m_src[m_pos + kw.size()]))
-            return false;
+        if (m_pos + kw.size() < m_src.size() && IsIdCont(m_src[m_pos + kw.size()])) return false;
         m_pos += kw.size();
         return true;
     }
@@ -129,14 +136,22 @@ public:
     bool MatchHashDirective(std::string_view name) noexcept {
         std::size_t save = m_pos;
         SkipHSpace();
-        if (m_pos >= m_src.size() || m_src[m_pos] != '#') { m_pos = save; return false; }
+        if (m_pos >= m_src.size() || m_src[m_pos] != '#') {
+            m_pos = save;
+            return false;
+        }
         ++m_pos;
         SkipHSpace();
-        if (! MatchKeyword(name)) { m_pos = save; return false; }
+        if (! MatchKeyword(name)) {
+            m_pos = save;
+            return false;
+        }
         return true;
     }
 
-    struct Saved { std::size_t pos; };
+    struct Saved {
+        std::size_t pos;
+    };
     Saved Save() const noexcept { return { m_pos }; }
     void  Restore(Saved s) noexcept { m_pos = s.pos; }
 
@@ -155,9 +170,9 @@ public:
         : m_src(src), m_pos(0), m_line_start(0), m_line_end(0), m_in_block(false) {
         Recompute();
     }
-    bool             Done()       const noexcept { return m_pos > m_src.size(); }
-    std::size_t      LineStart()  const noexcept { return m_line_start; }
-    std::size_t      LineEnd()    const noexcept { return m_line_end; }
+    bool             Done() const noexcept { return m_pos > m_src.size(); }
+    std::size_t      LineStart() const noexcept { return m_line_start; }
+    std::size_t      LineEnd() const noexcept { return m_line_end; }
     std::string_view Line() const noexcept {
         // When the entire line is masked by an enclosing block comment, hide
         // it from callers so token scans never see the masked text.
@@ -183,7 +198,7 @@ private:
     void Recompute() noexcept {
         if (m_pos > m_src.size()) {
             m_line_start = m_line_end = m_src.size();
-            m_line_masked = false;
+            m_line_masked             = false;
             return;
         }
         m_line_start = m_pos;
@@ -191,9 +206,9 @@ private:
         m_line_end   = (nl == std::string_view::npos) ? m_src.size() : nl;
 
         // Walk the line characterwise to update block-comment state.
-        m_line_masked = m_in_block;
-        std::size_t p = m_line_start;
-        bool starts_in_block = m_in_block;
+        m_line_masked               = m_in_block;
+        std::size_t p               = m_line_start;
+        bool        starts_in_block = m_in_block;
         while (p < m_line_end) {
             if (m_in_block) {
                 if (p + 1 < m_line_end && m_src[p] == '*' && m_src[p + 1] == '/') {
@@ -236,18 +251,19 @@ private:
 // (text + offset) so callers can splice / re-emit the source unchanged. The
 // lexer is line-aware: Newline / HSpace / LineComment / BlockComment are
 // each their own kind so directive parsing stays straightforward.
-enum class TokenKind : std::uint8_t {
+enum class TokenKind : std::uint8_t
+{
     Eof,
-    Newline,       // single '\n'
-    HSpace,        // run of ' ' / '\t'
-    LineComment,   // includes the leading '//' and runs up to (not including) '\n'
-    BlockComment,  // includes leading '/*' and trailing '*/'
-    Ident,         // [A-Za-z_][A-Za-z0-9_]*
-    Int,           // [0-9]+
-    String,        // "..." including quotes; consumed up to '\n' / EOF if unterminated
-    Hash,          // single '#'
-    Punct,         // any single-byte ASCII punctuation not covered above
-    Unknown,       // any other byte (non-ASCII, control chars)
+    Newline,      // single '\n'
+    HSpace,       // run of ' ' / '\t'
+    LineComment,  // includes the leading '//' and runs up to (not including) '\n'
+    BlockComment, // includes leading '/*' and trailing '*/'
+    Ident,        // [A-Za-z_][A-Za-z0-9_]*
+    Int,          // [0-9]+
+    String,       // "..." including quotes; consumed up to '\n' / EOF if unterminated
+    Hash,         // single '#'
+    Punct,        // any single-byte ASCII punctuation not covered above
+    Unknown,      // any other byte (non-ASCII, control chars)
 };
 
 struct Token {
@@ -258,16 +274,16 @@ struct Token {
 
 class Lexer {
 public:
-    explicit Lexer(std::string_view src) noexcept : m_src(src), m_pos(0) {}
+    explicit Lexer(std::string_view src) noexcept: m_src(src), m_pos(0) {}
 
     std::string_view Source() const noexcept { return m_src; }
-    std::size_t      Pos()    const noexcept { return m_pos; }
+    std::size_t      Pos() const noexcept { return m_pos; }
     void             SeekTo(std::size_t p) noexcept { m_pos = p > m_src.size() ? m_src.size() : p; }
-    bool             Eof()    const noexcept { return m_pos >= m_src.size(); }
+    bool             Eof() const noexcept { return m_pos >= m_src.size(); }
 
     Token Peek() const noexcept {
-        std::size_t save = m_pos;
-        Token t = const_cast<Lexer*>(this)->ScanOne();
+        std::size_t save                = m_pos;
+        Token       t                   = const_cast<Lexer*>(this)->ScanOne();
         const_cast<Lexer*>(this)->m_pos = save;
         return t;
     }
@@ -284,14 +300,15 @@ public:
         }
     }
 
-    struct Saved { std::size_t pos; };
+    struct Saved {
+        std::size_t pos;
+    };
     Saved Save() const noexcept { return { m_pos }; }
     void  Restore(Saved s) noexcept { m_pos = s.pos; }
 
 private:
     Token ScanOne() noexcept {
-        if (m_pos >= m_src.size())
-            return { TokenKind::Eof, {}, m_src.size() };
+        if (m_pos >= m_src.size()) return { TokenKind::Eof, {}, m_src.size() };
         std::size_t start = m_pos;
         char        c0    = m_src[m_pos];
 
@@ -310,10 +327,12 @@ private:
         }
         if (c0 == '/' && m_pos + 1 < m_src.size() && m_src[m_pos + 1] == '*') {
             m_pos += 2;
-            while (m_pos + 1 < m_src.size() &&
-                   !(m_src[m_pos] == '*' && m_src[m_pos + 1] == '/')) ++m_pos;
-            if (m_pos + 1 < m_src.size()) m_pos += 2;
-            else m_pos = m_src.size();
+            while (m_pos + 1 < m_src.size() && ! (m_src[m_pos] == '*' && m_src[m_pos + 1] == '/'))
+                ++m_pos;
+            if (m_pos + 1 < m_src.size())
+                m_pos += 2;
+            else
+                m_pos = m_src.size();
             return { TokenKind::BlockComment, m_src.substr(start, m_pos - start), start };
         }
         if (IsIdStart(c0)) {
@@ -348,36 +367,52 @@ private:
     std::size_t      m_pos;
 };
 
-enum class PpKind {
+enum class PpKind
+{
     None,
-    If, Ifdef, Ifndef, Elif, Else, Endif,
-    Define, Undef, Include, Require,
-    Pragma, Extension, Version, Other,
+    If,
+    Ifdef,
+    Ifndef,
+    Elif,
+    Else,
+    Endif,
+    Define,
+    Undef,
+    Include,
+    Require,
+    Pragma,
+    Extension,
+    Version,
+    Other,
 };
 
 inline PpKind ClassifyPreproc(Cursor c) noexcept {
     Lexer lx(c.Source().substr(c.Pos()));
     // First non-HSpace token must be Hash.
-    Token t = lx.NextSkip([](TokenKind k) { return k == TokenKind::HSpace; });
+    Token t = lx.NextSkip([](TokenKind k) {
+        return k == TokenKind::HSpace;
+    });
     if (t.kind != TokenKind::Hash) return PpKind::None;
     // Directive name after optional HSpace.
-    t = lx.NextSkip([](TokenKind k) { return k == TokenKind::HSpace; });
+    t = lx.NextSkip([](TokenKind k) {
+        return k == TokenKind::HSpace;
+    });
     if (t.kind != TokenKind::Ident) return PpKind::Other;
     auto id = t.text;
-    if (id == "if")        return PpKind::If;
-    if (id == "ifdef")     return PpKind::Ifdef;
-    if (id == "ifndef")    return PpKind::Ifndef;
-    if (id == "elif")      return PpKind::Elif;
-    if (id == "else")      return PpKind::Else;
-    if (id == "endif")     return PpKind::Endif;
-    if (id == "define")    return PpKind::Define;
-    if (id == "undef")     return PpKind::Undef;
-    if (id == "include")   return PpKind::Include;
-    if (id == "require")   return PpKind::Require;
-    if (id == "pragma")    return PpKind::Pragma;
+    if (id == "if") return PpKind::If;
+    if (id == "ifdef") return PpKind::Ifdef;
+    if (id == "ifndef") return PpKind::Ifndef;
+    if (id == "elif") return PpKind::Elif;
+    if (id == "else") return PpKind::Else;
+    if (id == "endif") return PpKind::Endif;
+    if (id == "define") return PpKind::Define;
+    if (id == "undef") return PpKind::Undef;
+    if (id == "include") return PpKind::Include;
+    if (id == "require") return PpKind::Require;
+    if (id == "pragma") return PpKind::Pragma;
     if (id == "extension") return PpKind::Extension;
-    if (id == "version")   return PpKind::Version;
+    if (id == "version") return PpKind::Version;
     return PpKind::Other;
 }
 
-}  // namespace owe::shader_lex
+} // namespace owe::shader_lex

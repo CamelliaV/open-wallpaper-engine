@@ -1,7 +1,5 @@
 module;
 
-
-
 export module wescene.parse:wp_mdl_parser;
 import eigen;
 import wescene.core;
@@ -10,8 +8,8 @@ import wescene.fs;
 import wescene.scene;
 
 export import wescene.puppet;
-import :wp_shader_parser;  // WPShaderInfo
-import :wp_material;       // wpscene::WPMaterial
+import :wp_shader_parser; // WPShaderInfo
+import :wp_material;      // wpscene::WPMaterial
 
 export namespace owe
 
@@ -21,8 +19,8 @@ export namespace owe
 // u32 vertex layout flag + u32 always-one + u32 mesh_count.
 struct WPMdlHeader {
     i32 mdlv { 13 };
-    u32 mdl_flag { 0 };       // vertex layout bitmask; mdlv<=14 meshes inherit this
-    u32 unk_a { 1 };          // always_one in hexpat
+    u32 mdl_flag { 0 }; // vertex layout bitmask; mdlv<=14 meshes inherit this
+    u32 unk_a { 1 };    // always_one in hexpat
     u32 mesh_count { 1 };
 };
 
@@ -33,17 +31,17 @@ struct WPMdl {
     // (non-puppet) meshes; renderer currently consumes meshes[0] only.
     struct Mesh {
         std::string mat_json_file;
-        u32         flag_a { 0 };         // hexpat Mesh.flag_a (usually 0; 2 has trailing 1)
+        u32         flag_a { 0 }; // hexpat Mesh.flag_a (usually 0; 2 has trailing 1)
         bool        has_flag_a2_one { false };
-        u32         flag { 0 };           // per-mesh vertex layout flag (mdlv>14); 0 = inherit header
+        u32         flag { 0 }; // per-mesh vertex layout flag (mdlv>14); 0 = inherit header
         std::array<float, 3> aabb_min {};
         std::array<float, 3> aabb_max {};
-        bool        has_aabb { false };   // mdlv>=17
+        bool                 has_aabb { false }; // mdlv>=17
 
         // SoA attributes; empty means the bit was not set in `flag`.
         std::vector<std::array<float, 3>>    positions;
         std::vector<std::array<float, 3>>    normals;
-        std::vector<std::array<float, 4>>    tangents;        // tangent[3] + tangent_sign
+        std::vector<std::array<float, 4>>    tangents; // tangent[3] + tangent_sign
         std::vector<std::array<uint8_t, 4>>  extra4;
         std::vector<std::array<uint32_t, 4>> blend_indices;
         std::vector<std::array<float, 4>>    blend_weights;
@@ -85,13 +83,13 @@ struct WPMdl {
         std::string                          tag;
         uint32_t                             hash;
         std::vector<std::array<uint16_t, 3>> vertices;
-        std::vector<uint16_t>                vertex_trailers;  // shape_id != 0
-        std::vector<uint8_t>                 trailer;          // shape_id == 0
+        std::vector<uint16_t>                vertex_trailers; // shape_id != 0
+        std::vector<uint8_t>                 trailer;         // shape_id == 0
     };
     struct MorphSection {
-        float                          event_time;
-        uint16_t                       event_id;
-        std::vector<MorphSectionData>  sections;
+        float                         event_time;
+        uint16_t                      event_id;
+        std::vector<MorphSectionData> sections;
     };
     std::vector<MorphSection> morph_sections;
 

@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.vulkan_render:fin_pass;
 import wescene.spec_texs;
 import rstd.cppstd;
@@ -29,11 +28,11 @@ public:
         ImageParameters vk_present;
 
         // configured once at init by VulkanRender
-        VkImageLayout present_layout    { VK_IMAGE_LAYOUT_UNDEFINED };
+        VkImageLayout present_layout { VK_IMAGE_LAYOUT_UNDEFINED };
         uint32_t      present_queue_index { 0 };
         // Format of the present image. Used to pick copy vs blit; UNDEFINED
         // forces blit (the safe default for unknown formats).
-        VkFormat      present_format    { VK_FORMAT_UNDEFINED };
+        VkFormat present_format { VK_FORMAT_UNDEFINED };
     };
 
     FinPass(const Desc&);

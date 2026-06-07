@@ -2,7 +2,8 @@
 
 #include "include/cef_frame.h"
 
-namespace weweb {
+namespace weweb
+{
 
 std::string BuildPropertyListenerSnippet(const nlohmann::json& props) {
     // The page side typically registers a listener like:
@@ -20,25 +21,21 @@ std::string BuildPropertyListenerSnippet(const nlohmann::json& props) {
         "  if (typeof window.wallpaperPropertyListener.applyUserProperties !== 'function') return;"
         "  try {"
         "    window.wallpaperPropertyListener.applyUserProperties(";
-    snippet += props.is_object() ? props.dump() : std::string{"{}"};
-    snippet +=
-        "    );"
-        "  } catch (e) {"
-        "    console.error('weweb: applyUserProperties threw:', e);"
-        "  }"
-        "})();";
+    snippet += props.is_object() ? props.dump() : std::string { "{}" };
+    snippet += "    );"
+               "  } catch (e) {"
+               "    console.error('weweb: applyUserProperties threw:', e);"
+               "  }"
+               "})();";
     return snippet;
 }
 
-void InjectUserProperties(CefRefPtr<CefBrowser> browser,
-                          const nlohmann::json& props) {
-    if (!browser) return;
+void InjectUserProperties(CefRefPtr<CefBrowser> browser, const nlohmann::json& props) {
+    if (! browser) return;
     auto frame = browser->GetMainFrame();
-    if (!frame) return;
+    if (! frame) return;
     frame->ExecuteJavaScript(
-        BuildPropertyListenerSnippet(props),
-        "weweb://internal/inject_user_properties.js",
-        0);
+        BuildPropertyListenerSnippet(props), "weweb://internal/inject_user_properties.js", 0);
 }
 
-}  // namespace weweb
+} // namespace weweb

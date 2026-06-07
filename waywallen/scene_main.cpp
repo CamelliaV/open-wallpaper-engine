@@ -41,7 +41,7 @@ struct Options {
     bool        enable_audio { true };
     std::string render_node;
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
-    uint32_t    msaa_samples { 1 };
+    uint32_t                                         msaa_samples { 1 };
     std::vector<std::pair<std::string, std::string>> initial_user_properties;
 };
 
@@ -53,20 +53,18 @@ struct Options {
 Options parse_args(int argc, char** argv) {
     argparse::ArgumentParser program("waywallen-wescene-renderer");
 
-    program.add_argument("--ipc")
-        .required()
-        .help("Unix-domain socket path for daemon IPC");
+    program.add_argument("--ipc").required().help("Unix-domain socket path for daemon IPC");
     program.add_argument("--path")
-        .default_value(std::string{})
+        .default_value(std::string {})
         .help("Wallpaper Engine .pkg path (canonical resource)");
     program.add_argument("--assets")
-        .default_value(std::string{})
+        .default_value(std::string {})
         .help("Optional Wallpaper Engine assets directory");
     program.add_argument("--workshop_id")
-        .default_value(std::string{})
+        .default_value(std::string {})
         .help("Optional Steam workshop id (informational)");
     program.add_argument("--render-node")
-        .default_value(std::string{})
+        .default_value(std::string {})
         .help("DRM render-node path to pin Vulkan device selection to "
               "(empty ⇒ let Vulkan pick the default)");
     program.add_argument("remaining").remaining();
@@ -92,8 +90,7 @@ Options parse_args(int argc, char** argv) {
 // settings have <10 entries today).
 const char* kv_get(const ww_kv_list_t& kv, const char* key) {
     for (uint32_t i = 0; i < kv.count; ++i) {
-        if (kv.data[i].key && std::strcmp(kv.data[i].key, key) == 0)
-            return kv.data[i].value;
+        if (kv.data[i].key && std::strcmp(kv.data[i].key, key) == 0) return kv.data[i].value;
     }
     return nullptr;
 }
@@ -101,10 +98,10 @@ const char* kv_get(const ww_kv_list_t& kv, const char* key) {
 // Parse a setting string as f32; falls back to `def` on parse error
 // or a NULL pointer.
 float parse_f32(const char* s, float def) {
-    if (!s || !*s) return def;
+    if (! s || ! *s) return def;
     char* end = nullptr;
-    errno = 0;
-    double v = std::strtod(s, &end);
+    errno     = 0;
+    double v  = std::strtod(s, &end);
     if (errno != 0 || end == s) return def;
     return static_cast<float>(v);
 }
@@ -113,15 +110,15 @@ float parse_f32(const char* s, float def) {
 // else falls back to `def` so a malformed wire value doesn't silently
 // flip the gate.
 bool parse_bool(const char* s, bool def) {
-    if (!s || !*s) return def;
-    if (std::strcmp(s, "true") == 0)  return true;
+    if (! s || ! *s) return def;
+    if (std::strcmp(s, "true") == 0) return true;
     if (std::strcmp(s, "false") == 0) return false;
     return def;
 }
 
-bool resolve_render_node_to_uuid(const std::string& path,
+bool resolve_render_node_to_uuid(const std::string&                 path,
                                  std::array<uint8_t, VK_UUID_SIZE>& out_uuid,
-                                 std::string& err_msg) {
+                                 std::string&                       err_msg) {
     static const char* k_inst_exts[] = {
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
     };
@@ -134,7 +131,7 @@ bool resolve_render_node_to_uuid(const std::string& path,
     ici.pApplicationInfo        = &app;
     ici.enabledExtensionCount   = sizeof(k_inst_exts) / sizeof(k_inst_exts[0]);
     ici.ppEnabledExtensionNames = k_inst_exts;
-    VkInstance inst = VK_NULL_HANDLE;
+    VkInstance inst             = VK_NULL_HANDLE;
     if (vkCreateInstance(&ici, nullptr, &inst) != VK_SUCCESS) {
         err_msg = "vkCreateInstance failed";
         return false;
@@ -147,40 +144,35 @@ bool resolve_render_node_to_uuid(const std::string& path,
         return false;
     }
 
-    int rc = ww_bridge_vk_resolve_render_node(&dt, inst, path.c_str(),
-                                              out_uuid.data());
+    int rc = ww_bridge_vk_resolve_render_node(&dt, inst, path.c_str(), out_uuid.data());
     vkDestroyInstance(inst, nullptr);
 
     if (rc == 0) return true;
     if (rc == -ENOENT) {
-        err_msg = "no Vulkan device with VK_EXT_physical_device_drm matches "
-                  + path;
+        err_msg = "no Vulkan device with VK_EXT_physical_device_drm matches " + path;
     } else if (rc == -ENOTSUP) {
         err_msg = "Vulkan instance lacks vkGetPhysicalDeviceProperties2 chain";
     } else if (rc < 0) {
-        err_msg = std::string("ww_bridge_vk_resolve_render_node: ")
-                  + ::strerror(-rc);
+        err_msg = std::string("ww_bridge_vk_resolve_render_node: ") + ::strerror(-rc);
     } else {
-        err_msg = "ww_bridge_vk_resolve_render_node returned "
-                  + std::to_string(rc);
+        err_msg = "ww_bridge_vk_resolve_render_node returned " + std::to_string(rc);
     }
     return false;
 }
-
 
 // ---------------------------------------------------------------------------
 // Host state shared between reader thread and main thread.
 // ---------------------------------------------------------------------------
 
 struct HostState {
-    int                            sock { -1 };
-    ww_pool_t*                     pool { nullptr };
+    int        sock { -1 };
+    ww_pool_t* pool { nullptr };
     // Non-owning pointer; the unique_ptr lives inside VulkanRender.
     ww_wescene::BridgeExSwapchain* swapchain { nullptr };
     // Non-owning pointer to the SceneWallpaper that lives in main's
     // stack frame; the reader thread uses it to dispatch ApplySettings
     // hot-reload (volume / fps) into the looper.
-    owe::SceneWallpaper*     wp { nullptr };
+    owe::SceneWallpaper* wp { nullptr };
 
     // Render-target extent. Pointer events arrive in pixel coords from
     // the consumer display;
@@ -194,21 +186,18 @@ struct HostState {
     // thus a ReportState send) earlier than `ww_bridge_pool_advertise_caps`
     // (which is what actually triggers Ready). Stash any clear-colour
     // emitted before Ready, and flush after advertise_caps succeeds.
-    std::mutex                                clear_mu;
-    bool                                      clear_ready_published { false };
-    std::optional<std::array<float, 3>>       clear_pending;
+    std::mutex                          clear_mu;
+    bool                                clear_ready_published { false };
+    std::optional<std::array<float, 3>> clear_pending;
 };
 
-void signal_shutdown(HostState& s) {
-    s.shutdown.store(true, std::memory_order_release);
-}
+void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_release); }
 
 // Apply a single fps change through the same path WW_EVT_IN_SET_FPS would
 // have used. Centralised so ApplySettings can route through it.
 void set_fps(HostState& s, uint32_t fps) {
-    if (!s.wp || fps == 0) return;
-    s.wp->setPropertyInt32(owe::PROPERTY_FPS,
-                           static_cast<int32_t>(fps));
+    if (! s.wp || fps == 0) return;
+    s.wp->setPropertyInt32(owe::PROPERTY_FPS, static_cast<int32_t>(fps));
 }
 
 void apply_control(HostState& s, ww_bridge_control_t& msg) {
@@ -228,16 +217,15 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         for (uint32_t i = 0; i < as.settings.count; ++i) {
             const char* key = as.settings.data[i].key;
             const char* val = as.settings.data[i].value;
-            if (!key || !val) continue;
+            if (! key || ! val) continue;
             if (std::strcmp(key, "volume") == 0) {
                 if (s.wp) {
                     // Wire format is u32 0..100; engine takes 0..1 ratio.
-                    s.wp->setPropertyFloat(owe::PROPERTY_VOLUME,
-                                           parse_f32(val, 100.0f) / 100.0f);
+                    s.wp->setPropertyFloat(owe::PROPERTY_VOLUME, parse_f32(val, 100.0f) / 100.0f);
                 }
             } else if (std::strcmp(key, "fps") == 0) {
-                char* end = nullptr;
-                unsigned long n = std::strtoul(val, &end, 10);
+                char*         end = nullptr;
+                unsigned long n   = std::strtoul(val, &end, 10);
                 if (end != val) set_fps(s, static_cast<uint32_t>(n));
             } else if (std::strcmp(key, "test_pattern") == 0) {
                 // Wescene's test_pattern flag is set on initial spawn
@@ -258,8 +246,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     case WW_EVT_IN_POINTER_MOTION: {
         ww_bridge_pointer_motion_t pm {};
-        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.wp
-            && s.width > 0 && s.height > 0) {
+        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.wp && s.width > 0 &&
+            s.height > 0) {
             s.wp->mouseInput(static_cast<double>(pm.x) / s.width,
                              static_cast<double>(pm.y) / s.height);
             // The bridge has no explicit enter/leave; treat every motion
@@ -275,25 +263,20 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             // matching the GLFW numbering scripts expect.
             int idx = -1;
             switch (pb.button) {
-                case 0x110: idx = 0; break;  // BTN_LEFT
-                case 0x111: idx = 1; break;  // BTN_RIGHT
-                case 0x112: idx = 2; break;  // BTN_MIDDLE
-                default: break;
+            case 0x110: idx = 0; break; // BTN_LEFT
+            case 0x111: idx = 1; break; // BTN_RIGHT
+            case 0x112: idx = 2; break; // BTN_MIDDLE
+            default: break;
             }
             if (idx >= 0) s.wp->mouseButton(idx, pb.state != 0);
         }
         break;
     }
-    case WW_EVT_IN_POINTER_AXIS:
-        break;
-    case WW_EVT_IN_SET_FPS:
-        set_fps(s, msg.u.set_fps.fps);
-        break;
-    case WW_EVT_IN_SHUTDOWN:
-        signal_shutdown(s);
-        break;
+    case WW_EVT_IN_POINTER_AXIS: break;
+    case WW_EVT_IN_SET_FPS: set_fps(s, msg.u.set_fps.fps); break;
+    case WW_EVT_IN_SHUTDOWN: signal_shutdown(s); break;
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
-        const auto& nb = msg.u.negotiate_buffers;
+        const auto&         nb = msg.u.negotiate_buffers;
         ww_pool_directive_t d {};
         d.category    = nb.path;
         d.mem_source  = nb.mem_source;
@@ -313,18 +296,17 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     default:
-        rstd_warn("waywallen-wescene-renderer: unknown control op {}",
-                  static_cast<int>(msg.op));
+        rstd_warn("waywallen-wescene-renderer: unknown control op {}", static_cast<int>(msg.op));
         break;
     }
 }
 
 void reader_loop(HostState& s) {
-    while (!s.shutdown.load(std::memory_order_acquire)) {
+    while (! s.shutdown.load(std::memory_order_acquire)) {
         ww_bridge_control_t msg {};
-        int rc = ww_bridge_recv_control(s.sock, &msg);
+        int                 rc = ww_bridge_recv_control(s.sock, &msg);
         if (rc != 0) {
-            if (!s.shutdown.load(std::memory_order_acquire)) {
+            if (! s.shutdown.load(std::memory_order_acquire)) {
                 rstd_error("waywallen-wescene-renderer: recv_control failed: {}", rc);
             }
             signal_shutdown(s);
@@ -336,7 +318,6 @@ void reader_loop(HostState& s) {
 }
 
 } // namespace
-
 
 // ---------------------------------------------------------------------------
 // main
@@ -355,10 +336,11 @@ int main(int argc, char** argv) {
                 rstd::log::Level::Warn,
                 rstd::log::Level::Error,
             };
-            auto lvl = kMap[level <= 3u ? level : 3u];
-            auto args = rstd::fmt::Arguments::make("{}", msg);
+            auto              lvl  = kMap[level <= 3u ? level : 3u];
+            auto              args = rstd::fmt::Arguments::make("{}", msg);
             rstd::log::Record rec {
-                rstd::log::Metadata { lvl, {} }, args,
+                rstd::log::Metadata { lvl, {} },
+                args,
             };
             rstd::log::log(rec);
         },
@@ -370,18 +352,16 @@ int main(int argc, char** argv) {
 
     HostState host;
     host.sock = ww_bridge_connect(opts.ipc_path.c_str());
-    if (host.sock < 0)
-        die("ww_bridge_connect: " + std::string(::strerror(-host.sock)));
+    if (host.sock < 0) die("ww_bridge_connect: " + std::string(::strerror(-host.sock)));
 
     {
         ww_bridge_init_t init {};
         if (int rc = ww_bridge_recv_init(host.sock, &init); rc != 0) {
             const char* reason = (rc == -EPROTO)
-                ? "init: protocol error or unsupported spawn_version"
-                : "init: recv failed";
-            ww_bridge_send_init_nack(host.sock, init.spawn_version,
-                                     WW_BRIDGE_SUPPORTED_SPAWN_VERSION,
-                                     reason);
+                                     ? "init: protocol error or unsupported spawn_version"
+                                     : "init: recv failed";
+            ww_bridge_send_init_nack(
+                host.sock, init.spawn_version, WW_BRIDGE_SUPPORTED_SPAWN_VERSION, reason);
             ww_bridge_init_free(&init);
             die(std::string(reason) + " rc=" + std::to_string(rc));
         }
@@ -395,46 +375,42 @@ int main(int argc, char** argv) {
         {
             uint32_t resolution = static_cast<uint32_t>(WW_RESOLUTION_1080P);
             if (const char* v = kv_get(init.settings, "resolution"); v && *v) {
-                char* end = nullptr;
-                unsigned long n = std::strtoul(v, &end, 10);
-                uint32_t parsed = (end != v)
-                    ? ww_resolution_sanitize(static_cast<uint32_t>(n))
-                    : static_cast<uint32_t>(WW_RESOLUTION_1080P);
-                resolution = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
-                    ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
-                    : parsed;
+                char*         end    = nullptr;
+                unsigned long n      = std::strtoul(v, &end, 10);
+                uint32_t      parsed = (end != v) ? ww_resolution_sanitize(static_cast<uint32_t>(n))
+                                                  : static_cast<uint32_t>(WW_RESOLUTION_1080P);
+                resolution           = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
+                                           ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
+                                           : parsed;
             }
             opts.width  = 16;
             opts.height = 9;
-            ww_resolution_apply_cap(resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE,
-                                    &opts.width, &opts.height);
+            ww_resolution_apply_cap(
+                resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE, &opts.width, &opts.height);
         }
         if (const char* v = kv_get(init.settings, "fps"); v && *v) {
-            char* end = nullptr;
-            unsigned long n = std::strtoul(v, &end, 10);
+            char*         end = nullptr;
+            unsigned long n   = std::strtoul(v, &end, 10);
             if (end != v) opts.initial_fps = static_cast<uint32_t>(n);
         }
         if (const char* v = kv_get(init.settings, "test_pattern"); v && *v) {
             opts.test_pattern = (std::strcmp(v, "0") != 0);
         }
         // Wire format is u32 0..100; engine takes 0..1 ratio.
-        opts.initial_volume =
-            parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
+        opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
         // identity=true: respawn-only. Reflected into PROPERTY_MUTED below
         // so SoundManager::init() short-circuits and no audio device opens.
-        opts.enable_audio =
-            parse_bool(kv_get(init.settings, "enable_audio"), true);
+        opts.enable_audio = parse_bool(kv_get(init.settings, "enable_audio"), true);
         // CLI `--render-node` wins over Init kv (mirroring mpv/video).
         // Empty ⇒ let SceneWallpaper pick the default Vulkan device.
         if (opts.render_node.empty()) {
-            if (const char* v = kv_get(init.settings, "render_node");
-                v && *v) {
+            if (const char* v = kv_get(init.settings, "render_node"); v && *v) {
                 opts.render_node = v;
             }
         }
         if (const char* v = kv_get(init.settings, "msaa"); v && *v) {
-            char* end = nullptr;
-            unsigned long n = std::strtoul(v, &end, 10);
+            char*         end = nullptr;
+            unsigned long n   = std::strtoul(v, &end, 10);
             if (end != v) opts.msaa_samples = static_cast<uint32_t>(n);
         }
         // Per-item user-property overrides arrive as a raw JSON object
@@ -459,9 +435,12 @@ int main(int argc, char** argv) {
                     // colour as "r g b[ a]"). Encode non-string values
                     // through nlohmann::json's printer.
                     std::string sval;
-                    if (v.is_string())      sval = v.get<std::string>();
-                    else if (v.is_boolean()) sval = v.get<bool>() ? "true" : "false";
-                    else                    sval = v.dump();
+                    if (v.is_string())
+                        sval = v.get<std::string>();
+                    else if (v.is_boolean())
+                        sval = v.get<bool>() ? "true" : "false";
+                    else
+                        sval = v.dump();
                     opts.initial_user_properties.emplace_back(k, sval);
                 }
             } else if (! parsed.is_discarded()) {
@@ -473,9 +452,9 @@ int main(int argc, char** argv) {
     }
 
     owe::SceneWallpaper wp;
-    if (!wp.init()) die("SceneWallpaper::init failed");
+    if (! wp.init()) die("SceneWallpaper::init failed");
 
-    host.wp = &wp;
+    host.wp     = &wp;
     host.width  = opts.width;
     host.height = opts.height;
 
@@ -491,26 +470,23 @@ int main(int argc, char** argv) {
             host.clear_pending = std::array<float, 3> { r, g, b };
             return;
         }
-        if (int rc = ww_bridge_send_report_state_clear_color(host.sock, r, g, b, 1.0f);
-            rc != 0) {
+        if (int rc = ww_bridge_send_report_state_clear_color(host.sock, r, g, b, 1.0f); rc != 0) {
             rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
         }
     });
 
     // Mute first so loadScene's SoundManager::init() short-circuits when
     // audio is disabled; the audio device + system output never open.
-    if (!opts.enable_audio)
-        wp.setPropertyBool(owe::PROPERTY_MUTED, true);
-    if (!opts.initial_assets.empty())
+    if (! opts.enable_audio) wp.setPropertyBool(owe::PROPERTY_MUTED, true);
+    if (! opts.initial_assets.empty())
         wp.setPropertyString(owe::PROPERTY_ASSETS, opts.initial_assets);
     for (const auto& [key, value] : opts.initial_user_properties) {
         wp.setPropertyString(key, value);
     }
-    if (!opts.initial_scene.empty())
+    if (! opts.initial_scene.empty())
         wp.setPropertyString(owe::PROPERTY_SOURCE, opts.initial_scene);
     if (opts.initial_fps)
-        wp.setPropertyInt32(owe::PROPERTY_FPS,
-                            static_cast<int32_t>(opts.initial_fps));
+        wp.setPropertyInt32(owe::PROPERTY_FPS, static_cast<int32_t>(opts.initial_fps));
     wp.setPropertyFloat(owe::PROPERTY_VOLUME, opts.initial_volume);
 
     // The factory runs inside VulkanRender::init after the GPU is picked
@@ -518,55 +494,53 @@ int main(int argc, char** argv) {
     // succeed. The factory captures `host` by reference; after init both
     // host.pool and host.swapchain point at live objects.
     const bool msaa_enabled = opts.msaa_samples > 1;
-    auto factory =
-        [&host, msaa_enabled](const owe::RenderInitInfo::ExSwapchainHandles& h)
-            -> std::unique_ptr<owe::ExSwapchain> {
+    auto       factory =
+        [&host, msaa_enabled](
+            const owe::RenderInitInfo::ExSwapchainHandles& h) -> std::unique_ptr<owe::ExSwapchain> {
         ww_pool_vulkan_init_t pi {};
-        pi.instance              = h.instance;
-        pi.physical_device       = h.physical_device;
-        pi.device                = h.device;
-        pi.queue                 = h.graphics_queue;
-        pi.queue_family_index    = h.graphics_queue_family;
+        pi.instance           = h.instance;
+        pi.physical_device    = h.physical_device;
+        pi.device             = h.device;
+        pi.queue              = h.graphics_queue;
+        pi.queue_family_index = h.graphics_queue_family;
         pi.get_instance_proc_addr =
             reinterpret_cast<void* (*)(void*, const char*)>(vkGetInstanceProcAddr);
-        pi.device_uuid           = nullptr; // bridge will zero
-        pi.driver_uuid           = nullptr;
+        pi.device_uuid = nullptr; // bridge will zero
+        pi.driver_uuid = nullptr;
 
         ww_bridge_vk_dt_t dt {};
         ww_bridge_vk_dt_load(&dt, vkGetInstanceProcAddr, h.instance);
         if (int rc = ww_bridge_vk_query_render_node(
-                &dt, h.physical_device,
-                &pi.drm_render_major, &pi.drm_render_minor);
+                &dt, h.physical_device, &pi.drm_render_major, &pi.drm_render_minor);
             rc != 0) {
             rstd_warn("waywallen-wescene-renderer: drm render-node query failed ({}); "
-                      "topology will be unknown to daemon", rc);
+                      "topology will be unknown to daemon",
+                      rc);
         }
-        pi.drm_render_fd         = -1; // bridge opens by minor
+        pi.drm_render_fd = -1; // bridge opens by minor
         // FinPass writes the slot via vkCmdCopyImage by default (single-
         // sample screen RT, extent + RGBA8 already match), so
         // TRANSFER_DST is always required. MSAA additionally needs
         // BLIT_DST because vkCmdBlitImage is the only op that does the
         // multi-sample → single-sample resolve at the same step.
-        pi.image_usage_flags     = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        pi.format_feature_flags  = VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        pi.image_usage_flags    = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        pi.format_feature_flags = VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
         if (msaa_enabled) {
             pi.format_feature_flags |= VK_FORMAT_FEATURE_BLIT_DST_BIT;
         }
-        if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool);
-            rc != 0) {
+        if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool); rc != 0) {
             rstd_error("waywallen-wescene-renderer: ww_bridge_pool_create failed: {}", rc);
             return nullptr;
         }
         (void)h; // Vulkan handles no longer needed by BridgeExSwapchain.
-        auto sw = std::make_unique<ww_wescene::BridgeExSwapchain>(
-            host.pool, host.sock);
+        auto sw        = std::make_unique<ww_wescene::BridgeExSwapchain>(host.pool, host.sock);
         host.swapchain = sw.get();
         return sw;
     };
 
     std::array<uint8_t, VK_UUID_SIZE> chosen_uuid {};
-    bool have_uuid = false;
-    if (!opts.render_node.empty()) {
+    bool                              have_uuid = false;
+    if (! opts.render_node.empty()) {
         std::string err;
         if (resolve_render_node_to_uuid(opts.render_node, chosen_uuid, err)) {
             have_uuid = true;
@@ -575,30 +549,31 @@ int main(int argc, char** argv) {
         } else {
             rstd_warn("waywallen-wescene-renderer: render_node={} not honored: {}; "
                       "falling back to default device",
-                      opts.render_node, err);
+                      opts.render_node,
+                      err);
         }
     }
 
     {
         owe::RenderInitInfo info;
-        info.offscreen        = true;
-        info.offscreen_tiling = owe::TexTiling::OPTIMAL;
-        info.width            = static_cast<uint16_t>(opts.width);
-        info.height           = static_cast<uint16_t>(opts.height);
-        info.msaa_samples     = opts.msaa_samples;
-        info.surface_info.createSurfaceOp =
-            [](VkInstance, VkSurfaceKHR*) -> VkResult { return VK_SUCCESS; };
+        info.offscreen                    = true;
+        info.offscreen_tiling             = owe::TexTiling::OPTIMAL;
+        info.width                        = static_cast<uint16_t>(opts.width);
+        info.height                       = static_cast<uint16_t>(opts.height);
+        info.msaa_samples                 = opts.msaa_samples;
+        info.surface_info.createSurfaceOp = [](VkInstance, VkSurfaceKHR*) -> VkResult {
+            return VK_SUCCESS;
+        };
         info.ex_swapchain_factory = std::move(factory);
         if (have_uuid) {
-            info.uuid = std::span<const std::uint8_t>(chosen_uuid.data(),
-                                                     chosen_uuid.size());
+            info.uuid = std::span<const std::uint8_t>(chosen_uuid.data(), chosen_uuid.size());
         }
         wp.initVulkan(std::move(info));
     }
 
-    if (!wp.waitVulkanInited(/*timeout_ms*/ 10000))
+    if (! wp.waitVulkanInited(/*timeout_ms*/ 10000))
         die("VulkanRender did not finish init within 10s");
-    if (!host.pool || !host.swapchain)
+    if (! host.pool || ! host.swapchain)
         die("ex_swapchain_factory did not produce a pool / swapchain");
 
     host.swapchain->setOnFirstNegotiated([&] {
@@ -607,10 +582,11 @@ int main(int argc, char** argv) {
     });
 
     // Bridge sends ready + release_syncobj + format_caps in one go.
-    if (int rc = ww_bridge_pool_advertise_caps(host.pool, host.sock,
-                                               opts.width, opts.height,
-                                               WW_MEM_HINT_DEVICE_LOCAL
-                                                   | WW_MEM_HINT_HOST_VISIBLE);
+    if (int rc = ww_bridge_pool_advertise_caps(host.pool,
+                                               host.sock,
+                                               opts.width,
+                                               opts.height,
+                                               WW_MEM_HINT_DEVICE_LOCAL | WW_MEM_HINT_HOST_VISIBLE);
         rc != 0)
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
@@ -623,21 +599,23 @@ int main(int argc, char** argv) {
         host.clear_ready_published = true;
         if (host.clear_pending && host.sock >= 0) {
             auto c = *host.clear_pending;
-            if (int rc = ww_bridge_send_report_state_clear_color(
-                    host.sock, c[0], c[1], c[2], 1.0f);
+            if (int rc = ww_bridge_send_report_state_clear_color(host.sock, c[0], c[1], c[2], 1.0f);
                 rc != 0) {
                 rstd_warn("waywallen-wescene-renderer: pending report_state(clear_color) "
-                          "flush failed ({})", rc);
+                          "flush failed ({})",
+                          rc);
             }
             host.clear_pending.reset();
         }
     }
 
-    std::thread reader([&]() { reader_loop(host); });
+    std::thread reader([&]() {
+        reader_loop(host);
+    });
 
     // Idle until shutdown. All real work is on the render and reader
     // threads.
-    while (!host.shutdown.load(std::memory_order_acquire)) {
+    while (! host.shutdown.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 

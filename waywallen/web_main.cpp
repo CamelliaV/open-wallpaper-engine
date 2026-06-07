@@ -35,15 +35,15 @@ namespace
 {
 
 struct Options {
-    std::string ipc_path;
-    uint32_t    width  { 1920 };
-    uint32_t    height { 1080 };
+    std::string           ipc_path;
+    uint32_t              width { 1920 };
+    uint32_t              height { 1080 };
     std::filesystem::path workshop_dir;
-    std::string workshop_id;
-    uint32_t    initial_fps { 60 };
-    float       initial_volume { 1.0f };
-    int         remote_debugging_port { 0 };
-    bool        enable_audio { true };
+    std::string           workshop_id;
+    uint32_t              initial_fps { 60 };
+    float                 initial_volume { 1.0f };
+    int                   remote_debugging_port { 0 };
+    bool                  enable_audio { true };
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -53,9 +53,7 @@ struct Options {
 
 Options parse_args(int argc, char** argv) {
     argparse::ArgumentParser program("waywallen-weweb-renderer");
-    program.add_argument("--ipc")
-        .required()
-        .help("Unix-domain socket path for daemon IPC");
+    program.add_argument("--ipc").required().help("Unix-domain socket path for daemon IPC");
     program.add_argument("--path")
         .default_value(std::string {})
         .help("Workshop directory (containing project.json + index.html)");
@@ -80,50 +78,49 @@ Options parse_args(int argc, char** argv) {
 
 const char* kv_get(const ww_kv_list_t& kv, const char* key) {
     for (uint32_t i = 0; i < kv.count; ++i) {
-        if (kv.data[i].key && std::strcmp(kv.data[i].key, key) == 0)
-            return kv.data[i].value;
+        if (kv.data[i].key && std::strcmp(kv.data[i].key, key) == 0) return kv.data[i].value;
     }
     return nullptr;
 }
 
 float parse_f32(const char* s, float def) {
-    if (!s || !*s) return def;
+    if (! s || ! *s) return def;
     char* end = nullptr;
-    errno = 0;
-    double v = std::strtod(s, &end);
+    errno     = 0;
+    double v  = std::strtod(s, &end);
     if (errno != 0 || end == s) return def;
     return static_cast<float>(v);
 }
 
 // Daemon serializes bool settings as the literal "true"/"false".
 bool parse_bool(const char* s, bool def) {
-    if (!s || !*s) return def;
-    if (std::strcmp(s, "true") == 0)  return true;
+    if (! s || ! *s) return def;
+    if (std::strcmp(s, "true") == 0) return true;
     if (std::strcmp(s, "false") == 0) return false;
     return def;
 }
 
 uint32_t parse_u32(const char* s, uint32_t def) {
-    if (!s || !*s) return def;
-    char* end = nullptr;
-    unsigned long v = std::strtoul(s, &end, 10);
+    if (! s || ! *s) return def;
+    char*         end = nullptr;
+    unsigned long v   = std::strtoul(s, &end, 10);
     if (end == s) return def;
     return static_cast<uint32_t>(v);
 }
 
 std::filesystem::path derive_cache_dir(const std::string& workshop_id) {
-    namespace fs = std::filesystem;
+    namespace fs    = std::filesystem;
     const char* xdg = std::getenv("XDG_CACHE_HOME");
-    fs::path base;
+    fs::path    base;
     if (xdg && *xdg) {
         base = xdg;
     } else {
         const char* home = std::getenv("HOME");
-        if (!home || !*home) return {};
+        if (! home || ! *home) return {};
         base = fs::path(home) / ".cache";
     }
     fs::path dir = base / "waywallen-weweb-renderer";
-    if (!workshop_id.empty()) dir /= workshop_id;
+    if (! workshop_id.empty()) dir /= workshop_id;
     std::error_code ec;
     fs::create_directories(dir, ec); // best-effort
     return dir;
@@ -132,8 +129,8 @@ std::filesystem::path derive_cache_dir(const std::string& workshop_id) {
 std::filesystem::path executable_dir(const char* argv0) {
     namespace fs = std::filesystem;
     std::error_code ec;
-    auto self = fs::read_symlink("/proc/self/exe", ec);
-    if (!ec && !self.empty()) return self.parent_path();
+    auto            self = fs::read_symlink("/proc/self/exe", ec);
+    if (! ec && ! self.empty()) return self.parent_path();
     if (argv0) return fs::path(argv0).parent_path();
     return fs::current_path();
 }
@@ -147,13 +144,13 @@ struct SettingDelta {
 };
 
 struct HostState {
-    int                                   sock { -1 };
-    ww_pool_t*                            pool { nullptr };
-    ww_wescene::BridgeProducerCore*       core { nullptr };
-    weweb::BrowserHost*                   host { nullptr };
+    int                             sock { -1 };
+    ww_pool_t*                      pool { nullptr };
+    ww_wescene::BridgeProducerCore* core { nullptr };
+    weweb::BrowserHost*             host { nullptr };
 
-    std::mutex                            settings_mu;
-    std::vector<SettingDelta>             pending_settings;
+    std::mutex                settings_mu;
+    std::vector<SettingDelta> pending_settings;
 
     std::atomic<bool> shutdown { false };
 
@@ -170,7 +167,7 @@ int cef_button_from_linux(uint32_t btn) {
     case 0x110: return 0; // BTN_LEFT  -> MBT_LEFT
     case 0x111: return 2; // BTN_RIGHT -> MBT_RIGHT
     case 0x112: return 1; // BTN_MIDDLE-> MBT_MIDDLE
-    default:    return -1;
+    default: return -1;
     }
 }
 
@@ -185,7 +182,7 @@ void drain_settings(HostState& s) {
         std::lock_guard<std::mutex> lk(s.settings_mu);
         drained.swap(s.pending_settings);
     }
-    if (!s.host) return;
+    if (! s.host) return;
     for (auto& sd : drained) {
         if (sd.key == "volume") {
             // Wire format is u32 0..100; CEF host takes 0..1 ratio.
@@ -198,10 +195,10 @@ void drain_settings(HostState& s) {
             // Try parse as JSON first (so numbers / booleans / objects
             // round-trip); fall back to string.
             nlohmann::json v;
-            auto parsed = nlohmann::json::parse(sd.value,
-                                                /*cb*/nullptr,
-                                                /*allow_exceptions*/false,
-                                                /*ignore_comments*/true);
+            auto           parsed = nlohmann::json::parse(sd.value,
+                                                          /*cb*/ nullptr,
+                                                          /*allow_exceptions*/ false,
+                                                          /*ignore_comments*/ true);
             if (parsed.is_discarded()) {
                 v["value"] = sd.value;
             } else {
@@ -225,7 +222,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         for (uint32_t i = 0; i < as.settings.count; ++i) {
             const char* key = as.settings.data[i].key;
             const char* val = as.settings.data[i].value;
-            if (!key || !val) continue;
+            if (! key || ! val) continue;
             enqueue_setting(s, key, val);
         }
         ww_bridge_setting_changed_free(&as);
@@ -243,9 +240,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         // same pixel size, so the values map 1:1.
         ww_bridge_pointer_motion_t pm {};
         if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.host) {
-            s.host->OnMouseMove(static_cast<int>(pm.x),
-                                static_cast<int>(pm.y),
-                                s.left_down);
+            s.host->OnMouseMove(static_cast<int>(pm.x), static_cast<int>(pm.y), s.left_down);
         }
         break;
     }
@@ -258,7 +253,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 if (cef_btn == 0) s.left_down = down;
                 s.host->OnMouseButton(static_cast<int>(pb.x),
                                       static_cast<int>(pb.y),
-                                      cef_btn, down,
+                                      cef_btn,
+                                      down,
                                       /*click_count=*/1);
             }
         }
@@ -278,14 +274,10 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         }
         break;
     }
-    case WW_EVT_IN_SET_FPS:
-        enqueue_setting(s, "fps", std::to_string(msg.u.set_fps.fps));
-        break;
-    case WW_EVT_IN_SHUTDOWN:
-        s.shutdown.store(true, std::memory_order_release);
-        break;
+    case WW_EVT_IN_SET_FPS: enqueue_setting(s, "fps", std::to_string(msg.u.set_fps.fps)); break;
+    case WW_EVT_IN_SHUTDOWN: s.shutdown.store(true, std::memory_order_release); break;
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
-        const auto& nb = msg.u.negotiate_buffers;
+        const auto&         nb = msg.u.negotiate_buffers;
         ww_pool_directive_t d {};
         d.category    = nb.path;
         d.mem_source  = nb.mem_source;
@@ -302,18 +294,17 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     default:
-        rstd_warn("waywallen-weweb-renderer: unknown control op {}",
-                  static_cast<int>(msg.op));
+        rstd_warn("waywallen-weweb-renderer: unknown control op {}", static_cast<int>(msg.op));
         break;
     }
 }
 
 void reader_loop(HostState& s) {
-    while (!s.shutdown.load(std::memory_order_acquire)) {
+    while (! s.shutdown.load(std::memory_order_acquire)) {
         ww_bridge_control_t msg {};
-        int rc = ww_bridge_recv_control(s.sock, &msg);
+        int                 rc = ww_bridge_recv_control(s.sock, &msg);
         if (rc != 0) {
-            if (!s.shutdown.load(std::memory_order_acquire)) {
+            if (! s.shutdown.load(std::memory_order_acquire)) {
                 rstd_error("waywallen-weweb-renderer: recv_control failed: {}", rc);
             }
             s.shutdown.store(true, std::memory_order_release);
@@ -326,13 +317,11 @@ void reader_loop(HostState& s) {
 
 } // namespace
 
-
 int main(int argc, char** argv) {
     // CRITICAL: CEF re-execs this binary as helper procs. Must run
     // before argparse / logging / anything with side effects.
     weweb::BrowserHost host;
-    if (int helper_exit = host.RunOrExitIfHelper(argc, argv);
-        helper_exit >= 0) {
+    if (int helper_exit = host.RunOrExitIfHelper(argc, argv); helper_exit >= 0) {
         return helper_exit;
     }
 
@@ -348,10 +337,11 @@ int main(int argc, char** argv) {
                 rstd::log::Level::Warn,
                 rstd::log::Level::Error,
             };
-            auto lvl = kMap[(unsigned)level <= 3u ? (unsigned)level : 3u];
-            auto args = rstd::fmt::Arguments::make("{}", msg);
+            auto              lvl  = kMap[(unsigned)level <= 3u ? (unsigned)level : 3u];
+            auto              args = rstd::fmt::Arguments::make("{}", msg);
             rstd::log::Record rec {
-                rstd::log::Metadata { lvl, {} }, args,
+                rstd::log::Metadata { lvl, {} },
+                args,
             };
             rstd::log::log(rec);
         },
@@ -361,25 +351,22 @@ int main(int argc, char** argv) {
 
     ::prctl(PR_SET_PDEATHSIG, SIGTERM);
 
-    if (opts.workshop_dir.empty() ||
-        !std::filesystem::is_directory(opts.workshop_dir)) {
+    if (opts.workshop_dir.empty() || ! std::filesystem::is_directory(opts.workshop_dir)) {
         die("--path must be an existing workshop directory");
     }
 
     HostState state;
     state.sock = ww_bridge_connect(opts.ipc_path.c_str());
-    if (state.sock < 0)
-        die("ww_bridge_connect: " + std::string(::strerror(-state.sock)));
+    if (state.sock < 0) die("ww_bridge_connect: " + std::string(::strerror(-state.sock)));
 
     {
         ww_bridge_init_t init {};
         if (int rc = ww_bridge_recv_init(state.sock, &init); rc != 0) {
             const char* reason = (rc == -EPROTO)
-                ? "init: protocol error or unsupported spawn_version"
-                : "init: recv failed";
-            ww_bridge_send_init_nack(state.sock, init.spawn_version,
-                                     WW_BRIDGE_SUPPORTED_SPAWN_VERSION,
-                                     reason);
+                                     ? "init: protocol error or unsupported spawn_version"
+                                     : "init: recv failed";
+            ww_bridge_send_init_nack(
+                state.sock, init.spawn_version, WW_BRIDGE_SUPPORTED_SPAWN_VERSION, reason);
             ww_bridge_init_free(&init);
             die(std::string(reason) + " rc=" + std::to_string(rc));
         }
@@ -392,74 +379,68 @@ int main(int argc, char** argv) {
         {
             uint32_t resolution = static_cast<uint32_t>(WW_RESOLUTION_1080P);
             if (const char* v = kv_get(init.settings, "resolution"); v && *v) {
-                char* end = nullptr;
-                unsigned long n = std::strtoul(v, &end, 10);
-                uint32_t parsed = (end != v)
-                    ? ww_resolution_sanitize(static_cast<uint32_t>(n))
-                    : static_cast<uint32_t>(WW_RESOLUTION_1080P);
-                resolution = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
-                    ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
-                    : parsed;
+                char*         end    = nullptr;
+                unsigned long n      = std::strtoul(v, &end, 10);
+                uint32_t      parsed = (end != v) ? ww_resolution_sanitize(static_cast<uint32_t>(n))
+                                                  : static_cast<uint32_t>(WW_RESOLUTION_1080P);
+                resolution           = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
+                                           ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
+                                           : parsed;
             }
             opts.width  = 16;
             opts.height = 9;
-            ww_resolution_apply_cap(resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE,
-                                    &opts.width, &opts.height);
+            ww_resolution_apply_cap(
+                resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE, &opts.width, &opts.height);
         }
-        opts.initial_fps    = parse_u32(kv_get(init.settings, "fps"),
-                                        opts.initial_fps);
+        opts.initial_fps = parse_u32(kv_get(init.settings, "fps"), opts.initial_fps);
         // Wire format is u32 0..100; CEF host takes 0..1 ratio.
-        opts.initial_volume =
-            parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
+        opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
         // identity=true: respawn-only. Translates to --mute-audio so
         // Chromium never opens an output device.
-        opts.enable_audio =
-            parse_bool(kv_get(init.settings, "enable_audio"), true);
-        opts.remote_debugging_port = static_cast<int>(parse_u32(
-            kv_get(init.settings, "remote_debugging_port"), 0));
+        opts.enable_audio = parse_bool(kv_get(init.settings, "enable_audio"), true);
+        opts.remote_debugging_port =
+            static_cast<int>(parse_u32(kv_get(init.settings, "remote_debugging_port"), 0));
 
         ww_bridge_init_free(&init);
     }
 
     auto manifest_opt = weweb::LoadWebManifest(opts.workshop_dir);
-    if (!manifest_opt) die("LoadWebManifest failed");
+    if (! manifest_opt) die("LoadWebManifest failed");
     auto& manifest = *manifest_opt;
 
     ww_wescene::WebProducerDevice producer;
-    if (!producer.Init()) die("WebProducerDevice::Init failed");
+    if (! producer.Init()) die("WebProducerDevice::Init failed");
 
     ww_pool_vulkan_init_t pi {};
-    pi.instance               = producer.Instance();
-    pi.physical_device        = producer.Physical();
-    pi.device                 = producer.Device();
-    pi.queue                  = producer.Queue();
-    pi.queue_family_index     = producer.QueueFamily();
+    pi.instance           = producer.Instance();
+    pi.physical_device    = producer.Physical();
+    pi.device             = producer.Device();
+    pi.queue              = producer.Queue();
+    pi.queue_family_index = producer.QueueFamily();
     pi.get_instance_proc_addr =
         reinterpret_cast<void* (*)(void*, const char*)>(vkGetInstanceProcAddr);
-    pi.device_uuid            = producer.DeviceUuid();
-    pi.driver_uuid            = producer.DriverUuid();
+    pi.device_uuid = producer.DeviceUuid();
+    pi.driver_uuid = producer.DriverUuid();
     {
         ww_bridge_vk_dt_t dt {};
         ww_bridge_vk_dt_load(&dt, vkGetInstanceProcAddr, producer.Instance());
         if (int rc = ww_bridge_vk_query_render_node(
-                &dt, producer.Physical(),
-                &pi.drm_render_major, &pi.drm_render_minor);
+                &dt, producer.Physical(), &pi.drm_render_major, &pi.drm_render_minor);
             rc != 0) {
             rstd_warn("waywallen-weweb-renderer: drm render-node query failed ({}); "
-                      "topology will be unknown to daemon", rc);
+                      "topology will be unknown to daemon",
+                      rc);
         }
     }
-    pi.drm_render_fd          = -1; // bridge opens by minor
-    pi.image_usage_flags      = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    pi.drm_render_fd     = -1; // bridge opens by minor
+    pi.image_usage_flags = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     // TRANSFER_DST is the default contract for any producer slot.
     // weweb additionally writes via vkCmdBlitImage in
     // WebProducerDevice::BlitToSlot (CEF source extent/format never
     // matches the slot), so OR in BLIT_DST.
-    pi.format_feature_flags   = VK_FORMAT_FEATURE_TRANSFER_DST_BIT
-                              | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+    pi.format_feature_flags = VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
 
-    if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &state.pool);
-        rc != 0)
+    if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &state.pool); rc != 0)
         die("ww_bridge_pool_create failed: " + std::to_string(rc));
 
     ww_wescene::BridgeProducerCore core(state.pool, state.sock);
@@ -471,8 +452,7 @@ int main(int argc, char** argv) {
         // initial volume too — we couldn't before OpenWallpaper because
         // there was no browser yet, but we can post a property update
         // now and the listener will pick it up.
-        if (opts.initial_fps > 0)
-            host.SetFrameRate(static_cast<int>(opts.initial_fps));
+        if (opts.initial_fps > 0) host.SetFrameRate(static_cast<int>(opts.initial_fps));
         host.ApplyVolume(opts.initial_volume);
         rstd_info("waywallen-weweb-renderer: negotiated, fps={} volume={}",
                   opts.initial_fps,
@@ -480,7 +460,7 @@ int main(int argc, char** argv) {
     });
 
     // BrowserHost::Init wants resources / locales relative to argv[0].
-    auto exe_dir = executable_dir(argv[0]);
+    auto                            exe_dir = executable_dir(argv[0]);
     weweb::BrowserHost::InitOptions ho;
     ho.resources_dir = exe_dir;
     ho.locales_dir   = exe_dir / "locales";
@@ -490,62 +470,60 @@ int main(int argc, char** argv) {
         ho.remote_debugging_port   = opts.remote_debugging_port;
     }
     ho.enable_audio = opts.enable_audio;
-    if (!host.Init(ho)) die("BrowserHost::Init failed");
+    if (! host.Init(ho)) die("BrowserHost::Init failed");
 
     // OnAcceleratedPaint runs synchronously on the CEF UI thread (=
     // the thread that drives Pump, which is this main thread). Drain
     // any pending negotiate directive first so the slot pool reflects
     // the latest extent / fourcc before acquiring.
-    host.SetAcceleratedPaintCallback(
-        [&core, &producer](const weweb::DmaBufFrame& frame) {
-            core.drainPendingDirective();
-            if (!core.ready()) return;
+    host.SetAcceleratedPaintCallback([&core, &producer](const weweb::DmaBufFrame& frame) {
+        core.drainPendingDirective();
+        if (! core.ready()) return;
 
-            auto imp = producer.Import(frame);
-            if (!imp.ok) return;
+        auto imp = producer.Import(frame);
+        if (! imp.ok) return;
 
-            VkImage  slot_image = VK_NULL_HANDLE;
-            uint32_t slot_w = 0, slot_h = 0;
-            if (!core.acquireSlot(&slot_image, &slot_w, &slot_h)) {
-                producer.DestroyImported(imp);
-                return;
-            }
-            int sync_fd = producer.BlitToSlot(imp, slot_image,
-                                              { slot_w, slot_h });
-            core.submitSlot(sync_fd);
+        VkImage  slot_image = VK_NULL_HANDLE;
+        uint32_t slot_w = 0, slot_h = 0;
+        if (! core.acquireSlot(&slot_image, &slot_w, &slot_h)) {
             producer.DestroyImported(imp);
-        });
+            return;
+        }
+        int sync_fd = producer.BlitToSlot(imp, slot_image, { slot_w, slot_h });
+        core.submitSlot(sync_fd);
+        producer.DestroyImported(imp);
+    });
 
-    if (!host.OpenWallpaper(manifest, opts.workshop_dir,
-                            static_cast<int>(opts.width),
-                            static_cast<int>(opts.height))) {
+    if (! host.OpenWallpaper(manifest,
+                             opts.workshop_dir,
+                             static_cast<int>(opts.width),
+                             static_cast<int>(opts.height))) {
         die("BrowserHost::OpenWallpaper failed");
     }
 
-    if (int rc = ww_bridge_pool_advertise_caps(state.pool, state.sock,
-                                               opts.width, opts.height,
-                                               WW_MEM_HINT_DEVICE_LOCAL);
+    if (int rc = ww_bridge_pool_advertise_caps(
+            state.pool, state.sock, opts.width, opts.height, WW_MEM_HINT_DEVICE_LOCAL);
         rc != 0)
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
-    rstd_info("waywallen-weweb-renderer: ready, advertised caps {}x{}",
-              opts.width, opts.height);
+    rstd_info("waywallen-weweb-renderer: ready, advertised caps {}x{}", opts.width, opts.height);
 
-    std::thread reader([&]() { reader_loop(state); });
+    std::thread reader([&]() {
+        reader_loop(state);
+    });
 
     // Audio-response capture: taps the system default-sink monitor and feeds
     // the page's wallpaperRegisterAudioListener callbacks. Best-effort — a
     // failed init just means audio-reactive pages stay idle.
     wavsen::audio::AudioCapture audio_capture;
-    if (!audio_capture.init()) {
+    if (! audio_capture.init()) {
         rstd_warn("waywallen-weweb-renderer: audio capture init failed; "
                   "audio response disabled");
     }
     wavsen::audio::AudioSpectrum audio_spec;
-    unsigned audio_tick = 0;
+    unsigned                     audio_tick = 0;
 
-    while (!state.shutdown.load(std::memory_order_acquire) &&
-           !host.ShouldExit()) {
+    while (! state.shutdown.load(std::memory_order_acquire) && ! host.ShouldExit()) {
         drain_settings(state);
         host.Pump();
         // CEF's OSR pacing goes idle without explicit invalidate kicks

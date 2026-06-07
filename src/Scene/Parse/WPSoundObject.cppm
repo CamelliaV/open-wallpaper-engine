@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.parse:wp_sound_object;
 import rstd.cppstd;
 import wavsen.audio;
@@ -28,22 +27,22 @@ struct WPSoundObject {
     std::vector<std::string> sound;
 
     // Common cross-kind metadata.
-    bool                     locktransforms { false };
-    bool                     muteineditor { false };
-    bool                     nointerpolation { false };
-    std::uint32_t            parent { 0 };
+    bool                      locktransforms { false };
+    bool                      muteineditor { false };
+    bool                      nointerpolation { false };
+    std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json           instance;
-    WPFieldBindings          field_bindings;
+    nlohmann::json            instance;
+    WPFieldBindings           field_bindings;
 
     // Sound-kind specifics.
-    bool                     startsilent { false };       // PKGV0002+
-    bool                     blockalign { false };        // PKGV0018+
-    bool                     spatialization { false };    // PKGV0023+
-    std::string              queuemode;                   // PKGV0020+
+    bool        startsilent { false };    // PKGV0002+
+    bool        blockalign { false };     // PKGV0018+
+    bool        spatialization { false }; // PKGV0023+
+    std::string queuemode;                // PKGV0020+
 
     // `visible:{user:"<key>",value:bool}` -> key.
-    std::string              visible_user_key;
+    std::string visible_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);

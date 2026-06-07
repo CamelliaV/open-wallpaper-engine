@@ -137,8 +137,7 @@ struct FontFace::Impl {
         dirty_rects.push_back({ 0, 0, kWhiteCellSize, kWhiteCellSize });
     }
 
-    bool ReserveSlot(std::uint32_t w, std::uint32_t h, std::uint32_t& out_x,
-                     std::uint32_t& out_y) {
+    bool ReserveSlot(std::uint32_t w, std::uint32_t h, std::uint32_t& out_x, std::uint32_t& out_y) {
         if (pen_x + w > atlas_w) {
             pen_y += shelf_h + 1;
             pen_x   = 0;
@@ -168,11 +167,11 @@ FontFace& FontFace::operator=(FontFace&&) noexcept = default;
 FontMetrics FontFace::Metrics() const {
     FontMetrics m {};
     if (m_impl->face != nullptr && m_impl->face->size != nullptr) {
-        const auto& sm  = m_impl->face->size->metrics;
-        m.ascender      = static_cast<float>(sm.ascender) / 64.0f;
-        m.descender     = static_cast<float>(sm.descender) / 64.0f;
-        m.line_height   = static_cast<float>(sm.height) / 64.0f;
-        m.pixel_size    = m_impl->pixel_size;
+        const auto& sm = m_impl->face->size->metrics;
+        m.ascender     = static_cast<float>(sm.ascender) / 64.0f;
+        m.descender    = static_cast<float>(sm.descender) / 64.0f;
+        m.line_height  = static_cast<float>(sm.height) / 64.0f;
+        m.pixel_size   = m_impl->pixel_size;
     }
     m.atlas_w = m_impl->atlas_w;
     m.atlas_h = m_impl->atlas_h;
@@ -186,7 +185,7 @@ std::span<const std::uint8_t> FontFace::AtlasPixels() const {
 std::span<const AtlasDirtyRect> FontFace::DirtyRects() const noexcept {
     return m_impl->dirty_rects;
 }
-void FontFace::ClearDirtyRects() noexcept { m_impl->dirty_rects.clear(); }
+void               FontFace::ClearDirtyRects() noexcept { m_impl->dirty_rects.clear(); }
 const std::string& FontFace::AtlasUrl() const noexcept { return m_impl->atlas_url; }
 
 const GlyphInfo* FontFace::Lookup(std::uint32_t codepoint) const noexcept {
@@ -233,7 +232,11 @@ void FontFace::Populate(std::span<const std::uint32_t> codepoints) {
             continue;
         }
 
-        impl.Blit(gi.atlas_x, gi.atlas_y, gi.pixel_w, gi.pixel_h, g->bitmap.buffer,
+        impl.Blit(gi.atlas_x,
+                  gi.atlas_y,
+                  gi.pixel_w,
+                  gi.pixel_h,
+                  g->bitmap.buffer,
                   static_cast<std::uint32_t>(g->bitmap.pitch));
         impl.dirty_rects.push_back({ gi.atlas_x, gi.atlas_y, gi.pixel_w, gi.pixel_h });
         impl.glyphs.emplace(codepoint, gi);
@@ -263,11 +266,11 @@ FontCache::FontCache(): m_impl(std::make_unique<Impl>()) {}
 FontCache::~FontCache() = default;
 
 FontFace* FontCache::GetFace(std::shared_ptr<std::vector<std::byte>> blob,
-                             std::uint32_t                            pixel_size) {
+                             std::uint32_t                           pixel_size) {
     if (! blob || blob->empty() || pixel_size == 0) return nullptr;
 
-    auto blob_span = std::span<const std::byte>(blob->data(), blob->size());
-    auto blob_hash = HashBlob(blob_span);
+    auto      blob_span = std::span<const std::byte>(blob->data(), blob->size());
+    auto      blob_hash = HashBlob(blob_span);
     Impl::Key key { blob_hash, pixel_size };
     if (auto it = m_impl->faces.find(key); it != m_impl->faces.end()) {
         return it->second.get();
@@ -293,11 +296,11 @@ FontFace* FontCache::GetFace(std::shared_ptr<std::vector<std::byte>> blob,
     // pointers into this buffer and dereferences them on every glyph load.
     face->m_impl->blob       = std::move(blob);
     face->m_impl->pixel_size = pixel_size;
-    face->m_impl->atlas_url  = "_text_atlas_" + std::to_string(blob_hash) + "_" +
-                              std::to_string(pixel_size);
+    face->m_impl->atlas_url =
+        "_text_atlas_" + std::to_string(blob_hash) + "_" + std::to_string(pixel_size);
 
-    auto* raw           = face.get();
-    m_impl->faces[key]  = std::move(face);
+    auto* raw          = face.get();
+    m_impl->faces[key] = std::move(face);
     return raw;
 }
 
@@ -310,8 +313,9 @@ std::vector<FontFace*> FontCache::Faces() const {
 
 FontCache& EnsureSceneFontCache(owe::Scene& scene) {
     if (! scene.font_cache) {
-        scene.font_cache = { new FontCache(),
-                              [](void* p) noexcept { delete static_cast<FontCache*>(p); } };
+        scene.font_cache = { new FontCache(), [](void* p) noexcept {
+                                delete static_cast<FontCache*>(p);
+                            } };
     }
     return *static_cast<FontCache*>(scene.font_cache.get());
 }
@@ -347,7 +351,7 @@ static std::filesystem::path ResolveViaFontconfig(std::string_view name) {
         if (match != nullptr) FcPatternDestroy(match);
         return {};
     }
-    FcChar8* file = nullptr;
+    FcChar8*              file = nullptr;
     std::filesystem::path out;
     if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file != nullptr) {
         out = std::filesystem::path(reinterpret_cast<const char*>(file));
@@ -382,9 +386,9 @@ FontCache::ResolvedBlob FontCache::ResolveSystemFont(std::string_view name, bool
             roots.emplace_back(fs::path(home) / ".local/share/fonts");
             roots.emplace_back(fs::path(home) / ".fonts");
         }
-        std::string base = fs::path(name).filename().string();
-        std::size_t scanned = 0;
-        constexpr std::size_t kCap = 8192;
+        std::string           base    = fs::path(name).filename().string();
+        std::size_t           scanned = 0;
+        constexpr std::size_t kCap    = 8192;
         for (const auto& root : roots) {
             if (! fs::exists(root)) continue;
             std::error_code ec;
@@ -436,8 +440,7 @@ FontCache::ResolvedBlob FontCache::ResolveSystemFont(std::string_view name, bool
 
 // -- Atlas snapshot -------------------------------------------------------
 
-std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face,
-                                                   const std::string& key) {
+std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face, const std::string& key) {
     auto fm  = face.Metrics();
     auto pix = face.AtlasPixels();
     if (fm.atlas_w == 0 || fm.atlas_h == 0 || pix.empty()) return nullptr;
@@ -445,37 +448,37 @@ std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face,
     auto img = std::make_shared<owe::Image>();
     img->key = key;
 
-    img->header.width    = static_cast<owe::i32>(fm.atlas_w);
-    img->header.height   = static_cast<owe::i32>(fm.atlas_h);
-    img->header.mapWidth  = img->header.width;
-    img->header.mapHeight = img->header.height;
+    img->header.width         = static_cast<owe::i32>(fm.atlas_w);
+    img->header.height        = static_cast<owe::i32>(fm.atlas_h);
+    img->header.mapWidth      = img->header.width;
+    img->header.mapHeight     = img->header.height;
     img->header.mipmap_larger = false;
     img->header.mipmap_pow2   = false;
-    img->header.type     = owe::ImageType::UNKNOWN;
-    img->header.format   = owe::TextureFormat::R8;
-    img->header.count    = 1;
-    img->header.isSprite = false;
-    img->header.sample   = { owe::TextureWrap::CLAMP_TO_EDGE,
-                             owe::TextureWrap::CLAMP_TO_EDGE,
-                             owe::TextureFilter::LINEAR,
-                             owe::TextureFilter::LINEAR };
+    img->header.type          = owe::ImageType::UNKNOWN;
+    img->header.format        = owe::TextureFormat::R8;
+    img->header.count         = 1;
+    img->header.isSprite      = false;
+    img->header.sample        = { owe::TextureWrap::CLAMP_TO_EDGE,
+                                  owe::TextureWrap::CLAMP_TO_EDGE,
+                                  owe::TextureFilter::LINEAR,
+                                  owe::TextureFilter::LINEAR };
 
     img->slots.resize(1);
-    auto& slot = img->slots[0];
+    auto& slot  = img->slots[0];
     slot.width  = img->header.width;
     slot.height = img->header.height;
     slot.mipmaps.resize(1);
-    auto& mip   = slot.mipmaps[0];
-    mip.width   = img->header.width;
-    mip.height  = img->header.height;
-    mip.size    = static_cast<owe::isize>(pix.size());
+    auto& mip  = slot.mipmaps[0];
+    mip.width  = img->header.width;
+    mip.height = img->header.height;
+    mip.size   = static_cast<owe::isize>(pix.size());
 
     // Alias the face's live CPU atlas (no memcpy). The renderer's first
     // CreateTex call samples whatever pixels are present at that moment, so
     // glyphs the actuator Populated between parse-time and the first draw
     // are picked up. The face is scene-owned and outlives the Image.
-    mip.data = owe::ImageDataPtr(const_cast<std::uint8_t*>(pix.data()),
-                                  [](std::uint8_t*) noexcept {});
+    mip.data = owe::ImageDataPtr(const_cast<std::uint8_t*>(pix.data()), [](std::uint8_t*) noexcept {
+    });
 
     return img;
 }
@@ -524,7 +527,7 @@ std::shared_ptr<owe::SceneShader> CompileTextShader() {
     using namespace owe::vulkan;
 
     std::array<ShaderCompUnit, 2> units {
-        ShaderCompUnit { owe::ShaderType::VERTEX,   kTextShaderHlsl, "main_vs", SourceLang::Hlsl },
+        ShaderCompUnit { owe::ShaderType::VERTEX, kTextShaderHlsl, "main_vs", SourceLang::Hlsl },
         ShaderCompUnit { owe::ShaderType::FRAGMENT, kTextShaderHlsl, "main_ps", SourceLang::Hlsl },
     };
     ShaderCompOpt opt {};
@@ -550,9 +553,11 @@ std::shared_ptr<owe::SceneShader> CompileTextShader() {
 } // namespace
 
 std::shared_ptr<owe::SceneShader> GetTextSceneShader() {
-    static std::once_flag                            once;
-    static std::shared_ptr<owe::SceneShader>   shader;
-    std::call_once(once, [] { shader = CompileTextShader(); });
+    static std::once_flag                    once;
+    static std::shared_ptr<owe::SceneShader> shader;
+    std::call_once(once, [] {
+        shader = CompileTextShader();
+    });
     return shader;
 }
 
@@ -573,16 +578,16 @@ bool ContainsSubstring(std::string_view s, std::string_view what) noexcept {
 } // namespace
 
 struct TextLayouter::Impl {
-    FontFace*                             face { nullptr };
+    FontFace*                       face { nullptr };
     std::shared_ptr<owe::SceneMesh> mesh;
-    TextLayoutStyle                       style;
-    std::size_t                           peak_quads { 0 };
-    FontMetrics                           metrics;
+    TextLayoutStyle                 style;
+    std::size_t                     peak_quads { 0 };
+    FontMetrics                     metrics;
 
-    float        last_text_w { 0.0f };
-    float        last_text_h { 0.0f };
-    bool         missing_glyph_logged { false };
-    bool         truncate_logged { false };
+    float last_text_w { 0.0f };
+    float last_text_h { 0.0f };
+    bool  missing_glyph_logged { false };
+    bool  truncate_logged { false };
 
     // Scratch buffers reused across SetText calls — avoids reallocs for
     // every script tick. Sized at construction to peak capacity.
@@ -591,27 +596,26 @@ struct TextLayouter::Impl {
     std::vector<float>         colors;
     std::vector<std::uint32_t> indices;
 
-    Impl(FontFace* f, std::shared_ptr<owe::SceneMesh> m, TextLayoutStyle s,
-         std::size_t pq)
-        : face(f), mesh(std::move(m)), style(std::move(s)),
-          peak_quads(pq), metrics(face->Metrics()) {
+    Impl(FontFace* f, std::shared_ptr<owe::SceneMesh> m, TextLayoutStyle s, std::size_t pq)
+        : face(f),
+          mesh(std::move(m)),
+          style(std::move(s)),
+          peak_quads(pq),
+          metrics(face->Metrics()) {
         positions.assign(pq * 4 * 3, 0.0f);
         texcoords.assign(pq * 4 * 2, 0.0f);
-        colors   .assign(pq * 4 * 4, 0.0f);
-        indices  .assign(pq * 6,     0u);
+        colors.assign(pq * 4 * 4, 0.0f);
+        indices.assign(pq * 6, 0u);
     }
 };
 
-TextLayouter::TextLayouter(FontFace*                             face,
-                           std::shared_ptr<owe::SceneMesh> mesh,
-                           TextLayoutStyle                       style,
-                           std::size_t                           peak_quads)
-    : m_impl(std::make_unique<Impl>(face, std::move(mesh),
-                                    std::move(style), peak_quads)) {}
+TextLayouter::TextLayouter(FontFace* face, std::shared_ptr<owe::SceneMesh> mesh,
+                           TextLayoutStyle style, std::size_t peak_quads)
+    : m_impl(std::make_unique<Impl>(face, std::move(mesh), std::move(style), peak_quads)) {}
 
 TextLayouter::~TextLayouter() = default;
 
-float TextLayouter::TextWidth() const noexcept  { return m_impl->last_text_w; }
+float TextLayouter::TextWidth() const noexcept { return m_impl->last_text_w; }
 float TextLayouter::TextHeight() const noexcept { return m_impl->last_text_h; }
 
 void TextLayouter::SetText(std::string_view utf8) {
@@ -634,8 +638,7 @@ void TextLayouter::SetText(std::string_view utf8) {
             // fires for codepoints that genuinely failed to rasterise (e.g.
             // missing in the font). Log-once keeps log noise bounded.
             if (! im.missing_glyph_logged) {
-                rstd_info("text: codepoint U+{:04X} not rasterised, skipping",
-                         cp);
+                rstd_info("text: codepoint U+{:04X} not rasterised, skipping", cp);
                 im.missing_glyph_logged = true;
             }
             continue;
@@ -645,7 +648,7 @@ void TextLayouter::SetText(std::string_view utf8) {
         ++total_glyph_quads;
     }
 
-    bool has_bg = im.style.opaquebackground;
+    bool        has_bg      = im.style.opaquebackground;
     std::size_t total_quads = total_glyph_quads + (has_bg ? 1u : 0u);
     if (total_quads > im.peak_quads) {
         // Off-RT overflow only — the layouter emits top-to-bottom, so the
@@ -653,7 +656,8 @@ void TextLayouter::SetText(std::string_view utf8) {
         // keeps a runaway terminal/log script from spamming every frame.
         if (! im.truncate_logged) {
             rstd_info("text: {} quads exceed peak capacity {}, truncating tail",
-                     total_quads, im.peak_quads);
+                      total_quads,
+                      im.peak_quads);
             im.truncate_logged = true;
         }
         total_quads = im.peak_quads;
@@ -663,12 +667,12 @@ void TextLayouter::SetText(std::string_view utf8) {
             total_glyph_quads = total_quads;
     }
 
-    auto&  fm    = im.metrics;
-    float  text_w = 0.0f;
+    auto& fm     = im.metrics;
+    float text_w = 0.0f;
     for (auto& l : lines)
         if (l.width > text_w) text_w = l.width;
-    float text_h = fm.ascender - fm.descender +
-                   static_cast<float>(lines.size() - 1) * fm.line_height;
+    float text_h =
+        fm.ascender - fm.descender + static_cast<float>(lines.size() - 1) * fm.line_height;
     im.last_text_w = text_w;
     im.last_text_h = text_h;
 
@@ -676,18 +680,25 @@ void TextLayouter::SetText(std::string_view utf8) {
     // doesn't show up. Cheaper than tracking exact quad count downstream.
     std::fill(im.positions.begin(), im.positions.end(), 0.0f);
     std::fill(im.texcoords.begin(), im.texcoords.end(), 0.0f);
-    std::fill(im.colors.begin(),    im.colors.end(),    0.0f);
-    std::fill(im.indices.begin(),   im.indices.end(),   0u);
+    std::fill(im.colors.begin(), im.colors.end(), 0.0f);
+    std::fill(im.indices.begin(), im.indices.end(), 0u);
 
-    auto write_quad = [&](std::size_t q_idx, float left, float right, float bottom,
-                          float top, float u_l, float u_r, float v_t, float v_b,
+    auto write_quad = [&](std::size_t                 q_idx,
+                          float                       left,
+                          float                       right,
+                          float                       bottom,
+                          float                       top,
+                          float                       u_l,
+                          float                       u_r,
+                          float                       v_t,
+                          float                       v_b,
                           const std::array<float, 4>& rgba) {
-        std::size_t v_off = q_idx * 4;
+        std::size_t v_off     = q_idx * 4;
         const float pos[4][3] = {
-            { left,  top,    0.0f },
-            { right, top,    0.0f },
+            { left, top, 0.0f },
+            { right, top, 0.0f },
             { right, bottom, 0.0f },
-            { left,  bottom, 0.0f },
+            { left, bottom, 0.0f },
         };
         const float uv[4][2] = {
             { u_l, v_t },
@@ -698,16 +709,16 @@ void TextLayouter::SetText(std::string_view utf8) {
         for (std::size_t k = 0; k < 4; ++k) {
             std::memcpy(&im.positions[(v_off + k) * 3], pos[k], sizeof(pos[k]));
             std::memcpy(&im.texcoords[(v_off + k) * 2], uv[k], sizeof(uv[k]));
-            std::memcpy(&im.colors   [(v_off + k) * 4], rgba.data(), sizeof(float) * 4);
+            std::memcpy(&im.colors[(v_off + k) * 4], rgba.data(), sizeof(float) * 4);
         }
-        std::size_t i_off = q_idx * 6;
-        const std::uint32_t base = static_cast<std::uint32_t>(v_off);
-        im.indices[i_off + 0] = base + 0;
-        im.indices[i_off + 1] = base + 1;
-        im.indices[i_off + 2] = base + 2;
-        im.indices[i_off + 3] = base + 0;
-        im.indices[i_off + 4] = base + 2;
-        im.indices[i_off + 5] = base + 3;
+        std::size_t         i_off = q_idx * 6;
+        const std::uint32_t base  = static_cast<std::uint32_t>(v_off);
+        im.indices[i_off + 0]     = base + 0;
+        im.indices[i_off + 1]     = base + 1;
+        im.indices[i_off + 2]     = base + 2;
+        im.indices[i_off + 3]     = base + 0;
+        im.indices[i_off + 4]     = base + 2;
+        im.indices[i_off + 5]     = base + 3;
     };
 
     float text_top    = +text_h * 0.5f;
@@ -717,15 +728,15 @@ void TextLayouter::SetText(std::string_view utf8) {
     (void)text_left;
     (void)text_right;
     (void)text_bottom;
-    float pad         = im.style.padding;
+    float pad = im.style.padding;
 
     std::size_t q = 0;
 
     if (has_bg) {
-        float u_l = 1.0f / static_cast<float>(fm.atlas_w);
-        float u_r = 3.0f / static_cast<float>(fm.atlas_w);
-        float v_t = 1.0f / static_cast<float>(fm.atlas_h);
-        float v_b = 3.0f / static_cast<float>(fm.atlas_h);
+        float                u_l = 1.0f / static_cast<float>(fm.atlas_w);
+        float                u_r = 3.0f / static_cast<float>(fm.atlas_w);
+        float                v_t = 1.0f / static_cast<float>(fm.atlas_h);
+        float                v_b = 3.0f / static_cast<float>(fm.atlas_h);
         std::array<float, 4> rgba {
             im.style.background_color[0] * im.style.background_brightness,
             im.style.background_color[1] * im.style.background_brightness,
@@ -733,9 +744,15 @@ void TextLayouter::SetText(std::string_view utf8) {
             1.0f,
         };
         write_quad(q++,
-                   -text_w * 0.5f - pad, +text_w * 0.5f + pad,
-                   -text_h * 0.5f - pad, +text_h * 0.5f + pad,
-                   u_l, u_r, v_t, v_b, rgba);
+                   -text_w * 0.5f - pad,
+                   +text_w * 0.5f + pad,
+                   -text_h * 0.5f - pad,
+                   +text_h * 0.5f + pad,
+                   u_l,
+                   u_r,
+                   v_t,
+                   v_b,
+                   rgba);
     }
 
     std::array<float, 4> text_rgba {
@@ -756,8 +773,7 @@ void TextLayouter::SetText(std::string_view utf8) {
         } else {
             line_origin_x = -line.width * 0.5f;
         }
-        float baseline_y =
-            text_top - fm.ascender - static_cast<float>(li) * fm.line_height;
+        float baseline_y = text_top - fm.ascender - static_cast<float>(li) * fm.line_height;
 
         float pen_x = line_origin_x;
         for (auto* gi : line.glyphs) {
@@ -772,11 +788,11 @@ void TextLayouter::SetText(std::string_view utf8) {
             float top    = baseline_y + gi->bearing_y;
             float bottom = top - static_cast<float>(gi->pixel_h);
             float u_l    = static_cast<float>(gi->atlas_x) / static_cast<float>(fm.atlas_w);
-            float u_r    = static_cast<float>(gi->atlas_x + gi->pixel_w) /
-                        static_cast<float>(fm.atlas_w);
+            float u_r =
+                static_cast<float>(gi->atlas_x + gi->pixel_w) / static_cast<float>(fm.atlas_w);
             float v_t = static_cast<float>(gi->atlas_y) / static_cast<float>(fm.atlas_h);
-            float v_b = static_cast<float>(gi->atlas_y + gi->pixel_h) /
-                        static_cast<float>(fm.atlas_h);
+            float v_b =
+                static_cast<float>(gi->atlas_y + gi->pixel_h) / static_cast<float>(fm.atlas_h);
             write_quad(q++, left, right, bottom, top, u_l, u_r, v_t, v_b, text_rgba);
             pen_x += gi->advance_x;
             ++emitted_glyphs;
@@ -790,7 +806,7 @@ void TextLayouter::SetText(std::string_view utf8) {
     auto& v = im.mesh->GetVertexArray(0);
     v.SetVertex(WE_IN_POSITION, im.positions);
     v.SetVertex(WE_IN_TEXCOORD, im.texcoords);
-    v.SetVertex(WE_IN_COLOR,    im.colors);
+    v.SetVertex(WE_IN_COLOR, im.colors);
 
     auto& idx = im.mesh->GetIndexArray(0);
     idx.Assign(0, im.indices);

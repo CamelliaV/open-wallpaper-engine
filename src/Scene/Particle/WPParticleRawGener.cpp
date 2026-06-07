@@ -2,7 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-
 module wescene.scene;
 import eigen;
 import wescene.spec_texs;
@@ -20,7 +19,8 @@ struct WPGOption {
 
 namespace
 {
-inline void AssignVertexTimes(std::span<float> dst, std::span<const float> src, unsigned num) noexcept {
+inline void AssignVertexTimes(std::span<float> dst, std::span<const float> src,
+                              unsigned num) noexcept {
     const unsigned dst_one_size = dst.size() / num;
     for (unsigned i = 0; i < num; i++) {
         std::copy(src.begin(), src.end(), dst.begin() + i * dst_one_size);
@@ -103,9 +103,9 @@ inline usize GenParticleData(std::span<const std::unique_ptr<ParticleInstance>> 
 inline size_t GenRopeParticleSegments(const Particle& p, const ParticleTrail& trail,
                                       const ParticleRawGenSpecOp& specOp, WPGOption opt,
                                       SceneVertexArray& sv, size_t base_index) {
-    const auto one_size = sv.OneSize();
+    const auto            one_size = sv.OneSize();
     std::array<float, 32> v {};
-    size_t emitted = 0;
+    size_t                emitted = 0;
 
     if (trail.len < 2) return 0;
 
@@ -129,18 +129,18 @@ inline size_t GenRopeParticleSegments(const Particle& p, const ParticleTrail& tr
         const float in_ParticleTrailPosition = (float)(j - 1);
 
         size_t off = 0;
-        v[off++] = pre_pos[0];
-        v[off++] = pre_pos[1];
-        v[off++] = pre_pos[2];
-        v[off++] = size;
-        v[off++] = cur_pos[0];
-        v[off++] = cur_pos[1];
-        v[off++] = cur_pos[2];
-        v[off++] = in_ParticleTrailLength;
-        v[off++] = scp[0];
-        v[off++] = scp[1];
-        v[off++] = scp[2];
-        v[off++] = in_ParticleTrailPosition;
+        v[off++]   = pre_pos[0];
+        v[off++]   = pre_pos[1];
+        v[off++]   = pre_pos[2];
+        v[off++]   = size;
+        v[off++]   = cur_pos[0];
+        v[off++]   = cur_pos[1];
+        v[off++]   = cur_pos[2];
+        v[off++]   = in_ParticleTrailLength;
+        v[off++]   = scp[0];
+        v[off++]   = scp[1];
+        v[off++]   = scp[2];
+        v[off++]   = in_ParticleTrailPosition;
         if (opt.thick_format) {
             v[off++] = ecp[0];
             v[off++] = ecp[1];
@@ -174,13 +174,12 @@ inline size_t GenRopeParticleData(std::span<const std::unique_ptr<ParticleInstan
     size_t total = 0;
     for (const auto& inst : instances) {
         if (inst->IsNoLiveParticle()) continue;
-        auto particles = inst->Particles();
-        auto trails    = inst->Trails();
-        const size_t n = std::min(particles.size(), trails.size());
+        auto         particles = inst->Particles();
+        auto         trails    = inst->Trails();
+        const size_t n         = std::min(particles.size(), trails.size());
         for (size_t si = 0; si < n; si++) {
             if (! ParticleModify::LifetimeOk(particles[si])) continue;
-            total += GenRopeParticleSegments(
-                particles[si], trails[si], specOp, opt, sv, total);
+            total += GenRopeParticleSegments(particles[si], trails[si], specOp, opt, sv, total);
         }
     }
     return total;

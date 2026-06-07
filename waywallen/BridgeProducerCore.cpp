@@ -45,15 +45,13 @@ VkFormat fourcc_to_vk_format(uint32_t fourcc) {
     case WW_DRM_FORMAT_BGRA8888: return VK_FORMAT_B8G8R8A8_UNORM;
     case WW_DRM_FORMAT_RGBX8888: return VK_FORMAT_R8G8B8A8_UNORM;
     case WW_DRM_FORMAT_BGRX8888: return VK_FORMAT_B8G8R8A8_UNORM;
-    default:                     return VK_FORMAT_UNDEFINED;
+    default: return VK_FORMAT_UNDEFINED;
     }
 }
 
 } // namespace
 
-
-BridgeProducerCore::BridgeProducerCore(ww_pool_t* pool, int sock)
-    : m_pool(pool), m_sock(sock) {}
+BridgeProducerCore::BridgeProducerCore(ww_pool_t* pool, int sock): m_pool(pool), m_sock(sock) {}
 
 BridgeProducerCore::~BridgeProducerCore() = default;
 
@@ -66,7 +64,7 @@ void BridgeProducerCore::queueDirective(const ww_pool_directive_t& directive) {
 }
 
 void BridgeProducerCore::drainPendingDirective() {
-    if (!m_pending_valid.load(std::memory_order_acquire)) return;
+    if (! m_pending_valid.load(std::memory_order_acquire)) return;
 
     ww_pool_directive_t d {};
     {
@@ -81,11 +79,11 @@ void BridgeProducerCore::drainPendingDirective() {
     // Snapshot callbacks under the lock and invoke unlocked so the
     // handler can re-enter the core (read width/height) without
     // blocking — only the producer thread ever invokes them anyway.
-    std::function<void()>                                first_cb;
-    std::function<void(const BridgeReadyEvent&)>         ready_cb;
+    std::function<void()>                        first_cb;
+    std::function<void(const BridgeReadyEvent&)> ready_cb;
     {
         std::lock_guard<std::mutex> lk(m_cb_mu);
-        if (!m_first_negotiated_done && m_on_first_negotiated) {
+        if (! m_first_negotiated_done && m_on_first_negotiated) {
             first_cb                = m_on_first_negotiated;
             m_first_negotiated_done = true;
         }
@@ -110,7 +108,8 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
                      "BridgeProducerCore: fourcc 0x%08x has no VkFormat mapping\n",
                      directive.fourcc);
         ww_bridge_send_bind_failed(m_sock,
-                                   directive.fourcc, directive.modifier,
+                                   directive.fourcc,
+                                   directive.modifier,
                                    /*reason*/ 1,
                                    "fourcc unsupported by producer");
         return -EINVAL;
@@ -118,7 +117,8 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     if (directive.count == 0 || directive.count > kMaxSlots) {
         std::fprintf(stderr,
                      "BridgeProducerCore: invalid slot count %u (cap=%u)\n",
-                     directive.count, kMaxSlots);
+                     directive.count,
+                     kMaxSlots);
         return 1;
     }
 
@@ -134,13 +134,11 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
 
     int rc = ww_bridge_pool_apply_directive(m_pool, m_sock, &directive);
     if (rc < 0) {
-        std::fprintf(stderr,
-                     "BridgeProducerCore: apply_directive dry-run failed: %d\n", rc);
+        std::fprintf(stderr, "BridgeProducerCore: apply_directive dry-run failed: %d\n", rc);
         return rc;
     }
     if (rc > 0) {
-        std::fprintf(stderr,
-                     "BridgeProducerCore: apply_directive system error: %d\n", rc);
+        std::fprintf(stderr, "BridgeProducerCore: apply_directive system error: %d\n", rc);
         return rc;
     }
 
@@ -150,9 +148,7 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     // sized from the `probe_width/height` we passed into advertise_caps.
     ww_pool_slot_t s0 {};
     if (int srx = ww_bridge_pool_acquire_slot(m_pool, 0, &s0); srx != 0) {
-        std::fprintf(stderr,
-                     "BridgeProducerCore: acquire_slot(0) post-apply failed: %d\n",
-                     srx);
+        std::fprintf(stderr, "BridgeProducerCore: acquire_slot(0) post-apply failed: %d\n", srx);
         return srx;
     }
 
@@ -165,8 +161,7 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     return 0;
 }
 
-bool BridgeProducerCore::acquireSlot(VkImage* out_image,
-                                     uint32_t* out_width,
+bool BridgeProducerCore::acquireSlot(VkImage* out_image, uint32_t* out_width,
                                      uint32_t* out_height) {
     if (m_slot_count == 0) return false;
 
@@ -180,13 +175,12 @@ bool BridgeProducerCore::acquireSlot(VkImage* out_image,
 
     ww_pool_slot_t s {};
     if (int rc = ww_bridge_pool_acquire_slot(m_pool, idx, &s); rc != 0) {
-        std::fprintf(stderr,
-                     "BridgeProducerCore: acquire_slot(%u) failed: %d\n", idx, rc);
+        std::fprintf(stderr, "BridgeProducerCore: acquire_slot(%u) failed: %d\n", idx, rc);
         return false;
     }
 
-    if (out_image)  *out_image  = static_cast<VkImage>(s.vk_image);
-    if (out_width)  *out_width  = s.width;
+    if (out_image) *out_image = static_cast<VkImage>(s.vk_image);
+    if (out_width) *out_width = s.width;
     if (out_height) *out_height = s.height;
 
     m_pending_slot = idx;
@@ -195,7 +189,7 @@ bool BridgeProducerCore::acquireSlot(VkImage* out_image,
 }
 
 void BridgeProducerCore::submitSlot(int producer_sync_fd) {
-    if (!m_have_pending) {
+    if (! m_have_pending) {
         if (producer_sync_fd >= 0) ::close(producer_sync_fd);
         return;
     }
@@ -204,8 +198,7 @@ void BridgeProducerCore::submitSlot(int producer_sync_fd) {
 
     int rc = ww_bridge_pool_submit_slot(m_pool, m_sock, slot, producer_sync_fd);
     if (rc != 0) {
-        std::fprintf(stderr,
-                     "BridgeProducerCore: submit_slot(%u) rc=%d\n", slot, rc);
+        std::fprintf(stderr, "BridgeProducerCore: submit_slot(%u) rc=%d\n", slot, rc);
         // Bridge contract: bridge always closes the fd. We don't dup-close.
     }
 }

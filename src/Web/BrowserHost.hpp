@@ -11,7 +11,8 @@
 #include "DmaBufFrame.hpp"
 #include "Manifest.hpp"
 
-namespace weweb {
+namespace weweb
+{
 
 class OsrRenderHandler;
 class ClientHandler;
@@ -27,19 +28,19 @@ class ClientHandler;
 class BrowserHost {
 public:
     struct InitOptions {
-        std::filesystem::path resources_dir;  // CEF Resources/
-        std::filesystem::path locales_dir;    // CEF Resources/locales/
-        std::filesystem::path cache_dir;      // optional CEF disk cache
-        bool enable_remote_debugging{false};
-        int  remote_debugging_port{0};
+        std::filesystem::path resources_dir; // CEF Resources/
+        std::filesystem::path locales_dir;   // CEF Resources/locales/
+        std::filesystem::path cache_dir;     // optional CEF disk cache
+        bool                  enable_remote_debugging { false };
+        int                   remote_debugging_port { 0 };
         // false ⇒ pass --mute-audio to Chromium so no output device opens.
-        bool enable_audio{true};
+        bool enable_audio { true };
     };
 
     BrowserHost();
     ~BrowserHost();
 
-    BrowserHost(const BrowserHost&) = delete;
+    BrowserHost(const BrowserHost&)            = delete;
     BrowserHost& operator=(const BrowserHost&) = delete;
 
     // Returns >= 0 if this process is a CEF helper (renderer / utility /
@@ -65,8 +66,7 @@ public:
     // manifest's user properties are injected on first load. The caller
     // accesses pixels via the returned OsrRenderHandler. Initial logical
     // size is `width` x `height`; resize via OnResize.
-    bool OpenWallpaper(const WebManifest& manifest,
-                       const std::filesystem::path& workshop_dir,
+    bool OpenWallpaper(const WebManifest& manifest, const std::filesystem::path& workshop_dir,
                        int width, int height);
 
     // Notify CEF that the host window changed size. Updates GetViewRect's
@@ -83,8 +83,7 @@ public:
     void OnMouseMove(int x, int y, bool left_down);
     void OnMouseButton(int x, int y, int cef_button, bool down, int click_count);
     void OnMouseWheel(int x, int y, int delta_x, int delta_y);
-    void OnKey(int cef_key_event_type, int native_key_code,
-               int windows_key_code, int modifiers,
+    void OnKey(int cef_key_event_type, int native_key_code, int windows_key_code, int modifiers,
                unsigned int unicode_char);
     void OnFocus(bool gained);
 
@@ -134,4 +133,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace weweb
+} // namespace weweb

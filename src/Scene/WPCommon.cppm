@@ -38,6 +38,6 @@ int32_t ReadMDLVesion(fs::IBinaryStream& file) { return ReadVersion("MDL", file)
 
 // DIY
 int32_t ReadSPVVesion(fs::IBinaryStream& file) { return ReadVersion("SPV", file); }
-void WriteSPVVesion(fs::IBinaryStreamW& file, int ver) { WriteVersion("SPVS", file, ver); }
+void    WriteSPVVesion(fs::IBinaryStreamW& file, int ver) { WriteVersion("SPVS", file, ver); }
 
 } // namespace owe

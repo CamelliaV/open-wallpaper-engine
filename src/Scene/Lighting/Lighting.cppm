@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.scene:lighting;
 import eigen;
 import wescene.core;
@@ -15,18 +14,23 @@ export namespace owe
 
 class SceneNode;
 
-enum class SceneLightType : u8 { Point = 0, Spot = 1, Directional = 2 };
+enum class SceneLightType : u8
+{
+    Point       = 0,
+    Spot        = 1,
+    Directional = 2
+};
 
 class SceneLight {
 public:
     struct Desc {
         SceneLightType  type { SceneLightType::Point };
         Eigen::Vector3f color { 1.0f, 1.0f, 1.0f };
-        float radius { 0.0f };
-        float intensity { 1.0f };
-        float exponent { 1.0f };
-        float attenuation { 0.0f };
-        float mindistance { 0.0f };
+        float           radius { 0.0f };
+        float           intensity { 1.0f };
+        float           exponent { 1.0f };
+        float           attenuation { 0.0f };
+        float           mindistance { 0.0f };
         // Cone angle cosines (cos(half-angle)). Identity (1.0) = no falloff.
         float inner_cone_cos { 1.0f };
         float outer_cone_cos { 1.0f };
@@ -54,17 +58,17 @@ public:
     // WE field-binding: `visible: {user: "key", value: <bool>}` ties this light's
     // runtime visibility to engine.userProperties[<key>]. Empty key = unbound.
     const std::string& visibleUserKey() const { return m_visible_user_key; }
-    void setVisibleUserKey(std::string k) { m_visible_user_key = std::move(k); }
-    bool runtimeVisible() const { return m_runtime_visible; }
-    void setRuntimeVisible(bool v) { m_runtime_visible = v; }
+    void               setVisibleUserKey(std::string k) { m_visible_user_key = std::move(k); }
+    bool               runtimeVisible() const { return m_runtime_visible; }
+    void               setRuntimeVisible(bool v) { m_runtime_visible = v; }
 
 private:
     Desc                       m_desc;
     Eigen::Vector3f            m_premultiplied_color { Eigen::Vector3f::Zero() };
     std::shared_ptr<SceneNode> m_node { nullptr };
 
-    std::string                m_visible_user_key {};
-    bool                       m_runtime_visible { true };
+    std::string m_visible_user_key {};
+    bool        m_runtime_visible { true };
 };
 
 } // namespace owe

@@ -39,10 +39,9 @@ double FrameTimer::IdeaTime() const {
 }
 
 void FrameTimer::UpdateFrametime() {
-    m_frametime.store(std::accumulate(m_frametime_queue.begin(),
-                                      m_frametime_queue.end(),
-                                      microseconds(0)) /
-                      m_frametime_queue.size());
+    m_frametime.store(
+        std::accumulate(m_frametime_queue.begin(), m_frametime_queue.end(), microseconds(0)) /
+        m_frametime_queue.size());
 }
 
 void FrameTimer::SetRequiredFps(u16 value) {

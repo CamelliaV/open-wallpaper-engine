@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.rgraph:dependency_graph;
 import wescene.core;
 import rstd.cppstd;

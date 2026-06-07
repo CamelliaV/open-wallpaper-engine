@@ -11,7 +11,8 @@ import wescene.parse;
 import wescene.pkg_fs;
 import wescene.fs;
 
-export namespace owe::testing {
+export namespace owe::testing
+{
 
 struct SceneParseResult {
     bool        ok { false };
@@ -29,9 +30,9 @@ struct SceneParseResult {
 SceneParseResult ProbeSceneParse(const std::string& workshop_dir);
 
 struct WorkshopProbe {
-    std::string id;            // workshop directory name (steam id)
-    std::string dir;           // absolute workshop directory
-    std::string pkg_stamp;     // raw "PKGV00xx" string from pkg header
+    std::string   id;          // workshop directory name (steam id)
+    std::string   dir;         // absolute workshop directory
+    std::string   pkg_stamp;   // raw "PKGV00xx" string from pkg header
     std::uint16_t pkg_version; // ParsePkgVersionStamp(pkg_stamp); 0 on error
 };
 
@@ -43,9 +44,11 @@ std::vector<WorkshopProbe> EnumerateWorkshopProbes(const std::string& workshop_r
 
 } // namespace owe::testing
 
-namespace owe::testing {
+namespace owe::testing
+{
 
-namespace {
+namespace
+{
 
 namespace fs = std::filesystem;
 

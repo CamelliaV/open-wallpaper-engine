@@ -12,21 +12,22 @@ import wavsen.audio;
 import viewer.common;
 import viewer.web;
 
-namespace {
+namespace
+{
 
 struct ViewerCtx {
-    weweb::BrowserHost* host{nullptr};
-    weweb::Presenter*   presenter{nullptr};
-    bool need_swapchain_recreate{false};
+    weweb::BrowserHost* host { nullptr };
+    weweb::Presenter*   presenter { nullptr };
+    bool                need_swapchain_recreate { false };
 };
 
 // CEF mouse button codes match cef_mouse_button_type_t: 0=L, 1=M, 2=R.
 int CefButtonFromGlfw(int glfw_button) {
     switch (glfw_button) {
-        case GLFW_MOUSE_BUTTON_LEFT:   return 0;
-        case GLFW_MOUSE_BUTTON_MIDDLE: return 1;
-        case GLFW_MOUSE_BUTTON_RIGHT:  return 2;
-        default:                       return -1;
+    case GLFW_MOUSE_BUTTON_LEFT: return 0;
+    case GLFW_MOUSE_BUTTON_MIDDLE: return 1;
+    case GLFW_MOUSE_BUTTON_RIGHT: return 2;
+    default: return -1;
     }
 }
 
@@ -37,29 +38,30 @@ void OnFramebufferSize(GLFWwindow* w, int /*fb_w*/, int /*fb_h*/) {
 
 void OnCursorPos(GLFWwindow* w, double x, double y) {
     auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
-    if (!ctx || !ctx->host) return;
+    if (! ctx || ! ctx->host) return;
     bool left = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     ctx->host->OnMouseMove(static_cast<int>(x), static_cast<int>(y), left);
 }
 
 void OnMouseButton(GLFWwindow* w, int button, int action, int /*mods*/) {
     auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
-    if (!ctx || !ctx->host) return;
+    if (! ctx || ! ctx->host) return;
     int cef_btn = CefButtonFromGlfw(button);
     if (cef_btn < 0) return;
     double x = 0, y = 0;
     glfwGetCursorPos(w, &x, &y);
-    ctx->host->OnMouseButton(static_cast<int>(x), static_cast<int>(y),
-                             cef_btn, action == GLFW_PRESS, /*click_count=*/1);
+    ctx->host->OnMouseButton(
+        static_cast<int>(x), static_cast<int>(y), cef_btn, action == GLFW_PRESS, /*click_count=*/1);
 }
 
 void OnScroll(GLFWwindow* w, double dx, double dy) {
     auto* ctx = static_cast<ViewerCtx*>(glfwGetWindowUserPointer(w));
-    if (!ctx || !ctx->host) return;
+    if (! ctx || ! ctx->host) return;
     double x = 0, y = 0;
     glfwGetCursorPos(w, &x, &y);
     // GLFW scroll units are "wheel notches"; CEF expects pixel-ish deltas.
-    ctx->host->OnMouseWheel(static_cast<int>(x), static_cast<int>(y),
+    ctx->host->OnMouseWheel(static_cast<int>(x),
+                            static_cast<int>(y),
                             static_cast<int>(dx * 40),
                             static_cast<int>(dy * 40));
 }
@@ -69,7 +71,7 @@ void OnFocus(GLFWwindow* w, int focused) {
     if (ctx && ctx->host) ctx->host->OnFocus(focused == GLFW_TRUE);
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
     weweb::BrowserHost host;
@@ -77,8 +79,7 @@ int main(int argc, char** argv) {
     // CRITICAL: must run before any of our own arg parsing — CEF re-execs
     // this binary with `--type=zygote/--type=renderer/...` switches; we
     // must short-circuit those helper invocations immediately.
-    if (int helper_exit = host.RunOrExitIfHelper(argc, argv);
-        helper_exit >= 0) {
+    if (int helper_exit = host.RunOrExitIfHelper(argc, argv); helper_exit >= 0) {
         return helper_exit;
     }
 
@@ -109,20 +110,20 @@ int main(int argc, char** argv) {
     }
 
     auto workshop_dir = std::filesystem::path(p.get<std::string>("workshop"));
-    if (!std::filesystem::is_directory(workshop_dir)) {
+    if (! std::filesystem::is_directory(workshop_dir)) {
         std::cerr << "webviewer: not a directory: " << workshop_dir << "\n";
         return 2;
     }
 
     auto presenter_name = p.get<std::string>("--presenter");
     if (presenter_name != "vulkan" && presenter_name != "egl") {
-        std::cerr << "webviewer: --presenter must be 'vulkan' or 'egl', got '"
-                  << presenter_name << "'\n";
+        std::cerr << "webviewer: --presenter must be 'vulkan' or 'egl', got '" << presenter_name
+                  << "'\n";
         return 2;
     }
 
     auto manifest_opt = weweb::LoadWebManifest(workshop_dir);
-    if (!manifest_opt) return 2;
+    if (! manifest_opt) return 2;
     auto& manifest = *manifest_opt;
 
     // Force GLFW to use the X11 backend. CEF in OSR mode still ends up
@@ -130,11 +131,11 @@ int main(int argc, char** argv) {
     // --ozone-platform=x11; matching the toolkit avoids cross-display
     // synchronization weirdness.
     viewer::InitGlfwPlatformHint(/*force_x11=*/false);
-    if (!glfwInit()) {
+    if (! glfwInit()) {
         std::cerr << "webviewer: glfwInit failed\n";
         return 1;
     }
-    if (presenter_name == "vulkan" && !glfwVulkanSupported()) {
+    if (presenter_name == "vulkan" && ! glfwVulkanSupported()) {
         std::cerr << "webviewer: glfw says Vulkan is not supported\n";
         glfwTerminate();
         return 1;
@@ -143,12 +144,11 @@ int main(int argc, char** argv) {
     // want GLFW to leave the window context-less either way.
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    int w_width  = p.get<int>("--width");
-    int w_height = p.get<int>("--height");
-    GLFWwindow* window = glfwCreateWindow(w_width, w_height,
-                                          manifest.title.c_str(),
-                                          nullptr, nullptr);
-    if (!window) {
+    int         w_width  = p.get<int>("--width");
+    int         w_height = p.get<int>("--height");
+    GLFWwindow* window =
+        glfwCreateWindow(w_width, w_height, manifest.title.c_str(), nullptr, nullptr);
+    if (! window) {
         std::cerr << "webviewer: glfwCreateWindow failed\n";
         glfwTerminate();
         return 1;
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
     } else {
         presenter = std::make_unique<weweb::EglPresenter>();
     }
-    if (!presenter->Init(window)) {
+    if (! presenter->Init(window)) {
         glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
@@ -176,7 +176,7 @@ int main(int argc, char** argv) {
         opts.remote_debugging_port   = port;
     }
 
-    if (!host.Init(opts)) {
+    if (! host.Init(opts)) {
         presenter->Shutdown();
         glfwDestroyWindow(window);
         glfwTerminate();
@@ -187,16 +187,15 @@ int main(int argc, char** argv) {
     // The callback runs synchronously inside CefDoMessageLoopWork on the
     // main thread; FDs in `frame` are valid only for the duration.
     weweb::Presenter* presenter_ptr = presenter.get();
-    host.SetAcceleratedPaintCallback(
-        [presenter_ptr](const weweb::DmaBufFrame& frame) {
-            presenter_ptr->AcceptDmaBuf(frame);
-        });
+    host.SetAcceleratedPaintCallback([presenter_ptr](const weweb::DmaBufFrame& frame) {
+        presenter_ptr->AcceptDmaBuf(frame);
+    });
 
     // Open the wallpaper at the swapchain extent — CEF renders straight
     // into our swapchain-pixel space, no rescaling needed.
     int initial_w = static_cast<int>(presenter->Width());
     int initial_h = static_cast<int>(presenter->Height());
-    if (!host.OpenWallpaper(manifest, workshop_dir, initial_w, initial_h)) {
+    if (! host.OpenWallpaper(manifest, workshop_dir, initial_w, initial_h)) {
         host.Shutdown();
         presenter->Shutdown();
         glfwDestroyWindow(window);
@@ -209,30 +208,30 @@ int main(int argc, char** argv) {
     ctx.presenter = presenter.get();
     glfwSetWindowUserPointer(window, &ctx);
     glfwSetFramebufferSizeCallback(window, OnFramebufferSize);
-    glfwSetCursorPosCallback     (window, OnCursorPos);
-    glfwSetMouseButtonCallback   (window, OnMouseButton);
-    glfwSetScrollCallback        (window, OnScroll);
-    glfwSetWindowFocusCallback   (window, OnFocus);
+    glfwSetCursorPosCallback(window, OnCursorPos);
+    glfwSetMouseButtonCallback(window, OnMouseButton);
+    glfwSetScrollCallback(window, OnScroll);
+    glfwSetWindowFocusCallback(window, OnFocus);
 
     // Audio-response capture (system default-sink monitor → page listeners).
     wavsen::audio::AudioCapture audio_capture;
-    if (!audio_capture.init()) {
+    if (! audio_capture.init()) {
         std::cerr << "webviewer: audio capture init failed; "
                      "audio response disabled\n";
     }
     wavsen::audio::AudioSpectrum audio_spec;
-    unsigned audio_tick = 0;
+    unsigned                     audio_tick = 0;
 
     // Main loop. ~60Hz nominal. CefDoMessageLoopWork is cheap; the
     // Vulkan FIFO present pacing also throttles us.
-    while (!glfwWindowShouldClose(window) && !host.ShouldExit()) {
+    while (! glfwWindowShouldClose(window) && ! host.ShouldExit()) {
         glfwPollEvents();
         host.Pump();
 
         // ~30 Hz audio push; wavsen is mono 64-bin, WE web wants 128 (L+R).
         if (audio_capture.is_inited() && (audio_tick++ & 1u) == 0) {
             if (audio_capture.snapshot(audio_spec)) {
-                std::array<float, 128> arr{};
+                std::array<float, 128> arr {};
                 for (std::size_t i = 0; i < 64; ++i) {
                     arr[i]      = audio_spec.bins[i];
                     arr[64 + i] = audio_spec.bins[i];
@@ -253,7 +252,7 @@ int main(int argc, char** argv) {
             int fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
             if (fbw > 0 && fbh > 0) {
-                if (!presenter->Resize()) {
+                if (! presenter->Resize()) {
                     std::cerr << "webviewer: presenter Resize failed\n";
                     break;
                 }
@@ -268,7 +267,7 @@ int main(int argc, char** argv) {
 
         // Owned image was already updated synchronously inside Pump()
         // when CEF delivered an OnAcceleratedPaint frame.
-        if (!presenter->RenderFrame()) {
+        if (! presenter->RenderFrame()) {
             ctx.need_swapchain_recreate = true;
         }
     }

@@ -8,14 +8,17 @@ import wescene.script;
 
 using namespace owe::script;
 
-namespace {
+namespace
+{
 
 // Build a one-shot FieldScript whose update() returns a host-visible counter.
 // The module body schedules timers/intervals that mutate that counter, so we
 // can observe the JsRuntime's deferred-callback sweep through FieldScript's
 // last_value().
 FieldScript* MakeProbe(JsRuntime& rt, const char* sha, const char* src) {
-    return rt.MakeFieldScript(src, sha, FieldKind::Scalar,
+    return rt.MakeFieldScript(src,
+                              sha,
+                              FieldKind::Scalar,
                               /*properties_config=*/nlohmann::json::object(),
                               /*initial_value=*/nlohmann::json(0),
                               /*node=*/nullptr);
@@ -31,13 +34,14 @@ double Tick(JsRuntime& rt, double runtime) {
     return 0.0;
 }
 
-}  // namespace
+} // namespace
 
 TEST(ScriptTimer, SetTimeoutFiresAfterDelay) {
     JsRuntime   rt;
     FrameInputs fi {};
     rt.SetFrameInputs(fi);
-    auto* fs = MakeProbe(rt, "test/timer_fires",
+    auto* fs = MakeProbe(rt,
+                         "test/timer_fires",
                          R"JS(
         let fired = 0;
         setTimeout(() => { fired++; }, 100);
@@ -60,7 +64,8 @@ TEST(ScriptTimer, SetIntervalRepeats) {
     JsRuntime   rt;
     FrameInputs fi {};
     rt.SetFrameInputs(fi);
-    auto* fs = MakeProbe(rt, "test/interval_repeats",
+    auto* fs = MakeProbe(rt,
+                         "test/interval_repeats",
                          R"JS(
         let n = 0;
         setInterval(() => { n++; }, 100);
@@ -79,7 +84,8 @@ TEST(ScriptTimer, ClearTimeoutCancels) {
     JsRuntime   rt;
     FrameInputs fi {};
     rt.SetFrameInputs(fi);
-    auto* fs = MakeProbe(rt, "test/clear_cancels",
+    auto* fs = MakeProbe(rt,
+                         "test/clear_cancels",
                          R"JS(
         let n = 0;
         let h = setTimeout(() => { n++; }, 100);
@@ -98,7 +104,8 @@ TEST(ScriptTimer, HandleSelfCallCancels) {
     JsRuntime   rt;
     FrameInputs fi {};
     rt.SetFrameInputs(fi);
-    auto* fs = MakeProbe(rt, "test/handle_self_call",
+    auto* fs = MakeProbe(rt,
+                         "test/handle_self_call",
                          R"JS(
         let n = 0;
         let h = setTimeout(() => { n++; }, 100);
@@ -125,8 +132,11 @@ TEST(ScriptNodeSize, ParserSetSizeFlowsToScript) {
         R"JS(
             export function update() { return thisLayer.size.x + thisLayer.size.y * 1000; }
         )JS",
-        "test/node_size_real", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/node_size_real",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -145,14 +155,17 @@ TEST(ScriptNodeSoftMutation, VisibleAndAlphaWrites) {
             thisLayer.visible = false;
             export function update() {}
         )JS",
-        "test/visible_alpha_writes", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/visible_alpha_writes",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     EXPECT_TRUE(node.IsAlphaOverridden());
     EXPECT_EQ(node.UserAlpha(), 0.25f);
     EXPECT_FALSE(node.Visible());
-    EXPECT_EQ(node.EffectiveAlpha(), 0.0f);  // hidden wins
+    EXPECT_EQ(node.EffectiveAlpha(), 0.0f); // hidden wins
 }
 
 TEST(ScriptNodeSoftMutation, VisibleTrueRestoresUserAlpha) {
@@ -167,8 +180,11 @@ TEST(ScriptNodeSoftMutation, VisibleTrueRestoresUserAlpha) {
             thisLayer.visible = true;
             export function update() {}
         )JS",
-        "test/visible_restore", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/visible_restore",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     EXPECT_TRUE(node.Visible());
@@ -186,8 +202,11 @@ TEST(ScriptNodeSoftMutation, BrightnessAndColorWrites) {
             thisLayer.color = new Vec3(1, 0.5, 0);
             export function update() {}
         )JS",
-        "test/brightness_color", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/brightness_color",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     EXPECT_TRUE(node.IsBrightnessOverridden());
@@ -210,8 +229,11 @@ TEST(ScriptNodeSoftMutation, NoWritesLeaveOverridesUnset) {
             let v = thisLayer.visible;
             export function update() {}
         )JS",
-        "test/no_writes", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/no_writes",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     EXPECT_FALSE(node.IsAlphaOverridden());
@@ -222,14 +244,15 @@ TEST(ScriptNodeSoftMutation, NoWritesLeaveOverridesUnset) {
 // ---------------------------------------------------------------------------
 // Cursor event dispatch
 
-namespace {
+namespace
+{
 FrameInputs MakeFi(float canvas_w = 1920.0f, float canvas_h = 1080.0f) {
     FrameInputs fi {};
     fi.canvas_w = canvas_w;
     fi.canvas_h = canvas_h;
     return fi;
 }
-}  // namespace
+} // namespace
 
 TEST(ScriptCursor, EnterLeaveAndMove) {
     // A 200×200 layer centered at (500, 500). Cursor at (500/1920, 500/1080)
@@ -248,15 +271,18 @@ TEST(ScriptCursor, EnterLeaveAndMove) {
             export function cursorMove()  { moves++;  }
             export function update() { return enters * 1000000 + leaves * 1000 + moves; }
         )JS",
-        "test/cursor_enter_leave_move", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/cursor_enter_leave_move",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     // Outside: no enter, no move.
-    auto fi = MakeFi();
+    auto fi             = MakeFi();
     fi.cursor_in_window = true;
-    fi.cursor_x = 100.0f / 1920.0f;
-    fi.cursor_y = 100.0f / 1080.0f;
+    fi.cursor_x         = 100.0f / 1920.0f;
+    fi.cursor_y         = 100.0f / 1080.0f;
     rt.SetFrameInputs(fi);
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 0.0);
@@ -297,14 +323,17 @@ TEST(ScriptCursor, ClickAndDownUpInside) {
                 return down * 10000 + up * 100 + click + (last_btn + 1) * 1000000;
             }
         )JS",
-        "test/cursor_click", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/cursor_click",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
-    auto fi = MakeFi();
+    auto fi             = MakeFi();
     fi.cursor_in_window = true;
-    fi.cursor_x = 500.0f / 1920.0f;
-    fi.cursor_y = 500.0f / 1080.0f;
+    fi.cursor_x         = 500.0f / 1920.0f;
+    fi.cursor_y         = 500.0f / 1080.0f;
     // Press left button (bit 0) this frame.
     fi.mouse_buttons_pressed = 1u << 0;
     fi.mouse_buttons_down    = 1u << 0;
@@ -335,14 +364,17 @@ TEST(ScriptCursor, ClickOutsideIsIgnored) {
             export function cursorClick() { click++; }
             export function update() { return click; }
         )JS",
-        "test/cursor_outside_click", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/cursor_outside_click",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
-    auto fi = MakeFi();
-    fi.cursor_in_window = true;
-    fi.cursor_x = 100.0f / 1920.0f;  // outside the AABB
-    fi.cursor_y = 100.0f / 1080.0f;
+    auto fi                  = MakeFi();
+    fi.cursor_in_window      = true;
+    fi.cursor_x              = 100.0f / 1920.0f; // outside the AABB
+    fi.cursor_y              = 100.0f / 1080.0f;
     fi.mouse_buttons_pressed = 1u << 0;
     rt.SetFrameInputs(fi);
     rt.TickAll();
@@ -363,14 +395,17 @@ TEST(ScriptCursor, CursorOutOfWindowSuppressesEvents) {
             export function cursorMove()  { n++; }
             export function update() { return n; }
         )JS",
-        "test/cursor_out_of_window", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/cursor_out_of_window",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
-    auto fi = MakeFi();
-    fi.cursor_in_window = false;  // outside window: events suppressed
-    fi.cursor_x = 500.0f / 1920.0f;
-    fi.cursor_y = 500.0f / 1080.0f;
+    auto fi             = MakeFi();
+    fi.cursor_in_window = false; // outside window: events suppressed
+    fi.cursor_x         = 500.0f / 1920.0f;
+    fi.cursor_y         = 500.0f / 1080.0f;
     rt.SetFrameInputs(fi);
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 0.0);
@@ -392,8 +427,11 @@ TEST(ScriptTexAnim, SetFramePinsAndStopsPlayback) {
                 return anim.getFrame() * 10 + (anim.isPlaying() ? 1 : 0);
             }
         )JS",
-        "test/texanim_setframe", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/texanim_setframe",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -415,8 +453,11 @@ TEST(ScriptTexAnim, PlayResumesAutoAdvance) {
             thisLayer.getTextureAnimation().play();
             export function update() {}
         )JS",
-        "test/texanim_play", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/texanim_play",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -434,13 +475,16 @@ TEST(ScriptTexAnim, PauseFreezesAtCurrent) {
             thisLayer.getTextureAnimation().pause();
             export function update() {}
         )JS",
-        "test/texanim_pause", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/texanim_pause",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
     EXPECT_FALSE(node.TexAnim().playing);
-    EXPECT_EQ(node.TexAnim().current_frame, -1);  // pause keeps auto cursor
+    EXPECT_EQ(node.TexAnim().current_frame, -1); // pause keeps auto cursor
 }
 
 TEST(ScriptTexAnim, UnboundLayerFallsBackToJsStub) {
@@ -455,8 +499,11 @@ TEST(ScriptTexAnim, UnboundLayerFallsBackToJsStub) {
             a.setFrame(7);
             export function update() { return a.getFrame(); }
         )JS",
-        "test/texanim_unbound", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), nullptr);
+        "test/texanim_unbound",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        nullptr);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -467,15 +514,15 @@ TEST(ScriptTexAnim, UnboundLayerFallsBackToJsStub) {
 // ---------------------------------------------------------------------------
 // localStorage
 
-namespace {
+namespace
+{
 std::string MakeTmpLsPath(const char* tag) {
-    auto p = std::filesystem::temp_directory_path() /
-             (std::string("owe_ls_") + tag + ".json");
+    auto p = std::filesystem::temp_directory_path() / (std::string("owe_ls_") + tag + ".json");
     std::error_code ec;
     std::filesystem::remove(p, ec);
     return p.native();
 }
-}  // namespace
+} // namespace
 
 TEST(ScriptLocalStorage, InMemoryWithoutPersistencePath) {
     JsRuntime   rt;
@@ -491,8 +538,11 @@ TEST(ScriptLocalStorage, InMemoryWithoutPersistencePath) {
                 return v + (o ? o.a + (o.b === 'two' ? 100 : 0) : 0);
             }
         )JS",
-        "test/ls_inmemory", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), nullptr);
+        "test/ls_inmemory",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        nullptr);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -512,8 +562,11 @@ TEST(ScriptLocalStorage, RemoveDeletesKey) {
                 return v === undefined ? -1 : v;
             }
         )JS",
-        "test/ls_remove", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), nullptr);
+        "test/ls_remove",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        nullptr);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -534,8 +587,11 @@ TEST(ScriptLocalStorage, PersistsAcrossRuntimes) {
                 localStorage.set('label', 'hello');
                 export function update() {}
             )JS",
-            "test/ls_writer", FieldKind::Scalar,
-            nlohmann::json::object(), nlohmann::json(0), nullptr);
+            "test/ls_writer",
+            FieldKind::Scalar,
+            nlohmann::json::object(),
+            nlohmann::json(0),
+            nullptr);
         ASSERT_NE(fs, nullptr);
     }
 
@@ -553,8 +609,11 @@ TEST(ScriptLocalStorage, PersistsAcrossRuntimes) {
                     return (c ?? -1) + (l === 'hello' ? 1000 : 0);
                 }
             )JS",
-            "test/ls_reader", FieldKind::Scalar,
-            nlohmann::json::object(), nlohmann::json(0), nullptr);
+            "test/ls_reader",
+            FieldKind::Scalar,
+            nlohmann::json::object(),
+            nlohmann::json(0),
+            nullptr);
         ASSERT_NE(fs, nullptr);
         rt.TickAll();
         EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 7 + 1000);
@@ -577,8 +636,11 @@ TEST(ScriptLocalStorage, ObjectRoundTrip) {
                 localStorage.set('pos', { x: 10, y: 20 });
                 export function update() {}
             )JS",
-            "test/ls_obj_write", FieldKind::Scalar,
-            nlohmann::json::object(), nlohmann::json(0), nullptr);
+            "test/ls_obj_write",
+            FieldKind::Scalar,
+            nlohmann::json::object(),
+            nlohmann::json(0),
+            nullptr);
     }
     {
         JsRuntime rt;
@@ -592,8 +654,11 @@ TEST(ScriptLocalStorage, ObjectRoundTrip) {
                     return (p && p.x === 10 && p.y === 20) ? 1 : 0;
                 }
             )JS",
-            "test/ls_obj_read", FieldKind::Scalar,
-            nlohmann::json::object(), nlohmann::json(0), nullptr);
+            "test/ls_obj_read",
+            FieldKind::Scalar,
+            nlohmann::json::object(),
+            nlohmann::json(0),
+            nullptr);
         rt.TickAll();
         EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
     }
@@ -621,8 +686,11 @@ TEST(ScriptNodeChildren, WalksSceneNodeChildren) {
                                        + (cs[1] ? cs[1].origin.x : 0);
             }
         )JS",
-        "test/getChildren_walk", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), parent.get());
+        "test/getChildren_walk",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        parent.get());
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -648,8 +716,11 @@ TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
                        + Math.round(d) * 1000000000;     // 180 * 1e9
             }
         )JS",
-        "test/wemath_smoothstep", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), nullptr);
+        "test/wemath_smoothstep",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        nullptr);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -666,13 +737,12 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
     // ResolveConfigValue stores the {user, value} wrapper verbatim; the
     // bootstrap getter unwraps at access time. SetUserProperty in
     // between should win.
-    JsRuntime rt;
-    nlohmann::json properties = nlohmann::json::parse(
-        R"({"x":{"user":"x1","value":0.5}})");
-    rt.SetUserProperty("x1",
-                       nlohmann::json::parse(R"({"type":"slider","value":-0.665})"));
+    JsRuntime      rt;
+    nlohmann::json properties = nlohmann::json::parse(R"({"x":{"user":"x1","value":0.5}})");
+    rt.SetUserProperty("x1", nlohmann::json::parse(R"({"type":"slider","value":-0.665})"));
     FrameInputs fi {};
-    fi.canvas_w = 3840.0f; fi.canvas_h = 2160.0f;
+    fi.canvas_w = 3840.0f;
+    fi.canvas_h = 2160.0f;
     rt.SetFrameInputs(fi);
     auto* fs = rt.MakeFieldScript(
         R"JS(
@@ -681,8 +751,11 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
               .finish();
             export function update() { return scriptProperties.x; }
         )JS",
-        "test/user_prop_override", FieldKind::Scalar,
-        properties, nlohmann::json(0), nullptr);
+        "test/user_prop_override",
+        FieldKind::Scalar,
+        properties,
+        nlohmann::json(0),
+        nullptr);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -695,11 +768,11 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
 }
 
 TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
-    JsRuntime rt;
-    nlohmann::json properties = nlohmann::json::parse(
-        R"({"x":{"user":"missing","value":0.5}})");
-    FrameInputs fi {};
-    fi.canvas_w = 3840.0f; fi.canvas_h = 2160.0f;
+    JsRuntime      rt;
+    nlohmann::json properties = nlohmann::json::parse(R"({"x":{"user":"missing","value":0.5}})");
+    FrameInputs    fi {};
+    fi.canvas_w = 3840.0f;
+    fi.canvas_h = 2160.0f;
     rt.SetFrameInputs(fi);
     auto* fs = rt.MakeFieldScript(
         R"JS(
@@ -708,8 +781,11 @@ TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
               .finish();
             export function update() { return scriptProperties.x; }
         )JS",
-        "test/user_prop_fallback", FieldKind::Scalar,
-        properties, nlohmann::json(0), nullptr);
+        "test/user_prop_fallback",
+        FieldKind::Scalar,
+        properties,
+        nlohmann::json(0),
+        nullptr);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -723,8 +799,8 @@ TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
     fi.canvas_h = 2160.0f;
     rt.SetFrameInputs(fi);
 
-    nlohmann::json properties = nlohmann::json::parse(
-        R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})");
+    nlohmann::json properties =
+        nlohmann::json::parse(R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})");
 
     auto* fs = rt.MakeFieldScript(
         R"JS(
@@ -739,7 +815,8 @@ TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
                 return value;
             }
         )JS",
-        "test/workshop_3327_repro", FieldKind::Vec3,
+        "test/workshop_3327_repro",
+        FieldKind::Vec3,
         properties,
         nlohmann::json("1315.0 1419.0 0.0"),
         nullptr);
@@ -761,8 +838,8 @@ TEST(SceneNodeTrans, SetTranslateRecomputesModelTrans) {
 
     child->UpdateTrans();
     Eigen::Matrix4d m1 = child->ModelTrans();
-    EXPECT_DOUBLE_EQ(m1(0, 3), 110.0);  // world x
-    EXPECT_DOUBLE_EQ(m1(1, 3), 220.0);  // world y
+    EXPECT_DOUBLE_EQ(m1(0, 3), 110.0); // world x
+    EXPECT_DOUBLE_EQ(m1(1, 3), 220.0); // world y
 
     // Mutate the parent and re-read the child without explicit dirty.
     parent.SetTranslate({ 500.0f, 600.0f, 0.0f });
@@ -784,16 +861,19 @@ TEST(SceneNodeTrans, SetScaleAndRotationMarkDirty) {
 }
 
 TEST(ScriptNodeSize, UnsetFallsBackTo100x100) {
-    owe::SceneNode node;  // m_size defaults to (0,0)
-    JsRuntime   rt;
-    FrameInputs fi {};
+    owe::SceneNode node; // m_size defaults to (0,0)
+    JsRuntime      rt;
+    FrameInputs    fi {};
     rt.SetFrameInputs(fi);
     auto* fs = rt.MakeFieldScript(
         R"JS(
             export function update() { return thisLayer.size.x + thisLayer.size.y * 1000; }
         )JS",
-        "test/node_size_unset", FieldKind::Scalar,
-        nlohmann::json::object(), nlohmann::json(0), &node);
+        "test/node_size_unset",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -804,7 +884,8 @@ TEST(ScriptTimer, ClearIntervalStops) {
     JsRuntime   rt;
     FrameInputs fi {};
     rt.SetFrameInputs(fi);
-    auto* fs = MakeProbe(rt, "test/clear_interval",
+    auto* fs = MakeProbe(rt,
+                         "test/clear_interval",
                          R"JS(
         let n = 0;
         let h = setInterval(() => { n++; }, 100);
@@ -815,9 +896,9 @@ TEST(ScriptTimer, ClearIntervalStops) {
     )JS");
     ASSERT_NE(fs, nullptr);
 
-    Tick(rt, 0.25);  // fires at 0.1, 0.2 → n=2
+    Tick(rt, 0.25); // fires at 0.1, 0.2 → n=2
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 2.0);
 
-    Tick(rt, 1.50);  // would have fired many more, but update cleared it
+    Tick(rt, 1.50); // would have fired many more, but update cleared it
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 2.0);
 }

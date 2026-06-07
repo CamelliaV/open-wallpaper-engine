@@ -1,7 +1,5 @@
 module;
 
-
-
 export module wescene.vulkan_render:resource;
 import wescene.core;
 import rstd.cppstd;

@@ -1,13 +1,12 @@
 module;
 
-
 export module wescene.shader_value_updater;
 import eigen;
 import wescene.core;
 import rstd.cppstd;
 import wescene.scene;
 
-import wescene.puppet;  // WPPuppetLayer
+import wescene.puppet; // WPPuppetLayer
 
 export namespace owe
 {
@@ -46,9 +45,9 @@ struct WPUniformInfo {
 };
 
 struct WPShaderValueData {
-    std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
+    std::array<float, 2>                       parallaxDepth { 0.0f, 0.0f };
     std::vector<std::pair<usize, std::string>> renderTargets;
-    WPPuppetLayer puppet_layer;
+    WPPuppetLayer                              puppet_layer;
 };
 
 struct WPCameraParallax {
@@ -94,7 +93,7 @@ private:
     std::array<float, 2> m_mousePos { 0.5f, 0.5f };
     std::array<float, 2> m_mousePosInput { 0.5f, 0.5f };
     double               m_mouseDelayedTime { 0.0f };
-    unsigned                 m_mouseInputCount { 0 };
+    unsigned             m_mouseInputCount { 0 };
 
     std::chrono::time_point<std::chrono::steady_clock> m_last_mouse_input_time;
 

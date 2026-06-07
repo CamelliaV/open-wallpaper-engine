@@ -4,7 +4,6 @@ module;
 
 #include <cmath>
 
-
 module wescene.shader_value_updater;
 import eigen;
 import wescene.spec_texs;
@@ -16,7 +15,8 @@ import wescene.scene;
 using namespace owe;
 using namespace Eigen;
 
-namespace {
+namespace
+{
 
 // Music energy is concentrated in low frequencies (bass/kick fundamentals).
 // Without compensation the leftmost bars dominate and the rest barely move.
@@ -27,14 +27,14 @@ constexpr float kAudioSampleRate  = 48000.0f;
 constexpr float kAudioFftSize     = 1024.0f;
 constexpr float kAudioHalfFft     = 512.0f;
 constexpr float kAudioTiltPivotHz = 200.0f;
-constexpr float kAudioTiltExp     = 0.30f;  // ~ +1.8 dB/oct, slightly past pink
+constexpr float kAudioTiltExp     = 0.30f; // ~ +1.8 dB/oct, slightly past pink
 
 const std::array<float, 64> kAudioBandGain = [] {
     std::array<std::size_t, 65> edges {};
     edges[0] = 1;
     for (std::size_t k = 1; k <= 64; ++k) {
-        const double t = std::pow(static_cast<double>(kAudioHalfFft),
-                                  static_cast<double>(k) / 64.0);
+        const double t =
+            std::pow(static_cast<double>(kAudioHalfFft), static_cast<double>(k) / 64.0);
         auto next = static_cast<std::size_t>(std::ceil(t));
         if (next <= edges[k - 1]) next = edges[k - 1] + 1;
         const auto cap = static_cast<std::size_t>(kAudioHalfFft);
@@ -45,7 +45,7 @@ const std::array<float, 64> kAudioBandGain = [] {
     for (std::size_t k = 0; k < 64; ++k) {
         const float center_bin = 0.5f * (float(edges[k]) + float(edges[k + 1]));
         const float center_hz  = center_bin * kAudioSampleRate / kAudioFftSize;
-        gain[k] = std::pow(center_hz / kAudioTiltPivotHz, kAudioTiltExp);
+        gain[k]                = std::pow(center_hz / kAudioTiltPivotHz, kAudioTiltExp);
     }
     return gain;
 }();
@@ -56,19 +56,19 @@ const std::array<float, 64> kAudioBandGain = [] {
 constexpr float kAudioAttackTauSec  = 0.020f;
 constexpr float kAudioReleaseTauSec = 0.180f;
 
-void UpdateVisualBands(std::span<const float, 64> bins, unsigned out_n,
-                       float dt_sec, std::span<float> state) {
+void UpdateVisualBands(std::span<const float, 64> bins, unsigned out_n, float dt_sec,
+                       std::span<float> state) {
     const unsigned ratio = 64u / out_n;
     for (unsigned i = 0; i < out_n; ++i) {
         // Peak (not mean) preserves transients across the consolidated bands.
         float peak = 0.0f;
         for (unsigned k = 0; k < ratio; ++k) {
             const unsigned src = i * ratio + k;
-            const float v = bins[src] * kAudioBandGain[src];
+            const float    v   = bins[src] * kAudioBandGain[src];
             if (v > peak) peak = v;
         }
         // Tanh re-compresses past-1 values that the high-freq boost can produce.
-        peak = std::tanh(peak);
+        peak             = std::tanh(peak);
         const float prev = state[i];
         if (dt_sec <= 0.0f) {
             // First frame (no valid frametime yet) — adopt raw immediately.
@@ -76,7 +76,7 @@ void UpdateVisualBands(std::span<const float, 64> bins, unsigned out_n,
         } else {
             const float tau = peak > prev ? kAudioAttackTauSec : kAudioReleaseTauSec;
             const float a   = 1.0f - std::exp(-dt_sec / tau);
-            state[i] = prev + a * (peak - prev);
+            state[i]        = prev + a * (peak - prev);
         }
     }
 }
@@ -98,7 +98,7 @@ void WPShaderValueUpdater::FrameBegin() {
     // Guard against parallax.delay == 0: scenes with cameraparallaxdelay=0
     // would otherwise produce 0/0 = NaN here, propagating through the MVP
     // and disappearing the wallpaper entirely (issue: gray-screen render).
-    double t = m_parallax.delay > 0.0 ? new_time / m_parallax.delay : 1.0;
+    double t   = m_parallax.delay > 0.0 ? new_time / m_parallax.delay : 1.0;
     m_mousePos = std::array { (float)algorism::lerp(t, m_mousePos[0], m_mousePosInput[0]),
                               (float)algorism::lerp(t, m_mousePos[1], m_mousePosInput[1]) };
 }
@@ -299,9 +299,8 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         //   else                → normal time-driven advance
         const SpriteFrame* fp = nullptr;
         if (anim_override.current_frame >= 0 && sp.numFrames() > 0) {
-            const i32 idx = i32(anim_override.current_frame) %
-                            i32(sp.numFrames());
-            fp = &sp.GetFrame(idx);
+            const i32 idx = i32(anim_override.current_frame) % i32(sp.numFrames());
+            fp            = &sp.GetFrame(idx);
         } else if (! anim_override.playing && sp.numFrames() > 0) {
             fp = &sp.GetCurFrame();
         } else {
@@ -317,15 +316,18 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     // WE's `g_LightsPosition[4]` is a vec3 array; std140 pads to vec4 stride
     // (16B) so the trailing scalar slot stays at 0.
     if (info.has_LP) {
-        constexpr unsigned kMaxLights = 4;
+        constexpr unsigned                kMaxLights = 4;
         std::array<float, kMaxLights * 4> lights_pos { 0 };
         std::array<float, 12>             lights_color_legacy { 0 };
-        unsigned i = 0;
+        unsigned                          i = 0;
         for (auto& l : m_scene->lights) {
             if (i == kMaxLights) break;
-            if (! l->runtimeVisible()) { i++; continue; }
+            if (! l->runtimeVisible()) {
+                i++;
+                continue;
+            }
             rstd_assert(l->node() != nullptr);
-            const auto& trans = l->node()->Translate();
+            const auto& trans     = l->node()->Translate();
             lights_pos[i * 4 + 0] = trans.x();
             lights_pos[i * 4 + 1] = trans.y();
             lights_pos[i * 4 + 2] = trans.z();

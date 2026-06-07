@@ -10,24 +10,33 @@ namespace owe
 {
 
 std::string ToString(const ImageType& type) {
-#define IMG(x) case ImageType::x: return #x;
+#define IMG(x) \
+    case ImageType::x: return #x;
     switch (type) {
-        IMG(UNKNOWN); IMG(BMP); IMG(ICO); IMG(JPEG); IMG(JNG);
-        IMG(PNG); IMG(VIDEO);
-    default:
-        std::fprintf(stderr, "[ERROR] Not valid image type: %d\n", (int)type);
-        return "";
+        IMG(UNKNOWN);
+        IMG(BMP);
+        IMG(ICO);
+        IMG(JPEG);
+        IMG(JNG);
+        IMG(PNG);
+        IMG(VIDEO);
+    default: std::fprintf(stderr, "[ERROR] Not valid image type: %d\n", (int)type); return "";
     }
 #undef IMG
 }
 
 std::string ToString(const TextureFormat& format) {
-#define FMT(x) case TextureFormat::x: return #x;
+#define FMT(x) \
+    case TextureFormat::x: return #x;
     switch (format) {
-        FMT(RGBA8); FMT(BC1); FMT(BC2); FMT(BC3); FMT(RGB8); FMT(RG8); FMT(R8);
-    default:
-        std::fprintf(stderr, "[ERROR] Not valid tex format: %d\n", (int)format);
-        return "";
+        FMT(RGBA8);
+        FMT(BC1);
+        FMT(BC2);
+        FMT(BC3);
+        FMT(RGB8);
+        FMT(RG8);
+        FMT(R8);
+    default: std::fprintf(stderr, "[ERROR] Not valid tex format: %d\n", (int)format); return "";
     }
 #undef FMT
 }

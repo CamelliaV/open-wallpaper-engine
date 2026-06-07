@@ -6,7 +6,7 @@ import wescene.core;
 import wescene.scene;
 import rstd.cppstd;
 import rstd.log;
-import rstd;  // rstd::io::Result / SeekFrom for IByteStream impl
+import rstd; // rstd::io::Result / SeekFrom for IByteStream impl
 
 using namespace owe;
 
@@ -24,31 +24,29 @@ static PlaybackMode ToPlaybackMode(std::string_view s) {
     return PlaybackMode::Loop;
 };
 
-namespace {
+namespace
+{
 
 // Adapter: owe::fs::IBinaryStream → wavsen::audio::IByteStream.
 class BStreamAdapter : public wavsen::audio::IByteStream {
 public:
     explicit BStreamAdapter(std::shared_ptr<fs::IBinaryStream> s): inner(std::move(s)) {}
 
-    auto read(rstd::u8* dst, rstd::usize bytes)
-        -> rstd::io::Result<rstd::usize> override {
+    auto read(rstd::u8* dst, rstd::usize bytes) -> rstd::io::Result<rstd::usize> override {
         const auto n = inner->Read(dst, bytes);
         return rstd::Ok(static_cast<rstd::usize>(n));
     }
 
-    auto seek(rstd::io::SeekFrom pos)
-        -> rstd::io::Result<rstd::u64> override {
+    auto seek(rstd::io::SeekFrom pos) -> rstd::io::Result<rstd::u64> override {
         bool ok = false;
         switch (pos.which) {
         case rstd::io::SeekFrom::Which::Start:
-            ok = inner->SeekSet(static_cast<std::int64_t>(pos.offset)); break;
-        case rstd::io::SeekFrom::Which::Current:
-            ok = inner->SeekCur(pos.offset); break;
-        case rstd::io::SeekFrom::Which::End:
-            ok = inner->SeekEnd(pos.offset); break;
+            ok = inner->SeekSet(static_cast<std::int64_t>(pos.offset));
+            break;
+        case rstd::io::SeekFrom::Which::Current: ok = inner->SeekCur(pos.offset); break;
+        case rstd::io::SeekFrom::Which::End: ok = inner->SeekEnd(pos.offset); break;
         }
-        if (!ok) {
+        if (! ok) {
             return rstd::Err(rstd::io::error::Error::from_kind(
                 rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::Other }));
         }
@@ -76,10 +74,7 @@ public:
         : vfs(vfs), m_config(c), m_soundPaths(paths) {};
     WPSoundStream(const std::vector<std::string>& paths, fs::VFS& vfs, Config c,
                   std::array<std::atomic<float>, 16>* audio_average)
-        : vfs(vfs),
-          m_config(c),
-          m_soundPaths(paths),
-          m_audioAverage(audio_average) {};
+        : vfs(vfs), m_config(c), m_soundPaths(paths), m_audioAverage(audio_average) {};
     virtual ~WPSoundStream() = default;
 
     uint64_t next_pcm(void* pData, uint32_t frameCount) override {
@@ -120,7 +115,7 @@ public:
         }
         for (uint32_t tried = 0; tried < n; ++tried) {
             const std::string& path = m_soundPaths[LoopIndex()];
-            auto bin = vfs.Open("/assets/" + path);
+            auto               bin  = vfs.Open("/assets/" + path);
             if (! bin) continue;
             auto adapter = std::make_shared<BStreamAdapter>(std::move(bin));
             auto stream  = wavsen::audio::make_stream(std::move(adapter), m_desc);
@@ -130,9 +125,7 @@ public:
             }
         }
         m_dead = true;
-        rstd::log::warn(
-            "WPSoundStream: all {} sound path(s) failed to open; disabling stream",
-            n);
+        rstd::log::warn("WPSoundStream: all {} sound path(s) failed to open; disabling stream", n);
     }
     uint32_t LoopIndex() {
         const uint32_t n = static_cast<uint32_t>(m_soundPaths.size());
@@ -162,8 +155,8 @@ private:
             for (std::size_t i = begin; i < end; ++i) sum += std::abs(samples[i]);
             float level = std::clamp(sum / static_cast<float>(end - begin), 0.0f, 1.0f);
 
-            auto& slot = (*m_audioAverage)[bin];
-            const float old = slot.load(std::memory_order_relaxed);
+            auto&       slot = (*m_audioAverage)[bin];
+            const float old  = slot.load(std::memory_order_relaxed);
             slot.store(std::max(old * 0.75f, level), std::memory_order_relaxed);
         }
     }
@@ -174,9 +167,9 @@ private:
     uint32_t m_curIndex { 0 };
     bool     m_dead { false };
 
-    const std::vector<std::string>             m_soundPaths;
+    const std::vector<std::string>              m_soundPaths;
     std::unique_ptr<wavsen::audio::SoundStream> m_curActive;
-    std::array<std::atomic<float>, 16>*          m_audioAverage { nullptr };
+    std::array<std::atomic<float>, 16>*         m_audioAverage { nullptr };
 };
 
 void WPSoundParser::Parse(const wpscene::WPSoundObject& obj, fs::VFS& vfs,
@@ -187,6 +180,6 @@ void WPSoundParser::Parse(const wpscene::WPSoundObject& obj, fs::VFS& vfs,
                                    .mode    = ToPlaybackMode(obj.playbackmode) };
 
     auto* audio_average = scene ? &scene->audioAverage : nullptr;
-    auto ss = std::make_unique<WPSoundStream>(obj.sound, vfs, config, audio_average);
+    auto  ss            = std::make_unique<WPSoundStream>(obj.sound, vfs, config, audio_average);
     sm.mount(std::move(ss));
 }

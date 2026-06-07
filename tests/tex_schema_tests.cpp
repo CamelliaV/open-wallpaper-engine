@@ -8,7 +8,8 @@ import wescene.pkg_fs;
 import wescene.fs;
 import wescene.types;
 
-namespace {
+namespace
+{
 
 namespace fs = std::filesystem;
 
@@ -25,11 +26,11 @@ constexpr const char* kWorkshopDirMacro =
 // production parity check.
 struct TexMeta {
     std::string  workshop_id;
-    std::string  pkg_path;       // "/materials/foo.tex" inside the pkg
+    std::string  pkg_path; // "/materials/foo.tex" inside the pkg
     int          texv { 0 };
     int          texi { 0 };
     int          texb { 0 };
-    int          texs { 0 };     // 0 == absent / non-sprite
+    int          texs { 0 }; // 0 == absent / non-sprite
     bool         sprite { false };
     bool         malformed { false };
     std::int32_t header_w { 0 }; // texture stamp section
@@ -37,16 +38,25 @@ struct TexMeta {
     std::int32_t map_w { 0 };
     std::int32_t map_h { 0 };
     std::int32_t image_count { 0 };
-    std::int32_t mip0_w { 0 };   // first mip of slot 0; 0 if mip_count == 0
+    std::int32_t mip0_w { 0 }; // first mip of slot 0; 0 if mip_count == 0
     std::int32_t mip0_h { 0 };
     std::int32_t slot0_mip_count { 0 };
 };
 
 using TexTuple = std::tuple<int, int, int, int>;
 
-const std::set<int>& kSupportedTexv() { static const std::set<int> v { 5 }; return v; }
-const std::set<int>& kSupportedTexi() { static const std::set<int> v { 1 }; return v; }
-const std::set<int>& kSupportedTexb() { static const std::set<int> v { 1, 2, 3, 4 }; return v; }
+const std::set<int>& kSupportedTexv() {
+    static const std::set<int> v { 5 };
+    return v;
+}
+const std::set<int>& kSupportedTexi() {
+    static const std::set<int> v { 1 };
+    return v;
+}
+const std::set<int>& kSupportedTexb() {
+    static const std::set<int> v { 1, 2, 3, 4 };
+    return v;
+}
 const std::set<int>& kSupportedTexs() {
     // 0 == absent (non-sprite). 2 / 3 cover all sprite samples; 1 is
     // documented as legacy int-coords but never observed.
@@ -54,7 +64,7 @@ const std::set<int>& kSupportedTexs() {
     return v;
 }
 
-template <typename T>
+template<typename T>
 bool read_pod(const char* buf, std::size_t len, std::size_t off, T& out) {
     if (off + sizeof(T) > len) return false;
     std::memcpy(&out, buf + off, sizeof(T));
@@ -86,35 +96,48 @@ bool IsPowOfTwo(std::uint32_t x) { return x > 1 && (x & (x - 1)) == 0; }
 // m.malformed = true on any short / nonsensical read.
 TexMeta read_tex_meta(const std::string& blob) {
     TexMeta m;
-    m.malformed         = true;  // flipped to false at the end
+    m.malformed           = true; // flipped to false at the end
     const char*       buf = blob.data();
     const std::size_t len = blob.size();
     std::size_t       o   = 0;
 
-    m.texv = parse_tex_stamp(buf, len, o); o += 9;
-    m.texi = parse_tex_stamp(buf, len, o); o += 9;
+    m.texv = parse_tex_stamp(buf, len, o);
+    o += 9;
+    m.texi = parse_tex_stamp(buf, len, o);
+    o += 9;
     if (m.texv <= 0 || m.texi <= 0) return m;
 
     std::int32_t format = 0, flags = 0, _u = 0;
-    if (! read_pod(buf, len, o, format))     return m; o += 4;
-    if (! read_pod(buf, len, o, flags))      return m; o += 4;
-    if (! read_pod(buf, len, o, m.header_w)) return m; o += 4;
-    if (! read_pod(buf, len, o, m.header_h)) return m; o += 4;
-    if (! read_pod(buf, len, o, m.map_w))    return m; o += 4;
-    if (! read_pod(buf, len, o, m.map_h))    return m; o += 4;
-    if (! read_pod(buf, len, o, _u))         return m; o += 4;
+    if (! read_pod(buf, len, o, format)) return m;
+    o += 4;
+    if (! read_pod(buf, len, o, flags)) return m;
+    o += 4;
+    if (! read_pod(buf, len, o, m.header_w)) return m;
+    o += 4;
+    if (! read_pod(buf, len, o, m.header_h)) return m;
+    o += 4;
+    if (! read_pod(buf, len, o, m.map_w)) return m;
+    o += 4;
+    if (! read_pod(buf, len, o, m.map_h)) return m;
+    o += 4;
+    if (! read_pod(buf, len, o, _u)) return m;
+    o += 4;
 
-    m.texb = parse_tex_stamp(buf, len, o); o += 9;
+    m.texb = parse_tex_stamp(buf, len, o);
+    o += 9;
     if (m.texb <= 0) return m;
 
-    if (! read_pod(buf, len, o, m.image_count)) return m; o += 4;
+    if (! read_pod(buf, len, o, m.image_count)) return m;
+    o += 4;
     if (m.texb >= 3) {
         std::int32_t image_type = 0;
-        if (! read_pod(buf, len, o, image_type)) return m; o += 4;
+        if (! read_pod(buf, len, o, image_type)) return m;
+        o += 4;
     }
     if (m.texb >= 4) {
         std::int32_t reserved = 0;
-        if (! read_pod(buf, len, o, reserved)) return m; o += 4;
+        if (! read_pod(buf, len, o, reserved)) return m;
+        o += 4;
     }
 
     m.sprite = (flags & (1u << 2)) != 0;
@@ -123,20 +146,29 @@ TexMeta read_tex_meta(const std::string& blob) {
     // the trailing texs stamp on sprite atlases.
     for (std::int32_t i = 0; i < m.image_count; ++i) {
         std::int32_t mip_count = 0;
-        if (! read_pod(buf, len, o, mip_count)) return m; o += 4;
+        if (! read_pod(buf, len, o, mip_count)) return m;
+        o += 4;
         if (i == 0) m.slot0_mip_count = mip_count;
         for (std::int32_t k = 0; k < mip_count; ++k) {
             std::int32_t mw0 = 0, mh0 = 0;
-            if (! read_pod(buf, len, o, mw0)) return m; o += 4;
-            if (! read_pod(buf, len, o, mh0)) return m; o += 4;
-            if (i == 0 && k == 0) { m.mip0_w = mw0; m.mip0_h = mh0; }
+            if (! read_pod(buf, len, o, mw0)) return m;
+            o += 4;
+            if (! read_pod(buf, len, o, mh0)) return m;
+            o += 4;
+            if (i == 0 && k == 0) {
+                m.mip0_w = mw0;
+                m.mip0_h = mh0;
+            }
             if (m.texb >= 2) {
                 std::int32_t lz4 = 0, dec = 0;
-                if (! read_pod(buf, len, o, lz4)) return m; o += 4;
-                if (! read_pod(buf, len, o, dec)) return m; o += 4;
+                if (! read_pod(buf, len, o, lz4)) return m;
+                o += 4;
+                if (! read_pod(buf, len, o, dec)) return m;
+                o += 4;
             }
             std::int32_t src = 0;
-            if (! read_pod(buf, len, o, src)) return m; o += 4;
+            if (! read_pod(buf, len, o, src)) return m;
+            o += 4;
             if (src < 0 || o + static_cast<std::size_t>(src) > len) return m;
             o += static_cast<std::size_t>(src);
         }
@@ -211,14 +243,12 @@ std::string TexNameFromPkgPath(const std::string& pkg_path) {
     constexpr std::string_view suffix = ".tex";
     if (pkg_path.compare(0, prefix.size(), prefix) != 0) return {};
     if (pkg_path.size() < prefix.size() + suffix.size()) return {};
-    if (pkg_path.compare(pkg_path.size() - suffix.size(), suffix.size(), suffix) != 0)
-        return {};
-    return pkg_path.substr(prefix.size(),
-                           pkg_path.size() - prefix.size() - suffix.size());
+    if (pkg_path.compare(pkg_path.size() - suffix.size(), suffix.size(), suffix) != 0) return {};
+    return pkg_path.substr(prefix.size(), pkg_path.size() - prefix.size() - suffix.size());
 }
 
 struct CorpusScan {
-    std::vector<TexMeta>                               metas;
+    std::vector<TexMeta> metas;
     // Per-pkg cached VFS so production-parity test can run ParseHeader
     // without re-mounting per texture. Indexed by workshop_id.
     std::map<std::string, std::shared_ptr<owe::fs::VFS>> vfs_by_workshop;
@@ -250,7 +280,7 @@ const CorpusScan& AllScans() {
             if (! vfs->Mount("/assets", std::move(wfs))) continue;
 
             for (auto& te : ReadTexEntries(pkg)) {
-                auto m = read_tex_meta(te.blob);
+                auto m        = read_tex_meta(te.blob);
                 m.workshop_id = id;
                 m.pkg_path    = te.path;
                 out.metas.push_back(std::move(m));
@@ -274,14 +304,10 @@ TEST(TexSchema, EveryObservedSubVersionIsSupported) {
         seen.emplace(m.texv, m.texi, m.texb, m.texs);
     }
     for (const auto& [v, i, b, sp] : seen) {
-        EXPECT_TRUE(kSupportedTexv().contains(v))
-            << "texv=" << v << " not in supported set";
-        EXPECT_TRUE(kSupportedTexi().contains(i))
-            << "texi=" << i << " not in supported set";
-        EXPECT_TRUE(kSupportedTexb().contains(b))
-            << "texb=" << b << " not in supported set";
-        EXPECT_TRUE(kSupportedTexs().contains(sp))
-            << "texs=" << sp << " not in supported set";
+        EXPECT_TRUE(kSupportedTexv().contains(v)) << "texv=" << v << " not in supported set";
+        EXPECT_TRUE(kSupportedTexi().contains(i)) << "texi=" << i << " not in supported set";
+        EXPECT_TRUE(kSupportedTexb().contains(b)) << "texb=" << b << " not in supported set";
+        EXPECT_TRUE(kSupportedTexs().contains(sp)) << "texs=" << sp << " not in supported set";
     }
 }
 
@@ -292,8 +318,7 @@ TEST(TexSchema, NoMalformedHeadersInCorpus) {
     std::size_t malformed = 0;
     for (const auto& m : metas)
         if (m.malformed) ++malformed;
-    EXPECT_EQ(malformed, 0u)
-        << malformed << " textures had truncated / unparseable headers";
+    EXPECT_EQ(malformed, 0u) << malformed << " textures had truncated / unparseable headers";
 }
 
 // Geometric invariant — non-sprite textures.
@@ -318,18 +343,17 @@ TEST(TexSchema, NonSpriteMip0AgreesWithHeaderOrMap) {
     std::size_t checked = 0, mismatched = 0, matched_map = 0;
     for (const auto& m : metas) {
         if (m.malformed || m.sprite) continue;
-        if (m.slot0_mip_count == 0) continue;  // no mips → invariant N/A
+        if (m.slot0_mip_count == 0) continue; // no mips → invariant N/A
         ++checked;
         const bool eq_header = (m.mip0_w == m.header_w && m.mip0_h == m.header_h);
-        const bool eq_map    = (m.mip0_w == m.map_w    && m.mip0_h == m.map_h);
+        const bool eq_map    = (m.mip0_w == m.map_w && m.mip0_h == m.map_h);
         if (eq_map && ! eq_header) ++matched_map;
         if (eq_header || eq_map) continue;
         ++mismatched;
         ADD_FAILURE() << "mip0 dims " << m.mip0_w << "x" << m.mip0_h
                       << " agree with neither header " << m.header_w << "x" << m.header_h
-                      << " nor map " << m.map_w << "x" << m.map_h
-                      << " for " << m.workshop_id << " " << m.pkg_path
-                      << " (texb=" << m.texb << ")";
+                      << " nor map " << m.map_w << "x" << m.map_h << " for " << m.workshop_id << " "
+                      << m.pkg_path << " (texb=" << m.texb << ")";
         if (mismatched >= 5) break;
     }
     std::cerr << "TexSchema.NonSpriteMip0AgreesWithHeaderOrMap: checked=" << checked
@@ -360,14 +384,12 @@ TEST(TexSchema, SpriteHeaderAndMip0DimsArePositive) {
         if (m.malformed || ! m.sprite) continue;
         if (m.slot0_mip_count == 0) continue;
         ++checked;
-        const bool ok = m.mip0_w > 0 && m.mip0_h > 0 &&
-                        m.header_w > 0 && m.header_h > 0;
+        const bool ok = m.mip0_w > 0 && m.mip0_h > 0 && m.header_w > 0 && m.header_h > 0;
         if (ok) continue;
         ++bad;
         ADD_FAILURE() << "non-positive sprite dims: mip0 " << m.mip0_w << "x" << m.mip0_h
-                      << " header " << m.header_w << "x" << m.header_h
-                      << " for " << m.workshop_id << " " << m.pkg_path
-                      << " (texb=" << m.texb << " texs=" << m.texs << ")";
+                      << " header " << m.header_w << "x" << m.header_h << " for " << m.workshop_id
+                      << " " << m.pkg_path << " (texb=" << m.texb << " texs=" << m.texs << ")";
         if (bad >= 5) break;
     }
     std::cerr << "TexSchema.SpriteHeaderAndMip0DimsArePositive: checked=" << checked
@@ -414,23 +436,20 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
             continue;
         }
 
-        const bool expected_pow2 =
-            m.sprite
-                ? IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w * m.mip0_h))
-                : (IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w)) ||
-                   IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_h)));
+        const bool expected_pow2 = m.sprite
+                                       ? IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w * m.mip0_h))
+                                       : (IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_w)) ||
+                                          IsPowOfTwo(static_cast<std::uint32_t>(m.mip0_h)));
 
         ++checked;
         if (h.mipmap_pow2 != expected_pow2) {
             ++parity_fail;
             if (m.sprite) ++parity_fail_sprite;
-            ADD_FAILURE() << "ParseHeader divergence for " << m.workshop_id
-                          << " " << m.pkg_path
+            ADD_FAILURE() << "ParseHeader divergence for " << m.workshop_id << " " << m.pkg_path
                           << " (texb=" << m.texb << " sprite=" << m.sprite << "): "
-                          << "expected pow2=" << expected_pow2
-                          << ", got pow2=" << h.mipmap_pow2
-                          << " (mip0=" << m.mip0_w << "x" << m.mip0_h
-                          << " map=" << m.map_w << "x" << m.map_h << ")";
+                          << "expected pow2=" << expected_pow2 << ", got pow2=" << h.mipmap_pow2
+                          << " (mip0=" << m.mip0_w << "x" << m.mip0_h << " map=" << m.map_w << "x"
+                          << m.map_h << ")";
             if (parity_fail >= 5) break;
             continue;
         }
@@ -440,20 +459,17 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
             const bool expected_larger = (m.mip0_w * m.mip0_h) > (m.map_w * m.map_h);
             if (h.mipmap_larger != expected_larger) {
                 ++parity_fail;
-                ADD_FAILURE() << "ParseHeader mipmap_larger divergence for "
-                              << m.workshop_id << " " << m.pkg_path
-                              << " (texb=" << m.texb << "): "
-                              << "expected " << expected_larger
-                              << ", got " << h.mipmap_larger
-                              << " (mip0=" << m.mip0_w << "x" << m.mip0_h
-                              << " map=" << m.map_w << "x" << m.map_h << ")";
+                ADD_FAILURE() << "ParseHeader mipmap_larger divergence for " << m.workshop_id << " "
+                              << m.pkg_path << " (texb=" << m.texb << "): "
+                              << "expected " << expected_larger << ", got " << h.mipmap_larger
+                              << " (mip0=" << m.mip0_w << "x" << m.mip0_h << " map=" << m.map_w
+                              << "x" << m.map_h << ")";
                 if (parity_fail >= 5) break;
             }
         }
     }
-    std::cerr << "TexSchema.ProductionParseHeaderAgreesWithMip0Reader: checked="
-              << checked << " parity_fail=" << parity_fail
-              << " (sprite=" << parity_fail_sprite << ")\n";
+    std::cerr << "TexSchema.ProductionParseHeaderAgreesWithMip0Reader: checked=" << checked
+              << " parity_fail=" << parity_fail << " (sprite=" << parity_fail_sprite << ")\n";
 }
 
 // Full pixel-decode end-to-end. Runs WPTexImageParser::Parse (not just
@@ -472,7 +488,7 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
 // in workshop-id order) so the test is stable across runs but still
 // covers each version-aware code path.
 TEST(TexSchema, ProductionParseDecodesEveryBucket) {
-    using Bucket = std::pair<int, int>;  // (texb, image_type)
+    using Bucket                     = std::pair<int, int>; // (texb, image_type)
     constexpr std::size_t kPerBucket = 8;
 
     const auto& scan = AllScans();
@@ -523,42 +539,38 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         if (! img || img->slots.empty()) {
             ++parse_failed;
             ++per_bucket_fail[key];
-            ADD_FAILURE() << "Parse returned null/empty for " << m.workshop_id
-                          << " " << m.pkg_path
-                          << " (texb=" << m.texb << " image_type="
-                          << static_cast<int>(h.type) << ")";
+            ADD_FAILURE() << "Parse returned null/empty for " << m.workshop_id << " " << m.pkg_path
+                          << " (texb=" << m.texb << " image_type=" << static_cast<int>(h.type)
+                          << ")";
             continue;
         }
         const auto& s0 = img->slots[0];
         if (s0.width <= 0 || s0.height <= 0) {
             ++slot_dim_zero;
             ++per_bucket_fail[key];
-            ADD_FAILURE() << "slot 0 has non-positive dims " << s0.width << "x"
-                          << s0.height << " for " << m.workshop_id << " "
-                          << m.pkg_path;
+            ADD_FAILURE() << "slot 0 has non-positive dims " << s0.width << "x" << s0.height
+                          << " for " << m.workshop_id << " " << m.pkg_path;
             continue;
         }
         if (s0.mipmaps.empty() || ! s0.mipmaps[0].data || s0.mipmaps[0].size <= 0) {
             ++slot_empty;
             ++per_bucket_fail[key];
-            ADD_FAILURE() << "slot 0 mip 0 missing data for " << m.workshop_id
-                          << " " << m.pkg_path;
+            ADD_FAILURE() << "slot 0 mip 0 missing data for " << m.workshop_id << " " << m.pkg_path;
             continue;
         }
         ++per_bucket_ok[key];
     }
 
-    std::cerr << "TexSchema.ProductionParseDecodesEveryBucket: attempted="
-              << parse_attempted << " parse_failed=" << parse_failed
-              << " slot_empty=" << slot_empty << " slot_dim_zero=" << slot_dim_zero
-              << "\n";
+    std::cerr << "TexSchema.ProductionParseDecodesEveryBucket: attempted=" << parse_attempted
+              << " parse_failed=" << parse_failed << " slot_empty=" << slot_empty
+              << " slot_dim_zero=" << slot_dim_zero << "\n";
     std::cerr << "  bucket (texb, image_type): ok / fail\n";
     std::set<Bucket> all_buckets;
-    for (auto& [k, _] : per_bucket_ok)   all_buckets.insert(k);
+    for (auto& [k, _] : per_bucket_ok) all_buckets.insert(k);
     for (auto& [k, _] : per_bucket_fail) all_buckets.insert(k);
     for (const auto& b : all_buckets) {
-        std::cerr << "    (" << b.first << ", " << b.second << "): "
-                  << per_bucket_ok[b] << " / " << per_bucket_fail[b] << "\n";
+        std::cerr << "    (" << b.first << ", " << b.second << "): " << per_bucket_ok[b] << " / "
+                  << per_bucket_fail[b] << "\n";
     }
 }
 
@@ -568,12 +580,8 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
 TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
     using TF = owe::TextureFormat;
     const std::map<int, TF> kExpected {
-        { 0, TF::RGBA8 },
-        { 4, TF::BC3 },
-        { 6, TF::BC2 },
-        { 7, TF::BC1 },
-        { 8, TF::RG8 },
-        { 9, TF::R8 },
+        { 0, TF::RGBA8 }, { 4, TF::BC3 }, { 6, TF::BC2 },
+        { 7, TF::BC1 },   { 8, TF::RG8 }, { 9, TF::R8 },
     };
 
     const auto& scan = AllScans();
@@ -615,15 +623,14 @@ TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
             if (tf != h.format) continue;
             if (code_seen.contains(code)) continue;
             code_seen.insert(code);
-            EXPECT_EQ(h.format, tf)
-                << "format code " << code << " mapped to wrong TextureFormat";
+            EXPECT_EQ(h.format, tf) << "format code " << code << " mapped to wrong TextureFormat";
             break;
         }
         if (code_seen.size() == kExpected.size()) break;
     }
 
-    std::cerr << "TexSchema.FormatCodeMapsToExpectedTextureFormat: codes seen="
-              << code_seen.size() << "/" << kExpected.size() << "\n";
+    std::cerr << "TexSchema.FormatCodeMapsToExpectedTextureFormat: codes seen=" << code_seen.size()
+              << "/" << kExpected.size() << "\n";
     for (const auto& [code, tf] : kExpected) {
         EXPECT_TRUE(code_seen.contains(code))
             << "format code " << code << " never observed in corpus";
@@ -631,7 +638,7 @@ TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
 }
 
 TEST(TexSchema, ReportObservedTuples) {
-    const auto& metas = AllScans().metas;
+    const auto&                     metas = AllScans().metas;
     std::map<TexTuple, std::size_t> tuples;
     for (const auto& m : metas) {
         if (m.malformed) continue;
@@ -640,8 +647,7 @@ TEST(TexSchema, ReportObservedTuples) {
     std::cerr << "\n# observed (texv, texi, texb, texs) tuples in corpus:\n";
     for (const auto& [tup, c] : tuples) {
         const auto [v, i, b, sp] = tup;
-        std::cerr << "  (" << v << ", " << i << ", " << b << ", " << sp
-                  << "): count=" << c << "\n";
+        std::cerr << "  (" << v << ", " << i << ", " << b << ", " << sp << "): count=" << c << "\n";
     }
     SUCCEED();
 }

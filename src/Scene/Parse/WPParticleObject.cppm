@@ -46,7 +46,7 @@ public:
     float       subdivision { 3.0f };
     // Trail history depth per rope-head particle (= number of trail nodes).
     // Only consumed by rope/trail renderers; default matches WE behaviour.
-    i32         segments { 16 };
+    i32 segments { 16 };
 };
 
 class Initializer {
@@ -176,8 +176,8 @@ public:
 
 class WPParticleObject {
 public:
-    bool                     FromJson(const nlohmann::json&, fs::VFS&);                  // legacy
-    bool                     FromJson(const nlohmann::json&, fs::VFS&, SceneVersion);    // canonical
+    bool                     FromJson(const nlohmann::json&, fs::VFS&);               // legacy
+    bool                     FromJson(const nlohmann::json&, fs::VFS&, SceneVersion); // canonical
     int32_t                  id;
     std::string              name;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
@@ -190,18 +190,18 @@ public:
     ParticleInstanceoverride instanceoverride;
 
     // Common cross-kind metadata.
-    bool                     locktransforms { false };
-    bool                     muteineditor { false };
-    bool                     nointerpolation { false };
-    std::uint32_t            parent { 0 };
+    bool                      locktransforms { false };
+    bool                      muteineditor { false };
+    bool                      nointerpolation { false };
+    std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json           instance;
-    nlohmann::json           particlesrc;       // PKGV0001+; always null in corpus
-    std::array<float, 3>     controlpoint { 0.0f, 0.0f, 0.0f };  // PKGV0019+
-    WPFieldBindings          field_bindings;
+    nlohmann::json            instance;
+    nlohmann::json            particlesrc;                       // PKGV0001+; always null in corpus
+    std::array<float, 3>      controlpoint { 0.0f, 0.0f, 0.0f }; // PKGV0019+
+    WPFieldBindings           field_bindings;
 
     // `visible:{user:"<key>",value:bool}` -> key; empty for plain literals.
-    std::string              visible_user_key;
+    std::string visible_user_key;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);

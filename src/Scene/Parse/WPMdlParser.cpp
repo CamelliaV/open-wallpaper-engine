@@ -1,8 +1,6 @@
 module;
 #include <rstd/macro.hpp>
 
-
-
 module wescene.parse;
 import wescene.spec_texs;
 import wescene.core;
@@ -44,13 +42,13 @@ constexpr uint32_t singile_bone_frame = 4 * 9;
 // UV2 implies a regular UV slot in addition to the UV2 slot.
 uint32_t compute_vertex_stride(uint32_t flag) {
     uint32_t s = 12;
-    if (flag & MDL_FLAG_NORMAL)      s += 12;
-    if (flag & MDL_FLAG_TANGENT)     s += 16;
-    if (flag & MDL_FLAG_EXTRA4)      s += 4;
-    if (flag & MDL_FLAG_SKIN_BLEND)  s += 16;
+    if (flag & MDL_FLAG_NORMAL) s += 12;
+    if (flag & MDL_FLAG_TANGENT) s += 16;
+    if (flag & MDL_FLAG_EXTRA4) s += 4;
+    if (flag & MDL_FLAG_SKIN_BLEND) s += 16;
     if (flag & MDL_FLAG_SKIN_WEIGHT) s += 16;
     if (flag & (MDL_FLAG_UV | MDL_FLAG_UV2)) s += 8;
-    if (flag & MDL_FLAG_UV2)         s += 8;
+    if (flag & MDL_FLAG_UV2) s += 8;
     return s;
 }
 
@@ -73,8 +71,8 @@ void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh);
 //   CStr mat_json + u32 flag_a + (if flag_a==2: u32) + (if MdlV>=17: aabb)
 //   + (if MdlV>14: u32 mesh_flag) + u32 vertex_size + Vertex[]
 //   + u32 indices_size + Triangle[] + (if MdlV>=21: Parts) + (if MdlV>21: Masks)
-bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header,
-               WPMdl::Mesh& mesh, std::string_view path) {
+bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header, WPMdl::Mesh& mesh,
+               std::string_view path) {
     mesh.mat_json_file = f.ReadStr();
     mesh.flag_a        = f.ReadUint32();
     if (mesh.flag_a == 2) {
@@ -94,19 +92,22 @@ bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header,
     uint32_t stride      = compute_vertex_stride(mesh_flag);
     if (stride == 0 || vertex_size % stride != 0) {
         rstd_error("unsupport mdl vertex size {} (flag=0x{:X} stride={}) in {}",
-                   vertex_size, mesh_flag, stride, std::string(path));
+                   vertex_size,
+                   mesh_flag,
+                   stride,
+                   std::string(path));
         return false;
     }
 
     uint32_t vertex_num = vertex_size / stride;
     mesh.positions.resize(vertex_num);
-    if (mesh_flag & MDL_FLAG_NORMAL)      mesh.normals.resize(vertex_num);
-    if (mesh_flag & MDL_FLAG_TANGENT)     mesh.tangents.resize(vertex_num);
-    if (mesh_flag & MDL_FLAG_EXTRA4)      mesh.extra4.resize(vertex_num);
-    if (mesh_flag & MDL_FLAG_SKIN_BLEND)  mesh.blend_indices.resize(vertex_num);
+    if (mesh_flag & MDL_FLAG_NORMAL) mesh.normals.resize(vertex_num);
+    if (mesh_flag & MDL_FLAG_TANGENT) mesh.tangents.resize(vertex_num);
+    if (mesh_flag & MDL_FLAG_EXTRA4) mesh.extra4.resize(vertex_num);
+    if (mesh_flag & MDL_FLAG_SKIN_BLEND) mesh.blend_indices.resize(vertex_num);
     if (mesh_flag & MDL_FLAG_SKIN_WEIGHT) mesh.blend_weights.resize(vertex_num);
     if (mesh_flag & (MDL_FLAG_UV | MDL_FLAG_UV2)) mesh.texcoords.resize(vertex_num);
-    if (mesh_flag & MDL_FLAG_UV2)         mesh.texcoord2.resize(vertex_num);
+    if (mesh_flag & MDL_FLAG_UV2) mesh.texcoord2.resize(vertex_num);
 
     for (uint32_t i = 0; i < vertex_num; ++i) {
         for (auto& v : mesh.positions[i]) v = f.ReadFloat();
@@ -155,11 +156,13 @@ bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header,
                 if (unk_c != 0) {
                     rstd_info("mdlv{} parts unk_c expected 0, got {}", header.mdlv, unk_c);
                 }
-                (void)f.ReadUint8();                        // vert_section_marker
+                (void)f.ReadUint8(); // vert_section_marker
                 uint32_t payload_size = f.ReadUint32();
                 if (payload_size != 12u * vertex_num) {
                     rstd_error("mdlv{} extras payload size {} != 12*{}",
-                               header.mdlv, payload_size, vertex_num);
+                               header.mdlv,
+                               payload_size,
+                               vertex_num);
                     return false;
                 }
                 mesh.part_uv2.resize(vertex_num);
@@ -184,7 +187,7 @@ bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header,
             uint32_t parts_num = parts_bytes / 16;
             mesh.parts.resize(parts_num);
             for (auto& part : mesh.parts) {
-                part.id    = f.ReadUint32();
+                part.id = f.ReadUint32();
                 (void)f.ReadUint32(); // reserved 0
                 part.start = f.ReadUint32();
                 part.size  = f.ReadUint32();
@@ -246,9 +249,9 @@ bool ParseIkConfig(fs::MemBinaryStream& f, WPPuppet::IkConfig& ik) {
         lst.resize(cnt);
         for (auto& v : lst) v = f.ReadUint32();
     }
-    ik.ik_chain_count      = f.ReadUint32();
-    ik.ik_chain_length[0]  = f.ReadFloat();
-    ik.ik_chain_length[1]  = f.ReadFloat();
+    ik.ik_chain_count        = f.ReadUint32();
+    ik.ik_chain_length[0]    = f.ReadFloat();
+    ik.ik_chain_length[1]    = f.ReadFloat();
     uint16_t chain_bones_cnt = f.ReadUint16();
     ik.ik_chain_bones.resize(chain_bones_cnt);
     for (auto& v : ik.ik_chain_bones) v = f.ReadUint32();
@@ -261,7 +264,7 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
     uint32_t end_offset = f.ReadUint32();
 
     uint16_t bones_num = f.ReadUint16();
-    f.ReadUint16();        // zero pad
+    f.ReadUint16(); // zero pad
 
     mdl.puppet  = std::make_shared<WPPuppet>();
     auto& bones = mdl.puppet->bones;
@@ -275,7 +278,9 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
         uint32_t file_parent = f.ReadUint32();
         if (file_parent >= i && file_parent != WPPuppet::NO_PARENT) {
             rstd_info("mdl bone[{}] forward parent {} in {}; treating as root",
-                      i, file_parent, std::string(path));
+                      i,
+                      file_parent,
+                      std::string(path));
             file_parent = WPPuppet::NO_PARENT;
         }
         bone.bind_parent = file_parent;
@@ -312,7 +317,8 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
             }
             uint32_t pair0 = f.ReadUint32();
             uint32_t pair1 = f.ReadUint32();
-            (void)pair0; (void)pair1;
+            (void)pair0;
+            (void)pair1;
 
             // extras_flag==2 means an IK config block follows. The hexpat
             // schema is verified against only one corpus sample and breaks
@@ -335,7 +341,7 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
             uint8_t has_offset_trans = f.ReadUint8();
             if (has_offset_trans) {
                 for (unsigned i = 0; i < bones_num; ++i) {
-                    auto& b = mdl.puppet->bones[i];
+                    auto& b               = mdl.puppet->bones[i];
                     b.has_file_skin_pivot = true;
                     b.file_skin_pivot.x() = f.ReadFloat();
                     b.file_skin_pivot.y() = f.ReadFloat();
@@ -364,7 +370,9 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
     // poison subsequent MDxx scans.
     if (end_offset > 0 && static_cast<uint32_t>(f.Tell()) != end_offset) {
         rstd_info("MDLS body ended at 0x{:X} but end_offset=0x{:X} ({})",
-                  static_cast<uint32_t>(f.Tell()), end_offset, std::string(path));
+                  static_cast<uint32_t>(f.Tell()),
+                  end_offset,
+                  std::string(path));
         f.SeekSet(end_offset);
     }
     return true;
@@ -373,7 +381,7 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
 void ParseMDAT(fs::MemBinaryStream& f, WPMdl& mdl) {
     uint32_t end_offset      = f.ReadUint32();
     uint32_t num_attachments = f.ReadUint16();
-    auto& attachments        = mdl.puppet->attachments;
+    auto&    attachments     = mdl.puppet->attachments;
     attachments.resize(num_attachments);
     for (auto& att : attachments) {
         att.bone_index = f.ReadUint16();
@@ -392,8 +400,8 @@ void ParseMDAT(fs::MemBinaryStream& f, WPMdl& mdl) {
 
 // hexpat AnimBoneCurves: u8 has_curves; if(has_curves) BoneFrameCurve[bone_count].
 // Each BoneFrameCurve = u32 zero + u32 byte_size + float[byte_size/4].
-bool ParseAnimBoneCurves(fs::MemBinaryStream& f,
-                         std::vector<WPPuppet::BoneFrameCurve>& out, uint32_t bone_count) {
+bool ParseAnimBoneCurves(fs::MemBinaryStream& f, std::vector<WPPuppet::BoneFrameCurve>& out,
+                         uint32_t bone_count) {
     uint8_t has_curves = f.ReadUint8();
     if (! has_curves) return true;
     out.resize(bone_count);
@@ -413,8 +421,8 @@ bool ParseAnimBoneCurves(fs::MemBinaryStream& f,
     return true;
 }
 
-bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim,
-                    int mdla_ver, std::string_view path) {
+bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim, int mdla_ver,
+                    std::string_view path) {
     anim.id           = f.ReadInt32();
     anim.unk_after_id = f.ReadUint32();
 
@@ -429,9 +437,9 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim,
     uint32_t b_num = f.ReadUint32();
     anim.bone_tracks.resize(b_num);
     for (uint32_t ti = 0; ti < b_num; ++ti) {
-        auto& track      = anim.bone_tracks[ti];
-        track.bone_index = ti;            // dense: slot i animates bone i
-        track.unk        = f.ReadInt32();
+        auto& track        = anim.bone_tracks[ti];
+        track.bone_index   = ti; // dense: slot i animates bone i
+        track.unk          = f.ReadInt32();
         uint32_t byte_size = f.ReadUint32();
         if (byte_size % singile_bone_frame != 0) {
             rstd_error("wrong bone frame size {} in {}", byte_size, std::string(path));
@@ -441,15 +449,15 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim,
         track.frames.resize(num);
         for (auto& frame : track.frames) {
             for (auto& v : frame.position) v = f.ReadFloat();
-            for (auto& v : frame.angle)    v = f.ReadFloat();
-            for (auto& v : frame.scale)    v = f.ReadFloat();
+            for (auto& v : frame.angle) v = f.ReadFloat();
+            for (auto& v : frame.scale) v = f.ReadFloat();
         }
     }
 
     if (mdla_ver >= 3) {
         uint32_t trans_flag = f.ReadUint32();
         if (trans_flag == 1) {
-            auto& tr = anim.trans.emplace();
+            auto&    tr         = anim.trans.emplace();
             uint32_t extra_size = f.ReadUint32();
             if (extra_size > 0) {
                 if (extra_size % 4 != 0) {
@@ -522,24 +530,28 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim,
     return true;
 }
 
-bool ParseMDLA(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag,
-               std::string_view path) {
+bool ParseMDLA(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag, std::string_view path) {
     mdl.mdla = std::stoi(std::string(tag.substr(4, 4)));
     if (mdl.mdla == 0) return true;
 
     uint32_t end_offset = f.ReadUint32();
 
     uint32_t anim_num = f.ReadUint32();
-    auto& anims = mdl.puppet->anims;
+    auto&    anims    = mdl.puppet->anims;
     anims.resize(anim_num);
     bool ok = true;
     for (auto& anim : anims) {
-        if (! ParseAnimation(f, anim, mdl.mdla, path)) { ok = false; break; }
+        if (! ParseAnimation(f, anim, mdl.mdla, path)) {
+            ok = false;
+            break;
+        }
     }
 
     if (end_offset > 0 && static_cast<uint32_t>(f.Tell()) != end_offset) {
         rstd_info("MDLA body ended at 0x{:X} but end_offset=0x{:X} ({})",
-                  static_cast<uint32_t>(f.Tell()), end_offset, std::string(path));
+                  static_cast<uint32_t>(f.Tell()),
+                  end_offset,
+                  std::string(path));
         f.SeekSet(end_offset);
     }
     return ok;
@@ -549,10 +561,10 @@ void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh) {
     uint32_t mask_count = f.ReadUint32();
     mesh.masks.resize(mask_count);
     for (auto& m : mesh.masks) {
-        m.leading_a = f.ReadUint32();
+        m.leading_a     = f.ReadUint32();
         uint32_t zero_a = f.ReadUint32();
         if (zero_a != 0) rstd_info("MaskBlock zero_a expected 0, got {}", zero_a);
-        m.mat_json = f.ReadStr();
+        m.mat_json        = f.ReadStr();
         uint32_t zero_pad = f.ReadUint32();
         if (zero_pad != 0) rstd_info("MaskBlock zero_pad expected 0, got {}", zero_pad);
         uint32_t a_count = f.ReadUint32();
@@ -564,16 +576,15 @@ void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh) {
     }
 }
 
-bool ParseMDMP(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag,
-               std::string_view path) {
-    mdl.mdmp = std::stoi(std::string(tag.substr(4, 4)));
+bool ParseMDMP(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag, std::string_view path) {
+    mdl.mdmp            = std::stoi(std::string(tag.substr(4, 4)));
     uint32_t end_offset = f.ReadUint32();
     while (f.Tell() < end_offset) {
-        auto& sec = mdl.morph_sections.emplace_back();
-        uint16_t count    = f.ReadUint16();
-        sec.event_time    = f.ReadFloat();
-        sec.event_id      = f.ReadUint16();
-        uint16_t zero_a   = f.ReadUint16();
+        auto&    sec    = mdl.morph_sections.emplace_back();
+        uint16_t count  = f.ReadUint16();
+        sec.event_time  = f.ReadFloat();
+        sec.event_id    = f.ReadUint16();
+        uint16_t zero_a = f.ReadUint16();
         if (zero_a != 0) {
             rstd_info("MDMPSection zero_a expected 0, got {}", zero_a);
         }
@@ -584,14 +595,14 @@ bool ParseMDMP(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag,
             if (sd_zero != 0) {
                 rstd_info("MDMPSectionData zero_a expected 0, got {}", sd_zero);
             }
-            sd.tag           = f.ReadStr();
-            uint32_t length  = f.ReadUint32();
-            sd.hash          = f.ReadUint32();
+            sd.tag          = f.ReadStr();
+            uint32_t length = f.ReadUint32();
+            sd.hash         = f.ReadUint32();
             if (length % 6 != 0) {
                 rstd_error("MDMPSectionData length {} not %% 6", length);
                 return false;
             }
-            uint32_t vcount  = length / 6;
+            uint32_t vcount = length / 6;
             sd.vertices.resize(vcount);
             for (auto& v : sd.vertices) {
                 for (auto& x : v) x = f.ReadUint16();
@@ -607,18 +618,20 @@ bool ParseMDMP(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag,
     }
     if (end_offset > 0 && static_cast<uint32_t>(f.Tell()) != end_offset) {
         rstd_info("MDMP body ended at 0x{:X} but end_offset=0x{:X} ({})",
-                  static_cast<uint32_t>(f.Tell()), end_offset, std::string(path));
+                  static_cast<uint32_t>(f.Tell()),
+                  end_offset,
+                  std::string(path));
         f.SeekSet(end_offset);
     }
     return true;
 }
 
 bool ParseMDLE(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag) {
-    mdl.mdle = std::stoi(std::string(tag.substr(4, 4)));
-    uint32_t end_offset    = f.ReadUint32();
-    uint32_t payload_bytes = f.ReadUint32();
-    const size_t nbones    = mdl.puppet->bones.size();
-    const size_t expected  = nbones * 64;
+    mdl.mdle                   = std::stoi(std::string(tag.substr(4, 4)));
+    uint32_t     end_offset    = f.ReadUint32();
+    uint32_t     payload_bytes = f.ReadUint32();
+    const size_t nbones        = mdl.puppet->bones.size();
+    const size_t expected      = nbones * 64;
     if (payload_bytes != expected) {
         rstd_error("MDLE payload_bytes {} != bones_num*64 {}", payload_bytes, expected);
         return false;
@@ -649,10 +662,10 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
             b.anim_parent = WPPuppet::NO_PARENT;
         }
     }
-    const size_t nbones = mdl.puppet->bones.size();
+    const size_t                 nbones = mdl.puppet->bones.size();
     std::vector<Eigen::Vector3d> sum_pos(nbones, Eigen::Vector3d::Zero());
     std::vector<double>          sum_w(nbones, 0.0);
-    auto v_to_e = [](const std::array<float, 3>& p) {
+    auto                         v_to_e = [](const std::array<float, 3>& p) {
         return Eigen::Vector3d { p[0], p[1], p[2] };
     };
 
@@ -662,27 +675,28 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
     // the WE 1-bone rigid convention: implicit weight 1.0 on slot 0.
     auto contribute = [&](const WPMdl::Mesh& m) {
         if (m.blend_indices.empty()) return;
-        const bool has_w = ! m.blend_weights.empty();
-        auto weight = [&](size_t vi, int k) -> float {
+        const bool has_w  = ! m.blend_weights.empty();
+        auto       weight = [&](size_t vi, int k) -> float {
             if (! has_w) return k == 0 ? 1.0f : 0.0f;
             return m.blend_weights[vi][k];
         };
         if (! m.indices.empty()) {
             for (const auto& tri : m.indices) {
                 if (tri[0] >= m.positions.size() || tri[1] >= m.positions.size() ||
-                    tri[2] >= m.positions.size()) continue;
-                Eigen::Vector3d p0 = v_to_e(m.positions[tri[0]]);
-                Eigen::Vector3d p1 = v_to_e(m.positions[tri[1]]);
-                Eigen::Vector3d p2 = v_to_e(m.positions[tri[2]]);
+                    tri[2] >= m.positions.size())
+                    continue;
+                Eigen::Vector3d p0           = v_to_e(m.positions[tri[0]]);
+                Eigen::Vector3d p1           = v_to_e(m.positions[tri[1]]);
+                Eigen::Vector3d p2           = v_to_e(m.positions[tri[2]]);
                 Eigen::Vector3d centroid_tri = (p0 + p1 + p2) / 3.0;
-                double area = 0.5 * (p1 - p0).cross(p2 - p0).norm();
+                double          area         = 0.5 * (p1 - p0).cross(p2 - p0).norm();
                 if (area <= 0.0) continue;
                 for (int k = 0; k < 3; ++k) {
                     if (weight(tri[k], 0) <= 0.0f) continue;
                     uint32_t bi = m.blend_indices[tri[k]][0];
                     if (bi >= nbones) continue;
                     sum_pos[bi] += centroid_tri * (area / 3.0);
-                    sum_w[bi]   += area / 3.0;
+                    sum_w[bi] += area / 3.0;
                 }
             }
         } else {
@@ -690,11 +704,11 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
             for (size_t vi = 0; vi < m.positions.size(); ++vi) {
                 Eigen::Vector3d p = v_to_e(m.positions[vi]);
                 for (int k = 0; k < slots; ++k) {
-                    float w = weight(vi, k);
+                    float    w  = weight(vi, k);
                     uint32_t bi = m.blend_indices[vi][k];
                     if (w > 0.0f && bi < nbones) {
                         sum_pos[bi] += p * (double)w;
-                        sum_w[bi]   += (double)w;
+                        sum_w[bi] += (double)w;
                     }
                 }
             }
@@ -718,8 +732,7 @@ bool ReadHeaderFromStream(fs::MemBinaryStream& f, WPMdlHeader& h, std::string_vi
     h.unk_a      = f.ReadUint32();
     h.mesh_count = f.ReadUint32();
     if (h.unk_a != 1) {
-        rstd_info("mdl '{}' header always_one={} (expected 1)",
-                  std::string(path_for_log), h.unk_a);
+        rstd_info("mdl '{}' header always_one={} (expected 1)", std::string(path_for_log), h.unk_a);
     }
     return true;
 }
@@ -737,8 +750,8 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     auto str_path = std::string(path);
     auto pfile    = vfs.Open("/assets/" + str_path);
     if (! pfile) return false;
-    auto memfile  = fs::MemBinaryStream(*pfile);
-    auto& f = memfile;
+    auto  memfile = fs::MemBinaryStream(*pfile);
+    auto& f       = memfile;
 
     if (! ReadHeaderFromStream(f, mdl.header, str_path)) return false;
 
@@ -771,8 +784,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         // the rescue inside ParseMDLA. Bones + mesh are still usable.
         if (! ParseMDLA(f, mdl, tag, str_path)) {
             if (mdl.puppet) mdl.puppet->anims.clear();
-            rstd_info("MDLA parse aborted for {}; puppet keeps bind pose only",
-                      str_path);
+            rstd_info("MDLA parse aborted for {}; puppet keeps bind pose only", str_path);
         }
     }
     if (peek_block_magic(f, "MDMP")) {
@@ -793,9 +805,12 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         }
     } else if (mdl.header.mdlv == 13) {
         while (f.Tell() < f.Size()) {
-            auto save = f.Tell();
-            uint8_t b = f.ReadUint8();
-            if (b != 0) { f.SeekSet(save); break; }
+            auto    save = f.Tell();
+            uint8_t b    = f.ReadUint8();
+            if (b != 0) {
+                f.SeekSet(save);
+                break;
+            }
         }
     }
 
@@ -808,7 +823,10 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     if (mdl.puppet) mdl.puppet->prepared();
 
     rstd_info("read puppet: mdlv: {}, nmdls: {}, mdla: {}, mdle: {}, bones: {}, anims: {}",
-              mdl.header.mdlv, mdl.mdls, mdl.mdla, mdl.mdle,
+              mdl.header.mdlv,
+              mdl.mdls,
+              mdl.mdla,
+              mdl.mdle,
               mdl.puppet ? mdl.puppet->bones.size() : 0,
               mdl.puppet ? mdl.puppet->anims.size() : 0);
     return true;
@@ -820,7 +838,7 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
 
     // Build the attribute list in a stable order. Skinning attrs come early so
     // a puppet vertex layout matches what WE shaders historically expect.
-    std::vector<VertexAttrSpec> specs;
+    std::vector<VertexAttrSpec>                      specs;
     std::vector<std::function<void(size_t, float*)>> packers;
 
     // Position is always present (the parser would have failed otherwise).
@@ -842,7 +860,10 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
             if (has_w) {
                 std::memcpy(dst, src.blend_weights[i].data(), sizeof(src.blend_weights[i]));
             } else {
-                dst[0] = 1.0f; dst[1] = 0.0f; dst[2] = 0.0f; dst[3] = 0.0f;
+                dst[0] = 1.0f;
+                dst[1] = 0.0f;
+                dst[2] = 0.0f;
+                dst[3] = 0.0f;
             }
         });
     }
@@ -853,7 +874,7 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
         });
     }
 
-    auto attrs = MakeAttrSet(specs);
+    auto             attrs = MakeAttrSet(specs);
     SceneVertexArray vertex(attrs, vert_num);
 
     size_t stride_floats = 0;

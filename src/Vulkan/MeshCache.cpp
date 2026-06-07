@@ -53,7 +53,7 @@ namespace
 // Match StagingBuffer's default seed size; vertex/index pools rarely need more
 // than a few MB for typical wallpapers.
 constexpr VkDeviceSize kSeedSize = 2 * 1024 * 1024;
-}
+} // namespace
 
 MeshCache::MeshCache(const Device& d): m_device(d) {}
 MeshCache::~MeshCache() { destroy(); }
@@ -78,9 +78,8 @@ void MeshCache::destroy() {
     m_dirty = false;
 }
 
-std::optional<MeshBufferRef> MeshCache::QueryOrUpload(MeshCacheKey              key,
-                                                     std::span<const uint8_t>  data,
-                                                     VkDeviceSize              alignment) {
+std::optional<MeshBufferRef>
+MeshCache::QueryOrUpload(MeshCacheKey key, std::span<const uint8_t> data, VkDeviceSize alignment) {
     if (! m_buf || key.array_ptr == nullptr) return std::nullopt;
 
     if (auto it = m_map.find(key); it != m_map.end()) {

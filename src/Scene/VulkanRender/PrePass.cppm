@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.vulkan_render:pre_pass;
 import wescene.spec_texs;
 import rstd.cppstd;

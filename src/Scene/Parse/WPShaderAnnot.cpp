@@ -15,9 +15,11 @@ import :shader_lex;
 // job downstream, and gating here creates chicken-and-egg cycles (texture
 // combo flag inside `#if MASK == 1` depends on its own annotation).
 
-namespace owe {
+namespace owe
+{
 
-namespace {
+namespace
+{
 
 using shader_lex::Cursor;
 using shader_lex::LineWalker;
@@ -35,16 +37,17 @@ void HandleComboLine(WPShaderInfo* info, std::string_view line) {
     info->combo_defs.push_back(std::move(combo));
 }
 
-void HandleUniformLine(WPShaderInfo*                    info,
-                       std::span<const WPShaderTexInfo> texinfos,
-                       std::string_view                 line) {
+void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texinfos,
+                       std::string_view line) {
     Cursor c(line);
     c.SkipHSpace();
     if (! c.MatchKeyword("uniform")) return;
     c.SkipHSpace();
-    auto type = c.ReadIdent(); if (! type) return;
+    auto type = c.ReadIdent();
+    if (! type) return;
     c.SkipHSpace();
-    auto name = c.ReadIdent(); if (! name) return;
+    auto name = c.ReadIdent();
+    if (! name) return;
     c.SkipHSpace();
     (void)c.ReadArraySuffix();
     c.SkipHSpace();
@@ -78,7 +81,7 @@ void HandleUniformLine(WPShaderInfo*                    info,
         }
         if (index < texcount && texinfos[(usize)index].enabled) {
             auto& compos = texinfos[(usize)index].composEnabled;
-            usize num = std::min(std::size(compos), std::size(wput.components));
+            usize num    = std::min(std::size(compos), std::size(wput.components));
             for (usize i = 0; i < num; i++) {
                 if (compos[i]) info->combos[wput.components[i].combo] = "1";
             }
@@ -113,7 +116,7 @@ void HandleUniformLine(WPShaderInfo*                    info,
 void ParseWPShader(const std::string& src, WPShaderInfo* info,
                    const std::vector<WPShaderTexInfo>& texinfos_vec) {
     std::span<const WPShaderTexInfo> texinfos(texinfos_vec.data(), texinfos_vec.size());
-    LineWalker w(src);
+    LineWalker                       w(src);
     for (; ! w.Done(); w.Step()) {
         auto line = w.Line();
         if (line.empty()) continue;

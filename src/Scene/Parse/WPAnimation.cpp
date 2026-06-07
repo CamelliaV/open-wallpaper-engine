@@ -1,11 +1,11 @@
 module;
 
-
 module wescene.parse;
 import nlohmann.json;
 import rstd.cppstd;
 
-namespace owe::wpscene {
+namespace owe::wpscene
+{
 
 bool ParseAnimKeyframeTangent(const nlohmann::json& json, WPAnimKeyframeTangent& out) {
     if (! json.is_object()) return false;
@@ -23,7 +23,7 @@ bool ParseAnimKeyframe(const nlohmann::json& json, WPAnimKeyframe& out) {
     owe::GetJsonValue(json, "lockangle", out.lockangle, false);
     owe::GetJsonValue(json, "locklength", out.locklength, false);
     if (json.contains("front")) ParseAnimKeyframeTangent(json.at("front"), out.front);
-    if (json.contains("back"))  ParseAnimKeyframeTangent(json.at("back"),  out.back);
+    if (json.contains("back")) ParseAnimKeyframeTangent(json.at("back"), out.back);
     return true;
 }
 
@@ -46,9 +46,9 @@ bool ParseAnimOptions(const nlohmann::json& json, WPAnimOptions& out) {
     owe::GetJsonValue(json, "startpaused", out.startpaused, false);
     owe::GetJsonValue(json, "wraploop", out.wraploop, false);
     if (json.contains("smoothing")) out.smoothing = json.at("smoothing");
-    if (json.contains("children"))  out.children  = json.at("children");
-    if (json.contains("events"))    out.events    = json.at("events");
-    if (json.contains("parent"))    out.parent    = json.at("parent");
+    if (json.contains("children")) out.children = json.at("children");
+    if (json.contains("events")) out.events = json.at("events");
+    if (json.contains("parent")) out.parent = json.at("parent");
     return true;
 }
 
@@ -84,8 +84,7 @@ std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindin
             sb.source = field_value.at("script").get<std::string>();
             if (field_value.contains("scriptproperties"))
                 sb.properties = field_value.at("scriptproperties");
-            if (field_value.contains("value"))
-                sb.initial_value = field_value.at("value");
+            if (field_value.contains("value")) sb.initial_value = field_value.at("value");
             if (field_value.contains("user") && field_value.at("user").is_string())
                 sb.user = field_value.at("user").get<std::string>();
             out.scripts[el.key()] = std::move(sb);

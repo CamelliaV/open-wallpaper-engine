@@ -179,9 +179,9 @@ public:
 
 class Fs : NoCopy, NoMove {
 public:
-    virtual bool                            Contains(std::string_view path) const     = 0;
-    virtual std::shared_ptr<IBinaryStream>  Open(std::string_view path)               = 0;
-    virtual std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path)              = 0;
+    virtual bool                            Contains(std::string_view path) const = 0;
+    virtual std::shared_ptr<IBinaryStream>  Open(std::string_view path)           = 0;
+    virtual std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path)          = 0;
 
 public:
     Fs()          = default;
@@ -307,11 +307,11 @@ protected:
 private:
     bool InArea(idx pos) const noexcept { return pos >= 0 && pos <= Size(); }
     idx  moveForward(idx step) noexcept {
-         idx end     = m_pos + step;
-         end         = end > Size() ? Size() : end;
-         idx stepped = end - m_pos;
-         m_pos       = end;
-         return stepped;
+        idx end     = m_pos + step;
+        end         = end > Size() ? Size() : end;
+        idx stepped = end - m_pos;
+        m_pos       = end;
+        return stepped;
     };
 
     idx                  m_pos;

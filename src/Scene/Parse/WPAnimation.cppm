@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.parse:wp_animation;
 import rstd.cppstd;
 import wescene.json;
@@ -45,26 +44,26 @@ struct WPAnimKeyframe {
 };
 
 struct WPAnimOptions {
-    float                  fps { 30.0f };
-    std::int32_t           length { 0 };
-    std::string            mode;
-    std::string            name;
-    bool                   startpaused { false };
-    bool                   wraploop { false };
+    float        fps { 30.0f };
+    std::int32_t length { 0 };
+    std::string  mode;
+    std::string  name;
+    bool         startpaused { false };
+    bool         wraploop { false };
     // `smoothing` may be null/int/float in the corpus; kept as raw json
     // until a renderer consumer needs it.
-    nlohmann::json         smoothing;
-    nlohmann::json         children;   // array of nested anim refs
-    nlohmann::json         events;     // array of marker objects
-    nlohmann::json         parent;     // object describing parent anim
+    nlohmann::json smoothing;
+    nlohmann::json children; // array of nested anim refs
+    nlohmann::json events;   // array of marker objects
+    nlohmann::json parent;   // object describing parent anim
 };
 
 struct WPAnimCurve {
     std::vector<WPAnimKeyframe> c0;
-    std::vector<WPAnimKeyframe> c1;   // empty for scalar fields
+    std::vector<WPAnimKeyframe> c1; // empty for scalar fields
     std::vector<WPAnimKeyframe> c2;
     WPAnimOptions               options;
-    bool                        relative { false };  // only on `origin`
+    bool                        relative { false }; // only on `origin`
 };
 
 // FromJson helpers (defined in WPAnimation.cpp).

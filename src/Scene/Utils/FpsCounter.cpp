@@ -1,6 +1,5 @@
 module;
 
-
 module wescene.utils;
 import wescene.core;
 import rstd.cppstd;

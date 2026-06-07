@@ -12,7 +12,8 @@ import wescene.scene;
 
 using nlohmann::json;
 
-namespace owe::script {
+namespace owe::script
+{
 
 // ---------------------------------------------------------------------------
 // Field-kind inference. The bound field's name is the only signal we have at
@@ -20,21 +21,20 @@ namespace owe::script {
 // (see docs/scripting/wallpaper_engine_api.md).
 // ---------------------------------------------------------------------------
 
-namespace {
+namespace
+{
 
 FieldKind GuessFieldKind(std::string_view field) {
     // Visible/enabled-style fields: bool. Several scripts return numbers
     // 0/1 here too; coercion table accepts both.
     if (field == "visible") return FieldKind::Bool;
     // Vec3 (position-like) fields.
-    if (field == "origin" || field == "scale" || field == "angles" ||
-        field == "spriteoffset")
+    if (field == "origin" || field == "scale" || field == "angles" || field == "spriteoffset")
         return FieldKind::Vec3;
     // Color (rgb) fields.
-    if (field == "color" || field == "colorn" || field == "Bg color" ||
-        field == "Bar Color" || field == "Inner Color" ||
-        field == "Outer Color" || field == "Color 1" || field == "Color 2" ||
-        field == "Color filter")
+    if (field == "color" || field == "colorn" || field == "Bg color" || field == "Bar Color" ||
+        field == "Inner Color" || field == "Outer Color" || field == "Color 1" ||
+        field == "Color 2" || field == "Color filter")
         return FieldKind::Color;
     // Strings (text content). Recognised here so the JS can run without
     // erroring; the actuator side ignores the result for MVP scope.
@@ -47,12 +47,12 @@ FieldKind GuessFieldKind(std::string_view field) {
 const char* KindName(FieldKind k) {
     switch (k) {
     case FieldKind::Unknown: return "unknown";
-    case FieldKind::Scalar:  return "scalar";
-    case FieldKind::Bool:    return "bool";
-    case FieldKind::Vec2:    return "vec2";
-    case FieldKind::Vec3:    return "vec3";
-    case FieldKind::Color:   return "color";
-    case FieldKind::String:  return "string";
+    case FieldKind::Scalar: return "scalar";
+    case FieldKind::Bool: return "bool";
+    case FieldKind::Vec2: return "vec2";
+    case FieldKind::Vec3: return "vec3";
+    case FieldKind::Color: return "color";
+    case FieldKind::String: return "string";
     }
     return "?";
 }
@@ -64,9 +64,12 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
 
     auto read_field = [&](JSValue obj, const char* name, double& out) -> bool {
         JSValue v = JS_GetPropertyStr(ctx, obj, name);
-        if (JS_IsUndefined(v)) { JS_FreeValue(ctx, v); return false; }
-        double d = 0.0;
-        int rc = JS_ToFloat64(ctx, &d, v);
+        if (JS_IsUndefined(v)) {
+            JS_FreeValue(ctx, v);
+            return false;
+        }
+        double d  = 0.0;
+        int    rc = JS_ToFloat64(ctx, &d, v);
         JS_FreeValue(ctx, v);
         if (rc < 0) return false;
         out = d;
@@ -74,9 +77,12 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
     };
     auto read_index = [&](JSValue arr, uint32_t i, double& out) -> bool {
         JSValue v = JS_GetPropertyUint32(ctx, arr, i);
-        if (JS_IsUndefined(v)) { JS_FreeValue(ctx, v); return false; }
-        double d = 0.0;
-        int rc = JS_ToFloat64(ctx, &d, v);
+        if (JS_IsUndefined(v)) {
+            JS_FreeValue(ctx, v);
+            return false;
+        }
+        double d  = 0.0;
+        int    rc = JS_ToFloat64(ctx, &d, v);
         JS_FreeValue(ctx, v);
         if (rc < 0) return false;
         out = d;
@@ -153,8 +159,7 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
         JS_FreeCString(ctx, s);
         return sv;
     }
-    case FieldKind::Unknown:
-        return {};
+    case FieldKind::Unknown: return {};
     }
     return {};
 }
@@ -163,41 +168,34 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
 // scenescript values are tiny (numbers, short strings, small objects).
 JSValue JsonToJs(JSContext* ctx, const json& j) {
     switch (j.type()) {
-    case json::value_t::null:
-        return JS_NULL;
-    case json::value_t::boolean:
-        return JS_NewBool(ctx, j.get<bool>());
+    case json::value_t::null: return JS_NULL;
+    case json::value_t::boolean: return JS_NewBool(ctx, j.get<bool>());
     case json::value_t::number_integer:
-    case json::value_t::number_unsigned:
-        return JS_NewInt64(ctx, j.get<int64_t>());
-    case json::value_t::number_float:
-        return JS_NewFloat64(ctx, j.get<double>());
+    case json::value_t::number_unsigned: return JS_NewInt64(ctx, j.get<int64_t>());
+    case json::value_t::number_float: return JS_NewFloat64(ctx, j.get<double>());
     case json::value_t::string: {
         const auto& s = j.get_ref<const std::string&>();
         return JS_NewStringLen(ctx, s.data(), s.size());
     }
     case json::value_t::array: {
-        JSValue arr = JS_NewArray(ctx);
-        uint32_t i = 0;
+        JSValue  arr = JS_NewArray(ctx);
+        uint32_t i   = 0;
         for (const auto& item : j) {
-            JS_DefinePropertyValueUint32(ctx, arr, i++, JsonToJs(ctx, item),
-                                         JS_PROP_C_W_E);
+            JS_DefinePropertyValueUint32(ctx, arr, i++, JsonToJs(ctx, item), JS_PROP_C_W_E);
         }
         return arr;
     }
     case json::value_t::object: {
         JSValue obj = JS_NewObject(ctx);
         for (auto it = j.begin(); it != j.end(); ++it) {
-            JS_DefinePropertyValueStr(ctx, obj, it.key().c_str(),
-                                       JsonToJs(ctx, it.value()),
-                                       JS_PROP_C_W_E);
+            JS_DefinePropertyValueStr(
+                ctx, obj, it.key().c_str(), JsonToJs(ctx, it.value()), JS_PROP_C_W_E);
         }
         return obj;
     }
     case json::value_t::binary:
     case json::value_t::discarded:
-    default:
-        return JS_UNDEFINED;
+    default: return JS_UNDEFINED;
     }
 }
 
@@ -205,9 +203,7 @@ JSValue JsonToJs(JSContext* ctx, const json& j) {
 // bootstrap getter resolves it lazily against engine.userProperties at
 // access time, so SetUserProperty calls after parse propagate.
 // Everything else passes through.
-JSValue ResolveConfigValue(JSContext* ctx, const json& v) {
-    return JsonToJs(ctx, v);
-}
+JSValue ResolveConfigValue(JSContext* ctx, const json& v) { return JsonToJs(ctx, v); }
 
 // Coerce a binding's initial-value JSON into the JS shape the script's
 // `init(value)` expects, given the bound field kind. Audio-response,
@@ -225,8 +221,8 @@ JSValue ResolveConfigValue(JSContext* ctx, const json& v) {
 JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
     auto parse_floats = [](const std::string& s) -> std::vector<double> {
         std::vector<double> out;
-        const char* p = s.c_str();
-        char*       end = nullptr;
+        const char*         p   = s.c_str();
+        char*               end = nullptr;
         while (*p) {
             double d = std::strtod(p, &end);
             if (end == p) break;
@@ -239,11 +235,10 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
     auto build_vec = [&](double x, double y, double z, int n) -> JSValue {
         // Vec2/Vec3 are JS classes installed in the bootstrap. Construct
         // by getting the global ctor and calling new on it.
-        JSValue global = JS_GetGlobalObject(ctx);
-        JSValue ctor   = JS_GetPropertyStr(ctx, global, n == 2 ? "Vec2" : "Vec3");
-        JSValue argv[3] = { JS_NewFloat64(ctx, x), JS_NewFloat64(ctx, y),
-                            JS_NewFloat64(ctx, z) };
-        JSValue obj    = JS_CallConstructor(ctx, ctor, n, argv);
+        JSValue global  = JS_GetGlobalObject(ctx);
+        JSValue ctor    = JS_GetPropertyStr(ctx, global, n == 2 ? "Vec2" : "Vec3");
+        JSValue argv[3] = { JS_NewFloat64(ctx, x), JS_NewFloat64(ctx, y), JS_NewFloat64(ctx, z) };
+        JSValue obj     = JS_CallConstructor(ctx, ctor, n, argv);
         for (int i = 0; i < n; ++i) JS_FreeValue(ctx, argv[i]);
         if (n < 3) JS_FreeValue(ctx, argv[2]);
         JS_FreeValue(ctx, ctor);
@@ -255,8 +250,7 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
     case FieldKind::Vec2: {
         if (v.is_string()) {
             auto fs = parse_floats(v.get_ref<const std::string&>());
-            return build_vec(fs.size() > 0 ? fs[0] : 0.0,
-                             fs.size() > 1 ? fs[1] : 0.0, 0.0, 2);
+            return build_vec(fs.size() > 0 ? fs[0] : 0.0, fs.size() > 1 ? fs[1] : 0.0, 0.0, 2);
         }
         if (v.is_array() && v.size() >= 2)
             return build_vec(v[0].get<double>(), v[1].get<double>(), 0.0, 2);
@@ -265,15 +259,14 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
     }
     case FieldKind::Vec3: {
         if (v.is_string()) {
-            auto fs = parse_floats(v.get_ref<const std::string&>());
-            double x = fs.size() > 0 ? fs[0] : 0.0;
-            double y = fs.size() > 1 ? fs[1] : x;  // splat single scalar
-            double z = fs.size() > 2 ? fs[2] : (fs.size() > 1 ? 0.0 : x);
+            auto   fs = parse_floats(v.get_ref<const std::string&>());
+            double x  = fs.size() > 0 ? fs[0] : 0.0;
+            double y  = fs.size() > 1 ? fs[1] : x; // splat single scalar
+            double z  = fs.size() > 2 ? fs[2] : (fs.size() > 1 ? 0.0 : x);
             return build_vec(x, y, z, 3);
         }
         if (v.is_array() && v.size() >= 3)
-            return build_vec(v[0].get<double>(), v[1].get<double>(),
-                             v[2].get<double>(), 3);
+            return build_vec(v[0].get<double>(), v[1].get<double>(), v[2].get<double>(), 3);
         if (v.is_number()) {
             double d = v.get<double>();
             return build_vec(d, d, d, 3);
@@ -282,12 +275,10 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
     }
     case FieldKind::Color: {
         if (v.is_string()) {
-            auto fs = parse_floats(v.get_ref<const std::string&>());
+            auto    fs  = parse_floats(v.get_ref<const std::string&>());
             JSValue arr = JS_NewArray(ctx);
             for (uint32_t i = 0; i < fs.size() && i < 3; ++i)
-                JS_DefinePropertyValueUint32(ctx, arr, i,
-                                             JS_NewFloat64(ctx, fs[i]),
-                                             JS_PROP_C_W_E);
+                JS_DefinePropertyValueUint32(ctx, arr, i, JS_NewFloat64(ctx, fs[i]), JS_PROP_C_W_E);
             return arr;
         }
         break;
@@ -295,13 +286,12 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
     case FieldKind::Scalar:
     case FieldKind::Bool:
     case FieldKind::String:
-    case FieldKind::Unknown:
-        break;
+    case FieldKind::Unknown: break;
     }
     return JsonToJs(ctx, v);
 }
 
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
 // FrameInputs storage. JSRuntime opaque data: a per-context FrameInputs
@@ -313,30 +303,30 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
 // callbacks that schedule more callbacks don't iterate over invalid storage.
 struct DeferredCb {
     uint32_t handle;
-    double   fire_at;     // engine.runtime seconds when due
-    double   interval_s;  // for setInterval; 0 for setTimeout
-    JSValue  fn;          // owned
+    double   fire_at;    // engine.runtime seconds when due
+    double   interval_s; // for setInterval; 0 for setTimeout
+    JSValue  fn;         // owned
     bool     repeating;
     bool     dead;
 };
 
 struct EngineHostState {
-    FrameInputs               inputs;
-    JSValue                   audio_buffer { JS_UNDEFINED };
-    bool                      audio_buffer_built { false };
+    FrameInputs inputs;
+    JSValue     audio_buffer { JS_UNDEFINED };
+    bool        audio_buffer_built { false };
     // Cached `globalThis.Vec3` ctor, populated lazily on first node access.
     // Used by the SceneNode wrapper to hand back Vec3 instances so scripts
     // can call `.add` / `.subtract` on `thisLayer.origin`.
-    JSValue                   vec3_ctor { JS_UNDEFINED };
+    JSValue vec3_ctor { JS_UNDEFINED };
     // The original JS-side `thisLayer` / `thisScene` stubs, captured at
     // bootstrap. Per-script binding restores them when a script has no
     // backing SceneNode.
-    JSValue                   default_layer { JS_UNDEFINED };
-    JSValue                   default_scene { JS_UNDEFINED };
+    JSValue default_layer { JS_UNDEFINED };
+    JSValue default_scene { JS_UNDEFINED };
     // engine.setTimeout / setInterval queue. Swept once per frame in
     // JsRuntime::TickAll before the script update loop runs.
-    std::vector<DeferredCb>   deferred;
-    uint32_t                  next_handle { 1 };
+    std::vector<DeferredCb> deferred;
+    uint32_t                next_handle { 1 };
     // localStorage backing. Values are JSON-serialised strings so we can
     // round-trip arbitrary script values through the persistence file.
     // Empty `ls_path` means in-memory only (the legacy bootstrap shape).
@@ -349,8 +339,7 @@ struct EngineHostState {
     // parser; consulted by NodeSetText so `thisLayer.text = "..."` reaches
     // TextLayouter::SetText. Missing entry means the layer is not text-
     // capable; writes silently no-op.
-    std::unordered_map<owe::SceneNode*,
-                       std::function<void(std::string_view)>> text_setters;
+    std::unordered_map<owe::SceneNode*, std::function<void(std::string_view)>> text_setters;
 };
 
 // ---------------------------------------------------------------------------
@@ -358,66 +347,69 @@ struct EngineHostState {
 // ---------------------------------------------------------------------------
 
 struct FieldScript::Impl {
-    JsRuntime::Impl*  rt { nullptr };
-    JSContext*        ctx { nullptr };
-    std::string       sha;
-    FieldKind         kind { FieldKind::Unknown };
-    JSValue           module_ns { JS_UNDEFINED };
-    JSValue           update_fn { JS_UNDEFINED };
-    bool              update_takes_arg { false };
-    JSValue           current_value { JS_UNDEFINED };  // last `value` returned, kept as JSValue for the (value)-arg form
-    ScriptValue       last_value;
-    bool              alive { true };
-    bool              error_logged { false };
+    JsRuntime::Impl* rt { nullptr };
+    JSContext*       ctx { nullptr };
+    std::string      sha;
+    FieldKind        kind { FieldKind::Unknown };
+    JSValue          module_ns { JS_UNDEFINED };
+    JSValue          update_fn { JS_UNDEFINED };
+    bool             update_takes_arg { false };
+    JSValue          current_value {
+        JS_UNDEFINED
+    }; // last `value` returned, kept as JSValue for the (value)-arg form
+    ScriptValue last_value;
+    bool        alive { true };
+    bool        error_logged { false };
     // Layer-B: the SceneNode this script's `thisLayer` resolves to. Null →
     // fall back to the generic JS stub. `wrapped_layer` caches the JSValue
     // wrapper so per-frame swap doesn't reallocate.
-    owe::SceneNode*   node { nullptr };
-    JSValue           wrapped_layer { JS_UNDEFINED };
+    owe::SceneNode* node { nullptr };
+    JSValue         wrapped_layer { JS_UNDEFINED };
     // Per-script cursor-inside-bbox state used to edge-detect
     // cursorEnter / cursorLeave between frames.
-    bool              cursor_inside { false };
+    bool cursor_inside { false };
     // Pre-spawned SceneNode clones available to thisScene.createLayer.
     // Populated by WireFieldScripts for audio-bar style scripts; popped
     // from the front each createLayer call.
     std::vector<owe::SceneNode*> clone_queue;
 };
 
-FieldScript::FieldScript() : m_impl(std::make_unique<Impl>()) {}
+FieldScript::FieldScript(): m_impl(std::make_unique<Impl>()) {}
 FieldScript::~FieldScript() = default;
-FieldKind FieldScript::field_kind() const noexcept { return m_impl->kind; }
+FieldKind          FieldScript::field_kind() const noexcept { return m_impl->kind; }
 const ScriptValue& FieldScript::last_value() const noexcept { return m_impl->last_value; }
-bool FieldScript::alive() const noexcept { return m_impl->alive; }
-std::string_view FieldScript::script_sha() const noexcept { return m_impl->sha; }
+bool               FieldScript::alive() const noexcept { return m_impl->alive; }
+std::string_view   FieldScript::script_sha() const noexcept { return m_impl->sha; }
 
 // ---------------------------------------------------------------------------
 // JsRuntime impl.
 // ---------------------------------------------------------------------------
 
 struct JsRuntime::Impl {
-    JSRuntime*                                          rt { nullptr };
-    JSContext*                                          ctx { nullptr };
-    EngineHostState                                     host;
+    JSRuntime*      rt { nullptr };
+    JSContext*      ctx { nullptr };
+    EngineHostState host;
     // Compiled-module dedup: same script source under the same sha is
     // imported once per runtime, exposing one shared namespace. A
     // FieldScript holds a JS_DupValue of the namespace.
-    std::unordered_map<std::string, JSValue>            ns_by_sha;
-    std::uint64_t                                       next_module_serial { 0 };
-    std::vector<std::unique_ptr<FieldScript>>           scripts;
+    std::unordered_map<std::string, JSValue>  ns_by_sha;
+    std::uint64_t                             next_module_serial { 0 };
+    std::vector<std::unique_ptr<FieldScript>> scripts;
     // Set of error-logged shas to log once.
-    std::unordered_set<std::string>                     errored;
+    std::unordered_set<std::string> errored;
     // Scene root for `thisScene`. Wrapped lazily; freed in dtor.
-    owe::SceneNode*                                     scene_root { nullptr };
-    JSValue                                             wrapped_scene { JS_UNDEFINED };
+    owe::SceneNode* scene_root { nullptr };
+    JSValue         wrapped_scene { JS_UNDEFINED };
 
     void LogError(JSContext* c, std::string_view sha, const char* what) {
         if (errored.contains(std::string(sha))) return;
         errored.insert(std::string(sha));
-        JSValue exc = JS_GetException(c);
+        JSValue     exc = JS_GetException(c);
         const char* msg = JS_ToCString(c, exc);
         rstd_error("script[{}] {}: {}",
-                            sha,
-                            std::string_view(what), std::string_view(msg ? msg : "<no message>"));
+                   sha,
+                   std::string_view(what),
+                   std::string_view(msg ? msg : "<no message>"));
         if (msg) JS_FreeCString(c, msg);
         JS_FreeValue(c, exc);
     }
@@ -425,9 +417,11 @@ struct JsRuntime::Impl {
 
 // --- engine.* getters --------------------------------------------------------
 
-namespace {
+namespace
+{
 
-JSValue EngineGetterFrametime(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/) {
+JSValue EngineGetterFrametime(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/,
+                              JSValueConst* /*argv*/) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     return JS_NewFloat64(ctx, host->inputs.frametime);
 }
@@ -440,21 +434,21 @@ JSValue EngineGetterTimeOfDay(JSContext* ctx, JSValueConst, int, JSValueConst*) 
     return JS_NewFloat64(ctx, host->inputs.time_of_day);
 }
 JSValue EngineGetterCanvasSize(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    JSValue v = JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx, v, "x", JS_NewFloat64(ctx, host->inputs.canvas_w),
-                               JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, v, "y", JS_NewFloat64(ctx, host->inputs.canvas_h),
-                               JS_PROP_C_W_E);
+    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JSValue v    = JS_NewObject(ctx);
+    JS_DefinePropertyValueStr(
+        ctx, v, "x", JS_NewFloat64(ctx, host->inputs.canvas_w), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx, v, "y", JS_NewFloat64(ctx, host->inputs.canvas_h), JS_PROP_C_W_E);
     return v;
 }
 JSValue EngineGetterScreenRes(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    JSValue v = JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx, v, "x", JS_NewFloat64(ctx, host->inputs.screen_w),
-                               JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, v, "y", JS_NewFloat64(ctx, host->inputs.screen_h),
-                               JS_PROP_C_W_E);
+    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JSValue v    = JS_NewObject(ctx);
+    JS_DefinePropertyValueStr(
+        ctx, v, "x", JS_NewFloat64(ctx, host->inputs.screen_w), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx, v, "y", JS_NewFloat64(ctx, host->inputs.screen_h), JS_PROP_C_W_E);
     return v;
 }
 
@@ -467,20 +461,18 @@ JSValue EngineGetterScreenRes(JSContext* ctx, JSValueConst, int, JSValueConst*) 
 // but on subsequent calls return the same one. Higher resolutions clamp
 // to 16 — the corpus has 24 mentions of AUDIO_RESOLUTION_16 vs. 3 of
 // AUDIO_RESOLUTION_32, and we don't yet have a 32-bin source.
-JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/,
-                                   int /*argc*/, JSValueConst* /*argv*/) {
+JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/,
+                                   JSValueConst* /*argv*/) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     if (! host->audio_buffer_built) {
         JSValue obj = JS_NewObject(ctx);
         JSValue avg = JS_NewArray(ctx);
         JSValue buf = JS_NewArray(ctx);
         for (uint32_t i = 0; i < host->inputs.audio_average.size(); ++i) {
-            JS_DefinePropertyValueUint32(ctx, avg, i,
-                                         JS_NewFloat64(ctx, host->inputs.audio_average[i]),
-                                         JS_PROP_C_W_E);
-            JS_DefinePropertyValueUint32(ctx, buf, i,
-                                         JS_NewFloat64(ctx, host->inputs.audio_average[i]),
-                                         JS_PROP_C_W_E);
+            JS_DefinePropertyValueUint32(
+                ctx, avg, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
+            JS_DefinePropertyValueUint32(
+                ctx, buf, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
         }
         JS_DefinePropertyValueStr(ctx, obj, "average", avg, JS_PROP_C_W_E);
         JS_DefinePropertyValueStr(ctx, obj, "buffer", buf, JS_PROP_C_W_E);
@@ -500,12 +492,10 @@ void RefreshAudioBuffer(JSContext* ctx) {
     JSValue avg = JS_GetPropertyStr(ctx, host->audio_buffer, "average");
     JSValue buf = JS_GetPropertyStr(ctx, host->audio_buffer, "buffer");
     for (uint32_t i = 0; i < host->inputs.audio_average.size(); ++i) {
-        JS_DefinePropertyValueUint32(ctx, avg, i,
-                                     JS_NewFloat64(ctx, host->inputs.audio_average[i]),
-                                     JS_PROP_C_W_E);
-        JS_DefinePropertyValueUint32(ctx, buf, i,
-                                     JS_NewFloat64(ctx, host->inputs.audio_average[i]),
-                                     JS_PROP_C_W_E);
+        JS_DefinePropertyValueUint32(
+            ctx, avg, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
+        JS_DefinePropertyValueUint32(
+            ctx, buf, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
     }
     JS_FreeValue(ctx, avg);
     JS_FreeValue(ctx, buf);
@@ -515,29 +505,33 @@ void RefreshAudioBuffer(JSContext* ctx) {
 // deferred handle ID; invoking it tombstones the corresponding entry. The
 // corpus uses both `clearTimeout(handle)` and `handle()` self-cancel forms,
 // so handle is itself a callable.
-JSValue EngineCancelDeferred(JSContext* ctx, JSValueConst /*this_val*/,
-                              int /*argc*/, JSValueConst* /*argv*/,
-                              int /*magic*/, JSValue* data) {
-    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    int32_t h = 0;
+JSValue EngineCancelDeferred(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/,
+                             JSValueConst* /*argv*/, int /*magic*/, JSValue* data) {
+    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    int32_t h    = 0;
     JS_ToInt32(ctx, &h, data[0]);
     for (auto& d : host->deferred) {
-        if (d.handle == uint32_t(h)) { d.dead = true; break; }
+        if (d.handle == uint32_t(h)) {
+            d.dead = true;
+            break;
+        }
     }
     return JS_UNDEFINED;
 }
 
 JSValue MakeCancelFn(JSContext* ctx, uint32_t handle) {
     JSValue data[1] = { JS_NewInt32(ctx, int32_t(handle)) };
-    JSValue fn = JS_NewCFunctionData(ctx, EngineCancelDeferred,
-                                     /*length=*/0, /*magic=*/0,
-                                     /*data_len=*/1, data);
+    JSValue fn      = JS_NewCFunctionData(ctx,
+                                          EngineCancelDeferred,
+                                          /*length=*/0,
+                                          /*magic=*/0,
+                                          /*data_len=*/1,
+                                          data);
     JS_FreeValue(ctx, data[0]);
     return fn;
 }
 
-JSValue EngineSetTimerImpl(JSContext* ctx, int argc, JSValueConst* argv,
-                            bool repeating) {
+JSValue EngineSetTimerImpl(JSContext* ctx, int argc, JSValueConst* argv, bool repeating) {
     if (argc < 1 || ! JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
     auto*  host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     double ms   = 0.0;
@@ -584,7 +578,10 @@ JSValue EngineClearDeferred(JSContext* ctx, JSValueConst, int argc, JSValueConst
 // Writes flush to disk synchronously when a persistence path is set.
 // The file format is a flat JSON object: {"k1": "json string", ...}.
 
-namespace { struct PersistedLocalStorage {}; }
+namespace
+{
+struct PersistedLocalStorage {};
+} // namespace
 
 void FlushLocalStorage(EngineHostState* host) {
     if (host->ls_path.empty()) return;
@@ -622,7 +619,7 @@ JSValue LocalStorageGet(JSContext* ctx, JSValueConst, int argc, JSValueConst* ar
     const char* key = JS_ToCString(ctx, argv[0]);
     if (! key) return JS_UNDEFINED;
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    auto it    = host->ls_data.find(key);
+    auto  it   = host->ls_data.find(key);
     JS_FreeCString(ctx, key);
     if (it == host->ls_data.end()) return JS_UNDEFINED;
     const auto& s = it->second;
@@ -633,7 +630,7 @@ JSValue LocalStorageSet(JSContext* ctx, JSValueConst, int argc, JSValueConst* ar
     if (argc < 2) return JS_UNDEFINED;
     const char* key = JS_ToCString(ctx, argv[0]);
     if (! key) return JS_UNDEFINED;
-    JSValue     jv  = JS_JSONStringify(ctx, argv[1], JS_UNDEFINED, JS_UNDEFINED);
+    JSValue jv = JS_JSONStringify(ctx, argv[1], JS_UNDEFINED, JS_UNDEFINED);
     if (JS_IsException(jv) || JS_IsUndefined(jv)) {
         JS_FreeValue(ctx, jv);
         JS_FreeCString(ctx, key);
@@ -651,9 +648,9 @@ JSValue LocalStorageSet(JSContext* ctx, JSValueConst, int argc, JSValueConst* ar
 
 JSValue LocalStorageRemove(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     if (argc < 1) return JS_UNDEFINED;
-    const char* key  = JS_ToCString(ctx, argv[0]);
+    const char* key = JS_ToCString(ctx, argv[0]);
     if (! key) return JS_UNDEFINED;
-    auto*       host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     host->ls_data.erase(key);
     JS_FreeCString(ctx, key);
     FlushLocalStorage(host);
@@ -663,12 +660,12 @@ JSValue LocalStorageRemove(JSContext* ctx, JSValueConst, int argc, JSValueConst*
 void InstallLocalStorage(JSContext* ctx) {
     JSValue g  = JS_GetGlobalObject(ctx);
     JSValue ls = JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(ctx, ls, "get",
-        JS_NewCFunction(ctx, LocalStorageGet, "get", 1), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, ls, "set",
-        JS_NewCFunction(ctx, LocalStorageSet, "set", 2), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, ls, "remove",
-        JS_NewCFunction(ctx, LocalStorageRemove, "remove", 1), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx, ls, "get", JS_NewCFunction(ctx, LocalStorageGet, "get", 1), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx, ls, "set", JS_NewCFunction(ctx, LocalStorageSet, "set", 2), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx, ls, "remove", JS_NewCFunction(ctx, LocalStorageRemove, "remove", 1), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, g, "localStorage", ls, JS_PROP_C_W_E);
     JS_FreeValue(ctx, g);
 }
@@ -678,7 +675,7 @@ void InstallLocalStorage(JSContext* ctx) {
 // SceneWallpaper feeds canvas_w / canvas_h matching the active camera's
 // ortho rect, so cursor_pixel_x is in scene-units along X.
 struct CursorWorld {
-    double  x { 0 }, y { 0 };
+    double x { 0 }, y { 0 };
 };
 
 CursorWorld CursorToWorld(const FrameInputs& fi) {
@@ -695,19 +692,23 @@ CursorWorld CursorToWorld(const FrameInputs& fi) {
 bool HitTestNode(owe::SceneNode* n, const CursorWorld& c) {
     if (! n) return false;
     n->UpdateTrans();
-    Eigen::Matrix4d m = n->ModelTrans();
+    Eigen::Matrix4d m  = n->ModelTrans();
     Eigen::Vector2f sz = n->Size();
     if (sz.x() == 0.0f && sz.y() == 0.0f) sz = Eigen::Vector2f { 100.0f, 100.0f };
-    double hx = sz.x() * 0.5, hy = sz.y() * 0.5;
+    double          hx = sz.x() * 0.5, hy = sz.y() * 0.5;
     Eigen::Vector4d corners[4] = {
-        { -hx, -hy, 0, 1 }, { hx, -hy, 0, 1 },
-        {  hx,  hy, 0, 1 }, { -hx, hy, 0, 1 },
+        { -hx, -hy, 0, 1 },
+        { hx, -hy, 0, 1 },
+        { hx, hy, 0, 1 },
+        { -hx, hy, 0, 1 },
     };
     double minx = 1e30, miny = 1e30, maxx = -1e30, maxy = -1e30;
     for (auto& corner : corners) {
         Eigen::Vector4d w = m * corner;
-        minx = std::min(minx, w.x()); maxx = std::max(maxx, w.x());
-        miny = std::min(miny, w.y()); maxy = std::max(maxy, w.y());
+        minx              = std::min(minx, w.x());
+        maxx              = std::max(maxx, w.x());
+        miny              = std::min(miny, w.y());
+        maxy              = std::max(maxy, w.y());
     }
     return c.x >= minx && c.x <= maxx && c.y >= miny && c.y <= maxy;
 }
@@ -715,13 +716,11 @@ bool HitTestNode(owe::SceneNode* n, const CursorWorld& c) {
 // Build the event object passed to cursor callbacks. WE scripts read
 // event.worldPosition (a Vec2 in scene units) and event.button (0/1/2).
 JSValue MakeCursorEvent(JSContext* ctx, const CursorWorld& c, int button) {
-    JSValue ev = JS_NewObject(ctx);
-    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JSValue ev   = JS_NewObject(ctx);
+    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     JSValue wp;
     if (! JS_IsUndefined(host->vec3_ctor)) {
-        JSValue args[3] {
-            JS_NewFloat64(ctx, c.x), JS_NewFloat64(ctx, c.y), JS_NewFloat64(ctx, 0)
-        };
+        JSValue args[3] { JS_NewFloat64(ctx, c.x), JS_NewFloat64(ctx, c.y), JS_NewFloat64(ctx, 0) };
         wp = JS_CallConstructor(ctx, host->vec3_ctor, 3, args);
         for (auto& a : args) JS_FreeValue(ctx, a);
     } else {
@@ -738,8 +737,8 @@ JSValue MakeCursorEvent(JSContext* ctx, const CursorWorld& c, int button) {
 // Invoke `name` on the script's module namespace if exported, passing one
 // event arg. `thisLayer` should already be bound to the script's node by
 // the caller. Exceptions are caught and logged once per sha.
-void InvokeCursorCallback(JSContext* ctx, JSValue ns, const char* name,
-                          JSValue ev, JsRuntime::Impl* rt, std::string_view sha) {
+void InvokeCursorCallback(JSContext* ctx, JSValue ns, const char* name, JSValue ev,
+                          JsRuntime::Impl* rt, std::string_view sha) {
     JSValue fn = JS_GetPropertyStr(ctx, ns, name);
     if (JS_IsFunction(ctx, fn)) {
         JSValue arg = JS_DupValue(ctx, ev);
@@ -768,10 +767,9 @@ void SweepDeferred(JSContext* ctx, EngineHostState* host) {
             JSValue ret = JS_Call(ctx, fn, JS_UNDEFINED, 0, nullptr);
             JS_FreeValue(ctx, fn);
             if (JS_IsException(ret)) {
-                JSValue exc = JS_GetException(ctx);
+                JSValue     exc = JS_GetException(ctx);
                 const char* msg = JS_ToCString(ctx, exc);
-                rstd_error("script timer callback threw: {}",
-                           msg ? msg : "<no message>");
+                rstd_error("script timer callback threw: {}", msg ? msg : "<no message>");
                 if (msg) JS_FreeCString(ctx, msg);
                 JS_FreeValue(ctx, exc);
                 host->deferred[i].dead = true;
@@ -797,16 +795,18 @@ void SweepDeferred(JSContext* ctx, EngineHostState* host) {
             d.fn = JS_UNDEFINED;
         }
     }
-    host->deferred.erase(
-        std::remove_if(host->deferred.begin(), host->deferred.end(),
-                       [](const DeferredCb& d) { return d.dead; }),
-        host->deferred.end());
+    host->deferred.erase(std::remove_if(host->deferred.begin(),
+                                        host->deferred.end(),
+                                        [](const DeferredCb& d) {
+                                            return d.dead;
+                                        }),
+                         host->deferred.end());
 }
 
 // engine.registerAsset(...) — return the first arg unchanged so chained
 // `.something` works without throwing (even if the result isn't useful).
-JSValue EngineRegisterAsset(JSContext* ctx, JSValueConst /*this_val*/,
-                            int argc, JSValueConst* argv) {
+JSValue EngineRegisterAsset(JSContext* ctx, JSValueConst /*this_val*/, int argc,
+                            JSValueConst* argv) {
     if (argc > 0) return JS_DupValue(ctx, argv[0]);
     return JS_NewObject(ctx);
 }
@@ -1074,10 +1074,10 @@ if (! globalThis.shared) globalThis.shared = {};
 
 void InstallEngineGlobal(JSContext* ctx) {
     // Run the bootstrap to create createScriptProperties + skeleton engine.
-    JSValue r = JS_Eval(ctx, kBootstrapJs, std::strlen(kBootstrapJs),
-                        "<wescene-bootstrap>", JS_EVAL_TYPE_GLOBAL);
+    JSValue r = JS_Eval(
+        ctx, kBootstrapJs, std::strlen(kBootstrapJs), "<wescene-bootstrap>", JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(r)) {
-        JSValue exc = JS_GetException(ctx);
+        JSValue     exc = JS_GetException(ctx);
         const char* msg = JS_ToCString(ctx, exc);
         rstd_error("script bootstrap: {}", msg ? msg : "<exc>");
         if (msg) JS_FreeCString(ctx, msg);
@@ -1092,29 +1092,28 @@ void InstallEngineGlobal(JSContext* ctx) {
     JSValue engine = JS_GetPropertyStr(ctx, global, "engine");
 
     auto define_getter = [&](const char* name, JSCFunction* f) {
-        JSAtom atom  = JS_NewAtom(ctx, name);
+        JSAtom  atom = JS_NewAtom(ctx, name);
         JSValue gfun = JS_NewCFunction(ctx, f, name, 0);
-        JS_DefinePropertyGetSet(ctx, engine, atom, gfun, JS_UNDEFINED,
-                                JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_DefinePropertyGetSet(
+            ctx, engine, atom, gfun, JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_FreeAtom(ctx, atom);
     };
-    define_getter("frametime",        EngineGetterFrametime);
-    define_getter("runtime",          EngineGetterRuntime);
-    define_getter("timeOfDay",        EngineGetterTimeOfDay);
-    define_getter("canvasSize",       EngineGetterCanvasSize);
+    define_getter("frametime", EngineGetterFrametime);
+    define_getter("runtime", EngineGetterRuntime);
+    define_getter("timeOfDay", EngineGetterTimeOfDay);
+    define_getter("canvasSize", EngineGetterCanvasSize);
     define_getter("screenResolution", EngineGetterScreenRes);
 
     auto define_fn = [&](const char* name, JSCFunction* f, int nargs) {
-        JS_DefinePropertyValueStr(ctx, engine, name,
-                                   JS_NewCFunction(ctx, f, name, nargs),
-                                   JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(
+            ctx, engine, name, JS_NewCFunction(ctx, f, name, nargs), JS_PROP_C_W_E);
     };
     define_fn("registerAudioBuffers", EngineRegisterAudioBuffers, 1);
-    define_fn("setTimeout",           EngineSetTimeout,    2);
-    define_fn("setInterval",          EngineSetInterval,   2);
-    define_fn("clearTimeout",         EngineClearDeferred, 1);
-    define_fn("clearInterval",        EngineClearDeferred, 1);
-    define_fn("registerAsset",        EngineRegisterAsset, 1);
+    define_fn("setTimeout", EngineSetTimeout, 2);
+    define_fn("setInterval", EngineSetInterval, 2);
+    define_fn("clearTimeout", EngineClearDeferred, 1);
+    define_fn("clearInterval", EngineClearDeferred, 1);
+    define_fn("registerAsset", EngineRegisterAsset, 1);
 
     // A handful of corpus scripts call setTimeout/clearTimeout bare (no
     // `engine.` prefix). Mirror onto globalThis so they resolve.
@@ -1197,7 +1196,9 @@ static constexpr BuiltinModule kBuiltinModules[] = {
 JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*) {
     for (const auto& m : kBuiltinModules) {
         if (std::strcmp(m.name, module_name) != 0) continue;
-        JSValue compiled = JS_Eval(ctx, m.source, std::strlen(m.source),
+        JSValue compiled = JS_Eval(ctx,
+                                   m.source,
+                                   std::strlen(m.source),
                                    module_name,
                                    JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
         if (JS_IsException(compiled)) {
@@ -1263,9 +1264,8 @@ inline bool ReadXYZ(JSContext* ctx, JSValueConst v, double& x, double& y, double
     JSValue jx = JS_GetPropertyStr(ctx, v, "x");
     JSValue jy = JS_GetPropertyStr(ctx, v, "y");
     JSValue jz = JS_GetPropertyStr(ctx, v, "z");
-    bool ok = (JS_ToFloat64(ctx, &x, jx) == 0)
-            && (JS_ToFloat64(ctx, &y, jy) == 0)
-            && (JS_ToFloat64(ctx, &z, jz) == 0);
+    bool    ok = (JS_ToFloat64(ctx, &x, jx) == 0) && (JS_ToFloat64(ctx, &y, jy) == 0) &&
+                 (JS_ToFloat64(ctx, &z, jz) == 0);
     JS_FreeValue(ctx, jx);
     JS_FreeValue(ctx, jy);
     JS_FreeValue(ctx, jz);
@@ -1305,7 +1305,7 @@ JSValue NodeSetScale(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
 // The JS angles API is in degrees; SceneNode::m_rotation is radians.
 constexpr double kRadToDeg = 180.0 / rstd::f64_::consts::PI;
 constexpr double kDegToRad = rstd::f64_::consts::PI / 180.0;
-JSValue NodeGetAngles(JSContext* ctx, JSValueConst this_val) {
+JSValue          NodeGetAngles(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return JS_UNDEFINED;
     auto v = n->Rotation();
@@ -1377,16 +1377,14 @@ JSValue NodeSetColor(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     n->SetColor({ float(x), float(y), float(z) });
     return JS_UNDEFINED;
 }
-JSValue NodeGetVAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(ctx, "center"); }
-JSValue NodeGetHAlign(JSContext* ctx, JSValueConst)       { return JS_NewString(ctx, "center"); }
+JSValue NodeGetVAlign(JSContext* ctx, JSValueConst) { return JS_NewString(ctx, "center"); }
+JSValue NodeGetHAlign(JSContext* ctx, JSValueConst) { return JS_NewString(ctx, "center"); }
 JSValue NodeSetIgnore(JSContext*, JSValueConst, JSValueConst) { return JS_UNDEFINED; }
 
 // `text` is the only string-valued property on WWLayer. Most scripts only
 // write it (clock / date / locale formatters); GetText therefore returns
 // an empty string rather than tracking last-applied text state.
-JSValue NodeGetText(JSContext* ctx, JSValueConst) {
-    return JS_NewString(ctx, "");
-}
+JSValue NodeGetText(JSContext* ctx, JSValueConst) { return JS_NewString(ctx, ""); }
 JSValue NodeSetText(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return JS_UNDEFINED;
@@ -1419,17 +1417,15 @@ JSValue NodeGetTransformMatrix(JSContext* ctx, JSValueConst this_val, int, JSVal
     JSValue obj = JS_NewObject(ctx);
     if (n) {
         n->UpdateTrans();
-        const auto& mat = n->ModelTrans();  // Eigen Matrix4d column-major
+        const auto& mat = n->ModelTrans(); // Eigen Matrix4d column-major
         for (int i = 0; i < 16; ++i) {
-            JS_DefinePropertyValueUint32(ctx, m, i,
-                                         JS_NewFloat64(ctx, mat.data()[i]),
-                                         JS_PROP_C_W_E);
+            JS_DefinePropertyValueUint32(
+                ctx, m, i, JS_NewFloat64(ctx, mat.data()[i]), JS_PROP_C_W_E);
         }
     } else {
-        constexpr double id[16] { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+        constexpr double id[16] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
         for (int i = 0; i < 16; ++i) {
-            JS_DefinePropertyValueUint32(ctx, m, i, JS_NewFloat64(ctx, id[i]),
-                                         JS_PROP_C_W_E);
+            JS_DefinePropertyValueUint32(ctx, m, i, JS_NewFloat64(ctx, id[i]), JS_PROP_C_W_E);
         }
     }
     JS_DefinePropertyValueStr(ctx, obj, "m", m, JS_PROP_C_W_E);
@@ -1437,15 +1433,13 @@ JSValue NodeGetTransformMatrix(JSContext* ctx, JSValueConst this_val, int, JSVal
 }
 
 JSValue NodeGetChildren(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
-    auto* n = GetLayerNode(this_val);
+    auto*   n   = GetLayerNode(this_val);
     JSValue arr = JS_NewArray(ctx);
     if (! n) return arr;
     uint32_t i = 0;
     for (const auto& child : n->GetChildren()) {
         if (! child) continue;
-        JS_DefinePropertyValueUint32(ctx, arr, i++,
-                                     WrapLayerNode(ctx, child.get()),
-                                     JS_PROP_C_W_E);
+        JS_DefinePropertyValueUint32(ctx, arr, i++, WrapLayerNode(ctx, child.get()), JS_PROP_C_W_E);
     }
     return arr;
 }
@@ -1476,8 +1470,7 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int /*ar
                              JSValueConst* /*argv*/) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     auto* fs   = host->active_field_script;
-    if (! fs || fs->m_impl->clone_queue.empty())
-        return JS_DupValue(ctx, host->default_layer);
+    if (! fs || fs->m_impl->clone_queue.empty()) return JS_DupValue(ctx, host->default_layer);
     owe::SceneNode* node = fs->m_impl->clone_queue.front();
     fs->m_impl->clone_queue.erase(fs->m_impl->clone_queue.begin());
     return WrapLayerNode(ctx, node);
@@ -1489,9 +1482,7 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int /*ar
 JSValue NodeSceneGetLayerIndex(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     return JS_NewInt32(ctx, 0);
 }
-JSValue NodeSceneSortLayer(JSContext*, JSValueConst, int, JSValueConst*) {
-    return JS_UNDEFINED;
-}
+JSValue NodeSceneSortLayer(JSContext*, JSValueConst, int, JSValueConst*) { return JS_UNDEFINED; }
 
 // --- WWTextureAnimation -----------------------------------------------------
 // Wraps a SceneNode*'s TextureAnimatorState. Slot 0 only — every workshop
@@ -1502,7 +1493,7 @@ static JSClassID s_texanim_class_id = 0;
 
 JSClassDef s_texanim_class_def {
     .class_name = "WWTextureAnimation",
-    .finalizer  = nullptr,  // SceneNode owns the state
+    .finalizer  = nullptr, // SceneNode owns the state
 };
 
 inline owe::SceneNode* GetTexAnimNode(JSValueConst v) {
@@ -1511,7 +1502,7 @@ inline owe::SceneNode* GetTexAnimNode(JSValueConst v) {
 
 JSValue TexAnimPlay(JSContext*, JSValueConst this_val, int, JSValueConst*) {
     if (auto* n = GetTexAnimNode(this_val)) {
-        auto& a = n->TexAnim();
+        auto& a         = n->TexAnim();
         a.current_frame = -1;
         a.playing       = true;
     }
@@ -1548,21 +1539,19 @@ JSValue TexAnimIsPlaying(JSContext* ctx, JSValueConst this_val, int, JSValueCons
 }
 
 const JSCFunctionListEntry s_texanim_proto_funcs[] = {
-    JS_CFUNC_DEF("play",      0, TexAnimPlay),
-    JS_CFUNC_DEF("stop",      0, TexAnimStop),
-    JS_CFUNC_DEF("pause",     0, TexAnimPause),
-    JS_CFUNC_DEF("setFrame",  1, TexAnimSetFrame),
-    JS_CFUNC_DEF("getFrame",  0, TexAnimGetFrame),
-    JS_CFUNC_DEF("isPlaying", 0, TexAnimIsPlaying),
+    JS_CFUNC_DEF("play", 0, TexAnimPlay),         JS_CFUNC_DEF("stop", 0, TexAnimStop),
+    JS_CFUNC_DEF("pause", 0, TexAnimPause),       JS_CFUNC_DEF("setFrame", 1, TexAnimSetFrame),
+    JS_CFUNC_DEF("getFrame", 0, TexAnimGetFrame), JS_CFUNC_DEF("isPlaying", 0, TexAnimIsPlaying),
 };
 
 void InitTexAnimClass(JSContext* ctx, JSRuntime* rt) {
     if (s_texanim_class_id == 0) JS_NewClassID(rt, &s_texanim_class_id);
     JS_NewClass(rt, s_texanim_class_id, &s_texanim_class_def);
     JSValue proto = JS_NewObject(ctx);
-    JS_SetPropertyFunctionList(ctx, proto, s_texanim_proto_funcs,
-                                sizeof(s_texanim_proto_funcs) /
-                                    sizeof(s_texanim_proto_funcs[0]));
+    JS_SetPropertyFunctionList(ctx,
+                               proto,
+                               s_texanim_proto_funcs,
+                               sizeof(s_texanim_proto_funcs) / sizeof(s_texanim_proto_funcs[0]));
     JS_SetClassProto(ctx, s_texanim_class_id, proto);
 }
 
@@ -1598,44 +1587,45 @@ JSValue NodeGetAnimationStub(JSContext* ctx, JSValueConst, int, JSValueConst*) {
 }
 
 const JSCFunctionListEntry s_layer_proto_funcs[] = {
-    JS_CGETSET_DEF("origin",          NodeGetOrigin,  NodeSetOrigin),
-    JS_CGETSET_DEF("scale",           NodeGetScale,   NodeSetScale),
-    JS_CGETSET_DEF("angles",          NodeGetAngles,  NodeSetAngles),
-    JS_CGETSET_DEF("size",            NodeGetSize,    NodeSetIgnore),
-    JS_CGETSET_DEF("visible",         NodeGetVisible,    NodeSetVisible),
-    JS_CGETSET_DEF("alpha",           NodeGetAlpha,      NodeSetAlpha),
-    JS_CGETSET_DEF("brightness",      NodeGetBrightness, NodeSetBrightness),
-    JS_CGETSET_DEF("color",           NodeGetColor,      NodeSetColor),
-    JS_CGETSET_DEF("text",            NodeGetText,    NodeSetText),
-    JS_CGETSET_DEF("verticalalign",   NodeGetVAlign,  NodeSetIgnore),
-    JS_CGETSET_DEF("horizontalalign", NodeGetHAlign,  NodeSetIgnore),
-    JS_CFUNC_DEF("getParent",           0, NodeGetParent),
-    JS_CFUNC_DEF("getTransformMatrix",  0, NodeGetTransformMatrix),
-    JS_CFUNC_DEF("getChildren",         0, NodeGetChildren),
-    JS_CFUNC_DEF("getName",             0, NodeGetName),
-    JS_CFUNC_DEF("getLayer",            1, NodeGetLayer),
+    JS_CGETSET_DEF("origin", NodeGetOrigin, NodeSetOrigin),
+    JS_CGETSET_DEF("scale", NodeGetScale, NodeSetScale),
+    JS_CGETSET_DEF("angles", NodeGetAngles, NodeSetAngles),
+    JS_CGETSET_DEF("size", NodeGetSize, NodeSetIgnore),
+    JS_CGETSET_DEF("visible", NodeGetVisible, NodeSetVisible),
+    JS_CGETSET_DEF("alpha", NodeGetAlpha, NodeSetAlpha),
+    JS_CGETSET_DEF("brightness", NodeGetBrightness, NodeSetBrightness),
+    JS_CGETSET_DEF("color", NodeGetColor, NodeSetColor),
+    JS_CGETSET_DEF("text", NodeGetText, NodeSetText),
+    JS_CGETSET_DEF("verticalalign", NodeGetVAlign, NodeSetIgnore),
+    JS_CGETSET_DEF("horizontalalign", NodeGetHAlign, NodeSetIgnore),
+    JS_CFUNC_DEF("getParent", 0, NodeGetParent),
+    JS_CFUNC_DEF("getTransformMatrix", 0, NodeGetTransformMatrix),
+    JS_CFUNC_DEF("getChildren", 0, NodeGetChildren),
+    JS_CFUNC_DEF("getName", 0, NodeGetName),
+    JS_CFUNC_DEF("getLayer", 1, NodeGetLayer),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
-    JS_CFUNC_DEF("getAnimation",        0, NodeGetAnimationStub),
-    JS_CFUNC_DEF("getAnimationLayer",   1, NodeGetAnimationStub),
-    JS_CFUNC_DEF("createLayer",         1, NodeSceneCreateLayer),
-    JS_CFUNC_DEF("getLayerIndex",       1, NodeSceneGetLayerIndex),
-    JS_CFUNC_DEF("sortLayer",           2, NodeSceneSortLayer),
+    JS_CFUNC_DEF("getAnimation", 0, NodeGetAnimationStub),
+    JS_CFUNC_DEF("getAnimationLayer", 1, NodeGetAnimationStub),
+    JS_CFUNC_DEF("createLayer", 1, NodeSceneCreateLayer),
+    JS_CFUNC_DEF("getLayerIndex", 1, NodeSceneGetLayerIndex),
+    JS_CFUNC_DEF("sortLayer", 2, NodeSceneSortLayer),
 };
 
 void InitLayerClass(JSContext* ctx, JSRuntime* rt) {
     if (s_layer_class_id == 0) JS_NewClassID(rt, &s_layer_class_id);
     JS_NewClass(rt, s_layer_class_id, &s_layer_class_def);
     JSValue proto = JS_NewObject(ctx);
-    JS_SetPropertyFunctionList(ctx, proto, s_layer_proto_funcs,
-                                sizeof(s_layer_proto_funcs) /
-                                    sizeof(s_layer_proto_funcs[0]));
+    JS_SetPropertyFunctionList(ctx,
+                               proto,
+                               s_layer_proto_funcs,
+                               sizeof(s_layer_proto_funcs) / sizeof(s_layer_proto_funcs[0]));
     JS_SetClassProto(ctx, s_layer_class_id, proto);
 }
 
 // Stash the bootstrap's `thisLayer` / `thisScene` stubs for restore.
 void CaptureDefaultBindings(JSContext* ctx) {
-    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    JSValue g    = JS_GetGlobalObject(ctx);
+    auto*   host        = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JSValue g           = JS_GetGlobalObject(ctx);
     host->default_layer = JS_GetPropertyStr(ctx, g, "thisLayer");
     host->default_scene = JS_GetPropertyStr(ctx, g, "thisScene");
     JS_FreeValue(ctx, g);
@@ -1654,11 +1644,11 @@ void BindThisScene(JSContext* ctx, JSValueConst val) {
     JS_FreeValue(ctx, g);
 }
 
-}  // namespace
+} // namespace
 
 // --- JsRuntime methods ------------------------------------------------------
 
-JsRuntime::JsRuntime() : m_impl(std::make_unique<Impl>()) {
+JsRuntime::JsRuntime(): m_impl(std::make_unique<Impl>()) {
     m_impl->rt  = JS_NewRuntime();
     m_impl->ctx = JS_NewContext(m_impl->rt);
     if (! m_impl->rt || ! m_impl->ctx) {
@@ -1677,8 +1667,8 @@ JsRuntime::JsRuntime() : m_impl(std::make_unique<Impl>()) {
     // Built-in ES modules (WEMath, …). Resolves bare `import 'WEMath'`
     // against the kBuiltinModules table; unknown names raise
     // ReferenceError via the loader.
-    JS_SetModuleLoaderFunc(m_impl->rt, /*normalize=*/nullptr,
-                           BuiltinModuleLoader, /*opaque=*/nullptr);
+    JS_SetModuleLoaderFunc(
+        m_impl->rt, /*normalize=*/nullptr, BuiltinModuleLoader, /*opaque=*/nullptr);
     InitLayerClass(m_impl->ctx, m_impl->rt);
     InitTexAnimClass(m_impl->ctx, m_impl->rt);
     InstallEngineGlobal(m_impl->ctx);
@@ -1704,10 +1694,8 @@ JsRuntime::~JsRuntime() {
     m_impl->scripts.clear();
     for (auto& [_sha, ns] : m_impl->ns_by_sha) JS_FreeValue(m_impl->ctx, ns);
     m_impl->ns_by_sha.clear();
-    if (! JS_IsUndefined(m_impl->wrapped_scene))
-        JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
-    if (! JS_IsUndefined(m_impl->host.vec3_ctor))
-        JS_FreeValue(m_impl->ctx, m_impl->host.vec3_ctor);
+    if (! JS_IsUndefined(m_impl->wrapped_scene)) JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
+    if (! JS_IsUndefined(m_impl->host.vec3_ctor)) JS_FreeValue(m_impl->ctx, m_impl->host.vec3_ctor);
     if (! JS_IsUndefined(m_impl->host.default_layer))
         JS_FreeValue(m_impl->ctx, m_impl->host.default_layer);
     if (! JS_IsUndefined(m_impl->host.default_scene))
@@ -1732,18 +1720,17 @@ void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
 void JsRuntime::SetUserProperty(std::string_view key, const json& property) {
     if (! m_impl || ! m_impl->ctx) return;
     std::string key_str { key };
-    JSContext*  ctx = m_impl->ctx;
+    JSContext*  ctx    = m_impl->ctx;
     JSValue     global = JS_GetGlobalObject(ctx);
     JSValue     engine = JS_GetPropertyStr(ctx, global, "engine");
     JSValue     props  = JS_GetPropertyStr(ctx, engine, "userProperties");
     if (! JS_IsObject(props)) {
         JS_FreeValue(ctx, props);
         props = JS_NewObject(ctx);
-        JS_DefinePropertyValueStr(ctx, engine, "userProperties",
-                                  JS_DupValue(ctx, props), JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(
+            ctx, engine, "userProperties", JS_DupValue(ctx, props), JS_PROP_C_W_E);
     }
-    JS_DefinePropertyValueStr(ctx, props, key_str.c_str(),
-                              JsonToJs(ctx, property), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, props, key_str.c_str(), JsonToJs(ctx, property), JS_PROP_C_W_E);
     JS_FreeValue(ctx, props);
     JS_FreeValue(ctx, engine);
     JS_FreeValue(ctx, global);
@@ -1756,12 +1743,10 @@ void JsRuntime::SetPersistence(std::string path) {
 
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
     if (! m_impl || ! m_impl->ctx) return;
-    if (! JS_IsUndefined(m_impl->wrapped_scene))
-        JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
+    if (! JS_IsUndefined(m_impl->wrapped_scene)) JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
     m_impl->scene_root    = root;
     m_impl->wrapped_scene = root ? WrapLayerNode(m_impl->ctx, root) : JS_UNDEFINED;
-    if (! JS_IsUndefined(m_impl->wrapped_scene))
-        BindThisScene(m_impl->ctx, m_impl->wrapped_scene);
+    if (! JS_IsUndefined(m_impl->wrapped_scene)) BindThisScene(m_impl->ctx, m_impl->wrapped_scene);
 }
 
 void JsRuntime::TickAll() {
@@ -1787,34 +1772,37 @@ void JsRuntime::TickAll() {
         auto* I = fs->m_impl.get();
         if (! I->alive || ! I->node) continue;
         const bool now_inside = in_window && HitTestNode(I->node, cursor);
-        BindThisLayer(ctx, JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer
-                                                            : I->wrapped_layer);
+        BindThisLayer(
+            ctx, JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer : I->wrapped_layer);
         m_impl->host.active_field_script = fs.get();
         if (now_inside != I->cursor_inside) {
-            InvokeCursorCallback(ctx, I->module_ns,
+            InvokeCursorCallback(ctx,
+                                 I->module_ns,
                                  now_inside ? "cursorEnter" : "cursorLeave",
-                                 ensure_ev(-1), m_impl.get(), I->sha);
+                                 ensure_ev(-1),
+                                 m_impl.get(),
+                                 I->sha);
             I->cursor_inside = now_inside;
         }
         if (now_inside) {
-            InvokeCursorCallback(ctx, I->module_ns, "cursorMove",
-                                 ensure_ev(-1), m_impl.get(), I->sha);
+            InvokeCursorCallback(
+                ctx, I->module_ns, "cursorMove", ensure_ev(-1), m_impl.get(), I->sha);
         }
         if (btn_pressed && now_inside) {
             for (int b = 0; b < 3; ++b) {
                 if (btn_pressed & (1u << b)) {
-                    InvokeCursorCallback(ctx, I->module_ns, "cursorDown",
-                                         ensure_ev(b), m_impl.get(), I->sha);
-                    InvokeCursorCallback(ctx, I->module_ns, "cursorClick",
-                                         ensure_ev(b), m_impl.get(), I->sha);
+                    InvokeCursorCallback(
+                        ctx, I->module_ns, "cursorDown", ensure_ev(b), m_impl.get(), I->sha);
+                    InvokeCursorCallback(
+                        ctx, I->module_ns, "cursorClick", ensure_ev(b), m_impl.get(), I->sha);
                 }
             }
         }
         if (btn_release && now_inside) {
             for (int b = 0; b < 3; ++b) {
                 if (btn_release & (1u << b)) {
-                    InvokeCursorCallback(ctx, I->module_ns, "cursorUp",
-                                         ensure_ev(b), m_impl.get(), I->sha);
+                    InvokeCursorCallback(
+                        ctx, I->module_ns, "cursorUp", ensure_ev(b), m_impl.get(), I->sha);
                 }
             }
         }
@@ -1827,14 +1815,13 @@ void JsRuntime::TickAll() {
         if (JS_IsUndefined(I->update_fn)) continue;
         // Swap `thisLayer` to this script's bound node before update. When
         // unbound, restore the original stub captured at bootstrap.
-        BindThisLayer(ctx,
-                      JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer
-                                                       : I->wrapped_layer);
+        BindThisLayer(
+            ctx, JS_IsUndefined(I->wrapped_layer) ? m_impl->host.default_layer : I->wrapped_layer);
         m_impl->host.active_field_script = fs.get();
         JSValue ret;
         if (I->update_takes_arg) {
             JSValue args[1] = { JS_DupValue(ctx, I->current_value) };
-            ret = JS_Call(ctx, I->update_fn, JS_UNDEFINED, 1, args);
+            ret             = JS_Call(ctx, I->update_fn, JS_UNDEFINED, 1, args);
             JS_FreeValue(ctx, args[0]);
         } else {
             ret = JS_Call(ctx, I->update_fn, JS_UNDEFINED, 0, nullptr);
@@ -1860,7 +1847,7 @@ void JsRuntime::ForEachScript(EachFn fn, void* user) {
     for (auto& fs : m_impl->scripts) fn(fs.get(), user);
 }
 
-void JsRuntime::RegisterTextSetter(owe::SceneNode* node,
+void JsRuntime::RegisterTextSetter(owe::SceneNode*                       node,
                                    std::function<void(std::string_view)> setter) {
     if (node == nullptr) return;
     m_impl->host.text_setters[node] = std::move(setter);
@@ -1868,26 +1855,24 @@ void JsRuntime::RegisterTextSetter(owe::SceneNode* node,
 
 // --- Module load + FieldScript construction ---------------------------------
 
-namespace {
+namespace
+{
 
 // Discover whether `update` takes an argument by inspecting `length`.
 // JS function objects have a `length` property = formal parameter count.
 bool FunctionTakesArg(JSContext* ctx, JSValue fn) {
     JSValue len = JS_GetPropertyStr(ctx, fn, "length");
-    int32_t n = 0;
+    int32_t n   = 0;
     JS_ToInt32(ctx, &n, len);
     JS_FreeValue(ctx, len);
     return n >= 1;
 }
 
-}  // namespace
+} // namespace
 
-FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
-                                        std::string_view script_sha,
-                                        FieldKind        field_kind_in,
-                                        const json&      properties_config,
-                                        const json&      initial_value,
-                                        owe::SceneNode*  node,
+FieldScript* JsRuntime::MakeFieldScript(std::string_view source, std::string_view script_sha,
+                                        FieldKind field_kind_in, const json& properties_config,
+                                        const json& initial_value, owe::SceneNode* node,
                                         std::vector<owe::SceneNode*> clones) {
     JSContext* ctx = m_impl->ctx;
     if (! ctx) return nullptr;
@@ -1907,10 +1892,11 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     JSValue       ns;
     auto          sha_str = std::string(script_sha);
     std::uint64_t uniq    = m_impl->next_module_serial++;
-    std::string   fname   = "scripts/" + sha_str + "-" +
-                              std::to_string(uniq) + ".js";
+    std::string   fname   = "scripts/" + sha_str + "-" + std::to_string(uniq) + ".js";
     {
-        JSValue compiled = JS_Eval(ctx, source.data(), source.size(),
+        JSValue compiled = JS_Eval(ctx,
+                                   source.data(),
+                                   source.size(),
                                    fname.c_str(),
                                    JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
         if (JS_IsException(compiled)) {
@@ -1919,8 +1905,8 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
             if (! JS_IsUndefined(wrapped)) JS_FreeValue(ctx, wrapped);
             return nullptr;
         }
-        JSModuleDef* m = static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(compiled));
-        JSValue ev = JS_EvalFunction(ctx, compiled);
+        JSModuleDef* m  = static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(compiled));
+        JSValue      ev = JS_EvalFunction(ctx, compiled);
         if (JS_IsException(ev)) {
             m_impl->LogError(ctx, script_sha, "module eval failed");
             JS_FreeValue(ctx, ev);
@@ -1932,16 +1918,16 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     }
 
     // 2. Build the FieldScript handle.
-    auto fs           = std::make_unique<FieldScript>();
-    auto* I           = fs->m_impl.get();
-    I->rt             = m_impl.get();
-    I->ctx            = ctx;
-    I->sha            = sha_str;
-    I->kind           = (field_kind_in == FieldKind::Unknown) ? FieldKind::Scalar : field_kind_in;
-    I->module_ns      = ns;  // owns one ref now
-    I->node           = node;
-    I->wrapped_layer  = wrapped;  // takes ownership; freed in JsRuntime dtor
-    I->clone_queue    = std::move(clones);
+    auto  fs         = std::make_unique<FieldScript>();
+    auto* I          = fs->m_impl.get();
+    I->rt            = m_impl.get();
+    I->ctx           = ctx;
+    I->sha           = sha_str;
+    I->kind          = (field_kind_in == FieldKind::Unknown) ? FieldKind::Scalar : field_kind_in;
+    I->module_ns     = ns; // owns one ref now
+    I->node          = node;
+    I->wrapped_layer = wrapped; // takes ownership; freed in JsRuntime dtor
+    I->clone_queue   = std::move(clones);
 
     // 3. Wire scriptProperties._hostValues from the per-binding config so
     //    `scriptProperties.foo` returns the configured value (resolving
@@ -1950,11 +1936,9 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     if (! JS_IsUndefined(sp)) {
         JSValue hv = JS_GetPropertyStr(ctx, sp, "__hostValues");
         if (JS_IsObject(hv) && properties_config.is_object()) {
-            for (auto it = properties_config.begin();
-                 it != properties_config.end(); ++it) {
-                JS_DefinePropertyValueStr(ctx, hv, it.key().c_str(),
-                                          ResolveConfigValue(ctx, it.value()),
-                                          JS_PROP_C_W_E);
+            for (auto it = properties_config.begin(); it != properties_config.end(); ++it) {
+                JS_DefinePropertyValueStr(
+                    ctx, hv, it.key().c_str(), ResolveConfigValue(ctx, it.value()), JS_PROP_C_W_E);
             }
         }
         JS_FreeValue(ctx, hv);
@@ -1965,11 +1949,11 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
     //    coerced to match the bound field's expected JS shape. Mark this
     //    fs as the active script so init-time createLayer calls pop from
     //    its clone_queue.
-    JSValue init_fn = JS_GetPropertyStr(ctx, ns, "init");
+    JSValue init_fn  = JS_GetPropertyStr(ctx, ns, "init");
     JSValue init_arg = CoerceInitialValue(ctx, initial_value, I->kind);
     if (JS_IsFunction(ctx, init_fn)) {
         m_impl->host.active_field_script = fs.get();
-        JSValue r = JS_Call(ctx, init_fn, JS_UNDEFINED, 1, &init_arg);
+        JSValue r                        = JS_Call(ctx, init_fn, JS_UNDEFINED, 1, &init_arg);
         if (JS_IsException(r)) {
             m_impl->LogError(ctx, script_sha, "init threw");
         }
@@ -2002,11 +1986,11 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source,
 // ---------------------------------------------------------------------------
 
 struct ScriptScene::Impl {
-    JsRuntime              rt;
-    std::vector<Actuator>  actuators;
+    JsRuntime             rt;
+    std::vector<Actuator> actuators;
 };
 
-ScriptScene::ScriptScene() : m_impl(std::make_unique<Impl>()) {}
+ScriptScene::ScriptScene(): m_impl(std::make_unique<Impl>()) {}
 ScriptScene::~ScriptScene() = default;
 
 JsRuntime& ScriptScene::runtime() noexcept { return m_impl->rt; }
@@ -2014,17 +1998,19 @@ void       ScriptScene::AddActuator(Actuator a) { m_impl->actuators.push_back(a)
 // Empty = no scripts AND no actuators. Visibility-bound side-effect-only
 // scripts (audio bar fanout) don't register an actuator but still need
 // their TickAll to run, so emptiness must also consult the runtime.
-bool       ScriptScene::empty() const noexcept {
+bool ScriptScene::empty() const noexcept {
     if (! m_impl->actuators.empty()) return false;
     bool has_script = false;
     m_impl->rt.ForEachScript(
-        [](script::FieldScript*, void* u) { *static_cast<bool*>(u) = true; },
+        [](script::FieldScript*, void* u) {
+            *static_cast<bool*>(u) = true;
+        },
         &has_script);
     return ! has_script;
 }
 
-std::function<void(const ScriptValue&)>
-MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget target) {
+std::function<void(const ScriptValue&)> MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node,
+                                                               NodeTransformTarget target) {
     return [node = std::move(node), target](const ScriptValue& v) {
         if (! node) return;
         if (std::holds_alternative<std::monostate>(v)) return;
@@ -2035,8 +2021,9 @@ MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget
         Eigen::Vector3f current = [&] {
             switch (target) {
             case NodeTransformTarget::Translate: return node->Translate();
-            case NodeTransformTarget::Scale:     return node->Scale();
-            case NodeTransformTarget::Rotation:  return Eigen::Vector3f { node->Rotation() * float(kRadToDeg) };
+            case NodeTransformTarget::Scale: return node->Scale();
+            case NodeTransformTarget::Rotation:
+                return Eigen::Vector3f { node->Rotation() * float(kRadToDeg) };
             }
             return Eigen::Vector3f { 0.0f, 0.0f, 0.0f };
         }();
@@ -2047,8 +2034,8 @@ MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget
                                      static_cast<float>(p->y),
                                      static_cast<float>(p->z) };
         } else if (auto* p = std::get_if<Vec2Value>(&v)) {
-            next = Eigen::Vector3f { static_cast<float>(p->x),
-                                     static_cast<float>(p->y), current.z() };
+            next =
+                Eigen::Vector3f { static_cast<float>(p->x), static_cast<float>(p->y), current.z() };
         } else if (auto* p = std::get_if<ScalarValue>(&v)) {
             // Scalar splats across all three axes for scale; falls back to
             // current.x for translate/rotation (rare but seen in the corpus
@@ -2065,8 +2052,8 @@ MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node, NodeTransformTarget
 
         switch (target) {
         case NodeTransformTarget::Translate: node->SetTranslate(next); break;
-        case NodeTransformTarget::Scale:     node->SetScale(next); break;
-        case NodeTransformTarget::Rotation:  node->SetRotation(next * float(kDegToRad)); break;
+        case NodeTransformTarget::Scale: node->SetScale(next); break;
+        case NodeTransformTarget::Rotation: node->SetRotation(next * float(kDegToRad)); break;
         }
     };
 }
@@ -2080,13 +2067,13 @@ void ScriptScene::Tick(const FrameInputs& fi) {
     }
 }
 
-void InstallScriptScene(owe::Scene&             scene,
-                        std::unique_ptr<ScriptScene>  ss) {
+void InstallScriptScene(owe::Scene& scene, std::unique_ptr<ScriptScene> ss) {
     // Move into Scene's opaque-pointer slot. The deleter knows the
     // concrete type because it's instantiated in this TU.
-    void* raw = ss.release();
-    scene.script_scene = decltype(scene.script_scene)(
-        raw, [](void* p) noexcept { delete static_cast<ScriptScene*>(p); });
+    void* raw          = ss.release();
+    scene.script_scene = decltype(scene.script_scene)(raw, [](void* p) noexcept {
+        delete static_cast<ScriptScene*>(p);
+    });
 }
 
 void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi) {
@@ -2095,8 +2082,7 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi) {
     ss->Tick(fi);
 }
 
-void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
-                          const nlohmann::json& property) {
+void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const nlohmann::json& property) {
     if (auto* ss = static_cast<ScriptScene*>(scene.script_scene.get()); ss != nullptr) {
         ss->runtime().SetUserProperty(key, property);
     }
@@ -2104,13 +2090,12 @@ void SetSceneUserProperty(owe::Scene& scene, std::string_view key,
     // `engine.userProperties[key]` flip runtime visibility here. Scene-only
     // (no JS) wallpapers also need this, so it runs unconditionally.
     bool have_bool = false;
-    bool v = false;
-    if (property.is_object() && property.contains("value") &&
-        property.at("value").is_boolean()) {
-        v = property.at("value").get<bool>();
+    bool v         = false;
+    if (property.is_object() && property.contains("value") && property.at("value").is_boolean()) {
+        v         = property.at("value").get<bool>();
         have_bool = true;
     } else if (property.is_boolean()) {
-        v = property.get<bool>();
+        v         = property.get<bool>();
         have_bool = true;
     }
     if (have_bool) {
@@ -2127,4 +2112,4 @@ void SetScenePersistence(owe::Scene& scene, std::string path) {
     ss->runtime().SetPersistence(std::move(path));
 }
 
-}  // namespace owe::script
+} // namespace owe::script

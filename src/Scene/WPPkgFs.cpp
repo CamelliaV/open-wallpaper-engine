@@ -53,10 +53,10 @@ std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
         idx         length = pkg.ReadInt32();
         pkgfiles.push_back({ path, offset, length });
     }
-    auto pkgfs          = std::unique_ptr<WPPkgFs>(new WPPkgFs());
-    pkgfs->m_pkgPath    = pkgpath;
+    auto pkgfs           = std::unique_ptr<WPPkgFs>(new WPPkgFs());
+    pkgfs->m_pkgPath     = pkgpath;
     pkgfs->m_pkg_version = std::move(ver);
-    idx headerSize   = pkg.Tell();
+    idx headerSize       = pkg.Tell();
     for (auto& el : pkgfiles) {
         el.offset += headerSize;
         pkgfs->m_files.insert({ LowerPath(el.path), el });
@@ -64,9 +64,7 @@ std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
     return pkgfs;
 }
 
-bool WPPkgFs::Contains(std::string_view path) const {
-    return m_files.count(LowerPath(path)) > 0;
-}
+bool WPPkgFs::Contains(std::string_view path) const { return m_files.count(LowerPath(path)) > 0; }
 
 std::shared_ptr<IBinaryStream> WPPkgFs::Open(std::string_view path) {
     auto pkg = fs::CreateCBinaryStream(m_pkgPath);

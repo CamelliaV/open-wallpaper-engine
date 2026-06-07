@@ -6,7 +6,8 @@
 
 #include "include/cef_browser.h"
 
-namespace weweb {
+namespace weweb
+{
 
 // Build the JS payload that drives Wallpaper Engine's
 // `window.wallpaperPropertyListener.applyUserProperties()` hook on initial
@@ -15,7 +16,6 @@ namespace weweb {
 std::string BuildPropertyListenerSnippet(const nlohmann::json& props);
 
 // Inject the snippet into the page's main frame.
-void InjectUserProperties(CefRefPtr<CefBrowser> browser,
-                          const nlohmann::json& props);
+void InjectUserProperties(CefRefPtr<CefBrowser> browser, const nlohmann::json& props);
 
-}  // namespace weweb
+} // namespace weweb

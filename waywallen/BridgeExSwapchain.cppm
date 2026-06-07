@@ -22,9 +22,7 @@ public:
     BridgeExSwapchain(ww_pool_t* pool, int sock);
     ~BridgeExSwapchain() override;
 
-    void queueDirective(const ww_pool_directive_t& directive) {
-        m_core.queueDirective(directive);
-    }
+    void queueDirective(const ww_pool_directive_t& directive) { m_core.queueDirective(directive); }
     bool hasPendingDirective() const { return m_core.hasPendingDirective(); }
 
     void setOnFirstNegotiated(std::function<void()> cb) {
@@ -35,26 +33,19 @@ public:
 
     bool acquireRenderTarget(owe::vulkan::ImageParameters& out) override;
 
-    void submitRendered(int producer_sync_fd) override {
-        m_core.submitSlot(producer_sync_fd);
-    }
+    void submitRendered(int producer_sync_fd) override { m_core.submitSlot(producer_sync_fd); }
 
     unsigned width() const override { return m_core.width(); }
     unsigned height() const override { return m_core.height(); }
     VkFormat format() const override { return m_core.format(); }
 
-    VkImageLayout producerOutputLayout() const override {
-        return VK_IMAGE_LAYOUT_GENERAL;
-    }
+    VkImageLayout producerOutputLayout() const override { return VK_IMAGE_LAYOUT_GENERAL; }
 
-    uint32_t releaseTargetQueueFamily() const override {
-        return VK_QUEUE_FAMILY_FOREIGN_EXT;
-    }
+    uint32_t releaseTargetQueueFamily() const override { return VK_QUEUE_FAMILY_FOREIGN_EXT; }
 
     bool ready() const override { return m_core.ready(); }
 
-    void setOnReadyChanged(
-        std::function<void(const owe::ExSwapchainReadyEvent&)> cb) override {
+    void setOnReadyChanged(std::function<void(const owe::ExSwapchainReadyEvent&)> cb) override {
         if (! cb) {
             m_core.setOnReadyChanged({});
             return;

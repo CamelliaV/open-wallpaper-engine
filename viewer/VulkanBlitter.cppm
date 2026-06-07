@@ -100,7 +100,7 @@ private:
     // VUID-vkQueueSubmit-pSignalSemaphores-00067 because vkQueuePresentKHR
     // keeps the wait semaphore busy until the image is re-acquired.
     std::vector<VkSemaphore> render_done_sem_;
-    VkFence                  in_flight_fence_[kMaxFramesInFlight] { VK_NULL_HANDLE, VK_NULL_HANDLE };
+    VkFence in_flight_fence_[kMaxFramesInFlight] { VK_NULL_HANDLE, VK_NULL_HANDLE };
 
     GLFWwindow* window_ { nullptr };
 };

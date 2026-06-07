@@ -42,14 +42,11 @@ using idx   = std::ptrdiff_t;
 using usize = std::size_t;
 using isize = std::ptrdiff_t;
 
-inline std::intptr_t Ptr2Int(void* p) noexcept {
-    return reinterpret_cast<std::intptr_t>(p);
-}
+inline std::intptr_t Ptr2Int(void* p) noexcept { return reinterpret_cast<std::intptr_t>(p); }
 
 // StringHelper
 constexpr bool sstart_with(std::string_view str, std::string_view start) {
-    return str.size() >= start.size() &&
-           str.compare(0, start.size(), start, 0, start.size()) == 0;
+    return str.size() >= start.size() && str.compare(0, start.size(), start, 0, start.size()) == 0;
 }
 constexpr bool send_with(std::string_view str, std::string_view end) {
     return str.size() >= end.size() &&
@@ -68,14 +65,13 @@ using Set = std::set<Key, std::less<>>;
 
 template<class Key, class Value, class KeyLike, class Allocator>
 inline bool exists(const std::map<Key, Value, std::less<>, Allocator>& m,
-                   const KeyLike&                                       key) noexcept {
+                   const KeyLike&                                      key) noexcept {
     auto iter = m.find(key);
     return iter != m.end();
 }
 
 template<class Key, class KeyLike, class Allocator>
-inline bool exists(const std::set<Key, std::less<>, Allocator>& m,
-                   const KeyLike&                               key) noexcept {
+inline bool exists(const std::set<Key, std::less<>, Allocator>& m, const KeyLike& key) noexcept {
     auto iter = m.find(key);
     return iter != m.end();
 }

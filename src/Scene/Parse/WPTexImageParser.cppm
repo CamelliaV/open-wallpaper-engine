@@ -17,7 +17,8 @@ export namespace owe
 //   texv: always 5
 //   texi: always 1
 //   texb: 1 (PKGV0001 only; 4)  |  2 (early; 170)  |  3 (historic; 10096)  |  4 (PKGV0022+; 5129)
-//   texs: 0 (non-sprite)  |  2 (early sprites; 15)  |  3 (current sprites; 491, including 90 with texb=4)
+//   texs: 0 (non-sprite)  |  2 (early sprites; 15)  |  3 (current sprites; 491, including 90 with
+//   texb=4)
 //          texs == 1 is documented in legacy code but never observed.
 //
 // Full binary layout, by version. All ints are little-endian int32

@@ -258,22 +258,30 @@ bool EglPresenter::Init(GLFWwindow* window) {
     if (! LoadFunctionPointers()) return false;
 
     {
-        const char* plat_str = (platform == GLFW_PLATFORM_WAYLAND) ? "wayland"
-                             : (platform == GLFW_PLATFORM_X11)     ? "x11"
-                                                                   : "?";
+        const char* plat_str    = (platform == GLFW_PLATFORM_WAYLAND) ? "wayland"
+                                  : (platform == GLFW_PLATFORM_X11)   ? "x11"
+                                                                      : "?";
         const char* egl_vendor  = eglQueryString(egl_display_, EGL_VENDOR);
         const char* egl_version = eglQueryString(egl_display_, EGL_VERSION);
         const char* egl_apis    = eglQueryString(egl_display_, EGL_CLIENT_APIS);
         const char* egl_exts    = eglQueryString(egl_display_, EGL_EXTENSIONS);
-        std::fprintf(stderr, "weweb-egl: platform=%s egl=%d.%d vendor=%s\n",
-                     plat_str, egl_major, egl_minor, egl_vendor ? egl_vendor : "?");
+        std::fprintf(stderr,
+                     "weweb-egl: platform=%s egl=%d.%d vendor=%s\n",
+                     plat_str,
+                     egl_major,
+                     egl_minor,
+                     egl_vendor ? egl_vendor : "?");
         std::fprintf(stderr, "weweb-egl: EGL_VERSION = %s\n", egl_version ? egl_version : "?");
         std::fprintf(stderr, "weweb-egl: EGL_CLIENT_APIS = %s\n", egl_apis ? egl_apis : "?");
-        const bool has_dmabuf      = egl_exts && std::strstr(egl_exts, "EGL_EXT_image_dma_buf_import")           != nullptr;
-        const bool has_dmabuf_mods = egl_exts && std::strstr(egl_exts, "EGL_EXT_image_dma_buf_import_modifiers") != nullptr;
-        std::fprintf(stderr, "weweb-egl: EGL_EXT_image_dma_buf_import = %s\n",
+        const bool has_dmabuf =
+            egl_exts && std::strstr(egl_exts, "EGL_EXT_image_dma_buf_import") != nullptr;
+        const bool has_dmabuf_mods =
+            egl_exts && std::strstr(egl_exts, "EGL_EXT_image_dma_buf_import_modifiers") != nullptr;
+        std::fprintf(stderr,
+                     "weweb-egl: EGL_EXT_image_dma_buf_import = %s\n",
                      has_dmabuf ? "yes" : "MISSING");
-        std::fprintf(stderr, "weweb-egl: EGL_EXT_image_dma_buf_import_modifiers = %s\n",
+        std::fprintf(stderr,
+                     "weweb-egl: EGL_EXT_image_dma_buf_import_modifiers = %s\n",
                      has_dmabuf_mods ? "yes" : "no");
         if (DebugVerbose() && egl_exts) {
             std::fprintf(stderr, "weweb-egl: EGL_EXTENSIONS = %s\n", egl_exts);
@@ -282,46 +290,53 @@ bool EglPresenter::Init(GLFWwindow* window) {
         const auto* gl_vendor   = glGetString(GL_VENDOR);
         const auto* gl_renderer = glGetString(GL_RENDERER);
         const auto* gl_version  = glGetString(GL_VERSION);
-        std::fprintf(stderr, "weweb-egl: GL_VENDOR   = %s\n", gl_vendor   ? reinterpret_cast<const char*>(gl_vendor)   : "?");
-        std::fprintf(stderr, "weweb-egl: GL_RENDERER = %s\n", gl_renderer ? reinterpret_cast<const char*>(gl_renderer) : "?");
-        std::fprintf(stderr, "weweb-egl: GL_VERSION  = %s\n", gl_version  ? reinterpret_cast<const char*>(gl_version)  : "?");
+        std::fprintf(stderr,
+                     "weweb-egl: GL_VENDOR   = %s\n",
+                     gl_vendor ? reinterpret_cast<const char*>(gl_vendor) : "?");
+        std::fprintf(stderr,
+                     "weweb-egl: GL_RENDERER = %s\n",
+                     gl_renderer ? reinterpret_cast<const char*>(gl_renderer) : "?");
+        std::fprintf(stderr,
+                     "weweb-egl: GL_VERSION  = %s\n",
+                     gl_version ? reinterpret_cast<const char*>(gl_version) : "?");
 
         // Dump the modifier list NVIDIA's EGL will accept for the formats
         // CEF emits. Helps spot mismatches before the first import — e.g.
         // if NV only advertises NVIDIA-specific tilings and CEF will hand
         // us LINEAR, the import is doomed regardless of attribute layout.
         if (has_dmabuf_mods && fn_eglQueryDmaBufModifiersEXT_) {
-            const std::uint32_t formats[]   = {kDrmFmtArgb8888, kDrmFmtAbgr8888,
-                                               kDrmFmtBgra8888, kDrmFmtXrgb8888};
-            const char*         fmt_names[] = {"ARGB8888", "ABGR8888",
-                                               "BGRA8888", "XRGB8888"};
+            const std::uint32_t formats[] = {
+                kDrmFmtArgb8888, kDrmFmtAbgr8888, kDrmFmtBgra8888, kDrmFmtXrgb8888
+            };
+            const char* fmt_names[] = { "ARGB8888", "ABGR8888", "BGRA8888", "XRGB8888" };
             for (std::size_t fi = 0; fi < std::size(formats); ++fi) {
                 EGLint n = 0;
-                if (! fn_eglQueryDmaBufModifiersEXT_(egl_display_,
-                                                     static_cast<EGLint>(formats[fi]),
-                                                     0, nullptr, nullptr, &n)
-                    || n <= 0) {
-                    std::fprintf(stderr, "weweb-egl: %s: 0 modifiers (unsupported)\n",
-                                 fmt_names[fi]);
+                if (! fn_eglQueryDmaBufModifiersEXT_(
+                        egl_display_, static_cast<EGLint>(formats[fi]), 0, nullptr, nullptr, &n) ||
+                    n <= 0) {
+                    std::fprintf(
+                        stderr, "weweb-egl: %s: 0 modifiers (unsupported)\n", fmt_names[fi]);
                     continue;
                 }
                 std::vector<EGLuint64KHR> mods(static_cast<std::size_t>(n));
                 if (! fn_eglQueryDmaBufModifiersEXT_(egl_display_,
                                                      static_cast<EGLint>(formats[fi]),
-                                                     n, mods.data(), nullptr, &n)) {
+                                                     n,
+                                                     mods.data(),
+                                                     nullptr,
+                                                     &n)) {
                     continue;
                 }
                 std::fprintf(stderr, "weweb-egl: %s: %d modifiers", fmt_names[fi], n);
                 for (EGLint mi = 0; mi < n; ++mi) {
-                    std::fprintf(stderr, " 0x%016llx",
-                                 static_cast<unsigned long long>(mods[mi]));
+                    std::fprintf(stderr, " 0x%016llx", static_cast<unsigned long long>(mods[mi]));
                 }
                 std::fputc('\n', stderr);
             }
         } else {
             std::fprintf(stderr,
-                "weweb-egl: cannot query supported modifiers "
-                "(EGL_EXT_image_dma_buf_import_modifiers missing)\n");
+                         "weweb-egl: cannot query supported modifiers "
+                         "(EGL_EXT_image_dma_buf_import_modifiers missing)\n");
         }
     }
 
@@ -466,8 +481,8 @@ bool EglPresenter::AcceptDmaBuf(const DmaBufFrame& frame) {
     // Mirror VulkanBlitter::AcceptDmaBuf and substitute LINEAR explicitly
     // so both backends agree and NVIDIA accepts the import.
     constexpr std::uint64_t kDrmModLinear = 0x0;
-    const std::uint64_t modifier = (frame.modifier == kDrmModInvalid)
-                                       ? kDrmModLinear : frame.modifier;
+    const std::uint64_t     modifier =
+        (frame.modifier == kDrmModInvalid) ? kDrmModLinear : frame.modifier;
 
     std::vector<EGLint> attrs = {
         EGL_WIDTH,

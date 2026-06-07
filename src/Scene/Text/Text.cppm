@@ -64,9 +64,9 @@ struct GlyphInfo {
     std::uint32_t pixel_w { 0 };
     std::uint32_t pixel_h { 0 };
     // FreeType bearings + advance, fractional pixels.
-    float         bearing_x { 0.0f };
-    float         bearing_y { 0.0f };
-    float         advance_x { 0.0f };
+    float bearing_x { 0.0f };
+    float bearing_y { 0.0f };
+    float advance_x { 0.0f };
 };
 
 struct FontMetrics {
@@ -106,7 +106,7 @@ public:
     // Populate()'d yet. No FreeType / atlas mutation.
     const GlyphInfo* Lookup(std::uint32_t codepoint) const noexcept;
 
-    FontMetrics                  Metrics() const;
+    FontMetrics                   Metrics() const;
     std::span<const std::uint8_t> AtlasPixels() const;
 
     std::span<const AtlasDirtyRect> DirtyRects() const noexcept;
@@ -133,8 +133,7 @@ public:
     // size. The shared_ptr keeps the blob alive for the face's lifetime so
     // FreeType's pointers into it stay valid. Returns nullptr if FreeType
     // cannot open the blob.
-    FontFace* GetFace(std::shared_ptr<std::vector<std::byte>> blob,
-                      std::uint32_t                            pixel_size);
+    FontFace* GetFace(std::shared_ptr<std::vector<std::byte>> blob, std::uint32_t pixel_size);
 
     // Iterate every face the cache currently owns (used by the renderer's
     // per-frame atlas-commit hook).
@@ -142,7 +141,7 @@ public:
 
     struct ResolvedBlob {
         std::shared_ptr<std::vector<std::byte>> bytes;
-        std::string                             source;  // path or "in-pkg:..."
+        std::string                             source; // path or "in-pkg:..."
     };
 
     // Resolves a font reference. Tries:
@@ -152,8 +151,7 @@ public:
     //   3. first available .ttf/.otf in /usr/share/fonts as last-resort
     //      fallback (when fallback_to_any == true)
     // Returns {nullptr, ""} if nothing matches.
-    static ResolvedBlob ResolveSystemFont(std::string_view name,
-                                          bool             fallback_to_any = true);
+    static ResolvedBlob ResolveSystemFont(std::string_view name, bool fallback_to_any = true);
 
 private:
     struct Impl;
@@ -170,8 +168,7 @@ FontCache* SceneFontCache(owe::Scene& scene) noexcept;
 // single slot, single mipmap, LINEAR/CLAMP_TO_EDGE sampler). The returned
 // Image owns its pixel buffer; the FontFace can subsequently mutate or be
 // destroyed without affecting the snapshot.
-std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face,
-                                                   const std::string& key);
+std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face, const std::string& key);
 
 // Lazily compiles the embedded text HLSL shader (one-time, process-wide
 // cached) and returns a ready-to-bind SceneShader. The shader expects:
@@ -200,7 +197,7 @@ struct TextLayoutStyle {
     std::array<float, 3> background_color { 0.0f, 0.0f, 0.0f };
     float                background_brightness { 1.0f };
 
-    std::string halign;        // "left" / "right" / contains-substring; default = center
+    std::string halign; // "left" / "right" / contains-substring; default = center
     float       padding { 0.0f };
 };
 
@@ -210,10 +207,8 @@ public:
     // FontCache keeps it alive). `mesh` must already have its
     // SceneVertexArray/SceneIndexArray sized to peak_quads * 4 vertices and
     // peak_quads * 6 indices.
-    TextLayouter(FontFace*                       face,
-                 std::shared_ptr<owe::SceneMesh> mesh,
-                 TextLayoutStyle                 style,
-                 std::size_t                     peak_quads);
+    TextLayouter(FontFace* face, std::shared_ptr<owe::SceneMesh> mesh, TextLayoutStyle style,
+                 std::size_t peak_quads);
     ~TextLayouter();
     TextLayouter(const TextLayouter&)            = delete;
     TextLayouter& operator=(const TextLayouter&) = delete;

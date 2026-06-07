@@ -6,13 +6,13 @@
 
 module;
 
-
 export module wescene.testing.pkg_header;
 
 import rstd.cppstd;
 import wescene.fs;
 
-export namespace owe::testing {
+export namespace owe::testing
+{
 
 struct PkgEntry {
     std::string  path;
@@ -29,9 +29,11 @@ bool ReadPkgHeader(const std::string& pkg_path, std::string& version,
 
 } // namespace owe::testing
 
-namespace owe::testing {
+namespace owe::testing
+{
 
-namespace {
+namespace
+{
 
 std::string ReadSizedString(owe::fs::IBinaryStream& f) {
     std::int32_t len = f.ReadInt32();

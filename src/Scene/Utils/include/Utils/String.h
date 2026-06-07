@@ -8,7 +8,7 @@
 #include <string_view>
 #include <exception>
 #include <stdexcept>
-#include "Logging.h"  // for __SHORT_FILE__
+#include "Logging.h" // for __SHORT_FILE__
 
 #define STRTONUM(s, num) utils::StrToNum(s, num, __SHORT_FILE__, __LINE__);
 

@@ -64,8 +64,8 @@ public:
 
 class WPSceneGeneral {
 public:
-    bool                 FromJson(const nlohmann::json&);                  // legacy
-    bool                 FromJson(const nlohmann::json&, SceneVersion);    // canonical
+    bool FromJson(const nlohmann::json&);               // legacy
+    bool FromJson(const nlohmann::json&, SceneVersion); // canonical
 
     // ---- baseline (PKGV0001+) ------------------------------------------
     std::array<float, 3> clearcolor { 0.0f, 0.0f, 0.0f };
@@ -87,22 +87,22 @@ public:
 
     // bloom / camerashake scalars exist since PKGV0001 but were never
     // unpacked into the struct before the version-aware split.
-    bool                 bloom { false };
-    float                bloomstrength { 0.0f };
-    float                bloomthreshold { 0.0f };
-    bool                 camerashake { false };
-    float                camerashakeamplitude { 0.0f };
-    float                camerashakespeed { 0.0f };
-    float                camerashakeroughness { 0.0f };
+    bool  bloom { false };
+    float bloomstrength { 0.0f };
+    float bloomthreshold { 0.0f };
+    bool  camerashake { false };
+    float camerashakeamplitude { 0.0f };
+    float camerashakespeed { 0.0f };
+    float camerashakeroughness { 0.0f };
 
     // ---- PKGV0010+ ------------------------------------------------------
-    bool                 hdr { false };
-    bool                 norecompile { false };
-    float                bloomhdrfeather { 0.0f };
-    std::uint32_t        bloomhdriterations { 0 };
-    float                bloomhdrscatter { 0.0f };
-    float                bloomhdrstrength { 0.0f };
-    float                bloomhdrthreshold { 0.0f };
+    bool          hdr { false };
+    bool          norecompile { false };
+    float         bloomhdrfeather { 0.0f };
+    std::uint32_t bloomhdriterations { 0 };
+    float         bloomhdrscatter { 0.0f };
+    float         bloomhdrstrength { 0.0f };
+    float         bloomhdrthreshold { 0.0f };
 
     // ---- PKGV0020+ ------------------------------------------------------
     std::array<float, 3> bloomtint { 1.0f, 1.0f, 1.0f };
@@ -138,8 +138,8 @@ public:
 
 class WPScene {
 public:
-    bool             FromJson(const nlohmann::json&);                  // legacy: defaults to unknown version
-    bool             FromJson(const nlohmann::json&, SceneVersion);    // canonical entry
+    bool             FromJson(const nlohmann::json&); // legacy: defaults to unknown version
+    bool             FromJson(const nlohmann::json&, SceneVersion); // canonical entry
     SceneVersion     pkg_version { kSceneVersionUnknown };
     SceneJsonVersion scene_json_version { kSceneJsonVersionDefault };
     WPSceneCamera    camera;

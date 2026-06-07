@@ -2,10 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-
-
-
-
 module wescene.parse;
 import eigen;
 import nlohmann.json;
@@ -186,7 +182,8 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
                     float  scale = r.scale / 2.0f;
                     if (a > scale) {
                         auto axis = result.cross(forward).normalized();
-                        result    = AngleAxisf((a - a * scale) * rstd::f32_::consts::PI, axis) * result;
+                        result =
+                            AngleAxisf((a - a * scale) * rstd::f32_::consts::PI, axis) * result;
                     }
                 }
                 // offset
@@ -200,8 +197,8 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
     };
 }
 
-ParticleInitOp WPParticleParser::genOverrideInitOp(
-    std::shared_ptr<const wpscene::ParticleInstanceoverride> over) {
+ParticleInitOp
+WPParticleParser::genOverrideInitOp(std::shared_ptr<const wpscene::ParticleInstanceoverride> over) {
     return [over = std::move(over)](Particle& p, double) {
         PM::MutiplyInitLifeTime(p, over->lifetime);
         PM::MutiplyInitAlpha(p, over->alpha);
@@ -431,9 +428,8 @@ struct ControlPointForce {
     };
 };
 
-ParticleOperatorOp
-WPParticleParser::genParticleOperatorOp(
-    const nlohmann::json&                                   wpj,
+ParticleOperatorOp WPParticleParser::genParticleOperatorOp(
+    const nlohmann::json&                                    wpj,
     std::shared_ptr<const wpscene::ParticleInstanceoverride> over_state) {
     do {
         if (! wpj.contains("name")) break;
@@ -476,7 +472,7 @@ WPParticleParser::genParticleOperatorOp(
                 }
             };
         } else if (name == "sizechange") {
-            auto vc        = ValueChange::ReadFromJson(wpj);
+            auto vc = ValueChange::ReadFromJson(wpj);
             return [vc, over_state](const ParticleInfo& info) {
                 auto size_over = over_state->size;
                 for (auto& p : info.particles)
@@ -575,8 +571,8 @@ WPParticleParser::genParticleOperatorOp(
         } else if (name == "vortex") {
             Vortex v = Vortex::ReadFromJson(wpj);
             return [=](const ParticleInfo& info) {
-                Vector3d offset = info.controlpoints[v.controlpoint].offset +
-                                  (Vector3f { v.offset.data() }).cast<double>();
+                Vector3d offset  = info.controlpoints[v.controlpoint].offset +
+                                   (Vector3f { v.offset.data() }).cast<double>();
                 Vector3d axis    = (Vector3f { v.axis.data() }).cast<double>();
                 double   dis_mid = v.distanceouter - v.distanceinner + 0.1f;
 
@@ -626,39 +622,43 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
     };
     if (wpe.name == "boxrandom") {
         ParticleBoxEmitterArgs box;
-        box.emitSpeed     = wpe.rate;
-        box.minDistance   = wpe.distancemin;
-        box.maxDistance   = wpe.distancemax;
-        box.directions    = wpe.directions;
-        box.orgin         = wpe.origin;
-        box.one_per_frame = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
-        box.instantaneous = wpe.instantaneous;
-        box.minSpeed      = wpe.speedmin;
-        box.maxSpeed      = wpe.speedmax;
-        box.duration      = wpe.duration;
-        box.controlpoint  = wpe.controlpoint;
+        box.emitSpeed      = wpe.rate;
+        box.minDistance    = wpe.distancemin;
+        box.maxDistance    = wpe.distancemax;
+        box.directions     = wpe.directions;
+        box.orgin          = wpe.origin;
+        box.one_per_frame  = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
+        box.instantaneous  = wpe.instantaneous;
+        box.minSpeed       = wpe.speedmin;
+        box.maxSpeed       = wpe.speedmax;
+        box.duration       = wpe.duration;
+        box.controlpoint   = wpe.controlpoint;
         box.audio_response = audio_response;
-        box.sort          = sort;
+        box.sort           = sort;
         return ParticleBoxEmitterArgs::MakeEmittOp(box);
     } else if (wpe.name == "sphererandom") {
         ParticleSphereEmitterArgs sphere;
-        sphere.emitSpeed     = wpe.rate;
-        sphere.minDistance   = wpe.distancemin[0];
-        sphere.maxDistance   = wpe.distancemax[0];
-        sphere.directions    = wpe.directions;
-        sphere.orgin         = wpe.origin;
-        sphere.sign          = wpe.sign;
-        sphere.one_per_frame = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
-        sphere.instantaneous = wpe.instantaneous;
-        sphere.minSpeed      = wpe.speedmin;
-        sphere.maxSpeed      = wpe.speedmax;
-        sphere.duration      = wpe.duration;
-        sphere.controlpoint  = wpe.controlpoint;
+        sphere.emitSpeed      = wpe.rate;
+        sphere.minDistance    = wpe.distancemin[0];
+        sphere.maxDistance    = wpe.distancemax[0];
+        sphere.directions     = wpe.directions;
+        sphere.orgin          = wpe.origin;
+        sphere.sign           = wpe.sign;
+        sphere.one_per_frame  = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
+        sphere.instantaneous  = wpe.instantaneous;
+        sphere.minSpeed       = wpe.speedmin;
+        sphere.maxSpeed       = wpe.speedmax;
+        sphere.duration       = wpe.duration;
+        sphere.controlpoint   = wpe.controlpoint;
         sphere.audio_response = audio_response;
-        sphere.sort          = sort;
+        sphere.sort           = sort;
         return ParticleSphereEmitterArgs::MakeEmittOp(sphere);
     } else
-        return [](std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t, double,
-                  std::span<const float>, std::span<const ParticleControlpoint>) {
+        return [](std::vector<Particle>&,
+                  std::vector<ParticleInitOp>&,
+                  uint32_t,
+                  double,
+                  std::span<const float>,
+                  std::span<const ParticleControlpoint>) {
         };
 }

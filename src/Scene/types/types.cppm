@@ -1,7 +1,5 @@
 module;
 
-
-
 export module wescene.types;
 import wescene.core;
 import rstd.cppstd;
@@ -53,24 +51,35 @@ enum class ImageType
     // container as a .tex body. We extend ImageType past FreeImage's
     // range (which stops at RAW=34) so the value can flow through the
     // existing ImageHeader::type slot without colliding.
-    VIDEO   = 100,
+    VIDEO = 100,
 };
 std::string ToString(const ImageType&);
 
 enum class TextureFormat
 {
-    BC1, BC2, BC3, RGB8, RGBA8, RG8, R8
+    BC1,
+    BC2,
+    BC3,
+    RGB8,
+    RGBA8,
+    RG8,
+    R8
 };
 std::string ToString(const TextureFormat&);
 
 enum class BlendMode
 {
-    Disable, Translucent, Additive, Normal
+    Disable,
+    Translucent,
+    Additive,
+    Normal
 };
 
 enum class ShaderType
 {
-    VERTEX, GEOMETRY, FRAGMENT
+    VERTEX,
+    GEOMETRY,
+    FRAGMENT
 };
 
 enum class TextureType
@@ -80,22 +89,27 @@ enum class TextureType
 
 enum class MeshPrimitive
 {
-    POINT, TRIANGLE
+    POINT,
+    TRIANGLE
 };
 
 enum class FillMode
 {
-    STRETCH, ASPECTFIT, ASPECTCROP
+    STRETCH,
+    ASPECTFIT,
+    ASPECTCROP
 };
 
 enum class TextureWrap
 {
-    CLAMP_TO_EDGE, REPEAT
+    CLAMP_TO_EDGE,
+    REPEAT
 };
 
 enum class TextureFilter
 {
-    LINEAR, NEAREST
+    LINEAR,
+    NEAREST
 };
 
 struct TextureSample {
@@ -107,8 +121,14 @@ struct TextureSample {
 
 enum class VertexType
 {
-    FLOAT1, FLOAT2, FLOAT3, FLOAT4,
-    UINT1,  UINT2,  UINT3,  UINT4
+    FLOAT1,
+    FLOAT2,
+    FLOAT3,
+    FLOAT4,
+    UINT1,
+    UINT2,
+    UINT3,
+    UINT4
 };
 
 // ---------- BitFlags<EnumT> (was in Utils.cppm) ---------------------------
@@ -135,17 +155,17 @@ public:
         bits_.reset();
         return *this;
     }
-    [[nodiscard]] bool        all() const noexcept { return bits_.all(); }
-    [[nodiscard]] bool        any() const noexcept { return bits_.any(); }
-    [[nodiscard]] bool        none() const noexcept { return bits_.none(); }
+    [[nodiscard]] bool                  all() const noexcept { return bits_.all(); }
+    [[nodiscard]] bool                  any() const noexcept { return bits_.any(); }
+    [[nodiscard]] bool                  none() const noexcept { return bits_.none(); }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return bits_.size(); }
-    [[nodiscard]] std::size_t count() const noexcept { return bits_.count(); }
-    constexpr bool operator[](EnumT e) const { return bits_[underlying(e)]; }
-    constexpr bool operator[](UnderlyingT t) const { return bits_[t]; }
-    auto           to_string() const { return bits_.to_string(); }
+    [[nodiscard]] std::size_t           count() const noexcept { return bits_.count(); }
+    constexpr bool                      operator[](EnumT e) const { return bits_[underlying(e)]; }
+    constexpr bool                      operator[](UnderlyingT t) const { return bits_[t]; }
+    auto                                to_string() const { return bits_.to_string(); }
 
 private:
-    static constexpr UnderlyingT underlying(EnumT e) { return static_cast<UnderlyingT>(e); }
+    static constexpr UnderlyingT         underlying(EnumT e) { return static_cast<UnderlyingT>(e); }
     std::bitset<sizeof(UnderlyingT) * 8> bits_;
 };
 
@@ -220,7 +240,7 @@ struct ImageData {
      * AVIOContext for libavformat. */
     std::shared_ptr<void> videoStream;
     isize                 videoOffset { 0 };
-    isize                 videoSize   { 0 };
+    isize                 videoSize { 0 };
     ImageData() = default;
 };
 
@@ -240,7 +260,7 @@ struct ImageHeader {
     bool          isSprite { false };
     TextureSample sample;
 
-    SpriteAnimation spriteAnim;
+    SpriteAnimation                             spriteAnim;
     std::unordered_map<std::string, ImageExtra> extraHeader;
 };
 
@@ -258,7 +278,7 @@ struct Image : NoCopy, NoMove {
     std::string       key;
 };
 
-} // namespace owe (export)
+} // namespace owe
 
 // Small OS utility — dlopen/dlsym wrapper. Lives here so wescene-vulkan-runtime
 // can reach it without dragging wescene-base in. hash_combine is co-located
@@ -301,4 +321,4 @@ private:
     void* handle { nullptr };
 };
 
-} // namespace utils (export)
+} // namespace utils

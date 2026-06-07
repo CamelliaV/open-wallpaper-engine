@@ -51,7 +51,7 @@ public:
     const auto& operator[](std::size_t index) const { return _value()[index]; }
     auto& operator[](std::size_t index) { return m_dynamic ? m_dvalue[index] : m_value[index]; }
 
-    auto data() const noexcept { return _value().data(); };
+    auto   data() const noexcept { return _value().data(); };
     size_t size() const noexcept { return m_size; };
 
     void setSize(size_t v) noexcept { m_size = std::min(v, (size_t)_value().size()); }
@@ -113,12 +113,12 @@ struct SceneRenderTarget {
         double      scale { 1.0 };
     };
 
-    i32           width;
-    i32           height;
-    bool          allowReuse { false };
-    bool          withDepth { false };
-    bool          has_mipmap { false };
-    unsigned          mipmap_level { 1 };
+    i32      width;
+    i32      height;
+    bool     allowReuse { false };
+    bool     withDepth { false };
+    bool     has_mipmap { false };
+    unsigned mipmap_level { 1 };
     // 1 disables MSAA; only screen RT is opted-in by VulkanRender at init.
     unsigned      sample_count { 1 };
     TextureSample sample { TextureWrap::CLAMP_TO_EDGE,
@@ -133,7 +133,7 @@ struct SceneRenderTarget {
     // load-op (LOAD) would leak the previous frame's pixels through —
     // visible as ghosting when the rendered string changes (e.g. clock
     // text "12:00" → "12:01" leaves "12:00"'s glyphs underneath).
-    bool          force_clear { false };
+    bool force_clear { false };
 };
 
 // ============================================================================
@@ -277,7 +277,7 @@ struct SceneMaterialCustomShader {
     // RenderSetUserProperty handler writing a new user-property value. The
     // pass's per-frame update_op picks this up, re-writes the affected cbuffer
     // members, and clears the flag.
-    bool                         dirty { false };
+    bool dirty { false };
 };
 
 struct SceneMaterial {
@@ -327,11 +327,11 @@ public:
         // named RT (instead of the SceneNode's default). Used by puppet
         // clipping-mask submeshes to write into a shared `_rt_puppet_mask`
         // that the main puppet pass samples via g_Texture8.
-        std::string                   output_override;
+        std::string output_override;
     };
 
-    SceneMesh(bool dynamic = false): m_dynamic(dynamic), m_dirty(false),
-                                     m_data(std::make_shared<Data>()) {}
+    SceneMesh(bool dynamic = false)
+        : m_dynamic(dynamic), m_dirty(false), m_data(std::make_shared<Data>()) {}
 
     MeshPrimitive Primitive() const { return m_primitive; }
     uint32_t      PointSize() const { return m_pointSize; }
@@ -353,10 +353,8 @@ public:
 
     // Materials are per-mesh-instance, NOT shared via ChangeMeshDataFrom — same
     // contract as the legacy m_material field.
-    const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const {
-        return m_materials;
-    }
-    std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() { return m_materials; }
+    const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const { return m_materials; }
+    std::vector<std::shared_ptr<SceneMaterial>>&       MaterialSlots() { return m_materials; }
 
     // ---- Legacy single-slot compat (routes through submeshes[0] / materials[0]) ----
     std::size_t VertexCount() const { return submesh0().vertex_arrays.size(); }
@@ -385,9 +383,7 @@ public:
         m_materials.push_back(std::make_shared<SceneMaterial>(std::move(material)));
     }
 
-    SceneMaterial* Material() {
-        return m_materials.empty() ? nullptr : m_materials[0].get();
-    }
+    SceneMaterial* Material() { return m_materials.empty() ? nullptr : m_materials[0].get(); }
 
     void ChangeMeshDataFrom(const SceneMesh& o) { m_data = o.m_data; }
 
@@ -419,8 +415,8 @@ private:
     bool              m_dynamic;
     std::atomic<bool> m_dirty;
 
-    std::shared_ptr<Data>                       m_data;       // shared via ChangeMeshDataFrom
-    std::vector<std::shared_ptr<SceneMaterial>> m_materials;  // per-instance
+    std::shared_ptr<Data>                       m_data;      // shared via ChangeMeshDataFrom
+    std::vector<std::shared_ptr<SceneMaterial>> m_materials; // per-instance
 };
 
 // ============================================================================
@@ -462,8 +458,11 @@ public:
     auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
     const auto& FirstTarget() const { return m_pingpong_a; }
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
-    void        SetFinalBlend(BlendMode m) { m_final_blend = m; m_resolved = false; }
-    void        SetFinalTarget(std::string t) {
+    void        SetFinalBlend(BlendMode m) {
+        m_final_blend = m;
+        m_resolved    = false;
+    }
+    void SetFinalTarget(std::string t) {
         m_final_target = std::move(t);
         m_resolved     = false;
     }
@@ -478,7 +477,7 @@ private:
     std::string m_pingpong_a;
     std::string m_pingpong_b;
 
-    bool fullscreen { false };
+    bool                       fullscreen { false };
     std::unique_ptr<SceneMesh> m_final_mesh;
     BlendMode                  m_final_blend;
     std::string                m_final_target { SpecTex_Default };
@@ -495,8 +494,8 @@ private:
 // ============================================================================
 
 struct ScenePostProcessPass {
-    std::shared_ptr<SceneNode> node;     // synthetic; mesh + material only
-    std::string                output;   // RT key; empty -> SpecTex_Default
+    std::shared_ptr<SceneNode> node;   // synthetic; mesh + material only
+    std::string                output; // RT key; empty -> SpecTex_Default
 };
 
 struct ScenePostProcessCopy {
@@ -558,7 +557,10 @@ public:
     // the attached node (if any) is ignored.
     void SetLookAt(const Eigen::Vector3d& eye, const Eigen::Vector3d& center,
                    const Eigen::Vector3d& up) {
-        m_eye = eye; m_center = center; m_up = up; m_lookat = true;
+        m_eye    = eye;
+        m_center = center;
+        m_up     = up;
+        m_lookat = true;
     }
     bool IsLookAt() const { return m_lookat; }
 
@@ -672,21 +674,30 @@ public:
     void        SetCamera(const std::string& name) { m_cameraName = name; }
     void        AddMesh(std::shared_ptr<SceneMesh> mesh) { m_mesh = mesh; }
     void        AppendChild(std::shared_ptr<SceneNode> sub) {
-               sub->m_parent = this;
-               m_children.push_back(sub);
-               // Stale ModelTrans on the child (cached without this new
-               // parent context) would persist for the rest of the frame
-               // otherwise — force a recompute on next UpdateTrans.
-               sub->MarkTransDirty();
+        sub->m_parent = this;
+        m_children.push_back(sub);
+        // Stale ModelTrans on the child (cached without this new
+        // parent context) would persist for the rest of the frame
+        // otherwise — force a recompute on next UpdateTrans.
+        sub->MarkTransDirty();
     }
     Eigen::Matrix4d GetLocalTrans() const;
 
     const auto& Translate() const { return m_translate; }
     const auto& Rotation() const { return m_rotation; }
     const auto& Scale() const { return m_scale; }
-    void        SetRotation(Eigen::Vector3f v) { m_rotation = v; MarkTransDirty(); }
-    void        SetTranslate(Eigen::Vector3f v) { m_translate = v; MarkTransDirty(); }
-    void        SetScale(Eigen::Vector3f v)     { m_scale = v; MarkTransDirty(); }
+    void        SetRotation(Eigen::Vector3f v) {
+        m_rotation = v;
+        MarkTransDirty();
+    }
+    void SetTranslate(Eigen::Vector3f v) {
+        m_translate = v;
+        MarkTransDirty();
+    }
+    void SetScale(Eigen::Vector3f v) {
+        m_scale = v;
+        MarkTransDirty();
+    }
 
     // Local content size (image / text bbox). Zero means "unknown"; scripts
     // reading `thisLayer.size` then fall back to the legacy 100×100 stub.
@@ -699,12 +710,18 @@ public:
     // constValue from parse time stands.
     //
     // visible folds into alpha: false → effective alpha 0, true → m_user_alpha.
-    bool   IsAlphaOverridden() const { return m_alpha_overridden; }
-    float  EffectiveAlpha() const { return m_visible ? m_user_alpha : 0.0f; }
-    bool   Visible() const { return m_visible; }
-    float  UserAlpha() const { return m_user_alpha; }
-    void   SetVisible(bool v) { m_visible = v; m_alpha_overridden = true; }
-    void   SetUserAlpha(float v) { m_user_alpha = v; m_alpha_overridden = true; }
+    bool  IsAlphaOverridden() const { return m_alpha_overridden; }
+    float EffectiveAlpha() const { return m_visible ? m_user_alpha : 0.0f; }
+    bool  Visible() const { return m_visible; }
+    float UserAlpha() const { return m_user_alpha; }
+    void  SetVisible(bool v) {
+        m_visible          = v;
+        m_alpha_overridden = true;
+    }
+    void SetUserAlpha(float v) {
+        m_user_alpha       = v;
+        m_alpha_overridden = true;
+    }
 
     // Recorded when the layer's `visible` field is authored as
     // `{user:"<key>", value:bool}`. The render handler walks the tree on
@@ -712,13 +729,19 @@ public:
     const std::string& VisibleUserKey() const { return m_visible_user_key; }
     void               SetVisibleUserKey(std::string k) { m_visible_user_key = std::move(k); }
 
-    bool   IsBrightnessOverridden() const { return m_brightness_overridden; }
-    float  Brightness() const { return m_brightness; }
-    void   SetBrightness(float v) { m_brightness = v; m_brightness_overridden = true; }
+    bool  IsBrightnessOverridden() const { return m_brightness_overridden; }
+    float Brightness() const { return m_brightness; }
+    void  SetBrightness(float v) {
+        m_brightness            = v;
+        m_brightness_overridden = true;
+    }
 
     bool                   IsColorOverridden() const { return m_color_overridden; }
     const Eigen::Vector3f& Color() const { return m_color; }
-    void                   SetColor(Eigen::Vector3f v) { m_color = v; m_color_overridden = true; }
+    void                   SetColor(Eigen::Vector3f v) {
+        m_color            = v;
+        m_color_overridden = true;
+    }
 
     // Per-texture-slot script-driven sprite-animation override. Wallpaper
     // Engine's setFrame(n) / play() / stop() control map onto these:
@@ -757,7 +780,10 @@ public:
     // children, so TraverseNode never visits it through `p`. Used for the
     // SceneImageEffectLayer composite quad: the quad needs spImgNode's
     // world transform but must not be rendered twice in scene-tree traversal.
-    void SetParentAnchor(SceneNode* p) { m_parent = p; MarkTransDirty(); }
+    void SetParentAnchor(SceneNode* p) {
+        m_parent = p;
+        MarkTransDirty();
+    }
 
     // BFS over self + descendants; returns first node whose Name() matches.
     SceneNode* FindByName(std::string_view name);
@@ -778,14 +804,14 @@ private:
     Eigen::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
     Eigen::Vector2f m_size { 0.0f, 0.0f };
 
-    bool            m_visible { true };
-    std::string     m_visible_user_key {};
-    float           m_user_alpha { 1.0f };
-    bool            m_alpha_overridden { false };
-    float           m_brightness { 1.0f };
-    bool            m_brightness_overridden { false };
-    Eigen::Vector3f m_color { 1.0f, 1.0f, 1.0f };
-    bool            m_color_overridden { false };
+    bool                 m_visible { true };
+    std::string          m_visible_user_key {};
+    float                m_user_alpha { 1.0f };
+    bool                 m_alpha_overridden { false };
+    float                m_brightness { 1.0f };
+    bool                 m_brightness_overridden { false };
+    Eigen::Vector3f      m_color { 1.0f, 1.0f, 1.0f };
+    bool                 m_color_overridden { false };
     TextureAnimatorState m_tex_anim {};
 
     std::shared_ptr<SceneMesh> m_mesh;
@@ -848,13 +874,12 @@ struct ParticleInfo {
     double                                time_pass;
 };
 
-using ParticleInitOp = std::function<void(Particle&, double)>;
+using ParticleInitOp     = std::function<void(Particle&, double)>;
 using ParticleOperatorOp = std::function<void(const ParticleInfo&)>;
 
-using ParticleEmittOp =
-    std::function<void(std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t maxcount,
-                       double timepass, std::span<const float> audio_average,
-                       std::span<const ParticleControlpoint> controlpoints)>;
+using ParticleEmittOp = std::function<void(
+    std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t maxcount, double timepass,
+    std::span<const float> audio_average, std::span<const ParticleControlpoint> controlpoints)>;
 
 struct ParticleAudioResponse {
     bool                 enable { false };
@@ -865,18 +890,18 @@ struct ParticleAudioResponse {
 };
 
 struct ParticleBoxEmitterArgs {
-    std::array<float, 3> directions;
-    std::array<float, 3> minDistance;
-    std::array<float, 3> maxDistance;
-    float                emitSpeed;
-    std::array<float, 3> orgin;
-    bool                 one_per_frame;
-    bool                 sort;
-    u32                  instantaneous;
-    float                minSpeed;
-    float                maxSpeed;
-    float                duration { 0.0f };
-    int32_t              controlpoint { 0 };
+    std::array<float, 3>  directions;
+    std::array<float, 3>  minDistance;
+    std::array<float, 3>  maxDistance;
+    float                 emitSpeed;
+    std::array<float, 3>  orgin;
+    bool                  one_per_frame;
+    bool                  sort;
+    u32                   instantaneous;
+    float                 minSpeed;
+    float                 maxSpeed;
+    float                 duration { 0.0f };
+    int32_t               controlpoint { 0 };
     ParticleAudioResponse audio_response;
 
     static ParticleEmittOp MakeEmittOp(ParticleBoxEmitterArgs);
@@ -1155,11 +1180,11 @@ public:
     BoundedData& GetBoundedData();
 
 private:
-    bool                        m_is_death { false };
-    bool                        m_no_live_particle { false };
-    std::vector<Particle>       m_particles;
-    std::vector<ParticleTrail>  m_trails;
-    BoundedData                 m_bounded_data;
+    bool                       m_is_death { false };
+    bool                       m_no_live_particle { false };
+    std::vector<Particle>      m_particles;
+    std::vector<ParticleTrail> m_trails;
+    BoundedData                m_bounded_data;
 };
 
 class ParticleSubSystem : NoCopy, NoMove {
@@ -1201,9 +1226,9 @@ public:
     u32       MaxInstanceCount() const;
 
 private:
-    ParticleSystem&            m_sys;
-    std::shared_ptr<SceneMesh> m_mesh;
-    std::weak_ptr<SceneNode>   m_owner_node;
+    ParticleSystem&              m_sys;
+    std::shared_ptr<SceneMesh>   m_mesh;
+    std::weak_ptr<SceneNode>     m_owner_node;
     std::vector<ParticleEmittOp> m_emiters;
 
     std::vector<ParticleInitOp>     m_initializers;
@@ -1286,9 +1311,9 @@ public:
     virtual void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&) = 0;
     virtual void FrameEnd()                                                        = 0;
 
-    virtual void MouseInput(double x, double y) = 0;
-    virtual void SetTexelSize(float x, float y) = 0;
-    virtual void SetScreenSize(i32 w, i32 h)    = 0;
+    virtual void MouseInput(double x, double y)                    = 0;
+    virtual void SetTexelSize(float x, float y)                    = 0;
+    virtual void SetScreenSize(i32 w, i32 h)                       = 0;
     virtual void SetAudioSpectrum(std::span<const float, 64> bins) = 0;
 };
 
@@ -1366,7 +1391,7 @@ public:
     // we forward-declare it here it would conflict with the module-attached
     // declaration in any TU that imports wescene.fs and imports wescene.scene.
     using VFSDeleterFn = void (*)(void*) noexcept;
-    std::unique_ptr<void, VFSDeleterFn>  vfs;
+    std::unique_ptr<void, VFSDeleterFn> vfs;
 
     // Same opaque-pointer pattern for the per-Scene scenescript runtime.
     // The concrete type is `owe::script::ScriptScene` (defined in
@@ -1374,15 +1399,15 @@ public:
     // upstream of wescene-script — so we keep it opaque here. The renderer
     // ticks it once per frame via `owe::script::TickSceneScripts`.
     using ScriptDeleterFn = void (*)(void*) noexcept;
-    std::unique_ptr<void, ScriptDeleterFn> script_scene { nullptr,
-                                                          [](void*) noexcept {} };
+    std::unique_ptr<void, ScriptDeleterFn> script_scene { nullptr, [](void*) noexcept {
+                                                         } };
 
     // Scene-owned text::FontCache. Multiple text objects with matching
     // (font_blob, pixel_size) share a FontFace + its 1024² atlas. Populated
     // lazily by ParseTextObj via text::EnsureSceneFontCache.
     using FontCacheDeleterFn = void (*)(void*) noexcept;
-    std::unique_ptr<void, FontCacheDeleterFn> font_cache { nullptr,
-                                                           [](void*) noexcept {} };
+    std::unique_ptr<void, FontCacheDeleterFn> font_cache { nullptr, [](void*) noexcept {
+                                                          } };
 
     std::string scene_id { "unknown_id" };
 
@@ -1396,7 +1421,7 @@ public:
 
     SceneCamera* activeCamera;
 
-    std::array<float, 2> pointerPosition { 0.5f, 0.5f };
+    std::array<float, 2>               pointerPosition { 0.5f, 0.5f };
     std::array<std::atomic<float>, 16> audioAverage {};
 
     i32                  ortho[2] { 1920, 1080 };
@@ -1404,8 +1429,8 @@ public:
 
     double elapsingTime { 0.0f }, frameTime { 0.0f };
     void   PassFrameTime(double t) {
-          frameTime = t;
-          elapsingTime += t;
+        frameTime = t;
+        elapsingTime += t;
     }
 
     void UpdateLinkedCamera(const std::string& name) {
@@ -1421,4 +1446,4 @@ public:
     }
 };
 
-} // export namespace owe
+} // namespace owe

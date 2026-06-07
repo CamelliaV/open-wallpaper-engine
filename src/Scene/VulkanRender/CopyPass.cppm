@@ -1,6 +1,5 @@
 module;
 
-
 export module wescene.vulkan_render:copy_pass;
 import rstd.cppstd;
 import wescene.vulkan;

@@ -23,7 +23,8 @@ import wescene.testing.corpus;
 
 using owe::testing::Corpus;
 
-namespace {
+namespace
+{
 
 // ----- parameter generators (see header note about static-local refs) ------
 
@@ -119,9 +120,10 @@ TEST_P(ScenePkgVersionTest, AllWorkshopsParseAndExposeSaneScene) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    All, ScenePkgVersionTest, ::testing::ValuesIn(AllPkgVersions()),
-    [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
+INSTANTIATE_TEST_SUITE_P(All, ScenePkgVersionTest, ::testing::ValuesIn(AllPkgVersions()),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;
+                         });
 
 // ============================================================================
 // .tex header version stamps
@@ -177,18 +179,22 @@ TEST_P(TextureFormatTest, AllInstancesParse) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    All, TextureTexvTest, ::testing::ValuesIn(AllTexvVersions()),
-    [](const ::testing::TestParamInfo<int>& i) { return IntName(i.param); });
-INSTANTIATE_TEST_SUITE_P(
-    All, TextureTexiTest, ::testing::ValuesIn(AllTexiVersions()),
-    [](const ::testing::TestParamInfo<int>& i) { return IntName(i.param); });
-INSTANTIATE_TEST_SUITE_P(
-    All, TextureTexbTest, ::testing::ValuesIn(AllTexbVersions()),
-    [](const ::testing::TestParamInfo<int>& i) { return IntName(i.param); });
-INSTANTIATE_TEST_SUITE_P(
-    All, TextureFormatTest, ::testing::ValuesIn(AllTexFormats()),
-    [](const ::testing::TestParamInfo<int>& i) { return "F" + std::to_string(i.param); });
+INSTANTIATE_TEST_SUITE_P(All, TextureTexvTest, ::testing::ValuesIn(AllTexvVersions()),
+                         [](const ::testing::TestParamInfo<int>& i) {
+                             return IntName(i.param);
+                         });
+INSTANTIATE_TEST_SUITE_P(All, TextureTexiTest, ::testing::ValuesIn(AllTexiVersions()),
+                         [](const ::testing::TestParamInfo<int>& i) {
+                             return IntName(i.param);
+                         });
+INSTANTIATE_TEST_SUITE_P(All, TextureTexbTest, ::testing::ValuesIn(AllTexbVersions()),
+                         [](const ::testing::TestParamInfo<int>& i) {
+                             return IntName(i.param);
+                         });
+INSTANTIATE_TEST_SUITE_P(All, TextureFormatTest, ::testing::ValuesIn(AllTexFormats()),
+                         [](const ::testing::TestParamInfo<int>& i) {
+                             return "F" + std::to_string(i.param);
+                         });
 
 // ============================================================================
 // .mdl header version stamps
@@ -238,15 +244,18 @@ TEST_P(MdlMdlaTest, AllInstancesExposeStamps) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    All, MdlMdlvTest, ::testing::ValuesIn(AllMdlvVersions()),
-    [](const ::testing::TestParamInfo<int>& i) { return "Mdlv" + std::to_string(i.param); });
-INSTANTIATE_TEST_SUITE_P(
-    All, MdlMdlsTest, ::testing::ValuesIn(AllMdlsVersions()),
-    [](const ::testing::TestParamInfo<int>& i) { return "Mdls" + std::to_string(i.param); });
-INSTANTIATE_TEST_SUITE_P(
-    All, MdlMdlaTest, ::testing::ValuesIn(AllMdlaVersions()),
-    [](const ::testing::TestParamInfo<int>& i) { return "Mdla" + std::to_string(i.param); });
+INSTANTIATE_TEST_SUITE_P(All, MdlMdlvTest, ::testing::ValuesIn(AllMdlvVersions()),
+                         [](const ::testing::TestParamInfo<int>& i) {
+                             return "Mdlv" + std::to_string(i.param);
+                         });
+INSTANTIATE_TEST_SUITE_P(All, MdlMdlsTest, ::testing::ValuesIn(AllMdlsVersions()),
+                         [](const ::testing::TestParamInfo<int>& i) {
+                             return "Mdls" + std::to_string(i.param);
+                         });
+INSTANTIATE_TEST_SUITE_P(All, MdlMdlaTest, ::testing::ValuesIn(AllMdlaVersions()),
+                         [](const ::testing::TestParamInfo<int>& i) {
+                             return "Mdla" + std::to_string(i.param);
+                         });
 
 // ============================================================================
 // Smoke: corpus must contain at least one workshop with at least one of
