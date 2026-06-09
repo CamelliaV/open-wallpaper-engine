@@ -1352,10 +1352,11 @@ public:
     virtual void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&) = 0;
     virtual void FrameEnd()                                                        = 0;
 
-    virtual void MouseInput(double x, double y)                    = 0;
-    virtual void SetTexelSize(float x, float y)                    = 0;
-    virtual void SetScreenSize(i32 w, i32 h)                       = 0;
-    virtual void SetAudioSpectrum(std::span<const float, 64> bins) = 0;
+    virtual void MouseInput(double x, double y)                     = 0;
+    virtual void SetTexelSize(float x, float y)                     = 0;
+    virtual void SetScreenSize(i32 w, i32 h)                        = 0;
+    virtual void SetAudioSpectrum(std::span<const float, 64> left,
+                                  std::span<const float, 64> right) = 0;
 };
 
 // ============================================================================

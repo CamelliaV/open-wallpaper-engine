@@ -80,7 +80,8 @@ public:
     // Push the current 64-bin spectrum snapshot. Renderer calls this once
     // per frame before drawFrame. Used to fill `g_AudioSpectrum{16,32,64}{Left,Right}`
     // shader uniforms in UpdateUniforms.
-    void SetAudioSpectrum(std::span<const float, 64> bins) override;
+    void SetAudioSpectrum(std::span<const float, 64> left,
+                          std::span<const float, 64> right) override;
 
     void SetScreenSize(i32 w, i32 h) override { m_screen_size = { (float)w, (float)h }; }
 
@@ -99,15 +100,14 @@ private:
 
     std::array<float, 2> m_screen_size { 1920, 1080 };
 
-    // Latest 64-bin spectrum, pushed by SetAudioSpectrum() once per frame.
-    std::array<float, 64> m_audio_bins {};
-
-    // Per-frame visual bands derived from m_audio_bins with pink-tilt
-    // weighting + asymmetric EMA, ready for std140 packing in UpdateUniforms.
-    // Doubles as persistent smoothing state across frames.
-    std::array<float, 16> m_audio_visual_16 {};
-    std::array<float, 32> m_audio_visual_32 {};
-    std::array<float, 64> m_audio_visual_64 {};
+    // Per-frame visual bands ready for std140 packing in UpdateUniforms.
+    // AudioCapture already applies smoothing and amplitude mapping.
+    std::array<float, 16> m_audio_16_l {};
+    std::array<float, 16> m_audio_16_r {};
+    std::array<float, 32> m_audio_32_l {};
+    std::array<float, 32> m_audio_32_r {};
+    std::array<float, 64> m_audio_64_l {};
+    std::array<float, 64> m_audio_64_r {};
 
     Map<void*, WPShaderValueData> m_nodeDataMap;
     Map<void*, WPUniformInfo>     m_nodeUniformInfoMap;

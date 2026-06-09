@@ -63,10 +63,10 @@ struct FrameInputs {
     float canvas_h { 1080.0f };
     float screen_w { 1920.0f };
     float screen_h { 1080.0f };
-    // 64-bin (left+right averaged) audio buffer, populated by the audio
-    // chain. Values are typically 0..1 with peaks above. Length is fixed
-    // at 64 regardless of the script-requested resolution; scripts
-    // requesting 16 just use the first 16 entries.
+    // 64-bin audio buffers populated by the audio chain. The script bridge
+    // resamples these to the requested registerAudioBuffers() resolution.
+    std::array<float, 64> audio_left {};
+    std::array<float, 64> audio_right {};
     std::array<float, 64> audio_average {};
     // Cursor state. (cursor_x, cursor_y) is normalised canvas coords:
     // x ∈ [0,1] left-to-right, y ∈ [0,1] top-to-bottom. button bits use

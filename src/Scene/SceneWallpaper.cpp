@@ -576,14 +576,17 @@ void RenderHandler::on(RenderDraw&&) {
                                                 .count();
             const bool             stale =
                 ! primed || spec.publish_ms == 0 || (now_ms - spec.publish_ms) > kStaleMs;
-            if (stale) spec.bins.fill(0.0f);
-            fi.audio_average = spec.bins;
+            if (stale) spec.clear();
+            fi.audio_left    = spec.left;
+            fi.audio_right   = spec.right;
+            fi.audio_average = spec.average;
             // pkg-internal music plays through the system sink, so wavsen's
             // monitor capture already picks it up; no need to overlay
             // Scene::audioAverage (driven by WPSoundParser). audioAverage
             // remains a particle-only signal — see ParticleSystem.
             m_scene->shaderValueUpdater->SetAudioSpectrum(
-                std::span<const float, 64>(fi.audio_average));
+                std::span<const float, 64>(fi.audio_left),
+                std::span<const float, 64>(fi.audio_right));
             owe::script::TickSceneScripts(*m_scene, fi);
         }
         m_scene->paritileSys->Emitt();

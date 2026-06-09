@@ -319,6 +319,7 @@ struct DeferredCb {
 struct EngineHostState {
     FrameInputs inputs;
     JSValue     audio_buffer { JS_UNDEFINED };
+    uint32_t    audio_buffer_resolution { 64 };
     bool        audio_buffer_built { false };
     // Cached `globalThis.Vec3` ctor, populated lazily on first node access.
     // Used by the SceneNode wrapper to hand back Vec3 instances so scripts
@@ -348,6 +349,25 @@ struct EngineHostState {
     std::unordered_map<owe::SceneNode*, std::function<void(std::string_view)>> text_setters;
     owe::SceneNode* scene_root { nullptr };
 };
+
+uint32_t NormalizeAudioResolution(int32_t requested) {
+    if (requested <= 16) return 16;
+    if (requested <= 32) return 32;
+    return 64;
+}
+
+float AudioBufferValue(std::span<const float, 64> bins, uint32_t resolution, uint32_t index) {
+    if (resolution == 64) return bins[index];
+
+    const uint32_t ratio = 64 / resolution;
+    const uint32_t begin = index * ratio;
+    float          peak  = 0.0f;
+    for (uint32_t k = 0; k < ratio; ++k) {
+        const float v = bins[begin + k];
+        if (v > peak) peak = v;
+    }
+    return peak;
+}
 
 // ---------------------------------------------------------------------------
 // FieldScript impl.
@@ -459,28 +479,42 @@ JSValue EngineGetterScreenRes(JSContext* ctx, JSValueConst, int, JSValueConst*) 
     return v;
 }
 
-// engine.registerAudioBuffers(resolution) → { average: Float64Array, buffer: Float64Array }
+void SetAudioArrayValue(JSContext* ctx, JSValueConst arr, uint32_t index, float value) {
+    JS_DefinePropertyValueUint32(ctx, arr, index, JS_NewFloat64(ctx, value), JS_PROP_C_W_E);
+}
+
+// engine.registerAudioBuffers(resolution) → { left, right, average, buffer }
 //
-// Returns a stable per-context object with two array properties whose
-// underlying storage points at the FrameInputs::audio_average buffer
-// rebuilt each frame. We allocate a fresh JSValue array on every call here
-// (per the API contract — the script normally calls it once and caches it),
-// but on subsequent calls return the same one. Higher resolutions clamp
-// to 16 — the corpus has 24 mentions of AUDIO_RESOLUTION_16 vs. 3 of
-// AUDIO_RESOLUTION_32, and we don't yet have a 32-bin source.
-JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/,
-                                   JSValueConst* /*argv*/) {
+// Returns a stable per-context object rebuilt from FrameInputs every frame.
+// The requested 16/32/64 resolution controls both array length and the
+// frequency mapping scripts index into.
+JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, int argc,
+                                   JSValueConst* argv) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     if (! host->audio_buffer_built) {
-        JSValue obj = JS_NewObject(ctx);
-        JSValue avg = JS_NewArray(ctx);
-        JSValue buf = JS_NewArray(ctx);
-        for (uint32_t i = 0; i < host->inputs.audio_average.size(); ++i) {
-            JS_DefinePropertyValueUint32(
-                ctx, avg, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
-            JS_DefinePropertyValueUint32(
-                ctx, buf, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
+        int32_t requested = 64;
+        if (argc > 0) (void)JS_ToInt32(ctx, &requested, argv[0]);
+        host->audio_buffer_resolution = NormalizeAudioResolution(requested);
+
+        JSValue obj   = JS_NewObject(ctx);
+        JSValue left  = JS_NewArray(ctx);
+        JSValue right = JS_NewArray(ctx);
+        JSValue avg   = JS_NewArray(ctx);
+        JSValue buf   = JS_NewArray(ctx);
+        for (uint32_t i = 0; i < host->audio_buffer_resolution; ++i) {
+            const float l =
+                AudioBufferValue(host->inputs.audio_left, host->audio_buffer_resolution, i);
+            const float r =
+                AudioBufferValue(host->inputs.audio_right, host->audio_buffer_resolution, i);
+            const float a =
+                AudioBufferValue(host->inputs.audio_average, host->audio_buffer_resolution, i);
+            SetAudioArrayValue(ctx, left, i, l);
+            SetAudioArrayValue(ctx, right, i, r);
+            SetAudioArrayValue(ctx, avg, i, a);
+            SetAudioArrayValue(ctx, buf, i, a);
         }
+        JS_DefinePropertyValueStr(ctx, obj, "left", left, JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, obj, "right", right, JS_PROP_C_W_E);
         JS_DefinePropertyValueStr(ctx, obj, "average", avg, JS_PROP_C_W_E);
         JS_DefinePropertyValueStr(ctx, obj, "buffer", buf, JS_PROP_C_W_E);
         host->audio_buffer       = obj;
@@ -496,14 +530,23 @@ JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, in
 void RefreshAudioBuffer(JSContext* ctx) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     if (! host->audio_buffer_built) return;
-    JSValue avg = JS_GetPropertyStr(ctx, host->audio_buffer, "average");
-    JSValue buf = JS_GetPropertyStr(ctx, host->audio_buffer, "buffer");
-    for (uint32_t i = 0; i < host->inputs.audio_average.size(); ++i) {
-        JS_DefinePropertyValueUint32(
-            ctx, avg, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
-        JS_DefinePropertyValueUint32(
-            ctx, buf, i, JS_NewFloat64(ctx, host->inputs.audio_average[i]), JS_PROP_C_W_E);
+    JSValue left  = JS_GetPropertyStr(ctx, host->audio_buffer, "left");
+    JSValue right = JS_GetPropertyStr(ctx, host->audio_buffer, "right");
+    JSValue avg   = JS_GetPropertyStr(ctx, host->audio_buffer, "average");
+    JSValue buf   = JS_GetPropertyStr(ctx, host->audio_buffer, "buffer");
+    for (uint32_t i = 0; i < host->audio_buffer_resolution; ++i) {
+        const float l = AudioBufferValue(host->inputs.audio_left, host->audio_buffer_resolution, i);
+        const float r =
+            AudioBufferValue(host->inputs.audio_right, host->audio_buffer_resolution, i);
+        const float a =
+            AudioBufferValue(host->inputs.audio_average, host->audio_buffer_resolution, i);
+        SetAudioArrayValue(ctx, left, i, l);
+        SetAudioArrayValue(ctx, right, i, r);
+        SetAudioArrayValue(ctx, avg, i, a);
+        SetAudioArrayValue(ctx, buf, i, a);
     }
+    JS_FreeValue(ctx, left);
+    JS_FreeValue(ctx, right);
     JS_FreeValue(ctx, avg);
     JS_FreeValue(ctx, buf);
 }

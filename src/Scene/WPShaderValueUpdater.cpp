@@ -2,8 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include <cmath>
-
 module wescene.shader_value_updater;
 import eigen;
 import wescene.spec_texs;
@@ -18,66 +16,17 @@ using namespace Eigen;
 namespace
 {
 
-// Music energy is concentrated in low frequencies (bass/kick fundamentals).
-// Without compensation the leftmost bars dominate and the rest barely move.
-// Apply a per-wavsen-band gain so a flat pink-spectrum input lands roughly
-// equal across bands. Layout must match wavsen's audio_capture.cpp::kBandEdges
-// (FFT bins 1..512 over a 1024-pt FFT @ 48 kHz, with +1 collision floor).
-constexpr float kAudioSampleRate  = 48000.0f;
-constexpr float kAudioFftSize     = 1024.0f;
-constexpr float kAudioHalfFft     = 512.0f;
-constexpr float kAudioTiltPivotHz = 200.0f;
-constexpr float kAudioTiltExp     = 0.30f; // ~ +1.8 dB/oct, slightly past pink
-
-const std::array<float, 64> kAudioBandGain = [] {
-    std::array<std::size_t, 65> edges {};
-    edges[0] = 1;
-    for (std::size_t k = 1; k <= 64; ++k) {
-        const double t =
-            std::pow(static_cast<double>(kAudioHalfFft), static_cast<double>(k) / 64.0);
-        auto next = static_cast<std::size_t>(std::ceil(t));
-        if (next <= edges[k - 1]) next = edges[k - 1] + 1;
-        const auto cap = static_cast<std::size_t>(kAudioHalfFft);
-        if (next > cap) next = cap;
-        edges[k] = next;
-    }
-    std::array<float, 64> gain {};
-    for (std::size_t k = 0; k < 64; ++k) {
-        const float center_bin = 0.5f * (float(edges[k]) + float(edges[k + 1]));
-        const float center_hz  = center_bin * kAudioSampleRate / kAudioFftSize;
-        gain[k]                = std::pow(center_hz / kAudioTiltPivotHz, kAudioTiltExp);
-    }
-    return gain;
-}();
-
-// Asymmetric EMA in the visual domain: fast attack so transients pop,
-// slow release so bars decay smoothly instead of flickering. Time constants
-// (not per-frame alphas) so the feel is the same at 30 / 60 / 144 fps.
-constexpr float kAudioAttackTauSec  = 0.020f;
-constexpr float kAudioReleaseTauSec = 0.180f;
-
-void UpdateVisualBands(std::span<const float, 64> bins, unsigned out_n, float dt_sec,
-                       std::span<float> state) {
-    const unsigned ratio = 64u / out_n;
-    for (unsigned i = 0; i < out_n; ++i) {
-        // Peak (not mean) preserves transients across the consolidated bands.
+template<std::size_t N>
+void PeakResample64(std::span<const float, 64> bins, std::array<float, N>& out) {
+    static_assert(64 % N == 0);
+    constexpr std::size_t ratio = 64 / N;
+    for (std::size_t i = 0; i < N; ++i) {
         float peak = 0.0f;
-        for (unsigned k = 0; k < ratio; ++k) {
-            const unsigned src = i * ratio + k;
-            const float    v   = bins[src] * kAudioBandGain[src];
+        for (std::size_t k = 0; k < ratio; ++k) {
+            const float v = bins[i * ratio + k];
             if (v > peak) peak = v;
         }
-        // Tanh re-compresses past-1 values that the high-freq boost can produce.
-        peak             = std::tanh(peak);
-        const float prev = state[i];
-        if (dt_sec <= 0.0f) {
-            // First frame (no valid frametime yet) — adopt raw immediately.
-            state[i] = peak;
-        } else {
-            const float tau = peak > prev ? kAudioAttackTauSec : kAudioReleaseTauSec;
-            const float a   = 1.0f - std::exp(-dt_sec / tau);
-            state[i]        = prev + a * (peak - prev);
-        }
+        out[i] = peak;
     }
 }
 
@@ -361,20 +310,18 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     }
 
     // WE audio-bar shaders. std140 array stride is 16 bytes per element, so
-    // pack each amplitude into the .x slot of a vec4 and leave .yzw at zero.
-    // Visual values are pre-smoothed by SetAudioSpectrum. wavsen is mono today
-    // so Left and Right read the same source.
+    // pack each already-smoothed amplitude into .x and leave .yzw at zero.
     auto push_audio = [&](std::string_view name, std::span<const float> visual) {
         std::vector<float> packed(visual.size() * 4, 0.0f);
         for (std::size_t i = 0; i < visual.size(); ++i) packed[i * 4] = visual[i];
         updateOp(name, std::span<const float>(packed));
     };
-    if (info.has_audio_16_l) push_audio(G_AUDIO_SPEC_16_L, m_audio_visual_16);
-    if (info.has_audio_16_r) push_audio(G_AUDIO_SPEC_16_R, m_audio_visual_16);
-    if (info.has_audio_32_l) push_audio(G_AUDIO_SPEC_32_L, m_audio_visual_32);
-    if (info.has_audio_32_r) push_audio(G_AUDIO_SPEC_32_R, m_audio_visual_32);
-    if (info.has_audio_64_l) push_audio(G_AUDIO_SPEC_64_L, m_audio_visual_64);
-    if (info.has_audio_64_r) push_audio(G_AUDIO_SPEC_64_R, m_audio_visual_64);
+    if (info.has_audio_16_l) push_audio(G_AUDIO_SPEC_16_L, m_audio_16_l);
+    if (info.has_audio_16_r) push_audio(G_AUDIO_SPEC_16_R, m_audio_16_r);
+    if (info.has_audio_32_l) push_audio(G_AUDIO_SPEC_32_L, m_audio_32_l);
+    if (info.has_audio_32_r) push_audio(G_AUDIO_SPEC_32_R, m_audio_32_r);
+    if (info.has_audio_64_l) push_audio(G_AUDIO_SPEC_64_L, m_audio_64_l);
+    if (info.has_audio_64_r) push_audio(G_AUDIO_SPEC_64_R, m_audio_64_r);
 }
 
 void WPShaderValueUpdater::SetNodeData(void* nodeAddr, const WPShaderValueData& data) {
@@ -389,14 +336,12 @@ void WPShaderValueUpdater::CopyNodeData(void* src, void* dst) {
 
 void WPShaderValueUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y }; }
 
-void WPShaderValueUpdater::SetAudioSpectrum(std::span<const float, 64> bins) {
-    std::copy(bins.begin(), bins.end(), m_audio_bins.begin());
-    // Run smoothing once per frame here, not per SceneNode in UpdateUniforms,
-    // so multiple audio-responsive nodes share one EMA tick. m_scene->frameTime
-    // holds the previous frame's dt (PassFrameTime runs at end of frame); on
-    // frame 0 it's still zero, which UpdateVisualBands handles by adopting raw.
-    const float dt = static_cast<float>(m_scene->frameTime);
-    UpdateVisualBands(m_audio_bins, 16, dt, m_audio_visual_16);
-    UpdateVisualBands(m_audio_bins, 32, dt, m_audio_visual_32);
-    UpdateVisualBands(m_audio_bins, 64, dt, m_audio_visual_64);
+void WPShaderValueUpdater::SetAudioSpectrum(std::span<const float, 64> left,
+                                            std::span<const float, 64> right) {
+    PeakResample64(left, m_audio_16_l);
+    PeakResample64(right, m_audio_16_r);
+    PeakResample64(left, m_audio_32_l);
+    PeakResample64(right, m_audio_32_r);
+    PeakResample64(left, m_audio_64_l);
+    PeakResample64(right, m_audio_64_r);
 }

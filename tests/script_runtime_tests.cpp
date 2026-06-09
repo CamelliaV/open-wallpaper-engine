@@ -34,6 +34,12 @@ double Tick(JsRuntime& rt, double runtime) {
     return 0.0;
 }
 
+double LastScalar(FieldScript* fs) {
+    EXPECT_TRUE(std::holds_alternative<ScalarValue>(fs->last_value()));
+    if (! std::holds_alternative<ScalarValue>(fs->last_value())) return 0.0;
+    return std::get<ScalarValue>(fs->last_value()).v;
+}
+
 } // namespace
 
 TEST(ScriptTimer, SetTimeoutFiresAfterDelay) {
@@ -116,6 +122,45 @@ TEST(ScriptTimer, HandleSelfCallCancels) {
 
     Tick(rt, 0.50);
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 0.0);
+}
+
+TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
+        fi.audio_left[i]    = static_cast<float>(i);
+        fi.audio_right[i]   = static_cast<float>(200 + i);
+        fi.audio_average[i] = static_cast<float>(100 + i);
+    }
+    rt.SetFrameInputs(fi);
+
+    auto* fs = MakeProbe(rt,
+                         "test/audio_buffers_resample",
+                         R"JS(
+        let audio = engine.registerAudioBuffers(16);
+        export function update() {
+            return audio.left.length * 100000000
+                + audio.right.length * 1000000
+                + audio.average[15] * 10000
+                + audio.left[15] * 100
+                + audio.right[15];
+        }
+    )JS");
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs),
+              16.0 * 100000000.0 + 16.0 * 1000000.0 + 163.0 * 10000.0 + 63.0 * 100.0 + 263.0);
+
+    for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
+        fi.audio_left[i]    = static_cast<float>(100 + i);
+        fi.audio_right[i]   = static_cast<float>(300 + i);
+        fi.audio_average[i] = static_cast<float>(200 + i);
+    }
+    rt.SetFrameInputs(fi);
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs),
+              16.0 * 100000000.0 + 16.0 * 1000000.0 + 263.0 * 10000.0 + 163.0 * 100.0 + 363.0);
 }
 
 // ---------------------------------------------------------------------------
