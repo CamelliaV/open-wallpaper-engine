@@ -107,13 +107,13 @@ public:
         std::vector<BoneFrame> frames;
     };
 
-    // mdla>=3 per-anim translation block (UnkAnimTrans). Two layouts observed:
-    //   * extra non-empty: extra_track + main_track both carry 9 floats/frame
-    //     (root pos/rot/scale); used as a per-anim root motion track.
-    //   * extra empty: only main_track, 1 float/frame scalar (mostly zeros).
+    // mdla>=3 per-anim translation/root-motion payload. trans_flag==1 uses
+    // extra_track + main_track; trans_flag==0 can store main_track followed by
+    // zero-delimited same-sized tail tracks.
     struct AnimTrans {
-        std::vector<float> extra_track;
-        std::vector<float> main_track;
+        std::vector<float>              extra_track;
+        std::vector<float>              main_track;
+        std::vector<std::vector<float>> tail_tracks;
     };
 
     // Per-bone, per-frame curve (anim.length + 1 samples). Reused by both the

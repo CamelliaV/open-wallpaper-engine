@@ -180,50 +180,71 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
     // normalization — additive layers don't compete for the replace slot.
     // Skip layers whose animation isn't actually in the puppet so missing
     // editor-residue refs don't dilute the survivors.
-    const auto& anims = m_puppet->anims;
-    total_blend       = 0.0;
-    for (int i = 0; i < alayers.size(); i++) {
-        if (! alayers[i].visible || alayers[i].additive) continue;
-        bool exists = std::any_of(anims.begin(), anims.end(), [&](const auto& a) {
-            return a.id == alayers[i].id;
+    const auto& anims                   = m_puppet->anims;
+    total_blend                         = 0.0;
+    const AnimationLayer* additive_base = nullptr;
+    bool                  has_replace   = false;
+    auto                  exists        = [&](const auto& layer) {
+        return std::any_of(anims.begin(), anims.end(), [&](const auto& a) {
+            return a.id == layer.id;
         });
-        if (exists) total_blend += alayers[i].blend;
+    };
+    for (const auto& layer : alayers) {
+        if (! layer.visible || ! exists(layer)) continue;
+        if (layer.additive) {
+            if (! has_replace && additive_base == nullptr && layer.blend > 0.0) {
+                additive_base = std::addressof(layer);
+            }
+            continue;
+        }
+        has_replace   = true;
+        additive_base = nullptr;
+        total_blend += layer.blend;
     }
 
-    std::transform(
-        alayers.rbegin(), alayers.rend(), m_layers.rbegin(), [&blend, this](const auto& layer) {
-            double      cur_blend { 0.0f };
-            const auto& anims = m_puppet->anims;
+    std::transform(alayers.rbegin(),
+                   alayers.rend(),
+                   m_layers.rbegin(),
+                   [&blend, additive_base, this](const auto& layer) {
+                       double      cur_blend { 0.0f };
+                       const auto& anims     = m_puppet->anims;
+                       auto        out_layer = layer;
 
-            auto it = std::find_if(anims.begin(), anims.end(), [&layer](auto& a) {
-                return layer.id == a.id;
-            });
-            bool ok = it != anims.end() && layer.visible;
+                       auto it = std::find_if(anims.begin(), anims.end(), [&layer](auto& a) {
+                           return layer.id == a.id;
+                       });
+                       bool ok = it != anims.end() && layer.visible;
 
-            double& total_blend = m_total_blend;
+                       double& total_blend = m_total_blend;
 
-            if (ok) {
-                if (layer.additive) {
-                    // Additive layers carry their scene.json blend unchanged;
-                    // genFrame consumes it as a delta scale, not a normalized
-                    // replace weight.
-                    cur_blend = layer.blend;
-                } else if (total_blend > 1.0) {
-                    cur_blend = layer.blend / total_blend;
-                    blend     = 0.0;
-                } else {
-                    cur_blend = blend * layer.blend;
-                    blend *= 1.0f - layer.blend;
-                    blend = blend < 0.0f ? 0.0f : blend;
-                }
-            }
+                       if (ok) {
+                           if (std::addressof(layer) == additive_base) {
+                               // Additive-only stacks still need one absolute frame[0]
+                               // pose; otherwise authored puppet pieces stay scattered.
+                               cur_blend          = 1.0;
+                               blend              = 0.0;
+                               out_layer.additive = false;
+                           } else if (layer.additive) {
+                               // Additive layers carry their scene.json blend unchanged;
+                               // genFrame consumes it as a delta scale, not a normalized
+                               // replace weight.
+                               cur_blend = layer.blend;
+                           } else if (total_blend > 1.0) {
+                               cur_blend = layer.blend / total_blend;
+                               blend     = 0.0;
+                           } else {
+                               cur_blend = blend * layer.blend;
+                               blend *= 1.0f - layer.blend;
+                               blend = blend < 0.0f ? 0.0f : blend;
+                           }
+                       }
 
-            return Layer {
-                .anim_layer = layer,
-                .blend      = cur_blend,
-                .anim       = ok ? std::addressof(*it) : nullptr,
-            };
-        });
+                       return Layer {
+                           .anim_layer = out_layer,
+                           .blend      = cur_blend,
+                           .anim       = ok ? std::addressof(*it) : nullptr,
+                       };
+                   });
 }
 
 std::span<const Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {

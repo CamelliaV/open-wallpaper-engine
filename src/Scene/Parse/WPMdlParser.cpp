@@ -34,8 +34,9 @@ constexpr uint32_t MDL_FLAG_EXTRA4      = 0x00010000;
 constexpr uint32_t MDL_FLAG_SKIN_BLEND  = 0x00800000;
 constexpr uint32_t MDL_FLAG_SKIN_WEIGHT = 0x01000000;
 
-constexpr uint32_t singile_indices    = 2 * 3;
-constexpr uint32_t singile_bone_frame = 4 * 9;
+constexpr uint32_t singile_indices              = 2 * 3;
+constexpr uint32_t singile_bone_frame           = 4 * 9;
+constexpr uint32_t mdls_offset_trans_entry_size = (3 + 16) * 4;
 
 // Compute per-vertex byte stride from a layout flag bitset. Position is
 // always emitted (12 bytes), other attributes are gated by their bits.
@@ -63,6 +64,88 @@ bool peek_block_magic(fs::MemBinaryStream& f, std::string_view expect4) {
     bool ok = (std::memcmp(buf, expect4.data(), 4) == 0);
     f.SeekSet(save);
     return ok;
+}
+
+bool peek_uint8_at(fs::MemBinaryStream& f, idx off, uint8_t& out) {
+    if (off < 0 || off + 1 > f.Size()) return false;
+    auto save = f.Tell();
+    f.SeekSet(off);
+    out = f.ReadUint8();
+    f.SeekSet(save);
+    return true;
+}
+
+bool peek_uint32_at(fs::MemBinaryStream& f, idx off, uint32_t& out) {
+    if (off < 0 || off + 4 > f.Size()) return false;
+    auto save = f.Tell();
+    f.SeekSet(off);
+    out = f.ReadUint32();
+    f.SeekSet(save);
+    return true;
+}
+
+bool is_anim_trans_main_size(uint32_t byte_size, int32_t length) {
+    if (length < 0 || byte_size == 0 || byte_size % 4 != 0) return false;
+    auto samples = static_cast<uint64_t>(length) + 1;
+    return byte_size == samples * singile_bone_frame || byte_size == samples * 4;
+}
+
+bool next_is_anim_trans_main(fs::MemBinaryStream& f, int32_t length) {
+    uint32_t byte_size = 0;
+    return peek_uint32_at(f, f.Tell(), byte_size) && is_anim_trans_main_size(byte_size, length);
+}
+
+bool next_after_zero_is_anim_trans_main(fs::MemBinaryStream& f, int32_t length) {
+    auto     off  = f.Tell();
+    uint32_t zero = 0;
+    if (! peek_uint32_at(f, off, zero) || zero != 0) return false;
+    uint32_t byte_size = 0;
+    return peek_uint32_at(f, off + 4, byte_size) && is_anim_trans_main_size(byte_size, length);
+}
+
+bool next_is_anim_bone_curves(fs::MemBinaryStream& f) {
+    auto    off        = f.Tell();
+    uint8_t has_curves = 0;
+    if (! peek_uint8_at(f, off, has_curves)) return false;
+    if (! has_curves) return true;
+
+    uint32_t zero_a = 0;
+    if (! peek_uint32_at(f, off + 1, zero_a) || zero_a != 0) return false;
+    uint32_t byte_size = 0;
+    return peek_uint32_at(f, off + 5, byte_size) && byte_size % 4 == 0;
+}
+
+bool next_is_anim_record_padding(fs::MemBinaryStream& f, uint32_t end_offset) {
+    auto off = f.Tell();
+    if (end_offset == 0 || off + 12 > static_cast<idx>(end_offset)) return false;
+    uint32_t zero = 0;
+    if (! peek_uint32_at(f, off, zero) || zero != 0) return false;
+    uint32_t next_id = 0;
+    if (! peek_uint32_at(f, off + 4, next_id) || next_id == 0 || next_id > 100000) {
+        return false;
+    }
+    uint32_t next_unk_after_id = 0;
+    return peek_uint32_at(f, off + 8, next_unk_after_id) && next_unk_after_id == 0;
+}
+
+idx mdls_v2_indexed_trailer_start(uint32_t end_offset, uint16_t bones_num) {
+    auto trailer_size = 1ull + static_cast<uint64_t>(bones_num) * mdls_offset_trans_entry_size +
+                        1ull + static_cast<uint64_t>(bones_num) * 4ull;
+    if (end_offset < trailer_size) return -1;
+    return static_cast<idx>(end_offset - trailer_size);
+}
+
+bool is_mdls_v2_indexed_trailer(fs::MemBinaryStream& f, idx start, uint32_t end_offset,
+                                uint16_t bones_num) {
+    if (start < 0 || start >= static_cast<idx>(end_offset)) return false;
+    uint8_t has_offset_trans = 0;
+    if (! peek_uint8_at(f, start, has_offset_trans) || has_offset_trans != 1) return false;
+
+    auto has_index_off =
+        start + 1 + static_cast<idx>(bones_num) * static_cast<idx>(mdls_offset_trans_entry_size);
+    if (has_index_off >= static_cast<idx>(end_offset)) return false;
+    uint8_t has_index = 0;
+    return peek_uint8_at(f, has_index_off, has_index) && has_index == 1;
 }
 
 void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh);
@@ -310,6 +393,18 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
             }
             uint8_t pad[8];
             f.Read(pad, sizeof(pad));
+            if (extras_flag == 5) {
+                auto trailer_start = mdls_v2_indexed_trailer_start(end_offset, bones_num);
+                if (trailer_start >= f.Tell() &&
+                    is_mdls_v2_indexed_trailer(f, trailer_start, end_offset, bones_num)) {
+                    f.SeekSet(trailer_start);
+                } else {
+                    rstd_info("MDLSv2 extras_flag 5 did not match indexed trailer in {}",
+                              std::string(path));
+                }
+            } else if (extras_flag != 0) {
+                rstd_info("MDLSv2 unexpected extras_flag {}", extras_flag);
+            }
         } else {
             uint8_t zero_b = f.ReadUint8();
             if (zero_b != 0) {
@@ -421,8 +516,23 @@ bool ParseAnimBoneCurves(fs::MemBinaryStream& f, std::vector<WPPuppet::BoneFrame
     return true;
 }
 
+bool ParseAnimTransMainTrack(fs::MemBinaryStream& f, std::vector<float>& out, int32_t length,
+                             std::string_view path) {
+    uint32_t byte_size = f.ReadUint32();
+    if (! is_anim_trans_main_size(byte_size, length)) {
+        rstd_error("AnimTransMain byte_size {} does not match animation length {} in {}",
+                   byte_size,
+                   length,
+                   std::string(path));
+        return false;
+    }
+    out.resize(byte_size / 4);
+    for (auto& v : out) v = f.ReadFloat();
+    return true;
+}
+
 bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim, int mdla_ver,
-                    std::string_view path) {
+                    uint32_t mdla_end_offset, std::string_view path) {
     anim.id           = f.ReadInt32();
     anim.unk_after_id = f.ReadUint32();
 
@@ -484,6 +594,25 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim, int mdla_
                     rstd_info("UnkAnimTrans trail_zero expected 0, got {}", trail_zero);
                 }
             }
+        } else if (trans_flag == 0) {
+            if (next_is_anim_trans_main(f, anim.length)) {
+                auto& tr = anim.trans.emplace();
+                if (! ParseAnimTransMainTrack(f, tr.main_track, anim.length, path)) return false;
+                while (next_after_zero_is_anim_trans_main(f, anim.length)) {
+                    uint32_t trail_zero = f.ReadUint32();
+                    if (trail_zero != 0) {
+                        rstd_info("AnimTransMain trail_zero expected 0, got {}", trail_zero);
+                    }
+                    auto& tail_track = tr.tail_tracks.emplace_back();
+                    if (! ParseAnimTransMainTrack(f, tail_track, anim.length, path)) return false;
+                }
+            }
+        } else {
+            rstd_error("Animation {} trans_flag expected 0/1, got {} in {}",
+                       anim.name,
+                       trans_flag,
+                       std::string(path));
+            return false;
         }
         if (! ParseAnimBoneCurves(f, anim.blend_curves, b_num)) return false;
     }
@@ -516,7 +645,9 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim, int mdla_
     }
 
     if (mdla_ver == 6) {
-        if (! ParseAnimBoneCurves(f, anim.scalar_curves, b_num)) return false;
+        if (next_is_anim_bone_curves(f)) {
+            if (! ParseAnimBoneCurves(f, anim.scalar_curves, b_num)) return false;
+        }
     }
 
     // Trailing event list — present on every animation regardless of mdla
@@ -526,6 +657,14 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim, int mdla_
     for (auto& ev : anim.events) {
         ev.time_value = f.ReadUint32();
         ev.event_json = f.ReadStr();
+    }
+    if (next_is_anim_record_padding(f, mdla_end_offset)) {
+        uint32_t record_padding_zero = f.ReadUint32();
+        if (record_padding_zero != 0) {
+            rstd_info("Animation {} record_padding_zero expected 0, got {}",
+                      anim.name,
+                      record_padding_zero);
+        }
     }
     return true;
 }
@@ -541,12 +680,20 @@ bool ParseMDLA(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag, std::st
     anims.resize(anim_num);
     bool ok = true;
     for (auto& anim : anims) {
-        if (! ParseAnimation(f, anim, mdl.mdla, path)) {
+        if (! ParseAnimation(f, anim, mdl.mdla, end_offset, path)) {
             ok = false;
             break;
         }
     }
 
+    if (end_offset > 0 && static_cast<uint32_t>(f.Tell()) + 4 == end_offset) {
+        uint32_t final_padding_zero = f.ReadUint32();
+        if (final_padding_zero != 0) {
+            rstd_info("MDLA final_padding_zero expected 0, got {} ({})",
+                      final_padding_zero,
+                      std::string(path));
+        }
+    }
     if (end_offset > 0 && static_cast<uint32_t>(f.Tell()) != end_offset) {
         rstd_info("MDLA body ended at 0x{:X} but end_offset=0x{:X} ({})",
                   static_cast<uint32_t>(f.Tell()),
