@@ -127,6 +127,22 @@ std::optional<float> ScriptValueAsFloat(const script::ScriptValue& value) {
     return std::nullopt;
 }
 
+std::optional<Vector3f> ScriptValueAsVec3(const script::ScriptValue& value,
+                                          const Vector3f&            current) {
+    Vector3f next = current;
+    if (auto* p = std::get_if<script::Vec3Value>(&value)) {
+        next = Vector3f { static_cast<float>(p->x),
+                          static_cast<float>(p->y),
+                          static_cast<float>(p->z) };
+    } else if (auto* p = std::get_if<script::Vec2Value>(&value)) {
+        next = Vector3f { static_cast<float>(p->x), static_cast<float>(p->y), current.z() };
+    } else if (auto* p = std::get_if<script::ScalarValue>(&value)) {
+        next.x() = static_cast<float>(p->v);
+    } else
+        return std::nullopt;
+    return next;
+}
+
 SceneAnimationKey ToSceneAnimationKey(const wpscene::WPAnimKeyframe& key) {
     return {
         .frame         = key.frame,
@@ -250,6 +266,45 @@ void WireCameraShakeScripts(ParseContext& context, const wpscene::WPFieldBinding
                             else if (field == "camerashakeroughness")
                                 updater->SetCameraShakeRoughness(*scalar);
                         } });
+    }
+}
+
+void WireCameraFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
+                            const wpscene::WPFieldBindings& fb, const Vector3f& translate_bias,
+                            const Vector3f& rotation_bias) {
+    SceneNode* node = node_sp.get();
+    if (! node || fb.scripts.empty()) return;
+    auto& ss = EnsureScriptScene(context);
+    auto& rt = ss.runtime();
+
+    for (const auto& [field, sb] : fb.scripts) {
+        script::FieldKind kind = script::FieldKind::Vec3;
+        if (field == "visible") {
+            kind = script::FieldKind::Bool;
+        } else if (field != "origin" && field != "angles") {
+            continue;
+        }
+
+        std::string sha = utils::genSha1(std::span<const char>(sb.source));
+        auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, sb.initial_value, node);
+        if (! fs) continue;
+
+        if (field == "origin") {
+            ss.AddActuator({ fs, [node_sp, translate_bias](const script::ScriptValue& value) {
+                                Vector3f current = node_sp->Translate() - translate_bias;
+                                auto     next    = ScriptValueAsVec3(value, current);
+                                if (next) node_sp->SetTranslate(translate_bias + *next);
+                            } });
+        } else if (field == "angles") {
+            ss.AddActuator({ fs, [node_sp, rotation_bias](const script::ScriptValue& value) {
+                                constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
+                                constexpr float kDegToRad = rstd::f32_::consts::PI / 180.0f;
+                                Vector3f        current =
+                                    (node_sp->Rotation() - rotation_bias) * kRadToDeg;
+                                auto next = ScriptValueAsVec3(value, current);
+                                if (next) node_sp->SetRotation(rotation_bias + *next * kDegToRad);
+                            } });
+        }
     }
 }
 
@@ -905,6 +960,8 @@ void ParseCameraObj(ParseContext& context, wpscene::WPCameraObject& cam) {
     if (! cam.visible_user_key.empty())
         scene.camera_path_user_index[cam.visible_user_key].push_back(path);
 
+    WireCameraFieldScripts(
+        context, node, cam.field_bindings, path_translate_bias, path_rotation_bias);
     context.node_id_map[cam.id] = { cam.parent, node };
 }
 
