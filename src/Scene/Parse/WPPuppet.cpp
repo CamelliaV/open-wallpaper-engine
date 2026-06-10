@@ -69,8 +69,15 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         auto&       affine = m_final_affines[i];
 
         rstd_assert(bone.anim_parent < i || bone.noAnimParent());
-        const Affine3f parent =
-            bone.noAnimParent() ? Affine3f::Identity() : m_final_affines[bone.anim_parent];
+        Affine3f parent = Affine3f::Identity();
+        if (! bone.noAnimParent()) {
+            parent = m_final_affines[bone.anim_parent];
+            if (world_anchored_bones) {
+                // MDLV21 child bind poses are already puppet-local; inherit
+                // only the parent's animated delta to avoid double transforms.
+                parent = parent * bones[bone.anim_parent].inv_bind.matrix();
+            }
+        }
 
         // Bind state. vco is a fixed render-time pivot offset for root sprite
         // bones (matches world_bind's pretranslate in prepared()) and is added

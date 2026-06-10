@@ -37,10 +37,8 @@ public:
         Eigen::Affine3f local_bind { Eigen::Affine3f::Identity() };
         uint32_t        bind_parent { NO_PARENT };
         uint32_t        anim_parent { NO_PARENT };
-        // Original on-file parent index. bind_parent / anim_parent are
-        // rewritten to NO_PARENT by ApplyMDLS3CentroidPivot for the
-        // skinning pose path, but MDAT attachment resolution needs the
-        // un-flattened chain to compute the bone's puppet-local pose.
+        // Original on-file parent index. MDLV21 flattens bind_parent for
+        // skinning while keeping anim_parent on this chain.
         uint32_t file_parent { NO_PARENT };
 
         // Per-bone WE bone_simulation JSON (spring/damping/gravity for

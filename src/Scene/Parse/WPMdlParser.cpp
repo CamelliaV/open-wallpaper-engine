@@ -796,9 +796,10 @@ bool ParseMDLE(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag) {
     return true;
 }
 
-// MDLS v3+ vertex-centroid offsets per bone. MDLV21 puppets need the parent
+// MDLS v3+ vertex-centroid offsets per bone. MDLV21 puppets need the bind
 // chain flattened and the centroid_offset bracketed around scale/rotation
-// in genFrame (bones are world-anchored, sprite lives at bind.t + vco).
+// in genFrame (bones are world-anchored, sprite lives at bind.t + vco), while
+// animation still follows the file parent chain via parent skin deltas.
 // MDLV22+ keeps file_parent intact for chain LBS; `vertex_centroid_offset`
 // is still computed but not consumed by the chain path.
 void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
@@ -806,7 +807,7 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
     if (mdl.puppet->world_anchored_bones) {
         for (auto& b : mdl.puppet->bones) {
             b.bind_parent = WPPuppet::NO_PARENT;
-            b.anim_parent = WPPuppet::NO_PARENT;
+            b.anim_parent = b.file_parent;
         }
     }
     const size_t                 nbones = mdl.puppet->bones.size();
@@ -838,12 +839,18 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
                 Eigen::Vector3d centroid_tri = (p0 + p1 + p2) / 3.0;
                 double          area         = 0.5 * (p1 - p0).cross(p2 - p0).norm();
                 if (area <= 0.0) continue;
-                for (int k = 0; k < 3; ++k) {
-                    if (weight(tri[k], 0) <= 0.0f) continue;
-                    uint32_t bi = m.blend_indices[tri[k]][0];
-                    if (bi >= nbones) continue;
-                    sum_pos[bi] += centroid_tri * (area / 3.0);
-                    sum_w[bi] += area / 3.0;
+                const int slots = has_w ? 4 : 1;
+                for (int corner = 0; corner < 3; ++corner) {
+                    uint32_t vi = tri[corner];
+                    for (int slot = 0; slot < slots; ++slot) {
+                        float    w  = weight(vi, slot);
+                        uint32_t bi = m.blend_indices[vi][slot];
+                        if (w > 0.0f && bi < nbones) {
+                            double tri_w = (area / 3.0) * static_cast<double>(w);
+                            sum_pos[bi] += centroid_tri * tri_w;
+                            sum_w[bi] += tri_w;
+                        }
+                    }
                 }
             }
         } else {
