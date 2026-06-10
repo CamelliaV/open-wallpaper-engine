@@ -136,7 +136,7 @@ public:
     WPSceneLightConfig lightconfig;
 };
 
-class WPScene {
+class WPSceneMetadata {
 public:
     bool             FromJson(const nlohmann::json&); // legacy: defaults to unknown version
     bool             FromJson(const nlohmann::json&, SceneVersion); // canonical entry
@@ -144,11 +144,49 @@ public:
     SceneJsonVersion scene_json_version { kSceneJsonVersionDefault };
     WPSceneCamera    camera;
     WPSceneGeneral   general;
+    std::optional<std::array<uint32_t, 2>> canvas_extent;
 };
+
+using WPScene = WPSceneMetadata;
+
+enum class WPSceneObjectKind
+{
+    Unknown,
+    Container,
+    Image,
+    Particle,
+    Sound,
+    Light,
+    Text,
+    Model,
+    Camera,
+};
+
+class WPSceneObjectMetadata {
+public:
+    WPSceneObjectKind                   kind { WPSceneObjectKind::Unknown };
+    std::size_t                         raw_index { 0 };
+    std::int32_t                        id { 0 };
+    std::string                         name;
+    bool                                visible { true };
+    std::uint32_t                       parent { 0 };
+    std::optional<std::array<float, 2>> size;
+};
+
+class WPSceneDocument {
+public:
+    nlohmann::json                     root_json;
+    WPSceneMetadata                    metadata;
+    std::vector<WPSceneObjectMetadata> objects_metadata;
+};
+
+std::optional<WPSceneDocument> ParseSceneDocumentJson(std::string_view, SceneVersion);
+std::optional<WPSceneDocument> LoadSceneDocumentFromVfs(fs::VFS&, std::string_view, SceneVersion);
+std::optional<WPSceneDocument> LoadSceneDocumentFromPkg(std::string_view);
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Orthogonalprojection, width, height);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneCamera, center, eye, up);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneGeneral, clearcolor, orthogonalprojection, zoom);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPScene, camera, general);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneMetadata, camera, general);
 } // namespace wpscene
 } // namespace owe

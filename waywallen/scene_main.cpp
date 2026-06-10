@@ -22,6 +22,7 @@
 import rstd.cppstd;
 import rstd.log;
 import wescene.scene_wallpaper;
+import wescene.parse;
 import waywallen.bridge_ex_swapchain;
 import nlohmann.json;
 
@@ -41,8 +42,9 @@ struct Options {
     bool        enable_audio { true };
     std::string render_node;
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
-    uint32_t                                         msaa_samples { 1 };
-    std::vector<std::pair<std::string, std::string>> initial_user_properties;
+    uint32_t                                        msaa_samples { 1 };
+    std::unordered_map<std::string, nlohmann::json> initial_user_properties;
+    std::shared_ptr<owe::wpscene::WPSceneDocument>  initial_scene_document;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -197,7 +199,7 @@ void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_re
 // have used. Centralised so ApplySettings can route through it.
 void set_fps(HostState& s, uint32_t fps) {
     if (! s.wp || fps == 0) return;
-    s.wp->setPropertyInt32(owe::PROPERTY_FPS, static_cast<int32_t>(fps));
+    s.wp->setFps(fps);
 }
 
 void apply_control(HostState& s, ww_bridge_control_t& msg) {
@@ -221,7 +223,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             if (std::strcmp(key, "volume") == 0) {
                 if (s.wp) {
                     // Wire format is u32 0..100; engine takes 0..1 ratio.
-                    s.wp->setPropertyFloat(owe::PROPERTY_VOLUME, parse_f32(val, 100.0f) / 100.0f);
+                    s.wp->setVolume(parse_f32(val, 100.0f) / 100.0f);
                 }
             } else if (std::strcmp(key, "fps") == 0) {
                 char*         end = nullptr;
@@ -229,10 +231,10 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 if (end != val) set_fps(s, static_cast<uint32_t>(n));
             } else if (std::strcmp(key, "test_pattern") == 0) {
                 // Wescene's test_pattern flag is set on initial spawn
-                // through PROPERTY_TEST_PATTERN; runtime toggling not
-                // wired (would require respawn). Log and ignore.
+                // through RenderInit; runtime toggling is not wired
+                // (would require respawn). Log and ignore.
             } else {
-                if (s.wp) s.wp->setPropertyString(key, val);
+                if (s.wp) s.wp->setUserPropertyRaw(key, val);
             }
         }
         ww_bridge_setting_changed_free(&as);
@@ -368,10 +370,9 @@ int main(int argc, char** argv) {
 
         // Scene .pkg path + assets + workshop_id arrive via CLI argv
         // (already parsed into opts.{initial_scene, initial_assets,
-        // workshop_id}). Init carries only the resolved settings kv;
-        // render extent is driven by the `resolution` setting against
-        // a 16:9 baseline (scenes have no fixed native size; the
-        // compositor handles final letterbox / scale on present).
+        // workshop_id}). Init carries only the resolved settings kv.
+        // Use scene.json's authored canvas as the native aspect and then
+        // apply the user's short-edge resolution setting.
         {
             uint32_t resolution = static_cast<uint32_t>(WW_RESOLUTION_1080P);
             if (const char* v = kv_get(init.settings, "resolution"); v && *v) {
@@ -383,10 +384,28 @@ int main(int argc, char** argv) {
                                            ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
                                            : parsed;
             }
-            opts.width  = 16;
-            opts.height = 9;
+            if (! opts.initial_scene.empty()) {
+                auto scene_doc = owe::wpscene::LoadSceneDocumentFromPkg(opts.initial_scene);
+                if (scene_doc) {
+                    opts.initial_scene_document =
+                        std::make_shared<owe::wpscene::WPSceneDocument>(std::move(*scene_doc));
+                }
+            }
+            if (opts.initial_scene_document &&
+                opts.initial_scene_document->metadata.canvas_extent) {
+                const auto extent = *opts.initial_scene_document->metadata.canvas_extent;
+                opts.width        = extent[0];
+                opts.height       = extent[1];
+                rstd_info(
+                    "waywallen-wescene-renderer: scene canvas {}x{}", opts.width, opts.height);
+            } else {
+                opts.width  = 16;
+                opts.height = 9;
+                rstd_info("waywallen-wescene-renderer: scene canvas unknown, using 16:9 fallback");
+            }
             ww_resolution_apply_cap(
                 resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE, &opts.width, &opts.height);
+            rstd_info("waywallen-wescene-renderer: render extent {}x{}", opts.width, opts.height);
         }
         if (const char* v = kv_get(init.settings, "fps"); v && *v) {
             char*         end = nullptr;
@@ -398,7 +417,7 @@ int main(int argc, char** argv) {
         }
         // Wire format is u32 0..100; engine takes 0..1 ratio.
         opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
-        // identity=true: respawn-only. Reflected into PROPERTY_MUTED below
+        // identity=true: respawn-only. Reflected into SceneWallpaperConfig below
         // so SoundManager::init() short-circuits and no audio device opens.
         opts.enable_audio = parse_bool(kv_get(init.settings, "enable_audio"), true);
         // CLI `--render-node` wins over Init kv (mirroring mpv/video).
@@ -429,19 +448,7 @@ int main(int argc, char** argv) {
                 for (auto it = parsed.begin(); it != parsed.end(); ++it) {
                     const std::string& k = it.key();
                     const auto&        v = it.value();
-                    // SceneWallpaper::setPropertyString already accepts the
-                    // wire-string forms WE properties take (numbers
-                    // serialised as decimal, booleans as "true"/"false",
-                    // colour as "r g b[ a]"). Encode non-string values
-                    // through nlohmann::json's printer.
-                    std::string sval;
-                    if (v.is_string())
-                        sval = v.get<std::string>();
-                    else if (v.is_boolean())
-                        sval = v.get<bool>() ? "true" : "false";
-                    else
-                        sval = v.dump();
-                    opts.initial_user_properties.emplace_back(k, sval);
+                    opts.initial_user_properties.emplace(k, v);
                 }
             } else if (! parsed.is_discarded()) {
                 rstd_warn("init.user_properties is not a JSON object; ignored");
@@ -475,19 +482,17 @@ int main(int argc, char** argv) {
         }
     });
 
+    owe::SceneWallpaperConfig wp_config;
+    wp_config.source_pkg_path = opts.initial_scene;
+    wp_config.assets_dir      = opts.initial_assets;
+    wp_config.scene_document  = opts.initial_scene_document;
+    wp_config.user_properties = opts.initial_user_properties;
+    wp_config.fps             = opts.initial_fps;
+    wp_config.volume          = opts.initial_volume;
     // Mute first so loadScene's SoundManager::init() short-circuits when
     // audio is disabled; the audio device + system output never open.
-    if (! opts.enable_audio) wp.setPropertyBool(owe::PROPERTY_MUTED, true);
-    if (! opts.initial_assets.empty())
-        wp.setPropertyString(owe::PROPERTY_ASSETS, opts.initial_assets);
-    for (const auto& [key, value] : opts.initial_user_properties) {
-        wp.setPropertyString(key, value);
-    }
-    if (! opts.initial_scene.empty())
-        wp.setPropertyString(owe::PROPERTY_SOURCE, opts.initial_scene);
-    if (opts.initial_fps)
-        wp.setPropertyInt32(owe::PROPERTY_FPS, static_cast<int32_t>(opts.initial_fps));
-    wp.setPropertyFloat(owe::PROPERTY_VOLUME, opts.initial_volume);
+    wp_config.muted = ! opts.enable_audio;
+    wp.configure(std::move(wp_config));
 
     // The factory runs inside VulkanRender::init after the GPU is picked
     // and the VkDevice is created; that's when ww_bridge_pool_create can

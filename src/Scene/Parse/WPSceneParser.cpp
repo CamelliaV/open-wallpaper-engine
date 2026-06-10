@@ -2508,15 +2508,21 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::W
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
                                             fs::VFS& vfs, wavsen::audio::SoundManager& sm,
                                             wpscene::SceneVersion pkg_version) {
-    nlohmann::json json;
-    if (! owe::ParseJson(buf, json)) return nullptr;
-    wpscene::WPScene sc;
-    sc.FromJson(json, pkg_version);
+    auto doc = wpscene::ParseSceneDocumentJson(buf, pkg_version);
+    if (! doc) return nullptr;
+    return Parse(scene_id, *doc, vfs, sm);
+}
+
+std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view                scene_id,
+                                            const wpscene::WPSceneDocument& doc, fs::VFS& vfs,
+                                            wavsen::audio::SoundManager& sm) {
+    const auto& json = doc.root_json;
+    auto        sc   = doc.metadata;
     rstd_info("scene: pkg_version={} scene_json_version={}",
-              static_cast<unsigned>(pkg_version),
+              static_cast<unsigned>(sc.pkg_version),
               static_cast<unsigned>(sc.scene_json_version));
 
-    auto wp_objs = ExpandObjects(json, vfs, pkg_version, m_user_properties);
+    auto wp_objs = ExpandObjects(json, vfs, sc.pkg_version, m_user_properties);
     AdjustAutoOrthoProjection(sc, wp_objs);
     auto context = BuildContext(vfs, scene_id, sc);
 

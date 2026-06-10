@@ -4,9 +4,12 @@ module;
 export module wescene.scene_wallpaper;
 import wescene.core;
 import rstd.cppstd;
+import nlohmann.json;
 
 export import wescene.vulkan_render;
 export import wescene.vulkan;
+export import wescene.types;
+export import wescene.parse;
 
 export namespace owe
 {
@@ -21,18 +24,21 @@ using FirstFrameCallback = std::function<void()>;
 // always opaque).
 using ClearColorCallback = std::function<void(float r, float g, float b)>;
 
-inline constexpr std::string_view PROPERTY_SOURCE               = "source";
-inline constexpr std::string_view PROPERTY_ASSETS               = "assets";
-inline constexpr std::string_view PROPERTY_FPS                  = "fps";
-inline constexpr std::string_view PROPERTY_FILLMODE             = "fillmode";
-inline constexpr std::string_view PROPERTY_SPEED                = "speed";
-inline constexpr std::string_view PROPERTY_GRAPHIVZ             = "graphivz";
-inline constexpr std::string_view PROPERTY_VOLUME               = "volume";
-inline constexpr std::string_view PROPERTY_MUTED                = "muted";
-inline constexpr std::string_view PROPERTY_CACHE_PATH           = "cache_path";
-inline constexpr std::string_view PROPERTY_FIRST_FRAME_CALLBACK = "first_frame_callback";
+struct SceneWallpaperConfig {
+    std::string                                     source_pkg_path;
+    std::string                                     assets_dir;
+    std::string                                     cache_dir;
+    std::shared_ptr<wpscene::WPSceneDocument>       scene_document;
+    std::unordered_map<std::string, nlohmann::json> user_properties;
+    uint32_t                                        fps { 30 };
+    float                                           volume { 1.0f };
+    bool                                            muted { false };
+    FillMode                                        fill_mode { FillMode::ASPECTCROP };
+    float                                           speed { 1.0f };
+    bool                                            graphviz { false };
+};
 
-class MainHandler;
+class SceneRuntimeController;
 
 class SceneWallpaper : NoCopy {
 public:
@@ -51,11 +57,15 @@ public:
     void mouseButton(int button, bool down);
     void mouseEnter(bool in_window);
 
-    void setPropertyBool(std::string_view, bool);
-    void setPropertyInt32(std::string_view, int32_t);
-    void setPropertyFloat(std::string_view, float);
-    void setPropertyString(std::string_view, std::string);
-    void setPropertyObject(std::string_view, std::shared_ptr<void>);
+    void configure(SceneWallpaperConfig);
+    void setFps(uint32_t);
+    void setVolume(float);
+    void setMuted(bool);
+    void setFillMode(FillMode);
+    void setSpeed(float);
+    void setUserPropertyRaw(std::string_view, std::string);
+    void setUserPropertyJson(std::string_view, nlohmann::json);
+    void setOnFirstFrame(FirstFrameCallback);
 
     // Install (or clear, with `nullptr`) a callback invoked on the
     // main thread after each scene is parsed, carrying the scene's
@@ -83,10 +93,10 @@ private:
     bool m_inited { false };
 
 private:
-    friend class MainHandler;
+    friend class SceneRuntimeController;
 
-    bool                         m_offscreen { false };
-    std::unique_ptr<MainHandler> m_main_handler;
+    bool                                    m_offscreen { false };
+    std::unique_ptr<SceneRuntimeController> m_runtime;
 };
 
 } // namespace owe

@@ -6,6 +6,7 @@ module wescene.parse;
 import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
+import wescene.pkg_fs;
 
 using namespace owe::wpscene;
 
@@ -153,6 +154,87 @@ void parse_lightconfig(WPSceneGeneral& g, const nlohmann::json& json) {
     }
 }
 
+WPSceneObjectKind object_kind(const nlohmann::json& obj) {
+    if (! obj.is_object()) return WPSceneObjectKind::Unknown;
+    if (obj.contains("image") && ! obj.at("image").is_null()) return WPSceneObjectKind::Image;
+    if (obj.contains("particle") && ! obj.at("particle").is_null())
+        return WPSceneObjectKind::Particle;
+    if (obj.contains("sound") && ! obj.at("sound").is_null()) return WPSceneObjectKind::Sound;
+    if (obj.contains("light") && ! obj.at("light").is_null()) return WPSceneObjectKind::Light;
+    if (obj.contains("text") && ! obj.at("text").is_null()) return WPSceneObjectKind::Text;
+    if (obj.contains("model") && ! obj.at("model").is_null()) return WPSceneObjectKind::Model;
+    if (obj.contains("camera") && ! obj.at("camera").is_null()) return WPSceneObjectKind::Camera;
+    return WPSceneObjectKind::Container;
+}
+
+WPSceneObjectMetadata parse_object_metadata(const nlohmann::json& obj, std::size_t raw_index) {
+    WPSceneObjectMetadata metadata;
+    metadata.raw_index = raw_index;
+    metadata.kind      = object_kind(obj);
+    if (! obj.is_object()) return metadata;
+
+    owe::GetJsonValue(obj, "id", metadata.id, false);
+    owe::GetJsonValue(obj, "name", metadata.name, false);
+    owe::GetJsonValue(obj, "visible", metadata.visible, false);
+    owe::GetJsonValue(obj, "parent", metadata.parent, false);
+
+    std::array<float, 2> size {};
+    if (owe::GetJsonValue(obj, "size", size, false) && size[0] > 0.0f && size[1] > 0.0f) {
+        metadata.size = size;
+    }
+    return metadata;
+}
+
+std::vector<WPSceneObjectMetadata> parse_objects_metadata(const nlohmann::json& root) {
+    std::vector<WPSceneObjectMetadata> objects;
+    if (! root.contains("objects") || ! root.at("objects").is_array()) return objects;
+
+    const auto& raw_objects = root.at("objects");
+    objects.reserve(raw_objects.size());
+    for (std::size_t i = 0; i < raw_objects.size(); ++i) {
+        objects.push_back(parse_object_metadata(raw_objects.at(i), i));
+    }
+    return objects;
+}
+
+std::optional<std::array<uint32_t, 2>> image_extent(const WPSceneObjectMetadata& obj) {
+    if (obj.kind != WPSceneObjectKind::Image || ! obj.size) return std::nullopt;
+    return std::array<uint32_t, 2> { static_cast<uint32_t>((*obj.size)[0]),
+                                     static_cast<uint32_t>((*obj.size)[1]) };
+}
+
+std::optional<std::array<uint32_t, 2>>
+largest_image_extent(std::span<const WPSceneObjectMetadata> objects) {
+    std::optional<std::array<uint32_t, 2>> best;
+    uint64_t                               best_area = 0;
+    for (const auto& obj : objects) {
+        auto extent = image_extent(obj);
+        if (! extent) continue;
+        const uint64_t area =
+            static_cast<uint64_t>((*extent)[0]) * static_cast<uint64_t>((*extent)[1]);
+        if (area > best_area) {
+            best      = *extent;
+            best_area = area;
+        }
+    }
+    return best;
+}
+
+std::optional<std::array<uint32_t, 2>>
+scene_canvas_extent(const WPSceneMetadata&                 metadata,
+                    std::span<const WPSceneObjectMetadata> objects_metadata) {
+    const auto& general = metadata.general;
+    if (! general.isOrtho) return std::nullopt;
+
+    const auto& ortho = general.orthogonalprojection;
+    if (! ortho.auto_) {
+        if (ortho.width <= 0 || ortho.height <= 0) return std::nullopt;
+        return std::array<uint32_t, 2> { static_cast<uint32_t>(ortho.width),
+                                         static_cast<uint32_t>(ortho.height) };
+    }
+    return largest_image_extent(objects_metadata);
+}
+
 } // namespace
 
 bool WPSceneGeneral::FromJson(const nlohmann::json& json) {
@@ -170,9 +252,11 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, SceneVersion v) {
     return true;
 }
 
-bool WPScene::FromJson(const nlohmann::json& json) { return FromJson(json, kSceneVersionUnknown); }
+bool WPSceneMetadata::FromJson(const nlohmann::json& json) {
+    return FromJson(json, kSceneVersionUnknown);
+}
 
-bool WPScene::FromJson(const nlohmann::json& json, SceneVersion v) {
+bool WPSceneMetadata::FromJson(const nlohmann::json& json, SceneVersion v) {
     pkg_version        = v;
     scene_json_version = DetectSceneJsonVersion(json);
     if (json.contains("camera")) {
@@ -190,3 +274,37 @@ bool WPScene::FromJson(const nlohmann::json& json, SceneVersion v) {
     }
     return true;
 }
+
+namespace owe::wpscene
+{
+
+std::optional<WPSceneDocument> ParseSceneDocumentJson(std::string_view buf,
+                                                      SceneVersion     pkg_version) {
+    WPSceneDocument doc;
+    if (! owe::ParseJson(buf, doc.root_json)) return std::nullopt;
+    if (! doc.metadata.FromJson(doc.root_json, pkg_version)) return std::nullopt;
+    doc.objects_metadata       = parse_objects_metadata(doc.root_json);
+    doc.metadata.canvas_extent = scene_canvas_extent(doc.metadata, doc.objects_metadata);
+    return doc;
+}
+
+std::optional<WPSceneDocument> LoadSceneDocumentFromVfs(fs::VFS& vfs, std::string_view scene_path,
+                                                        SceneVersion pkg_version) {
+    auto f = vfs.Open(scene_path);
+    if (! f) return std::nullopt;
+    return ParseSceneDocumentJson(f->ReadAllStr(), pkg_version);
+}
+
+std::optional<WPSceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path) {
+    if (pkg_path.empty()) return std::nullopt;
+    auto pkg = fs::WPPkgFs::CreatePkgFs(pkg_path);
+    if (! pkg) return std::nullopt;
+
+    auto scene_file = pkg->Open("/scene.json");
+    if (! scene_file) return std::nullopt;
+
+    const auto pkg_version = ParsePkgVersionStamp(pkg->pkg_version_stamp());
+    return ParseSceneDocumentJson(scene_file->ReadAllStr(), pkg_version);
+}
+
+} // namespace owe::wpscene

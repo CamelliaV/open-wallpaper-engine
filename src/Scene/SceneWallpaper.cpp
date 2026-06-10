@@ -69,19 +69,37 @@ struct MainStop {
     bool stop;
 };
 struct MainFirstFrame {};
-
-// Property values stay in a small variant so we don't need a separate
-// message kind per property.
-using PropertyValue =
-    std::variant<bool, int32_t, float, std::string, std::shared_ptr<FirstFrameCallback>>;
-
-struct MainSetProperty {
-    std::string   key;
-    PropertyValue value;
+struct MainConfigure {
+    SceneWallpaperConfig config;
+};
+struct MainSetFps {
+    uint32_t fps { 0 };
+};
+struct MainSetVolume {
+    float volume { 1.0f };
+};
+struct MainSetMuted {
+    bool muted { false };
+};
+struct MainSetFillMode {
+    FillMode mode { FillMode::ASPECTCROP };
+};
+struct MainSetSpeed {
+    float speed { 1.0f };
+};
+struct MainSetUserProperty {
+    std::string    key;
+    nlohmann::json value;
+};
+struct MainSetFirstFrameCallback {
+    FirstFrameCallback cb;
 };
 
 struct MainMsg {
-    std::variant<MainLoadScene, MainSetProperty, MainStop, MainFirstFrame> v;
+    std::variant<MainLoadScene, MainConfigure, MainSetFps, MainSetVolume, MainSetMuted,
+                 MainSetFillMode, MainSetSpeed, MainSetUserProperty, MainSetFirstFrameCallback,
+                 MainStop, MainFirstFrame>
+        v;
 };
 
 namespace
@@ -103,20 +121,12 @@ nlohmann::json ParseSettingJsonValue(std::string_view raw) {
     return std::string(raw);
 }
 
-nlohmann::json PropertyValueToUserProperty(const PropertyValue& value) {
-    nlohmann::json v;
-    if (auto* p = std::get_if<bool>(&value)) {
-        v = *p;
-    } else if (auto* p = std::get_if<int32_t>(&value)) {
-        v = *p;
-    } else if (auto* p = std::get_if<float>(&value)) {
-        v = *p;
-    } else if (auto* p = std::get_if<std::string>(&value)) {
-        v = ParseSettingJsonValue(*p);
-    } else {
-        v = nullptr;
-    }
-    return MakeUserPropertyDescriptor(std::move(v));
+nlohmann::json RawUserProperty(std::string_view value) {
+    return MakeUserPropertyDescriptor(ParseSettingJsonValue(value));
+}
+
+nlohmann::json JsonUserProperty(nlohmann::json value) {
+    return MakeUserPropertyDescriptor(std::move(value));
 }
 
 // Parse a "r g b" / "r g b a" / "x y z w ..." space-separated float string into
@@ -375,31 +385,48 @@ void MergeProjectUserProperties(const std::filesystem::path&                    
     }
 }
 
+std::unordered_map<std::string, nlohmann::json>
+NormalizeUserProperties(const std::unordered_map<std::string, nlohmann::json>& input) {
+    std::unordered_map<std::string, nlohmann::json> out;
+    out.reserve(input.size());
+    for (const auto& [key, value] : input) {
+        out.emplace(key, MakeUserPropertyDescriptor(value));
+    }
+    return out;
+}
+
 } // namespace
 
 using MainSender   = msgloop::MessageLoop<MainMsg>::Sender;
 using RenderSender = msgloop::MessageLoop<RenderMsg>::Sender;
 
-class RenderHandler;
+class SceneRenderController;
 
-class MainHandler {
+class SceneRuntimeController {
 public:
-    MainHandler();
-    ~MainHandler();
+    SceneRuntimeController();
+    ~SceneRuntimeController();
 
     bool init();
-    auto renderHandler() const { return m_render_handler.get(); }
+    auto renderController() const { return m_render_controller.get(); }
     bool inited() const { return m_inited; }
 
     MainSender   mainSender() { return m_main_loop.sender(); }
     RenderSender renderSender() { return m_render_loop.sender(); }
 
     void on(MainLoadScene&&);
-    void on(MainSetProperty&&);
+    void on(MainConfigure&&);
+    void on(MainSetFps&&);
+    void on(MainSetVolume&&);
+    void on(MainSetMuted&&);
+    void on(MainSetFillMode&&);
+    void on(MainSetSpeed&&);
+    void on(MainSetUserProperty&&);
+    void on(MainSetFirstFrameCallback&&);
     void on(MainStop&&);
     void on(MainFirstFrame&&);
 
-    bool isGenGraphviz() const { return m_gen_graphviz; }
+    bool isGenGraphviz() const { return m_config.graphviz; }
 
     void setOnClearColor(ClearColorCallback cb) { m_clear_color_cb = std::move(cb); }
 
@@ -408,10 +435,7 @@ private:
 
     bool m_inited { false };
 
-    std::string                                     m_assets;
-    std::string                                     m_source;
-    std::string                                     m_cache_path;
-    bool                                            m_gen_graphviz { false };
+    SceneWallpaperConfig                            m_config;
     std::unordered_map<std::string, nlohmann::json> m_user_properties;
 
     WPSceneParser                                m_scene_parser;
@@ -419,19 +443,19 @@ private:
     FirstFrameCallback                           m_first_frame_callback;
     ClearColorCallback                           m_clear_color_cb;
 
-    msgloop::MessageLoop<MainMsg>   m_main_loop;
-    msgloop::MessageLoop<RenderMsg> m_render_loop;
-    std::unique_ptr<RenderHandler>  m_render_handler;
+    msgloop::MessageLoop<MainMsg>          m_main_loop;
+    msgloop::MessageLoop<RenderMsg>        m_render_loop;
+    std::unique_ptr<SceneRenderController> m_render_controller;
 };
 
-class RenderHandler {
+class SceneRenderController {
 public:
-    explicit RenderHandler(MainHandler& main): m_main(main) {
+    explicit SceneRenderController(SceneRuntimeController& main): m_main(main) {
         // Best-effort: a failing init just leaves snapshots returning false
         // and audio_average at zeros — wallpapers still render fine.
         (void)m_audio_capture.init();
     }
-    ~RenderHandler() {
+    ~SceneRenderController() {
         m_render->destroy();
         rstd_info("render handler deleted");
     }
@@ -497,7 +521,7 @@ public:
     FpsCounter fps_counter;
 
 private:
-    MainHandler& m_main;
+    SceneRuntimeController& m_main;
 
     std::unique_ptr<vulkan::VulkanRender> m_render { std::make_unique<vulkan::VulkanRender>() };
     std::shared_ptr<Scene>                m_scene { nullptr };
@@ -522,16 +546,16 @@ private:
     wavsen::audio::AudioCapture m_audio_capture;
 };
 
-// ---- RenderHandler message handlers ----------------------------------------
+// ---- SceneRenderController message handlers ---------------------------------
 
-void RenderHandler::on(RenderStop&& m) {
+void SceneRenderController::on(RenderStop&& m) {
     if (m.stop)
         frame_timer.Stop();
     else
         frame_timer.Run();
 }
 
-void RenderHandler::on(RenderDraw&&) {
+void SceneRenderController::on(RenderDraw&&) {
     frame_timer.FrameBegin();
     if (m_rg) {
         m_scene->shaderValueUpdater->FrameBegin();
@@ -614,14 +638,14 @@ void RenderHandler::on(RenderDraw&&) {
     frame_timer.FrameEnd();
 }
 
-void RenderHandler::on(RenderSetFillMode&& m) {
+void SceneRenderController::on(RenderSetFillMode&& m) {
     m_fillmode = m.mode;
     if (m_scene && renderInited()) {
         m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     }
 }
 
-void RenderHandler::on(RenderSetScene&& m) {
+void SceneRenderController::on(RenderSetScene&& m) {
     m_scene = std::move(m.scene);
     if (m_rg) m_render->clearLastRenderGraph();
     // Drop cached mesh buffers from the previous scene before building the
@@ -635,9 +659,9 @@ void RenderHandler::on(RenderSetScene&& m) {
     m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
 }
 
-void RenderHandler::on(RenderSetSpeed&& m) { m_speed = m.speed; }
+void SceneRenderController::on(RenderSetSpeed&& m) { m_speed = m.speed; }
 
-void RenderHandler::on(RenderSetUserProperty&& m) {
+void SceneRenderController::on(RenderSetUserProperty&& m) {
     if (! m_scene) return;
     owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
     ApplyUserPropertyToShaders(*m_scene, m.key, m.property);
@@ -646,7 +670,7 @@ void RenderHandler::on(RenderSetUserProperty&& m) {
     ApplyUserPropertyToNodeVisibility(*m_scene, m.key, m.property);
 }
 
-void RenderHandler::on(RenderInit&& m) {
+void SceneRenderController::on(RenderInit&& m) {
     m_render->init(std::move(*m.info));
 
     // Subscribe to ExSwapchain ready/extent/format changes. The
@@ -673,7 +697,7 @@ void RenderHandler::on(RenderInit&& m) {
     if (m_main_tx) (void)m_main_tx->send(MainMsg { MainLoadScene {} });
 }
 
-void RenderHandler::on(RenderSwapchainReady&& m) {
+void SceneRenderController::on(RenderSwapchainReady&& m) {
     if (! m.ready) {
         frame_timer.Stop();
         return;
@@ -687,85 +711,84 @@ void RenderHandler::on(RenderSwapchainReady&& m) {
     frame_timer.Run();
 }
 
-// ---- MainHandler message handlers ------------------------------------------
+// ---- SceneRuntimeController message handlers --------------------------------
 
-void MainHandler::on(MainLoadScene&&) {
-    if (m_render_handler->renderInited()) {
+void SceneRuntimeController::on(MainLoadScene&&) {
+    if (m_render_controller->renderInited()) {
         loadScene();
     }
 }
 
-void MainHandler::on(MainSetProperty&& m) {
-    const auto& property = m.key;
-    const auto& value    = m.value;
-
-    if (property == PROPERTY_SOURCE) {
-        if (auto* p = std::get_if<std::string>(&value)) {
-            m_source = *p;
-            rstd_info("source: {}", m_source);
-            on(MainLoadScene {});
-        }
-    } else if (property == PROPERTY_ASSETS) {
-        if (auto* p = std::get_if<std::string>(&value)) {
-            m_assets = *p;
-            on(MainLoadScene {});
-        }
-    } else if (property == PROPERTY_FPS) {
-        if (auto* p = std::get_if<int32_t>(&value)) {
-            int32_t fps = *p;
-            if (fps >= 5) {
-                m_render_handler->frame_timer.SetRequiredFps((uint8_t)fps);
-            }
-        }
-    } else if (property == PROPERTY_FILLMODE) {
-        if (auto* p = std::get_if<int32_t>(&value)) {
-            (void)m_render_loop.sender().send(RenderMsg { RenderSetFillMode { (FillMode)*p } });
-        }
-    } else if (property == PROPERTY_GRAPHIVZ) {
-        if (auto* p = std::get_if<bool>(&value)) m_gen_graphviz = *p;
-    } else if (property == PROPERTY_MUTED) {
-        if (auto* p = std::get_if<bool>(&value)) m_sound_manager->set_muted(*p);
-    } else if (property == PROPERTY_VOLUME) {
-        if (auto* p = std::get_if<float>(&value)) m_sound_manager->set_volume(*p);
-    } else if (property == PROPERTY_CACHE_PATH) {
-        if (auto* p = std::get_if<std::string>(&value)) m_cache_path = *p;
-    } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
-        if (auto* p = std::get_if<std::shared_ptr<FirstFrameCallback>>(&value)) {
-            m_first_frame_callback = **p;
-        }
-    } else if (property == PROPERTY_SPEED) {
-        if (auto* p = std::get_if<float>(&value)) {
-            (void)m_render_loop.sender().send(RenderMsg { RenderSetSpeed { *p } });
-        }
-    } else {
-        nlohmann::json prop         = PropertyValueToUserProperty(value);
-        m_user_properties[property] = prop;
-        // `schemecolor` doubles as the wallpaper-level accent color and as
-        // the scene clear/background colour in owe. When it changes, push
-        // the new RGB to the host (waywallen daemon) so display endpoints
-        // get a `set_config` with matching letterbox bars even before the
-        // renderer paints the next frame. The render-thread path below
-        // still runs to update `scene.clearColor` + any bound shader
-        // uniforms.
-        if (property == "schemecolor" && m_clear_color_cb) {
-            const nlohmann::json* v_ptr = &prop;
-            if (prop.is_object() && prop.contains("value")) v_ptr = &prop.at("value");
-            if (v_ptr->is_string()) {
-                std::vector<float> nums;
-                if (ParseFloatList(v_ptr->get<std::string>(), nums) && nums.size() >= 3) {
-                    auto clamp01 = [](float n) {
-                        return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
-                    };
-                    m_clear_color_cb(clamp01(nums[0]), clamp01(nums[1]), clamp01(nums[2]));
-                }
-            }
-        }
-        (void)m_render_loop.sender().send(
-            RenderMsg { RenderSetUserProperty { property, std::move(prop) } });
-    }
+void SceneRuntimeController::on(MainConfigure&& m) {
+    m_config          = std::move(m.config);
+    m_user_properties = NormalizeUserProperties(m_config.user_properties);
+    on(MainSetFps { m_config.fps });
+    on(MainSetVolume { m_config.volume });
+    on(MainSetMuted { m_config.muted });
+    on(MainSetFillMode { m_config.fill_mode });
+    on(MainSetSpeed { m_config.speed });
+    on(MainLoadScene {});
 }
 
-void MainHandler::on(MainStop&& m) {
+void SceneRuntimeController::on(MainSetFps&& m) {
+    m_config.fps = m.fps;
+    if (m.fps >= 5) m_render_controller->frame_timer.SetRequiredFps(static_cast<uint8_t>(m.fps));
+}
+
+void SceneRuntimeController::on(MainSetVolume&& m) {
+    m_config.volume = m.volume;
+    m_sound_manager->set_volume(m.volume);
+}
+
+void SceneRuntimeController::on(MainSetMuted&& m) {
+    m_config.muted = m.muted;
+    m_sound_manager->set_muted(m.muted);
+}
+
+void SceneRuntimeController::on(MainSetFillMode&& m) {
+    m_config.fill_mode = m.mode;
+    (void)m_render_loop.sender().send(RenderMsg { RenderSetFillMode { m.mode } });
+}
+
+void SceneRuntimeController::on(MainSetSpeed&& m) {
+    m_config.speed = m.speed;
+    (void)m_render_loop.sender().send(RenderMsg { RenderSetSpeed { m.speed } });
+}
+
+void SceneRuntimeController::on(MainSetUserProperty&& m) {
+    nlohmann::json prop              = MakeUserPropertyDescriptor(std::move(m.value));
+    m_config.user_properties[m.key]  = prop;
+    m_user_properties[m.key]         = prop;
+    const std::string    property    = std::move(m.key);
+    const nlohmann::json prop_for_rt = prop;
+    // `schemecolor` doubles as the wallpaper-level accent color and as
+    // the scene clear/background colour in owe. When it changes, push
+    // the new RGB to the host (waywallen daemon) so display endpoints
+    // get a `set_config` with matching letterbox bars even before the
+    // renderer paints the next frame. The render-thread path below
+    // still runs to update `scene.clearColor` + any bound shader uniforms.
+    if (property == "schemecolor" && m_clear_color_cb) {
+        const nlohmann::json* v_ptr = &prop;
+        if (prop.is_object() && prop.contains("value")) v_ptr = &prop.at("value");
+        if (v_ptr->is_string()) {
+            std::vector<float> nums;
+            if (ParseFloatList(v_ptr->get<std::string>(), nums) && nums.size() >= 3) {
+                auto clamp01 = [](float n) {
+                    return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
+                };
+                m_clear_color_cb(clamp01(nums[0]), clamp01(nums[1]), clamp01(nums[2]));
+            }
+        }
+    }
+    (void)m_render_loop.sender().send(
+        RenderMsg { RenderSetUserProperty { property, prop_for_rt } });
+}
+
+void SceneRuntimeController::on(MainSetFirstFrameCallback&& m) {
+    m_first_frame_callback = std::move(m.cb);
+}
+
+void SceneRuntimeController::on(MainStop&& m) {
     if (m.stop) {
         m_sound_manager->pause();
     } else {
@@ -774,14 +797,14 @@ void MainHandler::on(MainStop&& m) {
     (void)m_render_loop.sender().send(RenderMsg { RenderStop { m.stop } });
 }
 
-void MainHandler::on(MainFirstFrame&&) {
+void SceneRuntimeController::on(MainFirstFrame&&) {
     if (m_first_frame_callback) m_first_frame_callback();
 }
 
-void MainHandler::loadScene() {
-    if (m_source.empty() || m_assets.empty()) return;
+void SceneRuntimeController::loadScene() {
+    if (m_config.source_pkg_path.empty() || m_config.assets_dir.empty()) return;
 
-    rstd_info("loading scene: {}", m_source);
+    rstd_info("loading scene: {}", m_config.source_pkg_path);
 
     if (! m_sound_manager->is_inited()) {
         m_sound_manager->init();
@@ -796,13 +819,13 @@ void MainHandler::loadScene() {
     std::unique_ptr<fs::VFS> pVfs = std::make_unique<fs::VFS>();
     auto&                    vfs  = *pVfs;
     if (! vfs.IsMounted("assets")) {
-        bool sus = vfs.Mount("/assets", fs::CreatePhysicalFs(m_assets), "assets");
+        bool sus = vfs.Mount("/assets", fs::CreatePhysicalFs(m_config.assets_dir), "assets");
         if (! sus) {
             rstd_error("Mount assets dir failed");
             return;
         }
     }
-    std::filesystem::path pkgPath_fs { m_source };
+    std::filesystem::path pkgPath_fs { m_config.source_pkg_path };
     pkgPath_fs.replace_extension("pkg");
     std::string pkgPath  = pkgPath_fs.native();
     std::string pkgEntry = pkgPath_fs.filename().replace_extension("json").native();
@@ -825,25 +848,22 @@ void MainHandler::loadScene() {
             return;
         }
     }
-    if (! m_cache_path.empty()) {
-        if (! vfs.Mount("/cache", fs::CreatePhysicalFs(m_cache_path, true), "cache")) {
-            rstd_error("can't load cache folder: {}", m_cache_path);
+    if (! m_config.cache_dir.empty()) {
+        if (! vfs.Mount("/cache", fs::CreatePhysicalFs(m_config.cache_dir, true), "cache")) {
+            rstd_error("can't load cache folder: {}", m_config.cache_dir);
         } else {
-            rstd_info("cache folder: {}", m_cache_path);
+            rstd_info("cache folder: {}", m_config.cache_dir);
         }
     }
 
     {
-        std::string       scene_src;
         const std::string base { "/assets/" };
-        {
-            std::string scenePath = base + pkgEntry;
-            if (vfs.Contains(scenePath)) {
-                auto f = vfs.Open(scenePath);
-                if (f) scene_src = f->ReadAllStr();
-            }
+        auto              scene_doc = m_config.scene_document;
+        if (! scene_doc) {
+            auto loaded = wpscene::LoadSceneDocumentFromVfs(vfs, base + pkgEntry, pkg_v);
+            if (loaded) scene_doc = std::make_shared<wpscene::WPSceneDocument>(std::move(*loaded));
         }
-        if (scene_src.empty()) {
+        if (! scene_doc) {
             rstd_error("Not supported scene type");
             return;
         }
@@ -851,7 +871,7 @@ void MainHandler::loadScene() {
         // overrides) user-property map to the parser so visible-binding
         // pruning sees the user's saved values, not the scene.json defaults.
         m_scene_parser.SetUserProperties(&m_user_properties);
-        scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, pkg_v);
+        scene = m_scene_parser.Parse(scene_id, *scene_doc, vfs, *m_sound_manager);
         m_scene_parser.SetUserProperties(nullptr);
         // Apply a user-property override on `schemecolor` to the freshly-
         // parsed scene clear color so the host callback below publishes
@@ -875,9 +895,9 @@ void MainHandler::loadScene() {
         for (const auto& [key, prop] : m_user_properties) {
             owe::script::SetSceneUserProperty(*scene, key, prop);
         }
-        if (! m_cache_path.empty() && scene) {
+        if (! m_config.cache_dir.empty() && scene) {
             std::filesystem::path ls_dir =
-                std::filesystem::path(m_cache_path) / "script_localstorage";
+                std::filesystem::path(m_config.cache_dir) / "script_localstorage";
             std::error_code ec;
             std::filesystem::create_directories(ls_dir, ec);
             std::string ls_file = (ls_dir / (scene_id + ".json")).native();
@@ -907,12 +927,12 @@ void MainHandler::loadScene() {
     (void)rtx.send(RenderMsg { RenderDraw {} });
 }
 
-bool MainHandler::init() {
+bool SceneRuntimeController::init() {
     if (m_inited) return true;
 
     // Wire render handler senders before starting the loops; otherwise an
     // early RenderInit could fire before they're set.
-    m_render_handler->setSenders(m_render_loop.sender(), m_main_loop.sender());
+    m_render_controller->setSenders(m_render_loop.sender(), m_main_loop.sender());
 
     m_main_loop.start([this](MainMsg&& m) {
         std::visit(
@@ -924,13 +944,13 @@ bool MainHandler::init() {
     m_render_loop.start([this](RenderMsg&& m) {
         std::visit(
             [this](auto&& v) {
-                m_render_handler->on(std::move(v));
+                m_render_controller->on(std::move(v));
             },
             std::move(m.v));
     });
 
     {
-        auto& frameTimer = m_render_handler->frame_timer;
+        auto& frameTimer = m_render_controller->frame_timer;
         auto  rtx        = m_render_loop.sender();
         frameTimer.SetCallback([rtx]() mutable {
             (void)rtx.send(RenderMsg { RenderDraw {} });
@@ -943,14 +963,14 @@ bool MainHandler::init() {
     return true;
 }
 
-MainHandler::MainHandler()
+SceneRuntimeController::SceneRuntimeController()
     : m_sound_manager(std::make_unique<wavsen::audio::SoundManager>()),
       m_main_loop("main"),
       m_render_loop("render"),
-      m_render_handler(std::make_unique<RenderHandler>(*this)) {}
+      m_render_controller(std::make_unique<SceneRenderController>(*this)) {}
 
-MainHandler::~MainHandler() {
-    // Orderly shutdown: drain both loops *before* RenderHandler dies, so
+SceneRuntimeController::~SceneRuntimeController() {
+    // Orderly shutdown: drain both loops *before* SceneRenderController dies, so
     // m_render->destroy() doesn't race with an in-flight RenderDraw.
     //
     //   1. Stop the frame timer (joins its thread → no more Draw posts).
@@ -961,13 +981,13 @@ MainHandler::~MainHandler() {
     //   4. Stop the render loop — drops engine sender, recv() returns Err
     //      after the in-flight handler returns, thread joins.
     //   5. Same for the main loop.
-    //   6. Default member destruction then runs RenderHandler's dtor with
+    //   6. Default member destruction then runs SceneRenderController's dtor with
     //      the render thread already gone, so destroy() is single-threaded.
-    if (m_render_handler) {
-        m_render_handler->frame_timer.Stop();
-        m_render_handler->frame_timer.SetCallback([] {
+    if (m_render_controller) {
+        m_render_controller->frame_timer.Stop();
+        m_render_controller->frame_timer.SetCallback([] {
         });
-        m_render_handler->clearSenders();
+        m_render_controller->clearSenders();
     }
     m_render_loop.stop();
     m_main_loop.stop();
@@ -975,87 +995,93 @@ MainHandler::~MainHandler() {
 
 } // namespace owe
 
-SceneWallpaper::SceneWallpaper(): m_main_handler(std::make_unique<MainHandler>()) {}
+SceneWallpaper::SceneWallpaper(): m_runtime(std::make_unique<SceneRuntimeController>()) {}
 
 SceneWallpaper::~SceneWallpaper() = default;
 
-bool SceneWallpaper::inited() const { return m_main_handler->inited(); }
+bool SceneWallpaper::inited() const { return m_runtime->inited(); }
 
-bool SceneWallpaper::init() { return m_main_handler->init(); }
+bool SceneWallpaper::init() { return m_runtime->init(); }
 
 void SceneWallpaper::initVulkan(RenderInitInfo info) {
     m_offscreen = info.offscreen;
     auto sp     = std::make_shared<RenderInitInfo>(std::move(info));
-    (void)m_main_handler->renderSender().send(RenderMsg { RenderInit { std::move(sp) } });
+    (void)m_runtime->renderSender().send(RenderMsg { RenderInit { std::move(sp) } });
 }
 
-void SceneWallpaper::play() {
-    (void)m_main_handler->mainSender().send(MainMsg { MainStop { false } });
-}
-void SceneWallpaper::pause() {
-    (void)m_main_handler->mainSender().send(MainMsg { MainStop { true } });
-}
+void SceneWallpaper::play() { (void)m_runtime->mainSender().send(MainMsg { MainStop { false } }); }
+void SceneWallpaper::pause() { (void)m_runtime->mainSender().send(MainMsg { MainStop { true } }); }
 
 void SceneWallpaper::mouseInput(double x, double y) {
-    m_main_handler->renderHandler()->setMousePos(x, y);
+    m_runtime->renderController()->setMousePos(x, y);
 }
 
 void SceneWallpaper::mouseButton(int button, bool down) {
-    m_main_handler->renderHandler()->setMouseButton(button, down);
+    m_runtime->renderController()->setMouseButton(button, down);
 }
 
 void SceneWallpaper::mouseEnter(bool in_window) {
-    m_main_handler->renderHandler()->setMouseInWindow(in_window);
+    m_runtime->renderController()->setMouseInWindow(in_window);
 }
 
-void SceneWallpaper::setPropertyBool(std::string_view name, bool value) {
-    (void)m_main_handler->mainSender().send(
-        MainMsg { MainSetProperty { std::string(name), PropertyValue { value } } });
+void SceneWallpaper::configure(SceneWallpaperConfig config) {
+    (void)m_runtime->mainSender().send(MainMsg { MainConfigure { std::move(config) } });
 }
-void SceneWallpaper::setPropertyInt32(std::string_view name, int32_t value) {
-    (void)m_main_handler->mainSender().send(
-        MainMsg { MainSetProperty { std::string(name), PropertyValue { value } } });
+
+void SceneWallpaper::setFps(uint32_t fps) {
+    (void)m_runtime->mainSender().send(MainMsg { MainSetFps { fps } });
 }
-void SceneWallpaper::setPropertyFloat(std::string_view name, float value) {
-    (void)m_main_handler->mainSender().send(
-        MainMsg { MainSetProperty { std::string(name), PropertyValue { value } } });
+
+void SceneWallpaper::setVolume(float volume) {
+    (void)m_runtime->mainSender().send(MainMsg { MainSetVolume { volume } });
 }
-void SceneWallpaper::setPropertyString(std::string_view name, std::string value) {
-    (void)m_main_handler->mainSender().send(
-        MainMsg { MainSetProperty { std::string(name), PropertyValue { std::move(value) } } });
+
+void SceneWallpaper::setMuted(bool muted) {
+    (void)m_runtime->mainSender().send(MainMsg { MainSetMuted { muted } });
 }
+
+void SceneWallpaper::setFillMode(FillMode mode) {
+    (void)m_runtime->mainSender().send(MainMsg { MainSetFillMode { mode } });
+}
+
+void SceneWallpaper::setSpeed(float speed) {
+    (void)m_runtime->mainSender().send(MainMsg { MainSetSpeed { speed } });
+}
+
+void SceneWallpaper::setUserPropertyRaw(std::string_view name, std::string value) {
+    (void)m_runtime->mainSender().send(
+        MainMsg { MainSetUserProperty { std::string(name), RawUserProperty(value) } });
+}
+
+void SceneWallpaper::setUserPropertyJson(std::string_view name, nlohmann::json value) {
+    (void)m_runtime->mainSender().send(
+        MainMsg { MainSetUserProperty { std::string(name), std::move(value) } });
+}
+
 void SceneWallpaper::setOnClearColor(ClearColorCallback cb) {
-    m_main_handler->setOnClearColor(std::move(cb));
+    m_runtime->setOnClearColor(std::move(cb));
 }
 
-void SceneWallpaper::setPropertyObject(std::string_view name, std::shared_ptr<void> value) {
-    // Currently the only object property is the first-frame callback. Cast at
-    // the API boundary so the typed message stays self-describing.
-    if (name == PROPERTY_FIRST_FRAME_CALLBACK) {
-        std::shared_ptr<FirstFrameCallback> cb {
-            value, reinterpret_cast<FirstFrameCallback*>(value.get())
-        };
-        (void)m_main_handler->mainSender().send(
-            MainMsg { MainSetProperty { std::string(name), PropertyValue { std::move(cb) } } });
-    }
+void SceneWallpaper::setOnFirstFrame(FirstFrameCallback cb) {
+    (void)m_runtime->mainSender().send(MainMsg { MainSetFirstFrameCallback { std::move(cb) } });
 }
 
 int SceneWallpaper::takeLastFrameSyncFd() {
-    return m_main_handler->renderHandler()->takeLastFrameSyncFd();
+    return m_runtime->renderController()->takeLastFrameSyncFd();
 }
 
 ExSwapchain* SceneWallpaper::exSwapchain() const {
-    return m_main_handler->renderHandler()->exSwapchain();
+    return m_runtime->renderController()->exSwapchain();
 }
 
 bool SceneWallpaper::getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const {
-    return m_main_handler->renderHandler()->getDrmRenderNode(out_major, out_minor);
+    return m_runtime->renderController()->getDrmRenderNode(out_major, out_minor);
 }
 
 bool SceneWallpaper::waitVulkanInited(uint32_t timeout_ms) {
     using clock   = std::chrono::steady_clock;
     auto deadline = clock::now() + std::chrono::milliseconds(timeout_ms);
-    auto rh       = m_main_handler->renderHandler();
+    auto rh       = m_runtime->renderController();
     while (clock::now() < deadline) {
         if (rh->renderInited()) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -1064,23 +1090,23 @@ bool SceneWallpaper::waitVulkanInited(uint32_t timeout_ms) {
 }
 
 VkInstance SceneWallpaper::vkInstance() const {
-    return m_main_handler->renderHandler()->render()->vkInstance();
+    return m_runtime->renderController()->render()->vkInstance();
 }
 VkPhysicalDevice SceneWallpaper::vkPhysicalDevice() const {
-    return m_main_handler->renderHandler()->render()->vkPhysicalDevice();
+    return m_runtime->renderController()->render()->vkPhysicalDevice();
 }
 VkDevice SceneWallpaper::vkDevice() const {
-    return m_main_handler->renderHandler()->render()->vkDevice();
+    return m_runtime->renderController()->render()->vkDevice();
 }
 VkQueue SceneWallpaper::vkGraphicsQueue() const {
-    return m_main_handler->renderHandler()->render()->vkGraphicsQueue();
+    return m_runtime->renderController()->render()->vkGraphicsQueue();
 }
 uint32_t SceneWallpaper::vkGraphicsQueueFamily() const {
-    return m_main_handler->renderHandler()->render()->vkGraphicsQueueFamily();
+    return m_runtime->renderController()->render()->vkGraphicsQueueFamily();
 }
 void SceneWallpaper::deviceUuid(uint8_t out[16]) const {
-    m_main_handler->renderHandler()->render()->deviceUuid(out);
+    m_runtime->renderController()->render()->deviceUuid(out);
 }
 void SceneWallpaper::driverUuid(uint8_t out[16]) const {
-    m_main_handler->renderHandler()->render()->driverUuid(out);
+    m_runtime->renderController()->render()->driverUuid(out);
 }

@@ -102,20 +102,21 @@ int main(int argc, char** argv) {
     data.psw  = psw;
 
     psw->init();
-    psw->initVulkan(std::move(info));
-    psw->setPropertyString(owe::PROPERTY_ASSETS, program.get<std::string>(viewer::ARG_ASSETS));
-    psw->setPropertyString(owe::PROPERTY_SOURCE, program.get<std::string>(viewer::ARG_SCENE));
-    psw->setPropertyBool(owe::PROPERTY_GRAPHIVZ, program.get<bool>(viewer::OPT_GRAPHVIZ));
-    psw->setPropertyInt32(owe::PROPERTY_FPS, program.get<int32_t>(viewer::OPT_FPS));
+
+    owe::SceneWallpaperConfig config;
+    config.assets_dir      = program.get<std::string>(viewer::ARG_ASSETS);
+    config.source_pkg_path = program.get<std::string>(viewer::ARG_SCENE);
+    config.graphviz        = program.get<bool>(viewer::OPT_GRAPHVIZ);
+    config.fps             = static_cast<uint32_t>(program.get<int32_t>(viewer::OPT_FPS));
 
     std::string cache_path = program.get<std::string>(viewer::OPT_CACHE_PATH);
     if (cache_path.empty()) cache_path = owe::platform::GetCachePath("wescene-renderer");
-    psw->setPropertyString(owe::PROPERTY_CACHE_PATH, cache_path);
+    config.cache_dir = std::move(cache_path);
 
     // Apply --user-properties FILE before the scene loads so the first
     // frame already reflects the user's edits. Mirrors the daemon path
     // (Init.user_properties): JSON object whose values can be strings,
-    // numbers, or booleans; setPropertyString already parses both.
+    // numbers, or booleans.
     if (auto up_path = program.get<std::string>(viewer::OPT_USER_PROPS); ! up_path.empty()) {
         std::ifstream is(up_path);
         if (! is) {
@@ -132,21 +133,13 @@ int main(int argc, char** argv) {
             std::cerr << "--user-properties: '" << up_path << "' is not a JSON object\n";
             return 1;
         }
-        // Iterator form: `items()` structured-binding chases std::get
-        // through ADL, which doesn't resolve under modules.
         for (auto it = parsed.begin(); it != parsed.end(); ++it) {
-            const std::string& k = it.key();
-            const auto&        v = it.value();
-            std::string        sval;
-            if (v.is_string())
-                sval = v.get<std::string>();
-            else if (v.is_boolean())
-                sval = v.get<bool>() ? "true" : "false";
-            else
-                sval = v.dump();
-            psw->setPropertyString(k, sval);
+            config.user_properties.emplace(it.key(), it.value());
         }
     }
+
+    psw->configure(std::move(config));
+    psw->initVulkan(std::move(info));
 
     glfwSetWindowUserPointer(window, &data);
 
