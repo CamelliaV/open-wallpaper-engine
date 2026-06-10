@@ -9,6 +9,22 @@ import rstd.cppstd;
 
 using namespace owe::wpscene;
 
+namespace
+{
+
+void LoadUserShaderValues(const nlohmann::json&                         json,
+                          std::unordered_map<std::string, std::string>& out) {
+    auto it = json.find("usershadervalues");
+    if (it == json.end() || ! it->is_object()) return;
+
+    for (const auto& el : it->items()) {
+        if (! el.value().is_string()) continue;
+        out[el.key()] = el.value().get<std::string>();
+    }
+}
+
+} // namespace
+
 bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "name", name);
     owe::GetJsonValue(json, "index", index);
@@ -30,6 +46,9 @@ void WPMaterialPass::Update(const WPMaterialPass& p) {
     for (const auto& el : p.constantshadervalues_user) {
         constantshadervalues_user[el.first] = el.second;
     }
+    for (const auto& el : p.user_shader_values) {
+        user_shader_values[el.first] = el.second;
+    }
     for (const auto& el : p.combos) {
         combos[el.first] = el.second;
     }
@@ -49,6 +68,9 @@ void WPMaterial::MergePass(const WPMaterialPass& p) {
     }
     for (const auto& el : p.constantshadervalues_user) {
         constantshadervalues_user[el.first] = el.second;
+    }
+    for (const auto& el : p.user_shader_values) {
+        user_shader_values[el.first] = el.second;
     }
     for (const auto& el : p.combos) {
         combos[el.first] = el.second;
@@ -85,6 +107,7 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
             }
         }
     }
+    LoadUserShaderValues(json, user_shader_values);
     if (json.contains("combos")) {
         for (const auto& jC : json.at("combos").items()) {
             std::string name;
@@ -144,6 +167,7 @@ bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
             }
         }
     }
+    LoadUserShaderValues(jContent, user_shader_values);
     if (jContent.contains("combos")) {
         for (const auto& jC : jContent.at("combos").items()) {
             std::string name;

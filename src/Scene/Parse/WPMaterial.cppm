@@ -35,6 +35,8 @@ public:
     // The fallback `value` is already extracted into `constantshadervalues`
     // by GetJsonValue's auto-unwrap.
     std::unordered_map<std::string, std::string> constantshadervalues_user;
+    // Legacy `usershadervalues`: project.json key -> shader material key.
+    std::unordered_map<std::string, std::string> user_shader_values;
     std::string                                  target;
     std::vector<WPMaterialPassBindItem>          bind;
 };
@@ -53,6 +55,7 @@ public:
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;
+    std::unordered_map<std::string, std::string>        user_shader_values;
 
     bool use_puppet { false };
 };

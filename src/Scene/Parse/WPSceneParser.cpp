@@ -594,6 +594,15 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     return true;
 }
 
+std::string ResolveShaderMaterialKey(const WPShaderInfo& info, const std::string& material_key) {
+    if (auto it = info.alias.find(material_key); it != info.alias.end()) return it->second;
+
+    for (const auto& el : info.alias) {
+        if (el.second.size() > 2 && el.second.substr(2) == material_key) return el.second;
+    }
+    return {};
+}
+
 // Register a (material, shader-info, wpmat) triple into the scene-wide user
 // variable index. Must be called AFTER the SceneMaterial has been moved into
 // a shared_ptr (e.g. `mesh->AddMaterial(std::move(local))`) and `stable_mat`
@@ -603,6 +612,8 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
 //   (2) Instance-bound effect-internal keys from
 //       `wpmat.constantshadervalues_user`, mapped through `info.alias` to
 //       the GLSL uniform name.
+//   (3) Legacy material `usershadervalues` bindings: project key to shader
+//       material key.
 void RegisterShaderUserVarIndex(Scene* pScene, SceneMaterial* stable_mat,
                                 const wpscene::WPMaterial& wpmat, const WPShaderInfo& info) {
     if (! pScene || ! stable_mat) return;
@@ -613,21 +624,21 @@ void RegisterShaderUserVarIndex(Scene* pScene, SceneMaterial* stable_mat,
         // Resolve effect-internal key → GLSL uniform name via alias.
         // LoadConstvalue's fallback search (alias entry whose value, after
         // dropping the leading "u_", matches the key) is honored here too.
-        std::string glname;
-        if (auto it = info.alias.find(effect_key); it != info.alias.end()) {
-            glname = it->second;
-        } else {
-            for (const auto& el : info.alias) {
-                if (el.second.size() > 2 && el.second.substr(2) == effect_key) {
-                    glname = el.second;
-                    break;
-                }
-            }
-        }
+        std::string glname = ResolveShaderMaterialKey(info, effect_key);
         if (glname.empty()) {
             rstd_warn("user binding '{}' → no shader uniform with material='{}'",
                       wallpaper_key,
                       effect_key);
+            continue;
+        }
+        pScene->shader_user_var_index[wallpaper_key].push_back({ stable_mat, glname });
+    }
+    for (const auto& [wallpaper_key, material_key] : wpmat.user_shader_values) {
+        std::string glname = ResolveShaderMaterialKey(info, material_key);
+        if (glname.empty()) {
+            rstd_warn("user shader value '{}' -> no shader uniform with material='{}'",
+                      wallpaper_key,
+                      material_key);
             continue;
         }
         pScene->shader_user_var_index[wallpaper_key].push_back({ stable_mat, glname });

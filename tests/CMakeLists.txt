@@ -73,6 +73,10 @@ add_executable(wpshader_parse_tests wpshader_parse_tests.cpp)
 target_link_libraries(wpshader_parse_tests PRIVATE owe-parse GTest::gtest_main)
 set_target_properties(wpshader_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
+add_executable(wpmaterial_parse_tests wpmaterial_parse_tests.cpp)
+target_link_libraries(wpmaterial_parse_tests PRIVATE owe-parse GTest::gtest_main)
+set_target_properties(wpmaterial_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 # Unit coverage for the line-aware shader-source Cursor / LineWalker /
 # preprocessor classifier in :shader_lex. Stand-alone — only links owe-parse
 # for the partition module surface.
@@ -123,6 +127,11 @@ gtest_discover_tests(
 )
 gtest_discover_tests(
     wpshader_parse_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    wpmaterial_parse_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )
