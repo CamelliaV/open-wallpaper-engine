@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <cmath>
 
 module wescene.shader_value_updater;
 import eigen;
@@ -28,6 +29,37 @@ void PeakResample64(std::span<const float, 64> bins, std::array<float, N>& out) 
         }
         out[i] = peak;
     }
+}
+
+float Fract(float value) { return value - std::floor(value); }
+
+float Smooth(float value) { return value * value * (3.0f - 2.0f * value); }
+
+float HashNoise(int n, float seed) {
+    float v = std::sin(static_cast<float>(n) * 127.1f + seed * 311.7f) * 43758.5453f;
+    return Fract(v) * 2.0f - 1.0f;
+}
+
+float ValueNoise(float x, float seed) {
+    int   i = static_cast<int>(std::floor(x));
+    float f = x - static_cast<float>(i);
+    return algorism::lerp(Smooth(f), HashNoise(i, seed), HashNoise(i + 1, seed));
+}
+
+float ShakeNoise(float x, float roughness, float seed) {
+    int octaves =
+        std::clamp(1 + static_cast<int>(std::round(std::max(0.0f, roughness) * 2.0f)), 1, 5);
+    float sum  = 0.0f;
+    float norm = 0.0f;
+    float amp  = 1.0f;
+    float freq = 1.0f;
+    for (int i = 0; i < octaves; ++i) {
+        sum += ValueNoise(x * freq, seed + static_cast<float>(i) * 19.13f) * amp;
+        norm += amp;
+        freq *= 2.0f;
+        amp *= 0.5f;
+    }
+    return norm > 0.0f ? sum / norm : 0.0f;
 }
 
 } // namespace
@@ -160,6 +192,20 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     bool reqETVPI = info.has_ETVPI;
 
     Matrix4d viewProTrans = camera->GetViewProjectionMatrix();
+    if (m_cameraShake.enable && camera == m_scene->activeCamera && m_cameraShake.amplitude > 0.0f &&
+        m_cameraShake.speed > 0.0f) {
+        float base_extent = static_cast<float>(std::min(m_scene->ortho[0], m_scene->ortho[1]));
+        float scale       = m_cameraShake.amplitude * m_cameraShake.speed * base_extent * 0.01f;
+        scale             = std::clamp(scale, 0.0f, base_extent * 0.1f);
+
+        float    t = static_cast<float>(m_scene->elapsingTime) * m_cameraShake.speed;
+        Vector3d shake {
+            static_cast<double>(ShakeNoise(t, m_cameraShake.roughness, 1.0f) * scale),
+            static_cast<double>(ShakeNoise(t, m_cameraShake.roughness, 7.0f) * scale),
+            0.0,
+        };
+        viewProTrans = viewProTrans * Affine3d(Translation3d(-shake)).matrix();
+    }
 
     if (info.has_VP) {
         updateOp(G_VP, ShaderValue::fromMatrix(viewProTrans));

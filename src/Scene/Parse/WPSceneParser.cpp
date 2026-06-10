@@ -110,6 +110,22 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
     }
     return out;
 }
+
+script::ScriptScene& EnsureScriptScene(ParseContext& context) {
+    if (! context.script_scene) {
+        context.script_scene = std::make_unique<script::ScriptScene>();
+        context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.get());
+    }
+    return *context.script_scene;
+}
+
+std::optional<float> ScriptValueAsFloat(const script::ScriptValue& value) {
+    if (auto* p = std::get_if<script::ScalarValue>(&value)) return static_cast<float>(p->v);
+    if (auto* p = std::get_if<script::BoolValue>(&value)) return p->v ? 1.0f : 0.0f;
+    if (auto* p = std::get_if<script::Vec2Value>(&value)) return static_cast<float>(p->x);
+    if (auto* p = std::get_if<script::Vec3Value>(&value)) return static_cast<float>(p->x);
+    return std::nullopt;
+}
 } // namespace
 
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
@@ -121,15 +137,7 @@ void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
                       const wpscene::WPFieldBindings& fb) {
     SceneNode* node = node_sp.get();
     if (! node || fb.scripts.empty()) return;
-    if (! context.script_scene) {
-        context.script_scene = std::make_unique<script::ScriptScene>();
-        // Bind thisScene to the scene root *before* any init() runs, so
-        // scripts that call thisScene.createLayer / getLayerIndex / sortLayer
-        // inside init() see the C++ wrapper instead of the bootstrap stub.
-        // FinalizeScene re-applies this with the same root.
-        context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.get());
-    }
-    auto& ss = *context.script_scene;
+    auto& ss = EnsureScriptScene(context);
     auto& rt = ss.runtime();
 
     for (const auto& [field, sb] : fb.scripts) {
@@ -165,6 +173,42 @@ void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
             sb.source, sha, kind, sb.properties, sb.initial_value, node, std::move(clones));
         if (! fs) continue;
         if (has_actuator) ss.AddActuator({ fs, script::MakeNodeTransformApply(node_sp, tgt) });
+    }
+}
+
+void WireCameraShakeScripts(ParseContext& context, const wpscene::WPFieldBindings& fb) {
+    if (fb.scripts.empty()) return;
+
+    auto& ss = EnsureScriptScene(context);
+    auto& rt = ss.runtime();
+
+    for (const auto& [field, sb] : fb.scripts) {
+        script::FieldKind kind = script::FieldKind::Scalar;
+        if (field == "camerashake") {
+            kind = script::FieldKind::Bool;
+        } else if (field != "camerashakeamplitude" && field != "camerashakespeed" &&
+                   field != "camerashakeroughness") {
+            continue;
+        }
+
+        std::string sha = utils::genSha1(std::span<const char>(sb.source));
+        auto*       fs  = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, sb.initial_value);
+        if (! fs) continue;
+
+        auto* updater = context.shader_updater;
+        ss.AddActuator({ fs, [updater, field](const script::ScriptValue& value) {
+                            if (! updater) return;
+                            auto scalar = ScriptValueAsFloat(value);
+                            if (! scalar) return;
+                            if (field == "camerashake")
+                                updater->SetCameraShakeEnabled(*scalar >= 0.5f);
+                            else if (field == "camerashakeamplitude")
+                                updater->SetCameraShakeAmplitude(*scalar);
+                            else if (field == "camerashakespeed")
+                                updater->SetCameraShakeSpeed(*scalar);
+                            else if (field == "camerashakeroughness")
+                                updater->SetCameraShakeRoughness(*scalar);
+                        } });
     }
 }
 
@@ -820,6 +864,21 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
         cam_para.delay          = sc.general.cameraparallaxdelay;
         cam_para.mouseinfluence = sc.general.cameraparallaxmouseinfluence;
         context.shader_updater->SetCameraParallax(cam_para);
+    }
+    {
+        WPCameraShake cam_shake;
+        cam_shake.enable    = sc.general.camerashake;
+        cam_shake.amplitude = sc.general.camerashakeamplitude;
+        cam_shake.speed     = sc.general.camerashakespeed;
+        cam_shake.roughness = sc.general.camerashakeroughness;
+        context.shader_updater->SetCameraShake(cam_shake);
+        for (const auto& [field, key] : sc.general.user_bindings) {
+            if (field == "camerashake" || field == "camerashakeamplitude" ||
+                field == "camerashakespeed" || field == "camerashakeroughness") {
+                scene.camera_shake_user_var_index[key].push_back(field);
+            }
+        }
+        WireCameraShakeScripts(context, sc.general.field_bindings);
     }
 }
 

@@ -57,6 +57,13 @@ struct WPCameraParallax {
     float mouseinfluence;
 };
 
+struct WPCameraShake {
+    bool  enable { false };
+    float amplitude { 0.0f };
+    float speed { 0.0f };
+    float roughness { 1.0f };
+};
+
 class WPShaderValueUpdater : public IShaderValueUpdater {
 public:
     WPShaderValueUpdater(Scene* scene): m_scene(scene) {}
@@ -76,6 +83,11 @@ public:
     // pick up the template's parallaxDepth / puppet binding / RT links.
     void CopyNodeData(void* src, void* dst);
     void SetCameraParallax(const WPCameraParallax& value) { m_parallax = value; }
+    void SetCameraShake(const WPCameraShake& value) { m_cameraShake = value; }
+    void SetCameraShakeEnabled(bool value) override { m_cameraShake.enable = value; }
+    void SetCameraShakeAmplitude(float value) override { m_cameraShake.amplitude = value; }
+    void SetCameraShakeSpeed(float value) override { m_cameraShake.speed = value; }
+    void SetCameraShakeRoughness(float value) override { m_cameraShake.roughness = value; }
 
     // Push the current 64-bin spectrum snapshot. Renderer calls this once
     // per frame before drawFrame. Used to fill `g_AudioSpectrum{16,32,64}{Left,Right}`
@@ -88,6 +100,7 @@ public:
 private:
     Scene*               m_scene;
     WPCameraParallax     m_parallax;
+    WPCameraShake        m_cameraShake;
     double               m_dayTime { 0.0f };
     std::array<float, 2> m_texelSize { 1.0f / 1920.0f, 1.0f / 1080.0f };
 

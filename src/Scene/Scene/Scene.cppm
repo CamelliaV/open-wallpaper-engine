@@ -1357,6 +1357,10 @@ public:
     virtual void SetScreenSize(i32 w, i32 h)                        = 0;
     virtual void SetAudioSpectrum(std::span<const float, 64> left,
                                   std::span<const float, 64> right) = 0;
+    virtual void SetCameraShakeEnabled(bool value)                  = 0;
+    virtual void SetCameraShakeAmplitude(float value)               = 0;
+    virtual void SetCameraShakeSpeed(float value)                   = 0;
+    virtual void SetCameraShakeRoughness(float value)               = 0;
 };
 
 // ============================================================================
@@ -1422,6 +1426,8 @@ public:
     Map<std::string, std::vector<ParticleOverrideBinding>> particle_user_var_index;
 
     Map<std::string, std::vector<std::shared_ptr<SceneSoundControl>>> sound_volume_user_index;
+
+    Map<std::string, std::vector<std::string>> camera_shake_user_var_index;
 
     // Scene-tree root. After parse handoff to the render thread, the tree
     // shape under `sceneGraph` is immutable until Scene destruction (see the

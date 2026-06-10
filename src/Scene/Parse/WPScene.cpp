@@ -73,6 +73,15 @@ constexpr bool wants(SceneVersion v, SceneVersion gate) {
     return v == kSceneVersionUnknown || v >= gate;
 }
 
+void capture_user_bindings(WPSceneGeneral& g, const nlohmann::json& json) {
+    for (const auto& el : json.items()) {
+        if (! el.value().is_object()) continue;
+        auto it = el.value().find("user");
+        if (it == el.value().end() || ! it->is_string()) continue;
+        g.user_bindings[el.key()] = it->get<std::string>();
+    }
+}
+
 void parse_baseline(WPSceneGeneral& g, const nlohmann::json& json) {
     owe::GetJsonValue(json, "ambientcolor", g.ambientcolor);
     owe::GetJsonValue(json, "skylightcolor", g.skylightcolor);
@@ -249,6 +258,8 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, SceneVersion v) {
     if (wants(v, 22)) parse_v22_plus(*this, json);
     if (wants(v, 23)) parse_v23_plus(*this, json);
     if (wants(v, 21)) parse_lightconfig(*this, json);
+    AbsorbAllFieldBindings(json, field_bindings);
+    capture_user_bindings(*this, json);
     return true;
 }
 

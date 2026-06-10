@@ -5,6 +5,7 @@ module;
 export module wescene.parse:wp_scene;
 import rstd.cppstd;
 import wescene.fs;
+import :wp_animation;
 
 export namespace owe
 
@@ -87,13 +88,15 @@ public:
 
     // bloom / camerashake scalars exist since PKGV0001 but were never
     // unpacked into the struct before the version-aware split.
-    bool  bloom { false };
-    float bloomstrength { 0.0f };
-    float bloomthreshold { 0.0f };
-    bool  camerashake { false };
-    float camerashakeamplitude { 0.0f };
-    float camerashakespeed { 0.0f };
-    float camerashakeroughness { 0.0f };
+    bool                                         bloom { false };
+    float                                        bloomstrength { 0.0f };
+    float                                        bloomthreshold { 0.0f };
+    bool                                         camerashake { false };
+    float                                        camerashakeamplitude { 0.0f };
+    float                                        camerashakespeed { 0.0f };
+    float                                        camerashakeroughness { 0.0f };
+    WPFieldBindings                              field_bindings;
+    std::unordered_map<std::string, std::string> user_bindings;
 
     // ---- PKGV0010+ ------------------------------------------------------
     bool          hdr { false };
