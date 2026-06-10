@@ -1,4 +1,12 @@
 cmake_minimum_required(VERSION 3.28)
+
+if(CMAKE_VERSION VERSION_LESS_EQUAL "4.3.0")
+    message(FATAL_ERROR
+        "CMake ${CMAKE_VERSION} is not supported. "
+        "CMake 4.3.0 and older can generate broken C++20 module BMI rules with Clang 22. "
+        "Use CMake 4.3.1 or newer.")
+endif()
+
 project(owe)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -17,7 +25,13 @@ endif()
 
 
 find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
 
+if(CMAKE_USE_PTHREADS_INIT)
+    # Clang records pthread support in C++ module BMIs; keep all module targets compatible.
+    add_compile_options("$<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:-pthread>")
+    add_link_options("$<$<LINK_LANG_AND_ID:CXX,Clang,GNU>:-pthread>")
+endif()
 
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
