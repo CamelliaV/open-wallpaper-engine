@@ -2,6 +2,27 @@ include(FetchContent)
 
 find_package(waywallen-bridge REQUIRED)
 
+# Single installable plugin providing the scene renderer + WE source,
+# plus the web renderer when BUILD_WEWEB. Folder name == plugin id.
+set(_OWE_PLUGIN_DIR share/waywallen/plugins/${OWE_WAYWALLEN_PLUGIN_ID})
+if(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT)
+    set(_OWE_WESCENE_INSTALL_DIR ${_OWE_PLUGIN_DIR}/bin)
+    set(_OWE_WEWEB_INSTALL_DIR ${_OWE_PLUGIN_DIR}/bin/weweb)
+    set(OWE_WESCENE_BIN bin/waywallen-wescene-renderer)
+    set(OWE_WEWEB_BIN bin/weweb/waywallen-weweb-renderer)
+    set(_OWE_WEWEB_FILES_PREFIX bin/weweb)
+    set(_OWE_WESCENE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../../../../lib")
+    set(_OWE_WEWEB_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../../../../../lib")
+else()
+    set(_OWE_WESCENE_INSTALL_DIR bin)
+    set(_OWE_WEWEB_INSTALL_DIR bin/weweb)
+    set(OWE_WESCENE_BIN ../../../../bin/waywallen-wescene-renderer)
+    set(OWE_WEWEB_BIN ../../../../bin/weweb/waywallen-weweb-renderer)
+    set(_OWE_WEWEB_FILES_PREFIX ../../../../bin/weweb)
+    set(_OWE_WESCENE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib")
+    set(_OWE_WEWEB_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib")
+endif()
+
 add_library(waywallen-bridge-producer STATIC)
 target_sources(waywallen-bridge-producer
     PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
@@ -30,11 +51,9 @@ target_sources(waywallen-wescene-renderer
 target_sources(waywallen-wescene-renderer PRIVATE BridgeExSwapchain.cpp)
 
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
-# ELF binaries install to <prefix>/bin (share/ ELF trips distro
-# permission limits); $ORIGIN/../lib reaches the shared libs.
 set_target_properties(waywallen-wescene-renderer PROPERTIES
     CXX_SCAN_FOR_MODULES ON
-    INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+    INSTALL_RPATH "${_OWE_WESCENE_INSTALL_RPATH}"
 )
 
 target_include_directories(waywallen-wescene-renderer
@@ -58,11 +77,8 @@ target_compile_options(waywallen-wescene-renderer PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
-# Single installable plugin providing the scene renderer + WE source,
-# plus the web renderer when BUILD_WEWEB. Folder name == plugin id.
-set(_OWE_PLUGIN_DIR share/waywallen/plugins/org.waywallen.open-wallpaper-engine)
 install(TARGETS waywallen-wescene-renderer
-    RUNTIME DESTINATION bin
+    RUNTIME DESTINATION ${_OWE_WESCENE_INSTALL_DIR}
 )
 
 # weweb-renderer host bin — gated on BUILD_WEWEB (which also gates the
@@ -96,13 +112,10 @@ if(BUILD_WEWEB)
         web_main.cpp
     )
     target_compile_features(waywallen-weweb-renderer PRIVATE cxx_std_20)
-    # Install layout: <prefix>/bin/weweb/{waywallen-weweb-renderer, libcef.so, ...}.
-    # $ORIGIN finds libcef.so (same dir); $ORIGIN/../../lib reaches the
-    # workspace shared libs (waywallen::bridge / wavsen / rstd) in <prefix>/lib.
     set_target_properties(waywallen-weweb-renderer PROPERTIES
         CXX_SCAN_FOR_MODULES ON
         BUILD_RPATH   "$ORIGIN"
-        INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib"
+        INSTALL_RPATH "${_OWE_WEWEB_INSTALL_RPATH}"
         BUILD_WITH_INSTALL_RPATH ON
     )
     target_include_directories(waywallen-weweb-renderer
@@ -133,12 +146,8 @@ if(BUILD_WEWEB)
     )
     weweb_stage_cef_runtime(waywallen-weweb-renderer)
 
-    # weweb bin + CEF runtime install to <prefix>/bin/weweb (out of
-    # share/ for the ELF permission limit); the weweb bin's `$ORIGIN`
-    # rpath resolves libcef.so etc. in the same folder.
-    set(_WEWEB_INSTALL_DIR bin/weweb)
     install(TARGETS waywallen-weweb-renderer
-        RUNTIME DESTINATION ${_WEWEB_INSTALL_DIR}
+        RUNTIME DESTINATION ${_OWE_WEWEB_INSTALL_DIR}
     )
     # CEF_BINARY_FILES / CEF_RESOURCE_FILES are basenames; prepend
     # CEF_BINARY_DIR / CEF_RESOURCE_DIR for absolute paths.
@@ -154,7 +163,7 @@ if(BUILD_WEWEB)
     foreach(_f IN LISTS CEF_BINARY_FILES)
         if(NOT _f IN_LIST _CEF_SKIP)
             install(FILES ${CEF_BINARY_DIR}/${_f}
-                DESTINATION ${_WEWEB_INSTALL_DIR})
+                DESTINATION ${_OWE_WEWEB_INSTALL_DIR})
         endif()
     endforeach()
     # CEF_RESOURCE_FILES contains a `locales` directory entry mixed in
@@ -162,11 +171,11 @@ if(BUILD_WEWEB)
     foreach(_f IN LISTS CEF_RESOURCE_FILES)
         if(_f STREQUAL "locales")
             install(DIRECTORY ${CEF_RESOURCE_DIR}/locales/
-                DESTINATION ${_WEWEB_INSTALL_DIR}/locales
+                DESTINATION ${_OWE_WEWEB_INSTALL_DIR}/locales
                 FILES_MATCHING PATTERN "*.pak")
         else()
             install(FILES ${CEF_RESOURCE_DIR}/${_f}
-                DESTINATION ${_WEWEB_INSTALL_DIR})
+                DESTINATION ${_OWE_WEWEB_INSTALL_DIR})
         endif()
     endforeach()
 endif()
@@ -174,10 +183,10 @@ endif()
 # --- Generate the plugin manifest -----------------------------------------
 # The `[renderers.weweb-renderer]` block is spliced in only when BUILD_WEWEB;
 # `files` is externalised to files.txt (assembled at configure time below).
-set(OWE_PLUGIN_VERSION 0.1.4)
 set(_OWE_PLUGIN_SRC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.waywallen.open-wallpaper-engine)
 if(BUILD_WEWEB)
     file(READ ${_OWE_PLUGIN_SRC}/weweb-renderer.toml.in OWE_WEWEB_BLOCK)
+    string(CONFIGURE "${OWE_WEWEB_BLOCK}" OWE_WEWEB_BLOCK @ONLY)
 else()
     set(OWE_WEWEB_BLOCK "")
 endif()
@@ -198,28 +207,26 @@ install(FILES ${_OWE_PLUGIN_SRC}/wallpaper_engine.lua
 # time from the known install set (no install-time directory scan). The
 # CEF locale paks are the one set we don't list by hand; glob the CEF
 # source dir (a fixed vendored tree) to enumerate them.
-# Bin paths are relative to the plugin dir (share/.../<id>) and point at
-# <prefix>/bin — four levels up — since ELF installs there, not in share.
 set(_OWE_FILES
     plugin.toml
     wallpaper_engine.lua
-    ../../../../bin/waywallen-wescene-renderer
+    ${OWE_WESCENE_BIN}
 )
 if(BUILD_WEWEB)
-    list(APPEND _OWE_FILES ../../../../bin/weweb/waywallen-weweb-renderer)
+    list(APPEND _OWE_FILES ${OWE_WEWEB_BIN})
     foreach(_f IN LISTS CEF_BINARY_FILES)
         if(NOT _f IN_LIST _CEF_SKIP)
-            list(APPEND _OWE_FILES ../../../../bin/weweb/${_f})
+            list(APPEND _OWE_FILES ${_OWE_WEWEB_FILES_PREFIX}/${_f})
         endif()
     endforeach()
     foreach(_f IN LISTS CEF_RESOURCE_FILES)
         if(_f STREQUAL "locales")
             file(GLOB _owe_paks RELATIVE ${CEF_RESOURCE_DIR}/locales
                 ${CEF_RESOURCE_DIR}/locales/*.pak)
-            list(TRANSFORM _owe_paks PREPEND "../../../../bin/weweb/locales/")
+            list(TRANSFORM _owe_paks PREPEND "${_OWE_WEWEB_FILES_PREFIX}/locales/")
             list(APPEND _OWE_FILES ${_owe_paks})
         else()
-            list(APPEND _OWE_FILES ../../../../bin/weweb/${_f})
+            list(APPEND _OWE_FILES ${_OWE_WEWEB_FILES_PREFIX}/${_f})
         endif()
     endforeach()
 endif()
@@ -230,4 +237,3 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/owe-files.txt
     DESTINATION ${_OWE_PLUGIN_DIR}
     RENAME files.txt
 )
-

@@ -7,7 +7,10 @@ if(CMAKE_VERSION VERSION_LESS_EQUAL "4.3.0")
         "Use CMake 4.3.1 or newer.")
 endif()
 
-project(owe)
+set(OWE_PLUGIN_VERSION 0.1.4)
+set(OWE_WAYWALLEN_PLUGIN_ID org.waywallen.open-wallpaper-engine)
+
+project(owe VERSION ${OWE_PLUGIN_VERSION})
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +41,9 @@ add_subdirectory(third_party)
 
 option(BUILD_WESCENE "Build the wescene (Wallpaper Engine *scene*) renderer" ON)
 option(BUILD_WEWEB   "Build the weweb (Wallpaper Engine *web*) renderer"     ON)
+option(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT
+    "Install waywallen plugin files inside the plugin directory for CPack bundles"
+    OFF)
 
 if(BUILD_WEWEB)
     include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
@@ -66,4 +72,18 @@ if((BUILD_WESCENE AND BUILD_VIEWER) OR (BUILD_WEWEB AND BUILD_VIEWER))
             "development headers or set BUILD_VIEWER=OFF and BUILD_WEWEB=OFF.")
     endif()
     add_subdirectory(viewer)
+endif()
+
+if(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT)
+    string(TOLOWER "${CMAKE_SYSTEM_NAME}" _OWE_CPACK_SYSTEM)
+    set(CPACK_GENERATOR ZIP)
+    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+    set(CPACK_PACKAGE_NAME "${OWE_WAYWALLEN_PLUGIN_ID}")
+    set(CPACK_PACKAGE_VENDOR "waywallen")
+    set(CPACK_PACKAGE_VERSION "${OWE_PLUGIN_VERSION}")
+    set(CPACK_PACKAGE_FILE_NAME
+        "${OWE_WAYWALLEN_PLUGIN_ID}-${OWE_PLUGIN_VERSION}-${_OWE_CPACK_SYSTEM}-${CMAKE_SYSTEM_PROCESSOR}")
+    set(CPACK_PACKAGING_INSTALL_PREFIX "/")
+    set(CPACK_STRIP_FILES TRUE)
+    include(CPack)
 endif()

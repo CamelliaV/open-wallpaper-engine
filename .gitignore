@@ -18,6 +18,7 @@ build
 .cache
 cmake-build-debug
 build-*
+/dist
 /workshop
 /rstd
 /third_party/rstd

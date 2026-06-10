@@ -1,0 +1,129 @@
+name: Build Waywallen Plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.4); leave empty to build the current ref"
+        required: false
+      waywallen_ref:
+        description: "waywallen ref used to build waywallen-bridge"
+        required: false
+        default: main
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: Release
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 2G
+  DIST_DIR: ${{ github.workspace }}/dist
+  INSTALL_DIR: ${{ github.workspace }}/build/waywallen-plugin-install
+  OWE_CONDA_ENV: owe-plugin
+  OWE_CONDA_PREFIX: ${{ github.workspace }}/build/conda-envs/owe-plugin
+  WAYWALLEN_REF: ${{ inputs.waywallen_ref || 'main' }}
+  WAYWALLEN_SRC: ${{ github.workspace }}/build/waywallen-src
+
+jobs:
+  plugin:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Checkout waywallen bridge
+        uses: actions/checkout@v4
+        with:
+          repository: waywallen/waywallen
+          ref: ${{ inputs.waywallen_ref || 'main' }}
+          path: build/waywallen-src
+
+      - name: Install OS prereqs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bzip2 \
+            ca-certificates \
+            curl \
+            file \
+            git \
+            libasound2 \
+            libegl1 \
+            libfontconfig1-dev \
+            libgbm1 \
+            libgl1 \
+            libgtk-3-0 \
+            libnss3 \
+            libpipewire-0.3-dev \
+            libpulse-dev \
+            libspa-0.2-dev \
+            libxkbcommon0 \
+            pkg-config \
+            xz-utils
+
+      - name: Install Miniconda
+        run: |
+          curl -fsSL -o /tmp/miniconda.sh \
+            https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+          bash /tmp/miniconda.sh -b -p "$HOME/miniconda"
+          echo "$HOME/miniconda/bin" >> "$GITHUB_PATH"
+          echo "$HOME/miniconda/condabin" >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.OWE_CONDA_PREFIX }}
+          key: owe-plugin-conda-${{ runner.os }}-${{ hashFiles('environment.yml') }}
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: owe-plugin-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            owe-plugin-ccache-${{ runner.os }}-
+
+      - name: Build plugin package
+        id: package
+        run: bash ./scripts/build_waywallen_plugin.sh
+
+      - name: ccache stats
+        if: always()
+        run: |
+          set +e
+          source "$HOME/miniconda/etc/profile.d/conda.sh"
+          conda activate "$OWE_CONDA_PREFIX"
+          ccache -s
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: waywallen-plugin-open-wallpaper-engine
+          path: ${{ steps.package.outputs.zip }}
+
+      - name: Determine release
+        id: rel
+        run: |
+          ref="${{ inputs.tag || github.ref_name }}"
+          if [ "${{ github.event_name }}" = "push" ] || [[ "$ref" == v* ]]; then
+            echo "tag=$ref" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        if: steps.rel.outputs.is_release == 'true'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.rel.outputs.tag }}
+          artifacts: ${{ steps.package.outputs.zip }}
+          body: Waywallen plugin package for open-wallpaper-engine.
+          immutableCreate: true
+          skipIfReleaseExists: true

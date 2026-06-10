@@ -1,0 +1,53 @@
+# open-wallpaper-engine release environment.
+name: owe-plugin
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  # Toolchain for C++20 modules.
+  - clang=22
+  - clangxx=22
+  - clang-tools=22
+  - lld=22
+  - llvm-tools=22
+  - clang_linux-64=22
+  - clangxx_linux-64=22
+  - sysroot_linux-64=2.28
+
+  # Build infrastructure.
+  - cmake>=4.3.1,<4.4
+  - ninja
+  - pkg-config
+  - ccache
+  - git
+  - make
+  - nasm
+
+  # Renderer and bridge dependencies.
+  - libvulkan-headers
+  - libvulkan-loader
+  - libgl-devel
+  - libegl-devel
+  - libgles-devel
+  - mesa-libgbm-devel-conda-x86_64
+  - libdrm
+  - libva-utils
+  - dav1d-dev
+  - freetype
+  - lz4-c
+
+  # CEF build/link dependencies.
+  - alsa-lib
+  - gtk3
+  - nss
+  - libxkbcommon
+  - wayland
+  - xorg-libx11
+  - xorg-libxcomposite
+  - xorg-libxdamage
+  - xorg-libxext
+  - xorg-libxfixes
+  - xorg-libxrandr
+  - xorg-libxrender
+  - xorg-libxscrnsaver
+  - xorg-libxcb

@@ -1,9 +1,8 @@
 
-# CEF (Wallpaper Engine *web*) renderer. The bin sits flat in the plugin
-# dir beside the CEF runtime (libcef.so etc.) so its `$ORIGIN` rpath
-# resolves them. web wp_type entries come from the source component above.
+# CEF (Wallpaper Engine *web*) renderer. web wp_type entries come from the
+# source component above.
 [renderers.weweb-renderer]
-bin = "../../../../bin/weweb/waywallen-weweb-renderer"
+bin = "@OWE_WEWEB_BIN@"
 types = ["web"]
 priority = 100
 spawn_version = 5
