@@ -752,6 +752,7 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode f
     gCam.Update();
     gPerCam.Update();
     scene.UpdateLinkedCamera("global");
+    scene.CaptureCameraPathViewports();
 }
 
 void VulkanRender::Impl::clearLastRenderGraph() {

@@ -126,6 +126,47 @@ std::optional<float> ScriptValueAsFloat(const script::ScriptValue& value) {
     if (auto* p = std::get_if<script::Vec3Value>(&value)) return static_cast<float>(p->x);
     return std::nullopt;
 }
+
+SceneAnimationKey ToSceneAnimationKey(const wpscene::WPAnimKeyframe& key) {
+    return {
+        .frame         = key.frame,
+        .value         = key.value,
+        .front_enabled = key.front.enabled,
+        .front_x       = key.front.x,
+        .front_y       = key.front.y,
+        .back_enabled  = key.back.enabled,
+        .back_x        = key.back.x,
+        .back_y        = key.back.y,
+    };
+}
+
+std::vector<SceneAnimationKey>
+ToSceneAnimationAxis(const std::vector<wpscene::WPAnimKeyframe>& keys) {
+    std::vector<SceneAnimationKey> out;
+    out.reserve(keys.size());
+    for (const auto& key : keys) out.push_back(ToSceneAnimationKey(key));
+    std::ranges::sort(out, {}, &SceneAnimationKey::frame);
+    return out;
+}
+
+SceneAnimationCurve ToSceneAnimationCurve(const wpscene::WPAnimCurve& curve) {
+    SceneAnimationCurve out;
+    out.c0       = ToSceneAnimationAxis(curve.c0);
+    out.c1       = ToSceneAnimationAxis(curve.c1);
+    out.c2       = ToSceneAnimationAxis(curve.c2);
+    out.fps      = curve.options.fps;
+    out.length   = curve.options.length;
+    out.mode     = curve.options.mode;
+    out.wraploop = curve.options.wraploop;
+    out.relative = curve.relative;
+    return out;
+}
+
+void AssignCurve(SceneAnimationCurve& dst, const wpscene::WPFieldBindings& bindings,
+                 std::string_view field) {
+    auto it = bindings.animations.find(std::string(field));
+    if (it != bindings.animations.end()) dst = ToSceneAnimationCurve(it->second);
+}
 } // namespace
 
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
@@ -801,31 +842,70 @@ void ParseCamera(ParseContext& context, wpscene::WPScene& sc) {
     }
 }
 
-// The scene's camera entity (objects[] with a non-null `camera` field) is the
-// authoritative runtime camera for a perspective scene — its origin/angles/fov
-// are in WE world units, the same space the layers are authored in. (The
-// top-level scene.camera eye/center is only the editor's saved viewport and
-// sits much farther back; ParseCamera seeds it as a fallback.) Drive
-// global_perspective from this node so every layer composites under it.
 void ParseCameraObj(ParseContext& context, wpscene::WPCameraObject& cam) {
-    auto& scene = *context.scene;
-    auto  it    = scene.cameras.find("global_perspective");
-    if (it == scene.cameras.end()) return;
-    // Only take over when ParseCamera already made the perspective camera
-    // active (general.isOrtho == false). A 2D scene can still carry an editor
-    // camera marker; leave its ortho camera untouched.
-    if (scene.activeCamera != it->second.get()) return;
+    auto& scene           = *context.scene;
+    bool  use_perspective = false;
+    auto  per_it          = scene.cameras.find("global_perspective");
+    if (per_it != scene.cameras.end() && scene.activeCamera == per_it->second.get())
+        use_perspective = true;
 
+    std::string camera_name = use_perspective ? "global_perspective" : "global";
+    auto        it          = scene.cameras.find(camera_name);
+    if (it == scene.cameras.end()) return;
+
+    auto camera       = it->second;
+    auto default_node = camera->GetAttachedNode();
+    if (! default_node) return;
+
+    double   default_width     = camera->Width();
+    double   default_height    = camera->Height();
+    double   default_fov       = camera->Fov();
+    Vector3f default_translate = default_node->Translate();
+    Vector3f default_rotation  = default_node->Rotation();
     Vector3f origin { cam.origin[0], cam.origin[1], cam.origin[2] };
     Vector3f angles { cam.angles[0], cam.angles[1], cam.angles[2] };
-    auto     node = std::make_shared<SceneNode>(origin, Vector3f::Ones(), angles);
-    scene.sceneGraph->AppendChild(node);
+    Vector3f path_translate_bias = use_perspective ? Vector3f::Zero() : default_translate;
+    Vector3f path_rotation_bias  = use_perspective ? Vector3f::Zero() : default_rotation;
 
-    auto& per = *it->second;
-    per.AttatchNode(node); // node-based view, clears the scene.camera LookAt seed
-    if (cam.fov > 0.0f) per.SetFov(cam.fov);
-    per.SetAspect((double)context.ortho_w / (double)context.ortho_h);
-    scene.activeCamera = &per;
+    auto node = std::make_shared<SceneNode>(
+        path_translate_bias + origin, Vector3f::Ones(), path_rotation_bias + angles);
+    node->ID() = cam.id;
+    if (! cam.visible) node->SetVisible(false);
+    if (! cam.visible_user_key.empty()) node->SetVisibleUserKey(cam.visible_user_key);
+
+    camera->AttatchNode(node);
+    if (use_perspective) {
+        if (cam.fov > 0.0f) camera->SetFov(cam.fov);
+        camera->SetAspect((double)context.ortho_w / (double)context.ortho_h);
+        scene.activeCamera = camera.get();
+    }
+
+    auto path                 = std::make_shared<SceneCameraPath>();
+    path->camera_name         = camera_name;
+    path->camera              = camera;
+    path->node                = node;
+    path->default_translate   = default_translate;
+    path->default_rotation    = default_rotation;
+    path->path_translate_bias = path_translate_bias;
+    path->path_rotation_bias  = path_rotation_bias;
+    path->default_width       = default_width;
+    path->default_height      = default_height;
+    path->default_fov         = default_fov;
+    path->origin_base         = origin;
+    path->rotation_base       = angles;
+    path->zoom_base           = cam.zoom;
+    path->fov_base            = cam.fov;
+    path->perspective         = use_perspective;
+    path->enabled             = cam.visible;
+    AssignCurve(path->origin_curve, cam.field_bindings, "origin");
+    AssignCurve(path->rotation_curve, cam.field_bindings, "angles");
+    AssignCurve(path->zoom_curve, cam.field_bindings, "zoom");
+    AssignCurve(path->fov_curve, cam.field_bindings, "fov");
+    scene.camera_paths.push_back(path);
+    if (! cam.visible_user_key.empty())
+        scene.camera_path_user_index[cam.visible_user_key].push_back(path);
+
+    context.node_id_map[cam.id] = { cam.parent, node };
 }
 
 void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {

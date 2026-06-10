@@ -586,11 +586,13 @@ public:
         m_aspect      = cam.m_aspect;
         m_nearClip    = cam.m_nearClip;
         m_farClip     = cam.m_farClip;
+        m_fov         = cam.m_fov;
         m_perspective = cam.m_perspective;
         m_lookat      = cam.m_lookat;
         m_eye         = cam.m_eye;
         m_center      = cam.m_center;
         m_up          = cam.m_up;
+        m_node        = cam.m_node;
     }
 
 private:
@@ -614,6 +616,61 @@ private:
 
     std::shared_ptr<SceneNode>             m_node;
     std::shared_ptr<SceneImageEffectLayer> m_imgEffect { nullptr };
+};
+
+struct SceneAnimationKey {
+    std::int32_t frame { 0 };
+    float        value { 0.0f };
+    bool         front_enabled { false };
+    float        front_x { 0.0f };
+    float        front_y { 0.0f };
+    bool         back_enabled { false };
+    float        back_x { 0.0f };
+    float        back_y { 0.0f };
+};
+
+struct SceneAnimationCurve {
+    std::vector<SceneAnimationKey> c0;
+    std::vector<SceneAnimationKey> c1;
+    std::vector<SceneAnimationKey> c2;
+    float                          fps { 30.0f };
+    std::int32_t                   length { 0 };
+    std::string                    mode;
+    bool                           wraploop { false };
+    bool                           relative { false };
+
+    bool            Empty() const;
+    float           EvaluateScalar(float base, double runtime) const;
+    Eigen::Vector3f EvaluateVec3(const Eigen::Vector3f& base, double runtime) const;
+};
+
+class SceneCameraPath {
+public:
+    std::string                  camera_name;
+    std::shared_ptr<SceneCamera> camera;
+    std::shared_ptr<SceneNode>   node;
+    Eigen::Vector3f              default_translate { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f              default_rotation { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f              path_translate_bias { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f              path_rotation_bias { Eigen::Vector3f::Zero() };
+    double                       default_width { 1.0 };
+    double                       default_height { 1.0 };
+    double                       default_fov { 50.0 };
+    Eigen::Vector3f              origin_base { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f              rotation_base { Eigen::Vector3f::Zero() };
+    float                        zoom_base { 1.0f };
+    float                        fov_base { 50.0f };
+    bool                         perspective { false };
+    bool                         enabled { true };
+    SceneAnimationCurve          origin_curve;
+    SceneAnimationCurve          rotation_curve;
+    SceneAnimationCurve          zoom_curve;
+    SceneAnimationCurve          fov_curve;
+
+    void CaptureViewport();
+    void SetEnabled(bool value) { enabled = value; }
+    bool Tick(double runtime);
+    bool ApplyDefault();
 };
 
 class SceneSoundControl {
@@ -1389,6 +1446,7 @@ public:
 
     std::unordered_map<std::string, std::shared_ptr<SceneCamera>> cameras;
     std::unordered_map<std::string, std::vector<std::string>>     linkedCameras;
+    std::vector<std::shared_ptr<SceneCameraPath>>                 camera_paths;
 
     // WE layer IDs the render-graph build may elide when nothing links to
     // them, or route to `_rt_link_<id>` when something does. Two flavours
@@ -1428,6 +1486,8 @@ public:
     Map<std::string, std::vector<std::shared_ptr<SceneSoundControl>>> sound_volume_user_index;
 
     Map<std::string, std::vector<std::string>> camera_shake_user_var_index;
+
+    Map<std::string, std::vector<std::shared_ptr<SceneCameraPath>>> camera_path_user_index;
 
     // Scene-tree root. After parse handoff to the render thread, the tree
     // shape under `sceneGraph` is immutable until Scene destruction (see the
@@ -1494,6 +1554,9 @@ public:
             }
         }
     }
+
+    void TickCameraPaths();
+    void CaptureCameraPathViewports();
 };
 
 } // namespace owe

@@ -359,6 +359,20 @@ void ApplyUserPropertyToCameraShake(Scene& scene, const std::string& key,
     }
 }
 
+void ApplyUserPropertyToCameraPath(Scene& scene, const std::string& key,
+                                   const nlohmann::json& prop) {
+    auto it = scene.camera_path_user_index.find(key);
+    if (it == scene.camera_path_user_index.end()) return;
+
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok || coerced.value.size() < 1) return;
+
+    bool enabled = coerced.value[0] >= 0.5f;
+    for (auto& path : it->second) {
+        if (path) path->SetEnabled(enabled);
+    }
+}
+
 // Walk the scene tree once and flip SceneNode::SetVisible for every node
 // whose `VisibleUserKey()` matches `key`. Cheap — tree is frozen post-parse
 // and typically < a few hundred nodes.
@@ -632,6 +646,7 @@ void SceneRenderController::on(RenderDraw&&) {
             m_scene->shaderValueUpdater->SetAudioSpectrum(
                 std::span<const float, 64>(fi.audio_left),
                 std::span<const float, 64>(fi.audio_right));
+            m_scene->TickCameraPaths();
             owe::script::TickSceneScripts(*m_scene, fi);
         }
         m_scene->paritileSys->Emitt();
@@ -689,6 +704,7 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
     ApplyUserPropertyToParticles(*m_scene, m.key, m.property);
     ApplyUserPropertyToSoundVolume(*m_scene, m.key, m.property);
     ApplyUserPropertyToCameraShake(*m_scene, m.key, m.property);
+    ApplyUserPropertyToCameraPath(*m_scene, m.key, m.property);
     ApplyUserPropertyToNodeVisibility(*m_scene, m.key, m.property);
 }
 
