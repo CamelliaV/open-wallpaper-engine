@@ -157,13 +157,41 @@ static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInf
     info.t       = _rate - (double)info.frame_a;
 }
 
+static constexpr void genSingleInterpolationInfo(WPPuppet::Animation::InterpolationInfo& info,
+                                                 double& cur, u32 length, double frame_time,
+                                                 double max_time) {
+    if (length == 0 || frame_time <= 0.0) {
+        cur          = 0.0;
+        info.frame_a = 0;
+        info.frame_b = 0;
+        info.t       = 0.0;
+        return;
+    }
+
+    cur          = std::clamp(cur, 0.0, max_time);
+    double rate  = cur / frame_time;
+    u32    frame = static_cast<u32>(rate);
+    if (frame >= length) {
+        info.frame_a = length - 1;
+        info.frame_b = length;
+        info.t       = 1.0;
+        return;
+    }
+
+    info.frame_a = frame;
+    info.frame_b = frame + 1;
+    info.t       = rate - static_cast<double>(frame);
+}
+
 WPPuppet::Animation::InterpolationInfo
 WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
     InterpolationInfo _info;
     auto&             _cur_time = *cur_time;
 
-    if (mode == PlayMode::Loop || mode == PlayMode::Single) {
+    if (mode == PlayMode::Loop) {
         genInterpolationInfo(_info, _cur_time, (u32)length, frame_time, max_time);
+    } else if (mode == PlayMode::Single) {
+        genSingleInterpolationInfo(_info, _cur_time, (u32)length, frame_time, max_time);
     } else if (mode == PlayMode::Mirror) {
         // Frames 0..length stored; mirror cycle is 0,1,..,length,length-1,..,0
         // (2*length intervals). Map any f in [0, 2*length] back into [0, length].

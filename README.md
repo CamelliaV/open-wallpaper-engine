@@ -61,11 +61,11 @@ Flags (see `viewer/arg.hpp`):
 	- [x] Global bloom
 - [x] Camera
 	- [x] Zoom
-	- [ ] Shake
-	- [ ] Fade / Path
+	- [x] Shake
+	- [x] Path
 - [x] Audio
 	- [x] Loop
-	- [ ] Random
+	- [x] Random
 	- [x] Visualization
 - [x] Particle System
 	- [x] Renderers
