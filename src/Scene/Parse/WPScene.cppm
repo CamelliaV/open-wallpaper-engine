@@ -183,6 +183,7 @@ public:
 std::optional<WPSceneDocument> ParseSceneDocumentJson(std::string_view, SceneVersion);
 std::optional<WPSceneDocument> LoadSceneDocumentFromVfs(fs::VFS&, std::string_view, SceneVersion);
 std::optional<WPSceneDocument> LoadSceneDocumentFromPkg(std::string_view);
+std::optional<WPSceneDocument> LoadSceneDocumentFromSource(std::string_view);
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Orthogonalprojection, width, height);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneCamera, center, eye, up);

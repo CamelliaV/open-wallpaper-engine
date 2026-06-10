@@ -385,7 +385,7 @@ int main(int argc, char** argv) {
                                            : parsed;
             }
             if (! opts.initial_scene.empty()) {
-                auto scene_doc = owe::wpscene::LoadSceneDocumentFromPkg(opts.initial_scene);
+                auto scene_doc = owe::wpscene::LoadSceneDocumentFromSource(opts.initial_scene);
                 if (scene_doc) {
                     opts.initial_scene_document =
                         std::make_shared<owe::wpscene::WPSceneDocument>(std::move(*scene_doc));

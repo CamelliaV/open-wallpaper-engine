@@ -307,4 +307,21 @@ std::optional<WPSceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_pat
     return ParseSceneDocumentJson(scene_file->ReadAllStr(), pkg_version);
 }
 
+std::optional<WPSceneDocument> LoadSceneDocumentFromSource(std::string_view source_path) {
+    if (source_path.empty()) return std::nullopt;
+
+    std::filesystem::path path { std::string(source_path) };
+    auto                  ext = path.extension().string();
+    for (auto& c : ext) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+
+    if (ext == ".pkg") return LoadSceneDocumentFromPkg(source_path);
+    if (ext != ".json") return std::nullopt;
+
+    auto scene_file = fs::CreateCBinaryStream(source_path);
+    if (! scene_file) return std::nullopt;
+    return ParseSceneDocumentJson(scene_file->ReadAllStr(), kSceneVersionUnknown);
+}
+
 } // namespace owe::wpscene
