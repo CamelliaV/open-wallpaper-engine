@@ -6,10 +6,10 @@ ENV_FILE="$PROJECT_DIR/environment.yml"
 ENV_NAME="${OWE_CONDA_ENV:-owe-plugin}"
 ENV_PREFIX="${OWE_CONDA_PREFIX:-$PROJECT_DIR/build/conda-envs/$ENV_NAME}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
-PLUGIN_ID="${OWE_WAYWALLEN_PLUGIN_ID:-org.waywallen.open-wallpaper-engine}"
 WAYWALLEN_REF="${WAYWALLEN_REF:-main}"
 WAYWALLEN_SRC="${WAYWALLEN_SRC:-$PROJECT_DIR/build/waywallen-src}"
 BRIDGE_BUILD_DIR="${BRIDGE_BUILD_DIR:-$PROJECT_DIR/build/waywallen-bridge}"
+BRIDGE_INSTALL_DIR="${BRIDGE_INSTALL_DIR:-$PROJECT_DIR/build/waywallen-bridge-install}"
 OWE_BUILD_DIR="${OWE_BUILD_DIR:-$PROJECT_DIR/build/waywallen-plugin}"
 INSTALL_DIR="${INSTALL_DIR:-$PROJECT_DIR/build/waywallen-plugin-install}"
 DIST_DIR="${DIST_DIR:-$PROJECT_DIR/dist}"
@@ -38,6 +38,10 @@ fi
 case "$INSTALL_DIR" in
     "$PROJECT_DIR"/build/*) ;;
     *) fail "INSTALL_DIR must stay under $PROJECT_DIR/build" ;;
+esac
+case "$BRIDGE_INSTALL_DIR" in
+    "$PROJECT_DIR"/build/*) ;;
+    *) fail "BRIDGE_INSTALL_DIR must stay under $PROJECT_DIR/build" ;;
 esac
 
 info "Preparing conda env: $ENV_PREFIX"
@@ -89,8 +93,8 @@ fi
 THREAD_ARGS=(-DCMAKE_C_FLAGS_INIT=-pthread -DCMAKE_CXX_FLAGS_INIT=-pthread)
 
 info "Cleaning install prefix"
-rm -rf "$INSTALL_DIR"
-mkdir -p "$INSTALL_DIR" "$DIST_DIR"
+rm -rf "$BRIDGE_INSTALL_DIR" "$INSTALL_DIR"
+mkdir -p "$BRIDGE_INSTALL_DIR" "$INSTALL_DIR" "$DIST_DIR"
 
 info "Configuring waywallen bridge"
 cmake -S "$WAYWALLEN_SRC/bridge" -B "$BRIDGE_BUILD_DIR" -G Ninja \
@@ -102,7 +106,7 @@ cmake -S "$WAYWALLEN_SRC/bridge" -B "$BRIDGE_BUILD_DIR" -G Ninja \
     "${THREAD_ARGS[@]}" \
     "${CCACHE_ARGS[@]}" \
     -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+    -DCMAKE_INSTALL_PREFIX="$BRIDGE_INSTALL_DIR" \
     -DBUILD_SHARED_LIBS=OFF
 
 info "Building waywallen bridge"
@@ -118,7 +122,7 @@ cmake -S "$PROJECT_DIR" -B "$OWE_BUILD_DIR" -G Ninja \
     "${SYSROOT_ARGS[@]}" \
     "${THREAD_ARGS[@]}" \
     "${CCACHE_ARGS[@]}" \
-    -DCMAKE_PREFIX_PATH="$INSTALL_DIR;$CONDA_PREFIX" \
+    -DCMAKE_PREFIX_PATH="$BRIDGE_INSTALL_DIR;$CONDA_PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
     -DOWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON \
     -DBUILD_WAYWALLEN=ON \
@@ -131,7 +135,7 @@ cmake --build "$OWE_BUILD_DIR" --parallel
 cmake --install "$OWE_BUILD_DIR"
 
 info "Validating plugin install"
-plugin_dir="$INSTALL_DIR/share/waywallen/plugins/$PLUGIN_ID"
+plugin_dir="$INSTALL_DIR"
 files_txt="$plugin_dir/files.txt"
 test -f "$plugin_dir/plugin.toml"
 test -f "$files_txt"

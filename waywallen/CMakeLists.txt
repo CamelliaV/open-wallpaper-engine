@@ -3,25 +3,23 @@ include(FetchContent)
 find_package(waywallen-bridge REQUIRED)
 
 # Single installable plugin providing the scene renderer + WE source,
-# plus the web renderer when BUILD_WEWEB. Folder name == plugin id.
-set(_OWE_PLUGIN_DIR share/waywallen/plugins/${OWE_WAYWALLEN_PLUGIN_ID})
+# plus the web renderer when BUILD_WEWEB.
 if(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT)
-    set(_OWE_WESCENE_INSTALL_DIR ${_OWE_PLUGIN_DIR}/bin)
-    set(_OWE_WEWEB_INSTALL_DIR ${_OWE_PLUGIN_DIR}/bin/weweb)
+    set(_OWE_PLUGIN_DIR .)
     set(OWE_WESCENE_BIN bin/waywallen-wescene-renderer)
     set(OWE_WEWEB_BIN bin/weweb/waywallen-weweb-renderer)
     set(_OWE_WEWEB_FILES_PREFIX bin/weweb)
-    set(_OWE_WESCENE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../../../../lib")
-    set(_OWE_WEWEB_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../../../../../lib")
 else()
-    set(_OWE_WESCENE_INSTALL_DIR bin)
-    set(_OWE_WEWEB_INSTALL_DIR bin/weweb)
+    set(_OWE_PLUGIN_DIR share/waywallen/plugins/${OWE_WAYWALLEN_PLUGIN_ID})
     set(OWE_WESCENE_BIN ../../../../bin/waywallen-wescene-renderer)
     set(OWE_WEWEB_BIN ../../../../bin/weweb/waywallen-weweb-renderer)
     set(_OWE_WEWEB_FILES_PREFIX ../../../../bin/weweb)
-    set(_OWE_WESCENE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib")
-    set(_OWE_WEWEB_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib")
 endif()
+set(_OWE_WESCENE_INSTALL_DIR bin)
+set(_OWE_WEWEB_INSTALL_DIR bin/weweb)
+set(_OWE_WESCENE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib")
+set(_OWE_WEWEB_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib")
+set(_OWE_STRIP_FILES ${OWE_WESCENE_BIN})
 
 add_library(waywallen-bridge-producer STATIC)
 target_sources(waywallen-bridge-producer
@@ -149,6 +147,7 @@ if(BUILD_WEWEB)
     install(TARGETS waywallen-weweb-renderer
         RUNTIME DESTINATION ${_OWE_WEWEB_INSTALL_DIR}
     )
+    list(APPEND _OWE_STRIP_FILES ${OWE_WEWEB_BIN})
     # CEF_BINARY_FILES / CEF_RESOURCE_FILES are basenames; prepend
     # CEF_BINARY_DIR / CEF_RESOURCE_DIR for absolute paths.
     #
@@ -164,6 +163,9 @@ if(BUILD_WEWEB)
         if(NOT _f IN_LIST _CEF_SKIP)
             install(FILES ${CEF_BINARY_DIR}/${_f}
                 DESTINATION ${_OWE_WEWEB_INSTALL_DIR})
+            if(_f STREQUAL "chrome-sandbox" OR _f MATCHES "\\.so(\\.[0-9]+)*$")
+                list(APPEND _OWE_STRIP_FILES ${_OWE_WEWEB_FILES_PREFIX}/${_f})
+            endif()
         endif()
     endforeach()
     # CEF_RESOURCE_FILES contains a `locales` directory entry mixed in
@@ -237,3 +239,26 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/owe-files.txt
     DESTINATION ${_OWE_PLUGIN_DIR}
     RENAME files.txt
 )
+
+if(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT AND CMAKE_STRIP)
+    set(_OWE_INSTALL_STRIP_FILES)
+    foreach(_f IN LISTS _OWE_STRIP_FILES)
+        list(APPEND _OWE_INSTALL_STRIP_FILES "${_OWE_PLUGIN_DIR}/${_f}")
+    endforeach()
+    install(CODE "
+        set(_owe_strip_tool [==[${CMAKE_STRIP}]==])
+        set(_owe_strip_files [==[${_OWE_INSTALL_STRIP_FILES}]==])
+        foreach(_rel IN LISTS _owe_strip_files)
+            set(_path \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/\${_rel}\")
+            if(EXISTS \"\${_path}\")
+                execute_process(
+                    COMMAND \"\${_owe_strip_tool}\" --strip-unneeded \"\${_path}\"
+                    RESULT_VARIABLE _strip_result
+                )
+                if(NOT _strip_result EQUAL 0)
+                    message(FATAL_ERROR \"failed to strip \${_path}\")
+                endif()
+            endif()
+        endforeach()
+    ")
+endif()

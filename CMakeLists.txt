@@ -42,7 +42,7 @@ add_subdirectory(third_party)
 option(BUILD_WESCENE "Build the wescene (Wallpaper Engine *scene*) renderer" ON)
 option(BUILD_WEWEB   "Build the weweb (Wallpaper Engine *web*) renderer"     ON)
 option(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT
-    "Install waywallen plugin files inside the plugin directory for CPack bundles"
+    "Install waywallen plugin files as a plugin-root bundle for CPack"
     OFF)
 
 if(BUILD_WEWEB)
@@ -76,7 +76,8 @@ endif()
 
 if(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT)
     string(TOLOWER "${CMAKE_SYSTEM_NAME}" _OWE_CPACK_SYSTEM)
-    set(CPACK_GENERATOR ZIP)
+    set(CPACK_GENERATOR ZIP_ZSTD)
+    set(CPACK_ARCHIVE_COMPRESSION_LEVEL 5)
     set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
     set(CPACK_PACKAGE_NAME "${OWE_WAYWALLEN_PLUGIN_ID}")
     set(CPACK_PACKAGE_VENDOR "waywallen")
