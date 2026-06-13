@@ -138,6 +138,14 @@ constexpr const char* kWorkshopDirMacro =
 #endif
     ;
 
+constexpr const char* kAssetsDirMacro =
+#ifdef WAYWALLEN_ASSETS_DIR
+    WAYWALLEN_ASSETS_DIR
+#else
+    ""
+#endif
+    ;
+
 struct TexMeta {
     std::string path;
     int32_t     texv { 0 };
@@ -484,8 +492,9 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
     jpkg["has_scene_json"] = has_scene_json;
 
     owe::fs::VFS vfs;
-    auto         pfs = owe::fs::CreatePhysicalFs(workshop_dir);
-    auto         wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
+    if (auto afs = owe::fs::CreatePhysicalFs(kAssetsDirMacro)) vfs.Mount("/assets", std::move(afs));
+    auto pfs = owe::fs::CreatePhysicalFs(workshop_dir);
+    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
     if (! wfs) {
         err          = "WPPkgFs::CreatePkgFs failed";
         out["error"] = err;

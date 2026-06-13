@@ -1073,16 +1073,18 @@ function __wwCreateTexAnimStub() {
         isPlaying(){ return playing;  },
     };
 }
-// Sprite-image / puppet-bone animation handle. `rate` is read+written by
-// scripts that vary playback speed via a slider; play/stop/isPlaying are
-// the bare minimum so cursor-driven puppet animation scripts don't crash.
+// Sprite-image / puppet-bone animation handle. Scripts commonly adjust
+// playback rate and manually drive the current frame from init/update.
 function __wwCreateAnimationStub() {
-    let playing = false;
+    let frame = 0, playing = false;
     const o = {
         rate: 1,
+        frameCount: 1,
         play()     { playing = true;  },
         stop()     { playing = false; },
         pause()    { playing = false; },
+        setFrame(n){ frame = Math.max(0, n | 0); },
+        getFrame() { return frame;    },
         isPlaying(){ return playing;  },
     };
     return o;
