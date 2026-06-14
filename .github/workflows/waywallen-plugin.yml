@@ -55,6 +55,7 @@ jobs:
             curl \
             file \
             git \
+            glslang-tools \
             libasound2t64 \
             libegl1 \
             libfontconfig1-dev \
