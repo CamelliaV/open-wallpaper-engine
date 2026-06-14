@@ -182,6 +182,20 @@ local function project_dir_of(entry)
     return entry.resource and entry.resource:match("^(.*)/[^/]+$") or nil
 end
 
+local PROPERTY_KEY_MAP = {
+    schemecolor = "waywallen.scheme_color"
+}
+
+local function map_property_keys(props)
+    for from, to in pairs(PROPERTY_KEY_MAP) do
+        local v = props[from]
+        if v ~= nil then
+            if props[to] == nil then props[to] = v end
+            props[from] = nil
+        end
+    end
+end
+
 function M.properties(entry, ctx)
     local dir = project_dir_of(entry)
     if not dir then return nil end
@@ -193,6 +207,7 @@ function M.properties(entry, ctx)
     if not parsed or type(parsed) ~= "table" then return nil end
     local props = parsed.general and parsed.general.properties or nil
     if not props or type(props) ~= "table" or next(props) == nil then return nil end
+    map_property_keys(props)
 
     -- Resolve `text` from WE's UI locale when it's a known i18n key.
     -- Author-written labels (free text) miss the lookup and stay as-is.

@@ -129,6 +129,18 @@ nlohmann::json JsonUserProperty(nlohmann::json value) {
     return MakeUserPropertyDescriptor(std::move(value));
 }
 
+constexpr std::string_view kSchemeColorKey          = "schemecolor";
+constexpr std::string_view kWaywallenSchemeColorKey = "waywallen.scheme_color";
+
+bool IsSchemeColorKey(std::string_view key) {
+    return key == kSchemeColorKey || key == kWaywallenSchemeColorKey;
+}
+
+std::string CanonicalUserPropertyKey(std::string_view key) {
+    if (key == kWaywallenSchemeColorKey) return std::string(kSchemeColorKey);
+    return std::string(key);
+}
+
 // Parse a "r g b" / "r g b a" / "x y z w ..." space-separated float string into
 // a small float vector. Trailing / leading whitespace is tolerated. Returns
 // false when no numbers parse — caller treats as coercion failure.
@@ -230,11 +242,9 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
 // `u_*` uniform with this material-key. Sets the per-material dirty flag so
 // CustomShaderPass picks the new value up next frame.
 void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nlohmann::json& prop) {
-    // Well-known property `schemecolor` is WE's accent color; in owe it
-    // maps to the scene-level clear color (used as the background fill
-    // by every non-effect render pass). Update it directly on the
-    // Scene; CustomShaderPass::execute resyncs each frame.
-    if (key == "schemecolor") {
+    // `schemecolor` is WE's accent color; waywallen exposes it through
+    // `waywallen.scheme_color`.
+    if (IsSchemeColorKey(key)) {
         auto coerced = CoerceUserPropertyValue(prop);
         if (coerced.ok && coerced.value.size() >= 3) {
             scene.clearColor = { coerced.value[0], coerced.value[1], coerced.value[2] };
@@ -415,8 +425,9 @@ void MergeProjectUserProperties(const std::filesystem::path&                    
     if (props == gen->end() || ! props->is_object()) return;
 
     for (auto it = props->begin(); it != props->end(); ++it) {
-        if (out.contains(it.key())) continue;
-        out.emplace(it.key(), MakeUserPropertyDescriptor(it.value()));
+        std::string key = CanonicalUserPropertyKey(it.key());
+        if (out.contains(key)) continue;
+        out.emplace(std::move(key), MakeUserPropertyDescriptor(it.value()));
     }
 }
 
@@ -425,7 +436,10 @@ NormalizeUserProperties(const std::unordered_map<std::string, nlohmann::json>& i
     std::unordered_map<std::string, nlohmann::json> out;
     out.reserve(input.size());
     for (const auto& [key, value] : input) {
-        out.emplace(key, MakeUserPropertyDescriptor(value));
+        std::string canonical = CanonicalUserPropertyKey(key);
+        if (key == canonical || ! out.contains(canonical)) {
+            out[std::move(canonical)] = MakeUserPropertyDescriptor(value);
+        }
     }
     return out;
 }
@@ -699,13 +713,14 @@ void SceneRenderController::on(RenderSetSpeed&& m) { m_speed = m.speed; }
 
 void SceneRenderController::on(RenderSetUserProperty&& m) {
     if (! m_scene) return;
-    owe::script::SetSceneUserProperty(*m_scene, m.key, m.property);
-    ApplyUserPropertyToShaders(*m_scene, m.key, m.property);
-    ApplyUserPropertyToParticles(*m_scene, m.key, m.property);
-    ApplyUserPropertyToSoundVolume(*m_scene, m.key, m.property);
-    ApplyUserPropertyToCameraShake(*m_scene, m.key, m.property);
-    ApplyUserPropertyToCameraPath(*m_scene, m.key, m.property);
-    ApplyUserPropertyToNodeVisibility(*m_scene, m.key, m.property);
+    std::string key = CanonicalUserPropertyKey(m.key);
+    owe::script::SetSceneUserProperty(*m_scene, key, m.property);
+    ApplyUserPropertyToShaders(*m_scene, key, m.property);
+    ApplyUserPropertyToParticles(*m_scene, key, m.property);
+    ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
+    ApplyUserPropertyToCameraShake(*m_scene, key, m.property);
+    ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
+    ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
 }
 
 void SceneRenderController::on(RenderInit&& m) {
@@ -794,18 +809,18 @@ void SceneRuntimeController::on(MainSetSpeed&& m) {
 }
 
 void SceneRuntimeController::on(MainSetUserProperty&& m) {
-    nlohmann::json prop              = MakeUserPropertyDescriptor(std::move(m.value));
-    m_config.user_properties[m.key]  = prop;
-    m_user_properties[m.key]         = prop;
-    const std::string    property    = std::move(m.key);
-    const nlohmann::json prop_for_rt = prop;
+    nlohmann::json    prop             = MakeUserPropertyDescriptor(std::move(m.value));
+    const std::string property         = CanonicalUserPropertyKey(m.key);
+    m_config.user_properties[property] = prop;
+    m_user_properties[property]        = prop;
+    const nlohmann::json prop_for_rt   = prop;
     // `schemecolor` doubles as the wallpaper-level accent color and as
     // the scene clear/background colour in owe. When it changes, push
     // the new RGB to the host (waywallen daemon) so display endpoints
     // get a `set_config` with matching letterbox bars even before the
     // renderer paints the next frame. The render-thread path below
     // still runs to update `scene.clearColor` + any bound shader uniforms.
-    if (property == "schemecolor" && m_clear_color_cb) {
+    if (IsSchemeColorKey(property) && m_clear_color_cb) {
         const nlohmann::json* v_ptr = &prop;
         if (prop.is_object() && prop.contains("value")) v_ptr = &prop.at("value");
         if (v_ptr->is_string()) {
