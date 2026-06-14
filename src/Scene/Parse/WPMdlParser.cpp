@@ -1067,9 +1067,9 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
             std::memcpy(dst, src.texcoords[i].data(), sizeof(src.texcoords[i]));
         });
     }
-    const auto* uv2 = ! src.part_uv2.empty() ? &src.part_uv2
-                    : ! src.texcoord2.empty() ? &src.texcoord2
-                                              : nullptr;
+    const auto* uv2 = ! src.part_uv2.empty()    ? &src.part_uv2
+                      : ! src.texcoord2.empty() ? &src.texcoord2
+                                                : nullptr;
     if (! src.texcoords.empty() && uv2 != nullptr && uv2->size() == vert_num) {
         specs.push_back(VAttr::TexCoordVec4);
         packers.push_back([&src, uv2](size_t i, float* dst) {

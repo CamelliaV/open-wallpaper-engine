@@ -229,22 +229,22 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::WPScene& sc) {
     auto it = context.scene->cameras.find("global_perspective");
     if (it == context.scene->cameras.end()) return;
 
-    auto path                 = std::make_shared<SceneCameraPath>();
-    path->camera_name         = "global_perspective";
-    path->camera              = it->second;
-    path->node                = context.global_perspective_camera_node;
-    path->default_translate   = path->node ? path->node->Translate() : Vector3f::Zero();
-    path->default_rotation    = path->node ? path->node->Rotation() : Vector3f::Zero();
-    path->default_width       = path->camera->Width();
-    path->default_height      = path->camera->Height();
-    path->default_fov         = path->camera->Fov();
-    path->fov_base            = static_cast<float>(path->camera->Fov());
-    path->perspective         = true;
-    path->enabled             = true;
-    path->default_lookat      = true;
-    path->default_eye         = Vector3f(sc.camera.eye.data());
-    path->default_center      = Vector3f(sc.camera.center.data());
-    path->default_up          = Vector3f(sc.camera.up.data());
+    auto path               = std::make_shared<SceneCameraPath>();
+    path->camera_name       = "global_perspective";
+    path->camera            = it->second;
+    path->node              = context.global_perspective_camera_node;
+    path->default_translate = path->node ? path->node->Translate() : Vector3f::Zero();
+    path->default_rotation  = path->node ? path->node->Rotation() : Vector3f::Zero();
+    path->default_width     = path->camera->Width();
+    path->default_height    = path->camera->Height();
+    path->default_fov       = path->camera->Fov();
+    path->fov_base          = static_cast<float>(path->camera->Fov());
+    path->perspective       = true;
+    path->enabled           = true;
+    path->default_lookat    = true;
+    path->default_eye       = Vector3f(sc.camera.eye.data());
+    path->default_center    = Vector3f(sc.camera.center.data());
+    path->default_up        = Vector3f(sc.camera.up.data());
 
     for (const auto& rel : sc.camera.paths) {
         auto file = context.vfs->Open("/assets/" + rel);
@@ -1082,7 +1082,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
 
         gb["g_LightAmbientColor"]  = sc.general.ambientcolor;
         gb["g_LightSkylightColor"] = sc.general.skylightcolor;
-        gb["g_NormalModelMatrix"] = ShaderValue::fromMatrix(Matrix4f::Identity());
+        gb["g_NormalModelMatrix"]  = ShaderValue::fromMatrix(Matrix4f::Identity());
     }
 
     {

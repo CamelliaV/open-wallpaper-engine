@@ -170,7 +170,7 @@ inline Matrix4d LookAt(Vector3d eye, Vector3d center, Vector3d up) noexcept {
     Vector3d xAxis  = up.cross(zAxis).normalized();
     Vector3d yAxis  = zAxis.cross(xAxis).normalized();
 
-    Matrix4d view = Matrix4d::Identity();
+    Matrix4d view          = Matrix4d::Identity();
     view.block<1, 3>(0, 0) = xAxis.transpose();
     view.block<1, 3>(1, 0) = yAxis.transpose();
     view.block<1, 3>(2, 0) = zAxis.transpose();

@@ -155,9 +155,8 @@ void SceneCameraPath::CaptureViewport() {
 bool SceneCameraPath::ApplyDefault() {
     if (! camera) return false;
     if (default_lookat) {
-        camera->SetLookAt(default_eye.cast<double>(),
-                          default_center.cast<double>(),
-                          default_up.cast<double>());
+        camera->SetLookAt(
+            default_eye.cast<double>(), default_center.cast<double>(), default_up.cast<double>());
     }
     if (node) {
         node->SetTranslate(default_translate);
@@ -177,9 +176,8 @@ bool SceneCameraPath::Tick(double runtime) {
     if (! lookat_tracks.empty()) {
         auto key = eval_lookat_tracks(lookat_tracks, runtime, lookat_fps);
         if (! key) return false;
-        camera->SetLookAt(key->eye.cast<double>(),
-                          key->center.cast<double>(),
-                          key->up.cast<double>());
+        camera->SetLookAt(
+            key->eye.cast<double>(), key->center.cast<double>(), key->up.cast<double>());
         if (fov_base > 0.0f) camera->SetFov(fov_base);
         camera->Update();
         return true;

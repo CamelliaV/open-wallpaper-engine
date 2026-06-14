@@ -84,9 +84,7 @@ ParticleInstance* ParticleSubSystem::QueryNewInstance() {
     return nullptr;
 }
 
-void ParticleSubSystem::Emitt() {
-    Tick(m_sys.scene.frameTime, true);
-}
+void ParticleSubSystem::Emitt() { Tick(m_sys.scene.frameTime, true); }
 
 void ParticleSubSystem::Tick(double frame_time, bool update_mesh) {
     if (! m_started) {
@@ -103,7 +101,7 @@ void ParticleSubSystem::Warmup() {
     constexpr u32    kMaxWarmupFrames       = 240;
     u32              frame_count =
         std::max(1u, static_cast<u32>(std::ceil(m_start_time / kTargetWarmupFrameTime)));
-    frame_count      = std::min(frame_count, kMaxWarmupFrames);
+    frame_count       = std::min(frame_count, kMaxWarmupFrames);
     double frame_time = m_start_time / static_cast<double>(frame_count);
     for (u32 i = 0; i < frame_count; ++i) {
         Advance(frame_time, false);
@@ -148,8 +146,11 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
         if (m_instances.empty()) m_instances.emplace_back(std::make_unique<ParticleInstance>());
     }
 
-    auto spawn_inst = [](ParticleInstance& inst, ParticleSubSystem& child, isize idx,
-                         Eigen::Vector3f pos = Eigen::Vector3f::Zero(), bool fixed_pos = false) {
+    auto spawn_inst = [](ParticleInstance&  inst,
+                         ParticleSubSystem& child,
+                         isize              idx,
+                         Eigen::Vector3f    pos       = Eigen::Vector3f::Zero(),
+                         bool               fixed_pos = false) {
         ParticleInstance* n_inst = child.QueryNewInstance();
         if (n_inst != nullptr) {
             n_inst->GetBoundedData() = {

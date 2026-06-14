@@ -31,8 +31,8 @@ inline u32 GetEmitNum(double& timer, float speed) {
 
 inline double EmitDuration(float speed) noexcept { return speed > 0.0f ? 1.0 / speed : 0.0; }
 
-inline u32 ResolveEmitNum(double& timer, float speed, u32 instantaneous,
-                          bool one_per_frame, bool empty) {
+inline u32 ResolveEmitNum(double& timer, float speed, u32 instantaneous, bool one_per_frame,
+                          bool empty) {
     if (instantaneous > 0 && empty) return instantaneous;
     if (speed <= 0.0f) return 0;
     u32 emit_num = GetEmitNum(timer, speed);
@@ -198,8 +198,8 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
             return p;
         };
         float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
-        u32   emit_num   = ResolveEmitNum(
-            timer, emit_speed, a.instantaneous, a.one_per_frame, ps.empty());
+        u32   emit_num =
+            ResolveEmitNum(timer, emit_speed, a.instantaneous, a.one_per_frame, ps.empty());
         if (emit_num == 0) return;
         Emitt(ps, emit_num, maxcount, a.sort, [&]() {
             return Spwan(GenBox, inis, EmitDuration(emit_speed));
@@ -226,7 +226,7 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
         Eigen::Vector3d origin     = ResolveEmitterOrigin(cps, a.controlpoint, a.orgin);
         Eigen::Vector3d directions = Eigen::Vector3f { a.directions.data() }.cast<double>();
         u32             dimensions = ActiveAxisCount(directions);
-        auto            GenSphere = [&]() {
+        auto            GenSphere  = [&]() {
             auto            p    = Particle();
             double          r    = RandomRadius(a.minDistance, a.maxDistance, dimensions);
             Eigen::Vector3d unit = RandomDirectedUnit(directions);
@@ -242,8 +242,8 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
             return p;
         };
         float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
-        u32   emit_num   = ResolveEmitNum(
-            timer, emit_speed, a.instantaneous, a.one_per_frame, ps.empty());
+        u32   emit_num =
+            ResolveEmitNum(timer, emit_speed, a.instantaneous, a.one_per_frame, ps.empty());
         if (emit_num == 0) return;
         Emitt(ps, emit_num, maxcount, a.sort, [&]() {
             return Spwan(GenSphere, inis, EmitDuration(emit_speed));

@@ -658,32 +658,32 @@ struct SceneCameraLookAtTrack {
 
 class SceneCameraPath {
 public:
-    std::string                  camera_name;
-    std::shared_ptr<SceneCamera> camera;
-    std::shared_ptr<SceneNode>   node;
-    Eigen::Vector3f              default_translate { Eigen::Vector3f::Zero() };
-    Eigen::Vector3f              default_rotation { Eigen::Vector3f::Zero() };
-    Eigen::Vector3f              path_translate_bias { Eigen::Vector3f::Zero() };
-    Eigen::Vector3f              path_rotation_bias { Eigen::Vector3f::Zero() };
-    double                       default_width { 1.0 };
-    double                       default_height { 1.0 };
-    double                       default_fov { 50.0 };
-    Eigen::Vector3f              origin_base { Eigen::Vector3f::Zero() };
-    Eigen::Vector3f              rotation_base { Eigen::Vector3f::Zero() };
-    float                        zoom_base { 1.0f };
-    float                        fov_base { 50.0f };
-    bool                         perspective { false };
-    bool                         enabled { true };
-    bool                         default_lookat { false };
-    Eigen::Vector3f              default_eye { Eigen::Vector3f::Zero() };
-    Eigen::Vector3f              default_center { -Eigen::Vector3f::UnitZ() };
-    Eigen::Vector3f              default_up { Eigen::Vector3f::UnitY() };
-    float                        lookat_fps { 30.0f };
+    std::string                         camera_name;
+    std::shared_ptr<SceneCamera>        camera;
+    std::shared_ptr<SceneNode>          node;
+    Eigen::Vector3f                     default_translate { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f                     default_rotation { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f                     path_translate_bias { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f                     path_rotation_bias { Eigen::Vector3f::Zero() };
+    double                              default_width { 1.0 };
+    double                              default_height { 1.0 };
+    double                              default_fov { 50.0 };
+    Eigen::Vector3f                     origin_base { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f                     rotation_base { Eigen::Vector3f::Zero() };
+    float                               zoom_base { 1.0f };
+    float                               fov_base { 50.0f };
+    bool                                perspective { false };
+    bool                                enabled { true };
+    bool                                default_lookat { false };
+    Eigen::Vector3f                     default_eye { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f                     default_center { -Eigen::Vector3f::UnitZ() };
+    Eigen::Vector3f                     default_up { Eigen::Vector3f::UnitY() };
+    float                               lookat_fps { 30.0f };
     std::vector<SceneCameraLookAtTrack> lookat_tracks;
-    SceneAnimationCurve          origin_curve;
-    SceneAnimationCurve          rotation_curve;
-    SceneAnimationCurve          zoom_curve;
-    SceneAnimationCurve          fov_curve;
+    SceneAnimationCurve                 origin_curve;
+    SceneAnimationCurve                 rotation_curve;
+    SceneAnimationCurve                 zoom_curve;
+    SceneAnimationCurve                 fov_curve;
 
     void CaptureViewport();
     void SetEnabled(bool value) { enabled = value; }
@@ -1338,8 +1338,7 @@ public:
 public:
     ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, uint32_t maxcount,
                       double rate, u32 maxcount_instance, double probability, SpawnType type,
-                      ParticleRawGenSpecOp specOp, u32 trail_length = 0,
-                      double start_time = 0.0);
+                      ParticleRawGenSpecOp specOp, u32 trail_length = 0, double start_time = 0.0);
     ~ParticleSubSystem();
 
     void Emitt();
