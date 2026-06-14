@@ -31,6 +31,7 @@ VkFormat ToVkType(TextureFormat tf) {
     case TextureFormat::RG8: return VK_FORMAT_R8G8_UNORM;
     case TextureFormat::RGB8: return VK_FORMAT_R8G8B8_UNORM;
     case TextureFormat::RGBA8: return VK_FORMAT_R8G8B8A8_UNORM;
+    case TextureFormat::D32F: return VK_FORMAT_D32_SFLOAT;
     default: rstd_assert(false); return VK_FORMAT_R8G8B8A8_UNORM;
     }
 }
@@ -90,25 +91,36 @@ VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
         if (result != VK_SUCCESS) break;
 
         VkImageSubresourceRange subresourceRange {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .aspectMask     = layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                  ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                  : VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel   = 0,
             .levelCount     = VK_REMAINING_MIP_LEVELS,
             .baseArrayLayer = 0,
             .layerCount     = VK_REMAINING_ARRAY_LAYERS,
         };
+        const bool depth_layout = layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        VkAccessFlags dst_access =
+            depth_layout ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                         : VK_ACCESS_MEMORY_READ_BIT;
+        VkPipelineStageFlags dst_stage = depth_layout
+                                             ? VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
+                                             : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         {
             VkImageMemoryBarrier out_bar {
                 .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .pNext            = nullptr,
-                .srcAccessMask    = VK_ACCESS_MEMORY_WRITE_BIT,
-                .dstAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
+                .srcAccessMask    = {},
+                .dstAccessMask    = dst_access,
                 .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
                 .newLayout        = layout,
                 .image            = image.handle,
                 .subresourceRange = subresourceRange,
             };
-            cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                dst_stage,
                                 VK_DEPENDENCY_BY_REGION_BIT,
                                 out_bar);
         }
@@ -276,7 +288,8 @@ CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat form
         // since the resolved sibling carries the readable copy).
         if (samples != VK_SAMPLE_COUNT_1_BIT) {
             miplevel = 1;
-            usage    = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            if ((usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0)
+                usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         }
         VkImageCreateInfo info {
             .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -301,6 +314,7 @@ CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat form
 
         image.mipmap_level = miplevel;
         {
+            const bool depth_usage = (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
             VkImageViewCreateInfo createinfo {
                 .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                 .pNext    = nullptr,
@@ -309,7 +323,8 @@ CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat form
                 .format   = format,
                 .subresourceRange =
                     VkImageSubresourceRange {
-                        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .aspectMask     = depth_usage ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                      : VK_IMAGE_ASPECT_COLOR_BIT,
                         .baseMipLevel   = 0,
                         .levelCount     = miplevel,
                         .baseArrayLayer = 0,
@@ -567,17 +582,20 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
         VkSamplerCreateInfo sam_info = GenSamplerInfo(tex_key);
         VkFormat            format   = ToVkType(tex_key.format);
         VkExtent3D          ext { (u32)tex_key.width, (u32)tex_key.height, 1 };
+        const bool          depth_usage = tex_key.usage == TexUsage::DEPTH;
+        VkImageUsageFlags   usage =
+            depth_usage ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                        : VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                              VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-        if (auto opt =
-                CreateImage(m_device,
-                            ext,
-                            tex_key.mipmap_level,
-                            format,
-                            sam_info,
-                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                            VMA_MEMORY_USAGE_GPU_ONLY,
-                            tex_key.samples);
+        if (auto opt = CreateImage(m_device,
+                                   ext,
+                                   tex_key.mipmap_level,
+                                   format,
+                                   sam_info,
+                                   usage,
+                                   VMA_MEMORY_USAGE_GPU_ONLY,
+                                   tex_key.samples);
             opt.has_value()) {
             image_paras = std::move(opt.value());
         } else
@@ -591,7 +609,8 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
         TransImgLayout(m_device.graphics_queue().handle,
                        m_tex_cmd,
                        ToImageParameters(image_paras),
-                       tex_key.samples == VK_SAMPLE_COUNT_1_BIT
+                       depth_usage ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                       : tex_key.samples == VK_SAMPLE_COUNT_1_BIT
                            ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                            : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 

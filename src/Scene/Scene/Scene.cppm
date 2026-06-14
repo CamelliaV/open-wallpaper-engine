@@ -296,6 +296,9 @@ public:
 
     SceneMaterialCustomShader customShader;
     BlendMode                 blenmode { BlendMode::Disable };
+    bool                      depth_test { false };
+    bool                      depth_write { false };
+    CullMode                  cull_mode { CullMode::None };
 };
 
 // ============================================================================

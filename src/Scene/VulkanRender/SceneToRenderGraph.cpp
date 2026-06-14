@@ -101,6 +101,7 @@ struct ExtraInfo {
     std::vector<DelayLinkInfo> link_info {};
     rg::RenderGraph*           rgraph { nullptr };
     Scene*                     scene { nullptr };
+    Set<std::string>           depth_initialized_outputs {};
     // Result of Pass A; non-null during Pass B. Only layer IDs in this set
     // actually have downstream link consumers, so we skip id_link_map writes
     // for non-referenced layers.
@@ -211,6 +212,16 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                 const auto& output_rt = scene.renderTargets.at(pass_output_s);
                 pdesc.clear_output    = output_node->version() == 0 && output_rt.bind.screen;
                 pdesc.preserve_output = output_node->version() > 0;
+                const bool uses_depth = output_rt.withDepth && vulkan::UsesDepthAttachment(*material);
+                pdesc.clear_depth =
+                    uses_depth &&
+                    (pdesc.clear_output || output_rt.force_clear ||
+                     extra.depth_initialized_outputs.count(pass_output_s) == 0);
+                if (uses_depth) {
+                    extra.depth_initialized_outputs.insert(pass_output_s);
+                } else if (pdesc.clear_output || output_rt.force_clear) {
+                    extra.depth_initialized_outputs.erase(pass_output_s);
+                }
                 builder.write(output_node);
                 auto record_link_source = [&](i32 id) {
                     if (extra.linked_ids == nullptr || extra.linked_ids->count(id) != 0) {

@@ -44,6 +44,38 @@ inline void SetAttachmentLoadOp(BlendMode bm, VkAttachmentLoadOp& load_op) {
     }
 }
 
+inline bool IsDepthWritingBlendMode(BlendMode bm) {
+    switch (bm) {
+    case BlendMode::Disable:
+    case BlendMode::Normal: return true;
+    case BlendMode::Additive:
+    case BlendMode::Translucent: return false;
+    }
+    return false;
+}
+
+inline bool EffectiveDepthWrite(const SceneMaterial& material) {
+    return material.depth_write && IsDepthWritingBlendMode(material.blenmode);
+}
+
+inline bool UsesDepthAttachment(const SceneMaterial& material) {
+    return material.depth_test || EffectiveDepthWrite(material);
+}
+
+inline void SetDepthState(const SceneMaterial& material, VkPipelineDepthStencilStateCreateInfo& state) {
+    state.depthTestEnable  = material.depth_test;
+    state.depthWriteEnable = EffectiveDepthWrite(material);
+    state.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+}
+
+inline void SetCullMode(CullMode mode, VkPipelineRasterizationStateCreateInfo& state) {
+    switch (mode) {
+    case CullMode::Front: state.cullMode = VK_CULL_MODE_FRONT_BIT; break;
+    case CullMode::Back: state.cullMode = VK_CULL_MODE_BACK_BIT; break;
+    case CullMode::None: state.cullMode = VK_CULL_MODE_NONE; break;
+    }
+}
+
 inline TextureKey ToTexKey(owe::SceneRenderTarget rt) {
     return TextureKey {
         .width        = rt.width,
@@ -71,6 +103,18 @@ inline VkSampleCountFlagBits ToVkSampleCount(unsigned sample_count) {
     case 64: return VK_SAMPLE_COUNT_64_BIT;
     default: return VK_SAMPLE_COUNT_1_BIT;
     }
+}
+
+inline TextureKey ToDepthTexKey(owe::SceneRenderTarget rt) {
+    return TextureKey {
+        .width        = rt.width,
+        .height       = rt.height,
+        .usage        = TexUsage::DEPTH,
+        .format       = owe::TextureFormat::D32F,
+        .sample       = rt.sample,
+        .mipmap_level = 1,
+        .samples      = ToVkSampleCount(rt.sample_count),
+    };
 }
 
 inline std::string MsaaTwinName(std::string_view tex_name, VkSampleCountFlagBits samples) {

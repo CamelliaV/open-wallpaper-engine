@@ -571,6 +571,16 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
+bool ParseEnabled(std::string_view str) { return str == "enabled"; }
+
+CullMode ParseCullMode(std::string_view str) {
+    if (str == "back" || str == "normal") return CullMode::Back;
+    if (str == "front") return CullMode::Front;
+    if (str == "nocull" || str == "none" || str.empty()) return CullMode::None;
+    rstd_error("unknown cullmode: {}", str);
+    return CullMode::None;
+}
+
 void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
                       const WPShaderInfo& sinfo, const Scene& scene) {
     if (IsSpecTex(name)) {
@@ -590,7 +600,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
             name.clear();
         } else if (sstart_with(name, OWE_BLOOM_MIP_PREFIX)) {
         } else if (sstart_with(name, WE_REFLECTION_PREFIX)) {
-            name = WE_MIP_MAPPED_FRAME_BUFFER;
+            name.clear();
         } else if (sstart_with(name, OWE_EFFECT_PPONG_PREFIX)) {
         } else if (sstart_with(name, WE_HALF_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
@@ -703,7 +713,12 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
 
     for (usize i = 0; i < textures.size(); i++) {
         std::string name = textures.at(i);
+        bool        unsupported_reflection = sstart_with(name, WE_REFLECTION_PREFIX);
         ParseSpecTexName(name, wpmat, *pWPShaderInfo, *pScene);
+        if (unsupported_reflection && name.empty()) {
+            pWPShaderInfo->combos["reflection"] = "0";
+            pWPShaderInfo->combos["REFLECTION"] = "0";
+        }
         material.textures.push_back(name);
         material.defines.push_back("g_Texture" + std::to_string(i));
         if (name.empty()) {
@@ -781,7 +796,10 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
         return false;
     }
 
-    material.blenmode = ParseBlendMode(wpmat.blending);
+    material.blenmode    = ParseBlendMode(wpmat.blending);
+    material.depth_test  = ParseEnabled(wpmat.depthtest);
+    material.depth_write = ParseEnabled(wpmat.depthwrite);
+    material.cull_mode   = ParseCullMode(wpmat.cullmode);
 
     // FS is always the last unit (VS may be followed by optional GS, then FS).
     const auto& fs_active = sd_units.back().preprocess_info.active_tex_slots;
@@ -2600,9 +2618,10 @@ ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::WPSc
     context.user_properties = user_properties;
 
     context.scene->renderTargets[SpecTex_Default.data()] = {
-        .width  = context.ortho_w,
-        .height = context.ortho_w,
-        .bind   = { .enable = true, .screen = true },
+        .width     = context.ortho_w,
+        .height    = context.ortho_w,
+        .withDepth = true,
+        .bind      = { .enable = true, .screen = true },
     };
     context.scene->renderTargets[WE_MIP_MAPPED_FRAME_BUFFER.data()] = {
         .width      = context.ortho_w,

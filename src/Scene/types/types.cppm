@@ -63,7 +63,8 @@ enum class TextureFormat
     RGB8,
     RGBA8,
     RG8,
-    R8
+    R8,
+    D32F
 };
 std::string ToString(const TextureFormat&);
 
@@ -73,6 +74,13 @@ enum class BlendMode
     Translucent,
     Additive,
     Normal
+};
+
+enum class CullMode
+{
+    None,
+    Front,
+    Back
 };
 
 enum class ShaderType

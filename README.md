@@ -84,8 +84,6 @@ Flags (see `viewer/arg.hpp`):
 	- [x] Mesh masks
     - [ ] Bone simulation
     - [ ] Morph (MDMP)
-- [ ] 3D model
-	- [x] Parse
-	- [ ] Render
+- [X] 3D model
 - [x] Scenescript  
 - [x] User Properties

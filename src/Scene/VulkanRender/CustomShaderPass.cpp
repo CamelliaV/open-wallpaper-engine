@@ -21,6 +21,7 @@ CustomShaderPass::CustomShaderPass(const Desc& desc) {
     m_desc.output          = desc.output;
     m_desc.sprites_map     = desc.sprites_map;
     m_desc.clear_output    = desc.clear_output;
+    m_desc.clear_depth     = desc.clear_depth;
     m_desc.preserve_output = desc.preserve_output;
 };
 CustomShaderPass::~CustomShaderPass() {}
@@ -28,7 +29,9 @@ CustomShaderPass::~CustomShaderPass() {}
 std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFormat format,
                                                 VkAttachmentLoadOp    loadOp,
                                                 VkImageLayout         finalLayout,
-                                                VkSampleCountFlagBits samples) {
+                                                VkSampleCountFlagBits samples,
+                                                bool                  has_depth,
+                                                VkAttachmentLoadOp    depthLoadOp) {
     const bool has_resolve = (samples != VK_SAMPLE_COUNT_1_BIT);
 
     // attachment[0] is the color attachment. With MSAA it's the multisample
@@ -63,7 +66,18 @@ std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFor
         .finalLayout    = finalLayout,
     };
 
-    std::array<VkAttachmentDescription, 2> attachments { color, resolve };
+    VkAttachmentDescription depth {
+        .format         = VK_FORMAT_D32_SFLOAT,
+        .samples        = samples,
+        .loadOp         = depthLoadOp,
+        .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout  = depthLoadOp == VK_ATTACHMENT_LOAD_OP_LOAD
+                              ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                              : VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
 
     VkAttachmentReference color_ref {
         .attachment = 0,
@@ -73,26 +87,45 @@ std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFor
         .attachment = 1,
         .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     };
+    VkAttachmentReference depth_ref {
+        .attachment = has_resolve ? 2u : 1u,
+        .layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+    std::vector<VkAttachmentDescription> attachments;
+    attachments.reserve(3);
+    attachments.push_back(color);
+    if (has_resolve) attachments.push_back(resolve);
+    if (has_depth) attachments.push_back(depth);
 
     VkSubpassDescription subpass {
         .pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS,
         .colorAttachmentCount = 1,
         .pColorAttachments    = &color_ref,
         .pResolveAttachments  = has_resolve ? &resolve_ref : nullptr,
+        .pDepthStencilAttachment = has_depth ? &depth_ref : nullptr,
     };
 
     VkSubpassDependency dependency {
         .srcSubpass    = VK_SUBPASS_EXTERNAL,
         .dstSubpass    = 0,
-        .srcStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = {},
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .srcStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
     };
 
     VkRenderPassCreateInfo creatinfo {
         .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = has_resolve ? 2u : 1u,
+        .attachmentCount = static_cast<uint32_t>(attachments.size()),
         .pAttachments    = attachments.data(),
         .subpassCount    = 1,
         .pSubpasses      = &subpass,
@@ -221,6 +254,22 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
     SceneMaterial& material_ref = *slots[submesh.material_slot];
+    auto&          output_rt    = scene.renderTargets.at(m_desc.output);
+    const bool     has_depth_attachment = output_rt.withDepth && UsesDepthAttachment(material_ref);
+    m_desc.has_depth_attachment = has_depth_attachment;
+    VkAttachmentLoadOp depthLoadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+    if (has_depth_attachment) {
+        depthLoadOp = m_desc.clear_depth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+
+        auto depth_name = m_desc.output + "::depth";
+        if (auto opt =
+                device.tex_cache().Query(depth_name, ToDepthTexKey(output_rt), ! output_rt.allowReuse);
+            opt.has_value()) {
+            m_desc.vk_depth = opt.value();
+        } else {
+            return;
+        }
+    }
 
     std::vector<Uni_ShaderSpv> spvs;
     DescriptorSetInfo          descriptor_info;
@@ -347,7 +396,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                                     VK_FORMAT_R8G8B8A8_UNORM,
                                     loadOp,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                    m_desc.samples);
+                                    m_desc.samples,
+                                    has_depth_attachment,
+                                    depthLoadOp);
         if (! opt.has_value()) return;
         auto& pass = opt.value();
 
@@ -370,6 +421,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             .addInputBindingDescription(bind_descriptions)
             .addInputAttributeDescription(attr_descriptions)
             .setSampleCount(m_desc.samples);
+        SetDepthState(material_ref, pipeline.depth);
+        SetCullMode(material_ref.cull_mode, pipeline.raster);
         for (auto& spv : spvs) pipeline.addStage(std::move(spv));
 
         if (! pipeline.create(device, pass, m_desc.pipeline)) return;
@@ -377,15 +430,18 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
 
     {
         const bool                 has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
-        std::array<VkImageView, 2> views {
+        std::array<VkImageView, 3> views {
             has_msaa ? m_desc.vk_output_msaa.view : m_desc.vk_output.view,
             m_desc.vk_output.view,
+            m_desc.vk_depth.view,
         };
+        const uint32_t depth_view_index = has_msaa ? 2u : 1u;
+        if (has_depth_attachment) views[depth_view_index] = m_desc.vk_depth.view;
         VkFramebufferCreateInfo info {
             .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .pNext           = nullptr,
             .renderPass      = *m_desc.pipeline.pass,
-            .attachmentCount = has_msaa ? 2u : 1u,
+            .attachmentCount = (has_msaa ? 2u : 1u) + (has_depth_attachment ? 1u : 0u),
             .pAttachments    = views.data(),
             .width           = m_desc.vk_output.extent.width,
             .height          = m_desc.vk_output.extent.height,
@@ -607,8 +663,15 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     }
 
     const bool                  has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
-    std::array<VkClearValue, 2> clears { m_desc.clear_value, VkClearValue {} };
-    VkRenderPassBeginInfo       pass_begin_info {
+    const uint32_t              clear_count =
+        (has_msaa ? 2u : 1u) + (m_desc.has_depth_attachment ? 1u : 0u);
+    std::array<VkClearValue, 3> clears {};
+    clears[0] = m_desc.clear_value;
+    if (m_desc.has_depth_attachment) {
+        const uint32_t depth_index       = has_msaa ? 2u : 1u;
+        clears[depth_index].depthStencil = { 1.0f, 0 };
+    }
+    VkRenderPassBeginInfo pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext       = nullptr,
         .renderPass  = *m_desc.pipeline.pass,
@@ -618,7 +681,7 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
                 .offset = { 0, 0 },
                 .extent = { outext.width, outext.height },
             },
-        .clearValueCount = has_msaa ? 2u : 1u,
+        .clearValueCount = clear_count,
         .pClearValues    = clears.data(),
     };
     cmd.BeginRenderPass(pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);

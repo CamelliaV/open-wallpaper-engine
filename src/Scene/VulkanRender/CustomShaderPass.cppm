@@ -32,7 +32,9 @@ public:
         // MSAA twin (color attachment) when output RT has sample_count>1.
         // Empty handle means no MSAA; framebuffer attaches only vk_output.
         ImageParameters       vk_output_msaa;
+        ImageParameters       vk_depth;
         VkSampleCountFlagBits samples { VK_SAMPLE_COUNT_1_BIT };
+        bool                  has_depth_attachment { false };
 
         // bufs
         bool dyn_vertex { false };
@@ -53,6 +55,7 @@ public:
         const std::array<float, 3>* clear_value_src { nullptr };
         bool                        blending { false };
         bool                        clear_output { false };
+        bool                        clear_depth { false };
         bool                        preserve_output { false };
         vvk::Framebuffer            fb;
         PipelineParameters          pipeline;
