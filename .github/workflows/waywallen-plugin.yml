@@ -55,7 +55,7 @@ jobs:
             curl \
             file \
             git \
-            libasound2 \
+            libasound2t64 \
             libegl1 \
             libfontconfig1-dev \
             libgbm1 \
