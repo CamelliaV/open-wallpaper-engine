@@ -14,7 +14,6 @@ using namespace Eigen;
 
 struct WPGOption {
     bool thick_format { false };
-    bool geometry_shader { false };
 };
 
 namespace
@@ -90,6 +89,49 @@ inline usize GenParticleData(std::span<const std::unique_ptr<ParticleInstance>> 
                 { data + offset, totle_size }, std::array { p.rotation[0], p.rotation[1] }, 4);
 
             sv.SetVertexs((i++) * 4, { data, totle_size });
+        }
+    }
+    return i;
+}
+
+inline usize GenParticlePointData(std::span<const std::unique_ptr<ParticleInstance>> instances,
+                                  const ParticleRawGenSpecOp& specOp, WPGOption opt,
+                                  SceneVertexArray& sv) noexcept {
+    const auto            one_size = sv.OneSize();
+    const auto            attrs    = sv.GetAttrOffsetMap();
+    std::array<float, 16> v {};
+    auto write_attr = [&](std::string_view name, std::span<const float> data) noexcept {
+        auto it = attrs.find(std::string(name));
+        if (it == attrs.end()) return;
+        const usize offset = it->second.offset / sizeof(float);
+        std::copy(data.begin(), data.end(), v.begin() + (isize)offset);
+    };
+
+    usize i { 0 };
+    for (const auto& inst : instances) {
+        if (inst->IsNoLiveParticle()) continue;
+
+        for (const auto& p : inst->Particles()) {
+            if (! ParticleModify::LifetimeOk(p)) continue;
+
+            float lifetime = p.lifetime;
+            specOp(p, { &lifetime });
+
+            auto  pos  = inst->GetBoundedData().pos + p.position;
+            float size = p.size / 2.0f;
+
+            std::fill(v.begin(), v.begin() + (isize)one_size, 0.0f);
+            write_attr(WE_IN_POSITION, std::array { pos[0], pos[1], pos[2] });
+            write_attr(WE_IN_TEXCOORDVEC4,
+                       std::array { p.rotation[0], p.rotation[1], p.rotation[2], size });
+            write_attr(WE_IN_COLOR, std::array { p.color[0], p.color[1], p.color[2], p.alpha });
+
+            if (opt.thick_format) {
+                write_attr(WE_IN_TEXCOORDVEC4C1,
+                           std::array { p.velocity[0], p.velocity[1], p.velocity[2], lifetime });
+            }
+
+            sv.SetVertexs(i++, { v.data(), one_size });
         }
     }
     return i;
@@ -221,6 +263,12 @@ void WPParticleRawGener::GenGLData(std::span<const std::unique_ptr<ParticleInsta
         // high-water mark.
         sv.ResetSize();
         GenRopeParticleData(instances, specOp, opt, sv);
+        return;
+    }
+
+    if (mesh.Primitive() == MeshPrimitive::POINT) {
+        sv.ResetSize();
+        GenParticlePointData(instances, specOp, opt, sv);
         return;
     }
 

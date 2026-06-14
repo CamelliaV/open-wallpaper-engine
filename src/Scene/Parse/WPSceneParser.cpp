@@ -350,7 +350,7 @@ void GenCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
 }
 
 void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
-                     bool thick_format) {
+                     bool thick_format, bool geometry_shader) {
     (void)particle;
     std::vector<VertexAttrSpec> specs {
         VAttr::Position,
@@ -358,9 +358,14 @@ void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_
         VAttr::Color,
     };
     if (thick_format) specs.push_back(VAttr::TexCoordVec4C1);
-    specs.push_back(VAttr::TexCoordC2);
-    mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count * 4));
-    mesh.AddIndexArray(SceneIndexArray(count * 6));
+    if (geometry_shader) {
+        mesh.SetPrimitive(MeshPrimitive::POINT);
+        mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count));
+    } else {
+        specs.push_back(VAttr::TexCoordC2);
+        mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count * 4));
+        mesh.AddIndexArray(SceneIndexArray(count * 6));
+    }
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
 }
 
@@ -379,12 +384,24 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
         specs.push_back(VAttr::TexCoordVec3C2);
     }
     specs.push_back(VAttr::Color);
-    // GS-driven path: one vertex per trail segment, no quad fan-out and no
-    // index buffer — the geometry shader expands a single point input into
-    // 4 + 2*TRAILSUBDIVISION strip vertices via cubic Bezier.
+    mesh.SetPrimitive(MeshPrimitive::POINT);
     mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), count));
     mesh.GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
+}
+
+struct ParticleRenderDesc {
+    bool rope { false };
+    bool trail { false };
+    bool geometry_shader { false };
+};
+
+ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render) {
+    ParticleRenderDesc desc;
+    desc.rope            = sstart_with(render.name, "rope");
+    desc.trail           = send_with(render.name, "trail");
+    desc.geometry_shader = desc.rope || (! desc.trail && render.name == "sprite");
+    return desc;
 }
 
 ParticleAnimationMode ToAnimMode(const std::string& str) {
@@ -525,7 +542,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
 
 bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene, SceneNode* pNode,
                   SceneMaterial* pMaterial, WPShaderValueData* pSvData,
-                  WPShaderInfo* pWPShaderInfo = nullptr) {
+                  WPShaderInfo* pWPShaderInfo = nullptr, bool enable_geometry_shader = false) {
     (void)pNode;
 
     auto& svData   = *pSvData;
@@ -551,12 +568,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
         .src             = fs::GetFileContent(vfs, shaderPath + ".vert"),
         .preprocess_info = {},
     });
-    // Optional geometry stage: only `genericropeparticle` is wired through
-    // GS today (cubic-Bezier subdivision). Other shaders that ship a .geom
-    // (e.g. `genericparticle`) expect a different vertex layout / topology
-    // that the rope mesh path doesn't yet produce, so leave them on the
-    // no-GS branch until that work lands.
-    if (wpmat.shader == "genericropeparticle") {
+    if (enable_geometry_shader) {
         if (std::string geom_src = fs::GetFileContent(vfs, shaderPath + ".geom");
             ! geom_src.empty()) {
             sd_units.push_back({
@@ -1648,8 +1660,9 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     auto& vfs          = *context.vfs;
 
     auto wppartRenderer = particle_obj.renderers.at(0);
-    bool render_rope    = sstart_with(wppartRenderer.name, "rope");
-    bool hastrail       = send_with(wppartRenderer.name, "trail");
+    auto render_desc    = DescribeParticleRender(wppartRenderer);
+    bool render_rope    = render_desc.rope;
+    bool hastrail       = render_desc.trail;
 
     if (render_rope) particle_obj.material.shader = "genericropeparticle";
 
@@ -1721,7 +1734,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                               spNode.get(),
                               &material,
                               &svData,
-                              &shaderInfo);
+                              &shaderInfo,
+                              render_desc.geometry_shader);
     } catch (const std::exception& e) {
         rstd_error("load particleobj '{}' material exception: {}", wppartobj.name, e.what());
     }
@@ -1757,7 +1771,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
             u32 rope_segs = mesh_maxcount * (trail_length - 1);
             SetRopeParticleMesh(mesh, particle_obj, rope_segs, thick_format);
         } else {
-            SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format);
+            SetParticleMesh(
+                mesh, particle_obj, mesh_maxcount, thick_format, render_desc.geometry_shader);
         }
     }
 

@@ -400,6 +400,7 @@ float    _ww_mul(float4 a, float4 b)      { return dot(a, b); }
 // canonical struct field name so `IN[0].gl_Position` / `v.gl_Position` both
 // resolve correctly.
 #define gl_Position _ww_sv_position
+#define VS_OUTPUT   WW_VSOut
 #define PS_INPUT    WW_PSIn
 
 __SHADER_PLACEHOLD__

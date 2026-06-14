@@ -352,16 +352,14 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         pipeline.toDefault();
         const bool has_index =
             m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
-        // Rope/spline particles feed one vertex per trail segment into a
-        // geometry shader that subdivides via cubic Bezier — input topology
-        // must be POINT_LIST. Detected via the WE_PRENDER_ROPE option set on
-        // the first vertex array by SetRopeParticleMesh.
-        const bool rope_topology =
-            ! submesh.vertex_arrays.empty() && submesh.vertex_arrays[0].GetOption(WE_PRENDER_ROPE);
-        VkPrimitiveTopology topology = rope_topology
-                                           ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-                                           : (has_index ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-                                                        : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP);
+        VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        switch (mesh.Primitive()) {
+        case MeshPrimitive::POINT: topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
+        case MeshPrimitive::TRIANGLE:
+            topology = has_index ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+                                 : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+            break;
+        }
         pipeline.addDescriptorSetInfo(spanone { descriptor_info })
             .setColorBlendStates(spanone { color_blend })
             .setTopology(topology)
