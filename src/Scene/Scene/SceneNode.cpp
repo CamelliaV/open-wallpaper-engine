@@ -45,6 +45,9 @@ void SceneNode::MarkTransDirty() {
         for (auto& child : m_children) {
             child->MarkTransDirty();
         }
+        for (auto* anchor : m_transform_anchors) {
+            if (anchor) anchor->MarkTransDirty();
+        }
     }
 }
 

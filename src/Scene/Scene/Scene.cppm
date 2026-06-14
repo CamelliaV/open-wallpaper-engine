@@ -733,8 +733,15 @@ public:
     // HitTestNode falls back to local trans instead of dereferencing freed
     // memory.
     ~SceneNode() {
+        if (m_parent) {
+            auto& anchors = m_parent->m_transform_anchors;
+            anchors.erase(std::remove(anchors.begin(), anchors.end(), this), anchors.end());
+        }
         for (auto& c : m_children) {
             if (c) c->m_parent = nullptr;
+        }
+        for (auto* anchor : m_transform_anchors) {
+            if (anchor && anchor->m_parent == this) anchor->m_parent = nullptr;
         }
     }
 
@@ -877,7 +884,21 @@ public:
     // SceneImageEffectLayer composite quad: the quad needs spImgNode's
     // world transform but must not be rendered twice in scene-tree traversal.
     void SetParentAnchor(SceneNode* p) {
+        if (m_parent == p) {
+            MarkTransDirty();
+            return;
+        }
+        if (m_parent) {
+            auto& anchors = m_parent->m_transform_anchors;
+            anchors.erase(std::remove(anchors.begin(), anchors.end(), this), anchors.end());
+        }
         m_parent = p;
+        if (m_parent) {
+            auto& anchors = m_parent->m_transform_anchors;
+            if (std::find(anchors.begin(), anchors.end(), this) == anchors.end()) {
+                anchors.push_back(this);
+            }
+        }
         MarkTransDirty();
     }
 
@@ -922,6 +943,7 @@ private:
     SceneNode* m_parent { nullptr };
 
     std::list<std::shared_ptr<SceneNode>> m_children;
+    std::vector<SceneNode*>               m_transform_anchors;
 };
 
 // SceneLight + SceneLightType live in the `wescene.scene:lighting` partition

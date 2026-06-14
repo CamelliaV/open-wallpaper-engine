@@ -115,6 +115,11 @@ script::ScriptScene& EnsureScriptScene(ParseContext& context) {
     if (! context.script_scene) {
         context.script_scene = std::make_unique<script::ScriptScene>();
         context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.get());
+        if (context.user_properties != nullptr) {
+            for (const auto& [key, prop] : *context.user_properties) {
+                context.script_scene->runtime().SetUserProperty(key, prop);
+            }
+        }
     }
     return *context.script_scene;
 }
@@ -2426,10 +2431,12 @@ void AdjustAutoOrthoProjection(wpscene::WPScene& sc, std::span<const WPObjectVar
     sc.general.orthogonalprojection.height = h;
 }
 
-ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::WPScene& sc) {
+ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::WPScene& sc,
+                          const std::unordered_map<std::string, nlohmann::json>* user_properties) {
     ParseContext context;
     InitContext(context, vfs, sc);
     ParseCamera(context, sc);
+    context.user_properties = user_properties;
 
     context.scene->renderTargets[SpecTex_Default.data()] = {
         .width  = context.ortho_w,
@@ -2731,7 +2738,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view                scen
 
     auto wp_objs = ExpandObjects(json, vfs, sc.pkg_version, m_user_properties);
     AdjustAutoOrthoProjection(sc, wp_objs);
-    auto context = BuildContext(vfs, scene_id, sc);
+    auto context = BuildContext(vfs, scene_id, sc, m_user_properties);
 
     // Single JSON-order walk:
     // - record every object's id (and parent_id) in declaration order so the

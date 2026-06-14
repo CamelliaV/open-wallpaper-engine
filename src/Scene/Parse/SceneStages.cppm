@@ -33,11 +33,12 @@ using WPObjectVar =
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
-    std::shared_ptr<Scene> scene;
-    WPShaderValueUpdater*  shader_updater { nullptr };
-    i32                    ortho_w { 0 };
-    i32                    ortho_h { 0 };
-    fs::VFS*               vfs { nullptr };
+    std::shared_ptr<Scene>                                 scene;
+    WPShaderValueUpdater*                                  shader_updater { nullptr };
+    i32                                                    ortho_w { 0 };
+    i32                                                    ortho_h { 0 };
+    fs::VFS*                                               vfs { nullptr };
+    const std::unordered_map<std::string, nlohmann::json>* user_properties { nullptr };
 
     ShaderValueMap             global_base_uniforms;
     std::shared_ptr<SceneNode> effect_camera_node;
