@@ -70,7 +70,6 @@ Flags (see `viewer/arg.hpp`):
 - [x] Particle System
 	- [x] Renderers
 	- [x] Emitters
-		- [ ] Duration 
 	- [x] Initializers
 	- [x] Operators
 	- [x] Control Points

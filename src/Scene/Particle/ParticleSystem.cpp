@@ -33,13 +33,15 @@ ParticleInstance::BoundedData& ParticleInstance::GetBoundedData() { return m_bou
 ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm,
                                      uint32_t maxcount, double rate, u32 maxcount_instance,
                                      double probability, SpawnType type,
-                                     ParticleRawGenSpecOp specOp, u32 trail_length)
+                                     ParticleRawGenSpecOp specOp, u32 trail_length,
+                                     double start_time)
     : m_sys(p),
       m_mesh(sm),
       m_maxcount(maxcount),
       m_rate(rate),
       m_genSpecOp(specOp),
       m_time(0),
+      m_start_time(start_time),
       m_maxcount_instance(maxcount_instance),
       m_probability(probability),
       m_spawn_type(type),
@@ -83,8 +85,33 @@ ParticleInstance* ParticleSubSystem::QueryNewInstance() {
 }
 
 void ParticleSubSystem::Emitt() {
-    double frameTime    = m_sys.scene.frameTime;
-    double particleTime = frameTime * m_rate;
+    Tick(m_sys.scene.frameTime, true);
+}
+
+void ParticleSubSystem::Tick(double frame_time, bool update_mesh) {
+    if (! m_started) {
+        m_started = true;
+        Warmup();
+    }
+    Advance(frame_time, update_mesh);
+}
+
+void ParticleSubSystem::Warmup() {
+    if (m_start_time <= 0.0) return;
+
+    constexpr double kTargetWarmupFrameTime = 1.0 / 60.0;
+    constexpr u32    kMaxWarmupFrames       = 240;
+    u32              frame_count =
+        std::max(1u, static_cast<u32>(std::ceil(m_start_time / kTargetWarmupFrameTime)));
+    frame_count      = std::min(frame_count, kMaxWarmupFrames);
+    double frame_time = m_start_time / static_cast<double>(frame_count);
+    for (u32 i = 0; i < frame_count; ++i) {
+        Advance(frame_time, false);
+    }
+}
+
+void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
+    double particleTime = frame_time * m_rate;
     m_time += particleTime;
 
     // Cursor in canvas-absolute world coords. The "global" camera lives at
@@ -121,12 +148,14 @@ void ParticleSubSystem::Emitt() {
         if (m_instances.empty()) m_instances.emplace_back(std::make_unique<ParticleInstance>());
     }
 
-    auto spawn_inst = [](ParticleInstance& inst, ParticleSubSystem& child, isize idx) {
+    auto spawn_inst = [](ParticleInstance& inst, ParticleSubSystem& child, isize idx,
+                         Eigen::Vector3f pos = Eigen::Vector3f::Zero(), bool fixed_pos = false) {
         ParticleInstance* n_inst = child.QueryNewInstance();
         if (n_inst != nullptr) {
             n_inst->GetBoundedData() = {
                 .parent       = &inst,
-                .particle_idx = idx,
+                .particle_idx = fixed_pos ? -1 : idx,
+                .pos          = pos,
             };
         }
     };
@@ -225,7 +254,8 @@ void ParticleSubSystem::Emitt() {
             if (! ParticleModify::LifetimeOk(p)) {
                 // new dead
                 for (auto& child : m_children) {
-                    if (child->Type() == SpawnType::EVENT_DEATH) spawn_inst(*inst, *child, i);
+                    if (child->Type() == SpawnType::EVENT_DEATH)
+                        spawn_inst(*inst, *child, i, ParticleModify::GetPos(p), true);
                 }
             } else {
                 has_live = true;
@@ -274,12 +304,13 @@ void ParticleSubSystem::Emitt() {
         }
     }
 
-    m_mesh->SetDirty();
-
-    m_sys.gener->GenGLData(m_instances, *m_mesh, m_genSpecOp);
+    if (update_mesh) {
+        m_mesh->SetDirty();
+        m_sys.gener->GenGLData(m_instances, *m_mesh, m_genSpecOp);
+    }
 
     for (auto& child : m_children) {
-        child->Emitt();
+        child->Tick(frame_time, update_mesh);
     }
 }
 

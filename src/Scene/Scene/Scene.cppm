@@ -1320,7 +1320,8 @@ public:
 public:
     ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, uint32_t maxcount,
                       double rate, u32 maxcount_instance, double probability, SpawnType type,
-                      ParticleRawGenSpecOp specOp, u32 trail_length = 0);
+                      ParticleRawGenSpecOp specOp, u32 trail_length = 0,
+                      double start_time = 0.0);
     ~ParticleSubSystem();
 
     void Emitt();
@@ -1346,6 +1347,10 @@ public:
     u32       MaxInstanceCount() const;
 
 private:
+    void Tick(double frame_time, bool update_mesh);
+    void Warmup();
+    void Advance(double frame_time, bool update_mesh);
+
     ParticleSystem&              m_sys;
     std::shared_ptr<SceneMesh>   m_mesh;
     std::weak_ptr<SceneNode>     m_owner_node;
@@ -1360,6 +1365,8 @@ private:
     u32                  m_maxcount;
     double               m_rate;
     double               m_time;
+    double               m_start_time { 0.0 };
+    bool                 m_started { false };
 
     std::vector<std::unique_ptr<ParticleSubSystem>> m_children;
     std::vector<std::unique_ptr<ParticleInstance>>  m_instances;

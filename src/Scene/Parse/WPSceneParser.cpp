@@ -1797,7 +1797,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                 break;
             }
         },
-        trail_length);
+        trail_length,
+        static_cast<double>(particle_obj.starttime));
 
     particleSub->SetOwnerNode(spNode);
     LoadEmitter(*particleSub,
