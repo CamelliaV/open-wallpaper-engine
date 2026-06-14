@@ -29,9 +29,8 @@ CustomShaderPass::~CustomShaderPass() {}
 std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFormat format,
                                                 VkAttachmentLoadOp    loadOp,
                                                 VkImageLayout         finalLayout,
-                                                VkSampleCountFlagBits samples,
-                                                bool                  has_depth,
-                                                VkAttachmentLoadOp    depthLoadOp) {
+                                                VkSampleCountFlagBits samples, bool has_depth,
+                                                VkAttachmentLoadOp depthLoadOp) {
     const bool has_resolve = (samples != VK_SAMPLE_COUNT_1_BIT);
 
     // attachment[0] is the color attachment. With MSAA it's the multisample
@@ -98,25 +97,24 @@ std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFor
     if (has_depth) attachments.push_back(depth);
 
     VkSubpassDescription subpass {
-        .pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS,
-        .colorAttachmentCount = 1,
-        .pColorAttachments    = &color_ref,
-        .pResolveAttachments  = has_resolve ? &resolve_ref : nullptr,
+        .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount    = 1,
+        .pColorAttachments       = &color_ref,
+        .pResolveAttachments     = has_resolve ? &resolve_ref : nullptr,
         .pDepthStencilAttachment = has_depth ? &depth_ref : nullptr,
     };
 
     VkSubpassDependency dependency {
-        .srcSubpass    = VK_SUBPASS_EXTERNAL,
-        .dstSubpass    = 0,
-        .srcStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask =
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask =
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
         .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
                          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
@@ -253,17 +251,17 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
     const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
-    SceneMaterial& material_ref = *slots[submesh.material_slot];
-    auto&          output_rt    = scene.renderTargets.at(m_desc.output);
+    SceneMaterial& material_ref         = *slots[submesh.material_slot];
+    auto&          output_rt            = scene.renderTargets.at(m_desc.output);
     const bool     has_depth_attachment = output_rt.withDepth && UsesDepthAttachment(material_ref);
-    m_desc.has_depth_attachment = has_depth_attachment;
+    m_desc.has_depth_attachment         = has_depth_attachment;
     VkAttachmentLoadOp depthLoadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
     if (has_depth_attachment) {
         depthLoadOp = m_desc.clear_depth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 
         auto depth_name = m_desc.output + "::depth";
-        if (auto opt =
-                device.tex_cache().Query(depth_name, ToDepthTexKey(output_rt), ! output_rt.allowReuse);
+        if (auto opt = device.tex_cache().Query(
+                depth_name, ToDepthTexKey(output_rt), ! output_rt.allowReuse);
             opt.has_value()) {
             m_desc.vk_depth = opt.value();
         } else {
@@ -662,9 +660,8 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
         cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
     }
 
-    const bool                  has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
-    const uint32_t              clear_count =
-        (has_msaa ? 2u : 1u) + (m_desc.has_depth_attachment ? 1u : 0u);
+    const bool     has_msaa    = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
+    const uint32_t clear_count = (has_msaa ? 2u : 1u) + (m_desc.has_depth_attachment ? 1u : 0u);
     std::array<VkClearValue, 3> clears {};
     clears[0] = m_desc.clear_value;
     if (m_desc.has_depth_attachment) {

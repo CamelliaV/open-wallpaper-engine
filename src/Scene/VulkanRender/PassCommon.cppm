@@ -62,7 +62,8 @@ inline bool UsesDepthAttachment(const SceneMaterial& material) {
     return material.depth_test || EffectiveDepthWrite(material);
 }
 
-inline void SetDepthState(const SceneMaterial& material, VkPipelineDepthStencilStateCreateInfo& state) {
+inline void SetDepthState(const SceneMaterial&                   material,
+                          VkPipelineDepthStencilStateCreateInfo& state) {
     state.depthTestEnable  = material.depth_test;
     state.depthWriteEnable = EffectiveDepthWrite(material);
     state.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;

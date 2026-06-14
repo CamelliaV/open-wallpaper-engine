@@ -99,11 +99,10 @@ VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
             .baseArrayLayer = 0,
             .layerCount     = VK_REMAINING_ARRAY_LAYERS,
         };
-        const bool depth_layout = layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        VkAccessFlags dst_access =
-            depth_layout ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
-                         : VK_ACCESS_MEMORY_READ_BIT;
+        const bool    depth_layout = layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        VkAccessFlags dst_access   = depth_layout ? VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                                                  : VK_ACCESS_MEMORY_READ_BIT;
         VkPipelineStageFlags dst_stage = depth_layout
                                              ? VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                                    VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
@@ -119,10 +118,8 @@ VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
                 .image            = image.handle,
                 .subresourceRange = subresourceRange,
             };
-            cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                dst_stage,
-                                VK_DEPENDENCY_BY_REGION_BIT,
-                                out_bar);
+            cmd.PipelineBarrier(
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, dst_stage, VK_DEPENDENCY_BY_REGION_BIT, out_bar);
         }
         result = cmd.End();
         if (result != VK_SUCCESS) break;
@@ -323,8 +320,8 @@ CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat form
                 .format   = format,
                 .subresourceRange =
                     VkImageSubresourceRange {
-                        .aspectMask     = depth_usage ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                      : VK_IMAGE_ASPECT_COLOR_BIT,
+                        .aspectMask =
+                            depth_usage ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
                         .baseMipLevel   = 0,
                         .levelCount     = miplevel,
                         .baseArrayLayer = 0,

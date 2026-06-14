@@ -212,11 +212,11 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                 const auto& output_rt = scene.renderTargets.at(pass_output_s);
                 pdesc.clear_output    = output_node->version() == 0 && output_rt.bind.screen;
                 pdesc.preserve_output = output_node->version() > 0;
-                const bool uses_depth = output_rt.withDepth && vulkan::UsesDepthAttachment(*material);
+                const bool uses_depth =
+                    output_rt.withDepth && vulkan::UsesDepthAttachment(*material);
                 pdesc.clear_depth =
-                    uses_depth &&
-                    (pdesc.clear_output || output_rt.force_clear ||
-                     extra.depth_initialized_outputs.count(pass_output_s) == 0);
+                    uses_depth && (pdesc.clear_output || output_rt.force_clear ||
+                                   extra.depth_initialized_outputs.count(pass_output_s) == 0);
                 if (uses_depth) {
                     extra.depth_initialized_outputs.insert(pass_output_s);
                 } else if (pdesc.clear_output || output_rt.force_clear) {

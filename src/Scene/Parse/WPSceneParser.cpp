@@ -712,7 +712,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     }
 
     for (usize i = 0; i < textures.size(); i++) {
-        std::string name = textures.at(i);
+        std::string name                   = textures.at(i);
         bool        unsupported_reflection = sstart_with(name, WE_REFLECTION_PREFIX);
         ParseSpecTexName(name, wpmat, *pWPShaderInfo, *pScene);
         if (unsupported_reflection && name.empty()) {

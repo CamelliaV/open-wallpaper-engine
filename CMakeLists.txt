@@ -7,7 +7,7 @@ if(CMAKE_VERSION VERSION_LESS_EQUAL "4.3.0")
         "Use CMake 4.3.1 or newer.")
 endif()
 
-set(OWE_PLUGIN_VERSION 0.1.4)
+set(OWE_PLUGIN_VERSION 0.1.5)
 set(OWE_WAYWALLEN_PLUGIN_ID org.waywallen.open-wallpaper-engine)
 
 project(owe VERSION ${OWE_PLUGIN_VERSION})
