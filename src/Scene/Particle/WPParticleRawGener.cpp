@@ -94,17 +94,41 @@ inline usize GenParticleData(std::span<const std::unique_ptr<ParticleInstance>> 
     return i;
 }
 
+struct AttrSlot {
+    usize offset { 0 };
+    bool  enabled { false };
+};
+
+inline AttrSlot
+FindAttrSlot(const owe::Map<std::string, SceneVertexArray::SceneVertexAttributeOffset>& attrs,
+             std::string_view name) noexcept {
+    auto it = attrs.find(std::string(name));
+    if (it == attrs.end()) return {};
+    return { it->second.offset / sizeof(float), true };
+}
+
 inline usize GenParticlePointData(std::span<const std::unique_ptr<ParticleInstance>> instances,
                                   const ParticleRawGenSpecOp& specOp, WPGOption opt,
                                   SceneVertexArray& sv) noexcept {
     const auto            one_size = sv.OneSize();
     const auto            attrs    = sv.GetAttrOffsetMap();
+    const AttrSlot        position = FindAttrSlot(attrs, WE_IN_POSITION);
+    const AttrSlot        texcoord = FindAttrSlot(attrs, WE_IN_TEXCOORDVEC4);
+    const AttrSlot        color    = FindAttrSlot(attrs, WE_IN_COLOR);
+    const AttrSlot        velocity = FindAttrSlot(attrs, WE_IN_TEXCOORDVEC4C1);
     std::array<float, 16> v {};
-    auto write_attr = [&](std::string_view name, std::span<const float> data) noexcept {
-        auto it = attrs.find(std::string(name));
-        if (it == attrs.end()) return;
-        const usize offset = it->second.offset / sizeof(float);
-        std::copy(data.begin(), data.end(), v.begin() + (isize)offset);
+    auto                  write3 = [&](AttrSlot slot, float x, float y, float z) noexcept {
+        if (! slot.enabled) return;
+        v[slot.offset + 0] = x;
+        v[slot.offset + 1] = y;
+        v[slot.offset + 2] = z;
+    };
+    auto write4 = [&](AttrSlot slot, float x, float y, float z, float w) noexcept {
+        if (! slot.enabled) return;
+        v[slot.offset + 0] = x;
+        v[slot.offset + 1] = y;
+        v[slot.offset + 2] = z;
+        v[slot.offset + 3] = w;
     };
 
     usize i { 0 };
@@ -121,14 +145,12 @@ inline usize GenParticlePointData(std::span<const std::unique_ptr<ParticleInstan
             float size = p.size / 2.0f;
 
             std::fill(v.begin(), v.begin() + (isize)one_size, 0.0f);
-            write_attr(WE_IN_POSITION, std::array { pos[0], pos[1], pos[2] });
-            write_attr(WE_IN_TEXCOORDVEC4,
-                       std::array { p.rotation[0], p.rotation[1], p.rotation[2], size });
-            write_attr(WE_IN_COLOR, std::array { p.color[0], p.color[1], p.color[2], p.alpha });
+            write3(position, pos[0], pos[1], pos[2]);
+            write4(texcoord, p.rotation[0], p.rotation[1], p.rotation[2], size);
+            write4(color, p.color[0], p.color[1], p.color[2], p.alpha);
 
             if (opt.thick_format) {
-                write_attr(WE_IN_TEXCOORDVEC4C1,
-                           std::array { p.velocity[0], p.velocity[1], p.velocity[2], lifetime });
+                write4(velocity, p.velocity[0], p.velocity[1], p.velocity[2], lifetime);
             }
 
             sv.SetVertexs(i++, { v.data(), one_size });
