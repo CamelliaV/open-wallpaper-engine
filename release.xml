@@ -1,0 +1,36 @@
+<release version="0.1.3" date="2026-06-02">
+  <description>
+    <p>Added: Scanning of bundled defaultprojects and user-authored myprojects wallpapers.</p>
+    <p>Added: Perspective scene cameras now follow the scene's camera object, with a lookat fallback.</p>
+    <p>Added: WEVector scripting module, unblocking audio-visualizer wallpapers.</p>
+    <p>Added: Content rating metadata on scanned wallpapers.</p>
+    <p>Changed: Reworked the waywallen plugin layout.</p>
+    <p>Changed: Broader spec-texture name coverage for layer composites and self-links.</p>
+    <p>Fixed: Off-aspect scene wallpapers are no longer stretched.</p>
+    <p>Fixed: Point-sampled (noInterpolation) image layers stay point-sampled through the whole effect chain.</p>
+    <p>Fixed: Cross-stage shader varyings are widened to the wider declared type.</p>
+    <p>Fixed: Dynamic text content render-target width.</p>
+    <p>Fixed: Audio-bar fanout ordering.</p>
+    <p>Fixed: ApplyBlending override and stray shadowAtlas handling.</p>
+    <p>Community: Merged #13 (@burlone0): fix off-aspect scene wallpapers being stretched.</p>
+    <p>Community: Fixed #12: point-art image layers losing their nearest filtering.</p>
+  </description>
+</release>
+<release version="0.1.2" date="2026-05-24">
+  <description>
+    <p>Added: Support for newest puppet (MDLV21) wallpapers, including skinning, submeshes and clip masks.</p>
+    <p>Added: Scripting support for SceneNode, setTimeout, cursor, localStorage, WEMath and createLayer.</p>
+    <p>Added: Audio-reactive shaders driven by the wavsen spectrum.</p>
+    <p>Added: User properties on scene layers, including scripted updates.</p>
+    <p>Added: System and workshop font resolution.</p>
+    <p>Added: A resolution setting.</p>
+    <p>Changed: Switched the shader frontend from DXC to glslang for broader HLSL compatibility.</p>
+    <p>Changed: Audio spectrum bars are now smoother and frame-rate independent.</p>
+    <p>Changed: Text alignment now follows the original horizontalalign / verticalalign fields.</p>
+    <p>Fixed: Particle movement and controlpointattract behavior.</p>
+    <p>Fixed: Rope rendering and link_mouse follow.</p>
+    <p>Fixed: Puppet animation speed on multi-pass layers.</p>
+    <p>Fixed: Various Vulkan synchronization issues.</p>
+    <p>Community: Merged #6 (@Shnimlz): audio-responsive particles and scripted scene user properties.</p>
+  </description>
+</release>

@@ -118,12 +118,18 @@ jobs:
             echo "is_release=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Extract changelog
+        if: steps.rel.outputs.is_release == 'true'
+        run: |
+          python3 scripts/changelog.py "${{ steps.rel.outputs.tag }}" > /tmp/changelog.md
+          cat /tmp/changelog.md
+
       - name: Create release
         if: steps.rel.outputs.is_release == 'true'
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ steps.rel.outputs.tag }}
           artifacts: ${{ steps.package.outputs.zip }}
-          body: Waywallen plugin package for open-wallpaper-engine.
+          bodyFile: /tmp/changelog.md
           immutableCreate: true
           skipIfReleaseExists: true
