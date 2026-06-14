@@ -81,6 +81,49 @@ float eval_axis(const std::vector<SceneAnimationKey>& keys, float frame) {
     }
     return keys.back().value;
 }
+
+Eigen::Vector3f lerp_vec3(const Eigen::Vector3f& a, const Eigen::Vector3f& b, float t) {
+    return a + (b - a) * t;
+}
+
+SceneCameraLookAtKey eval_lookat_track(const SceneCameraLookAtTrack& track, float frame) {
+    if (track.keys.empty()) return {};
+    if (frame <= track.keys.front().frame) return track.keys.front();
+    for (std::size_t i = 1; i < track.keys.size(); ++i) {
+        const auto& a = track.keys[i - 1];
+        const auto& b = track.keys[i];
+        if (frame > b.frame) continue;
+        float dt = b.frame - a.frame;
+        float t  = dt > 0.0f ? std::clamp((frame - a.frame) / dt, 0.0f, 1.0f) : 1.0f;
+        return {
+            .frame  = frame,
+            .eye    = lerp_vec3(a.eye, b.eye, t),
+            .center = lerp_vec3(a.center, b.center, t),
+            .up     = lerp_vec3(a.up, b.up, t).normalized(),
+        };
+    }
+    return track.keys.back();
+}
+
+std::optional<SceneCameraLookAtKey>
+eval_lookat_tracks(std::span<const SceneCameraLookAtTrack> tracks, double runtime, float fps) {
+    float total = 0.0f;
+    for (const auto& track : tracks) total += std::max(track.duration, 0.0f);
+    if (total <= 0.0f) return std::nullopt;
+
+    float frame = static_cast<float>(runtime) * (fps > 0.0f ? fps : 30.0f);
+    frame       = std::fmod(frame, total);
+    if (frame < 0.0f) frame += total;
+
+    float offset = 0.0f;
+    for (const auto& track : tracks) {
+        float duration = std::max(track.duration, 0.0f);
+        if (duration <= 0.0f) continue;
+        if (frame <= offset + duration) return eval_lookat_track(track, frame - offset);
+        offset += duration;
+    }
+    return eval_lookat_track(tracks.back(), tracks.back().duration);
+}
 } // namespace
 
 bool SceneAnimationCurve::Empty() const { return c0.empty() && c1.empty() && c2.empty(); }
@@ -110,9 +153,16 @@ void SceneCameraPath::CaptureViewport() {
 }
 
 bool SceneCameraPath::ApplyDefault() {
-    if (! camera || ! node) return false;
-    node->SetTranslate(default_translate);
-    node->SetRotation(default_rotation);
+    if (! camera) return false;
+    if (default_lookat) {
+        camera->SetLookAt(default_eye.cast<double>(),
+                          default_center.cast<double>(),
+                          default_up.cast<double>());
+    }
+    if (node) {
+        node->SetTranslate(default_translate);
+        node->SetRotation(default_rotation);
+    }
     camera->SetWidth(default_width);
     camera->SetHeight(default_height);
     if (default_fov > 0.0) camera->SetFov(default_fov);
@@ -121,8 +171,21 @@ bool SceneCameraPath::ApplyDefault() {
 }
 
 bool SceneCameraPath::Tick(double runtime) {
-    if (! camera || ! node) return false;
+    if (! camera) return false;
     if (! enabled) return ApplyDefault();
+
+    if (! lookat_tracks.empty()) {
+        auto key = eval_lookat_tracks(lookat_tracks, runtime, lookat_fps);
+        if (! key) return false;
+        camera->SetLookAt(key->eye.cast<double>(),
+                          key->center.cast<double>(),
+                          key->up.cast<double>());
+        if (fov_base > 0.0f) camera->SetFov(fov_base);
+        camera->Update();
+        return true;
+    }
+
+    if (! node) return false;
 
     node->SetTranslate(path_translate_bias + origin_curve.EvaluateVec3(origin_base, runtime));
     node->SetRotation(path_rotation_bias + rotation_curve.EvaluateVec3(rotation_base, runtime));

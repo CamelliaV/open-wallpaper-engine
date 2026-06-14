@@ -188,6 +188,78 @@ void AssignCurve(SceneAnimationCurve& dst, const wpscene::WPFieldBindings& bindi
     auto it = bindings.animations.find(std::string(field));
     if (it != bindings.animations.end()) dst = ToSceneAnimationCurve(it->second);
 }
+
+std::optional<SceneCameraLookAtKey> ParseLookAtKey(const nlohmann::json& json) {
+    if (! json.is_object()) return std::nullopt;
+    SceneCameraLookAtKey key;
+    std::array<float, 3> eye {};
+    std::array<float, 3> center {};
+    std::array<float, 3> up {};
+    if (! owe::GetJsonValue(json, "eye", eye, false)) return std::nullopt;
+    if (! owe::GetJsonValue(json, "center", center, false)) return std::nullopt;
+    if (! owe::GetJsonValue(json, "up", up, false)) return std::nullopt;
+    owe::GetJsonValue(json, "timestamp", key.frame, false);
+    key.eye    = Vector3f(eye.data());
+    key.center = Vector3f(center.data());
+    key.up     = Vector3f(up.data());
+    return key;
+}
+
+std::optional<SceneCameraLookAtTrack> ParseLookAtTrack(const nlohmann::json& json) {
+    if (! json.is_object() || ! json.contains("transforms") || ! json.at("transforms").is_array())
+        return std::nullopt;
+
+    SceneCameraLookAtTrack track;
+    owe::GetJsonValue(json, "duration", track.duration, false);
+    for (const auto& raw_key : json.at("transforms")) {
+        auto key = ParseLookAtKey(raw_key);
+        if (key) track.keys.push_back(*key);
+    }
+    if (track.keys.empty()) return std::nullopt;
+
+    std::ranges::sort(track.keys, {}, &SceneCameraLookAtKey::frame);
+    if (track.duration <= 0.0f) track.duration = track.keys.back().frame;
+    if (track.duration <= 0.0f) track.duration = 1.0f;
+    return track;
+}
+
+void LoadRootCameraPaths(ParseContext& context, const wpscene::WPScene& sc) {
+    if (sc.general.isOrtho || sc.camera.paths.empty() || context.vfs == nullptr) return;
+
+    auto it = context.scene->cameras.find("global_perspective");
+    if (it == context.scene->cameras.end()) return;
+
+    auto path                 = std::make_shared<SceneCameraPath>();
+    path->camera_name         = "global_perspective";
+    path->camera              = it->second;
+    path->node                = context.global_perspective_camera_node;
+    path->default_translate   = path->node ? path->node->Translate() : Vector3f::Zero();
+    path->default_rotation    = path->node ? path->node->Rotation() : Vector3f::Zero();
+    path->default_width       = path->camera->Width();
+    path->default_height      = path->camera->Height();
+    path->default_fov         = path->camera->Fov();
+    path->fov_base            = static_cast<float>(path->camera->Fov());
+    path->perspective         = true;
+    path->enabled             = true;
+    path->default_lookat      = true;
+    path->default_eye         = Vector3f(sc.camera.eye.data());
+    path->default_center      = Vector3f(sc.camera.center.data());
+    path->default_up          = Vector3f(sc.camera.up.data());
+
+    for (const auto& rel : sc.camera.paths) {
+        auto file = context.vfs->Open("/assets/" + rel);
+        if (! file) continue;
+        auto json = nlohmann::json::parse(file->ReadAllStr(), nullptr, false);
+        if (json.is_discarded() || ! json.contains("paths") || ! json.at("paths").is_array())
+            continue;
+        for (const auto& raw_track : json.at("paths")) {
+            auto track = ParseLookAtTrack(raw_track);
+            if (track) path->lookat_tracks.push_back(std::move(*track));
+        }
+    }
+
+    if (! path->lookat_tracks.empty()) context.scene->camera_paths.push_back(std::move(path));
+}
 } // namespace
 
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
@@ -491,8 +563,7 @@ BlendMode ParseBlendMode(std::string_view str) {
     } else if (str == "normal") {
         bm = BlendMode::Normal;
     } else if (str == "disabled") {
-        // seems disabled is normal
-        bm = BlendMode::Normal;
+        bm = BlendMode::Disable;
     } else {
         bm = BlendMode::Normal;
         rstd_error("unknown blending: {}", str);
@@ -519,6 +590,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
             name.clear();
         } else if (sstart_with(name, OWE_BLOOM_MIP_PREFIX)) {
         } else if (sstart_with(name, WE_REFLECTION_PREFIX)) {
+            name = WE_MIP_MAPPED_FRAME_BUFFER;
         } else if (sstart_with(name, OWE_EFFECT_PPONG_PREFIX)) {
         } else if (sstart_with(name, WE_HALF_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
@@ -911,6 +983,7 @@ void ParseCamera(ParseContext& context, wpscene::WPScene& sc) {
                                                          : general.fov);
         per.SetAspect((double)context.ortho_w / (double)context.ortho_h);
         scene.activeCamera = scene.cameras.at("global_perspective").get();
+        LoadRootCameraPaths(context, sc);
     }
 }
 
@@ -1007,7 +1080,8 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
         gb["g_TexelSize"]     = std::array { 1.0f / 1920.0f, 1.0f / 1080.0f };
         gb["g_TexelSizeHalf"] = std::array { 1.0f / 1920.0f / 2.0f, 1.0f / 1080.0f / 2.0f };
 
-        gb["g_LightAmbientColor"] = sc.general.ambientcolor;
+        gb["g_LightAmbientColor"]  = sc.general.ambientcolor;
+        gb["g_LightSkylightColor"] = sc.general.skylightcolor;
         gb["g_NormalModelMatrix"] = ShaderValue::fromMatrix(Matrix4f::Identity());
     }
 
@@ -1908,6 +1982,77 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     context.node_id_map[light_obj.id] = { light_obj.parent, node };
 }
 
+void ParseModelObj(ParseContext& context, wpscene::WPModelObject& model_obj) {
+    auto& vfs = *context.vfs;
+
+    WPMdl mdl;
+    if (! WPMdlParser::Parse(model_obj.model, vfs, mdl)) {
+        rstd_error("parse model failed: {}", model_obj.model);
+        return;
+    }
+
+    auto node  = std::make_shared<SceneNode>(Vector3f(model_obj.origin.data()),
+                                             Vector3f(model_obj.scale.data()),
+                                             Vector3f(model_obj.angles.data()));
+    node->ID() = model_obj.id;
+    if (! model_obj.visible_user_key.empty()) node->SetVisibleUserKey(model_obj.visible_user_key);
+
+    auto mesh = std::make_shared<SceneMesh>();
+
+    WPShaderValueData svData;
+    svData.parallaxDepth = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
+    if (mdl.puppet && ! mdl.puppet->bones.empty()) {
+        svData.puppet_layer = WPPuppetLayer(mdl.puppet);
+        std::array<WPPuppetLayer::AnimationLayer, 0> no_layers {};
+        svData.puppet_layer.prepared(std::span<WPPuppetLayer::AnimationLayer>(no_layers));
+    }
+
+    for (const auto& mdl_mesh : mdl.meshes) {
+        if (mdl_mesh.positions.empty()) continue;
+
+        auto wpmat = WPMdlParser::ParseMaterial(mdl_mesh.mat_json_file, vfs);
+        if (! wpmat) continue;
+        if (mdl.puppet && ! mdl.puppet->bones.empty()) WPMdlParser::AddPuppetMatInfo(*wpmat, mdl);
+
+        SceneMaterial scene_mat;
+        WPShaderInfo  shader_info;
+        shader_info.baseConstSvs = context.global_base_uniforms;
+        if (mdl.puppet && ! mdl.puppet->bones.empty()) {
+            WPMdlParser::AddPuppetShaderInfo(shader_info, mdl);
+        }
+
+        if (! LoadMaterial(
+                vfs, *wpmat, context.scene.get(), node.get(), &scene_mat, &svData, &shader_info)) {
+            rstd_error(
+                "load model material '{}' failed for '{}'", mdl_mesh.mat_json_file, model_obj.name);
+            continue;
+        }
+        LoadConstvalue(scene_mat, *wpmat, shader_info);
+
+        const uint32_t material_slot = static_cast<uint32_t>(mesh->MaterialSlots().size());
+        mesh->AddMaterial(std::move(scene_mat));
+        RegisterShaderUserVarIndex(
+            context.scene.get(), mesh->MaterialSlots().back().get(), *wpmat, shader_info);
+
+        mesh->Submeshes().emplace_back();
+        auto& submesh = mesh->Submeshes().back();
+        WPMdlParser::GenMeshFromMdl(submesh, mdl_mesh);
+        submesh.material_slot = material_slot;
+    }
+
+    if (mesh->Submeshes().empty()) {
+        rstd_error("model '{}' has no renderable mesh", model_obj.model);
+        return;
+    }
+
+    node->AddMesh(mesh);
+    context.shader_updater->SetNodeData(node.get(), svData);
+    WireFieldScripts(context, node, model_obj.field_bindings);
+    context.node_id_map[model_obj.id] = {
+        model_obj.parent, node, mdl.puppet, model_obj.attachment
+    };
+}
+
 // Wrapping image parser: serves text-atlas Images for synthetic urls (set
 // via Register) and delegates everything else to the underlying parser.
 // Installed lazily on first text object so the WE .tex path is unchanged
@@ -2497,9 +2642,8 @@ void ProcessObjects(ParseContext& context, std::span<WPObjectVar> wp_objs,
                        [&context, opts](wpscene::WPTextObject& obj) {
                            if (opts.kinds & ProcessOpts::Text) ParseTextObj(context, obj);
                        },
-                       // .mdl model attachments and per-object camera markers
-                       // remain absorption-only; see SceneSchema tests.
-                       [](wpscene::WPModelObject&) {
+                       [&context, opts](wpscene::WPModelObject& obj) {
+                           if (opts.kinds & ProcessOpts::Model) ParseModelObj(context, obj);
                        },
                        [&context](wpscene::WPCameraObject& obj) {
                            ParseCameraObj(context, obj);

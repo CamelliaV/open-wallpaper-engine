@@ -110,7 +110,8 @@ public:
     // over the whole corpus even on mdls that would hang full Parse.
     static bool ParseHeader(std::string_view path, fs::VFS&, WPMdlHeader&);
 
-    static bool Parse(std::string_view path, fs::VFS&, WPMdl&);
+    static bool                               Parse(std::string_view path, fs::VFS&, WPMdl&);
+    static std::optional<wpscene::WPMaterial> ParseMaterial(std::string_view ref, fs::VFS&);
 
     static void AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl);
     static void AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl);

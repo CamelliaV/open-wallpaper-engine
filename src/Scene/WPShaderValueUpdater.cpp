@@ -108,6 +108,7 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp&
     info.has_AM                 = existsOp(G_AM);
     info.has_MVP                = existsOp(G_MVP);
     info.has_MVPI               = existsOp(G_MVPI);
+    info.has_EYEPOSITION        = existsOp(G_EYEPOSITION);
     info.has_ETVP               = existsOp(G_ETVP);
     info.has_ETVPI              = existsOp(G_ETVPI);
 
@@ -122,6 +123,7 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp&
     info.has_TEXELSIZEHALF    = existsOp(G_TEXELSIZEHALF);
     info.has_SCREEN           = existsOp(G_SCREEN);
     info.has_LP               = existsOp(G_LP);
+    info.has_LCR              = existsOp(G_LCR);
     info.has_audio_16_l       = existsOp(G_AUDIO_SPEC_16_L);
     info.has_audio_16_r       = existsOp(G_AUDIO_SPEC_16_R);
     info.has_audio_32_l       = existsOp(G_AUDIO_SPEC_32_L);
@@ -209,6 +211,10 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
 
     if (info.has_VP) {
         updateOp(G_VP, ShaderValue::fromMatrix(viewProTrans));
+    }
+    if (info.has_EYEPOSITION) {
+        const auto eye = camera->GetPosition().cast<float>();
+        updateOp(G_EYEPOSITION, std::array<float, 3> { eye.x(), eye.y(), eye.z() });
     }
     if (reqM || reqMVP || reqMI || reqMVPI) {
         Matrix4d modelTrans = pNode->ModelTrans();
@@ -313,6 +319,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     if (info.has_LP) {
         constexpr unsigned                kMaxLights = 4;
         std::array<float, kMaxLights * 4> lights_pos { 0 };
+        std::array<float, kMaxLights * 4> lights_color_radius { 0 };
         std::array<float, 12>             lights_color_legacy { 0 };
         unsigned                          i = 0;
         for (auto& l : m_scene->lights) {
@@ -322,11 +329,16 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
                 continue;
             }
             rstd_assert(l->node() != nullptr);
-            const auto& trans     = l->node()->Translate();
-            lights_pos[i * 4 + 0] = trans.x();
-            lights_pos[i * 4 + 1] = trans.y();
-            lights_pos[i * 4 + 2] = trans.z();
-            lights_pos[i * 4 + 3] = 0.0f;
+            const auto& trans              = l->node()->Translate();
+            lights_pos[i * 4 + 0]          = trans.x();
+            lights_pos[i * 4 + 1]          = trans.y();
+            lights_pos[i * 4 + 2]          = trans.z();
+            lights_pos[i * 4 + 3]          = 0.0f;
+            const auto color               = l->color();
+            lights_color_radius[i * 4 + 0] = color.x();
+            lights_color_radius[i * 4 + 1] = color.y();
+            lights_color_radius[i * 4 + 2] = color.z();
+            lights_color_radius[i * 4 + 3] = l->radius();
             if (i < 3) {
                 const auto& cp = l->premultipliedColor();
                 std::copy(cp.begin(), cp.end(), lights_color_legacy.begin() + i * 4);
@@ -335,6 +347,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         }
         updateOp(G_LP, lights_pos);
         updateOp(G_LCP, lights_color_legacy);
+        updateOp(G_LCR, lights_color_radius);
     }
 
     // Script-driven per-frame overrides. updateOp overlays the material's

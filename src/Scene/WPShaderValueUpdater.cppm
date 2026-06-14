@@ -17,6 +17,7 @@ struct WPUniformInfo {
     bool has_AM { false };
     bool has_MVP { false };
     bool has_MVPI { false };
+    bool has_EYEPOSITION { false };
     bool has_ETVP { false };
     bool has_ETVPI { false };
     bool has_VP { false };
@@ -30,6 +31,7 @@ struct WPUniformInfo {
     bool has_TEXELSIZEHALF { false };
     bool has_SCREEN { false };
     bool has_LP { false };
+    bool has_LCR { false };
 
     // WE audio-bar shaders. Each pair is a (Left, Right) float[N] array
     // selected by the shader's RESOLUTION combo at compile time.

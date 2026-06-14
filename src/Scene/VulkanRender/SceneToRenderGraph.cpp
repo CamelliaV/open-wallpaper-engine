@@ -208,6 +208,9 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                                                               .key  = pass_output_s,
                                                               .type = rg::TexNode::TexType::Temp },
                                           true);
+                const auto& output_rt = scene.renderTargets.at(pass_output_s);
+                pdesc.clear_output    = output_node->version() == 0 && output_rt.bind.screen;
+                pdesc.preserve_output = output_node->version() > 0;
                 builder.write(output_node);
                 auto record_link_source = [&](i32 id) {
                     if (extra.linked_ids == nullptr || extra.linked_ids->count(id) != 0) {

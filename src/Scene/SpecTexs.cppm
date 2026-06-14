@@ -46,7 +46,9 @@ inline constexpr std::string_view SpecTex_Default { "_rt_default" };
 inline constexpr std::string_view SpecTex_Link { "_rt_link_" };
 
 inline constexpr std::string_view WE_IN_POSITION { "a_Position" };
+inline constexpr std::string_view WE_IN_NORMAL { "a_Normal" };
 inline constexpr std::string_view WE_IN_TEXCOORD { "a_TexCoord" };
+inline constexpr std::string_view WE_IN_TANGENT4 { "a_Tangent4" };
 inline constexpr std::string_view WE_IN_BLENDINDICES { "a_BlendIndices" };
 inline constexpr std::string_view WE_IN_BLENDWEIGHTS { "a_BlendWeights" };
 
@@ -74,8 +76,10 @@ struct VertexAttrSpec {
 namespace VAttr
 {
 inline constexpr VertexAttrSpec Position { WE_IN_POSITION, VertexType::FLOAT3 };
+inline constexpr VertexAttrSpec Normal { WE_IN_NORMAL, VertexType::FLOAT3 };
 inline constexpr VertexAttrSpec PositionVec4 { WE_IN_POSITIONVEC4, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoord { WE_IN_TEXCOORD, VertexType::FLOAT2 };
+inline constexpr VertexAttrSpec Tangent4 { WE_IN_TANGENT4, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4 { WE_IN_TEXCOORDVEC4, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4C1 { WE_IN_TEXCOORDVEC4C1, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4C2 { WE_IN_TEXCOORDVEC4C2, VertexType::FLOAT4 };
@@ -95,10 +99,12 @@ inline constexpr std::string_view G_MVP { "g_ModelViewProjectionMatrix" };
 inline constexpr std::string_view G_AM { "g_AltModelMatrix" };
 inline constexpr std::string_view G_MI { "g_ModelMatrixInverse" };
 inline constexpr std::string_view G_MVPI { "g_ModelViewProjectionMatrixInverse" };
+inline constexpr std::string_view G_EYEPOSITION { "g_EyePosition" };
 inline constexpr std::string_view G_ETVP { "g_EffectTextureProjectionMatrix" };
 inline constexpr std::string_view G_ETVPI { "g_EffectTextureProjectionMatrixInverse" };
 inline constexpr std::string_view G_LP { "g_LightsPosition" };
 inline constexpr std::string_view G_LCP { "g_LightsColorPremultiplied" };
+inline constexpr std::string_view G_LCR { "g_LightsColorRadius" };
 
 inline constexpr std::string_view G_TIME { "g_Time" };
 inline constexpr std::string_view G_DAYTIME { "g_DayTime" };

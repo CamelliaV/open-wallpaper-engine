@@ -2,6 +2,7 @@ module;
 #include <rstd/macro.hpp>
 
 module wescene.parse;
+import nlohmann.json;
 import wescene.spec_texs;
 import wescene.core;
 import wescene.types;
@@ -891,6 +892,13 @@ bool ReadHeaderFromStream(fs::MemBinaryStream& f, WPMdlHeader& h, std::string_vi
     return true;
 }
 
+std::string ResolveMdlMaterialPath(std::string_view ref) {
+    std::string path(ref);
+    if (! path.ends_with(".json")) path += ".json";
+    if (path.starts_with("materials/")) return "/assets/" + path;
+    return "/assets/materials/" + path;
+}
+
 } // namespace
 
 bool WPMdlParser::ParseHeader(std::string_view path, fs::VFS& vfs, WPMdlHeader& h) {
@@ -986,6 +994,26 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     return true;
 }
 
+std::optional<wpscene::WPMaterial> WPMdlParser::ParseMaterial(std::string_view ref, fs::VFS& vfs) {
+    nlohmann::json json;
+    const auto     path = ResolveMdlMaterialPath(ref);
+    if (! owe::ParseJson(fs::GetFileContent(vfs, path), json)) {
+        rstd_error("load mdl material '{}' failed", path);
+        return std::nullopt;
+    }
+
+    wpscene::WPMaterial material;
+    material.blending   = "disabled";
+    material.depthtest  = "enabled";
+    material.depthwrite = "enabled";
+    material.cullmode   = "back";
+    if (! material.FromJson(json)) {
+        rstd_error("parse mdl material '{}' failed", path);
+        return std::nullopt;
+    }
+    return material;
+}
+
 void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src) {
     const size_t vert_num = src.positions.size();
     if (vert_num == 0) return;
@@ -1000,6 +1028,18 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     packers.push_back([&src](size_t i, float* dst) {
         std::memcpy(dst, src.positions[i].data(), sizeof(src.positions[i]));
     });
+    if (! src.normals.empty()) {
+        specs.push_back(VAttr::Normal);
+        packers.push_back([&src](size_t i, float* dst) {
+            std::memcpy(dst, src.normals[i].data(), sizeof(src.normals[i]));
+        });
+    }
+    if (! src.tangents.empty()) {
+        specs.push_back(VAttr::Tangent4);
+        packers.push_back([&src](size_t i, float* dst) {
+            std::memcpy(dst, src.tangents[i].data(), sizeof(src.tangents[i]));
+        });
+    }
     if (! src.blend_indices.empty()) {
         specs.push_back(VAttr::BlendIndices);
         packers.push_back([&src](size_t i, float* dst) {
@@ -1025,6 +1065,18 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
         specs.push_back(VAttr::TexCoord);
         packers.push_back([&src](size_t i, float* dst) {
             std::memcpy(dst, src.texcoords[i].data(), sizeof(src.texcoords[i]));
+        });
+    }
+    const auto* uv2 = ! src.part_uv2.empty() ? &src.part_uv2
+                    : ! src.texcoord2.empty() ? &src.texcoord2
+                                              : nullptr;
+    if (! src.texcoords.empty() && uv2 != nullptr && uv2->size() == vert_num) {
+        specs.push_back(VAttr::TexCoordVec4);
+        packers.push_back([&src, uv2](size_t i, float* dst) {
+            dst[0] = src.texcoords[i][0];
+            dst[1] = src.texcoords[i][1];
+            dst[2] = (*uv2)[i][0];
+            dst[3] = (*uv2)[i][1];
         });
     }
 

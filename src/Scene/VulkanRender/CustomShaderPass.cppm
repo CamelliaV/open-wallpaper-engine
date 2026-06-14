@@ -52,6 +52,8 @@ public:
         // ppong RTs that always reset transparent).
         const std::array<float, 3>* clear_value_src { nullptr };
         bool                        blending { false };
+        bool                        clear_output { false };
+        bool                        preserve_output { false };
         vvk::Framebuffer            fb;
         PipelineParameters          pipeline;
         u32                         draw_count { 0 };

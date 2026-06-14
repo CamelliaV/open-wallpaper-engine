@@ -407,6 +407,81 @@ __SHADER_PLACEHOLD__
 
 )";
 
+inline bool IsShaderTrivia(shader_lex::TokenKind kind) {
+    return kind == shader_lex::TokenKind::HSpace || kind == shader_lex::TokenKind::Newline ||
+           kind == shader_lex::TokenKind::LineComment ||
+           kind == shader_lex::TokenKind::BlockComment;
+}
+
+inline shader_lex::Token NextShaderToken(shader_lex::Lexer& lx) {
+    return lx.NextSkip(IsShaderTrivia);
+}
+
+inline bool TokenIs(shader_lex::Token token, std::string_view text) {
+    return token.kind == shader_lex::TokenKind::Ident && token.text == text;
+}
+
+inline bool PunctIs(shader_lex::Token token, char c) {
+    return token.kind == shader_lex::TokenKind::Punct && token.text.size() == 1 &&
+           token.text[0] == c;
+}
+
+inline bool Contains(std::span<const std::string> values, std::string_view value) {
+    return std::ranges::any_of(values, [&](const std::string& v) {
+        return v == value;
+    });
+}
+
+inline std::vector<std::string> CollectBuildTangentSpaceVars(std::string_view src) {
+    std::vector<std::string> vars;
+    shader_lex::Lexer        lx(src);
+    for (;;) {
+        auto t = NextShaderToken(lx);
+        if (t.kind == shader_lex::TokenKind::Eof) break;
+        if (! TokenIs(t, "mat3")) continue;
+
+        auto name = NextShaderToken(lx);
+        if (name.kind != shader_lex::TokenKind::Ident) continue;
+        if (! PunctIs(NextShaderToken(lx), '=')) continue;
+        if (! TokenIs(NextShaderToken(lx), "BuildTangentSpace")) continue;
+        if (! PunctIs(NextShaderToken(lx), '(')) continue;
+        if (! Contains(vars, name.text)) vars.emplace_back(name.text);
+    }
+    return vars;
+}
+
+inline void NormalizeExpandedShaderSource(std::string& src) {
+    auto tangent_space_vars = CollectBuildTangentSpaceVars(src);
+    if (tangent_space_vars.empty()) return;
+
+    shader_lex::Lexer lx(src);
+    std::string       out;
+    std::size_t       copied = 0;
+    for (;;) {
+        auto t = lx.Next();
+        if (t.kind == shader_lex::TokenKind::Eof) break;
+        if (! TokenIs(t, "mul")) continue;
+
+        auto save  = lx.Save();
+        auto open  = NextShaderToken(lx);
+        auto arg   = NextShaderToken(lx);
+        auto comma = NextShaderToken(lx);
+        if (! PunctIs(open, '(') || arg.kind != shader_lex::TokenKind::Ident ||
+            ! Contains(tangent_space_vars, arg.text) || ! PunctIs(comma, ',')) {
+            lx.Restore(save);
+            continue;
+        }
+
+        out.append(src, copied, t.offset - copied);
+        out.append("mul(transpose(");
+        out.append(arg.text);
+        out.append("),");
+        copied = comma.offset + comma.text.size();
+    }
+    out.append(src, copied, std::string::npos);
+    src = std::move(out);
+}
+
 inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
     std::string output;
     output.reserve(input.size());
@@ -1349,6 +1424,7 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
         cursor = w.LineEnd();
     }
     newsrc.append(src, cursor, std::string::npos);
+    NormalizeExpandedShaderSource(newsrc);
 
     ParseWPShader(all_includes, pWPShaderInfo, texinfos);
     ParseWPShader(newsrc, pWPShaderInfo, texinfos);

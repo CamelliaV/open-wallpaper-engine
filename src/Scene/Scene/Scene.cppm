@@ -644,6 +644,18 @@ struct SceneAnimationCurve {
     Eigen::Vector3f EvaluateVec3(const Eigen::Vector3f& base, double runtime) const;
 };
 
+struct SceneCameraLookAtKey {
+    float           frame { 0.0f };
+    Eigen::Vector3f eye { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f center { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f up { Eigen::Vector3f::UnitY() };
+};
+
+struct SceneCameraLookAtTrack {
+    float                             duration { 0.0f };
+    std::vector<SceneCameraLookAtKey> keys;
+};
+
 class SceneCameraPath {
 public:
     std::string                  camera_name;
@@ -662,6 +674,12 @@ public:
     float                        fov_base { 50.0f };
     bool                         perspective { false };
     bool                         enabled { true };
+    bool                         default_lookat { false };
+    Eigen::Vector3f              default_eye { Eigen::Vector3f::Zero() };
+    Eigen::Vector3f              default_center { -Eigen::Vector3f::UnitZ() };
+    Eigen::Vector3f              default_up { Eigen::Vector3f::UnitY() };
+    float                        lookat_fps { 30.0f };
+    std::vector<SceneCameraLookAtTrack> lookat_tracks;
     SceneAnimationCurve          origin_curve;
     SceneAnimationCurve          rotation_curve;
     SceneAnimationCurve          zoom_curve;

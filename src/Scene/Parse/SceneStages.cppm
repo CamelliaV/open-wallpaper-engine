@@ -90,7 +90,8 @@ struct ProcessOpts {
         Sound    = 1u << 2,
         Light    = 1u << 3,
         Text     = 1u << 4,
-        All      = 0x1Fu,
+        Model    = 1u << 5,
+        All      = 0x3Fu,
     };
     unsigned kinds { All };
 };

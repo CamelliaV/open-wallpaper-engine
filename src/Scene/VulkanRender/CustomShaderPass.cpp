@@ -15,11 +15,13 @@ import wescene.scene;
 using namespace owe::vulkan;
 
 CustomShaderPass::CustomShaderPass(const Desc& desc) {
-    m_desc.node          = desc.node;
-    m_desc.submesh_index = desc.submesh_index;
-    m_desc.textures      = desc.textures;
-    m_desc.output        = desc.output;
-    m_desc.sprites_map   = desc.sprites_map;
+    m_desc.node            = desc.node;
+    m_desc.submesh_index   = desc.submesh_index;
+    m_desc.textures        = desc.textures;
+    m_desc.output          = desc.output;
+    m_desc.sprites_map     = desc.sprites_map;
+    m_desc.clear_output    = desc.clear_output;
+    m_desc.preserve_output = desc.preserve_output;
 };
 CustomShaderPass::~CustomShaderPass() {}
 
@@ -337,6 +339,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             m_desc.blending = color_blend.blendEnable;
 
             SetAttachmentLoadOp(blendmode, loadOp);
+            if (m_desc.preserve_output) loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            if (m_desc.clear_output) loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             if (out_force_clear) loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         }
         auto opt = CreateRenderPass(device.handle(),

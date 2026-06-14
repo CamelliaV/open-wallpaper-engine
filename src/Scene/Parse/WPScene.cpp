@@ -49,6 +49,11 @@ bool WPSceneCamera::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "center", center);
     owe::GetJsonValue(json, "eye", eye);
     owe::GetJsonValue(json, "up", up);
+    if (json.contains("paths") && json.at("paths").is_array()) {
+        for (const auto& path : json.at("paths")) {
+            if (path.is_string()) paths.push_back(path.get<std::string>());
+        }
+    }
     return true;
 }
 
@@ -104,6 +109,7 @@ void parse_baseline(WPSceneGeneral& g, const nlohmann::json& json) {
     owe::GetJsonValue(json, "camerashakeamplitude", g.camerashakeamplitude, false);
     owe::GetJsonValue(json, "camerashakespeed", g.camerashakespeed, false);
     owe::GetJsonValue(json, "camerashakeroughness", g.camerashakeroughness, false);
+    g.isOrtho = false;
     if (json.contains("orthogonalprojection")) {
         const auto& ortho = json.at("orthogonalprojection");
         if (ortho.is_null())

@@ -170,12 +170,14 @@ inline Matrix4d LookAt(Vector3d eye, Vector3d center, Vector3d up) noexcept {
     Vector3d xAxis  = up.cross(zAxis).normalized();
     Vector3d yAxis  = zAxis.cross(xAxis).normalized();
 
-    Affine3d trans        = Affine3d::Identity();
-    trans.linear().col(0) = xAxis;
-    trans.linear().col(1) = yAxis;
-    trans.linear().col(2) = zAxis;
-    trans *= Translation3d(-eye);
-    return trans.matrix();
+    Matrix4d view = Matrix4d::Identity();
+    view.block<1, 3>(0, 0) = xAxis.transpose();
+    view.block<1, 3>(1, 0) = yAxis.transpose();
+    view.block<1, 3>(2, 0) = zAxis.transpose();
+    view(0, 3)             = -xAxis.dot(eye);
+    view(1, 3)             = -yAxis.dot(eye);
+    view(2, 3)             = -zAxis.dot(eye);
+    return view;
 }
 
 inline Matrix4d Ortho(double left, double right, double bottom, double top, double nearz,

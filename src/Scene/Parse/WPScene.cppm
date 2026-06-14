@@ -48,6 +48,7 @@ public:
     std::array<float, 3> center { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> eye { 0.0f, 0.0f, 1.0f };
     std::array<float, 3> up { 0.0f, 1.0f, 0.0f };
+    std::vector<std::string> paths;
 };
 
 // PKGV0021+ — global maximum-light counts the runtime should be sized for
@@ -77,7 +78,7 @@ public:
     float                cameraparallaxamount { 0.0f };
     float                cameraparallaxdelay { 0.0f };
     float                cameraparallaxmouseinfluence { 0.0f };
-    bool                 isOrtho { true };
+    bool                 isOrtho { false };
     Orthogonalprojection orthogonalprojection { 1920, 1080 };
     float                zoom { 1.0f };
     float                fov { 50.0f };
