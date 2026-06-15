@@ -1770,6 +1770,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     if (! is_child) {
         svData.parallaxDepth = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
     }
+    svData.use_camera_eye_position = particle_obj.flags[wpscene::Particle::FlagEnum::perspective];
 
     WPShaderInfo shaderInfo;
     shaderInfo.baseConstSvs                         = context.global_base_uniforms;
