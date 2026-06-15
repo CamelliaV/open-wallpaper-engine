@@ -1,4 +1,4 @@
-<release version="0.1.5" date="2026-06-14">
+<release version="0.1.6" date="2026-06-14">
   <description>
     <p>Added: Waywallen plugin build CI and plugin packages.</p>
     <p>Added: Camera shake, camera paths and 3D scene/model rendering support.</p>
