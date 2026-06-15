@@ -18,9 +18,7 @@ permissions:
   contents: write
 
 env:
-  BUILD_TYPE: Release
-  CCACHE_DIR: ${{ github.workspace }}/.ccache
-  CCACHE_MAXSIZE: 2G
+  BUILD_TYPE: RelWithDebInfo
   DIST_DIR: ${{ github.workspace }}/dist
   INSTALL_DIR: ${{ github.workspace }}/build/waywallen-plugin-install
   OWE_CONDA_ENV: owe-plugin
@@ -84,24 +82,9 @@ jobs:
           path: ${{ env.OWE_CONDA_PREFIX }}
           key: owe-plugin-conda-${{ runner.os }}-${{ hashFiles('environment.yml') }}
 
-      - uses: actions/cache@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: owe-plugin-ccache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            owe-plugin-ccache-${{ runner.os }}-
-
       - name: Build plugin package
         id: package
         run: bash ./scripts/build_waywallen_plugin.sh
-
-      - name: ccache stats
-        if: always()
-        run: |
-          set +e
-          source "$HOME/miniconda/etc/profile.d/conda.sh"
-          conda activate "$OWE_CONDA_PREFIX"
-          ccache -s
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

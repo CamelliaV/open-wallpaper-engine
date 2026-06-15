@@ -80,11 +80,6 @@ info "Preparing shared waywallen build dependencies"
 bash "$WAYWALLEN_SRC/scripts/build_ffmpeg.sh"
 bash "$WAYWALLEN_SRC/scripts/copy_syslibs.sh"
 
-CCACHE_ARGS=()
-if command -v ccache >/dev/null 2>&1; then
-    CCACHE_ARGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
-fi
-
 SYSROOT_ARGS=()
 if [[ -n "${CONDA_BUILD_SYSROOT:-}" ]]; then
     SYSROOT_ARGS=(-DCMAKE_SYSROOT="$CONDA_BUILD_SYSROOT")
@@ -104,7 +99,6 @@ cmake -S "$WAYWALLEN_SRC/bridge" -B "$BRIDGE_BUILD_DIR" -G Ninja \
     -DCMAKE_LINKER_TYPE=LLD \
     "${SYSROOT_ARGS[@]}" \
     "${THREAD_ARGS[@]}" \
-    "${CCACHE_ARGS[@]}" \
     -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$BRIDGE_INSTALL_DIR" \
     -DBUILD_SHARED_LIBS=OFF
@@ -121,7 +115,6 @@ cmake -S "$PROJECT_DIR" -B "$OWE_BUILD_DIR" -G Ninja \
     -DCMAKE_LINKER_TYPE=LLD \
     "${SYSROOT_ARGS[@]}" \
     "${THREAD_ARGS[@]}" \
-    "${CCACHE_ARGS[@]}" \
     -DCMAKE_PREFIX_PATH="$BRIDGE_INSTALL_DIR;$CONDA_PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
     -DOWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT=ON \
