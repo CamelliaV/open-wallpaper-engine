@@ -17,8 +17,6 @@ else()
 endif()
 set(_OWE_WESCENE_INSTALL_DIR bin)
 set(_OWE_WEWEB_INSTALL_DIR bin/weweb)
-set(_OWE_WESCENE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib")
-set(_OWE_WEWEB_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib")
 set(_OWE_STRIP_FILES ${OWE_WESCENE_BIN})
 
 add_library(waywallen-bridge-producer STATIC)
@@ -51,7 +49,6 @@ target_sources(waywallen-wescene-renderer PRIVATE BridgeExSwapchain.cpp)
 target_compile_features(waywallen-wescene-renderer PRIVATE cxx_std_20)
 set_target_properties(waywallen-wescene-renderer PROPERTIES
     CXX_SCAN_FOR_MODULES ON
-    INSTALL_RPATH "${_OWE_WESCENE_INSTALL_RPATH}"
 )
 
 target_include_directories(waywallen-wescene-renderer
@@ -112,9 +109,6 @@ if(BUILD_WEWEB)
     target_compile_features(waywallen-weweb-renderer PRIVATE cxx_std_20)
     set_target_properties(waywallen-weweb-renderer PROPERTIES
         CXX_SCAN_FOR_MODULES ON
-        BUILD_RPATH   "$ORIGIN"
-        INSTALL_RPATH "${_OWE_WEWEB_INSTALL_RPATH}"
-        BUILD_WITH_INSTALL_RPATH ON
     )
     target_include_directories(waywallen-weweb-renderer
         PRIVATE
