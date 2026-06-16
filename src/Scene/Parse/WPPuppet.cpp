@@ -286,6 +286,23 @@ std::span<const Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
     return m_puppet->genFrame(*this, time);
 }
 
+uint32_t WPPuppetLayer::boneIndex(std::string_view name) const noexcept {
+    if (! m_puppet) return 0;
+    for (uint32_t i = 0; i < m_puppet->bones.size(); ++i) {
+        if (m_puppet->bones[i].name == name) return i + 1;
+    }
+    return 0;
+}
+
+std::optional<Eigen::Affine3f> WPPuppetLayer::boneTransform(uint32_t index, double time) noexcept {
+    if (! m_puppet || index == 0) return std::nullopt;
+    const uint32_t zero_based = index - 1;
+    if (zero_based >= m_puppet->bones.size()) return std::nullopt;
+    auto frame = genFrame(time);
+    if (zero_based >= frame.size()) return std::nullopt;
+    return frame[zero_based] * m_puppet->bones[zero_based].world_bind;
+}
+
 void WPPuppetLayer::updateInterpolation(double elapsed) noexcept {
     double delta   = (m_last_elapsed < 0.0) ? 0.0 : (elapsed - m_last_elapsed);
     bool   advance = (m_last_elapsed < 0.0) || (delta > 0.0);

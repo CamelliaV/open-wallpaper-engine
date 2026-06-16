@@ -347,7 +347,9 @@ struct EngineHostState {
     // TextLayouter::SetText. Missing entry means the layer is not text-
     // capable; writes silently no-op.
     std::unordered_map<owe::SceneNode*, std::function<void(std::string_view)>> text_setters;
-    owe::SceneNode* scene_root { nullptr };
+    JsRuntime::BoneIndexResolver                                               bone_index_resolver;
+    JsRuntime::BoneTransformResolver bone_transform_resolver;
+    owe::SceneNode*                  scene_root { nullptr };
 };
 
 uint32_t NormalizeAudioResolution(int32_t requested) {
@@ -379,8 +381,10 @@ struct FieldScript::Impl {
     std::string      sha;
     FieldKind        kind { FieldKind::Unknown };
     JSValue          module_ns { JS_UNDEFINED };
+    JSValue          init_fn { JS_UNDEFINED };
     JSValue          update_fn { JS_UNDEFINED };
     bool             update_takes_arg { false };
+    bool             init_done { false };
     JSValue          current_value {
         JS_UNDEFINED
     }; // last `value` returned, kept as JSValue for the (value)-arg form
@@ -438,6 +442,15 @@ struct JsRuntime::Impl {
                    std::string_view(what),
                    std::string_view(msg ? msg : "<no message>"));
         if (msg) JS_FreeCString(c, msg);
+        JSValue stack = JS_GetPropertyStr(c, exc, "stack");
+        if (! JS_IsUndefined(stack) && ! JS_IsNull(stack)) {
+            const char* stack_msg = JS_ToCString(c, stack);
+            if (stack_msg && stack_msg[0] != '\0') {
+                rstd_error("script[{}] stack:\n{}", sha, std::string_view(stack_msg));
+            }
+            if (stack_msg) JS_FreeCString(c, stack_msg);
+        }
+        JS_FreeValue(c, stack);
         JS_FreeValue(c, exc);
     }
 };
@@ -1189,7 +1202,7 @@ void InstallEngineGlobal(JSContext* ctx) {
 // --- Built-in ES modules ----------------------------------------------------
 // Scripts `import * as M from 'M'`. QuickJS calls our loader with the
 // bare name; we return a precompiled JSModuleDef built from the source
-// below. Add an entry to extend (e.g. WEColor / WEEasing) once needed.
+// below. Add an entry to extend (e.g. WEEasing) once needed.
 struct BuiltinModule {
     const char* name;
     const char* source;
@@ -1240,9 +1253,56 @@ export function distance(a, b) {
 }
 )JS";
 
+static constexpr const char* kWEColorSrc = R"JS(
+function v3(x, y, z) { return new globalThis.Vec3(x, y, z); }
+function c(v, k, i) {
+    if (v && typeof v === 'object') return Number(v[k] ?? v[i] ?? 0);
+    return Number(v ?? 0);
+}
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+export function rgb2hsv(rgb) {
+    const r = clamp01(c(rgb, 'x', 0));
+    const g = clamp01(c(rgb, 'y', 1));
+    const b = clamp01(c(rgb, 'z', 2));
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    let h = 0;
+    if (d !== 0) {
+        if (max === r) h = ((g - b) / d) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h /= 6;
+        if (h < 0) h += 1;
+    }
+    const s = max === 0 ? 0 : d / max;
+    return v3(h, s, max);
+}
+export function hsv2rgb(hsv) {
+    let h = c(hsv, 'x', 0) % 1;
+    if (h < 0) h += 1;
+    const s = clamp01(c(hsv, 'y', 1));
+    const v = clamp01(c(hsv, 'z', 2));
+    const i = Math.floor(h * 6);
+    const f = h * 6 - i;
+    const p = v * (1 - s);
+    const q = v * (1 - f * s);
+    const t = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+    case 0: return v3(v, t, p);
+    case 1: return v3(q, v, p);
+    case 2: return v3(p, v, t);
+    case 3: return v3(p, q, v);
+    case 4: return v3(t, p, v);
+    default: return v3(v, p, q);
+    }
+}
+)JS";
+
 static constexpr BuiltinModule kBuiltinModules[] = {
     { "WEMath", kWEMathSrc },
     { "WEVector", kWEVectorSrc },
+    { "WEColor", kWEColorSrc },
 };
 
 JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*) {
@@ -1506,6 +1566,55 @@ JSValue NodeGetTransformMatrix(JSContext* ctx, JSValueConst this_val, int, JSVal
     return obj;
 }
 
+JSValue BoneTransformTranslation(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "__wwTranslation");
+    if (! JS_IsUndefined(v)) return v;
+    JS_FreeValue(ctx, v);
+    return MakeVec3(ctx, 0, 0, 0);
+}
+
+JSValue MakeBoneTransform(JSContext* ctx, const Eigen::Vector3f& translation) {
+    JSValue obj = JS_NewObject(ctx);
+    JS_DefinePropertyValueStr(ctx,
+                              obj,
+                              "__wwTranslation",
+                              MakeVec3(ctx, translation.x(), translation.y(), translation.z()),
+                              JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx,
+                              obj,
+                              "translation",
+                              JS_NewCFunction(ctx, BoneTransformTranslation, "translation", 0),
+                              JS_PROP_C_W_E);
+    return obj;
+}
+
+JSValue NodeGetBoneIndex(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto* n    = GetLayerNode(this_val);
+    if (! n || argc < 1 || ! host->bone_index_resolver) return JS_NewInt32(ctx, 0);
+    const char* name = JS_ToCString(ctx, argv[0]);
+    if (! name) return JS_NewInt32(ctx, 0);
+    const uint32_t index = host->bone_index_resolver(n, name);
+    JS_FreeCString(ctx, name);
+    return JS_NewInt32(ctx, static_cast<int32_t>(index));
+}
+
+JSValue NodeGetBoneTransform(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto* n    = GetLayerNode(this_val);
+    if (! n || argc < 1 || ! host->bone_transform_resolver)
+        return MakeBoneTransform(ctx, { 0.0f, 0.0f, 0.0f });
+
+    int32_t index = 0;
+    JS_ToInt32(ctx, &index, argv[0]);
+    if (index <= 0) return MakeBoneTransform(ctx, { 0.0f, 0.0f, 0.0f });
+
+    auto bone =
+        host->bone_transform_resolver(n, static_cast<uint32_t>(index), host->inputs.runtime);
+    if (! bone) return MakeBoneTransform(ctx, { 0.0f, 0.0f, 0.0f });
+    return MakeBoneTransform(ctx, { bone->x, bone->y, bone->z });
+}
+
 JSValue NodeGetChildren(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
     auto*   n   = GetLayerNode(this_val);
     JSValue arr = JS_NewArray(ctx);
@@ -1518,10 +1627,14 @@ JSValue NodeGetChildren(JSContext* ctx, JSValueConst this_val, int, JSValueConst
     return arr;
 }
 
-JSValue NodeGetName(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+JSValue NodeGetNameValue(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return JS_NewString(ctx, "");
     return JS_NewStringLen(ctx, n->Name().data(), n->Name().size());
+}
+
+JSValue NodeGetName(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    return NodeGetNameValue(ctx, this_val);
 }
 
 JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1534,6 +1647,51 @@ JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     owe::SceneNode* hit = n->FindByName(layer_name);
     JS_FreeCString(ctx, name);
     return hit ? WrapLayerNode(ctx, hit) : WrapLayerName(ctx, std::move(layer_name));
+}
+
+bool TreeContains(owe::SceneNode* root, owe::SceneNode* needle) {
+    if (! root || ! needle) return false;
+    if (root == needle) return true;
+    for (const auto& child : root->GetChildren()) {
+        if (child && TreeContains(child.get(), needle)) return true;
+    }
+    return false;
+}
+
+JSValue NodeSceneLayerListIncludes(JSContext* ctx, JSValueConst this_val, int argc,
+                                   JSValueConst* argv) {
+    if (argc < 1) return JS_NewBool(ctx, false);
+    JSValue root_val = JS_GetPropertyStr(ctx, this_val, "__wwRoot");
+    auto*   root     = GetLayerNode(root_val);
+    auto*   needle   = GetLayerNode(argv[0]);
+    bool    found    = TreeContains(root, needle);
+    JS_FreeValue(ctx, root_val);
+    return JS_NewBool(ctx, found);
+}
+
+JSValue NodeSceneEnumerateLayers(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    JSValue arr = JS_NewArray(ctx);
+    auto*   n   = GetLayerNode(this_val);
+    if (! n) return arr;
+
+    uint32_t i      = 0;
+    auto     append = [&](auto& self, owe::SceneNode* node) -> void {
+        if (! node) return;
+        JS_DefinePropertyValueUint32(ctx, arr, i++, WrapLayerNode(ctx, node), JS_PROP_C_W_E);
+        for (const auto& child : node->GetChildren()) {
+            if (child) self(self, child.get());
+        }
+    };
+    for (const auto& child : n->GetChildren()) {
+        if (child) append(append, child.get());
+    }
+    JS_DefinePropertyValueStr(ctx, arr, "__wwRoot", WrapLayerNode(ctx, n), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx,
+                              arr,
+                              "includes",
+                              JS_NewCFunction(ctx, NodeSceneLayerListIncludes, "includes", 1),
+                              JS_PROP_C_W_E);
+    return arr;
 }
 
 // thisScene.createLayer(model_path) — WE-style runtime layer spawn. The
@@ -1688,6 +1846,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("brightness", NodeGetBrightness, NodeSetBrightness),
     JS_CGETSET_DEF("color", NodeGetColor, NodeSetColor),
     JS_CGETSET_DEF("text", NodeGetText, NodeSetText),
+    JS_CGETSET_DEF("name", NodeGetNameValue, NodeSetIgnore),
     JS_CGETSET_DEF("verticalalign", NodeGetVAlign, NodeSetIgnore),
     JS_CGETSET_DEF("horizontalalign", NodeGetHAlign, NodeSetIgnore),
     JS_CFUNC_DEF("getParent", 0, NodeGetParent),
@@ -1695,6 +1854,9 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getChildren", 0, NodeGetChildren),
     JS_CFUNC_DEF("getName", 0, NodeGetName),
     JS_CFUNC_DEF("getLayer", 1, NodeGetLayer),
+    JS_CFUNC_DEF("enumerateLayers", 0, NodeSceneEnumerateLayers),
+    JS_CFUNC_DEF("getBoneIndex", 1, NodeGetBoneIndex),
+    JS_CFUNC_DEF("getBoneTransform", 1, NodeGetBoneTransform),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
     JS_CFUNC_DEF("getAnimation", 0, NodeGetAnimationStub),
     JS_CFUNC_DEF("getAnimationLayer", 1, NodeGetAnimationStub),
@@ -1781,6 +1943,7 @@ JsRuntime::~JsRuntime() {
     for (auto& fs : m_impl->scripts) {
         if (fs && fs->m_impl) {
             JS_FreeValue(m_impl->ctx, fs->m_impl->update_fn);
+            JS_FreeValue(m_impl->ctx, fs->m_impl->init_fn);
             JS_FreeValue(m_impl->ctx, fs->m_impl->module_ns);
             JS_FreeValue(m_impl->ctx, fs->m_impl->current_value);
             if (! JS_IsUndefined(fs->m_impl->wrapped_layer))
@@ -1856,9 +2019,20 @@ void JsRuntime::SetUserProperty(std::string_view key, const json& property) {
     JS_FreeValue(ctx, global);
 }
 
+void JsRuntime::SetBoneResolvers(BoneIndexResolver     index_resolver,
+                                 BoneTransformResolver transform_resolver) {
+    m_impl->host.bone_index_resolver     = std::move(index_resolver);
+    m_impl->host.bone_transform_resolver = std::move(transform_resolver);
+}
+
 void JsRuntime::SetPersistence(std::string path) {
     m_impl->host.ls_path = std::move(path);
     LoadLocalStorage(&m_impl->host);
+}
+
+namespace
+{
+void RunFieldScriptInit(JSContext* ctx, JsRuntime::Impl* rt, FieldScript* fs);
 }
 
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
@@ -1868,6 +2042,9 @@ void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
     m_impl->host.scene_root = root;
     m_impl->wrapped_scene   = root ? WrapLayerNode(m_impl->ctx, root) : JS_UNDEFINED;
     if (! JS_IsUndefined(m_impl->wrapped_scene)) BindThisScene(m_impl->ctx, m_impl->wrapped_scene);
+    for (auto& fs : m_impl->scripts) {
+        RunFieldScriptInit(m_impl->ctx, m_impl.get(), fs.get());
+    }
 }
 
 void JsRuntime::TickAll() {
@@ -1989,6 +2166,27 @@ bool FunctionTakesArg(JSContext* ctx, JSValue fn) {
     return n >= 1;
 }
 
+void RunFieldScriptInit(JSContext* ctx, JsRuntime::Impl* rt, FieldScript* fs) {
+    if (! fs || ! fs->m_impl || fs->m_impl->init_done) return;
+    auto* I = fs->m_impl.get();
+    if (! JS_IsFunction(ctx, I->init_fn)) {
+        I->init_done = true;
+        return;
+    }
+
+    BindThisLayer(ctx,
+                  JS_IsUndefined(I->wrapped_layer) ? rt->host.default_layer : I->wrapped_layer);
+    if (! JS_IsUndefined(rt->wrapped_scene)) BindThisScene(ctx, rt->wrapped_scene);
+    rt->host.active_field_script = fs;
+    JSValue arg                  = JS_DupValue(ctx, I->current_value);
+    JSValue r                    = JS_Call(ctx, I->init_fn, JS_UNDEFINED, 1, &arg);
+    JS_FreeValue(ctx, arg);
+    if (JS_IsException(r)) rt->LogError(ctx, I->sha, "init threw");
+    JS_FreeValue(ctx, r);
+    rt->host.active_field_script = nullptr;
+    I->init_done                 = true;
+}
+
 } // namespace
 
 FieldScript* JsRuntime::MakeFieldScript(std::string_view source, std::string_view script_sha,
@@ -2066,24 +2264,16 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source, std::string_vie
     }
     JS_FreeValue(ctx, sp);
 
-    // 4. If the module exports `init`, call it with the initial value
-    //    coerced to match the bound field's expected JS shape. Mark this
-    //    fs as the active script so init-time createLayer calls pop from
-    //    its clone_queue.
+    // `init` runs after SetSceneRoot so thisScene queries see the complete tree.
     JSValue init_fn  = JS_GetPropertyStr(ctx, ns, "init");
     JSValue init_arg = CoerceInitialValue(ctx, initial_value, I->kind);
     if (JS_IsFunction(ctx, init_fn)) {
-        m_impl->host.active_field_script = fs.get();
-        JSValue r                        = JS_Call(ctx, init_fn, JS_UNDEFINED, 1, &init_arg);
-        if (JS_IsException(r)) {
-            m_impl->LogError(ctx, script_sha, "init threw");
-        }
-        JS_FreeValue(ctx, r);
-        m_impl->host.active_field_script = nullptr;
+        I->init_fn = init_fn;
+    } else {
+        JS_FreeValue(ctx, init_fn);
     }
-    JS_FreeValue(ctx, init_fn);
 
-    // 5. Cache `update` for the per-frame tick.
+    // Cache `update` for the per-frame tick.
     JSValue update_fn = JS_GetPropertyStr(ctx, ns, "update");
     if (JS_IsFunction(ctx, update_fn)) {
         I->update_fn        = update_fn;
@@ -2099,6 +2289,7 @@ FieldScript* JsRuntime::MakeFieldScript(std::string_view source, std::string_vie
 
     auto* raw = fs.get();
     m_impl->scripts.push_back(std::move(fs));
+    if (m_impl->scene_root) RunFieldScriptInit(ctx, m_impl.get(), raw);
     return raw;
 }
 

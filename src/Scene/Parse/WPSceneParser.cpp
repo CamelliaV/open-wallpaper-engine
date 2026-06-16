@@ -90,6 +90,50 @@ unsigned DetectAudioFanoutCount(std::string_view src) {
     return 0;
 }
 
+std::shared_ptr<WPPuppetLayer> MakePuppetLayer(std::shared_ptr<WPPuppet>                puppet,
+                                               std::span<WPPuppetLayer::AnimationLayer> layers) {
+    if (! puppet) return nullptr;
+    auto out = std::make_shared<WPPuppetLayer>(std::move(puppet));
+    out->prepared(layers);
+    return out;
+}
+
+void RegisterPuppetLayer(ParseContext& context, SceneNode* node,
+                         std::shared_ptr<WPPuppetLayer> layer) {
+    if (! node || ! layer) return;
+    context.puppet_layers->by_node[node] = std::move(layer);
+}
+
+std::shared_ptr<WPPuppetLayer> LookupPuppetLayer(const std::shared_ptr<PuppetLayerRegistry>& layers,
+                                                 SceneNode*                                  node) {
+    if (! layers || ! node) return nullptr;
+    auto it = layers->by_node.find(node);
+    if (it != layers->by_node.end()) return it->second;
+    auto fallback_it = layers->fallback_by_node.find(node);
+    return fallback_it == layers->fallback_by_node.end() ? nullptr : fallback_it->second;
+}
+
+SceneNode* RootOf(SceneNode* node) {
+    if (! node) return nullptr;
+    while (node->Parent()) node = node->Parent();
+    return node;
+}
+
+std::shared_ptr<WPPuppetLayer>
+FindPuppetLayerWithBone(const std::shared_ptr<PuppetLayerRegistry>& layers, SceneNode* node,
+                        std::string_view name, uint32_t& index) {
+    if (! layers || ! node) return nullptr;
+    if (auto it = layers->by_node.find(node); it != layers->by_node.end()) {
+        index = it->second ? it->second->boneIndex(name) : 0;
+        if (index != 0) return it->second;
+    }
+    for (auto& child : node->GetChildren()) {
+        if (! child) continue;
+        if (auto hit = FindPuppetLayerWithBone(layers, child.get(), name, index)) return hit;
+    }
+    return nullptr;
+}
+
 std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* tmpl,
                                               unsigned count) {
     std::vector<owe::SceneNode*> out;
@@ -103,6 +147,8 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
         clone->AddMesh(tmpl->MeshShared());
         clone->ID() = -((i32)i + 1); // negative IDs reserved for clones
         context.shader_updater->CopyNodeData(tmpl, clone.get());
+        if (auto layer = LookupPuppetLayer(context.puppet_layers, tmpl))
+            RegisterPuppetLayer(context, clone.get(), std::move(layer));
         out.push_back(clone.get());
         // Defer attachment to FinalizeScene so the clones land at the
         // template's z-position (right after it), not at the root front.
@@ -114,7 +160,33 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
 script::ScriptScene& EnsureScriptScene(ParseContext& context) {
     if (! context.script_scene) {
         context.script_scene = std::make_unique<script::ScriptScene>();
-        context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.get());
+        auto layers          = context.puppet_layers;
+        context.script_scene->runtime().SetBoneResolvers(
+            [layers](SceneNode* node, std::string_view name) -> uint32_t {
+                auto     layer = LookupPuppetLayer(layers, node);
+                uint32_t index = layer ? layer->boneIndex(name) : 0;
+                if (index != 0) return index;
+
+                if (auto fallback = FindPuppetLayerWithBone(layers, RootOf(node), name, index)) {
+                    layers->fallback_by_node[node] = std::move(fallback);
+                    return index;
+                }
+                return 0;
+            },
+            [layers](SceneNode* node,
+                     uint32_t   index,
+                     double     time) -> std::optional<script::BoneTranslation> {
+                auto layer = LookupPuppetLayer(layers, node);
+                if (! layer) return std::nullopt;
+                auto bone = layer->boneTransform(index, time);
+                if (! bone) return std::nullopt;
+
+                node->UpdateTrans();
+                Eigen::Affine3f world = Eigen::Affine3f::Identity();
+                world.matrix()        = node->ModelTrans().cast<float>();
+                auto t                = (world * *bone).translation();
+                return script::BoneTranslation { t.x(), t.y(), t.z() };
+            });
         if (context.user_properties != nullptr) {
             for (const auto& [key, prop] : *context.user_properties) {
                 context.script_scene->runtime().SetUserProperty(key, prop);
@@ -1022,7 +1094,7 @@ void ParseCameraObj(ParseContext& context, wpscene::WPCameraObject& cam) {
     Vector3f path_rotation_bias  = use_perspective ? Vector3f::Zero() : default_rotation;
 
     auto node = std::make_shared<SceneNode>(
-        path_translate_bias + origin, Vector3f::Ones(), path_rotation_bias + angles);
+        path_translate_bias + origin, Vector3f::Ones(), path_rotation_bias + angles, cam.name);
     node->ID() = cam.id;
     if (! cam.visible) node->SetVisible(false);
     if (! cam.visible_user_key.empty()) node->SetVisibleUserKey(cam.visible_user_key);
@@ -1193,12 +1265,18 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
     auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
                                                  Vector3f(wpimgobj.scale.data()),
-                                                 Vector3f(wpimgobj.angles.data()));
+                                                 Vector3f(wpimgobj.angles.data()),
+                                                 wpimgobj.name);
     LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->ID() = wpimgobj.id;
     if (! wpimgobj.visible_user_key.empty())
         spImgNode->SetVisibleUserKey(wpimgobj.visible_user_key);
+    std::shared_ptr<WPPuppetLayer> image_puppet_layer;
+    if (puppet && has_bones) {
+        image_puppet_layer = MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
+        RegisterPuppetLayer(context, spImgNode.get(), image_puppet_layer);
+    }
 
     // Puppet clipping masks: register the half-res shared RT here; per-mask
     // submeshes (pre-pass + clipped main) are emitted below after the base
@@ -1229,6 +1307,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
     SceneMaterial     material;
     WPShaderValueData svData;
+    svData.puppet_layer = image_puppet_layer;
 
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
@@ -1327,10 +1406,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     wpimgobj.effects.push_back(puppet_effect);
                 }
             } else {
-                if (has_bones) {
-                    svData.puppet_layer = WPPuppetLayer(puppet->puppet);
-                    svData.puppet_layer.prepared(wpimgobj.puppet_layers);
-                }
                 for (const auto& m : puppet->meshes) {
                     if (m.positions.empty()) continue;
                     mesh.Submeshes().emplace_back();
@@ -1639,8 +1714,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 {
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                     if (puppet && wpmat.use_puppet) {
-                        svData.puppet_layer = WPPuppetLayer(puppet->puppet);
-                        svData.puppet_layer.prepared(wpimgobj.puppet_layers);
+                        svData.puppet_layer =
+                            MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
+                        RegisterPuppetLayer(context, spEffNode.get(), svData.puppet_layer);
                     }
                 }
                 spMesh->AddMaterial(std::move(material));
@@ -1714,7 +1790,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
         }
         spNode     = std::make_shared<SceneNode>(corigin,
                                                  Vector3f(child_ptr.child->scale.data()),
-                                                 Vector3f(child_ptr.child->angles.data()));
+                                                 Vector3f(child_ptr.child->angles.data()),
+                                                 child_ptr.child->name);
         child_data = ChildData(*child_ptr.child);
 
         child_ptr.max_instancecount *= child_data.maxcount;
@@ -1723,7 +1800,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
         p_particle_obj = &wppartobj.particleObj;
         spNode         = std::make_shared<SceneNode>(Vector3f(wppartobj.origin.data()),
                                                      Vector3f(wppartobj.scale.data()),
-                                                     Vector3f(wppartobj.angles.data()));
+                                                     Vector3f(wppartobj.angles.data()),
+                                                     wppartobj.name);
         if (! wppartobj.visible_user_key.empty())
             spNode->SetVisibleUserKey(wppartobj.visible_user_key);
     }
@@ -1952,7 +2030,8 @@ void ParseSoundObj(ParseContext& context, wpscene::WPSoundObject& obj,
 void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     auto node = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
                                             Vector3f(light_obj.scale.data()),
-                                            Vector3f(light_obj.angles.data()));
+                                            Vector3f(light_obj.angles.data()),
+                                            light_obj.name);
 
     SceneLight::Desc desc;
     if (light_obj.light == "spot") {
@@ -2001,19 +2080,21 @@ void ParseModelObj(ParseContext& context, wpscene::WPModelObject& model_obj) {
 
     auto node  = std::make_shared<SceneNode>(Vector3f(model_obj.origin.data()),
                                              Vector3f(model_obj.scale.data()),
-                                             Vector3f(model_obj.angles.data()));
+                                             Vector3f(model_obj.angles.data()),
+                                             model_obj.name);
     node->ID() = model_obj.id;
     if (! model_obj.visible_user_key.empty()) node->SetVisibleUserKey(model_obj.visible_user_key);
 
     auto mesh = std::make_shared<SceneMesh>();
 
     WPShaderValueData svData;
-    svData.parallaxDepth = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
+    svData.parallaxDepth           = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
     svData.use_camera_eye_position = true;
     if (mdl.puppet && ! mdl.puppet->bones.empty()) {
-        svData.puppet_layer = WPPuppetLayer(mdl.puppet);
         std::array<WPPuppetLayer::AnimationLayer, 0> no_layers {};
-        svData.puppet_layer.prepared(std::span<WPPuppetLayer::AnimationLayer>(no_layers));
+        svData.puppet_layer =
+            MakePuppetLayer(mdl.puppet, std::span<WPPuppetLayer::AnimationLayer>(no_layers));
+        RegisterPuppetLayer(context, node.get(), svData.puppet_layer);
     }
 
     for (const auto& mdl_mesh : mdl.meshes) {
@@ -2280,8 +2361,10 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         text_h = 1.0f;
     }
 
-    auto sp_node = std::make_shared<SceneNode>(
-        Vector3f(obj.origin.data()), Vector3f(obj.scale.data()), Vector3f(obj.angles.data()));
+    auto sp_node            = std::make_shared<SceneNode>(Vector3f(obj.origin.data()),
+                                                          Vector3f(obj.scale.data()),
+                                                          Vector3f(obj.angles.data()),
+                                                          obj.name);
     sp_node->ID()           = obj.id;
     const float text_bbox_w = text_w + 2.0f * style.padding;
     const float text_bbox_h = text_h + 2.0f * style.padding;
@@ -2948,12 +3031,15 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view                scen
             if (has_kind(o)) continue;
             std::uint32_t parent = 0;
             if (o.contains("parent")) parent = o.at("parent").get<std::uint32_t>();
+            std::string name;
+            if (o.contains("name") && o.at("name").is_string())
+                name = o.at("name").get<std::string>();
             std::array<float, 3> origin { 0, 0, 0 }, scale { 1, 1, 1 }, angles { 0, 0, 0 };
             read_vec3(o, "origin", origin);
             read_vec3(o, "scale", scale);
             read_vec3(o, "angles", angles);
             auto node = std::make_shared<SceneNode>(
-                Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()));
+                Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()), name);
             node->ID() = id;
             wpscene::WPFieldBindings fb;
             wpscene::AbsorbAllFieldBindings(o, fb);

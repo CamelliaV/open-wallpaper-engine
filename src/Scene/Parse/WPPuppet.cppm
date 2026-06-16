@@ -254,6 +254,8 @@ public:
     void prepared(std::span<AnimationLayer>);
 
     std::span<const Eigen::Affine3f> genFrame(double time) noexcept;
+    uint32_t                         boneIndex(std::string_view name) const noexcept;
+    std::optional<Eigen::Affine3f>   boneTransform(uint32_t index, double time) noexcept;
 
     void updateInterpolation(double time) noexcept;
 

@@ -36,6 +36,10 @@ struct BoolValue {
 using ScriptValue = std::variant<std::monostate, ScalarValue, BoolValue, Vec2Value, Vec3Value,
                                  ColorValue, StringValue>;
 
+struct BoneTranslation {
+    float x { 0.0f }, y { 0.0f }, z { 0.0f };
+};
+
 // What kind of value a FieldScript is expected to produce. Set at parse
 // time based on the field name's well-known type — see the per-field-kind
 // table in the API doc.
@@ -145,6 +149,12 @@ public:
     // `property` should be the descriptor object shape used by project.json
     // (`{value: ...}` plus optional metadata).
     void SetUserProperty(std::string_view key, const nlohmann::json& property);
+
+    using BoneIndexResolver = std::function<uint32_t(owe::SceneNode*, std::string_view)>;
+    using BoneTransformResolver =
+        std::function<std::optional<BoneTranslation>(owe::SceneNode*, uint32_t, double)>;
+    void SetBoneResolvers(BoneIndexResolver     index_resolver,
+                          BoneTransformResolver transform_resolver);
 
     // Drive every alive FieldScript once. Invokes their cached `update`
     // export and stores the coerced return into FieldScript::last_value().

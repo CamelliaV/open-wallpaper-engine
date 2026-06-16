@@ -29,6 +29,11 @@ using WPObjectVar =
                  wpscene::WPLightObject, wpscene::WPTextObject, wpscene::WPModelObject,
                  wpscene::WPCameraObject>;
 
+struct PuppetLayerRegistry {
+    std::unordered_map<SceneNode*, std::shared_ptr<WPPuppetLayer>> by_node;
+    std::unordered_map<SceneNode*, std::shared_ptr<WPPuppetLayer>> fallback_by_node;
+};
+
 // Per-Parse state. Built by BuildContext, mutated by ProcessObjects,
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
@@ -49,6 +54,7 @@ struct ParseContext {
     // bindings come in. Installed onto the Scene by FinalizeScene.
     // Stays null when no object has any script binding.
     std::unique_ptr<owe::script::ScriptScene> script_scene;
+    std::shared_ptr<PuppetLayerRegistry> puppet_layers { std::make_shared<PuppetLayerRegistry>() };
 
     // ID → (parent_id, node) for every parseable object. Filled by each
     // ParseXObj. FinalizeScene re-parents nodes with non-zero parent_id

@@ -179,8 +179,8 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
                 updateOp(WE_GLTEX_MIPMAPINFO_NAMES[el.first], (float)rt.mipmap_level);
             }
         }
-        if (nodeData.puppet_layer.hasPuppet() && info.has_BONES) {
-            auto data = nodeData.puppet_layer.genFrame(m_scene->elapsingTime);
+        if (nodeData.puppet_layer && nodeData.puppet_layer->hasPuppet() && info.has_BONES) {
+            auto data = nodeData.puppet_layer->genFrame(m_scene->elapsingTime);
             updateOp(G_BONES, std::span<const float> { data[0].data(), data.size() * 16 });
         }
     }
@@ -212,8 +212,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     if (info.has_VP) {
         updateOp(G_VP, ShaderValue::fromMatrix(viewProTrans));
     }
-    if (info.has_EYEPOSITION && hasNodeData &&
-        m_nodeDataMap.at(pNode).use_camera_eye_position) {
+    if (info.has_EYEPOSITION && hasNodeData && m_nodeDataMap.at(pNode).use_camera_eye_position) {
         const auto eye = camera->GetPosition().cast<float>();
         updateOp(G_EYEPOSITION, std::array<float, 3> { eye.x(), eye.y(), eye.z() });
     }
