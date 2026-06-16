@@ -31,35 +31,50 @@ void PeakResample64(std::span<const float, 64> bins, std::array<float, N>& out) 
     }
 }
 
-float Fract(float value) { return value - std::floor(value); }
-
 float Smooth(float value) { return value * value * (3.0f - 2.0f * value); }
 
-float HashNoise(int n, float seed) {
-    float v = std::sin(static_cast<float>(n) * 127.1f + seed * 311.7f) * 43758.5453f;
-    return Fract(v) * 2.0f - 1.0f;
-}
+Vector2f ShakeOffset(float x, float roughness) {
+    const float r    = std::clamp(roughness, 0.0f, 2.0f);
+    const float over = std::clamp(r - 1.0f, 0.0f, 1.0f);
+    const float grow = over * over;
 
-float ValueNoise(float x, float seed) {
-    int   i = static_cast<int>(std::floor(x));
-    float f = x - static_cast<float>(i);
-    return algorism::lerp(Smooth(f), HashNoise(i, seed), HashNoise(i + 1, seed));
-}
+    constexpr float kPi      = static_cast<float>(rstd::f64_::consts::PI);
+    const float     beat_pos = std::max(0.0f, x) / (kPi * 0.5f);
+    const int       beat     = static_cast<int>(std::floor(beat_pos));
+    const float     local    = beat_pos - static_cast<float>(beat);
+    const float     u        = Smooth(local);
 
-float ShakeNoise(float x, float roughness, float seed) {
-    int octaves =
-        std::clamp(1 + static_cast<int>(std::round(std::max(0.0f, roughness) * 2.0f)), 1, 5);
-    float sum  = 0.0f;
-    float norm = 0.0f;
-    float amp  = 1.0f;
-    float freq = 1.0f;
-    for (int i = 0; i < octaves; ++i) {
-        sum += ValueNoise(x * freq, seed + static_cast<float>(i) * 19.13f) * amp;
-        norm += amp;
-        freq *= 2.0f;
-        amp *= 0.5f;
-    }
-    return norm > 0.0f ? sum / norm : 0.0f;
+    static constexpr std::array<std::array<float, 2>, 8> kDirections { {
+        { -1.0f, 1.0f },
+        { 1.0f, -1.0f },
+        { -1.0f, 1.0f },
+        { 1.0f, -1.0f },
+        { 1.0f, 1.0f },
+        { -1.0f, -1.0f },
+        { 1.0f, 1.0f },
+        { -1.0f, -1.0f },
+    } };
+    static constexpr std::array<float, 8>                kBaseFactors {
+        0.8f, 1.0f, 0.45f, 0.6f, 0.8f, 1.0f, 0.45f, 0.6f,
+    };
+    static constexpr std::array<float, 8> kRoughFactors {
+        6.0f, 8.0f, 1.0f, 1.0f, 6.0f, 8.0f, 1.0f, 1.0f,
+    };
+
+    auto sample = [&](int index) -> Vector2f {
+        if ((index % 2) != 0) return Vector2f::Zero();
+        const int   i      = (index / 2) % static_cast<int>(kDirections.size());
+        const float factor = kBaseFactors[i] * (1.0f + (kRoughFactors[i] - 1.0f) * grow);
+        return Vector2f { kDirections[i][0] * factor, kDirections[i][1] * factor };
+    };
+
+    const Vector2f a     = sample(beat);
+    const Vector2f b     = sample(beat + 1);
+    const Vector2f delta = b - a;
+    Vector2f       curve { -delta.y(), delta.x() };
+    if (curve.squaredNorm() > 0.0f) curve.normalize();
+    const float bend = std::sin(local * kPi) * (0.09f + grow * 0.04f) * delta.norm();
+    return a * (1.0f - u) + b * u + curve * bend;
 }
 
 } // namespace
@@ -196,17 +211,18 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     Matrix4d viewProTrans = camera->GetViewProjectionMatrix();
     if (m_cameraShake.enable && camera == m_scene->activeCamera && m_cameraShake.amplitude > 0.0f &&
         m_cameraShake.speed > 0.0f) {
-        float base_extent = static_cast<float>(std::min(m_scene->ortho[0], m_scene->ortho[1]));
-        float scale       = m_cameraShake.amplitude * m_cameraShake.speed * base_extent * 0.01f;
-        scale             = std::clamp(scale, 0.0f, base_extent * 0.1f);
+        const float base_extent =
+            static_cast<float>(std::min(m_scene->ortho[0], m_scene->ortho[1]));
+        const float scale = m_cameraShake.amplitude * base_extent * 0.01f;
 
-        float    t = static_cast<float>(m_scene->elapsingTime) * m_cameraShake.speed;
-        Vector3d shake {
-            static_cast<double>(ShakeNoise(t, m_cameraShake.roughness, 1.0f) * scale),
-            static_cast<double>(ShakeNoise(t, m_cameraShake.roughness, 7.0f) * scale),
+        const float t      = static_cast<float>(m_scene->elapsingTime) * m_cameraShake.speed * 2.0f;
+        auto        offset = ShakeOffset(t, m_cameraShake.roughness);
+        Vector3d    shake {
+            static_cast<double>(offset.x() * scale),
+            static_cast<double>(offset.y() * scale),
             0.0,
         };
-        viewProTrans = viewProTrans * Affine3d(Translation3d(-shake)).matrix();
+        viewProTrans = viewProTrans * Affine3d(Translation3d(shake)).matrix();
     }
 
     if (info.has_VP) {
