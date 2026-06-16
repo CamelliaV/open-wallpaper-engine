@@ -1,3 +1,12 @@
+<release version="0.1.7" date="2026-06-16">
+  <description>
+    <p>Fixed: Camera shake motion.</p>
+    <p>Fixed: Parenting script bone lookup for puppet layers and script-created nodes.</p>
+    <p>Fixed: Particle emitter origin scaling for scaled parent layers.</p>
+    <p>Fixed: Culling and shader uniform regressions affecting layered scene rendering.</p>
+    <p>Fixed: Draw the first frame when paused.</p>
+  </description>
+</release>
 <release version="0.1.6" date="2026-06-14">
   <description>
     <p>Added: Waywallen plugin build CI and plugin packages.</p>
