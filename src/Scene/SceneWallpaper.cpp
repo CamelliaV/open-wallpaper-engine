@@ -577,6 +577,7 @@ private:
     std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
     float                                 m_speed { 1.0f };
     FillMode                              m_fillmode { FillMode::ASPECTCROP };
+    bool                                  m_stopped { false };
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
     std::atomic<uint32_t>             m_buttons_down { 0 };
@@ -598,6 +599,7 @@ private:
 // ---- SceneRenderController message handlers ---------------------------------
 
 void SceneRenderController::on(RenderStop&& m) {
+    m_stopped = m.stop;
     if (m.stop)
         frame_timer.Stop();
     else
@@ -761,7 +763,10 @@ void SceneRenderController::on(RenderSwapchainReady&& m) {
         m_render->compileRenderGraph(*m_scene, *m_rg);
         m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     }
-    frame_timer.Run();
+    if (m_stopped)
+        frame_timer.Stop();
+    else
+        frame_timer.Run();
 }
 
 // ---- SceneRuntimeController message handlers --------------------------------
@@ -1064,6 +1069,9 @@ void SceneWallpaper::initVulkan(RenderInitInfo info) {
 
 void SceneWallpaper::play() { (void)m_runtime->mainSender().send(MainMsg { MainStop { false } }); }
 void SceneWallpaper::pause() { (void)m_runtime->mainSender().send(MainMsg { MainStop { true } }); }
+void SceneWallpaper::requestFrame() {
+    (void)m_runtime->renderSender().send(RenderMsg { RenderDraw {} });
+}
 
 void SceneWallpaper::mouseInput(double x, double y) {
     m_runtime->renderController()->setMousePos(x, y);

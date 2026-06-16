@@ -153,6 +153,8 @@ struct HostState {
     std::vector<SettingDelta> pending_settings;
 
     std::atomic<bool> shutdown { false };
+    std::atomic<bool> paused { false };
+    std::atomic<bool> submitted_since_negotiate { false };
 
     // Tracked locally on the reader thread so OnMouseMove can carry
     // the left-button-down flag CEF expects in modifiers (GLFW path
@@ -209,6 +211,14 @@ void drain_settings(HostState& s) {
     }
 }
 
+void sync_pause_visibility(HostState& s) {
+    if (! s.host) return;
+    const bool hide = s.paused.load(std::memory_order_acquire) &&
+                      s.submitted_since_negotiate.load(std::memory_order_acquire);
+    s.host->SetPaused(hide);
+    if (! hide) s.host->Invalidate();
+}
+
 // --- Reader thread ----------------------------------------------------------
 
 void apply_control(HostState& s, ww_bridge_control_t& msg) {
@@ -229,10 +239,12 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     case WW_EVT_IN_PLAY:
-        if (s.host) s.host->SetPaused(false);
+        s.paused.store(false, std::memory_order_release);
+        sync_pause_visibility(s);
         break;
     case WW_EVT_IN_PAUSE:
-        if (s.host) s.host->SetPaused(true);
+        s.paused.store(true, std::memory_order_release);
+        sync_pause_visibility(s);
         break;
     case WW_EVT_IN_POINTER_MOTION: {
         // Daemon transforms display-local coords into renderer-tex
@@ -291,6 +303,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         if (d.count > ww_wescene::BridgeProducerCore::kMaxSlots)
             d.count = ww_wescene::BridgeProducerCore::kMaxSlots;
         if (s.core) s.core->queueDirective(d);
+        s.submitted_since_negotiate.store(false, std::memory_order_release);
+        sync_pause_visibility(s);
         break;
     }
     default:
@@ -476,7 +490,7 @@ int main(int argc, char** argv) {
     // the thread that drives Pump, which is this main thread). Drain
     // any pending negotiate directive first so the slot pool reflects
     // the latest extent / fourcc before acquiring.
-    host.SetAcceleratedPaintCallback([&core, &producer](const weweb::DmaBufFrame& frame) {
+    host.SetAcceleratedPaintCallback([&state, &core, &producer](const weweb::DmaBufFrame& frame) {
         core.drainPendingDirective();
         if (! core.ready()) return;
 
@@ -492,6 +506,8 @@ int main(int argc, char** argv) {
         int sync_fd = producer.BlitToSlot(imp, slot_image, { slot_w, slot_h });
         core.submitSlot(sync_fd);
         producer.DestroyImported(imp);
+        state.submitted_since_negotiate.store(true, std::memory_order_release);
+        if (state.paused.load(std::memory_order_acquire) && state.host) state.host->SetPaused(true);
     });
 
     if (! host.OpenWallpaper(manifest,

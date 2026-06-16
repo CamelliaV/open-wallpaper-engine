@@ -182,6 +182,7 @@ struct HostState {
     uint32_t height { 0 };
 
     std::atomic<bool> shutdown { false };
+    std::atomic<bool> paused { false };
 
     // Daemon enforces "Ready before any ReportState" during the spawn
     // handshake; the scene-load path can fire `setOnClearColor` (and
@@ -241,10 +242,15 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     case WW_EVT_IN_PLAY:
+        s.paused.store(false, std::memory_order_release);
         if (s.wp) s.wp->play();
         break;
     case WW_EVT_IN_PAUSE:
-        if (s.wp) s.wp->pause();
+        s.paused.store(true, std::memory_order_release);
+        if (s.wp) {
+            s.wp->pause();
+            s.wp->requestFrame();
+        }
         break;
     case WW_EVT_IN_POINTER_MOTION: {
         ww_bridge_pointer_motion_t pm {};
@@ -295,6 +301,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         // the pending directive at the head of its next acquireRenderTarget,
         // so this thread does no Vk / bridge slot work.
         if (s.swapchain) s.swapchain->queueDirective(d);
+        if (s.wp && s.paused.load(std::memory_order_acquire)) s.wp->requestFrame();
         break;
     }
     default:
@@ -582,8 +589,12 @@ int main(int argc, char** argv) {
         die("ex_swapchain_factory did not produce a pool / swapchain");
 
     host.swapchain->setOnFirstNegotiated([&] {
-        wp.play();
-        rstd_info("waywallen-wescene-renderer: negotiated, scene playback started");
+        if (host.paused.load(std::memory_order_acquire)) {
+            rstd_info("waywallen-wescene-renderer: negotiated while paused");
+        } else {
+            wp.play();
+            rstd_info("waywallen-wescene-renderer: negotiated, scene playback started");
+        }
     });
 
     // Bridge sends ready + release_syncobj + format_caps in one go.
