@@ -1424,7 +1424,9 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
         cursor = w.LineEnd();
     }
     newsrc.append(src, cursor, std::string::npos);
-    NormalizeExpandedShaderSource(newsrc);
+    if (pWPShaderInfo != nullptr && pWPShaderInfo->normalize_tangent_space) {
+        NormalizeExpandedShaderSource(newsrc);
+    }
 
     ParseWPShader(all_includes, pWPShaderInfo, texinfos);
     ParseWPShader(newsrc, pWPShaderInfo, texinfos);

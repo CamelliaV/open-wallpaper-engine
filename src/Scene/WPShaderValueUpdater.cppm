@@ -50,7 +50,7 @@ struct WPShaderValueData {
     std::array<float, 2>                       parallaxDepth { 0.0f, 0.0f };
     std::vector<std::pair<usize, std::string>> renderTargets;
     WPPuppetLayer                              puppet_layer;
-    bool                                       use_camera_eye_position { true };
+    bool                                       use_camera_eye_position { false };
 };
 
 struct WPCameraParallax {

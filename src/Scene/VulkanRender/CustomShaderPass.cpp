@@ -419,7 +419,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             .addInputBindingDescription(bind_descriptions)
             .addInputAttributeDescription(attr_descriptions)
             .setSampleCount(m_desc.samples);
-        SetDepthState(material_ref, pipeline.depth);
+        if (has_depth_attachment) SetDepthState(material_ref, pipeline.depth);
         SetCullMode(material_ref.cull_mode, pipeline.raster);
         for (auto& spv : spvs) pipeline.addStage(std::move(spv));
 

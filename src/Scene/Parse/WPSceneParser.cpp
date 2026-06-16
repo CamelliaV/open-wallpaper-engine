@@ -402,16 +402,16 @@ void GenCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
 
     // clang-format off
 	const std::array pos = {
-		left, bottom, z,
 		left,  top, z,
-		right, bottom, z,
+		left, bottom, z,
 		right,  top, z,
+		right, bottom, z,
 	};
 	const std::array texCoord = {
-		0.0f, th,
 		0.0f, 0.0f,
-		tw, th,
+		0.0f, th,
 		tw, 0.0f,
+		tw, th,
 	};
     // clang-format on
 
@@ -2020,6 +2020,7 @@ void ParseModelObj(ParseContext& context, wpscene::WPModelObject& model_obj) {
 
     WPShaderValueData svData;
     svData.parallaxDepth = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
+    svData.use_camera_eye_position = true;
     if (mdl.puppet && ! mdl.puppet->bones.empty()) {
         svData.puppet_layer = WPPuppetLayer(mdl.puppet);
         std::array<WPPuppetLayer::AnimationLayer, 0> no_layers {};
@@ -2035,7 +2036,8 @@ void ParseModelObj(ParseContext& context, wpscene::WPModelObject& model_obj) {
 
         SceneMaterial scene_mat;
         WPShaderInfo  shader_info;
-        shader_info.baseConstSvs = context.global_base_uniforms;
+        shader_info.baseConstSvs            = context.global_base_uniforms;
+        shader_info.normalize_tangent_space = true;
         if (mdl.puppet && ! mdl.puppet->bones.empty()) {
             WPMdlParser::AddPuppetShaderInfo(shader_info, mdl);
         }
@@ -2619,10 +2621,11 @@ ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::WPSc
     context.user_properties = user_properties;
 
     context.scene->renderTargets[SpecTex_Default.data()] = {
-        .width     = context.ortho_w,
-        .height    = context.ortho_w,
-        .withDepth = true,
-        .bind      = { .enable = true, .screen = true },
+        .width             = context.ortho_w,
+        .height            = context.ortho_w,
+        .withDepth         = true,
+        .bind              = { .enable = true, .screen = true },
+        .preserve_on_write = true,
     };
     context.scene->renderTargets[WE_MIP_MAPPED_FRAME_BUFFER.data()] = {
         .width      = context.ortho_w,

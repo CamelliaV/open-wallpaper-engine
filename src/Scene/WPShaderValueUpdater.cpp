@@ -212,8 +212,8 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     if (info.has_VP) {
         updateOp(G_VP, ShaderValue::fromMatrix(viewProTrans));
     }
-    if (info.has_EYEPOSITION &&
-        (! hasNodeData || m_nodeDataMap.at(pNode).use_camera_eye_position)) {
+    if (info.has_EYEPOSITION && hasNodeData &&
+        m_nodeDataMap.at(pNode).use_camera_eye_position) {
         const auto eye = camera->GetPosition().cast<float>();
         updateOp(G_EYEPOSITION, std::array<float, 3> { eye.x(), eye.y(), eye.z() });
     }
