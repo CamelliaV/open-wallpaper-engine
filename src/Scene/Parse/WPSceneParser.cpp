@@ -513,8 +513,7 @@ void LoadOperator(ParticleSubSystem& pSys, const wpscene::Particle& wp,
     }
 }
 void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp, float count,
-                 bool render_rope, i32 cp_start_index = 0,
-                 Eigen::Vector3f world_scale = { 1.f, 1.f, 1.f }) {
+                 bool render_rope, i32 cp_start_index = 0) {
     // Sort was used by the rope generator to keep adjacent-particle pairs
     // packed at the front of m_particles[]. With per-particle trail history
     // each slot is independent, so sort is unnecessary and would shuffle the
@@ -529,14 +528,6 @@ void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp, float cou
         // authored as `controlpoint: 0` always samples cps[0] even when WE
         // wired it through `cps[cp_start_index]`.
         if (newEm.controlpoint >= 0) newEm.controlpoint += cp_start_index;
-        // WE authors emitter origins in world pixels. The owning SceneNode's
-        // scale is applied again at render time (the shader multiplies
-        // particle positions by g_ModelMatrix); pre-divide so the offset
-        // lands at the intended world-pixel distance from the owner.
-        for (int i = 0; i < 3; ++i) {
-            float s = world_scale[i];
-            if (std::abs(s) > 1e-6f) newEm.origin[i] /= s;
-        }
         pSys.AddEmitter(WPParticleParser::genParticleEmittOp(newEm, sort));
     }
 }
@@ -1684,9 +1675,9 @@ struct ParticleChildPtr {
 
     i32 max_instancecount { 1 };
 
-    // Effective world scale at node_parent. Pixel-unit offsets (emitter
-    // origins, eventfollow child origins) are pre-divided by this so the
-    // shader's MVP scale recovers the original WE world-pixel offset.
+    // Effective world scale at node_parent. Particle child origins are
+    // pre-divided by this so the shader's MVP scale recovers the authored
+    // parent-relative world-pixel offset.
     Eigen::Vector3f world_scale { 1.f, 1.f, 1.f };
 };
 
@@ -1738,8 +1729,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     }
 
     // Effective world scale at this SceneNode: parent's world scale times
-    // this node's local scale. Used to compensate WE world-pixel offsets in
-    // emitter origins (and propagated to grandchildren).
+    // this node's local scale. Propagated to child particle nodes.
     Eigen::Vector3f node_world_scale = child_ptr.world_scale.cwiseProduct(spNode->Scale());
 
     // shared_ptr so RenderSetUserProperty can mutate the override at runtime
@@ -1898,8 +1888,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                 particle_obj,
                 override.count,
                 render_rope,
-                is_child ? child_data.controlpointstartindex : 0,
-                node_world_scale);
+                is_child ? child_data.controlpointstartindex : 0);
     LoadInitializer(*particleSub, particle_obj, override_state);
     LoadOperator(*particleSub, particle_obj, override_state);
     LoadControlPoint(*particleSub, particle_obj);
