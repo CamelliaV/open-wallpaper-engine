@@ -808,6 +808,34 @@ TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
               50.0 + 50.0 * 100 + 3142.0 * 10000 + 180.0 * 1e9);
 }
 
+TEST(ScriptVector, InstanceMixInterpolatesVectors) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update(value) {
+                let a = new Vec3(1, 2, 3).mix(new Vec3(5, 6, 7), 0.25);
+                let b = new Vec2(2, 6).mix(new Vec2(10, 14), 0.5);
+                let c = new Vec3(2).mix(6, 0.25);
+                return new Vec3(a.x + b.x, a.y + b.y, a.z + c.z);
+            }
+        )JS",
+        "test/vector_mix",
+        FieldKind::Vec3,
+        nlohmann::json::object(),
+        nlohmann::json("0.0 0.0 0.0"),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    ASSERT_TRUE(std::holds_alternative<Vec3Value>(fs->last_value()));
+    const auto& v = std::get<Vec3Value>(fs->last_value());
+    EXPECT_NEAR(v.x, 8.0, 0.001);
+    EXPECT_NEAR(v.y, 13.0, 0.001);
+    EXPECT_NEAR(v.z, 7.0, 0.001);
+}
+
 // ---------------------------------------------------------------------------
 // Workshop 3327063360 repro: scripted-origin layer should land at canvas
 // center when scriptProperties.{x,y} fall back to their declared 0.5.

@@ -1006,6 +1006,11 @@ class Vec2 {
   subtract(o) { return new Vec2(this.x - (o.x ?? o), this.y - (o.y ?? o)); }
   multiply(o) { return new Vec2(this.x * (o.x ?? o), this.y * (o.y ?? o)); }
   divide(o)   { return new Vec2(this.x / (o.x ?? o), this.y / (o.y ?? o)); }
+  mix(o, t)    {
+    return new Vec2(
+      this.x + ((o.x ?? o) - this.x) * t,
+      this.y + ((o.y ?? o) - this.y) * t);
+  }
   copy()      { return new Vec2(this.x, this.y); }
   clone()     { return new Vec2(this.x, this.y); }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y); }
@@ -1028,6 +1033,12 @@ class Vec3 {
   subtract(o) { return new Vec3(this.x - (o.x ?? o), this.y - (o.y ?? o), this.z - (o.z ?? o)); }
   multiply(o) { return new Vec3(this.x * (o.x ?? o), this.y * (o.y ?? o), this.z * (o.z ?? o)); }
   divide(o)   { return new Vec3(this.x / (o.x ?? o), this.y / (o.y ?? o), this.z / (o.z ?? o)); }
+  mix(o, t)    {
+    return new Vec3(
+      this.x + ((o.x ?? o) - this.x) * t,
+      this.y + ((o.y ?? o) - this.y) * t,
+      this.z + ((o.z ?? o) - this.z) * t);
+  }
   copy()      { return new Vec3(this.x, this.y, this.z); }
   clone()     { return new Vec3(this.x, this.y, this.z); }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z); }
