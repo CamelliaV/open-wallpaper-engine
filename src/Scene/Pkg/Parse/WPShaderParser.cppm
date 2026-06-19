@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:wp_shader_parser;
+export module wescene.pkg.parse:wp_shader_parser;
 import nlohmann.json;
 import wescene.core;
 import wescene.types;

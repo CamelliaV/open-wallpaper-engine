@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:shader_lex;
+export module wescene.pkg.parse:shader_lex;
 import rstd.cppstd;
 
 export namespace owe::shader_lex

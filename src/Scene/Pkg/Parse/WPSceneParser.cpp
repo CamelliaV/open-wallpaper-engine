@@ -5,7 +5,7 @@ module;
 #include "Utils/String.h"
 #include "Utils/Sha.hpp"
 
-module wescene.parse;
+module wescene.pkg.parse;
 import eigen;
 import nlohmann.json;
 import wescene.spec_texs;

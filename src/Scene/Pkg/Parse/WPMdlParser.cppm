@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:wp_mdl_parser;
+export module wescene.pkg.parse:wp_mdl_parser;
 import eigen;
 import wescene.core;
 import rstd.cppstd;
@@ -8,7 +8,7 @@ import wescene.fs;
 import wescene.scene;
 import wescene.pkg.scene_obj;
 
-export import wescene.puppet;
+export import wescene.pkg.puppet;
 import :wp_shader_parser; // WPShaderInfo
 
 export namespace owe

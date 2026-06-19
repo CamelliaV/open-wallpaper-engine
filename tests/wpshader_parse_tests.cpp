@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-import wescene.parse;
+import wescene.pkg.parse;
 import nlohmann.json;
 
 using owe::ParseWPShader;

@@ -5,7 +5,7 @@ module;
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-module wescene.parse;
+module wescene.pkg.parse;
 import wescene.core;
 import wescene.types;
 import rstd.log;

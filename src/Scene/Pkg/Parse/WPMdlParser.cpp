@@ -1,7 +1,7 @@
 module;
 #include <rstd/macro.hpp>
 
-module wescene.parse;
+module wescene.pkg.parse;
 import nlohmann.json;
 import wescene.spec_texs;
 import wescene.core;

@@ -3,7 +3,7 @@ module;
 #include <rstd/macro.hpp>
 #include "Utils/String.h"
 
-module wescene.parse;
+module wescene.pkg.parse;
 import nlohmann.json;
 import rstd.cppstd;
 import rstd.log;

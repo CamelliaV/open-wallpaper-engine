@@ -2,7 +2,7 @@ module;
 
 #include <rstd/macro.hpp>
 
-module wescene.parse;
+module wescene.pkg.parse;
 import eigen;
 import nlohmann.json;
 import wescene.core;

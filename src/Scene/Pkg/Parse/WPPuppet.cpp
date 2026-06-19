@@ -2,7 +2,7 @@ module;
 
 #include <rstd/macro.hpp>
 
-module wescene.puppet;
+module wescene.pkg.puppet;
 import eigen;
 import wescene.core;
 import rstd.cppstd;

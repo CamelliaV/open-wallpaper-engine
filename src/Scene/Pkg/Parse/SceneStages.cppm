@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:scene_stages;
+export module wescene.pkg.parse:scene_stages;
 import nlohmann.json;
 
 import rstd.cppstd;
@@ -13,7 +13,7 @@ import wescene.scene_uniform_updater;
 import wescene.types;
 import wescene.pkg.scene_obj;
 
-import wescene.puppet;
+import wescene.pkg.puppet;
 
 export namespace owe
 {

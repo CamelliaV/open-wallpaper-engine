@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 
 import rstd.cppstd;
-import wescene.parse;
+import wescene.pkg.parse;
 import wescene.pkg_fs;
 import wescene.fs;
 import wescene.types;

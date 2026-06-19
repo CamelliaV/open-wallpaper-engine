@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 import nlohmann.json;
-import wescene.parse;
+import wescene.pkg.parse;
 
 TEST(MaterialParser, ParsesLegacyUserShaderValues) {
     const auto j = nlohmann::json::parse(R"({

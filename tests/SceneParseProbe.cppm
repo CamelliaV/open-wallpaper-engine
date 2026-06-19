@@ -5,7 +5,7 @@ module;
 export module wescene.testing.scene_parse_probe;
 
 import rstd.cppstd;
-import wescene.parse;
+import wescene.pkg.parse;
 import wescene.fs;
 
 export namespace owe::testing

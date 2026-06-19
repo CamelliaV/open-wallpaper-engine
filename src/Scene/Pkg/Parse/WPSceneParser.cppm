@@ -2,7 +2,7 @@ module;
 
 #include <nlohmann/json.hpp>
 
-export module wescene.parse:wp_scene_parser;
+export module wescene.pkg.parse:wp_scene_parser;
 import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;

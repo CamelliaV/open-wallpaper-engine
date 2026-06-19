@@ -1,7 +1,7 @@
 module;
 
 #include <sys/types.h>
-module wescene.parse;
+module wescene.pkg.parse;
 import wescene.core;
 import wescene.scene;
 import rstd.cppstd;

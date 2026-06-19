@@ -1,6 +1,6 @@
 module;
 
-export module wescene.puppet;
+export module wescene.pkg.puppet;
 import eigen;
 import wescene.core;
 import rstd.cppstd;

@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:wp_uniform;
+export module wescene.pkg.parse:wp_uniform;
 import rstd.cppstd;
 import wescene.fs;
 

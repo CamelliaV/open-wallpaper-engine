@@ -9,7 +9,7 @@ import nlohmann.json;
 export import wescene.vulkan_render;
 export import wescene.vulkan;
 export import wescene.types;
-export import wescene.parse;
+export import wescene.pkg.parse;
 
 export namespace owe
 {

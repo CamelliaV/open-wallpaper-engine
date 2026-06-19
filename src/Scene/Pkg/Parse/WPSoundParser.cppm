@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:wp_sound_parser;
+export module wescene.pkg.parse:wp_sound_parser;
 import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;

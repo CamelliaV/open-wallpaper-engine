@@ -1530,7 +1530,7 @@ public:
     // Mutated by RenderSetUserProperty; the shared_ptr is also captured by
     // every initializer / operator closure on the relevant subsystem. The
     // state is type-erased because the real type
-    // `owe::wpscene::ParticleInstanceoverride` is attached to wescene.parse,
+    // `owe::wpscene::ParticleInstanceoverride` is attached to wescene.pkg.parse,
     // which already imports wescene.scene — pulling it in here would create
     // a cycle.
     struct ParticleOverrideBinding {

@@ -9,7 +9,7 @@ import wescene.fs;
 
 export import :field_binding;
 export import :material;
-export import wescene.puppet;
+export import wescene.pkg.puppet;
 import :scene_document;
 
 export namespace owe

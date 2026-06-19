@@ -3,7 +3,7 @@ module;
 #include <rstd/macro.hpp>
 #include "Utils/String.h"
 
-module wescene.parse;
+module wescene.pkg.parse;
 import nlohmann.json;
 import wescene.core;
 import wescene.types;
@@ -534,7 +534,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
 }
 
 // ParseWPShader implementation moved to WPShaderParser_Pegtl.cpp.
-// Declaration is reachable through wescene.parse via the same module.
+// Declaration is reachable through wescene.pkg.parse via the same module.
 
 // Find a safe spot in `src` to splice an `#include` line into. The chosen
 // position lies after every top-level `attribute/varying/uniform/struct`

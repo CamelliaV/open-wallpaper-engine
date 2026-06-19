@@ -1,5 +1,5 @@
 module;
-export module wescene.parse:wp_tex_image_parser;
+export module wescene.pkg.parse:wp_tex_image_parser;
 import wescene.types;
 import rstd.cppstd;
 import wescene.scene;

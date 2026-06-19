@@ -16,7 +16,7 @@
 
 #include <regex>
 
-import wescene.parse;
+import wescene.pkg.parse;
 import wescene.fs;
 import wescene.pkg_fs;
 import wescene.scene;

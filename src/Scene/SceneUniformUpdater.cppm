@@ -6,7 +6,7 @@ import wescene.core;
 import rstd.cppstd;
 import wescene.scene;
 
-import wescene.puppet; // WPPuppetLayer
+import wescene.pkg.puppet; // WPPuppetLayer
 
 export namespace owe
 {

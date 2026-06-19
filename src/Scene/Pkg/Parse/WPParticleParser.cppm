@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:wp_particle_parser;
+export module wescene.pkg.parse:wp_particle_parser;
 import nlohmann.json;
 import rstd.cppstd;
 import wescene.scene;

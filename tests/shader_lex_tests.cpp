@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-import wescene.parse;
+import wescene.pkg.parse;
 
 using namespace owe::shader_lex;
 

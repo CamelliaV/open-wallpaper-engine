@@ -80,7 +80,7 @@ set_property(TARGET owe-script PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 
 # ---------------------------------------------------------------------------
-# owe-parse (Parse/* + Puppet + SceneUniformUpdater)
+# owe-parse (Pkg/Parse/* + Puppet + SceneUniformUpdater)
 # ---------------------------------------------------------------------------
 add_library(owe-parse STATIC
   SceneUniformUpdater.cpp
@@ -88,40 +88,42 @@ add_library(owe-parse STATIC
   Pkg/SceneObj/ImageObject.cpp
   Pkg/SceneObj/LightObject.cpp
   Pkg/SceneObj/Material.cpp
-  Parse/WPMdlParser.cpp
+  Pkg/Parse/WPMdlParser.cpp
   Pkg/SceneObj/ParticleObject.cpp
-  Parse/WPParticleParser.cpp
-  Parse/WPPuppet.cpp
+  Pkg/Parse/WPParticleParser.cpp
+  Pkg/Parse/WPPuppet.cpp
   Pkg/SceneObj/SceneDocument.cpp
-  Parse/WPSceneParser.cpp
-  Parse/WPShaderParser.cpp
-  Parse/WPShaderAnnot.cpp
-  Parse/WPSoundParser.cpp
-  Parse/WPTexImageParser.cpp
+  Pkg/Parse/WPSceneParser.cpp
+  Pkg/Parse/WPShaderParser.cpp
+  Pkg/Parse/WPShaderAnnot.cpp
+  Pkg/Parse/WPSoundParser.cpp
+  Pkg/Parse/WPTexImageParser.cpp
   Text/Text.cpp)
 target_sources(owe-parse
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          SceneUniformUpdater.cppm
-         Parse/Parse.cppm
+         Pkg/Parse/mod.cppm
+         Pkg/Parse/Compat.cppm
+         Pkg/Parse/PuppetCompat.cppm
          Pkg/SceneObj/mod.cppm
          Pkg/SceneObj/FieldBinding.cppm
          Pkg/SceneObj/ImageObject.cppm
          Pkg/SceneObj/LightObject.cppm
          Pkg/SceneObj/Material.cppm
-         Parse/WPMdlParser.cppm
+         Pkg/Parse/WPMdlParser.cppm
          Pkg/SceneObj/MiscObject.cppm
          Pkg/SceneObj/ParticleObject.cppm
-         Parse/WPParticleParser.cppm
-         Parse/WPPuppet.cppm
+         Pkg/Parse/WPParticleParser.cppm
+         Pkg/Parse/WPPuppet.cppm
          Pkg/SceneObj/SceneDocument.cppm
-         Parse/SceneStages.cppm
-         Parse/WPSceneParser.cppm
-         Parse/ShaderLex.cppm
-         Parse/WPShaderParser.cppm
+         Pkg/Parse/SceneStages.cppm
+         Pkg/Parse/WPSceneParser.cppm
+         Pkg/Parse/ShaderLex.cppm
+         Pkg/Parse/WPShaderParser.cppm
          Pkg/SceneObj/SoundObject.cppm
-         Parse/WPSoundParser.cppm
-         Parse/WPTexImageParser.cppm
-         Parse/WPUniform.cppm
+         Pkg/Parse/WPSoundParser.cppm
+         Pkg/Parse/WPTexImageParser.cppm
+         Pkg/Parse/WPUniform.cppm
          Text/Text.cppm)
 target_link_libraries(owe-parse
   PUBLIC owe-base owe-shader-compile owe-script

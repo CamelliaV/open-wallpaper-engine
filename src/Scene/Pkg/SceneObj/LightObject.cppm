@@ -6,7 +6,7 @@ import rstd.cppstd;
 import wescene.fs;
 
 export import :field_binding;
-export import wescene.puppet;
+export import wescene.pkg.puppet;
 import :scene_document;
 
 export namespace owe

@@ -14,7 +14,7 @@ import wavsen.audio;
 import wescene.fs;
 import wescene.message_loop;
 import wescene.timer;
-import wescene.parse;
+import wescene.pkg.parse;
 import wescene.pkg_fs;
 import wescene.rgraph;
 import wescene.script;

@@ -22,7 +22,7 @@
 import rstd.cppstd;
 import rstd.log;
 import wescene.scene_wallpaper;
-import wescene.parse;
+import wescene.pkg.parse;
 import waywallen.bridge_ex_swapchain;
 import nlohmann.json;
 
