@@ -12,7 +12,7 @@ import rstd.log;
 import rstd.cppstd;
 import wescene.utils;
 import wescene.scene;
-import wescene.common;
+import wescene.pkg_asset_version;
 
 using namespace owe;
 
@@ -102,8 +102,8 @@ TextureFormat ToTexFormate(int type) {
 // caller can decide whether to bail or attempt a best-effort read.
 WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
     WPTexFormatVersion v;
-    v.texv                         = ReadTexVesion(file);
-    v.texi                         = ReadTexVesion(file);
+    v.texv                         = ReadTexVersion(file);
+    v.texi                         = ReadTexVersion(file);
     header.extraHeader["texv"].val = v.texv;
     header.extraHeader["texi"].val = v.texi;
 
@@ -142,7 +142,7 @@ WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
 
     file.ReadInt32(); // unknown
 
-    v.texb                         = ReadTexVesion(file);
+    v.texb                         = ReadTexVersion(file);
     header.extraHeader["texb"].val = v.texb;
 
     header.count = file.ReadInt32();
@@ -333,7 +333,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             }
         }
         // sprite pos
-        ver.texs                       = ReadTexVesion(file);
+        ver.texs                       = ReadTexVersion(file);
         header.extraHeader["texs"].val = ver.texs;
         // texs out of [1,3] means the body walk above ended at the wrong
         // offset (corrupt file or a layout drift this parser doesn't

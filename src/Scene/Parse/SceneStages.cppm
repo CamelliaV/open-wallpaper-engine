@@ -9,7 +9,7 @@ import wescene.core;
 import wescene.fs;
 import wescene.scene;
 import wescene.script;
-import wescene.shader_value_updater;
+import wescene.scene_uniform_updater;
 import wescene.types;
 
 import wescene.puppet;
@@ -39,7 +39,7 @@ struct PuppetLayerRegistry {
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
     std::shared_ptr<Scene>                                 scene;
-    WPShaderValueUpdater*                                  shader_updater { nullptr };
+    SceneUniformUpdater*                                   shader_updater { nullptr };
     i32                                                    ortho_w { 0 };
     i32                                                    ortho_h { 0 };
     fs::VFS*                                               vfs { nullptr };

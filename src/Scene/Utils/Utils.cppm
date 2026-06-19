@@ -142,7 +142,7 @@ using ::utils::genSha1;
 
 // hash_combine moved to wescene.types (re-exported above).
 
-// Was Utils/Identity.hpp. Used by wescene.json's _GetJsonValue<T> overloads.
+// Was Utils/Identity.hpp.
 template<typename>
 struct is_std_array {};
 template<typename T>

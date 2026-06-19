@@ -11,7 +11,7 @@ import wescene.json;
 //
 //    1. Plain literal       → `42`, `"1 2 3"`, `true`
 //    2. Property-bound       → `{"value": X, "user": "<binding-name>"}`
-//                             (auto-unwrapped by WPJson::_GetJsonValue)
+//                             (auto-unwrapped by wescene.json GetJsonValue)
 //    3. Animated / scripted  → `{"value": X, "animation": {...}}` or
 //                             `{"value": X, "scriptproperties": {...}}`
 //

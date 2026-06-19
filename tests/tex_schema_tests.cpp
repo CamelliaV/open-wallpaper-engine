@@ -71,7 +71,7 @@ bool read_pod(const char* buf, std::size_t len, std::size_t off, T& out) {
     return true;
 }
 
-// Mirrors `ReadVersion("TEX", file)` from src/WPCommon.cppm: 9 bytes of
+// Mirrors `ReadAssetVersion("TEX", file)` from src/Scene/Pkg/AssetVersion.cppm: 9 bytes of
 // "TEXX####\0". Returns 0 on prefix mismatch / short read.
 int parse_tex_stamp(const char* buf, std::size_t len, std::size_t off) {
     if (off + 9 > len) return 0;

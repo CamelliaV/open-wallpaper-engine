@@ -9,7 +9,7 @@ import wescene.types;
 import rstd.log;
 import rstd.cppstd;
 import wescene.scene;
-import wescene.common;
+import wescene.pkg_asset_version;
 
 using namespace owe;
 
@@ -343,7 +343,7 @@ bool ParseIkConfig(fs::MemBinaryStream& f, WPPuppet::IkConfig& ik) {
 }
 
 bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
-    mdl.mdls = ReadMDLVesion(f);
+    mdl.mdls = ReadMdlVersion(f);
 
     uint32_t end_offset = f.ReadUint32();
 
@@ -882,7 +882,7 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
 
 // hexpat Header: VersionTag mdlv + u32 mdl_flag + s32 always_one(==1) + u32 mesh_count.
 bool ReadHeaderFromStream(fs::MemBinaryStream& f, WPMdlHeader& h, std::string_view path_for_log) {
-    h.mdlv       = ReadMDLVesion(f);
+    h.mdlv       = ReadMdlVersion(f);
     h.mdl_flag   = f.ReadUint32();
     h.unk_a      = f.ReadUint32();
     h.mesh_count = f.ReadUint32();
@@ -923,7 +923,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     }
 
     // Consume the 9-byte VersionTag for blocks whose body parser expects to
-    // start at `end_offset`. MDLS reads its tag internally via ReadMDLVesion.
+    // start at `end_offset`. MDLS reads its tag internally via ReadMdlVersion.
     auto consume_tag = [&]() -> std::string {
         char buf[9] { 0 };
         f.Read(buf, 9);

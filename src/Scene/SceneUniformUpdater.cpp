@@ -3,7 +3,7 @@ module;
 #include <rstd/macro.hpp>
 #include <cmath>
 
-module wescene.shader_value_updater;
+module wescene.scene_uniform_updater;
 import eigen;
 import wescene.spec_texs;
 import wescene.core;
@@ -79,7 +79,7 @@ Vector2f ShakeOffset(float x, float roughness) {
 
 } // namespace
 
-void WPShaderValueUpdater::FrameBegin() {
+void SceneUniformUpdater::FrameBegin() {
     /*
         using namespace std::chrono;
         auto nowTime = system_clock::to_time_t(system_clock::now());
@@ -99,9 +99,9 @@ void WPShaderValueUpdater::FrameBegin() {
                               (float)algorism::lerp(t, m_mousePos[1], m_mousePosInput[1]) };
 }
 
-void WPShaderValueUpdater::FrameEnd() {}
+void SceneUniformUpdater::FrameEnd() {}
 
-void WPShaderValueUpdater::MouseInput(double x, double y) {
+void SceneUniformUpdater::MouseInput(double x, double y) {
     using namespace std::chrono;
 
     auto   now_time = steady_clock::now();
@@ -115,8 +115,8 @@ void WPShaderValueUpdater::MouseInput(double x, double y) {
     m_last_mouse_input_time = now_time;
 }
 
-void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& existsOp) {
-    m_nodeUniformInfoMap[pNode] = WPUniformInfo();
+void SceneUniformUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& existsOp) {
+    m_nodeUniformInfoMap[pNode] = SceneUniformInfo();
     auto& info                  = m_nodeUniformInfoMap[pNode];
     info.has_MI                 = existsOp(G_MI);
     info.has_M                  = existsOp(G_M);
@@ -153,8 +153,8 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp&
     });
 }
 
-void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites,
-                                          const UpdateUniformOp& updateOp) {
+void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites,
+                                         const UpdateUniformOp& updateOp) {
     if (! pNode->Mesh()) return;
 
     pNode->UpdateTrans();
@@ -399,20 +399,20 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     if (info.has_audio_64_r) push_audio(G_AUDIO_SPEC_64_R, m_audio_64_r);
 }
 
-void WPShaderValueUpdater::SetNodeData(void* nodeAddr, const WPShaderValueData& data) {
+void SceneUniformUpdater::SetNodeData(void* nodeAddr, const SceneUniformNodeData& data) {
     m_nodeDataMap[nodeAddr] = data;
 }
 
-void WPShaderValueUpdater::CopyNodeData(void* src, void* dst) {
+void SceneUniformUpdater::CopyNodeData(void* src, void* dst) {
     auto it = m_nodeDataMap.find(src);
     if (it == m_nodeDataMap.end()) return;
     m_nodeDataMap[dst] = it->second;
 }
 
-void WPShaderValueUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y }; }
+void SceneUniformUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y }; }
 
-void WPShaderValueUpdater::SetAudioSpectrum(std::span<const float, 64> left,
-                                            std::span<const float, 64> right) {
+void SceneUniformUpdater::SetAudioSpectrum(std::span<const float, 64> left,
+                                           std::span<const float, 64> right) {
     PeakResample64(left, m_audio_16_l);
     PeakResample64(right, m_audio_16_r);
     PeakResample64(left, m_audio_32_l);

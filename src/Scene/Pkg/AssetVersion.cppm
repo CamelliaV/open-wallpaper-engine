@@ -3,7 +3,7 @@ module;
 #include <rstd/macro.hpp>
 #include <cstdio>
 
-export module wescene.common;
+export module wescene.pkg_asset_version;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
@@ -13,7 +13,7 @@ import wescene.fs;
 export namespace owe
 {
 
-int32_t ReadVersion(std::string_view prefix, fs::IBinaryStream& file) {
+int32_t ReadAssetVersion(std::string_view prefix, fs::IBinaryStream& file) {
     char str_v[9] { '\0' };
     file.Read(str_v, 9);
     if (! sstart_with(str_v, prefix)) return 0;
@@ -27,17 +27,20 @@ int32_t ReadVersion(std::string_view prefix, fs::IBinaryStream& file) {
     }
     return slot;
 }
-void WriteVersion(std::string_view prefix, fs::IBinaryStreamW& file, int ver) {
+
+void WriteAssetVersion(std::string_view prefix, fs::IBinaryStreamW& file, int ver) {
     char buf[9] { '\0' };
     std::snprintf(buf, sizeof(buf), "%.4s%.4d", prefix.data(), ver);
     file.Write(buf, sizeof(buf));
 }
 
-int32_t ReadTexVesion(fs::IBinaryStream& file) { return ReadVersion("TEX", file); }
-int32_t ReadMDLVesion(fs::IBinaryStream& file) { return ReadVersion("MDL", file); }
+int32_t ReadTexVersion(fs::IBinaryStream& file) { return ReadAssetVersion("TEX", file); }
+int32_t ReadMdlVersion(fs::IBinaryStream& file) { return ReadAssetVersion("MDL", file); }
 
 // DIY
-int32_t ReadSPVVesion(fs::IBinaryStream& file) { return ReadVersion("SPV", file); }
-void    WriteSPVVesion(fs::IBinaryStreamW& file, int ver) { WriteVersion("SPVS", file, ver); }
+int32_t ReadShaderCacheVersion(fs::IBinaryStream& file) { return ReadAssetVersion("SPV", file); }
+void    WriteShaderCacheVersion(fs::IBinaryStreamW& file, int ver) {
+    WriteAssetVersion("SPVS", file, ver);
+}
 
 } // namespace owe

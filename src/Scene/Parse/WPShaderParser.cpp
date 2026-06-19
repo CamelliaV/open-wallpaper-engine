@@ -11,7 +11,7 @@ import rstd.log;
 import rstd.cppstd;
 import wescene.shader_compile;
 import wescene.scene;
-import wescene.common;
+import wescene.pkg_asset_version;
 import wescene.utils;
 import :shader_lex;
 
@@ -1357,7 +1357,7 @@ inline std::string GetCachePath(std::string_view scene_id, std::string_view file
 
 inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream& file) {
     codes.clear();
-    i32 ver = ReadSPVVesion(file);
+    i32 ver = ReadShaderCacheVersion(file);
 
     usize count = file.ReadUint32();
     rstd_assert(count <= 16 && count >= 0);
@@ -1380,7 +1380,7 @@ inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream
 inline void SaveShaderToFile(std::span<const ShaderCode> codes, fs::IBinaryStreamW& file) {
     char nop[256] { '\0' };
 
-    WriteSPVVesion(file, 1);
+    WriteShaderCacheVersion(file, 1);
     file.WriteUint32((u32)codes.size());
     for (const auto& c : codes) {
         u32 size = (u32)c.size() * 4;

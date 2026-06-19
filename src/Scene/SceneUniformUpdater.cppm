@@ -1,6 +1,6 @@
 module;
 
-export module wescene.shader_value_updater;
+export module wescene.scene_uniform_updater;
 import eigen;
 import wescene.core;
 import rstd.cppstd;
@@ -11,7 +11,7 @@ import wescene.puppet; // WPPuppetLayer
 export namespace owe
 {
 
-struct WPUniformInfo {
+struct SceneUniformInfo {
     bool has_MI { false };
     bool has_M { false };
     bool has_AM { false };
@@ -46,31 +46,31 @@ struct WPUniformInfo {
     std::array<Tex, 12> texs;
 };
 
-struct WPShaderValueData {
+struct SceneUniformNodeData {
     std::array<float, 2>                       parallaxDepth { 0.0f, 0.0f };
     std::vector<std::pair<usize, std::string>> renderTargets;
     std::shared_ptr<WPPuppetLayer>             puppet_layer;
     bool                                       use_camera_eye_position { false };
 };
 
-struct WPCameraParallax {
+struct SceneCameraParallax {
     bool  enable { false };
     float amount;
     float delay;
     float mouseinfluence;
 };
 
-struct WPCameraShake {
+struct SceneCameraShake {
     bool  enable { false };
     float amplitude { 0.0f };
     float speed { 0.0f };
     float roughness { 1.0f };
 };
 
-class WPShaderValueUpdater : public IShaderValueUpdater {
+class SceneUniformUpdater : public IShaderValueUpdater {
 public:
-    WPShaderValueUpdater(Scene* scene): m_scene(scene) {}
-    virtual ~WPShaderValueUpdater() {}
+    SceneUniformUpdater(Scene* scene): m_scene(scene) {}
+    virtual ~SceneUniformUpdater() {}
 
     void FrameBegin() override;
 
@@ -80,13 +80,12 @@ public:
     void MouseInput(double, double) override;
     void SetTexelSize(float x, float y) override;
 
-    void SetNodeData(void*, const WPShaderValueData&);
-    // Replicate the shader-value record from src to dst. Used when scripts
-    // clone a SceneNode at parse time (audio-bar fanout) so the clones
-    // pick up the template's parallaxDepth / puppet binding / RT links.
+    void SetNodeData(void*, const SceneUniformNodeData&);
+    // Replicate the uniform record from src to dst. Used when scripts clone
+    // a SceneNode at parse time so the clones pick up the template data.
     void CopyNodeData(void* src, void* dst);
-    void SetCameraParallax(const WPCameraParallax& value) { m_parallax = value; }
-    void SetCameraShake(const WPCameraShake& value) { m_cameraShake = value; }
+    void SetCameraParallax(const SceneCameraParallax& value) { m_parallax = value; }
+    void SetCameraShake(const SceneCameraShake& value) { m_cameraShake = value; }
     void SetCameraShakeEnabled(bool value) override { m_cameraShake.enable = value; }
     void SetCameraShakeAmplitude(float value) override { m_cameraShake.amplitude = value; }
     void SetCameraShakeSpeed(float value) override { m_cameraShake.speed = value; }
@@ -102,8 +101,8 @@ public:
 
 private:
     Scene*               m_scene;
-    WPCameraParallax     m_parallax;
-    WPCameraShake        m_cameraShake;
+    SceneCameraParallax  m_parallax;
+    SceneCameraShake     m_cameraShake;
     double               m_dayTime { 0.0f };
     std::array<float, 2> m_texelSize { 1.0f / 1920.0f, 1.0f / 1080.0f };
 
@@ -125,8 +124,8 @@ private:
     std::array<float, 64> m_audio_64_l {};
     std::array<float, 64> m_audio_64_r {};
 
-    Map<void*, WPShaderValueData> m_nodeDataMap;
-    Map<void*, WPUniformInfo>     m_nodeUniformInfoMap;
+    Map<void*, SceneUniformNodeData> m_nodeDataMap;
+    Map<void*, SceneUniformInfo>     m_nodeUniformInfoMap;
 };
 
 } // namespace owe

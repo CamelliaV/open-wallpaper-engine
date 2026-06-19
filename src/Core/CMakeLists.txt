@@ -6,10 +6,16 @@
 # header in the GMF.
 # ---------------------------------------------------------------------------
 add_library(owe-core STATIC)
+target_sources(owe-core PRIVATE Json.cpp)
 target_sources(owe-core
-  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Core.cppm eigen.cppm)
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+         Core.cppm
+         eigen.cppm
+         Fs.cppm
+         nlohmann_json.cppm
+         Json.cppm)
 target_link_libraries(owe-core
-  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen)
+  PUBLIC rstd::rstd rstd.cppstd rstd.log Eigen3::Eigen nlohmann_json)
 target_compile_features(owe-core PUBLIC cxx_std_20)
 target_compile_options(owe-core PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-core PROPERTY POSITION_INDEPENDENT_CODE ON)

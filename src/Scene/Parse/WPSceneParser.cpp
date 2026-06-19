@@ -18,7 +18,7 @@ import wescene.scene;
 import wescene.text;
 import wescene.script;
 
-import wescene.shader_value_updater;
+import wescene.scene_uniform_updater;
 
 using namespace owe;
 using namespace Eigen;
@@ -686,7 +686,7 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
 }
 
 bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene, SceneNode* pNode,
-                  SceneMaterial* pMaterial, WPShaderValueData* pSvData,
+                  SceneMaterial* pMaterial, SceneUniformNodeData* pSvData,
                   WPShaderInfo* pWPShaderInfo = nullptr, bool enable_geometry_shader = false) {
     (void)pNode;
 
@@ -1143,9 +1143,9 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     auto& scene              = *context.scene;
     scene.imageParser        = std::make_unique<WPTexImageParser>(&vfs);
     scene.paritileSys->gener = std::make_unique<WPParticleRawGener>();
-    scene.shaderValueUpdater = std::make_unique<WPShaderValueUpdater>(&scene);
+    scene.shaderValueUpdater = std::make_unique<SceneUniformUpdater>(&scene);
     GenCardMesh(scene.default_effect_mesh, { 2, 2 });
-    context.shader_updater = static_cast<WPShaderValueUpdater*>(scene.shaderValueUpdater.get());
+    context.shader_updater = static_cast<SceneUniformUpdater*>(scene.shaderValueUpdater.get());
 
     scene.clearColor = sc.general.clearcolor;
     scene.ortho[0]   = sc.general.orthogonalprojection.width;
@@ -1168,7 +1168,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     }
 
     {
-        WPCameraParallax cam_para;
+        SceneCameraParallax cam_para;
         cam_para.enable         = sc.general.cameraparallax;
         cam_para.amount         = sc.general.cameraparallaxamount;
         cam_para.delay          = sc.general.cameraparallaxdelay;
@@ -1176,7 +1176,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
         context.shader_updater->SetCameraParallax(cam_para);
     }
     {
-        WPCameraShake cam_shake;
+        SceneCameraShake cam_shake;
         cam_shake.enable    = sc.general.camerashake;
         cam_shake.amplitude = sc.general.camerashakeamplitude;
         cam_shake.speed     = sc.general.camerashakespeed;
@@ -1306,8 +1306,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         context.scene->renderTargets[std::string(PUPPET_MASK_RT)] = rt;
     }
 
-    SceneMaterial     material;
-    WPShaderValueData svData;
+    SceneMaterial        material;
+    SceneUniformNodeData svData;
     svData.puppet_layer = image_puppet_layer;
 
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
@@ -1480,9 +1480,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 mask_wpmat.textures[1] = mb.mat_json;
                 WPMdlParser::AddPuppetMatInfo(mask_wpmat, *puppet);
 
-                SceneMaterial     mask_scene_mat;
-                WPShaderValueData mask_svData;
-                WPShaderInfo      mask_shaderInfo;
+                SceneMaterial        mask_scene_mat;
+                SceneUniformNodeData mask_svData;
+                WPShaderInfo         mask_shaderInfo;
                 mask_shaderInfo.baseConstSvs = baseConstSvs;
                 if (! LoadMaterial(vfs,
                                    mask_wpmat,
@@ -1510,9 +1510,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 clip_wpmat.textures[8] = std::string(PUPPET_MASK_RT);
                 WPMdlParser::AddPuppetMatInfo(clip_wpmat, *puppet);
 
-                SceneMaterial     clip_scene_mat;
-                WPShaderValueData clip_svData;
-                WPShaderInfo      clip_shaderInfo;
+                SceneMaterial        clip_scene_mat;
+                SceneUniformNodeData clip_svData;
+                WPShaderInfo         clip_shaderInfo;
                 clip_shaderInfo.baseConstSvs = baseConstSvs;
                 if (! LoadMaterial(vfs,
                                    clip_wpmat,
@@ -1696,8 +1696,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
                 wpEffShaderInfo.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
-                SceneMaterial     material;
-                WPShaderValueData svData;
+                SceneMaterial        material;
+                SceneUniformNodeData svData;
                 if (! LoadMaterial(vfs,
                                    wpmat,
                                    context.scene.get(),
@@ -1833,8 +1833,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
         spNode->SetCamera("global_perspective");
     }
 
-    SceneMaterial     material;
-    WPShaderValueData svData;
+    SceneMaterial        material;
+    SceneUniformNodeData svData;
 
     if (! is_child) {
         svData.parallaxDepth = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
@@ -2088,7 +2088,7 @@ void ParseModelObj(ParseContext& context, wpscene::WPModelObject& model_obj) {
 
     auto mesh = std::make_shared<SceneMesh>();
 
-    WPShaderValueData svData;
+    SceneUniformNodeData svData;
     svData.parallaxDepth           = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
     svData.use_camera_eye_position = true;
     if (mdl.puppet && ! mdl.puppet->bones.empty()) {
@@ -2392,7 +2392,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
     // inside ppong_a, but the compose pass samples a fixed UV window, so the
     // shift would manifest as the text appearing to drift in the wrong frame
     // of reference. Parallax goes on compose_node below (world-space quad).
-    WPShaderValueData svData;
+    SceneUniformNodeData svData;
     context.shader_updater->SetNodeData(sp_node.get(), svData);
 
     // --- per-layer compose -------------------------------------------------
@@ -2471,9 +2471,9 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
         else
             pt_mat.textures[0] = ppong_a;
 
-        SceneMaterial     compose_mat;
-        WPShaderValueData compose_sv;
-        WPShaderInfo      compose_si;
+        SceneMaterial        compose_mat;
+        SceneUniformNodeData compose_sv;
+        WPShaderInfo         compose_si;
         compose_si.baseConstSvs = context.global_base_uniforms;
         // genericimage3 multiplies samples by g_Color4 / g_UserAlpha /
         // g_Brightness — they default to zero when uninitialised, blacking
@@ -2900,9 +2900,9 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::W
         WPShaderInfo wpShaderInfo;
         wpShaderInfo.baseConstSvs = context.global_base_uniforms;
 
-        auto              pp_node = std::make_shared<SceneNode>();
-        SceneMaterial     material;
-        WPShaderValueData svData;
+        auto                 pp_node = std::make_shared<SceneNode>();
+        SceneMaterial        material;
+        SceneUniformNodeData svData;
         if (! LoadMaterial(vfs, wpmat, &scene, pp_node.get(), &material, &svData, &wpShaderInfo)) {
             rstd_error("bloom: LoadMaterial failed: {}", mat_relpath);
             return false;

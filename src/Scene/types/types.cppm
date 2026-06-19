@@ -240,12 +240,10 @@ struct ImageData {
     ImageDataPtr data {};
     /* Video-tex back-channel: when ImageHeader::type == VIDEO, the
      * parser stashes the underlying pkg stream's lifetime here (opaque
-     * shared_ptr<void> — concrete type is owe::fs::IBinaryStream, owned
-     * by wescene.fs, which can't be referenced from this module without
-     * inducing a base→types→base build cycle). Consumers in the Vulkan
-     * layer static_pointer_cast it back. `data` stays empty in that
-     * case; the renderer side wraps {stream, offset, size} into an
-     * AVIOContext for libavformat. */
+     * shared_ptr<void> — concrete type is owe::fs::IBinaryStream).
+     * Consumers in the Vulkan layer static_pointer_cast it back. `data`
+     * stays empty in that case; the renderer side wraps {stream, offset,
+     * size} into an AVIOContext for libavformat. */
     std::shared_ptr<void> videoStream;
     isize                 videoOffset { 0 };
     isize                 videoSize { 0 };

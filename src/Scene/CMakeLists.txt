@@ -23,8 +23,7 @@ add_library(owe-base STATIC
   Utils/Sha.cpp
   Utils/FpsCounter.cpp
   Utils/Algorism.cpp
-  WPJson.cpp
-  WPPkgFs.cpp
+  Pkg/PkgFs.cpp
   Timer/ThreadTimer.cpp
   Timer/FrameTimer.cpp
   Scene/Scene.cpp
@@ -41,16 +40,13 @@ add_library(owe-base STATIC
 target_sources(owe-base
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          SpecTexs.cppm
-         WPCommon.cppm
-         WPJson.cppm
-         WPPkgFs.cppm
-         nlohmann_json.cppm
+         Pkg/AssetVersion.cppm
+         Pkg/PkgFs.cppm
          Utils/Utils.cppm
          MessageLoop/MessageLoop.cppm
          Timer/Timer.cppm
          Timer/ThreadTimer.cppm
          Timer/FrameTimer.cppm
-         Fs/Fs.cppm
          Lighting/Lighting.cppm
          Scene/Scene.cppm)
 target_link_libraries(owe-base
@@ -83,10 +79,10 @@ set_property(TARGET owe-script PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 
 # ---------------------------------------------------------------------------
-# owe-parse (Parse/* + Puppet + ShaderValueUpdater)
+# owe-parse (Parse/* + Puppet + SceneUniformUpdater)
 # ---------------------------------------------------------------------------
 add_library(owe-parse STATIC
-  WPShaderValueUpdater.cpp
+  SceneUniformUpdater.cpp
   Parse/WPAnimation.cpp
   Parse/WPImageObject.cpp
   Parse/WPLightObject.cpp
@@ -104,7 +100,7 @@ add_library(owe-parse STATIC
   Text/Text.cpp)
 target_sources(owe-parse
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-         WPShaderValueUpdater.cppm
+         SceneUniformUpdater.cppm
          Parse/Parse.cppm
          Parse/WPAnimation.cppm
          Parse/WPImageObject.cppm

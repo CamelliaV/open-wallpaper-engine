@@ -1,13 +1,12 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Utils/String.h"
+#include <type_traits>
 
 module wescene.json;
 import rstd.log;
 import rstd.cppstd;
 import nlohmann.json;
-import wescene.utils;
 
 namespace owe
 {
@@ -26,10 +25,80 @@ bool ParseJson(std::string_view source, nlohmann::json& result, std::source_loca
     return true;
 }
 
+namespace
+{
+
+template<typename>
+struct JsonArrayTarget {};
+
 template<typename T>
-inline bool _GetJsonValue(const nlohmann::json&                  json,
-                          typename utils::is_std_array<T>::type& value) {
-    using Tv          = typename T::value_type;
+struct JsonArrayTarget<std::vector<T>> {
+    using type       = std::vector<T>;
+    using value_type = T;
+};
+
+template<typename T, std::size_t N>
+struct JsonArrayTarget<std::array<T, N>> {
+    using type       = std::array<T, N>;
+    using value_type = T;
+};
+
+struct WrongArraySizeExp : public std::exception {
+    const char* what() const noexcept override { return "Wrong size of the array"; }
+};
+
+template<typename T>
+T ParseNumber(std::string_view value) {
+    std::string text { value };
+    if constexpr (std::is_same_v<T, float>) {
+        return std::stof(text);
+    } else if constexpr (std::is_same_v<T, double>) {
+        return std::stod(text);
+    } else if constexpr (std::is_signed_v<T>) {
+        return static_cast<T>(std::stoll(text));
+    } else {
+        return static_cast<T>(std::stoull(text));
+    }
+}
+
+std::vector<std::string_view> Split(std::string_view value, char delimiter) {
+    std::vector<std::string_view> result;
+    while (true) {
+        std::size_t pos = value.find(delimiter);
+        if (pos == std::string_view::npos) {
+            result.push_back(value);
+            return result;
+        }
+        result.push_back(value.substr(0, pos));
+        value.remove_prefix(pos + 1);
+    }
+}
+
+template<typename T>
+bool ConvertArray(std::string_view value, std::vector<T>& target) {
+    const auto parts = Split(value, ' ');
+    if (target.size() < parts.size()) target.resize(parts.size());
+    std::transform(parts.begin(), parts.end(), target.begin(), [](std::string_view part) {
+        return ParseNumber<T>(part);
+    });
+    return true;
+}
+
+template<typename T, std::size_t N>
+bool ConvertArray(std::string_view value, std::array<T, N>& target) {
+    const auto parts = Split(value, ' ');
+    if (parts.size() != N) throw WrongArraySizeExp();
+    std::transform(parts.begin(), parts.end(), target.begin(), [](std::string_view part) {
+        return ParseNumber<T>(part);
+    });
+    return true;
+}
+
+} // namespace
+
+template<typename T>
+inline bool _GetJsonValue(const nlohmann::json& json, typename JsonArrayTarget<T>::type& value) {
+    using Tv          = typename JsonArrayTarget<T>::value_type;
     const auto* pjson = &json;
     if (json.contains("value")) pjson = &json.at("value");
     const auto& njson = *pjson;
@@ -39,7 +108,7 @@ inline bool _GetJsonValue(const nlohmann::json&                  json,
     } else {
         std::string strvalue;
         strvalue = njson.get<std::string>();
-        return utils::StrToArray::Convert(strvalue, value);
+        return ConvertArray(strvalue, value);
     }
 }
 
@@ -82,7 +151,7 @@ inline bool _GetJsonValue(const nlohmann::json& json, T& value, const char* name
                    std::string_view(loc.function_name()),
                    std::string_view(loc.file_name()),
                    loc.line());
-    } catch (const utils::StrToArray::WrongSizeExp& e) {
+    } catch (const WrongArraySizeExp& e) {
         rstd_error("{} {} at {} {}:{}",
                    std::string_view(e.what()),
                    nameinfo,
