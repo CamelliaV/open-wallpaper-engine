@@ -2,8 +2,8 @@
 //
 // One TEST_P per observed PKGV version. For each, every workshop with
 // that version is re-opened, scene.json read via VFS, and parsed via the
-// canonical version-bearing WPScene::FromJson(json, pkg_version) path.
-// Establishes the baseline for the upcoming WPScene refactor that splits
+// canonical version-bearing SceneMetadata::FromJson(json, pkg_version) path.
+// Establishes the baseline for the upcoming SceneMetadata refactor that splits
 // FromJson by version: a regression here means the refactor changed
 // what was previously parseable.
 //

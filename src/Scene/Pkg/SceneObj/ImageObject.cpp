@@ -2,21 +2,21 @@ module;
 
 #include <rstd/macro.hpp>
 
-module wescene.parse;
+module wescene.pkg.scene_obj;
 import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
 
 using namespace owe::wpscene;
 
-bool WPEffectCommand::FromJson(const nlohmann::json& json) {
+bool EffectCommand::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "command", command);
     owe::GetJsonValue(json, "target", target);
     owe::GetJsonValue(json, "source", source);
     return true;
 }
 
-bool WPObjectInstance::FromJson(const nlohmann::json& json) {
+bool ObjectInstance::FromJson(const nlohmann::json& json) {
     present = true;
     owe::GetJsonValue(json, "id", id, false);
     if (json.contains("combos") && json.at("combos").is_object()) {
@@ -43,7 +43,7 @@ bool WPObjectInstance::FromJson(const nlohmann::json& json) {
     return true;
 }
 
-bool WPEffectFbo::FromJson(const nlohmann::json& json) {
+bool EffectFbo::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "name", name);
     owe::GetJsonValue(json, "format", format);
 
@@ -56,11 +56,11 @@ bool WPEffectFbo::FromJson(const nlohmann::json& json) {
 }
 
 // Define and initialize the static property
-const std::unordered_set<std::string> WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS = {
+const std::unordered_set<std::string> ImageEffect::BLACKLISTED_WORKSHOP_EFFECTS = {
     "2799421411" // Audio Responsive Oscilloscope   --  causes vulcan deadlock
 };
 
-bool WPImageEffect::IsEffectBlacklisted(const std::string& filePath) {
+bool ImageEffect::IsEffectBlacklisted(const std::string& filePath) {
     std::filesystem::path path(filePath);
     // Check if the path has a parent path
     if (path.has_parent_path()) {
@@ -68,18 +68,18 @@ bool WPImageEffect::IsEffectBlacklisted(const std::string& filePath) {
         if (path.has_parent_path()) {
             std::string effectId   = path.parent_path().filename().string();
             std::string parentPath = path.parent_path().string();
-            return WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.find(effectId) !=
-                   WPImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.end();
+            return ImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.find(effectId) !=
+                   ImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.end();
         }
     }
     return false;
 }
 
-bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+bool ImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
 
-bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
+bool ImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     std::string filePath;
     owe::GetJsonValue(json, "file", filePath);
     owe::GetJsonValue(json, "visible", visible, false);
@@ -102,7 +102,7 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
         }
         int32_t i = 0;
         for (const auto& jP : jPasses) {
-            WPMaterialPass pass;
+            MaterialPass pass;
             pass.FromJson(jP);
             passes[i++].Update(pass);
         }
@@ -110,12 +110,12 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     return true;
 }
 
-bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
+bool ImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
     owe::GetJsonValue(json, "version", version, false);
     owe::GetJsonValue(json, "name", name);
     if (json.contains("fbos")) {
         for (auto& jF : json.at("fbos")) {
-            WPEffectFbo fbo;
+            EffectFbo fbo;
             fbo.FromJson(jF);
             fbos.push_back(std::move(fbo));
         }
@@ -126,7 +126,7 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
         for (const auto& jP : jEPasses) {
             if (! jP.contains("material")) {
                 if (jP.contains("command")) {
-                    WPEffectCommand cmd;
+                    EffectCommand cmd;
                     cmd.FromJson(jP);
                     cmd.afterpos = passes.size();
                     commands.push_back(cmd);
@@ -139,10 +139,10 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
             owe::GetJsonValue(jP, "material", matPath);
             nlohmann::json jMat;
             if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) return false;
-            WPMaterial material;
+            Material material;
             material.FromJson(jMat);
             materials.push_back(std::move(material));
-            WPMaterialPass pass;
+            MaterialPass pass;
             pass.FromJson(jP);
             passes.push_back(std::move(pass));
             if (jP.contains("compose")) owe::GetJsonValue(jP, "compose", compose);
@@ -152,7 +152,7 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
                 rstd_error("effect compose option error");
                 return false;
             }
-            WPEffectFbo fbo;
+            EffectFbo fbo;
             {
                 fbo.name  = "_rt_FullCompoBuffer1";
                 fbo.scale = 1;
@@ -169,11 +169,11 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
     return true;
 }
 
-bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
 
-bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
+bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     owe::GetJsonValue(json, "image", image);
     owe::GetJsonValue(json, "visible", visible, false);
     if (json.contains("visible") && json.at("visible").is_object()) {
@@ -228,7 +228,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVers
     }
     if (json.contains("effects")) {
         for (const auto& jE : json.at("effects")) {
-            WPImageEffect wpeff;
+            ImageEffect wpeff;
             wpeff.FromJson(jE, vfs);
             effects.push_back(std::move(wpeff));
         }

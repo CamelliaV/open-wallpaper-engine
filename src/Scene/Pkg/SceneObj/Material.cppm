@@ -2,10 +2,10 @@ module;
 
 #include <nlohmann/json.hpp>
 
-export module wescene.parse:wp_material;
+export module wescene.pkg.scene_obj:material;
 import rstd.cppstd;
 import wescene.fs;
-import :wp_scene;
+import :scene_document;
 
 export namespace owe
 
@@ -13,17 +13,17 @@ export namespace owe
 namespace wpscene
 {
 
-class WPMaterialPassBindItem {
+class MaterialPassBindItem {
 public:
     bool        FromJson(const nlohmann::json&);
     std::string name;
     int32_t     index;
 };
 
-class WPMaterialPass {
+class MaterialPass {
 public:
     bool                                                FromJson(const nlohmann::json&);
-    void                                                Update(const WPMaterialPass&);
+    void                                                Update(const MaterialPass&);
     std::uint32_t                                       id { 0 }; // pass id (PKGV0001+)
     std::vector<std::string>                            textures;
     std::vector<nlohmann::json>                         usertextures; // PKGV0018+; polymorphic
@@ -38,14 +38,14 @@ public:
     // Legacy `usershadervalues`: project.json key -> shader material key.
     std::unordered_map<std::string, std::string> user_shader_values;
     std::string                                  target;
-    std::vector<WPMaterialPassBindItem>          bind;
+    std::vector<MaterialPassBindItem>            bind;
 };
 
-class WPMaterial {
+class Material {
 public:
     bool                     FromJson(const nlohmann::json&);               // legacy
     bool                     FromJson(const nlohmann::json&, SceneVersion); // canonical
-    void                     MergePass(const WPMaterialPass&);
+    void                     MergePass(const MaterialPass&);
     std::string              blending { "translucent" };
     std::string              cullmode { "nocull" };
     std::string              shader;
@@ -60,10 +60,10 @@ public:
     bool use_puppet { false };
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterialPassBindItem, name, index);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterialPass, bind, target, textures, combos,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MaterialPassBindItem, name, index);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MaterialPass, bind, target, textures, combos,
                                    constantshadervalues);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterial, blending, shader, textures, combos,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Material, blending, shader, textures, combos,
                                    constantshadervalues);
 } // namespace wpscene
 } // namespace owe

@@ -44,7 +44,7 @@ struct Options {
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
     uint32_t                                        msaa_samples { 1 };
     std::unordered_map<std::string, nlohmann::json> initial_user_properties;
-    std::shared_ptr<owe::wpscene::WPSceneDocument>  initial_scene_document;
+    std::shared_ptr<owe::wpscene::SceneDocument>    initial_scene_document;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -395,7 +395,7 @@ int main(int argc, char** argv) {
                 auto scene_doc = owe::wpscene::LoadSceneDocumentFromSource(opts.initial_scene);
                 if (scene_doc) {
                     opts.initial_scene_document =
-                        std::make_shared<owe::wpscene::WPSceneDocument>(std::move(*scene_doc));
+                        std::make_shared<owe::wpscene::SceneDocument>(std::move(*scene_doc));
                 }
             }
             if (opts.initial_scene_document &&

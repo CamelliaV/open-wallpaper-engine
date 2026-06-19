@@ -2,15 +2,15 @@ module;
 
 #include <nlohmann/json.hpp>
 
-export module wescene.parse:wp_particle_object;
+export module wescene.pkg.scene_obj:particle_object;
 import wescene.core;
 import rstd.cppstd;
 import wescene.utils;
 import wescene.fs;
 
-export import :wp_animation;
-export import :wp_material;
-import :wp_scene;
+export import :field_binding;
+export import :material;
+import :scene_document;
 
 export namespace owe
 
@@ -108,7 +108,7 @@ public:
     std::vector<ParticleRender>       renderers;
     std::vector<ParticleControlpoint> controlpoints;
 
-    WPMaterial material;
+    Material material;
 
     std::vector<ParticleChild> children;
 
@@ -174,7 +174,7 @@ public:
     std::unordered_map<std::string, std::string> bindings;
 };
 
-class WPParticleObject {
+class ParticleObject {
 public:
     bool                     FromJson(const nlohmann::json&, fs::VFS&);               // legacy
     bool                     FromJson(const nlohmann::json&, fs::VFS&, SceneVersion); // canonical
@@ -198,7 +198,7 @@ public:
     nlohmann::json            instance;
     nlohmann::json            particlesrc;                       // PKGV0001+; always null in corpus
     std::array<float, 3>      controlpoint { 0.0f, 0.0f, 0.0f }; // PKGV0019+
-    WPFieldBindings           field_bindings;
+    FieldBindings             field_bindings;
 
     // `visible:{user:"<key>",value:bool}` -> key; empty for plain literals.
     std::string visible_user_key;
@@ -207,7 +207,7 @@ public:
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Emitter, name, distancemax, distancemin, rate, directions);
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Particle, initializers, operators, emitters);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPParticleObject, name, origin, angles, scale, visible, particle,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParticleObject, name, origin, angles, scale, visible, particle,
                                    particleObj);
 } // namespace wpscene
 } // namespace owe

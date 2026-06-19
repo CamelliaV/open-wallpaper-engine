@@ -1,13 +1,13 @@
 module;
 
-module wescene.parse;
+module wescene.pkg.scene_obj;
 import nlohmann.json;
 import rstd.cppstd;
 
 namespace owe::wpscene
 {
 
-bool ParseAnimKeyframeTangent(const nlohmann::json& json, WPAnimKeyframeTangent& out) {
+bool ParseAnimKeyframeTangent(const nlohmann::json& json, AnimKeyframeTangent& out) {
     if (! json.is_object()) return false;
     owe::GetJsonValue(json, "enabled", out.enabled, false);
     owe::GetJsonValue(json, "x", out.x, false);
@@ -16,7 +16,7 @@ bool ParseAnimKeyframeTangent(const nlohmann::json& json, WPAnimKeyframeTangent&
     return true;
 }
 
-bool ParseAnimKeyframe(const nlohmann::json& json, WPAnimKeyframe& out) {
+bool ParseAnimKeyframe(const nlohmann::json& json, AnimKeyframe& out) {
     if (! json.is_object()) return false;
     owe::GetJsonValue(json, "frame", out.frame, false);
     owe::GetJsonValue(json, "value", out.value, false);
@@ -27,17 +27,17 @@ bool ParseAnimKeyframe(const nlohmann::json& json, WPAnimKeyframe& out) {
     return true;
 }
 
-bool ParseAnimAxis(const nlohmann::json& json, std::vector<WPAnimKeyframe>& out) {
+bool ParseAnimAxis(const nlohmann::json& json, std::vector<AnimKeyframe>& out) {
     if (! json.is_array()) return false;
     out.reserve(json.size());
     for (const auto& jK : json) {
-        WPAnimKeyframe k;
+        AnimKeyframe k;
         if (ParseAnimKeyframe(jK, k)) out.push_back(std::move(k));
     }
     return true;
 }
 
-bool ParseAnimOptions(const nlohmann::json& json, WPAnimOptions& out) {
+bool ParseAnimOptions(const nlohmann::json& json, AnimOptions& out) {
     if (! json.is_object()) return false;
     owe::GetJsonValue(json, "fps", out.fps, false);
     owe::GetJsonValue(json, "length", out.length, false);
@@ -52,7 +52,7 @@ bool ParseAnimOptions(const nlohmann::json& json, WPAnimOptions& out) {
     return true;
 }
 
-bool ParseAnimCurve(const nlohmann::json& json, WPAnimCurve& out) {
+bool ParseAnimCurve(const nlohmann::json& json, AnimCurve& out) {
     if (! json.is_object()) return false;
     if (json.contains("c0")) ParseAnimAxis(json.at("c0"), out.c0);
     if (json.contains("c1")) ParseAnimAxis(json.at("c1"), out.c1);
@@ -62,14 +62,14 @@ bool ParseAnimCurve(const nlohmann::json& json, WPAnimCurve& out) {
     return true;
 }
 
-std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindings& out) {
+std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, FieldBindings& out) {
     if (! obj_json.is_object()) return 0;
     std::size_t n = 0;
     for (const auto& el : obj_json.items()) {
         const auto& field_value = el.value();
         if (! field_value.is_object()) continue;
         if (field_value.contains("animation")) {
-            WPAnimCurve curve;
+            AnimCurve curve;
             if (ParseAnimCurve(field_value.at("animation"), curve)) {
                 out.animations[el.key()] = std::move(curve);
                 ++n;
@@ -80,7 +80,7 @@ std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindin
             ++n;
         }
         if (field_value.contains("script") && field_value.at("script").is_string()) {
-            WPScriptBinding sb;
+            ScriptBinding sb;
             sb.source = field_value.at("script").get<std::string>();
             if (field_value.contains("scriptproperties"))
                 sb.properties = field_value.at("scriptproperties");

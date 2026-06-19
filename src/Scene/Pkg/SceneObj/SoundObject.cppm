@@ -1,13 +1,13 @@
 module;
 
-export module wescene.parse:wp_sound_object;
+export module wescene.pkg.scene_obj:sound_object;
 import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;
 
 import wescene.json;
-export import :wp_animation;
-import :wp_scene;
+export import :field_binding;
+import :scene_document;
 
 export namespace owe
 
@@ -16,7 +16,7 @@ export namespace owe
 namespace wpscene
 {
 
-struct WPSoundObject {
+struct SoundObject {
     std::int32_t             id { 0 };
     std::string              playbackmode { "loop" };
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
@@ -36,7 +36,7 @@ struct WPSoundObject {
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json            instance;
-    WPFieldBindings           field_bindings;
+    FieldBindings             field_bindings;
 
     // Sound-kind specifics.
     bool        startsilent { false };    // PKGV0002+

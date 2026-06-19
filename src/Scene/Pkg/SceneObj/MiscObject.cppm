@@ -1,11 +1,11 @@
 module;
 
-export module wescene.parse:wp_misc_object;
+export module wescene.pkg.scene_obj:misc_object;
 import rstd.cppstd;
 import wescene.fs;
 import wescene.json;
-export import :wp_animation;
-import :wp_scene;
+export import :field_binding;
+import :scene_document;
 
 // Object kinds beyond image/light/particle/sound: text overlays, .mdl
 // model attachments, and editor camera markers. These exist only at the
@@ -21,8 +21,8 @@ export namespace owe::wpscene
 // string, or an object (e.g. `{"script": "..."}` for property-bound
 // text). Both are captured verbatim as nlohmann::json so future consumers
 // can decode either path without re-parsing.
-struct WPTextObject {
-    // Common positional/metadata (mirrors WPImageObject prefix).
+struct TextObject {
+    // Common positional/metadata (mirrors ImageObject prefix).
     std::int32_t         id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
@@ -37,7 +37,7 @@ struct WPTextObject {
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json            instance;
-    WPFieldBindings           field_bindings;
+    FieldBindings             field_bindings;
 
     // Text-specific.
     nlohmann::json text; // string | {script: ...} | {value: ...}
@@ -132,7 +132,7 @@ struct WPTextObject {
 // 3D model attachment (PKGV0001+). Discriminator: top-level `model` is a
 // non-null string. WE links to a `.mdl` file under /assets and optionally
 // names a sub-attachment to overlay.
-struct WPModelObject {
+struct ModelObject {
     std::int32_t         id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
@@ -147,7 +147,7 @@ struct WPModelObject {
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json            instance;
-    WPFieldBindings           field_bindings;
+    FieldBindings             field_bindings;
 
     std::string model;
     std::string attachment;
@@ -189,7 +189,7 @@ struct WPModelObject {
 // Editor camera marker (PKGV0020+). Discriminator: top-level `camera` is
 // a non-null string. Carries camera animation paths and per-camera
 // projection overrides.
-struct WPCameraObject {
+struct CameraObject {
     std::int32_t         id { 0 };
     std::string          name;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
@@ -204,7 +204,7 @@ struct WPCameraObject {
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json            instance;
-    WPFieldBindings           field_bindings;
+    FieldBindings             field_bindings;
 
     std::string camera; // camera name reference
     std::string path;   // animation path .json

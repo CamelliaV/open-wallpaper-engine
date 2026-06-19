@@ -80,7 +80,7 @@ public:
     // Named locator/anchor parsed from the MDAT section between MDLS and MDLA.
     // 64-byte payload is a column-major 4x4 affine transform in the anchored
     // bone's local space; `unk` is the bone index this attachment is wired to.
-    // Consumed by WPImageObject `attachment = "<name>"` to position child
+    // Consumed by ImageObject `attachment = "<name>"` to position child
     // images at named bone offsets (e.g. bangs under a head bone).
     struct Attachment {
         uint16_t        bone_index { 0 }; // hexpat MDAT Attachment.unk

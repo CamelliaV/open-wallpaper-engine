@@ -2,7 +2,7 @@ module;
 
 #include <rstd/macro.hpp>
 
-module wescene.parse;
+module wescene.pkg.scene_obj;
 import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
@@ -25,13 +25,13 @@ void LoadUserShaderValues(const nlohmann::json&                         json,
 
 } // namespace
 
-bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
+bool MaterialPassBindItem::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "name", name);
     owe::GetJsonValue(json, "index", index);
     return true;
 }
 
-void WPMaterialPass::Update(const WPMaterialPass& p) {
+void MaterialPass::Update(const MaterialPass& p) {
     int32_t i = -1;
     for (const auto& el : p.textures) {
         i++;
@@ -54,7 +54,7 @@ void WPMaterialPass::Update(const WPMaterialPass& p) {
     }
 }
 
-void WPMaterial::MergePass(const WPMaterialPass& p) {
+void Material::MergePass(const MaterialPass& p) {
     int32_t i = -1;
     for (const auto& el : p.textures) {
         i++;
@@ -77,7 +77,7 @@ void WPMaterial::MergePass(const WPMaterialPass& p) {
     }
 }
 
-bool WPMaterialPass::FromJson(const nlohmann::json& json) {
+bool MaterialPass::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "id", id, false);
     if (json.contains("textures")) {
         for (const auto& jT : json.at("textures")) {
@@ -120,7 +120,7 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "target", target, false);
     if (json.contains("bind")) {
         for (const auto& jB : json.at("bind")) {
-            WPMaterialPassBindItem bindItem;
+            MaterialPassBindItem bindItem;
             bindItem.FromJson(jB);
             bind.push_back(bindItem);
         }
@@ -128,11 +128,9 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
     return true;
 }
 
-bool WPMaterial::FromJson(const nlohmann::json& json) {
-    return FromJson(json, kSceneVersionUnknown);
-}
+bool Material::FromJson(const nlohmann::json& json) { return FromJson(json, kSceneVersionUnknown); }
 
-bool WPMaterial::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
+bool Material::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
     if (! json.contains("passes") || json.at("passes").size() == 0) {
         rstd_error("material no data");
         return false;

@@ -28,7 +28,7 @@ struct SceneWallpaperConfig {
     std::string                                     source_pkg_path;
     std::string                                     assets_dir;
     std::string                                     cache_dir;
-    std::shared_ptr<wpscene::WPSceneDocument>       scene_document;
+    std::shared_ptr<wpscene::SceneDocument>         scene_document;
     std::unordered_map<std::string, nlohmann::json> user_properties;
     uint32_t                                        fps { 30 };
     float                                           volume { 1.0f };

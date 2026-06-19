@@ -40,6 +40,7 @@ add_library(owe-base STATIC
 target_sources(owe-base
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          SpecTexs.cppm
+         Pkg/mod.cppm
          Pkg/AssetVersion.cppm
          Pkg/PkgFs.cppm
          Utils/Utils.cppm
@@ -83,15 +84,15 @@ set_property(TARGET owe-script PROPERTY CXX_SCAN_FOR_MODULES ON)
 # ---------------------------------------------------------------------------
 add_library(owe-parse STATIC
   SceneUniformUpdater.cpp
-  Parse/WPAnimation.cpp
-  Parse/WPImageObject.cpp
-  Parse/WPLightObject.cpp
-  Parse/WPMaterial.cpp
+  Pkg/SceneObj/FieldBinding.cpp
+  Pkg/SceneObj/ImageObject.cpp
+  Pkg/SceneObj/LightObject.cpp
+  Pkg/SceneObj/Material.cpp
   Parse/WPMdlParser.cpp
-  Parse/WPParticleObject.cpp
+  Pkg/SceneObj/ParticleObject.cpp
   Parse/WPParticleParser.cpp
   Parse/WPPuppet.cpp
-  Parse/WPScene.cpp
+  Pkg/SceneObj/SceneDocument.cpp
   Parse/WPSceneParser.cpp
   Parse/WPShaderParser.cpp
   Parse/WPShaderAnnot.cpp
@@ -102,21 +103,22 @@ target_sources(owe-parse
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          SceneUniformUpdater.cppm
          Parse/Parse.cppm
-         Parse/WPAnimation.cppm
-         Parse/WPImageObject.cppm
-         Parse/WPLightObject.cppm
-         Parse/WPMaterial.cppm
+         Pkg/SceneObj/mod.cppm
+         Pkg/SceneObj/FieldBinding.cppm
+         Pkg/SceneObj/ImageObject.cppm
+         Pkg/SceneObj/LightObject.cppm
+         Pkg/SceneObj/Material.cppm
          Parse/WPMdlParser.cppm
-         Parse/WPMiscObject.cppm
-         Parse/WPParticleObject.cppm
+         Pkg/SceneObj/MiscObject.cppm
+         Pkg/SceneObj/ParticleObject.cppm
          Parse/WPParticleParser.cppm
          Parse/WPPuppet.cppm
-         Parse/WPScene.cppm
+         Pkg/SceneObj/SceneDocument.cppm
          Parse/SceneStages.cppm
          Parse/WPSceneParser.cppm
          Parse/ShaderLex.cppm
          Parse/WPShaderParser.cppm
-         Parse/WPSoundObject.cppm
+         Pkg/SceneObj/SoundObject.cppm
          Parse/WPSoundParser.cppm
          Parse/WPTexImageParser.cppm
          Parse/WPUniform.cppm

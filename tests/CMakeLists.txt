@@ -59,7 +59,7 @@ add_executable(wescene-test wescene_test_main.cpp)
 target_link_libraries(wescene-test PRIVATE wescene_test_lib argparse::argparse)
 set_target_properties(wescene-test PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
-# Regression net for the version-aware WPScene::FromJson path.
+# Regression net for the version-aware SceneMetadata::FromJson path.
 # Stays decoupled from Corpus so unrelated .mdl/.tex parser bugs cannot
 # mask scene.json parse regressions.
 add_executable(scene_parse_tests scene_parse_tests.cpp)

@@ -2,10 +2,10 @@ module;
 
 #include <nlohmann/json.hpp>
 
-export module wescene.parse:wp_scene;
+export module wescene.pkg.scene_obj:scene_document;
 import rstd.cppstd;
 import wescene.fs;
-import :wp_animation;
+import :field_binding;
 
 export namespace owe
 
@@ -42,7 +42,7 @@ public:
     bool    auto_ { false };
 };
 
-class WPSceneCamera {
+class SceneCamera {
 public:
     bool                     FromJson(const nlohmann::json&);
     std::array<float, 3>     center { 0.0f, 0.0f, 0.0f };
@@ -53,7 +53,7 @@ public:
 
 // PKGV0021+ — global maximum-light counts the runtime should be sized for
 // (per WE editor configuration). All entries default to 0 if absent.
-class WPSceneLightConfig {
+class SceneLightConfig {
 public:
     bool          FromJson(const nlohmann::json&);
     std::uint32_t directional { 0 };
@@ -64,7 +64,7 @@ public:
     std::uint32_t spotshadow { 0 };
 };
 
-class WPSceneGeneral {
+class SceneGeneral {
 public:
     bool FromJson(const nlohmann::json&);               // legacy
     bool FromJson(const nlohmann::json&, SceneVersion); // canonical
@@ -96,7 +96,7 @@ public:
     float                                        camerashakeamplitude { 0.0f };
     float                                        camerashakespeed { 0.0f };
     float                                        camerashakeroughness { 0.0f };
-    WPFieldBindings                              field_bindings;
+    FieldBindings                                field_bindings;
     std::unordered_map<std::string, std::string> user_bindings;
 
     // ---- PKGV0010+ ------------------------------------------------------
@@ -137,23 +137,21 @@ public:
     float                fogheightenddensity { 0.0f };
 
     // PKGV0021+ — global per-kind maximum light counts.
-    WPSceneLightConfig lightconfig;
+    SceneLightConfig lightconfig;
 };
 
-class WPSceneMetadata {
+class SceneMetadata {
 public:
     bool             FromJson(const nlohmann::json&); // legacy: defaults to unknown version
     bool             FromJson(const nlohmann::json&, SceneVersion); // canonical entry
     SceneVersion     pkg_version { kSceneVersionUnknown };
     SceneJsonVersion scene_json_version { kSceneJsonVersionDefault };
-    WPSceneCamera    camera;
-    WPSceneGeneral   general;
+    SceneCamera      camera;
+    SceneGeneral     general;
     std::optional<std::array<uint32_t, 2>> canvas_extent;
 };
 
-using WPScene = WPSceneMetadata;
-
-enum class WPSceneObjectKind
+enum class SceneObjectKind
 {
     Unknown,
     Container,
@@ -166,9 +164,9 @@ enum class WPSceneObjectKind
     Camera,
 };
 
-class WPSceneObjectMetadata {
+class SceneObjectMetadata {
 public:
-    WPSceneObjectKind                   kind { WPSceneObjectKind::Unknown };
+    SceneObjectKind                     kind { SceneObjectKind::Unknown };
     std::size_t                         raw_index { 0 };
     std::int32_t                        id { 0 };
     std::string                         name;
@@ -177,21 +175,21 @@ public:
     std::optional<std::array<float, 2>> size;
 };
 
-class WPSceneDocument {
+class SceneDocument {
 public:
-    nlohmann::json                     root_json;
-    WPSceneMetadata                    metadata;
-    std::vector<WPSceneObjectMetadata> objects_metadata;
+    nlohmann::json                   root_json;
+    SceneMetadata                    metadata;
+    std::vector<SceneObjectMetadata> objects_metadata;
 };
 
-std::optional<WPSceneDocument> ParseSceneDocumentJson(std::string_view, SceneVersion);
-std::optional<WPSceneDocument> LoadSceneDocumentFromVfs(fs::VFS&, std::string_view, SceneVersion);
-std::optional<WPSceneDocument> LoadSceneDocumentFromPkg(std::string_view);
-std::optional<WPSceneDocument> LoadSceneDocumentFromSource(std::string_view);
+std::optional<SceneDocument> ParseSceneDocumentJson(std::string_view, SceneVersion);
+std::optional<SceneDocument> LoadSceneDocumentFromVfs(fs::VFS&, std::string_view, SceneVersion);
+std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view);
+std::optional<SceneDocument> LoadSceneDocumentFromSource(std::string_view);
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Orthogonalprojection, width, height);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneCamera, center, eye, up);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneGeneral, clearcolor, orthogonalprojection, zoom);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPSceneMetadata, camera, general);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneCamera, center, eye, up);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneGeneral, clearcolor, orthogonalprojection, zoom);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneMetadata, camera, general);
 } // namespace wpscene
 } // namespace owe

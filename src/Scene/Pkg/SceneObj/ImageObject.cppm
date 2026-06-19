@@ -2,15 +2,15 @@ module;
 
 #include <nlohmann/json.hpp>
 
-export module wescene.parse:wp_image_object;
+export module wescene.pkg.scene_obj:image_object;
 import wescene.core;
 import rstd.cppstd;
 import wescene.fs;
 
-export import :wp_animation;
-export import :wp_material;
+export import :field_binding;
+export import :material;
 export import wescene.puppet;
-import :wp_scene;
+import :scene_document;
 
 export namespace owe
 
@@ -19,7 +19,7 @@ export namespace owe
 namespace wpscene
 {
 
-class WPEffectCommand {
+class EffectCommand {
 public:
     bool        FromJson(const nlohmann::json&);
     std::string command;
@@ -29,7 +29,7 @@ public:
     i32 afterpos { 0 }; // 0 for begin, start from 1
 };
 
-class WPEffectFbo {
+class EffectFbo {
 public:
     bool        FromJson(const nlohmann::json&);
     std::string name;
@@ -40,7 +40,7 @@ public:
 // objects[].instance — PKGV0018+. Embedded WE-format material binding
 // (compiled-shader id + textures + combos). The renderer doesn't currently
 // substitute it, but the parser needs to accept the shape.
-class WPObjectInstance {
+class ObjectInstance {
 public:
     bool                                          FromJson(const nlohmann::json&);
     bool                                          present { false };
@@ -53,52 +53,52 @@ public:
     std::vector<nlohmann::json> usertextures;
 };
 
-class WPImageEffect {
+class ImageEffect {
 private:
     static const std::unordered_set<std::string> BLACKLISTED_WORKSHOP_EFFECTS;
     bool                                         IsEffectBlacklisted(const std::string& filePath);
 
 public:
-    bool        FromJson(const nlohmann::json&, fs::VFS& vfs);               // legacy
-    bool        FromJson(const nlohmann::json&, fs::VFS& vfs, SceneVersion); // canonical
-    bool        FromFileJson(const nlohmann::json&, fs::VFS& vfs);
-    int32_t     id;
-    std::string name;
-    std::string username; // PKGV0001+; per-instance label override
-    bool        visible { true };
-    int32_t     version;
-    std::vector<WPMaterial>      materials;
-    std::vector<WPMaterialPass>  passes;
-    std::vector<WPEffectCommand> commands;
-    std::vector<WPEffectFbo>     fbos;
+    bool                  FromJson(const nlohmann::json&, fs::VFS& vfs);               // legacy
+    bool                  FromJson(const nlohmann::json&, fs::VFS& vfs, SceneVersion); // canonical
+    bool                  FromFileJson(const nlohmann::json&, fs::VFS& vfs);
+    int32_t               id;
+    std::string           name;
+    std::string           username; // PKGV0001+; per-instance label override
+    bool                  visible { true };
+    int32_t               version;
+    std::vector<Material> materials;
+    std::vector<MaterialPass>  passes;
+    std::vector<EffectCommand> commands;
+    std::vector<EffectFbo>     fbos;
 };
 
-class WPImageObject {
+class ImageObject {
 public:
     struct Config {
         bool passthrough { false };
     };
-    bool                       FromJson(const nlohmann::json&, fs::VFS&);               // legacy
-    bool                       FromJson(const nlohmann::json&, fs::VFS&, SceneVersion); // canonical
-    int32_t                    id { 0 };
-    std::string                name;
-    std::array<float, 3>       origin { 0.0f, 0.0f, 0.0f };
-    std::array<float, 3>       scale { 1.0f, 1.0f, 1.0f };
-    std::array<float, 3>       angles { 0.0f, 0.0f, 0.0f };
-    std::array<float, 2>       size { 2.0f, 2.0f };
-    std::array<float, 2>       parallaxDepth { 0.0f, 0.0f };
-    std::array<float, 3>       color { 1.0f, 1.0f, 1.0f };
-    int32_t                    colorBlendMode { 0 };
-    float                      alpha { 1.0f };
-    float                      brightness { 1.0f };
-    bool                       fullscreen { false };
-    bool                       nopadding { false };
-    bool                       visible { true };
-    std::string                image;
-    std::string                alignment { "center" };
-    WPMaterial                 material;
-    std::vector<WPImageEffect> effects;
-    Config                     config;
+    bool                     FromJson(const nlohmann::json&, fs::VFS&);               // legacy
+    bool                     FromJson(const nlohmann::json&, fs::VFS&, SceneVersion); // canonical
+    int32_t                  id { 0 };
+    std::string              name;
+    std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
+    std::array<float, 3>     angles { 0.0f, 0.0f, 0.0f };
+    std::array<float, 2>     size { 2.0f, 2.0f };
+    std::array<float, 2>     parallaxDepth { 0.0f, 0.0f };
+    std::array<float, 3>     color { 1.0f, 1.0f, 1.0f };
+    int32_t                  colorBlendMode { 0 };
+    float                    alpha { 1.0f };
+    float                    brightness { 1.0f };
+    bool                     fullscreen { false };
+    bool                     nopadding { false };
+    bool                     visible { true };
+    std::string              image;
+    std::string              alignment { "center" };
+    Material                 material;
+    std::vector<ImageEffect> effects;
+    Config                   config;
 
     // Common cross-kind metadata (PKGV0001+ unless noted).
     bool                      locktransforms { false };
@@ -106,7 +106,7 @@ public:
     bool                      nointerpolation { false }; // PKGV0021+
     std::uint32_t             parent { 0 };              // PKGV0019+; 0 = no parent
     std::vector<std::int32_t> dependencies;              // PKGV0001+; referenced object ids
-    WPObjectInstance          instance;                  // PKGV0018+; instance binding
+    ObjectInstance            instance;                  // PKGV0018+; instance binding
 
     // Image-kind specifics (gates listed for reference; reads are unconditional via _NOWARN).
     bool                 perspective { false };                // PKGV0002+
@@ -132,16 +132,16 @@ public:
 
     // Per-field property-binding side channel; populated when scalar
     // fields (origin/scale/alpha/...) carry an `animation` curve or a
-    // `scriptproperties` subtree. See WPAnimation.cppm.
-    WPFieldBindings field_bindings;
+    // `scriptproperties` subtree. See FieldBinding.cppm.
+    FieldBindings field_bindings;
 
     // `visible:{user:"<key>",value:bool}` -> key.
     std::string visible_user_key;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPEffectFbo, name, scale);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPImageEffect, name, visible, passes, fbos, materials);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPImageObject, name, origin, angles, scale, size, visible,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(EffectFbo, name, scale);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ImageEffect, name, visible, passes, fbos, materials);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ImageObject, name, origin, angles, scale, size, visible,
                                    material, effects);
 
 } // namespace wpscene

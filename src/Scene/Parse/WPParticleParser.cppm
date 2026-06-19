@@ -2,10 +2,11 @@ module;
 
 export module wescene.parse:wp_particle_parser;
 import nlohmann.json;
+import rstd.cppstd;
 import wescene.scene;
 import wescene.fs;
 
-export import :wp_particle_object;
+export import wescene.pkg.scene_obj;
 
 export namespace owe
 

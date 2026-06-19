@@ -1,6 +1,6 @@
 module;
 
-export module wescene.parse:wp_animation;
+export module wescene.pkg.scene_obj:field_binding;
 import rstd.cppstd;
 import wescene.json;
 
@@ -25,7 +25,7 @@ import wescene.json;
 export namespace owe::wpscene
 {
 
-struct WPAnimKeyframeTangent {
+struct AnimKeyframeTangent {
     bool  enabled { false };
     float x { 0.0f };
     float y { 0.0f };
@@ -34,16 +34,16 @@ struct WPAnimKeyframeTangent {
     std::int32_t magic { 0 };
 };
 
-struct WPAnimKeyframe {
-    std::int32_t          frame { 0 };
-    float                 value { 0.0f };
-    bool                  lockangle { false };
-    bool                  locklength { false };
-    WPAnimKeyframeTangent front;
-    WPAnimKeyframeTangent back;
+struct AnimKeyframe {
+    std::int32_t        frame { 0 };
+    float               value { 0.0f };
+    bool                lockangle { false };
+    bool                locklength { false };
+    AnimKeyframeTangent front;
+    AnimKeyframeTangent back;
 };
 
-struct WPAnimOptions {
+struct AnimOptions {
     float        fps { 30.0f };
     std::int32_t length { 0 };
     std::string  mode;
@@ -58,20 +58,20 @@ struct WPAnimOptions {
     nlohmann::json parent;   // object describing parent anim
 };
 
-struct WPAnimCurve {
-    std::vector<WPAnimKeyframe> c0;
-    std::vector<WPAnimKeyframe> c1; // empty for scalar fields
-    std::vector<WPAnimKeyframe> c2;
-    WPAnimOptions               options;
-    bool                        relative { false }; // only on `origin`
+struct AnimCurve {
+    std::vector<AnimKeyframe> c0;
+    std::vector<AnimKeyframe> c1; // empty for scalar fields
+    std::vector<AnimKeyframe> c2;
+    AnimOptions               options;
+    bool                      relative { false }; // only on `origin`
 };
 
-// FromJson helpers (defined in WPAnimation.cpp).
-bool ParseAnimKeyframeTangent(const nlohmann::json&, WPAnimKeyframeTangent&);
-bool ParseAnimKeyframe(const nlohmann::json&, WPAnimKeyframe&);
-bool ParseAnimAxis(const nlohmann::json&, std::vector<WPAnimKeyframe>&);
-bool ParseAnimOptions(const nlohmann::json&, WPAnimOptions&);
-bool ParseAnimCurve(const nlohmann::json&, WPAnimCurve&);
+// FromJson helpers (defined in FieldBinding.cpp).
+bool ParseAnimKeyframeTangent(const nlohmann::json&, AnimKeyframeTangent&);
+bool ParseAnimKeyframe(const nlohmann::json&, AnimKeyframe&);
+bool ParseAnimAxis(const nlohmann::json&, std::vector<AnimKeyframe>&);
+bool ParseAnimOptions(const nlohmann::json&, AnimOptions&);
+bool ParseAnimCurve(const nlohmann::json&, AnimCurve&);
 
 // One captured `{value, script, scriptproperties, user}` per-field
 // binding. `source` is the inline JS module text observed in scene.json's
@@ -80,7 +80,7 @@ bool ParseAnimCurve(const nlohmann::json&, WPAnimCurve&);
 // `scriptproperties` config block; `initial_value` is the binding's
 // `value` field, fed to `init(value)` by the runtime. `user` carries the
 // optional user-property name from `{user, value}` companion bindings.
-struct WPScriptBinding {
+struct ScriptBinding {
     std::string    source;
     nlohmann::json properties;
     nlohmann::json initial_value;
@@ -90,16 +90,16 @@ struct WPScriptBinding {
 // Side-channel container attached to every parseable object kind. Only
 // fields that actually carry a binding contribute entries — empty maps
 // for the common case where every field is a plain literal.
-struct WPFieldBindings {
-    std::unordered_map<std::string, WPAnimCurve>     animations;
-    std::unordered_map<std::string, nlohmann::json>  scriptproperties;
-    std::unordered_map<std::string, WPScriptBinding> scripts;
+struct FieldBindings {
+    std::unordered_map<std::string, AnimCurve>      animations;
+    std::unordered_map<std::string, nlohmann::json> scriptproperties;
+    std::unordered_map<std::string, ScriptBinding>  scripts;
 };
 
 // Walks every direct child of `obj_json` and, when the child is an
 // object containing `animation` and/or `scriptproperties`, captures into
 // `out`. Idempotent: re-running on the same json overwrites prior
 // entries. Returns the count of bindings absorbed.
-std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, WPFieldBindings& out);
+std::size_t AbsorbAllFieldBindings(const nlohmann::json& obj_json, FieldBindings& out);
 
 } // namespace owe::wpscene

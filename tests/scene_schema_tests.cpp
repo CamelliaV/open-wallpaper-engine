@@ -4,10 +4,10 @@
 // applied independently per top-level scope:
 //
 //   * "general.<X>" — fields directly under the scene's `general` object.
-//     Source of truth: src/Parse/WPScene.cpp parse_*/capture_* helpers.
+//     Source of truth: src/Scene/Pkg/SceneObj/SceneDocument.cpp parse_*/capture_* helpers.
 //   * "objects[].<X>" — fields directly on each scene object (image/light/
 //     particle/sound). Source of truth: the union of fields read across
-//     WPImageObject / WPLightObject / WPParticleObject / WPSoundObject
+//     ImageObject / LightObject / ParticleObject / SoundObject
 //     FromJson implementations.
 //
 // For each scope we run:
@@ -24,9 +24,9 @@
 // otherwise silently miss data on older scenes).
 //
 // kParsedGeneralKeys / kParsedObjectKeys must be kept in sync with
-// src/Parse/WPScene.cpp and src/Parse/WP*Object.cpp respectively; when you
-// add a new owe::GetJsonValue(json, "key", ...) call for a top-level field,
-// list it here too.
+// src/Scene/Pkg/SceneObj/SceneDocument.cpp and src/Scene/Pkg/SceneObj/*Object.cpp
+// respectively; when you add a new owe::GetJsonValue(json, "key", ...) call for a
+// top-level field, list it here too.
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -40,7 +40,7 @@ namespace
 constexpr std::string_view kGeneralPrefix = "general.";
 constexpr std::string_view kObjectsPrefix = "objects[].";
 
-// Mirrors src/Parse/WPScene.cpp. Group keyed by the min PKGV version where
+// Mirrors src/Scene/Pkg/SceneObj/SceneDocument.cpp. Group keyed by the min PKGV version where
 // the parser starts attempting the read. Updates here are docs; the
 // assertion below treats the union as the parsed set.
 const auto& kParsedGeneralKeys() {
@@ -180,7 +180,7 @@ const std::set<std::string>& kParsedObjectKeys() {
         "blockalign",
         "spatialization",
         "queuemode",
-        // text-only (WPTextObject)
+        // text-only (TextObject)
         "text",
         "font",
         "pointsize",
@@ -193,10 +193,10 @@ const std::set<std::string>& kParsedObjectKeys() {
         "limitrows",
         "limitwidth",
         "limituseellipsis",
-        // model-only (WPModelObject)
+        // model-only (ModelObject)
         "model",
         "attachment",
-        // camera-only (WPCameraObject)
+        // camera-only (CameraObject)
         "camera",
         "fov",
         "zoom",
@@ -224,7 +224,7 @@ bool IsDirectChildOf(std::string_view prefix, std::string_view path) {
 }
 
 // Parsed direct children of selected nested parents. Mirrors the parser
-// code paths (see WPSceneGeneral / WPParticleObject / WPImageObject /
+// code paths (see SceneGeneral / ParticleObject / ImageObject /
 // WPPuppetLayer parsing). Used by ReportTopUnparsedNestedKeys.
 const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
     using set                                 = std::set<std::string>;
@@ -278,7 +278,7 @@ const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
                 "blendout",
                 "blendtime" } },
 
-        // Effects: scene-level entries on top of WPImageEffect-loaded data.
+        // Effects: scene-level entries on top of ImageEffect-loaded data.
         { "objects[].effects[].", set { "file", "id", "name", "passes", "username", "visible" } },
         { "objects[].effects[].passes[].",
           set { "combos", "constantshadervalues", "id", "textures", "usertextures" } },
@@ -289,7 +289,7 @@ const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
         // <field>.animation.* parent description applies to all fields
         // (origin, scale, alpha, color, angles, parallaxDepth, visible,
         // brightness, alignment, ...). Captured by AbsorbAllFieldBindings
-        // into WPFieldBindings::animations.
+        // into FieldBindings::animations.
         { "objects[].alpha.animation.", set { "c0", "options" } },
         { "objects[].alpha.animation.options.",
           set { "fps",

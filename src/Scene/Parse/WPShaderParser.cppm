@@ -48,7 +48,7 @@ struct WPShaderInfo {
 
     // Filled by LoadMaterial for the direct-binding u_* route. The
     // scene-instance-level user-binding route (effect-key → wallpaper-key)
-    // is registered separately from `WPMaterial::constantshadervalues_user`.
+    // is registered separately from `Material::constantshadervalues_user`.
     std::vector<UserVarRecord> user_var_staging;
 };
 
@@ -113,7 +113,7 @@ public:
     // material directly, without instantiating a Scene or running the
     // full SceneParser pipeline.
     //
-    // Inputs come from the material JSON (parsed via WPMaterial::FromJson)
+    // Inputs come from the material JSON (parsed via Material::FromJson)
     // plus the VFS that resolves /assets/shaders/<material.shader>.{vert,frag}
     // and #include directives. combos_override entries win over the
     // material's own combos. BLENDMODE=0 and BONECOUNT=1 are seeded if

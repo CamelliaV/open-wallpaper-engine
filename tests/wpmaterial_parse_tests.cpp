@@ -3,7 +3,7 @@
 import nlohmann.json;
 import wescene.parse;
 
-TEST(WPMaterialParser, ParsesLegacyUserShaderValues) {
+TEST(MaterialParser, ParsesLegacyUserShaderValues) {
     const auto j = nlohmann::json::parse(R"({
         "passes": [
             {
@@ -18,7 +18,7 @@ TEST(WPMaterialParser, ParsesLegacyUserShaderValues) {
         ]
     })");
 
-    owe::wpscene::WPMaterial material;
+    owe::wpscene::Material material;
     ASSERT_TRUE(material.FromJson(j));
 
     ASSERT_EQ(material.user_shader_values.size(), 3u);

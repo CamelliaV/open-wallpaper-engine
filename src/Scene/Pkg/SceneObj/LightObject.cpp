@@ -1,15 +1,15 @@
 module;
 
-module wescene.parse;
+module wescene.pkg.scene_obj;
 import nlohmann.json;
 
 using namespace owe::wpscene;
 
-bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+bool LightObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
 
-bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
+bool LightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
     owe::GetJsonValue(json, "origin", origin);
     owe::GetJsonValue(json, "angles", angles);
     owe::GetJsonValue(json, "scale", scale);

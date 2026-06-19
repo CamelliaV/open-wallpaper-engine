@@ -2,7 +2,7 @@ module;
 
 #include <rstd/macro.hpp>
 
-module wescene.parse;
+module wescene.pkg.scene_obj;
 import nlohmann.json;
 import wescene.core;
 import rstd.log;
@@ -224,11 +224,11 @@ bool Particle::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     return true;
 }
 
-bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+bool ParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
 
-bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
+bool ParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     owe::GetJsonValue(json, "particle", particle);
     owe::GetJsonValue(json, "visible", visible, false);
     if (json.contains("visible") && json.at("visible").is_object()) {

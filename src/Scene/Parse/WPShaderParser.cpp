@@ -1652,9 +1652,9 @@ WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::V
                                       std::string_view scene_id, const Combos& combos_override) {
     CompileMaterialShaderResult r;
 
-    wpscene::WPMaterial mat;
+    wpscene::Material mat;
     if (! mat.FromJson(material_json)) {
-        r.error = "WPMaterial::FromJson failed";
+        r.error = "Material::FromJson failed";
         return r;
     }
     r.shader_name = mat.shader;

@@ -6,10 +6,10 @@ import wescene.core;
 import rstd.cppstd;
 import wescene.fs;
 import wescene.scene;
+import wescene.pkg.scene_obj;
 
 export import wescene.puppet;
 import :wp_shader_parser; // WPShaderInfo
-import :wp_material;      // wpscene::WPMaterial
 
 export namespace owe
 
@@ -110,11 +110,11 @@ public:
     // over the whole corpus even on mdls that would hang full Parse.
     static bool ParseHeader(std::string_view path, fs::VFS&, WPMdlHeader&);
 
-    static bool                               Parse(std::string_view path, fs::VFS&, WPMdl&);
-    static std::optional<wpscene::WPMaterial> ParseMaterial(std::string_view ref, fs::VFS&);
+    static bool                             Parse(std::string_view path, fs::VFS&, WPMdl&);
+    static std::optional<wpscene::Material> ParseMaterial(std::string_view ref, fs::VFS&);
 
     static void AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl);
-    static void AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl);
+    static void AddPuppetMatInfo(wpscene::Material& mat, const WPMdl& mdl);
 
     // Emit vertex/index arrays for any WPMdl::Mesh, sending only the vertex
     // attribute streams whose SoA vectors are populated. Skinning combos must

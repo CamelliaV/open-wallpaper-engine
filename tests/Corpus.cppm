@@ -241,7 +241,7 @@ json map_to_json(const Map& m) {
     return o;
 }
 
-json dump_material(const owe::wpscene::WPMaterial& m) {
+json dump_material(const owe::wpscene::Material& m) {
     return {
         { "shader", m.shader },
         { "blending", m.blending },
@@ -255,7 +255,7 @@ json dump_material(const owe::wpscene::WPMaterial& m) {
     };
 }
 
-json dump_material_pass(const owe::wpscene::WPMaterialPass& p) {
+json dump_material_pass(const owe::wpscene::MaterialPass& p) {
     json bind = json::array();
     for (const auto& b : p.bind) {
         bind.push_back({ { "name", b.name }, { "index", b.index } });
@@ -269,7 +269,7 @@ json dump_material_pass(const owe::wpscene::WPMaterialPass& p) {
     };
 }
 
-json dump_effect_fbo(const owe::wpscene::WPEffectFbo& f) {
+json dump_effect_fbo(const owe::wpscene::EffectFbo& f) {
     return {
         { "name", f.name },
         { "format", f.format },
@@ -307,8 +307,8 @@ json dump_object_common(const json& obj) {
 json dump_light_object(const json& obj, owe::fs::VFS& vfs) {
     json out    = dump_object_common(obj);
     out["kind"] = "light";
-    owe::wpscene::WPLightObject lo;
-    bool                        ok = false;
+    owe::wpscene::LightObject lo;
+    bool                      ok = false;
     try {
         ok = lo.FromJson(obj, vfs);
     } catch (const std::exception&) {
@@ -330,8 +330,8 @@ json dump_light_object(const json& obj, owe::fs::VFS& vfs) {
 json dump_particle_object(const json& obj, owe::fs::VFS& vfs) {
     json out    = dump_object_common(obj);
     out["kind"] = "particle";
-    owe::wpscene::WPParticleObject po;
-    bool                           ok = false;
+    owe::wpscene::ParticleObject po;
+    bool                         ok = false;
     try {
         ok = po.FromJson(obj, vfs);
     } catch (const std::exception&) {
@@ -359,8 +359,8 @@ json dump_particle_object(const json& obj, owe::fs::VFS& vfs) {
 json dump_sound_object(const json& obj, owe::fs::VFS& vfs) {
     json out    = dump_object_common(obj);
     out["kind"] = "sound";
-    owe::wpscene::WPSoundObject so;
-    bool                        ok = false;
+    owe::wpscene::SoundObject so;
+    bool                      ok = false;
     try {
         ok = so.FromJson(obj, vfs);
     } catch (const std::exception&) {
@@ -380,8 +380,8 @@ json dump_sound_object(const json& obj, owe::fs::VFS& vfs) {
 json dump_image_object(const json& obj, owe::fs::VFS& vfs) {
     json out    = dump_object_common(obj);
     out["kind"] = "image";
-    owe::wpscene::WPImageObject img;
-    bool                        ok = false;
+    owe::wpscene::ImageObject img;
+    bool                      ok = false;
     try {
         ok = img.FromJson(obj, vfs);
     } catch (const std::exception&) {
@@ -405,7 +405,7 @@ json dump_image_object(const json& obj, owe::fs::VFS& vfs) {
     out["puppet"]           = img.puppet;
     out["material"]         = dump_material(img.material);
     out["effect_count"]     = static_cast<int>(img.effects.size());
-    // WPImageEffect::id and ::version are left uninitialised by the
+    // ImageEffect::id and ::version are left uninitialised by the
     // parser when the source json omits them, so dumping their raw value
     // produces stack garbage. Skip them.
     json effs = json::array();
@@ -508,13 +508,13 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         if (stream) {
             std::string text = stream->ReadAllStr();
             try {
-                auto                  j = json::parse(text);
-                owe::wpscene::WPScene scene;
-                bool                  parsed = scene.FromJson(j);
-                json&                 jscene = out["scene"];
-                jscene["parsed"]             = parsed;
-                jscene["is_ortho"]           = scene.general.isOrtho;
-                jscene["ortho"]              = {
+                auto                        j = json::parse(text);
+                owe::wpscene::SceneMetadata scene;
+                bool                        parsed = scene.FromJson(j);
+                json&                       jscene = out["scene"];
+                jscene["parsed"]                   = parsed;
+                jscene["is_ortho"]                 = scene.general.isOrtho;
+                jscene["ortho"]                    = {
                     { "width", scene.general.orthogonalprojection.width },
                     { "height", scene.general.orthogonalprojection.height },
                 };
@@ -524,7 +524,7 @@ json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                     { "up", scene.camera.up },
                 };
                 // cameraparallaxamount/delay/mouseinfluence are undefaulted
-                // floats in WPSceneGeneral, so when the source scene.json
+                // floats in SceneGeneral, so when the source scene.json
                 // omits them the parser leaves stack garbage. Only emit them
                 // when cameraparallax is enabled.
                 json jgen = {

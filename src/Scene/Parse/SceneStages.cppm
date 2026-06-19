@@ -11,23 +11,16 @@ import wescene.scene;
 import wescene.script;
 import wescene.scene_uniform_updater;
 import wescene.types;
+import wescene.pkg.scene_obj;
 
 import wescene.puppet;
-
-import :wp_image_object;
-import :wp_light_object;
-import :wp_misc_object;
-import :wp_particle_object;
-import :wp_scene;
-import :wp_sound_object;
 
 export namespace owe
 {
 
-using WPObjectVar =
-    std::variant<wpscene::WPImageObject, wpscene::WPParticleObject, wpscene::WPSoundObject,
-                 wpscene::WPLightObject, wpscene::WPTextObject, wpscene::WPModelObject,
-                 wpscene::WPCameraObject>;
+using SceneObjectVar = std::variant<wpscene::ImageObject, wpscene::ParticleObject,
+                                    wpscene::SoundObject, wpscene::LightObject, wpscene::TextObject,
+                                    wpscene::ModelObject, wpscene::CameraObject>;
 
 struct PuppetLayerRegistry {
     std::unordered_map<SceneNode*, std::shared_ptr<WPPuppetLayer>> by_node;
@@ -102,28 +95,28 @@ struct ProcessOpts {
     unsigned kinds { All };
 };
 
-// Walks json["objects"] and instantiates one WPObjectVar per recognised
+// Walks json["objects"] and instantiates one SceneObjectVar per recognised
 // kind via FromJson. Pure JSON deserialisation plus per-object VFS
 // reads (for image/material refs); no Scene / glslang touched.
 // `user_props` (nullable) lets `visible:{user:"<key>"}` resolve to the
 // host's current bool, so layers toggled off in the UI are pruned at
 // parse time.
-std::vector<WPObjectVar>
+std::vector<SceneObjectVar>
 ExpandObjects(const nlohmann::json&, fs::VFS&, wpscene::SceneVersion,
               const std::unordered_map<std::string, nlohmann::json>* user_props = nullptr);
 
 // If general.orthogonalprojection.auto_, replaces width/height with the
 // largest image object's size.
-void AdjustAutoOrthoProjection(wpscene::WPScene&, std::span<const WPObjectVar>);
+void AdjustAutoOrthoProjection(wpscene::SceneMetadata&, std::span<const SceneObjectVar>);
 
 // Allocates Scene + cameras + base uniforms + the two default render
 // targets (SpecTex_Default, WE_MIP_MAPPED_FRAME_BUFFER).
-ParseContext BuildContext(fs::VFS&, std::string_view scene_id, wpscene::WPScene&);
+ParseContext BuildContext(fs::VFS&, std::string_view scene_id, wpscene::SceneMetadata&);
 
 // Per-object dispatch. Brackets glslang init/finalize around the visit
 // loop. opts.kinds masks which kinds run; default is all-kinds. Sound
 // dispatch additionally requires sm non-null.
-void ProcessObjects(ParseContext&, std::span<WPObjectVar>, wavsen::audio::SoundManager* sm,
+void ProcessObjects(ParseContext&, std::span<SceneObjectVar>, wavsen::audio::SoundManager* sm,
                     ProcessOpts opts = {});
 
 // Installs the lazily-built ScriptScene onto the Scene (if any) and

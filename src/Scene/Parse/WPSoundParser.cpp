@@ -235,10 +235,10 @@ private:
     std::array<std::atomic<float>, 16>*         m_audioAverage { nullptr };
 };
 
-std::shared_ptr<SceneSoundControl> WPSoundParser::Parse(const wpscene::WPSoundObject& obj,
-                                                        fs::VFS&                      vfs,
-                                                        wavsen::audio::SoundManager&  sm,
-                                                        Scene*                        scene) {
+std::shared_ptr<SceneSoundControl> WPSoundParser::Parse(const wpscene::SoundObject&  obj,
+                                                        fs::VFS&                     vfs,
+                                                        wavsen::audio::SoundManager& sm,
+                                                        Scene*                       scene) {
     WPSoundStream::Config config { .maxtime = obj.maxtime,
                                    .mintime = obj.mintime,
                                    .volume  = std::clamp(obj.volume, 0.0f, 1.0f),

@@ -1,17 +1,18 @@
 module;
 
 export module wescene.parse:wp_sound_parser;
+import rstd.cppstd;
 import wavsen.audio;
+import wescene.fs;
 import wescene.scene;
-
-import :wp_sound_object;
+import wescene.pkg.scene_obj;
 
 export namespace owe
 {
 
 class WPSoundParser {
 public:
-    static std::shared_ptr<SceneSoundControl> Parse(const wpscene::WPSoundObject&, fs::VFS&,
+    static std::shared_ptr<SceneSoundControl> Parse(const wpscene::SoundObject&, fs::VFS&,
                                                     wavsen::audio::SoundManager&, Scene*);
 };
 

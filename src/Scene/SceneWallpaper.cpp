@@ -919,7 +919,7 @@ void SceneRuntimeController::loadScene() {
         auto              scene_doc = m_config.scene_document;
         if (! scene_doc) {
             auto loaded = wpscene::LoadSceneDocumentFromVfs(vfs, base + pkgEntry, pkg_v);
-            if (loaded) scene_doc = std::make_shared<wpscene::WPSceneDocument>(std::move(*loaded));
+            if (loaded) scene_doc = std::make_shared<wpscene::SceneDocument>(std::move(*loaded));
         }
         if (! scene_doc) {
             rstd_error("Not supported scene type");

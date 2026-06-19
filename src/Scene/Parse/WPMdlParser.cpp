@@ -994,7 +994,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     return true;
 }
 
-std::optional<wpscene::WPMaterial> WPMdlParser::ParseMaterial(std::string_view ref, fs::VFS& vfs) {
+std::optional<wpscene::Material> WPMdlParser::ParseMaterial(std::string_view ref, fs::VFS& vfs) {
     nlohmann::json json;
     const auto     path = ResolveMdlMaterialPath(ref);
     if (! owe::ParseJson(fs::GetFileContent(vfs, path), json)) {
@@ -1002,7 +1002,7 @@ std::optional<wpscene::WPMaterial> WPMdlParser::ParseMaterial(std::string_view r
         return std::nullopt;
     }
 
-    wpscene::WPMaterial material;
+    wpscene::Material material;
     material.blending   = "disabled";
     material.depthtest  = "enabled";
     material.depthwrite = "enabled";
@@ -1137,7 +1137,7 @@ void WPMdlParser::AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl) {
     info.combos["BONECOUNT"] = std::to_string(mdl.puppet->bones.size());
 }
 
-void WPMdlParser::AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl) {
+void WPMdlParser::AddPuppetMatInfo(wpscene::Material& mat, const WPMdl& mdl) {
     mat.combos["SKINNING"]  = 1;
     mat.combos["BONECOUNT"] = (i32)mdl.puppet->bones.size();
     mat.use_puppet          = true;

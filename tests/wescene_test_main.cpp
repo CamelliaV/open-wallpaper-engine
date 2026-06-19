@@ -232,14 +232,14 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
         err = std::string("scene.json parse: ") + e.what();
         return false;
     }
-    owe::wpscene::WPScene sc;
+    owe::wpscene::SceneMetadata sc;
     if (! sc.FromJson(j, pkg_v)) {
-        err = "WPScene::FromJson returned false";
+        err = "SceneMetadata::FromJson returned false";
         return false;
     }
-    auto wp_objs = owe::ExpandObjects(j, vfs, pkg_v);
-    owe::AdjustAutoOrthoProjection(sc, wp_objs);
-    (void)wp_objs;
+    auto scene_objs = owe::ExpandObjects(j, vfs, pkg_v);
+    owe::AdjustAutoOrthoProjection(sc, scene_objs);
+    (void)scene_objs;
     return true;
 }
 
@@ -274,7 +274,7 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries, owe::f
         if (! StartsWith(e.path, prefix) || ! EndsWith(e.path, suffix)) continue;
         if (e.path.size() < prefix.size() + suffix.size()) continue;
         // ParseHeader takes the bare name (no /materials/ prefix, no .tex
-        // suffix), matching WPMaterial.textures shape.
+        // suffix), matching Material.textures shape.
         const std::string name =
             e.path.substr(prefix.size(), e.path.size() - prefix.size() - suffix.size());
         bool        ok    = false;

@@ -1,13 +1,13 @@
 module;
 
-export module wescene.parse:wp_light_object;
+export module wescene.pkg.scene_obj:light_object;
 import nlohmann.json;
 import rstd.cppstd;
 import wescene.fs;
 
-export import :wp_animation;
+export import :field_binding;
 export import wescene.puppet;
-import :wp_scene;
+import :scene_document;
 
 export namespace owe
 
@@ -16,7 +16,7 @@ export namespace owe
 namespace wpscene
 {
 
-class WPLightObject {
+class LightObject {
 public:
     bool                 FromJson(const nlohmann::json&, fs::VFS&);               // legacy
     bool                 FromJson(const nlohmann::json&, fs::VFS&, SceneVersion); // canonical
@@ -43,7 +43,7 @@ public:
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
     nlohmann::json            instance;
-    WPFieldBindings           field_bindings;
+    FieldBindings             field_bindings;
 
     // Light-kind specifics.
     bool  ledsource { false };          // PKGV0006+
