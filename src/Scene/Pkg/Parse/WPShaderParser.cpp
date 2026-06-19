@@ -1125,6 +1125,20 @@ inline Std140Layout Std140Base(std::string_view hlsl_base) {
     return { 16, 16 };
 }
 
+inline std::pair<std::string_view, std::string_view> SplitUniformType(std::string_view ty) {
+    if (auto pos = ty.find('['); pos != std::string_view::npos) {
+        return { ty.substr(0, pos), ty.substr(pos) };
+    }
+    return { ty, {} };
+}
+
+struct UniformLayout {
+    std::string_view array;
+    std::string      hlsl_ty;
+    std::size_t      align;
+    std::size_t      size;
+};
+
 inline std::size_t ParseArrayCount(std::string_view arr) {
     if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
     std::string_view inner = arr.substr(1, arr.size() - 2);
@@ -1135,6 +1149,32 @@ inline std::size_t ParseArrayCount(std::string_view arr) {
         n = n * 10 + (std::size_t)(c - '0');
     }
     return n == 0 ? 1 : n;
+}
+
+inline UniformLayout LayoutUniform(std::string_view ty) {
+    const auto [base_ty, array] = SplitUniformType(ty);
+    auto       hlsl_ty          = ToHLSLType(base_ty);
+    const auto n                = ParseArrayCount(array);
+    const auto L                = Std140Base(hlsl_ty);
+    return {
+        .array   = array,
+        .hlsl_ty = std::move(hlsl_ty),
+        .align   = (n > 1) ? std::size_t(16) : L.align,
+        .size    = (n > 1) ? ((L.size + 15) & ~std::size_t(15)) * n : L.size,
+    };
+}
+
+inline void MergeUniform(Map<std::string, std::string>& uniforms_union, std::string_view name,
+                         std::string_view ty) {
+    auto [it, inserted] = uniforms_union.try_emplace(std::string(name), std::string(ty));
+    if (inserted) return;
+
+    const auto old_layout = LayoutUniform(it->second);
+    const auto new_layout = LayoutUniform(ty);
+    if (new_layout.size > old_layout.size ||
+        (new_layout.size == old_layout.size && new_layout.align > old_layout.align)) {
+        it->second = std::string(ty);
+    }
 }
 
 // Emit `cbuffer ww_Uniforms { ... };` body with explicit std140 `:packoffset`
@@ -1149,35 +1189,27 @@ inline std::string EmitCBufferStd140(const Map<std::string, std::string>& unifor
     out += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
     std::size_t offset = 0;
     for (const auto& [name, ty] : uniforms_union) {
-        std::string base_ty = ty;
-        std::string array;
-        if (auto pos = ty.find('['); pos != std::string::npos) {
-            base_ty = ty.substr(0, pos);
-            array   = ty.substr(pos);
-        }
-        std::string  hlsl_ty      = ToHLSLType(base_ty);
-        std::size_t  n            = ParseArrayCount(array);
-        Std140Layout L            = Std140Base(hlsl_ty);
-        std::size_t  member_align = (n > 1) ? std::size_t(16) : L.align;
-        std::size_t  member_size  = (n > 1) ? ((L.size + 15) & ~std::size_t(15)) * n : L.size;
-        offset                    = (offset + member_align - 1) & ~(member_align - 1);
-        std::size_t reg           = offset / 16;
-        std::size_t comp          = (offset % 16) / 4;
-        const char  letter        = "xyzw"[comp];
-        const bool  is_matrix =
-            hlsl_ty == "float2x2" || hlsl_ty == "float3x3" || hlsl_ty == "float4x4" ||
-            hlsl_ty == "float2x3" || hlsl_ty == "float2x4" || hlsl_ty == "float3x2" ||
-            hlsl_ty == "float3x4" || hlsl_ty == "float4x2" || hlsl_ty == "float4x3";
+        const auto  layout    = LayoutUniform(ty);
+        std::string array     = std::string(layout.array);
+        offset                = (offset + layout.align - 1) & ~(layout.align - 1);
+        std::size_t reg       = offset / 16;
+        std::size_t comp      = (offset % 16) / 4;
+        const char  letter    = "xyzw"[comp];
+        const bool  is_matrix = layout.hlsl_ty == "float2x2" || layout.hlsl_ty == "float3x3" ||
+                                layout.hlsl_ty == "float4x4" || layout.hlsl_ty == "float2x3" ||
+                                layout.hlsl_ty == "float2x4" || layout.hlsl_ty == "float3x2" ||
+                                layout.hlsl_ty == "float3x4" || layout.hlsl_ty == "float4x2" ||
+                                layout.hlsl_ty == "float4x3";
         out += "    ";
         if (is_matrix) out += "column_major ";
-        out += hlsl_ty + " " + name + array;
+        out += layout.hlsl_ty + " " + name + array;
         out += " : packoffset(c" + std::to_string(reg);
         if (comp != 0) {
             out += ".";
             out += letter;
         }
         out += ");\n";
-        offset += member_size;
+        offset += layout.size;
     }
     out += "};\n";
     return out;
@@ -1238,7 +1270,7 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
         Map<std::string, std::string> uniforms_union_local;
         if (! uniforms_union_in) {
             auto absorb = [&](const Map<std::string, std::string>& m) {
-                for (const auto& [k, v] : m) uniforms_union_local.try_emplace(k, v);
+                for (const auto& [k, v] : m) MergeUniform(uniforms_union_local, k, v);
             };
             absorb(unit.preprocess_info.uniforms);
             if (pre) absorb(pre->uniforms);
@@ -1300,7 +1332,7 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
     Map<std::string, std::string> uniforms_union_local;
     if (! uniforms_union_in) {
         auto absorb = [&](const Map<std::string, std::string>& m) {
-            for (const auto& [k, v] : m) uniforms_union_local.try_emplace(k, v);
+            for (const auto& [k, v] : m) MergeUniform(uniforms_union_local, k, v);
         };
         absorb(unit.preprocess_info.uniforms);
         if (pre) absorb(pre->uniforms);
@@ -1586,7 +1618,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         Map<std::string, std::string> uniforms_union;
         for (auto& unit : units) {
             for (const auto& [name, ty] : unit.preprocess_info.uniforms) {
-                uniforms_union.try_emplace(name, ty);
+                MergeUniform(uniforms_union, name, ty);
             }
         }
 

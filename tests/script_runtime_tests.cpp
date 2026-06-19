@@ -124,6 +124,25 @@ TEST(ScriptTimer, HandleSelfCallCancels) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 0.0);
 }
 
+TEST(ScriptCompat, RegExpLegacyCapturesSurviveTimerCallbacks) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = MakeProbe(rt,
+                         "test/regexp_legacy_captures",
+                         R"JS(
+        let n = 0;
+        setInterval(() => {
+            if (/(H+)/.test('HH:mm')) n = RegExp.$1.length;
+        }, 100);
+        export function update() { return n; }
+    )JS");
+    ASSERT_NE(fs, nullptr);
+
+    Tick(rt, 0.15);
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 2.0);
+}
+
 TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
     JsRuntime   rt;
     FrameInputs fi {};

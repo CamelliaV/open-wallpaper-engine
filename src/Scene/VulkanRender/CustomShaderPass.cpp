@@ -139,24 +139,47 @@ std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFor
     }
 }
 
+static std::span<uint8_t> MakeUniformUploadBytes(const owe::ShaderValue& value, size_t refl_size,
+                                                 std::vector<owe::ShaderValue::value_type>& resized,
+                                                 bool& compatible) {
+    compatible                    = true;
+    const size_t       value_size = value.size() * sizeof(owe::ShaderValue::value_type);
+    std::span<uint8_t> value_u8 {
+        const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(value.data())),
+        value_size,
+    };
+
+    if (refl_size != value_size && refl_size % sizeof(owe::ShaderValue::value_type) == 0) {
+        const size_t refl_count = refl_size / sizeof(owe::ShaderValue::value_type);
+        resized.assign(refl_count, 0.0f);
+        std::copy_n(value.data(), std::min(value.size(), refl_count), resized.begin());
+        value_u8 = { reinterpret_cast<uint8_t*>(resized.data()), refl_size };
+    } else if (refl_size != value_size) {
+        compatible = false;
+        value_u8   = value_u8.first(std::min(refl_size, value_u8.size()));
+    }
+    return value_u8;
+}
+
 static void UpdateUniform(StagingBuffer* buf, const StagingBufferRef& bufref,
                           const ShaderReflected::Block& block, std::string_view name,
                           const owe::ShaderValue& value) {
     using namespace owe;
-    std::span<uint8_t> value_u8 { (uint8_t*)value.data(),
-                                  value.size() * sizeof(ShaderValue::value_type) };
-    auto               uni = block.member_map.find(name);
+    auto uni = block.member_map.find(name);
     if (uni == block.member_map.end()) {
         return;
     }
 
-    const size_t offset    = uni->second.offset;
-    const size_t refl_size = uni->second.size;
-    if (refl_size != value_u8.size()) {
+    const size_t                         offset    = uni->second.offset;
+    const size_t                         refl_size = uni->second.size;
+    bool                                 compatible {};
+    std::vector<ShaderValue::value_type> resized;
+    auto value_u8 = MakeUniformUploadBytes(value, refl_size, resized, compatible);
+    if (! compatible) {
         rstd_warn("uniform \"{}\" size mismatch: reflected {} bytes, uploader {} bytes",
                   name,
                   refl_size,
-                  value_u8.size());
+                  value.size() * sizeof(ShaderValue::value_type));
     }
     buf->writeToBuf(bufref, value_u8, offset);
 }

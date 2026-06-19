@@ -886,6 +886,63 @@ JSValue EngineRegisterAsset(JSContext* ctx, JSValueConst /*this_val*/, int argc,
 // snippet evaluated once into the global context. That keeps the C side
 // minimal and lets the dynamic property lookup use a JS Proxy.
 constexpr const char* kBootstrapJs = R"JS(
+(() => {
+  const nativeExec = RegExp.prototype.exec;
+  const defineRegExpStatic = (name, value) => {
+    Object.defineProperty(RegExp, name, {
+      value,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  };
+  for (let i = 1; i <= 9; ++i) defineRegExpStatic('$' + i, '');
+  defineRegExpStatic('$_', '');
+  defineRegExpStatic('input', '');
+  defineRegExpStatic('$&', '');
+  defineRegExpStatic('lastMatch', '');
+  defineRegExpStatic('$+', '');
+  defineRegExpStatic('lastParen', '');
+  defineRegExpStatic('$`', '');
+  defineRegExpStatic('leftContext', '');
+  defineRegExpStatic("$'", '');
+  defineRegExpStatic('rightContext', '');
+
+  const updateRegExpStatics = (match) => {
+    if (!match) return;
+    const input = String(match.input ?? '');
+    const index = match.index ?? 0;
+    const text = match[0] ?? '';
+    for (let i = 1; i <= 9; ++i) RegExp['$' + i] = match[i] ?? '';
+    RegExp.$_ = input;
+    RegExp.input = input;
+    RegExp['$&'] = text;
+    RegExp.lastMatch = text;
+    RegExp['$+'] = '';
+    RegExp.lastParen = '';
+    for (let i = match.length - 1; i >= 1; --i) {
+      if (match[i] !== undefined) {
+        RegExp['$+'] = match[i];
+        RegExp.lastParen = match[i];
+        break;
+      }
+    }
+    RegExp['$`'] = input.slice(0, index);
+    RegExp.leftContext = RegExp['$`'];
+    RegExp["$'"] = input.slice(index + text.length);
+    RegExp.rightContext = RegExp["$'"];
+  };
+
+  RegExp.prototype.exec = function(str) {
+    const match = nativeExec.call(this, str);
+    updateRegExpStatics(match);
+    return match;
+  };
+  RegExp.prototype.test = function(str) {
+    return this.exec(str) !== null;
+  };
+})();
+
 globalThis.createScriptProperties = function () {
   const _props = [];
   const _byName = new Map();
