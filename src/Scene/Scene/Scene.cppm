@@ -539,6 +539,8 @@ public:
     void AttatchNode(std::shared_ptr<SceneNode>);
 
     bool   IsPerspective() const { return m_perspective; }
+    bool   AllowCameraShake() const { return m_allowCameraShake; }
+    void   SetAllowCameraShake(bool value) { m_allowCameraShake = value; }
     double Aspect() const { return m_aspect; }
     double Width() const { return m_width; }
     double Height() const { return m_height; }
@@ -587,18 +589,19 @@ public:
     std::shared_ptr<SceneNode> GetAttachedNode() const { return m_node; }
 
     void Clone(const SceneCamera& cam) {
-        m_width       = cam.m_width;
-        m_height      = cam.m_height;
-        m_aspect      = cam.m_aspect;
-        m_nearClip    = cam.m_nearClip;
-        m_farClip     = cam.m_farClip;
-        m_fov         = cam.m_fov;
-        m_perspective = cam.m_perspective;
-        m_lookat      = cam.m_lookat;
-        m_eye         = cam.m_eye;
-        m_center      = cam.m_center;
-        m_up          = cam.m_up;
-        m_node        = cam.m_node;
+        m_width            = cam.m_width;
+        m_height           = cam.m_height;
+        m_aspect           = cam.m_aspect;
+        m_nearClip         = cam.m_nearClip;
+        m_farClip          = cam.m_farClip;
+        m_fov              = cam.m_fov;
+        m_perspective      = cam.m_perspective;
+        m_allowCameraShake = cam.m_allowCameraShake;
+        m_lookat           = cam.m_lookat;
+        m_eye              = cam.m_eye;
+        m_center           = cam.m_center;
+        m_up               = cam.m_up;
+        m_node             = cam.m_node;
     }
 
 private:
@@ -611,6 +614,7 @@ private:
     double m_farClip { 1000.0f };
     double m_fov { 45.0f };
     bool   m_perspective;
+    bool   m_allowCameraShake { true };
 
     bool            m_lookat { false };
     Eigen::Vector3d m_eye { Eigen::Vector3d::Zero() };

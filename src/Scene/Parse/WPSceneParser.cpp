@@ -1101,6 +1101,7 @@ void ParseCameraObj(ParseContext& context, wpscene::WPCameraObject& cam) {
 
     camera->AttatchNode(node);
     if (use_perspective) {
+        camera->SetAllowCameraShake(false);
         if (cam.fov > 0.0f) camera->SetFov(cam.fov);
         camera->SetAspect((double)context.ortho_w / (double)context.ortho_h);
         scene.activeCamera = camera.get();

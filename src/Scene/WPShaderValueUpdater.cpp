@@ -209,8 +209,8 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     bool reqETVPI = info.has_ETVPI;
 
     Matrix4d viewProTrans = camera->GetViewProjectionMatrix();
-    if (m_cameraShake.enable && camera == m_scene->activeCamera && m_cameraShake.amplitude > 0.0f &&
-        m_cameraShake.speed > 0.0f) {
+    if (m_cameraShake.enable && camera == m_scene->activeCamera && camera->AllowCameraShake() &&
+        m_cameraShake.amplitude > 0.0f && m_cameraShake.speed > 0.0f) {
         const float base_extent =
             static_cast<float>(std::min(m_scene->ortho[0], m_scene->ortho[1]));
         const float scale = m_cameraShake.amplitude * base_extent * 0.01f;
