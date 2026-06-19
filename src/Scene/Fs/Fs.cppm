@@ -5,11 +5,20 @@ module;
 
 export module wescene.fs;
 import wescene.core;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 
 export namespace owe::fs
 {
+
+using RstdPath = rstd::ref<rstd::path::Path>;
+
+inline RstdPath ToPath(std::string_view path) { return RstdPath(rstd::ref<rstd::str>(path)); }
+
+inline std::string ToStdString(RstdPath path) {
+    return std::string(reinterpret_cast<const char*>(path.data()), path.len());
+}
 
 // -- Bswap -----------------------------------------------------------------
 
@@ -179,9 +188,16 @@ public:
 
 class Fs : NoCopy, NoMove {
 public:
-    virtual bool                            Contains(std::string_view path) const = 0;
-    virtual std::shared_ptr<IBinaryStream>  Open(std::string_view path)           = 0;
-    virtual std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path)          = 0;
+    virtual bool                            Contains(RstdPath path) const = 0;
+    virtual std::shared_ptr<IBinaryStream>  Open(RstdPath path)           = 0;
+    virtual std::shared_ptr<IBinaryStreamW> OpenW(RstdPath path)          = 0;
+
+    bool Contains(const char* path) const { return Contains(ToPath(path)); }
+    bool Contains(std::string_view path) const { return Contains(ToPath(path)); }
+    std::shared_ptr<IBinaryStream>  Open(const char* path) { return Open(ToPath(path)); }
+    std::shared_ptr<IBinaryStream>  Open(std::string_view path) { return Open(ToPath(path)); }
+    std::shared_ptr<IBinaryStreamW> OpenW(const char* path) { return OpenW(ToPath(path)); }
+    std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) { return OpenW(ToPath(path)); }
 
 public:
     Fs()          = default;
@@ -388,17 +404,20 @@ class VFS : NoCopy, NoMove {
 public:
     struct MountedFs {
         std::string         name;
-        std::string         mountPoint;
+        rstd::path::PathBuf mountPoint;
         std::unique_ptr<Fs> fs;
-        static bool         CheckMountPoint(const std::string_view mountPoint) {
-            return mountPoint[mountPoint.size() - 1] != '/';
+        static bool         CheckMountPoint(RstdPath mountPoint) {
+            auto components = mountPoint.components();
+            auto root       = components.next();
+            if (root.is_none() || ! (*root).is_root_dir()) return false;
+            return components.next().is_some();
         }
-        static bool InMountPoint(const std::string_view mountPoint, const std::string_view path) {
-            return path.compare(0, mountPoint.size() + 1, std::string(mountPoint) + '/') == 0;
+        static bool SamePath(RstdPath lhs, RstdPath rhs) {
+            return lhs.starts_with(rhs) && rhs.starts_with(lhs);
         }
-        static std::string GetPathInMount(const std::string_view mountPoint,
-                                          const std::string_view path) {
-            return std::string(path.substr(mountPoint.size()));
+        RstdPath               path() const { return mountPoint.as_path(); }
+        rstd::Option<RstdPath> PathInMount(RstdPath path) const {
+            return path.strip_prefix(mountPoint.as_path());
         }
     };
 
@@ -406,15 +425,24 @@ public:
     VFS()  = default;
     ~VFS() = default;
 
+    bool Mount(const char* mountpoint, std::unique_ptr<Fs> fs, std::string_view name = "") {
+        return Mount(ToPath(mountpoint), std::move(fs), name);
+    }
     bool Mount(std::string_view mountpoint, std::unique_ptr<Fs> fs, std::string_view name = "") {
+        return Mount(ToPath(mountpoint), std::move(fs), name);
+    }
+    bool Mount(RstdPath mountpoint, std::unique_ptr<Fs> fs, std::string_view name = "") {
         if (! MountedFs::CheckMountPoint(mountpoint) || ! fs) return false;
 
-        m_mountedFss.push_back({ std::string(name), std::string(mountpoint), std::move(fs) });
+        m_mountedFss.push_back(
+            { std::string(name), rstd::path::PathBuf::from(mountpoint), std::move(fs) });
         return true;
     }
-    bool Unmount(std::string_view mountpoint) {
+    bool Unmount(std::string_view mountpoint) { return Unmount(ToPath(mountpoint)); }
+    bool Unmount(const char* mountpoint) { return Unmount(ToPath(mountpoint)); }
+    bool Unmount(RstdPath mountpoint) {
         for (auto iter = m_mountedFss.rbegin(); iter < m_mountedFss.rend(); iter++) {
-            if (iter->mountPoint == mountpoint) {
+            if (MountedFs::SamePath(iter->path(), mountpoint)) {
                 m_mountedFss.erase((++iter).base());
                 return true;
             }
@@ -428,41 +456,39 @@ public:
         }
         return false;
     }
-    std::shared_ptr<IBinaryStream> Open(std::string_view path) {
-        auto find_it =
-            std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&path](const auto& mfs) {
-                return MountedFs::InMountPoint(mfs.mountPoint, path) &&
-                       mfs.fs->Contains(MountedFs::GetPathInMount(mfs.mountPoint, path));
-            });
-        if (find_it != std::rend(m_mountedFss))
-            return find_it->fs->Open(MountedFs::GetPathInMount(find_it->mountPoint, path));
-        rstd_error("not found \"{}\" in vfs", path);
-        return nullptr;
-    }
-    std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) {
-        auto find_it =
-            std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&path](const auto& mfs) {
-                return MountedFs::InMountPoint(mfs.mountPoint, path) &&
-                       mfs.fs->Contains(MountedFs::GetPathInMount(mfs.mountPoint, path));
-            });
-        if (find_it == std::rend(m_mountedFss)) {
-            find_it =
-                std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&path](const auto& mfs) {
-                    return MountedFs::InMountPoint(mfs.mountPoint, path);
-                });
-        }
-        if (find_it != std::rend(m_mountedFss))
-            return find_it->fs->OpenW(MountedFs::GetPathInMount(find_it->mountPoint, path));
-        rstd_error("not found \"{}\" in vfs", path);
-        return nullptr;
-    }
-    bool Contains(std::string_view path) const {
+    std::shared_ptr<IBinaryStream> Open(std::string_view path) { return Open(ToPath(path)); }
+    std::shared_ptr<IBinaryStream> Open(const char* path) { return Open(ToPath(path)); }
+    std::shared_ptr<IBinaryStream> Open(RstdPath path) {
         for (auto iter = m_mountedFss.rbegin(); iter < m_mountedFss.rend(); iter++) {
-            auto& el = *iter;
-            if (MountedFs::InMountPoint(el.mountPoint, path)) {
-                auto mpath = MountedFs::GetPathInMount(el.mountPoint, path);
-                if (el.fs->Contains(mpath)) return true;
-            }
+            auto mounted_path = iter->PathInMount(path);
+            if (mounted_path.is_none() || ! iter->fs->Contains(*mounted_path)) continue;
+            return iter->fs->Open(*mounted_path);
+        }
+        rstd_error("not found \"{}\" in vfs", path);
+        return nullptr;
+    }
+    std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) { return OpenW(ToPath(path)); }
+    std::shared_ptr<IBinaryStreamW> OpenW(const char* path) { return OpenW(ToPath(path)); }
+    std::shared_ptr<IBinaryStreamW> OpenW(RstdPath path) {
+        for (auto iter = m_mountedFss.rbegin(); iter < m_mountedFss.rend(); iter++) {
+            auto mounted_path = iter->PathInMount(path);
+            if (mounted_path.is_none() || ! iter->fs->Contains(*mounted_path)) continue;
+            return iter->fs->OpenW(*mounted_path);
+        }
+        for (auto iter = m_mountedFss.rbegin(); iter < m_mountedFss.rend(); iter++) {
+            auto mounted_path = iter->PathInMount(path);
+            if (mounted_path.is_some()) return iter->fs->OpenW(*mounted_path);
+        }
+        rstd_error("not found \"{}\" in vfs", path);
+        return nullptr;
+    }
+    bool Contains(std::string_view path) const { return Contains(ToPath(path)); }
+    bool Contains(const char* path) const { return Contains(ToPath(path)); }
+    bool Contains(RstdPath path) const {
+        for (auto iter = m_mountedFss.rbegin(); iter < m_mountedFss.rend(); iter++) {
+            auto& el           = *iter;
+            auto  mounted_path = el.PathInMount(path);
+            if (mounted_path.is_some() && el.fs->Contains(*mounted_path)) return true;
         }
         return false;
     }
@@ -483,22 +509,31 @@ class PhysicalFs : public Fs {
 public:
     PhysicalFs(std::string_view physicalPath): m_path(physicalPath) {}
     virtual ~PhysicalFs() = default;
-    bool Contains(std::string_view path) const override {
-        auto fullpath = m_path / path.substr(1);
+    using Fs::Contains;
+    using Fs::Open;
+    using Fs::OpenW;
+
+    bool Contains(RstdPath path) const override {
+        auto fullpath = FullPath(path);
         return std::filesystem::exists(fullpath);
     }
-    std::shared_ptr<IBinaryStream> Open(std::string_view path) override {
+    std::shared_ptr<IBinaryStream> Open(RstdPath path) override {
         return CreateCBinaryStream(FullPath(path));
     }
-    std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) override {
+    std::shared_ptr<IBinaryStreamW> OpenW(RstdPath path) override {
         std::filesystem::path full_path { FullPath(path) };
         std::filesystem::create_directories(full_path.parent_path());
         return CreateCBinaryStreamW(full_path.native());
     }
 
 private:
-    std::string FullPath(std::string_view path) const {
-        auto fullpath = m_path / path.substr(1);
+    std::string FullPath(RstdPath path) const {
+        auto local_path = path;
+        if (path.has_root()) {
+            auto stripped = path.strip_prefix(RstdPath("/"));
+            if (stripped.is_some()) local_path = *stripped;
+        }
+        auto fullpath = m_path / ToStdString(local_path);
         return fullpath.string();
     }
     std::filesystem::path m_path;

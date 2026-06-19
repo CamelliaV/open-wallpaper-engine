@@ -4,6 +4,7 @@ module;
 
 module wescene.pkg_fs;
 import wescene.core;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 
@@ -41,6 +42,20 @@ std::string LowerPath(std::string_view p) {
     }
     return s;
 }
+
+std::string RootedComponentPath(RstdPath path) {
+    auto out        = rstd::path::PathBuf::from("/");
+    auto components = path.components();
+    while (true) {
+        auto component = components.next();
+        if (component.is_none()) break;
+        if ((*component).is_root_dir() || (*component).is_cur_dir()) continue;
+        out.push(RstdPath((*component).as_os_str()));
+    }
+    return ToStdString(out.as_path());
+}
+
+std::string PkgLookupKey(RstdPath path) { return LowerPath(RootedComponentPath(path)); }
 } // namespace
 
 std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
@@ -59,7 +74,7 @@ std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
     for (i32 i = 0; i < entryCount; i++) {
         auto maybe_path = ReadSizedString(pkg, 4096);
         if (! maybe_path) return nullptr;
-        std::string path   = "/" + std::move(*maybe_path);
+        std::string path   = RootedComponentPath(ToPath(*maybe_path));
         idx         offset = pkg.ReadInt32();
         idx         length = pkg.ReadInt32();
         if (offset < 0 || length < 0) return nullptr;
@@ -76,16 +91,16 @@ std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
     return pkgfs;
 }
 
-bool WPPkgFs::Contains(std::string_view path) const { return m_files.count(LowerPath(path)) > 0; }
+bool WPPkgFs::Contains(RstdPath path) const { return m_files.count(PkgLookupKey(path)) > 0; }
 
-std::shared_ptr<IBinaryStream> WPPkgFs::Open(std::string_view path) {
+std::shared_ptr<IBinaryStream> WPPkgFs::Open(RstdPath path) {
     auto pkg = fs::CreateCBinaryStream(m_pkgPath);
     if (! pkg) return nullptr;
-    auto it = m_files.find(LowerPath(path));
+    auto it = m_files.find(PkgLookupKey(path));
     if (it != m_files.end()) {
         return std::make_shared<LimitedBinaryStream>(pkg, it->second.offset, it->second.length);
     }
     return nullptr;
 }
 
-std::shared_ptr<IBinaryStreamW> WPPkgFs::OpenW(std::string_view) { return nullptr; }
+std::shared_ptr<IBinaryStreamW> WPPkgFs::OpenW(RstdPath) { return nullptr; }

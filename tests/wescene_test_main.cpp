@@ -23,6 +23,7 @@ import wescene.scene;
 import wescene.spec_texs;
 import wescene.types;
 import wavsen.audio;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.testing.corpus;
@@ -73,6 +74,18 @@ bool StartsWith(std::string_view s, std::string_view prefix) {
     return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
 }
 
+std::string RootedPathString(owe::fs::RstdPath path) {
+    auto out        = rstd::path::PathBuf::from("/");
+    auto components = path.components();
+    while (true) {
+        auto component = components.next();
+        if (component.is_none()) break;
+        if ((*component).is_root_dir() || (*component).is_cur_dir()) continue;
+        out.push(owe::fs::RstdPath((*component).as_os_str()));
+    }
+    return owe::fs::ToStdString(out.as_path());
+}
+
 // Resolve a user-provided pkg argument. Accepts either a direct path to
 // scene.pkg or a directory that contains one. Returns empty on failure.
 std::string ResolvePkgPath(std::string_view arg) {
@@ -85,13 +98,10 @@ std::string ResolvePkgPath(std::string_view arg) {
 // Normalise an asset path to the in-pkg shape ("/scene.json"). Accepts
 // "/scene.json", "scene.json", "/assets/scene.json", "assets/scene.json".
 std::string NormalisePkgAssetPath(std::string_view arg) {
-    std::string p { arg };
-    if (StartsWith(p, "/assets/"))
-        p.erase(0, 7); // → "/scene.json"
-    else if (StartsWith(p, "assets/"))
-        p.erase(0, 6); // → "/scene.json" — wait, 6 chars then ensure leading '/'
-    if (! p.empty() && p.front() != '/') p.insert(p.begin(), '/');
-    return p;
+    auto input = owe::fs::ToPath(arg);
+    auto path  = input.strip_prefix(owe::fs::RstdPath("/assets"));
+    if (path.is_none()) path = input.strip_prefix(owe::fs::RstdPath("assets"));
+    return RootedPathString(path.unwrap_or(input));
 }
 
 // ---------------------------------------------------------------------------

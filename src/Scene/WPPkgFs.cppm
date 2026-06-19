@@ -2,6 +2,7 @@ module;
 
 export module wescene.pkg_fs;
 import wescene.core;
+import rstd;
 import rstd.cppstd;
 
 export import wescene.fs;
@@ -18,9 +19,13 @@ private:
     WPPkgFs() = default;
 
 public:
-    bool                            Contains(std::string_view path) const override;
-    std::shared_ptr<IBinaryStream>  Open(std::string_view path) override;
-    std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) override;
+    using Fs::Contains;
+    using Fs::Open;
+    using Fs::OpenW;
+
+    bool                            Contains(RstdPath path) const override;
+    std::shared_ptr<IBinaryStream>  Open(RstdPath path) override;
+    std::shared_ptr<IBinaryStreamW> OpenW(RstdPath path) override;
 
     // Pkg-format version stamp from the binary header (e.g. "PKGV0023").
     // Empty if the pkg was malformed.
