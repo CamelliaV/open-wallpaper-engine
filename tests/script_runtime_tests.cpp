@@ -855,6 +855,27 @@ TEST(ScriptVector, InstanceMixInterpolatesVectors) {
     EXPECT_NEAR(v.z, 7.0, 0.001);
 }
 
+TEST(ScriptVector, LengthSqrMatchesWallpaperEngineVectors) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update(value) {
+                return new Vec3(2, 3, 6).lengthSqr() + new Vec2(5, 12).lengthSqr();
+            }
+        )JS",
+        "test/vector_length_sqr",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_NEAR(std::get<ScalarValue>(fs->last_value()).v, 218.0, 0.001);
+}
+
 // ---------------------------------------------------------------------------
 // Workshop 3327063360 repro: scripted-origin layer should land at canvas
 // center when scriptProperties.{x,y} fall back to their declared 0.5.

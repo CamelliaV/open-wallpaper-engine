@@ -1071,6 +1071,7 @@ class Vec2 {
   copy()      { return new Vec2(this.x, this.y); }
   clone()     { return new Vec2(this.x, this.y); }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y); }
+  lengthSqr() { return this.x*this.x + this.y*this.y; }
 }
 class Vec3 {
   constructor(x, y, z) {
@@ -1099,6 +1100,7 @@ class Vec3 {
   copy()      { return new Vec3(this.x, this.y, this.z); }
   clone()     { return new Vec3(this.x, this.y, this.z); }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z); }
+  lengthSqr() { return this.x*this.x + this.y*this.y + this.z*this.z; }
 }
 globalThis.Vec2 = Vec2;
 globalThis.Vec3 = Vec3;
