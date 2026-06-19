@@ -1,6 +1,6 @@
 
 # CEF (Wallpaper Engine *web*) renderer. web wp_type entries come from the
-# source component above.
+# Lua entry above.
 [renderers.weweb-renderer]
 bin = "@OWE_WEWEB_BIN@"
 types = ["web"]

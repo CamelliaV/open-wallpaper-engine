@@ -5,16 +5,15 @@
 # rules, not the installed copy. Every plugin must ship a sibling
 # `files.txt` (one path per line); this one is produced by CMake.
 #
-# The source component advertises scene/video/web wp_types; video routes
+# The Lua entry advertises scene/video/web source capability; video routes
 # to the image/video plugin's renderer purely by wallpaper type.
 
 [plugin]
 id = "@OWE_WAYWALLEN_PLUGIN_ID@"
 name = "Wallpaper Engine"
 version = "@OWE_PLUGIN_VERSION@"
-
-[source]
-lua = "wallpaper_engine.lua"
+entry = "main.lua"
+entry_version = 2
 
 [renderers.wescene-renderer]
 bin = "@OWE_WESCENE_BIN@"

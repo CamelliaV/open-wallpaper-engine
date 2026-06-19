@@ -79,7 +79,7 @@ install(TARGETS waywallen-wescene-renderer
 # weweb-renderer host bin — gated on BUILD_WEWEB (which also gates the
 # weweb-host static lib in src/). Lives next to the wescene host so
 # both share the workspace `install/` prefix and the same Lua source
-# plugin (wallpaper_engine.lua) advertises both wp_types.
+# component advertises both wp_types.
 if(BUILD_WEWEB)
     # Headless Vulkan producer device (DMA-BUF import + bridge-slot blit).
     add_library(waywallen-web-producer-device STATIC)
@@ -195,8 +195,14 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/owe-plugin.toml
     DESTINATION ${_OWE_PLUGIN_DIR}
     RENAME plugin.toml
 )
-install(FILES ${_OWE_PLUGIN_SRC}/wallpaper_engine.lua
+install(FILES ${_OWE_PLUGIN_SRC}/main.lua
     DESTINATION ${_OWE_PLUGIN_DIR}
+)
+install(FILES
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/project.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/source.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/wallpaper.lua
+    DESTINATION ${_OWE_PLUGIN_DIR}/wallpaper_engine
 )
 
 # files.txt — the required per-plugin manifest, assembled at configure
@@ -204,8 +210,11 @@ install(FILES ${_OWE_PLUGIN_SRC}/wallpaper_engine.lua
 # CEF locale paks are the one set we don't list by hand; glob the CEF
 # source dir (a fixed vendored tree) to enumerate them.
 set(_OWE_FILES
+    main.lua
     plugin.toml
-    wallpaper_engine.lua
+    wallpaper_engine/project.lua
+    wallpaper_engine/source.lua
+    wallpaper_engine/wallpaper.lua
     ${OWE_WESCENE_BIN}
 )
 if(BUILD_WEWEB)
