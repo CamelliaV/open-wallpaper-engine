@@ -238,21 +238,25 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
     return r;
 }
 
+void ApplySchemeColorToClear(Scene& scene, const nlohmann::json& prop) {
+    if (! scene.schemeColorDrivesClear) return;
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok || coerced.value.size() < 3) return;
+    auto clamp01 = [](float n) {
+        return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
+    };
+    scene.clearColor = {
+        clamp01(coerced.value[0]),
+        clamp01(coerced.value[1]),
+        clamp01(coerced.value[2]),
+    };
+}
+
 // Push a user-property value to every material whose shader declared a
 // `u_*` uniform with this material-key. Sets the per-material dirty flag so
 // CustomShaderPass picks the new value up next frame.
 void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nlohmann::json& prop) {
-    // `schemecolor` is WE's accent color; waywallen exposes it through
-    // `waywallen.scheme_color`.
-    if (IsSchemeColorKey(key)) {
-        auto coerced = CoerceUserPropertyValue(prop);
-        if (coerced.ok && coerced.value.size() >= 3) {
-            scene.clearColor = { coerced.value[0], coerced.value[1], coerced.value[2] };
-        }
-        // schemecolor may also drive shader uniforms in some wallpapers
-        // (whitelisted via `constantshadervalues."{user":"schemecolor"}`),
-        // so don't return — let the shader-binding path below run too.
-    }
+    if (IsSchemeColorKey(key)) ApplySchemeColorToClear(scene, prop);
 
     auto it = scene.shader_user_var_index.find(key);
     if (it == scene.shader_user_var_index.end()) return;
@@ -819,25 +823,6 @@ void SceneRuntimeController::on(MainSetUserProperty&& m) {
     m_config.user_properties[property] = prop;
     m_user_properties[property]        = prop;
     const nlohmann::json prop_for_rt   = prop;
-    // `schemecolor` doubles as the wallpaper-level accent color and as
-    // the scene clear/background colour in owe. When it changes, push
-    // the new RGB to the host (waywallen daemon) so display endpoints
-    // get a `set_config` with matching letterbox bars even before the
-    // renderer paints the next frame. The render-thread path below
-    // still runs to update `scene.clearColor` + any bound shader uniforms.
-    if (IsSchemeColorKey(property) && m_clear_color_cb) {
-        const nlohmann::json* v_ptr = &prop;
-        if (prop.is_object() && prop.contains("value")) v_ptr = &prop.at("value");
-        if (v_ptr->is_string()) {
-            std::vector<float> nums;
-            if (ParseFloatList(v_ptr->get<std::string>(), nums) && nums.size() >= 3) {
-                auto clamp01 = [](float n) {
-                    return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
-                };
-                m_clear_color_cb(clamp01(nums[0]), clamp01(nums[1]), clamp01(nums[2]));
-            }
-        }
-    }
     (void)m_render_loop.sender().send(
         RenderMsg { RenderSetUserProperty { property, prop_for_rt } });
 }
@@ -931,26 +916,8 @@ void SceneRuntimeController::loadScene() {
         m_scene_parser.SetUserProperties(&m_user_properties);
         scene = m_scene_parser.Parse(scene_id, *scene_doc, vfs, *m_sound_manager);
         m_scene_parser.SetUserProperties(nullptr);
-        // Apply a user-property override on `schemecolor` to the freshly-
-        // parsed scene clear color so the host callback below publishes
-        // the user's value (not the project.json default). The render
-        // thread re-applies it idempotently when it runs the first-frame
-        // RenderSetUserProperty replay.
-        if (auto it = m_user_properties.find("schemecolor"); it != m_user_properties.end()) {
-            const nlohmann::json* v_ptr = &it->second;
-            if (it->second.is_object() && it->second.contains("value"))
-                v_ptr = &it->second.at("value");
-            if (v_ptr->is_string()) {
-                std::vector<float> nums;
-                if (ParseFloatList(v_ptr->get<std::string>(), nums) && nums.size() >= 3) {
-                    auto clamp01 = [](float n) {
-                        return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
-                    };
-                    scene->clearColor = { clamp01(nums[0]), clamp01(nums[1]), clamp01(nums[2]) };
-                }
-            }
-        }
         for (const auto& [key, prop] : m_user_properties) {
+            if (IsSchemeColorKey(key)) ApplySchemeColorToClear(*scene, prop);
             owe::script::SetSceneUserProperty(*scene, key, prop);
         }
         if (! m_config.cache_dir.empty() && scene) {

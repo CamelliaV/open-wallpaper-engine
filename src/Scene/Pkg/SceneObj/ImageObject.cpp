@@ -188,6 +188,7 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
         return false;
     }
     owe::GetJsonValue(jImage, "fullscreen", fullscreen, false);
+    owe::GetJsonValue(jImage, "passthrough", config.passthrough, false);
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "id", id, false);
     owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);

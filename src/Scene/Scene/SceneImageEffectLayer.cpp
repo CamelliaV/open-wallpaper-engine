@@ -63,10 +63,13 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         swap_pp();
     }
     if (last_output != nullptr) {
-        last_output->output = m_final_target;
-        auto& mesh          = *(last_output->sceneNode->Mesh());
-        auto& material      = *mesh.Material();
-        material.blenmode   = m_final_blend;
+        last_output->output  = m_final_target;
+        auto& mesh           = *(last_output->sceneNode->Mesh());
+        auto& material       = *mesh.Material();
+        material.blenmode    = m_final_blend;
+        material.depth_test  = m_final_depth_test;
+        material.depth_write = m_final_depth_write;
+        material.cull_mode   = m_final_cull_mode;
         last_output->sceneNode->SetCamera(std::string());
         // Anchor to the layer's primary SceneNode so the composite quad
         // inherits the layer's world transform (including any container

@@ -1,5 +1,7 @@
 module;
 
+#include <cmath>
+
 #include <rstd/macro.hpp>
 
 #include "Utils/String.h"
@@ -428,8 +430,8 @@ void WireCameraShakeScripts(ParseContext& context, const wpscene::FieldBindings&
 }
 
 void WireCameraFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
-                            const wpscene::FieldBindings& fb, const Vector3f& translate_bias,
-                            const Vector3f& rotation_bias) {
+                            std::shared_ptr<SceneCamera> camera, const wpscene::FieldBindings& fb,
+                            const Vector3f& translate_bias, const Vector3f& rotation_bias) {
     SceneNode* node = node_sp.get();
     if (! node || fb.scripts.empty()) return;
     auto& ss = EnsureScriptScene(context);
@@ -448,20 +450,27 @@ void WireCameraFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> no
         if (! fs) continue;
 
         if (field == "origin") {
-            ss.AddActuator({ fs, [node_sp, translate_bias](const script::ScriptValue& value) {
-                                Vector3f current = node_sp->Translate() - translate_bias;
-                                auto     next    = ScriptValueAsVec3(value, current);
-                                if (next) node_sp->SetTranslate(translate_bias + *next);
-                            } });
+            ss.AddActuator(
+                { fs, [node_sp, camera, translate_bias](const script::ScriptValue& value) {
+                     Vector3f current = node_sp->Translate() - translate_bias;
+                     auto     next    = ScriptValueAsVec3(value, current);
+                     if (next) {
+                         node_sp->SetTranslate(translate_bias + *next);
+                         if (camera) camera->Update();
+                     }
+                 } });
         } else if (field == "angles") {
-            ss.AddActuator({ fs, [node_sp, rotation_bias](const script::ScriptValue& value) {
-                                constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
-                                constexpr float kDegToRad = rstd::f32_::consts::PI / 180.0f;
-                                Vector3f        current =
-                                    (node_sp->Rotation() - rotation_bias) * kRadToDeg;
-                                auto next = ScriptValueAsVec3(value, current);
-                                if (next) node_sp->SetRotation(rotation_bias + *next * kDegToRad);
-                            } });
+            ss.AddActuator(
+                { fs, [node_sp, camera, rotation_bias](const script::ScriptValue& value) {
+                     constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
+                     constexpr float kDegToRad = rstd::f32_::consts::PI / 180.0f;
+                     Vector3f        current   = (node_sp->Rotation() - rotation_bias) * kRadToDeg;
+                     auto            next      = ScriptValueAsVec3(value, current);
+                     if (next) {
+                         node_sp->SetRotation(rotation_bias + *next * kDegToRad);
+                         if (camera) camera->Update();
+                     }
+                 } });
         }
     }
 }
@@ -520,6 +529,18 @@ void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_
         mesh.AddIndexArray(SceneIndexArray(count * 6));
     }
     mesh.GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick_format);
+}
+
+bool IsLayerCompositeShader(std::string_view shader) {
+    return shader == "genericimage" || shader == "genericimage2" || shader == "genericimage3" ||
+           shader == "genericimage4" || shader == "passthrough";
+}
+
+bool IsDefaultEditorClearColor(const std::array<float, 3>& color) {
+    constexpr float kDefault = 0.7f;
+    constexpr float kEpsilon = 0.0001f;
+    return std::abs(color[0] - kDefault) < kEpsilon && std::abs(color[1] - kDefault) < kEpsilon &&
+           std::abs(color[2] - kDefault) < kEpsilon;
 }
 
 void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
@@ -1142,7 +1163,7 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
         scene.camera_path_user_index[cam.visible_user_key].push_back(path);
 
     WireCameraFieldScripts(
-        context, node, cam.field_bindings, path_translate_bias, path_rotation_bias);
+        context, node, camera, cam.field_bindings, path_translate_bias, path_rotation_bias);
     context.node_id_map[cam.id] = { cam.parent, node };
 }
 
@@ -1156,11 +1177,12 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc
     GenCardMesh(scene.default_effect_mesh, { 2, 2 });
     context.shader_updater = static_cast<SceneUniformUpdater*>(scene.shaderValueUpdater.get());
 
-    scene.clearColor = sc.general.clearcolor;
-    scene.ortho[0]   = sc.general.orthogonalprojection.width;
-    scene.ortho[1]   = sc.general.orthogonalprojection.height;
-    context.ortho_w  = scene.ortho[0];
-    context.ortho_h  = scene.ortho[1];
+    scene.clearColor             = sc.general.clearcolor;
+    scene.schemeColorDrivesClear = IsDefaultEditorClearColor(scene.clearColor);
+    scene.ortho[0]               = sc.general.orthogonalprojection.width;
+    scene.ortho[1]               = sc.general.orthogonalprojection.height;
+    context.ortho_w              = scene.ortho[0];
+    context.ortho_h              = scene.ortho[1];
 
     {
         auto& gb              = context.global_base_uniforms;
@@ -1232,8 +1254,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     for (const auto& wpeffobj : wpimgobj.effects) {
         if (wpeffobj.visible) count_eff++;
     }
-    bool hasEffect = count_eff > 0;
-    bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
+    bool hasEffect     = count_eff > 0;
+    bool isPassthrough = wpimgobj.config.passthrough;
 
     if (wpimgobj.image == "models/util/projectlayer.json") return;
 
@@ -1241,7 +1263,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     // (they just sample `_rt_default` and write it back). Mark as elidable
     // so the render-graph builder drops them when unreferenced, or routes
     // them to `_rt_link_<id>` when another layer reads their composite.
-    if (! hasEffect && wpimgobj.visible && (wpimgobj.fullscreen || isCompose)) {
+    if (! hasEffect && wpimgobj.visible && (wpimgobj.fullscreen || isPassthrough)) {
         context.scene->elidable_layer_ids.insert(wpimgobj.id);
     }
 
@@ -1419,7 +1441,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         GenCardMesh(effct_final_mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
     }
     // material blendmode for last step to use
-    auto imgBlendMode = material.blenmode;
+    auto finalMaterialState = material;
     // disable img material blend, as it's the first effect node now
     if (hasEffect) {
         material.blenmode = BlendMode::Normal;
@@ -1541,7 +1563,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         // currently use addr for unique
         std::string nodeAddr = getAddr(spImgNode.get());
         // set camera to attatch effect
-        if (isCompose) {
+        if (isPassthrough) {
             scene.cameras[nodeAddr] =
                 std::make_shared<SceneCamera>((int32_t)scene.activeCamera->Width(),
                                               (int32_t)scene.activeCamera->Height(),
@@ -1570,7 +1592,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
             spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
         {
-            imgEffectLayer->SetFinalBlend(imgBlendMode);
+            imgEffectLayer->SetFinalMaterialState(finalMaterialState);
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
             scene.cameras.at(nodeAddr)->AttatchImgEffect(imgEffectLayer);
         }
@@ -1593,7 +1615,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
         }
 
-        int32_t i_eff = -1;
+        int32_t     i_eff = -1;
+        std::string last_effect_shader;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
             if (! wpeffobj.visible) {
@@ -1721,6 +1744,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 spMesh->AddMaterial(std::move(material));
                 RegisterShaderUserVarIndex(
                     context.scene.get(), spMesh->Material(), wpmat, wpEffShaderInfo);
+                if (auto* mat = spMesh->Material(); mat != nullptr) last_effect_shader = mat->name;
                 spEffNode->AddMesh(spMesh);
 
                 context.shader_updater->SetNodeData(spEffNode.get(), svData);
@@ -1731,6 +1755,54 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 imgEffectLayer->AddEffect(imgEffect);
             else {
                 rstd_error("effect \'{}\' failed to load", wpeffobj.name);
+            }
+        }
+
+        if (! wpimgobj.fullscreen && ! isPassthrough &&
+            ! IsLayerCompositeShader(last_effect_shader)) {
+            nlohmann::json    json;
+            wpscene::Material passthrough_mat;
+            if (! owe::ParseJson(
+                    fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
+                    json) ||
+                ! passthrough_mat.FromJson(json)) {
+                rstd_error("parse effectpassthrough.json failed for '{}'", wpimgobj.name);
+            } else {
+                if (passthrough_mat.textures.empty())
+                    passthrough_mat.textures.push_back(effect_ppong_a);
+                else
+                    passthrough_mat.textures[0] = effect_ppong_a;
+
+                auto finalEffect = std::make_shared<SceneImageEffect>();
+                auto spFinalNode = std::make_shared<SceneNode>();
+
+                WPShaderInfo wpFinalShaderInfo;
+                wpFinalShaderInfo.baseConstSvs = baseConstSvs;
+                SceneMaterial        finalMaterial;
+                SceneUniformNodeData finalSvData;
+                finalSvData.parallaxDepth = { wpimgobj.parallaxDepth[0],
+                                              wpimgobj.parallaxDepth[1] };
+                if (LoadMaterial(vfs,
+                                 passthrough_mat,
+                                 context.scene.get(),
+                                 spFinalNode.get(),
+                                 &finalMaterial,
+                                 &finalSvData,
+                                 &wpFinalShaderInfo)) {
+                    LoadConstvalue(finalMaterial, passthrough_mat, wpFinalShaderInfo);
+                    auto spFinalMesh = std::make_shared<SceneMesh>();
+                    spFinalMesh->AddMaterial(std::move(finalMaterial));
+                    RegisterShaderUserVarIndex(context.scene.get(),
+                                               spFinalMesh->Material(),
+                                               passthrough_mat,
+                                               wpFinalShaderInfo);
+                    spFinalNode->AddMesh(spFinalMesh);
+                    context.shader_updater->SetNodeData(spFinalNode.get(), finalSvData);
+                    finalEffect->nodes.push_back({ effect_ppong_b, spFinalNode });
+                    imgEffectLayer->AddEffect(finalEffect);
+                } else {
+                    rstd_error("effect passthrough failed to load for '{}'", wpimgobj.name);
+                }
             }
         }
     }

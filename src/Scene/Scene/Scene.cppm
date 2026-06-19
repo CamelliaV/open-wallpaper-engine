@@ -468,6 +468,13 @@ public:
         m_final_blend = m;
         m_resolved    = false;
     }
+    void SetFinalMaterialState(const SceneMaterial& material) {
+        m_final_blend       = material.blenmode;
+        m_final_depth_test  = material.depth_test;
+        m_final_depth_write = material.depth_write;
+        m_final_cull_mode   = material.cull_mode;
+        m_resolved          = false;
+    }
     void SetFinalTarget(std::string t) {
         m_final_target = std::move(t);
         m_resolved     = false;
@@ -486,6 +493,9 @@ private:
     bool                       fullscreen { false };
     std::unique_ptr<SceneMesh> m_final_mesh;
     BlendMode                  m_final_blend;
+    bool                       m_final_depth_test { false };
+    bool                       m_final_depth_write { false };
+    CullMode                   m_final_cull_mode { CullMode::None };
     std::string                m_final_target { SpecTex_Default };
     bool                       m_resolved { false };
 
@@ -1592,6 +1602,7 @@ public:
 
     i32                  ortho[2] { 1920, 1080 };
     std::array<float, 3> clearColor { 1.0f, 1.0f, 1.0f };
+    bool                 schemeColorDrivesClear { false };
 
     double elapsingTime { 0.0f }, frameTime { 0.0f };
     void   PassFrameTime(double t) {
