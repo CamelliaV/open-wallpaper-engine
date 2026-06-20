@@ -262,15 +262,12 @@ public:
 private:
     struct Layer {
         AnimationLayer                         anim_layer;
-        double                                 blend;
         const WPPuppet::Animation*             anim { nullptr };
         WPPuppet::Animation::InterpolationInfo interp_info {};
 
         operator bool() const noexcept { return anim != nullptr; };
     };
 
-    double m_global_blend { 1.0 };
-    double m_total_blend { 0.0 };
     // Absolute scene elapsed time of the last advance. Guards against
     // multi-pass nodes (e.g. puppet with mask pre-pass + clipped-main)
     // advancing animation N× per frame.

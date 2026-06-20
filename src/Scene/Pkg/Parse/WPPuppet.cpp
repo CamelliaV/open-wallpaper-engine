@@ -10,6 +10,47 @@ import rstd.cppstd;
 using namespace owe;
 using namespace Eigen;
 
+static double SampleBoneCurve(const std::vector<WPPuppet::BoneFrameCurve>&  curves,
+                              unsigned                                      bone_index,
+                              const WPPuppet::Animation::InterpolationInfo& info) {
+    if (bone_index >= curves.size()) return 1.0;
+    const auto& values = curves[bone_index].values;
+    if (values.empty()) return 1.0;
+
+    auto sample = [&](idx frame) {
+        const auto i = std::min<usize>(static_cast<usize>(frame), values.size() - 1);
+        return static_cast<double>(values[i]);
+    };
+    const double a = sample(info.frame_a);
+    const double b = sample(info.frame_b);
+    return a * (1.0 - info.t) + b * info.t;
+}
+
+static double LayerBoneBlend(const WPPuppet::Animation& anim, unsigned bone_index,
+                             const WPPuppet::Animation::InterpolationInfo& info,
+                             double                                        layer_blend) {
+    double blend = layer_blend * SampleBoneCurve(anim.blend_curves, bone_index, info);
+    blend *= SampleBoneCurve(anim.scalar_curves, bone_index, info);
+    return std::max(0.0, blend);
+}
+
+static bool HasAuthoredTrack(const WPPuppet::BoneTrack& track) {
+    constexpr float eps      = 1e-6f;
+    auto            non_zero = [](const Eigen::Vector3f& v) {
+        return v.cwiseAbs().maxCoeff() > eps;
+    };
+    auto non_default_scale = [](const Eigen::Vector3f& v) {
+        const bool zero = v.cwiseAbs().maxCoeff() <= eps;
+        const bool one  = (v - Eigen::Vector3f::Ones()).cwiseAbs().maxCoeff() <= eps;
+        return ! zero && ! one;
+    };
+    for (const auto& frame : track.frames) {
+        if (non_zero(frame.position) || non_zero(frame.angle) || non_default_scale(frame.scale))
+            return true;
+    }
+    return false;
+}
+
 static Quaterniond ToQuaternion(Vector3f euler) {
     const std::array<Vector3d, 3> axis { Vector3d::UnitX(), Vector3d::UnitY(), Vector3d::UnitZ() };
     return AngleAxis<double>(euler.z(), axis[2]) * AngleAxis<double>(euler.y(), axis[1]) *
@@ -48,8 +89,6 @@ void WPPuppet::prepared() {
 
 std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
                                                     double         time) noexcept {
-    double global_blend = puppet_layer.m_global_blend;
-
     puppet_layer.updateInterpolation(time);
 
     // TRS skinning is required: WE puppets animate scale (e.g. blink uses
@@ -58,12 +97,10 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
     // linear so vertices within the sprite get differential treatment.
     // Standard LBS: per-bone local affine = T(pos) · R(quat) · Diag(scale).
     // Chained through parent's anim transform, then M_skin = A_world · inv_bind.
-    // WE anim convention: frame[0] is the bone's bind pose. The bind anchor
-    // (pos/quat/scale) is the per-bone initial value; replace/additive layers
-    // shift it via deltas-from-frame[0]. `global_blend` is the residual bind
-    // weight after prepared() consumes replace-layer stacking — bind contributes
-    // `bind.X * global_blend` and each replace layer adds `layer.blend * frame_base.X`,
-    // so non-replaced bones stay at bind, and replaced ones at frame_base anchor.
+    // WE anim convention: frame[0] is the replacement anchor pose for a bone.
+    // MDLA blend curves decide which dense bone-track slots are active for each
+    // animation layer; inactive bones keep bind pose instead of being diluted by
+    // unrelated replacement layers.
     for (unsigned i = 0; i < m_final_affines.size(); i++) {
         const auto& bone   = bones[i];
         auto&       affine = m_final_affines[i];
@@ -79,19 +116,34 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             }
         }
 
+        const WPPuppet::BoneFrame* replace_base_frame { nullptr };
+        for (const auto& layer : puppet_layer.m_layers) {
+            if (layer.anim == nullptr || ! layer.anim_layer.visible || layer.anim_layer.additive)
+                continue;
+            if (i >= layer.anim->bone_tracks.size()) continue;
+            const auto& track = layer.anim->bone_tracks[i];
+            if (! HasAuthoredTrack(track)) continue;
+            const double blend =
+                LayerBoneBlend(*layer.anim, i, layer.interp_info, layer.anim_layer.blend);
+            if (blend <= 0.0) continue;
+            replace_base_frame = std::addressof(track.frames[(usize)0]);
+            break;
+        }
+
         // Bind state. vco is a fixed render-time pivot offset for root sprite
         // bones (matches world_bind's pretranslate in prepared()) and is added
-        // to trans AFTER the layer blend below — folding it into bind_pos here
-        // would multiply by global_blend / cur_blend and shift the sprite for
-        // partial-replace blends.
+        // after layer deltas so the replacement anchor stays in puppet space.
         const Quaterniond bind_quat { bone.local_bind.linear().cast<double>() };
 
-        Vector3f trans { bone.local_bind.translation() * global_blend };
-        Vector3f scale { Vector3f::Ones() * global_blend };
+        Vector3f trans { replace_base_frame != nullptr ? replace_base_frame->position
+                                                       : bone.local_bind.translation() };
+        Vector3f scale { replace_base_frame != nullptr ? replace_base_frame->scale
+                                                       : Vector3f::Ones() };
         // quat absorbs R_bind directly (instead of a separate affine.rotate(R_bind)
         // + inv_bind cancel). Each layer multiplies in its frame delta from frame[0];
         // bind_quat is preserved because deltas at frame[0] are identity.
-        Quaterniond       quat { bind_quat };
+        Quaterniond       quat { replace_base_frame != nullptr ? replace_base_frame->quaternion
+                                                               : bind_quat };
         const Quaterniond ident { Quaterniond::Identity() };
 
         for (auto& layer : puppet_layer.m_layers) {
@@ -99,14 +151,17 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             if (layer.anim == nullptr || ! alayer.visible) continue;
             if (i >= layer.anim->bone_tracks.size()) continue;
 
-            auto& info       = layer.interp_info;
-            auto& track      = layer.anim->bone_tracks[i];
+            auto& info  = layer.interp_info;
+            auto& track = layer.anim->bone_tracks[i];
+            if (! HasAuthoredTrack(track)) continue;
             auto& frame_base = track.frames[(usize)0];
             auto& frame_a    = track.frames[(usize)info.frame_a];
             auto& frame_b    = track.frames[(usize)info.frame_b];
 
             double t     = info.t;
             double one_t = 1.0 - info.t;
+            double blend = LayerBoneBlend(*layer.anim, i, info, alayer.blend);
+            if (blend <= 0.0) continue;
 
             auto frame_a_quat_delta = frame_a.quaternion * frame_base.quaternion.conjugate();
             auto frame_b_quat_delta = frame_b.quaternion * frame_base.quaternion.conjugate();
@@ -115,16 +170,13 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             auto scale_a_delta      = frame_a.scale - frame_base.scale;
             auto scale_b_delta      = frame_b.scale - frame_base.scale;
 
-            quat *=
-                frame_a_quat_delta.slerp(t, frame_b_quat_delta).slerp(1.0 - alayer.blend, ident);
+            quat *= frame_a_quat_delta.slerp(t, frame_b_quat_delta).slerp(1.0 - blend, ident);
             if (alayer.additive) {
-                trans += alayer.blend * (pos_a_delta * one_t + pos_b_delta * t);
-                scale += alayer.blend * (scale_a_delta * one_t + scale_b_delta * t);
+                trans += blend * (pos_a_delta * one_t + pos_b_delta * t);
+                scale += blend * (scale_a_delta * one_t + scale_b_delta * t);
             } else {
-                trans += (layer.blend * frame_base.position) +
-                         (alayer.blend * (pos_a_delta * one_t + pos_b_delta * t));
-                scale += (layer.blend * frame_base.scale) +
-                         (alayer.blend * (scale_a_delta * one_t + scale_b_delta * t));
+                trans += blend * (pos_a_delta * one_t + pos_b_delta * t);
+                scale += blend * (scale_a_delta * one_t + scale_b_delta * t);
             }
         }
         if (bone.noBindParent() && world_anchored_bones) {
@@ -208,15 +260,8 @@ WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
 
 void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
     m_layers.resize(alayers.size());
-    double& blend       = m_global_blend;
-    double& total_blend = m_total_blend;
 
-    // Only REPLACE layers (additive=false) contribute to the total_blend
-    // normalization — additive layers don't compete for the replace slot.
-    // Skip layers whose animation isn't actually in the puppet so missing
-    // editor-residue refs don't dilute the survivors.
-    const auto& anims                   = m_puppet->anims;
-    total_blend                         = 0.0;
+    const auto&           anims         = m_puppet->anims;
     const AnimationLayer* additive_base = nullptr;
     bool                  has_replace   = false;
     auto                  exists        = [&](const auto& layer) {
@@ -234,14 +279,12 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
         }
         has_replace   = true;
         additive_base = nullptr;
-        total_blend += layer.blend;
     }
 
     std::transform(alayers.rbegin(),
                    alayers.rend(),
                    m_layers.rbegin(),
-                   [&blend, additive_base, this](const auto& layer) {
-                       double      cur_blend { 0.0f };
+                   [additive_base, this](const auto& layer) {
                        const auto& anims     = m_puppet->anims;
                        auto        out_layer = layer;
 
@@ -250,33 +293,14 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
                        });
                        bool ok = it != anims.end() && layer.visible;
 
-                       double& total_blend = m_total_blend;
-
-                       if (ok) {
-                           if (std::addressof(layer) == additive_base) {
-                               // Additive-only stacks still need one absolute frame[0]
-                               // pose; otherwise authored puppet pieces stay scattered.
-                               cur_blend          = 1.0;
-                               blend              = 0.0;
-                               out_layer.additive = false;
-                           } else if (layer.additive) {
-                               // Additive layers carry their scene.json blend unchanged;
-                               // genFrame consumes it as a delta scale, not a normalized
-                               // replace weight.
-                               cur_blend = layer.blend;
-                           } else if (total_blend > 1.0) {
-                               cur_blend = layer.blend / total_blend;
-                               blend     = 0.0;
-                           } else {
-                               cur_blend = blend * layer.blend;
-                               blend *= 1.0f - layer.blend;
-                               blend = blend < 0.0f ? 0.0f : blend;
-                           }
+                       if (ok && std::addressof(layer) == additive_base) {
+                           // Additive-only stacks still need one absolute frame[0]
+                           // pose; otherwise authored puppet pieces stay scattered.
+                           out_layer.additive = false;
                        }
 
                        return Layer {
                            .anim_layer = out_layer,
-                           .blend      = cur_blend,
                            .anim       = ok ? std::addressof(*it) : nullptr,
                        };
                    });
