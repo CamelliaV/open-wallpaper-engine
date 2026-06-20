@@ -33,13 +33,15 @@ ParticleInstance::BoundedData& ParticleInstance::GetBoundedData() { return m_bou
 ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm,
                                      uint32_t maxcount, double rate, u32 maxcount_instance,
                                      double probability, SpawnType type,
-                                     ParticleRawGenSpecOp specOp, u32 trail_length,
+                                     ParticleRawGenSpecOp specOp,
+                                     ParticleFollowAnchor follow_anchor, u32 trail_length,
                                      double start_time)
     : m_sys(p),
       m_mesh(sm),
       m_maxcount(maxcount),
       m_rate(rate),
       m_genSpecOp(specOp),
+      m_follow_anchor(follow_anchor),
       m_time(0),
       m_start_time(start_time),
       m_maxcount_instance(maxcount_instance),
@@ -63,6 +65,22 @@ std::span<ParticleControlpoint> ParticleSubSystem::Controlpoints() { return m_co
 ParticleSubSystem::SpawnType ParticleSubSystem::Type() const { return m_spawn_type; }
 
 u32 ParticleSubSystem::MaxInstanceCount() const { return m_maxcount_instance; };
+
+Eigen::Vector3f ParticleSubSystem::FollowPosition(const Particle& p) const {
+    Eigen::Vector3f pos = ParticleModify::GetPos(p);
+    if (! m_follow_anchor.trail_renderer) return pos;
+
+    Eigen::Vector3f velocity = ParticleModify::GetVelocity(p);
+    float           speed    = velocity.norm();
+    if (speed <= 1e-6f) return pos;
+
+    float trail_len =
+        std::max(0.0f, std::min(speed * m_follow_anchor.length, m_follow_anchor.max_length));
+    if (trail_len <= 0.0f) return pos;
+
+    float visual_half_len = (p.size * 0.5f) * m_follow_anchor.texture_ratio * trail_len * 0.5f;
+    return pos + velocity.normalized() * visual_half_len;
+}
 
 void ParticleSubSystem::AddChild(std::unique_ptr<ParticleSubSystem>&& child) {
     m_children.emplace_back(std::move(child));
@@ -146,17 +164,21 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
         if (m_instances.empty()) m_instances.emplace_back(std::make_unique<ParticleInstance>());
     }
 
-    auto spawn_inst = [](ParticleInstance&  inst,
-                         ParticleSubSystem& child,
-                         isize              idx,
-                         Eigen::Vector3f    pos       = Eigen::Vector3f::Zero(),
-                         bool               fixed_pos = false) {
+    auto spawn_inst = [this](ParticleInstance&  inst,
+                             ParticleSubSystem& child,
+                             isize              idx,
+                             Eigen::Vector3f    pos       = Eigen::Vector3f::Zero(),
+                             bool               fixed_pos = false) {
+        if (! fixed_pos && idx >= 0 && static_cast<usize>(idx) < inst.Particles().size()) {
+            pos = FollowPosition(inst.Particles()[static_cast<usize>(idx)]);
+        }
         ParticleInstance* n_inst = child.QueryNewInstance();
         if (n_inst != nullptr) {
             n_inst->GetBoundedData() = {
-                .parent       = &inst,
-                .particle_idx = fixed_pos ? -1 : idx,
-                .pos          = pos,
+                .parent           = &inst,
+                .parent_subsystem = this,
+                .particle_idx     = fixed_pos ? -1 : idx,
+                .pos              = pos,
             };
         }
     };
@@ -174,7 +196,9 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
             std::span particles = bounded_data.parent->Particles();
             if (bounded_data.particle_idx != -1 && bounded_data.particle_idx < particles.size()) {
                 auto& p          = particles[bounded_data.particle_idx];
-                bounded_data.pos = ParticleModify::GetPos(p);
+                bounded_data.pos = bounded_data.parent_subsystem
+                                       ? bounded_data.parent_subsystem->FollowPosition(p)
+                                       : ParticleModify::GetPos(p);
                 // only update pos once when event_death
                 if (m_spawn_type == SpawnType::EVENT_DEATH) bounded_data.particle_idx = -1;
 
@@ -256,7 +280,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
                 // new dead
                 for (auto& child : m_children) {
                     if (child->Type() == SpawnType::EVENT_DEATH)
-                        spawn_inst(*inst, *child, i, ParticleModify::GetPos(p), true);
+                        spawn_inst(*inst, *child, i, FollowPosition(p), true);
                 }
             } else {
                 has_live = true;

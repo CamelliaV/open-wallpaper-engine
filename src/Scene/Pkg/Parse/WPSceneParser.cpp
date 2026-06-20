@@ -132,6 +132,14 @@ std::array<float, 2> Texture0UvScale(const SceneMaterial& material, bool nopaddi
     return { r[2] / r[0], r[3] / r[1] };
 }
 
+float ParticleTextureRatio(const SceneMaterial& material) {
+    auto it = material.customShader.constValues.find(WE_GLTEX_RESOLUTION_NAMES[0]);
+    if (it == material.customShader.constValues.end()) return 1.0f;
+    const auto& r = it->second;
+    if (r.size() < 2 || r[0] == 0.0f) return 1.0f;
+    return r[1] / r[0];
+}
+
 std::shared_ptr<WPPuppetLayer>
 FindPuppetLayerWithBone(const std::shared_ptr<PuppetLayerRegistry>& layers, SceneNode* node,
                         std::string_view name, uint32_t& index) {
@@ -623,9 +631,9 @@ struct ParticleRenderDesc {
 
 ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render) {
     ParticleRenderDesc desc;
-    desc.rope            = sstart_with(render.name, "rope");
+    desc.rope            = render.name == "rope";
     desc.trail           = send_with(render.name, "trail");
-    desc.geometry_shader = desc.rope || (! desc.trail && render.name == "sprite");
+    desc.geometry_shader = desc.rope || render.name == "sprite" || desc.trail;
     return desc;
 }
 
@@ -2010,12 +2018,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             (float)in_SegmentMaxCount,
         };
         shaderInfo.combos["TRAILRENDERER"] = "1";
-        // THICKFORMAT in genericropeparticle.{vert,geom} adds per-end size /
-        // color attributes (TexCoordVec4C2 + TexCoordVec4C3). ropetrail has a
-        // single rope color per segment, so it stays on the thin layout
-        // (TexCoordVec3C2 for the spline CP only). spritetrail uses the per-
-        // vertex velocity in TexCoordVec4C1.w + thick layout for the trail
-        // tangent / fade-in logic.
+        // Only the authored "rope" renderer uses genericropeparticle's segment
+        // layout. "*trail" renderers stay on genericparticle and need velocity
+        // in TexCoordVec4C1 for ComputeParticleTrailTangents.
         if (! render_rope) shaderInfo.combos["THICKFORMAT"] = "1";
     }
     if (render_rope) {
@@ -2069,6 +2074,13 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         if (seg > 256) seg = 256;
         trail_length = (u32)seg;
     }
+    ParticleFollowAnchor follow_anchor;
+    if (hastrail && ! render_rope) {
+        follow_anchor.trail_renderer = true;
+        follow_anchor.length         = wppartRenderer.length;
+        follow_anchor.max_length     = wppartRenderer.maxlength;
+        follow_anchor.texture_ratio  = ParticleTextureRatio(material);
+    }
     {
         // Rope mesh capacity = maxcount * (trail_length-1) since each live
         // particle produces (trail_length-1) GS-input segments. Non-rope path
@@ -2103,6 +2115,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                 break;
             }
         },
+        follow_anchor,
         trail_length,
         static_cast<double>(particle_obj.starttime));
 

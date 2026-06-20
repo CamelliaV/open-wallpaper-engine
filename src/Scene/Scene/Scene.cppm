@@ -1069,6 +1069,13 @@ struct ParticleAudioResponse {
     std::array<float, 2> bounds { 0.0f, 1.0f };
 };
 
+struct ParticleFollowAnchor {
+    bool  trail_renderer { false };
+    float length { 0.0f };
+    float max_length { 0.0f };
+    float texture_ratio { 1.0f };
+};
+
 struct ParticleBoxEmitterArgs {
     std::array<float, 3>  directions;
     std::array<float, 3>  minDistance;
@@ -1303,6 +1310,7 @@ enum class ParticleAnimationMode
 };
 
 class ParticleSystem;
+class ParticleSubSystem;
 
 // Per-slot trail history for rope-head particles. positions[head] is the
 // newest; len counts valid samples (0..capacity). Capacity is decided by the
@@ -1334,8 +1342,9 @@ struct ParticleTrail {
 class ParticleInstance : NoCopy, NoMove {
 public:
     struct BoundedData {
-        ParticleInstance* parent { nullptr };
-        isize             particle_idx { -1 };
+        ParticleInstance*        parent { nullptr };
+        const ParticleSubSystem* parent_subsystem { nullptr };
+        isize                    particle_idx { -1 };
 
         bool            pre_lifetime_ok { true };
         Eigen::Vector3f pos { 0.0f, 0.0f, 0.0f };
@@ -1380,7 +1389,8 @@ public:
 public:
     ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, uint32_t maxcount,
                       double rate, u32 maxcount_instance, double probability, SpawnType type,
-                      ParticleRawGenSpecOp specOp, u32 trail_length = 0, double start_time = 0.0);
+                      ParticleRawGenSpecOp specOp, ParticleFollowAnchor follow_anchor = {},
+                      u32 trail_length = 0, double start_time = 0.0);
     ~ParticleSubSystem();
 
     void Emitt();
@@ -1402,8 +1412,9 @@ public:
     // the particle's local emit space via the node's inverse model.
     void SetOwnerNode(std::weak_ptr<SceneNode> n) { m_owner_node = std::move(n); }
 
-    SpawnType Type() const;
-    u32       MaxInstanceCount() const;
+    SpawnType       Type() const;
+    u32             MaxInstanceCount() const;
+    Eigen::Vector3f FollowPosition(const Particle& p) const;
 
 private:
     void Tick(double frame_time, bool update_mesh);
@@ -1421,6 +1432,7 @@ private:
     std::array<ParticleControlpoint, 8> m_controlpoints;
 
     ParticleRawGenSpecOp m_genSpecOp;
+    ParticleFollowAnchor m_follow_anchor;
     u32                  m_maxcount;
     double               m_rate;
     double               m_time;
