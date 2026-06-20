@@ -43,11 +43,8 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     c.SkipHSpace();
     if (! c.MatchKeyword("uniform")) return;
     c.SkipHSpace();
-    auto type = c.ReadIdent();
-    if (! type) return;
-    c.SkipHSpace();
-    auto name = c.ReadIdent();
-    if (! name) return;
+    auto tn = shader_lex::ReadTypeName(c);
+    if (! tn) return;
     c.SkipHSpace();
     (void)c.ReadArraySuffix();
     c.SkipHSpace();
@@ -61,23 +58,25 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     nlohmann::json sv_json;
     if (! ParseJson(std::string(line.substr(c.Pos())), sv_json)) return;
 
+    auto name = tn->name;
+
     std::string material_key;
     GetJsonValue(sv_json, "material", material_key, false);
-    if (! material_key.empty()) info->alias[material_key] = std::string(*name);
+    if (! material_key.empty()) info->alias[material_key] = std::string(name);
 
-    const bool is_tex   = name->compare(0, 9, "g_Texture") == 0;
+    const bool is_tex   = name.compare(0, 9, "g_Texture") == 0;
     const idx  texcount = std::ssize(texinfos);
 
     if (is_tex) {
         wpscene::WPUniformTex wput;
         wput.FromJson(sv_json);
         i32 index { 0 };
-        STRTONUM(name->substr(9), index);
+        STRTONUM(name.substr(9), index);
         if (! wput.default_.empty()) {
             info->defTexs.push_back({ index, wput.default_ });
         }
         if (! wput.combo.empty()) {
-            const bool enabled = index < texcount && texinfos[(usize)index].enabled;
+            const bool enabled       = index < texcount && texinfos[(usize)index].enabled;
             info->combos[wput.combo] = enabled ? "1" : "0";
         }
         if (index < texcount && texinfos[(usize)index].enabled) {
@@ -89,7 +88,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
         }
     } else {
         wpscene::WPUniformVar var;
-        var.FromJson(sv_json, std::string(*name));
+        var.FromJson(sv_json, std::string(name));
         if (sv_json.contains("default")) {
             const auto& value = sv_json.at("default");
             ShaderValue sv;
@@ -101,7 +100,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
                 sv.setSize(1);
                 GetJsonValue(value, sv[0]);
             }
-            info->svs[std::string(*name)] = sv;
+            info->svs[std::string(name)] = sv;
         }
         if (sv_json.contains("combo")) {
             std::string cname;

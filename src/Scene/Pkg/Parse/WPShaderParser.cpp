@@ -59,11 +59,8 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
     }
     if (kw.empty()) return std::nullopt;
     c.SkipHSpace();
-    auto type = c.ReadIdent();
-    if (! type) return std::nullopt;
-    c.SkipHSpace();
-    auto name = c.ReadIdent();
-    if (! name) return std::nullopt;
+    auto tn = shader_lex::ReadTypeName(c);
+    if (! tn) return std::nullopt;
     c.SkipHSpace();
     auto array = c.ReadArraySuffix();
     c.SkipHSpace();
@@ -74,8 +71,8 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
     m.end         = line_start + c.Pos();
     m.keep_prefix = 0;
     m.storage     = kw;
-    m.type        = *type;
-    m.name        = *name;
+    m.type        = tn->type;
+    m.name        = tn->name;
     m.array       = array.value_or(std::string_view {});
     return m;
 }

@@ -14,6 +14,15 @@ inline bool IsIdStart(char c) {
 inline bool IsIdCont(char c) { return IsIdStart(c) || (c >= '0' && c <= '9'); }
 inline bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
+inline bool IsPrecisionQualifier(std::string_view ident) noexcept {
+    return ident == "lowp" || ident == "mediump" || ident == "highp";
+}
+
+struct TypeName {
+    std::string_view type;
+    std::string_view name;
+};
+
 // Hand-rolled scanner over a string_view. Pos always points at the next byte
 // to consume; Skip*/Match*/Read* primitives advance on success and stay put
 // on failure so the caller can probe alternatives without explicit Save.
@@ -159,6 +168,20 @@ private:
     std::string_view m_src;
     std::size_t      m_pos;
 };
+
+inline std::optional<TypeName> ReadTypeName(Cursor& c) noexcept {
+    auto type = c.ReadIdent();
+    if (! type) return std::nullopt;
+    c.SkipHSpace();
+    if (IsPrecisionQualifier(*type)) {
+        type = c.ReadIdent();
+        if (! type) return std::nullopt;
+        c.SkipHSpace();
+    }
+    auto name = c.ReadIdent();
+    if (! name) return std::nullopt;
+    return TypeName { *type, *name };
+}
 
 // Walks one source line at a time. Tracks block-comment state so that a
 // `/* ... \n ... */` spanning multiple physical lines turns every line it
