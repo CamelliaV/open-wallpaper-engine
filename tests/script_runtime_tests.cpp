@@ -168,9 +168,9 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
-    EXPECT_DOUBLE_EQ(
-        LastScalar(fs),
-        16.0 * 100000000.0 + 16.0 * 1000000.0 + 161.5 * 10000.0 + 61.5 * 100.0 + 261.5);
+    EXPECT_DOUBLE_EQ(LastScalar(fs),
+                     16.0 * 100000000.0 + 16.0 * 1000000.0 + 161.5 * 10000.0 + 61.5 * 100.0 +
+                         261.5);
 
     for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
         fi.audio_left[i]    = static_cast<float>(100 + i);
@@ -179,9 +179,9 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
     }
     rt.SetFrameInputs(fi);
     rt.TickAll();
-    EXPECT_DOUBLE_EQ(
-        LastScalar(fs),
-        16.0 * 100000000.0 + 16.0 * 1000000.0 + 261.5 * 10000.0 + 161.5 * 100.0 + 361.5);
+    EXPECT_DOUBLE_EQ(LastScalar(fs),
+                     16.0 * 100000000.0 + 16.0 * 1000000.0 + 261.5 * 10000.0 + 161.5 * 100.0 +
+                         361.5);
 }
 
 // ---------------------------------------------------------------------------

@@ -1713,7 +1713,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             if (wpfbo.fit > 0) {
                                 const float max_size = std::max(wpimgobj.size[0], wpimgobj.size[1]);
                                 if (max_size > 0.0f) {
-                                    const float fit_scale = static_cast<float>(wpfbo.fit) / max_size;
+                                    const float fit_scale =
+                                        static_cast<float>(wpfbo.fit) / max_size;
                                     return { static_cast<uint16_t>(std::max(
                                                  1.0f, std::round(wpimgobj.size[0] * fit_scale))),
                                              static_cast<uint16_t>(std::max(
@@ -1723,11 +1724,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             return { static_cast<uint16_t>(wpimgobj.size[0] / (float)wpfbo.scale),
                                      static_cast<uint16_t>(wpimgobj.size[1] / (float)wpfbo.scale) };
                         }();
-                        scene.renderTargets[rtname] = {
-                            .width      = fbo_size[0],
-                            .height     = fbo_size[1],
-                            .allowReuse = true
-                        };
+                        scene.renderTargets[rtname] = { .width      = fbo_size[0],
+                                                        .height     = fbo_size[1],
+                                                        .allowReuse = true };
                     }
                     fboMap[wpfbo.name] = rtname;
                 }

@@ -14,9 +14,8 @@ import wescene.script;
 namespace
 {
 
-void CollectNodesById(const std::shared_ptr<owe::SceneNode>&               root,
-                      std::int32_t                                         id,
-                      std::vector<std::shared_ptr<owe::SceneNode>>&        out) {
+void CollectNodesById(const std::shared_ptr<owe::SceneNode>& root, std::int32_t id,
+                      std::vector<std::shared_ptr<owe::SceneNode>>& out) {
     if (! root) return;
     if (root->ID() == id) out.push_back(root);
     for (const auto& child : root->GetChildren()) {
@@ -43,7 +42,7 @@ std::shared_ptr<owe::Scene> LoadWorkshopScene(std::string_view id) {
     std::unordered_map<std::string, nlohmann::json> user_props;
     const auto                                      project_path = workshop_dir / "project.json";
     if (std::filesystem::exists(project_path)) {
-        std::ifstream in(project_path);
+        std::ifstream  in(project_path);
         nlohmann::json project = nlohmann::json::parse(in, nullptr, false);
         if (! project.is_discarded() && project.contains("general") &&
             project.at("general").contains("properties") &&
@@ -71,9 +70,8 @@ TEST(SceneRuntimeScripts, EarthWorkshopMenuAlphaDefaultsHidden) {
     fi.runtime = 8.0f;
     owe::script::TickSceneScripts(*scene, fi);
 
-    for (std::int32_t id : { 275, 279, 283, 291, 301, 260, 288, 297, 276, 158, 313,
-                             309, 307, 315, 317, 319, 342, 346, 331, 413, 414, 415,
-                             416 }) {
+    for (std::int32_t id : { 275, 279, 283, 291, 301, 260, 288, 297, 276, 158, 313, 309,
+                             307, 315, 317, 319, 342, 346, 331, 413, 414, 415, 416 }) {
         std::vector<std::shared_ptr<owe::SceneNode>> nodes;
         CollectNodesById(scene->sceneGraph, id, nodes);
         ASSERT_FALSE(nodes.empty()) << "missing menu node " << id;
@@ -90,8 +88,8 @@ TEST(SceneRuntimeScripts, EarthWorkshopMenuAlphaDefaultsHidden) {
 }
 
 TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlpha) {
-    owe::Scene       scene;
-    owe::SceneNode   node;
+    owe::Scene        scene;
+    owe::SceneNode    node;
     owe::sprite_map_t sprites;
 
     auto camera_node = std::make_shared<owe::SceneNode>();
