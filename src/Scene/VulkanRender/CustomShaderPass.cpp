@@ -398,7 +398,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         }
     }
     {
-        VkPipelineColorBlendAttachmentState color_blend;
+        VkPipelineColorBlendAttachmentState color_blend {};
         VkAttachmentLoadOp                  loadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
         {
             VkColorComponentFlags colorMask =
