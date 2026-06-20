@@ -1163,8 +1163,10 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
     auto        it          = scene.cameras.find(camera_name);
     if (it == scene.cameras.end()) return;
 
-    auto camera       = it->second;
-    auto default_node = camera->GetAttachedNode();
+    auto camera = it->second;
+    auto default_node =
+        use_perspective ? context.global_perspective_camera_node : context.global_camera_node;
+    if (! default_node) default_node = camera->GetAttachedNode();
     if (! default_node) return;
 
     double   default_width     = camera->Width();
