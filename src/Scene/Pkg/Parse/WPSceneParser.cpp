@@ -119,6 +119,15 @@ SceneNode* RootOf(SceneNode* node) {
     return node;
 }
 
+std::array<float, 2> Texture0UvScale(const SceneMaterial& material, bool nopadding = false) {
+    if (nopadding) return { 1.0f, 1.0f };
+    auto it = material.customShader.constValues.find(WE_GLTEX_RESOLUTION_NAMES[0]);
+    if (it == material.customShader.constValues.end()) return { 1.0f, 1.0f };
+    const auto& r = it->second;
+    if (r.size() < 4 || r[0] == 0.0f || r[1] == 0.0f) return { 1.0f, 1.0f };
+    return { r[2] / r[0], r[3] / r[1] };
+}
+
 std::shared_ptr<WPPuppetLayer>
 FindPuppetLayerWithBone(const std::shared_ptr<PuppetLayerRegistry>& layers, SceneNode* node,
                         std::string_view name, uint32_t& index) {
@@ -1374,51 +1383,40 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     }
 
     // mesh
-    SceneMesh effct_final_mesh {};
-    auto      spMesh = std::make_shared<SceneMesh>();
-    auto&     mesh   = *spMesh;
+    SceneMesh                  effct_final_mesh {};
+    auto                       spMesh  = std::make_shared<SceneMesh>();
+    auto&                      mesh    = *spMesh;
+    const std::array<float, 2> mapRate = Texture0UvScale(material, wpimgobj.nopadding);
 
-    {
-        // deal with pow of 2
-        std::array<float, 2> mapRate { 1.0f, 1.0f };
-        if (! wpimgobj.nopadding &&
-            exists(material.customShader.constValues, WE_GLTEX_RESOLUTION_NAMES[0])) {
-            const auto& r = material.customShader.constValues.at(WE_GLTEX_RESOLUTION_NAMES[0]);
-            mapRate       = { r[2] / r[0], r[3] / r[1] };
-        }
+    if (puppet) {
+        if (hasEffect) {
+            GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
+            for (const auto& m : puppet->meshes) {
+                if (m.positions.empty()) continue;
+                effct_final_mesh.Submeshes().emplace_back();
+                WPMdlParser::GenMeshFromMdl(effct_final_mesh.Submeshes().back(), m, mapRate);
+            }
 
-        if (puppet) {
-            if (hasEffect) {
-                GenCardMesh(
-                    mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
-                for (const auto& m : puppet->meshes) {
-                    if (m.positions.empty()) continue;
-                    effct_final_mesh.Submeshes().emplace_back();
-                    WPMdlParser::GenMeshFromMdl(effct_final_mesh.Submeshes().back(), m);
-                }
-
-                if (has_bones) {
-                    wpscene::ImageEffect puppet_effect;
-                    wpscene::Material    puppet_mat;
-                    puppet_mat             = wpimgobj.material;
-                    puppet_mat.textures[0] = "";
-                    WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
-                    puppet_effect.materials.push_back(puppet_mat);
-                    wpimgobj.effects.push_back(puppet_effect);
-                }
-            } else {
-                for (const auto& m : puppet->meshes) {
-                    if (m.positions.empty()) continue;
-                    mesh.Submeshes().emplace_back();
-                    WPMdlParser::GenMeshFromMdl(mesh.Submeshes().back(), m);
-                }
+            if (has_bones) {
+                wpscene::ImageEffect puppet_effect;
+                wpscene::Material    puppet_mat;
+                puppet_mat             = wpimgobj.material;
+                puppet_mat.textures[0] = "";
+                WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
+                puppet_effect.materials.push_back(puppet_mat);
+                wpimgobj.effects.push_back(puppet_effect);
+            }
+        } else {
+            for (const auto& m : puppet->meshes) {
+                if (m.positions.empty()) continue;
+                mesh.Submeshes().emplace_back();
+                WPMdlParser::GenMeshFromMdl(mesh.Submeshes().back(), m, mapRate);
             }
         }
-        if (! puppet) {
-            GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
-            GenCardMesh(effct_final_mesh,
-                        { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
-        }
+    }
+    if (! puppet) {
+        GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
+        GenCardMesh(effct_final_mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
     }
     // material blendmode for last step to use
     auto imgBlendMode = material.blenmode;
@@ -1498,7 +1496,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 mesh.AddMaterial(std::move(mask_scene_mat));
                 mesh.Submeshes().emplace_back();
                 auto& pre_sm = mesh.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm, pmesh, mb.part_ids_b);
+                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm, pmesh, mb.part_ids_b, mapRate);
                 pre_sm.material_slot   = pre_slot;
                 pre_sm.output_override = std::string(PUPPET_MASK_RT);
 
@@ -1529,7 +1527,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 mesh.AddMaterial(std::move(clip_scene_mat));
                 mesh.Submeshes().emplace_back();
                 auto& clip_sm = mesh.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm, pmesh, mb.part_ids_a);
+                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm, pmesh, mb.part_ids_a, mapRate);
                 clip_sm.material_slot = clip_slot;
             }
         }
@@ -2121,14 +2119,15 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
         }
         LoadConstvalue(scene_mat, *wpmat, shader_info);
 
-        const uint32_t material_slot = static_cast<uint32_t>(mesh->MaterialSlots().size());
+        const uint32_t material_slot  = static_cast<uint32_t>(mesh->MaterialSlots().size());
+        const auto     texcoord_scale = Texture0UvScale(scene_mat);
         mesh->AddMaterial(std::move(scene_mat));
         RegisterShaderUserVarIndex(
             context.scene.get(), mesh->MaterialSlots().back().get(), *wpmat, shader_info);
 
         mesh->Submeshes().emplace_back();
         auto& submesh = mesh->Submeshes().back();
-        WPMdlParser::GenMeshFromMdl(submesh, mdl_mesh);
+        WPMdlParser::GenMeshFromMdl(submesh, mdl_mesh, texcoord_scale);
         submesh.material_slot = material_slot;
     }
 

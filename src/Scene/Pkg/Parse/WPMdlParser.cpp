@@ -1014,9 +1014,14 @@ std::optional<wpscene::Material> WPMdlParser::ParseMaterial(std::string_view ref
     return material;
 }
 
-void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src) {
+void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
+                                 std::array<float, 2> texcoord_scale) {
     const size_t vert_num = src.positions.size();
     if (vert_num == 0) return;
+    if (! src.part_uv2.empty() || ! src.parts.empty()) {
+        // V21+ part meshes already store primary UVs in backing-texture space.
+        texcoord_scale = { 1.0f, 1.0f };
+    }
 
     // Build the attribute list in a stable order. Skinning attrs come early so
     // a puppet vertex layout matches what WE shaders historically expect.
@@ -1063,8 +1068,9 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     }
     if (! src.texcoords.empty()) {
         specs.push_back(VAttr::TexCoord);
-        packers.push_back([&src](size_t i, float* dst) {
-            std::memcpy(dst, src.texcoords[i].data(), sizeof(src.texcoords[i]));
+        packers.push_back([&src, texcoord_scale](size_t i, float* dst) {
+            dst[0] = src.texcoords[i][0] * texcoord_scale[0];
+            dst[1] = src.texcoords[i][1] * texcoord_scale[1];
         });
     }
     const auto* uv2 = ! src.part_uv2.empty()    ? &src.part_uv2
@@ -1072,9 +1078,9 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
                                                 : nullptr;
     if (! src.texcoords.empty() && uv2 != nullptr && uv2->size() == vert_num) {
         specs.push_back(VAttr::TexCoordVec4);
-        packers.push_back([&src, uv2](size_t i, float* dst) {
-            dst[0] = src.texcoords[i][0];
-            dst[1] = src.texcoords[i][1];
+        packers.push_back([&src, uv2, texcoord_scale](size_t i, float* dst) {
+            dst[0] = src.texcoords[i][0] * texcoord_scale[0];
+            dst[1] = src.texcoords[i][1] * texcoord_scale[1];
             dst[2] = (*uv2)[i][0];
             dst[3] = (*uv2)[i][1];
         });
@@ -1119,8 +1125,9 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
 }
 
 void WPMdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
-                                        std::span<const uint32_t> clip_part_indices) {
-    GenMeshFromMdl(submesh, src);
+                                        std::span<const uint32_t> clip_part_indices,
+                                        std::array<float, 2>      texcoord_scale) {
+    GenMeshFromMdl(submesh, src, texcoord_scale);
     // `clip_part_indices` are positions in src.parts[] (0-based), not `part.id`.
     std::vector<SceneMesh::DrawRange> ranges;
     for (uint32_t idx : clip_part_indices) {
