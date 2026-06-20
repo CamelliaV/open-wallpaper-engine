@@ -9,6 +9,7 @@ import wescene.fs;
 
 export import :animation_layer;
 export import :field_binding;
+import :visibility_binding;
 export import :material;
 import :scene_document;
 
@@ -135,8 +136,8 @@ public:
     // `scriptproperties` subtree. See FieldBinding.cppm.
     FieldBindings field_bindings;
 
-    // `visible:{user:"<key>",value:bool}` -> key.
-    std::string visible_user_key;
+    VisibleUserBinding visible_user;
+    std::string        visible_user_key;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(EffectFbo, name, scale);

@@ -7,6 +7,7 @@ import wescene.fs;
 
 import wescene.json;
 export import :field_binding;
+import :visibility_binding;
 import :scene_document;
 
 export namespace owe
@@ -44,9 +45,9 @@ struct SoundObject {
     bool        spatialization { false }; // PKGV0023+
     std::string queuemode;                // PKGV0020+
 
-    // `visible:{user:"<key>",value:bool}` -> key.
-    std::string visible_user_key;
-    std::string volume_user_key;
+    VisibleUserBinding visible_user;
+    std::string        visible_user_key;
+    std::string        volume_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
@@ -66,11 +67,8 @@ struct SoundObject {
         owe::GetJsonValue(json, "mintime", mintime, false);
         owe::GetJsonValue(json, "maxtime", maxtime, false);
         owe::GetJsonValue(json, "visible", visible, false);
-        if (json.contains("visible") && json.at("visible").is_object()) {
-            const auto& jv = json.at("visible");
-            if (jv.contains("user") && jv.at("user").is_string())
-                visible_user_key = jv.at("user").get<std::string>();
-        }
+        ReadVisibleUserBinding(json, visible_user);
+        visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "id", id, false);
 

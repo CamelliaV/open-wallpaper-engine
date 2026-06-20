@@ -6,6 +6,7 @@ import rstd.cppstd;
 import wescene.fs;
 
 export import :field_binding;
+import :visibility_binding;
 export import wescene.pkg.puppet;
 import :scene_document;
 
@@ -32,9 +33,8 @@ public:
     float                radius { 1000.0f };
     float                intensity { 1.0f };
     bool                 visible { true };
-    // Populated when `visible` is `{user: "<key>", value: <bool>}`. Empty if
-    // the field is a plain boolean literal.
-    std::string visible_user_key;
+    VisibleUserBinding   visible_user;
+    std::string          visible_user_key;
 
     // Common cross-kind metadata.
     bool                      locktransforms { false };

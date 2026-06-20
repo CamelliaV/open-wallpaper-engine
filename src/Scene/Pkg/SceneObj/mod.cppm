@@ -2,6 +2,7 @@ export module wescene.pkg.scene_obj;
 
 export import :field_binding;
 export import :animation_layer;
+export import :visibility_binding;
 export import :material;
 export import :scene_document;
 export import :image_object;

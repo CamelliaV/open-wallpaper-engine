@@ -6,6 +6,7 @@ import wescene.fs;
 import wescene.json;
 import :animation_layer;
 export import :field_binding;
+import :visibility_binding;
 import :scene_document;
 
 // Object kinds beyond image/light/particle/sound: text overlays, .mdl
@@ -57,8 +58,8 @@ struct TextObject {
     bool          limitwidth { false };
     bool          limituseellipsis { false };
 
-    // `visible:{user:"<key>",value:bool}` -> key.
-    std::string visible_user_key;
+    VisibleUserBinding visible_user;
+    std::string        visible_user_key;
 
     // Visual/material overlap with image kind.
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
@@ -85,11 +86,8 @@ struct TextObject {
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
         owe::GetJsonValue(json, "visible", visible, false);
-        if (json.contains("visible") && json.at("visible").is_object()) {
-            const auto& jv = json.at("visible");
-            if (jv.contains("user") && jv.at("user").is_string())
-                visible_user_key = jv.at("user").get<std::string>();
-        }
+        ReadVisibleUserBinding(json, visible_user);
+        visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
@@ -155,6 +153,7 @@ struct ModelObject {
     bool        perspective { false };
 
     std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
+    VisibleUserBinding                         visible_user;
     std::string                                visible_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
@@ -168,11 +167,8 @@ struct ModelObject {
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
         owe::GetJsonValue(json, "visible", visible, false);
-        if (json.contains("visible") && json.at("visible").is_object()) {
-            const auto& jv = json.at("visible");
-            if (jv.contains("user") && jv.at("user").is_string())
-                visible_user_key = jv.at("user").get<std::string>();
-        }
+        ReadVisibleUserBinding(json, visible_user);
+        visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
@@ -217,7 +213,8 @@ struct CameraObject {
     bool        solid { false };
     bool        disablepropagation { false };
 
-    std::string visible_user_key;
+    VisibleUserBinding visible_user;
+    std::string        visible_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
@@ -230,11 +227,8 @@ struct CameraObject {
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
         owe::GetJsonValue(json, "visible", visible, false);
-        if (json.contains("visible") && json.at("visible").is_object()) {
-            const auto& jv = json.at("visible");
-            if (jv.contains("user") && jv.at("user").is_string())
-                visible_user_key = jv.at("user").get<std::string>();
-        }
+        ReadVisibleUserBinding(json, visible_user);
+        visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);

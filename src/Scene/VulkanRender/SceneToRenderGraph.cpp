@@ -102,21 +102,24 @@ struct ExtraInfo {
     rg::RenderGraph*           rgraph { nullptr };
     Scene*                     scene { nullptr };
     Set<std::string>           depth_initialized_outputs {};
+    rg::TexNode*               mip_framebuffer_snapshot { nullptr };
     // Result of Pass A; non-null during Pass B. Only layer IDs in this set
     // actually have downstream link consumers, so we skip id_link_map writes
     // for non-referenced layers.
     const Set<i32>* linked_ids { nullptr };
 };
 
-static rg::TexNode* AddMipFramebufferCopy(rg::RenderGraph&        rgraph,
-                                          rg::RenderGraphBuilder& builder) {
+static rg::TexNode* AddMipFramebufferCopy(ExtraInfo& extra, rg::RenderGraphBuilder& builder) {
+    if (extra.mip_framebuffer_snapshot != nullptr) return extra.mip_framebuffer_snapshot;
+
     auto* source = builder.createTexNode(rg::TexNode::Desc { .name = SpecTex_Default.data(),
                                                              .key  = SpecTex_Default.data(),
                                                              .type = rg::TexNode::TexType::Temp });
-    auto  copy_desc = rg::TexNode::Desc { .name = WE_MIP_MAPPED_FRAME_BUFFER.data(),
-                                          .key  = WE_MIP_MAPPED_FRAME_BUFFER.data(),
-                                          .type = rg::TexNode::TexType::Temp };
-    return rg::addCopyPass(rgraph, source, &copy_desc);
+    auto  copy_desc                = rg::TexNode::Desc { .name = WE_MIP_MAPPED_FRAME_BUFFER.data(),
+                                                         .key  = WE_MIP_MAPPED_FRAME_BUFFER.data(),
+                                                         .type = rg::TexNode::TexType::Temp };
+    extra.mip_framebuffer_snapshot = rg::addCopyPass(*extra.rgraph, source, &copy_desc);
+    return extra.mip_framebuffer_snapshot;
 }
 
 static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, ExtraInfo& extra) {
@@ -197,7 +200,7 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                         desc.type = ! IsSpecTex(url) ? rg::TexNode::TexType::Imported
                                                      : rg::TexNode::TexType::Temp;
                         if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
-                            input = AddMipFramebufferCopy(rgraph, builder);
+                            input = AddMipFramebufferCopy(extra, builder);
                         } else {
                             input = builder.createTexNode(desc);
                         }

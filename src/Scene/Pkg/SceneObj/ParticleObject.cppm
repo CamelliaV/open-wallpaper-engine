@@ -9,6 +9,7 @@ import wescene.utils;
 import wescene.fs;
 
 export import :field_binding;
+import :visibility_binding;
 export import :material;
 import :scene_document;
 
@@ -200,8 +201,8 @@ public:
     std::array<float, 3>      controlpoint { 0.0f, 0.0f, 0.0f }; // PKGV0019+
     FieldBindings             field_bindings;
 
-    // `visible:{user:"<key>",value:bool}` -> key; empty for plain literals.
-    std::string visible_user_key;
+    VisibleUserBinding visible_user;
+    std::string        visible_user_key;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);

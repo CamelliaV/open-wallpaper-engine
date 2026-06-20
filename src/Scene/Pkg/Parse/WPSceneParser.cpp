@@ -1,6 +1,7 @@
 module;
 
 #include <cmath>
+#include <sstream>
 
 #include <rstd/macro.hpp>
 
@@ -2713,27 +2714,117 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
               resolved.source);
 }
 
-// `visible:{user:"<key>",value:bool}` resolves against `user_props`'s
-// current bool when present. Lets a host that pre-loaded UI overrides
-// (project.json defaults already merged in) prune layers the user has
-// toggled off without round-tripping through RenderSetUserProperty.
+const nlohmann::json*
+UserPropertyValue(const std::unordered_map<std::string, nlohmann::json>* user_props,
+                  std::string_view                                       key) {
+    if (user_props == nullptr || key.empty()) return nullptr;
+    auto it = user_props->find(std::string(key));
+    if (it == user_props->end()) return nullptr;
+    if (it->second.is_object() && it->second.contains("value")) return &it->second.at("value");
+    return &it->second;
+}
+
+std::optional<std::string> JsonScalarString(const nlohmann::json& v) {
+    if (v.is_string()) return v.get<std::string>();
+    if (v.is_boolean()) return v.get<bool>() ? "true" : "false";
+    if (v.is_number_integer()) return std::to_string(v.get<std::int64_t>());
+    if (v.is_number_unsigned()) return std::to_string(v.get<std::uint64_t>());
+    if (v.is_number_float()) {
+        std::ostringstream os;
+        os << v.get<double>();
+        return os.str();
+    }
+    return std::nullopt;
+}
+
+bool JsonScalarEquals(const nlohmann::json& a, const nlohmann::json& b) {
+    if (a == b) return true;
+    auto as = JsonScalarString(a);
+    auto bs = JsonScalarString(b);
+    if (! as || ! bs) return false;
+    if (*as == *bs) return true;
+    if (a.is_boolean() && b.is_string()) {
+        const auto s = b.get<std::string>();
+        return (a.get<bool>() && s == "1") || (! a.get<bool>() && s == "0");
+    }
+    if (a.is_string() && b.is_boolean()) {
+        const auto s = a.get<std::string>();
+        return (b.get<bool>() && s == "1") || (! b.get<bool>() && s == "0");
+    }
+    return false;
+}
+
+bool ResolveVisibleUserBinding(bool& visible, const wpscene::VisibleUserBinding& binding,
+                               const std::unordered_map<std::string, nlohmann::json>* user_props) {
+    if (binding.empty()) return false;
+    const nlohmann::json* value = UserPropertyValue(user_props, binding.name);
+    if (binding.has_condition) {
+        if (value != nullptr) visible = JsonScalarEquals(*value, binding.condition);
+        return true;
+    }
+    if (value != nullptr && value->is_boolean()) visible = value->get<bool>();
+    return true;
+}
+
+struct ObjectVisibilityInfo {
+    std::uint32_t parent { 0 };
+    bool          visible { true };
+    bool          user_bound { false };
+};
+
+ObjectVisibilityInfo
+ResolveObjectVisibility(const nlohmann::json&                                  json_obj,
+                        const std::unordered_map<std::string, nlohmann::json>* user_props) {
+    ObjectVisibilityInfo info;
+    owe::GetJsonValue(json_obj, "parent", info.parent, false);
+    owe::GetJsonValue(json_obj, "visible", info.visible, false);
+    wpscene::VisibleUserBinding binding;
+    wpscene::ReadVisibleUserBinding(json_obj, binding);
+    info.user_bound = ! binding.empty();
+    ResolveVisibleUserBinding(info.visible, binding, user_props);
+    return info;
+}
+
+std::unordered_map<std::int32_t, ObjectVisibilityInfo>
+BuildObjectVisibilityInfo(const nlohmann::json&                                  json,
+                          const std::unordered_map<std::string, nlohmann::json>* user_props) {
+    std::unordered_map<std::int32_t, ObjectVisibilityInfo> out;
+    if (! json.contains("objects") || ! json.at("objects").is_array()) return out;
+    for (const auto& obj : json.at("objects")) {
+        if (! obj.is_object() || ! obj.contains("id") || ! obj.at("id").is_number_integer())
+            continue;
+        out[obj.at("id").get<std::int32_t>()] = ResolveObjectVisibility(obj, user_props);
+    }
+    return out;
+}
+
+bool HasHiddenUserAncestor(std::uint32_t                                                 id,
+                           const std::unordered_map<std::int32_t, ObjectVisibilityInfo>& objects) {
+    std::unordered_set<std::uint32_t> seen;
+    auto                              it = objects.find(static_cast<std::int32_t>(id));
+    if (it == objects.end()) return false;
+    std::uint32_t parent = it->second.parent;
+    while (parent != 0 && seen.insert(parent).second) {
+        auto pit = objects.find(static_cast<std::int32_t>(parent));
+        if (pit == objects.end()) return false;
+        if (pit->second.user_bound && ! pit->second.visible) return true;
+        parent = pit->second.parent;
+    }
+    return false;
+}
+
 template<typename T>
 void AddSceneObject(std::vector<SceneObjectVar>& objs, const nlohmann::json& json_obj, fs::VFS& vfs,
                     wpscene::SceneVersion                                  v,
-                    const std::unordered_map<std::string, nlohmann::json>* user_props) {
+                    const std::unordered_map<std::string, nlohmann::json>* user_props,
+                    bool                                                   force_invisible) {
     T scene_obj;
     if (! scene_obj.FromJson(json_obj, vfs, v)) {
         rstd_error("parse scene object failed, name: {}", scene_obj.name);
         return;
     }
-    if (user_props != nullptr && ! scene_obj.visible_user_key.empty()) {
-        if (auto it = user_props->find(scene_obj.visible_user_key); it != user_props->end()) {
-            const nlohmann::json* v_ptr = &it->second;
-            if (it->second.is_object() && it->second.contains("value"))
-                v_ptr = &it->second.at("value");
-            if (v_ptr->is_boolean()) scene_obj.visible = v_ptr->get<bool>();
-        }
-    }
+    ResolveVisibleUserBinding(scene_obj.visible, scene_obj.visible_user, user_props);
+    if (force_invisible) scene_obj.visible = false;
     // Image objects keep going even when visible=false: another layer's
     // material may reference them via `_rt_imageLayerComposite_<id>`. The
     // render-graph builder later decides whether to actually emit passes.
@@ -2752,25 +2843,38 @@ ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v,
               const std::unordered_map<std::string, nlohmann::json>* user_props) {
     std::vector<SceneObjectVar> scene_objs;
     if (! json.contains("objects")) return scene_objs;
+    auto visibility_info = BuildObjectVisibilityInfo(json, user_props);
     for (auto& obj : json.at("objects")) {
+        bool force_invisible = false;
+        if (obj.is_object() && obj.contains("id") && obj.at("id").is_number_integer()) {
+            force_invisible = HasHiddenUserAncestor((std::uint32_t)obj.at("id").get<std::int32_t>(),
+                                                    visibility_info);
+        }
         // Order matters: text/model/camera kinds coexist with null
         // image/particle/sound/light fields, so the renderer-supported
         // kinds get first pick. Falls through to the parsing-only kinds
         // (no rendering yet) so the data stays absorbed.
         if (obj.contains("image") && ! obj.at("image").is_null()) {
-            AddSceneObject<wpscene::ImageObject>(scene_objs, obj, vfs, v, user_props);
+            AddSceneObject<wpscene::ImageObject>(
+                scene_objs, obj, vfs, v, user_props, force_invisible);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
-            AddSceneObject<wpscene::ParticleObject>(scene_objs, obj, vfs, v, user_props);
+            AddSceneObject<wpscene::ParticleObject>(
+                scene_objs, obj, vfs, v, user_props, force_invisible);
         } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
-            AddSceneObject<wpscene::SoundObject>(scene_objs, obj, vfs, v, user_props);
+            AddSceneObject<wpscene::SoundObject>(
+                scene_objs, obj, vfs, v, user_props, force_invisible);
         } else if (obj.contains("light") && ! obj.at("light").is_null()) {
-            AddSceneObject<wpscene::LightObject>(scene_objs, obj, vfs, v, user_props);
+            AddSceneObject<wpscene::LightObject>(
+                scene_objs, obj, vfs, v, user_props, force_invisible);
         } else if (obj.contains("text") && ! obj.at("text").is_null()) {
-            AddSceneObject<wpscene::TextObject>(scene_objs, obj, vfs, v, user_props);
+            AddSceneObject<wpscene::TextObject>(
+                scene_objs, obj, vfs, v, user_props, force_invisible);
         } else if (obj.contains("model") && ! obj.at("model").is_null()) {
-            AddSceneObject<wpscene::ModelObject>(scene_objs, obj, vfs, v, user_props);
+            AddSceneObject<wpscene::ModelObject>(
+                scene_objs, obj, vfs, v, user_props, force_invisible);
         } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
-            AddSceneObject<wpscene::CameraObject>(scene_objs, obj, vfs, v, user_props);
+            AddSceneObject<wpscene::CameraObject>(
+                scene_objs, obj, vfs, v, user_props, force_invisible);
         }
     }
     return scene_objs;
@@ -3112,7 +3216,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
     //   bare SceneNode here so ParseImageObj children can find their parent.
     //   Their `visible:false` form is preserved as a parent anchor.
     if (json.contains("objects")) {
-        auto has_kind = [](const nlohmann::json& o) {
+        auto visibility_info = BuildObjectVisibilityInfo(json, m_user_properties);
+        auto has_kind        = [](const nlohmann::json& o) {
             for (const char* k :
                  { "image", "particle", "sound", "light", "text", "model", "camera" }) {
                 if (o.contains(k) && ! o.at(k).is_null()) return true;
@@ -3149,6 +3254,15 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             auto node = std::make_shared<SceneNode>(
                 Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()), name);
             node->ID() = id;
+            auto vit   = visibility_info.find(id);
+            if (vit != visibility_info.end()) {
+                bool visible = vit->second.visible &&
+                               ! HasHiddenUserAncestor((std::uint32_t)id, visibility_info);
+                if (! visible) node->SetVisible(false);
+            }
+            wpscene::VisibleUserBinding visible_user;
+            wpscene::ReadVisibleUserBinding(o, visible_user);
+            if (! visible_user.empty()) node->SetVisibleUserKey(visible_user.name);
             wpscene::FieldBindings fb;
             wpscene::AbsorbAllFieldBindings(o, fb);
             WireFieldScripts(context, node, fb);
