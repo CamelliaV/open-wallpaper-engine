@@ -472,8 +472,10 @@ void WireCameraShakeScripts(ParseContext& context, const wpscene::FieldBindings&
 }
 
 void WireCameraFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
-                            std::shared_ptr<SceneCamera> camera, const wpscene::FieldBindings& fb,
-                            const Vector3f& translate_bias, const Vector3f& rotation_bias) {
+                            std::shared_ptr<SceneCamera>     camera,
+                            std::shared_ptr<SceneCameraPath> camera_path,
+                            const wpscene::FieldBindings& fb, const Vector3f& translate_bias,
+                            const Vector3f& rotation_bias) {
     SceneNode* node = node_sp.get();
     if (! node || fb.scripts.empty()) return;
     auto& ss = EnsureScriptScene(context);
@@ -493,26 +495,33 @@ void WireCameraFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> no
 
         if (field == "origin") {
             ss.AddActuator(
-                { fs, [node_sp, camera, translate_bias](const script::ScriptValue& value) {
-                     Vector3f current = node_sp->Translate() - translate_bias;
-                     auto     next    = ScriptValueAsVec3(value, current);
-                     if (next) {
-                         node_sp->SetTranslate(translate_bias + *next);
-                         if (camera) camera->Update();
-                     }
-                 } });
+                { fs,
+                  [node_sp, camera, camera_path, translate_bias](const script::ScriptValue& value) {
+                      Vector3f current = camera_path ? camera_path->origin_base
+                                                     : node_sp->Translate() - translate_bias;
+                      auto     next    = ScriptValueAsVec3(value, current);
+                      if (next) {
+                          if (camera_path) camera_path->origin_base = *next;
+                          node_sp->SetTranslate(translate_bias + *next);
+                          if (camera) camera->Update();
+                      }
+                  } });
         } else if (field == "angles") {
             ss.AddActuator(
-                { fs, [node_sp, camera, rotation_bias](const script::ScriptValue& value) {
-                     constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
-                     constexpr float kDegToRad = rstd::f32_::consts::PI / 180.0f;
-                     Vector3f        current   = (node_sp->Rotation() - rotation_bias) * kRadToDeg;
-                     auto            next      = ScriptValueAsVec3(value, current);
-                     if (next) {
-                         node_sp->SetRotation(rotation_bias + *next * kDegToRad);
-                         if (camera) camera->Update();
-                     }
-                 } });
+                { fs,
+                  [node_sp, camera, camera_path, rotation_bias](const script::ScriptValue& value) {
+                      constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
+                      constexpr float kDegToRad = rstd::f32_::consts::PI / 180.0f;
+                      Vector3f        current   = camera_path ? camera_path->rotation_base
+                                                              : node_sp->Rotation() - rotation_bias;
+                      current *= kRadToDeg;
+                      auto next = ScriptValueAsVec3(value, current);
+                      if (next) {
+                          if (camera_path) camera_path->rotation_base = *next * kDegToRad;
+                          node_sp->SetRotation(rotation_bias + *next * kDegToRad);
+                          if (camera) camera->Update();
+                      }
+                  } });
         }
     }
 }
@@ -1208,7 +1217,7 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
         scene.camera_path_user_index[cam.visible_user_key].push_back(path);
 
     WireCameraFieldScripts(
-        context, node, camera, cam.field_bindings, path_translate_bias, path_rotation_bias);
+        context, node, camera, path, cam.field_bindings, path_translate_bias, path_rotation_bias);
     context.node_id_map[cam.id] = { cam.parent, node };
 }
 

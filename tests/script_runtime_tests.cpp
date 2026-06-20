@@ -957,6 +957,34 @@ TEST(ScriptVector, LengthSqrMatchesWallpaperEngineVectors) {
     EXPECT_NEAR(std::get<ScalarValue>(fs->last_value()).v, 218.0, 0.001);
 }
 
+TEST(ScriptVector, NormalizeReturnsUnitVectors) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update(value) {
+                let a = new Vec3(3, 4, 0).normalize();
+                let b = new Vec2(0, 5).normalize();
+                let z = new Vec3(0, 0, 0).normalize();
+                return new Vec3(a.x, a.y + b.y * 10, z.length());
+            }
+        )JS",
+        "test/vector_normalize",
+        FieldKind::Vec3,
+        nlohmann::json::object(),
+        nlohmann::json("0.0 0.0 0.0"),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    ASSERT_TRUE(std::holds_alternative<Vec3Value>(fs->last_value()));
+    const auto& v = std::get<Vec3Value>(fs->last_value());
+    EXPECT_NEAR(v.x, 0.6, 0.001);
+    EXPECT_NEAR(v.y, 10.8, 0.001);
+    EXPECT_NEAR(v.z, 0.0, 0.001);
+}
+
 // ---------------------------------------------------------------------------
 // Workshop 3327063360 repro: scripted-origin layer should land at canvas
 // center when scriptProperties.{x,y} fall back to their declared 0.5.

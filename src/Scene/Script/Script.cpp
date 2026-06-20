@@ -1156,6 +1156,10 @@ class Vec2 {
   clone()     { return new Vec2(this.x, this.y); }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y); }
   lengthSqr() { return this.x*this.x + this.y*this.y; }
+  normalize() {
+    const len = this.length();
+    return len > 0 ? this.divide(len) : new Vec2(0, 0);
+  }
 }
 class Vec3 {
   constructor(x, y, z) {
@@ -1185,6 +1189,10 @@ class Vec3 {
   clone()     { return new Vec3(this.x, this.y, this.z); }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z); }
   lengthSqr() { return this.x*this.x + this.y*this.y + this.z*this.z; }
+  normalize() {
+    const len = this.length();
+    return len > 0 ? this.divide(len) : new Vec3(0, 0, 0);
+  }
 }
 globalThis.Vec2 = Vec2;
 globalThis.Vec3 = Vec3;
