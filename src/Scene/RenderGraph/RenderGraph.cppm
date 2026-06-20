@@ -77,8 +77,11 @@ public:
 
 private:
     friend class RenderGraphBuilder;
-    void markPassNode(NodeID);
-    bool isPassNode(NodeID) const;
+    void                       markPassNode(NodeID);
+    bool                       isPassNode(NodeID) const;
+    bool                       isVirtualPassNode(NodeID) const;
+    bool                       isRenderPassNode(NodeID) const;
+    std::optional<std::string> passWriteTarget(NodeID) const;
 
     DependencyGraph m_dg;
     Set<NodeID>     m_set_passnode;

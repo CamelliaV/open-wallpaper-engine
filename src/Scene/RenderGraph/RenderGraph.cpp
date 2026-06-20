@@ -34,11 +34,88 @@ Pass* RenderGraph::getPass(NodeID id) const {
 }
 
 std::vector<NodeID> RenderGraph::topologicalOrder() const {
+    const size_t node_count = m_dg.NodeNum();
+
+    std::vector<size_t> in_degree(node_count, 0);
+    for (NodeID id = 0; id < node_count; ++id) {
+        for (auto out : m_dg.GetNodeOut(id)) {
+            ++in_degree[out];
+        }
+    }
+
+    std::vector<NodeID> ready;
+    ready.reserve(node_count);
+    for (NodeID id = 0; id < node_count; ++id) {
+        if (in_degree[id] == 0) ready.push_back(id);
+    }
+
+    std::vector<NodeID>        passnodes;
+    std::optional<std::string> active_target;
+    size_t                     visited = 0;
+
+    auto chooseReady = [&]() -> size_t {
+        std::sort(ready.begin(), ready.end());
+
+        for (size_t i = 0; i < ready.size(); ++i) {
+            if (! isRenderPassNode(ready[i])) return i;
+        }
+
+        if (active_target) {
+            for (size_t i = 0; i < ready.size(); ++i) {
+                auto target = passWriteTarget(ready[i]);
+                if (target && *target == *active_target) return i;
+            }
+        }
+
+        std::unordered_map<std::string, size_t> target_counts;
+        for (auto id : ready) {
+            if (auto target = passWriteTarget(id)) {
+                ++target_counts[*target];
+            }
+        }
+
+        size_t best_index = 0;
+        size_t best_count = 0;
+        for (size_t i = 0; i < ready.size(); ++i) {
+            size_t count = 0;
+            if (auto target = passWriteTarget(ready[i])) {
+                count = target_counts[*target];
+            }
+            if (count > best_count) {
+                best_index = i;
+                best_count = count;
+            }
+        }
+        return best_index;
+    };
+
+    while (! ready.empty()) {
+        const size_t pick_index = chooseReady();
+        const NodeID id         = ready[pick_index];
+        ready.erase(ready.begin() + static_cast<std::ptrdiff_t>(pick_index));
+        ++visited;
+
+        if (isRenderPassNode(id)) {
+            passnodes.push_back(id);
+            active_target = passWriteTarget(id);
+        }
+
+        auto outs = m_dg.GetNodeOut(id);
+        std::sort(outs.begin(), outs.end());
+        for (auto out : outs) {
+            rstd_assert(in_degree[out] > 0);
+            --in_degree[out];
+            if (in_degree[out] == 0) ready.push_back(out);
+        }
+    }
+
+    if (visited == node_count) return passnodes;
+
     std::vector<NodeID> allnodes = m_dg.TopologicalOrder();
-    std::vector<NodeID> passnodes;
+    passnodes.clear();
     std::copy_if(
         allnodes.begin(), allnodes.end(), std::back_inserter(passnodes), [this](auto item) {
-            return exists(m_set_passnode, item) && ! exists(m_set_vitrual_passnode, item);
+            return isRenderPassNode(item);
         });
     return passnodes;
 }
@@ -46,6 +123,27 @@ std::vector<NodeID> RenderGraph::topologicalOrder() const {
 void RenderGraph::markPassNode(NodeID id) { m_set_passnode.insert(id); }
 
 bool RenderGraph::isPassNode(NodeID id) const { return exists(m_set_passnode, id); }
+
+bool RenderGraph::isVirtualPassNode(NodeID id) const { return exists(m_set_vitrual_passnode, id); }
+
+bool RenderGraph::isRenderPassNode(NodeID id) const {
+    return isPassNode(id) && ! isVirtualPassNode(id);
+}
+
+std::optional<std::string> RenderGraph::passWriteTarget(NodeID id) const {
+    auto* pass_node = getPassNode(id);
+    if (pass_node == nullptr) return std::nullopt;
+
+    auto outs = m_dg.GetNodeOut(id);
+    std::sort(outs.begin(), outs.end());
+    for (auto out : outs) {
+        auto* tex_node = getTexNode(out);
+        if (tex_node != nullptr && tex_node->writer() == pass_node) {
+            return std::string(tex_node->key());
+        }
+    }
+    return std::nullopt;
+}
 
 RenderGraphBuilder::RenderGraphBuilder(RenderGraph& rg): m_rg(rg) {};
 
