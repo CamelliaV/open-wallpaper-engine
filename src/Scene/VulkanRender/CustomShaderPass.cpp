@@ -281,6 +281,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     VkAttachmentLoadOp depthLoadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
     if (has_depth_attachment) {
         depthLoadOp = m_desc.clear_depth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+        m_desc.depth_load_op = depthLoadOp;
 
         auto depth_name = m_desc.output + "::depth";
         if (auto opt = device.tex_cache().Query(
@@ -413,13 +414,14 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             if (m_desc.clear_output) loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             if (out_force_clear) loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         }
-        auto opt = CreateRenderPass(device.handle(),
-                                    VK_FORMAT_R8G8B8A8_UNORM,
-                                    loadOp,
-                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                    m_desc.samples,
-                                    has_depth_attachment,
-                                    depthLoadOp);
+        m_desc.color_load_op = loadOp;
+        auto opt             = CreateRenderPass(device.handle(),
+                                                VK_FORMAT_R8G8B8A8_UNORM,
+                                                loadOp,
+                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                                m_desc.samples,
+                                                has_depth_attachment,
+                                                depthLoadOp);
         if (! opt.has_value()) return;
         auto& pass = opt.value();
 
@@ -605,7 +607,36 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     setPrepared();
 }
 
-void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
+bool CustomShaderPass::canJoinRenderScopeAfter(const CustomShaderPass& previous) const {
+    if (! prepared() || ! previous.prepared()) return false;
+    if (m_desc.clear_output || m_desc.clear_depth) return false;
+    if (m_desc.color_load_op != VK_ATTACHMENT_LOAD_OP_LOAD) return false;
+    if (m_desc.has_depth_attachment && m_desc.depth_load_op != VK_ATTACHMENT_LOAD_OP_LOAD)
+        return false;
+
+    const auto& prev = previous.m_desc;
+    if (m_desc.output != prev.output) return false;
+    if (m_desc.samples != prev.samples) return false;
+    if (m_desc.has_depth_attachment != prev.has_depth_attachment) return false;
+    if (m_desc.vk_output.handle != prev.vk_output.handle ||
+        m_desc.vk_output.view != prev.vk_output.view ||
+        m_desc.vk_output.extent.width != prev.vk_output.extent.width ||
+        m_desc.vk_output.extent.height != prev.vk_output.extent.height) {
+        return false;
+    }
+    if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT &&
+        (m_desc.vk_output_msaa.handle != prev.vk_output_msaa.handle ||
+         m_desc.vk_output_msaa.view != prev.vk_output_msaa.view)) {
+        return false;
+    }
+    if (m_desc.has_depth_attachment && (m_desc.vk_depth.handle != prev.vk_depth.handle ||
+                                        m_desc.vk_depth.view != prev.vk_depth.view)) {
+        return false;
+    }
+    return true;
+}
+
+void CustomShaderPass::prepareRenderScopeDraw(RenderingResources& rr) {
     if (m_desc.update_op) m_desc.update_op();
 
     // Re-sync clear_value from the live scene.clearColor when this pass
@@ -619,8 +650,11 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
         m_desc.clear_value.color.float32[3] = 1.0f;
     }
 
-    auto&                   cmd    = rr.command;
-    auto&                   outext = m_desc.vk_output.extent;
+    recordSampledImageBarriers(rr);
+}
+
+void CustomShaderPass::recordSampledImageBarriers(RenderingResources& rr) {
+    auto&                   cmd = rr.command;
     VkImageSubresourceRange base_srang {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel   = 0,
@@ -633,21 +667,7 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
         int   binding = m_desc.vk_tex_binding[i];
         if (binding < 0) continue;
         if (slot.slots.empty()) continue;
-        auto&                 img = slot.getActive();
-        VkDescriptorImageInfo desc_img { img.sampler,
-                                         img.view,
-                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkWriteDescriptorSet  wset {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext           = nullptr,
-            .dstSet          = {},
-            .dstBinding      = (uint32_t)binding,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo      = &desc_img,
-        };
-        cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
-
+        auto&                img = slot.getActive();
         VkImageMemoryBarrier imb {
             .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext            = nullptr,
@@ -664,25 +684,11 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
                             VK_DEPENDENCY_BY_REGION_BIT,
                             imb);
     }
+}
 
-    if (m_desc.ubo_buf) {
-        VkDescriptorBufferInfo desc_buf {
-            rr.dyn_buf->gpuBuf(),
-            m_desc.ubo_buf.offset,
-            m_desc.ubo_buf.size,
-        };
-        VkWriteDescriptorSet wset {
-            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .pNext           = nullptr,
-            .dstSet          = {},
-            .dstBinding      = 0,
-            .descriptorCount = 1,
-            .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .pBufferInfo     = &desc_buf,
-        };
-        cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
-    }
-
+void CustomShaderPass::beginRenderScope(RenderingResources& rr) {
+    auto&          cmd         = rr.command;
+    auto&          outext      = m_desc.vk_output.extent;
     const bool     has_msaa    = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
     const uint32_t clear_count = (has_msaa ? 2u : 1u) + (m_desc.has_depth_attachment ? 1u : 0u);
     std::array<VkClearValue, 3> clears {};
@@ -705,6 +711,49 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
         .pClearValues    = clears.data(),
     };
     cmd.BeginRenderPass(pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+void CustomShaderPass::recordRenderScopeDraw(RenderingResources& rr) {
+    auto& cmd    = rr.command;
+    auto& outext = m_desc.vk_output.extent;
+    for (usize i = 0; i < m_desc.vk_textures.size(); i++) {
+        auto& slot    = m_desc.vk_textures[i];
+        int   binding = m_desc.vk_tex_binding[i];
+        if (binding < 0) continue;
+        if (slot.slots.empty()) continue;
+        auto&                 img = slot.getActive();
+        VkDescriptorImageInfo desc_img { img.sampler,
+                                         img.view,
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkWriteDescriptorSet  wset {
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext           = nullptr,
+            .dstSet          = {},
+            .dstBinding      = (uint32_t)binding,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo      = &desc_img,
+        };
+        cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
+    }
+
+    if (m_desc.ubo_buf) {
+        VkDescriptorBufferInfo desc_buf {
+            rr.dyn_buf->gpuBuf(),
+            m_desc.ubo_buf.offset,
+            m_desc.ubo_buf.size,
+        };
+        VkWriteDescriptorSet wset {
+            .sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext           = nullptr,
+            .dstSet          = {},
+            .dstBinding      = 0,
+            .descriptorCount = 1,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pBufferInfo     = &desc_buf,
+        };
+        cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
+    }
 
     cmd.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.handle);
     VkViewport viewport {
@@ -762,8 +811,15 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     } else {
         cmd.Draw(m_desc.draw_count, 1, 0, 0);
     }
+}
 
-    cmd.EndRenderPass();
+void CustomShaderPass::endRenderScope(RenderingResources& rr) { rr.command.EndRenderPass(); }
+
+void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
+    prepareRenderScopeDraw(rr);
+    beginRenderScope(rr);
+    recordRenderScopeDraw(rr);
+    endRenderScope(rr);
 }
 
 void CustomShaderPass::destory(const Device&, RenderingResources& rr) {

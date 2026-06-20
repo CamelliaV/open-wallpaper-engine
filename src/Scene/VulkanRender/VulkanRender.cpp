@@ -56,6 +56,8 @@ struct VulkanRender::Impl {
 
     void clearLastRenderGraph();
     void compileRenderGraph(Scene&, rg::RenderGraph&);
+    void rebuildRenderPassScopes();
+    void executeRenderPassScopes(RenderingResources&);
     void UpdateCameraFillMode(Scene&, owe::FillMode);
 
     bool initRes();
@@ -93,7 +95,12 @@ struct VulkanRender::Impl {
     // for VUID-vkQueueSubmit-pSignalSemaphores-00067
     std::vector<vvk::Semaphore> m_sem_swap_finish_per_image;
 
-    std::vector<VulkanPass*> m_passes;
+    struct RenderPassScope {
+        VulkanPass*                    single { nullptr };
+        std::vector<CustomShaderPass*> shader_passes;
+    };
+    std::vector<VulkanPass*>     m_passes;
+    std::vector<RenderPassScope> m_render_scopes;
 };
 
 VulkanRender::VulkanRender(): pImpl(std::make_unique<Impl>()) {}
@@ -416,6 +423,7 @@ void VulkanRender::Impl::destroy() {
         for (auto& p : m_passes) {
             p->destory(*m_device, m_rendering_resources);
         }
+        m_render_scopes.clear();
         m_dyn_buf->destroy();
         m_device->mesh_cache().destroy();
 
@@ -474,6 +482,74 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
 
 void VulkanRender::Impl::DestroyRenderingResource(RenderingResources& rr) {}
 
+void VulkanRender::Impl::rebuildRenderPassScopes() {
+    m_render_scopes.clear();
+    std::vector<CustomShaderPass*> pending_shader_passes;
+
+    auto flushShaderPasses = [&]() {
+        if (pending_shader_passes.empty()) return;
+        RenderPassScope scope;
+        scope.shader_passes = std::move(pending_shader_passes);
+        m_render_scopes.push_back(std::move(scope));
+        pending_shader_passes.clear();
+    };
+
+    for (auto* pass : m_passes) {
+        auto* shader_pass = dynamic_cast<CustomShaderPass*>(pass);
+        if (shader_pass != nullptr && shader_pass->prepared()) {
+            if (! pending_shader_passes.empty() &&
+                shader_pass->canJoinRenderScopeAfter(*pending_shader_passes.back())) {
+                pending_shader_passes.push_back(shader_pass);
+            } else {
+                flushShaderPasses();
+                pending_shader_passes.push_back(shader_pass);
+            }
+            continue;
+        }
+
+        flushShaderPasses();
+        m_render_scopes.push_back(RenderPassScope { .single = pass });
+    }
+
+    flushShaderPasses();
+}
+
+void VulkanRender::Impl::executeRenderPassScopes(RenderingResources& rr) {
+    for (auto& scope : m_render_scopes) {
+        if (scope.single != nullptr) {
+            if (scope.single->prepared()) {
+                scope.single->execute(*m_device, rr);
+            }
+            continue;
+        }
+
+        auto& shader_passes = scope.shader_passes;
+        if (shader_passes.empty()) continue;
+        if (shader_passes.size() == 1) {
+            auto* pass = shader_passes.front();
+            if (pass->prepared()) {
+                pass->execute(*m_device, rr);
+            }
+            continue;
+        }
+
+        if (! std::all_of(shader_passes.begin(), shader_passes.end(), [](auto* pass) {
+                return pass->prepared();
+            })) {
+            continue;
+        }
+
+        for (auto* pass : shader_passes) {
+            pass->prepareRenderScopeDraw(rr);
+        }
+        shader_passes.front()->beginRenderScope(rr);
+        for (auto* pass : shader_passes) {
+            pass->recordRenderScopeDraw(rr);
+        }
+        shader_passes.front()->endRenderScope(rr);
+    }
+}
+
 void VulkanRender::Impl::drawFrame(Scene& scene) {
     if (! (m_inited && m_pass_loaded)) return;
 
@@ -509,11 +585,7 @@ void VulkanRender::Impl::drawFrameSwapchain() {
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
     m_dyn_buf->recordUpload(rr.command);
-    for (auto* p : m_passes) {
-        if (p->prepared()) {
-            p->execute(*m_device, rr);
-        }
-    }
+    executeRenderPassScopes(rr);
     (void)rr.command.End();
 
     auto& sem_present_done = m_sem_swap_finish_per_image[image_index];
@@ -580,11 +652,7 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     });
     m_dyn_buf->recordUpload(rr.command);
 
-    for (auto* p : m_passes) {
-        if (p->prepared()) {
-            p->execute(*m_device, rr);
-        }
-    }
+    executeRenderPassScopes(rr);
 
     (void)rr.command.End();
 
@@ -759,6 +827,7 @@ void VulkanRender::Impl::clearLastRenderGraph() {
     for (auto& p : m_passes) {
         p->destory(*m_device, m_rendering_resources);
     }
+    m_render_scopes.clear();
     m_passes.clear();
     m_device->tex_cache().Clear();
     m_device->mesh_cache().onRenderGraphCleared();
@@ -775,6 +844,7 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     auto node_release_texs = rg.getLastReadTexs(nodes);
 
     m_passes.clear();
+    m_render_scopes.clear();
     m_passes.resize(nodes.size());
 
     std::transform(nodes.begin(),
@@ -803,6 +873,7 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
             p->prepare(scene, *m_device, m_rendering_resources);
         }
     }
+    rebuildRenderPassScopes();
 
     VVK_CHECK_VOID_RE(m_upload_cmd.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,

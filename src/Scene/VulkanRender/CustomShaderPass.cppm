@@ -57,6 +57,8 @@ public:
         bool                        clear_output { false };
         bool                        clear_depth { false };
         bool                        preserve_output { false };
+        VkAttachmentLoadOp          color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        VkAttachmentLoadOp          depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
         vvk::Framebuffer            fb;
         PipelineParameters          pipeline;
         u32                         draw_count { 0 };
@@ -73,6 +75,12 @@ public:
     void prepare(Scene&, const Device&, RenderingResources&) override;
     void execute(const Device&, RenderingResources&) override;
     void destory(const Device&, RenderingResources&) override;
+    bool canJoinRenderScopeAfter(const CustomShaderPass& previous) const;
+    void prepareRenderScopeDraw(RenderingResources&);
+    void recordSampledImageBarriers(RenderingResources&);
+    void beginRenderScope(RenderingResources&);
+    void recordRenderScopeDraw(RenderingResources&);
+    void endRenderScope(RenderingResources&);
 
 private:
     Desc m_desc;
