@@ -567,37 +567,6 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
     return m_tex_map[image.key];
 }
 
-ImageSlotsRef TextureCache::FallbackTex() {
-    static constexpr std::string_view key { "__wescene_fallback_black" };
-    if (auto it = m_tex_map.find(key); it != m_tex_map.end()) return it->second;
-
-    Image image;
-    image.key              = std::string(key);
-    image.header.width     = 1;
-    image.header.height    = 1;
-    image.header.mapWidth  = 1;
-    image.header.mapHeight = 1;
-    image.header.type      = ImageType::UNKNOWN;
-    image.header.format    = TextureFormat::RGBA8;
-    image.header.count     = 1;
-    image.slots.resize(1);
-
-    auto& slot  = image.slots[0];
-    slot.width  = 1;
-    slot.height = 1;
-    slot.mipmaps.resize(1);
-    auto& mip  = slot.mipmaps[0];
-    mip.width  = 1;
-    mip.height = 1;
-    mip.size   = 4;
-    auto* rgba = new uint8_t[4] { 0, 0, 0, 0 };
-    mip.data   = ImageDataPtr(rgba, [](uint8_t* data) {
-        delete[] data;
-    });
-
-    return CreateTex(image);
-}
-
 void TextureCache::allocateCmd() {
     const auto& pool = m_device.cmd_pool();
     VVK_CHECK(pool.Allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY, m_tex_cmds));

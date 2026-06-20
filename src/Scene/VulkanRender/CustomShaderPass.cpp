@@ -324,36 +324,13 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                 return item.second;
             });
 
-        usize texture_count = m_desc.vk_textures.size();
-        for (usize i = 0; i < WE_GLTEX_NAMES.size(); i++) {
-            auto        name         = WE_GLTEX_NAMES[i];
-            std::string sampler_name = std::string(name) + "_ww_sampler";
-            if (exists(ref.binding_map, name) || exists(ref.binding_map, sampler_name)) {
-                texture_count = std::max(texture_count, i + 1);
-            }
-        }
-        m_desc.vk_textures.resize(texture_count);
         m_desc.vk_tex_binding.clear();
-        m_desc.vk_tex_binding.reserve(texture_count);
+        m_desc.vk_tex_binding.reserve(m_desc.vk_textures.size());
 
-        ImageSlotsRef fallback_tex;
-        bool          fallback_tex_ready { false };
         for (usize i = 0; i < m_desc.vk_textures.size(); i++) {
             i32 binding { -1 };
-            if (i < WE_GLTEX_NAMES.size()) {
-                auto        name         = WE_GLTEX_NAMES[i];
-                std::string sampler_name = std::string(name) + "_ww_sampler";
-                if (exists(ref.binding_map, name))
-                    binding = (i32)ref.binding_map.at(name).binding;
-                else if (exists(ref.binding_map, sampler_name))
-                    binding = (i32)ref.binding_map.at(sampler_name).binding;
-            }
-            if (binding >= 0 && m_desc.vk_textures[i].slots.empty()) {
-                if (! fallback_tex_ready) {
-                    fallback_tex       = device.tex_cache().FallbackTex();
-                    fallback_tex_ready = true;
-                }
-                m_desc.vk_textures[i] = fallback_tex;
+            if (i < WE_GLTEX_NAMES.size() && exists(ref.binding_map, WE_GLTEX_NAMES[i])) {
+                binding = (i32)ref.binding_map.at(WE_GLTEX_NAMES[i]).binding;
             }
             m_desc.vk_tex_binding.push_back(binding);
         }

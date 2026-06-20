@@ -77,7 +77,8 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
             info->defTexs.push_back({ index, wput.default_ });
         }
         if (! wput.combo.empty()) {
-            info->combos[wput.combo] = (index >= texcount) ? "0" : "1";
+            const bool enabled = index < texcount && texinfos[(usize)index].enabled;
+            info->combos[wput.combo] = enabled ? "1" : "0";
         }
         if (index < texcount && texinfos[(usize)index].enabled) {
             auto& compos = texinfos[(usize)index].composEnabled;
