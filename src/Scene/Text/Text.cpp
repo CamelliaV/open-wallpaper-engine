@@ -584,10 +584,11 @@ struct TextLayouter::Impl {
     std::size_t                     peak_quads { 0 };
     FontMetrics                     metrics;
 
-    float last_text_w { 0.0f };
-    float last_text_h { 0.0f };
-    bool  missing_glyph_logged { false };
-    bool  truncate_logged { false };
+    float       last_text_w { 0.0f };
+    float       last_text_h { 0.0f };
+    std::string current_text;
+    bool        missing_glyph_logged { false };
+    bool        truncate_logged { false };
 
     // Scratch buffers reused across SetText calls — avoids reallocs for
     // every script tick. Sized at construction to peak capacity.
@@ -621,7 +622,9 @@ float TextLayouter::TextHeight() const noexcept { return m_impl->last_text_h; }
 void TextLayouter::SetText(std::string_view utf8) {
     auto& im = *m_impl;
 
-    auto codepoints = DecodeUtf8(utf8);
+    std::string next_text(utf8);
+    im.current_text = std::move(next_text);
+    auto codepoints = DecodeUtf8(im.current_text);
 
     // Split into lines and look up pre-rasterised glyph metrics.
     std::vector<TextLineRunGI> lines;
@@ -815,6 +818,12 @@ void TextLayouter::SetText(std::string_view utf8) {
     idx.SetRenderDataCount(q * 6);
 
     im.mesh->SetDirty();
+}
+
+void TextLayouter::SetHorizontalAlign(std::string_view align) {
+    auto& im        = *m_impl;
+    im.style.halign = std::string(align);
+    SetText(im.current_text);
 }
 
 } // namespace owe::text

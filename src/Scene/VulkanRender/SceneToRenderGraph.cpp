@@ -224,8 +224,11 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                                                               .key  = pass_output_s,
                                                               .type = rg::TexNode::TexType::Temp },
                                           true);
-                const auto& output_rt = scene.renderTargets.at(pass_output_s);
-                pdesc.clear_output    = output_node->version() == 0 && output_rt.bind.screen;
+                const auto& output_rt          = scene.renderTargets.at(pass_output_s);
+                const bool  first_output_write = output_node->version() == 0;
+                pdesc.transparent_clear = first_output_write && output_rt.clear_on_first_write;
+                pdesc.clear_output =
+                    (first_output_write && output_rt.bind.screen) || pdesc.transparent_clear;
                 pdesc.preserve_output = output_node->version() > 0 && output_rt.preserve_on_write;
                 const bool uses_depth =
                     output_rt.withDepth && vulkan::UsesDepthAttachment(*material);

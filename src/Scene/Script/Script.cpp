@@ -348,9 +348,17 @@ struct EngineHostState {
     // TextLayouter::SetText. Missing entry means the layer is not text-
     // capable; writes silently no-op.
     std::unordered_map<owe::SceneNode*, std::function<void(std::string_view)>> text_setters;
-    JsRuntime::BoneIndexResolver                                               bone_index_resolver;
-    JsRuntime::BoneTransformResolver bone_transform_resolver;
-    owe::SceneNode*                  scene_root { nullptr };
+    struct TextAlignHooks {
+        std::string                           horizontal { "center" };
+        std::string                           vertical { "center" };
+        double                                point_size { 1.0 };
+        std::function<void(std::string_view)> set_horizontal;
+        std::function<void(std::string_view)> set_vertical;
+    };
+    std::unordered_map<owe::SceneNode*, TextAlignHooks> text_align_hooks;
+    JsRuntime::BoneIndexResolver                        bone_index_resolver;
+    JsRuntime::BoneTransformResolver                    bone_transform_resolver;
+    owe::SceneNode*                                     scene_root { nullptr };
 };
 
 uint32_t NormalizeAudioResolution(int32_t requested) {
@@ -1044,15 +1052,27 @@ globalThis.createScriptProperties = function () {
       }
       return value;
     };
+    const userValue = (u) => {
+      if (typeof u === 'object' && u !== null && 'value' in u) return u.value;
+      return u;
+    };
+    const sameScalar = (a, b) => String(a) === String(b);
     const unwrapUserProp = (h) => {
       if (h === undefined || h === null) return undefined;
       if (typeof h !== 'object' || !('user' in h) || !('value' in h)) return h;
+      if (typeof h.user === 'object') {
+        const gate = h.user;
+        if (gate && typeof gate.name === 'string') {
+          const u = engine.userProperties[gate.name];
+          if (u !== undefined) return sameScalar(userValue(u), gate.condition);
+        }
+        return unwrapUserProp(h.value);
+      }
       const u = engine.userProperties[h.user];
       if (u !== undefined) {
         // project.json stores user props as { type, value, ... }; pluck
         // .value when present, else use the bare value directly.
-        if (typeof u === 'object' && u !== null && 'value' in u) return applyHostScale(h, u.value);
-        return applyHostScale(h, u);
+        return applyHostScale(h, userValue(u));
       }
       return applyHostScale(h, h.value);
     };
@@ -1648,8 +1668,48 @@ JSValue NodeSetColor(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     n->SetColor({ float(x), float(y), float(z) });
     return JS_UNDEFINED;
 }
-JSValue NodeGetVAlign(JSContext* ctx, JSValueConst) { return JS_NewString(ctx, "center"); }
-JSValue NodeGetHAlign(JSContext* ctx, JSValueConst) { return JS_NewString(ctx, "center"); }
+JSValue NodeGetVAlign(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_NewString(ctx, "center");
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  it   = host->text_align_hooks.find(n);
+    return JS_NewString(
+        ctx, it == host->text_align_hooks.end() ? "center" : it->second.vertical.c_str());
+}
+JSValue NodeGetHAlign(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_NewString(ctx, "center");
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  it   = host->text_align_hooks.find(n);
+    return JS_NewString(
+        ctx, it == host->text_align_hooks.end() ? "center" : it->second.horizontal.c_str());
+}
+JSValue NodeSetVAlign(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  it   = host->text_align_hooks.find(n);
+    if (it == host->text_align_hooks.end()) return JS_UNDEFINED;
+    const char* s = JS_ToCString(ctx, val);
+    if (s == nullptr) return JS_UNDEFINED;
+    it->second.vertical = s;
+    if (it->second.set_vertical) it->second.set_vertical(it->second.vertical);
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
+}
+JSValue NodeSetHAlign(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  it   = host->text_align_hooks.find(n);
+    if (it == host->text_align_hooks.end()) return JS_UNDEFINED;
+    const char* s = JS_ToCString(ctx, val);
+    if (s == nullptr) return JS_UNDEFINED;
+    it->second.horizontal = s;
+    if (it->second.set_horizontal) it->second.set_horizontal(it->second.horizontal);
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
+}
 JSValue NodeSetIgnore(JSContext*, JSValueConst, JSValueConst) { return JS_UNDEFINED; }
 
 // `text` is the only string-valued property on WWLayer. Most scripts only
@@ -1667,6 +1727,15 @@ JSValue NodeSetText(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     it->second(std::string_view(s));
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
+}
+JSValue NodeGetPointSize(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_NewFloat64(ctx, 1.0);
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  it   = host->text_align_hooks.find(n);
+    if (it != host->text_align_hooks.end()) return JS_NewFloat64(ctx, it->second.point_size);
+    auto* mesh = n->Mesh();
+    return JS_NewFloat64(ctx, mesh == nullptr ? 1.0 : mesh->PointSize());
 }
 
 // --- methods ----------------------------------------------------------------
@@ -1984,8 +2053,9 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("color", NodeGetColor, NodeSetColor),
     JS_CGETSET_DEF("text", NodeGetText, NodeSetText),
     JS_CGETSET_DEF("name", NodeGetNameValue, NodeSetIgnore),
-    JS_CGETSET_DEF("verticalalign", NodeGetVAlign, NodeSetIgnore),
-    JS_CGETSET_DEF("horizontalalign", NodeGetHAlign, NodeSetIgnore),
+    JS_CGETSET_DEF("verticalalign", NodeGetVAlign, NodeSetVAlign),
+    JS_CGETSET_DEF("horizontalalign", NodeGetHAlign, NodeSetHAlign),
+    JS_CGETSET_DEF("pointsize", NodeGetPointSize, NodeSetIgnore),
     JS_CFUNC_DEF("getParent", 0, NodeGetParent),
     JS_CFUNC_DEF("getTransformMatrix", 0, NodeGetTransformMatrix),
     JS_CFUNC_DEF("getChildren", 0, NodeGetChildren),
@@ -2287,6 +2357,20 @@ void JsRuntime::RegisterTextSetter(owe::SceneNode*                       node,
                                    std::function<void(std::string_view)> setter) {
     if (node == nullptr) return;
     m_impl->host.text_setters[node] = std::move(setter);
+}
+
+void JsRuntime::RegisterTextAlignSetters(owe::SceneNode* node, std::string horizontal,
+                                         std::string vertical, double point_size,
+                                         std::function<void(std::string_view)> set_horizontal,
+                                         std::function<void(std::string_view)> set_vertical) {
+    if (node == nullptr) return;
+    m_impl->host.text_align_hooks[node] = EngineHostState::TextAlignHooks {
+        .horizontal     = std::move(horizontal),
+        .vertical       = std::move(vertical),
+        .point_size     = point_size,
+        .set_horizontal = std::move(set_horizontal),
+        .set_vertical   = std::move(set_vertical),
+    };
 }
 
 // --- Module load + FieldScript construction ---------------------------------

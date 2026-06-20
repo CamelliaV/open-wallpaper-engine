@@ -173,6 +173,10 @@ public:
     // text writes from scripts bound to non-text fields (e.g. clock
     // scripts attached to `visible`).
     void RegisterTextSetter(owe::SceneNode* node, std::function<void(std::string_view)> setter);
+    void RegisterTextAlignSetters(owe::SceneNode* node, std::string horizontal,
+                                  std::string vertical, double point_size,
+                                  std::function<void(std::string_view)> set_horizontal,
+                                  std::function<void(std::string_view)> set_vertical);
 
     // Same exposure rule as FieldScript::Impl above: opaque outside the
     // module, but visible to peer module impl files.

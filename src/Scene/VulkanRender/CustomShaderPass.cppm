@@ -55,6 +55,7 @@ public:
         const std::array<float, 3>* clear_value_src { nullptr };
         bool                        blending { false };
         bool                        clear_output { false };
+        bool                        transparent_clear { false };
         bool                        clear_depth { false };
         bool                        preserve_output { false };
         VkAttachmentLoadOp          color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };

@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -378,7 +379,9 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::SceneMetadata& sc
 // closure); side-effect-only bindings (`visible`) get the script without an
 // actuator so update() still drives scene mutations.
 void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
-                      const wpscene::FieldBindings& fb) {
+                      const wpscene::FieldBindings&                   fb,
+                      std::function<void(const script::ScriptValue&)> origin_apply = {},
+                      std::function<void(const script::ScriptValue&)> scale_apply  = {}) {
     SceneNode* node = node_sp.get();
     if (! node || fb.scripts.empty()) return;
     auto& ss = EnsureScriptScene(context);
@@ -423,6 +426,10 @@ void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
         if (! has_actuator) continue;
         if (is_alpha)
             ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp) });
+        else if (field == "origin" && origin_apply)
+            ss.AddActuator({ fs, origin_apply });
+        else if (field == "scale" && scale_apply)
+            ss.AddActuator({ fs, scale_apply });
         else
             ss.AddActuator({ fs, script::MakeNodeTransformApply(node_sp, tgt) });
     }
@@ -1636,9 +1643,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         // set renderTarget for ping-pong operate
         {
             scene.renderTargets[effect_ppong_a] = {
-                .width      = (uint16_t)wpimgobj.size[0],
-                .height     = (uint16_t)wpimgobj.size[1],
-                .allowReuse = true,
+                .width                = (uint16_t)wpimgobj.size[0],
+                .height               = (uint16_t)wpimgobj.size[1],
+                .allowReuse           = true,
+                .clear_on_first_write = true,
             };
             if (wpimgobj.fullscreen) {
                 scene.renderTargets[effect_ppong_a].bind = { .enable = true, .screen = true };
@@ -1689,10 +1697,23 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             .scale  = 1.0 / wpfbo.scale,
                         };
                     } else {
-                        // i+2 for not override object's rt
+                        auto fbo_size = [&]() -> std::array<uint16_t, 2> {
+                            if (wpfbo.fit > 0) {
+                                const float max_size = std::max(wpimgobj.size[0], wpimgobj.size[1]);
+                                if (max_size > 0.0f) {
+                                    const float fit_scale = static_cast<float>(wpfbo.fit) / max_size;
+                                    return { static_cast<uint16_t>(std::max(
+                                                 1.0f, std::round(wpimgobj.size[0] * fit_scale))),
+                                             static_cast<uint16_t>(std::max(
+                                                 1.0f, std::round(wpimgobj.size[1] * fit_scale))) };
+                                }
+                            }
+                            return { static_cast<uint16_t>(wpimgobj.size[0] / (float)wpfbo.scale),
+                                     static_cast<uint16_t>(wpimgobj.size[1] / (float)wpfbo.scale) };
+                        }();
                         scene.renderTargets[rtname] = {
-                            .width      = (uint16_t)(wpimgobj.size[0] / (float)wpfbo.scale),
-                            .height     = (uint16_t)(wpimgobj.size[1] / (float)wpfbo.scale),
+                            .width      = fbo_size[0],
+                            .height     = fbo_size[1],
                             .allowReuse = true
                         };
                     }
@@ -1772,6 +1793,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 auto spMesh = std::make_shared<SceneMesh>();
                 {
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                    svData.effect_projection_node = spImgNode.get();
+                    svData.effect_projection_size = { wpimgobj.size[0], wpimgobj.size[1] };
                     if (puppet && wpmat.use_puppet) {
                         svData.puppet_layer =
                             MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
@@ -2456,6 +2479,21 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     style.halign                = obj.horizontalalign.empty() ? obj.alignment : obj.horizontalalign;
     style.padding               = static_cast<float>(obj.padding);
 
+    auto align_or_default = [](std::string      value,
+                               std::string_view fallback,
+                               std::string_view negative,
+                               std::string_view positive) {
+        if (! value.empty()) return value;
+        if (fallback.find(negative) != std::string::npos) return std::string(negative);
+        if (fallback.find(positive) != std::string::npos) return std::string(positive);
+        return std::string("center");
+    };
+    const std::string initial_halign =
+        align_or_default(obj.horizontalalign, obj.alignment, "left", "right");
+    const std::string initial_valign =
+        align_or_default(obj.verticalalign, obj.alignment, "top", "bottom");
+    style.halign = initial_halign;
+
     auto layouter = std::make_shared<text::TextLayouter>(face, sp_mesh, style, peak_quads);
     layouter->SetText(s_text);
 
@@ -2476,21 +2514,6 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     sp_node->ID()           = obj.id;
     const float text_bbox_w = text_w + 2.0f * style.padding;
     const float text_bbox_h = text_h + 2.0f * style.padding;
-    // WE text objects use horizontalalign+verticalalign as the bbox anchor on
-    // origin. The image-style `alignment` field (default "center") is only a
-    // fallback for older texts that lack h/valign — using it unconditionally
-    // forced every left/right text to render centered on origin, clipping the
-    // half that extended past it (e.g. workshop/2413184772 calendar).
-    std::string anchor = obj.alignment;
-    if (! obj.horizontalalign.empty() || ! obj.verticalalign.empty()) {
-        anchor.clear();
-        anchor += obj.horizontalalign;
-        if (! obj.verticalalign.empty()) {
-            if (! anchor.empty()) anchor += ' ';
-            anchor += obj.verticalalign;
-        }
-    }
-    LoadAlignment(*sp_node, anchor, { text_bbox_w, text_bbox_h });
     sp_node->SetSize({ text_bbox_w, text_bbox_h });
     sp_node->AddMesh(sp_mesh);
 
@@ -2517,6 +2540,21 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     //   * compose_node — fullscreen quad sampling ppong_a, Translucent
     //               blend, world-positioned. node_id_map registers IT for
     //               parent-chain reparenting + script transforms.
+    struct TextAnchorState {
+        std::string horizontal;
+        std::string vertical;
+        Vector3f    origin;
+        float       width { 1.0f };
+        float       height { 1.0f };
+    };
+    auto anchor_state = std::make_shared<TextAnchorState>(TextAnchorState {
+        .horizontal = initial_halign,
+        .vertical   = initial_valign,
+        .origin     = Vector3f(obj.origin.data()),
+        .width      = text_bbox_w,
+        .height     = text_bbox_h,
+    });
+
     auto compose_node = std::make_shared<SceneNode>();
     // Layer RT must be a worst-case sandbox: runtime SetText may expand the
     // glyph bbox well past the seed (clock/date/locale strings). Bound by
@@ -2558,7 +2596,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         // dynamic and rebuilt by the actuator below.
         compose_node->CopyTrans(*sp_node);
         compose_node->ID() = obj.id;
-        auto compose_mesh  = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
+        compose_node->SetSize({ text_bbox_w, text_bbox_h });
+        auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
         GenCardMesh(*compose_mesh, { (uint16_t)layer_w, (uint16_t)layer_h });
 
         nlohmann::json pt_json;
@@ -2614,10 +2653,22 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         sp_node->SetCamera(addr);
     }
 
-    // Transform-style script bindings (origin/scale/angles) animate the
-    // composite quad in world space, not the layer-space glyph node.
-    WireFieldScripts(context, compose_node, obj.field_bindings);
-    if (! obj.visible_user_key.empty()) compose_node->SetVisibleUserKey(obj.visible_user_key);
+    auto apply_text_anchor = [compose_node, anchor_state]() {
+        auto contains = [](const std::string& value, std::string_view token) {
+            return value.find(token) != std::string::npos;
+        };
+        const auto& scale = compose_node->Scale();
+        Vector3f    pos   = anchor_state->origin;
+        if (contains(anchor_state->horizontal, "left"))
+            pos.x() += anchor_state->width * scale.x() * 0.5f;
+        if (contains(anchor_state->horizontal, "right"))
+            pos.x() -= anchor_state->width * scale.x() * 0.5f;
+        if (contains(anchor_state->vertical, "top"))
+            pos.y() -= anchor_state->height * scale.y() * 0.5f;
+        if (contains(anchor_state->vertical, "bottom"))
+            pos.y() += anchor_state->height * scale.y() * 0.5f;
+        compose_node->SetTranslate(pos);
+    };
 
     // Per-frame compose-quad rebuild: world card sized to current text
     // bbox; UVs subsample the central text region of ppong_a (since the
@@ -2625,31 +2676,76 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // middle). Capture compose_node by shared_ptr — the topology invariant
     // (Scene.cppm) keeps it alive for the Scene's lifetime; the shared_ptr
     // capture is belt-and-suspenders for tear-down ordering.
-    auto rebuild_compose = [compose_node, layer_w, layer_h](float tw, float th) {
-        if (tw <= 0.0f) tw = 1.0f;
-        if (th <= 0.0f) th = 1.0f;
-        const float                 hx = tw * 0.5f;
-        const float                 hy = th * 0.5f;
-        const std::array<float, 12> pos {
-            -hx, -hy, 0.0f, -hx, +hy, 0.0f, +hx, -hy, 0.0f, +hx, +hy, 0.0f,
+    auto rebuild_compose =
+        [compose_node, anchor_state, apply_text_anchor, layer_w, layer_h](float tw, float th) {
+            if (tw <= 0.0f) tw = 1.0f;
+            if (th <= 0.0f) th = 1.0f;
+            anchor_state->width  = tw;
+            anchor_state->height = th;
+            compose_node->SetSize({ tw, th });
+            apply_text_anchor();
+            const float                 hx = tw * 0.5f;
+            const float                 hy = th * 0.5f;
+            const std::array<float, 12> pos {
+                -hx, -hy, 0.0f, -hx, +hy, 0.0f, +hx, -hy, 0.0f, +hx, +hy, 0.0f,
+            };
+            const float                u_half = 0.5f * std::min(1.0f, tw / float(layer_w));
+            const float                v_half = 0.5f * std::min(1.0f, th / float(layer_h));
+            const float                u_l    = 0.5f - u_half;
+            const float                u_r    = 0.5f + u_half;
+            const float                v_t    = 0.5f - v_half;
+            const float                v_b    = 0.5f + v_half;
+            const std::array<float, 8> uv {
+                u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
+            };
+            auto* mesh = compose_node->Mesh();
+            if (mesh == nullptr) return;
+            auto& v = mesh->GetVertexArray(0);
+            v.SetVertex(WE_IN_POSITION, pos);
+            v.SetVertex(WE_IN_TEXCOORD, uv);
+            mesh->SetDirty();
         };
-        const float                u_half = 0.5f * std::min(1.0f, tw / float(layer_w));
-        const float                v_half = 0.5f * std::min(1.0f, th / float(layer_h));
-        const float                u_l    = 0.5f - u_half;
-        const float                u_r    = 0.5f + u_half;
-        const float                v_t    = 0.5f - v_half;
-        const float                v_b    = 0.5f + v_half;
-        const std::array<float, 8> uv {
-            u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
-        };
-        auto* mesh = compose_node->Mesh();
-        if (mesh == nullptr) return;
-        auto& v = mesh->GetVertexArray(0);
-        v.SetVertex(WE_IN_POSITION, pos);
-        v.SetVertex(WE_IN_TEXCOORD, uv);
-        mesh->SetDirty();
-    };
     rebuild_compose(text_w, text_h);
+
+    auto apply_text_origin =
+        [compose_node, anchor_state, apply_text_anchor](const script::ScriptValue& value) {
+            Vector3f current = anchor_state->origin;
+            auto     next    = ScriptValueAsVec3(value, current);
+            if (! next) return;
+            anchor_state->origin = *next;
+            apply_text_anchor();
+        };
+    auto apply_text_scale = [compose_node, apply_text_anchor](const script::ScriptValue& value) {
+        Vector3f current = compose_node->Scale();
+        auto     next    = ScriptValueAsVec3(value, current);
+        if (! next) return;
+        compose_node->SetScale(*next);
+        apply_text_anchor();
+    };
+
+    auto set_halign = [layouter, rebuild_compose, anchor_state](std::string_view align) {
+        anchor_state->horizontal = std::string(align);
+        layouter->SetHorizontalAlign(align);
+        rebuild_compose(layouter->TextWidth(), layouter->TextHeight());
+    };
+    auto set_valign = [anchor_state, apply_text_anchor](std::string_view align) {
+        anchor_state->vertical = std::string(align);
+        apply_text_anchor();
+    };
+
+    if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
+    context.script_scene->runtime().RegisterTextAlignSetters(compose_node.get(),
+                                                             anchor_state->horizontal,
+                                                             anchor_state->vertical,
+                                                             obj.pointsize,
+                                                             set_halign,
+                                                             set_valign);
+
+    // Transform-style script bindings (origin/scale/angles) animate the
+    // composite quad in world space, not the layer-space glyph node.
+    WireFieldScripts(
+        context, compose_node, obj.field_bindings, apply_text_origin, apply_text_scale);
+    if (! obj.visible_user_key.empty()) compose_node->SetVisibleUserKey(obj.visible_user_key);
 
     // --- text-content actuator. Captures the layouter + a closure that
     // re-rasterises new codepoints, lays them out, and rebuilds the

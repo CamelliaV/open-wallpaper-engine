@@ -216,6 +216,7 @@ public:
     // Rewrites the vertex/index arrays in place, marks the mesh dirty.
     // Safe to call any number of times after construction.
     void SetText(std::string_view utf8);
+    void SetHorizontalAlign(std::string_view align);
 
     // For ParseTextObj's initial-bbox log; reflects the most recent layout.
     float TextWidth() const noexcept;

@@ -124,6 +124,7 @@ void SceneUniformUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& 
     info.has_MVP                = existsOp(G_MVP);
     info.has_MVPI               = existsOp(G_MVPI);
     info.has_EYEPOSITION        = existsOp(G_EYEPOSITION);
+    info.has_EMVP               = existsOp(G_EMVP);
     info.has_ETVP               = existsOp(G_ETVP);
     info.has_ETVPI              = existsOp(G_ETVPI);
 
@@ -208,6 +209,7 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     bool reqAM    = info.has_AM;
     bool reqMVP   = info.has_MVP;
     bool reqMVPI  = info.has_MVPI;
+    bool reqEMVP  = info.has_EMVP;
     bool reqETVP  = info.has_ETVP;
     bool reqETVPI = info.has_ETVPI;
 
@@ -235,7 +237,7 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
         const auto eye = camera->GetPosition().cast<float>();
         updateOp(G_EYEPOSITION, std::array<float, 3> { eye.x(), eye.y(), eye.z() });
     }
-    if (reqM || reqMVP || reqMI || reqMVPI) {
+    if (reqM || reqMVP || reqMI || reqMVPI || reqEMVP) {
         Matrix4d modelTrans = pNode->ModelTrans();
         if (hasNodeData && cam_name != "effect") {
             const auto& nodeData = m_nodeDataMap.at(pNode);
@@ -269,6 +271,29 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
             Matrix4d mvpTrans = viewProTrans * modelTrans;
             updateOp(G_MVP, ShaderValue::fromMatrix(mvpTrans));
             if (reqMVPI) updateOp(G_MVPI, ShaderValue::fromMatrix(mvpTrans.inverse()));
+        }
+        if (reqEMVP) {
+            Matrix4d effectModel = modelTrans;
+            if (hasNodeData && m_nodeDataMap.at(pNode).effect_projection_node != nullptr) {
+                const auto& nodeData = m_nodeDataMap.at(pNode);
+                auto*       source   = nodeData.effect_projection_node;
+                source->UpdateTrans();
+                effectModel = source->ModelTrans();
+                if (nodeData.effect_projection_size[0] > 0.0f &&
+                    nodeData.effect_projection_size[1] > 0.0f) {
+                    effectModel =
+                        effectModel *
+                        Affine3d(
+                            Scaling(static_cast<double>(nodeData.effect_projection_size[0]) * 0.5,
+                                    static_cast<double>(nodeData.effect_projection_size[1]) * 0.5,
+                                    1.0))
+                            .matrix();
+                }
+            }
+            SceneCamera* effect_camera = m_scene->activeCamera ? m_scene->activeCamera : camera;
+            updateOp(
+                G_EMVP,
+                ShaderValue::fromMatrix(effect_camera->GetViewProjectionMatrix() * effectModel));
         }
         if (reqETVP || reqETVPI) {
             /*

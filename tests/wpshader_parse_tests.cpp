@@ -6,6 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
+import wescene.fs;
 import wescene.pkg.parse;
 import wescene.types;
 import nlohmann.json;
@@ -160,4 +164,36 @@ TEST(WPShaderParser, UndefsBuiltinMacroBeforeUserRedefine) {
     ASSERT_NE(undef_pos, std::string::npos);
     ASSERT_NE(define_pos, std::string::npos);
     EXPECT_LT(undef_pos, define_pos);
+}
+
+TEST(WPShaderParser, CommonPerspectiveIncludeCompensatesLocalMatrixMul) {
+    auto root =
+        std::filesystem::temp_directory_path() /
+        ("owe-wpshader-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "shaders");
+
+    {
+        std::ofstream out(root / "shaders" / "common_perspective.h");
+        out << R"(
+mat3 squareToQuad(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
+	mat3 m = mat3(1.0);
+	if (p0.x == p1.x) {
+		return m;
+	}
+	return m;
+}
+)";
+    }
+
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.Mount("/assets", owe::fs::CreatePhysicalFs(root.string())));
+
+    const std::string out = owe::WPShaderParser::PreShaderSrc(
+        vfs, "#include \"common_perspective.h\"\nvoid main(){}\n", nullptr, {});
+
+    EXPECT_NE(out.find("_ww_perspective_mat"), std::string::npos);
+    EXPECT_NE(out.find("return _ww_perspective_mat(m);"), std::string::npos);
+
+    std::filesystem::remove_all(root);
 }

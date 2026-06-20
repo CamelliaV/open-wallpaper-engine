@@ -48,6 +48,7 @@ bool EffectFbo::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "format", format);
 
     owe::GetJsonValue(json, "scale", scale);
+    owe::GetJsonValue(json, "fit", fit, false);
     if (scale == 0) {
         rstd_error("fbo scale can't be 0");
         scale = 1;

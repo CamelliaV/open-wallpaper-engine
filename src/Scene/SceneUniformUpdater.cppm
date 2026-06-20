@@ -18,6 +18,7 @@ struct SceneUniformInfo {
     bool has_MVP { false };
     bool has_MVPI { false };
     bool has_EYEPOSITION { false };
+    bool has_EMVP { false };
     bool has_ETVP { false };
     bool has_ETVPI { false };
     bool has_VP { false };
@@ -54,6 +55,8 @@ struct SceneUniformNodeData {
     std::vector<std::pair<usize, std::string>> renderTargets;
     std::shared_ptr<WPPuppetLayer>             puppet_layer;
     bool                                       use_camera_eye_position { false };
+    SceneNode*                                 effect_projection_node { nullptr };
+    std::array<float, 2>                       effect_projection_size { 0.0f, 0.0f };
 };
 
 struct SceneCameraParallax {

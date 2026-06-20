@@ -15,14 +15,15 @@ import wescene.scene;
 using namespace owe::vulkan;
 
 CustomShaderPass::CustomShaderPass(const Desc& desc) {
-    m_desc.node            = desc.node;
-    m_desc.submesh_index   = desc.submesh_index;
-    m_desc.textures        = desc.textures;
-    m_desc.output          = desc.output;
-    m_desc.sprites_map     = desc.sprites_map;
-    m_desc.clear_output    = desc.clear_output;
-    m_desc.clear_depth     = desc.clear_depth;
-    m_desc.preserve_output = desc.preserve_output;
+    m_desc.node              = desc.node;
+    m_desc.submesh_index     = desc.submesh_index;
+    m_desc.textures          = desc.textures;
+    m_desc.output            = desc.output;
+    m_desc.sprites_map       = desc.sprites_map;
+    m_desc.clear_output      = desc.clear_output;
+    m_desc.transparent_clear = desc.transparent_clear;
+    m_desc.clear_depth       = desc.clear_depth;
+    m_desc.preserve_output   = desc.preserve_output;
 };
 CustomShaderPass::~CustomShaderPass() {}
 
@@ -589,9 +590,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
 
     {
-        if (out_force_clear) {
-            // Per-layer compose RTs want a transparent reset every frame —
-            // not the scene's opaque clear color.
+        if (out_force_clear || m_desc.transparent_clear) {
+            // Some offscreen RTs need a transparent reset, not the scene's
+            // opaque clear color.
             m_desc.clear_value     = VkClearValue { .color = { 0.0f, 0.0f, 0.0f, 0.0f } };
             m_desc.clear_value_src = nullptr;
         } else {

@@ -134,6 +134,7 @@ struct SceneRenderTarget {
     // visible as ghosting when the rendered string changes (e.g. clock
     // text "12:00" → "12:01" leaves "12:00"'s glyphs underneath).
     bool force_clear { false };
+    bool clear_on_first_write { false };
     // Later graph versions of this RT keep earlier color content. Use this
     // for composition targets, not transient effect outputs.
     bool preserve_on_write { false };

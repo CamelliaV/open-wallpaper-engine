@@ -512,6 +512,43 @@ inline void NormalizeExpandedShaderSource(std::string& src) {
     src = std::move(out);
 }
 
+inline std::string PatchCommonPerspectiveInclude(std::string_view include_name, std::string src) {
+    if (include_name != "common_perspective.h") return src;
+    if (src.find("_ww_perspective_mat") != std::string::npos) return src;
+
+    static constexpr std::string_view helper = R"(
+mat3 _ww_perspective_mat(mat3 m) {
+#if HLSL
+	// Local perspective matrices are not uploaded through a cbuffer, so they
+	// must compensate the global WE mul shim explicitly.
+	return transpose(m);
+#else
+	return m;
+#endif
+}
+
+)";
+
+    std::string out;
+    out.reserve(src.size() + helper.size() + 64);
+    out.append(helper);
+
+    static constexpr std::string_view needle { "return m;" };
+    static constexpr std::string_view repl { "return _ww_perspective_mat(m);" };
+    std::size_t                       pos = 0;
+    for (;;) {
+        std::size_t next = src.find(needle, pos);
+        if (next == std::string::npos) {
+            out.append(src, pos, std::string::npos);
+            break;
+        }
+        out.append(src, pos, next - pos);
+        out.append(repl);
+        pos = next + needle.size();
+    }
+    return out;
+}
+
 inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
     std::string output;
     output.reserve(input.size());
@@ -538,6 +575,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
         }
         std::string includeName = line.substr(in_p + 1, in_e - in_p - 1);
         std::string includeSrc  = fs::GetFileContent(vfs, "/assets/shaders/" + includeName);
+        includeSrc              = PatchCommonPerspectiveInclude(includeName, std::move(includeSrc));
         output.append("\n//-----include ");
         output.append(includeName);
         output.append("\n");
