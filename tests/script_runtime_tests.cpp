@@ -556,6 +556,38 @@ TEST(ScriptCursor, GlobalInputRefreshesFrameFields) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 300'400.0);
 }
 
+TEST(ScriptCursor, WorldPositionFlipsTopDownInputY) {
+    JsRuntime rt;
+    rt.SetFrameInputs(MakeFi());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update() {
+                return new Vec3(
+                    input.cursorWorldPosition.x,
+                    input.cursorWorldPosition.y,
+                    input.cursorScreenPosition.y);
+            }
+        )JS",
+        "test/global_input_world_y",
+        FieldKind::Vec3,
+        nlohmann::json::object(),
+        nlohmann::json("0.0 0.0 0.0"));
+    ASSERT_NE(fs, nullptr);
+
+    auto fi     = MakeFi();
+    fi.screen_h = 600.0f;
+    fi.cursor_x = 0.25f;
+    fi.cursor_y = 0.25f;
+    rt.SetFrameInputs(fi);
+    rt.TickAll();
+
+    ASSERT_TRUE(std::holds_alternative<Vec3Value>(fs->last_value()));
+    const auto& v = std::get<Vec3Value>(fs->last_value());
+    EXPECT_NEAR(v.x, 480.0, 0.001);
+    EXPECT_NEAR(v.y, 810.0, 0.001);
+    EXPECT_NEAR(v.z, 150.0, 0.001);
+}
+
 // ---------------------------------------------------------------------------
 // Texture animation override
 

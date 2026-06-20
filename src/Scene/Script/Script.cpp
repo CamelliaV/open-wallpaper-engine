@@ -741,10 +741,9 @@ void InstallLocalStorage(JSContext* ctx) {
     JS_FreeValue(ctx, g);
 }
 
-// Project (cursor_x, cursor_y) — normalised canvas coords with y-down —
-// into the same units the scene uses for SceneNode origins / sizes.
-// SceneWallpaper feeds canvas_w / canvas_h matching the active camera's
-// ortho rect, so cursor_pixel_x is in scene-units along X.
+// Project normalised canvas coordinates into the scene's world units.
+// Hosts feed pointer Y top-down; the scene world uses Y-up, matching
+// link_mouse particles and SceneCamera's orthographic viewport.
 struct CursorWorld {
     double x { 0 }, y { 0 };
 };
@@ -752,11 +751,7 @@ struct CursorWorld {
 CursorWorld CursorToWorld(const FrameInputs& fi) {
     return CursorWorld {
         .x = double(fi.cursor_x) * double(fi.canvas_w),
-        // The cursor's Y comes in top-down (GLFW / canvas pixels). Scene
-        // graph layers are positioned with Y also top-down (image
-        // `origin[1]` is verbatim from scene.json, no inversion in the
-        // parser today). Match that — don't flip.
-        .y = double(fi.cursor_y) * double(fi.canvas_h),
+        .y = (1.0 - double(fi.cursor_y)) * double(fi.canvas_h),
     };
 }
 
