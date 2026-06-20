@@ -144,9 +144,15 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
     // then transformed by g_ModelMatrix (the owner node's world transform).
     // To make a link_mouse cp track the cursor in world, push the cursor
     // through the owner node's inverse model first.
-    Eigen::Vector3d mouse_local = mouse_world;
+    Eigen::Vector3d mouse_local          = mouse_world;
+    Eigen::Matrix3d world_from_local_dir = Eigen::Matrix3d::Identity();
+    Eigen::Matrix3d local_from_world_dir = Eigen::Matrix3d::Identity();
     if (auto node = m_owner_node.lock()) {
         node->UpdateTrans();
+        world_from_local_dir = node->ModelTrans().block<3, 3>(0, 0);
+        if (std::abs(world_from_local_dir.determinant()) > 1e-9)
+            local_from_world_dir = world_from_local_dir.inverse();
+
         Eigen::Matrix4d m_inv = node->ModelTrans().inverse();
         Eigen::Vector4d v     = m_inv * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
         mouse_local           = v.head<3>();
@@ -236,10 +242,12 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
         if (m_spawn_type == SpawnType::EVENT_DEATH) inst->SetDeath(true);
 
         ParticleInfo info {
-            .particles     = inst->ParticlesVec(),
-            .controlpoints = m_controlpoints,
-            .time          = m_time,
-            .time_pass     = particleTime,
+            .particles            = inst->ParticlesVec(),
+            .controlpoints        = m_controlpoints,
+            .world_from_local_dir = world_from_local_dir,
+            .local_from_world_dir = local_from_world_dir,
+            .time                 = m_time,
+            .time_pass            = particleTime,
         };
 
         bool  has_live = false;
