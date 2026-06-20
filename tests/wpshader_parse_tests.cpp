@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 import wescene.pkg.parse;
+import wescene.types;
 import nlohmann.json;
 
 using owe::ParseWPShader;
@@ -146,4 +147,17 @@ void main(){}
 )";
     auto              info = Parse(src);
     EXPECT_EQ(info.combos.at("HASTEX"), "1");
+}
+
+TEST(WPShaderParser, UndefsBuiltinMacroBeforeUserRedefine) {
+    const std::string out = owe::WPShaderParser::PreShaderHeader(
+        "#define M_PI_2 1.57079632679\nfloat f() { return M_PI_2; }\n",
+        {},
+        owe::ShaderType::FRAGMENT);
+
+    const auto undef_pos  = out.find("#undef M_PI_2");
+    const auto define_pos = out.find("#define M_PI_2 1.57079632679");
+    ASSERT_NE(undef_pos, std::string::npos);
+    ASSERT_NE(define_pos, std::string::npos);
+    EXPECT_LT(undef_pos, define_pos);
 }

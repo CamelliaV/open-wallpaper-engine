@@ -184,6 +184,7 @@ bool SceneCameraPath::Tick(double runtime) {
     }
 
     if (! node) return false;
+    camera->AttatchNode(node);
 
     node->SetTranslate(path_translate_bias + origin_curve.EvaluateVec3(origin_base, runtime));
     node->SetRotation(path_rotation_bias + rotation_curve.EvaluateVec3(rotation_base, runtime));

@@ -432,6 +432,36 @@ inline bool Contains(std::span<const std::string> values, std::string_view value
     });
 }
 
+inline bool LineDefinesMacro(std::string_view src, std::size_t line_start,
+                             std::string_view macro_name) {
+    shader_lex::Cursor c(src);
+    c.SeekTo(line_start);
+    if (! c.MatchHashDirective("define")) return false;
+    c.SkipHSpace();
+    auto ident = c.ReadIdent();
+    return ident && *ident == macro_name;
+}
+
+inline std::string UndefBeforeUserMacroDefines(std::string_view src, std::string_view macro_name) {
+    bool        changed = false;
+    std::string out;
+    out.reserve(src.size() + 64);
+    shader_lex::LineWalker w(src);
+    for (; ! w.Done(); w.Step()) {
+        if (LineDefinesMacro(src, w.LineStart(), macro_name)) {
+            out += "#ifdef ";
+            out += macro_name;
+            out += "\n#undef ";
+            out += macro_name;
+            out += "\n#endif\n";
+            changed = true;
+        }
+        out.append(src, w.LineStart(), w.LineEnd() - w.LineStart());
+        if (w.LineEnd() < src.size()) out.push_back('\n');
+    }
+    return changed ? out : std::string { src };
+}
+
 inline std::vector<std::string> CollectBuildTangentSpaceVars(std::string_view src) {
     std::vector<std::string> vars;
     shader_lex::Lexer        lx(src);
@@ -1468,6 +1498,8 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
+    const std::string user_src = UndefBeforeUserMacroDefines(src, "M_PI_2");
+
     // All stages route through glslang's HLSL frontend.
     std::string pre;
     if (type == ShaderType::GEOMETRY) {
@@ -1491,9 +1523,9 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
     };
     bool user_mod = false;
     for (auto needle : kModSentinels) {
-        if (src.find(needle) != std::string::npos ||
-            (src.size() >= needle.size() - 1 &&
-             std::string_view(src).substr(0, needle.size() - 1) == needle.substr(1))) {
+        if (user_src.find(needle) != std::string::npos ||
+            (user_src.size() >= needle.size() - 1 &&
+             std::string_view(user_src).substr(0, needle.size() - 1) == needle.substr(1))) {
             user_mod = true;
             break;
         }
@@ -1525,7 +1557,7 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
     } else {
         pre += combo_defines;
     }
-    return pre + src;
+    return pre + user_src;
 }
 
 void WPShaderParser::InitGlslang() { vulkan::InitProcess(); }

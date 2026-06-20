@@ -475,6 +475,42 @@ TEST(ScriptCursor, CursorOutOfWindowSuppressesEvents) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 0.0);
 }
 
+TEST(ScriptCursor, GlobalInputRefreshesFrameFields) {
+    JsRuntime rt;
+    rt.SetFrameInputs(MakeFi());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update() {
+                return input.cursorScreenPosition.x +
+                       input.cursorScreenPosition.y * 1000 +
+                       (input.cursorLeftDown ? 1000000 : 0) +
+                       input.mouseButtonsDown * 10000000;
+            }
+        )JS",
+        "test/global_input_refresh",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0));
+    ASSERT_NE(fs, nullptr);
+
+    auto fi               = MakeFi();
+    fi.screen_w           = 800.0f;
+    fi.screen_h           = 600.0f;
+    fi.cursor_x           = 0.25f;
+    fi.cursor_y           = 0.5f;
+    fi.mouse_buttons_down = 1u << 0;
+    fi.cursor_in_window   = true;
+    rt.SetFrameInputs(fi);
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 11'300'200.0);
+
+    fi.cursor_x           = 0.5f;
+    fi.mouse_buttons_down = 0;
+    rt.SetFrameInputs(fi);
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 300'400.0);
+}
+
 // ---------------------------------------------------------------------------
 // Texture animation override
 

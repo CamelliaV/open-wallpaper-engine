@@ -752,6 +752,63 @@ CursorWorld CursorToWorld(const FrameInputs& fi) {
     };
 }
 
+void SetObjectNumber(JSContext* ctx, JSValueConst obj, const char* name, double value) {
+    JS_SetPropertyStr(ctx, obj, name, JS_NewFloat64(ctx, value));
+}
+
+void SetVec2Fields(JSContext* ctx, JSValueConst obj, double x, double y) {
+    SetObjectNumber(ctx, obj, "x", x);
+    SetObjectNumber(ctx, obj, "y", y);
+}
+
+void SetVec3Fields(JSContext* ctx, JSValueConst obj, double x, double y, double z) {
+    SetObjectNumber(ctx, obj, "x", x);
+    SetObjectNumber(ctx, obj, "y", y);
+    SetObjectNumber(ctx, obj, "z", z);
+}
+
+void UpdateInputObject(JSContext* ctx) {
+    auto*       host  = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    const auto& fi    = host->inputs;
+    JSValue     g     = JS_GetGlobalObject(ctx);
+    JSValue     input = JS_GetPropertyStr(ctx, g, "input");
+    if (! JS_IsObject(input)) {
+        JS_FreeValue(ctx, input);
+        JS_FreeValue(ctx, g);
+        return;
+    }
+
+    JSValue screen = JS_GetPropertyStr(ctx, input, "cursorScreenPosition");
+    if (JS_IsObject(screen))
+        SetVec2Fields(ctx, screen, fi.cursor_x * fi.screen_w, fi.cursor_y * fi.screen_h);
+    JS_FreeValue(ctx, screen);
+
+    const CursorWorld world = CursorToWorld(fi);
+    JSValue           wp    = JS_GetPropertyStr(ctx, input, "cursorWorldPosition");
+    if (JS_IsObject(wp)) SetVec3Fields(ctx, wp, world.x, world.y, 0.0);
+    JS_FreeValue(ctx, wp);
+
+    JSValue lp = JS_GetPropertyStr(ctx, input, "cursorLocalPosition");
+    if (JS_IsObject(lp)) SetVec3Fields(ctx, lp, world.x, world.y, 0.0);
+    JS_FreeValue(ctx, lp);
+
+    JS_SetPropertyStr(ctx, input, "mouseButtonsDown", JS_NewUint32(ctx, fi.mouse_buttons_down));
+    JS_SetPropertyStr(
+        ctx, input, "mouseButtonsPressed", JS_NewUint32(ctx, fi.mouse_buttons_pressed));
+    JS_SetPropertyStr(
+        ctx, input, "mouseButtonsReleased", JS_NewUint32(ctx, fi.mouse_buttons_released));
+    JS_SetPropertyStr(
+        ctx, input, "cursorLeftDown", JS_NewBool(ctx, (fi.mouse_buttons_down & (1u << 0)) != 0));
+    JS_SetPropertyStr(
+        ctx, input, "cursorRightDown", JS_NewBool(ctx, (fi.mouse_buttons_down & (1u << 1)) != 0));
+    JS_SetPropertyStr(
+        ctx, input, "cursorMiddleDown", JS_NewBool(ctx, (fi.mouse_buttons_down & (1u << 2)) != 0));
+    JS_SetPropertyStr(ctx, input, "inWindow", JS_NewBool(ctx, fi.cursor_in_window));
+
+    JS_FreeValue(ctx, input);
+    JS_FreeValue(ctx, g);
+}
+
 bool HitTestNode(owe::SceneNode* n, const CursorWorld& c) {
     if (! n) return false;
     n->UpdateTrans();
@@ -1186,6 +1243,9 @@ globalThis.input = {
     mouseButtonsDown:     0,
     mouseButtonsPressed:  0,
     mouseButtonsReleased: 0,
+    cursorLeftDown:       false,
+    cursorRightDown:      false,
+    cursorMiddleDown:     false,
     inWindow:             false,
 };
 
@@ -2043,6 +2103,7 @@ JsRuntime::~JsRuntime() {
 
 void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
     m_impl->host.inputs = fi;
+    UpdateInputObject(m_impl->ctx);
     if (m_impl->host.audio_buffer_built) RefreshAudioBuffer(m_impl->ctx);
 }
 

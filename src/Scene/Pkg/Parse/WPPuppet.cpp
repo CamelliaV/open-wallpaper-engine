@@ -51,11 +51,38 @@ static bool HasAuthoredTrack(const WPPuppet::BoneTrack& track) {
     return false;
 }
 
+struct BindLinear {
+    Quaterniond rotation;
+    Vector3f    scale;
+};
+
 static Quaterniond ToQuaternion(Vector3f euler) {
     const std::array<Vector3d, 3> axis { Vector3d::UnitX(), Vector3d::UnitY(), Vector3d::UnitZ() };
     return AngleAxis<double>(euler.z(), axis[2]) * AngleAxis<double>(euler.y(), axis[1]) *
            AngleAxis<double>(euler.x(), axis[0]);
 };
+
+static BindLinear DecomposeBindLinear(const Matrix3f& linear) {
+    Matrix3f rot = linear;
+    Vector3f scale { rot.col(0).norm(), rot.col(1).norm(), rot.col(2).norm() };
+    for (int i = 0; i < 3; ++i) {
+        if (scale[i] > 0.000001f) {
+            rot.col(i) /= scale[i];
+        } else {
+            rot.col(i).setZero();
+            rot(i, i) = 1.0f;
+            scale[i]  = 1.0f;
+        }
+    }
+    if (rot.determinant() < 0.0f) {
+        scale.x() = -scale.x();
+        rot.col(0) *= -1.0f;
+    }
+
+    Quaterniond q { rot.cast<double>() };
+    q.normalize();
+    return { q, scale };
+}
 
 void WPPuppet::prepared() {
     for (unsigned i = 0; i < bones.size(); i++) {
@@ -133,17 +160,16 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         // Bind state. vco is a fixed render-time pivot offset for root sprite
         // bones (matches world_bind's pretranslate in prepared()) and is added
         // after layer deltas so the replacement anchor stays in puppet space.
-        const Quaterniond bind_quat { bone.local_bind.linear().cast<double>() };
+        const BindLinear bind_linear = DecomposeBindLinear(bone.local_bind.linear());
 
         Vector3f trans { replace_base_frame != nullptr ? replace_base_frame->position
                                                        : bone.local_bind.translation() };
         Vector3f scale { replace_base_frame != nullptr ? replace_base_frame->scale
-                                                       : Vector3f::Ones() };
-        // quat absorbs R_bind directly (instead of a separate affine.rotate(R_bind)
-        // + inv_bind cancel). Each layer multiplies in its frame delta from frame[0];
-        // bind_quat is preserved because deltas at frame[0] are identity.
+                                                       : bind_linear.scale };
+        // quat absorbs the anchor rotation directly. Each layer multiplies in its
+        // frame delta from frame[0], whose delta is identity.
         Quaterniond       quat { replace_base_frame != nullptr ? replace_base_frame->quaternion
-                                                               : bind_quat };
+                                                               : bind_linear.rotation };
         const Quaterniond ident { Quaterniond::Identity() };
 
         for (auto& layer : puppet_layer.m_layers) {

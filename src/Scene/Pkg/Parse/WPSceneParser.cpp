@@ -1129,7 +1129,7 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
     if (! cam.visible) node->SetVisible(false);
     if (! cam.visible_user_key.empty()) node->SetVisibleUserKey(cam.visible_user_key);
 
-    camera->AttatchNode(node);
+    if (cam.visible) camera->AttatchNode(node);
     if (use_perspective) {
         camera->SetAllowCameraShake(false);
         if (cam.fov > 0.0f) camera->SetFov(cam.fov);
