@@ -759,8 +759,10 @@ void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const W
 
 bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, SceneNode* pNode,
                   SceneMaterial* pMaterial, SceneUniformNodeData* pSvData,
-                  WPShaderInfo* pWPShaderInfo = nullptr, bool enable_geometry_shader = false) {
+                  WPShaderInfo* pWPShaderInfo = nullptr, bool enable_geometry_shader = false,
+                  bool* out_geometry_shader = nullptr) {
     (void)pNode;
+    if (out_geometry_shader) *out_geometry_shader = false;
 
     auto& svData   = *pSvData;
     auto& material = *pMaterial;
@@ -786,14 +788,15 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
         .preprocess_info = {},
     });
     if (enable_geometry_shader) {
-        if (std::string geom_src = fs::GetFileContent(vfs, shaderPath + ".geom");
-            ! geom_src.empty()) {
+        std::string geom_path = shaderPath + ".geom";
+        if (vfs.Contains(geom_path)) {
             sd_units.push_back({
                 .stage           = ShaderType::GEOMETRY,
-                .src             = std::move(geom_src),
+                .src             = fs::GetFileContent(vfs, geom_path),
                 .preprocess_info = {},
             });
             pWPShaderInfo->combos["GS_ENABLED"] = "1";
+            if (out_geometry_shader) *out_geometry_shader = true;
         }
     }
     sd_units.push_back({
@@ -2018,7 +2021,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         shaderInfo.combos["SPRITESHEETBLEND"] = "1";
     }
 
-    bool mat_ok = false;
+    bool mat_ok              = false;
+    bool use_geometry_shader = false;
     try {
         mat_ok = LoadMaterial(vfs,
                               particle_obj.material,
@@ -2027,7 +2031,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                               &material,
                               &svData,
                               &shaderInfo,
-                              render_desc.geometry_shader);
+                              render_desc.geometry_shader,
+                              &use_geometry_shader);
     } catch (const std::exception& e) {
         rstd_error("load particleobj '{}' material exception: {}", wppartobj.name, e.what());
     }
@@ -2063,8 +2068,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             u32 rope_segs = mesh_maxcount * (trail_length - 1);
             SetRopeParticleMesh(mesh, particle_obj, rope_segs, thick_format);
         } else {
-            SetParticleMesh(
-                mesh, particle_obj, mesh_maxcount, thick_format, render_desc.geometry_shader);
+            SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format, use_geometry_shader);
         }
     }
 
@@ -3143,23 +3147,9 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
     return context.scene;
 }
 
-// Build a first-class global post-process for LDR bloom and append it to
-// scene.post_processes.
-//
-// Five steps:
-//   1. downsample_quarter_bloom  : SpecTex_Default -> _rt_bloom_mip1
-//   2. downsample_eighth_blur_v  : _rt_bloom_mip1  -> _rt_bloom_mip2  (gaussian X)
-//   3. blur_h_bloom              : _rt_bloom_mip2  -> _rt_bloom_mip1  (gaussian Y)
-//   4. combine_ldr               : SpecTex_Default + _rt_bloom_mip1 -> _rt_bloom_combine
-//   5. copy                      : _rt_bloom_combine -> SpecTex_Default
-//
-// TODO: HDR bloom (combine_hdr / hdr_downsample chain)
 void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::SceneGeneral& g) {
-    if (g.hdr) return;
-
     auto& scene = *context.scene;
 
-    // Allocate post-process RTs as screen-bound (auto-resized with swapchain).
     auto declare_rt = [&](std::string name, float inv_scale) {
         SceneRenderTarget rt {};
         rt.width                             = 2;
@@ -3170,7 +3160,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         rt.bind.scale                        = inv_scale;
         scene.renderTargets[std::move(name)] = rt;
     };
-    declare_rt("_rt_bloom_mip1", 0.25f);
+    declare_rt("_rt_bloom_mip1", g.hdr ? 0.5f : 0.25f);
     declare_rt("_rt_bloom_mip2", 0.25f);
     declare_rt("_rt_bloom_combine", 1.0f);
 
@@ -3189,7 +3179,8 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
                         std::vector<wpscene::MaterialPassBindItem>
                                                                 binds,
                         std::string                             output_rt,
-                        std::function<void(wpscene::Material&)> mutate = nullptr) -> bool {
+                        std::function<void(wpscene::Material&)> mutate         = nullptr,
+                        std::function<void(WPShaderInfo&)>      configure_info = nullptr) -> bool {
         nlohmann::json jMat;
         if (! owe::ParseJson(fs::GetFileContent(vfs, std::string("/assets/") + mat_relpath),
                              jMat)) {
@@ -3206,6 +3197,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
 
         WPShaderInfo wpShaderInfo;
         wpShaderInfo.baseConstSvs = context.global_base_uniforms;
+        if (configure_info) configure_info(wpShaderInfo);
 
         auto                 pp_node = std::make_shared<SceneNode>();
         SceneMaterial        material;
@@ -3240,37 +3232,100 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         return true;
     };
 
-    // Bright-pass: feed scene-general bloom params via material constvalues.
-    // The shader's `g_BloomStrength` / `g_BloomThreshold` / `g_BloomTint`
-    // pick them up through the // {"material":...} aliases (LoadConstvalue
-    // wires alias name -> uniform name).
-    if (! add_pass("materials/util/downsample_quarter_bloom.json",
-                   { { "previous", 0 } },
-                   "_rt_bloom_mip1",
-                   [&](wpscene::Material& m) {
-                       m.constantshadervalues["bloomstrength"]  = { g.bloomstrength };
-                       m.constantshadervalues["bloomthreshold"] = { g.bloomthreshold };
-                       m.constantshadervalues["bloomtint"]      = {
-                           g.bloomtint[0],
-                           g.bloomtint[1],
-                           g.bloomtint[2],
-                       };
-                   }))
-        return;
+    if (g.hdr) {
+        auto hdr_offsets = [](float source_scale) {
+            float x = 1.0f / (1920.0f * source_scale);
+            float y = 1.0f / (1080.0f * source_scale);
+            return std::array { x, y, -x, -y };
+        };
+        auto set_render_var = [](WPShaderInfo& info, std::array<float, 4> value) {
+            info.baseConstSvs["g_RenderVar0"] = value;
+        };
+        float threshold = g.bloomhdrthreshold;
+        float knee      = threshold * g.bloomhdrfeather;
+        float scatter   = g.bloomhdrscatter > 0.0f ? g.bloomhdrscatter : 1.0f;
 
-    if (! add_pass("materials/util/downsample_eighth_blur_v.json",
-                   { { "_rt_bloom_mip1", 0 } },
-                   "_rt_bloom_mip2"))
-        return;
+        if (! add_pass(
+                "materials/util/hdr_downsample_bloom.json",
+                { { "previous", 0 } },
+                "_rt_bloom_mip1",
+                [&](wpscene::Material& m) {
+                    m.constantshadervalues["bloomstrength"] = { g.bloomhdrstrength };
+                    m.constantshadervalues["blend"]         = {
+                        threshold,
+                        threshold - knee,
+                        2.0f * knee,
+                        knee > 0.0f ? 0.25f / knee : 0.0f,
+                    };
+                    m.constantshadervalues["bloomtint"] = {
+                        g.bloomtint[0],
+                        g.bloomtint[1],
+                        g.bloomtint[2],
+                    };
+                },
+                [&](WPShaderInfo& info) {
+                    set_render_var(info, hdr_offsets(1.0f));
+                }))
+            return;
 
-    if (! add_pass(
-            "materials/util/blur_h_bloom.json", { { "_rt_bloom_mip2", 0 } }, "_rt_bloom_mip1"))
-        return;
+        if (! add_pass("materials/util/hdr_downsample.json",
+                       { { "_rt_bloom_mip1", 0 } },
+                       "_rt_bloom_mip2",
+                       nullptr,
+                       [&](WPShaderInfo& info) {
+                           set_render_var(info, hdr_offsets(0.5f));
+                       }))
+            return;
 
-    if (! add_pass("materials/util/combine_ldr.json",
-                   { { "previous", 0 }, { "_rt_bloom_mip1", 1 } },
-                   "_rt_bloom_combine"))
-        return;
+        if (! add_pass(
+                "materials/util/hdr_upsample.json",
+                { { "_rt_bloom_mip2", 0 } },
+                "_rt_bloom_mip1",
+                [&](wpscene::Material& m) {
+                    m.constantshadervalues["scatter"] = { scatter };
+                },
+                [&](WPShaderInfo& info) {
+                    set_render_var(info, hdr_offsets(0.25f));
+                }))
+            return;
+
+        if (! add_pass("materials/util/combine_hdr_upsample_linear.json",
+                       { { "previous", 0 }, { "_rt_bloom_mip1", 1 } },
+                       "_rt_bloom_combine",
+                       nullptr,
+                       [&](WPShaderInfo& info) {
+                           set_render_var(info, { 1.0f, 0.0f, 0.0f, 0.0f });
+                       }))
+            return;
+    } else {
+        if (! add_pass("materials/util/downsample_quarter_bloom.json",
+                       { { "previous", 0 } },
+                       "_rt_bloom_mip1",
+                       [&](wpscene::Material& m) {
+                           m.constantshadervalues["bloomstrength"]  = { g.bloomstrength };
+                           m.constantshadervalues["bloomthreshold"] = { g.bloomthreshold };
+                           m.constantshadervalues["bloomtint"]      = {
+                               g.bloomtint[0],
+                               g.bloomtint[1],
+                               g.bloomtint[2],
+                           };
+                       }))
+            return;
+
+        if (! add_pass("materials/util/downsample_eighth_blur_v.json",
+                       { { "_rt_bloom_mip1", 0 } },
+                       "_rt_bloom_mip2"))
+            return;
+
+        if (! add_pass(
+                "materials/util/blur_h_bloom.json", { { "_rt_bloom_mip2", 0 } }, "_rt_bloom_mip1"))
+            return;
+
+        if (! add_pass("materials/util/combine_ldr.json",
+                       { { "previous", 0 }, { "_rt_bloom_mip1", 1 } },
+                       "_rt_bloom_combine"))
+            return;
+    }
 
     pp->steps.emplace_back(ScenePostProcessCopy {
         .src = "_rt_bloom_combine",
@@ -3372,7 +3427,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
 
     ProcessObjects(context, scene_objs, &sm);
 
-    if (sc.general.bloom && ! sc.general.hdr) {
+    if (sc.general.bloom) {
         BuildBloomPostProcess(context, vfs, sc.general);
     }
     return FinalizeScene(context);
