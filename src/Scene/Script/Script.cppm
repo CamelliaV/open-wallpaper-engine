@@ -225,6 +225,9 @@ struct Actuator {
 std::function<void(const ScriptValue&)> MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node,
                                                                NodeTransformTarget target);
 
+// Build the closure that drives a SceneNode alpha field.
+std::function<void(const ScriptValue&)> MakeNodeAlphaApply(std::shared_ptr<owe::SceneNode> node);
+
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
 // populated by the parser, attached to the Scene as an opaque pointer
 // (Scene::script_scene). Ticked once per frame by `TickSceneScripts`.

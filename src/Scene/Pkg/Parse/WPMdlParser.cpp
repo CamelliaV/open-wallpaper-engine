@@ -35,7 +35,8 @@ constexpr uint32_t MDL_FLAG_EXTRA4      = 0x00010000;
 constexpr uint32_t MDL_FLAG_SKIN_BLEND  = 0x00800000;
 constexpr uint32_t MDL_FLAG_SKIN_WEIGHT = 0x01000000;
 
-constexpr uint32_t singile_indices              = 2 * 3;
+constexpr uint32_t singile_indices_u16          = 2 * 3;
+constexpr uint32_t singile_indices_u32          = 4 * 3;
 constexpr uint32_t singile_bone_frame           = 4 * 9;
 constexpr uint32_t mdls_offset_trans_entry_size = (3 + 16) * 4;
 
@@ -151,6 +152,10 @@ bool is_mdls_v2_indexed_trailer(fs::MemBinaryStream& f, idx start, uint32_t end_
 
 void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh);
 
+bool UsesUint32Indices(const WPMdlHeader& header, uint32_t vertex_num) {
+    return header.mdlv >= 23 && vertex_num > std::numeric_limits<uint16_t>::max();
+}
+
 // hexpat Mesh<MdlV, TopFlag, SinglePuppet>:
 //   CStr mat_json + u32 flag_a + (if flag_a==2: u32) + (if MdlV>=17: aabb)
 //   + (if MdlV>14: u32 mesh_flag) + u32 vertex_size + Vertex[]
@@ -218,15 +223,20 @@ bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header, WPMdl::Mesh& m
         }
     }
 
-    uint32_t indices_size = f.ReadUint32();
-    if (indices_size % singile_indices != 0) {
-        rstd_error("unsupport mdl indices size {} in {}", indices_size, std::string(path));
+    uint32_t       indices_size    = f.ReadUint32();
+    const bool     use_u32_indices = UsesUint32Indices(header, vertex_num);
+    const uint32_t index_stride    = use_u32_indices ? singile_indices_u32 : singile_indices_u16;
+    if (indices_size % index_stride != 0) {
+        rstd_error("unsupport mdl indices size {} (stride={}) in {}",
+                   indices_size,
+                   index_stride,
+                   std::string(path));
         return false;
     }
-    uint32_t indices_num = indices_size / singile_indices;
+    uint32_t indices_num = indices_size / index_stride;
     mesh.indices.resize(indices_num);
     for (auto& id : mesh.indices) {
-        for (auto& v : id) v = f.ReadUint16();
+        for (auto& v : id) v = use_u32_indices ? f.ReadUint32() : f.ReadUint16();
     }
 
     // V21+ Parts sub-block (hexpat Parts<MdlV>): optional uv2 region followed
@@ -1105,7 +1115,7 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     std::vector<uint32_t> indices;
     indices.reserve(src.indices.size() * 3);
     for (const auto& tri : src.indices) {
-        for (uint16_t v : tri) indices.push_back(v);
+        for (uint32_t v : tri) indices.push_back(v);
     }
 
     submesh.vertex_arrays.emplace_back(std::move(vertex));

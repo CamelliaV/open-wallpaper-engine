@@ -821,14 +821,21 @@ public:
     const auto& Size() const { return m_size; }
     void        SetSize(Eigen::Vector2f v) { m_size = v; }
 
-    // Script-driven per-frame overrides. The renderer's shader-value updater
-    // pushes these as g_UserAlpha / g_Brightness / g_Color4 only when the
-    // matching *_overridden flag is set — otherwise the material's baked
-    // constValue from parse time stands.
+    // Script-driven per-frame overrides. The renderer maps these onto the
+    // shader's available runtime tint uniforms without touching baked values
+    // until script writes occur.
     //
     // visible folds into alpha: false → effective alpha 0, true → m_user_alpha.
-    bool  IsAlphaOverridden() const { return m_alpha_overridden; }
-    float EffectiveAlpha() const { return m_visible ? m_user_alpha : 0.0f; }
+    bool IsAlphaOverridden() const {
+        return m_alpha_overridden ||
+               (m_alpha_source != nullptr && m_alpha_source->IsAlphaOverridden());
+    }
+    float EffectiveAlpha() const {
+        float alpha = m_visible ? m_user_alpha : 0.0f;
+        if (m_alpha_source != nullptr && m_alpha_source->IsAlphaOverridden())
+            alpha *= m_alpha_source->EffectiveAlpha();
+        return alpha;
+    }
     bool  Visible() const { return m_visible; }
     float UserAlpha() const { return m_user_alpha; }
     void  SetVisible(bool v) {
@@ -839,6 +846,7 @@ public:
         m_user_alpha       = v;
         m_alpha_overridden = true;
     }
+    void SetAlphaSource(SceneNode* node) { m_alpha_source = node; }
 
     // Recorded when the layer's `visible` field is authored as
     // `{user:"<key>", value:bool}`. The render handler walks the tree on
@@ -858,6 +866,12 @@ public:
     void                   SetColor(Eigen::Vector3f v) {
         m_color            = v;
         m_color_overridden = true;
+    }
+    const Eigen::Vector3f& BaseColor() const { return m_base_color; }
+    float                  BaseAlpha() const { return m_base_alpha; }
+    void                   SetBaseColor(Eigen::Vector3f color, float alpha) {
+        m_base_color = color;
+        m_base_alpha = alpha;
     }
 
     // Per-texture-slot script-driven sprite-animation override. Wallpaper
@@ -967,10 +981,13 @@ private:
     std::string                        m_visible_user_key {};
     float                              m_user_alpha { 1.0f };
     bool                               m_alpha_overridden { false };
+    SceneNode*                         m_alpha_source { nullptr };
     float                              m_brightness { 1.0f };
     bool                               m_brightness_overridden { false };
     Eigen::Vector3f                    m_color { 1.0f, 1.0f, 1.0f };
     bool                               m_color_overridden { false };
+    Eigen::Vector3f                    m_base_color { 1.0f, 1.0f, 1.0f };
+    float                              m_base_alpha { 1.0f };
     TextureAnimatorState               m_tex_anim {};
     bool                               m_layer_playing { true };
     std::shared_ptr<SceneSoundControl> m_sound_control;

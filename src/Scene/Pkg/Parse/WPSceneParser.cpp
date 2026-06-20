@@ -231,6 +231,32 @@ std::optional<Vector3f> ScriptValueAsVec3(const script::ScriptValue& value,
     return next;
 }
 
+bool IsFractionSliderProperty(const ParseContext& context, const nlohmann::json& binding) {
+    if (! context.user_properties || ! binding.is_object() || ! binding.contains("user") ||
+        ! binding.at("user").is_string())
+        return false;
+    const auto key = binding.at("user").get<std::string>();
+    auto       it  = context.user_properties->find(key);
+    if (it == context.user_properties->end() || ! it->second.is_object()) return false;
+    const auto& prop = it->second;
+    return prop.value("type", std::string {}) == "slider" && prop.value("fraction", false);
+}
+
+nlohmann::json ScriptPropertiesForField(const ParseContext& context, std::string_view field,
+                                        const wpscene::ScriptBinding& binding) {
+    nlohmann::json props = binding.properties;
+    if (field != "scale" || binding.source.find("/10000") == std::string::npos ||
+        ! props.is_object())
+        return props;
+
+    for (auto& item : props.items()) {
+        if (IsFractionSliderProperty(context, item.value())) {
+            item.value()["__scriptValueScale"] = 50.0;
+        }
+    }
+    return props;
+}
+
 SceneAnimationKey ToSceneAnimationKey(const wpscene::AnimKeyframe& key) {
     return {
         .frame         = key.frame,
@@ -348,8 +374,8 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::SceneMetadata& sc
 // Walks `fb.scripts` for one parsed object's field bindings and, for the
 // supported fields, creates a FieldScript + closure-based Actuator. Text
 // bindings are wired by ParseTextObj's own call site (with the layouter
-// closure); other side-effect-only bindings (`visible`) get the script
-// without an actuator so update() still drives layer mutations.
+// closure); side-effect-only bindings (`visible`) get the script without an
+// actuator so update() still drives scene mutations.
 void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
                       const wpscene::FieldBindings& fb) {
     SceneNode* node = node_sp.get();
@@ -358,9 +384,10 @@ void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
     auto& rt = ss.runtime();
 
     for (const auto& [field, sb] : fb.scripts) {
-        script::NodeTransformTarget tgt;
+        script::NodeTransformTarget tgt = script::NodeTransformTarget::Translate;
         script::FieldKind           kind;
         bool                        has_actuator = true;
+        bool                        is_alpha     = false;
         if (field == "origin") {
             tgt  = script::NodeTransformTarget::Translate;
             kind = script::FieldKind::Vec3;
@@ -376,9 +403,11 @@ void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
             // don't write a return value back to the node.
             kind         = script::FieldKind::Bool;
             has_actuator = false;
+        } else if (field == "alpha") {
+            kind     = script::FieldKind::Scalar;
+            is_alpha = true;
         } else {
-            // text/alpha/color/rate/intensity/... — wired elsewhere or
-            // not yet supported.
+            // text/color/rate/intensity/... are wired elsewhere or not yet supported.
             continue;
         }
         std::string                  sha = utils::genSha1(std::span<const char>(sb.source));
@@ -386,10 +415,15 @@ void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
         if (unsigned n = DetectAudioFanoutCount(sb.source); n > 1) {
             clones = SpawnLayerClones(context, node, n - 1);
         }
-        auto* fs = rt.MakeFieldScript(
-            sb.source, sha, kind, sb.properties, sb.initial_value, node, std::move(clones));
+        auto  props = ScriptPropertiesForField(context, field, sb);
+        auto* fs    = rt.MakeFieldScript(
+            sb.source, sha, kind, props, sb.initial_value, node, std::move(clones));
         if (! fs) continue;
-        if (has_actuator) ss.AddActuator({ fs, script::MakeNodeTransformApply(node_sp, tgt) });
+        if (! has_actuator) continue;
+        if (is_alpha)
+            ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp) });
+        else
+            ss.AddActuator({ fs, script::MakeNodeTransformApply(node_sp, tgt) });
     }
 }
 
@@ -1301,6 +1335,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                  wpimgobj.name);
     LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
+    spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID() = wpimgobj.id;
     if (! wpimgobj.visible_user_key.empty())
         spImgNode->SetVisibleUserKey(wpimgobj.visible_user_key);

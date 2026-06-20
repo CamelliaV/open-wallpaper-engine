@@ -83,6 +83,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             last_output->sceneNode->SetParentAnchor(m_worldNode);
             mesh.ChangeMeshDataFrom(*m_final_mesh);
         }
+        last_output->sceneNode->SetAlphaSource(m_worldNode);
     }
     m_resolved = true;
 }

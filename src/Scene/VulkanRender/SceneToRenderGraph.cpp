@@ -106,8 +106,18 @@ struct ExtraInfo {
     // actually have downstream link consumers, so we skip id_link_map writes
     // for non-referenced layers.
     const Set<i32>* linked_ids { nullptr };
-    bool            use_mipmap_framebuffer { false };
 };
+
+static rg::TexNode* AddMipFramebufferCopy(rg::RenderGraph&        rgraph,
+                                          rg::RenderGraphBuilder& builder) {
+    auto* source = builder.createTexNode(rg::TexNode::Desc { .name = SpecTex_Default.data(),
+                                                             .key  = SpecTex_Default.data(),
+                                                             .type = rg::TexNode::TexType::Temp });
+    auto  copy_desc = rg::TexNode::Desc { .name = WE_MIP_MAPPED_FRAME_BUFFER.data(),
+                                          .key  = WE_MIP_MAPPED_FRAME_BUFFER.data(),
+                                          .type = rg::TexNode::TexType::Temp };
+    return rg::addCopyPass(rgraph, source, &copy_desc);
+}
 
 static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, ExtraInfo& extra) {
     auto& rgraph = *extra.rgraph;
@@ -186,12 +196,14 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                         desc.name = url;
                         desc.type = ! IsSpecTex(url) ? rg::TexNode::TexType::Imported
                                                      : rg::TexNode::TexType::Temp;
-                        input     = builder.createTexNode(desc);
-                        if (IsSpecTex(url)) {
+                        if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
+                            input = AddMipFramebufferCopy(rgraph, builder);
+                        } else {
+                            input = builder.createTexNode(desc);
+                        }
+                        if (IsSpecTex(url) && ! sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
                             builder.markVirtualWrite(input);
                         }
-                        if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER))
-                            extra.use_mipmap_framebuffer = true;
                     }
 
                     if (url == pass_output) {
@@ -381,16 +393,6 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
                 pass.setDescTex((u32)info.tex_index, new_in->key());
                 return true;
             });
-    }
-
-    if (extra.use_mipmap_framebuffer) {
-        rg::addCopyPass(*rgraph,
-                        rg::TexNode::Desc { .name = SpecTex_Default.data(),
-                                            .key  = SpecTex_Default.data(),
-                                            .type = rg::TexNode::TexType::Temp },
-                        rg::TexNode::Desc { .name = WE_MIP_MAPPED_FRAME_BUFFER.data(),
-                                            .key  = WE_MIP_MAPPED_FRAME_BUFFER.data(),
-                                            .type = rg::TexNode::TexType::Temp });
     }
 
     return rgraph;

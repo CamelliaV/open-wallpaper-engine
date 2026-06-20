@@ -48,7 +48,7 @@ struct WPMdl {
         std::vector<std::array<float, 2>>    texcoords;
         std::vector<std::array<float, 2>>    texcoord2;
 
-        std::vector<std::array<uint16_t, 3>> indices;
+        std::vector<std::array<uint32_t, 3>> indices;
 
         // V21+ Parts sub-block — uv2 region per vertex + part draw ranges.
         struct Part {

@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <algorithm>
 #include <cmath>
 
 module wescene.scene_uniform_updater;
@@ -18,16 +19,15 @@ namespace
 {
 
 template<std::size_t N>
-void PeakResample64(std::span<const float, 64> bins, std::array<float, N>& out) {
+void AverageResample64(std::span<const float, 64> bins, std::array<float, N>& out) {
     static_assert(64 % N == 0);
     constexpr std::size_t ratio = 64 / N;
     for (std::size_t i = 0; i < N; ++i) {
-        float peak = 0.0f;
+        float sum = 0.0f;
         for (std::size_t k = 0; k < ratio; ++k) {
-            const float v = bins[i * ratio + k];
-            if (v > peak) peak = v;
+            sum += std::max(0.0f, bins[i * ratio + k]);
         }
-        out[i] = peak;
+        out[i] = sum / static_cast<float>(ratio);
     }
 }
 
@@ -139,6 +139,9 @@ void SceneUniformUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& 
     info.has_SCREEN           = existsOp(G_SCREEN);
     info.has_LP               = existsOp(G_LP);
     info.has_LCR              = existsOp(G_LCR);
+    info.has_USERALPHA        = existsOp("g_UserAlpha");
+    info.has_COLOR4           = existsOp("g_Color4");
+    info.has_BRIGHTNESS       = existsOp("g_Brightness");
     info.has_audio_16_l       = existsOp(G_AUDIO_SPEC_16_L);
     info.has_audio_16_r       = existsOp(G_AUDIO_SPEC_16_R);
     info.has_audio_32_l       = existsOp(G_AUDIO_SPEC_32_L);
@@ -369,18 +372,28 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     // Script-driven per-frame overrides. updateOp overlays the material's
     // baked constValue for this draw; we only push when the script has
     // actually written to avoid clobbering the bake.
+    auto push_color4 = [&updateOp](const Eigen::Vector3f& color, float alpha) {
+        updateOp("g_Color4", std::array<float, 4> { color.x(), color.y(), color.z(), alpha });
+    };
     if (pNode->IsAlphaOverridden()) {
         const float eff_alpha = pNode->EffectiveAlpha();
-        updateOp("g_UserAlpha", eff_alpha);
-        if (pNode->IsColorOverridden()) {
-            const auto& c = pNode->Color();
-            updateOp("g_Color4", std::array<float, 4> { c.x(), c.y(), c.z(), eff_alpha });
+        if (info.has_USERALPHA) {
+            updateOp("g_UserAlpha", eff_alpha);
+        }
+        if (info.has_COLOR4) {
+            if (! info.has_USERALPHA) {
+                push_color4(pNode->IsColorOverridden() ? pNode->Color() : pNode->BaseColor(),
+                            eff_alpha);
+            } else if (pNode->IsColorOverridden()) {
+                push_color4(pNode->Color(), pNode->BaseAlpha());
+            }
         }
     } else if (pNode->IsColorOverridden()) {
-        const auto& c = pNode->Color();
-        updateOp("g_Color4", std::array<float, 4> { c.x(), c.y(), c.z(), 1.0f });
+        if (info.has_COLOR4) {
+            push_color4(pNode->Color(), pNode->BaseAlpha());
+        }
     }
-    if (pNode->IsBrightnessOverridden()) {
+    if (pNode->IsBrightnessOverridden() && info.has_BRIGHTNESS) {
         updateOp("g_Brightness", pNode->Brightness());
     }
 
@@ -413,10 +426,10 @@ void SceneUniformUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y 
 
 void SceneUniformUpdater::SetAudioSpectrum(std::span<const float, 64> left,
                                            std::span<const float, 64> right) {
-    PeakResample64(left, m_audio_16_l);
-    PeakResample64(right, m_audio_16_r);
-    PeakResample64(left, m_audio_32_l);
-    PeakResample64(right, m_audio_32_r);
-    PeakResample64(left, m_audio_64_l);
-    PeakResample64(right, m_audio_64_r);
+    AverageResample64(left, m_audio_16_l);
+    AverageResample64(right, m_audio_16_r);
+    AverageResample64(left, m_audio_32_l);
+    AverageResample64(right, m_audio_32_r);
+    AverageResample64(left, m_audio_64_l);
+    AverageResample64(right, m_audio_64_r);
 }

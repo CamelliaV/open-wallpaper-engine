@@ -168,8 +168,9 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
-    EXPECT_EQ(LastScalar(fs),
-              16.0 * 100000000.0 + 16.0 * 1000000.0 + 163.0 * 10000.0 + 63.0 * 100.0 + 263.0);
+    EXPECT_DOUBLE_EQ(
+        LastScalar(fs),
+        16.0 * 100000000.0 + 16.0 * 1000000.0 + 161.5 * 10000.0 + 61.5 * 100.0 + 261.5);
 
     for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
         fi.audio_left[i]    = static_cast<float>(100 + i);
@@ -178,8 +179,9 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
     }
     rt.SetFrameInputs(fi);
     rt.TickAll();
-    EXPECT_EQ(LastScalar(fs),
-              16.0 * 100000000.0 + 16.0 * 1000000.0 + 263.0 * 10000.0 + 163.0 * 100.0 + 363.0);
+    EXPECT_DOUBLE_EQ(
+        LastScalar(fs),
+        16.0 * 100000000.0 + 16.0 * 1000000.0 + 261.5 * 10000.0 + 161.5 * 100.0 + 361.5);
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +255,49 @@ TEST(ScriptNodeSoftMutation, VisibleTrueRestoresUserAlpha) {
 
     EXPECT_TRUE(node.Visible());
     EXPECT_FLOAT_EQ(node.EffectiveAlpha(), 0.4f);
+}
+
+TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
+    auto node = std::make_shared<owe::SceneNode>();
+
+    ScriptScene ss;
+    auto*       fs = ss.runtime().MakeFieldScript(
+        R"JS(
+            export function update() { return 0.125; }
+        )JS",
+        "test/alpha_field_return",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(1.0),
+        node.get());
+    ASSERT_NE(fs, nullptr);
+    ss.AddActuator({ fs, MakeNodeAlphaApply(node) });
+
+    FrameInputs fi {};
+    ss.Tick(fi);
+
+    EXPECT_TRUE(node->IsAlphaOverridden());
+    EXPECT_FLOAT_EQ(node->UserAlpha(), 0.125f);
+    EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.125f);
+}
+
+TEST(SceneNodeRuntimeAlpha, AlphaSourceContributesOverride) {
+    owe::SceneNode source;
+    owe::SceneNode composite;
+    composite.SetAlphaSource(&source);
+
+    EXPECT_FALSE(composite.IsAlphaOverridden());
+    EXPECT_FLOAT_EQ(composite.EffectiveAlpha(), 1.0f);
+
+    source.SetUserAlpha(0.25f);
+    EXPECT_TRUE(composite.IsAlphaOverridden());
+    EXPECT_FLOAT_EQ(composite.EffectiveAlpha(), 0.25f);
+
+    composite.SetUserAlpha(0.5f);
+    EXPECT_FLOAT_EQ(composite.EffectiveAlpha(), 0.125f);
+
+    source.SetVisible(false);
+    EXPECT_FLOAT_EQ(composite.EffectiveAlpha(), 0.0f);
 }
 
 TEST(ScriptNodeSoftMutation, BrightnessAndColorWrites) {

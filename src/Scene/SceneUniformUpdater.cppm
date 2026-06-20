@@ -32,6 +32,9 @@ struct SceneUniformInfo {
     bool has_SCREEN { false };
     bool has_LP { false };
     bool has_LCR { false };
+    bool has_USERALPHA { false };
+    bool has_COLOR4 { false };
+    bool has_BRIGHTNESS { false };
 
     // WE audio-bar shaders. Each pair is a (Left, Right) float[N] array
     // selected by the shader's RESOLUTION combo at compile time.

@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <algorithm>
 #include "quickjs.h"
 
 module wescene.script;
@@ -363,12 +364,11 @@ float AudioBufferValue(std::span<const float, 64> bins, uint32_t resolution, uin
 
     const uint32_t ratio = 64 / resolution;
     const uint32_t begin = index * ratio;
-    float          peak  = 0.0f;
+    float          sum   = 0.0f;
     for (uint32_t k = 0; k < ratio; ++k) {
-        const float v = bins[begin + k];
-        if (v > peak) peak = v;
+        sum += std::max(0.0f, bins[begin + k]);
     }
-    return peak;
+    return sum / static_cast<float>(ratio);
 }
 
 // ---------------------------------------------------------------------------
@@ -1037,6 +1037,13 @@ globalThis.createScriptProperties = function () {
   builder.finish = function () {
     const _hostValues = builder._hostValues || {};
     const target = {};
+    const applyHostScale = (h, value) => {
+      if (h && typeof h === 'object' && typeof h.__scriptValueScale === 'number' &&
+          typeof value === 'number') {
+        return value * h.__scriptValueScale;
+      }
+      return value;
+    };
     const unwrapUserProp = (h) => {
       if (h === undefined || h === null) return undefined;
       if (typeof h !== 'object' || !('user' in h) || !('value' in h)) return h;
@@ -1044,10 +1051,10 @@ globalThis.createScriptProperties = function () {
       if (u !== undefined) {
         // project.json stores user props as { type, value, ... }; pluck
         // .value when present, else use the bare value directly.
-        if (typeof u === 'object' && u !== null && 'value' in u) return u.value;
-        return u;
+        if (typeof u === 'object' && u !== null && 'value' in u) return applyHostScale(h, u.value);
+        return applyHostScale(h, u);
       }
-      return h.value;
+      return applyHostScale(h, h.value);
     };
     // WE substitutes user-prop values verbatim, even when the user's
     // slider range is wider than the script's declared range — corpus
@@ -2497,6 +2504,23 @@ std::function<void(const ScriptValue&)> MakeNodeTransformApply(std::shared_ptr<o
         case NodeTransformTarget::Translate: node->SetTranslate(next); break;
         case NodeTransformTarget::Scale: node->SetScale(next); break;
         case NodeTransformTarget::Rotation: node->SetRotation(next * float(kDegToRad)); break;
+        }
+    };
+}
+
+std::function<void(const ScriptValue&)> MakeNodeAlphaApply(std::shared_ptr<owe::SceneNode> node) {
+    return [node = std::move(node)](const ScriptValue& v) {
+        if (! node) return;
+        if (std::holds_alternative<std::monostate>(v)) return;
+
+        if (auto* p = std::get_if<ScalarValue>(&v)) {
+            node->SetUserAlpha(static_cast<float>(p->v));
+        } else if (auto* p = std::get_if<BoolValue>(&v)) {
+            node->SetUserAlpha(p->v ? 1.0f : 0.0f);
+        } else if (auto* p = std::get_if<Vec2Value>(&v)) {
+            node->SetUserAlpha(static_cast<float>(p->x));
+        } else if (auto* p = std::get_if<Vec3Value>(&v)) {
+            node->SetUserAlpha(static_cast<float>(p->x));
         }
     };
 }
