@@ -387,9 +387,15 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
                 auto& pass = static_cast<vulkan::CustomShaderPass&>(rgpass);
 
                 auto* link_tex_node = extra.id_link_map.at(info.link_id);
-                auto  copy_desc     = link_tex_node->genDesc();
-                copy_desc.key       = GenLinkTex((idx)info.link_id);
-                copy_desc.name      = copy_desc.key;
+                auto  link_key      = GenLinkTex((idx)info.link_id);
+                if (link_tex_node->key() == link_key) {
+                    builder.read(link_tex_node);
+                    pass.setDescTex((u32)info.tex_index, link_tex_node->key());
+                    return true;
+                }
+                auto copy_desc = link_tex_node->genDesc();
+                copy_desc.key  = std::move(link_key);
+                copy_desc.name = copy_desc.key;
 
                 auto new_in = rg::addCopyPass(*rgraph, link_tex_node, &copy_desc);
                 builder.read(new_in);

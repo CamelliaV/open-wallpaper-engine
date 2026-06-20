@@ -567,6 +567,37 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
     return m_tex_map[image.key];
 }
 
+ImageSlotsRef TextureCache::FallbackTex() {
+    static constexpr std::string_view key { "__wescene_fallback_black" };
+    if (auto it = m_tex_map.find(key); it != m_tex_map.end()) return it->second;
+
+    Image image;
+    image.key              = std::string(key);
+    image.header.width     = 1;
+    image.header.height    = 1;
+    image.header.mapWidth  = 1;
+    image.header.mapHeight = 1;
+    image.header.type      = ImageType::UNKNOWN;
+    image.header.format    = TextureFormat::RGBA8;
+    image.header.count     = 1;
+    image.slots.resize(1);
+
+    auto& slot  = image.slots[0];
+    slot.width  = 1;
+    slot.height = 1;
+    slot.mipmaps.resize(1);
+    auto& mip  = slot.mipmaps[0];
+    mip.width  = 1;
+    mip.height = 1;
+    mip.size   = 4;
+    auto* rgba = new uint8_t[4] { 0, 0, 0, 0 };
+    mip.data   = ImageDataPtr(rgba, [](uint8_t* data) {
+        delete[] data;
+    });
+
+    return CreateTex(image);
+}
+
 void TextureCache::allocateCmd() {
     const auto& pool = m_device.cmd_pool();
     VVK_CHECK(pool.Allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY, m_tex_cmds));
@@ -1140,7 +1171,8 @@ void TextureCache::MarkShareReady(std::string_view key) {
     if (it != m_query_map.end()) {
         auto& query = it->second;
         if (query->persist) return;
-        query->share_ready = true;
+        query->query_keys.erase(std::string(key));
+        query->share_ready = query->query_keys.empty();
         m_query_map.erase(it);
     }
 }
@@ -1173,23 +1205,25 @@ void TextureCache::RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParame
 
     for (unsigned i = 1; i < image.mipmap_level; i++) {
         barrier.subresourceRange.baseMipLevel = i - 1;
-        barrier.oldLayout                     = i == 1 ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                                                       : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.oldLayout = i == 1 ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                   : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
         barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+        barrier.srcAccessMask = i == 1 ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 
-        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            VK_DEPENDENCY_BY_REGION_BIT,
-                            barrier);
+        VkPipelineStageFlags src_stage =
+            i == 1 ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT;
+        cmd.PipelineBarrier(
+            src_stage, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_DEPENDENCY_BY_REGION_BIT, barrier);
 
         barrier.subresourceRange.baseMipLevel = i;
-        barrier.oldLayout                     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.oldLayout                     = VK_IMAGE_LAYOUT_UNDEFINED;
         barrier.newLayout                     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcAccessMask                 = 0;
+        barrier.dstAccessMask                 = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                             VK_PIPELINE_STAGE_TRANSFER_BIT,
                             VK_DEPENDENCY_BY_REGION_BIT,
                             barrier);
@@ -1241,7 +1275,7 @@ void TextureCache::RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParame
     barrier.subresourceRange.baseMipLevel = image.mipmap_level - 1;
     barrier.oldLayout                     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout                     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcAccessMask                 = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.srcAccessMask                 = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask                 = VK_ACCESS_SHADER_READ_BIT;
 
     cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
