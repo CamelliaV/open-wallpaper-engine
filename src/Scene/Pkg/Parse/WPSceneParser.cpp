@@ -1592,6 +1592,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
             spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
         {
+            imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
             scene.cameras.at(nodeAddr)->AttatchImgEffect(imgEffectLayer);
@@ -2162,9 +2163,8 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     svData.parallaxDepth           = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
     svData.use_camera_eye_position = true;
     if (mdl.puppet && ! mdl.puppet->bones.empty()) {
-        std::array<WPPuppetLayer::AnimationLayer, 0> no_layers {};
-        svData.puppet_layer =
-            MakePuppetLayer(mdl.puppet, std::span<WPPuppetLayer::AnimationLayer>(no_layers));
+        svData.puppet_layer = MakePuppetLayer(
+            mdl.puppet, std::span<WPPuppetLayer::AnimationLayer>(model_obj.puppet_layers));
         RegisterPuppetLayer(context, node.get(), svData.puppet_layer);
     }
 

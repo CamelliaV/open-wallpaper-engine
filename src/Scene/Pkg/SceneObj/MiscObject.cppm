@@ -4,6 +4,7 @@ export module wescene.pkg.scene_obj:misc_object;
 import rstd.cppstd;
 import wescene.fs;
 import wescene.json;
+import :animation_layer;
 export import :field_binding;
 import :scene_document;
 
@@ -153,7 +154,8 @@ struct ModelObject {
     std::string attachment;
     bool        perspective { false };
 
-    std::string visible_user_key;
+    std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
+    std::string                                visible_user_key;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
@@ -181,6 +183,7 @@ struct ModelObject {
         owe::GetJsonValue(json, "model", model, false);
         owe::GetJsonValue(json, "attachment", attachment, false);
         owe::GetJsonValue(json, "perspective", perspective, false);
+        ReadPuppetAnimationLayers(json, puppet_layers);
         AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }

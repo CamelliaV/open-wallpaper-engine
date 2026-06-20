@@ -106,6 +106,7 @@ target_sources(owe-parse
          Pkg/Parse/Compat.cppm
          Pkg/Parse/PuppetCompat.cppm
          Pkg/SceneObj/mod.cppm
+         Pkg/SceneObj/AnimationLayer.cppm
          Pkg/SceneObj/FieldBinding.cppm
          Pkg/SceneObj/ImageObject.cppm
          Pkg/SceneObj/LightObject.cppm

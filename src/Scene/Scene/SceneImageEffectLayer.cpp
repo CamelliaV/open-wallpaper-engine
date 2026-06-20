@@ -70,12 +70,19 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         material.depth_test  = m_final_depth_test;
         material.depth_write = m_final_depth_write;
         material.cull_mode   = m_final_cull_mode;
-        last_output->sceneNode->SetCamera(std::string());
-        // Anchor to the layer's primary SceneNode so the composite quad
-        // inherits the layer's world transform (including any container
-        // parent chain) via ModelTrans. Identity local — no CopyTrans dance.
-        last_output->sceneNode->SetParentAnchor(m_worldNode);
-        mesh.ChangeMeshDataFrom(*m_final_mesh);
+        if (fullscreen) {
+            last_output->sceneNode->SetCamera(std::string(effect_cam));
+            last_output->sceneNode->SetParentAnchor(nullptr);
+            last_output->sceneNode->CopyTrans(default_node);
+            mesh.ChangeMeshDataFrom(default_mesh);
+        } else {
+            last_output->sceneNode->SetCamera(std::string());
+            // Anchor to the layer's primary SceneNode so the composite quad
+            // inherits the layer's world transform (including any container
+            // parent chain) via ModelTrans. Identity local — no CopyTrans dance.
+            last_output->sceneNode->SetParentAnchor(m_worldNode);
+            mesh.ChangeMeshDataFrom(*m_final_mesh);
+        }
     }
     m_resolved = true;
 }

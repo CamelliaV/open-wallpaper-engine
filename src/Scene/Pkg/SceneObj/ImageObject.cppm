@@ -7,9 +7,9 @@ import wescene.core;
 import rstd.cppstd;
 import wescene.fs;
 
+export import :animation_layer;
 export import :field_binding;
 export import :material;
-export import wescene.pkg.puppet;
 import :scene_document;
 
 export namespace owe

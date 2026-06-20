@@ -234,22 +234,7 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
             effects.push_back(std::move(wpeff));
         }
     }
-    if (json.contains("animationlayers")) {
-        for (const auto& jLayer : json.at("animationlayers")) {
-            WPPuppetLayer::AnimationLayer layer;
-            owe::GetJsonValue(jLayer, "animation", layer.id);
-            owe::GetJsonValue(jLayer, "blend", layer.blend);
-            owe::GetJsonValue(jLayer, "rate", layer.rate);
-            owe::GetJsonValue(jLayer, "visible", layer.visible, false);
-            owe::GetJsonValue(jLayer, "id", layer.layer_id, false);
-            owe::GetJsonValue(jLayer, "name", layer.name, false);
-            owe::GetJsonValue(jLayer, "additive", layer.additive, false);
-            owe::GetJsonValue(jLayer, "blendin", layer.blendin, false);
-            owe::GetJsonValue(jLayer, "blendout", layer.blendout, false);
-            owe::GetJsonValue(jLayer, "blendtime", layer.blendtime, false);
-            puppet_layers.push_back(layer);
-        }
-    }
+    ReadPuppetAnimationLayers(json, puppet_layers);
     if (json.contains("config")) {
         const auto& jConf = json.at("config");
         owe::GetJsonValue(jConf, "passthrough", config.passthrough, false);

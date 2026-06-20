@@ -464,7 +464,11 @@ public:
     auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
     const auto& FirstTarget() const { return m_pingpong_a; }
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
-    void        SetFinalBlend(BlendMode m) {
+    void        SetFullscreen(bool value) {
+        fullscreen = value;
+        m_resolved = false;
+    }
+    void SetFinalBlend(BlendMode m) {
         m_final_blend = m;
         m_resolved    = false;
     }
@@ -698,7 +702,7 @@ public:
     Eigen::Vector3f                     default_eye { Eigen::Vector3f::Zero() };
     Eigen::Vector3f                     default_center { -Eigen::Vector3f::UnitZ() };
     Eigen::Vector3f                     default_up { Eigen::Vector3f::UnitY() };
-    float                               lookat_fps { 30.0f };
+    float                               lookat_fps { 1.0f };
     std::vector<SceneCameraLookAtTrack> lookat_tracks;
     SceneAnimationCurve                 origin_curve;
     SceneAnimationCurve                 rotation_curve;

@@ -111,7 +111,7 @@ eval_lookat_tracks(std::span<const SceneCameraLookAtTrack> tracks, double runtim
     for (const auto& track : tracks) total += std::max(track.duration, 0.0f);
     if (total <= 0.0f) return std::nullopt;
 
-    float frame = static_cast<float>(runtime) * (fps > 0.0f ? fps : 30.0f);
+    float frame = static_cast<float>(runtime) * (fps > 0.0f ? fps : 1.0f);
     frame       = std::fmod(frame, total);
     if (frame < 0.0f) frame += total;
 
