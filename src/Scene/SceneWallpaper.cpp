@@ -238,6 +238,27 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
     return r;
 }
 
+ShaderValue ShapeUserShaderValue(const SceneMaterial& material, const std::string& uniform_name,
+                                 const ShaderValue& value) {
+    if (value.size() != 1) return value;
+
+    size_t target_size = 0;
+    if (auto it = material.customShader.constValues.find(uniform_name);
+        it != material.customShader.constValues.end()) {
+        target_size = it->second.size();
+    }
+    if (target_size <= 1 && material.customShader.shader) {
+        if (auto it = material.customShader.shader->default_uniforms.find(uniform_name);
+            it != material.customShader.shader->default_uniforms.end()) {
+            target_size = it->second.size();
+        }
+    }
+    if (target_size <= 1 || target_size > 4) return value;
+
+    std::vector<float> shaped(target_size, value[0]);
+    return ShaderValue(std::span<const float>(shaped));
+}
+
 void ApplySchemeColorToClear(Scene& scene, const nlohmann::json& prop) {
     if (! scene.schemeColorDrivesClear) return;
     auto coerced = CoerceUserPropertyValue(prop);
@@ -270,8 +291,9 @@ void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nloh
     }
     for (auto& [material, uniform_name] : it->second) {
         if (! material) continue;
-        material->customShader.constValues[uniform_name] = coerced.value;
-        material->customShader.dirty                     = true;
+        material->customShader.constValues[uniform_name] =
+            ShapeUserShaderValue(*material, uniform_name, coerced.value);
+        material->customShader.dirty = true;
     }
 }
 
