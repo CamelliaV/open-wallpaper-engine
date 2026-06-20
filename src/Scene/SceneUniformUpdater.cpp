@@ -167,6 +167,9 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     std::string_view cam_name = pNode->Camera();
     if (! pNode->Camera().empty()) {
         camera = m_scene->cameras.at(cam_name.data()).get();
+    } else if (pNode->Perspective()) {
+        cam_name = "global_perspective";
+        camera   = m_scene->cameras.at(cam_name.data()).get();
     } else
         camera = m_scene->activeCamera;
 

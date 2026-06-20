@@ -76,7 +76,9 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             last_output->sceneNode->CopyTrans(default_node);
             mesh.ChangeMeshDataFrom(default_mesh);
         } else {
-            last_output->sceneNode->SetCamera(std::string());
+            const bool perspective = m_worldNode != nullptr && m_worldNode->Perspective();
+            last_output->sceneNode->SetCamera(perspective ? "global_perspective" : "");
+            last_output->sceneNode->SetPerspective(perspective);
             // Anchor to the layer's primary SceneNode so the composite quad
             // inherits the layer's world transform (including any container
             // parent chain) via ModelTrans. Identity local — no CopyTrans dance.

@@ -18,6 +18,7 @@ inline constexpr std::string_view OPT_RESOLUTION  = "--resolution";
 inline constexpr std::string_view OPT_CACHE_PATH  = "--cache-path";
 inline constexpr std::string_view OPT_MSAA        = "--msaa";
 inline constexpr std::string_view OPT_USER_PROPS  = "--user-properties";
+inline constexpr std::string_view OPT_MOUSE_POS   = "--mouse-position";
 
 struct Resolution {
     unsigned w;
@@ -67,6 +68,11 @@ inline void setAndParseArg(argparse::ArgumentParser& arg, int argc, char** argv)
         .help("Path to a JSON file mapping project.json property keys to "
               "user-edited values (e.g. {\"schemecolor\":\"1 0 0\","
               "\"audio\":true}). Applied before scene load.")
+        .default_value(std::string())
+        .nargs(1);
+
+    arg.add_argument(OPT_MOUSE_POS)
+        .help("Set initial normalized mouse position, e.g. 0,1")
         .default_value(std::string())
         .nargs(1);
 

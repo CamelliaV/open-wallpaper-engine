@@ -257,6 +257,28 @@ TEST(ScriptNodeSoftMutation, VisibleTrueRestoresUserAlpha) {
     EXPECT_FLOAT_EQ(node.EffectiveAlpha(), 0.4f);
 }
 
+TEST(ScriptNodeSoftMutation, PerspectiveWritesNodeFlag) {
+    owe::SceneNode node;
+    JsRuntime      rt;
+    FrameInputs    fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            thisLayer.perspective = true;
+            export function update() { return thisLayer.perspective ? 1 : 0; }
+        )JS",
+        "test/perspective_write",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
+    ASSERT_NE(fs, nullptr);
+
+    EXPECT_TRUE(node.Perspective());
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
 TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
     auto node = std::make_shared<owe::SceneNode>();
 
@@ -1015,6 +1037,56 @@ TEST(ScriptVector, NormalizeReturnsUnitVectors) {
     EXPECT_NEAR(v.x, 0.6, 0.001);
     EXPECT_NEAR(v.y, 10.8, 0.001);
     EXPECT_NEAR(v.z, 0.0, 0.001);
+}
+
+TEST(ScriptVector, EngineCanvasSizeSupportsVectorMethods) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    fi.canvas_w = 3840.0f;
+    fi.canvas_h = 2160.0f;
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update() {
+                const v = engine.canvasSize.divide(2);
+                return v.x + v.y * 10000;
+            }
+        )JS",
+        "test/canvas_size_vec2_methods",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1920.0 + 1080.0 * 10000);
+}
+
+TEST(ScriptScene, InitialLayerConfigIsAvailable) {
+    owe::SceneNode node;
+    JsRuntime      rt;
+    FrameInputs    fi {};
+    rt.SetFrameInputs(fi);
+    rt.SetSceneRoot(&node);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let seen = 0;
+            export function init() {
+                const cfg = thisScene.getInitialLayerConfig(thisLayer);
+                seen = cfg && typeof cfg === 'object' ? 1 : 0;
+            }
+            export function update() { return seen; }
+        )JS",
+        "test/initial_layer_config",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        &node);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
 // ---------------------------------------------------------------------------

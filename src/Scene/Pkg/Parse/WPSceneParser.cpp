@@ -164,6 +164,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
         auto clone = std::make_shared<SceneNode>(
             tmpl->Translate(), tmpl->Scale(), tmpl->Rotation(), tmpl->Name());
         clone->SetSize(tmpl->Size());
+        clone->SetPerspective(tmpl->Perspective());
         if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
         clone->AddMesh(tmpl->MeshShared());
         clone->ID() = -((i32)i + 1); // negative IDs reserved for clones
@@ -1365,6 +1366,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                  wpimgobj.name);
     LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
+    spImgNode->SetPerspective(wpimgobj.perspective);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID() = wpimgobj.id;
     if (! wpimgobj.visible_user_key.empty())

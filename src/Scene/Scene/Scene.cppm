@@ -790,6 +790,8 @@ public:
 
     const auto& Camera() const { return m_cameraName; }
     void        SetCamera(const std::string& name) { m_cameraName = name; }
+    bool        Perspective() const { return m_perspective; }
+    void        SetPerspective(bool value) { m_perspective = value; }
     void        AddMesh(std::shared_ptr<SceneMesh> mesh) { m_mesh = mesh; }
     void        AppendChild(std::shared_ptr<SceneNode> sub) {
         sub->m_parent = this;
@@ -996,6 +998,7 @@ private:
     std::shared_ptr<SceneMesh> m_mesh;
 
     std::string m_cameraName;
+    bool        m_perspective { false };
 
     // Raw back-link. Safe because tree topology is frozen post-parse (see
     // class header) and the dtor clears children's m_parent before any

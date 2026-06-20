@@ -49,6 +49,20 @@ void updateCallback() {
     glfwPostEmptyEvent();
 }
 
+std::optional<std::array<double, 2>> parseMousePosition(const std::string& value) {
+    if (value.empty()) return std::nullopt;
+    const auto comma = value.find(',');
+    if (comma == std::string::npos) return std::nullopt;
+    double x = 0.0;
+    double y = 0.0;
+    auto   xs = value.substr(0, comma);
+    auto   ys = value.substr(comma + 1);
+    auto   xr = std::from_chars(xs.data(), xs.data() + xs.size(), x);
+    auto   yr = std::from_chars(ys.data(), ys.data() + ys.size(), y);
+    if (xr.ec != std::errc {} || yr.ec != std::errc {}) return std::nullopt;
+    return std::array { std::clamp(x, 0.0, 1.0), std::clamp(y, 0.0, 1.0) };
+}
+
 int main(int argc, char** argv) {
     static rstd::log::EnvLogger _logger;
     rstd::log::set_logger(_logger);
@@ -147,6 +161,12 @@ int main(int argc, char** argv) {
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
     glfwSetCursorEnterCallback(window, cursor_enter_callback);
+
+    if (auto mouse = parseMousePosition(program.get<std::string>(viewer::OPT_MOUSE_POS))) {
+        psw->mouseEnter(true);
+        psw->mouseInput((*mouse)[0], (*mouse)[1]);
+        glfwSetCursorPos(window, (*mouse)[0] * w_width, (*mouse)[1] * w_height);
+    }
 
     // Bulk-scan path: WP_COMPILE_ONLY=N waits N seconds after scene load
     // to let the async shader-compile pass drain, then exits. Skips the

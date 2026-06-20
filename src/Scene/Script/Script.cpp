@@ -468,6 +468,25 @@ struct JsRuntime::Impl {
 namespace
 {
 
+JSValue MakeVec2Value(JSContext* ctx, double x, double y) {
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor   = JS_GetPropertyStr(ctx, global, "Vec2");
+    JS_FreeValue(ctx, global);
+    if (! JS_IsFunction(ctx, ctor)) {
+        JS_FreeValue(ctx, ctor);
+        JSValue v = JS_NewObject(ctx);
+        JS_DefinePropertyValueStr(ctx, v, "x", JS_NewFloat64(ctx, x), JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, v, "y", JS_NewFloat64(ctx, y), JS_PROP_C_W_E);
+        return v;
+    }
+    JSValue args[2] { JS_NewFloat64(ctx, x), JS_NewFloat64(ctx, y) };
+    JSValue out = JS_CallConstructor(ctx, ctor, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    JS_FreeValue(ctx, ctor);
+    return out;
+}
+
 JSValue EngineGetterFrametime(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/,
                               JSValueConst* /*argv*/) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
@@ -482,22 +501,12 @@ JSValue EngineGetterTimeOfDay(JSContext* ctx, JSValueConst, int, JSValueConst*) 
     return JS_NewFloat64(ctx, host->inputs.time_of_day);
 }
 JSValue EngineGetterCanvasSize(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    JSValue v    = JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(
-        ctx, v, "x", JS_NewFloat64(ctx, host->inputs.canvas_w), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(
-        ctx, v, "y", JS_NewFloat64(ctx, host->inputs.canvas_h), JS_PROP_C_W_E);
-    return v;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    return MakeVec2Value(ctx, host->inputs.canvas_w, host->inputs.canvas_h);
 }
 JSValue EngineGetterScreenRes(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    auto*   host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    JSValue v    = JS_NewObject(ctx);
-    JS_DefinePropertyValueStr(
-        ctx, v, "x", JS_NewFloat64(ctx, host->inputs.screen_w), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(
-        ctx, v, "y", JS_NewFloat64(ctx, host->inputs.screen_h), JS_PROP_C_W_E);
-    return v;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    return MakeVec2Value(ctx, host->inputs.screen_w, host->inputs.screen_h);
 }
 
 void SetAudioArrayValue(JSContext* ctx, JSValueConst arr, uint32_t index, float value) {
@@ -1203,6 +1212,7 @@ function __wwCreateNodeStub() {
         scale:          new Vec3(1, 1, 1),
         angles:         new Vec3(0, 0, 0),
         size:           new Vec3(100, 100, 0),
+        perspective:    false,
         visible:        true,
         verticalalign:  'center',
         horizontalalign:'center',
@@ -1671,6 +1681,15 @@ JSValue NodeSetColor(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     n->SetColor({ float(x), float(y), float(z) });
     return JS_UNDEFINED;
 }
+JSValue NodeGetPerspective(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    return JS_NewBool(ctx, n ? n->Perspective() : false);
+}
+JSValue NodeSetPerspective(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (n) n->SetPerspective(JS_ToBool(ctx, val) != 0);
+    return JS_UNDEFINED;
+}
 JSValue NodeGetVAlign(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return JS_NewString(ctx, "center");
@@ -1903,18 +1922,27 @@ JSValue NodeSceneEnumerateLayers(JSContext* ctx, JSValueConst this_val, int, JSV
     return arr;
 }
 
+JSValue NodeSceneGetInitialLayerConfig(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    return JS_NewObject(ctx);
+}
+
 // thisScene.createLayer(model_path) — WE-style runtime layer spawn. The
 // model path is ignored: parser-side pre-spawned a queue of SceneNode clones
 // (one per expected createLayer call) when the script binding showed the
 // audio-bar pattern. Pop the next clone here; fall back to the default
 // stub when no clones remain so the script's caller still gets an object.
-JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/,
-                             JSValueConst* /*argv*/) {
+JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc,
+                             JSValueConst* argv) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     auto* fs   = host->active_field_script;
     if (! fs || fs->m_impl->clone_queue.empty()) return JS_DupValue(ctx, host->default_layer);
     owe::SceneNode* node = fs->m_impl->clone_queue.front();
     fs->m_impl->clone_queue.erase(fs->m_impl->clone_queue.begin());
+    if (argc > 0 && JS_IsObject(argv[0])) {
+        JSValue perspective = JS_GetPropertyStr(ctx, argv[0], "perspective");
+        if (! JS_IsUndefined(perspective)) node->SetPerspective(JS_ToBool(ctx, perspective) != 0);
+        JS_FreeValue(ctx, perspective);
+    }
     return WrapLayerNode(ctx, node);
 }
 
@@ -2054,6 +2082,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("alpha", NodeGetAlpha, NodeSetAlpha),
     JS_CGETSET_DEF("brightness", NodeGetBrightness, NodeSetBrightness),
     JS_CGETSET_DEF("color", NodeGetColor, NodeSetColor),
+    JS_CGETSET_DEF("perspective", NodeGetPerspective, NodeSetPerspective),
     JS_CGETSET_DEF("text", NodeGetText, NodeSetText),
     JS_CGETSET_DEF("name", NodeGetNameValue, NodeSetIgnore),
     JS_CGETSET_DEF("verticalalign", NodeGetVAlign, NodeSetVAlign),
@@ -2065,6 +2094,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getName", 0, NodeGetName),
     JS_CFUNC_DEF("getLayer", 1, NodeGetLayer),
     JS_CFUNC_DEF("enumerateLayers", 0, NodeSceneEnumerateLayers),
+    JS_CFUNC_DEF("getInitialLayerConfig", 1, NodeSceneGetInitialLayerConfig),
     JS_CFUNC_DEF("getBoneIndex", 1, NodeGetBoneIndex),
     JS_CFUNC_DEF("getBoneTransform", 1, NodeGetBoneTransform),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
