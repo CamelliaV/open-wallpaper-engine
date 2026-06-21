@@ -195,6 +195,7 @@ public:
     bool                      muteineditor { false };
     bool                      nointerpolation { false };
     std::uint32_t             parent { 0 };
+    std::string               attachment;
     std::vector<std::int32_t> dependencies;
     nlohmann::json            instance;
     nlohmann::json            particlesrc;                       // PKGV0001+; always null in corpus

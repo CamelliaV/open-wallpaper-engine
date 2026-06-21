@@ -231,6 +231,10 @@ void Scene::TickCameraPaths() {
     for (const auto& name : touched) UpdateLinkedCamera(name);
 }
 
+void Scene::TickTransformUpdaters() {
+    for (auto& update : transform_updaters) update(elapsingTime);
+}
+
 void Scene::CaptureCameraPathViewports() {
     for (auto& path : camera_paths) {
         if (path) path->CaptureViewport();

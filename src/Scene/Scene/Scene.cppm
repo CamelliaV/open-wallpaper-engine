@@ -1648,6 +1648,8 @@ public:
         frameTime = t;
         elapsingTime += t;
     }
+    std::vector<std::function<void(double)>> transform_updaters;
+    void                                     TickTransformUpdaters();
 
     void UpdateLinkedCamera(const std::string& name) {
         if (linkedCameras.count(name) != 0) {

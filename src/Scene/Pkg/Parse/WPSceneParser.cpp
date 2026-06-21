@@ -2009,6 +2009,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         spImgNode,
         (puppet && puppet->puppet) ? puppet->puppet : nullptr,
         wpimgobj.attachment,
+        image_puppet_layer,
     };
 }
 
@@ -2279,7 +2280,12 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     if (is_child)
         child_ptr.node_parent->AppendChild(spNode);
     else {
-        context.node_id_map[wppartobj.id] = { wppartobj.parent, spNode };
+        context.node_id_map[wppartobj.id] = {
+            wppartobj.parent,
+            spNode,
+            nullptr,
+            wppartobj.attachment,
+        };
     }
 }
 
@@ -2416,7 +2422,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     context.shader_updater->SetNodeData(node.get(), svData);
     WireFieldScripts(context, node, model_obj.field_bindings);
     context.node_id_map[model_obj.id] = {
-        model_obj.parent, node, mdl.puppet, model_obj.attachment
+        model_obj.parent, node, mdl.puppet, model_obj.attachment, svData.puppet_layer
     };
 }
 
@@ -2945,6 +2951,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_node,
         nullptr,
         obj.attachment,
+        nullptr,
         [anchor_state, apply_text_anchor](const Vector3f& offset) {
             anchor_state->origin += offset;
             apply_text_anchor();
@@ -3263,12 +3270,30 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
                 for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
                     bone_world = bone_world * puppet.bones[*it].local_bind;
                 }
-                Eigen::Affine3f anchor = bone_world * ait->local_xform;
-                Vector3f        offset = anchor.translation();
-                if (ref.apply_attachment_offset) {
-                    ref.apply_attachment_offset(offset);
+                auto apply_bind_offset = [&]() {
+                    Eigen::Affine3f anchor = bone_world * ait->local_xform;
+                    Vector3f        offset = anchor.translation();
+                    if (ref.apply_attachment_offset) {
+                        ref.apply_attachment_offset(offset);
+                    } else {
+                        ref.node->SetTranslate(ref.node->Translate() + offset);
+                    }
+                };
+                if (! ref.apply_attachment_offset && parent_ref->puppet_layer) {
+                    auto node       = ref.node;
+                    auto layer      = parent_ref->puppet_layer;
+                    auto attachment = *ait;
+                    auto base       = node->Translate();
+                    auto update     = [node, layer, attachment, base](double time) {
+                        auto bone = layer->boneTransform(
+                            static_cast<uint32_t>(attachment.bone_index) + 1u, time);
+                        if (! bone) return;
+                        node->SetTranslate(base + (*bone * attachment.local_xform).translation());
+                    };
+                    update(context.scene->elapsingTime);
+                    context.scene->transform_updaters.push_back(std::move(update));
                 } else {
-                    ref.node->SetTranslate(ref.node->Translate() + offset);
+                    apply_bind_offset();
                 }
             }
         }
@@ -3577,7 +3602,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             if (o.contains("attachment") && o.at("attachment").is_string()) {
                 attachment = o.at("attachment").get<std::string>();
             }
-            context.node_id_map[id] = { parent, node, nullptr, std::move(attachment) };
+            context.node_id_map[id] = { parent, node, nullptr, std::move(attachment), nullptr };
         }
     }
 

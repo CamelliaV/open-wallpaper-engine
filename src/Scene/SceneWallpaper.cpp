@@ -690,6 +690,7 @@ void SceneRenderController::on(RenderDraw&&) {
                 std::span<const float, 64>(fi.audio_right));
             owe::script::TickSceneScripts(*m_scene, fi);
             m_scene->TickCameraPaths();
+            m_scene->TickTransformUpdaters();
         }
         m_scene->paritileSys->Emitt();
 

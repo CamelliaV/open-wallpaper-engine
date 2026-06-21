@@ -249,6 +249,7 @@ bool ParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVer
     owe::GetJsonValue(json, "muteineditor", muteineditor, false);
     owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
     owe::GetJsonValue(json, "parent", parent, false);
+    owe::GetJsonValue(json, "attachment", attachment, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);
     owe::GetJsonValue(json, "controlpoint", controlpoint, false);
     if (json.contains("instance")) instance = json.at("instance");
