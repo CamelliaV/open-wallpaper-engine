@@ -1119,6 +1119,99 @@ void ApplyTextureBinds(wpscene::Material&                                  wpmat
     }
 }
 
+bool IsSystemMediaTextureBinding(const nlohmann::json& binding) {
+    if (! binding.is_object()) return false;
+    auto type = binding.find("type");
+    auto name = binding.find("name");
+    if (type == binding.end() || name == binding.end()) return false;
+    if (! type->is_string() || ! name->is_string()) return false;
+    if (type->get<std::string>() != "system") return false;
+    const auto value = name->get<std::string>();
+    return value == "$mediaThumbnail" || value == "$mediaPreviousThumbnail";
+}
+
+std::string ResolveSceneTextureProperty(const ParseContext& context, std::string_view key) {
+    if (! context.user_properties) return {};
+    auto it = context.user_properties->find(std::string(key));
+    if (it == context.user_properties->end()) return {};
+
+    const auto& prop = it->second;
+    if (prop.is_string()) {
+        auto value = prop.get<std::string>();
+        return value.empty() ? std::string {} : value;
+    }
+    if (! prop.is_object()) return {};
+
+    std::string type;
+    if (prop.contains("type") && prop.at("type").is_string())
+        type = prop.at("type").get<std::string>();
+    if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
+        return {};
+    if (! prop.contains("value") || ! prop.at("value").is_string()) return {};
+
+    const auto value = prop.at("value").get<std::string>();
+    return value.empty() ? std::string {} : value;
+}
+
+std::string ResolveUserTextureProperty(const ParseContext& context, const nlohmann::json& binding) {
+    if (! binding.is_string()) return {};
+    return ResolveSceneTextureProperty(context, binding.get<std::string>());
+}
+
+std::string ResolveMaterialTextureSlot(const ParseContext&      context,
+                                       const wpscene::Material& material, usize slot) {
+    std::string fallback;
+    if (slot < material.textures.size()) fallback = material.textures[slot];
+    if (slot >= material.usertextures.size()) return fallback;
+
+    if (auto prop = ResolveUserTextureProperty(context, material.usertextures[slot]);
+        ! prop.empty())
+        return prop;
+    return fallback;
+}
+
+std::string ResolveLinkedImageFallback(const ParseContext& context, std::string_view texture) {
+    std::optional<std::uint32_t> linked_id = ParseImageLayerCompositeId(texture);
+    if (! linked_id && IsSpecLinkTex(texture)) linked_id = ParseLinkTex(texture);
+    if (! linked_id) return {};
+
+    auto it = context.image_texture_fallbacks.find(static_cast<std::int32_t>(*linked_id));
+    if (it == context.image_texture_fallbacks.end()) return {};
+    return it->second;
+}
+
+std::string ResolveSystemMediaFallback(const ParseContext&      context,
+                                       const wpscene::Material& material, usize slot) {
+    if (slot >= material.textures.size()) return {};
+    return ResolveLinkedImageFallback(context, material.textures[slot]);
+}
+
+void ApplyUserTextureBindings(ParseContext& context, wpscene::Material& material) {
+    for (usize i = 0; i < material.usertextures.size(); ++i) {
+        const auto& binding = material.usertextures[i];
+        if (binding.is_null()) continue;
+
+        std::string resolved = ResolveUserTextureProperty(context, binding);
+        if (resolved.empty() && IsSystemMediaTextureBinding(binding)) {
+            resolved = ResolveSystemMediaFallback(context, material, i);
+        }
+        if (resolved.empty()) continue;
+
+        if (material.textures.size() <= i) material.textures.resize(i + 1);
+        material.textures[i] = std::move(resolved);
+    }
+}
+
+void IndexImageTextureFallbacks(ParseContext& context, std::span<SceneObjectVar> scene_objs) {
+    context.image_texture_fallbacks.clear();
+    for (const auto& obj : scene_objs) {
+        if (const auto* image = std::get_if<wpscene::ImageObject>(&obj)) {
+            auto texture = ResolveMaterialTextureSlot(context, image->material, 0);
+            if (! texture.empty()) context.image_texture_fallbacks[image->id] = std::move(texture);
+        }
+    }
+}
+
 void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
                     const WPShaderInfo& info) {
     // load glname from alias and load to constvalue
@@ -1464,8 +1557,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     SceneUniformNodeData svData;
     svData.puppet_layer = image_puppet_layer;
 
-    ShaderValueMap baseConstSvs = context.global_base_uniforms;
-    WPShaderInfo   shaderInfo;
+    ShaderValueMap    baseConstSvs = context.global_base_uniforms;
+    WPShaderInfo      shaderInfo;
+    wpscene::Material image_wpmat = wpimgobj.material;
+    ApplyUserTextureBindings(context, image_wpmat);
     {
         svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
         svData.propagatedParallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
@@ -1485,7 +1580,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         shaderInfo.baseConstSvs = baseConstSvs;
 
         if (! LoadMaterial(vfs,
-                           wpimgobj.material,
+                           image_wpmat,
                            context.scene.get(),
                            spImgNode.get(),
                            &material,
@@ -1494,7 +1589,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             rstd_error("load imageobj '{}' material faild", wpimgobj.name);
             return;
         };
-        LoadConstvalue(material, wpimgobj.material, shaderInfo);
+        LoadConstvalue(material, image_wpmat, shaderInfo);
     }
 
     // Whether the layer's base texture is point-sampled (noInterpolation).
@@ -1508,7 +1603,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             it != textures.end() && it->second.sample.magFilter == TextureFilter::NEAREST;
     }
 
-    for (const auto& cs : wpimgobj.material.constantshadervalues) {
+    for (const auto& cs : image_wpmat.constantshadervalues) {
         const auto&               name  = cs.first;
         const std::vector<float>& value = cs.second;
         std::string               glname;
@@ -1590,7 +1685,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             if (has_bones) {
                 wpscene::ImageEffect puppet_effect;
                 wpscene::Material    puppet_mat;
-                puppet_mat             = wpimgobj.material;
+                puppet_mat             = image_wpmat;
                 puppet_mat.textures[0] = "";
                 WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
                 puppet_effect.materials.push_back(puppet_mat);
@@ -1616,7 +1711,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     }
     mesh.AddMaterial(std::move(material));
     track_image_color_material(mesh.MaterialSlots().back().get());
-    RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(), wpimgobj.material, shaderInfo);
+    RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(), image_wpmat, shaderInfo);
 
     // Puppet clipping masks: each MaskBlock becomes a pair of submeshes.
     // 1) Pre-pass: clippingmaskimage4 over `part_ids_b` (mask shape mesh)
@@ -1654,7 +1749,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         }
 
         const std::string albedo_tex =
-            wpimgobj.material.textures.empty() ? std::string {} : wpimgobj.material.textures[0];
+            image_wpmat.textures.empty() ? std::string {} : image_wpmat.textures[0];
         for (const auto& pmesh : puppet->meshes) {
             for (const auto& mb : pmesh.masks) {
                 // (1) mask pre-pass submesh
@@ -1693,7 +1788,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 pre_sm.output_override = std::string(PUPPET_MASK_RT);
 
                 // (2) clipped-main submesh: main material + CLIPPINGTARGET
-                wpscene::Material clip_wpmat        = wpimgobj.material;
+                wpscene::Material clip_wpmat        = image_wpmat;
                 clip_wpmat.combos["CLIPPINGTARGET"] = 1;
                 clip_wpmat.combos["CLIPPINGUVS"]    = 1;
                 if (clip_wpmat.textures.size() < 9) clip_wpmat.textures.resize(9);
@@ -1876,6 +1971,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
                     wpmat.MergePass(wppass);
                     ApplyTextureBinds(wpmat, std::span(wppass.bind), fboMap);
+                    ApplyUserTextureBindings(context, wpmat);
                     if (! wppass.target.empty()) {
                         if (fboMap.count(wppass.target) == 0) {
                             rstd_error("fbo {} not found", wppass.target);
@@ -3274,6 +3370,7 @@ ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::Scen
 void ProcessObjects(ParseContext& context, std::span<SceneObjectVar> scene_objs,
                     wavsen::audio::SoundManager* sm, ProcessOpts opts) {
     WPShaderParser::InitGlslang();
+    IndexImageTextureFallbacks(context, scene_objs);
 
     for (SceneObjectVar& obj : scene_objs) {
         std::visit(visitor::overload {

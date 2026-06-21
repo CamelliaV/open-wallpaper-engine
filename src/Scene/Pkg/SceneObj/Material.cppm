@@ -43,15 +43,16 @@ public:
 
 class Material {
 public:
-    bool                     FromJson(const nlohmann::json&);               // legacy
-    bool                     FromJson(const nlohmann::json&, SceneVersion); // canonical
-    void                     MergePass(const MaterialPass&);
-    std::string              blending { "translucent" };
-    std::string              cullmode { "nocull" };
-    std::string              shader;
-    std::string              depthtest { "disabled" };
-    std::string              depthwrite { "disabled" };
-    std::vector<std::string> textures;
+    bool                        FromJson(const nlohmann::json&);               // legacy
+    bool                        FromJson(const nlohmann::json&, SceneVersion); // canonical
+    void                        MergePass(const MaterialPass&);
+    std::string                 blending { "translucent" };
+    std::string                 cullmode { "nocull" };
+    std::string                 shader;
+    std::string                 depthtest { "disabled" };
+    std::string                 depthwrite { "disabled" };
+    std::vector<std::string>    textures;
+    std::vector<nlohmann::json> usertextures;
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;

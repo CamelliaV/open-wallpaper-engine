@@ -83,7 +83,8 @@ struct ParseContext {
     // z-position instead of jumping to the front of the root child list.
     std::unordered_map<std::int32_t, std::vector<std::shared_ptr<SceneNode>>> layer_clones;
 
-    Set<std::int32_t> hidden_link_source_ids;
+    std::unordered_map<std::int32_t, std::string> image_texture_fallbacks;
+    Set<std::int32_t>                             hidden_link_source_ids;
 };
 
 struct ProcessOpts {

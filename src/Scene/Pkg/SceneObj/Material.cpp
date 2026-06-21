@@ -23,6 +23,13 @@ void LoadUserShaderValues(const nlohmann::json&                         json,
     }
 }
 
+void MergeUserTextures(const std::vector<nlohmann::json>& src, std::vector<nlohmann::json>& dst) {
+    if (src.size() > dst.size()) dst.resize(src.size());
+    for (std::size_t i = 0; i < src.size(); ++i) {
+        if (! src[i].is_null()) dst[i] = src[i];
+    }
+}
+
 } // namespace
 
 bool MaterialPassBindItem::FromJson(const nlohmann::json& json) {
@@ -49,6 +56,7 @@ void MaterialPass::Update(const MaterialPass& p) {
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
     }
+    MergeUserTextures(p.usertextures, usertextures);
     for (const auto& el : p.combos) {
         combos[el.first] = el.second;
     }
@@ -72,6 +80,7 @@ void Material::MergePass(const MaterialPass& p) {
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
     }
+    MergeUserTextures(p.usertextures, usertextures);
     for (const auto& el : p.combos) {
         combos[el.first] = el.second;
     }
@@ -150,6 +159,11 @@ bool Material::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
             std::string tex;
             if (! jT.is_null()) owe::GetJsonValue(jT, tex);
             textures.push_back(tex);
+        }
+    }
+    if (jContent.contains("usertextures") && jContent.at("usertextures").is_array()) {
+        for (const auto& jU : jContent.at("usertextures")) {
+            usertextures.push_back(jU);
         }
     }
     if (jContent.contains("constantshadervalues")) {
