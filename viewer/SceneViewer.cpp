@@ -16,6 +16,7 @@ atomic<bool> renderCall(false);
 
 struct UserData {
     owe::SceneWallpaper* psw { nullptr };
+    bool                 mouse_position_locked { false };
 
     uint16_t width;
     uint16_t height;
@@ -34,12 +35,13 @@ void mouse_button_callback(GLFWwindow* win, int button, int action, int /*mods*/
 
 void cursor_position_callback(GLFWwindow* win, double xpos, double ypos) {
     UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
+    if (! data || ! data->psw || data->mouse_position_locked) return;
     data->psw->mouseInput(xpos / data->width, ypos / data->height);
 }
 
 void cursor_enter_callback(GLFWwindow* win, int entered) {
     UserData* data = static_cast<UserData*>(glfwGetWindowUserPointer(win));
-    if (! data || ! data->psw) return;
+    if (! data || ! data->psw || data->mouse_position_locked) return;
     data->psw->mouseEnter(entered != 0);
 }
 }
@@ -53,8 +55,8 @@ std::optional<std::array<double, 2>> parseMousePosition(const std::string& value
     if (value.empty()) return std::nullopt;
     const auto comma = value.find(',');
     if (comma == std::string::npos) return std::nullopt;
-    double x = 0.0;
-    double y = 0.0;
+    double x  = 0.0;
+    double y  = 0.0;
     auto   xs = value.substr(0, comma);
     auto   ys = value.substr(comma + 1);
     auto   xr = std::from_chars(xs.data(), xs.data() + xs.size(), x);
@@ -162,11 +164,15 @@ int main(int argc, char** argv) {
     glfwSetCursorPosCallback(window, cursor_position_callback);
     glfwSetCursorEnterCallback(window, cursor_enter_callback);
 
-    if (auto mouse = parseMousePosition(program.get<std::string>(viewer::OPT_MOUSE_POS))) {
+    auto locked_mouse = parseMousePosition(program.get<std::string>(viewer::OPT_MOUSE_POS));
+    data.mouse_position_locked = locked_mouse.has_value();
+    auto apply_locked_mouse    = [&]() {
+        if (! locked_mouse) return;
         psw->mouseEnter(true);
-        psw->mouseInput((*mouse)[0], (*mouse)[1]);
-        glfwSetCursorPos(window, (*mouse)[0] * w_width, (*mouse)[1] * w_height);
-    }
+        psw->mouseInput((*locked_mouse)[0], (*locked_mouse)[1]);
+        glfwSetCursorPos(window, (*locked_mouse)[0] * w_width, (*locked_mouse)[1] * w_height);
+    };
+    apply_locked_mouse();
 
     // Bulk-scan path: WP_COMPILE_ONLY=N waits N seconds after scene load
     // to let the async shader-compile pass drain, then exits. Skips the
@@ -179,6 +185,7 @@ int main(int argc, char** argv) {
     } else {
         while (! glfwWindowShouldClose(window)) {
             glfwPollEvents();
+            apply_locked_mouse();
         }
     }
     delete psw;

@@ -1411,6 +1411,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     {
+        svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
+        svData.propagatedParallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
         if (! hasEffect) {
             svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
             if (puppet && has_bones) {
@@ -1843,6 +1845,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
                 SceneMaterial        material;
                 SceneUniformNodeData svData;
+                svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
                 if (! LoadMaterial(vfs,
                                    wpmat,
                                    context.scene.get(),
@@ -1858,6 +1861,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 LoadConstvalue(material, wpmat, wpEffShaderInfo);
                 auto spMesh = std::make_shared<SceneMesh>();
                 {
+                    svData.propagatedParallaxDepth = { wpimgobj.parallaxDepth[0],
+                                                       wpimgobj.parallaxDepth[1] };
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                     svData.effect_projection_node = spImgNode.get();
                     svData.effect_projection_size = { wpimgobj.size[0], wpimgobj.size[1] };
@@ -1969,8 +1974,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 wpFinalShaderInfo.baseConstSvs = baseConstSvs;
                 SceneMaterial        finalMaterial;
                 SceneUniformNodeData finalSvData;
-                finalSvData.parallaxDepth = { wpimgobj.parallaxDepth[0],
-                                              wpimgobj.parallaxDepth[1] };
+                finalSvData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
+                finalSvData.propagatedParallaxDepth        = { wpimgobj.parallaxDepth[0],
+                                                               wpimgobj.parallaxDepth[1] };
+                finalSvData.parallaxDepth                  = { wpimgobj.parallaxDepth[0],
+                                                               wpimgobj.parallaxDepth[1] };
                 if (LoadMaterial(vfs,
                                  passthrough_mat,
                                  context.scene.get(),
@@ -2096,7 +2104,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     SceneUniformNodeData svData;
 
     if (! is_child) {
-        svData.parallaxDepth = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
+        svData.parallaxDepth           = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
+        svData.propagatedParallaxDepth = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
     }
     svData.use_camera_eye_position = particle_obj.flags[wpscene::Particle::FlagEnum::perspective];
 
@@ -2355,6 +2364,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
 
     SceneUniformNodeData svData;
     svData.parallaxDepth           = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
+    svData.propagatedParallaxDepth = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
     svData.use_camera_eye_position = true;
     if (mdl.puppet && ! mdl.puppet->bones.empty()) {
         svData.puppet_layer = MakePuppetLayer(
@@ -2779,7 +2789,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_mesh->AddMaterial(std::move(compose_mat));
         RegisterShaderUserVarIndex(&scene, compose_mesh->Material(), pt_mat, compose_si);
         compose_node->AddMesh(compose_mesh);
-        compose_sv.parallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        compose_sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        compose_sv.propagatedParallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         context.shader_updater->SetNodeData(compose_node.get(), compose_sv);
 
         // Move sp_node into layer space — identity transform so the glyph

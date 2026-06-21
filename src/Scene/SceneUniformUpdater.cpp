@@ -244,14 +244,30 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
         Matrix4d modelTrans = pNode->ModelTrans();
         if (hasNodeData && cam_name != "effect") {
             const auto& nodeData = m_nodeDataMap.at(pNode);
-            if (m_parallax.enable) {
+            const bool layerLocalEffectSource =
+                camera->HasImgEffect() && camera->GetAttachedNode().get() == pNode;
+            if (m_parallax.enable && ! layerLocalEffectSource) {
+                auto*       parallaxNode = pNode;
+                const auto* parallaxData = &nodeData;
+                for (auto* parent = pNode->Parent(); parent != nullptr; parent = parent->Parent()) {
+                    auto it = m_nodeDataMap.find(parent);
+                    if (it == m_nodeDataMap.end()) break;
+                    if (! it->second.propagate_parallax_to_children) break;
+                    parallaxNode = parent;
+                    parallaxData = &it->second;
+                }
+                Matrix4d parallaxTrans = modelTrans;
+                if (parallaxNode != pNode) {
+                    parallaxNode->UpdateTrans();
+                    parallaxTrans = parallaxNode->ModelTrans();
+                }
                 // World position, not local. Image-effect composite nodes
                 // inherit transform via SetParentAnchor and keep identity
                 // local trans — Translate() would return (0,0) and put the
                 // parallax shift around canvas origin instead of the layer's
                 // actual world position.
-                Vector3f nodePos = modelTrans.block<3, 1>(0, 3).cast<float>();
-                Vector2f depth(&nodeData.parallaxDepth[0]);
+                Vector3f nodePos = parallaxTrans.block<3, 1>(0, 3).cast<float>();
+                Vector2f depth(&parallaxData->propagatedParallaxDepth[0]);
                 Vector2f ortho { (float)m_scene->ortho[0], (float)m_scene->ortho[1] };
                 // flip mouse y axis
                 Vector2f mouseVec =

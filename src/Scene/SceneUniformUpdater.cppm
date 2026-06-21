@@ -52,6 +52,8 @@ struct SceneUniformInfo {
 
 struct SceneUniformNodeData {
     std::array<float, 2>                       parallaxDepth { 0.0f, 0.0f };
+    std::array<float, 2>                       propagatedParallaxDepth { 0.0f, 0.0f };
+    bool                                       propagate_parallax_to_children { true };
     std::vector<std::pair<usize, std::string>> renderTargets;
     std::shared_ptr<WPPuppetLayer>             puppet_layer;
     bool                                       use_camera_eye_position { false };
