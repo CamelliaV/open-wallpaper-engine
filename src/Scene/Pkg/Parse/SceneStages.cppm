@@ -82,6 +82,8 @@ struct ParseContext {
     // them right after the template node — keeping all bars at the template's
     // z-position instead of jumping to the front of the root child list.
     std::unordered_map<std::int32_t, std::vector<std::shared_ptr<SceneNode>>> layer_clones;
+
+    Set<std::int32_t> hidden_link_source_ids;
 };
 
 struct ProcessOpts {
@@ -106,7 +108,8 @@ struct ProcessOpts {
 // parse time.
 std::vector<SceneObjectVar>
 ExpandObjects(const nlohmann::json&, fs::VFS&, wpscene::SceneVersion,
-              const std::unordered_map<std::string, nlohmann::json>* user_props = nullptr);
+              const std::unordered_map<std::string, nlohmann::json>* user_props        = nullptr,
+              const Set<std::int32_t>*                               linked_source_ids = nullptr);
 
 // If general.orthogonalprojection.auto_, replaces width/height with the
 // largest image object's size.

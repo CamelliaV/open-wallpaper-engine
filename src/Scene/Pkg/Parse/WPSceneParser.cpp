@@ -123,6 +123,38 @@ SceneNode* RootOf(SceneNode* node) {
     return node;
 }
 
+void CollectLinkedSourceIdsFromJsonValue(const nlohmann::json& value, Set<std::int32_t>& out) {
+    if (value.is_string()) {
+        const auto s = value.get<std::string>();
+        if (auto id = ParseImageLayerCompositeId(s)) out.insert(static_cast<std::int32_t>(*id));
+        if (IsSpecLinkTex(s)) out.insert(static_cast<std::int32_t>(ParseLinkTex(s)));
+        return;
+    }
+    if (value.is_array()) {
+        for (const auto& el : value) CollectLinkedSourceIdsFromJsonValue(el, out);
+        return;
+    }
+    if (! value.is_object()) return;
+    for (const auto& el : value.items()) {
+        if (el.key() == "dependencies" && el.value().is_array()) {
+            for (const auto& dep : el.value()) {
+                if (dep.is_number_integer()) out.insert(dep.get<std::int32_t>());
+            }
+        }
+        CollectLinkedSourceIdsFromJsonValue(el.value(), out);
+    }
+}
+
+Set<std::int32_t> CollectLinkedSourceIdsFromJson(const nlohmann::json& json) {
+    Set<std::int32_t> out;
+    if (json.contains("objects")) CollectLinkedSourceIdsFromJsonValue(json.at("objects"), out);
+    return out;
+}
+
+void MarkHiddenLinkSource(ParseContext& context, std::int32_t id) {
+    if (context.hidden_link_source_ids.count(id) != 0) context.scene->elidable_layer_ids.insert(id);
+}
+
 std::array<float, 2> Texture0UvScale(const SceneMaterial& material, bool nopadding = false) {
     if (nopadding) return { 1.0f, 1.0f };
     auto it = material.customShader.constValues.find(WE_GLTEX_RESOLUTION_NAMES[0]);
@@ -730,7 +762,7 @@ CullMode ParseCullMode(std::string_view str) {
 void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const WPShaderInfo& sinfo,
                       const Scene& scene) {
     if (IsSpecTex(name)) {
-        if (name == "_rt_FullFrameBuffer") {
+        if (name == WE_FULL_FRAME_BUFFER) {
             name = SpecTex_Default;
             if (wpmat.shader == "genericimage2" && ! exists(sinfo.combos, "BLENDMODE")) name = "";
             /*
@@ -2400,6 +2432,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
                                              Vector3f(model_obj.angles.data()),
                                              model_obj.name);
     node->ID() = model_obj.id;
+    MarkHiddenLinkSource(context, model_obj.id);
     if (! model_obj.visible_user_key.empty()) node->SetVisibleUserKey(model_obj.visible_user_key);
 
     auto mesh = std::make_shared<SceneMesh>();
@@ -2499,6 +2532,7 @@ TextRenderImageParser& EnsureTextImageParser(Scene& scene) {
 
 void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     if (! obj.visible) return;
+    MarkHiddenLinkSource(context, obj.id);
 
     // --- determine initial text + whether a script binding will rewrite it
     auto text_binding_it = obj.field_bindings.scripts.find("text");
@@ -3107,11 +3141,27 @@ bool HasHiddenUserAncestor(std::uint32_t                                        
     return false;
 }
 
+Set<std::int32_t>
+CollectHiddenLinkedSourceIds(const nlohmann::json& json, const Set<std::int32_t>& linked_source_ids,
+                             const std::unordered_map<std::string, nlohmann::json>* user_props) {
+    Set<std::int32_t> out;
+    auto              visibility_info = BuildObjectVisibilityInfo(json, user_props);
+    for (std::int32_t id : linked_source_ids) {
+        auto it = visibility_info.find(id);
+        if (it == visibility_info.end()) continue;
+        if (! it->second.visible ||
+            HasHiddenUserAncestor(static_cast<std::uint32_t>(id), visibility_info)) {
+            out.insert(id);
+        }
+    }
+    return out;
+}
+
 template<typename T>
 void AddSceneObject(std::vector<SceneObjectVar>& objs, const nlohmann::json& json_obj, fs::VFS& vfs,
                     wpscene::SceneVersion                                  v,
                     const std::unordered_map<std::string, nlohmann::json>* user_props,
-                    bool                                                   force_invisible) {
+                    const Set<std::int32_t>* linked_source_ids, bool force_invisible) {
     T scene_obj;
     if (! scene_obj.FromJson(json_obj, vfs, v)) {
         rstd_error("parse scene object failed, name: {}", scene_obj.name);
@@ -3119,11 +3169,15 @@ void AddSceneObject(std::vector<SceneObjectVar>& objs, const nlohmann::json& jso
     }
     ResolveVisibleUserBinding(scene_obj.visible, scene_obj.visible_user, user_props);
     if (force_invisible) scene_obj.visible = false;
+    const bool preserve_hidden_link_source =
+        ! scene_obj.visible && linked_source_ids != nullptr &&
+        linked_source_ids->count(static_cast<std::int32_t>(scene_obj.id)) != 0;
     // Image objects keep going even when visible=false: another layer's
     // material may reference them via `_rt_imageLayerComposite_<id>`. The
     // render-graph builder later decides whether to actually emit passes.
     if constexpr (! std::is_same_v<T, wpscene::ImageObject>) {
-        if (! scene_obj.visible) return;
+        if (! scene_obj.visible && ! preserve_hidden_link_source) return;
+        if (preserve_hidden_link_source) scene_obj.visible = true;
     }
     objs.push_back(scene_obj);
 }
@@ -3134,7 +3188,8 @@ namespace owe
 
 std::vector<SceneObjectVar>
 ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v,
-              const std::unordered_map<std::string, nlohmann::json>* user_props) {
+              const std::unordered_map<std::string, nlohmann::json>* user_props,
+              const Set<std::int32_t>*                               linked_source_ids) {
     std::vector<SceneObjectVar> scene_objs;
     if (! json.contains("objects")) return scene_objs;
     auto visibility_info = BuildObjectVisibilityInfo(json, user_props);
@@ -3150,25 +3205,25 @@ ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v,
         // (no rendering yet) so the data stays absorbed.
         if (obj.contains("image") && ! obj.at("image").is_null()) {
             AddSceneObject<wpscene::ImageObject>(
-                scene_objs, obj, vfs, v, user_props, force_invisible);
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
             AddSceneObject<wpscene::ParticleObject>(
-                scene_objs, obj, vfs, v, user_props, force_invisible);
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
             AddSceneObject<wpscene::SoundObject>(
-                scene_objs, obj, vfs, v, user_props, force_invisible);
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         } else if (obj.contains("light") && ! obj.at("light").is_null()) {
             AddSceneObject<wpscene::LightObject>(
-                scene_objs, obj, vfs, v, user_props, force_invisible);
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         } else if (obj.contains("text") && ! obj.at("text").is_null()) {
             AddSceneObject<wpscene::TextObject>(
-                scene_objs, obj, vfs, v, user_props, force_invisible);
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         } else if (obj.contains("model") && ! obj.at("model").is_null()) {
             AddSceneObject<wpscene::ModelObject>(
-                scene_objs, obj, vfs, v, user_props, force_invisible);
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
             AddSceneObject<wpscene::CameraObject>(
-                scene_objs, obj, vfs, v, user_props, force_invisible);
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         }
     }
     return scene_objs;
@@ -3200,14 +3255,14 @@ ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::Scen
 
     context.scene->renderTargets[SpecTex_Default.data()] = {
         .width             = context.ortho_w,
-        .height            = context.ortho_w,
+        .height            = context.ortho_h,
         .withDepth         = true,
         .bind              = { .enable = true, .screen = true },
         .preserve_on_write = true,
     };
     context.scene->renderTargets[WE_MIP_MAPPED_FRAME_BUFFER.data()] = {
         .width      = context.ortho_w,
-        .height     = context.ortho_w,
+        .height     = context.ortho_h,
         .has_mipmap = true,
         .bind       = { .enable = true, .name = SpecTex_Default.data() },
     };
@@ -3571,9 +3626,13 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
               static_cast<unsigned>(sc.pkg_version),
               static_cast<unsigned>(sc.scene_json_version));
 
-    auto scene_objs = ExpandObjects(json, vfs, sc.pkg_version, m_user_properties);
+    auto linked_source_ids = CollectLinkedSourceIdsFromJson(json);
+    auto scene_objs =
+        ExpandObjects(json, vfs, sc.pkg_version, m_user_properties, &linked_source_ids);
     AdjustAutoOrthoProjection(sc, scene_objs);
     auto context = BuildContext(vfs, scene_id, sc, m_user_properties);
+    context.hidden_link_source_ids =
+        CollectHiddenLinkedSourceIds(json, linked_source_ids, m_user_properties);
 
     // Single JSON-order walk:
     // - record every object's id (and parent_id) in declaration order so the

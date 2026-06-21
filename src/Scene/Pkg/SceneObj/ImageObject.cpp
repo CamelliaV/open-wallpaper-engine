@@ -214,6 +214,10 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
     owe::GetJsonValue(json, "brightness", brightness, false);
 
     owe::GetJsonValue(jImage, "puppet", puppet, false);
+    const bool explicit_no_copy_background = json.contains("copybackground") &&
+                                             json.at("copybackground").is_boolean() &&
+                                             ! json.at("copybackground").get<bool>();
+
     if (jImage.contains("material")) {
         std::string matPath;
         owe::GetJsonValue(jImage, "material", matPath);
@@ -223,6 +227,9 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
             return false;
         }
         material.FromJson(jMat);
+        if (image == "models/util/composelayer.json" && explicit_no_copy_background) {
+            material.combos["CLEARALPHA"] = 1;
+        }
     } else {
         rstd_info("image object no material");
         return false;

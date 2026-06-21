@@ -27,6 +27,7 @@ inline constexpr std::string_view WE_FULL_COMPO_BUFFER_PREFIX { "_rt_FullCompoBu
 inline constexpr std::string_view WE_HALF_COMPO_BUFFER_PREFIX { "_rt_HalfCompoBuffer" };
 inline constexpr std::string_view WE_QUARTER_COMPO_BUFFER_PREFIX { "_rt_QuarterCompoBuffer" };
 inline constexpr std::string_view WE_EIGHT_COMPO_BUFFER_PREFIX { "_rt_EightBuffer" };
+inline constexpr std::string_view WE_FULL_FRAME_BUFFER { "_rt_FullFrameBuffer" };
 inline constexpr std::string_view WE_MIP_MAPPED_FRAME_BUFFER { "_rt_MipMappedFrameBuffer" };
 // Other WE engine RTs seen in the assets.
 inline constexpr std::string_view WE_SHADOW_ATLAS_PREFIX { "_rt_shadowAtlas" };
