@@ -37,6 +37,7 @@ struct TextObject {
     bool                      muteineditor { false };
     bool                      nointerpolation { false };
     std::uint32_t             parent { 0 };
+    std::string               attachment;
     std::vector<std::int32_t> dependencies;
     nlohmann::json            instance;
     FieldBindings             field_bindings;
@@ -92,6 +93,7 @@ struct TextObject {
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
+        owe::GetJsonValue(json, "attachment", attachment, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
         if (json.contains("instance")) instance = json.at("instance");
 

@@ -1,6 +1,7 @@
 module;
 
 export module wescene.pkg.parse:scene_stages;
+import eigen;
 import nlohmann.json;
 
 import rstd.cppstd;
@@ -65,6 +66,7 @@ struct ParseContext {
         // pass needed). Both nullable.
         std::shared_ptr<WPPuppet> puppet;
         std::string               attachment;
+        std::function<void(const Eigen::Vector3f&)> apply_attachment_offset;
     };
     std::unordered_map<std::int32_t, NodeRef> node_id_map;
     // Scene.json declaration order. Reparenting in this order keeps each

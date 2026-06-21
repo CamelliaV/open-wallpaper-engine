@@ -2940,7 +2940,16 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // compose_node owns the world position and goes through the JSON-order
     // attach phase (FinalizeScene) like any other layer.
     context.scene->sceneGraph->AppendChild(sp_node);
-    context.node_id_map[obj.id] = { obj.parent, compose_node };
+    context.node_id_map[obj.id] = {
+        obj.parent,
+        compose_node,
+        nullptr,
+        obj.attachment,
+        [anchor_state, apply_text_anchor](const Vector3f& offset) {
+            anchor_state->origin += offset;
+            apply_text_anchor();
+        },
+    };
 
     const char* scripted_tag = has_text_script            ? " [scripted]"
                                : has_indirect_text_script ? " [scripted-indirect]"
@@ -3255,7 +3264,12 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
                     bone_world = bone_world * puppet.bones[*it].local_bind;
                 }
                 Eigen::Affine3f anchor = bone_world * ait->local_xform;
-                ref.node->SetTranslate(ref.node->Translate() + anchor.translation());
+                Vector3f        offset = anchor.translation();
+                if (ref.apply_attachment_offset) {
+                    ref.apply_attachment_offset(offset);
+                } else {
+                    ref.node->SetTranslate(ref.node->Translate() + offset);
+                }
             }
         }
         parent_node->AppendChild(ref.node);
