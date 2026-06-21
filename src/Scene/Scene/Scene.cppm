@@ -1641,7 +1641,7 @@ public:
 
     i32                  ortho[2] { 1920, 1080 };
     std::array<float, 3> clearColor { 1.0f, 1.0f, 1.0f };
-    bool                 schemeColorDrivesClear { false };
+    std::string          clearColorUserKey;
 
     double elapsingTime { 0.0f }, frameTime { 0.0f };
     void   PassFrameTime(double t) {

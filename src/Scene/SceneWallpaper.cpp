@@ -132,10 +132,6 @@ nlohmann::json JsonUserProperty(nlohmann::json value) {
 constexpr std::string_view kSchemeColorKey          = "schemecolor";
 constexpr std::string_view kWaywallenSchemeColorKey = "waywallen.scheme_color";
 
-bool IsSchemeColorKey(std::string_view key) {
-    return key == kSchemeColorKey || key == kWaywallenSchemeColorKey;
-}
-
 std::string CanonicalUserPropertyKey(std::string_view key) {
     if (key == kWaywallenSchemeColorKey) return std::string(kSchemeColorKey);
     return std::string(key);
@@ -259,8 +255,9 @@ ShaderValue ShapeUserShaderValue(const SceneMaterial& material, const std::strin
     return ShaderValue(std::span<const float>(shaped));
 }
 
-void ApplySchemeColorToClear(Scene& scene, const nlohmann::json& prop) {
-    if (! scene.schemeColorDrivesClear) return;
+void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const nlohmann::json& prop) {
+    if (scene.clearColorUserKey.empty()) return;
+    if (CanonicalUserPropertyKey(scene.clearColorUserKey) != key) return;
     auto coerced = CoerceUserPropertyValue(prop);
     if (! coerced.ok || coerced.value.size() < 3) return;
     auto clamp01 = [](float n) {
@@ -277,8 +274,6 @@ void ApplySchemeColorToClear(Scene& scene, const nlohmann::json& prop) {
 // `u_*` uniform with this material-key. Sets the per-material dirty flag so
 // CustomShaderPass picks the new value up next frame.
 void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nlohmann::json& prop) {
-    if (IsSchemeColorKey(key)) ApplySchemeColorToClear(scene, prop);
-
     auto it = scene.shader_user_var_index.find(key);
     if (it == scene.shader_user_var_index.end()) return;
 
@@ -744,6 +739,7 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
     if (! m_scene) return;
     std::string key = CanonicalUserPropertyKey(m.key);
     owe::script::SetSceneUserProperty(*m_scene, key, m.property);
+    ApplyUserPropertyToClear(*m_scene, key, m.property);
     ApplyUserPropertyToShaders(*m_scene, key, m.property);
     ApplyUserPropertyToParticles(*m_scene, key, m.property);
     ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
@@ -940,7 +936,7 @@ void SceneRuntimeController::loadScene() {
         scene = m_scene_parser.Parse(scene_id, *scene_doc, vfs, *m_sound_manager);
         m_scene_parser.SetUserProperties(nullptr);
         for (const auto& [key, prop] : m_user_properties) {
-            if (IsSchemeColorKey(key)) ApplySchemeColorToClear(*scene, prop);
+            ApplyUserPropertyToClear(*scene, key, prop);
             owe::script::SetSceneUserProperty(*scene, key, prop);
         }
         if (! m_config.cache_dir.empty() && scene) {

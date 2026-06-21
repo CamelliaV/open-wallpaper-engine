@@ -596,13 +596,6 @@ bool IsLayerCompositeShader(std::string_view shader) {
            shader == "genericimage4" || shader == "passthrough";
 }
 
-bool IsDefaultEditorClearColor(const std::array<float, 3>& color) {
-    constexpr float kDefault = 0.7f;
-    constexpr float kEpsilon = 0.0001f;
-    return std::abs(color[0] - kDefault) < kEpsilon && std::abs(color[1] - kDefault) < kEpsilon &&
-           std::abs(color[2] - kDefault) < kEpsilon;
-}
-
 void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
                          bool thick_format) {
     (void)particle;
@@ -1242,12 +1235,15 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc
     GenCardMesh(scene.default_effect_mesh, { 2, 2 });
     context.shader_updater = static_cast<SceneUniformUpdater*>(scene.shaderValueUpdater.get());
 
-    scene.clearColor             = sc.general.clearcolor;
-    scene.schemeColorDrivesClear = IsDefaultEditorClearColor(scene.clearColor);
-    scene.ortho[0]               = sc.general.orthogonalprojection.width;
-    scene.ortho[1]               = sc.general.orthogonalprojection.height;
-    context.ortho_w              = scene.ortho[0];
-    context.ortho_h              = scene.ortho[1];
+    scene.clearColor = sc.general.clearcolor;
+    if (auto it = sc.general.user_bindings.find("clearcolor");
+        it != sc.general.user_bindings.end()) {
+        scene.clearColorUserKey = it->second;
+    }
+    scene.ortho[0]  = sc.general.orthogonalprojection.width;
+    scene.ortho[1]  = sc.general.orthogonalprojection.height;
+    context.ortho_w = scene.ortho[0];
+    context.ortho_h = scene.ortho[1];
 
     {
         auto& gb              = context.global_base_uniforms;
