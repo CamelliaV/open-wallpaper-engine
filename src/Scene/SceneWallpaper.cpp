@@ -7,6 +7,7 @@ import wescene.types;
 import wescene.utils;
 import wescene.scene;
 
+import eigen;
 import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
@@ -292,6 +293,28 @@ void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nloh
     }
 }
 
+void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
+                                   const nlohmann::json& prop) {
+    auto it = scene.image_color_user_index.find(key);
+    if (it == scene.image_color_user_index.end()) return;
+
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok || coerced.value.size() < 3) return;
+
+    Eigen::Vector3f color { coerced.value[0], coerced.value[1], coerced.value[2] };
+    for (const auto& binding : it->second) {
+        if (binding.node) binding.node->SetColor(color);
+
+        float                alpha = binding.node ? binding.node->BaseAlpha() : 1.0f;
+        std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
+        for (auto* material : binding.materials) {
+            if (! material) continue;
+            material->customShader.constValues["g_Color4"] = color4;
+            material->customShader.dirty                   = true;
+        }
+    }
+}
+
 // Push a user-property value into every particle subsystem whose
 // instanceoverride was authored as `{user:"<key>", value:...}` for one of
 // its fields. The override sits behind a shared_ptr; mutating it through the
@@ -366,6 +389,21 @@ void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key,
     const float volume = std::clamp(coerced.value[0], 0.0f, 1.0f);
     for (auto& control : it->second) {
         if (control) control->SetVolume(volume);
+    }
+}
+
+void ApplyUserPropertyToCameraParallax(Scene& scene, const std::string& key,
+                                       const nlohmann::json& prop) {
+    auto it = scene.camera_parallax_user_var_index.find(key);
+    if (it == scene.camera_parallax_user_var_index.end() || ! scene.shaderValueUpdater) return;
+
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok || coerced.value.size() < 1) return;
+
+    float value = coerced.value[0];
+    for (const auto& field : it->second) {
+        if (field == "cameraparallaxmouseinfluence")
+            scene.shaderValueUpdater->SetCameraParallaxMouseInfluence(value);
     }
 }
 
@@ -741,8 +779,10 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
     owe::script::SetSceneUserProperty(*m_scene, key, m.property);
     ApplyUserPropertyToClear(*m_scene, key, m.property);
     ApplyUserPropertyToShaders(*m_scene, key, m.property);
+    ApplyUserPropertyToImageColor(*m_scene, key, m.property);
     ApplyUserPropertyToParticles(*m_scene, key, m.property);
     ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
+    ApplyUserPropertyToCameraParallax(*m_scene, key, m.property);
     ApplyUserPropertyToCameraShake(*m_scene, key, m.property);
     ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
     ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);

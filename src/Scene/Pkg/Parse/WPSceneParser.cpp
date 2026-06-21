@@ -1285,6 +1285,10 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc
         cam_para.delay          = sc.general.cameraparallaxdelay;
         cam_para.mouseinfluence = sc.general.cameraparallaxmouseinfluence;
         context.shader_updater->SetCameraParallax(cam_para);
+        if (auto it = sc.general.user_bindings.find("cameraparallaxmouseinfluence");
+            it != sc.general.user_bindings.end()) {
+            scene.camera_parallax_user_var_index[it->second].push_back(it->first);
+        }
     }
     {
         SceneCameraShake cam_shake;
@@ -1386,6 +1390,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     spImgNode->ID() = wpimgobj.id;
     if (! wpimgobj.visible_user_key.empty())
         spImgNode->SetVisibleUserKey(wpimgobj.visible_user_key);
+    std::vector<SceneMaterial*> image_color_materials;
+    auto                        track_image_color_material = [&](SceneMaterial* mat) {
+        if (! wpimgobj.color_user_key.empty() && mat != nullptr)
+            image_color_materials.push_back(mat);
+    };
     std::shared_ptr<WPPuppetLayer> image_puppet_layer;
     if (puppet && has_bones) {
         image_puppet_layer = MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
@@ -1574,6 +1583,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         material.blenmode = BlendMode::Normal;
     }
     mesh.AddMaterial(std::move(material));
+    track_image_color_material(mesh.MaterialSlots().back().get());
     RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(), wpimgobj.material, shaderInfo);
 
     // Puppet clipping masks: each MaskBlock becomes a pair of submeshes.
@@ -1643,6 +1653,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 }
                 uint32_t pre_slot = (uint32_t)mesh.MaterialSlots().size();
                 mesh.AddMaterial(std::move(mask_scene_mat));
+                track_image_color_material(mesh.MaterialSlots().back().get());
                 mesh.Submeshes().emplace_back();
                 auto& pre_sm = mesh.Submeshes().back();
                 WPMdlParser::GenMaskSubmeshFromMdl(pre_sm, pmesh, mb.part_ids_b, mapRate);
@@ -1674,6 +1685,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 LoadConstvalue(clip_scene_mat, clip_wpmat, clip_shaderInfo);
                 uint32_t clip_slot = (uint32_t)mesh.MaterialSlots().size();
                 mesh.AddMaterial(std::move(clip_scene_mat));
+                track_image_color_material(mesh.MaterialSlots().back().get());
                 mesh.Submeshes().emplace_back();
                 auto& clip_sm = mesh.Submeshes().back();
                 WPMdlParser::GenMaskSubmeshFromMdl(clip_sm, pmesh, mb.part_ids_a, mapRate);
@@ -1889,6 +1901,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     }
                 }
                 spMesh->AddMaterial(std::move(material));
+                track_image_color_material(spMesh->MaterialSlots().back().get());
                 RegisterShaderUserVarIndex(
                     context.scene.get(), spMesh->Material(), wpmat, wpEffShaderInfo);
                 auto add_puppet_mask_materials = [&]() -> bool {
@@ -1923,6 +1936,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             }
                             LoadConstvalue(mask_material, mask_wpmat, mask_shaderInfo);
                             spMesh->AddMaterial(std::move(mask_material));
+                            track_image_color_material(spMesh->MaterialSlots().back().get());
 
                             wpscene::Material clip_wpmat        = wpmat;
                             clip_wpmat.combos["CLIPPINGTARGET"] = 1;
@@ -1946,6 +1960,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             }
                             LoadConstvalue(clip_material, clip_wpmat, clip_shaderInfo);
                             spMesh->AddMaterial(std::move(clip_material));
+                            track_image_color_material(spMesh->MaterialSlots().back().get());
                         }
                     }
                     return true;
@@ -2005,6 +2020,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     LoadConstvalue(finalMaterial, passthrough_mat, wpFinalShaderInfo);
                     auto spFinalMesh = std::make_shared<SceneMesh>();
                     spFinalMesh->AddMaterial(std::move(finalMaterial));
+                    track_image_color_material(spFinalMesh->MaterialSlots().back().get());
                     RegisterShaderUserVarIndex(context.scene.get(),
                                                spFinalMesh->Material(),
                                                passthrough_mat,
@@ -2020,6 +2036,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         }
     }
     WireFieldScripts(context, spImgNode, wpimgobj.field_bindings);
+    if (! wpimgobj.color_user_key.empty()) {
+        context.scene->image_color_user_index[wpimgobj.color_user_key].push_back(
+            { spImgNode.get(), std::move(image_color_materials) });
+    }
     context.node_id_map[wpimgobj.id] = {
         wpimgobj.parent,
         spImgNode,

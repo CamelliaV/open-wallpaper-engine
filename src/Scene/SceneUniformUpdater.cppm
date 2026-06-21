@@ -94,6 +94,9 @@ public:
     void CopyNodeData(void* src, void* dst);
     void SetCameraParallax(const SceneCameraParallax& value) { m_parallax = value; }
     void SetCameraShake(const SceneCameraShake& value) { m_cameraShake = value; }
+    void SetCameraParallaxMouseInfluence(float value) override {
+        m_parallax.mouseinfluence = value;
+    }
     void SetCameraShakeEnabled(bool value) override { m_cameraShake.enable = value; }
     void SetCameraShakeAmplitude(float value) override { m_cameraShake.amplitude = value; }
     void SetCameraShakeSpeed(float value) override { m_cameraShake.speed = value; }
