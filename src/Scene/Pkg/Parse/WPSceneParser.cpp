@@ -1391,7 +1391,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
     }
-    if (puppet_has_masks && ! hasEffect &&
+    if (puppet_has_masks && has_bones &&
         context.scene->renderTargets.count(std::string(PUPPET_MASK_RT)) == 0) {
         SceneRenderTarget rt {};
         rt.width                                                  = 2;
@@ -1476,6 +1476,48 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     auto                       spMesh  = std::make_shared<SceneMesh>();
     auto&                      mesh    = *spMesh;
     const std::array<float, 2> mapRate = Texture0UvScale(material, wpimgobj.nopadding);
+    auto add_puppet_mask_submeshes     = [&](SceneMesh& target, uint32_t first_mask_slot) {
+        if (! puppet_has_masks) return;
+        std::set<uint32_t> clipped_indices;
+        for (const auto& pmesh : puppet->meshes) {
+            for (const auto& mb : pmesh.masks) {
+                for (auto idx : mb.part_ids_a) clipped_indices.insert(idx);
+            }
+        }
+        if (! clipped_indices.empty()) {
+            size_t smi = 0;
+            for (const auto& pmesh : puppet->meshes) {
+                if (pmesh.positions.empty()) continue;
+                if (smi >= target.Submeshes().size()) break;
+                std::vector<SceneMesh::DrawRange> kept;
+                kept.reserve(pmesh.parts.size());
+                for (size_t i = 0; i < pmesh.parts.size(); ++i) {
+                    const auto& p = pmesh.parts[i];
+                    if (p.size == 0) continue;
+                    if (clipped_indices.count((uint32_t)i) != 0) continue;
+                    kept.push_back({ p.start, p.size });
+                }
+                target.Submeshes()[smi].draw_ranges = std::move(kept);
+                ++smi;
+            }
+        }
+
+        uint32_t slot = first_mask_slot;
+        for (const auto& pmesh : puppet->meshes) {
+            for (const auto& mb : pmesh.masks) {
+                target.Submeshes().emplace_back();
+                auto& pre_sm = target.Submeshes().back();
+                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm, pmesh, mb.part_ids_b, mapRate);
+                pre_sm.material_slot   = slot++;
+                pre_sm.output_override = std::string(PUPPET_MASK_RT);
+
+                target.Submeshes().emplace_back();
+                auto& clip_sm = target.Submeshes().back();
+                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm, pmesh, mb.part_ids_a, mapRate);
+                clip_sm.material_slot = slot++;
+            }
+        }
+    };
 
     if (puppet) {
         if (hasEffect) {
@@ -1485,6 +1527,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 effct_final_mesh.Submeshes().emplace_back();
                 WPMdlParser::GenMeshFromMdl(effct_final_mesh.Submeshes().back(), m, mapRate);
             }
+            if (has_bones) add_puppet_mask_submeshes(effct_final_mesh, 1);
 
             if (has_bones) {
                 wpscene::ImageEffect puppet_effect;
@@ -1827,6 +1870,69 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 spMesh->AddMaterial(std::move(material));
                 RegisterShaderUserVarIndex(
                     context.scene.get(), spMesh->Material(), wpmat, wpEffShaderInfo);
+                auto add_puppet_mask_materials = [&]() -> bool {
+                    if (! (puppet && wpmat.use_puppet && puppet_has_masks)) return true;
+                    const std::string source_tex =
+                        wpmat.textures.empty() ? std::string {} : wpmat.textures[0];
+                    for (const auto& pmesh : puppet->meshes) {
+                        for (const auto& mb : pmesh.masks) {
+                            wpscene::Material mask_wpmat;
+                            mask_wpmat.shader     = "clippingmaskimage4";
+                            mask_wpmat.blending   = "translucent";
+                            mask_wpmat.depthtest  = "disabled";
+                            mask_wpmat.depthwrite = "disabled";
+                            mask_wpmat.cullmode   = "nocull";
+                            mask_wpmat.textures.resize(2);
+                            mask_wpmat.textures[0] = source_tex;
+                            mask_wpmat.textures[1] = mb.mat_json;
+                            WPMdlParser::AddPuppetMatInfo(mask_wpmat, *puppet);
+
+                            SceneMaterial        mask_material;
+                            SceneUniformNodeData mask_svData;
+                            WPShaderInfo         mask_shaderInfo;
+                            mask_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
+                            if (! LoadMaterial(vfs,
+                                               mask_wpmat,
+                                               context.scene.get(),
+                                               spEffNode.get(),
+                                               &mask_material,
+                                               &mask_svData,
+                                               &mask_shaderInfo)) {
+                                return false;
+                            }
+                            LoadConstvalue(mask_material, mask_wpmat, mask_shaderInfo);
+                            spMesh->AddMaterial(std::move(mask_material));
+
+                            wpscene::Material clip_wpmat        = wpmat;
+                            clip_wpmat.combos["CLIPPINGTARGET"] = 1;
+                            clip_wpmat.combos["CLIPPINGUVS"]    = 1;
+                            if (clip_wpmat.textures.size() < 9) clip_wpmat.textures.resize(9);
+                            clip_wpmat.textures[8] = std::string(PUPPET_MASK_RT);
+                            WPMdlParser::AddPuppetMatInfo(clip_wpmat, *puppet);
+
+                            SceneMaterial        clip_material;
+                            SceneUniformNodeData clip_svData;
+                            WPShaderInfo         clip_shaderInfo;
+                            clip_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
+                            if (! LoadMaterial(vfs,
+                                               clip_wpmat,
+                                               context.scene.get(),
+                                               spEffNode.get(),
+                                               &clip_material,
+                                               &clip_svData,
+                                               &clip_shaderInfo)) {
+                                return false;
+                            }
+                            LoadConstvalue(clip_material, clip_wpmat, clip_shaderInfo);
+                            spMesh->AddMaterial(std::move(clip_material));
+                        }
+                    }
+                    return true;
+                };
+                if (! add_puppet_mask_materials()) {
+                    eff_mat_ok = false;
+                    break;
+                }
                 if (auto* mat = spMesh->Material(); mat != nullptr) last_effect_shader = mat->name;
                 spEffNode->AddMesh(spMesh);
 
