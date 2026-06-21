@@ -999,6 +999,19 @@ std::string ResolveShaderMaterialKey(const WPShaderInfo& info, const std::string
     return {};
 }
 
+bool IsShaderPositionUniform(const WPShaderInfo& info, const std::string& glname) {
+    for (const auto& var : info.scalar_uniforms) {
+        if (var.name == glname) return var.position;
+    }
+    return false;
+}
+
+bool UsesEffectQuadPositionSpace(const wpscene::Material& wpmat) {
+    if (wpmat.shader != "effects/spin") return false;
+    auto mode_it = wpmat.combos.find("MODE");
+    return mode_it != wpmat.combos.end() && mode_it->second == 1;
+}
+
 // Register a (material, shader-info, wpmat) triple into the scene-wide user
 // variable index. Must be called AFTER the SceneMaterial has been moved into
 // a shared_ptr (e.g. `mesh->AddMaterial(std::move(local))`) and `stable_mat`
@@ -1094,7 +1107,13 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
         if (glname.empty()) {
             rstd_error("ShaderValue: {} not found in glsl", name);
         } else {
-            material.customShader.constValues[glname] = value;
+            std::vector<float> const_value = value;
+            if (UsesEffectQuadPositionSpace(wpmat) && IsShaderPositionUniform(info, glname) &&
+                const_value.size() >= 2) {
+                const_value[0] = const_value[0] * 2.0f - 1.0f;
+                const_value[1] = const_value[1] * 2.0f - 1.0f;
+            }
+            material.customShader.constValues[glname] = const_value;
         }
     }
 }
@@ -1711,6 +1730,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 .width                = (uint16_t)wpimgobj.size[0],
                 .height               = (uint16_t)wpimgobj.size[1],
                 .allowReuse           = true,
+                .force_clear          = ! wpimgobj.fullscreen,
                 .clear_on_first_write = true,
             };
             if (wpimgobj.fullscreen) {
