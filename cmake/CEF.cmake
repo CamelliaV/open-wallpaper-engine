@@ -23,6 +23,15 @@ endif()
 set(CEF_ROOT "${cef_SOURCE_DIR}" CACHE PATH "CEF binary distribution root" FORCE)
 list(APPEND CMAKE_MODULE_PATH "${cef_SOURCE_DIR}/cmake")
 
+if(NOT DEFINED PROJECT_ARCH)
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _weweb_system_processor)
+    if(_weweb_system_processor MATCHES "^(aarch64|arm64)$")
+        set(PROJECT_ARCH arm64)
+    elseif(_weweb_system_processor MATCHES "^(x86_64|amd64)$")
+        set(PROJECT_ARCH x86_64)
+    endif()
+endif()
+
 find_package(CEF REQUIRED)
 
 # CEF's variables.cmake derives CEF_BINARY_DIR from CMAKE_BUILD_TYPE
@@ -51,9 +60,18 @@ function(weweb_apply_cef_target_settings target)
 endfunction()
 
 # Apply CEF settings to a target that imports project C++20 modules. Clang's
-# BMI compatibility check requires exception and RTTI flags to match between
-# the module producer and importer, so keep those at the project's defaults.
+# BMI compatibility check requires exception, RTTI, and stack-protector flags
+# to match between module producers and importers, so keep those at the
+# project's defaults.
 function(weweb_apply_cef_module_target_settings target)
+    set(_weweb_cef_compiler_flags)
+    foreach(_flag IN LISTS CEF_COMPILER_FLAGS)
+        if(_flag MATCHES "^-fstack-protector($|-)" OR _flag MATCHES "^--param=ssp-buffer-size=")
+            continue()
+        endif()
+        list(APPEND _weweb_cef_compiler_flags "${_flag}")
+    endforeach()
+    set(CEF_COMPILER_FLAGS ${_weweb_cef_compiler_flags})
     SET_COMMON_TARGET_PROPERTIES(${target})
     target_compile_options(${target} PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-fexceptions -frtti>)

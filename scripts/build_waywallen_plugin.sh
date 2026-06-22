@@ -17,8 +17,29 @@ DIST_DIR="${DIST_DIR:-$PROJECT_DIR/dist}"
 info() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+host_arch="$(uname -m)"
+case "$host_arch" in
+    x86_64)
+        CONDA_TARGET="linux-64"
+        CONDA_GBM_ARCH="x86_64"
+        ;;
+    aarch64|arm64)
+        CONDA_TARGET="linux-aarch64"
+        CONDA_GBM_ARCH="aarch64"
+        ;;
+    *) fail "unsupported host architecture for conda target packages: $host_arch" ;;
+esac
+ENV_MERGED_FILE="$PROJECT_DIR/build/environment-${CONDA_TARGET}.yml"
+CONDA_TARGET_PACKAGES=(
+    "clang_${CONDA_TARGET}=22"
+    "clangxx_${CONDA_TARGET}=22"
+    "sysroot_${CONDA_TARGET}=2.28"
+    "mesa-libgbm-devel-conda-${CONDA_GBM_ARCH}=23.1.4"
+)
+
 command -v conda >/dev/null || fail "conda not found"
 command -v git >/dev/null || fail "git not found"
+command -v python3 >/dev/null || fail "python3 not found"
 [[ -f "$ENV_FILE" ]] || fail "missing $ENV_FILE"
 
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$PROJECT_DIR/build/.cache}"
@@ -44,6 +65,46 @@ case "$BRIDGE_INSTALL_DIR" in
     *) fail "BRIDGE_INSTALL_DIR must stay under $PROJECT_DIR/build" ;;
 esac
 
+info "Writing merged conda env: $ENV_MERGED_FILE"
+mkdir -p "$(dirname "$ENV_MERGED_FILE")"
+python3 - "$ENV_FILE" "$ENV_MERGED_FILE" "${CONDA_TARGET_PACKAGES[@]}" <<'PY'
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+extras = sys.argv[3:]
+
+lines = src.read_text().splitlines()
+existing = set()
+in_dependencies = False
+for raw in lines:
+    line = raw.split("#", 1)[0].rstrip()
+    if line.strip() == "dependencies:":
+        in_dependencies = True
+        continue
+    if not in_dependencies:
+        continue
+    stripped = line.strip()
+    if stripped.startswith("- "):
+        existing.add(stripped[2:].strip())
+
+extras = [pkg for pkg in extras if pkg not in existing]
+if extras:
+    insert_at = len(lines)
+    for idx, raw in enumerate(lines):
+        if raw.strip() == "- llvm-tools=22":
+            insert_at = idx + 1
+            break
+
+    additions = [f"  - {pkg}" for pkg in extras]
+    if insert_at < len(lines) and lines[insert_at].strip():
+        additions.append("")
+    lines[insert_at:insert_at] = additions
+
+dst.write_text("\n".join(lines) + "\n")
+PY
+
 info "Preparing conda env: $ENV_PREFIX"
 set +u
 # shellcheck disable=SC1091
@@ -51,9 +112,9 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 set -u
 
 if [[ -d "$ENV_PREFIX/conda-meta" ]]; then
-    conda env update -p "$ENV_PREFIX" -f "$ENV_FILE" --prune
+    conda env update -p "$ENV_PREFIX" -f "$ENV_MERGED_FILE" --prune
 else
-    conda env create -p "$ENV_PREFIX" -f "$ENV_FILE"
+    conda env create -p "$ENV_PREFIX" -f "$ENV_MERGED_FILE"
 fi
 
 set +u

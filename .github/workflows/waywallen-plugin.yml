@@ -90,7 +90,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.OWE_CONDA_PREFIX }}
-          key: owe-plugin-conda-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('environment.yml') }}
+          key: owe-plugin-conda-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('environment.yml', 'scripts/build_waywallen_plugin.sh') }}
 
       - name: Build plugin package
         id: package
