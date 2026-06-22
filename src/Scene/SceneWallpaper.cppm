@@ -61,6 +61,8 @@ public:
     void configure(SceneWallpaperConfig);
     void setFps(uint32_t);
     void setVolume(float);
+    void setVolumeScale(float);
+    void setVolumeScale(float, uint32_t fade_ms);
     void setMuted(bool);
     void setFillMode(FillMode);
     void setSpeed(float);

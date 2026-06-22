@@ -79,6 +79,10 @@ struct MainSetFps {
 struct MainSetVolume {
     float volume { 1.0f };
 };
+struct MainSetVolumeScale {
+    float scale { 1.0f };
+    uint32_t fade_ms { 0 };
+};
 struct MainSetMuted {
     bool muted { false };
 };
@@ -97,9 +101,9 @@ struct MainSetFirstFrameCallback {
 };
 
 struct MainMsg {
-    std::variant<MainLoadScene, MainConfigure, MainSetFps, MainSetVolume, MainSetMuted,
-                 MainSetFillMode, MainSetSpeed, MainSetUserProperty, MainSetFirstFrameCallback,
-                 MainStop, MainFirstFrame>
+    std::variant<MainLoadScene, MainConfigure, MainSetFps, MainSetVolume, MainSetVolumeScale,
+                 MainSetMuted, MainSetFillMode, MainSetSpeed, MainSetUserProperty,
+                 MainSetFirstFrameCallback, MainStop, MainFirstFrame>
         v;
 };
 
@@ -526,6 +530,7 @@ public:
     void on(MainConfigure&&);
     void on(MainSetFps&&);
     void on(MainSetVolume&&);
+    void on(MainSetVolumeScale&&);
     void on(MainSetMuted&&);
     void on(MainSetFillMode&&);
     void on(MainSetSpeed&&);
@@ -845,6 +850,7 @@ void SceneRuntimeController::on(MainConfigure&& m) {
     m_user_properties = NormalizeUserProperties(m_config.user_properties);
     on(MainSetFps { m_config.fps });
     on(MainSetVolume { m_config.volume });
+    on(MainSetVolumeScale { 1.0f });
     on(MainSetMuted { m_config.muted });
     on(MainSetFillMode { m_config.fill_mode });
     on(MainSetSpeed { m_config.speed });
@@ -859,6 +865,10 @@ void SceneRuntimeController::on(MainSetFps&& m) {
 void SceneRuntimeController::on(MainSetVolume&& m) {
     m_config.volume = m.volume;
     m_sound_manager->set_volume(m.volume);
+}
+
+void SceneRuntimeController::on(MainSetVolumeScale&& m) {
+    m_sound_manager->set_volume_scale(m.scale, m.fade_ms);
 }
 
 void SceneRuntimeController::on(MainSetMuted&& m) {
@@ -1121,6 +1131,14 @@ void SceneWallpaper::setFps(uint32_t fps) {
 
 void SceneWallpaper::setVolume(float volume) {
     (void)m_runtime->mainSender().send(MainMsg { MainSetVolume { volume } });
+}
+
+void SceneWallpaper::setVolumeScale(float scale) {
+    setVolumeScale(scale, 0);
+}
+
+void SceneWallpaper::setVolumeScale(float scale, uint32_t fade_ms) {
+    (void)m_runtime->mainSender().send(MainMsg { MainSetVolumeScale { scale, fade_ms } });
 }
 
 void SceneWallpaper::setMuted(bool muted) {

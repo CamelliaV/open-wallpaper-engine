@@ -204,9 +204,7 @@ struct HostState {
 
     std::atomic<bool> shutdown { false };
     std::atomic<bool> paused { false };
-    bool              audio_enabled { true };
     float             base_volume { 1.0f };
-    bool              muted { false };
 
     // Daemon enforces "Ready before any ReportState" during the spawn
     // handshake; the scene-load path can fire `setOnClearColor` (and
@@ -220,13 +218,19 @@ struct HostState {
 
 void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_release); }
 
-float effective_volume(const HostState& s) {
-    if (! s.audio_enabled || s.muted) return 0.0f;
-    return std::clamp(s.base_volume, 0.0f, 1.0f);
+float effective_volume(const HostState& s) { return std::clamp(s.base_volume, 0.0f, 1.0f); }
+
+void apply_volume_scale(HostState& s, float scale, uint32_t fade_ms) {
+    if (s.wp) s.wp->setVolumeScale(std::clamp(scale, 0.0f, 1.0f), fade_ms);
 }
 
-void apply_effective_volume(HostState& s) {
+void set_base_volume(HostState& s, float volume) {
+    s.base_volume = volume;
     if (s.wp) s.wp->setVolume(effective_volume(s));
+}
+
+void set_runtime_mute(HostState& s, bool muted, uint32_t fade_ms) {
+    apply_volume_scale(s, muted ? 0.0f : 1.0f, fade_ms);
 }
 
 // Apply a single fps change through the same path WW_EVT_IN_SET_FPS would
@@ -256,8 +260,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             if (! key || ! val) continue;
             if (std::strcmp(key, "volume") == 0) {
                 // Wire format is u32 0..100; engine takes 0..1 ratio.
-                s.base_volume = parse_f32(val, 100.0f) / 100.0f;
-                apply_effective_volume(s);
+                set_base_volume(s, parse_f32(val, 100.0f) / 100.0f);
             } else if (std::strcmp(key, "fps") == 0) {
                 char*         end = nullptr;
                 unsigned long n   = std::strtoul(val, &end, 10);
@@ -284,14 +287,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             s.wp->requestFrame();
         }
         break;
-    case WW_EVT_IN_MUTE:
-        s.muted = true;
-        apply_effective_volume(s);
-        break;
-    case WW_EVT_IN_UNMUTE:
-        s.muted = false;
-        apply_effective_volume(s);
-        break;
+    case WW_EVT_IN_MUTE: set_runtime_mute(s, true, msg.u.mute.fade_ms); break;
+    case WW_EVT_IN_UNMUTE: set_runtime_mute(s, false, msg.u.unmute.fade_ms); break;
     case WW_EVT_IN_POINTER_MOTION: {
         ww_bridge_pointer_motion_t pm {};
         if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.wp && s.width > 0 &&
@@ -517,7 +514,6 @@ int main(int argc, char** argv) {
     host.wp            = &wp;
     host.width         = opts.width;
     host.height        = opts.height;
-    host.audio_enabled = opts.enable_audio;
     host.base_volume   = opts.initial_volume;
 
     // Forward the scene's `general.clearcolor` to the daemon every
@@ -679,8 +675,7 @@ int main(int argc, char** argv) {
         reader_loop(host);
     });
 
-    // Idle until shutdown. All real work is on the render and reader
-    // threads.
+    // Idle until shutdown; the reader thread dispatches live controls.
     while (! host.shutdown.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
