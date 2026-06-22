@@ -33,6 +33,7 @@ struct Options {
     float       initial_volume { 1.0f };
     bool        enable_audio { true };
     std::string render_node;
+    std::string video_hwdec;
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
     uint32_t                                        msaa_samples { 1 };
     std::unordered_map<std::string, nlohmann::json> initial_user_properties;
@@ -61,6 +62,9 @@ Options parse_args(int argc, char** argv) {
         .default_value(std::string {})
         .help("DRM render-node path to pin Vulkan device selection to "
               "(empty ⇒ let Vulkan pick the default)");
+    program.add_argument("--hwdec")
+        .default_value(std::string {})
+        .help("Video texture decoder mode: auto, vulkan, vaapi, or none");
     program.add_argument("remaining").remaining();
 
     try {
@@ -77,6 +81,7 @@ Options parse_args(int argc, char** argv) {
     o.initial_assets = program.get<std::string>("--assets");
     o.workshop_id    = program.get<std::string>("--workshop_id");
     o.render_node    = program.get<std::string>("--render-node");
+    o.video_hwdec    = program.get<std::string>("--hwdec");
     return o;
 }
 
@@ -426,6 +431,12 @@ int main(int argc, char** argv) {
                 opts.render_node = v;
             }
         }
+        if (opts.video_hwdec.empty()) {
+            if (const char* v = kv_get(init.settings, "hwdec"); v && *v) {
+                opts.video_hwdec = v;
+            }
+        }
+        if (opts.video_hwdec.empty()) opts.video_hwdec = "auto";
         if (const char* v = kv_get(init.settings, "msaa"); v && *v) {
             char*         end = nullptr;
             unsigned long n   = std::strtoul(v, &end, 10);
@@ -564,6 +575,8 @@ int main(int argc, char** argv) {
         info.offscreen_tiling             = owe::TexTiling::OPTIMAL;
         info.width                        = static_cast<uint16_t>(opts.width);
         info.height                       = static_cast<uint16_t>(opts.height);
+        info.video_hwdec                  = opts.video_hwdec;
+        info.video_render_node            = opts.render_node;
         info.msaa_samples                 = opts.msaa_samples;
         info.surface_info.createSurfaceOp = [](VkInstance, VkSurfaceKHR*) -> VkResult {
             return VK_SUCCESS;

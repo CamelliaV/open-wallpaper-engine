@@ -39,8 +39,10 @@ struct RenderInitInfo {
     bool              offscreen_host_visible { false };
     VulkanSurfaceInfo surface_info;
 
-    uint16_t width { 1920 };
-    uint16_t height { 1080 };
+    uint16_t    width { 1920 };
+    uint16_t    height { 1080 };
+    std::string video_hwdec { "auto" };
+    std::string video_render_node;
     // MSAA samples for the screen RT only. 1 disables. Clamped down to
     // device's framebufferColorSampleCounts at init.
     uint32_t msaa_samples { 1 };

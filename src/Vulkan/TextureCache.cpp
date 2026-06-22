@@ -633,10 +633,10 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
  *      clamps reads/seeks to [offset, offset+size). Lifetime: the
  *      shared_ptr<owe::fs::IBinaryStream> lands inside the adapter and
  *      stays alive as long as the VideoDecoder owns it.
- *   3. We spin up a wavsen::video::VideoDecoder via open_from_stream in
- *      sw-decode mode (no Producer → no extension prerequisites on
- *      wescene's VkDevice). On Linux the avformat probe is happy with
- *      ftyp/EBML at the head of the stream.
+ *   3. We spin up a wavsen::video::VideoDecoder via open_from_stream.
+ *      When hwdec is enabled, a lazily-created wavsen Producer supplies
+ *      the hwdevice; otherwise the decoder stays sw-only. On Linux the
+ *      avformat probe is happy with ftyp/EBML at the head of the stream.
  *   4. Each render tick PumpVideoTextures advances PTS and copies the
  *      most recent decoded NV12 frame to the slot's VkImage via a
  *      CPU NV12→RGBA conversion + the existing staging path. Higher
@@ -724,9 +724,38 @@ void Nv12ToRgba8(const std::uint8_t* nv12, std::uint32_t w, std::uint32_t h, std
     }
 }
 
+wavsen::video::HwAccel ParseHwdec(std::string_view value) {
+    if (value == "vulkan") return wavsen::video::HwAccel::Vulkan;
+    if (value == "vaapi") return wavsen::video::HwAccel::Vaapi;
+    if (value == "none") return wavsen::video::HwAccel::None;
+    return wavsen::video::HwAccel::Auto;
+}
+
+const char* HwdecLabel(wavsen::video::HwAccel h) {
+    switch (h) {
+    case wavsen::video::HwAccel::Auto: return "auto";
+    case wavsen::video::HwAccel::Vulkan: return "vulkan";
+    case wavsen::video::HwAccel::Vaapi: return "vaapi";
+    case wavsen::video::HwAccel::None: return "none";
+    }
+    return "?";
+}
+
+const char* FrameKindLabel(wavsen::video::FrameKind k) {
+    switch (k) {
+    case wavsen::video::FrameKind::Sw: return "sw";
+    case wavsen::video::FrameKind::VulkanShared: return "vulkan-shared";
+    case wavsen::video::FrameKind::VaapiDrm: return "vaapi-drm";
+    }
+    return "?";
+}
+
 } // anonymous namespace
 
 struct TextureCache::VideoRegistry {
+    TextureCache::VideoDecodeOptions         options;
+    std::unique_ptr<wavsen::video::Producer> producer;
+
     struct Slot {
         std::string   key; /* matches m_tex_map */
         std::uint32_t width { 0 };
@@ -744,6 +773,19 @@ struct TextureCache::VideoRegistry {
         bool                                         have_frame { false };
     };
     std::vector<std::unique_ptr<Slot>> slots;
+
+    const wavsen::video::Producer* ensureProducer(std::uint32_t width, std::uint32_t height) {
+        if (producer) return producer.get();
+        auto r =
+            wavsen::video::Producer::create_with_render_node(width, height, options.render_node);
+        if (r.is_err()) {
+            rstd_warn("CreateVideoTex: hwdec producer unavailable; falling back to sw decode: {}",
+                      std::move(r).unwrap_err().message);
+            return nullptr;
+        }
+        producer = std::move(r).unwrap();
+        return producer.get();
+    }
 };
 
 ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
@@ -755,7 +797,8 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
     }
 
     if (! m_video_registry) {
-        m_video_registry = std::make_unique<VideoRegistry>();
+        m_video_registry          = std::make_unique<VideoRegistry>();
+        m_video_registry->options = m_video_decode_options;
     }
     if (! m_tex_cmd) allocateCmd();
 
@@ -868,24 +911,31 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
         VVK_CHECK(m_device.handle().WaitIdle());
     }
 
-    /* 3) Open the decoder. Sw mode for first iteration — sidesteps any
-     * Vulkan extension prerequisites on wescene's instance/device. The
-     * factory hands out a fresh PkgRangedInputStream per trial; the
-     * captured shared_ptr keeps the underlying pkg file handle alive. */
+    /* 3) Open the decoder. The factory hands out a fresh
+     * PkgRangedInputStream per trial; the captured shared_ptr keeps the
+     * underlying pkg file handle alive. */
     auto factory = [pkg = pkg_stream,
                     off = static_cast<std::int64_t>(mip.videoOffset),
                     len = static_cast<std::int64_t>(
                         mip.videoSize)]() -> std::unique_ptr<wavsen::video::IInputStream> {
         return std::make_unique<PkgRangedInputStream>(pkg, off, len);
     };
-    wavsen::video::OpenOpts opts {};
-    opts.hwaccel = wavsen::video::HwAccel::None;
-    auto dec_r   = wavsen::video::VideoDecoder::open_from_stream(std::move(factory),
-                                                                 slot->width,
-                                                                 slot->height,
-                                                                 /*loop=*/true,
-                                                                 /*vk=*/nullptr,
-                                                                 opts);
+    const auto              requested_hwdec = ParseHwdec(m_video_registry->options.hwdec);
+    wavsen::video::OpenOpts opts {
+        requested_hwdec,
+        m_video_registry->options.render_node,
+    };
+    const wavsen::video::Producer* producer = nullptr;
+    if (requested_hwdec != wavsen::video::HwAccel::None) {
+        producer = m_video_registry->ensureProducer(slot->width, slot->height);
+        if (! producer) opts.hwaccel = wavsen::video::HwAccel::None;
+    }
+    auto dec_r = wavsen::video::VideoDecoder::open_from_stream(std::move(factory),
+                                                               slot->width,
+                                                               slot->height,
+                                                               /*loop=*/true,
+                                                               producer,
+                                                               opts);
     if (dec_r.is_err()) {
         rstd_error("CreateVideoTex: open_from_stream failed for {}: {}",
                    image.key,
@@ -893,6 +943,10 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
         return {};
     }
     slot->decoder = std::move(dec_r).unwrap();
+    rstd_info("CreateVideoTex: {} hwdec={} decoder kind={}",
+              image.key,
+              HwdecLabel(requested_hwdec),
+              FrameKindLabel(slot->decoder->kind()));
 
     /* 4) Move VkImage ownership into m_tex_map[key] (the canonical
      * texture cache) and keep VideoRegistry::Slot referencing it by
@@ -1087,6 +1141,14 @@ bool TextureCache::UploadFontAtlasRegion(const std::string& key, const std::uint
 TextureCache::TextureCache(const Device& device): m_device(device) {}
 
 TextureCache::~TextureCache() {};
+
+void TextureCache::SetVideoDecodeOptions(VideoDecodeOptions options) {
+    m_video_decode_options = std::move(options);
+    if (m_video_registry) {
+        m_video_registry->options = m_video_decode_options;
+        if (m_video_registry->slots.empty()) m_video_registry->producer.reset();
+    }
+}
 
 void TextureCache::Clear() {
     m_tex_map.clear();

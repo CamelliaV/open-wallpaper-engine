@@ -393,10 +393,17 @@ struct TextureKey {
 
 class TextureCache : NoCopy, NoMove {
 public:
+    struct VideoDecodeOptions {
+        std::string hwdec { "auto" };
+        std::string render_node;
+    };
+
     TextureCache(const Device&);
     ~TextureCache();
 
     void Clear();
+
+    void SetVideoDecodeOptions(VideoDecodeOptions);
 
     std::optional<ExImageParameters> CreateExTex(uint32_t witdh, uint32_t height, VkFormat,
                                                  VkImageTiling);
@@ -435,6 +442,7 @@ private:
 
     const Device&                m_device;
     Map<std::string, ImageSlots> m_tex_map;
+    VideoDecodeOptions           m_video_decode_options;
 
     /* Opaque pImpl for the active video-tex set. Defined inside
      * TextureCache.cpp to keep wavsen.video out of the public

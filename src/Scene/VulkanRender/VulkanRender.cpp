@@ -315,6 +315,10 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
             rstd_error("init vulkan device failed");
             return false;
         }
+        m_device->tex_cache().SetVideoDecodeOptions(TextureCache::VideoDecodeOptions {
+            .hwdec       = info.video_hwdec,
+            .render_node = info.video_render_node,
+        });
     }
 
     {
