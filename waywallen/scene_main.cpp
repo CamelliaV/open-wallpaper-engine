@@ -1,5 +1,7 @@
 #include <rstd/macro.hpp>
 
+#include <algorithm>
+
 #include <argparse/argparse.hpp>
 
 #include <errno.h>
@@ -202,6 +204,9 @@ struct HostState {
 
     std::atomic<bool> shutdown { false };
     std::atomic<bool> paused { false };
+    bool              audio_enabled { true };
+    float             base_volume { 1.0f };
+    bool              muted { false };
 
     // Daemon enforces "Ready before any ReportState" during the spawn
     // handshake; the scene-load path can fire `setOnClearColor` (and
@@ -214,6 +219,15 @@ struct HostState {
 };
 
 void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_release); }
+
+float effective_volume(const HostState& s) {
+    if (! s.audio_enabled || s.muted) return 0.0f;
+    return std::clamp(s.base_volume, 0.0f, 1.0f);
+}
+
+void apply_effective_volume(HostState& s) {
+    if (s.wp) s.wp->setVolume(effective_volume(s));
+}
 
 // Apply a single fps change through the same path WW_EVT_IN_SET_FPS would
 // have used. Centralised so ApplySettings can route through it.
@@ -241,10 +255,9 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             const char* val = as.settings.data[i].value;
             if (! key || ! val) continue;
             if (std::strcmp(key, "volume") == 0) {
-                if (s.wp) {
-                    // Wire format is u32 0..100; engine takes 0..1 ratio.
-                    s.wp->setVolume(parse_f32(val, 100.0f) / 100.0f);
-                }
+                // Wire format is u32 0..100; engine takes 0..1 ratio.
+                s.base_volume = parse_f32(val, 100.0f) / 100.0f;
+                apply_effective_volume(s);
             } else if (std::strcmp(key, "fps") == 0) {
                 char*         end = nullptr;
                 unsigned long n   = std::strtoul(val, &end, 10);
@@ -270,6 +283,14 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             s.wp->pause();
             s.wp->requestFrame();
         }
+        break;
+    case WW_EVT_IN_MUTE:
+        s.muted = true;
+        apply_effective_volume(s);
+        break;
+    case WW_EVT_IN_UNMUTE:
+        s.muted = false;
+        apply_effective_volume(s);
         break;
     case WW_EVT_IN_POINTER_MOTION: {
         ww_bridge_pointer_motion_t pm {};
@@ -493,9 +514,11 @@ int main(int argc, char** argv) {
     owe::SceneWallpaper wp;
     if (! wp.init()) die("SceneWallpaper::init failed");
 
-    host.wp     = &wp;
-    host.width  = opts.width;
-    host.height = opts.height;
+    host.wp            = &wp;
+    host.width         = opts.width;
+    host.height        = opts.height;
+    host.audio_enabled = opts.enable_audio;
+    host.base_volume   = opts.initial_volume;
 
     // Forward the scene's `general.clearcolor` to the daemon every
     // time a scene loads. Alpha is forced to 1.0 — the rendered
@@ -520,7 +543,7 @@ int main(int argc, char** argv) {
     wp_config.scene_document  = opts.initial_scene_document;
     wp_config.user_properties = opts.initial_user_properties;
     wp_config.fps             = opts.initial_fps;
-    wp_config.volume          = opts.initial_volume;
+    wp_config.volume          = effective_volume(host);
     // Mute first so loadScene's SoundManager::init() short-circuits when
     // audio is disabled; the audio device + system output never open.
     wp_config.muted = ! opts.enable_audio;

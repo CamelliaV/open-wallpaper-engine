@@ -63,6 +63,7 @@ export inline constexpr uint32_t WW_DRM_FORMAT_RGBX8888 = OWE_WW_DRM_FORMAT_RGBX
 export inline constexpr uint32_t WW_DRM_FORMAT_BGRX8888 = OWE_WW_DRM_FORMAT_BGRX8888;
 
 export using ::WW_EVT_IN_INIT;
+export using ::WW_EVT_IN_MUTE;
 export using ::WW_EVT_IN_NEGOTIATE_BUFFERS;
 export using ::WW_EVT_IN_PAUSE;
 export using ::WW_EVT_IN_PLAY;
@@ -72,6 +73,7 @@ export using ::WW_EVT_IN_POINTER_MOTION;
 export using ::WW_EVT_IN_SET_FPS;
 export using ::WW_EVT_IN_SETTING_CHANGED;
 export using ::WW_EVT_IN_SHUTDOWN;
+export using ::WW_EVT_IN_UNMUTE;
 export using ::WW_POOL_BACKEND_VULKAN;
 export using ::WW_RESOLUTION_720P;
 export using ::WW_RESOLUTION_1080P;

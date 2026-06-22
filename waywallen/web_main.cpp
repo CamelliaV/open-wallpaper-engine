@@ -1,5 +1,7 @@
 #include <rstd/macro.hpp>
 
+#include <algorithm>
+
 #include <argparse/argparse.hpp>
 
 #include <errno.h>
@@ -149,6 +151,8 @@ struct SettingDelta {
     std::string value;
 };
 
+constexpr std::string_view kRuntimeMuteKey = "__waywallen_runtime_mute";
+
 struct HostState {
     int                             sock { -1 };
     ww_pool_t*                      pool { nullptr };
@@ -162,6 +166,9 @@ struct HostState {
     std::atomic<bool>     paused { false };
     std::atomic<bool>     submitted_since_negotiate { false };
     std::atomic<uint32_t> target_fps { 60 };
+    bool                  audio_enabled { true };
+    float                 base_volume { 1.0f };
+    bool                  muted { false };
 
     // Tracked locally on the reader thread so OnMouseMove can carry
     // the left-button-down flag CEF expects in modifiers (GLFW path
@@ -185,6 +192,15 @@ void enqueue_setting(HostState& s, std::string key, std::string val) {
     s.pending_settings.push_back({ std::move(key), std::move(val) });
 }
 
+float effective_volume(const HostState& s) {
+    if (! s.audio_enabled || s.muted) return 0.0f;
+    return std::clamp(s.base_volume, 0.0f, 1.0f);
+}
+
+void apply_effective_volume(HostState& s) {
+    if (s.host) s.host->ApplyVolume(effective_volume(s));
+}
+
 void drain_settings(HostState& s) {
     std::vector<SettingDelta> drained;
     {
@@ -195,7 +211,11 @@ void drain_settings(HostState& s) {
     for (auto& sd : drained) {
         if (sd.key == "volume") {
             // Wire format is u32 0..100; CEF host takes 0..1 ratio.
-            s.host->ApplyVolume(parse_f32(sd.value.c_str(), 100.0f) / 100.0f);
+            s.base_volume = parse_f32(sd.value.c_str(), 100.0f) / 100.0f;
+            apply_effective_volume(s);
+        } else if (sd.key == kRuntimeMuteKey) {
+            s.muted = parse_bool(sd.value.c_str(), false);
+            apply_effective_volume(s);
         } else if (sd.key == "fps") {
             uint32_t fps = parse_u32(sd.value.c_str(), 0);
             if (fps > 0) {
@@ -278,6 +298,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         s.paused.store(true, std::memory_order_release);
         sync_pause_visibility(s);
         break;
+    case WW_EVT_IN_MUTE: enqueue_setting(s, std::string(kRuntimeMuteKey), "true"); break;
+    case WW_EVT_IN_UNMUTE: enqueue_setting(s, std::string(kRuntimeMuteKey), "false"); break;
     case WW_EVT_IN_POINTER_MOTION: {
         // Daemon transforms display-local coords into renderer-tex
         // pixel space before sending; CEF view rect is opened at the
@@ -452,6 +474,8 @@ int main(int argc, char** argv) {
         }
         state.target_fps.store(opts.initial_fps > 0 ? opts.initial_fps : 60,
                                std::memory_order_release);
+        state.audio_enabled = opts.enable_audio;
+        state.base_volume   = opts.initial_volume;
 
         ww_bridge_init_free(&init);
     }
@@ -510,10 +534,10 @@ int main(int argc, char** argv) {
         // there was no browser yet, but we can post a property update
         // now and the listener will pick it up.
         if (opts.initial_fps > 0) host.SetFrameRate(static_cast<int>(opts.initial_fps));
-        host.ApplyVolume(opts.initial_volume);
+        apply_effective_volume(state);
         rstd_info("waywallen-weweb-renderer: negotiated, fps={} volume={}",
                   opts.initial_fps,
-                  std::format("{:.2f}", static_cast<double>(opts.initial_volume)));
+                  std::format("{:.2f}", static_cast<double>(effective_volume(state))));
     });
 
     // BrowserHost::Init wants resources / locales relative to argv[0].
