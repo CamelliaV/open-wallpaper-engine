@@ -22,11 +22,15 @@
 #
 # Selective fetch
 # ---------------
+# Manifest entries may use flatpak-builder's `only-arches` array. When present,
+# the entry is active only when the current CMake target processor matches one
+# of those Flatpak architecture names.
+#
 #   NAMES <name> [<name> ...]
 #     Whitelist. If non-empty, only entries whose `x-cmake.name` is in
 #     the list are declared/fetched; others are skipped silently. Empty
-#     (default) keeps the fetch-all behavior. A NAMES entry not present
-#     in deps.json is reported as a warning.
+#     (default) keeps the fetch-all behavior. A NAMES entry not active
+#     for the current architecture is reported as a warning.
 #
 # Skip-already-loaded
 # -------------------
@@ -62,6 +66,58 @@ function(_fetchdeps_json_get_opt out json)
   else()
     set(${out} "${_v}" PARENT_SCOPE)
   endif()
+endfunction()
+
+function(_fetchdeps_normalize_arch out arch)
+  string(TOLOWER "${arch}" _fd_arch)
+  if(_fd_arch MATCHES "^(x86_64|amd64)$")
+    set(_fd_arch "x86_64")
+  elseif(_fd_arch MATCHES "^(aarch64|arm64)$")
+    set(_fd_arch "aarch64")
+  elseif(_fd_arch MATCHES "^(i[3-6]86|x86)$")
+    set(_fd_arch "i386")
+  elseif(_fd_arch MATCHES "^(armv[67].*|armhf|arm)$")
+    set(_fd_arch "arm")
+  endif()
+  set(${out} "${_fd_arch}" PARENT_SCOPE)
+endfunction()
+
+function(_fetchdeps_current_arch out)
+  set(_fd_arch "${CMAKE_SYSTEM_PROCESSOR}")
+  if(NOT _fd_arch)
+    set(_fd_arch "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
+  _fetchdeps_normalize_arch(_fd_arch "${_fd_arch}")
+  set(${out} "${_fd_arch}" PARENT_SCOPE)
+endfunction()
+
+function(_fetchdeps_entry_matches_arch out json)
+  _fetchdeps_json_has_key(_fd_has_only "${json}" "only-arches")
+  if(NOT _fd_has_only)
+    set(${out} TRUE PARENT_SCOPE)
+    return()
+  endif()
+
+  string(JSON _fd_only_type ERROR_VARIABLE _fd_err TYPE "${json}" "only-arches")
+  if(_fd_err OR NOT _fd_only_type STREQUAL "ARRAY")
+    message(FATAL_ERROR "fetchdeps: only-arches must be an array of architecture names")
+  endif()
+
+  _fetchdeps_current_arch(_fd_current_arch)
+  string(JSON _fd_arch_len LENGTH "${json}" "only-arches")
+  if(_fd_arch_len GREATER 0)
+    math(EXPR _fd_arch_last "${_fd_arch_len} - 1")
+    foreach(_fd_i RANGE 0 ${_fd_arch_last})
+      string(JSON _fd_entry_arch GET "${json}" "only-arches" ${_fd_i})
+      _fetchdeps_normalize_arch(_fd_entry_arch "${_fd_entry_arch}")
+      if(_fd_entry_arch STREQUAL _fd_current_arch)
+        set(${out} TRUE PARENT_SCOPE)
+        return()
+      endif()
+    endforeach()
+  endif()
+
+  set(${out} FALSE PARENT_SCOPE)
 endfunction()
 
 function(_fetchdeps_is_declared out name)
@@ -269,19 +325,28 @@ macro(fetchdeps _fd_deps_path)
       set(_fd_known_names "")
       foreach(_fd_top_i RANGE 0 ${_fd_top_last})
         string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
+        _fetchdeps_entry_matches_arch(_fd_arch_ok "${_fd_top_entry}")
+        if(NOT _fd_arch_ok)
+          continue()
+        endif()
         string(JSON _fd_pre_name GET "${_fd_top_entry}" "x-cmake" name)
         list(APPEND _fd_known_names "${_fd_pre_name}")
       endforeach()
       foreach(_fd_want IN LISTS _FD_NAMES)
         if(NOT _fd_want IN_LIST _fd_known_names)
+          _fetchdeps_current_arch(_fd_current_arch)
           message(WARNING
-            "fetchdeps: NAMES entry '${_fd_want}' not in ${_fd_deps_path}")
+            "fetchdeps: NAMES entry '${_fd_want}' not active for ${_fd_current_arch} in ${_fd_deps_path}")
         endif()
       endforeach()
     endif()
 
     foreach(_fd_top_i RANGE 0 ${_fd_top_last})
       string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
+      _fetchdeps_entry_matches_arch(_fd_arch_ok "${_fd_top_entry}")
+      if(NOT _fd_arch_ok)
+        continue()
+      endif()
       string(JSON _fd_pre_name GET "${_fd_top_entry}" "x-cmake" name)
       if(_FD_NAMES AND NOT _fd_pre_name IN_LIST _FD_NAMES)
         continue()
@@ -290,6 +355,10 @@ macro(fetchdeps _fd_deps_path)
     endforeach()
     foreach(_fd_top_i RANGE 0 ${_fd_top_last})
       string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
+      _fetchdeps_entry_matches_arch(_fd_arch_ok "${_fd_top_entry}")
+      if(NOT _fd_arch_ok)
+        continue()
+      endif()
       string(JSON _fd_pre_name GET "${_fd_top_entry}" "x-cmake" name)
       if(_FD_NAMES AND NOT _fd_pre_name IN_LIST _FD_NAMES)
         continue()

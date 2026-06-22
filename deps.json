@@ -92,8 +92,21 @@
   {
     "dest": "build/_flatpak_deps/cef-src",
     "type": "archive",
-    "url": "https://cef-builds.spotifycdn.com/cef_binary_147.0.10%2Bgd58e84d%2Bchromium-147.0.7727.118_linux64_minimal.tar.bz2",
-    "sha256": "087ccfa1f0438429e20d91293b15cae08ee9e7b4988cc018d47568dd59dad1ef",
+    "only-arches": ["x86_64"],
+    "url": "https://cef-builds.spotifycdn.com/cef_binary_149.0.4%2Bg2f1bfd8%2Bchromium-149.0.7827.156_linux64_minimal.tar.bz2",
+    "sha256": "6d43607675e47ed6bfa40d1cfce136d04e7720529f8f1c4435d4ba1dcd1839b2",
+    "x-cmake": {
+      "name": "cef",
+      "exclude_from_all": true,
+      "source_subdir": "cmake-noop"
+    }
+  },
+  {
+    "dest": "build/_flatpak_deps/cef-src",
+    "type": "archive",
+    "only-arches": ["aarch64"],
+    "url": "https://cef-builds.spotifycdn.com/cef_binary_149.0.4%2Bg2f1bfd8%2Bchromium-149.0.7827.156_linuxarm64_minimal.tar.bz2",
+    "sha256": "8909a79689eec7b23ed80084b69766952d44e00f9a345832951b32903f8a80a0",
     "x-cmake": {
       "name": "cef",
       "exclude_from_all": true,

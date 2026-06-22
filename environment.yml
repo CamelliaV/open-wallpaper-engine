@@ -36,6 +36,7 @@ dependencies:
   - freetype
   - expat
   - lz4-c
+  - zlib
 
   # CEF build/link dependencies.
   - alsa-lib
