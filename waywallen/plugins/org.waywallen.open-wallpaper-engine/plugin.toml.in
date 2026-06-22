@@ -19,7 +19,7 @@ entry_version = 2
 bin = "@OWE_WESCENE_BIN@"
 types = ["scene"]
 priority = 100
-spawn_version = 5
+spawn_version = 6
 extras = ["assets", "workshop_id"]
 events = ["pointer"]
 

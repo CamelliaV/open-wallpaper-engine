@@ -50,7 +50,9 @@ public:
     void initVulkan(RenderInitInfo);
 
     void play();
+    void play(uint32_t fade_ms);
     void pause();
+    void pause(uint32_t fade_ms);
     void requestFrame();
     void mouseInput(double x, double y);
     // button: 0=left, 1=right, 2=middle (GLFW numbering). down=true on

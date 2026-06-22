@@ -204,6 +204,7 @@ struct HostState {
 
     std::atomic<bool> shutdown { false };
     std::atomic<bool> paused { false };
+    std::atomic<bool> muted { false };
     float             base_volume { 1.0f };
 
     // Daemon enforces "Ready before any ReportState" during the spawn
@@ -224,13 +225,39 @@ void apply_volume_scale(HostState& s, float scale, uint32_t fade_ms) {
     if (s.wp) s.wp->setVolumeScale(std::clamp(scale, 0.0f, 1.0f), fade_ms);
 }
 
+float runtime_volume_scale(const HostState& s) {
+    return (! s.paused.load(std::memory_order_acquire) && ! s.muted.load(std::memory_order_acquire))
+               ? 1.0f
+               : 0.0f;
+}
+
+void apply_runtime_volume_scale(HostState& s, uint32_t fade_ms) {
+    apply_volume_scale(s, runtime_volume_scale(s), fade_ms);
+}
+
 void set_base_volume(HostState& s, float volume) {
     s.base_volume = volume;
     if (s.wp) s.wp->setVolume(effective_volume(s));
 }
 
+void set_runtime_pause(HostState& s, bool paused, uint32_t fade_ms) {
+    const bool was_paused  = s.paused.exchange(paused, std::memory_order_acq_rel);
+    const bool was_audible = ! was_paused && ! s.muted.load(std::memory_order_acquire);
+    if (! s.wp) return;
+
+    if (paused) {
+        apply_runtime_volume_scale(s, fade_ms);
+        s.wp->pause(was_audible ? fade_ms : 0);
+        s.wp->requestFrame();
+    } else {
+        s.wp->play();
+        apply_runtime_volume_scale(s, fade_ms);
+    }
+}
+
 void set_runtime_mute(HostState& s, bool muted, uint32_t fade_ms) {
-    apply_volume_scale(s, muted ? 0.0f : 1.0f, fade_ms);
+    s.muted.store(muted, std::memory_order_release);
+    apply_runtime_volume_scale(s, fade_ms);
 }
 
 // Apply a single fps change through the same path WW_EVT_IN_SET_FPS would
@@ -276,17 +303,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         ww_bridge_setting_changed_free(&as);
         break;
     }
-    case WW_EVT_IN_PLAY:
-        s.paused.store(false, std::memory_order_release);
-        if (s.wp) s.wp->play();
-        break;
-    case WW_EVT_IN_PAUSE:
-        s.paused.store(true, std::memory_order_release);
-        if (s.wp) {
-            s.wp->pause();
-            s.wp->requestFrame();
-        }
-        break;
+    case WW_EVT_IN_PLAY: set_runtime_pause(s, false, msg.u.play.fade_ms); break;
+    case WW_EVT_IN_PAUSE: set_runtime_pause(s, true, msg.u.pause.fade_ms); break;
     case WW_EVT_IN_MUTE: set_runtime_mute(s, true, msg.u.mute.fade_ms); break;
     case WW_EVT_IN_UNMUTE: set_runtime_mute(s, false, msg.u.unmute.fade_ms); break;
     case WW_EVT_IN_POINTER_MOTION: {
@@ -511,10 +529,10 @@ int main(int argc, char** argv) {
     owe::SceneWallpaper wp;
     if (! wp.init()) die("SceneWallpaper::init failed");
 
-    host.wp            = &wp;
-    host.width         = opts.width;
-    host.height        = opts.height;
-    host.base_volume   = opts.initial_volume;
+    host.wp          = &wp;
+    host.width       = opts.width;
+    host.height      = opts.height;
+    host.base_volume = opts.initial_volume;
 
     // Forward the scene's `general.clearcolor` to the daemon every
     // time a scene loads. Alpha is forced to 1.0 — the rendered

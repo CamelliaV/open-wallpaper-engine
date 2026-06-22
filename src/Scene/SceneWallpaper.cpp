@@ -67,7 +67,12 @@ struct RenderMsg {
 
 struct MainLoadScene {};
 struct MainStop {
-    bool stop;
+    bool     stop;
+    uint32_t fade_ms { 0 };
+    bool     scale_audio { false };
+};
+struct MainPauseAudio {
+    uint64_t generation { 0 };
 };
 struct MainFirstFrame {};
 struct MainConfigure {
@@ -80,7 +85,7 @@ struct MainSetVolume {
     float volume { 1.0f };
 };
 struct MainSetVolumeScale {
-    float scale { 1.0f };
+    float    scale { 1.0f };
     uint32_t fade_ms { 0 };
 };
 struct MainSetMuted {
@@ -103,7 +108,7 @@ struct MainSetFirstFrameCallback {
 struct MainMsg {
     std::variant<MainLoadScene, MainConfigure, MainSetFps, MainSetVolume, MainSetVolumeScale,
                  MainSetMuted, MainSetFillMode, MainSetSpeed, MainSetUserProperty,
-                 MainSetFirstFrameCallback, MainStop, MainFirstFrame>
+                 MainSetFirstFrameCallback, MainStop, MainPauseAudio, MainFirstFrame>
         v;
 };
 
@@ -537,6 +542,7 @@ public:
     void on(MainSetUserProperty&&);
     void on(MainSetFirstFrameCallback&&);
     void on(MainStop&&);
+    void on(MainPauseAudio&&);
     void on(MainFirstFrame&&);
 
     bool isGenGraphviz() const { return m_config.graphviz; }
@@ -555,6 +561,7 @@ private:
     std::unique_ptr<wavsen::audio::SoundManager> m_sound_manager;
     FirstFrameCallback                           m_first_frame_callback;
     ClearColorCallback                           m_clear_color_cb;
+    uint64_t                                     m_audio_pause_generation { 0 };
 
     msgloop::MessageLoop<MainMsg>          m_main_loop;
     msgloop::MessageLoop<RenderMsg>        m_render_loop;
@@ -901,12 +908,28 @@ void SceneRuntimeController::on(MainSetFirstFrameCallback&& m) {
 }
 
 void SceneRuntimeController::on(MainStop&& m) {
+    const uint64_t generation = ++m_audio_pause_generation;
     if (m.stop) {
-        m_sound_manager->pause();
+        if (m.scale_audio) m_sound_manager->set_volume_scale(0.0f, m.fade_ms);
+        if (m.fade_ms == 0 || ! m.scale_audio) {
+            m_sound_manager->pause();
+        } else {
+            auto     tx    = m_main_loop.sender();
+            uint32_t delay = m.fade_ms;
+            std::thread([tx = std::move(tx), generation, delay]() mutable {
+                std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+                (void)tx.send(MainMsg { MainPauseAudio { generation } });
+            }).detach();
+        }
     } else {
         m_sound_manager->play();
+        if (m.scale_audio) m_sound_manager->set_volume_scale(1.0f, m.fade_ms);
     }
     (void)m_render_loop.sender().send(RenderMsg { RenderStop { m.stop } });
+}
+
+void SceneRuntimeController::on(MainPauseAudio&& m) {
+    if (m.generation == m_audio_pause_generation) m_sound_manager->pause();
 }
 
 void SceneRuntimeController::on(MainFirstFrame&&) {
@@ -1104,7 +1127,13 @@ void SceneWallpaper::initVulkan(RenderInitInfo info) {
 }
 
 void SceneWallpaper::play() { (void)m_runtime->mainSender().send(MainMsg { MainStop { false } }); }
+void SceneWallpaper::play(uint32_t fade_ms) {
+    (void)m_runtime->mainSender().send(MainMsg { MainStop { false, fade_ms, true } });
+}
 void SceneWallpaper::pause() { (void)m_runtime->mainSender().send(MainMsg { MainStop { true } }); }
+void SceneWallpaper::pause(uint32_t fade_ms) {
+    (void)m_runtime->mainSender().send(MainMsg { MainStop { true, fade_ms, true } });
+}
 void SceneWallpaper::requestFrame() {
     (void)m_runtime->renderSender().send(RenderMsg { RenderDraw {} });
 }
@@ -1133,9 +1162,7 @@ void SceneWallpaper::setVolume(float volume) {
     (void)m_runtime->mainSender().send(MainMsg { MainSetVolume { volume } });
 }
 
-void SceneWallpaper::setVolumeScale(float scale) {
-    setVolumeScale(scale, 0);
-}
+void SceneWallpaper::setVolumeScale(float scale) { setVolumeScale(scale, 0); }
 
 void SceneWallpaper::setVolumeScale(float scale, uint32_t fade_ms) {
     (void)m_runtime->mainSender().send(MainMsg { MainSetVolumeScale { scale, fade_ms } });
