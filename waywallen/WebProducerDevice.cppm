@@ -74,12 +74,23 @@ public:
     // returns -1 on failure.
     int BlitToSlot(const ImportedFrame& imp, VkImage slot_image, VkExtent2D slot_extent);
 
+    // Upload a CEF CPU paint buffer into a bridge slot. `slot_format`
+    // must be the VkFormat published by BridgeProducerCore for the
+    // currently acquired slot.
+    int UploadToSlot(const ::weweb::CpuPaintFrame& frame, VkImage slot_image,
+                     VkExtent2D slot_extent, VkFormat slot_format);
+
 private:
     bool CreateInstance();
     bool PickPhysicalDevice();
     bool CreateDevice();
     bool CreateCommandPool();
     bool CreateSyncObjects();
+    bool BeginTransferCommands(const char* op);
+    int  SubmitTransferCommands(const char* op, bool wait_for_completion);
+    void RestoreTransferFence();
+    bool EnsureCpuUploadResources(const ::weweb::CpuPaintFrame& frame);
+    void DestroyCpuUploadResources();
 
     uint32_t FindMemoryType(uint32_t bits, VkMemoryPropertyFlags props) const;
 
@@ -100,6 +111,12 @@ private:
 
     PFN_vkGetMemoryFdPropertiesKHR pfn_GetMemoryFdProperties_ { nullptr };
     PFN_vkGetSemaphoreFdKHR        pfn_GetSemaphoreFd_ { nullptr };
+
+    VkBuffer       cpu_staging_buffer_ { VK_NULL_HANDLE };
+    VkDeviceMemory cpu_staging_memory_ { VK_NULL_HANDLE };
+    void*          cpu_staging_map_ { nullptr };
+    VkDeviceSize   cpu_staging_size_ { 0 };
+    bool           cpu_staging_coherent_ { false };
 };
 
 } // namespace ww_wescene

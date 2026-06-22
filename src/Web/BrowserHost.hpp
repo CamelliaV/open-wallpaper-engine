@@ -35,6 +35,12 @@ public:
         int                   remote_debugging_port { 0 };
         // false ⇒ pass --mute-audio to Chromium so no output device opens.
         bool enable_audio { true };
+        bool shared_texture_enabled { true };
+    };
+
+    struct OpenOptions {
+        bool shared_texture_enabled { true };
+        int  frame_rate { 60 };
     };
 
     BrowserHost();
@@ -56,10 +62,11 @@ public:
     bool Init(const InitOptions& opts);
 
     // Install an accelerated-paint sink. When set BEFORE OpenWallpaper
-    // and `info.shared_texture_enabled = 1` is honoured by CEF, the
+    // and OpenOptions::shared_texture_enabled is honoured by CEF, the
     // host will deliver DMA-BUF frames here instead of CPU OnPaint
     // bitmaps. Plane FDs are valid only inside the synchronous call.
     void SetAcceleratedPaintCallback(AcceleratedPaintCallback cb);
+    void SetCpuPaintCallback(CpuPaintCallback cb);
 
     // Spawn a windowless (OSR) browser for the wallpaper. The entry HTML
     // is loaded from `file://<workshop_dir>/<entry_html>` and the
@@ -68,6 +75,8 @@ public:
     // size is `width` x `height`; resize via OnResize.
     bool OpenWallpaper(const WebManifest& manifest, const std::filesystem::path& workshop_dir,
                        int width, int height);
+    bool OpenWallpaper(const WebManifest& manifest, const std::filesystem::path& workshop_dir,
+                       int width, int height, OpenOptions opts);
 
     // Notify CEF that the host window changed size. Updates GetViewRect's
     // returned rect so the next OnPaint matches `width` x `height`.

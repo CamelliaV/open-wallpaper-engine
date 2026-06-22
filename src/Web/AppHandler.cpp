@@ -36,9 +36,6 @@ void AppHandler::OnBeforeCommandLineProcessing(const CefString&          process
     cmd->AppendSwitch("no-sandbox");
     // cmd->AppendSwitch("disable-gpu-sandbox");
 
-    cmd->AppendSwitch("off-screen-rendering-enabled");
-    cmd->AppendSwitch("shared-texture-enabled");
-
     std::string features { "AcceleratedVideoDecodeLinuxZeroCopyGL,AcceleratedVideoDecodeLinuxGL,"
                            "VaapiIgnoreDriverChecks,VaapiOnNvidiaGPUs,VaapiVideoDecodeLinuxGL" };
     std::string dis_features;
@@ -49,33 +46,49 @@ void AppHandler::OnBeforeCommandLineProcessing(const CefString&          process
             "Crashpad,AutofillServerCommunication,HardwareMediaKeyHandling,WebBluetooth,WebUSB";
     }
 
+    auto dis_vulkan = [&dis_features, &cmd] {
+        if (! dis_features.empty()) dis_features += ",";
+        dis_features += "Vulkan,VulkanFromANGLE,DefaultAngleVulkan,SkiaGraphite";
+        cmd->AppendSwitch("disable-vulkan-surface");
+    };
+
+    auto enable_shared = [this, &cmd] {
+        if (! m_shared_texture_enabled) return;
+        cmd->AppendSwitch("shared-texture-enabled");
+        cmd->AppendSwitch("enable-zero-copy");
+    };
+
     if (0) {
         // Vulkan
         cmd->AppendSwitch("vulkan");
         cmd->AppendSwitchWithValue("use-vulkan", "native");
         cmd->AppendSwitchWithValue("use-angle", "vulkan");
         cmd->AppendSwitchWithValue("use-gl", "angle");
-        cmd->AppendSwitch("disable-vulkan-surface");
-        cmd->AppendSwitch("disable-software-rasterizer");
         cmd->AppendSwitch("enable-raw-draw");
         cmd->AppendSwitch("enable-unsafe-webgpu");
+        enable_shared();
+
         features.append(",DefaultAngleVulkan,VulkanFromANGLE,Vulkan,SkiaGraphite");
+        cmd->AppendSwitchWithValue("ozone-platform", "x11");
     } else {
         // Gl-Egl
         cmd->AppendSwitchWithValue("use-gl", "angle");
         cmd->AppendSwitchWithValue("use-angle", "gl-egl");
-        cmd->AppendSwitch("disable-vulkan-surface");
-        dis_features += ",Vulkan,VulkanFromANGLE,DefaultAngleVulkan,SkiaGraphite";
-    }
 
-    cmd->AppendSwitchWithValue("ozone-platform", "wayland");
-    // cmd->AppendSwitchWithValue("headless", "new");
-    // cmd->AppendSwitchWithValue("ozone-platform-hint", "wayland");
+        enable_shared();
+        dis_vulkan();
+
+        cmd->AppendSwitchWithValue("ozone-platform", "wayland");
+        // cmd->AppendSwitchWithValue("ozone-platform-hint", "wayland");
+    }
+    // cmd->AppendSwitchWithValue("render-node-override", "/dev/dri/renderD130");
+
     cmd->AppendSwitch("enable-gpu");
     cmd->AppendSwitch("ignore-gpu-blocklist");
     cmd->AppendSwitch("enable-gpu-rasterization");
     cmd->AppendSwitch("enable-gpu-compositing");
-    cmd->AppendSwitch("enable-zero-copy");
+    cmd->AppendSwitch("disable-software-rasterizer");
+    cmd->AppendSwitch("off-screen-rendering-enabled");
 
     // hw decode
     cmd->AppendSwitch("enable-accelerated-video-decode");

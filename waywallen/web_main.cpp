@@ -44,6 +44,7 @@ struct Options {
     float                 initial_volume { 1.0f };
     int                   remote_debugging_port { 0 };
     bool                  enable_audio { true };
+    bool                  shared_texture_enabled { true };
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -152,9 +153,10 @@ struct HostState {
     std::mutex                settings_mu;
     std::vector<SettingDelta> pending_settings;
 
-    std::atomic<bool> shutdown { false };
-    std::atomic<bool> paused { false };
-    std::atomic<bool> submitted_since_negotiate { false };
+    std::atomic<bool>     shutdown { false };
+    std::atomic<bool>     paused { false };
+    std::atomic<bool>     submitted_since_negotiate { false };
+    std::atomic<uint32_t> target_fps { 60 };
 
     // Tracked locally on the reader thread so OnMouseMove can carry
     // the left-button-down flag CEF expects in modifiers (GLFW path
@@ -191,7 +193,10 @@ void drain_settings(HostState& s) {
             s.host->ApplyVolume(parse_f32(sd.value.c_str(), 100.0f) / 100.0f);
         } else if (sd.key == "fps") {
             uint32_t fps = parse_u32(sd.value.c_str(), 0);
-            if (fps > 0) s.host->SetFrameRate(static_cast<int>(fps));
+            if (fps > 0) {
+                s.target_fps.store(fps, std::memory_order_release);
+                s.host->SetFrameRate(static_cast<int>(fps));
+            }
         } else {
             // Forward unknown keys to the page as a user-property patch.
             // Try parse as JSON first (so numbers / booleans / objects
@@ -217,6 +222,28 @@ void sync_pause_visibility(HostState& s) {
                       s.submitted_since_negotiate.load(std::memory_order_acquire);
     s.host->SetPaused(hide);
     if (! hide) s.host->Invalidate();
+}
+
+std::chrono::microseconds frame_delay(const HostState& s) {
+    uint32_t fps = s.target_fps.load(std::memory_order_acquire);
+    if (fps == 0) fps = 60;
+    if (fps > 240) fps = 240;
+    return std::chrono::microseconds(1000000u / fps);
+}
+
+template<typename RenderToSlot>
+void submit_bridge_slot(HostState& s, ww_wescene::BridgeProducerCore& core,
+                        RenderToSlot&& render_to_slot) {
+    VkImage  slot_image = VK_NULL_HANDLE;
+    uint32_t slot_w = 0, slot_h = 0;
+    if (! core.acquireSlot(&slot_image, &slot_w, &slot_h)) return;
+
+    int sync_fd = render_to_slot(slot_image, VkExtent2D { slot_w, slot_h }, core.format());
+    core.submitSlot(sync_fd);
+    if (sync_fd < 0) return;
+
+    s.submitted_since_negotiate.store(true, std::memory_order_release);
+    if (s.paused.load(std::memory_order_acquire) && s.host) s.host->SetPaused(true);
 }
 
 // --- Reader thread ----------------------------------------------------------
@@ -412,8 +439,12 @@ int main(int argc, char** argv) {
         // identity=true: respawn-only. Translates to --mute-audio so
         // Chromium never opens an output device.
         opts.enable_audio = parse_bool(kv_get(init.settings, "enable_audio"), true);
+        opts.shared_texture_enabled =
+            parse_bool(kv_get(init.settings, "shared_texture_enabled"), true);
         opts.remote_debugging_port =
             static_cast<int>(parse_u32(kv_get(init.settings, "remote_debugging_port"), 0));
+        state.target_fps.store(opts.initial_fps > 0 ? opts.initial_fps : 60,
+                               std::memory_order_release);
 
         ww_bridge_init_free(&init);
     }
@@ -483,7 +514,8 @@ int main(int argc, char** argv) {
         ho.enable_remote_debugging = true;
         ho.remote_debugging_port   = opts.remote_debugging_port;
     }
-    ho.enable_audio = opts.enable_audio;
+    ho.enable_audio           = opts.enable_audio;
+    ho.shared_texture_enabled = opts.shared_texture_enabled;
     if (! host.Init(ho)) die("BrowserHost::Init failed");
 
     // OnAcceleratedPaint runs synchronously on the CEF UI thread (=
@@ -497,23 +529,36 @@ int main(int argc, char** argv) {
         auto imp = producer.Import(frame);
         if (! imp.ok) return;
 
-        VkImage  slot_image = VK_NULL_HANDLE;
-        uint32_t slot_w = 0, slot_h = 0;
-        if (! core.acquireSlot(&slot_image, &slot_w, &slot_h)) {
-            producer.DestroyImported(imp);
-            return;
-        }
-        int sync_fd = producer.BlitToSlot(imp, slot_image, { slot_w, slot_h });
-        core.submitSlot(sync_fd);
+        submit_bridge_slot(state,
+                           core,
+                           [&producer, &imp](VkImage    slot_image,
+                                             VkExtent2D slot_extent,
+                                             VkFormat /*slot_format*/) {
+                               return producer.BlitToSlot(imp, slot_image, slot_extent);
+                           });
         producer.DestroyImported(imp);
-        state.submitted_since_negotiate.store(true, std::memory_order_release);
-        if (state.paused.load(std::memory_order_acquire) && state.host) state.host->SetPaused(true);
     });
 
+    host.SetCpuPaintCallback([&state, &core, &producer](const weweb::CpuPaintFrame& frame) {
+        core.drainPendingDirective();
+        if (! core.ready()) return;
+
+        submit_bridge_slot(
+            state,
+            core,
+            [&producer, &frame](VkImage slot_image, VkExtent2D slot_extent, VkFormat slot_format) {
+                return producer.UploadToSlot(frame, slot_image, slot_extent, slot_format);
+            });
+    });
+
+    weweb::BrowserHost::OpenOptions open_opts;
+    open_opts.shared_texture_enabled = opts.shared_texture_enabled;
+    open_opts.frame_rate             = static_cast<int>(opts.initial_fps);
     if (! host.OpenWallpaper(manifest,
                              opts.workshop_dir,
                              static_cast<int>(opts.width),
-                             static_cast<int>(opts.height))) {
+                             static_cast<int>(opts.height),
+                             open_opts)) {
         die("BrowserHost::OpenWallpaper failed");
     }
 
@@ -561,7 +606,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        std::this_thread::sleep_for(frame_delay(state));
     }
 
     state.shutdown.store(true, std::memory_order_release);

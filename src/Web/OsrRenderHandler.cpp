@@ -32,12 +32,19 @@ bool OsrRenderHandler::GetScreenInfo(CefRefPtr<CefBrowser> /*browser*/, CefScree
     return true;
 }
 
-void OsrRenderHandler::OnPaint(CefRefPtr<CefBrowser> /*browser*/, PaintElementType /*type*/,
-                               const RectList& /*dirtyRects*/, const void* /*buffer*/,
-                               int /*width*/, int /*height*/) {
-    // Pure virtual in CefRenderHandler so we must define it. Never
-    // fires while shared_texture_enabled = 1 — CEF routes to
-    // OnAcceleratedPaint instead.
+void OsrRenderHandler::OnPaint(CefRefPtr<CefBrowser> /*browser*/, PaintElementType type,
+                               const RectList& /*dirtyRects*/, const void* buffer, int width,
+                               int height) {
+    if (type != PET_VIEW) return;
+    if (! cpu_cb_ || ! buffer || width <= 0 || height <= 0) return;
+
+    CpuPaintFrame frame;
+    frame.buffer     = buffer;
+    frame.width      = width;
+    frame.height     = height;
+    frame.row_stride = static_cast<uint32_t>(width) * 4u;
+    frame.format     = DmaBufFormat::BGRA8_UNORM;
+    cpu_cb_(frame);
 }
 
 void OsrRenderHandler::OnAcceleratedPaint(CefRefPtr<CefBrowser> /*browser*/, PaintElementType type,

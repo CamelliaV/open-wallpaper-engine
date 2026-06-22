@@ -19,6 +19,7 @@ struct BrowserHost::Impl {
     CefRefPtr<OsrRenderHandler> osr;
     CefRefPtr<ClientHandler>    client;
     AcceleratedPaintCallback    accel_cb;
+    CpuPaintCallback            cpu_cb;
     std::atomic<bool>           should_exit { false };
     bool                        initialised { false };
     // Stash the original argv from RunOrExitIfHelper; CefInitialize needs
@@ -78,6 +79,7 @@ bool BrowserHost::Init(const InitOptions& opts) {
     // Stash before CefInitialize; AppHandler::OnBeforeCommandLineProcessing
     // runs synchronously inside it and reads the flag.
     impl_->app->SetMuteAudio(! opts.enable_audio);
+    impl_->app->SetSharedTextureEnabled(opts.shared_texture_enabled);
 
     if (! CefInitialize(main_args, settings, impl_->app.get(), nullptr)) {
         std::fprintf(stderr, "weweb: CefInitialize failed\n");
@@ -89,6 +91,12 @@ bool BrowserHost::Init(const InitOptions& opts) {
 
 bool BrowserHost::OpenWallpaper(const WebManifest&           manifest,
                                 const std::filesystem::path& workshop_dir, int width, int height) {
+    return OpenWallpaper(manifest, workshop_dir, width, height, OpenOptions {});
+}
+
+bool BrowserHost::OpenWallpaper(const WebManifest&           manifest,
+                                const std::filesystem::path& workshop_dir, int width, int height,
+                                OpenOptions opts) {
     if (! impl_->initialised) {
         std::fprintf(stderr, "weweb: OpenWallpaper before Init\n");
         return false;
@@ -98,6 +106,9 @@ bool BrowserHost::OpenWallpaper(const WebManifest&           manifest,
     impl_->osr->SetViewSize(width, height);
     if (impl_->accel_cb) {
         impl_->osr->SetAcceleratedPaintCallback(impl_->accel_cb);
+    }
+    if (impl_->cpu_cb) {
+        impl_->osr->SetCpuPaintCallback(impl_->cpu_cb);
     }
 
     impl_->client = new ClientHandler(manifest.user_props, impl_->osr);
@@ -109,11 +120,11 @@ bool BrowserHost::OpenWallpaper(const WebManifest&           manifest,
     std::string url   = "file://" + entry.string();
 
     CefWindowInfo info;
-    info.SetAsWindowless(0);         // no parent window — pure OSR
-    info.shared_texture_enabled = 1; // request DMA-BUF / OnAcceleratedPaint
+    info.SetAsWindowless(0); // no parent window — pure OSR
+    info.shared_texture_enabled = opts.shared_texture_enabled ? 1 : 0;
 
     CefBrowserSettings browser_settings;
-    browser_settings.windowless_frame_rate = 60;
+    browser_settings.windowless_frame_rate = opts.frame_rate > 0 ? opts.frame_rate : 60;
 
     CefBrowserHost::CreateBrowser(
         info, impl_->client.get(), url, browser_settings, nullptr, nullptr);
@@ -123,6 +134,11 @@ bool BrowserHost::OpenWallpaper(const WebManifest&           manifest,
 void BrowserHost::SetAcceleratedPaintCallback(AcceleratedPaintCallback cb) {
     impl_->accel_cb = std::move(cb);
     if (impl_->osr) impl_->osr->SetAcceleratedPaintCallback(impl_->accel_cb);
+}
+
+void BrowserHost::SetCpuPaintCallback(CpuPaintCallback cb) {
+    impl_->cpu_cb = std::move(cb);
+    if (impl_->osr) impl_->osr->SetCpuPaintCallback(impl_->cpu_cb);
 }
 
 void BrowserHost::Invalidate() {

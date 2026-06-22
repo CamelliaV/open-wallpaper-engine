@@ -1,7 +1,10 @@
 module;
 
 #include <cstdio>
+#include <cstring>
 #include <unistd.h>
+
+#include <vulkan/vulkan.h>
 
 #include "DmaBufFrame.hpp"
 
@@ -40,6 +43,47 @@ VkFormat FormatToVk(::weweb::DmaBufFormat f) {
     return VK_FORMAT_B8G8R8A8_UNORM;
 }
 
+bool CopyCpuPaintToStaging(const ::weweb::CpuPaintFrame& frame, VkFormat slot_format, void* dst) {
+    if (! frame.buffer || ! dst) return false;
+    if (frame.width <= 0 || frame.height <= 0) return false;
+    const uint32_t width      = static_cast<uint32_t>(frame.width);
+    const uint32_t height     = static_cast<uint32_t>(frame.height);
+    const uint32_t src_stride = frame.row_stride ? frame.row_stride : width * 4u;
+    if (src_stride < width * 4u) return false;
+
+    const auto* src      = static_cast<const uint8_t*>(frame.buffer);
+    auto*       out      = static_cast<uint8_t*>(dst);
+    const bool  src_bgra = frame.format == ::weweb::DmaBufFormat::BGRA8_UNORM;
+    const bool  src_rgba = frame.format == ::weweb::DmaBufFormat::RGBA8_UNORM;
+    const bool  dst_bgra = slot_format == VK_FORMAT_B8G8R8A8_UNORM;
+    const bool  dst_rgba = slot_format == VK_FORMAT_R8G8B8A8_UNORM;
+    if ((! src_bgra && ! src_rgba) || (! dst_bgra && ! dst_rgba)) return false;
+
+    const uint32_t dst_stride = width * 4u;
+    if ((src_bgra && dst_bgra) || (src_rgba && dst_rgba)) {
+        for (uint32_t y = 0; y < height; ++y) {
+            std::memcpy(out + y * dst_stride, src + y * src_stride, dst_stride);
+        }
+        return true;
+    }
+
+    for (uint32_t y = 0; y < height; ++y) {
+        const uint8_t* row = src + y * src_stride;
+        uint8_t*       wr  = out + y * dst_stride;
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint8_t c0 = row[x * 4 + 0];
+            const uint8_t c1 = row[x * 4 + 1];
+            const uint8_t c2 = row[x * 4 + 2];
+            const uint8_t c3 = row[x * 4 + 3];
+            wr[x * 4 + 0]    = c2;
+            wr[x * 4 + 1]    = c1;
+            wr[x * 4 + 2]    = c0;
+            wr[x * 4 + 3]    = c3;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 WebProducerDevice::WebProducerDevice() = default;
@@ -52,6 +96,8 @@ bool WebProducerDevice::Init() {
 
 void WebProducerDevice::Shutdown() {
     if (device_) vkDeviceWaitIdle(device_);
+
+    DestroyCpuUploadResources();
 
     if (blit_sem_) {
         vkDestroySemaphore(device_, blit_sem_, nullptr);
@@ -250,6 +296,154 @@ uint32_t WebProducerDevice::FindMemoryType(uint32_t bits, VkMemoryPropertyFlags 
     return UINT32_MAX;
 }
 
+void WebProducerDevice::DestroyCpuUploadResources() {
+    if (cpu_staging_memory_ && cpu_staging_map_) {
+        vkUnmapMemory(device_, cpu_staging_memory_);
+        cpu_staging_map_ = nullptr;
+    }
+    if (cpu_staging_buffer_) {
+        vkDestroyBuffer(device_, cpu_staging_buffer_, nullptr);
+        cpu_staging_buffer_ = VK_NULL_HANDLE;
+    }
+    if (cpu_staging_memory_) {
+        vkFreeMemory(device_, cpu_staging_memory_, nullptr);
+        cpu_staging_memory_ = VK_NULL_HANDLE;
+    }
+    cpu_staging_size_     = 0;
+    cpu_staging_coherent_ = false;
+}
+
+bool WebProducerDevice::EnsureCpuUploadResources(const ::weweb::CpuPaintFrame& frame) {
+    if (frame.width <= 0 || frame.height <= 0) return false;
+    const VkDeviceSize need =
+        static_cast<VkDeviceSize>(frame.width) * static_cast<VkDeviceSize>(frame.height) * 4u;
+    if (need == 0) return false;
+    if (cpu_staging_buffer_ && cpu_staging_size_ >= need) return true;
+
+    if (vkWaitForFences(device_, 1, &blit_fence_, VK_TRUE, kFenceTimeoutNs) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: CPU upload fence wait timed out\n");
+        return false;
+    }
+    DestroyCpuUploadResources();
+
+    VkBufferCreateInfo bi {};
+    bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bi.size        = need;
+    bi.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateBuffer(device_, &bi, nullptr, &cpu_staging_buffer_) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: vkCreateBuffer(cpu staging) failed\n");
+        return false;
+    }
+
+    VkMemoryRequirements mr {};
+    vkGetBufferMemoryRequirements(device_, cpu_staging_buffer_, &mr);
+    uint32_t mtype =
+        FindMemoryType(mr.memoryTypeBits,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (mtype == UINT32_MAX) {
+        mtype = FindMemoryType(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    }
+    if (mtype == UINT32_MAX) {
+        std::fprintf(stderr, "WebProducerDevice: no host-visible staging memory type\n");
+        DestroyCpuUploadResources();
+        return false;
+    }
+
+    VkMemoryAllocateInfo ai {};
+    ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ai.allocationSize  = mr.size;
+    ai.memoryTypeIndex = mtype;
+    if (vkAllocateMemory(device_, &ai, nullptr, &cpu_staging_memory_) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: vkAllocateMemory(cpu staging) failed\n");
+        DestroyCpuUploadResources();
+        return false;
+    }
+    if (vkBindBufferMemory(device_, cpu_staging_buffer_, cpu_staging_memory_, 0) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: vkBindBufferMemory(cpu staging) failed\n");
+        DestroyCpuUploadResources();
+        return false;
+    }
+    if (vkMapMemory(device_, cpu_staging_memory_, 0, VK_WHOLE_SIZE, 0, &cpu_staging_map_) !=
+        VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: vkMapMemory(cpu staging) failed\n");
+        DestroyCpuUploadResources();
+        return false;
+    }
+
+    cpu_staging_size_ = mr.size;
+    cpu_staging_coherent_ =
+        (mem_props_.memoryTypes[mtype].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+    return true;
+}
+
+bool WebProducerDevice::BeginTransferCommands(const char* op) {
+    if (vkWaitForFences(device_, 1, &blit_fence_, VK_TRUE, kFenceTimeoutNs) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: prior %s fence wait timed out\n", op);
+        return false;
+    }
+    vkResetFences(device_, 1, &blit_fence_);
+    vkResetCommandBuffer(blit_cmd_, 0);
+
+    VkCommandBufferBeginInfo bi {};
+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(blit_cmd_, &bi) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: vkBeginCommandBuffer(%s) failed\n", op);
+        RestoreTransferFence();
+        return false;
+    }
+    return true;
+}
+
+void WebProducerDevice::RestoreTransferFence() {
+    if (blit_fence_) {
+        vkDestroyFence(device_, blit_fence_, nullptr);
+        blit_fence_ = VK_NULL_HANDLE;
+    }
+    VkFenceCreateInfo fi {};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    (void)vkCreateFence(device_, &fi, nullptr, &blit_fence_);
+}
+
+int WebProducerDevice::SubmitTransferCommands(const char* op, bool wait_for_completion) {
+    if (vkEndCommandBuffer(blit_cmd_) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: vkEndCommandBuffer(%s) failed\n", op);
+        RestoreTransferFence();
+        return -1;
+    }
+
+    VkSubmitInfo submit {};
+    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount   = 1;
+    submit.pCommandBuffers      = &blit_cmd_;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores    = &blit_sem_;
+    if (vkQueueSubmit(queue_, 1, &submit, blit_fence_) != VK_SUCCESS) {
+        std::fprintf(stderr, "WebProducerDevice: vkQueueSubmit(%s) failed\n", op);
+        RestoreTransferFence();
+        return -1;
+    }
+
+    VkSemaphoreGetFdInfoKHR gi {};
+    gi.sType      = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+    gi.semaphore  = blit_sem_;
+    gi.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+
+    int sync_fd = -1;
+    if (pfn_GetSemaphoreFd_(device_, &gi, &sync_fd) != VK_SUCCESS || sync_fd < 0) {
+        std::fprintf(stderr, "WebProducerDevice: vkGetSemaphoreFdKHR after %s failed\n", op);
+        vkWaitForFences(device_, 1, &blit_fence_, VK_TRUE, kFenceTimeoutNs);
+        return -1;
+    }
+
+    if (wait_for_completion) {
+        vkWaitForFences(device_, 1, &blit_fence_, VK_TRUE, kFenceTimeoutNs);
+    }
+    return sync_fd;
+}
+
 WebProducerDevice::ImportedFrame WebProducerDevice::Import(const ::weweb::DmaBufFrame& frame) {
     ImportedFrame imp {};
     if (frame.plane_count < 1) return imp;
@@ -383,6 +577,99 @@ void WebProducerDevice::DestroyImported(ImportedFrame& imp) {
     if (imp.image) vkDestroyImage(device_, imp.image, nullptr);
     if (imp.memory) vkFreeMemory(device_, imp.memory, nullptr);
     imp = {};
+}
+
+int WebProducerDevice::UploadToSlot(const ::weweb::CpuPaintFrame& frame, VkImage slot_image,
+                                    VkExtent2D slot_extent, VkFormat slot_format) {
+    if (! frame.buffer || slot_image == VK_NULL_HANDLE) return -1;
+    if (frame.width <= 0 || frame.height <= 0) return -1;
+    if (slot_format != VK_FORMAT_B8G8R8A8_UNORM && slot_format != VK_FORMAT_R8G8B8A8_UNORM) {
+        std::fprintf(stderr,
+                     "WebProducerDevice: CPU paint unsupported slot format %d\n",
+                     static_cast<int>(slot_format));
+        return -1;
+    }
+    if (slot_extent.width != static_cast<uint32_t>(frame.width) ||
+        slot_extent.height != static_cast<uint32_t>(frame.height)) {
+        std::fprintf(stderr,
+                     "WebProducerDevice: CPU paint extent mismatch frame=%dx%d slot=%ux%u\n",
+                     frame.width,
+                     frame.height,
+                     slot_extent.width,
+                     slot_extent.height);
+        return -1;
+    }
+    if (! EnsureCpuUploadResources(frame)) return -1;
+    if (! CopyCpuPaintToStaging(frame, slot_format, cpu_staging_map_)) return -1;
+    if (! cpu_staging_coherent_) {
+        VkMappedMemoryRange range {};
+        range.sType  = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        range.memory = cpu_staging_memory_;
+        range.offset = 0;
+        range.size   = VK_WHOLE_SIZE;
+        vkFlushMappedMemoryRanges(device_, 1, &range);
+    }
+
+    if (! BeginTransferCommands("cpu-paint")) return -1;
+
+    VkImageMemoryBarrier b_dst {};
+    b_dst.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b_dst.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
+    b_dst.newLayout                   = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b_dst.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+    b_dst.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+    b_dst.image                       = slot_image;
+    b_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    b_dst.subresourceRange.levelCount = 1;
+    b_dst.subresourceRange.layerCount = 1;
+    b_dst.srcAccessMask               = 0;
+    b_dst.dstAccessMask               = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(blit_cmd_,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0,
+                         0,
+                         nullptr,
+                         0,
+                         nullptr,
+                         1,
+                         &b_dst);
+
+    VkBufferImageCopy copy {};
+    copy.bufferOffset                    = 0;
+    copy.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.mipLevel       = 0;
+    copy.imageSubresource.baseArrayLayer = 0;
+    copy.imageSubresource.layerCount     = 1;
+    copy.imageOffset                     = { 0, 0, 0 };
+    copy.imageExtent                     = { slot_extent.width, slot_extent.height, 1 };
+    vkCmdCopyBufferToImage(
+        blit_cmd_, cpu_staging_buffer_, slot_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    VkImageMemoryBarrier b_release {};
+    b_release.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    b_release.oldLayout                   = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b_release.newLayout                   = VK_IMAGE_LAYOUT_GENERAL;
+    b_release.srcQueueFamilyIndex         = queue_family_;
+    b_release.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_FOREIGN_EXT;
+    b_release.image                       = slot_image;
+    b_release.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    b_release.subresourceRange.levelCount = 1;
+    b_release.subresourceRange.layerCount = 1;
+    b_release.srcAccessMask               = VK_ACCESS_TRANSFER_WRITE_BIT;
+    b_release.dstAccessMask               = 0;
+    vkCmdPipelineBarrier(blit_cmd_,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0,
+                         0,
+                         nullptr,
+                         0,
+                         nullptr,
+                         1,
+                         &b_release);
+
+    return SubmitTransferCommands("cpu-paint", /*wait_for_completion=*/false);
 }
 
 int WebProducerDevice::BlitToSlot(const ImportedFrame& imp, VkImage slot_image,

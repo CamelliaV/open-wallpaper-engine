@@ -46,9 +46,20 @@ struct DmaBufFrame {
     int visible_height { 0 };
 };
 
+// CPU bitmap delivered by CefRenderHandler::OnPaint. The buffer is
+// borrowed and valid only during the synchronous CpuPaintCallback call.
+struct CpuPaintFrame {
+    const void*  buffer { nullptr };
+    int          width { 0 };
+    int          height { 0 };
+    uint32_t     row_stride { 0 };
+    DmaBufFormat format { DmaBufFormat::BGRA8_UNORM };
+};
+
 // Synchronous receiver for accelerated-paint frames. Defined here so
 // both internal (OsrRenderHandler) and public (BrowserHost) headers can
 // reference one canonical type.
 using AcceleratedPaintCallback = std::function<void(const DmaBufFrame&)>;
+using CpuPaintCallback         = std::function<void(const CpuPaintFrame&)>;
 
 } // namespace weweb

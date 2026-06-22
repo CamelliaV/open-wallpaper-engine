@@ -14,6 +14,7 @@ public:
     // Must be set BEFORE CefInitialize. true ⇒ append `--mute-audio` so
     // Chromium never opens an output device.
     void SetMuteAudio(bool m) { m_mute_audio = m; }
+    void SetSharedTextureEnabled(bool enabled) { m_shared_texture_enabled = enabled; }
 
     // CefApp.
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
@@ -32,6 +33,7 @@ public:
 
 private:
     bool m_mute_audio { false };
+    bool m_shared_texture_enabled { true };
 
     IMPLEMENT_REFCOUNTING(AppHandler);
     DISALLOW_COPY_AND_ASSIGN(AppHandler);
