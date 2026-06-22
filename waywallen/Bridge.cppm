@@ -5,11 +5,13 @@ module;
 #include <waywallen-bridge/pool.h>
 #include <waywallen-bridge/probe_vk.h>
 
-#define ww_resolution_apply_cap  OWE_ww_resolution_apply_cap
-#define ww_resolution_sanitize   OWE_ww_resolution_sanitize
-#define ww_resolution_short_edge OWE_ww_resolution_short_edge
+#define ww_resolution_apply_cap        OWE_ww_resolution_apply_cap
+#define ww_resolution_apply_short_edge OWE_ww_resolution_apply_short_edge
+#define ww_resolution_sanitize         OWE_ww_resolution_sanitize
+#define ww_resolution_short_edge       OWE_ww_resolution_short_edge
 #include <waywallen-bridge/resolution.h>
 #undef ww_resolution_apply_cap
+#undef ww_resolution_apply_short_edge
 #undef ww_resolution_sanitize
 #undef ww_resolution_short_edge
 
@@ -76,6 +78,7 @@ export using ::WW_RESOLUTION_1080P;
 export using ::WW_RESOLUTION_1440P;
 export using ::WW_RESOLUTION_2160P;
 export using ::WW_RESOLUTION_CAP_ALLOW_UPSCALE;
+export using ::WW_RESOLUTION_CUSTOM;
 export using ::WW_RESOLUTION_ORIGIN;
 export using ::VK_FORMAT_FEATURE_BLIT_DST_BIT;
 export using ::VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
@@ -120,7 +123,7 @@ export using ::ww_pool_slot_t;
 export using ::ww_pool_t;
 export using ::ww_pool_vulkan_init_t;
 
-export inline uint32_t ww_resolution_short_edge(uint32_t r) {
+export inline uint32_t ww_resolution_short_edge(int32_t r) {
     switch (r) {
     case WW_RESOLUTION_720P: return 720u;
     case WW_RESOLUTION_1080P: return 1080u;
@@ -130,15 +133,16 @@ export inline uint32_t ww_resolution_short_edge(uint32_t r) {
     }
 }
 
-export inline uint32_t ww_resolution_sanitize(uint32_t raw) {
-    if (raw > static_cast<uint32_t>(WW_RESOLUTION_2160P))
-        return static_cast<uint32_t>(WW_RESOLUTION_1080P);
+export inline int32_t ww_resolution_sanitize(int32_t raw) {
+    if (raw == static_cast<int32_t>(WW_RESOLUTION_CUSTOM)) return raw;
+    if (raw < static_cast<int32_t>(WW_RESOLUTION_ORIGIN) ||
+        raw > static_cast<int32_t>(WW_RESOLUTION_2160P))
+        return static_cast<int32_t>(WW_RESOLUTION_1080P);
     return raw;
 }
 
-export inline void ww_resolution_apply_cap(uint32_t resolution, uint32_t option, uint32_t* w,
-                                           uint32_t* h) {
-    uint32_t cap = ww_resolution_short_edge(resolution);
+export inline void ww_resolution_apply_short_edge(uint32_t cap, uint32_t option, uint32_t* w,
+                                                  uint32_t* h) {
     if (cap == 0 || w == nullptr || h == nullptr || *w == 0 || *h == 0) return;
     uint32_t short_edge = (*w < *h) ? *w : *h;
     if (short_edge == cap) return;
@@ -154,4 +158,9 @@ export inline void ww_resolution_apply_cap(uint32_t resolution, uint32_t option,
     }
     if (*w == 0) *w = 1u;
     if (*h == 0) *h = 1u;
+}
+
+export inline void ww_resolution_apply_cap(int32_t resolution, uint32_t option, uint32_t* w,
+                                           uint32_t* h) {
+    ww_resolution_apply_short_edge(ww_resolution_short_edge(resolution), option, w, h);
 }

@@ -30,6 +30,7 @@ fps    = { type = "u32", default = 30,  min = 1, max = 240, step = 1, identity =
 hwdec = { type = "string", default = "auto", choices = ["auto", "vaapi", "vulkan", "none"], identity = true, label_key = "settings.wescene.hwdec", group = "decode", order = 20 }
 render_node = { type = "string", default = "", identity = true, label_key = "settings.wescene.render_node", group = "render", order = 30 }
 msaa   = { type = "u32", default = 1, min = 1, max = 16, step = 1, identity = true, label_key = "settings.wescene.msaa", group = "render", order = 25 }
-# 1 = 720p, 2 = 1080p, 3 = 1440p, 4 = 2160p — no origin for scene (no native size); drives the actual render extent at a 16:9 base aspect.
-resolution = { type = "u32", default = 2, min = 1, max = 4, step = 1, identity = true, label_key = "settings.wescene.resolution", group = "render", order = 22 }
+# -1 = custom, 1 = 720p, 2 = 1080p, 3 = 1440p, 4 = 2160p. Origin is disallowed for scene.
+resolution = { type = "i32", default = 2, min = -1, max = 4, step = 1, identity = true, label_key = "settings.wescene.resolution", group = "render", order = 22 }
+custom_extent = { type = "u32", default = 1080, min = 1, max = 8192, step = 1, identity = true, label_key = "settings.wescene.custom_extent", group = "render", order = 23 }
 @OWE_WEWEB_BLOCK@

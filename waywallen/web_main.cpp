@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <sys/prctl.h>
@@ -102,6 +103,15 @@ uint32_t parse_u32(const char* s, uint32_t def) {
     unsigned long v   = std::strtoul(s, &end, 10);
     if (end == s) return def;
     return static_cast<uint32_t>(v);
+}
+
+int32_t parse_i32(const char* s, int32_t def) {
+    if (! s || ! *s) return def;
+    char* end = nullptr;
+    errno     = 0;
+    long v    = std::strtol(s, &end, 10);
+    if (errno != 0 || end == s) return def;
+    return static_cast<int32_t>(v);
 }
 
 std::filesystem::path derive_cache_dir(const std::string& workshop_id) {
@@ -413,15 +423,11 @@ int main(int argc, char** argv) {
         // on present). Schema disallows ORIGIN, so any invalid kv
         // falls back to 1080p.
         {
-            uint32_t resolution = static_cast<uint32_t>(WW_RESOLUTION_1080P);
-            if (const char* v = kv_get(init.settings, "resolution"); v && *v) {
-                char*         end    = nullptr;
-                unsigned long n      = std::strtoul(v, &end, 10);
-                uint32_t      parsed = (end != v) ? ww_resolution_sanitize(static_cast<uint32_t>(n))
-                                                  : static_cast<uint32_t>(WW_RESOLUTION_1080P);
-                resolution           = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
-                                           ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
-                                           : parsed;
+            int32_t resolution = ww_resolution_sanitize(parse_i32(
+                kv_get(init.settings, "resolution"), static_cast<int32_t>(WW_RESOLUTION_1080P)));
+            if (resolution == static_cast<int32_t>(WW_RESOLUTION_ORIGIN) ||
+                resolution == static_cast<int32_t>(WW_RESOLUTION_CUSTOM)) {
+                resolution = static_cast<int32_t>(WW_RESOLUTION_1080P);
             }
             opts.width  = 16;
             opts.height = 9;

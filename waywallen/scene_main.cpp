@@ -3,7 +3,9 @@
 #include <argparse/argparse.hpp>
 
 #include <errno.h>
+#include <ctype.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <sys/prctl.h>
@@ -113,6 +115,26 @@ bool parse_bool(const char* s, bool def) {
     if (std::strcmp(s, "true") == 0) return true;
     if (std::strcmp(s, "false") == 0) return false;
     return def;
+}
+
+int32_t parse_i32(const char* s, int32_t def) {
+    if (! s || ! *s) return def;
+    char* end = nullptr;
+    errno     = 0;
+    long v    = std::strtol(s, &end, 10);
+    if (errno != 0 || end == s) return def;
+    return static_cast<int32_t>(v);
+}
+
+uint32_t parse_u32(const char* s, uint32_t def) {
+    if (! s || ! *s) return def;
+    while (*s && std::isspace(static_cast<unsigned char>(*s))) ++s;
+    if (*s == '-') return def;
+    char* end       = nullptr;
+    errno           = 0;
+    unsigned long v = std::strtoul(s, &end, 10);
+    if (errno != 0 || end == s) return def;
+    return static_cast<uint32_t>(v);
 }
 
 bool resolve_render_node_to_uuid(const std::string&                 path,
@@ -378,16 +400,11 @@ int main(int argc, char** argv) {
         // Use scene.json's authored canvas as the native aspect and then
         // apply the user's short-edge resolution setting.
         {
-            uint32_t resolution = static_cast<uint32_t>(WW_RESOLUTION_1080P);
-            if (const char* v = kv_get(init.settings, "resolution"); v && *v) {
-                char*         end    = nullptr;
-                unsigned long n      = std::strtoul(v, &end, 10);
-                uint32_t      parsed = (end != v) ? ww_resolution_sanitize(static_cast<uint32_t>(n))
-                                                  : static_cast<uint32_t>(WW_RESOLUTION_1080P);
-                resolution           = (parsed == static_cast<uint32_t>(WW_RESOLUTION_ORIGIN))
-                                           ? static_cast<uint32_t>(WW_RESOLUTION_1080P)
-                                           : parsed;
-            }
+            int32_t resolution = ww_resolution_sanitize(parse_i32(
+                kv_get(init.settings, "resolution"), static_cast<int32_t>(WW_RESOLUTION_1080P)));
+            if (resolution == static_cast<int32_t>(WW_RESOLUTION_ORIGIN))
+                resolution = static_cast<int32_t>(WW_RESOLUTION_1080P);
+            uint32_t custom_extent = parse_u32(kv_get(init.settings, "custom_extent"), 1080u);
             if (! opts.initial_scene.empty()) {
                 auto scene_doc = owe::wpscene::LoadSceneDocumentFromSource(opts.initial_scene);
                 if (scene_doc) {
@@ -407,8 +424,13 @@ int main(int argc, char** argv) {
                 opts.height = 9;
                 rstd_info("waywallen-wescene-renderer: scene canvas unknown, using 16:9 fallback");
             }
-            ww_resolution_apply_cap(
-                resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE, &opts.width, &opts.height);
+            if (resolution == static_cast<int32_t>(WW_RESOLUTION_CUSTOM)) {
+                ww_resolution_apply_short_edge(
+                    custom_extent, WW_RESOLUTION_CAP_ALLOW_UPSCALE, &opts.width, &opts.height);
+            } else {
+                ww_resolution_apply_cap(
+                    resolution, WW_RESOLUTION_CAP_ALLOW_UPSCALE, &opts.width, &opts.height);
+            }
             rstd_info("waywallen-wescene-renderer: render extent {}x{}", opts.width, opts.height);
         }
         if (const char* v = kv_get(init.settings, "fps"); v && *v) {
