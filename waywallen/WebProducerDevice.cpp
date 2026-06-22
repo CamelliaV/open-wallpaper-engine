@@ -155,7 +155,7 @@ bool WebProducerDevice::PickPhysicalDevice() {
     std::vector<VkPhysicalDevice> devs(count);
     VK_CHECK(vkEnumeratePhysicalDevices(instance_, &count, devs.data()));
 
-    const bool pinning = ! render_node_.empty();
+    const bool pinning             = ! render_node_.empty();
     uint32_t   wanted_render_major = 0;
     uint32_t   wanted_render_minor = 0;
     if (pinning) {

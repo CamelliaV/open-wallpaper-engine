@@ -99,7 +99,7 @@ public:
     ClientHandler(const ClientHandler&)            = delete;
     ClientHandler& operator=(const ClientHandler&) = delete;
 
-    void SetCloseCallback(std::function<void()> cb);
+    void                  SetCloseCallback(std::function<void()> cb);
     CefRefPtr<CefBrowser> GetBrowser() const { return browser_; }
 
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }

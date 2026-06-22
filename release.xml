@@ -1,3 +1,44 @@
+<release version="0.1.8" date="2026-06-21">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Project-layer effect rendering.</li>
+      <li>Live image color properties.</li>
+      <li>Scripted perspective parallax.</li>
+      <li>Script vector mix and lengthSqr helpers.</li>
+      <li>Scalar shader user value fanout.</li>
+      <li>Precision-qualified shader uniform parsing.</li>
+      <li>Web wallpaper drm node override.</li>
+      <li>Scene video tex hwdec.</li>
+      <li>CI aarch64.</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>Web wallpaper on nvidia card #15.</li>
+      <li>Clear-color user bindings.</li>
+      <li>Passthrough image layers.</li>
+      <li>Layered clock reflections.</li>
+      <li>Hidden composelayer sources.</li>
+      <li>MDLV23 mesh alpha scripts.</li>
+      <li>Model effect passes.</li>
+      <li>Puppet replace base poses.</li>
+      <li>Puppet effect clipping masks.</li>
+      <li>Blend attachment state initialization.</li>
+      <li>Script skinned stage rendering.</li>
+      <li>Script camera paths and baselines.</li>
+      <li>Script cursor world coordinates.</li>
+      <li>Particle,text,effect follow anchors.</li>
+      <li>Media thumbnail fallbacks.</li>
+    </ul>
+    <p>Improved:</p>
+    <ul>
+      <li>Compatible shader pass batching.</li>
+      <li>Render-graph ordering for target-local passes.</li>
+      <li>Framebuffer snapshot reuse.</li>
+      <li>Drop vulkan validation errors.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.1.7" date="2026-06-16">
   <description>
     <p>Fixed: Camera shake motion.</p>

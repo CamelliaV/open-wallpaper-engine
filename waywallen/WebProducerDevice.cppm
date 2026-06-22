@@ -99,8 +99,8 @@ private:
     uint32_t                         queue_family_ { 0 };
     VkQueue                          queue_ { VK_NULL_HANDLE };
 
-    uint8_t device_uuid_[16] {};
-    uint8_t driver_uuid_[16] {};
+    uint8_t     device_uuid_[16] {};
+    uint8_t     driver_uuid_[16] {};
     std::string render_node_;
 
     VkCommandPool   cmd_pool_ { VK_NULL_HANDLE };

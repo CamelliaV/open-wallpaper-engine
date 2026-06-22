@@ -5,8 +5,8 @@ module;
 #include <waywallen-bridge/pool.h>
 #include <waywallen-bridge/probe_vk.h>
 
-#define ww_resolution_apply_cap OWE_ww_resolution_apply_cap
-#define ww_resolution_sanitize OWE_ww_resolution_sanitize
+#define ww_resolution_apply_cap  OWE_ww_resolution_apply_cap
+#define ww_resolution_sanitize   OWE_ww_resolution_sanitize
 #define ww_resolution_short_edge OWE_ww_resolution_short_edge
 #include <waywallen-bridge/resolution.h>
 #undef ww_resolution_apply_cap
