@@ -81,7 +81,9 @@ void AppHandler::OnBeforeCommandLineProcessing(const CefString&          process
         cmd->AppendSwitchWithValue("ozone-platform", "wayland");
         // cmd->AppendSwitchWithValue("ozone-platform-hint", "wayland");
     }
-    // cmd->AppendSwitchWithValue("render-node-override", "/dev/dri/renderD130");
+    if (! m_render_node_override.empty()) {
+        cmd->AppendSwitchWithValue("render-node-override", m_render_node_override);
+    }
 
     cmd->AppendSwitch("enable-gpu");
     cmd->AppendSwitch("ignore-gpu-blocklist");

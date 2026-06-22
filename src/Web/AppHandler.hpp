@@ -4,6 +4,8 @@
 #include "include/cef_browser_process_handler.h"
 #include "include/cef_render_process_handler.h"
 
+#include <string>
+
 namespace weweb
 {
 
@@ -15,6 +17,7 @@ public:
     // Chromium never opens an output device.
     void SetMuteAudio(bool m) { m_mute_audio = m; }
     void SetSharedTextureEnabled(bool enabled) { m_shared_texture_enabled = enabled; }
+    void SetRenderNodeOverride(const std::string& path) { m_render_node_override = path; }
 
     // CefApp.
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
@@ -34,6 +37,7 @@ public:
 private:
     bool m_mute_audio { false };
     bool m_shared_texture_enabled { true };
+    std::string m_render_node_override;
 
     IMPLEMENT_REFCOUNTING(AppHandler);
     DISALLOW_COPY_AND_ASSIGN(AppHandler);

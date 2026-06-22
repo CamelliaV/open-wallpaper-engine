@@ -29,6 +29,10 @@ public:
     // Tear everything down. Idempotent.
     void Shutdown();
 
+    // Prefer the physical device whose VK_EXT_physical_device_drm render node
+    // matches this path. Must be called before Init.
+    void SetRenderNode(const std::string& path);
+
     // Vulkan handles (caller-owned by this class) — bridge consumes
     // these via `ww_pool_vulkan_init_t`.
     VkInstance       Instance() const { return instance_; }
@@ -103,6 +107,7 @@ private:
 
     uint8_t device_uuid_[16] {};
     uint8_t driver_uuid_[16] {};
+    std::string render_node_;
 
     VkCommandPool   cmd_pool_ { VK_NULL_HANDLE };
     VkCommandBuffer blit_cmd_ { VK_NULL_HANDLE };

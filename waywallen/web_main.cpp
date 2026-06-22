@@ -45,6 +45,7 @@ struct Options {
     int                   remote_debugging_port { 0 };
     bool                  enable_audio { true };
     bool                  shared_texture_enabled { true };
+    std::string           render_node;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -61,6 +62,10 @@ Options parse_args(int argc, char** argv) {
     program.add_argument("--workshop_id")
         .default_value(std::string {})
         .help("Optional Steam workshop id (informational; used for cache dir)");
+    program.add_argument("--render-node")
+        .default_value(std::string {})
+        .help("DRM render-node path to pin Vulkan/CEF GPU selection to "
+              "(empty => let the renderer pick the default)");
     program.add_argument("remaining").remaining();
 
     try {
@@ -74,6 +79,7 @@ Options parse_args(int argc, char** argv) {
     o.ipc_path     = program.get<std::string>("--ipc");
     o.workshop_dir = program.get<std::string>("--path");
     o.workshop_id  = program.get<std::string>("--workshop_id");
+    o.render_node  = program.get<std::string>("--render-node");
     return o;
 }
 
@@ -443,6 +449,12 @@ int main(int argc, char** argv) {
             parse_bool(kv_get(init.settings, "shared_texture_enabled"), true);
         opts.remote_debugging_port =
             static_cast<int>(parse_u32(kv_get(init.settings, "remote_debugging_port"), 0));
+        // CLI `--render-node` wins over Init kv (mirroring scene/mpv/video).
+        if (opts.render_node.empty()) {
+            if (const char* v = kv_get(init.settings, "render_node"); v && *v) {
+                opts.render_node = v;
+            }
+        }
         state.target_fps.store(opts.initial_fps > 0 ? opts.initial_fps : 60,
                                std::memory_order_release);
 
@@ -454,6 +466,11 @@ int main(int argc, char** argv) {
     auto& manifest = *manifest_opt;
 
     ww_wescene::WebProducerDevice producer;
+    if (! opts.render_node.empty()) {
+        rstd_info("waywallen-weweb-renderer: render_node={} pinning Vulkan/CEF device",
+                  opts.render_node);
+        producer.SetRenderNode(opts.render_node);
+    }
     if (! producer.Init()) die("WebProducerDevice::Init failed");
 
     ww_pool_vulkan_init_t pi {};
@@ -516,6 +533,9 @@ int main(int argc, char** argv) {
     }
     ho.enable_audio           = opts.enable_audio;
     ho.shared_texture_enabled = opts.shared_texture_enabled;
+    if (! opts.render_node.empty()) {
+        ho.render_node_override = opts.render_node;
+    }
     if (! host.Init(ho)) die("BrowserHost::Init failed");
 
     // OnAcceleratedPaint runs synchronously on the CEF UI thread (=

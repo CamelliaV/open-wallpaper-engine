@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include <nlohmann/json.hpp>
@@ -36,6 +37,7 @@ public:
         // false ⇒ pass --mute-audio to Chromium so no output device opens.
         bool enable_audio { true };
         bool shared_texture_enabled { true };
+        std::string render_node_override;
     };
 
     struct OpenOptions {

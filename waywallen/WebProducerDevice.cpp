@@ -1,7 +1,10 @@
 module;
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 #include <vulkan/vulkan.h>
@@ -89,6 +92,8 @@ bool CopyCpuPaintToStaging(const ::weweb::CpuPaintFrame& frame, VkFormat slot_fo
 WebProducerDevice::WebProducerDevice() = default;
 WebProducerDevice::~WebProducerDevice() { Shutdown(); }
 
+void WebProducerDevice::SetRenderNode(const std::string& path) { render_node_ = path; }
+
 bool WebProducerDevice::Init() {
     return CreateInstance() && PickPhysicalDevice() && CreateDevice() && CreateCommandPool() &&
            CreateSyncObjects();
@@ -151,6 +156,22 @@ bool WebProducerDevice::PickPhysicalDevice() {
     std::vector<VkPhysicalDevice> devs(count);
     VK_CHECK(vkEnumeratePhysicalDevices(instance_, &count, devs.data()));
 
+    const bool pinning = ! render_node_.empty();
+    uint32_t   wanted_render_major = 0;
+    uint32_t   wanted_render_minor = 0;
+    if (pinning) {
+        struct stat st {};
+        if (::stat(render_node_.c_str(), &st) != 0) {
+            std::fprintf(stderr,
+                         "WebProducerDevice: stat(%s) failed: %s\n",
+                         render_node_.c_str(),
+                         std::strerror(errno));
+            return false;
+        }
+        wanted_render_major = static_cast<uint32_t>(major(st.st_rdev));
+        wanted_render_minor = static_cast<uint32_t>(minor(st.st_rdev));
+    }
+
     for (auto pd : devs) {
         uint32_t qcount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, nullptr);
@@ -175,7 +196,8 @@ bool WebProducerDevice::PickPhysicalDevice() {
         vkEnumerateDeviceExtensionProperties(pd, nullptr, &ecount, exts.data());
 
         bool has_ext_mem_fd = false, has_dma_buf = false, has_modifier = false,
-             has_ext_sem_fd = false, has_q_foreign = false, has_fmt_list = false;
+             has_ext_sem_fd = false, has_q_foreign = false, has_fmt_list = false,
+             has_drm_props = false;
         for (auto& e : exts) {
             if (std::strcmp(e.extensionName, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) == 0)
                 has_ext_mem_fd = true;
@@ -189,10 +211,26 @@ bool WebProducerDevice::PickPhysicalDevice() {
                 has_q_foreign = true;
             if (std::strcmp(e.extensionName, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME) == 0)
                 has_fmt_list = true;
+            if (std::strcmp(e.extensionName, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME) == 0)
+                has_drm_props = true;
         }
         if (! has_ext_mem_fd || ! has_dma_buf || ! has_modifier || ! has_ext_sem_fd ||
             ! has_q_foreign || ! has_fmt_list)
             continue;
+
+        if (pinning) {
+            if (! has_drm_props) continue;
+            VkPhysicalDeviceDrmPropertiesEXT drm {};
+            drm.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT;
+            VkPhysicalDeviceProperties2 props2 {};
+            props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            props2.pNext = &drm;
+            vkGetPhysicalDeviceProperties2(pd, &props2);
+            if (! drm.hasRender) continue;
+            if (static_cast<uint32_t>(drm.renderMajor) != wanted_render_major ||
+                static_cast<uint32_t>(drm.renderMinor) != wanted_render_minor)
+                continue;
+        }
 
         phys_         = pd;
         queue_family_ = picked_qf;
@@ -208,10 +246,18 @@ bool WebProducerDevice::PickPhysicalDevice() {
         std::memcpy(driver_uuid_, id_props.driverUUID, 16);
         return true;
     }
-    std::fprintf(stderr,
-                 "WebProducerDevice: no suitable physical device "
-                 "(need external_memory_fd + dma_buf + modifier + "
-                 "external_semaphore_fd + queue_family_foreign)\n");
+    if (pinning) {
+        std::fprintf(stderr,
+                     "WebProducerDevice: no suitable physical device matching render_node %s "
+                     "(need external_memory_fd + dma_buf + modifier + "
+                     "external_semaphore_fd + queue_family_foreign + physical_device_drm)\n",
+                     render_node_.c_str());
+    } else {
+        std::fprintf(stderr,
+                     "WebProducerDevice: no suitable physical device "
+                     "(need external_memory_fd + dma_buf + modifier + "
+                     "external_semaphore_fd + queue_family_foreign)\n");
+    }
     return false;
 }
 

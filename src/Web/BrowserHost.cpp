@@ -80,6 +80,7 @@ bool BrowserHost::Init(const InitOptions& opts) {
     // runs synchronously inside it and reads the flag.
     impl_->app->SetMuteAudio(! opts.enable_audio);
     impl_->app->SetSharedTextureEnabled(opts.shared_texture_enabled);
+    impl_->app->SetRenderNodeOverride(opts.render_node_override);
 
     if (! CefInitialize(main_args, settings, impl_->app.get(), nullptr)) {
         std::fprintf(stderr, "weweb: CefInitialize failed\n");
