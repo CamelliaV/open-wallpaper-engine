@@ -6,6 +6,7 @@
 #   * libcef_lib         — IMPORTED target wrapping the prebuilt libcef.so.
 #   * libcef_dll_wrapper — STATIC, built from CEF's libcef_dll/ sources.
 #   * weweb_apply_cef_target_settings(target)
+#   * weweb_apply_cef_module_target_settings(target)
 #   * weweb_stage_cef_runtime(target)
 #
 # CEF's own cmake helpers (find_package(CEF) + cef_macros + cef_variables)
@@ -47,6 +48,15 @@ ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 # target that includes CEF headers compiles cleanly.
 function(weweb_apply_cef_target_settings target)
     SET_COMMON_TARGET_PROPERTIES(${target})
+endfunction()
+
+# Apply CEF settings to a target that imports project C++20 modules. Clang's
+# BMI compatibility check requires exception and RTTI flags to match between
+# the module producer and importer, so keep those at the project's defaults.
+function(weweb_apply_cef_module_target_settings target)
+    SET_COMMON_TARGET_PROPERTIES(${target})
+    target_compile_options(${target} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-fexceptions -frtti>)
 endfunction()
 
 # Stage CEF runtime files (libcef.so, libEGL.so, libGLESv2.so, libv8…,

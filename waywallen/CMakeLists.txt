@@ -22,6 +22,7 @@ set(_OWE_STRIP_FILES ${OWE_WESCENE_BIN})
 add_library(waywallen-bridge-producer STATIC)
 target_sources(waywallen-bridge-producer
     PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+        Bridge.cppm
         BridgeProducerCore.cppm
 )
 target_sources(waywallen-bridge-producer PRIVATE BridgeProducerCore.cpp)
@@ -91,10 +92,10 @@ if(BUILD_WEWEB)
     target_include_directories(waywallen-web-producer-device
         PUBLIC
             .
-            ${CMAKE_SOURCE_DIR}/src/Web
     )
     target_link_libraries(waywallen-web-producer-device
         PUBLIC
+            owe-web-api
             wavsen::ffi::vulkan
             rstd.cppstd
     )
@@ -114,13 +115,8 @@ if(BUILD_WEWEB)
         PRIVATE
             ${CMAKE_SOURCE_DIR}/src/Web
     )
-    # web_main.cpp does NOT include `include/cef_*.h` directly — only
-    # weweb's facade headers (BrowserHost.hpp, DmaBufFrame.hpp,
-    # Manifest.hpp) — so we deliberately skip
-    # `weweb_apply_cef_target_settings`, which would force
-    # -fno-exceptions / -fno-rtti onto this TU and break argparse +
-    # rstd module imports. weweb-host is built with the CEF flags as
-    # required.
+    # web_main.cpp does NOT include `include/cef_*.h` directly; CEF
+    # settings stay inside owe-web-host.
     target_link_libraries(waywallen-weweb-renderer
         PRIVATE
             owe-web-host

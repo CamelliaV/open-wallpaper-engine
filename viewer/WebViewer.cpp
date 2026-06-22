@@ -4,10 +4,8 @@
 
 #include <argparse/argparse.hpp>
 
-#include "BrowserHost.hpp"
-#include "Manifest.hpp"
-
 import rstd.cppstd;
+import weweb;
 import wavsen.audio;
 import viewer.common;
 import viewer.web;

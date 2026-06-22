@@ -1,7 +1,3 @@
-module;
-
-#include <waywallen-bridge/pool.h>
-
 module waywallen.bridge_ex_swapchain;
 
 import rstd.cppstd;

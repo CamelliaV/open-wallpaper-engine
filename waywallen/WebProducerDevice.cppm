@@ -1,14 +1,8 @@
-// WebProducerDevice — headless Vulkan producer used by
-// `waywallen-weweb-renderer`.
-
-module;
-
-#include "DmaBufFrame.hpp"
-
 export module waywallen.web_producer_device;
 
 import rstd.cppstd;
 import vulkan;
+import weweb;
 
 export namespace ww_wescene
 {

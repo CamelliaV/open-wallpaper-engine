@@ -14,11 +14,10 @@ module;
 
 #include <wayland-egl.h>
 
-#include "DmaBufFrame.hpp"
-
 module viewer.web;
 
 import rstd.cppstd;
+import weweb;
 
 namespace weweb
 {

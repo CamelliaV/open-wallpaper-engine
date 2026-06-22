@@ -9,12 +9,11 @@ module;
 
 #include <vulkan/vulkan.h>
 
-#include "DmaBufFrame.hpp"
-
 module waywallen.web_producer_device;
 
 import rstd.cppstd;
 import vulkan;
+import weweb;
 
 namespace ww_wescene
 {

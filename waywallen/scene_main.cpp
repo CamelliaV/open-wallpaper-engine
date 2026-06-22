@@ -1,13 +1,4 @@
-// waywallen-wescene-renderer — wescene (Wallpaper Engine scene) host
-// subprocess.
-
 #include <rstd/macro.hpp>
-
-#include <waywallen-bridge/bridge.h>
-#include <waywallen-bridge/pool.h>
-#include <waywallen-bridge/probe_vk.h>
-#include <waywallen-bridge/protocol_bits.h>
-#include <waywallen-bridge/resolution.h>
 
 #include <argparse/argparse.hpp>
 
@@ -23,6 +14,7 @@ import rstd.cppstd;
 import rstd.log;
 import wescene.scene_wallpaper;
 import wescene.pkg.parse;
+import waywallen.bridge;
 import waywallen.bridge_ex_swapchain;
 import nlohmann.json;
 

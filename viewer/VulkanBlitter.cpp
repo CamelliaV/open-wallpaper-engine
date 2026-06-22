@@ -3,14 +3,13 @@ module;
 #include <cstdio>
 #include <unistd.h>
 
-#include "DmaBufFrame.hpp"
-
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 module viewer.web;
 
 import rstd.cppstd;
+import weweb;
 import vulkan;
 
 namespace weweb

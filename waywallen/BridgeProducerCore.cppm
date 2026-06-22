@@ -1,37 +1,10 @@
-// BridgeProducerCore — bridge-protocol state shared by every waywallen
-// renderer subprocess that pushes Vulkan-backed DMA-BUF slots through a
-// `ww_pool_t`.
-//
-// Owns:
-//   - the bridge `ww_pool_t*` and control socket fd (caller-owned;
-//     core only borrows them).
-//   - the pending `ww_pool_directive_t` stash + slot bookkeeping
-//     (slot count / next slot / negotiated geometry / fourcc /
-//     resolved VkFormat).
-//   - on-first-negotiated and on-ready-changed callbacks.
-//
-// What it does NOT do:
-//   - any Vulkan command recording (the producer host owns the
-//     VkDevice and submits the blit).
-//   - any inheritance from `owe::ExSwapchain` — that adapter is
-//     `BridgeExSwapchain`, which is a thin shim around this core for
-//     the wescene host. Other producers (e.g. weweb) consume this core
-//     directly without pulling wescene-vulkan-runtime.
-//
-// Threading model is identical to BridgeExSwapchain's:
-//   - `queueDirective` is the only multi-threaded entry point.
-//   - `drainPendingDirective` / `acquireSlot` / `submitSlot` are
-//     producer-thread-only (the thread that submits the blit).
-
 module;
-
-#include <waywallen-bridge/bridge.h>
-#include <waywallen-bridge/pool.h>
 
 export module waywallen.bridge_producer_core;
 
 import rstd.cppstd;
 import vulkan;
+export import waywallen.bridge;
 
 export namespace ww_wescene
 {

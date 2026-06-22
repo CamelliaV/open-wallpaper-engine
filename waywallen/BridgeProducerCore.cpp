@@ -1,9 +1,5 @@
 module;
 
-#include <waywallen-bridge/bridge.h>
-#include <waywallen-bridge/drm_fourcc.h>
-#include <waywallen-bridge/pool.h>
-
 #include <cerrno>
 #include <cstdio>
 #include <unistd.h>
@@ -12,6 +8,7 @@ module waywallen.bridge_producer_core;
 
 import rstd.cppstd;
 import vulkan;
+import waywallen.bridge;
 
 namespace ww_wescene
 {

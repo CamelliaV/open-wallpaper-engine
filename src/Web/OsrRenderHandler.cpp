@@ -1,4 +1,9 @@
-#include "OsrRenderHandler.hpp"
+module weweb;
+
+import rstd.cppstd;
+
+import :cef;
+import :cef_internal;
 
 namespace weweb
 {

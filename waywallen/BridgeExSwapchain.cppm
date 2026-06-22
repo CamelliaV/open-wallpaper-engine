@@ -1,11 +1,3 @@
-// BridgeExSwapchain — `owe::ExSwapchain` adapter over
-// BridgeProducerCore for the wescene host. See header notes that used
-// to live in the classic .hpp.
-
-module;
-
-#include <waywallen-bridge/pool.h>
-
 export module waywallen.bridge_ex_swapchain;
 
 import rstd.cppstd;

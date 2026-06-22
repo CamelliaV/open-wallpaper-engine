@@ -5,14 +5,13 @@ module;
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 
-#include "DmaBufFrame.hpp"
-
 struct GLFWwindow;
 struct wl_egl_window;
 
 export module viewer.web:egl_presenter;
 
 import rstd.cppstd;
+import weweb;
 import :presenter;
 
 export namespace weweb

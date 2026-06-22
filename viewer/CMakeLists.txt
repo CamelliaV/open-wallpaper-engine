@@ -40,6 +40,7 @@ if(BUILD_WEWEB)
     target_link_libraries(viewer-web
         PUBLIC
             viewer-common
+            owe-web-api
             rstd.cppstd
             wavsen::ffi::vulkan
             PkgConfig::GLFW

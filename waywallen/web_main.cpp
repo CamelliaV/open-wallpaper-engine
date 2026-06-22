@@ -1,17 +1,4 @@
-// waywallen-weweb-renderer — CEF (Wallpaper Engine *web*) host
-// subprocess.
-
-#include "BrowserHost.hpp"
-#include "DmaBufFrame.hpp"
-#include "Manifest.hpp"
-
 #include <rstd/macro.hpp>
-
-#include <waywallen-bridge/bridge.h>
-#include <waywallen-bridge/pool.h>
-#include <waywallen-bridge/probe_vk.h>
-#include <waywallen-bridge/protocol_bits.h>
-#include <waywallen-bridge/resolution.h>
 
 #include <argparse/argparse.hpp>
 
@@ -27,7 +14,9 @@
 import rstd.cppstd;
 import rstd.log;
 import vulkan;
+import weweb;
 import wavsen.audio;
+import waywallen.bridge;
 import waywallen.bridge_producer_core;
 import waywallen.web_producer_device;
 

@@ -1,8 +1,12 @@
-#include "Manifest.hpp"
+module;
 
-#include <cctype>
-#include <cstdio>
-#include <fstream>
+#include <nlohmann/json.hpp>
+
+module weweb;
+
+import rstd.cppstd;
+
+import :manifest;
 
 namespace weweb
 {
@@ -27,8 +31,8 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
         return std::nullopt;
     }
 
-    // weweb-host inherits CEF's -fno-exceptions, so use the non-throwing
-    // parser entry point.
+    // Invalid project.json is input data; keep parse failure on the
+    // diagnostic return path.
     auto j = nlohmann::json::parse(is,
                                    /*callback=*/nullptr,
                                    /*allow_exceptions=*/false,

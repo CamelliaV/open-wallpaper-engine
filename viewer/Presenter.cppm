@@ -1,12 +1,11 @@
 module;
 
-#include "DmaBufFrame.hpp"
-
 struct GLFWwindow;
 
 export module viewer.web:presenter;
 
 import rstd.cppstd;
+import weweb;
 
 export namespace weweb
 {

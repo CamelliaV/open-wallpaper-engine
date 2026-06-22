@@ -1,12 +1,11 @@
 module;
 
-#include "DmaBufFrame.hpp"
-
 struct GLFWwindow;
 
 export module viewer.web:vulkan_blitter;
 
 import rstd.cppstd;
+import weweb;
 import vulkan;
 import :presenter;
 

@@ -1,6 +1,13 @@
-#include "UserProperties.hpp"
+module;
 
-#include "include/cef_frame.h"
+#include <nlohmann/json.hpp>
+
+module weweb;
+
+import rstd.cppstd;
+
+import :cef;
+import :cef_internal;
 
 namespace weweb
 {

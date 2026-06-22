@@ -1,15 +1,14 @@
-#include "BrowserHost.hpp"
+module;
 
-#include <atomic>
-#include <cstdio>
-#include <cstdlib>
+#include <nlohmann/json.hpp>
 
-#include "include/cef_app.h"
-#include "include/cef_browser.h"
+module weweb;
 
-#include "AppHandler.hpp"
-#include "ClientHandler.hpp"
-#include "OsrRenderHandler.hpp"
+import rstd.cppstd;
+
+import :browser_host;
+import :cef;
+import :cef_internal;
 
 namespace weweb
 {
