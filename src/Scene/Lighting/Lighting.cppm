@@ -6,9 +6,8 @@ import wescene.core;
 import rstd.cppstd;
 
 // SceneNode lives in the primary interface unit of wescene.scene. SceneLight
-// stores it via std::shared_ptr / raw pointer only; full type is never needed
-// inside this partition. Forward declaration is enough — the type-erased
-// shared_ptr deleter handles destruction in TUs that see the complete type.
+// only needs a raw observation pointer here; ownership is carried by the
+// scene tree.
 export namespace owe
 {
 
@@ -48,12 +47,12 @@ public:
     SceneLightType  type() const { return m_desc.type; }
     Eigen::Vector3f color() const { return m_desc.color * m_desc.intensity; }
     float           radius() const { return m_desc.radius; }
-    SceneNode*      node() const { return m_node.get(); }
+    SceneNode*      node() const { return m_node; }
     // Legacy uniform G_LCP layout (color * intensity * radius²) consumed by
     // shaders that bind g_LightsColorPremultiplied.
     Eigen::Vector3f premultipliedColor() const { return m_premultiplied_color; }
 
-    void setNode(std::shared_ptr<SceneNode> node) { m_node = node; }
+    void setNode(SceneNode* node) { m_node = node; }
 
     // WE field-binding: `visible: {user: "key", value: <bool>}` ties this light's
     // runtime visibility to engine.userProperties[<key>]. Empty key = unbound.
@@ -63,9 +62,9 @@ public:
     void               setRuntimeVisible(bool v) { m_runtime_visible = v; }
 
 private:
-    Desc                       m_desc;
-    Eigen::Vector3f            m_premultiplied_color { Eigen::Vector3f::Zero() };
-    std::shared_ptr<SceneNode> m_node { nullptr };
+    Desc            m_desc;
+    Eigen::Vector3f m_premultiplied_color { Eigen::Vector3f::Zero() };
+    SceneNode*      m_node { nullptr };
 
     std::string m_visible_user_key {};
     bool        m_runtime_visible { true };

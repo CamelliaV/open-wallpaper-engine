@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 import rstd.cppstd;
+import rstd;
 import eigen;
 import nlohmann.json;
 import wavsen.audio;
@@ -16,10 +17,9 @@ import wescene.script;
 namespace
 {
 
-void CollectNodesById(const std::shared_ptr<owe::SceneNode>& root, std::int32_t id,
-                      std::vector<std::shared_ptr<owe::SceneNode>>& out) {
-    if (! root) return;
-    if (root->ID() == id) out.push_back(root);
+void CollectNodesById(const rstd::sync::Arc<owe::SceneNode>& root, std::int32_t id,
+                      std::vector<owe::SceneNode*>& out) {
+    if (root->ID() == id) out.push_back(root.as_ptr());
     for (const auto& child : root->GetChildren()) {
         CollectNodesById(child, id, out);
     }
@@ -74,7 +74,7 @@ TEST(SceneRuntimeScripts, EarthWorkshopMenuAlphaDefaultsHidden) {
 
     for (std::int32_t id : { 275, 279, 283, 291, 301, 260, 288, 297, 276, 158, 313, 309,
                              307, 315, 317, 319, 342, 346, 331, 413, 414, 415, 416 }) {
-        std::vector<std::shared_ptr<owe::SceneNode>> nodes;
+        std::vector<owe::SceneNode*> nodes;
         CollectNodesById(scene->sceneGraph, id, nodes);
         ASSERT_FALSE(nodes.empty()) << "missing menu node " << id;
 
@@ -94,9 +94,9 @@ TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlp
     owe::SceneNode    node;
     owe::sprite_map_t sprites;
 
-    auto camera_node = std::make_shared<owe::SceneNode>();
+    auto camera_node = rstd::sync::Arc<owe::SceneNode>::make();
     auto camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
-    camera->AttatchNode(camera_node);
+    camera->AttatchNode(camera_node.as_ptr());
     scene.cameras["default"] = camera;
     scene.activeCamera       = camera.get();
 
@@ -131,24 +131,25 @@ TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource
     scene.ortho[0] = 3840;
     scene.ortho[1] = 2160;
 
-    auto camera_node = std::make_shared<owe::SceneNode>(Eigen::Vector3f { 1920.0f, 1080.0f, 0.0f },
-                                                        Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                                                        Eigen::Vector3f::Zero());
-    auto camera      = std::make_shared<owe::SceneCamera>(3840, 2160, -1.0, 1.0);
-    camera->AttatchNode(camera_node);
+    auto camera_node =
+        rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 1920.0f, 1080.0f, 0.0f },
+                                              Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
+                                              Eigen::Vector3f::Zero());
+    auto camera = std::make_shared<owe::SceneCamera>(3840, 2160, -1.0, 1.0);
+    camera->AttatchNode(camera_node.as_ptr());
     scene.cameras["default"] = camera;
     scene.activeCamera       = camera.get();
 
-    auto parent = std::make_shared<owe::SceneNode>(Eigen::Vector3f { 1982.0f, 1053.0f, 0.0f },
-                                                   Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                                                   Eigen::Vector3f::Zero());
-    auto child  = std::make_shared<owe::SceneNode>(Eigen::Vector3f { -76.0f, -3.0f, 0.0f },
-                                                   Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                                                   Eigen::Vector3f::Zero());
+    auto parent = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 1982.0f, 1053.0f, 0.0f },
+                                                        Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
+                                                        Eigen::Vector3f::Zero());
+    auto child  = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { -76.0f, -3.0f, 0.0f },
+                                                        Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
+                                                        Eigen::Vector3f::Zero());
     auto mesh   = std::make_shared<owe::SceneMesh>();
     mesh->AddMaterial(owe::SceneMaterial {});
     child->AddMesh(mesh);
-    parent->AppendChild(child);
+    parent->AppendChild(child.clone());
 
     owe::SceneUniformUpdater updater(&scene);
     updater.SetCameraParallax({ true, 0.03f, 0.0f, 0.36f });
@@ -158,14 +159,14 @@ TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource
     owe::SceneUniformNodeData parent_data;
     parent_data.parallaxDepth           = { -1.56f, -0.79f };
     parent_data.propagatedParallaxDepth = parent_data.parallaxDepth;
-    updater.SetNodeData(parent.get(), parent_data);
+    updater.SetNodeData(parent.as_ptr(), parent_data);
 
     owe::SceneUniformNodeData child_data;
     child_data.parallaxDepth           = { -1.12f, -1.36f };
     child_data.propagatedParallaxDepth = child_data.parallaxDepth;
-    updater.SetNodeData(child.get(), child_data);
+    updater.SetNodeData(child.as_ptr(), child_data);
 
-    updater.InitUniforms(child.get(), [](std::string_view name) {
+    updater.InitUniforms(child.as_ptr(), [](std::string_view name) {
         return name == owe::G_MVP;
     });
 
@@ -173,7 +174,7 @@ TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource
         owe::sprite_map_t                                 sprites;
         std::unordered_map<std::string, owe::ShaderValue> values;
         updater.UpdateUniforms(
-            child.get(), sprites, [&](std::string_view name, owe::ShaderValue value) {
+            child.as_ptr(), sprites, [&](std::string_view name, owe::ShaderValue value) {
                 values[std::string(name)] = value;
             });
         return values.at(std::string(owe::G_MVP));
@@ -196,21 +197,25 @@ TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource
     EXPECT_NEAR(mvp[13], expected_parent.y(), 1e-5f);
 
     parent_data.propagate_parallax_to_children = false;
-    updater.SetNodeData(parent.get(), parent_data);
+    updater.SetNodeData(parent.as_ptr(), parent_data);
     mvp                 = capture_mvp();
     auto expected_child = expected_translation({ 1906.0f, 1050.0f }, { -1.12f, -1.36f });
     EXPECT_NEAR(mvp[12], expected_child.x(), 1e-5f);
     EXPECT_NEAR(mvp[13], expected_child.y(), 1e-5f);
 
     auto layer_camera = std::make_shared<owe::SceneCamera>(3840, 2160, -1.0, 1.0);
-    layer_camera->AttatchNode(child);
-    layer_camera->AttatchImgEffect(std::make_shared<owe::SceneImageEffectLayer>(
-        child.get(), 3840.0f, 2160.0f, "_rt_effect_pingpong_a_test", "_rt_effect_pingpong_b_test"));
+    layer_camera->AttatchNode(child.as_ptr());
+    layer_camera->AttatchImgEffect(
+        std::make_shared<owe::SceneImageEffectLayer>(child.as_ptr(),
+                                                     3840.0f,
+                                                     2160.0f,
+                                                     "_rt_effect_pingpong_a_test",
+                                                     "_rt_effect_pingpong_b_test"));
     scene.cameras["layer"] = layer_camera;
     child->SetCamera("layer");
 
     parent_data.propagate_parallax_to_children = true;
-    updater.SetNodeData(parent.get(), parent_data);
+    updater.SetNodeData(parent.as_ptr(), parent_data);
     mvp = capture_mvp();
     EXPECT_NEAR(mvp[12], 0.0f, 1e-5f);
     EXPECT_NEAR(mvp[13], 0.0f, 1e-5f);

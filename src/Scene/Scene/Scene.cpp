@@ -4,6 +4,7 @@ module;
 
 module wescene.scene;
 import eigen;
+import rstd;
 import rstd.cppstd;
 
 import wescene.fs;
@@ -203,7 +204,7 @@ bool SceneCameraPath::Tick(double runtime) {
 }
 
 Scene::Scene()
-    : sceneGraph(std::make_shared<SceneNode>()),
+    : sceneGraph(rstd::sync::Arc<SceneNode>::make()),
       vfs(nullptr, &delete_vfs),
       paritileSys(std::make_unique<ParticleSystem>(*this)) {}
 Scene::~Scene() = default;

@@ -74,7 +74,7 @@ static void TraverseNode(const std::function<void(SceneNode*)>& func, SceneNode*
                          const Set<i32>* skip_subtree_ids = nullptr) {
     if (skip_subtree_ids != nullptr && skip_subtree_ids->count(node->ID()) != 0) return;
     func(node);
-    for (auto& child : node->GetChildren()) TraverseNode(func, child.get(), skip_subtree_ids);
+    for (auto& child : node->GetChildren()) TraverseNode(func, child.as_ptr(), skip_subtree_ids);
 }
 
 static void CheckAndSetSprite(Scene& scene, vulkan::CustomShaderPass::Desc& desc,
@@ -141,7 +141,7 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                     cmdItor++;
                 }
                 auto& name = n.output;
-                ToGraphPass(n.sceneNode.get(), name, node->ID(), extra);
+                ToGraphPass(n.sceneNode.as_ptr(), name, node->ID(), extra);
                 nodePos++;
             }
         }
@@ -269,7 +269,7 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32
                                     Set<i32>& out_skip) {
     bool all_children_skippable = true;
     for (auto& c : node->GetChildren()) {
-        if (! CollectEmitSkipSubtrees(c.get(), scene, linked_ids, out_skip))
+        if (! CollectEmitSkipSubtrees(c.as_ptr(), scene, linked_ids, out_skip))
             all_children_skippable = false;
     }
     const i32  nid = node->ID();
@@ -299,13 +299,13 @@ static void CollectLinkedIds(SceneNode* node, Scene& scene, Set<i32>& out) {
             for (usize i = 0; i < eff_layer->EffectCount(); i++) {
                 auto& eff = eff_layer->GetEffect(i);
                 for (auto& n : eff->nodes) {
-                    if (n.sceneNode && n.sceneNode->HasMaterial())
+                    if (n.sceneNode->HasMaterial())
                         inspect_material(*n.sceneNode->Mesh()->Material());
                 }
             }
         }
     }
-    for (auto& c : node->GetChildren()) CollectLinkedIds(c.get(), scene, out);
+    for (auto& c : node->GetChildren()) CollectLinkedIds(c.as_ptr(), scene, out);
 }
 
 std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
@@ -316,11 +316,11 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     // every WE layer id that any material binds via `_rt_link_<id>`. This is the
     // delay-resolve step replacing a JSON pre-scan.
     Set<i32> linked_ids;
-    CollectLinkedIds(scene.sceneGraph.get(), scene, linked_ids);
+    CollectLinkedIds(scene.sceneGraph.as_ptr(), scene, linked_ids);
     for (auto& pp : scene.post_processes) {
         for (auto& step : pp->steps) {
             if (auto* sp = std::get_if<ScenePostProcessPass>(&step)) {
-                CollectLinkedIds(sp->node.get(), scene, linked_ids);
+                CollectLinkedIds(sp->node.as_ptr(), scene, linked_ids);
             }
         }
     }
@@ -331,7 +331,7 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     // Most corpora have ~25x more elidable layers than link-referenced ones;
     // the skip set lets the emit walk short-circuit without mutating the tree.
     Set<i32> emit_skip_subtree_ids;
-    CollectEmitSkipSubtrees(scene.sceneGraph.get(), scene, linked_ids, emit_skip_subtree_ids);
+    CollectEmitSkipSubtrees(scene.sceneGraph.as_ptr(), scene, linked_ids, emit_skip_subtree_ids);
 
     // Pass B: emit passes. For elidable layers with a link consumer, route
     // into a private `_rt_link_<id>` RT instead of `_rt_default`; elidable
@@ -362,7 +362,7 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
                 ToGraphPass(node, SpecTex_Default, nid, extra);
             }
         },
-        scene.sceneGraph.get(),
+        scene.sceneGraph.as_ptr(),
         &emit_skip_subtree_ids);
 
     // Emit global post-process passes after the main scene-graph traversal.
@@ -373,7 +373,7 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
             if (auto* sp = std::get_if<ScenePostProcessPass>(&step)) {
                 std::string_view target =
                     sp->output.empty() ? SpecTex_Default : std::string_view(sp->output);
-                ToGraphPass(sp->node.get(), target, sp->node->ID(), extra);
+                ToGraphPass(sp->node.as_ptr(), target, sp->node->ID(), extra);
             } else if (auto* cp = std::get_if<ScenePostProcessCopy>(&step)) {
                 rg::addCopyPass(*rgraph, rg::createTexDesc(cp->src), rg::createTexDesc(cp->dst));
             }

@@ -3,6 +3,7 @@ module;
 export module wescene.script;
 import nlohmann.json;
 import wescene.core;
+import rstd;
 import rstd.cppstd;
 import wescene.scene;
 
@@ -222,15 +223,12 @@ struct Actuator {
 
 // Build the closure that drives a SceneNode transform field. Encapsulates
 // the Vec3/Vec2/Scalar/Bool coercion table so callers stay one-liners.
-// Captures `node` as shared_ptr — the tree-topology invariant in Scene.cppm
-// already guarantees the node lives for the Scene's lifetime, so this is
-// belt-and-suspenders for Scene-teardown ordering, not protection against
-// runtime tree mutation.
-std::function<void(const ScriptValue&)> MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node,
+// Captures `node` as Arc so actuator lifetime follows the SceneNode allocation.
+std::function<void(const ScriptValue&)> MakeNodeTransformApply(rstd::sync::Arc<owe::SceneNode> node,
                                                                NodeTransformTarget target);
 
 // Build the closure that drives a SceneNode alpha field.
-std::function<void(const ScriptValue&)> MakeNodeAlphaApply(std::shared_ptr<owe::SceneNode> node);
+std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::SceneNode> node);
 
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
 // populated by the parser, attached to the Scene as an opaque pointer

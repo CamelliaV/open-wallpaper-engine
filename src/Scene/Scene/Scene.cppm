@@ -5,6 +5,7 @@ module;
 
 export module wescene.scene;
 import eigen;
+import rstd;
 import wescene.core;
 import rstd.cppstd;
 import wescene.types;
@@ -426,109 +427,10 @@ private:
     std::vector<std::shared_ptr<SceneMaterial>> m_materials; // per-instance
 };
 
-// ============================================================================
-// SceneImageEffectLayer.h (forward decls of SceneNode)
-// ============================================================================
-
 class SceneNode;
-
-struct SceneImageEffectNode {
-    std::string                output; // render target
-    std::shared_ptr<SceneNode> sceneNode;
-};
-
-struct SceneImageEffect {
-    enum class CmdType
-    {
-        Copy,
-    };
-    struct Command {
-        CmdType     cmd { CmdType::Copy };
-        std::string dst;
-        std::string src;
-        i32         afterpos { 0 };
-    };
-    std::vector<Command>            commands;
-    std::list<SceneImageEffectNode> nodes;
-};
-
-class SceneImageEffectLayer {
-public:
-    SceneImageEffectLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
-                          std::string_view pingpong_b);
-
-    void AddEffect(const std::shared_ptr<SceneImageEffect>& node) {
-        m_effects.push_back(node);
-        m_resolved = false;
-    }
-    std::size_t EffectCount() const { return m_effects.size(); }
-    auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
-    const auto& FirstTarget() const { return m_pingpong_a; }
-    SceneMesh&  FinalMesh() const { return *m_final_mesh; }
-    void        SetFullscreen(bool value) {
-        fullscreen = value;
-        m_resolved = false;
-    }
-    void SetFinalBlend(BlendMode m) {
-        m_final_blend = m;
-        m_resolved    = false;
-    }
-    void SetFinalMaterialState(const SceneMaterial& material) {
-        m_final_blend       = material.blenmode;
-        m_final_depth_test  = material.depth_test;
-        m_final_depth_write = material.depth_write;
-        m_final_cull_mode   = material.cull_mode;
-        m_resolved          = false;
-    }
-    void SetFinalTarget(std::string t) {
-        m_final_target = std::move(t);
-        m_resolved     = false;
-    }
-    const auto& FinalTarget() const { return m_final_target; }
-
-    // Idempotent: second and later calls are no-ops until any of the
-    // mutating setters above (or AddEffect) flips m_resolved back to false.
-    void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
-
-private:
-    SceneNode*  m_worldNode;
-    std::string m_pingpong_a;
-    std::string m_pingpong_b;
-
-    bool                       fullscreen { false };
-    std::unique_ptr<SceneMesh> m_final_mesh;
-    BlendMode                  m_final_blend;
-    bool                       m_final_depth_test { false };
-    bool                       m_final_depth_write { false };
-    CullMode                   m_final_cull_mode { CullMode::None };
-    std::string                m_final_target { SpecTex_Default };
-    bool                       m_resolved { false };
-
-    std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
-};
-
-// ============================================================================
-// ScenePostProcess.h
-// First-class global post-process. Each pass uses the scene's default
-// fullscreen NDC quad as its mesh - no camera, no transform, no image.
-// Runs after main scene-graph traversal and writes through SpecTex_Default.
-// ============================================================================
-
-struct ScenePostProcessPass {
-    std::shared_ptr<SceneNode> node;   // synthetic; mesh + material only
-    std::string                output; // RT key; empty -> SpecTex_Default
-};
-
-struct ScenePostProcessCopy {
-    std::string src;
-    std::string dst;
-};
-
-struct ScenePostProcess {
-    using Step = std::variant<ScenePostProcessPass, ScenePostProcessCopy>;
-    std::string       name;
-    std::vector<Step> steps;
-};
+struct SceneImageEffect;
+class SceneImageEffectLayer;
+struct ScenePostProcess;
 
 // ============================================================================
 // SceneCamera.h
@@ -547,11 +449,11 @@ public:
     explicit SceneCamera(float aspect, float near, float far, float fov)
         : m_aspect(aspect), m_nearClip(near), m_farClip(far), m_fov(fov), m_perspective(true) {}
 
-    SceneCamera(const SceneCamera&) = default;
+    SceneCamera(const SceneCamera& cam) { Clone(cam); }
 
     void Update();
 
-    void AttatchNode(std::shared_ptr<SceneNode>);
+    void AttatchNode(SceneNode*);
 
     bool   IsPerspective() const { return m_perspective; }
     bool   AllowCameraShake() const { return m_allowCameraShake; }
@@ -601,7 +503,10 @@ public:
     Eigen::Matrix4d GetViewMatrix();
     Eigen::Matrix4d GetViewProjectionMatrix();
 
-    std::shared_ptr<SceneNode> GetAttachedNode() const { return m_node; }
+    rstd::Option<SceneNode*> GetAttachedNode() const {
+        if (m_node == nullptr) return rstd::None();
+        return rstd::Some<SceneNode*>(m_node);
+    }
 
     void Clone(const SceneCamera& cam) {
         m_width            = cam.m_width;
@@ -628,7 +533,7 @@ private:
     double m_nearClip { 0.01f };
     double m_farClip { 1000.0f };
     double m_fov { 45.0f };
-    bool   m_perspective;
+    bool   m_perspective { false };
     bool   m_allowCameraShake { true };
 
     bool            m_lookat { false };
@@ -639,7 +544,7 @@ private:
     Eigen::Matrix4d m_viewMat { Eigen::Matrix4d::Identity() };
     Eigen::Matrix4d m_viewProjectionMat { Eigen::Matrix4d::Identity() };
 
-    std::shared_ptr<SceneNode>             m_node;
+    SceneNode*                             m_node { nullptr };
     std::shared_ptr<SceneImageEffectLayer> m_imgEffect { nullptr };
 };
 
@@ -685,7 +590,7 @@ class SceneCameraPath {
 public:
     std::string                         camera_name;
     std::shared_ptr<SceneCamera>        camera;
-    std::shared_ptr<SceneNode>          node;
+    SceneNode*                          node { nullptr };
     Eigen::Vector3f                     default_translate { Eigen::Vector3f::Zero() };
     Eigen::Vector3f                     default_rotation { Eigen::Vector3f::Zero() };
     Eigen::Vector3f                     path_translate_bias { Eigen::Vector3f::Zero() };
@@ -751,7 +656,7 @@ public:
 // SceneImageEffectLayer::m_worldNode, SceneCamera::m_node, m_parent itself)
 // is valid for the Scene's lifetime by construction. The dtor's parent
 // back-link clearing below is a defence against Scene teardown ordering,
-// where a child held by an external shared_ptr (e.g. SceneCamera::m_node)
+// where a child held by an external Arc (e.g. actuator closures)
 // can outlive its parent inside the std::list destructor.
 class SceneNode : NoCopy, NoMove {
 public:
@@ -793,13 +698,13 @@ public:
     bool        Perspective() const { return m_perspective; }
     void        SetPerspective(bool value) { m_perspective = value; }
     void        AddMesh(std::shared_ptr<SceneMesh> mesh) { m_mesh = mesh; }
-    void        AppendChild(std::shared_ptr<SceneNode> sub) {
+    void        AppendChild(rstd::sync::Arc<SceneNode> sub) {
         sub->m_parent = this;
-        m_children.push_back(sub);
         // Stale ModelTrans on the child (cached without this new
         // parent context) would persist for the rest of the frame
         // otherwise — force a recompute on next UpdateTrans.
         sub->MarkTransDirty();
+        m_children.push_back(rstd::move(sub));
     }
     Eigen::Matrix4d GetLocalTrans() const;
 
@@ -1005,8 +910,110 @@ private:
     // out-of-order teardown can dereference a stale pointer.
     SceneNode* m_parent { nullptr };
 
-    std::list<std::shared_ptr<SceneNode>> m_children;
+    std::list<rstd::sync::Arc<SceneNode>> m_children;
     std::vector<SceneNode*>               m_transform_anchors;
+};
+
+// ============================================================================
+// SceneImageEffectLayer.h
+// ============================================================================
+
+struct SceneImageEffectNode {
+    std::string                output; // render target
+    rstd::sync::Arc<SceneNode> sceneNode;
+};
+
+struct SceneImageEffect {
+    enum class CmdType
+    {
+        Copy,
+    };
+    struct Command {
+        CmdType     cmd { CmdType::Copy };
+        std::string dst;
+        std::string src;
+        i32         afterpos { 0 };
+    };
+    std::vector<Command>            commands;
+    std::list<SceneImageEffectNode> nodes;
+};
+
+class SceneImageEffectLayer {
+public:
+    SceneImageEffectLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
+                          std::string_view pingpong_b);
+
+    void AddEffect(const std::shared_ptr<SceneImageEffect>& node) {
+        m_effects.push_back(node);
+        m_resolved = false;
+    }
+    std::size_t EffectCount() const { return m_effects.size(); }
+    auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
+    const auto& FirstTarget() const { return m_pingpong_a; }
+    SceneMesh&  FinalMesh() const { return *m_final_mesh; }
+    void        SetFullscreen(bool value) {
+        fullscreen = value;
+        m_resolved = false;
+    }
+    void SetFinalBlend(BlendMode m) {
+        m_final_blend = m;
+        m_resolved    = false;
+    }
+    void SetFinalMaterialState(const SceneMaterial& material) {
+        m_final_blend       = material.blenmode;
+        m_final_depth_test  = material.depth_test;
+        m_final_depth_write = material.depth_write;
+        m_final_cull_mode   = material.cull_mode;
+        m_resolved          = false;
+    }
+    void SetFinalTarget(std::string t) {
+        m_final_target = std::move(t);
+        m_resolved     = false;
+    }
+    const auto& FinalTarget() const { return m_final_target; }
+
+    // Idempotent: second and later calls are no-ops until any of the
+    // mutating setters above (or AddEffect) flips m_resolved back to false.
+    void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
+
+private:
+    SceneNode*  m_worldNode;
+    std::string m_pingpong_a;
+    std::string m_pingpong_b;
+
+    bool                       fullscreen { false };
+    std::unique_ptr<SceneMesh> m_final_mesh;
+    BlendMode                  m_final_blend;
+    bool                       m_final_depth_test { false };
+    bool                       m_final_depth_write { false };
+    CullMode                   m_final_cull_mode { CullMode::None };
+    std::string                m_final_target { SpecTex_Default };
+    bool                       m_resolved { false };
+
+    std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
+};
+
+// ============================================================================
+// ScenePostProcess.h
+// First-class global post-process. Each pass uses the scene's default
+// fullscreen NDC quad as its mesh - no camera, no transform, no image.
+// Runs after main scene-graph traversal and writes through SpecTex_Default.
+// ============================================================================
+
+struct ScenePostProcessPass {
+    rstd::sync::Arc<SceneNode> node;   // synthetic; mesh + material only
+    std::string                output; // RT key; empty -> SpecTex_Default
+};
+
+struct ScenePostProcessCopy {
+    std::string src;
+    std::string dst;
+};
+
+struct ScenePostProcess {
+    using Step = std::variant<ScenePostProcessPass, ScenePostProcessCopy>;
+    std::string       name;
+    std::vector<Step> steps;
 };
 
 // SceneLight + SceneLightType live in the `wescene.scene:lighting` partition
@@ -1411,11 +1418,11 @@ public:
     std::span<const ParticleControlpoint> Controlpoints() const;
     std::span<ParticleControlpoint>       Controlpoints();
 
-    // The SceneNode this subsystem renders through. Held weakly because
-    // the node lives in the scene graph (shared_ptr there); used at
+    // The SceneNode this subsystem renders through. Owned by the scene graph;
+    // used at
     // Emitt() time to map world-space inputs (link_mouse cursor) into
     // the particle's local emit space via the node's inverse model.
-    void SetOwnerNode(std::weak_ptr<SceneNode> n) { m_owner_node = std::move(n); }
+    void SetOwnerNode(SceneNode* n) { m_owner_node = n; }
 
     SpawnType       Type() const;
     u32             MaxInstanceCount() const;
@@ -1428,7 +1435,7 @@ private:
 
     ParticleSystem&              m_sys;
     std::shared_ptr<SceneMesh>   m_mesh;
-    std::weak_ptr<SceneNode>     m_owner_node;
+    SceneNode*                   m_owner_node { nullptr };
     std::vector<ParticleEmittOp> m_emiters;
 
     std::vector<ParticleInitOp>     m_initializers;
@@ -1607,7 +1614,7 @@ public:
     // shape under `sceneGraph` is immutable until Scene destruction (see the
     // invariant on SceneNode). Render-graph build is read-only; script ticks
     // only mutate per-node transform / visibility fields.
-    std::shared_ptr<SceneNode>           sceneGraph;
+    rstd::sync::Arc<SceneNode>           sceneGraph;
     std::unique_ptr<IShaderValueUpdater> shaderValueUpdater;
     std::unique_ptr<IImageParser>        imageParser;
 

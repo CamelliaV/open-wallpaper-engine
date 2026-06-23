@@ -466,14 +466,12 @@ void ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
         have_bool = true;
     }
     if (! have_bool) return;
-    if (! scene.sceneGraph) return;
-
     std::function<void(SceneNode*)> walk = [&](SceneNode* n) {
         if (! n) return;
         if (n->VisibleUserKey() == key) n->SetVisible(v);
-        for (auto& c : n->GetChildren()) walk(c.get());
+        for (auto& c : n->GetChildren()) walk(c.as_ptr());
     };
-    walk(scene.sceneGraph.get());
+    walk(scene.sceneGraph.as_ptr());
 }
 
 void MergeProjectUserProperties(const std::filesystem::path&                     project_dir,

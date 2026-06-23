@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 import rstd.cppstd;
+import rstd;
 import eigen;
 import nlohmann.json;
 import wescene.scene;
@@ -280,7 +281,7 @@ TEST(ScriptNodeSoftMutation, PerspectiveWritesNodeFlag) {
 }
 
 TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
-    auto node = std::make_shared<owe::SceneNode>();
+    auto node = rstd::sync::Arc<owe::SceneNode>::make();
 
     ScriptScene ss;
     auto*       fs = ss.runtime().MakeFieldScript(
@@ -291,9 +292,9 @@ TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
         FieldKind::Scalar,
         nlohmann::json::object(),
         nlohmann::json(1.0),
-        node.get());
+        node.as_ptr());
     ASSERT_NE(fs, nullptr);
-    ss.AddActuator({ fs, MakeNodeAlphaApply(node) });
+    ss.AddActuator({ fs, MakeNodeAlphaApply(node.clone()) });
 
     FrameInputs fi {};
     ss.Tick(fi);
@@ -866,11 +867,11 @@ TEST(ScriptLocalStorage, ObjectRoundTrip) {
 }
 
 TEST(ScriptNodeChildren, WalksSceneNodeChildren) {
-    auto parent = std::make_shared<owe::SceneNode>();
-    auto a      = std::make_shared<owe::SceneNode>();
-    auto b      = std::make_shared<owe::SceneNode>();
-    parent->AppendChild(a);
-    parent->AppendChild(b);
+    auto parent = rstd::sync::Arc<owe::SceneNode>::make();
+    auto a      = rstd::sync::Arc<owe::SceneNode>::make();
+    auto b      = rstd::sync::Arc<owe::SceneNode>::make();
+    parent->AppendChild(a.clone());
+    parent->AppendChild(b.clone());
     a->SetTranslate({ 10.0f, 0.0f, 0.0f });
     b->SetTranslate({ 20.0f, 0.0f, 0.0f });
 
@@ -889,7 +890,7 @@ TEST(ScriptNodeChildren, WalksSceneNodeChildren) {
         FieldKind::Scalar,
         nlohmann::json::object(),
         nlohmann::json(0),
-        parent.get());
+        parent.as_ptr());
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
@@ -897,12 +898,12 @@ TEST(ScriptNodeChildren, WalksSceneNodeChildren) {
 }
 
 TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
-    auto root = std::make_shared<owe::SceneNode>();
+    auto root = rstd::sync::Arc<owe::SceneNode>::make();
 
     JsRuntime   rt;
     FrameInputs fi {};
     rt.SetFrameInputs(fi);
-    rt.SetSceneRoot(root.get());
+    rt.SetSceneRoot(root.as_ptr());
     auto* fs = rt.MakeFieldScript(
         R"JS(
             let late;
@@ -919,12 +920,12 @@ TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
         FieldKind::Scalar,
         nlohmann::json::object(),
         nlohmann::json(0),
-        root.get());
+        root.as_ptr());
     ASSERT_NE(fs, nullptr);
 
-    auto late = std::make_shared<owe::SceneNode>(
+    auto late = rstd::sync::Arc<owe::SceneNode>::make(
         Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "late-sound");
-    root->AppendChild(late);
+    root->AppendChild(late.clone());
     rt.SetUserProperty("go", nlohmann::json::parse(R"({"type":"bool","value":true})"));
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
@@ -1212,9 +1213,9 @@ TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
 TEST(SceneNodeTrans, SetTranslateRecomputesModelTrans) {
     owe::SceneNode parent;
     parent.SetTranslate({ 100.0f, 200.0f, 0.0f });
-    auto child = std::make_shared<owe::SceneNode>();
+    auto child = rstd::sync::Arc<owe::SceneNode>::make();
     child->SetTranslate({ 10.0f, 20.0f, 0.0f });
-    parent.AppendChild(child);
+    parent.AppendChild(child.clone());
 
     child->UpdateTrans();
     Eigen::Matrix4d m1 = child->ModelTrans();

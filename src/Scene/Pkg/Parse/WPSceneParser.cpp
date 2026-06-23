@@ -15,6 +15,7 @@ import nlohmann.json;
 import wescene.spec_texs;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.utils;
@@ -181,8 +182,7 @@ FindPuppetLayerWithBone(const std::shared_ptr<PuppetLayerRegistry>& layers, Scen
         if (index != 0) return it->second;
     }
     for (auto& child : node->GetChildren()) {
-        if (! child) continue;
-        if (auto hit = FindPuppetLayerWithBone(layers, child.get(), name, index)) return hit;
+        if (auto hit = FindPuppetLayerWithBone(layers, child.as_ptr(), name, index)) return hit;
     }
     return nullptr;
 }
@@ -193,17 +193,17 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
     if (! tmpl || count == 0) return out;
     out.reserve(count);
     for (unsigned i = 0; i < count; ++i) {
-        auto clone = std::make_shared<SceneNode>(
+        auto clone = rstd::sync::Arc<SceneNode>::make(
             tmpl->Translate(), tmpl->Scale(), tmpl->Rotation(), tmpl->Name());
         clone->SetSize(tmpl->Size());
         clone->SetPerspective(tmpl->Perspective());
         if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
         clone->AddMesh(tmpl->MeshShared());
         clone->ID() = -((i32)i + 1); // negative IDs reserved for clones
-        context.shader_updater->CopyNodeData(tmpl, clone.get());
+        context.shader_updater->CopyNodeData(tmpl, clone.as_ptr());
         if (auto layer = LookupPuppetLayer(context.puppet_layers, tmpl))
-            RegisterPuppetLayer(context, clone.get(), std::move(layer));
-        out.push_back(clone.get());
+            RegisterPuppetLayer(context, clone.as_ptr(), std::move(layer));
+        out.push_back(clone.as_ptr());
         // Defer attachment to FinalizeScene so the clones land at the
         // template's z-position (right after it), not at the root front.
         context.layer_clones[tmpl->ID()].push_back(std::move(clone));
@@ -384,7 +384,9 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::SceneMetadata& sc
     auto path               = std::make_shared<SceneCameraPath>();
     path->camera_name       = "global_perspective";
     path->camera            = it->second;
-    path->node              = context.global_perspective_camera_node;
+    path->node              = context.global_perspective_camera_node.is_some()
+                                  ? (*context.global_perspective_camera_node).as_ptr()
+                                  : nullptr;
     path->default_translate = path->node ? path->node->Translate() : Vector3f::Zero();
     path->default_rotation  = path->node ? path->node->Rotation() : Vector3f::Zero();
     path->default_width     = path->camera->Width();
@@ -419,12 +421,12 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::SceneMetadata& sc
 // bindings are wired by ParseTextObj's own call site (with the layouter
 // closure); side-effect-only bindings (`visible`) get the script without an
 // actuator so update() still drives scene mutations.
-void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
+void WireFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNode>& node_sp,
                       const wpscene::FieldBindings&                   fb,
                       std::function<void(const script::ScriptValue&)> origin_apply = {},
                       std::function<void(const script::ScriptValue&)> scale_apply  = {}) {
-    SceneNode* node = node_sp.get();
-    if (! node || fb.scripts.empty()) return;
+    SceneNode* node = node_sp.as_ptr();
+    if (fb.scripts.empty()) return;
     auto& ss = EnsureScriptScene(context);
     auto& rt = ss.runtime();
 
@@ -466,13 +468,13 @@ void WireFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
         if (! fs) continue;
         if (! has_actuator) continue;
         if (is_alpha)
-            ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp) });
+            ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp.clone()) });
         else if (field == "origin" && origin_apply)
             ss.AddActuator({ fs, origin_apply });
         else if (field == "scale" && scale_apply)
             ss.AddActuator({ fs, scale_apply });
         else
-            ss.AddActuator({ fs, script::MakeNodeTransformApply(node_sp, tgt) });
+            ss.AddActuator({ fs, script::MakeNodeTransformApply(node_sp.clone(), tgt) });
     }
 }
 
@@ -512,13 +514,13 @@ void WireCameraShakeScripts(ParseContext& context, const wpscene::FieldBindings&
     }
 }
 
-void WireCameraFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> node_sp,
+void WireCameraFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNode>& node_sp,
                             std::shared_ptr<SceneCamera>     camera,
                             std::shared_ptr<SceneCameraPath> camera_path,
                             const wpscene::FieldBindings& fb, const Vector3f& translate_bias,
                             const Vector3f& rotation_bias) {
-    SceneNode* node = node_sp.get();
-    if (! node || fb.scripts.empty()) return;
+    SceneNode* node = node_sp.as_ptr();
+    if (fb.scripts.empty()) return;
     auto& ss = EnsureScriptScene(context);
     auto& rt = ss.runtime();
 
@@ -537,32 +539,31 @@ void WireCameraFieldScripts(ParseContext& context, std::shared_ptr<SceneNode> no
         if (field == "origin") {
             ss.AddActuator(
                 { fs,
-                  [node_sp, camera, camera_path, translate_bias](const script::ScriptValue& value) {
+                  [node, camera, camera_path, translate_bias](const script::ScriptValue& value) {
                       Vector3f current = camera_path ? camera_path->origin_base
-                                                     : node_sp->Translate() - translate_bias;
+                                                     : node->Translate() - translate_bias;
                       auto     next    = ScriptValueAsVec3(value, current);
                       if (next) {
                           if (camera_path) camera_path->origin_base = *next;
-                          node_sp->SetTranslate(translate_bias + *next);
+                          node->SetTranslate(translate_bias + *next);
                           if (camera) camera->Update();
                       }
                   } });
         } else if (field == "angles") {
             ss.AddActuator(
-                { fs,
-                  [node_sp, camera, camera_path, rotation_bias](const script::ScriptValue& value) {
-                      constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
-                      constexpr float kDegToRad = rstd::f32_::consts::PI / 180.0f;
-                      Vector3f        current   = camera_path ? camera_path->rotation_base
-                                                              : node_sp->Rotation() - rotation_bias;
-                      current *= kRadToDeg;
-                      auto next = ScriptValueAsVec3(value, current);
-                      if (next) {
-                          if (camera_path) camera_path->rotation_base = *next * kDegToRad;
-                          node_sp->SetRotation(rotation_bias + *next * kDegToRad);
-                          if (camera) camera->Update();
-                      }
-                  } });
+                { fs, [node, camera, camera_path, rotation_bias](const script::ScriptValue& value) {
+                     constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
+                     constexpr float kDegToRad = rstd::f32_::consts::PI / 180.0f;
+                     Vector3f        current   = camera_path ? camera_path->rotation_base
+                                                             : node->Rotation() - rotation_bias;
+                     current *= kRadToDeg;
+                     auto next = ScriptValueAsVec3(value, current);
+                     if (next) {
+                         if (camera_path) camera_path->rotation_base = *next * kDegToRad;
+                         node->SetRotation(rotation_bias + *next * kDegToRad);
+                         if (camera) camera->Update();
+                     }
+                 } });
         }
     }
 }
@@ -1250,9 +1251,9 @@ void ParseCamera(ParseContext& context, wpscene::SceneMetadata& sc) {
     auto& general = sc.general;
     // effect camera
     scene.cameras["effect"]    = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
-    context.effect_camera_node = std::make_shared<SceneNode>(); // at 0,0,0
-    scene.cameras.at("effect")->AttatchNode(context.effect_camera_node);
-    scene.sceneGraph->AppendChild(context.effect_camera_node);
+    context.effect_camera_node = rstd::Some(rstd::sync::Arc<SceneNode>::make()); // at 0,0,0
+    scene.cameras.at("effect")->AttatchNode((*context.effect_camera_node).as_ptr());
+    scene.sceneGraph->AppendChild((*context.effect_camera_node).clone());
 
     // global camera
     scene.cameras["global"] = std::make_shared<SceneCamera>((context.ortho_w / (i32)general.zoom),
@@ -1263,9 +1264,9 @@ void ParseCamera(ParseContext& context, wpscene::SceneMetadata& sc) {
     Vector3f cori { (float)context.ortho_w / 2.0f, (float)context.ortho_h / 2.0f, 0 },
         cscale { 1.0f, 1.0f, 1.0f }, cangle(Vector3f::Zero());
 
-    context.global_camera_node = std::make_shared<SceneNode>(cori, cscale, cangle);
-    scene.activeCamera->AttatchNode(context.global_camera_node);
-    scene.sceneGraph->AppendChild(context.global_camera_node);
+    context.global_camera_node = rstd::Some(rstd::sync::Arc<SceneNode>::make(cori, cscale, cangle));
+    scene.activeCamera->AttatchNode((*context.global_camera_node).as_ptr());
+    scene.sceneGraph->AppendChild((*context.global_camera_node).clone());
 
     scene.cameras["global_perspective"] =
         std::make_shared<SceneCamera>((float)context.ortho_w / (float)context.ortho_h,
@@ -1273,11 +1274,13 @@ void ParseCamera(ParseContext& context, wpscene::SceneMetadata& sc) {
                                       general.farz,
                                       algorism::CalculatePersperctiveFov(1000.0f, context.ortho_h));
 
-    Vector3f cperori                       = cori;
-    cperori[2]                             = 1000.0f;
-    context.global_perspective_camera_node = std::make_shared<SceneNode>(cperori, cscale, cangle);
-    scene.cameras["global_perspective"]->AttatchNode(context.global_perspective_camera_node);
-    scene.sceneGraph->AppendChild(context.global_perspective_camera_node);
+    Vector3f cperori = cori;
+    cperori[2]       = 1000.0f;
+    context.global_perspective_camera_node =
+        rstd::Some(rstd::sync::Arc<SceneNode>::make(cperori, cscale, cangle));
+    scene.cameras["global_perspective"]->AttatchNode(
+        (*context.global_perspective_camera_node).as_ptr());
+    scene.sceneGraph->AppendChild((*context.global_perspective_camera_node).clone());
 
     // Perspective scene (orthogonalprojection==null). The content is authored
     // in WE world units around the origin and viewed by an explicit eye/center
@@ -1309,11 +1312,19 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
     auto        it          = scene.cameras.find(camera_name);
     if (it == scene.cameras.end()) return;
 
-    auto camera = it->second;
-    auto default_node =
-        use_perspective ? context.global_perspective_camera_node : context.global_camera_node;
-    if (! default_node) default_node = camera->GetAttachedNode();
-    if (! default_node) return;
+    auto       camera = it->second;
+    SceneNode* default_node =
+        use_perspective
+            ? (context.global_perspective_camera_node.is_some()
+                   ? (*context.global_perspective_camera_node).as_ptr()
+                   : nullptr)
+            : (context.global_camera_node.is_some() ? (*context.global_camera_node).as_ptr()
+                                                    : nullptr);
+    if (default_node == nullptr) {
+        auto attached = camera->GetAttachedNode();
+        if (attached.is_some()) default_node = attached.unwrap();
+    }
+    if (default_node == nullptr) return;
 
     double   default_width     = camera->Width();
     double   default_height    = camera->Height();
@@ -1325,13 +1336,13 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
     Vector3f path_translate_bias = use_perspective ? Vector3f::Zero() : default_translate;
     Vector3f path_rotation_bias  = use_perspective ? Vector3f::Zero() : default_rotation;
 
-    auto node = std::make_shared<SceneNode>(
+    auto node = rstd::sync::Arc<SceneNode>::make(
         path_translate_bias + origin, Vector3f::Ones(), path_rotation_bias + angles, cam.name);
     node->ID() = cam.id;
     if (! cam.visible) node->SetVisible(false);
     if (! cam.visible_user_key.empty()) node->SetVisibleUserKey(cam.visible_user_key);
 
-    if (cam.visible) camera->AttatchNode(node);
+    if (cam.visible) camera->AttatchNode(node.as_ptr());
     if (use_perspective) {
         camera->SetAllowCameraShake(false);
         if (cam.fov > 0.0f) camera->SetFov(cam.fov);
@@ -1342,7 +1353,7 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
     auto path                 = std::make_shared<SceneCameraPath>();
     path->camera_name         = camera_name;
     path->camera              = camera;
-    path->node                = node;
+    path->node                = node.as_ptr();
     path->default_translate   = default_translate;
     path->default_rotation    = default_rotation;
     path->path_translate_bias = path_translate_bias;
@@ -1366,7 +1377,7 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
 
     WireCameraFieldScripts(
         context, node, camera, path, cam.field_bindings, path_translate_bias, path_rotation_bias);
-    context.node_id_map[cam.id] = { cam.parent, node };
+    context.node_id_map[cam.id] = { cam.parent, rstd::Some(node.clone()) };
 }
 
 void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc) {
@@ -1502,11 +1513,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     }
 
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
-    auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
-                                                 Vector3f(wpimgobj.scale.data()),
-                                                 Vector3f(wpimgobj.angles.data()),
-                                                 wpimgobj.name);
-    LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
+    auto spImgNode = rstd::sync::Arc<SceneNode>::make(Vector3f(wpimgobj.origin.data()),
+                                                      Vector3f(wpimgobj.scale.data()),
+                                                      Vector3f(wpimgobj.angles.data()),
+                                                      wpimgobj.name);
+    LoadAlignment(*spImgNode.as_ptr(), wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetPerspective(wpimgobj.perspective);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
@@ -1521,7 +1532,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     std::shared_ptr<WPPuppetLayer> image_puppet_layer;
     if (puppet && has_bones) {
         image_puppet_layer = MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
-        RegisterPuppetLayer(context, spImgNode.get(), image_puppet_layer);
+        RegisterPuppetLayer(context, spImgNode.as_ptr(), image_puppet_layer);
     }
 
     // Puppet clipping masks: register the half-res shared RT here; per-mask
@@ -1580,7 +1591,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         if (! LoadMaterial(vfs,
                            image_wpmat,
                            context.scene.get(),
-                           spImgNode.get(),
+                           spImgNode.as_ptr(),
                            &material,
                            &svData,
                            &shaderInfo)) {
@@ -1769,7 +1780,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 if (! LoadMaterial(vfs,
                                    mask_wpmat,
                                    context.scene.get(),
-                                   spImgNode.get(),
+                                   spImgNode.as_ptr(),
                                    &mask_scene_mat,
                                    &mask_svData,
                                    &mask_shaderInfo)) {
@@ -1800,7 +1811,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 if (! LoadMaterial(vfs,
                                    clip_wpmat,
                                    context.scene.get(),
-                                   spImgNode.get(),
+                                   spImgNode.as_ptr(),
                                    &clip_scene_mat,
                                    &clip_svData,
                                    &clip_shaderInfo)) {
@@ -1821,11 +1832,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     spImgNode->AddMesh(spMesh);
 
-    context.shader_updater->SetNodeData(spImgNode.get(), svData);
+    context.shader_updater->SetNodeData(spImgNode.as_ptr(), svData);
     if (hasEffect) {
         auto& scene = *context.scene;
         // currently use addr for unique
-        std::string nodeAddr = getAddr(spImgNode.get());
+        std::string nodeAddr = getAddr(spImgNode.as_ptr());
         // set camera to attatch effect
         if (isPassthrough) {
             scene.cameras[nodeAddr] =
@@ -1833,7 +1844,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                               (int32_t)scene.activeCamera->Height(),
                                               -1.0f,
                                               1.0f);
-            scene.cameras.at(nodeAddr)->AttatchNode(scene.activeCamera->GetAttachedNode());
+            auto attached = scene.activeCamera->GetAttachedNode();
+            if (attached.is_some()) scene.cameras.at(nodeAddr)->AttatchNode(attached.unwrap());
             if (scene.linkedCameras.count("global") == 0) scene.linkedCameras["global"] = {};
             scene.linkedCameras.at("global").push_back(nodeAddr);
         } else {
@@ -1846,7 +1858,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             // translation. Otherwise the layer's quad ends up off-center in
             // the ping-pong RT whenever the layer is nested under a non-zero
             // container.
-            scene.cameras.at(nodeAddr)->AttatchNode(spImgNode);
+            scene.cameras.at(nodeAddr)->AttatchNode(spImgNode.as_ptr());
         }
         spImgNode->SetCamera(nodeAddr);
         std::string effect_ppong_a, effect_ppong_b;
@@ -1854,7 +1866,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         effect_ppong_b = OWE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
         // set image effect
         auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
-            spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
+            spImgNode.as_ptr(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
         {
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
@@ -1989,8 +2001,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 if (wpmat.textures.at(0).empty()) {
                     wpmat.textures[0] = inRT;
                 }
-                auto         spEffNode  = std::make_shared<SceneNode>();
-                std::string  effmataddr = getAddr(spEffNode.get());
+                auto         spEffNode  = rstd::sync::Arc<SceneNode>::make();
+                std::string  effmataddr = getAddr(spEffNode.as_ptr());
                 WPShaderInfo wpEffShaderInfo;
                 wpEffShaderInfo.baseConstSvs = baseConstSvs;
                 wpEffShaderInfo.baseConstSvs["g_EffectTextureProjectionMatrix"] =
@@ -2003,7 +2015,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 if (! LoadMaterial(vfs,
                                    wpmat,
                                    context.scene.get(),
-                                   spEffNode.get(),
+                                   spEffNode.as_ptr(),
                                    &material,
                                    &svData,
                                    &wpEffShaderInfo)) {
@@ -2018,12 +2030,12 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     svData.propagatedParallaxDepth = { wpimgobj.parallaxDepth[0],
                                                        wpimgobj.parallaxDepth[1] };
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
-                    svData.effect_projection_node = spImgNode.get();
+                    svData.effect_projection_node = spImgNode.as_ptr();
                     svData.effect_projection_size = { wpimgobj.size[0], wpimgobj.size[1] };
                     if (puppet && wpmat.use_puppet) {
                         svData.puppet_layer =
                             MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
-                        RegisterPuppetLayer(context, spEffNode.get(), svData.puppet_layer);
+                        RegisterPuppetLayer(context, spEffNode.as_ptr(), svData.puppet_layer);
                     }
                 }
                 spMesh->AddMaterial(std::move(material));
@@ -2054,7 +2066,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             if (! LoadMaterial(vfs,
                                                mask_wpmat,
                                                context.scene.get(),
-                                               spEffNode.get(),
+                                               spEffNode.as_ptr(),
                                                &mask_material,
                                                &mask_svData,
                                                &mask_shaderInfo)) {
@@ -2078,7 +2090,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             if (! LoadMaterial(vfs,
                                                clip_wpmat,
                                                context.scene.get(),
-                                               spEffNode.get(),
+                                               spEffNode.as_ptr(),
                                                &clip_material,
                                                &clip_svData,
                                                &clip_shaderInfo)) {
@@ -2098,8 +2110,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 if (auto* mat = spMesh->Material(); mat != nullptr) last_effect_shader = mat->name;
                 spEffNode->AddMesh(spMesh);
 
-                context.shader_updater->SetNodeData(spEffNode.get(), svData);
-                imgEffect->nodes.push_back({ matOutRT, spEffNode });
+                context.shader_updater->SetNodeData(spEffNode.as_ptr(), svData);
+                imgEffect->nodes.push_back(SceneImageEffectNode { matOutRT, spEffNode.clone() });
             }
 
             if (eff_mat_ok)
@@ -2125,7 +2137,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     passthrough_mat.textures[0] = effect_ppong_a;
 
                 auto finalEffect = std::make_shared<SceneImageEffect>();
-                auto spFinalNode = std::make_shared<SceneNode>();
+                auto spFinalNode = rstd::sync::Arc<SceneNode>::make();
 
                 WPShaderInfo wpFinalShaderInfo;
                 wpFinalShaderInfo.baseConstSvs = baseConstSvs;
@@ -2139,7 +2151,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 if (LoadMaterial(vfs,
                                  passthrough_mat,
                                  context.scene.get(),
-                                 spFinalNode.get(),
+                                 spFinalNode.as_ptr(),
                                  &finalMaterial,
                                  &finalSvData,
                                  &wpFinalShaderInfo)) {
@@ -2152,8 +2164,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                passthrough_mat,
                                                wpFinalShaderInfo);
                     spFinalNode->AddMesh(spFinalMesh);
-                    context.shader_updater->SetNodeData(spFinalNode.get(), finalSvData);
-                    finalEffect->nodes.push_back({ effect_ppong_b, spFinalNode });
+                    context.shader_updater->SetNodeData(spFinalNode.as_ptr(), finalSvData);
+                    finalEffect->nodes.push_back(
+                        SceneImageEffectNode { effect_ppong_b, spFinalNode.clone() });
                     imgEffectLayer->AddEffect(finalEffect);
                 } else {
                     rstd_error("effect passthrough failed to load for '{}'", wpimgobj.name);
@@ -2164,11 +2177,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     WireFieldScripts(context, spImgNode, wpimgobj.field_bindings);
     if (! wpimgobj.color_user_key.empty()) {
         context.scene->image_color_user_index[wpimgobj.color_user_key].push_back(
-            { spImgNode.get(), std::move(image_color_materials) });
+            { spImgNode.as_ptr(), std::move(image_color_materials) });
     }
     context.node_id_map[wpimgobj.id] = {
         wpimgobj.parent,
-        spImgNode,
+        rstd::Some(spImgNode.clone()),
         (puppet && puppet->puppet) ? puppet->puppet : nullptr,
         wpimgobj.attachment,
         image_puppet_layer,
@@ -2203,9 +2216,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         float       probability { 1.0f };
     };
 
-    wpscene::Particle*         p_particle_obj { nullptr };
-    std::shared_ptr<SceneNode> spNode;
-    ChildData                  child_data;
+    wpscene::Particle*                       p_particle_obj { nullptr };
+    rstd::Option<rstd::sync::Arc<SceneNode>> spNodeOpt;
+    ChildData                                child_data;
 
     bool is_child = child_ptr.child != nullptr;
     if (is_child) {
@@ -2219,23 +2232,26 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             float s = child_ptr.world_scale[i];
             if (std::abs(s) > 1e-6f) corigin[i] /= s;
         }
-        spNode     = std::make_shared<SceneNode>(corigin,
-                                                 Vector3f(child_ptr.child->scale.data()),
-                                                 Vector3f(child_ptr.child->angles.data()),
-                                                 child_ptr.child->name);
+        spNodeOpt =
+            rstd::Some(rstd::sync::Arc<SceneNode>::make(corigin,
+                                                        Vector3f(child_ptr.child->scale.data()),
+                                                        Vector3f(child_ptr.child->angles.data()),
+                                                        child_ptr.child->name));
         child_data = ChildData(*child_ptr.child);
 
         child_ptr.max_instancecount *= child_data.maxcount;
 
     } else {
         p_particle_obj = &wppartobj.particleObj;
-        spNode         = std::make_shared<SceneNode>(Vector3f(wppartobj.origin.data()),
-                                                     Vector3f(wppartobj.scale.data()),
-                                                     Vector3f(wppartobj.angles.data()),
-                                                     wppartobj.name);
+        spNodeOpt = rstd::Some(rstd::sync::Arc<SceneNode>::make(Vector3f(wppartobj.origin.data()),
+                                                                Vector3f(wppartobj.scale.data()),
+                                                                Vector3f(wppartobj.angles.data()),
+                                                                wppartobj.name));
+        auto& spNode = *spNodeOpt;
         if (! wppartobj.visible_user_key.empty())
             spNode->SetVisibleUserKey(wppartobj.visible_user_key);
     }
+    auto& spNode = *spNodeOpt;
 
     // Effective world scale at this SceneNode: parent's world scale times
     // this node's local scale. Propagated to child particle nodes.
@@ -2322,7 +2338,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         mat_ok = LoadMaterial(vfs,
                               particle_obj.material,
                               context.scene.get(),
-                              spNode.get(),
+                              spNode.as_ptr(),
                               &material,
                               &svData,
                               &shaderInfo,
@@ -2399,7 +2415,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         trail_length,
         static_cast<double>(particle_obj.starttime));
 
-    particleSub->SetOwnerNode(spNode);
+    particleSub->SetOwnerNode(spNode.as_ptr());
     LoadEmitter(*particleSub,
                 particle_obj,
                 override.count,
@@ -2419,14 +2435,14 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     RegisterShaderUserVarIndex(
         context.scene.get(), mesh.Material(), particle_obj.material, shaderInfo);
     spNode->AddMesh(spMesh);
-    context.shader_updater->SetNodeData(spNode.get(), svData);
+    context.shader_updater->SetNodeData(spNode.as_ptr(), svData);
 
     for (auto& child : particle_obj.children) {
         ParseParticleObj(context,
                          wppartobj,
                          {
                              .child             = &child,
-                             .node_parent       = spNode.get(),
+                             .node_parent       = spNode.as_ptr(),
                              .particle_parent   = particleSub.get(),
                              .max_instancecount = child_ptr.max_instancecount,
                              .world_scale       = node_world_scale,
@@ -2440,11 +2456,11 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
 
     WireFieldScripts(context, spNode, wppartobj.field_bindings);
     if (is_child)
-        child_ptr.node_parent->AppendChild(spNode);
+        child_ptr.node_parent->AppendChild(spNode.clone());
     else {
         context.node_id_map[wppartobj.id] = {
             wppartobj.parent,
-            spNode,
+            rstd::Some(spNode.clone()),
             nullptr,
             wppartobj.attachment,
         };
@@ -2453,10 +2469,10 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
 
 void ParseSoundObj(ParseContext& context, wpscene::SoundObject& obj,
                    wavsen::audio::SoundManager& sm) {
-    auto node  = std::make_shared<SceneNode>(Vector3f(obj.origin.data()),
-                                             Vector3f(obj.scale.data()),
-                                             Vector3f(obj.angles.data()),
-                                             obj.name);
+    auto node  = rstd::sync::Arc<SceneNode>::make(Vector3f(obj.origin.data()),
+                                                  Vector3f(obj.scale.data()),
+                                                  Vector3f(obj.angles.data()),
+                                                  obj.name);
     node->ID() = obj.id;
     if (! obj.visible) node->SetVisible(false);
     if (! obj.visible_user_key.empty()) node->SetVisibleUserKey(obj.visible_user_key);
@@ -2467,14 +2483,14 @@ void ParseSoundObj(ParseContext& context, wpscene::SoundObject& obj,
         context.scene->sound_volume_user_index[obj.volume_user_key].push_back(control);
 
     WireFieldScripts(context, node, obj.field_bindings);
-    context.node_id_map[obj.id] = { obj.parent, node };
+    context.node_id_map[obj.id] = { obj.parent, rstd::Some(node.clone()) };
 }
 
 void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
-    auto node = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
-                                            Vector3f(light_obj.scale.data()),
-                                            Vector3f(light_obj.angles.data()),
-                                            light_obj.name);
+    auto node = rstd::sync::Arc<SceneNode>::make(Vector3f(light_obj.origin.data()),
+                                                 Vector3f(light_obj.scale.data()),
+                                                 Vector3f(light_obj.angles.data()),
+                                                 light_obj.name);
 
     SceneLight::Desc desc;
     if (light_obj.light == "spot") {
@@ -2503,13 +2519,13 @@ void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
 
     context.scene->lights.emplace_back(std::make_unique<SceneLight>(desc));
     auto& light = *(context.scene->lights.back());
-    light.setNode(node);
+    light.setNode(node.as_ptr());
     light.setRuntimeVisible(light_obj.visible);
     if (! light_obj.visible_user_key.empty()) {
         light.setVisibleUserKey(light_obj.visible_user_key);
     }
 
-    context.node_id_map[light_obj.id] = { light_obj.parent, node };
+    context.node_id_map[light_obj.id] = { light_obj.parent, rstd::Some(node.clone()) };
 }
 
 void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
@@ -2521,10 +2537,10 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
         return;
     }
 
-    auto node  = std::make_shared<SceneNode>(Vector3f(model_obj.origin.data()),
-                                             Vector3f(model_obj.scale.data()),
-                                             Vector3f(model_obj.angles.data()),
-                                             model_obj.name);
+    auto node  = rstd::sync::Arc<SceneNode>::make(Vector3f(model_obj.origin.data()),
+                                                  Vector3f(model_obj.scale.data()),
+                                                  Vector3f(model_obj.angles.data()),
+                                                  model_obj.name);
     node->ID() = model_obj.id;
     MarkHiddenLinkSource(context, model_obj.id);
     if (! model_obj.visible_user_key.empty()) node->SetVisibleUserKey(model_obj.visible_user_key);
@@ -2538,7 +2554,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     if (mdl.puppet && ! mdl.puppet->bones.empty()) {
         svData.puppet_layer = MakePuppetLayer(
             mdl.puppet, std::span<WPPuppetLayer::AnimationLayer>(model_obj.puppet_layers));
-        RegisterPuppetLayer(context, node.get(), svData.puppet_layer);
+        RegisterPuppetLayer(context, node.as_ptr(), svData.puppet_layer);
     }
 
     for (const auto& mdl_mesh : mdl.meshes) {
@@ -2556,8 +2572,13 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
             WPMdlParser::AddPuppetShaderInfo(shader_info, mdl);
         }
 
-        if (! LoadMaterial(
-                vfs, *wpmat, context.scene.get(), node.get(), &scene_mat, &svData, &shader_info)) {
+        if (! LoadMaterial(vfs,
+                           *wpmat,
+                           context.scene.get(),
+                           node.as_ptr(),
+                           &scene_mat,
+                           &svData,
+                           &shader_info)) {
             rstd_error(
                 "load model material '{}' failed for '{}'", mdl_mesh.mat_json_file, model_obj.name);
             continue;
@@ -2582,11 +2603,13 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     }
 
     node->AddMesh(mesh);
-    context.shader_updater->SetNodeData(node.get(), svData);
+    context.shader_updater->SetNodeData(node.as_ptr(), svData);
     WireFieldScripts(context, node, model_obj.field_bindings);
-    context.node_id_map[model_obj.id] = {
-        model_obj.parent, node, mdl.puppet, model_obj.attachment, svData.puppet_layer
-    };
+    context.node_id_map[model_obj.id] = { model_obj.parent,
+                                          rstd::Some(node.clone()),
+                                          mdl.puppet,
+                                          model_obj.attachment,
+                                          svData.puppet_layer };
 }
 
 // Wrapping image parser: serves text-atlas Images for synthetic urls (set
@@ -2822,10 +2845,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         text_h = 1.0f;
     }
 
-    auto sp_node            = std::make_shared<SceneNode>(Vector3f(obj.origin.data()),
-                                                          Vector3f(obj.scale.data()),
-                                                          Vector3f(obj.angles.data()),
-                                                          obj.name);
+    auto sp_node            = rstd::sync::Arc<SceneNode>::make(Vector3f(obj.origin.data()),
+                                                               Vector3f(obj.scale.data()),
+                                                               Vector3f(obj.angles.data()),
+                                                               obj.name);
     sp_node->ID()           = obj.id;
     const float text_bbox_w = text_w + 2.0f * style.padding;
     const float text_bbox_h = text_h + 2.0f * style.padding;
@@ -2838,7 +2861,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // shift would manifest as the text appearing to drift in the wrong frame
     // of reference. Parallax goes on compose_node below (world-space quad).
     SceneUniformNodeData svData;
-    context.shader_updater->SetNodeData(sp_node.get(), svData);
+    context.shader_updater->SetNodeData(sp_node.as_ptr(), svData);
 
     // --- per-layer compose -------------------------------------------------
     // Render the glyphs into a private bbox-sized RT via an ortho camera
@@ -2870,7 +2893,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         .height     = text_bbox_h,
     });
 
-    auto compose_node = std::make_shared<SceneNode>();
+    auto compose_node = rstd::sync::Arc<SceneNode>::make();
     // Layer RT must be a worst-case sandbox: runtime SetText may expand the
     // glyph bbox well past the seed (clock/date/locale strings). Bound by
     // canvas so we don't waste VRAM, and floor at the parse-time bbox so a
@@ -2881,14 +2904,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     const i32   layer_h     = std::max<i32>(1, (i32)std::max(text_bbox_h, layer_max_h));
     {
         auto&             scene   = *context.scene;
-        const std::string addr    = getAddr(sp_node.get());
+        const std::string addr    = getAddr(sp_node.as_ptr());
         const std::string ppong_a = std::string(OWE_EFFECT_PPONG_PREFIX_A) + addr;
 
         // Per-layer ortho camera. effect_camera_node sits at origin so the
         // view matrix is identity; ortho extents = bbox so glyph pixel
         // coords (centered around 0) map directly to [-1, +1] NDC.
         scene.cameras[addr] = std::make_shared<SceneCamera>(layer_w, layer_h, -1.0f, 1.0f);
-        scene.cameras.at(addr)->AttatchNode(context.effect_camera_node);
+        scene.cameras.at(addr)->AttatchNode((*context.effect_camera_node).as_ptr());
 
         scene.renderTargets[ppong_a] = {
             .width       = layer_w,
@@ -2901,7 +2924,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         // routes sp_node's output to ppong_a (FirstTarget()) without
         // emitting any extra effect passes (m_effects is empty).
         auto layer = std::make_shared<SceneImageEffectLayer>(
-            sp_node.get(), (float)layer_w, (float)layer_h, ppong_a, ppong_a);
+            sp_node.as_ptr(), (float)layer_w, (float)layer_h, ppong_a, ppong_a);
         scene.cameras.at(addr)->AttatchImgEffect(layer);
 
         // Compose quad — sized to the visible text bbox in world space, with
@@ -2909,7 +2932,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         // glyphs actually live (the rest of the RT is transparent slack).
         // Scripted texts mutate text_w/text_h each frame, so the mesh is
         // dynamic and rebuilt by the actuator below.
-        compose_node->CopyTrans(*sp_node);
+        compose_node->CopyTrans(*sp_node.as_ptr());
         compose_node->ID() = obj.id;
         compose_node->SetSize({ text_bbox_w, text_bbox_h });
         auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
@@ -2947,7 +2970,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         if (! LoadMaterial(*context.vfs,
                            pt_mat,
                            &scene,
-                           compose_node.get(),
+                           compose_node.as_ptr(),
                            &compose_mat,
                            &compose_sv,
                            &compose_si)) {
@@ -2961,7 +2984,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_node->AddMesh(compose_mesh);
         compose_sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         compose_sv.propagatedParallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
-        context.shader_updater->SetNodeData(compose_node.get(), compose_sv);
+        context.shader_updater->SetNodeData(compose_node.as_ptr(), compose_sv);
 
         // Move sp_node into layer space — identity transform so the glyph
         // mesh renders at the ortho origin.
@@ -2969,11 +2992,12 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         sp_node->SetCamera(addr);
     }
 
-    auto apply_text_anchor = [compose_node, anchor_state]() {
+    SceneNode* compose_ptr       = compose_node.as_ptr();
+    auto       apply_text_anchor = [compose_ptr, anchor_state]() {
         auto contains = [](const std::string& value, std::string_view token) {
             return value.find(token) != std::string::npos;
         };
-        const auto& scale = compose_node->Scale();
+        const auto& scale = compose_ptr->Scale();
         Vector3f    pos   = anchor_state->origin;
         if (contains(anchor_state->horizontal, "left"))
             pos.x() += anchor_state->width * scale.x() * 0.5f;
@@ -2983,22 +3007,20 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             pos.y() -= anchor_state->height * scale.y() * 0.5f;
         if (contains(anchor_state->vertical, "bottom"))
             pos.y() += anchor_state->height * scale.y() * 0.5f;
-        compose_node->SetTranslate(pos);
+        compose_ptr->SetTranslate(pos);
     };
 
     // Per-frame compose-quad rebuild: world card sized to current text
     // bbox; UVs subsample the central text region of ppong_a (since the
     // ortho is layer-sized but glyphs occupy only text-bbox in the
-    // middle). Capture compose_node by shared_ptr — the topology invariant
-    // (Scene.cppm) keeps it alive for the Scene's lifetime; the shared_ptr
-    // capture is belt-and-suspenders for tear-down ordering.
+    // middle).
     auto rebuild_compose =
-        [compose_node, anchor_state, apply_text_anchor, layer_w, layer_h](float tw, float th) {
+        [compose_ptr, anchor_state, apply_text_anchor, layer_w, layer_h](float tw, float th) {
             if (tw <= 0.0f) tw = 1.0f;
             if (th <= 0.0f) th = 1.0f;
             anchor_state->width  = tw;
             anchor_state->height = th;
-            compose_node->SetSize({ tw, th });
+            compose_ptr->SetSize({ tw, th });
             apply_text_anchor();
             const float                 hx = tw * 0.5f;
             const float                 hy = th * 0.5f;
@@ -3014,7 +3036,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             const std::array<float, 8> uv {
                 u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
             };
-            auto* mesh = compose_node->Mesh();
+            auto* mesh = compose_ptr->Mesh();
             if (mesh == nullptr) return;
             auto& v = mesh->GetVertexArray(0);
             v.SetVertex(WE_IN_POSITION, pos);
@@ -3023,19 +3045,18 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         };
     rebuild_compose(text_w, text_h);
 
-    auto apply_text_origin =
-        [compose_node, anchor_state, apply_text_anchor](const script::ScriptValue& value) {
-            Vector3f current = anchor_state->origin;
-            auto     next    = ScriptValueAsVec3(value, current);
-            if (! next) return;
-            anchor_state->origin = *next;
-            apply_text_anchor();
-        };
-    auto apply_text_scale = [compose_node, apply_text_anchor](const script::ScriptValue& value) {
-        Vector3f current = compose_node->Scale();
+    auto apply_text_origin = [anchor_state, apply_text_anchor](const script::ScriptValue& value) {
+        Vector3f current = anchor_state->origin;
         auto     next    = ScriptValueAsVec3(value, current);
         if (! next) return;
-        compose_node->SetScale(*next);
+        anchor_state->origin = *next;
+        apply_text_anchor();
+    };
+    auto apply_text_scale = [compose_ptr, apply_text_anchor](const script::ScriptValue& value) {
+        Vector3f current = compose_ptr->Scale();
+        auto     next    = ScriptValueAsVec3(value, current);
+        if (! next) return;
+        compose_ptr->SetScale(*next);
         apply_text_anchor();
     };
 
@@ -3050,7 +3071,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     };
 
     if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
-    context.script_scene->runtime().RegisterTextAlignSetters(compose_node.get(),
+    context.script_scene->runtime().RegisterTextAlignSetters(compose_node.as_ptr(),
                                                              anchor_state->horizontal,
                                                              anchor_state->vertical,
                                                              obj.pointsize,
@@ -3082,7 +3103,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        script::FieldKind::String,
                                                        sb.properties,
                                                        sb.initial_value,
-                                                       sp_node.get());
+                                                       sp_node.as_ptr());
         if (fs) {
             ss.AddActuator({
                 fs,
@@ -3099,7 +3120,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // line above).
     if (wants_dynamic_text) {
         if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
-        context.script_scene->runtime().RegisterTextSetter(compose_node.get(),
+        context.script_scene->runtime().RegisterTextSetter(compose_node.as_ptr(),
                                                            [set_text](std::string_view s) {
                                                                set_text(s);
                                                            });
@@ -3109,10 +3130,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // parent chain — append directly to scene root, never reparented.
     // compose_node owns the world position and goes through the JSON-order
     // attach phase (FinalizeScene) like any other layer.
-    context.scene->sceneGraph->AppendChild(sp_node);
+    context.scene->sceneGraph->AppendChild(sp_node.clone());
     context.node_id_map[obj.id] = {
         obj.parent,
-        compose_node,
+        rstd::Some(compose_node.clone()),
         nullptr,
         obj.attachment,
         nullptr,
@@ -3415,17 +3436,17 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
     int attached = 0, missing_parent = 0;
     for (auto id : context.node_id_order) {
         auto rit = context.node_id_map.find(id);
-        if (rit == context.node_id_map.end() || ! rit->second.node) continue;
+        if (rit == context.node_id_map.end() || rit->second.node.is_none()) continue;
         auto&                        ref         = rit->second;
-        SceneNode*                   parent_node = context.scene->sceneGraph.get();
+        SceneNode*                   parent_node = context.scene->sceneGraph.as_ptr();
         const ParseContext::NodeRef* parent_ref  = nullptr;
         if (ref.parent_id != 0) {
             auto pit = context.node_id_map.find(static_cast<std::int32_t>(ref.parent_id));
-            if (pit == context.node_id_map.end() || ! pit->second.node) {
+            if (pit == context.node_id_map.end() || pit->second.node.is_none()) {
                 missing_parent++;
                 continue;
             }
-            parent_node = pit->second.node.get();
+            parent_node = (*pit->second.node).as_ptr();
             parent_ref  = &pit->second;
         }
         // MDAT bone-anchor: if the child carries `attachment = "<name>"` and
@@ -3462,15 +3483,15 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
                     if (ref.apply_attachment_offset) {
                         ref.apply_attachment_offset(offset);
                     } else {
-                        ref.node->SetTranslate(ref.node->Translate() + offset);
+                        (*ref.node)->SetTranslate((*ref.node)->Translate() + offset);
                     }
                 };
                 if (! ref.apply_attachment_offset && parent_ref->puppet_layer) {
-                    auto node       = ref.node;
-                    auto layer      = parent_ref->puppet_layer;
-                    auto attachment = *ait;
-                    auto base       = node->Translate();
-                    auto update     = [node, layer, attachment, base](double time) {
+                    SceneNode* node       = (*ref.node).as_ptr();
+                    auto       layer      = parent_ref->puppet_layer;
+                    auto       attachment = *ait;
+                    auto       base       = node->Translate();
+                    auto       update     = [node, layer, attachment, base](double time) {
                         auto bone = layer->boneTransform(
                             static_cast<uint32_t>(attachment.bone_index) + 1u, time);
                         if (! bone) return;
@@ -3483,14 +3504,14 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
                 }
             }
         }
-        parent_node->AppendChild(ref.node);
+        parent_node->AppendChild((*ref.node).clone());
         attached++;
 
         // Attach this layer's fanout clones (audio bars) right after it, so
         // all bars sit at the template's z-position in the parent child list.
         if (auto cit = context.layer_clones.find(id); cit != context.layer_clones.end()) {
             for (auto& clone : cit->second) {
-                parent_node->AppendChild(clone);
+                parent_node->AppendChild(rstd::move(clone));
                 attached++;
             }
         }
@@ -3508,7 +3529,7 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
         // Hand the scene root to the JS runtime so `thisScene.getLayer(name)`
         // can resolve against the live graph. The renderer also ticks the
         // ScriptScene once per frame via owe::script::TickSceneScripts.
-        context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.get());
+        context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.as_ptr());
         owe::script::InstallScriptScene(*context.scene, std::move(context.script_scene));
     }
     return context.scene;
@@ -3566,10 +3587,11 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         wpShaderInfo.baseConstSvs = context.global_base_uniforms;
         if (configure_info) configure_info(wpShaderInfo);
 
-        auto                 pp_node = std::make_shared<SceneNode>();
+        auto                 pp_node = rstd::sync::Arc<SceneNode>::make();
         SceneMaterial        material;
         SceneUniformNodeData svData;
-        if (! LoadMaterial(vfs, wpmat, &scene, pp_node.get(), &material, &svData, &wpShaderInfo)) {
+        if (! LoadMaterial(
+                vfs, wpmat, &scene, pp_node.as_ptr(), &material, &svData, &wpShaderInfo)) {
             rstd_error("bloom: LoadMaterial failed: {}", mat_relpath);
             return false;
         }
@@ -3590,10 +3612,10 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         // Anchor to the existing "effect" cam (2x2 ortho, identity for
         // our NDC fullscreen quads) so A=1.0 from the shader survives.
         pp_node->SetCamera("effect");
-        context.shader_updater->SetNodeData(pp_node.get(), svData);
+        context.shader_updater->SetNodeData(pp_node.as_ptr(), svData);
 
         pp->steps.emplace_back(ScenePostProcessPass {
-            .node   = std::move(pp_node),
+            .node   = rstd::move(pp_node),
             .output = std::move(output_rt),
         });
         return true;
@@ -3773,7 +3795,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             read_vec3(o, "origin", origin);
             read_vec3(o, "scale", scale);
             read_vec3(o, "angles", angles);
-            auto node = std::make_shared<SceneNode>(
+            auto node = rstd::sync::Arc<SceneNode>::make(
                 Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()), name);
             node->ID() = id;
             auto vit   = visibility_info.find(id);
@@ -3792,7 +3814,9 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             if (o.contains("attachment") && o.at("attachment").is_string()) {
                 attachment = o.at("attachment").get<std::string>();
             }
-            context.node_id_map[id] = { parent, node, nullptr, std::move(attachment), nullptr };
+            context.node_id_map[id] = {
+                parent, rstd::Some(node.clone()), nullptr, std::move(attachment), nullptr
+            };
         }
     }
 

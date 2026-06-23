@@ -147,7 +147,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
     Eigen::Vector3d mouse_local          = mouse_world;
     Eigen::Matrix3d world_from_local_dir = Eigen::Matrix3d::Identity();
     Eigen::Matrix3d local_from_world_dir = Eigen::Matrix3d::Identity();
-    if (auto node = m_owner_node.lock()) {
+    if (auto* node = m_owner_node) {
         node->UpdateTrans();
         world_from_local_dir = node->ModelTrans().block<3, 3>(0, 0);
         if (std::abs(world_from_local_dir.determinant()) > 1e-9)

@@ -7,6 +7,7 @@ module;
 module wescene.script;
 import eigen;
 import nlohmann.json;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.scene;
@@ -1849,8 +1850,8 @@ JSValue NodeGetChildren(JSContext* ctx, JSValueConst this_val, int, JSValueConst
     if (! n) return arr;
     uint32_t i = 0;
     for (const auto& child : n->GetChildren()) {
-        if (! child) continue;
-        JS_DefinePropertyValueUint32(ctx, arr, i++, WrapLayerNode(ctx, child.get()), JS_PROP_C_W_E);
+        JS_DefinePropertyValueUint32(
+            ctx, arr, i++, WrapLayerNode(ctx, child.as_ptr()), JS_PROP_C_W_E);
     }
     return arr;
 }
@@ -1881,7 +1882,7 @@ bool TreeContains(owe::SceneNode* root, owe::SceneNode* needle) {
     if (! root || ! needle) return false;
     if (root == needle) return true;
     for (const auto& child : root->GetChildren()) {
-        if (child && TreeContains(child.get(), needle)) return true;
+        if (TreeContains(child.as_ptr(), needle)) return true;
     }
     return false;
 }
@@ -1907,11 +1908,11 @@ JSValue NodeSceneEnumerateLayers(JSContext* ctx, JSValueConst this_val, int, JSV
         if (! node) return;
         JS_DefinePropertyValueUint32(ctx, arr, i++, WrapLayerNode(ctx, node), JS_PROP_C_W_E);
         for (const auto& child : node->GetChildren()) {
-            if (child) self(self, child.get());
+            self(self, child.as_ptr());
         }
     };
     for (const auto& child : n->GetChildren()) {
-        if (child) append(append, child.get());
+        append(append, child.as_ptr());
     }
     JS_DefinePropertyValueStr(ctx, arr, "__wwRoot", WrapLayerNode(ctx, n), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx,
@@ -2576,11 +2577,21 @@ bool ScriptScene::empty() const noexcept {
     return ! has_script;
 }
 
-std::function<void(const ScriptValue&)> MakeNodeTransformApply(std::shared_ptr<owe::SceneNode> node,
+struct SceneNodeArcCapture {
+    rstd::sync::Arc<owe::SceneNode> node;
+
+    explicit SceneNodeArcCapture(rstd::sync::Arc<owe::SceneNode> n): node(rstd::move(n)) {}
+    SceneNodeArcCapture(const SceneNodeArcCapture& other): node(other.node.clone()) {}
+    SceneNodeArcCapture(SceneNodeArcCapture&&) noexcept            = default;
+    SceneNodeArcCapture& operator=(SceneNodeArcCapture&&) noexcept = default;
+    SceneNodeArcCapture& operator=(const SceneNodeArcCapture&)     = delete;
+};
+
+std::function<void(const ScriptValue&)> MakeNodeTransformApply(rstd::sync::Arc<owe::SceneNode> node,
                                                                NodeTransformTarget target) {
-    return [node = std::move(node), target](const ScriptValue& v) {
-        if (! node) return;
+    return [hold = SceneNodeArcCapture(rstd::move(node)), target](const ScriptValue& v) {
         if (std::holds_alternative<std::monostate>(v)) return;
+        auto& node = hold.node;
 
         // Script angle values are degrees; node rotation is radians. Read the
         // current rotation back as degrees so partial (Vec2 / scalar) updates
@@ -2625,10 +2636,10 @@ std::function<void(const ScriptValue&)> MakeNodeTransformApply(std::shared_ptr<o
     };
 }
 
-std::function<void(const ScriptValue&)> MakeNodeAlphaApply(std::shared_ptr<owe::SceneNode> node) {
-    return [node = std::move(node)](const ScriptValue& v) {
-        if (! node) return;
+std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::SceneNode> node) {
+    return [hold = SceneNodeArcCapture(rstd::move(node))](const ScriptValue& v) {
         if (std::holds_alternative<std::monostate>(v)) return;
+        auto& node = hold.node;
 
         if (auto* p = std::get_if<ScalarValue>(&v)) {
             node->SetUserAlpha(static_cast<float>(p->v));

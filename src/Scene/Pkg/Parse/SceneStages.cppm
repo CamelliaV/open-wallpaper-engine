@@ -4,6 +4,7 @@ export module wescene.pkg.parse:scene_stages;
 import eigen;
 import nlohmann.json;
 
+import rstd;
 import rstd.cppstd;
 import wavsen.audio;
 import wescene.core;
@@ -39,10 +40,10 @@ struct ParseContext {
     fs::VFS*                                               vfs { nullptr };
     const std::unordered_map<std::string, nlohmann::json>* user_properties { nullptr };
 
-    ShaderValueMap             global_base_uniforms;
-    std::shared_ptr<SceneNode> effect_camera_node;
-    std::shared_ptr<SceneNode> global_camera_node;
-    std::shared_ptr<SceneNode> global_perspective_camera_node;
+    ShaderValueMap                           global_base_uniforms;
+    rstd::Option<rstd::sync::Arc<SceneNode>> effect_camera_node;
+    rstd::Option<rstd::sync::Arc<SceneNode>> global_camera_node;
+    rstd::Option<rstd::sync::Arc<SceneNode>> global_perspective_camera_node;
 
     // Lazily allocated by WireFieldScripts as objects with script
     // bindings come in. Installed onto the Scene by FinalizeScene.
@@ -57,8 +58,8 @@ struct ParseContext {
     // (e.g. workshop 3327063360's "Audio Bars" hardcoded at (-155, 322)
     // is parent=4995, the "总组件" centre).
     struct NodeRef {
-        std::uint32_t              parent_id { 0 };
-        std::shared_ptr<SceneNode> node;
+        std::uint32_t                            parent_id { 0 };
+        rstd::Option<rstd::sync::Arc<SceneNode>> node;
         // Carried for cross-node wiring at FinalizeScene attach time.
         // `puppet` populated for image objects that own an MDL skeleton,
         // so a child layer with `attachment = "<name>"` can resolve the
@@ -81,7 +82,7 @@ struct ParseContext {
     // (not appended to the graph at spawn time) so FinalizeScene can attach
     // them right after the template node — keeping all bars at the template's
     // z-position instead of jumping to the front of the root child list.
-    std::unordered_map<std::int32_t, std::vector<std::shared_ptr<SceneNode>>> layer_clones;
+    std::unordered_map<std::int32_t, std::vector<rstd::sync::Arc<SceneNode>>> layer_clones;
 
     std::unordered_map<std::int32_t, std::string> image_texture_fallbacks;
     Set<std::int32_t>                             hidden_link_source_ids;

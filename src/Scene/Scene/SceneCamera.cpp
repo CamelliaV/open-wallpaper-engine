@@ -3,6 +3,7 @@ module;
 #include <rstd/macro.hpp>
 module wescene.scene;
 import eigen;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.utils;
@@ -64,7 +65,7 @@ void SceneCamera::CalculateViewProjectionMatrix() {
 
 void SceneCamera::Update() { CalculateViewProjectionMatrix(); }
 
-void SceneCamera::AttatchNode(std::shared_ptr<SceneNode> node) {
+void SceneCamera::AttatchNode(SceneNode* node) {
     if (! node) {
         rstd_error("Attach a null node to camera");
         return;

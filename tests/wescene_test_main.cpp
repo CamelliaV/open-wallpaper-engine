@@ -1307,15 +1307,15 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
                         for (auto& enode : eff->nodes) {
                             std::string tag2 = "[eff " + std::to_string(ei) + " node " +
                                                std::to_string(ni++) + "]";
-                            DumpPass(out, "    " + tag2, *enode.sceneNode, enode.output);
+                            DumpPass(out, "    " + tag2, *enode.sceneNode.as_ptr(), enode.output);
                         }
                     }
                 }
             }
         }
-        for (auto& child : n->GetChildren()) walk(child.get(), depth + 1);
+        for (auto& child : n->GetChildren()) walk(child.as_ptr(), depth + 1);
     };
-    walk(scene.sceneGraph.get(), 0);
+    walk(scene.sceneGraph.as_ptr(), 0);
 }
 
 void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
@@ -1338,7 +1338,7 @@ void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
                     "  [pp " + std::to_string(ci) + ":" + std::to_string(si) + " draw]";
                 DumpPass(out,
                          tag,
-                         *sp->node,
+                         *sp->node.as_ptr(),
                          sp->output.empty() ? std::string(owe::SpecTex_Default) : sp->output);
             } else if (auto* cp = std::get_if<owe::ScenePostProcessCopy>(&step)) {
                 std::fprintf(out,

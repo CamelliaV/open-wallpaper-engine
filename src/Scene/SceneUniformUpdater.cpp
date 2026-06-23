@@ -243,9 +243,10 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     if (reqM || reqMVP || reqMI || reqMVPI || reqEMVP) {
         Matrix4d modelTrans = pNode->ModelTrans();
         if (hasNodeData && cam_name != "effect") {
-            const auto& nodeData = m_nodeDataMap.at(pNode);
+            const auto& nodeData   = m_nodeDataMap.at(pNode);
+            auto        cameraNode = camera->GetAttachedNode();
             const bool  layerLocalEffectSource =
-                camera->HasImgEffect() && camera->GetAttachedNode().get() == pNode;
+                camera->HasImgEffect() && cameraNode.is_some() && *cameraNode == pNode;
             if (m_parallax.enable && ! layerLocalEffectSource) {
                 auto*       parallaxNode = pNode;
                 const auto* parallaxData = &nodeData;
