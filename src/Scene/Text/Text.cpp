@@ -21,17 +21,18 @@ namespace owe::text
 namespace
 {
 
-// Fixed per-FontFace atlas. With lazy populate (no JS-literal scrape, no ASCII
-// sweep), the realistic upper bound for one face is ~200 glyphs × ~60²px,
-// which fits in 1024² R8 (1MB CPU + 1MB GPU) with slack. Overflow falls back
-// to the white-cell tofu branch — no atlas growth, no descriptor-set
-// invalidation hazard.
-constexpr std::uint32_t kAtlasDim { 1024 };
+constexpr std::uint32_t kMinAtlasDim { 1024 };
 
 // 4×4 white cell at (0,0) so a single-channel atlas can also serve solid-fill
 // quads (e.g. opaquebackground rectangle) and as a tofu fallback when the
 // atlas overflows.
 constexpr std::uint32_t kWhiteCellSize { 4 };
+
+std::uint32_t AtlasDimForPixelSize(std::uint32_t pixel_size) {
+    if (pixel_size > 512) return 4096;
+    if (pixel_size > 256) return 2048;
+    return kMinAtlasDim;
+}
 
 class FtLibrary {
 public:
@@ -96,8 +97,8 @@ struct FontFace::Impl {
     FT_Face                                 face { nullptr };
     std::uint32_t                           pixel_size { 0 };
 
-    std::uint32_t             atlas_w { kAtlasDim };
-    std::uint32_t             atlas_h { kAtlasDim };
+    std::uint32_t             atlas_w { kMinAtlasDim };
+    std::uint32_t             atlas_h { kMinAtlasDim };
     std::vector<std::uint8_t> atlas;
 
     // Shelf packer state: pen advances along the current shelf, falls to a
@@ -122,6 +123,18 @@ struct FontFace::Impl {
 
     Impl() {
         atlas.assign(static_cast<std::size_t>(atlas_w) * atlas_h, 0);
+        SeedWhiteCell();
+    }
+
+    void ResetAtlas(std::uint32_t dim) {
+        atlas_w = dim;
+        atlas_h = dim;
+        atlas.assign(static_cast<std::size_t>(atlas_w) * atlas_h, 0);
+        dirty_rects.clear();
+        glyphs.clear();
+        pen_x   = 0;
+        pen_y   = 0;
+        shelf_h = 0;
         SeedWhiteCell();
     }
 
@@ -296,6 +309,7 @@ FontFace* FontCache::GetFace(std::shared_ptr<std::vector<std::byte>> blob,
     // pointers into this buffer and dereferences them on every glyph load.
     face->m_impl->blob       = std::move(blob);
     face->m_impl->pixel_size = pixel_size;
+    face->m_impl->ResetAtlas(AtlasDimForPixelSize(pixel_size));
     face->m_impl->atlas_url =
         "_text_atlas_" + std::to_string(blob_hash) + "_" + std::to_string(pixel_size);
 
@@ -586,6 +600,8 @@ struct TextLayouter::Impl {
 
     float       last_text_w { 0.0f };
     float       last_text_h { 0.0f };
+    float       last_source_w { 0.0f };
+    float       last_source_h { 0.0f };
     std::string current_text;
     bool        missing_glyph_logged { false };
     bool        truncate_logged { false };
@@ -618,6 +634,8 @@ TextLayouter::~TextLayouter() = default;
 
 float TextLayouter::TextWidth() const noexcept { return m_impl->last_text_w; }
 float TextLayouter::TextHeight() const noexcept { return m_impl->last_text_h; }
+float TextLayouter::SourceWidth() const noexcept { return m_impl->last_source_w; }
+float TextLayouter::SourceHeight() const noexcept { return m_impl->last_source_h; }
 
 void TextLayouter::SetText(std::string_view utf8) {
     auto& im = *m_impl;
@@ -676,8 +694,10 @@ void TextLayouter::SetText(std::string_view utf8) {
         if (l.width > text_w) text_w = l.width;
     float text_h =
         fm.ascender - fm.descender + static_cast<float>(lines.size() - 1) * fm.line_height;
-    im.last_text_w = text_w;
-    im.last_text_h = text_h;
+    im.last_text_w   = text_w;
+    im.last_text_h   = text_h;
+    im.last_source_w = text_w;
+    im.last_source_h = text_h;
 
     // Zero the unused tail so stale data from the previous (longer) text
     // doesn't show up. Cheaper than tracking exact quad count downstream.
@@ -765,7 +785,26 @@ void TextLayouter::SetText(std::string_view utf8) {
         im.style.alpha,
     };
 
-    std::size_t emitted_glyphs = 0;
+    std::size_t emitted_glyphs       = 0;
+    bool        have_glyph_bounds    = false;
+    float       glyph_min_x          = 0.0f;
+    float       glyph_max_x          = 0.0f;
+    float       glyph_min_y          = 0.0f;
+    float       glyph_max_y          = 0.0f;
+    auto        include_glyph_bounds = [&](float left, float right, float bottom, float top) {
+        if (! have_glyph_bounds) {
+            glyph_min_x       = left;
+            glyph_max_x       = right;
+            glyph_min_y       = bottom;
+            glyph_max_y       = top;
+            have_glyph_bounds = true;
+            return;
+        }
+        glyph_min_x = std::min(glyph_min_x, left);
+        glyph_max_x = std::max(glyph_max_x, right);
+        glyph_min_y = std::min(glyph_min_y, bottom);
+        glyph_max_y = std::max(glyph_max_y, top);
+    };
     for (std::size_t li = 0; li < lines.size(); ++li) {
         const auto& line = lines[li];
         float       line_origin_x;
@@ -797,11 +836,24 @@ void TextLayouter::SetText(std::string_view utf8) {
             float v_b =
                 static_cast<float>(gi->atlas_y + gi->pixel_h) / static_cast<float>(fm.atlas_h);
             write_quad(q++, left, right, bottom, top, u_l, u_r, v_t, v_b, text_rgba);
+            include_glyph_bounds(left, right, bottom, top);
             pen_x += gi->advance_x;
             ++emitted_glyphs;
             if (emitted_glyphs >= total_glyph_quads) break;
         }
         if (emitted_glyphs >= total_glyph_quads) break;
+    }
+
+    if (have_glyph_bounds) {
+        im.last_source_w               = std::max(1.0f, glyph_max_x - glyph_min_x);
+        im.last_source_h               = std::max(1.0f, glyph_max_y - glyph_min_y);
+        const float       shift_x      = -0.5f * (glyph_min_x + glyph_max_x);
+        const float       shift_y      = -0.5f * (glyph_min_y + glyph_max_y);
+        const std::size_t vertex_count = q * 4;
+        for (std::size_t i = 0; i < vertex_count; ++i) {
+            im.positions[i * 3 + 0] += shift_x;
+            im.positions[i * 3 + 1] += shift_y;
+        }
     }
 
     // Push into the mesh. Vertex array's stride is interleaved with padding

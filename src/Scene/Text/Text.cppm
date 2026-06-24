@@ -221,6 +221,8 @@ public:
     // For ParseTextObj's initial-bbox log; reflects the most recent layout.
     float TextWidth() const noexcept;
     float TextHeight() const noexcept;
+    float SourceWidth() const noexcept;
+    float SourceHeight() const noexcept;
 
 private:
     struct Impl;

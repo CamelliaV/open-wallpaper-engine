@@ -252,7 +252,7 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
                 const auto* parallaxData = &nodeData;
                 for (auto* parent = pNode->Parent(); parent != nullptr; parent = parent->Parent()) {
                     auto it = m_nodeDataMap.find(parent);
-                    if (it == m_nodeDataMap.end()) break;
+                    if (it == m_nodeDataMap.end()) continue;
                     if (! it->second.propagate_parallax_to_children) break;
                     parallaxNode = parent;
                     parallaxData = &it->second;

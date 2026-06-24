@@ -573,7 +573,7 @@ void WireCameraFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNo
 namespace
 {
 // mapRate < 1.0
-void GenCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
+void GenCardMesh(SceneMesh& mesh, const std::array<float, 2> size,
                  const std::array<float, 2> mapRate = { 1.0f, 1.0f }) {
     float left   = -(size[0] / 2.0f);
     float right  = size[0] / 2.0f;
@@ -1387,7 +1387,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc
     scene.imageParser        = std::make_unique<WPTexImageParser>(&vfs);
     scene.paritileSys->gener = std::make_unique<WPParticleRawGener>();
     scene.shaderValueUpdater = std::make_unique<SceneUniformUpdater>(&scene);
-    GenCardMesh(scene.default_effect_mesh, { 2, 2 });
+    GenCardMesh(scene.default_effect_mesh, { 2.0f, 2.0f });
     context.shader_updater = static_cast<SceneUniformUpdater*>(scene.shaderValueUpdater.get());
 
     scene.clearColor = sc.general.clearcolor;
@@ -1683,7 +1683,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     if (puppet) {
         if (hasEffect) {
-            GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
+            GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate);
             for (const auto& m : puppet->meshes) {
                 if (m.positions.empty()) continue;
                 effct_final_mesh.Submeshes().emplace_back();
@@ -1709,8 +1709,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         }
     }
     if (! puppet) {
-        GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
-        GenCardMesh(effct_final_mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
+        GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate);
+        GenCardMesh(effct_final_mesh, { wpimgobj.size[0], wpimgobj.size[1] });
     }
     // material blendmode for last step to use
     auto finalMaterialState = material;
@@ -2656,10 +2656,20 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     bool has_text_script = (text_binding_it != obj.field_bindings.scripts.end());
     // Scripts can also drive `text` indirectly: a script attached to any
     // other field (commonly `visible`) writes `thisLayer.text = "..."` from
-    // its update() side-effect (e.g. workshop 2283810443's clock). Treat
-    // those layers as scripted-text for mesh sizing + setter registration.
-    bool has_indirect_text_script = ! has_text_script && ! obj.field_bindings.scripts.empty();
-    bool wants_dynamic_text       = has_text_script || has_indirect_text_script;
+    // its update() side-effect (e.g. workshop 2283810443's clock). Transform
+    // scripts alone should not force large dynamic text RTs.
+    bool has_indirect_text_script = false;
+    if (! has_text_script) {
+        for (const auto& [_, sb] : obj.field_bindings.scripts) {
+            if (sb.source.find(".text") != std::string::npos ||
+                sb.source.find("[\"text\"]") != std::string::npos ||
+                sb.source.find("['text']") != std::string::npos) {
+                has_indirect_text_script = true;
+                break;
+            }
+        }
+    }
+    bool wants_dynamic_text = has_text_script || has_indirect_text_script;
 
     std::string s_text;
     if (obj.text.is_string()) {
@@ -2738,12 +2748,11 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         face->Populate(seed);
     }
 
-    // --- atlas-texture registration. The face's atlas is fixed at 1024² R8;
-    // we snapshot whatever the CPU buffer holds right now (seed glyphs + the
-    // white cell) and register it with the imageParser. TextureCache::CreateTex
-    // will pick this up on first material bind, allocating the VkImage at
-    // 1024². Subsequent glyph adds emit dirty rects which the renderer
-    // re-uploads each frame via TextureCache::PumpFontAtlases.
+    // --- atlas-texture registration. We snapshot the per-face CPU atlas
+    // (seed glyphs + the white cell) and register it with the imageParser.
+    // TextureCache::CreateTex will pick this up on first material bind.
+    // Subsequent glyph adds emit dirty rects which the renderer re-uploads
+    // each frame via TextureCache::PumpFontAtlases.
     const std::string& atlas_url = face->AtlasUrl();
     if (! context.scene->textures.contains(atlas_url)) {
         auto atlas_img = text::BuildAtlasImage(*face, atlas_url);
@@ -2775,8 +2784,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         const auto& fm  = face->Metrics();
         const float adv = std::max(1.0f, static_cast<float>(fm.pixel_size) * 0.25f);
         const float lh = fm.line_height > 1.0f ? fm.line_height : static_cast<float>(fm.pixel_size);
-        const float rt_w = std::min<float>(static_cast<float>(context.scene->ortho[0]), 1024.0f);
-        const float rt_h = std::min<float>(static_cast<float>(context.scene->ortho[1]), 256.0f);
+        const float obj_w        = obj.size[0] > 0.0f ? obj.size[0] : 1024.0f;
+        const float obj_h        = obj.size[1] > 0.0f ? obj.size[1] : 256.0f;
+        const float rt_w         = std::max(1024.0f, obj_w * 3.0f);
+        const float rt_h         = std::max(256.0f, obj_h * 2.0f);
         const std::size_t cols   = static_cast<std::size_t>(std::ceil(rt_w / adv));
         const std::size_t rows   = static_cast<std::size_t>(std::ceil(rt_h / std::max(1.0f, lh)));
         const std::size_t rt_cap = std::clamp<std::size_t>(cols * rows, 64, 16384);
@@ -2835,8 +2846,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     auto layouter = std::make_shared<text::TextLayouter>(face, sp_mesh, style, peak_quads);
     layouter->SetText(s_text);
 
-    float text_w = layouter->TextWidth();
-    float text_h = layouter->TextHeight();
+    float text_w        = layouter->TextWidth();
+    float text_h        = layouter->TextHeight();
+    float text_source_w = layouter->SourceWidth();
+    float text_source_h = layouter->SourceHeight();
     if (text_w <= 0.0f || text_h <= 0.0f) {
         // Empty seed (scripted-only text). Fake a 1×1 bbox so SceneNode /
         // parallax setup still works; the runtime actuator scales the
@@ -2844,14 +2857,18 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         text_w = 1.0f;
         text_h = 1.0f;
     }
+    if (text_source_w <= 0.0f) text_source_w = text_w;
+    if (text_source_h <= 0.0f) text_source_h = text_h;
 
-    auto sp_node            = rstd::sync::Arc<SceneNode>::make(Vector3f(obj.origin.data()),
-                                                               Vector3f(obj.scale.data()),
-                                                               Vector3f(obj.angles.data()),
-                                                               obj.name);
-    sp_node->ID()           = obj.id;
-    const float text_bbox_w = text_w + 2.0f * style.padding;
-    const float text_bbox_h = text_h + 2.0f * style.padding;
+    auto sp_node                   = rstd::sync::Arc<SceneNode>::make(Vector3f(obj.origin.data()),
+                                                                      Vector3f(obj.scale.data()),
+                                                                      Vector3f(obj.angles.data()),
+                                                                      obj.name);
+    sp_node->ID()                  = obj.id;
+    const float text_bbox_w        = text_w + 2.0f * style.padding;
+    const float text_bbox_h        = text_h + 2.0f * style.padding;
+    const float text_source_bbox_w = text_source_w + 2.0f * style.padding;
+    const float text_source_bbox_h = text_source_h + 2.0f * style.padding;
     sp_node->SetSize({ text_bbox_w, text_bbox_h });
     sp_node->AddMesh(sp_mesh);
 
@@ -2894,14 +2911,19 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     });
 
     auto compose_node = rstd::sync::Arc<SceneNode>::make();
-    // Layer RT must be a worst-case sandbox: runtime SetText may expand the
-    // glyph bbox well past the seed (clock/date/locale strings). Bound by
-    // canvas so we don't waste VRAM, and floor at the parse-time bbox so a
-    // narrow runtime string still fits without clipping artifacts.
-    const float layer_max_w = std::min<float>(context.scene->ortho[0], 1024.0f);
-    const float layer_max_h = std::min<float>(context.scene->ortho[1], 256.0f);
-    const i32   layer_w     = std::max<i32>(1, (i32)std::max(text_bbox_w, layer_max_w));
-    const i32   layer_h     = std::max<i32>(1, (i32)std::max(text_bbox_h, layer_max_h));
+    // Layer RT must cover the source glyph bounds, not the main canvas.
+    // Clock/date scripts often render a large text source and shrink it with
+    // the scene transform when composing into the world.
+    const float object_w = obj.size[0] > 0.0f ? obj.size[0] : text_bbox_w;
+    const float object_h = obj.size[1] > 0.0f ? obj.size[1] : text_bbox_h;
+    const float dynamic_w_budget =
+        std::max({ text_source_bbox_w, text_bbox_w, object_w * 3.0f, 1024.0f });
+    const float dynamic_h_budget =
+        std::max({ text_source_bbox_h, text_bbox_h, object_h * 2.0f, 256.0f });
+    const float layer_max_w = wants_dynamic_text ? dynamic_w_budget : text_source_bbox_w;
+    const float layer_max_h = wants_dynamic_text ? dynamic_h_budget : text_source_bbox_h;
+    const i32 layer_w = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_w, layer_max_w)));
+    const i32 layer_h = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_h, layer_max_h)));
     {
         auto&             scene   = *context.scene;
         const std::string addr    = getAddr(sp_node.as_ptr());
@@ -2936,7 +2958,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_node->ID() = obj.id;
         compose_node->SetSize({ text_bbox_w, text_bbox_h });
         auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
-        GenCardMesh(*compose_mesh, { (uint16_t)layer_w, (uint16_t)layer_h });
+        GenCardMesh(*compose_mesh, { static_cast<float>(layer_w), static_cast<float>(layer_h) });
 
         nlohmann::json pt_json;
         if (! owe::ParseJson(
@@ -3014,36 +3036,38 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // bbox; UVs subsample the central text region of ppong_a (since the
     // ortho is layer-sized but glyphs occupy only text-bbox in the
     // middle).
-    auto rebuild_compose =
-        [compose_ptr, anchor_state, apply_text_anchor, layer_w, layer_h](float tw, float th) {
-            if (tw <= 0.0f) tw = 1.0f;
-            if (th <= 0.0f) th = 1.0f;
-            anchor_state->width  = tw;
-            anchor_state->height = th;
-            compose_ptr->SetSize({ tw, th });
-            apply_text_anchor();
-            const float                 hx = tw * 0.5f;
-            const float                 hy = th * 0.5f;
-            const std::array<float, 12> pos {
-                -hx, -hy, 0.0f, -hx, +hy, 0.0f, +hx, -hy, 0.0f, +hx, +hy, 0.0f,
-            };
-            const float                u_half = 0.5f * std::min(1.0f, tw / float(layer_w));
-            const float                v_half = 0.5f * std::min(1.0f, th / float(layer_h));
-            const float                u_l    = 0.5f - u_half;
-            const float                u_r    = 0.5f + u_half;
-            const float                v_t    = 0.5f - v_half;
-            const float                v_b    = 0.5f + v_half;
-            const std::array<float, 8> uv {
-                u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
-            };
-            auto* mesh = compose_ptr->Mesh();
-            if (mesh == nullptr) return;
-            auto& v = mesh->GetVertexArray(0);
-            v.SetVertex(WE_IN_POSITION, pos);
-            v.SetVertex(WE_IN_TEXCOORD, uv);
-            mesh->SetDirty();
+    auto rebuild_compose = [compose_ptr, anchor_state, apply_text_anchor, layer_w, layer_h](
+                               float tw, float th, float source_w, float source_h) {
+        if (tw <= 0.0f) tw = 1.0f;
+        if (th <= 0.0f) th = 1.0f;
+        if (source_w <= 0.0f) source_w = tw;
+        if (source_h <= 0.0f) source_h = th;
+        anchor_state->width  = tw;
+        anchor_state->height = th;
+        compose_ptr->SetSize({ tw, th });
+        apply_text_anchor();
+        const float                 hx = tw * 0.5f;
+        const float                 hy = th * 0.5f;
+        const std::array<float, 12> pos {
+            -hx, -hy, 0.0f, -hx, +hy, 0.0f, +hx, -hy, 0.0f, +hx, +hy, 0.0f,
         };
-    rebuild_compose(text_w, text_h);
+        const float                u_half = 0.5f * std::min(1.0f, source_w / float(layer_w));
+        const float                v_half = 0.5f * std::min(1.0f, source_h / float(layer_h));
+        const float                u_l    = 0.5f - u_half;
+        const float                u_r    = 0.5f + u_half;
+        const float                v_t    = 0.5f - v_half;
+        const float                v_b    = 0.5f + v_half;
+        const std::array<float, 8> uv {
+            u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
+        };
+        auto* mesh = compose_ptr->Mesh();
+        if (mesh == nullptr) return;
+        auto& v = mesh->GetVertexArray(0);
+        v.SetVertex(WE_IN_POSITION, pos);
+        v.SetVertex(WE_IN_TEXCOORD, uv);
+        mesh->SetDirty();
+    };
+    rebuild_compose(text_w, text_h, text_source_w, text_source_h);
 
     auto apply_text_origin = [anchor_state, apply_text_anchor](const script::ScriptValue& value) {
         Vector3f current = anchor_state->origin;
@@ -3063,7 +3087,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     auto set_halign = [layouter, rebuild_compose, anchor_state](std::string_view align) {
         anchor_state->horizontal = std::string(align);
         layouter->SetHorizontalAlign(align);
-        rebuild_compose(layouter->TextWidth(), layouter->TextHeight());
+        rebuild_compose(layouter->TextWidth(),
+                        layouter->TextHeight(),
+                        layouter->SourceWidth(),
+                        layouter->SourceHeight());
     };
     auto set_valign = [anchor_state, apply_text_anchor](std::string_view align) {
         anchor_state->vertical = std::string(align);
@@ -3091,7 +3118,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     auto set_text = [layouter, face, rebuild_compose](std::string_view s) {
         face->Populate(text::DecodeUtf8(s));
         layouter->SetText(s);
-        rebuild_compose(layouter->TextWidth(), layouter->TextHeight());
+        rebuild_compose(layouter->TextWidth(),
+                        layouter->TextHeight(),
+                        layouter->SourceWidth(),
+                        layouter->SourceHeight());
     };
     if (has_text_script) {
         const auto& sb = text_binding_it->second;
@@ -3103,7 +3133,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        script::FieldKind::String,
                                                        sb.properties,
                                                        sb.initial_value,
-                                                       sp_node.as_ptr());
+                                                       compose_node.as_ptr());
         if (fs) {
             ss.AddActuator({
                 fs,
@@ -3798,7 +3828,18 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             auto node = rstd::sync::Arc<SceneNode>::make(
                 Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()), name);
             node->ID() = id;
-            auto vit   = visibility_info.find(id);
+            std::array<float, 2> parallax_depth { 0.0f, 0.0f };
+            bool                 disable_propagation = false;
+            owe::GetJsonValue(o, "parallaxDepth", parallax_depth, false);
+            owe::GetJsonValue(o, "disablepropagation", disable_propagation, false);
+            if (parallax_depth[0] != 0.0f || parallax_depth[1] != 0.0f || disable_propagation) {
+                SceneUniformNodeData sv_data;
+                sv_data.propagate_parallax_to_children = ! disable_propagation;
+                sv_data.parallaxDepth                  = { parallax_depth[0], parallax_depth[1] };
+                sv_data.propagatedParallaxDepth        = { parallax_depth[0], parallax_depth[1] };
+                context.shader_updater->SetNodeData(node.as_ptr(), sv_data);
+            }
+            auto vit = visibility_info.find(id);
             if (vit != visibility_info.end()) {
                 bool visible = vit->second.visible &&
                                ! HasHiddenUserAncestor((std::uint32_t)id, visibility_info);
