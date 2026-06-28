@@ -9,22 +9,44 @@ import wescene.scene;
 
 using namespace owe::vulkan;
 
-FinPass::FinPass(const Desc&) {}
+FinPass::FinPass(const Desc& desc) {
+    m_desc.result              = desc.result;
+    m_desc.result_request      = desc.result_request;
+    m_desc.present_layout      = desc.present_layout;
+    m_desc.present_queue_index = desc.present_queue_index;
+    m_desc.present_format      = desc.present_format;
+}
 FinPass::~FinPass() {}
 
 void FinPass::setPresent(ImageParameters img) { m_desc.vk_present = img; }
 void FinPass::setPresentLayout(VkImageLayout layout) { m_desc.present_layout = layout; }
 void FinPass::setPresentQueueIndex(uint32_t i) { m_desc.present_queue_index = i; }
 void FinPass::setPresentFormat(VkFormat fmt) { m_desc.present_format = fmt; }
+bool FinPass::setResultRequest(std::optional<TextureRequest> request) {
+    return SetTextureRequestIfChanged(m_desc.result_request, std::move(request));
+}
+
+std::vector<PassTextureRequestDiagnostic> FinPass::textureRequestDiagnostics() const {
+    return {
+        PassTextureRequestDiagnostic {
+            .role    = "frame-result",
+            .name    = std::string(m_desc.result),
+            .request = m_desc.result_request,
+        },
+    };
+}
 
 void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& /*rr*/) {
+    RenderResourceSystem resources(device);
+
     auto tex_name = std::string(m_desc.result);
     if (scene.renderTargets.count(tex_name) == 0) {
         rstd_error("FinPass: scene render target \"{}\" not found", tex_name);
         return;
     }
-    auto& rt  = scene.renderTargets.at(tex_name);
-    auto  opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
+    auto& rt      = scene.renderTargets.at(tex_name);
+    auto  request = m_desc.result_request.value_or(MakeRenderTargetTextureRequest(tex_name, rt));
+    auto  opt     = resources.EnsureTexture(request);
     if (! opt.has_value()) {
         rstd_error("FinPass: TextureCache::Query(\"{}\") failed", tex_name);
         return;

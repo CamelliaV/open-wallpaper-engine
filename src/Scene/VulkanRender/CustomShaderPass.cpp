@@ -15,129 +15,425 @@ import wescene.scene;
 using namespace owe::vulkan;
 
 CustomShaderPass::CustomShaderPass(const Desc& desc) {
-    m_desc.node              = desc.node;
-    m_desc.submesh_index     = desc.submesh_index;
-    m_desc.textures          = desc.textures;
-    m_desc.output            = desc.output;
-    m_desc.sprites_map       = desc.sprites_map;
-    m_desc.clear_output      = desc.clear_output;
-    m_desc.transparent_clear = desc.transparent_clear;
-    m_desc.clear_depth       = desc.clear_depth;
-    m_desc.preserve_output   = desc.preserve_output;
+    m_desc.node                = desc.node;
+    m_desc.draw_item           = desc.draw_item;
+    m_desc.render_item         = desc.render_item;
+    m_desc.submesh_index       = desc.submesh_index;
+    m_desc.texture_bindings    = desc.texture_bindings;
+    m_desc.output              = desc.output;
+    m_desc.output_request      = desc.output_request;
+    m_desc.output_msaa_request = desc.output_msaa_request;
+    m_desc.depth_request       = desc.depth_request;
+    m_desc.sprites_map         = desc.sprites_map;
+    m_desc.clear_output        = desc.clear_output;
+    m_desc.transparent_clear   = desc.transparent_clear;
+    m_desc.clear_depth         = desc.clear_depth;
+    m_desc.preserve_output     = desc.preserve_output;
 };
 CustomShaderPass::~CustomShaderPass() {}
 
-std::optional<vvk::RenderPass> CreateRenderPass(const vvk::Device& device, VkFormat format,
-                                                VkAttachmentLoadOp    loadOp,
-                                                VkImageLayout         finalLayout,
-                                                VkSampleCountFlagBits samples, bool has_depth,
-                                                VkAttachmentLoadOp depthLoadOp) {
-    const bool has_resolve = (samples != VK_SAMPLE_COUNT_1_BIT);
+namespace
+{
+std::optional<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::string_view name) {
+    if (name.empty()) return std::nullopt;
+    if (! owe::IsSpecTex(name)) return MakeImportedTextureRequest(name);
+    auto it = scene.renderTargets.find(std::string(name));
+    if (it == scene.renderTargets.end()) return std::nullopt;
+    return MakeRenderTargetTextureRequest(name, it->second);
+}
 
-    // attachment[0] is the color attachment. With MSAA it's the multisample
-    // twin (never sampled, finalLayout=COLOR_ATTACHMENT_OPTIMAL); without
-    // MSAA it's the resolved texture itself (finalLayout=SHADER_READ).
-    VkAttachmentDescription color {
-        .format         = format,
-        .samples        = samples,
-        .loadOp         = loadOp,
-        .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-        .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout    = has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : finalLayout,
+template<typename T>
+void HashVkScalar(std::size_t& seed, T value) {
+    utils::hash_combine(seed, static_cast<uint64_t>(value));
+}
+
+std::size_t HashDescriptorBindings(std::span<const VkDescriptorSetLayoutBinding> bindings) {
+    auto sorted = std::vector<VkDescriptorSetLayoutBinding>(bindings.begin(), bindings.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.binding < rhs.binding;
+    });
+
+    std::size_t seed { 0 };
+    utils::hash_combine(seed, sorted.size());
+    for (const auto& binding : sorted) {
+        HashVkScalar(seed, binding.binding);
+        HashVkScalar(seed, binding.descriptorType);
+        HashVkScalar(seed, binding.descriptorCount);
+        HashVkScalar(seed, binding.stageFlags);
+    }
+    return seed;
+}
+
+std::size_t HashShaderSpvs(std::span<const Uni_ShaderSpv> spvs) {
+    struct StageRecord {
+        owe::ShaderType stage;
+        std::string     entry_point;
+        std::size_t     code_hash { 0 };
     };
 
-    if (loadOp == VK_ATTACHMENT_LOAD_OP_LOAD) {
-        color.initialLayout = has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                                          : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    std::vector<StageRecord> records;
+    records.reserve(spvs.size());
+    for (const auto& spv : spvs) {
+        if (! spv) continue;
+        records.push_back(StageRecord {
+            .stage       = spv->stage,
+            .entry_point = spv->entry_point,
+            .code_hash   = owe::SceneShaderStageCodeHash(spv->spirv),
+        });
+    }
+    std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.stage != rhs.stage) return lhs.stage < rhs.stage;
+        return lhs.entry_point < rhs.entry_point;
+    });
+
+    std::size_t seed { 0 };
+    utils::hash_combine(seed, records.size());
+    for (const auto& record : records) {
+        HashVkScalar(seed, record.stage);
+        utils::hash_combine(seed, record.entry_point);
+        utils::hash_combine(seed, record.code_hash);
+    }
+    return seed;
+}
+
+std::size_t HashVertexInputState(std::span<const VkVertexInputBindingDescription>   bindings,
+                                 std::span<const VkVertexInputAttributeDescription> attrs) {
+    auto sorted_bindings =
+        std::vector<VkVertexInputBindingDescription>(bindings.begin(), bindings.end());
+    std::sort(sorted_bindings.begin(), sorted_bindings.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.binding < rhs.binding;
+    });
+
+    auto sorted_attrs = std::vector<VkVertexInputAttributeDescription>(attrs.begin(), attrs.end());
+    std::sort(sorted_attrs.begin(), sorted_attrs.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.location != rhs.location) return lhs.location < rhs.location;
+        return lhs.binding < rhs.binding;
+    });
+
+    std::size_t seed { 0 };
+    utils::hash_combine(seed, sorted_bindings.size());
+    for (const auto& binding : sorted_bindings) {
+        HashVkScalar(seed, binding.binding);
+        HashVkScalar(seed, binding.stride);
+        HashVkScalar(seed, binding.inputRate);
+    }
+    utils::hash_combine(seed, sorted_attrs.size());
+    for (const auto& attr : sorted_attrs) {
+        HashVkScalar(seed, attr.location);
+        HashVkScalar(seed, attr.binding);
+        HashVkScalar(seed, attr.format);
+        HashVkScalar(seed, attr.offset);
+    }
+    return seed;
+}
+
+std::size_t HashMultisampleState(const VkPipelineMultisampleStateCreateInfo& state) {
+    std::size_t seed { 0 };
+    HashVkScalar(seed, state.rasterizationSamples);
+    HashVkScalar(seed, state.sampleShadingEnable);
+    utils::hash_combine(seed, state.minSampleShading);
+    HashVkScalar(seed, state.alphaToCoverageEnable);
+    HashVkScalar(seed, state.alphaToOneEnable);
+    return seed;
+}
+
+std::size_t HashRasterizationState(const VkPipelineRasterizationStateCreateInfo& state) {
+    std::size_t seed { 0 };
+    HashVkScalar(seed, state.depthClampEnable);
+    HashVkScalar(seed, state.rasterizerDiscardEnable);
+    HashVkScalar(seed, state.polygonMode);
+    HashVkScalar(seed, state.cullMode);
+    HashVkScalar(seed, state.frontFace);
+    HashVkScalar(seed, state.depthBiasEnable);
+    utils::hash_combine(seed, state.depthBiasConstantFactor);
+    utils::hash_combine(seed, state.depthBiasClamp);
+    utils::hash_combine(seed, state.depthBiasSlopeFactor);
+    utils::hash_combine(seed, state.lineWidth);
+    return seed;
+}
+
+template<typename T>
+std::size_t HashStencilOpState(const T& state) {
+    std::size_t seed { 0 };
+    HashVkScalar(seed, state.failOp);
+    HashVkScalar(seed, state.passOp);
+    HashVkScalar(seed, state.depthFailOp);
+    HashVkScalar(seed, state.compareOp);
+    HashVkScalar(seed, state.compareMask);
+    HashVkScalar(seed, state.writeMask);
+    HashVkScalar(seed, state.reference);
+    return seed;
+}
+
+std::size_t HashDepthStencilState(const VkPipelineDepthStencilStateCreateInfo& state) {
+    std::size_t seed { 0 };
+    HashVkScalar(seed, state.depthTestEnable);
+    HashVkScalar(seed, state.depthWriteEnable);
+    HashVkScalar(seed, state.depthCompareOp);
+    HashVkScalar(seed, state.depthBoundsTestEnable);
+    HashVkScalar(seed, state.stencilTestEnable);
+    utils::hash_combine(seed, HashStencilOpState(state.front));
+    utils::hash_combine(seed, HashStencilOpState(state.back));
+    utils::hash_combine(seed, state.minDepthBounds);
+    utils::hash_combine(seed, state.maxDepthBounds);
+    return seed;
+}
+
+std::size_t HashColorBlendState(const VkPipelineColorBlendAttachmentState& state) {
+    std::size_t seed { 0 };
+    HashVkScalar(seed, state.blendEnable);
+    HashVkScalar(seed, state.srcColorBlendFactor);
+    HashVkScalar(seed, state.dstColorBlendFactor);
+    HashVkScalar(seed, state.colorBlendOp);
+    HashVkScalar(seed, state.srcAlphaBlendFactor);
+    HashVkScalar(seed, state.dstAlphaBlendFactor);
+    HashVkScalar(seed, state.alphaBlendOp);
+    HashVkScalar(seed, state.colorWriteMask);
+    return seed;
+}
+
+std::size_t
+HashPipelineFingerprint(const owe::SceneMaterial& material, const owe::SceneShader& shader,
+                        std::span<const Uni_ShaderSpv>                     shader_spvs,
+                        std::span<const VkDescriptorSetLayoutBinding>      descriptor_bindings,
+                        std::span<const VkVertexInputBindingDescription>   vertex_bindings,
+                        std::span<const VkVertexInputAttributeDescription> vertex_attrs,
+                        const VkPipelineColorBlendAttachmentState&         color_blend,
+                        const VkPipelineDepthStencilStateCreateInfo&       depth_state,
+                        const VkPipelineRasterizationStateCreateInfo&      raster_state,
+                        const VkPipelineMultisampleStateCreateInfo&        multisample_state,
+                        VkPrimitiveTopology topology, VkSampleCountFlagBits samples,
+                        bool push_descriptor, VkFormat color_format,
+                        VkImageLayout color_final_layout, VkAttachmentLoadOp color_load_op,
+                        VkAttachmentLoadOp depth_load_op, bool has_depth_attachment) {
+    std::size_t seed { 0 };
+    utils::hash_combine(seed, SceneShaderCodeHash(shader));
+    utils::hash_combine(seed, HashShaderSpvs(shader_spvs));
+    utils::hash_combine(seed,
+                        material.customShader.variant
+                            ? material.customShader.variant->descriptor_layout_hash
+                            : HashDescriptorBindings(descriptor_bindings));
+    HashVkScalar(seed, push_descriptor);
+    utils::hash_combine(seed, HashDescriptorBindings(descriptor_bindings));
+    utils::hash_combine(seed, HashVertexInputState(vertex_bindings, vertex_attrs));
+    utils::hash_combine(seed, HashColorBlendState(color_blend));
+    utils::hash_combine(seed, HashDepthStencilState(depth_state));
+    utils::hash_combine(seed, HashRasterizationState(raster_state));
+    utils::hash_combine(seed, HashMultisampleState(multisample_state));
+    HashVkScalar(seed, topology);
+    HashVkScalar(seed, samples);
+    HashVkScalar(seed, color_format);
+    HashVkScalar(seed, VK_FORMAT_D32_SFLOAT);
+    HashVkScalar(seed, color_final_layout);
+    HashVkScalar(seed, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    HashVkScalar(seed, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+    HashVkScalar(seed, color_load_op);
+    HashVkScalar(seed, depth_load_op);
+    HashVkScalar(seed, has_depth_attachment);
+    HashVkScalar(seed, material.depth_test);
+    HashVkScalar(seed, material.depth_write);
+    HashVkScalar(seed, material.cull_mode);
+    HashVkScalar(seed, material.blenmode);
+    return seed;
+}
+} // namespace
+
+PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
+    PassInvalidationFlags flags = PassInvalidationNone;
+    for (auto& binding : m_desc.texture_bindings) {
+        if (binding.name.empty() || ! IsSpecTex(binding.name)) continue;
+        if (SetTextureRequestIfChanged(binding.request,
+                                       TextureRequestFromScene(scene, binding.name))) {
+            flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
+        }
     }
 
-    // attachment[1] is the resolve target (single-sample). loadOp DONT_CARE
-    // since we always overwrite via the implicit resolve at end-of-subpass.
-    VkAttachmentDescription resolve {
-        .format         = format,
-        .samples        = VK_SAMPLE_COUNT_1_BIT,
-        .loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-        .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout    = finalLayout,
-    };
+    if (! m_desc.output.empty() && IsSpecTex(m_desc.output)) {
+        if (auto it = scene.renderTargets.find(m_desc.output); it != scene.renderTargets.end()) {
+            auto& rt             = it->second;
+            auto  output_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
+            if (SetTextureRequestIfChanged(m_desc.output_request, std::move(output_request))) {
+                flags |= ToPassInvalidationFlags(PassInvalidation::Resources) |
+                         ToPassInvalidationFlags(PassInvalidation::Framebuffer);
+            }
 
-    VkAttachmentDescription depth {
-        .format         = VK_FORMAT_D32_SFLOAT,
-        .samples        = samples,
-        .loadOp         = depthLoadOp,
-        .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-        .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .initialLayout  = depthLoadOp == VK_ATTACHMENT_LOAD_OP_LOAD
-                              ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                              : VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    };
+            auto samples = TextureSampleCount(rt.sample_count);
+            if (m_desc.samples != samples) {
+                m_desc.samples = samples;
+                flags |= PassInvalidationAll;
+            }
 
-    VkAttachmentReference color_ref {
-        .attachment = 0,
-        .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
-    VkAttachmentReference resolve_ref {
-        .attachment = 1,
-        .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
-    VkAttachmentReference depth_ref {
-        .attachment = has_resolve ? 2u : 1u,
-        .layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    };
-    std::vector<VkAttachmentDescription> attachments;
-    attachments.reserve(3);
-    attachments.push_back(color);
-    if (has_resolve) attachments.push_back(resolve);
-    if (has_depth) attachments.push_back(depth);
+            std::optional<TextureRequest> msaa_request;
+            if (samples != VK_SAMPLE_COUNT_1_BIT) {
+                auto twin_name = MsaaTwinName(m_desc.output, samples);
+                msaa_request   = MakeMsaaTextureRequest(twin_name, rt, samples);
+            }
+            if (SetTextureRequestIfChanged(m_desc.output_msaa_request, std::move(msaa_request))) {
+                flags |= ToPassInvalidationFlags(PassInvalidation::Resources) |
+                         ToPassInvalidationFlags(PassInvalidation::Framebuffer);
+            }
 
-    VkSubpassDescription subpass {
-        .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
-        .colorAttachmentCount    = 1,
-        .pColorAttachments       = &color_ref,
-        .pResolveAttachments     = has_resolve ? &resolve_ref : nullptr,
-        .pDepthStencilAttachment = has_depth ? &depth_ref : nullptr,
-    };
+            bool has_depth_attachment = false;
+            if (m_desc.node != nullptr && m_desc.node->Mesh() != nullptr) {
+                auto& mesh = *m_desc.node->Mesh();
+                if (m_desc.submesh_index < mesh.Submeshes().size()) {
+                    const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
+                    const auto& slots   = mesh.MaterialSlots();
+                    if (submesh.material_slot < slots.size() && slots[submesh.material_slot]) {
+                        has_depth_attachment =
+                            rt.withDepth && UsesDepthAttachment(*slots[submesh.material_slot]);
+                    }
+                }
+            }
+            if (m_desc.has_depth_attachment != has_depth_attachment) {
+                m_desc.has_depth_attachment = has_depth_attachment;
+                flags |= PassInvalidationAll;
+            }
 
-    VkSubpassDependency dependency {
-        .srcSubpass = VK_SUBPASS_EXTERNAL,
-        .dstSubpass = 0,
-        .srcStageMask =
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        .srcAccessMask =
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-    };
-
-    VkRenderPassCreateInfo creatinfo {
-        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = static_cast<uint32_t>(attachments.size()),
-        .pAttachments    = attachments.data(),
-        .subpassCount    = 1,
-        .pSubpasses      = &subpass,
-        .dependencyCount = 1,
-        .pDependencies   = &dependency,
-    };
-    vvk::RenderPass pass;
-    if (auto res = device.CreateRenderPass(creatinfo, pass); res == VK_SUCCESS) {
-        return pass;
-    } else {
-        VVK_CHECK(res);
-        return std::nullopt;
+            std::optional<TextureRequest> depth_request;
+            if (has_depth_attachment) {
+                depth_request = MakeDepthTextureRequest(m_desc.output + "::depth", rt);
+            }
+            if (SetTextureRequestIfChanged(m_desc.depth_request, std::move(depth_request))) {
+                flags |= ToPassInvalidationFlags(PassInvalidation::Resources) |
+                         ToPassInvalidationFlags(PassInvalidation::Framebuffer);
+            }
+        }
     }
+    return flags;
+}
+
+std::optional<owe::RenderItemId> CustomShaderPass::renderItemId() const {
+    return m_desc.render_item;
+}
+
+std::size_t CustomShaderPass::pipelineFingerprint() const { return m_desc.pipeline_fingerprint; }
+
+std::optional<PipelineCacheKey> CustomShaderPass::pipelineCacheKey() const {
+    return m_desc.pipeline_cache_key;
+}
+
+bool CustomShaderPass::pipelineCacheHit() const { return m_desc.pipeline_cache_hit; }
+
+uint64_t CustomShaderPass::pipelineCacheObservedCount() const {
+    return m_desc.pipeline_cache_observed_count;
+}
+
+std::optional<RenderPassCacheKey> CustomShaderPass::renderPassCacheKey() const {
+    return m_desc.render_pass_cache_key;
+}
+
+bool CustomShaderPass::renderPassCacheHit() const { return m_desc.render_pass_cache_hit; }
+
+uint64_t CustomShaderPass::renderPassCacheObservedCount() const {
+    return m_desc.render_pass_cache_observed_count;
+}
+
+std::optional<FramebufferCacheKey> CustomShaderPass::framebufferCacheKey() const {
+    return m_desc.framebuffer_cache_key;
+}
+
+bool CustomShaderPass::framebufferCacheHit() const { return m_desc.framebuffer_cache_hit; }
+
+uint64_t CustomShaderPass::framebufferCacheObservedCount() const {
+    return m_desc.framebuffer_cache_observed_count;
+}
+
+std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagnostics() const {
+    std::vector<PassTextureRequestDiagnostic> out;
+    out.reserve(m_desc.texture_bindings.size() + 3);
+    for (std::size_t i = 0; i < m_desc.texture_bindings.size(); ++i) {
+        const auto& binding = m_desc.texture_bindings[i];
+        if (binding.name.empty() && ! binding.request.has_value()) continue;
+        out.push_back(PassTextureRequestDiagnostic {
+            .role    = "sampled",
+            .slot    = static_cast<uint32_t>(i),
+            .name    = binding.name,
+            .request = binding.request,
+        });
+    }
+    if (! m_desc.output.empty() || m_desc.output_request.has_value()) {
+        out.push_back(PassTextureRequestDiagnostic {
+            .role    = "output",
+            .name    = m_desc.output,
+            .request = m_desc.output_request,
+        });
+    }
+    if (m_desc.output_msaa_request.has_value()) {
+        out.push_back(PassTextureRequestDiagnostic {
+            .role    = "output-msaa",
+            .name    = m_desc.output_msaa_request->name,
+            .request = m_desc.output_msaa_request,
+        });
+    }
+    if (m_desc.depth_request.has_value()) {
+        out.push_back(PassTextureRequestDiagnostic {
+            .role    = "depth",
+            .name    = m_desc.depth_request->name,
+            .request = m_desc.depth_request,
+        });
+    }
+    return out;
+}
+
+MaterialTextureBindingRefresh
+CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& render_scene) {
+    MaterialTextureBindingRefresh result;
+    if (m_desc.node == nullptr || m_desc.node->Mesh() == nullptr) return result;
+
+    auto& mesh = *m_desc.node->Mesh();
+    if (m_desc.submesh_index >= mesh.Submeshes().size()) return result;
+    const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
+    const auto& slots   = mesh.MaterialSlots();
+    if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return result;
+
+    const auto& textures = slots[submesh.material_slot]->textures;
+    if (textures.size() != m_desc.texture_bindings.size()) {
+        result.requires_graph_rebuild = true;
+        return result;
+    }
+
+    for (usize i = 0; i < textures.size(); ++i) {
+        const auto& next = textures[i];
+        const auto& old  = m_desc.texture_bindings[i];
+        if (! CanRefreshSceneMaterialTextureBinding(old.name, next, m_desc.output)) {
+            result.requires_graph_rebuild = true;
+            return result;
+        }
+    }
+
+    for (usize i = 0; i < textures.size(); ++i) {
+        const auto& next     = textures[i];
+        auto&       old      = m_desc.texture_bindings[i];
+        auto        next_dep = ClassifySceneMaterialTexture(next);
+        if (old.name == next && ! IsLocalSceneMaterialTextureDependency(next_dep)) continue;
+
+        TextureBindingRequest binding;
+        if (! next.empty()) {
+            binding.name    = next;
+            binding.request = MakeImportedTextureRequest(next, render_scene.textureDescId(next));
+        }
+
+        if (! SameTextureBindingRequest(old, binding)) {
+            old = std::move(binding);
+            result.invalidation_flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
+        }
+
+        if (next.empty()) {
+            m_desc.sprites_map.erase(i);
+            continue;
+        }
+
+        auto  texture_id = render_scene.textureDescId(next);
+        auto* texture    = texture_id.has_value() ? render_scene.textureDesc(*texture_id) : nullptr;
+        if (texture != nullptr && texture->desc.isSprite) {
+            m_desc.sprites_map[i] = texture->desc.spriteAnim;
+        } else {
+            m_desc.sprites_map.erase(i);
+        }
+    }
+
+    return result;
 }
 
 static std::span<uint8_t> MakeUniformUploadBytes(const owe::ShaderValue& value, size_t refl_size,
@@ -219,26 +515,20 @@ static void CheckBlockOverlap(const ShaderReflected::Block& block, std::string_v
 }
 
 void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
-    m_desc.vk_textures.resize(m_desc.textures.size());
-    for (usize i = 0; i < m_desc.textures.size(); i++) {
-        auto& tex_name = m_desc.textures[i];
-        if (tex_name.empty()) continue;
+    RenderResourceSystem resources(rr.imported_texture_provider, device);
+
+    m_desc.vk_textures.resize(m_desc.texture_bindings.size());
+    for (usize i = 0; i < m_desc.texture_bindings.size(); i++) {
+        auto& binding = m_desc.texture_bindings[i];
+        if (binding.empty()) continue;
 
         ImageSlotsRef img_slots;
-        if (IsSpecTex(tex_name)) {
-            if (scene.renderTargets.count(tex_name) == 0) continue;
-            auto& rt  = scene.renderTargets.at(tex_name);
-            auto  opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
-            if (! opt.has_value()) continue;
-            img_slots.slots = { opt.value() };
-        } else {
-            auto image = scene.imageParser->Parse(tex_name);
-            if (image) {
-                img_slots = device.tex_cache().CreateTex(*image);
-            } else {
-                rstd_error("parse tex \"{}\" failed", tex_name);
-            }
-        }
+        auto request = binding.request.has_value() ? binding.request
+                                                   : TextureRequestFromScene(scene, binding.name);
+        if (! request.has_value()) continue;
+        auto opt = resources.EnsureSampledTexture(*request);
+        if (! opt.has_value()) continue;
+        img_slots             = std::move(*opt);
         m_desc.vk_textures[i] = img_slots;
     }
     bool out_force_clear { false };
@@ -248,20 +538,20 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         rstd_assert(scene.renderTargets.count(tex_name) > 0);
         auto& rt        = scene.renderTargets.at(tex_name);
         out_force_clear = rt.force_clear;
-        if (auto opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
-            opt.has_value()) {
+        auto request = m_desc.output_request.value_or(MakeRenderTargetTextureRequest(tex_name, rt));
+        if (auto opt = resources.EnsureTexture(request); opt.has_value()) {
             m_desc.vk_output = opt.value();
         } else
             return;
 
-        m_desc.samples = ToVkSampleCount(rt.sample_count);
+        m_desc.samples = TextureSampleCount(rt.sample_count);
         if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
             // MSAA twin needs its own cache key — Query() resolves by name,
             // not by TextureKey content_hash.
-            std::string twin_name = MsaaTwinName(tex_name, m_desc.samples);
-            if (auto opt = device.tex_cache().Query(
-                    twin_name, ToTexKeyMsaa(rt, m_desc.samples), /*persist*/ true);
-                opt.has_value()) {
+            std::string twin_name    = MsaaTwinName(tex_name, m_desc.samples);
+            auto        msaa_request = m_desc.output_msaa_request.value_or(
+                MakeMsaaTextureRequest(twin_name, rt, m_desc.samples));
+            if (auto opt = resources.EnsureTexture(msaa_request); opt.has_value()) {
                 m_desc.vk_output_msaa = opt.value();
             } else {
                 rstd_error("MSAA twin Query failed for {}", tex_name);
@@ -285,42 +575,50 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         m_desc.depth_load_op = depthLoadOp;
 
         auto depth_name = m_desc.output + "::depth";
-        if (auto opt = device.tex_cache().Query(
-                depth_name, ToDepthTexKey(output_rt), ! output_rt.allowReuse);
-            opt.has_value()) {
+        auto depth_request =
+            m_desc.depth_request.value_or(MakeDepthTextureRequest(depth_name, output_rt));
+        if (auto opt = resources.EnsureTexture(depth_request); opt.has_value()) {
             m_desc.vk_depth = opt.value();
         } else {
             return;
         }
     }
 
-    std::vector<Uni_ShaderSpv> spvs;
-    DescriptorSetInfo          descriptor_info;
-    ShaderReflected            ref;
+    std::vector<Uni_ShaderSpv>    spvs;
+    DescriptorSetInfo             descriptor_info;
+    const CachedShaderReflection* shader_reflection { nullptr };
+    const ShaderReflected*        ref { nullptr };
+    SceneShader*                  shader_ref { nullptr };
     {
         SceneShader& shader = *(material_ref.customShader.shader);
+        shader_ref          = &shader;
 
-        if (! GenReflect(shader.codes, spvs, ref)) {
+        if (rr.shader_reflection_cache != nullptr) {
+            shader_reflection = rr.shader_reflection_cache->Query(shader);
+        }
+        if (shader_reflection == nullptr) {
             rstd_error("gen spv reflect failed, {}", shader.name);
             return;
         }
-        for (const auto& blk : ref.blocks) CheckBlockOverlap(blk, shader.name);
+        ref  = &shader_reflection->reflected;
+        spvs = CloneShaderSpvs(*shader_reflection);
+        for (const auto& blk : ref->blocks) CheckBlockOverlap(blk, shader.name);
 
         auto& bindings = descriptor_info.bindings;
-        bindings.resize(ref.binding_map.size());
+        bindings.resize(ref->binding_map.size());
 
         /*
         rstd_info("----shader------");
         rstd_info("{}", shader.name);
         rstd_info("--inputs:");
-        for (auto& i : ref.input_location_map) {
+        for (auto& i : ref->input_location_map) {
             rstd_info("{} {}", i.second, i.first);
         }
         rstd_info("--bindings:");
         */
 
         std::transform(
-            ref.binding_map.begin(), ref.binding_map.end(), bindings.begin(), [](auto& item) {
+            ref->binding_map.begin(), ref->binding_map.end(), bindings.begin(), [](auto& item) {
                 // rstd_info("{} {}", item.second.binding, item.first);
                 return item.second;
             });
@@ -330,23 +628,23 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
 
         for (usize i = 0; i < m_desc.vk_textures.size(); i++) {
             i32 binding { -1 };
-            if (i < WE_GLTEX_NAMES.size() && exists(ref.binding_map, WE_GLTEX_NAMES[i])) {
-                binding = (i32)ref.binding_map.at(WE_GLTEX_NAMES[i]).binding;
+            if (i < WE_GLTEX_NAMES.size() && exists(ref->binding_map, WE_GLTEX_NAMES[i])) {
+                binding = (i32)ref->binding_map.at(WE_GLTEX_NAMES[i]).binding;
             }
             m_desc.vk_tex_binding.push_back(binding);
         }
     }
 
-    m_desc.draw_count = 0;
     std::vector<VkVertexInputBindingDescription>   bind_descriptions;
     std::vector<VkVertexInputAttributeDescription> attr_descriptions;
     {
-        m_desc.dyn_vertex = mesh.Dynamic();
-        m_desc.vertex_bufs.clear();
-        m_desc.vertex_dyn_bufs.clear();
-        if (m_desc.dyn_vertex) m_desc.vertex_dyn_bufs.resize(submesh.vertex_arrays.size());
-
-        auto& mc = device.mesh_cache();
+        RenderBufferResolver buffer_resolver(device, *rr.dyn_buf);
+        DrawBufferRequest    buffer_request { .render_item   = m_desc.render_item,
+                                              .mesh          = &mesh,
+                                              .submesh_index = m_desc.submesh_index };
+        auto                 draw_buffers = buffer_resolver.prepareDrawBuffers(buffer_request);
+        if (! draw_buffers) return;
+        m_desc.draw_buffers = std::move(*draw_buffers);
 
         for (unsigned i = 0; i < submesh.vertex_arrays.size(); i++) {
             const auto& vertex    = submesh.vertex_arrays[i];
@@ -359,7 +657,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             };
             bind_descriptions.push_back(bind_desc);
 
-            for (auto& item : ref.input_location_map) {
+            for (auto& item : ref->input_location_map) {
                 auto& name   = item.first;
                 auto& input  = item.second;
                 usize offset = exists(attrs_map, name) ? attrs_map[name].offset : 0;
@@ -371,30 +669,6 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                     .offset   = (u32)offset,
                 };
                 attr_descriptions.push_back(attr_desc);
-            }
-            if (! m_desc.dyn_vertex) {
-                auto opt = mc.QueryOrUpload(
-                    { &vertex, 0 }, { (const uint8_t*)vertex.Data(), vertex.CapacitySizeOf() });
-                if (! opt) return;
-                m_desc.vertex_bufs.push_back(std::move(*opt));
-            } else {
-                auto& buf = m_desc.vertex_dyn_bufs[i];
-                if (! rr.dyn_buf->allocateSubRef(vertex.CapacitySizeOf(), buf)) return;
-            }
-            m_desc.draw_count += (u32)(vertex.DataSize() / vertex.OneSize());
-        }
-
-        if (! submesh.index_arrays.empty()) {
-            auto& indice      = submesh.index_arrays[0];
-            m_desc.draw_count = (u32)indice.DataCount();
-            if (! m_desc.dyn_vertex) {
-                auto opt = mc.QueryOrUpload(
-                    { &indice, 0 }, { (const uint8_t*)indice.Data(), indice.CapacitySizeof() });
-                if (! opt) return;
-                m_desc.index_buf = std::move(*opt);
-            } else {
-                if (! rr.dyn_buf->allocateSubRef(indice.CapacitySizeof(), m_desc.index_dyn_buf))
-                    return;
             }
         }
     }
@@ -419,23 +693,18 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             if (m_desc.clear_output) loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
             if (out_force_clear) loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         }
-        m_desc.color_load_op = loadOp;
-        auto opt             = CreateRenderPass(device.handle(),
-                                                VK_FORMAT_R8G8B8A8_UNORM,
-                                                loadOp,
-                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                                m_desc.samples,
-                                                has_depth_attachment,
-                                                depthLoadOp);
-        if (! opt.has_value()) return;
-        auto& pass = opt.value();
+        m_desc.color_load_op                       = loadOp;
+        constexpr VkFormat      color_format       = VK_FORMAT_R8G8B8A8_UNORM;
+        constexpr VkImageLayout color_final_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         descriptor_info.push_descriptor = true;
-        GraphicsPipeline pipeline;
-        pipeline.toDefault();
-        const bool has_index =
-            m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
-        VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        GraphicsPipeline pipeline_state;
+        pipeline_state.toDefault();
+        pipeline_state.setSampleCount(m_desc.samples);
+        if (has_depth_attachment) SetDepthState(material_ref, pipeline_state.depth);
+        SetCullMode(material_ref.cull_mode, pipeline_state.raster);
+        const bool          has_index = m_desc.draw_buffers.hasIndex();
+        VkPrimitiveTopology topology  = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
         switch (mesh.Primitive()) {
         case MeshPrimitive::POINT: topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
         case MeshPrimitive::TRIANGLE:
@@ -443,17 +712,58 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                                  : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
             break;
         }
-        pipeline.addDescriptorSetInfo(spanone { descriptor_info })
-            .setColorBlendStates(spanone { color_blend })
-            .setTopology(topology)
-            .addInputBindingDescription(bind_descriptions)
-            .addInputAttributeDescription(attr_descriptions)
-            .setSampleCount(m_desc.samples);
-        if (has_depth_attachment) SetDepthState(material_ref, pipeline.depth);
-        SetCullMode(material_ref.cull_mode, pipeline.raster);
-        for (auto& spv : spvs) pipeline.addStage(std::move(spv));
-
-        if (! pipeline.create(device, pass, m_desc.pipeline)) return;
+        m_desc.pipeline_fingerprint = HashPipelineFingerprint(material_ref,
+                                                              *shader_ref,
+                                                              spvs,
+                                                              descriptor_info.bindings,
+                                                              bind_descriptions,
+                                                              attr_descriptions,
+                                                              color_blend,
+                                                              pipeline_state.depth,
+                                                              pipeline_state.raster,
+                                                              pipeline_state.multisample,
+                                                              topology,
+                                                              m_desc.samples,
+                                                              descriptor_info.push_descriptor,
+                                                              color_format,
+                                                              color_final_layout,
+                                                              loadOp,
+                                                              depthLoadOp,
+                                                              has_depth_attachment);
+        PipelineResourceSystem pipeline_resources(
+            device, &rr.pipeline_cache, &rr.render_pass_cache);
+        PipelineResourceRequest pipeline_request {
+            .descriptor_sets      = { descriptor_info },
+            .vertex_bindings      = std::move(bind_descriptions),
+            .vertex_attrs         = std::move(attr_descriptions),
+            .shader_stages        = std::move(spvs),
+            .color_blend          = color_blend,
+            .depth                = pipeline_state.depth,
+            .raster               = pipeline_state.raster,
+            .multisample          = pipeline_state.multisample,
+            .topology             = topology,
+            .color_format         = color_format,
+            .color_final_layout   = color_final_layout,
+            .color_load_op        = loadOp,
+            .depth_load_op        = depthLoadOp,
+            .has_depth_attachment = has_depth_attachment,
+        };
+        m_desc.pipeline_cache_key.reset();
+        m_desc.render_pass_cache_key.reset();
+        m_desc.pipeline_cache_hit               = false;
+        m_desc.pipeline_cache_observed_count    = 0;
+        m_desc.render_pass_cache_hit            = false;
+        m_desc.render_pass_cache_observed_count = 0;
+        auto pipeline_result =
+            pipeline_resources.CreateGraphicsPipeline(std::move(pipeline_request));
+        if (! pipeline_result.has_value()) return;
+        m_desc.pipeline                         = std::move(pipeline_result->pipeline);
+        m_desc.pipeline_cache_key               = pipeline_result->cache_key;
+        m_desc.render_pass_cache_key            = pipeline_result->render_pass_key;
+        m_desc.pipeline_cache_hit               = pipeline_result->cache_hit;
+        m_desc.pipeline_cache_observed_count    = pipeline_result->cache_observed_count;
+        m_desc.render_pass_cache_hit            = pipeline_result->render_pass_cache_hit;
+        m_desc.render_pass_cache_observed_count = pipeline_result->render_pass_cache_observed_count;
     }
 
     {
@@ -465,62 +775,52 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         };
         const uint32_t depth_view_index = has_msaa ? 2u : 1u;
         if (has_depth_attachment) views[depth_view_index] = m_desc.vk_depth.view;
-        VkFramebufferCreateInfo info {
-            .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-            .pNext           = nullptr,
-            .renderPass      = *m_desc.pipeline.pass,
-            .attachmentCount = (has_msaa ? 2u : 1u) + (has_depth_attachment ? 1u : 0u),
-            .pAttachments    = views.data(),
-            .width           = m_desc.vk_output.extent.width,
-            .height          = m_desc.vk_output.extent.height,
-            .layers          = 1,
-        };
-        VVK_CHECK_VOID_RE(device.handle().CreateFramebuffer(info, m_desc.fb));
+        const uint32_t attachment_count = (has_msaa ? 2u : 1u) + (has_depth_attachment ? 1u : 0u);
+        m_desc.framebuffer_cache_key.reset();
+        m_desc.framebuffer_cache_hit            = false;
+        m_desc.framebuffer_cache_observed_count = 0;
+        FramebufferResourceSystem framebuffer_resources(
+            device, &rr.framebuffer_cache, &rr.framebuffer_cache_diagnostics);
+        auto framebuffer = framebuffer_resources.CreateFramebuffer(FramebufferResourceRequest {
+            .render_pass     = **m_desc.pipeline->pipeline.pass,
+            .render_pass_key = m_desc.render_pass_cache_key.value_or(RenderPassCacheKey {}),
+            .attachments =
+                std::vector<VkImageView>(views.begin(), views.begin() + attachment_count),
+            .extent = { m_desc.vk_output.extent.width, m_desc.vk_output.extent.height },
+        });
+        if (! framebuffer.has_value()) return;
+        m_desc.fb                               = std::move(framebuffer->framebuffer);
+        m_desc.framebuffer_cache_key            = framebuffer->cache_key;
+        m_desc.framebuffer_cache_hit            = framebuffer->cache_hit;
+        m_desc.framebuffer_cache_observed_count = framebuffer->cache_observed_count;
     }
 
-    if (! ref.blocks.empty()) {
-        auto& block = ref.blocks.front();
+    if (! ref->blocks.empty()) {
+        auto& block = ref->blocks.front();
         rr.dyn_buf->allocateSubRef(
             block.size, m_desc.ubo_buf, device.limits().minUniformBufferOffsetAlignment);
     }
 
-    if (! ref.blocks.empty()) {
+    if (! ref->blocks.empty()) {
         std::function<void()> update_dyn_buf_op;
-        if (m_desc.dyn_vertex) {
-            auto& mesh        = *m_desc.node->Mesh();
-            auto  smi         = m_desc.submesh_index;
-            auto* dyn_buf     = rr.dyn_buf;
-            auto& vertex_bufs = m_desc.vertex_dyn_bufs;
-            auto& draw_count  = m_desc.draw_count;
-            auto& index_buf   = m_desc.index_dyn_buf;
-            update_dyn_buf_op = [&mesh, smi, &vertex_bufs, &draw_count, &index_buf, dyn_buf]() {
-                if (mesh.Dirty().exchange(false)) {
-                    if (smi >= mesh.Submeshes().size()) return;
-                    const auto& sm = mesh.Submeshes()[smi];
-                    for (usize i = 0; i < sm.vertex_arrays.size(); i++) {
-                        const auto& vertex = sm.vertex_arrays[i];
-                        auto&       buf    = vertex_bufs[i];
-                        if (! dyn_buf->writeToBuf(buf,
-                                                  { (uint8_t*)vertex.Data(), vertex.DataSizeOf() }))
-                            return;
-                    }
-                    if (! sm.index_arrays.empty()) {
-                        const auto& indice = sm.index_arrays[0];
-                        draw_count         = (u32)indice.RenderDataCount();
-                        auto& buf          = index_buf;
-                        if (! dyn_buf->writeToBuf(buf,
-                                                  { (uint8_t*)indice.Data(), indice.DataSizeOf() }))
-                            return;
-                    } else if (! sm.vertex_arrays.empty()) {
-                        // No index buffer (e.g. POINT_LIST for GS-driven rope):
-                        // draw_count comes from the first vertex array.
-                        draw_count = (u32)sm.vertex_arrays[0].VertexCount();
-                    }
-                }
-            };
+        if (m_desc.draw_buffers.dynamic) {
+            auto& mesh         = *m_desc.node->Mesh();
+            auto  smi          = m_desc.submesh_index;
+            auto  render_item  = m_desc.render_item;
+            auto* resolver_buf = rr.dyn_buf;
+            auto* resolver_dev = &device;
+            auto& draw_buffers = m_desc.draw_buffers;
+            update_dyn_buf_op =
+                [&mesh, smi, render_item, &draw_buffers, resolver_dev, resolver_buf]() {
+                    RenderBufferResolver resolver(*resolver_dev, *resolver_buf);
+                    DrawBufferRequest    request { .render_item   = render_item,
+                                                   .mesh          = &mesh,
+                                                   .submesh_index = smi };
+                    (void)resolver.updateDynamicDrawBuffers(request, draw_buffers);
+                };
         }
 
-        auto  block  = ref.blocks.front();
+        auto  block  = ref->blocks.front();
         auto* buf    = rr.dyn_buf;
         auto* bufref = &m_desc.ubo_buf;
 
@@ -607,19 +907,23 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         }
     }
     for (auto& tex : releaseTexs()) {
-        device.tex_cache().MarkShareReady(tex);
+        resources.MarkShareReady(tex);
     }
     setPrepared();
 }
 
-bool CustomShaderPass::canJoinRenderScopeAfter(const CustomShaderPass& previous) const {
-    if (! prepared() || ! previous.prepared()) return false;
+bool CustomShaderPass::supportsRenderScope() const { return prepared(); }
+
+bool CustomShaderPass::canJoinRenderScopeAfter(const VulkanPass& previous) const {
+    const auto* prev_pass = dynamic_cast<const CustomShaderPass*>(&previous);
+    if (prev_pass == nullptr) return false;
+    if (! prepared() || ! prev_pass->prepared()) return false;
     if (m_desc.clear_output || m_desc.clear_depth) return false;
     if (m_desc.color_load_op != VK_ATTACHMENT_LOAD_OP_LOAD) return false;
     if (m_desc.has_depth_attachment && m_desc.depth_load_op != VK_ATTACHMENT_LOAD_OP_LOAD)
         return false;
 
-    const auto& prev = previous.m_desc;
+    const auto& prev = prev_pass->m_desc;
     if (m_desc.output != prev.output) return false;
     if (m_desc.samples != prev.samples) return false;
     if (m_desc.has_depth_attachment != prev.has_depth_attachment) return false;
@@ -705,8 +1009,8 @@ void CustomShaderPass::beginRenderScope(RenderingResources& rr) {
     VkRenderPassBeginInfo pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext       = nullptr,
-        .renderPass  = *m_desc.pipeline.pass,
-        .framebuffer = *m_desc.fb,
+        .renderPass  = **m_desc.pipeline->pipeline.pass,
+        .framebuffer = **m_desc.fb,
         .renderArea =
             VkRect2D {
                 .offset = { 0, 0 },
@@ -739,7 +1043,8 @@ void CustomShaderPass::recordRenderScopeDraw(RenderingResources& rr) {
             .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo      = &desc_img,
         };
-        cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
+        cmd.PushDescriptorSetKHR(
+            VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline->pipeline.layout, 0, wset);
     }
 
     if (m_desc.ubo_buf) {
@@ -757,10 +1062,11 @@ void CustomShaderPass::recordRenderScopeDraw(RenderingResources& rr) {
             .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .pBufferInfo     = &desc_buf,
         };
-        cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
+        cmd.PushDescriptorSetKHR(
+            VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline->pipeline.layout, 0, wset);
     }
 
-    cmd.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.handle);
+    cmd.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline->pipeline.handle);
     VkViewport viewport {
         .x        = 0,
         .y        = (float)outext.height,
@@ -774,30 +1080,31 @@ void CustomShaderPass::recordRenderScopeDraw(RenderingResources& rr) {
     cmd.SetViewport(0, viewport);
     cmd.SetScissor(0, scissor);
 
-    if (m_desc.dyn_vertex) {
+    auto& draw_buffers = m_desc.draw_buffers;
+    if (draw_buffers.dynamic) {
         auto gpu_buf = rr.dyn_buf->gpuBuf();
-        for (usize i = 0; i < m_desc.vertex_dyn_bufs.size(); i++) {
-            auto& buf = m_desc.vertex_dyn_bufs[i];
+        for (usize i = 0; i < draw_buffers.dynamic_vertices.size(); i++) {
+            auto& buf = draw_buffers.dynamic_vertices[i];
             cmd.BindVertexBuffers((u32)i, 1, &gpu_buf, &buf.offset);
         }
-        if (m_desc.index_dyn_buf) {
-            cmd.BindIndexBuffer(gpu_buf, m_desc.index_dyn_buf.offset, VK_INDEX_TYPE_UINT32);
+        if (draw_buffers.dynamic_index) {
+            cmd.BindIndexBuffer(gpu_buf, draw_buffers.dynamic_index.offset, VK_INDEX_TYPE_UINT32);
         }
     } else {
-        for (usize i = 0; i < m_desc.vertex_bufs.size(); i++) {
-            auto&        mref = m_desc.vertex_bufs[i];
+        for (usize i = 0; i < draw_buffers.static_vertices.size(); i++) {
+            auto&        mref = draw_buffers.static_vertices[i];
             VkBuffer     vb   = mref.buffer();
             VkDeviceSize off  = mref.offset();
             cmd.BindVertexBuffers((u32)i, 1, &vb, &off);
         }
-        if (m_desc.index_buf) {
-            VkBuffer     ib  = m_desc.index_buf.buffer();
-            VkDeviceSize off = m_desc.index_buf.offset();
+        if (draw_buffers.static_index) {
+            VkBuffer     ib  = draw_buffers.static_index.buffer();
+            VkDeviceSize off = draw_buffers.static_index.offset();
             cmd.BindIndexBuffer(ib, off, VK_INDEX_TYPE_UINT32);
         }
     }
 
-    const bool has_index = m_desc.dyn_vertex ? (bool)m_desc.index_dyn_buf : (bool)m_desc.index_buf;
+    const bool has_index = draw_buffers.hasIndex();
     if (has_index) {
         const auto&                                    submeshes = m_desc.node->Mesh()->Submeshes();
         static const std::vector<SceneMesh::DrawRange> kEmpty;
@@ -805,7 +1112,7 @@ void CustomShaderPass::recordRenderScopeDraw(RenderingResources& rr) {
                                  ? submeshes[m_desc.submesh_index].draw_ranges
                                  : kEmpty;
         if (ranges.empty()) {
-            cmd.DrawIndexed(m_desc.draw_count, 1, 0, 0, 0);
+            cmd.DrawIndexed(draw_buffers.draw_count, 1, 0, 0, 0);
         } else {
             // Per-part drawing — preserves the file's z-order so later parts
             // overdraw earlier ones (eyelid over pupil during blink).
@@ -814,7 +1121,7 @@ void CustomShaderPass::recordRenderScopeDraw(RenderingResources& rr) {
             }
         }
     } else {
-        cmd.Draw(m_desc.draw_count, 1, 0, 0);
+        cmd.Draw(draw_buffers.draw_count, 1, 0, 0);
     }
 }
 
@@ -827,20 +1134,29 @@ void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     endRenderScope(rr);
 }
 
-void CustomShaderPass::destory(const Device&, RenderingResources& rr) {
+void CustomShaderPass::destory(const Device& device, RenderingResources& rr) {
     m_desc.update_op = {};
-    for (auto& bufref : m_desc.vertex_dyn_bufs) rr.dyn_buf->unallocateSubRef(bufref);
-    if (m_desc.index_dyn_buf) rr.dyn_buf->unallocateSubRef(m_desc.index_dyn_buf);
+    rr.pipeline_retire_queue.Retire(std::move(m_desc.fb));
+    m_desc.fb.reset();
+    rr.pipeline_retire_queue.Retire(std::move(m_desc.pipeline));
+    m_desc.pipeline.reset();
+    m_desc.pipeline_cache_key.reset();
+    m_desc.render_pass_cache_key.reset();
+    m_desc.framebuffer_cache_key.reset();
+    m_desc.pipeline_cache_hit               = false;
+    m_desc.pipeline_cache_observed_count    = 0;
+    m_desc.render_pass_cache_hit            = false;
+    m_desc.render_pass_cache_observed_count = 0;
+    m_desc.framebuffer_cache_hit            = false;
+    m_desc.framebuffer_cache_observed_count = 0;
+    RenderBufferResolver resolver(device, *rr.dyn_buf);
+    resolver.releaseDynamicDrawBuffers(m_desc.draw_buffers);
     rr.dyn_buf->unallocateSubRef(m_desc.ubo_buf);
-    // Static MeshBufferRef values dec their refcount via destructor when
-    // m_desc.vertex_bufs / m_desc.index_buf go out of scope; clear here to
-    // release the slot eagerly so a follow-up evictUnused can free.
-    m_desc.vertex_bufs.clear();
-    m_desc.index_buf = {};
+    m_desc.draw_buffers = {};
 }
 
-void CustomShaderPass::setDescTex(u32 index, std::string_view tex_key) {
-    rstd_assert(index < m_desc.textures.size());
-    if (index >= m_desc.textures.size()) return;
-    m_desc.textures[index] = tex_key;
+bool CustomShaderPass::setTextureBinding(uint32_t index, TextureBindingRequest binding) {
+    if (index >= m_desc.texture_bindings.size()) return false;
+    m_desc.texture_bindings[index] = std::move(binding);
+    return true;
 }

@@ -11,6 +11,7 @@
 
 import wescene.fs;
 import wescene.pkg.parse;
+import wescene.scene;
 import wescene.types;
 import nlohmann.json;
 
@@ -120,6 +121,17 @@ void main(){}
     EXPECT_EQ(info.combos.at("BLENDMODE"), "9");
 }
 
+TEST(WPShaderParser, ComboMaterialKeyIsRecorded) {
+    const std::string src  = R"(
+// [COMBO] {"material":"toggle","combo":"USE_FEATURE","default":1}
+void main(){}
+)";
+    auto              info = Parse(src);
+    ASSERT_EQ(info.combo_defs.size(), 1u);
+    EXPECT_EQ(info.combo_defs[0].material, "toggle");
+    EXPECT_EQ(info.combo_defs[0].combo, "USE_FEATURE");
+}
+
 TEST(WPShaderParser, ScalarDefaultPushedToSvs) {
     const std::string src  = R"(
 uniform float g_Brightness; // {"material":"brightness","default":1.5,"range":[0,10]}
@@ -196,4 +208,70 @@ mat3 squareToQuad(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
     EXPECT_NE(out.find("return _ww_perspective_mat(m);"), std::string::npos);
 
     std::filesystem::remove_all(root);
+}
+
+TEST(WPShaderParser, CompileSceneShaderVariantRejectsInvalidDescriptor) {
+    owe::fs::VFS vfs;
+
+    const auto result = owe::WPShaderParser::CompileSceneShaderVariant({}, vfs);
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_FALSE(result.shader);
+    EXPECT_FALSE(result.error.empty());
+}
+
+TEST(WPShaderParser, CompileSceneShaderVariantUsesDescriptorAndComboOverride) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id        = "variant-test";
+    desc.shader_name     = "variant-test";
+    desc.resolved_combos = { { "USE_COLOR", "0" } };
+    desc.texture_infos.push_back(owe::SceneShaderTextureCompileInfo { .enabled = false });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/variant-test.vert",
+        .source     = R"(
+// [COMBO] {"combo":"USE_COLOR","default":0}
+attribute vec3 a_Position;
+varying vec4 v_Color;
+void main() {
+    gl_Position = vec4(a_Position, 1.0);
+#if USE_COLOR == 1
+    v_Color = vec4(1.0, 0.0, 0.0, 1.0);
+#else
+    v_Color = vec4(0.0, 1.0, 0.0, 1.0);
+#endif
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/variant-test.frag",
+        .source     = R"(
+varying vec4 v_Color;
+uniform float g_Brightness; // {"material":"brightness","default":1.0,"range":[0,2]}
+void main() {
+    gl_FragColor = v_Color * g_Brightness;
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result =
+        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, { { "USE_COLOR", "1" } });
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    EXPECT_EQ(result.shader->name, "variant-test");
+    ASSERT_EQ(result.shader->codes.size(), 2u);
+    EXPECT_FALSE(result.shader->codes[0].empty());
+    EXPECT_EQ(result.variant.resolved_combos.at("USE_COLOR"), "1");
+    EXPECT_EQ(result.variant.input_combos.at("USE_COLOR"), "1");
+    EXPECT_EQ(result.variant.uniform_aliases.at("brightness"), "g_Brightness");
+    EXPECT_TRUE(result.variant.default_uniforms.contains("g_Brightness"));
+    EXPECT_NE(result.variant.descriptor_layout_hash, 0u);
+    ASSERT_EQ(result.variant.stages.size(), 2u);
+    EXPECT_EQ(result.variant.stages[0].source_key, "/assets/shaders/variant-test.vert");
+    EXPECT_NE(result.variant.stages[0].code_hash, 0u);
+    EXPECT_TRUE(result.variant.stages[1].uniforms.contains("g_Brightness"));
+    EXPECT_NE(result.variant.stages[1].code_hash, 0u);
 }

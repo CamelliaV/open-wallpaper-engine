@@ -154,7 +154,7 @@ GraphicsPipeline& GraphicsPipeline::setSampleCount(VkSampleCountFlagBits s) {
     return *this;
 }
 
-bool GraphicsPipeline::create(const Device& device, vvk::RenderPass& pass,
+bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
                               PipelineParameters& pipeline) {
     VkPipelineDynamicStateCreateInfo dynamic_info {
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -230,9 +230,8 @@ bool GraphicsPipeline::create(const Device& device, vvk::RenderPass& pass,
         .pColorBlendState    = &m_color,
         .pDynamicState       = &dynamic_info,
         .layout              = *pipeline.layout,
-        .renderPass          = *pass,
+        .renderPass          = pass,
     };
     VVK_CHECK_BOOL_RE(device.handle().CreateGraphicsPipeline(create, pipeline.handle));
-    pipeline.pass = std::move(pass);
     return true;
 }

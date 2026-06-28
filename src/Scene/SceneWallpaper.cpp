@@ -53,13 +53,17 @@ struct RenderSwapchainReady {
     uint32_t width;
     uint32_t height;
 };
+struct RenderRequestPreparedPassDiagnostics {
+    RenderPassDiagnosticCallback cb;
+};
 
 // Wrapped in a non-std struct so the rstd channel's internal `addressof`
 // calls don't fall into ADL ambiguity with std::addressof when the element
 // type sits in namespace std.
 struct RenderMsg {
     std::variant<RenderInit, RenderSetScene, RenderSetFillMode, RenderSetSpeed,
-                 RenderSetUserProperty, RenderStop, RenderDraw, RenderSwapchainReady>
+                 RenderSetUserProperty, RenderStop, RenderDraw, RenderSwapchainReady,
+                 RenderRequestPreparedPassDiagnostics>
         v;
 };
 
@@ -104,11 +108,23 @@ struct MainSetUserProperty {
 struct MainSetFirstFrameCallback {
     FirstFrameCallback cb;
 };
+struct MainSetUserPropertyDiagnosticCallback {
+    UserPropertyDiagnosticCallback cb;
+};
+struct MainUserPropertyDiagnostics {
+    std::vector<SceneUserPropertyDiagnostic> diagnostics;
+};
+struct MainPreparedPassDiagnostics {
+    RenderPassDiagnosticCallback                cb;
+    std::vector<vulkan::PreparedPassDiagnostic> diagnostics;
+};
 
 struct MainMsg {
     std::variant<MainLoadScene, MainConfigure, MainSetFps, MainSetVolume, MainSetVolumeScale,
                  MainSetMuted, MainSetFillMode, MainSetSpeed, MainSetUserProperty,
-                 MainSetFirstFrameCallback, MainStop, MainPauseAudio, MainFirstFrame>
+                 MainSetFirstFrameCallback, MainSetUserPropertyDiagnosticCallback,
+                 MainUserPropertyDiagnostics, MainPreparedPassDiagnostics, MainStop, MainPauseAudio,
+                 MainFirstFrame>
         v;
 };
 
@@ -137,6 +153,11 @@ nlohmann::json RawUserProperty(std::string_view value) {
 
 nlohmann::json JsonUserProperty(nlohmann::json value) {
     return MakeUserPropertyDescriptor(std::move(value));
+}
+
+bool IsShaderGraphUserProperty(const nlohmann::json& prop) {
+    return prop.is_object() && prop.contains("type") && prop.at("type").is_string() &&
+           prop.at("type").get<std::string>() == "combo";
 }
 
 constexpr std::string_view kSchemeColorKey          = "schemecolor";
@@ -189,7 +210,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
 
     // Combo / texture / file paths can't write a uniform.
     if (type == "combo") {
-        r.skip_reason = "combo type — live #define recompile not implemented";
+        r.skip_reason = "shader graph mutation is not a uniform update";
         return r;
     }
     if (type == "texture" || type == "replacetexture" || type == "file" || type == "textinput") {
@@ -244,27 +265,6 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
     return r;
 }
 
-ShaderValue ShapeUserShaderValue(const SceneMaterial& material, const std::string& uniform_name,
-                                 const ShaderValue& value) {
-    if (value.size() != 1) return value;
-
-    size_t target_size = 0;
-    if (auto it = material.customShader.constValues.find(uniform_name);
-        it != material.customShader.constValues.end()) {
-        target_size = it->second.size();
-    }
-    if (target_size <= 1 && material.customShader.shader) {
-        if (auto it = material.customShader.shader->default_uniforms.find(uniform_name);
-            it != material.customShader.shader->default_uniforms.end()) {
-            target_size = it->second.size();
-        }
-    }
-    if (target_size <= 1 || target_size > 4) return value;
-
-    std::vector<float> shaped(target_size, value[0]);
-    return ShaderValue(std::span<const float>(shaped));
-}
-
 void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const nlohmann::json& prop) {
     if (scene.clearColorUserKey.empty()) return;
     if (CanonicalUserPropertyKey(scene.clearColorUserKey) != key) return;
@@ -281,11 +281,16 @@ void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const nlohma
 }
 
 // Push a user-property value to every material whose shader declared a
-// `u_*` uniform with this material-key. Sets the per-material dirty flag so
-// CustomShaderPass picks the new value up next frame.
-void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nlohmann::json& prop) {
+// `u_*` uniform with this material-key.
+void ApplyUserPropertyToShaderUniforms(Scene& scene, const std::string& key,
+                                       const nlohmann::json& prop) {
     auto it = scene.shader_user_var_index.find(key);
     if (it == scene.shader_user_var_index.end()) return;
+
+    if (IsShaderGraphUserProperty(prop)) {
+        rstd_warn("user property '{}' skipped: shader graph mutation is not a uniform update", key);
+        return;
+    }
 
     auto coerced = CoerceUserPropertyValue(prop);
     if (! coerced.ok) {
@@ -296,10 +301,198 @@ void ApplyUserPropertyToShaders(Scene& scene, const std::string& key, const nloh
     }
     for (auto& [material, uniform_name] : it->second) {
         if (! material) continue;
-        material->customShader.constValues[uniform_name] =
-            ShapeUserShaderValue(*material, uniform_name, coerced.value);
-        material->customShader.dirty = true;
+        scene.SetMaterialShaderValue(*material, uniform_name, coerced.value);
     }
+}
+
+std::optional<std::string> ResolveRuntimeSceneTextureProperty(const nlohmann::json& prop) {
+    if (prop.is_string()) return prop.get<std::string>();
+    if (! prop.is_object()) return std::nullopt;
+
+    std::string type;
+    if (prop.contains("type") && prop.at("type").is_string())
+        type = prop.at("type").get<std::string>();
+    if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
+        return std::nullopt;
+    if (! prop.contains("value") || ! prop.at("value").is_string()) return std::nullopt;
+    return prop.at("value").get<std::string>();
+}
+
+bool SameSceneMaterialId(SceneMaterialId lhs, SceneMaterialId rhs) {
+    return lhs.index == rhs.index && lhs.generation == rhs.generation;
+}
+
+void PushUniqueMaterialId(std::vector<SceneMaterialId>& materials, SceneMaterialId id) {
+    auto it = std::find_if(materials.begin(), materials.end(), [id](auto existing) {
+        return SameSceneMaterialId(existing, id);
+    });
+    if (it == materials.end()) materials.push_back(id);
+}
+
+vulkan::PassInvalidationFlags MaterialDirtyToPassInvalidationFlags(SceneMaterialDirtyFlags flags) {
+    vulkan::PassInvalidationFlags out = vulkan::PassInvalidationNone;
+    if ((flags & SceneMaterialDirtyResources) != 0) {
+        out |= vulkan::ToPassInvalidationFlags(vulkan::PassInvalidation::Resources);
+    }
+    if ((flags & SceneMaterialDirtyPipeline) != 0) {
+        out |= vulkan::ToPassInvalidationFlags(vulkan::PassInvalidation::Pipeline) |
+               vulkan::ToPassInvalidationFlags(vulkan::PassInvalidation::Framebuffer);
+    }
+    return out;
+}
+
+std::vector<SceneMaterialId> ApplyUserPropertyToMaterialTextures(Scene&                scene,
+                                                                 const std::string&    key,
+                                                                 const nlohmann::json& prop) {
+    std::vector<SceneMaterialId> changed_materials;
+    auto                         it = scene.material_texture_user_index.find(key);
+    if (it == scene.material_texture_user_index.end()) return changed_materials;
+
+    auto texture_value = ResolveRuntimeSceneTextureProperty(prop);
+    if (! texture_value.has_value()) return changed_materials;
+
+    for (const auto& binding : it->second) {
+        if (binding.material == nullptr) continue;
+        std::string next     = texture_value->empty() ? binding.fallback : *texture_value;
+        auto        mutation = scene.SetMaterialTextureSlot(*binding.material, binding.slot, next);
+        if (mutation.changed && mutation.material.has_value()) {
+            PushUniqueMaterialId(changed_materials, *mutation.material);
+        }
+    }
+
+    return changed_materials;
+}
+
+std::vector<SceneUserPropertyDiagnostic> CollectUserPropertyDiagnostics(const Scene&     scene,
+                                                                        std::string_view key) {
+    std::vector<SceneUserPropertyDiagnostic> out;
+    for (const auto& diagnostic : scene.UserPropertyDiagnostics()) {
+        if (diagnostic.key == key) out.push_back(diagnostic);
+    }
+    return out;
+}
+
+std::optional<std::string>
+ResolveRuntimeShaderComboValue(const nlohmann::json&                prop,
+                               const Scene::ShaderComboUserBinding& binding) {
+    const nlohmann::json* val_ptr = &prop;
+    if (prop.is_object() && prop.contains("value")) val_ptr = &prop.at("value");
+    const auto& value = *val_ptr;
+
+    if (value.is_null()) return binding.fallback;
+    if (value.is_boolean()) return value.get<bool>() ? "1" : "0";
+    if (value.is_number_integer()) return std::to_string(value.get<int>());
+    if (value.is_number_unsigned()) return std::to_string(value.get<unsigned>());
+    if (value.is_number_float()) return std::to_string(static_cast<int>(value.get<float>()));
+    if (! value.is_string()) return std::nullopt;
+
+    auto text = value.get<std::string>();
+    if (text.empty()) return binding.fallback;
+    if (auto it = binding.options.find(text); it != binding.options.end()) return it->second;
+    if (text == "true") return "1";
+    if (text == "false") return "0";
+
+    try {
+        std::size_t parsed = 0;
+        int         number = std::stoi(text, &parsed);
+        if (parsed == text.size()) return std::to_string(number);
+    } catch (...) {
+    }
+    return std::nullopt;
+}
+
+void RecordShaderComboDiagnostic(Scene& scene, std::string key,
+                                 SceneUserPropertyDiagnosticCode code, std::string material,
+                                 std::string combo, std::string message) {
+    scene.AddUserPropertyDiagnostic(SceneUserPropertyDiagnostic {
+        .key      = std::move(key),
+        .code     = code,
+        .material = std::move(material),
+        .combo    = std::move(combo),
+        .message  = std::move(message),
+    });
+}
+
+bool ApplyUserPropertyToShaderCombos(Scene& scene, const std::string& key,
+                                     const nlohmann::json& prop) {
+    auto it = scene.shader_combo_user_index.find(key);
+    if (it == scene.shader_combo_user_index.end()) return false;
+
+    scene.ClearUserPropertyDiagnostics(key);
+
+    auto* vfs = static_cast<fs::VFS*>(scene.vfs.get());
+    if (! vfs) {
+        rstd_warn("user property '{}' skipped: scene VFS is not available", key);
+        RecordShaderComboDiagnostic(scene,
+                                    key,
+                                    SceneUserPropertyDiagnosticCode::SceneVfsUnavailable,
+                                    {},
+                                    {},
+                                    "scene VFS is not available");
+        return false;
+    }
+
+    bool requires_graph_rebuild = false;
+    for (const auto& binding : it->second) {
+        if (! binding.material) continue;
+        auto next = ResolveRuntimeShaderComboValue(prop, binding);
+        if (! next.has_value()) {
+            rstd_warn(
+                "user property '{}' skipped: combo '{}' value is unsupported", key, binding.combo);
+            RecordShaderComboDiagnostic(
+                scene,
+                key,
+                SceneUserPropertyDiagnosticCode::UnsupportedShaderComboValue,
+                binding.material ? binding.material->name : std::string {},
+                binding.combo,
+                "shader combo value is unsupported");
+            continue;
+        }
+        auto& material = *binding.material;
+        if (! material.customShader.variant.has_value()) {
+            rstd_warn("user property '{}' skipped: material '{}' has no shader variant descriptor",
+                      key,
+                      material.name);
+            RecordShaderComboDiagnostic(
+                scene,
+                key,
+                SceneUserPropertyDiagnosticCode::MissingShaderVariantDescriptor,
+                material.name,
+                binding.combo,
+                "material has no shader variant descriptor");
+            continue;
+        }
+        const auto& current_variant = *material.customShader.variant;
+        if (auto current = current_variant.resolved_combos.find(binding.combo);
+            current != current_variant.resolved_combos.end() && current->second == *next) {
+            continue;
+        }
+
+        auto compiled = WPShaderParser::CompileSceneShaderVariant(
+            current_variant, *vfs, { { binding.combo, *next } });
+        if (! compiled.ok || ! compiled.shader) {
+            rstd_warn("user property '{}' skipped: shader combo '{}' compile failed: {}",
+                      key,
+                      binding.combo,
+                      compiled.error);
+            RecordShaderComboDiagnostic(scene,
+                                        key,
+                                        SceneUserPropertyDiagnosticCode::ShaderComboCompileFailed,
+                                        material.name,
+                                        binding.combo,
+                                        compiled.error);
+            continue;
+        }
+        auto mutation = scene.SetMaterialShaderVariant(material,
+                                                       SceneShaderVariantMutation {
+                                                           .shader  = std::move(compiled.shader),
+                                                           .variant = std::move(compiled.variant),
+                                                       });
+        if (mutation.changed && (material.DirtyFlags() & SceneMaterialDirtyGraph) != 0) {
+            requires_graph_rebuild = true;
+        }
+    }
+    return requires_graph_rebuild;
 }
 
 void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
@@ -318,8 +511,7 @@ void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
         std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
         for (auto* material : binding.materials) {
             if (! material) continue;
-            material->customShader.constValues["g_Color4"] = color4;
-            material->customShader.dirty                   = true;
+            scene.SetMaterialShaderValue(*material, "g_Color4", color4);
         }
     }
 }
@@ -451,10 +643,9 @@ void ApplyUserPropertyToCameraPath(Scene& scene, const std::string& key,
     }
 }
 
-// Walk the scene tree once and flip SceneNode::SetVisible for every node
-// whose `VisibleUserKey()` matches `key`. Cheap — tree is frozen post-parse
-// and typically < a few hundred nodes.
-void ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
+// Walk the scene tree once and flip visibility for every node whose
+// `VisibleUserKey()` matches `key`. Cheap: tree shape is frozen post-parse.
+bool ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
                                        const nlohmann::json& prop) {
     bool have_bool = false;
     bool v         = false;
@@ -465,13 +656,18 @@ void ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
         v         = prop.get<bool>();
         have_bool = true;
     }
-    if (! have_bool) return;
-    std::function<void(SceneNode*)> walk = [&](SceneNode* n) {
+    if (! have_bool) return false;
+
+    bool                            requires_graph_rebuild = false;
+    std::function<void(SceneNode*)> walk                   = [&](SceneNode* n) {
         if (! n) return;
-        if (n->VisibleUserKey() == key) n->SetVisible(v);
+        if (n->VisibleUserKey() == key) {
+            requires_graph_rebuild |= scene.SetNodeVisible(*n, v);
+        }
         for (auto& c : n->GetChildren()) walk(c.as_ptr());
     };
     walk(scene.sceneGraph.as_ptr());
+    return requires_graph_rebuild;
 }
 
 void MergeProjectUserProperties(const std::filesystem::path&                     project_dir,
@@ -539,6 +735,9 @@ public:
     void on(MainSetSpeed&&);
     void on(MainSetUserProperty&&);
     void on(MainSetFirstFrameCallback&&);
+    void on(MainSetUserPropertyDiagnosticCallback&&);
+    void on(MainUserPropertyDiagnostics&&);
+    void on(MainPreparedPassDiagnostics&&);
     void on(MainStop&&);
     void on(MainPauseAudio&&);
     void on(MainFirstFrame&&);
@@ -558,6 +757,7 @@ private:
     WPSceneParser                                m_scene_parser;
     std::unique_ptr<wavsen::audio::SoundManager> m_sound_manager;
     FirstFrameCallback                           m_first_frame_callback;
+    UserPropertyDiagnosticCallback               m_user_property_diagnostic_cb;
     ClearColorCallback                           m_clear_color_cb;
     uint64_t                                     m_audio_pause_generation { 0 };
 
@@ -586,6 +786,7 @@ public:
     void on(RenderStop&&);
     void on(RenderDraw&&);
     void on(RenderSwapchainReady&&);
+    void on(RenderRequestPreparedPassDiagnostics&&);
 
     ExSwapchain* exSwapchain() const { return m_render->exSwapchain(); }
     int          takeLastFrameSyncFd() { return m_render->takeLastFrameSyncFd(); }
@@ -639,10 +840,16 @@ public:
     FpsCounter fps_counter;
 
 private:
+    void rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention, bool evict_meshes);
+    void consumeDirtyEventsCoveredByGraphRebuild();
+    void refreshPreparedMeshDirtyEvents();
+    void refreshPreparedMaterialDirtyEvents();
+
     SceneRuntimeController& m_main;
 
     std::unique_ptr<vulkan::VulkanRender> m_render { std::make_unique<vulkan::VulkanRender>() };
     std::shared_ptr<Scene>                m_scene { nullptr };
+    RenderSceneSnapshot                   m_render_scene;
     std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
     float                                 m_speed { 1.0f };
     FillMode                              m_fillmode { FillMode::ASPECTCROP };
@@ -736,6 +943,8 @@ void SceneRenderController::on(RenderDraw&&) {
             m_scene->TickTransformUpdaters();
         }
         m_scene->paritileSys->Emitt();
+        refreshPreparedMeshDirtyEvents();
+        refreshPreparedMaterialDirtyEvents();
 
         /* Advance video textures (no-op if none) before drawFrame so
          * the new RGBA frame is sampled by the same render pass. */
@@ -767,35 +976,113 @@ void SceneRenderController::on(RenderSetFillMode&& m) {
     }
 }
 
-void SceneRenderController::on(RenderSetScene&& m) {
-    m_scene = std::move(m.scene);
-    if (m_rg) m_render->clearLastRenderGraph();
-    // Drop cached mesh buffers from the previous scene before building the
-    // new graph. Swapchain-resize rebuilds (RenderSwapchainReady) reuse the
-    // same SceneMesh set, so evict is intentionally not called there.
-    m_render->evictUnusedMeshes();
-    m_rg = sceneToRenderGraph(*m_scene);
+void SceneRenderController::rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention,
+                                               bool                                 evict_meshes) {
+    if (! m_scene || ! renderInited()) return;
+    if (m_rg) m_render->clearLastRenderGraph(retention);
+    if (evict_meshes) m_render->evictUnusedMeshes();
+    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
+    m_rg           = sceneToRenderGraph(*m_scene, m_render_scene);
 
     if (m_main.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");
-    m_render->compileRenderGraph(*m_scene, *m_rg);
+    m_render->compileRenderGraph(*m_scene, *m_rg, m_render_scene);
     m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+    consumeDirtyEventsCoveredByGraphRebuild();
+}
+
+void SceneRenderController::consumeDirtyEventsCoveredByGraphRebuild() {
+    if (! m_scene) return;
+    (void)m_scene->ConsumePreparedMaterialDirtyEvents();
+    (void)m_scene->ConsumePreparedMeshDirtyEvents();
+}
+
+void SceneRenderController::refreshPreparedMeshDirtyEvents() {
+    if (! m_scene || ! renderInited() || ! m_rg) return;
+    auto events = m_scene->ConsumePreparedMeshDirtyEvents();
+    if (events.empty()) return;
+
+    bool requires_graph_rebuild = std::any_of(events.begin(), events.end(), [](const auto& event) {
+        return (event.flags & SceneMeshDirtyLayout) != 0;
+    });
+    if (requires_graph_rebuild) {
+        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+        return;
+    }
+
+    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
+    for (const auto& event : events) {
+        if ((event.flags & SceneMeshDirtyData) == 0) continue;
+        m_render->refreshPreparedMesh(
+            *m_scene,
+            m_render_scene,
+            event.mesh,
+            vulkan::ToPassInvalidationFlags(vulkan::PassInvalidation::Resources));
+    }
+}
+
+void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
+    if (! m_scene || ! renderInited() || ! m_rg) return;
+    auto events = m_scene->ConsumePreparedMaterialDirtyEvents();
+    if (events.empty()) return;
+
+    bool requires_graph_rebuild = std::any_of(events.begin(), events.end(), [](const auto& event) {
+        return (event.flags & SceneMaterialDirtyGraph) != 0;
+    });
+    if (requires_graph_rebuild) {
+        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+        return;
+    }
+
+    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
+    for (const auto& event : events) {
+        auto flags = MaterialDirtyToPassInvalidationFlags(event.flags);
+        if (flags == vulkan::PassInvalidationNone) continue;
+        m_render->refreshPreparedMaterial(*m_scene, m_render_scene, event.material, flags);
+    }
+}
+
+void SceneRenderController::on(RenderSetScene&& m) {
+    m_scene = std::move(m.scene);
+    rebuildRenderGraph(vulkan::RenderGraphResourceRetention::ReleaseSceneTextures, true);
 }
 
 void SceneRenderController::on(RenderSetSpeed&& m) { m_speed = m.speed; }
 
 void SceneRenderController::on(RenderSetUserProperty&& m) {
     if (! m_scene) return;
-    std::string key = CanonicalUserPropertyKey(m.key);
+    std::string key                      = CanonicalUserPropertyKey(m.key);
+    const bool  has_shader_combo_binding = m_scene->shader_combo_user_index.contains(key);
     owe::script::SetSceneUserProperty(*m_scene, key, m.property);
     ApplyUserPropertyToClear(*m_scene, key, m.property);
-    ApplyUserPropertyToShaders(*m_scene, key, m.property);
+    ApplyUserPropertyToShaderUniforms(*m_scene, key, m.property);
+    auto texture_materials = ApplyUserPropertyToMaterialTextures(*m_scene, key, m.property);
+    bool shader_combo_requires_graph = ApplyUserPropertyToShaderCombos(*m_scene, key, m.property);
     ApplyUserPropertyToImageColor(*m_scene, key, m.property);
     ApplyUserPropertyToParticles(*m_scene, key, m.property);
     ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
     ApplyUserPropertyToCameraParallax(*m_scene, key, m.property);
     ApplyUserPropertyToCameraShake(*m_scene, key, m.property);
     ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
-    ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
+    bool requires_graph_rebuild = ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
+    requires_graph_rebuild      = requires_graph_rebuild || shader_combo_requires_graph;
+
+    if (! texture_materials.empty() && renderInited() && m_rg && ! requires_graph_rebuild) {
+        m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
+        if (! m_render->refreshPreparedMaterialTextures(
+                *m_scene, m_render_scene, texture_materials)) {
+            requires_graph_rebuild = true;
+        }
+    }
+    if (has_shader_combo_binding && m_main_tx) {
+        auto diagnostics = CollectUserPropertyDiagnostics(*m_scene, key);
+        (void)m_main_tx->send(
+            MainMsg { MainUserPropertyDiagnostics { .diagnostics = std::move(diagnostics) } });
+    }
+    if (requires_graph_rebuild) {
+        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+        return;
+    }
+    if (renderInited() && m_rg) refreshPreparedMaterialDirtyEvents();
 }
 
 void SceneRenderController::on(RenderInit&& m) {
@@ -832,14 +1119,22 @@ void SceneRenderController::on(RenderSwapchainReady&& m) {
     }
     bool extent_changed = m_render->onSwapchainReady(m.width, m.height);
     if (extent_changed && m_scene && m_rg) {
-        m_render->clearLastRenderGraph();
-        m_render->compileRenderGraph(*m_scene, *m_rg);
+        m_render->refreshPreparedResources(*m_scene, m_render_scene);
         m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     }
     if (m_stopped)
         frame_timer.Stop();
     else
         frame_timer.Run();
+}
+
+void SceneRenderController::on(RenderRequestPreparedPassDiagnostics&& m) {
+    if (! m_main_tx) return;
+    auto diagnostics = m_render->preparedPassDiagnostics();
+    (void)m_main_tx->send(MainMsg { MainPreparedPassDiagnostics {
+        .cb          = std::move(m.cb),
+        .diagnostics = std::move(diagnostics),
+    } });
 }
 
 // ---- SceneRuntimeController message handlers --------------------------------
@@ -903,6 +1198,18 @@ void SceneRuntimeController::on(MainSetUserProperty&& m) {
 
 void SceneRuntimeController::on(MainSetFirstFrameCallback&& m) {
     m_first_frame_callback = std::move(m.cb);
+}
+
+void SceneRuntimeController::on(MainSetUserPropertyDiagnosticCallback&& m) {
+    m_user_property_diagnostic_cb = std::move(m.cb);
+}
+
+void SceneRuntimeController::on(MainUserPropertyDiagnostics&& m) {
+    if (m_user_property_diagnostic_cb) m_user_property_diagnostic_cb(std::move(m.diagnostics));
+}
+
+void SceneRuntimeController::on(MainPreparedPassDiagnostics&& m) {
+    if (m.cb) m.cb(std::move(m.diagnostics));
 }
 
 void SceneRuntimeController::on(MainStop&& m) {
@@ -1194,6 +1501,16 @@ void SceneWallpaper::setOnClearColor(ClearColorCallback cb) {
 
 void SceneWallpaper::setOnFirstFrame(FirstFrameCallback cb) {
     (void)m_runtime->mainSender().send(MainMsg { MainSetFirstFrameCallback { std::move(cb) } });
+}
+
+void SceneWallpaper::setOnUserPropertyDiagnostics(UserPropertyDiagnosticCallback cb) {
+    (void)m_runtime->mainSender().send(
+        MainMsg { MainSetUserPropertyDiagnosticCallback { std::move(cb) } });
+}
+
+void SceneWallpaper::requestPreparedPassDiagnostics(RenderPassDiagnosticCallback cb) {
+    (void)m_runtime->renderSender().send(
+        RenderMsg { RenderRequestPreparedPassDiagnostics { std::move(cb) } });
 }
 
 int SceneWallpaper::takeLastFrameSyncFd() {

@@ -8,6 +8,7 @@ import wescene.scene;
 
 import :vulkan_pass;
 import :resource;
+import :buffer_resolver;
 
 export namespace owe::vulkan
 {
@@ -16,13 +17,18 @@ class CustomShaderPass : public VulkanPass {
 public:
     struct Desc {
         // in
-        SceneNode* node { nullptr };
+        SceneNode*      node { nullptr };
+        SceneDrawItemId draw_item;
+        RenderItemId    render_item;
         // Which submesh of node->Mesh() this pass renders. SceneToRenderGraph
         // emits one pass per (node, submesh).
-        uint32_t                 submesh_index { 0 };
-        std::vector<std::string> textures;
-        std::string              output;
-        sprite_map_t             sprites_map;
+        uint32_t                           submesh_index { 0 };
+        std::vector<TextureBindingRequest> texture_bindings;
+        std::string                        output;
+        std::optional<TextureRequest>      output_request;
+        std::optional<TextureRequest>      output_msaa_request;
+        std::optional<TextureRequest>      depth_request;
+        sprite_map_t                       sprites_map;
 
         // -----prepared
         // vulkan texs
@@ -37,14 +43,8 @@ public:
         bool                  has_depth_attachment { false };
 
         // bufs
-        bool dyn_vertex { false };
-        // Static mesh: cached in Device::mesh_cache() across render-graph rebuilds.
-        std::vector<MeshBufferRef> vertex_bufs;
-        MeshBufferRef              index_buf;
-        // Dynamic mesh: re-allocated from dyn_buf each rebuild.
-        std::vector<StagingBufferRef> vertex_dyn_bufs;
-        StagingBufferRef              index_dyn_buf;
-        StagingBufferRef              ubo_buf;
+        DrawBufferRefs   draw_buffers;
+        StagingBufferRef ubo_buf;
 
         // pipeline
         VkClearValue clear_value;
@@ -52,17 +52,26 @@ public:
         // (re-syncing `clear_value.color` from the array each execute);
         // null means the pass owns a hard-coded clear (e.g. effect-layer
         // ppong RTs that always reset transparent).
-        const std::array<float, 3>* clear_value_src { nullptr };
-        bool                        blending { false };
-        bool                        clear_output { false };
-        bool                        transparent_clear { false };
-        bool                        clear_depth { false };
-        bool                        preserve_output { false };
-        VkAttachmentLoadOp          color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-        VkAttachmentLoadOp          depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-        vvk::Framebuffer            fb;
-        PipelineParameters          pipeline;
-        u32                         draw_count { 0 };
+        const std::array<float, 3>*            clear_value_src { nullptr };
+        bool                                   blending { false };
+        bool                                   clear_output { false };
+        bool                                   transparent_clear { false };
+        bool                                   clear_depth { false };
+        bool                                   preserve_output { false };
+        VkAttachmentLoadOp                     color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        VkAttachmentLoadOp                     depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        std::shared_ptr<vvk::Framebuffer>      fb;
+        std::shared_ptr<PipelineResourceEntry> pipeline;
+        std::size_t                            pipeline_fingerprint { 0 };
+        std::optional<PipelineCacheKey>        pipeline_cache_key;
+        std::optional<RenderPassCacheKey>      render_pass_cache_key;
+        std::optional<FramebufferCacheKey>     framebuffer_cache_key;
+        bool                                   pipeline_cache_hit { false };
+        uint64_t                               pipeline_cache_observed_count { 0 };
+        bool                                   render_pass_cache_hit { false };
+        uint64_t                               render_pass_cache_observed_count { 0 };
+        bool                                   framebuffer_cache_hit { false };
+        uint64_t                               framebuffer_cache_observed_count { 0 };
 
         // uniforms
         std::function<void()> update_op;
@@ -71,17 +80,33 @@ public:
     CustomShaderPass(const Desc&);
     virtual ~CustomShaderPass();
 
-    void setDescTex(u32 index, std::string_view tex_key);
+    PassInvalidationFlags                     finalizeResourceRequests(Scene&) override;
+    std::optional<RenderItemId>               renderItemId() const override;
+    std::size_t                               pipelineFingerprint() const override;
+    std::optional<PipelineCacheKey>           pipelineCacheKey() const override;
+    bool                                      pipelineCacheHit() const override;
+    uint64_t                                  pipelineCacheObservedCount() const override;
+    std::optional<RenderPassCacheKey>         renderPassCacheKey() const override;
+    bool                                      renderPassCacheHit() const override;
+    uint64_t                                  renderPassCacheObservedCount() const override;
+    std::optional<FramebufferCacheKey>        framebufferCacheKey() const override;
+    bool                                      framebufferCacheHit() const override;
+    uint64_t                                  framebufferCacheObservedCount() const override;
+    std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const override;
+    MaterialTextureBindingRefresh
+         refreshMaterialTextureBindings(const RenderSceneSnapshot&) override;
+    bool setTextureBinding(uint32_t index, TextureBindingRequest binding) override;
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
     void execute(const Device&, RenderingResources&) override;
     void destory(const Device&, RenderingResources&) override;
-    bool canJoinRenderScopeAfter(const CustomShaderPass& previous) const;
-    void prepareRenderScopeDraw(RenderingResources&);
+    bool supportsRenderScope() const override;
+    bool canJoinRenderScopeAfter(const VulkanPass& previous) const override;
+    void prepareRenderScopeDraw(RenderingResources&) override;
     void recordSampledImageBarriers(RenderingResources&);
-    void beginRenderScope(RenderingResources&);
-    void recordRenderScopeDraw(RenderingResources&);
-    void endRenderScope(RenderingResources&);
+    void beginRenderScope(RenderingResources&) override;
+    void recordRenderScopeDraw(RenderingResources&) override;
+    void endRenderScope(RenderingResources&) override;
 
 private:
     Desc m_desc;

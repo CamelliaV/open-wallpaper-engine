@@ -6,6 +6,7 @@ import wescene.core;
 import rstd.cppstd;
 import nlohmann.json;
 
+export import wescene.scene;
 export import wescene.vulkan_render;
 export import wescene.vulkan;
 export import wescene.types;
@@ -15,6 +16,10 @@ export namespace owe
 {
 
 using FirstFrameCallback = std::function<void()>;
+using UserPropertyDiagnosticCallback =
+    std::function<void(std::vector<SceneUserPropertyDiagnostic>)>;
+using RenderPassDiagnosticCallback =
+    std::function<void(std::vector<vulkan::PreparedPassDiagnostic>)>;
 
 // Fired once per loaded scene with the parsed `general.clearcolor`.
 // The host forwards the value to the daemon via
@@ -71,6 +76,8 @@ public:
     void setUserPropertyRaw(std::string_view, std::string);
     void setUserPropertyJson(std::string_view, nlohmann::json);
     void setOnFirstFrame(FirstFrameCallback);
+    void setOnUserPropertyDiagnostics(UserPropertyDiagnosticCallback);
+    void requestPreparedPassDiagnostics(RenderPassDiagnosticCallback);
 
     // Install (or clear, with `nullptr`) a callback invoked on the
     // main thread after each scene is parsed, carrying the scene's

@@ -153,7 +153,8 @@ Set<std::int32_t> CollectLinkedSourceIdsFromJson(const nlohmann::json& json) {
 }
 
 void MarkHiddenLinkSource(ParseContext& context, std::int32_t id) {
-    if (context.hidden_link_source_ids.count(id) != 0) context.scene->elidable_layer_ids.insert(id);
+    if (context.hidden_link_source_ids.count(id) != 0)
+        context.scene->MarkLayerVisibilityElidable(WallpaperLayerId { .value = id });
 }
 
 std::array<float, 2> Texture0UvScale(const SceneMaterial& material, bool nopadding = false) {
@@ -801,6 +802,59 @@ void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const W
     }
 }
 
+SceneShaderTextureCompileInfo ToSceneShaderTextureCompileInfo(const WPShaderTexInfo& info) {
+    return SceneShaderTextureCompileInfo {
+        .enabled    = info.enabled,
+        .components = info.composEnabled,
+    };
+}
+
+owe::Map<std::string, std::string> MaterialCombosToShaderCombos(const wpscene::Material& material) {
+    owe::Map<std::string, std::string> combos;
+    for (const auto& [key, value] : material.combos) combos[key] = std::to_string(value);
+    return combos;
+}
+
+std::vector<SceneShaderDefaultTexture> ToSceneShaderDefaultTextures(const WPShaderInfo& info) {
+    std::vector<SceneShaderDefaultTexture> out;
+    out.reserve(info.defTexs.size());
+    for (const auto& [slot, texture] : info.defTexs) {
+        out.push_back(SceneShaderDefaultTexture { .slot = slot, .texture = texture });
+    }
+    return out;
+}
+
+SceneShaderVariantDesc MakeSceneShaderVariantDesc(
+    std::string_view scene_id, const wpscene::Material& material, const WPShaderInfo& info,
+    std::span<const WPShaderUnit> units, std::span<const std::string> source_keys,
+    std::span<const std::string> stage_sources, std::span<const WPShaderTexInfo> texinfos,
+    bool geometry_shader_enabled) {
+    SceneShaderVariantDesc desc;
+    desc.scene_id                = std::string(scene_id);
+    desc.shader_name             = material.shader;
+    desc.input_combos            = MaterialCombosToShaderCombos(material);
+    desc.resolved_combos         = info.combos;
+    desc.uniform_aliases         = info.alias;
+    desc.default_uniforms        = info.svs;
+    desc.default_textures        = ToSceneShaderDefaultTextures(info);
+    desc.geometry_shader_enabled = geometry_shader_enabled;
+
+    desc.texture_infos.reserve(texinfos.size());
+    for (const auto& texinfo : texinfos) {
+        desc.texture_infos.push_back(ToSceneShaderTextureCompileInfo(texinfo));
+    }
+
+    desc.stages.reserve(units.size());
+    for (usize i = 0; i < units.size(); ++i) {
+        desc.stages.push_back(SceneShaderVariantStage {
+            .stage      = units[i].stage,
+            .source_key = i < source_keys.size() ? source_keys[i] : std::string {},
+            .source     = i < stage_sources.size() ? stage_sources[i] : units[i].src,
+        });
+    }
+    return desc;
+}
+
 bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, SceneNode* pNode,
                   SceneMaterial* pMaterial, SceneUniformNodeData* pSvData,
                   WPShaderInfo* pWPShaderInfo = nullptr, bool enable_geometry_shader = false,
@@ -826,28 +880,30 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     std::string shaderPath("/assets/shaders/" + wpmat.shader);
 
     std::vector<WPShaderUnit> sd_units;
-    sd_units.push_back({
-        .stage           = ShaderType::VERTEX,
-        .src             = fs::GetFileContent(vfs, shaderPath + ".vert"),
-        .preprocess_info = {},
-    });
+    std::vector<std::string>  sd_source_keys;
+    std::vector<std::string>  sd_original_sources;
+    auto                      add_shader_unit = [&](ShaderType stage, std::string source_key) {
+        auto source = fs::GetFileContent(vfs, source_key);
+        sd_source_keys.push_back(std::move(source_key));
+        sd_original_sources.push_back(source);
+        sd_units.push_back({
+            .stage           = stage,
+            .src             = std::move(source),
+            .preprocess_info = {},
+        });
+    };
+    add_shader_unit(ShaderType::VERTEX, shaderPath + ".vert");
+    bool geometry_shader_enabled = false;
     if (enable_geometry_shader) {
         std::string geom_path = shaderPath + ".geom";
         if (vfs.Contains(geom_path)) {
-            sd_units.push_back({
-                .stage           = ShaderType::GEOMETRY,
-                .src             = fs::GetFileContent(vfs, geom_path),
-                .preprocess_info = {},
-            });
+            add_shader_unit(ShaderType::GEOMETRY, std::move(geom_path));
             pWPShaderInfo->combos["GS_ENABLED"] = "1";
+            geometry_shader_enabled             = true;
             if (out_geometry_shader) *out_geometry_shader = true;
         }
     }
-    sd_units.push_back({
-        .stage           = ShaderType::FRAGMENT,
-        .src             = fs::GetFileContent(vfs, shaderPath + ".frag"),
-        .preprocess_info = {},
-    });
+    add_shader_unit(ShaderType::FRAGMENT, shaderPath + ".frag");
 
     std::vector<WPShaderTexInfo>                 texinfos;
     std::unordered_map<std::string, ImageHeader> texHeaders;
@@ -973,10 +1029,22 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
         // pWPShaderInfo->combos.at("LIGHTING");
     }
 
+    auto variant_desc          = MakeSceneShaderVariantDesc(pScene->scene_id,
+                                                            wpmat,
+                                                            *pWPShaderInfo,
+                                                            sd_units,
+                                                            sd_source_keys,
+                                                            sd_original_sources,
+                                                            texinfos,
+                                                            geometry_shader_enabled);
+    variant_desc.texture_slots = material.textures;
+
     if (! WPShaderParser::CompileToSpv(
             pScene->scene_id, sd_units, shader->codes, vfs, pWPShaderInfo, texinfos)) {
         return false;
     }
+    WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
+        variant_desc, sd_units, shader->codes);
 
     material.blenmode    = ParseBlendMode(wpmat.blending);
     material.depth_test  = ParseEnabled(wpmat.depthtest);
@@ -992,8 +1060,9 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     for (const auto& el : pWPShaderInfo->baseConstSvs) {
         materialShader.constValues[el.first] = el.second;
     }
-    material.customShader = materialShader;
-    material.name         = wpmat.shader;
+    material.customShader         = materialShader;
+    material.customShader.variant = std::move(variant_desc);
+    material.name                 = wpmat.shader;
 
     // u_* user-variable uniforms: stage records into pWPShaderInfo so the
     // caller can register them into `Scene::shader_user_var_index` AFTER
@@ -1059,6 +1128,18 @@ bool UsesEffectQuadPositionSpace(const wpscene::Material& wpmat) {
 void RegisterShaderUserVarIndex(Scene* pScene, SceneMaterial* stable_mat,
                                 const wpscene::Material& wpmat, const WPShaderInfo& info) {
     if (! pScene || ! stable_mat) return;
+    for (const auto& combo : info.combo_defs) {
+        if (combo.material.empty() || combo.combo.empty()) continue;
+        Scene::ShaderComboUserBinding binding {
+            .material = stable_mat,
+            .combo    = combo.combo,
+            .fallback = std::to_string(combo.default_),
+        };
+        for (const auto& [label, value] : combo.options) {
+            binding.options[label] = std::to_string(value);
+        }
+        pScene->shader_combo_user_index[combo.material].push_back(std::move(binding));
+    }
     for (const auto& rec : info.user_var_staging) {
         pScene->shader_user_var_index[rec.material].push_back({ stable_mat, rec.name });
     }
@@ -1084,6 +1165,28 @@ void RegisterShaderUserVarIndex(Scene* pScene, SceneMaterial* stable_mat,
             continue;
         }
         pScene->shader_user_var_index[wallpaper_key].push_back({ stable_mat, glname });
+    }
+}
+
+std::optional<std::string> UserTexturePropertyKey(const nlohmann::json& binding) {
+    if (! binding.is_string()) return std::nullopt;
+    auto key = binding.get<std::string>();
+    if (key.empty()) return std::nullopt;
+    return key;
+}
+
+void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
+                                      const wpscene::Material& fallback_material) {
+    if (! pScene || ! stable_mat) return;
+    for (usize i = 0; i < fallback_material.usertextures.size(); ++i) {
+        auto key = UserTexturePropertyKey(fallback_material.usertextures[i]);
+        if (! key.has_value()) continue;
+        std::string fallback;
+        if (i < fallback_material.textures.size()) fallback = fallback_material.textures[i];
+        pScene->material_texture_user_index[*key].push_back(
+            Scene::MaterialTextureUserBinding { .material = stable_mat,
+                                                .slot     = static_cast<uint32_t>(i),
+                                                .fallback = std::move(fallback) });
     }
 }
 
@@ -1449,7 +1552,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     // may be sampled by other layers via `_rt_imageLayerComposite_<id>`. The
     // render-graph builder decides whether to actually emit passes for them.
     if (! wpimgobj.visible) {
-        context.scene->elidable_layer_ids.insert(wpimgobj.id);
+        context.scene->MarkLayerVisibilityElidable(
+            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
     }
 
     auto& vfs = *context.vfs;
@@ -1482,7 +1586,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     // so the render-graph builder drops them when unreferenced, or routes
     // them to `_rt_link_<id>` when another layer reads their composite.
     if (! hasEffect && wpimgobj.visible && (wpimgobj.fullscreen || isPassthrough)) {
-        context.scene->elidable_layer_ids.insert(wpimgobj.id);
+        context.scene->MarkLayerStaticElidable(
+            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
     }
 
     bool hasPuppet = ! wpimgobj.puppet.empty();
@@ -1568,7 +1673,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     ShaderValueMap    baseConstSvs = context.global_base_uniforms;
     WPShaderInfo      shaderInfo;
-    wpscene::Material image_wpmat = wpimgobj.material;
+    wpscene::Material image_wpmat                 = wpimgobj.material;
+    wpscene::Material image_user_texture_fallback = image_wpmat;
     ApplyUserTextureBindings(context, image_wpmat);
     {
         svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
@@ -1721,6 +1827,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     mesh.AddMaterial(std::move(material));
     track_image_color_material(mesh.MaterialSlots().back().get());
     RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(), image_wpmat, shaderInfo);
+    RegisterMaterialUserTextureIndex(
+        context.scene.get(), mesh.Material(), image_user_texture_fallback);
 
     // Puppet clipping masks: each MaskBlock becomes a pair of submeshes.
     // 1) Pre-pass: clippingmaskimage4 over `part_ids_b` (mask shape mesh)
@@ -1975,12 +2083,14 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             bool eff_mat_ok { true };
 
             for (usize i_mat = 0; i_mat < wpeffobj.materials.size(); i_mat++) {
-                wpscene::Material wpmat = wpeffobj.materials.at(i_mat);
-                std::string       matOutRT { OWE_EFFECT_PPONG_PREFIX_B };
+                wpscene::Material                wpmat = wpeffobj.materials.at(i_mat);
+                std::string                      matOutRT { OWE_EFFECT_PPONG_PREFIX_B };
+                std::optional<wpscene::Material> user_texture_fallback;
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
                     wpmat.MergePass(wppass);
                     ApplyTextureBinds(wpmat, std::span(wppass.bind), fboMap);
+                    user_texture_fallback = wpmat;
                     ApplyUserTextureBindings(context, wpmat);
                     if (! wppass.target.empty()) {
                         if (fboMap.count(wppass.target) == 0) {
@@ -2042,6 +2152,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 track_image_color_material(spMesh->MaterialSlots().back().get());
                 RegisterShaderUserVarIndex(
                     context.scene.get(), spMesh->Material(), wpmat, wpEffShaderInfo);
+                if (user_texture_fallback.has_value()) {
+                    RegisterMaterialUserTextureIndex(
+                        context.scene.get(), spMesh->Material(), *user_texture_fallback);
+                }
                 auto add_puppet_mask_materials = [&]() -> bool {
                     if (! (puppet && wpmat.use_puppet && puppet_has_masks)) return true;
                     const std::string source_tex =

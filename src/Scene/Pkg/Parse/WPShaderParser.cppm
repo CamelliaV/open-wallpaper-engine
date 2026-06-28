@@ -89,6 +89,15 @@ struct CompileMaterialShaderResult {
     std::string                  shader_name;
 };
 
+struct CompileSceneShaderVariantResult {
+    bool                         ok { false };
+    std::shared_ptr<SceneShader> shader;
+    SceneShaderVariantDesc       variant;
+    WPShaderInfo                 info;
+    std::vector<WPShaderTexInfo> tex_info;
+    std::string                  error;
+};
+
 // Per-stage shader-annotation parser. Implementation lives in
 // WPShaderParser_Pegtl.cpp; declaration here so the rest of the parse
 // module sees it. Not exported — internal helper.
@@ -109,6 +118,10 @@ public:
                              std::vector<ShaderCode>& spvs, fs::VFS&, WPShaderInfo*,
                              std::span<const WPShaderTexInfo>);
 
+    static void UpdateSceneShaderVariantDescFromCompiledUnits(SceneShaderVariantDesc&,
+                                                              std::span<const WPShaderUnit>,
+                                                              std::span<const ShaderCode>);
+
     // Lightweight entry point: compile the vert+frag shader pair for one
     // material directly, without instantiating a Scene or running the
     // full SceneParser pipeline.
@@ -127,5 +140,9 @@ public:
                                                              fs::VFS&              vfs,
                                                              std::string_view scene_id = "test",
                                                              const Combos&    combos_override = {});
+
+    static CompileSceneShaderVariantResult
+    CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs::VFS& vfs,
+                              const Combos& combos_override = {});
 };
 } // namespace owe

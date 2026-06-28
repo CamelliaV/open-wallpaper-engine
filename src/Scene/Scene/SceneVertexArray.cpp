@@ -48,7 +48,8 @@ SceneVertexArray::SceneVertexArray(SceneVertexArray&& o) noexcept
       m_oneSize(o.m_oneSize),
       m_size(o.m_size),
       m_capacity(o.m_capacity),
-      m_id(o.m_id) {}
+      m_id(o.m_id),
+      m_generation(o.m_generation) {}
 
 SceneVertexArray& SceneVertexArray::operator=(SceneVertexArray&& o) noexcept {
     m_attributes = o.m_attributes;
@@ -57,6 +58,7 @@ SceneVertexArray& SceneVertexArray::operator=(SceneVertexArray&& o) noexcept {
     m_size       = o.m_size;
     m_capacity   = o.m_capacity;
     m_id         = o.m_id;
+    m_generation = o.m_generation;
     return *this;
 }
 
@@ -72,6 +74,7 @@ bool SceneVertexArray::AddVertex(const float* data) {
         mpos += SceneVertexArray::RealAttributeSize(el);
     }
     m_size += m_oneSize;
+    BumpDataGeneration();
     return true;
 }
 
@@ -88,6 +91,7 @@ bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> d
                 usize num   = i / typeSize;
                 std::copy(start, start + (isize)typeSize, m_pData + offset + num * m_oneSize);
             }
+            BumpDataGeneration();
             return true;
         } else
             offset += RealAttributeSize(el);
@@ -99,12 +103,17 @@ bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noex
     usize start = index * m_oneSize;
     if (TrySetSize(start + data.size())) {
         std::copy(data.begin(), data.end(), m_pData + start);
+        BumpDataGeneration();
         return true;
     }
     return false;
 }
 
-void SceneVertexArray::ResetSize() noexcept { m_size = 0; }
+void SceneVertexArray::ResetSize() noexcept {
+    if (m_size == 0) return;
+    m_size = 0;
+    BumpDataGeneration();
+}
 
 bool SceneVertexArray::TrySetSize(usize new_size) noexcept {
     rstd_assert(new_size <= m_capacity);

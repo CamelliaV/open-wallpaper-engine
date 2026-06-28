@@ -21,7 +21,8 @@ SceneIndexArray::SceneIndexArray(SceneIndexArray&& o) noexcept
       m_size(o.m_size),
       m_capacity(o.m_capacity),
       m_render_size(o.m_render_size),
-      m_id(o.m_id) {}
+      m_id(o.m_id),
+      m_generation(o.m_generation) {}
 
 SceneIndexArray::~SceneIndexArray() {
     if (m_pData != nullptr) delete[] m_pData;

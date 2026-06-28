@@ -1746,6 +1746,235 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
     }
 }
 
+namespace
+{
+
+WPShaderTexInfo ToWPShaderTexInfo(const SceneShaderTextureCompileInfo& info) {
+    return WPShaderTexInfo {
+        .enabled       = info.enabled,
+        .composEnabled = info.components,
+    };
+}
+
+SceneShaderTextureCompileInfo ToSceneShaderTextureCompileInfo(const WPShaderTexInfo& info) {
+    return SceneShaderTextureCompileInfo {
+        .enabled    = info.enabled,
+        .components = info.composEnabled,
+    };
+}
+
+std::vector<SceneShaderDefaultTexture> ToSceneShaderDefaultTextures(const WPShaderInfo& info) {
+    std::vector<SceneShaderDefaultTexture> out;
+    out.reserve(info.defTexs.size());
+    for (const auto& [slot, texture] : info.defTexs) {
+        out.push_back(SceneShaderDefaultTexture { .slot = slot, .texture = texture });
+    }
+    return out;
+}
+
+void MergeVariantFallbackMetadata(WPShaderInfo& info, const SceneShaderVariantDesc& desc) {
+    for (const auto& [key, value] : desc.uniform_aliases) {
+        if (! info.alias.contains(key)) info.alias[key] = value;
+    }
+    for (const auto& [key, value] : desc.default_uniforms) {
+        if (! info.svs.contains(key)) info.svs[key] = value;
+    }
+    for (const auto& texture : desc.default_textures) {
+        auto found = std::find_if(info.defTexs.begin(), info.defTexs.end(), [&](const auto& item) {
+            return item.first == texture.slot;
+        });
+        if (found == info.defTexs.end()) info.defTexs.push_back({ texture.slot, texture.texture });
+    }
+}
+
+} // namespace
+
+void WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
+    SceneShaderVariantDesc& desc, std::span<const WPShaderUnit> units,
+    std::span<const ShaderCode> codes) {
+    for (usize i = 0; i < desc.stages.size() && i < units.size(); ++i) {
+        desc.stages[i].active_texture_slots = units[i].preprocess_info.active_tex_slots;
+        desc.stages[i].uniforms             = units[i].preprocess_info.uniforms;
+        if (i < codes.size()) desc.stages[i].code_hash = SceneShaderStageCodeHash(codes[i]);
+    }
+
+    std::vector<vulkan::Uni_ShaderSpv> spvs;
+    vulkan::ShaderReflected            reflected;
+    if (! vulkan::GenReflect(codes, spvs, reflected)) return;
+
+    struct BindingRecord {
+        std::string name;
+        uint32_t    binding { 0 };
+        uint32_t    descriptor_type { 0 };
+        uint32_t    descriptor_count { 0 };
+        uint32_t    stage_flags { 0 };
+    };
+    struct UniformMemberRecord {
+        std::string name;
+        unsigned    offset { 0 };
+        std::size_t size { 0 };
+        std::size_t num { 0 };
+    };
+    struct UniformBlockRecord {
+        std::string                      name;
+        unsigned                         size { 0 };
+        std::vector<UniformMemberRecord> members;
+    };
+
+    auto binding_less = [](const BindingRecord& lhs, const BindingRecord& rhs) {
+        if (lhs.binding != rhs.binding) return lhs.binding < rhs.binding;
+        return lhs.name < rhs.name;
+    };
+    auto member_less = [](const UniformMemberRecord& lhs, const UniformMemberRecord& rhs) {
+        if (lhs.offset != rhs.offset) return lhs.offset < rhs.offset;
+        return lhs.name < rhs.name;
+    };
+    auto block_less = [](const UniformBlockRecord& lhs, const UniformBlockRecord& rhs) {
+        return lhs.name < rhs.name;
+    };
+
+    std::vector<BindingRecord> bindings;
+    bindings.reserve(reflected.binding_map.size());
+    for (const auto& [name, binding] : reflected.binding_map) {
+        bindings.push_back(BindingRecord {
+            .name             = name,
+            .binding          = binding.binding,
+            .descriptor_type  = static_cast<uint32_t>(binding.descriptorType),
+            .descriptor_count = binding.descriptorCount,
+            .stage_flags      = binding.stageFlags,
+        });
+    }
+    std::sort(bindings.begin(), bindings.end(), binding_less);
+
+    std::vector<UniformBlockRecord> blocks;
+    blocks.reserve(reflected.blocks.size());
+    for (const auto& block : reflected.blocks) {
+        UniformBlockRecord record {
+            .name = block.name,
+            .size = block.size,
+        };
+        record.members.reserve(block.member_map.size());
+        for (const auto& [name, member] : block.member_map) {
+            record.members.push_back(UniformMemberRecord {
+                .name   = name,
+                .offset = member.offset,
+                .size   = member.size,
+                .num    = member.num,
+            });
+        }
+        std::sort(record.members.begin(), record.members.end(), member_less);
+        blocks.push_back(std::move(record));
+    }
+    std::sort(blocks.begin(), blocks.end(), block_less);
+
+    std::size_t seed { 0 };
+    utils::hash_combine(seed, bindings.size());
+    for (const auto& binding : bindings) {
+        utils::hash_combine(seed, binding.name);
+        utils::hash_combine(seed, binding.binding);
+        utils::hash_combine(seed, binding.descriptor_type);
+        utils::hash_combine(seed, binding.descriptor_count);
+        utils::hash_combine(seed, binding.stage_flags);
+    }
+    utils::hash_combine(seed, blocks.size());
+    for (const auto& block : blocks) {
+        utils::hash_combine(seed, block.name);
+        utils::hash_combine(seed, block.size);
+        utils::hash_combine(seed, block.members.size());
+        for (const auto& member : block.members) {
+            utils::hash_combine(seed, member.name);
+            utils::hash_combine(seed, member.offset);
+            utils::hash_combine(seed, member.size);
+            utils::hash_combine(seed, member.num);
+        }
+    }
+    desc.descriptor_layout_hash = seed;
+}
+
+CompileSceneShaderVariantResult
+WPShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs::VFS& vfs,
+                                          const Combos& combos_override) {
+    CompileSceneShaderVariantResult result;
+    result.variant = desc;
+
+    if (! desc.Valid()) {
+        result.error = "invalid shader variant descriptor";
+        return result;
+    }
+
+    result.tex_info.reserve(desc.texture_infos.size());
+    for (const auto& texinfo : desc.texture_infos) {
+        result.tex_info.push_back(ToWPShaderTexInfo(texinfo));
+    }
+
+    std::vector<WPShaderUnit> units;
+    units.reserve(desc.stages.size());
+    bool has_geometry_stage = false;
+    for (const auto& stage : desc.stages) {
+        if (stage.source.empty()) {
+            result.error = "shader variant stage source is empty";
+            return result;
+        }
+        has_geometry_stage = has_geometry_stage || stage.stage == ShaderType::GEOMETRY;
+        units.push_back(WPShaderUnit {
+            .stage           = stage.stage,
+            .src             = stage.source,
+            .preprocess_info = {},
+        });
+    }
+
+    for (auto& unit : units) {
+        unit.src = WPShaderParser::PreShaderSrc(vfs, unit.src, &result.info, result.tex_info);
+    }
+
+    for (const auto& [key, value] : desc.resolved_combos) {
+        result.info.combos[key] = value;
+    }
+    for (const auto& [key, value] : combos_override) {
+        result.info.combos[key]          = value;
+        result.variant.input_combos[key] = value;
+    }
+    if (has_geometry_stage && ! result.info.combos.contains("GS_ENABLED")) {
+        result.info.combos["GS_ENABLED"] = "1";
+    }
+    MergeVariantFallbackMetadata(result.info, desc);
+
+    result.variant.resolved_combos         = result.info.combos;
+    result.variant.uniform_aliases         = result.info.alias;
+    result.variant.default_uniforms        = result.info.svs;
+    result.variant.default_textures        = ToSceneShaderDefaultTextures(result.info);
+    result.variant.geometry_shader_enabled = has_geometry_stage;
+    result.variant.texture_infos.clear();
+    result.variant.texture_infos.reserve(result.tex_info.size());
+    for (const auto& texinfo : result.tex_info) {
+        result.variant.texture_infos.push_back(ToSceneShaderTextureCompileInfo(texinfo));
+    }
+
+    std::vector<ShaderCode> spvs;
+    InitGlslang();
+    const bool ok = CompileToSpv(desc.scene_id,
+                                 std::span<WPShaderUnit>(units.data(), units.size()),
+                                 spvs,
+                                 vfs,
+                                 &result.info,
+                                 result.tex_info);
+    FinalGlslang();
+
+    if (! ok) {
+        result.error = "CompileToSpv failed";
+        return result;
+    }
+    WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(result.variant, units, spvs);
+
+    auto shader              = std::make_shared<SceneShader>();
+    shader->name             = desc.shader_name;
+    shader->codes            = std::move(spvs);
+    shader->default_uniforms = result.info.svs;
+    result.shader            = std::move(shader);
+    result.ok                = true;
+    return result;
+}
+
 CompileMaterialShaderResult
 WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::VFS& vfs,
                                       std::string_view scene_id, const Combos& combos_override) {

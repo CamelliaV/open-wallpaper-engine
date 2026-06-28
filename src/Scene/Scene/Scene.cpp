@@ -1,5 +1,6 @@
 module;
 
+#include <atomic>
 #include <cmath>
 
 module wescene.scene;
@@ -15,6 +16,38 @@ namespace owe
 namespace
 {
 void delete_vfs(void* p) noexcept { delete static_cast<fs::VFS*>(p); }
+
+uint32_t next_scene_resource_generation() {
+    static std::atomic_uint32_t next { 1 };
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+uint64_t next_render_scene_version() {
+    static std::atomic_uint64_t next { 1 };
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+uint32_t index_from_size(std::size_t size) { return static_cast<uint32_t>(size); }
+
+template<typename Id>
+bool valid_index(Id id, uint32_t generation, std::size_t size) {
+    return id.generation == generation && static_cast<std::size_t>(id.index) < size;
+}
+
+template<typename Id>
+bool valid_render_index(Id id, uint64_t generation, std::size_t size) {
+    return id.generation == generation && static_cast<std::size_t>(id.index) < size;
+}
+
+uint64_t scene_id_key(uint32_t index, uint32_t generation) {
+    return (static_cast<uint64_t>(generation) << 32) | static_cast<uint64_t>(index);
+}
+
+uint64_t scene_id_key(SceneDrawItemId id) { return scene_id_key(id.index, id.generation); }
+
+uint64_t scene_id_key(SceneMaterialId id) { return scene_id_key(id.index, id.generation); }
+
+uint64_t scene_id_key(SceneMeshId id) { return scene_id_key(id.index, id.generation); }
 
 float cubic(float p0, float p1, float p2, float p3, float t) {
     float omt = 1.0f - t;
@@ -125,7 +158,506 @@ eval_lookat_tracks(std::span<const SceneCameraLookAtTrack> tracks, double runtim
     }
     return eval_lookat_track(tracks.back(), tracks.back().duration);
 }
+
+void collect_linked_ids_from_material(const SceneMaterial& material, Set<i32>& out) {
+    for (const auto& texture : material.textures) {
+        if (IsSpecLinkTex(texture)) out.insert(static_cast<i32>(ParseLinkTex(texture)));
+    }
+}
+
+void collect_linked_ids_from_node(SceneNode* node, Scene& scene, Set<i32>& out) {
+    if (node == nullptr) return;
+    if (node->HasMaterial()) collect_linked_ids_from_material(*node->Mesh()->Material(), out);
+    if (! node->Camera().empty()) {
+        auto it = scene.cameras.find(node->Camera());
+        if (it != scene.cameras.end() && it->second->HasImgEffect()) {
+            auto& effect_layer = it->second->GetImgEffect();
+            for (usize i = 0; i < effect_layer->EffectCount(); i++) {
+                auto& effect = effect_layer->GetEffect(i);
+                for (auto& effect_node : effect->nodes) {
+                    if (effect_node.sceneNode->HasMaterial()) {
+                        collect_linked_ids_from_material(*effect_node.sceneNode->Mesh()->Material(),
+                                                         out);
+                    }
+                }
+            }
+        }
+    }
+    for (auto& child : node->GetChildren())
+        collect_linked_ids_from_node(child.as_ptr(), scene, out);
+}
+
+void collect_linked_ids_from_scene(Scene& scene, Set<i32>& out) {
+    collect_linked_ids_from_node(scene.sceneGraph.as_ptr(), scene, out);
+    for (auto& pp : scene.post_processes) {
+        for (auto& step : pp->steps) {
+            if (auto* pass = std::get_if<ScenePostProcessPass>(&step)) {
+                collect_linked_ids_from_node(pass->node.as_ptr(), scene, out);
+            }
+        }
+    }
+}
+
+SceneNode* find_layer_node(SceneNode* node, Scene& scene, i32 id) {
+    if (node == nullptr) return nullptr;
+    if (node->ID() == id) return node;
+
+    if (! node->Camera().empty()) {
+        auto it = scene.cameras.find(node->Camera());
+        if (it != scene.cameras.end() && it->second->HasImgEffect()) {
+            auto& effect_layer = it->second->GetImgEffect();
+            for (usize i = 0; i < effect_layer->EffectCount(); i++) {
+                auto& effect = effect_layer->GetEffect(i);
+                for (auto& effect_node : effect->nodes) {
+                    if (auto* found = find_layer_node(effect_node.sceneNode.as_ptr(), scene, id))
+                        return found;
+                }
+            }
+        }
+    }
+
+    for (auto& child : node->GetChildren()) {
+        if (auto* found = find_layer_node(child.as_ptr(), scene, id)) return found;
+    }
+    return nullptr;
+}
+
+SceneNode* find_layer_node(Scene& scene, WallpaperLayerId id) {
+    if (auto* found = find_layer_node(scene.sceneGraph.as_ptr(), scene, id.value)) return found;
+    for (auto& pp : scene.post_processes) {
+        if (! pp) continue;
+        for (auto& step : pp->steps) {
+            if (auto* pass = std::get_if<ScenePostProcessPass>(&step)) {
+                if (auto* found = find_layer_node(pass->node.as_ptr(), scene, id.value))
+                    return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+void ensure_snapshot_link_render_targets(Scene& scene, const Set<i32>& linked_ids) {
+    for (auto id : linked_ids) {
+        if (scene.elidable_layer_ids.count(id) == 0) continue;
+        auto layer = WallpaperLayerId { .value = id };
+        auto key   = GenLinkTex(static_cast<std::ptrdiff_t>(id));
+        if (scene.renderTargets.contains(key)) continue;
+        if (auto* source = find_layer_node(scene, layer))
+            scene.EnsureLinkRenderTarget(layer, *source);
+    }
+}
 } // namespace
+
+void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
+    m_scene      = &scene;
+    m_generation = generation;
+
+    m_nodes.clear();
+    m_meshes.clear();
+    m_materials.clear();
+    m_texture_keys.clear();
+    m_render_target_keys.clear();
+    m_camera_keys.clear();
+    m_draw_items.clear();
+    m_node_ids.clear();
+    m_mesh_ids.clear();
+    m_material_ids.clear();
+    m_texture_ids.clear();
+    m_render_target_ids.clear();
+    m_camera_ids.clear();
+
+    auto register_mesh = [this, generation](SceneMesh& mesh) {
+        if (auto it = m_mesh_ids.find(&mesh); it != m_mesh_ids.end()) return it->second;
+        SceneMeshId id { .index = index_from_size(m_meshes.size()), .generation = generation };
+        m_meshes.push_back(&mesh);
+        m_mesh_ids.emplace(&mesh, id);
+        return id;
+    };
+
+    auto register_material = [this, generation](SceneMaterial& material) {
+        if (auto it = m_material_ids.find(&material); it != m_material_ids.end()) return it->second;
+        SceneMaterialId id { .index      = index_from_size(m_materials.size()),
+                             .generation = generation };
+        m_materials.push_back(&material);
+        m_material_ids.emplace(&material, id);
+        return id;
+    };
+
+    auto register_draw_items = [&](SceneNode& node, SceneNodeId node_id) {
+        auto* mesh = node.Mesh();
+        if (mesh == nullptr) return;
+
+        SceneMeshId mesh_id = register_mesh(*mesh);
+        const auto& slots   = mesh->MaterialSlots();
+        const auto& parts   = mesh->Submeshes();
+        for (std::size_t smi = 0; smi < parts.size(); ++smi) {
+            const auto& submesh    = parts[smi];
+            auto        slot_index = static_cast<std::size_t>(submesh.material_slot);
+            if (slot_index >= slots.size() || ! slots[slot_index]) continue;
+
+            SceneMaterialId material_id = register_material(*slots[slot_index]);
+            SceneDrawItemId draw_id { .index      = index_from_size(m_draw_items.size()),
+                                      .generation = generation };
+            m_draw_items.push_back(
+                SceneDrawItemRecord { .id            = draw_id,
+                                      .node          = node_id,
+                                      .mesh          = mesh_id,
+                                      .material      = material_id,
+                                      .submesh_index = static_cast<uint32_t>(smi) });
+        }
+    };
+
+    auto register_node = [&](SceneNode& node) {
+        if (auto it = m_node_ids.find(&node); it != m_node_ids.end()) return it->second;
+        SceneNodeId id { .index = index_from_size(m_nodes.size()), .generation = generation };
+        m_nodes.push_back(&node);
+        m_node_ids.emplace(&node, id);
+        register_draw_items(node, id);
+        return id;
+    };
+
+    auto collect_node = [&](auto& self, SceneNode* node) -> void {
+        if (node == nullptr) return;
+        if (m_node_ids.count(node) != 0) return;
+
+        register_node(*node);
+
+        if (! node->Camera().empty()) {
+            auto cam_it = scene.cameras.find(node->Camera());
+            if (cam_it != scene.cameras.end() && cam_it->second->HasImgEffect()) {
+                auto& eff_layer = cam_it->second->GetImgEffect();
+                for (std::size_t ei = 0; ei < eff_layer->EffectCount(); ++ei) {
+                    auto& eff = eff_layer->GetEffect(ei);
+                    for (auto& eff_node : eff->nodes) self(self, eff_node.sceneNode.as_ptr());
+                }
+            }
+        }
+
+        for (auto& child : node->GetChildren()) self(self, child.as_ptr());
+    };
+
+    collect_node(collect_node, scene.sceneGraph.as_ptr());
+    for (auto& pp : scene.post_processes) {
+        if (! pp) continue;
+        for (auto& step : pp->steps) {
+            if (auto* pass = std::get_if<ScenePostProcessPass>(&step)) {
+                collect_node(collect_node, pass->node.as_ptr());
+            }
+        }
+    }
+
+    auto collect_texture_ids = [generation, this]() {
+        m_texture_keys.reserve(m_scene->textures.size());
+        for (const auto& [key, _] : m_scene->textures) m_texture_keys.push_back(key);
+        std::sort(m_texture_keys.begin(), m_texture_keys.end());
+        for (std::size_t i = 0; i < m_texture_keys.size(); ++i) {
+            m_texture_ids.emplace(
+                m_texture_keys[i],
+                SceneTextureId { .index = index_from_size(i), .generation = generation });
+        }
+    };
+
+    auto collect_render_target_ids = [generation, this]() {
+        m_render_target_keys.reserve(m_scene->renderTargets.size());
+        for (const auto& [key, _] : m_scene->renderTargets) m_render_target_keys.push_back(key);
+        std::sort(m_render_target_keys.begin(), m_render_target_keys.end());
+        for (std::size_t i = 0; i < m_render_target_keys.size(); ++i) {
+            m_render_target_ids.emplace(
+                m_render_target_keys[i],
+                SceneRenderTargetId { .index = index_from_size(i), .generation = generation });
+        }
+    };
+
+    auto collect_camera_ids = [generation, this]() {
+        m_camera_keys.reserve(m_scene->cameras.size());
+        for (const auto& [key, _] : m_scene->cameras) m_camera_keys.push_back(key);
+        std::sort(m_camera_keys.begin(), m_camera_keys.end());
+        for (std::size_t i = 0; i < m_camera_keys.size(); ++i) {
+            m_camera_ids.emplace(
+                m_camera_keys[i],
+                SceneCameraId { .index = index_from_size(i), .generation = generation });
+        }
+    };
+
+    collect_texture_ids();
+    collect_render_target_ids();
+    collect_camera_ids();
+}
+
+std::optional<SceneNodeId> SceneResourceIndex::nodeId(const SceneNode& node) const {
+    auto it = m_node_ids.find(&node);
+    if (it == m_node_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<SceneMeshId> SceneResourceIndex::meshId(const SceneMesh& mesh) const {
+    auto it = m_mesh_ids.find(&mesh);
+    if (it == m_mesh_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<SceneMaterialId> SceneResourceIndex::materialId(const SceneMaterial& material) const {
+    auto it = m_material_ids.find(&material);
+    if (it == m_material_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<SceneDrawItemId> SceneResourceIndex::drawItemFor(SceneNodeId node,
+                                                               uint32_t    submesh_index) const {
+    if (node.generation != m_generation) return std::nullopt;
+    for (const auto& item : m_draw_items) {
+        if (item.node.index == node.index && item.submesh_index == submesh_index) return item.id;
+    }
+    return std::nullopt;
+}
+
+std::optional<SceneTextureId> SceneResourceIndex::textureId(std::string_view url) const {
+    auto it = m_texture_ids.find(std::string(url));
+    if (it == m_texture_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<SceneRenderTargetId> SceneResourceIndex::renderTargetId(std::string_view key) const {
+    auto it = m_render_target_ids.find(std::string(key));
+    if (it == m_render_target_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<SceneCameraId> SceneResourceIndex::cameraId(std::string_view name) const {
+    auto it = m_camera_ids.find(std::string(name));
+    if (it == m_camera_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<DrawItemView> SceneResourceIndex::resolve(SceneDrawItemId id) const {
+    if (! valid_index(id, m_generation, m_draw_items.size())) return std::nullopt;
+    const auto& item = m_draw_items[id.index];
+    auto*       n    = node(item.node);
+    auto*       me   = mesh(item.mesh);
+    auto*       ma   = material(item.material);
+    if (n == nullptr || me == nullptr || ma == nullptr) return std::nullopt;
+    if (static_cast<std::size_t>(item.submesh_index) >= me->Submeshes().size()) return std::nullopt;
+    return DrawItemView { .node          = n,
+                          .mesh          = me,
+                          .submesh       = &me->Submeshes()[item.submesh_index],
+                          .material      = ma,
+                          .submesh_index = item.submesh_index };
+}
+
+SceneNode* SceneResourceIndex::node(SceneNodeId id) const {
+    if (! valid_index(id, m_generation, m_nodes.size())) return nullptr;
+    return m_nodes[id.index];
+}
+
+SceneMesh* SceneResourceIndex::mesh(SceneMeshId id) const {
+    if (! valid_index(id, m_generation, m_meshes.size())) return nullptr;
+    return m_meshes[id.index];
+}
+
+SceneMaterial* SceneResourceIndex::material(SceneMaterialId id) const {
+    if (! valid_index(id, m_generation, m_materials.size())) return nullptr;
+    return m_materials[id.index];
+}
+
+const SceneTexture* SceneResourceIndex::texture(SceneTextureId id) const {
+    if (m_scene == nullptr || ! valid_index(id, m_generation, m_texture_keys.size()))
+        return nullptr;
+    auto it = m_scene->textures.find(m_texture_keys[id.index]);
+    if (it == m_scene->textures.end()) return nullptr;
+    return &it->second;
+}
+
+const SceneRenderTarget* SceneResourceIndex::renderTarget(SceneRenderTargetId id) const {
+    if (m_scene == nullptr || ! valid_index(id, m_generation, m_render_target_keys.size()))
+        return nullptr;
+    auto it = m_scene->renderTargets.find(m_render_target_keys[id.index]);
+    if (it == m_scene->renderTargets.end()) return nullptr;
+    return &it->second;
+}
+
+SceneRenderTarget* SceneResourceIndex::mutableRenderTarget(SceneRenderTargetId id) const {
+    if (m_scene == nullptr || ! valid_index(id, m_generation, m_render_target_keys.size()))
+        return nullptr;
+    auto it = m_scene->renderTargets.find(m_render_target_keys[id.index]);
+    if (it == m_scene->renderTargets.end()) return nullptr;
+    return &it->second;
+}
+
+SceneCamera* SceneResourceIndex::camera(SceneCameraId id) const {
+    if (m_scene == nullptr || ! valid_index(id, m_generation, m_camera_keys.size())) return nullptr;
+    auto it = m_scene->cameras.find(m_camera_keys[id.index]);
+    if (it == m_scene->cameras.end()) return nullptr;
+    return it->second.get();
+}
+
+void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
+    m_version = version;
+
+    m_render_items.clear();
+    m_texture_descs.clear();
+    m_render_target_descs.clear();
+    m_render_item_ids.clear();
+    m_texture_desc_ids.clear();
+    m_render_target_desc_ids.clear();
+    m_source_layer_items.clear();
+    m_material_render_items.clear();
+    m_mesh_render_items.clear();
+    m_link_sources.clear();
+    m_link_source_ids.clear();
+    m_linked_layer_ids.clear();
+
+    collect_linked_ids_from_scene(scene, m_linked_layer_ids);
+    ensure_snapshot_link_render_targets(scene, m_linked_layer_ids);
+    scene.RebuildResourceIndex();
+
+    const auto& index = scene.ResourceIndex();
+
+    std::vector<std::string> texture_keys;
+    texture_keys.reserve(scene.textures.size());
+    for (const auto& [key, _] : scene.textures) texture_keys.push_back(key);
+    std::sort(texture_keys.begin(), texture_keys.end());
+
+    for (const auto& key : texture_keys) {
+        auto id       = RenderTextureDescId { .index      = index_from_size(m_texture_descs.size()),
+                                              .generation = version.value };
+        auto scene_id = index.textureId(key).value_or(SceneTextureId {});
+        auto desc_it  = scene.textures.find(key);
+        m_texture_desc_ids.emplace(key, id);
+        m_texture_descs.push_back(RenderTextureDescRecord {
+            .id            = id,
+            .scene_texture = scene_id,
+            .key           = key,
+            .desc          = desc_it != scene.textures.end() ? desc_it->second : SceneTexture {},
+        });
+    }
+
+    std::vector<std::string> render_target_keys;
+    render_target_keys.reserve(scene.renderTargets.size());
+    for (const auto& [key, _] : scene.renderTargets) render_target_keys.push_back(key);
+    std::sort(render_target_keys.begin(), render_target_keys.end());
+
+    for (const auto& key : render_target_keys) {
+        auto id       = RenderTargetDescId { .index      = index_from_size(m_render_target_descs.size()),
+                                             .generation = version.value };
+        auto scene_id = index.renderTargetId(key).value_or(SceneRenderTargetId {});
+        auto desc_it  = scene.renderTargets.find(key);
+        m_render_target_desc_ids.emplace(key, id);
+        m_render_target_descs.push_back(RenderTargetDescRecord {
+            .id                  = id,
+            .scene_render_target = scene_id,
+            .key                 = key,
+            .desc = desc_it != scene.renderTargets.end() ? desc_it->second : SceneRenderTarget {},
+        });
+    }
+
+    for (const auto& item : index.DrawItems()) {
+        auto        id   = RenderItemId { .index      = index_from_size(m_render_items.size()),
+                                          .generation = version.value };
+        const auto* node = index.node(item.node);
+        std::optional<RenderTargetDescId> output_override;
+        if (auto view = index.resolve(item.id)) {
+            if (view->submesh != nullptr && ! view->submesh->output_override.empty()) {
+                output_override = renderTargetDescId(view->submesh->output_override);
+            }
+        }
+
+        auto source_layer = WallpaperLayerId { .value = node != nullptr ? node->ID() : -1 };
+        m_render_item_ids.emplace(scene_id_key(item.id), id);
+        m_source_layer_items[source_layer.value].push_back(id);
+        m_material_render_items[scene_id_key(item.material)].push_back(id);
+        m_mesh_render_items[scene_id_key(item.mesh)].push_back(id);
+        m_render_items.push_back(RenderItemRecord { .id              = id,
+                                                    .scene_draw_item = item.id,
+                                                    .scene_node      = item.node,
+                                                    .scene_mesh      = item.mesh,
+                                                    .scene_material  = item.material,
+                                                    .source_layer    = source_layer,
+                                                    .submesh_index   = item.submesh_index,
+                                                    .output_override = output_override });
+    }
+
+    for (auto id : m_linked_layer_ids) {
+        auto key     = GenLinkTex(static_cast<std::ptrdiff_t>(id));
+        auto desc_id = renderTargetDescId(key);
+        if (! desc_id) continue;
+
+        auto record_index = index_from_size(m_link_sources.size());
+        m_link_source_ids.emplace(id, record_index);
+        m_link_sources.push_back(RenderLinkSourceRecord {
+            .source_layer      = WallpaperLayerId { .value = id },
+            .render_target_key = std::move(key),
+            .render_target     = *desc_id,
+        });
+    }
+}
+
+const RenderItemRecord* RenderSceneSnapshot::renderItem(RenderItemId id) const {
+    if (! valid_render_index(id, m_version.value, m_render_items.size())) return nullptr;
+    return &m_render_items[id.index];
+}
+
+const RenderTextureDescRecord* RenderSceneSnapshot::textureDesc(RenderTextureDescId id) const {
+    if (! valid_render_index(id, m_version.value, m_texture_descs.size())) return nullptr;
+    return &m_texture_descs[id.index];
+}
+
+const RenderTargetDescRecord* RenderSceneSnapshot::renderTargetDesc(RenderTargetDescId id) const {
+    if (! valid_render_index(id, m_version.value, m_render_target_descs.size())) return nullptr;
+    return &m_render_target_descs[id.index];
+}
+
+std::optional<RenderItemId> RenderSceneSnapshot::renderItemFor(SceneDrawItemId id) const {
+    auto it = m_render_item_ids.find(scene_id_key(id));
+    if (it == m_render_item_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<RenderTextureDescId> RenderSceneSnapshot::textureDescId(std::string_view key) const {
+    auto it = m_texture_desc_ids.find(std::string(key));
+    if (it == m_texture_desc_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<RenderTargetDescId>
+RenderSceneSnapshot::renderTargetDescId(std::string_view key) const {
+    auto it = m_render_target_desc_ids.find(std::string(key));
+    if (it == m_render_target_desc_ids.end()) return std::nullopt;
+    return it->second;
+}
+
+std::span<const RenderItemId> RenderSceneSnapshot::renderItemsFor(WallpaperLayerId id) const {
+    auto it = m_source_layer_items.find(id.value);
+    if (it == m_source_layer_items.end()) return {};
+    return { it->second.data(), it->second.size() };
+}
+
+std::span<const RenderItemId> RenderSceneSnapshot::renderItemsFor(SceneMaterialId id) const {
+    auto it = m_material_render_items.find(scene_id_key(id));
+    if (it == m_material_render_items.end()) return {};
+    return { it->second.data(), it->second.size() };
+}
+
+std::span<const RenderItemId> RenderSceneSnapshot::renderItemsFor(SceneMeshId id) const {
+    auto it = m_mesh_render_items.find(scene_id_key(id));
+    if (it == m_mesh_render_items.end()) return {};
+    return { it->second.data(), it->second.size() };
+}
+
+const RenderLinkSourceRecord* RenderSceneSnapshot::linkSource(WallpaperLayerId id) const {
+    auto it = m_link_source_ids.find(id.value);
+    if (it == m_link_source_ids.end()) return nullptr;
+    return &m_link_sources[it->second];
+}
+
+bool RenderSceneSnapshot::HasLinkConsumer(WallpaperLayerId id) const {
+    return m_linked_layer_ids.count(id.value) != 0;
+}
+
+RenderSceneSnapshot ExtractRenderSceneSnapshot(Scene& scene) {
+    RenderSceneSnapshot snapshot;
+    snapshot.Rebuild(scene, RenderSceneVersion { .value = next_render_scene_version() });
+    return snapshot;
+}
 
 bool SceneAnimationCurve::Empty() const { return c0.empty() && c1.empty() && c2.empty(); }
 
@@ -206,8 +738,178 @@ bool SceneCameraPath::Tick(double runtime) {
 Scene::Scene()
     : sceneGraph(rstd::sync::Arc<SceneNode>::make()),
       vfs(nullptr, &delete_vfs),
-      paritileSys(std::make_unique<ParticleSystem>(*this)) {}
+      paritileSys(std::make_unique<ParticleSystem>(*this)),
+      m_resource_generation(next_scene_resource_generation()) {}
 Scene::~Scene() = default;
+
+void Scene::RebuildResourceIndex() { m_resource_index.Rebuild(*this, m_resource_generation); }
+
+bool Scene::EnsureTextureDescriptor(std::string_view key) {
+    if (key.empty() || IsSpecTex(key)) return true;
+    std::string name(key);
+    if (textures.contains(name)) return true;
+    if (! imageParser) return false;
+
+    const auto   header = imageParser->ParseHeader(name);
+    SceneTexture texture;
+    texture.url    = name;
+    texture.sample = header.sample;
+    if (header.isSprite) {
+        texture.isSprite   = true;
+        texture.spriteAnim = header.spriteAnim;
+    }
+    textures.emplace(std::move(name), std::move(texture));
+    return true;
+}
+
+bool Scene::SetMaterialShaderValue(SceneMaterial& material, std::string_view uniform_name,
+                                   const ShaderValue& value) {
+    return material.SetShaderValue(std::string(uniform_name), value);
+}
+
+SceneMaterialTextureSlotMutation
+Scene::SetMaterialTextureSlot(SceneMaterial& material, uint32_t slot, std::string_view texture) {
+    if (! EnsureTextureDescriptor(texture)) return {};
+
+    auto slot_index = static_cast<std::size_t>(slot);
+    if (material.textures.size() <= slot_index) material.textures.resize(slot_index + 1);
+    auto& current = material.textures[slot_index];
+    if (current == texture) return {};
+
+    current = std::string(texture);
+    if (m_resource_index.Empty()) RebuildResourceIndex();
+    return SceneMaterialTextureSlotMutation {
+        .changed  = true,
+        .material = m_resource_index.materialId(material),
+    };
+}
+
+SceneMaterialShaderVariantMutation
+Scene::SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutation mutation) {
+    if (! material.SetShaderVariant(std::move(mutation.shader), std::move(mutation.variant)))
+        return {};
+
+    if (m_resource_index.Empty()) RebuildResourceIndex();
+    return SceneMaterialShaderVariantMutation {
+        .changed  = true,
+        .material = m_resource_index.materialId(material),
+    };
+}
+
+void Scene::ClearUserPropertyDiagnostics(std::string_view key) {
+    if (key.empty()) {
+        m_user_property_diagnostics.clear();
+        return;
+    }
+    for (auto it = m_user_property_diagnostics.begin(); it != m_user_property_diagnostics.end();) {
+        if (it->key == key) {
+            it = m_user_property_diagnostics.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void Scene::AddUserPropertyDiagnostic(SceneUserPropertyDiagnostic diagnostic) {
+    m_user_property_diagnostics.push_back(std::move(diagnostic));
+}
+
+void Scene::RebuildElidableLayerIds() {
+    elidable_layer_ids.clear();
+    elidable_layer_ids.insert(static_elidable_layer_ids.begin(), static_elidable_layer_ids.end());
+    elidable_layer_ids.insert(visibility_elidable_layer_ids.begin(),
+                              visibility_elidable_layer_ids.end());
+}
+
+void Scene::MarkLayerStaticElidable(WallpaperLayerId id) {
+    static_elidable_layer_ids.insert(id.value);
+    elidable_layer_ids.insert(id.value);
+}
+
+void Scene::MarkLayerVisibilityElidable(WallpaperLayerId id) {
+    visibility_elidable_layer_ids.insert(id.value);
+    elidable_layer_ids.insert(id.value);
+}
+
+bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
+    node.SetVisible(visible);
+    if (! visible) return false;
+
+    const bool was_elidable = elidable_layer_ids.count(node.ID()) != 0;
+    if (visibility_elidable_layer_ids.erase(node.ID()) == 0) return false;
+    RebuildElidableLayerIds();
+    const bool is_elidable = elidable_layer_ids.count(node.ID()) != 0;
+    return was_elidable != is_elidable;
+}
+
+std::vector<SceneMeshDirtyEvent> Scene::ConsumePreparedMeshDirtyEvents() {
+    if (m_resource_index.Empty()) RebuildResourceIndex();
+
+    std::vector<SceneMeshDirtyEvent> events;
+    for (auto* mesh : m_resource_index.Meshes()) {
+        if (mesh == nullptr) continue;
+        auto flags = mesh->DirtyFlags();
+        if (flags == SceneMeshDirtyNone) continue;
+
+        SceneMeshDirtyFlags consume     = SceneMeshDirtyNone;
+        SceneMeshDirtyFlags event_flags = SceneMeshDirtyNone;
+        if ((flags & SceneMeshDirtyLayout) != 0) {
+            consume     = SceneMeshDirtyAll;
+            event_flags = SceneMeshDirtyLayout;
+        } else if (! mesh->Dynamic() && (flags & SceneMeshDirtyData) != 0) {
+            consume     = SceneMeshDirtyData;
+            event_flags = SceneMeshDirtyData;
+        }
+        if (consume == SceneMeshDirtyNone) continue;
+
+        auto consumed = mesh->ConsumeDirtyFlags(consume);
+        if ((consumed & SceneMeshDirtyLayout) != 0) {
+            event_flags = SceneMeshDirtyLayout;
+        } else if ((consumed & SceneMeshDirtyData) == 0) {
+            continue;
+        }
+
+        if (auto id = m_resource_index.meshId(*mesh)) {
+            events.push_back(SceneMeshDirtyEvent { .mesh = *id, .flags = event_flags });
+        }
+    }
+    return events;
+}
+
+std::vector<SceneMaterialDirtyEvent> Scene::ConsumePreparedMaterialDirtyEvents() {
+    if (m_resource_index.Empty()) RebuildResourceIndex();
+
+    std::vector<SceneMaterialDirtyEvent> events;
+    for (auto* material : m_resource_index.Materials()) {
+        if (material == nullptr) continue;
+        auto flags = material->DirtyFlags();
+        if (flags == SceneMaterialDirtyNone) continue;
+
+        SceneMaterialDirtyFlags consume     = SceneMaterialDirtyNone;
+        SceneMaterialDirtyFlags event_flags = SceneMaterialDirtyNone;
+        if ((flags & SceneMaterialDirtyGraph) != 0) {
+            consume     = SceneMaterialDirtyAll;
+            event_flags = SceneMaterialDirtyGraph;
+        } else {
+            consume     = flags & (SceneMaterialDirtyResources | SceneMaterialDirtyPipeline);
+            event_flags = consume;
+        }
+        if (consume == SceneMaterialDirtyNone) continue;
+
+        auto consumed = material->ConsumeDirtyFlags(consume);
+        if ((consumed & SceneMaterialDirtyGraph) != 0) {
+            event_flags = SceneMaterialDirtyGraph;
+        } else {
+            event_flags = consumed & (SceneMaterialDirtyResources | SceneMaterialDirtyPipeline);
+        }
+        if (event_flags == SceneMaterialDirtyNone) continue;
+
+        if (auto id = m_resource_index.materialId(*material)) {
+            events.push_back(SceneMaterialDirtyEvent { .material = *id, .flags = event_flags });
+        }
+    }
+    return events;
+}
 
 void Scene::TickCameraPaths() {
     if (camera_paths.empty()) return;
@@ -240,6 +942,20 @@ void Scene::CaptureCameraPathViewports() {
     for (auto& path : camera_paths) {
         if (path) path->CaptureViewport();
     }
+}
+
+std::string Scene::EnsureLinkRenderTarget(WallpaperLayerId source_layer,
+                                          const SceneNode& source_node) {
+    auto link_key = GenLinkTex(static_cast<std::ptrdiff_t>(source_layer.value));
+    if (renderTargets.count(link_key) == 0) {
+        auto sz                 = source_node.Size();
+        renderTargets[link_key] = {
+            .width      = sz.x() > 0 ? static_cast<i32>(sz.x()) : ortho[0],
+            .height     = sz.y() > 0 ? static_cast<i32>(sz.y()) : ortho[1],
+            .allowReuse = false,
+        };
+    }
+    return link_key;
 }
 
 } // namespace owe

@@ -402,6 +402,7 @@ public:
     ~TextureCache();
 
     void Clear();
+    void ClearTransientGraphResources();
 
     void SetVideoDecodeOptions(VideoDecodeOptions);
 
@@ -694,9 +695,9 @@ private:
 // ---------- GraphicsPipeline.hpp ----------
 
 struct PipelineParameters {
-    vvk::Pipeline       handle;
-    vvk::PipelineLayout layout;
-    vvk::RenderPass     pass;
+    vvk::Pipeline                    handle;
+    vvk::PipelineLayout              layout;
+    std::shared_ptr<vvk::RenderPass> pass;
 
     std::vector<vvk::DescriptorSetLayout> descriptor_layouts;
 };
@@ -713,7 +714,7 @@ public:
     ~GraphicsPipeline();
 
     void toDefault();
-    bool create(const Device&, vvk::RenderPass&, PipelineParameters&);
+    bool create(const Device&, VkRenderPass, PipelineParameters&);
 
     VkPipelineMultisampleStateCreateInfo   multisample {};
     VkPipelineRasterizationStateCreateInfo raster {};

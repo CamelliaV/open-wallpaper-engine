@@ -77,47 +77,6 @@ inline void SetCullMode(CullMode mode, VkPipelineRasterizationStateCreateInfo& s
     }
 }
 
-inline TextureKey ToTexKey(owe::SceneRenderTarget rt) {
-    return TextureKey {
-        .width        = rt.width,
-        .height       = rt.height,
-        .usage        = {},
-        .format       = owe::TextureFormat::RGBA8,
-        .sample       = rt.sample,
-        .mipmap_level = rt.mipmap_level,
-    };
-}
-
-inline TextureKey ToTexKeyMsaa(owe::SceneRenderTarget rt, VkSampleCountFlagBits s) {
-    auto k    = ToTexKey(rt);
-    k.samples = s;
-    return k;
-}
-
-inline VkSampleCountFlagBits ToVkSampleCount(unsigned sample_count) {
-    switch (sample_count) {
-    case 2: return VK_SAMPLE_COUNT_2_BIT;
-    case 4: return VK_SAMPLE_COUNT_4_BIT;
-    case 8: return VK_SAMPLE_COUNT_8_BIT;
-    case 16: return VK_SAMPLE_COUNT_16_BIT;
-    case 32: return VK_SAMPLE_COUNT_32_BIT;
-    case 64: return VK_SAMPLE_COUNT_64_BIT;
-    default: return VK_SAMPLE_COUNT_1_BIT;
-    }
-}
-
-inline TextureKey ToDepthTexKey(owe::SceneRenderTarget rt) {
-    return TextureKey {
-        .width        = rt.width,
-        .height       = rt.height,
-        .usage        = TexUsage::DEPTH,
-        .format       = owe::TextureFormat::D32F,
-        .sample       = rt.sample,
-        .mipmap_level = 1,
-        .samples      = ToVkSampleCount(rt.sample_count),
-    };
-}
-
 inline std::string MsaaTwinName(std::string_view tex_name, VkSampleCountFlagBits samples) {
     return std::string(tex_name) + "::msaa" + std::to_string((unsigned)samples);
 }

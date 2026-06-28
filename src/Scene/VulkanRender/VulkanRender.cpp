@@ -21,8 +21,35 @@ import wescene.rgraph;
 
 using namespace owe::vulkan;
 
-constexpr uint64_t vk_wait_time { 10u * 1000u * 1000000u };
-constexpr uint32_t vk_command_num { 2 };
+constexpr uint64_t             vk_wait_time { 10u * 1000u * 1000000u };
+constexpr uint32_t             vk_upload_command_num { 3 };
+constexpr uint32_t             vk_command_num { vk_upload_command_num + 1 };
+constexpr VkPipelineStageFlags vk_upload_wait_stages { VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+                                                       VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT };
+
+bool SameRenderItemId(owe::RenderItemId lhs, owe::RenderItemId rhs) {
+    return lhs.index == rhs.index && lhs.generation == rhs.generation;
+}
+
+void PushUniqueRenderItem(std::vector<owe::RenderItemId>& items, owe::RenderItemId id) {
+    auto it = std::find_if(items.begin(), items.end(), [id](auto existing) {
+        return SameRenderItemId(existing, id);
+    });
+    if (it == items.end()) items.push_back(id);
+}
+
+std::vector<owe::RenderItemId>
+RenderItemsForMaterials(const owe::RenderSceneSnapshot&       render_scene,
+                        std::span<const owe::SceneMaterialId> materials) {
+    std::vector<owe::RenderItemId> render_items;
+    for (auto material : materials) {
+        for (auto item : render_scene.renderItemsFor(material)) {
+            PushUniqueRenderItem(render_items, item);
+        }
+    }
+    return render_items;
+}
 
 constexpr std::array base_inst_exts {
     Extension { false, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME },
@@ -34,6 +61,7 @@ constexpr std::array base_device_exts {
     Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME },
+    Extension { true, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME },
     // Optional. When present we can report the picked physical device's
     // DRM render-node major/minor via `getDrmRenderNode()` so the
     // waywallen daemon can match it against each connected display's
@@ -41,6 +69,461 @@ constexpr std::array base_device_exts {
     // (0, 0); the daemon then conservatively assumes cross-GPU.
     Extension { false, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME },
 };
+
+struct RenderProgram {
+    enum class PreparedPassKind
+    {
+        Graph,
+        Frame,
+    };
+
+    struct PreparedPassRecord {
+        PreparedPassKind                       kind { PreparedPassKind::Graph };
+        std::optional<owe::rg::NodeID>         graph_node;
+        std::string                            pass_name;
+        std::optional<owe::rg::PassNode::Type> pass_type;
+        VulkanPass*                            pass { nullptr };
+        std::vector<std::string>               release_textures;
+        PassInvalidationFlags                  invalidation_flags { PassInvalidationNone };
+        std::size_t                            pipeline_fingerprint { 0 };
+
+        void applyReleaseTextures() const {
+            if (pass == nullptr) return;
+            std::vector<std::string_view> views;
+            views.reserve(release_textures.size());
+            for (const auto& key : release_textures) views.push_back(key);
+            pass->addReleaseTexs(views);
+        }
+
+        bool invalidated() const { return invalidation_flags != 0; }
+
+        void invalidate(PassInvalidationFlags flags) { invalidation_flags |= flags; }
+
+        void invalidate(PassInvalidation invalidation) {
+            invalidate(ToPassInvalidationFlags(invalidation));
+        }
+
+        void invalidateResources() { invalidate(PassInvalidation::Resources); }
+
+        void invalidatePipeline() { invalidate(PassInvalidation::Pipeline); }
+
+        void invalidateFramebuffer() { invalidate(PassInvalidation::Framebuffer); }
+
+        void invalidateAll() { invalidate(PassInvalidationAll); }
+
+        void clearInvalidation() { invalidation_flags = PassInvalidationNone; }
+
+        bool needsPrepare() const {
+            return pass != nullptr && (! pass->prepared() || invalidated());
+        }
+
+        void resetPrepared(const Device& device, RenderingResources& rr) {
+            if (pass == nullptr) return;
+            if (pass->prepared()) {
+                pass->destory(device, rr);
+            }
+            pass->resetPrepared();
+        }
+
+        void prepareIfNeeded(owe::Scene& scene, const Device& device, RenderingResources& rr) {
+            if (pass == nullptr) return;
+            if (invalidated() && pass->prepared()) {
+                resetPrepared(device, rr);
+            }
+            if (! pass->prepared()) {
+                pass->prepare(scene, device, rr);
+            }
+            if (pass->prepared()) {
+                pipeline_fingerprint = pass->pipelineFingerprint();
+                clearInvalidation();
+            }
+        }
+    };
+
+    struct RenderPassScope {
+        PreparedPassRecord*              single { nullptr };
+        std::vector<PreparedPassRecord*> scoped_passes;
+    };
+
+    std::vector<PreparedPassRecord> pass_records;
+    std::vector<RenderPassScope>    scopes;
+    PrePass*                        frame_prepass { nullptr };
+    FinPass*                        frame_finpass { nullptr };
+    bool                            loaded { false };
+
+    void clear() {
+        scopes.clear();
+        pass_records.clear();
+        frame_prepass = nullptr;
+        frame_finpass = nullptr;
+        loaded        = false;
+    }
+
+    void buildFromGraph(owe::rg::RenderGraph& graph) {
+        auto nodes             = graph.topologicalOrder();
+        auto node_release_texs = graph.getLastReadTextures(nodes);
+
+        clear();
+        pass_records.reserve(nodes.size());
+
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            auto  id   = nodes[i];
+            auto* pass = graph.getPass(id);
+            rstd_assert(pass != nullptr);
+            auto* vpass = static_cast<VulkanPass*>(pass);
+            auto  state = graph.passState(id);
+
+            PreparedPassRecord record {
+                .kind       = PreparedPassKind::Graph,
+                .graph_node = id,
+                .pass_name  = state ? state->name : std::string {},
+                .pass_type  = state ? std::optional(state->type) : std::nullopt,
+                .pass       = vpass,
+            };
+            for (const auto& tex : node_release_texs[i]) {
+                record.release_textures.push_back(tex.desc.key);
+            }
+            record.applyReleaseTextures();
+            pass_records.push_back(std::move(record));
+        }
+    }
+
+    void injectFramePasses(PrePass& prepass, FinPass& finpass) {
+        frame_prepass = &prepass;
+        frame_finpass = &finpass;
+        pass_records.insert(pass_records.begin(),
+                            PreparedPassRecord {
+                                .kind      = PreparedPassKind::Frame,
+                                .pass_name = "frame/pre",
+                                .pass      = &prepass,
+                            });
+        pass_records.push_back(PreparedPassRecord {
+            .kind      = PreparedPassKind::Frame,
+            .pass_name = "frame/fin",
+            .pass      = &finpass,
+        });
+    }
+
+    std::vector<PreparedPassDiagnostic> diagnostics() const {
+        std::vector<PreparedPassDiagnostic> out;
+        out.reserve(pass_records.size());
+        for (const auto& record : pass_records) {
+            out.push_back(PreparedPassDiagnostic {
+                .frame_pass           = record.kind == PreparedPassKind::Frame,
+                .graph_node           = record.graph_node,
+                .pass_name            = record.pass_name,
+                .pass_type            = record.pass_type,
+                .render_item          = record.pass ? record.pass->renderItemId() : std::nullopt,
+                .invalidation_flags   = record.invalidation_flags,
+                .pipeline_fingerprint = record.pipeline_fingerprint,
+                .pipeline_cache_key = record.pass ? record.pass->pipelineCacheKey() : std::nullopt,
+                .pipeline_cache_hit = record.pass != nullptr && record.pass->pipelineCacheHit(),
+                .pipeline_cache_observed_count =
+                    record.pass ? record.pass->pipelineCacheObservedCount() : 0,
+                .render_pass_cache_key =
+                    record.pass ? record.pass->renderPassCacheKey() : std::nullopt,
+                .render_pass_cache_hit =
+                    record.pass != nullptr && record.pass->renderPassCacheHit(),
+                .render_pass_cache_observed_count =
+                    record.pass ? record.pass->renderPassCacheObservedCount() : 0,
+                .framebuffer_cache_key =
+                    record.pass ? record.pass->framebufferCacheKey() : std::nullopt,
+                .framebuffer_cache_hit =
+                    record.pass != nullptr && record.pass->framebufferCacheHit(),
+                .framebuffer_cache_observed_count =
+                    record.pass ? record.pass->framebufferCacheObservedCount() : 0,
+                .release_textures = record.release_textures,
+                .texture_requests = record.pass ? record.pass->textureRequestDiagnostics()
+                                                : std::vector<PassTextureRequestDiagnostic> {},
+                .prepared         = record.pass != nullptr && record.pass->prepared(),
+            });
+        }
+        return out;
+    }
+
+    PreparedPassRecord* findRecord(VulkanPass* pass) {
+        if (pass == nullptr) return nullptr;
+        auto it = std::find_if(pass_records.begin(), pass_records.end(), [pass](auto& record) {
+            return record.pass == pass;
+        });
+        return it == pass_records.end() ? nullptr : &*it;
+    }
+
+    void invalidatePass(VulkanPass* pass, PassInvalidationFlags flags) {
+        if (flags == PassInvalidationNone) return;
+        if (auto* record = findRecord(pass)) {
+            record->invalidate(flags);
+            loaded = false;
+        }
+    }
+
+    void invalidateRenderItems(std::span<const owe::RenderItemId> render_items,
+                               PassInvalidationFlags              flags) {
+        if (flags == PassInvalidationNone || render_items.empty()) return;
+        for (auto& record : pass_records) {
+            if (record.pass == nullptr) continue;
+            auto pass_render_item = record.pass->renderItemId();
+            if (! pass_render_item.has_value()) continue;
+            auto matched = std::any_of(render_items.begin(), render_items.end(), [&](auto id) {
+                return SameRenderItemId(*pass_render_item, id);
+            });
+            if (! matched) continue;
+            record.invalidate(flags);
+            loaded = false;
+        }
+    }
+
+    bool refreshMaterialTextureBindings(const owe::RenderSceneSnapshot&    render_scene,
+                                        std::span<const owe::RenderItemId> render_items) {
+        if (render_items.empty()) return false;
+
+        bool requires_graph_rebuild = false;
+        for (auto& record : pass_records) {
+            if (record.pass == nullptr) continue;
+            auto pass_render_item = record.pass->renderItemId();
+            if (! pass_render_item.has_value()) continue;
+            auto matched = std::any_of(render_items.begin(), render_items.end(), [&](auto id) {
+                return SameRenderItemId(*pass_render_item, id);
+            });
+            if (! matched) continue;
+
+            auto refresh = record.pass->refreshMaterialTextureBindings(render_scene);
+            if (refresh.requires_graph_rebuild) {
+                requires_graph_rebuild = true;
+            }
+            if (refresh.invalidation_flags == PassInvalidationNone) continue;
+            record.invalidate(refresh.invalidation_flags);
+            loaded = false;
+        }
+        return requires_graph_rebuild;
+    }
+
+    void finalizeRenderTargetSizes(owe::Scene& scene, VkExtent2D extent,
+                                   VkSampleCountFlagBits msaa_samples) {
+        for (auto& item : scene.renderTargets) {
+            auto& rt = item.second;
+            if (rt.bind.enable && rt.bind.screen) {
+                rt.width  = static_cast<owe::i32>(rt.bind.scale * extent.width);
+                rt.height = static_cast<owe::i32>(rt.bind.scale * extent.height);
+            }
+        }
+        for (auto& item : scene.renderTargets) {
+            auto& rt = item.second;
+            if (rt.bind.screen || ! rt.bind.enable) continue;
+            auto bind_rt = scene.renderTargets.find(rt.bind.name);
+            if (rt.bind.name.empty() || bind_rt == scene.renderTargets.end()) {
+                rstd_error("unknonw render target bind: {}", rt.bind.name);
+                continue;
+            }
+            rt.width  = static_cast<owe::i32>(rt.bind.scale * bind_rt->second.width);
+            rt.height = static_cast<owe::i32>(rt.bind.scale * bind_rt->second.height);
+        }
+        for (auto& item : scene.renderTargets) {
+            auto& rt = item.second;
+            if (! item.first.empty() && (rt.width * rt.height <= 4)) {
+                rstd_error("wrong size for render target: {}", item.first);
+            } else if (rt.has_mipmap) {
+                rt.mipmap_level = std::max(3u,
+                                           static_cast<unsigned>(std::floor(
+                                               std::log2(std::min(rt.width, rt.height))))) -
+                                  2u;
+            }
+        }
+        if (msaa_samples != VK_SAMPLE_COUNT_1_BIT) {
+            auto it = scene.renderTargets.find(std::string(owe::SpecTex_Default));
+            if (it != scene.renderTargets.end()) {
+                it->second.sample_count = static_cast<unsigned>(msaa_samples);
+            }
+        }
+        scene.shaderValueUpdater->SetScreenSize(static_cast<owe::i32>(extent.width),
+                                                static_cast<owe::i32>(extent.height));
+    }
+
+    void finalizeFramePassRequests(owe::Scene& scene) {
+        if (frame_prepass == nullptr || frame_finpass == nullptr) return;
+
+        const std::string key(owe::SpecTex_Default);
+        auto              it = scene.renderTargets.find(key);
+        if (it == scene.renderTargets.end()) {
+            if (frame_prepass->setResultRequest(std::nullopt)) {
+                invalidatePass(frame_prepass,
+                               ToPassInvalidationFlags(PassInvalidation::Resources) |
+                                   ToPassInvalidationFlags(PassInvalidation::Framebuffer));
+            }
+            if (frame_finpass->setResultRequest(std::nullopt)) {
+                invalidatePass(frame_finpass, ToPassInvalidationFlags(PassInvalidation::Resources));
+            }
+            return;
+        }
+
+        auto&                         rt = it->second;
+        std::optional<TextureRequest> msaa_request;
+        auto                          samples = TextureSampleCount(rt.sample_count);
+        if (samples != VK_SAMPLE_COUNT_1_BIT) {
+            auto twin_name = MsaaTwinName(key, samples);
+            msaa_request   = MakeMsaaTextureRequest(twin_name, rt, samples);
+        }
+
+        if (frame_prepass->setResultRequest(MakeRenderTargetNoMipTextureRequest(key, rt),
+                                            std::move(msaa_request))) {
+            invalidatePass(frame_prepass,
+                           ToPassInvalidationFlags(PassInvalidation::Resources) |
+                               ToPassInvalidationFlags(PassInvalidation::Framebuffer));
+        }
+        if (frame_finpass->setResultRequest(MakeRenderTargetTextureRequest(key, rt))) {
+            invalidatePass(frame_finpass, ToPassInvalidationFlags(PassInvalidation::Resources));
+        }
+    }
+
+    void destroyPasses(const Device& device, RenderingResources& rr) {
+        for (auto& record : pass_records) {
+            record.resetPrepared(device, rr);
+        }
+    }
+
+    void finalizeResourceRequests(owe::Scene& scene) {
+        for (auto& record : pass_records) {
+            if (record.pass == nullptr) continue;
+            auto flags = record.pass->finalizeResourceRequests(scene);
+            if (flags == PassInvalidationNone) continue;
+            record.invalidate(flags);
+            loaded = false;
+        }
+    }
+
+    void prepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
+                 const owe::RenderSceneSnapshot& render_scene) {
+        SnapshotImportedTextureProvider imported_textures(render_scene, scene.imageParser.get());
+        struct ProviderScope {
+            RenderingResources& resources;
+            ProviderScope(RenderingResources& resources, ImportedTextureProvider& provider)
+                : resources(resources) {
+                resources.imported_texture_provider = &provider;
+            }
+            ~ProviderScope() { resources.imported_texture_provider = nullptr; }
+        } provider_scope(rr, imported_textures);
+
+        for (auto& record : pass_records) {
+            record.prepareIfNeeded(scene, device, rr);
+        }
+    }
+
+    void invalidateAllPreparedPasses() {
+        for (auto& record : pass_records) record.invalidateAll();
+        loaded = false;
+    }
+
+    uint64_t commitUploads(const Device& device, RenderingResources& rr,
+                           vvk::CommandBuffer& upload_cmd) {
+        VVK_CHECK_ACT(return 0,
+                             upload_cmd.Begin(VkCommandBufferBeginInfo {
+                                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                 .pNext = nullptr,
+                                 .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+                             }));
+        if (! device.mesh_cache().recordPendingUploads(upload_cmd)) return 0;
+        VVK_CHECK_ACT(return 0, upload_cmd.End());
+        {
+            const uint64_t                signal_value = ++rr.upload_timeline_value;
+            VkTimelineSemaphoreSubmitInfo timeline_info {
+                .sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                .pNext                     = nullptr,
+                .waitSemaphoreValueCount   = 0,
+                .pWaitSemaphoreValues      = nullptr,
+                .signalSemaphoreValueCount = 1,
+                .pSignalSemaphoreValues    = &signal_value,
+            };
+            VkSubmitInfo sub_info {
+                .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .pNext                = &timeline_info,
+                .commandBufferCount   = 1,
+                .pCommandBuffers      = upload_cmd.address(),
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores    = rr.sem_upload.address(),
+            };
+            VVK_CHECK_ACT(return 0, device.graphics_queue().handle.Submit(sub_info, {}));
+            loaded = true;
+            return signal_value;
+        }
+        return 0;
+    }
+
+    void rebuildScopes() {
+        scopes.clear();
+        std::vector<PreparedPassRecord*> pending_scope_passes;
+
+        auto flushScopePasses = [&]() {
+            if (pending_scope_passes.empty()) return;
+            RenderPassScope scope;
+            scope.scoped_passes = std::move(pending_scope_passes);
+            scopes.push_back(std::move(scope));
+            pending_scope_passes.clear();
+        };
+
+        for (auto& record : pass_records) {
+            auto* pass = record.pass;
+            if (pass->supportsRenderScope()) {
+                if (! pending_scope_passes.empty() &&
+                    pass->canJoinRenderScopeAfter(*pending_scope_passes.back()->pass)) {
+                    pending_scope_passes.push_back(&record);
+                } else {
+                    flushScopePasses();
+                    pending_scope_passes.push_back(&record);
+                }
+                continue;
+            }
+
+            flushScopePasses();
+            scopes.push_back(RenderPassScope { .single = &record });
+        }
+
+        flushScopePasses();
+    }
+
+    void execute(const Device& device, RenderingResources& rr) {
+        for (auto& scope : scopes) {
+            if (scope.single != nullptr) {
+                auto* pass = scope.single->pass;
+                if (pass->prepared()) {
+                    pass->execute(device, rr);
+                }
+                continue;
+            }
+
+            auto& scoped_passes = scope.scoped_passes;
+            if (scoped_passes.empty()) continue;
+            if (scoped_passes.size() == 1) {
+                auto* pass = scoped_passes.front()->pass;
+                if (pass->prepared()) {
+                    pass->execute(device, rr);
+                }
+                continue;
+            }
+
+            if (! std::all_of(scoped_passes.begin(), scoped_passes.end(), [](auto* record) {
+                    return record->pass->prepared();
+                })) {
+                continue;
+            }
+
+            for (auto* record : scoped_passes) {
+                record->pass->prepareRenderScopeDraw(rr);
+            }
+            scoped_passes.front()->pass->beginRenderScope(rr);
+            for (auto* record : scoped_passes) {
+                record->pass->recordRenderScopeDraw(rr);
+            }
+            scoped_passes.front()->pass->endRenderScope(rr);
+        }
+    }
+};
+
+void ReleaseCompletedRetiredResources(RenderingResources& rr) {
+    rr.pipeline_retire_queue.ReleaseAllReady();
+    rr.pipeline_cache.PruneExpired();
+    rr.render_pass_cache.PruneExpired();
+    rr.framebuffer_cache.PruneExpired();
+}
 
 struct VulkanRender::Impl {
     Impl()  = default;
@@ -54,17 +537,30 @@ struct VulkanRender::Impl {
     bool CreateRenderingResource(RenderingResources&);
     void DestroyRenderingResource(RenderingResources&);
 
-    void clearLastRenderGraph();
+    void clearLastRenderGraph(RenderGraphResourceRetention);
     void compileRenderGraph(Scene&, rg::RenderGraph&);
-    void rebuildRenderPassScopes();
-    void executeRenderPassScopes(RenderingResources&);
-    void UpdateCameraFillMode(Scene&, owe::FillMode);
+    void compileRenderGraph(Scene&, rg::RenderGraph&, const RenderSceneSnapshot&);
+    void refreshPreparedResources(Scene&);
+    void refreshPreparedResources(Scene&, const RenderSceneSnapshot&);
+    void invalidatePreparedRenderItems(std::span<const owe::RenderItemId>, PassInvalidationFlags);
+    void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&,
+                                    std::span<const owe::RenderItemId>, PassInvalidationFlags);
+    void refreshPreparedMaterial(Scene&, const RenderSceneSnapshot&, owe::SceneMaterialId,
+                                 PassInvalidationFlags);
+    bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&, owe::SceneMaterialId);
+    bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&,
+                                         std::span<const owe::SceneMaterialId>);
+    void refreshPreparedMesh(Scene&, const RenderSceneSnapshot&, owe::SceneMeshId,
+                             PassInvalidationFlags);
+    std::vector<PreparedPassDiagnostic> preparedPassDiagnostics() const;
+    void                                UpdateCameraFillMode(Scene&, owe::FillMode);
 
-    bool initRes();
-    void drawFrameSwapchain();
-    void drawFrameOffscreen();
-    void setRenderTargetSize(Scene&, rg::RenderGraph&);
-    bool onSwapchainReady(unsigned width, unsigned height);
+    bool                       initRes();
+    std::optional<std::size_t> acquireUploadCommandSlot(RenderingResources&);
+    void                       commitPreparedUploads();
+    void                       drawFrameSwapchain();
+    void                       drawFrameOffscreen();
+    bool                       onSwapchainReady(unsigned width, unsigned height);
 
     Instance                m_instance;
     std::unique_ptr<Device> m_device;
@@ -76,14 +572,16 @@ struct VulkanRender::Impl {
     ReDrawCB                 m_redraw_cb;
 
     std::unique_ptr<StagingBuffer> m_dyn_buf { nullptr };
+    ShaderReflectionCache          m_shader_reflection_cache;
 
-    vvk::CommandBuffers m_cmds;
-    vvk::CommandBuffer  m_upload_cmd;
-    vvk::CommandBuffer  m_render_cmd;
+    vvk::CommandBuffers             m_cmds;
+    std::vector<vvk::CommandBuffer> m_upload_cmds;
+    std::vector<uint64_t>           m_upload_cmd_values;
+    std::size_t                     m_next_upload_cmd { 0 };
+    vvk::CommandBuffer              m_render_cmd;
 
     bool m_with_surface { false };
     bool m_inited { false };
-    bool m_pass_loaded { false };
 
     // MSAA sample count for the screen RT only. 1bit = disabled.
     // Resolved against device's framebufferColorSampleCounts in init().
@@ -95,12 +593,7 @@ struct VulkanRender::Impl {
     // for VUID-vkQueueSubmit-pSignalSemaphores-00067
     std::vector<vvk::Semaphore> m_sem_swap_finish_per_image;
 
-    struct RenderPassScope {
-        VulkanPass*                    single { nullptr };
-        std::vector<CustomShaderPass*> shader_passes;
-    };
-    std::vector<VulkanPass*>     m_passes;
-    std::vector<RenderPassScope> m_render_scopes;
+    RenderProgram m_program;
 };
 
 VulkanRender::VulkanRender(): pImpl(std::make_unique<Impl>()) {}
@@ -227,9 +720,52 @@ void VulkanRender::driverUuid(uint8_t out[16]) const {
 bool VulkanRender::init(RenderInitInfo info) { return pImpl->init(std::move(info)); }
 void VulkanRender::destroy() { pImpl->destroy(); }
 void VulkanRender::drawFrame(Scene& scene) { pImpl->drawFrame(scene); };
-void VulkanRender::clearLastRenderGraph() { pImpl->clearLastRenderGraph(); };
+void VulkanRender::clearLastRenderGraph(RenderGraphResourceRetention retention) {
+    pImpl->clearLastRenderGraph(retention);
+};
 void VulkanRender::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     pImpl->compileRenderGraph(scene, rg);
+}
+void VulkanRender::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
+                                      const RenderSceneSnapshot& render_scene) {
+    pImpl->compileRenderGraph(scene, rg, render_scene);
+}
+void VulkanRender::refreshPreparedResources(Scene& scene) {
+    pImpl->refreshPreparedResources(scene);
+}
+void VulkanRender::refreshPreparedResources(Scene& scene, const RenderSceneSnapshot& render_scene) {
+    pImpl->refreshPreparedResources(scene, render_scene);
+}
+void VulkanRender::invalidatePreparedRenderItems(std::span<const owe::RenderItemId> render_items,
+                                                 PassInvalidationFlags              flags) {
+    pImpl->invalidatePreparedRenderItems(render_items, flags);
+}
+void VulkanRender::refreshPreparedRenderItems(Scene& scene, const RenderSceneSnapshot& render_scene,
+                                              std::span<const owe::RenderItemId> render_items,
+                                              PassInvalidationFlags              flags) {
+    pImpl->refreshPreparedRenderItems(scene, render_scene, render_items, flags);
+}
+void VulkanRender::refreshPreparedMaterial(Scene& scene, const RenderSceneSnapshot& render_scene,
+                                           owe::SceneMaterialId  material,
+                                           PassInvalidationFlags flags) {
+    pImpl->refreshPreparedMaterial(scene, render_scene, material, flags);
+}
+bool VulkanRender::refreshPreparedMaterialTextures(Scene&                     scene,
+                                                   const RenderSceneSnapshot& render_scene,
+                                                   owe::SceneMaterialId       material) {
+    return pImpl->refreshPreparedMaterialTextures(scene, render_scene, material);
+}
+bool VulkanRender::refreshPreparedMaterialTextures(
+    Scene& scene, const RenderSceneSnapshot& render_scene,
+    std::span<const owe::SceneMaterialId> materials) {
+    return pImpl->refreshPreparedMaterialTextures(scene, render_scene, materials);
+}
+void VulkanRender::refreshPreparedMesh(Scene& scene, const RenderSceneSnapshot& render_scene,
+                                       owe::SceneMeshId mesh, PassInvalidationFlags flags) {
+    pImpl->refreshPreparedMesh(scene, render_scene, mesh, flags);
+}
+std::vector<PreparedPassDiagnostic> VulkanRender::preparedPassDiagnostics() const {
+    return pImpl->preparedPassDiagnostics();
 }
 void VulkanRender::evictUnusedMeshes() {
     if (auto* d = pImpl->m_device.get()) d->mesh_cache().evictUnused();
@@ -410,8 +946,15 @@ bool VulkanRender::Impl::initRes() {
     {
         auto& pool = m_device->cmd_pool();
         VVK_CHECK_BOOL_RE(pool.Allocate(vk_command_num, VK_COMMAND_BUFFER_LEVEL_PRIMARY, m_cmds));
-        m_upload_cmd = vvk::CommandBuffer(m_cmds[0], m_device->handle().Dispatch());
-        m_render_cmd = vvk::CommandBuffer(m_cmds[1], m_device->handle().Dispatch());
+        m_upload_cmds.clear();
+        m_upload_cmds.reserve(vk_upload_command_num);
+        for (uint32_t i = 0; i < vk_upload_command_num; ++i) {
+            m_upload_cmds.emplace_back(m_cmds[i], m_device->handle().Dispatch());
+        }
+        m_upload_cmd_values.assign(vk_upload_command_num, 0);
+        m_next_upload_cmd = 0;
+        m_render_cmd =
+            vvk::CommandBuffer(m_cmds[vk_upload_command_num], m_device->handle().Dispatch());
     }
     if (! CreateRenderingResource(m_rendering_resources)) return false;
 
@@ -424,10 +967,9 @@ void VulkanRender::Impl::destroy() {
         VVK_CHECK(m_device->handle().WaitIdle());
 
         // res
-        for (auto& p : m_passes) {
-            p->destory(*m_device, m_rendering_resources);
-        }
-        m_render_scopes.clear();
+        m_program.destroyPasses(*m_device, m_rendering_resources);
+        ReleaseCompletedRetiredResources(m_rendering_resources);
+        m_program.clear();
         m_dyn_buf->destroy();
         m_device->mesh_cache().destroy();
 
@@ -447,6 +989,21 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
         rr.fence_frame));
 
     rr.fence_frame.Reset();
+
+    {
+        VkSemaphoreTypeCreateInfo type_info {
+            .sType         = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+            .pNext         = nullptr,
+            .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+            .initialValue  = 0,
+        };
+        VkSemaphoreCreateInfo ci {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = &type_info,
+            .flags = 0,
+        };
+        VVK_CHECK_BOOL_RE(m_device->handle().CreateSemaphore(ci, rr.sem_upload));
+    }
 
     if (m_with_surface) {
         VkSemaphoreCreateInfo ci { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -480,82 +1037,42 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
         VVK_CHECK_BOOL_RE(m_device->handle().CreateSemaphore(ci, rr.sem_export));
     }
 
-    rr.dyn_buf = m_dyn_buf.get();
+    rr.dyn_buf                 = m_dyn_buf.get();
+    rr.shader_reflection_cache = &m_shader_reflection_cache;
     return true;
 }
 
 void VulkanRender::Impl::DestroyRenderingResource(RenderingResources& rr) {}
 
-void VulkanRender::Impl::rebuildRenderPassScopes() {
-    m_render_scopes.clear();
-    std::vector<CustomShaderPass*> pending_shader_passes;
+std::optional<std::size_t> VulkanRender::Impl::acquireUploadCommandSlot(RenderingResources& rr) {
+    if (m_upload_cmds.empty()) return std::nullopt;
+    const std::size_t slot = m_next_upload_cmd;
+    m_next_upload_cmd      = (m_next_upload_cmd + 1) % m_upload_cmds.size();
 
-    auto flushShaderPasses = [&]() {
-        if (pending_shader_passes.empty()) return;
-        RenderPassScope scope;
-        scope.shader_passes = std::move(pending_shader_passes);
-        m_render_scopes.push_back(std::move(scope));
-        pending_shader_passes.clear();
-    };
-
-    for (auto* pass : m_passes) {
-        auto* shader_pass = dynamic_cast<CustomShaderPass*>(pass);
-        if (shader_pass != nullptr && shader_pass->prepared()) {
-            if (! pending_shader_passes.empty() &&
-                shader_pass->canJoinRenderScopeAfter(*pending_shader_passes.back())) {
-                pending_shader_passes.push_back(shader_pass);
-            } else {
-                flushShaderPasses();
-                pending_shader_passes.push_back(shader_pass);
-            }
-            continue;
+    const uint64_t wait_value = m_upload_cmd_values[slot];
+    if (wait_value != 0) {
+        uint64_t counter = 0;
+        VVK_CHECK_ACT(return std::nullopt, rr.sem_upload.GetCounter(&counter));
+        if (counter < wait_value) {
+            VVK_CHECK_ACT(return std::nullopt, rr.sem_upload.Wait(wait_value, vk_wait_time));
         }
-
-        flushShaderPasses();
-        m_render_scopes.push_back(RenderPassScope { .single = pass });
+        m_upload_cmd_values[slot] = 0;
     }
-
-    flushShaderPasses();
+    return slot;
 }
 
-void VulkanRender::Impl::executeRenderPassScopes(RenderingResources& rr) {
-    for (auto& scope : m_render_scopes) {
-        if (scope.single != nullptr) {
-            if (scope.single->prepared()) {
-                scope.single->execute(*m_device, rr);
-            }
-            continue;
-        }
-
-        auto& shader_passes = scope.shader_passes;
-        if (shader_passes.empty()) continue;
-        if (shader_passes.size() == 1) {
-            auto* pass = shader_passes.front();
-            if (pass->prepared()) {
-                pass->execute(*m_device, rr);
-            }
-            continue;
-        }
-
-        if (! std::all_of(shader_passes.begin(), shader_passes.end(), [](auto* pass) {
-                return pass->prepared();
-            })) {
-            continue;
-        }
-
-        for (auto* pass : shader_passes) {
-            pass->prepareRenderScopeDraw(rr);
-        }
-        shader_passes.front()->beginRenderScope(rr);
-        for (auto* pass : shader_passes) {
-            pass->recordRenderScopeDraw(rr);
-        }
-        shader_passes.front()->endRenderScope(rr);
-    }
+void VulkanRender::Impl::commitPreparedUploads() {
+    auto slot = acquireUploadCommandSlot(m_rendering_resources);
+    if (! slot.has_value()) return;
+    auto signal_value =
+        m_program.commitUploads(*m_device, m_rendering_resources, m_upload_cmds[*slot]);
+    if (signal_value == 0) return;
+    m_upload_cmd_values[*slot]                 = signal_value;
+    m_rendering_resources.pending_upload_value = signal_value;
 }
 
 void VulkanRender::Impl::drawFrame(Scene& scene) {
-    if (! (m_inited && m_pass_loaded)) return;
+    if (! (m_inited && m_program.loaded)) return;
 
     if (m_instance.offscreen()) {
         drawFrameOffscreen();
@@ -589,7 +1106,7 @@ void VulkanRender::Impl::drawFrameSwapchain() {
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
     m_dyn_buf->recordUpload(rr.command);
-    executeRenderPassScopes(rr);
+    m_program.execute(*m_device, rr);
     (void)rr.command.End();
 
     auto& sem_present_done = m_sem_swap_finish_per_image[image_index];
@@ -597,13 +1114,34 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     // Swapchain image is only written via FinPass blit/copy (TRANSFER).
     // Waiting at COLOR_ATTACHMENT_OUTPUT lets the layout transition + transfer
     // race the presentation engine's read → sync-validation WRITE_AFTER_READ.
-    VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    VkSubmitInfo         sub_info {
+    const bool                 wait_upload = rr.pending_upload_value != 0;
+    std::array<VkSemaphore, 2> wait_semaphores {
+        *rr.sem_swap_wait_image,
+        *rr.sem_upload,
+    };
+    std::array<VkPipelineStageFlags, 2> wait_stages {
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        vk_upload_wait_stages,
+    };
+    std::array<uint64_t, 2> wait_values {
+        0,
+        rr.pending_upload_value,
+    };
+    std::array<uint64_t, 1>       signal_values { 0 };
+    VkTimelineSemaphoreSubmitInfo timeline_info {
+        .sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+        .pNext                     = nullptr,
+        .waitSemaphoreValueCount   = wait_upload ? 2u : 0u,
+        .pWaitSemaphoreValues      = wait_upload ? wait_values.data() : nullptr,
+        .signalSemaphoreValueCount = wait_upload ? 1u : 0u,
+        .pSignalSemaphoreValues    = wait_upload ? signal_values.data() : nullptr,
+    };
+    VkSubmitInfo sub_info {
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext                = nullptr,
-        .waitSemaphoreCount   = 1,
-        .pWaitSemaphores      = rr.sem_swap_wait_image.address(),
-        .pWaitDstStageMask    = &wait_dst_stage,
+        .pNext                = wait_upload ? &timeline_info : nullptr,
+        .waitSemaphoreCount   = wait_upload ? 2u : 1u,
+        .pWaitSemaphores      = wait_semaphores.data(),
+        .pWaitDstStageMask    = wait_stages.data(),
         .commandBufferCount   = 1,
         .pCommandBuffers      = rr.command.address(),
         .signalSemaphoreCount = 1,
@@ -623,6 +1161,8 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     VVK_CHECK_VOID_RE(m_device->present_queue().handle.Present(present_info));
 
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
+    ReleaseCompletedRetiredResources(rr);
+    rr.pending_upload_value = 0;
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 }
 void VulkanRender::Impl::drawFrameOffscreen() {
@@ -656,13 +1196,35 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     });
     m_dyn_buf->recordUpload(rr.command);
 
-    executeRenderPassScopes(rr);
+    m_program.execute(*m_device, rr);
 
     (void)rr.command.End();
 
+    const bool                 wait_upload = rr.pending_upload_value != 0;
+    std::array<VkSemaphore, 1> wait_semaphores {
+        *rr.sem_upload,
+    };
+    std::array<VkPipelineStageFlags, 1> wait_stages {
+        vk_upload_wait_stages,
+    };
+    std::array<uint64_t, 1> wait_values {
+        rr.pending_upload_value,
+    };
+    std::array<uint64_t, 1>       signal_values { 0 };
+    VkTimelineSemaphoreSubmitInfo timeline_info {
+        .sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+        .pNext                     = nullptr,
+        .waitSemaphoreValueCount   = wait_upload ? 1u : 0u,
+        .pWaitSemaphoreValues      = wait_upload ? wait_values.data() : nullptr,
+        .signalSemaphoreValueCount = wait_upload ? 1u : 0u,
+        .pSignalSemaphoreValues    = wait_upload ? signal_values.data() : nullptr,
+    };
     VkSubmitInfo sub_info {
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext                = nullptr,
+        .pNext                = wait_upload ? &timeline_info : nullptr,
+        .waitSemaphoreCount   = wait_upload ? 1u : 0u,
+        .pWaitSemaphores      = wait_upload ? wait_semaphores.data() : nullptr,
+        .pWaitDstStageMask    = wait_upload ? wait_stages.data() : nullptr,
         .commandBufferCount   = 1,
         .pCommandBuffers      = rr.command.address(),
         .signalSemaphoreCount = 1,
@@ -671,6 +1233,8 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     VVK_CHECK_VOID_RE(m_device->graphics_queue().handle.Submit(sub_info, *rr.fence_frame));
 
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
+    ReleaseCompletedRetiredResources(rr);
+    rr.pending_upload_value = 0;
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 
     // Export the signaled semaphore as a dma_fence sync_file fd and hand
@@ -734,46 +1298,6 @@ bool VulkanRender::Impl::onSwapchainReady(unsigned width, unsigned height) {
     return true;
 }
 
-void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) {
-    auto& ext = m_device->out_extent();
-    for (auto& item : scene.renderTargets) {
-        auto& rt = item.second;
-        if (rt.bind.enable && rt.bind.screen) {
-            rt.width  = (i32)(rt.bind.scale * ext.width);
-            rt.height = (i32)(rt.bind.scale * ext.height);
-        }
-    }
-    for (auto& item : scene.renderTargets) {
-        auto& rt = item.second;
-        if (rt.bind.screen || ! rt.bind.enable) continue;
-        auto bind_rt = scene.renderTargets.find(rt.bind.name);
-        if (rt.bind.name.empty() || bind_rt == scene.renderTargets.end()) {
-            rstd_error("unknonw render target bind: {}", rt.bind.name);
-            continue;
-        }
-        rt.width  = (i32)(rt.bind.scale * bind_rt->second.width);
-        rt.height = (i32)(rt.bind.scale * bind_rt->second.height);
-    }
-    for (auto& item : scene.renderTargets) {
-        auto& rt = item.second;
-        if (! item.first.empty() && (rt.width * rt.height <= 4)) {
-            rstd_error("wrong size for render target: {}", item.first);
-        } else if (rt.has_mipmap) {
-            rt.mipmap_level = std::max(3u,
-                                       static_cast<unsigned>(
-                                           std::floor(std::log2(std::min(rt.width, rt.height))))) -
-                              2u;
-        }
-    }
-    if (m_msaa_samples != VK_SAMPLE_COUNT_1_BIT) {
-        auto it = scene.renderTargets.find(std::string(SpecTex_Default));
-        if (it != scene.renderTargets.end()) {
-            it->second.sample_count = (unsigned)m_msaa_samples;
-        }
-    }
-    scene.shaderValueUpdater->SetScreenSize((i32)ext.width, (i32)ext.height);
-}
-
 void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode fillmode) {
     using namespace owe;
     auto width  = m_device->out_extent().width;
@@ -827,13 +1351,16 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode f
     scene.CaptureCameraPathViewports();
 }
 
-void VulkanRender::Impl::clearLastRenderGraph() {
-    for (auto& p : m_passes) {
-        p->destory(*m_device, m_rendering_resources);
+void VulkanRender::Impl::clearLastRenderGraph(RenderGraphResourceRetention retention) {
+    m_program.destroyPasses(*m_device, m_rendering_resources);
+    ReleaseCompletedRetiredResources(m_rendering_resources);
+    m_program.clear();
+    if (retention == RenderGraphResourceRetention::ReleaseSceneTextures) {
+        m_device->tex_cache().Clear();
+        m_shader_reflection_cache.Clear();
+    } else {
+        m_device->tex_cache().ClearTransientGraphResources();
     }
-    m_render_scopes.clear();
-    m_passes.clear();
-    m_device->tex_cache().Clear();
     m_device->mesh_cache().onRenderGraphCleared();
 
     m_dyn_buf->destroy();
@@ -841,60 +1368,90 @@ void VulkanRender::Impl::clearLastRenderGraph() {
 }
 
 void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
+    auto render_scene = ExtractRenderSceneSnapshot(scene);
+    compileRenderGraph(scene, rg, render_scene);
+}
+
+void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
+                                            const RenderSceneSnapshot& render_scene) {
     if (! m_inited) return;
-    m_pass_loaded = false;
+    m_program.loaded = false;
 
-    auto nodes             = rg.topologicalOrder();
-    auto node_release_texs = rg.getLastReadTexs(nodes);
+    m_program.buildFromGraph(rg);
+    m_program.injectFramePasses(*m_prepass, *m_finpass);
 
-    m_passes.clear();
-    m_render_scopes.clear();
-    m_passes.resize(nodes.size());
+    m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
+    m_program.finalizeFramePassRequests(scene);
+    m_program.finalizeResourceRequests(scene);
+    m_program.prepare(scene, *m_device, m_rendering_resources, render_scene);
+    m_program.rebuildScopes();
 
-    std::transform(nodes.begin(),
-                   nodes.end(),
-                   node_release_texs.begin(),
-                   m_passes.begin(),
-                   [&rg](auto& id, auto& texs) {
-                       auto* pass = rg.getPass(id);
-                       rstd_assert(pass != nullptr);
-                       VulkanPass* vpass = static_cast<VulkanPass*>(pass);
-                       // rstd_info("----release tex");
-                       for (auto& tex : texs) {
-                           vpass->addReleaseTexs(spanone<const std::string_view> { tex->key() });
-                           //    rstd_info("{}", tex->key().data());
-                       }
-                       return vpass;
-                   });
-
-    m_passes.insert(m_passes.begin(), m_prepass.get());
-    m_passes.push_back(m_finpass.get());
-
-    setRenderTargetSize(scene, rg);
-
-    for (auto* p : m_passes) {
-        if (! p->prepared()) {
-            p->prepare(scene, *m_device, m_rendering_resources);
-        }
-    }
-    rebuildRenderPassScopes();
-
-    VVK_CHECK_VOID_RE(m_upload_cmd.Begin(VkCommandBufferBeginInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = nullptr,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    }));
-    m_device->mesh_cache().recordPendingUploads(m_upload_cmd);
-    VVK_CHECK_VOID_RE(m_upload_cmd.End());
-    {
-        VkSubmitInfo sub_info {
-            .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext              = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers    = m_upload_cmd.address(),
-        };
-        VVK_CHECK_VOID_RE(m_device->graphics_queue().handle.Submit(sub_info, {}));
-        VVK_CHECK_VOID_RE(m_device->handle().WaitIdle());
-    }
-    m_pass_loaded = true;
+    commitPreparedUploads();
 };
+
+void VulkanRender::Impl::refreshPreparedResources(Scene& scene) {
+    auto render_scene = ExtractRenderSceneSnapshot(scene);
+    refreshPreparedResources(scene, render_scene);
+}
+
+void VulkanRender::Impl::refreshPreparedResources(Scene&                     scene,
+                                                  const RenderSceneSnapshot& render_scene) {
+    if (! m_inited || m_program.pass_records.empty()) return;
+
+    m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
+    m_program.finalizeFramePassRequests(scene);
+    m_program.finalizeResourceRequests(scene);
+    m_program.prepare(scene, *m_device, m_rendering_resources, render_scene);
+    m_program.rebuildScopes();
+
+    commitPreparedUploads();
+}
+
+void VulkanRender::Impl::invalidatePreparedRenderItems(
+    std::span<const owe::RenderItemId> render_items, PassInvalidationFlags flags) {
+    if (! m_inited) return;
+    m_program.invalidateRenderItems(render_items, flags);
+}
+
+void VulkanRender::Impl::refreshPreparedRenderItems(Scene&                             scene,
+                                                    const RenderSceneSnapshot&         render_scene,
+                                                    std::span<const owe::RenderItemId> render_items,
+                                                    PassInvalidationFlags              flags) {
+    invalidatePreparedRenderItems(render_items, flags);
+    refreshPreparedResources(scene, render_scene);
+}
+
+void VulkanRender::Impl::refreshPreparedMaterial(Scene&                     scene,
+                                                 const RenderSceneSnapshot& render_scene,
+                                                 owe::SceneMaterialId       material,
+                                                 PassInvalidationFlags      flags) {
+    refreshPreparedRenderItems(scene, render_scene, render_scene.renderItemsFor(material), flags);
+}
+
+bool VulkanRender::Impl::refreshPreparedMaterialTextures(Scene&                     scene,
+                                                         const RenderSceneSnapshot& render_scene,
+                                                         owe::SceneMaterialId       material) {
+    std::array materials { material };
+    return refreshPreparedMaterialTextures(scene, render_scene, std::span(materials));
+}
+
+bool VulkanRender::Impl::refreshPreparedMaterialTextures(
+    Scene& scene, const RenderSceneSnapshot& render_scene,
+    std::span<const owe::SceneMaterialId> materials) {
+    if (! m_inited || m_program.pass_records.empty()) return true;
+    auto render_items = RenderItemsForMaterials(render_scene, materials);
+    bool requires_graph_rebuild =
+        m_program.refreshMaterialTextureBindings(render_scene, render_items);
+    if (requires_graph_rebuild) return false;
+    refreshPreparedResources(scene, render_scene);
+    return true;
+}
+
+void VulkanRender::Impl::refreshPreparedMesh(Scene& scene, const RenderSceneSnapshot& render_scene,
+                                             owe::SceneMeshId mesh, PassInvalidationFlags flags) {
+    refreshPreparedRenderItems(scene, render_scene, render_scene.renderItemsFor(mesh), flags);
+}
+
+std::vector<PreparedPassDiagnostic> VulkanRender::Impl::preparedPassDiagnostics() const {
+    return m_program.diagnostics();
+}

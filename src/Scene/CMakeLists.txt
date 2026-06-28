@@ -148,6 +148,8 @@ add_library(owe-render STATIC
   RenderGraph/TexNode.cpp
   RenderGraph/RenderGraph.cpp
   VulkanRender/VulkanRender.cpp
+  VulkanRender/BufferResolver.cpp
+  VulkanRender/ShaderReflectionCache.cpp
   VulkanRender/SceneToRenderGraph.cpp
   VulkanRender/CopyPass.cpp
   VulkanRender/CustomShaderPass.cpp
@@ -163,7 +165,9 @@ target_sources(owe-render
          RenderGraph/RenderGraph.cppm
          VulkanRender/VulkanRender.cppm
          VulkanRender/VulkanPass.cppm
+         VulkanRender/ShaderReflectionCache.cppm
          VulkanRender/Resource.cppm
+         VulkanRender/BufferResolver.cppm
          VulkanRender/PassCommon.cppm
          VulkanRender/CopyPass.cppm
          VulkanRender/CustomShaderPass.cppm

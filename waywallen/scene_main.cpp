@@ -16,6 +16,7 @@
 
 import rstd.cppstd;
 import rstd.log;
+import wescene.rgraph;
 import wescene.scene_wallpaper;
 import wescene.pkg.parse;
 import waywallen.bridge;
@@ -47,6 +48,131 @@ struct Options {
 [[noreturn]] void die(const std::string& msg) {
     rstd_error("waywallen-wescene-renderer: {}", msg);
     std::exit(1);
+}
+
+const char* diagnostic_code_name(owe::SceneUserPropertyDiagnosticCode code) {
+    switch (code) {
+    case owe::SceneUserPropertyDiagnosticCode::SceneVfsUnavailable: return "scene-vfs-unavailable";
+    case owe::SceneUserPropertyDiagnosticCode::UnsupportedShaderComboValue:
+        return "unsupported-shader-combo-value";
+    case owe::SceneUserPropertyDiagnosticCode::MissingShaderVariantDescriptor:
+        return "missing-shader-variant-descriptor";
+    case owe::SceneUserPropertyDiagnosticCode::ShaderComboCompileFailed:
+        return "shader-combo-compile-failed";
+    }
+    return "unknown";
+}
+
+bool env_flag_enabled(const char* name) {
+    const char* value = std::getenv(name);
+    if (! value || ! *value) return false;
+    return std::strcmp(value, "0") != 0 && std::strcmp(value, "false") != 0 &&
+           std::strcmp(value, "FALSE") != 0 && std::strcmp(value, "off") != 0 &&
+           std::strcmp(value, "OFF") != 0;
+}
+
+const char* pass_type_name(owe::rg::PassNode::Type type) {
+    switch (type) {
+    case owe::rg::PassNode::Type::CustomShader: return "custom-shader";
+    case owe::rg::PassNode::Type::Copy: return "copy";
+    case owe::rg::PassNode::Type::Virtual: return "virtual";
+    }
+    return "unknown";
+}
+
+const char* texture_request_kind_name(owe::vulkan::TextureRequestKind kind) {
+    switch (kind) {
+    case owe::vulkan::TextureRequestKind::Imported: return "imported";
+    case owe::vulkan::TextureRequestKind::RenderTarget: return "render-target";
+    case owe::vulkan::TextureRequestKind::RenderTargetMsaa: return "render-target-msaa";
+    case owe::vulkan::TextureRequestKind::DepthAttachment: return "depth-attachment";
+    }
+    return "unknown";
+}
+
+const char* texture_usage_name(owe::vulkan::TexUsage usage) {
+    switch (usage) {
+    case owe::vulkan::TexUsage::COLOR: return "color";
+    case owe::vulkan::TexUsage::DEPTH: return "depth";
+    }
+    return "unknown";
+}
+
+std::string render_item_text(const std::optional<owe::RenderItemId>& id) {
+    if (! id) return "-";
+    return std::to_string(id->index) + "/" + std::to_string(id->generation);
+}
+
+std::string texture_request_text(const owe::vulkan::PassTextureRequestDiagnostic& diagnostic) {
+    if (! diagnostic.request) return "none";
+    const auto& request = *diagnostic.request;
+    std::string text =
+        std::string(texture_request_kind_name(request.kind)) + " name='" + request.name + "'";
+    if (request.imported_texture) {
+        text += " desc=" + std::to_string(request.imported_texture->index) + "/" +
+                std::to_string(request.imported_texture->generation);
+    }
+    if (request.cache_key) {
+        const auto& key = *request.cache_key;
+        text += " key=" + std::to_string(key.width) + "x" + std::to_string(key.height);
+        text += " usage=" + std::string(texture_usage_name(key.usage));
+        text += " mip=" + std::to_string(key.mipmap_level);
+        text += " samples=" + std::to_string(static_cast<uint32_t>(key.samples));
+    }
+    text += request.persist ? " persist=true" : " persist=false";
+    return text;
+}
+
+void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnostic> diagnostics) {
+    rstd_info("waywallen-wescene-renderer: prepared pass diagnostics: {} pass(es)",
+              diagnostics.size());
+    for (const auto& diagnostic : diagnostics) {
+        const std::string graph_node =
+            diagnostic.graph_node ? std::to_string(*diagnostic.graph_node) : "-";
+        const std::string pass_type = diagnostic.pass_type
+                                          ? pass_type_name(*diagnostic.pass_type)
+                                          : (diagnostic.frame_pass ? "frame" : "unknown");
+        const std::string pipeline_cache_key =
+            diagnostic.pipeline_cache_key ? std::to_string(diagnostic.pipeline_cache_key->value)
+                                          : "-";
+        const std::string render_pass_cache_key =
+            diagnostic.render_pass_cache_key
+                ? std::to_string(diagnostic.render_pass_cache_key->value)
+                : "-";
+        const std::string framebuffer_cache_key =
+            diagnostic.framebuffer_cache_key
+                ? std::to_string(diagnostic.framebuffer_cache_key->value)
+                : "-";
+        rstd_info("waywallen-wescene-renderer: pass '{}' type={} graph={} render_item={} "
+                  "dirty={} fingerprint={} pipeline_key={} pipeline_seen={} pipeline_count={} "
+                  "render_pass_key={} render_pass_seen={} render_pass_count={} "
+                  "framebuffer_key={} framebuffer_seen={} framebuffer_count={} "
+                  "prepared={} releases={}",
+                  diagnostic.pass_name,
+                  pass_type,
+                  graph_node,
+                  render_item_text(diagnostic.render_item),
+                  diagnostic.invalidation_flags,
+                  diagnostic.pipeline_fingerprint,
+                  pipeline_cache_key,
+                  diagnostic.pipeline_cache_hit,
+                  diagnostic.pipeline_cache_observed_count,
+                  render_pass_cache_key,
+                  diagnostic.render_pass_cache_hit,
+                  diagnostic.render_pass_cache_observed_count,
+                  framebuffer_cache_key,
+                  diagnostic.framebuffer_cache_hit,
+                  diagnostic.framebuffer_cache_observed_count,
+                  diagnostic.prepared,
+                  diagnostic.release_textures.size());
+        for (const auto& texture : diagnostic.texture_requests) {
+            rstd_info("waywallen-wescene-renderer:   texture role={} slot={} binding='{}' {}",
+                      texture.role,
+                      texture.slot,
+                      texture.name,
+                      texture_request_text(texture));
+        }
+    }
 }
 
 Options parse_args(int argc, char** argv) {
@@ -550,6 +676,22 @@ int main(int argc, char** argv) {
             rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
         }
     });
+    wp.setOnUserPropertyDiagnostics([](std::vector<owe::SceneUserPropertyDiagnostic> diagnostics) {
+        for (const auto& diagnostic : diagnostics) {
+            rstd_warn("waywallen-wescene-renderer: user property '{}' diagnostic {} "
+                      "material='{}' combo='{}': {}",
+                      diagnostic.key,
+                      diagnostic_code_name(diagnostic.code),
+                      diagnostic.material,
+                      diagnostic.combo,
+                      diagnostic.message);
+        }
+    });
+    if (env_flag_enabled("OWE_DUMP_PREPARED_PASSES")) {
+        wp.setOnFirstFrame([&wp] {
+            wp.requestPreparedPassDiagnostics(log_prepared_pass_diagnostics);
+        });
+    }
 
     owe::SceneWallpaperConfig wp_config;
     wp_config.source_pkg_path = opts.initial_scene;

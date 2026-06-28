@@ -19,7 +19,8 @@ class FinPass : public VulkanPass {
 public:
     struct Desc {
         // in
-        const std::string_view result { SpecTex_Default }; // scene RT key
+        std::string_view              result { SpecTex_Default }; // scene RT key
+        std::optional<TextureRequest> result_request;
 
         // resolved in prepare()
         ImageParameters vk_result;
@@ -38,10 +39,12 @@ public:
     FinPass(const Desc&);
     virtual ~FinPass();
 
-    void setPresent(ImageParameters);
-    void setPresentLayout(VkImageLayout);
-    void setPresentQueueIndex(uint32_t);
-    void setPresentFormat(VkFormat);
+    void                                      setPresent(ImageParameters);
+    void                                      setPresentLayout(VkImageLayout);
+    void                                      setPresentQueueIndex(uint32_t);
+    void                                      setPresentFormat(VkFormat);
+    bool                                      setResultRequest(std::optional<TextureRequest>);
+    std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const override;
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
     void execute(const Device&, RenderingResources&) override;

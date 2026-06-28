@@ -2,9 +2,9 @@
 #
 # Two layers:
 #   * gtest binaries (scene_parse_tests, scene_schema_tests, tex_schema_tests,
-#     version_tests, deep_version_tests) — assert structural invariants over
+#     version_tests, deep_version_tests) -- assert structural invariants over
 #     the corpus. Indexed once via DumpWorkshop, no on-disk fixtures.
-#   * wescene-test — a single CLI tool that walks pkgs and runs scene parse,
+#   * wescene-test -- a single CLI tool that walks pkgs and runs scene parse,
 #     with optional --validate-tex / --validate-shader / --validate-mdl
 #     validators and --name / --pkgv / --limit filters. Replaces the older
 #     wpparse / wpshadercompile / wpdump / wpscan / wptexparse / wpscript*
@@ -85,8 +85,24 @@ add_executable(scene_runtime_tests scene_runtime_tests.cpp)
 target_link_libraries(scene_runtime_tests PRIVATE wescene_test_lib owe-script GTest::gtest_main)
 set_target_properties(scene_runtime_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
+add_executable(scene_resource_index_tests scene_resource_index_tests.cpp)
+target_link_libraries(scene_resource_index_tests PRIVATE owe-base GTest::gtest_main)
+set_target_properties(scene_resource_index_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+add_executable(buffer_resolver_tests buffer_resolver_tests.cpp)
+target_link_libraries(buffer_resolver_tests PRIVATE owe-render GTest::gtest_main)
+set_target_properties(buffer_resolver_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+add_executable(render_resource_request_tests render_resource_request_tests.cpp)
+target_link_libraries(render_resource_request_tests PRIVATE owe-render GTest::gtest_main)
+set_target_properties(render_resource_request_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+add_executable(render_graph_debug_tests render_graph_debug_tests.cpp)
+target_link_libraries(render_graph_debug_tests PRIVATE owe-render GTest::gtest_main)
+set_target_properties(render_graph_debug_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 # Unit coverage for the line-aware shader-source Cursor / LineWalker /
-# preprocessor classifier in :shader_lex. Stand-alone — only links owe-parse
+# preprocessor classifier in :shader_lex. Stand-alone -- only links owe-parse
 # for the partition module surface.
 add_executable(shader_lex_tests shader_lex_tests.cpp)
 target_link_libraries(shader_lex_tests PRIVATE owe-parse GTest::gtest_main)
@@ -150,6 +166,26 @@ gtest_discover_tests(
 )
 gtest_discover_tests(
     scene_runtime_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    scene_resource_index_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    buffer_resolver_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    render_resource_request_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    render_graph_debug_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )
