@@ -4,6 +4,7 @@ export module wescene.scene:lighting;
 import eigen;
 import wescene.core;
 import rstd.cppstd;
+import :visibility;
 
 // SceneNode lives in the primary interface unit of wescene.scene. SceneLight
 // only needs a raw observation pointer here; ownership is carried by the
@@ -54,20 +55,24 @@ public:
 
     void setNode(SceneNode* node) { m_node = node; }
 
-    // WE field-binding: `visible: {user: "key", value: <bool>}` ties this light's
-    // runtime visibility to engine.userProperties[<key>]. Empty key = unbound.
-    const std::string& visibleUserKey() const { return m_visible_user_key; }
-    void               setVisibleUserKey(std::string k) { m_visible_user_key = std::move(k); }
-    bool               runtimeVisible() const { return m_runtime_visible; }
-    void               setRuntimeVisible(bool v) { m_runtime_visible = v; }
+    const std::string& visibleUserKey() const { return m_visible_user_binding.key; }
+    void               setVisibleUserKey(std::string k) {
+        m_visible_user_binding = SceneUserVisibilityBinding { .key = std::move(k) };
+    }
+    const SceneUserVisibilityBinding& visibleUserBinding() const { return m_visible_user_binding; }
+    void                              setVisibleUserBinding(SceneUserVisibilityBinding binding) {
+        m_visible_user_binding = std::move(binding);
+    }
+    bool runtimeVisible() const { return m_runtime_visible; }
+    void setRuntimeVisible(bool v) { m_runtime_visible = v; }
 
 private:
     Desc            m_desc;
     Eigen::Vector3f m_premultiplied_color { Eigen::Vector3f::Zero() };
     SceneNode*      m_node { nullptr };
 
-    std::string m_visible_user_key {};
-    bool        m_runtime_visible { true };
+    SceneUserVisibilityBinding m_visible_user_binding {};
+    bool                       m_runtime_visible { true };
 };
 
 } // namespace owe

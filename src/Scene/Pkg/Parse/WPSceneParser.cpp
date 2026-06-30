@@ -157,6 +157,15 @@ void MarkHiddenLinkSource(ParseContext& context, std::int32_t id) {
         context.scene->MarkLayerVisibilityElidable(WallpaperLayerId { .value = id });
 }
 
+SceneUserVisibilityBinding
+ToSceneUserVisibilityBinding(const wpscene::VisibleUserBinding& binding) {
+    SceneUserVisibilityBinding out;
+    out.key           = binding.name;
+    out.condition     = binding.condition;
+    out.has_condition = binding.has_condition;
+    return out;
+}
+
 std::array<float, 2> Texture0UvScale(const SceneMaterial& material, bool nopadding = false) {
     if (nopadding) return { 1.0f, 1.0f };
     auto it = material.customShader.constValues.find(WE_GLTEX_RESOLUTION_NAMES[0]);
@@ -1443,7 +1452,8 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
         path_translate_bias + origin, Vector3f::Ones(), path_rotation_bias + angles, cam.name);
     node->ID() = cam.id;
     if (! cam.visible) node->SetVisible(false);
-    if (! cam.visible_user_key.empty()) node->SetVisibleUserKey(cam.visible_user_key);
+    if (! cam.visible_user.empty())
+        node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(cam.visible_user));
 
     if (cam.visible) camera->AttatchNode(node.as_ptr());
     if (use_perspective) {
@@ -1470,6 +1480,8 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
     path->fov_base            = cam.fov;
     path->perspective         = use_perspective;
     path->enabled             = cam.visible;
+    if (! cam.visible_user.empty())
+        path->visible_user_binding = ToSceneUserVisibilityBinding(cam.visible_user);
     AssignCurve(path->origin_curve, cam.field_bindings, "origin");
     AssignCurve(path->rotation_curve, cam.field_bindings, "angles");
     AssignCurve(path->zoom_curve, cam.field_bindings, "zoom");
@@ -1576,7 +1588,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     int32_t count_eff = 0;
     for (const auto& wpeffobj : wpimgobj.effects) {
-        if (wpeffobj.visible) count_eff++;
+        if (wpeffobj.visible || ! wpeffobj.visible_user.empty()) count_eff++;
     }
     bool hasEffect     = count_eff > 0;
     bool isPassthrough = wpimgobj.config.passthrough;
@@ -1627,8 +1639,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     spImgNode->SetPerspective(wpimgobj.perspective);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID() = wpimgobj.id;
-    if (! wpimgobj.visible_user_key.empty())
-        spImgNode->SetVisibleUserKey(wpimgobj.visible_user_key);
+    if (! wpimgobj.visible_user.empty())
+        spImgNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wpimgobj.visible_user));
     std::vector<SceneMaterial*> image_color_materials;
     auto                        track_image_color_material = [&](SceneMaterial* mat) {
         if (! wpimgobj.color_user_key.empty() && mat != nullptr)
@@ -2006,11 +2018,16 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         std::string last_effect_shader;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
-            if (! wpeffobj.visible) {
+            if (! wpeffobj.visible && wpeffobj.visible_user.empty()) {
                 i_eff--;
                 continue;
             }
             std::shared_ptr<SceneImageEffect> imgEffect = std::make_shared<SceneImageEffect>();
+            imgEffect->runtime_visible                  = wpeffobj.visible;
+            if (! wpeffobj.visible_user.empty()) {
+                imgEffect->visible_user_binding =
+                    ToSceneUserVisibilityBinding(wpeffobj.visible_user);
+            }
 
             // this will be replace when resolve, use here to get rt info
             const std::string inRT { effect_ppong_a };
@@ -2362,8 +2379,14 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                                                                 Vector3f(wppartobj.angles.data()),
                                                                 wppartobj.name));
         auto& spNode = *spNodeOpt;
-        if (! wppartobj.visible_user_key.empty())
-            spNode->SetVisibleUserKey(wppartobj.visible_user_key);
+        spNode->ID() = wppartobj.id;
+        if (! wppartobj.visible) {
+            spNode->SetVisible(false);
+            context.scene->MarkLayerVisibilityElidable(
+                WallpaperLayerId { .value = static_cast<i32>(wppartobj.id) });
+        }
+        if (! wppartobj.visible_user.empty())
+            spNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wppartobj.visible_user));
     }
     auto& spNode = *spNodeOpt;
 
@@ -2589,7 +2612,8 @@ void ParseSoundObj(ParseContext& context, wpscene::SoundObject& obj,
                                                   obj.name);
     node->ID() = obj.id;
     if (! obj.visible) node->SetVisible(false);
-    if (! obj.visible_user_key.empty()) node->SetVisibleUserKey(obj.visible_user_key);
+    if (! obj.visible_user.empty())
+        node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(obj.visible_user));
 
     auto control = WPSoundParser::Parse(obj, *context.vfs, sm, context.scene.get());
     node->SetSoundControl(control);
@@ -2635,8 +2659,8 @@ void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
     auto& light = *(context.scene->lights.back());
     light.setNode(node.as_ptr());
     light.setRuntimeVisible(light_obj.visible);
-    if (! light_obj.visible_user_key.empty()) {
-        light.setVisibleUserKey(light_obj.visible_user_key);
+    if (! light_obj.visible_user.empty()) {
+        light.setVisibleUserBinding(ToSceneUserVisibilityBinding(light_obj.visible_user));
     }
 
     context.node_id_map[light_obj.id] = { light_obj.parent, rstd::Some(node.clone()) };
@@ -2656,8 +2680,14 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
                                                   Vector3f(model_obj.angles.data()),
                                                   model_obj.name);
     node->ID() = model_obj.id;
+    if (! model_obj.visible) {
+        node->SetVisible(false);
+        context.scene->MarkLayerVisibilityElidable(
+            WallpaperLayerId { .value = static_cast<i32>(model_obj.id) });
+    }
     MarkHiddenLinkSource(context, model_obj.id);
-    if (! model_obj.visible_user_key.empty()) node->SetVisibleUserKey(model_obj.visible_user_key);
+    if (! model_obj.visible_user.empty())
+        node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(model_obj.visible_user));
 
     auto mesh = std::make_shared<SceneMesh>();
 
@@ -2762,7 +2792,11 @@ TextRenderImageParser& EnsureTextImageParser(Scene& scene) {
 }
 
 void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
-    if (! obj.visible) return;
+    if (! obj.visible && obj.visible_user.empty()) return;
+    if (! obj.visible) {
+        context.scene->MarkLayerVisibilityElidable(
+            WallpaperLayerId { .value = static_cast<i32>(obj.id) });
+    }
     MarkHiddenLinkSource(context, obj.id);
 
     // --- determine initial text + whether a script binding will rewrite it
@@ -3223,7 +3257,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // composite quad in world space, not the layer-space glyph node.
     WireFieldScripts(
         context, compose_node, obj.field_bindings, apply_text_origin, apply_text_scale);
-    if (! obj.visible_user_key.empty()) compose_node->SetVisibleUserKey(obj.visible_user_key);
+    if (! obj.visible) compose_node->SetVisible(false);
+    if (! obj.visible_user.empty())
+        compose_node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(obj.visible_user));
 
     // --- text-content actuator. Captures the layouter + a closure that
     // re-rasterises new codepoints, lays them out, and rebuilds the
@@ -3307,49 +3343,18 @@ UserPropertyValue(const std::unordered_map<std::string, nlohmann::json>* user_pr
     if (user_props == nullptr || key.empty()) return nullptr;
     auto it = user_props->find(std::string(key));
     if (it == user_props->end()) return nullptr;
-    if (it->second.is_object() && it->second.contains("value")) return &it->second.at("value");
-    return &it->second;
-}
-
-std::optional<std::string> JsonScalarString(const nlohmann::json& v) {
-    if (v.is_string()) return v.get<std::string>();
-    if (v.is_boolean()) return v.get<bool>() ? "true" : "false";
-    if (v.is_number_integer()) return std::to_string(v.get<std::int64_t>());
-    if (v.is_number_unsigned()) return std::to_string(v.get<std::uint64_t>());
-    if (v.is_number_float()) {
-        std::ostringstream os;
-        os << v.get<double>();
-        return os.str();
-    }
-    return std::nullopt;
-}
-
-bool JsonScalarEquals(const nlohmann::json& a, const nlohmann::json& b) {
-    if (a == b) return true;
-    auto as = JsonScalarString(a);
-    auto bs = JsonScalarString(b);
-    if (! as || ! bs) return false;
-    if (*as == *bs) return true;
-    if (a.is_boolean() && b.is_string()) {
-        const auto s = b.get<std::string>();
-        return (a.get<bool>() && s == "1") || (! a.get<bool>() && s == "0");
-    }
-    if (a.is_string() && b.is_boolean()) {
-        const auto s = a.get<std::string>();
-        return (b.get<bool>() && s == "1") || (! b.get<bool>() && s == "0");
-    }
-    return false;
+    return &SceneUserPropertyPayload(it->second);
 }
 
 bool ResolveVisibleUserBinding(bool& visible, const wpscene::VisibleUserBinding& binding,
                                const std::unordered_map<std::string, nlohmann::json>* user_props) {
     if (binding.empty()) return false;
     const nlohmann::json* value = UserPropertyValue(user_props, binding.name);
-    if (binding.has_condition) {
-        if (value != nullptr) visible = JsonScalarEquals(*value, binding.condition);
-        return true;
+    if (value != nullptr) {
+        if (auto resolved =
+                ResolveSceneUserVisibilityBinding(ToSceneUserVisibilityBinding(binding), *value))
+            visible = *resolved;
     }
-    if (value != nullptr && value->is_boolean()) visible = value->get<bool>();
     return true;
 }
 
@@ -3427,15 +3432,23 @@ void AddSceneObject(std::vector<SceneObjectVar>& objs, const nlohmann::json& jso
         return;
     }
     ResolveVisibleUserBinding(scene_obj.visible, scene_obj.visible_user, user_props);
+    if constexpr (std::is_same_v<T, wpscene::ImageObject>) {
+        for (auto& effect : scene_obj.effects)
+            ResolveVisibleUserBinding(effect.visible, effect.visible_user, user_props);
+    }
     if (force_invisible) scene_obj.visible = false;
     const bool preserve_hidden_link_source =
         ! scene_obj.visible && linked_source_ids != nullptr &&
         linked_source_ids->count(static_cast<std::int32_t>(scene_obj.id)) != 0;
+    const bool preserve_hidden_user_bound = ! scene_obj.visible && ! scene_obj.visible_user.empty();
     // Image objects keep going even when visible=false: another layer's
     // material may reference them via `_rt_imageLayerComposite_<id>`. The
     // render-graph builder later decides whether to actually emit passes.
     if constexpr (! std::is_same_v<T, wpscene::ImageObject>) {
-        if (! scene_obj.visible && ! preserve_hidden_link_source) return;
+        constexpr bool preserve_user_visibility = ! std::is_same_v<T, wpscene::SoundObject>;
+        if (! scene_obj.visible && ! preserve_hidden_link_source &&
+            ! (preserve_user_visibility && preserve_hidden_user_bound))
+            return;
         if (preserve_hidden_link_source) scene_obj.visible = true;
     }
     objs.push_back(scene_obj);
@@ -3961,7 +3974,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             }
             wpscene::VisibleUserBinding visible_user;
             wpscene::ReadVisibleUserBinding(o, visible_user);
-            if (! visible_user.empty()) node->SetVisibleUserKey(visible_user.name);
+            if (! visible_user.empty())
+                node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(visible_user));
             wpscene::FieldBindings fb;
             wpscene::AbsorbAllFieldBindings(o, fb);
             WireFieldScripts(context, node, fb);

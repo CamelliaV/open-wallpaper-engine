@@ -631,43 +631,12 @@ void ApplyUserPropertyToCameraShake(Scene& scene, const std::string& key,
 
 void ApplyUserPropertyToCameraPath(Scene& scene, const std::string& key,
                                    const nlohmann::json& prop) {
-    auto it = scene.camera_path_user_index.find(key);
-    if (it == scene.camera_path_user_index.end()) return;
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < 1) return;
-
-    bool enabled = coerced.value[0] >= 0.5f;
-    for (auto& path : it->second) {
-        if (path) path->SetEnabled(enabled);
-    }
+    scene.ApplyUserCameraPathVisibilityBindings(key, prop);
 }
 
-// Walk the scene tree once and flip visibility for every node whose
-// `VisibleUserKey()` matches `key`. Cheap: tree shape is frozen post-parse.
 bool ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
                                        const nlohmann::json& prop) {
-    bool have_bool = false;
-    bool v         = false;
-    if (prop.is_object() && prop.contains("value") && prop.at("value").is_boolean()) {
-        v         = prop.at("value").get<bool>();
-        have_bool = true;
-    } else if (prop.is_boolean()) {
-        v         = prop.get<bool>();
-        have_bool = true;
-    }
-    if (! have_bool) return false;
-
-    bool                            requires_graph_rebuild = false;
-    std::function<void(SceneNode*)> walk                   = [&](SceneNode* n) {
-        if (! n) return;
-        if (n->VisibleUserKey() == key) {
-            requires_graph_rebuild |= scene.SetNodeVisible(*n, v);
-        }
-        for (auto& c : n->GetChildren()) walk(c.as_ptr());
-    };
-    walk(scene.sceneGraph.as_ptr());
-    return requires_graph_rebuild;
+    return scene.ApplyUserNodeVisibilityBindings(key, prop);
 }
 
 void MergeProjectUserProperties(const std::filesystem::path&                     project_dir,
@@ -1064,7 +1033,9 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
     ApplyUserPropertyToCameraShake(*m_scene, key, m.property);
     ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
     bool requires_graph_rebuild = ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
-    requires_graph_rebuild      = requires_graph_rebuild || shader_combo_requires_graph;
+    requires_graph_rebuild =
+        m_scene->ApplyUserImageEffectVisibilityBindings(key, m.property) || requires_graph_rebuild;
+    requires_graph_rebuild = requires_graph_rebuild || shader_combo_requires_graph;
 
     if (! texture_materials.empty() && renderInited() && m_rg && ! requires_graph_rebuild) {
         m_render_scene = ExtractRenderSceneSnapshot(*m_scene);

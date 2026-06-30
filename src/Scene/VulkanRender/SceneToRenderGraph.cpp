@@ -251,10 +251,11 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
         effs->ResolveEffect(scene.default_effect_mesh, "effect");
 
         for (usize i = 0; i < effs->EffectCount(); i++) {
-            auto& eff     = effs->GetEffect(i);
-            auto  cmdItor = eff->commands.begin();
-            auto  cmdEnd  = eff->commands.end();
-            int   nodePos = 0;
+            auto& eff = effs->GetEffect(i);
+            if (! eff || ! eff->runtime_visible) continue;
+            auto cmdItor = eff->commands.begin();
+            auto cmdEnd  = eff->commands.end();
+            int  nodePos = 0;
             for (auto& n : eff->nodes) {
                 if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos) {
                     AddCopyPass(
@@ -276,7 +277,7 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
     SceneImageEffectLayer* imgeff = nullptr;
     if (! node->Camera().empty()) {
         auto& cam = scene.cameras.at(node->Camera());
-        if (cam->HasImgEffect()) {
+        if (cam->HasImgEffect() && cam->GetImgEffect()->HasRuntimeVisibleEffect()) {
             imgeff = cam->GetImgEffect().get();
             output = imgeff->FirstTarget();
         }

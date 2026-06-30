@@ -6,6 +6,7 @@ module;
 
 export module wescene.scene;
 import eigen;
+import nlohmann.json;
 import rstd;
 import wescene.core;
 import rstd.cppstd;
@@ -14,6 +15,7 @@ import wescene.spec_texs;
 
 // SceneLight + SceneLightType live in this partition. Re-exported here so
 // existing `import wescene.scene` consumers see them transparently.
+export import :visibility;
 export import :lighting;
 
 export namespace owe
@@ -1000,6 +1002,7 @@ public:
     SceneAnimationCurve                 rotation_curve;
     SceneAnimationCurve                 zoom_curve;
     SceneAnimationCurve                 fov_curve;
+    SceneUserVisibilityBinding          visible_user_binding;
 
     void CaptureViewport();
     void SetEnabled(bool value) { enabled = value; }
@@ -1142,11 +1145,14 @@ public:
     }
     void SetAlphaSource(SceneNode* node) { m_alpha_source = node; }
 
-    // Recorded when the layer's `visible` field is authored as
-    // `{user:"<key>", value:bool}`. The render handler walks the tree on
-    // RenderSetUserProperty and flips SetVisible(value) for matching nodes.
-    const std::string& VisibleUserKey() const { return m_visible_user_key; }
-    void               SetVisibleUserKey(std::string k) { m_visible_user_key = std::move(k); }
+    const std::string& VisibleUserKey() const { return m_visible_user_binding.key; }
+    void               SetVisibleUserKey(std::string k) {
+        m_visible_user_binding = SceneUserVisibilityBinding { .key = std::move(k) };
+    }
+    const SceneUserVisibilityBinding& VisibleUserBinding() const { return m_visible_user_binding; }
+    void                              SetVisibleUserBinding(SceneUserVisibilityBinding binding) {
+        m_visible_user_binding = std::move(binding);
+    }
 
     bool  IsBrightnessOverridden() const { return m_brightness_overridden; }
     float Brightness() const { return m_brightness; }
@@ -1273,7 +1279,7 @@ private:
     Eigen::Vector2f m_size { 0.0f, 0.0f };
 
     bool                               m_visible { true };
-    std::string                        m_visible_user_key {};
+    SceneUserVisibilityBinding         m_visible_user_binding {};
     float                              m_user_alpha { 1.0f };
     bool                               m_alpha_overridden { false };
     SceneNode*                         m_alpha_source { nullptr };
@@ -1323,6 +1329,8 @@ struct SceneImageEffect {
     };
     std::vector<Command>            commands;
     std::list<SceneImageEffectNode> nodes;
+    SceneUserVisibilityBinding      visible_user_binding;
+    bool                            runtime_visible { true };
 };
 
 class SceneImageEffectLayer {
@@ -1334,8 +1342,19 @@ public:
         m_effects.push_back(node);
         m_resolved = false;
     }
+    bool SetEffectRuntimeVisible(SceneImageEffect& effect, bool visible) {
+        if (effect.runtime_visible == visible) return false;
+        effect.runtime_visible = visible;
+        m_resolved             = false;
+        return true;
+    }
     std::size_t EffectCount() const { return m_effects.size(); }
     auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
+    bool        HasRuntimeVisibleEffect() const {
+        return std::any_of(m_effects.begin(), m_effects.end(), [](const auto& effect) {
+            return effect && effect->runtime_visible;
+        });
+    }
     const auto& FirstTarget() const { return m_pingpong_a; }
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
     void        SetFullscreen(bool value) {
@@ -2004,6 +2023,7 @@ public:
     std::span<const SceneDrawItemRecord> DrawItems() const {
         return { m_draw_items.data(), m_draw_items.size() };
     }
+    std::span<SceneNode* const> Nodes() const { return { m_nodes.data(), m_nodes.size() }; }
 
     std::optional<SceneNodeId>         nodeId(const SceneNode& node) const;
     std::optional<SceneMeshId>         meshId(const SceneMesh& mesh) const;
@@ -2272,6 +2292,13 @@ public:
     Map<std::string, std::vector<std::string>> camera_shake_user_var_index;
 
     Map<std::string, std::vector<std::shared_ptr<SceneCameraPath>>> camera_path_user_index;
+
+    bool ApplyUserNodeVisibilityBindings(std::string_view key, const nlohmann::json& property);
+    bool ApplyUserImageEffectVisibilityBindings(std::string_view      key,
+                                                const nlohmann::json& property);
+    bool ApplyUserLightVisibilityBindings(std::string_view key, const nlohmann::json& property);
+    bool ApplyUserCameraPathVisibilityBindings(std::string_view      key,
+                                               const nlohmann::json& property);
 
     // Scene-tree root. After parse handoff to the render thread, the tree
     // shape under `sceneGraph` is immutable until Scene destruction (see the

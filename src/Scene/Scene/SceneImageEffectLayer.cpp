@@ -29,6 +29,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
 
     SceneImageEffectNode* last_output { nullptr };
     for (auto& eff : m_effects) {
+        if (! eff || ! eff->runtime_visible) continue;
         for (auto& cmd : eff->commands) {
             if (sstart_with(cmd.src, OWE_EFFECT_PPONG_PREFIX_A)) cmd.src = ppong_a;
 

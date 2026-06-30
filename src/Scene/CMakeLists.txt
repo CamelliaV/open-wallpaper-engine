@@ -48,6 +48,7 @@ target_sources(owe-base
          Timer/Timer.cppm
          Timer/ThreadTimer.cppm
          Timer/FrameTimer.cppm
+         Scene/SceneVisibility.cppm
          Lighting/Lighting.cppm
          Scene/Scene.cppm)
 target_link_libraries(owe-base

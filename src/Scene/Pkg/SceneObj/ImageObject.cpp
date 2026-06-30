@@ -84,6 +84,8 @@ bool ImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
     std::string filePath;
     owe::GetJsonValue(json, "file", filePath);
     owe::GetJsonValue(json, "visible", visible, false);
+    ReadVisibleUserBinding(json, visible_user);
+    visible_user_key = visible_user.name;
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "username", username, false);
     if (this->IsEffectBlacklisted(filePath)) {

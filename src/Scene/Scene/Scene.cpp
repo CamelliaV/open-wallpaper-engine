@@ -5,6 +5,7 @@ module;
 
 module wescene.scene;
 import eigen;
+import nlohmann.json;
 import rstd;
 import rstd.cppstd;
 
@@ -832,14 +833,88 @@ void Scene::MarkLayerVisibilityElidable(WallpaperLayerId id) {
 }
 
 bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
+    const i32  id           = node.ID();
+    const bool was_elidable = id >= 0 && elidable_layer_ids.count(id) != 0;
     node.SetVisible(visible);
-    if (! visible) return false;
+    if (id < 0) return false;
 
-    const bool was_elidable = elidable_layer_ids.count(node.ID()) != 0;
-    if (visibility_elidable_layer_ids.erase(node.ID()) == 0) return false;
+    if (! visible) {
+        MarkLayerVisibilityElidable(WallpaperLayerId { .value = id });
+        const bool is_elidable = elidable_layer_ids.count(id) != 0;
+        return was_elidable != is_elidable;
+    }
+
+    if (visibility_elidable_layer_ids.erase(id) == 0) return false;
     RebuildElidableLayerIds();
-    const bool is_elidable = elidable_layer_ids.count(node.ID()) != 0;
+    const bool is_elidable = elidable_layer_ids.count(id) != 0;
     return was_elidable != is_elidable;
+}
+
+bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const nlohmann::json& property) {
+    bool requires_graph_rebuild = false;
+    if (m_resource_index.Empty()) RebuildResourceIndex();
+    for (auto* node : m_resource_index.Nodes()) {
+        if (node == nullptr) continue;
+        if (auto visible =
+                ResolveSceneUserVisibilityBinding(node->VisibleUserBinding(), key, property)) {
+            requires_graph_rebuild |= SetNodeVisible(*node, *visible);
+        }
+    }
+    return requires_graph_rebuild;
+}
+
+bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view      key,
+                                                   const nlohmann::json& property) {
+    if (m_resource_index.Empty()) RebuildResourceIndex();
+
+    bool                                  requires_graph_rebuild = false;
+    std::unordered_set<SceneImageEffect*> visited;
+    for (auto* node : m_resource_index.Nodes()) {
+        if (node == nullptr || node->Camera().empty()) continue;
+        auto camera_it = cameras.find(node->Camera());
+        if (camera_it == cameras.end() || ! camera_it->second->HasImgEffect()) continue;
+        auto& effect_layer = camera_it->second->GetImgEffect();
+        for (usize i = 0; i < effect_layer->EffectCount(); ++i) {
+            auto& effect = effect_layer->GetEffect(i);
+            if (! effect || ! visited.insert(effect.get()).second) continue;
+            auto visible =
+                ResolveSceneUserVisibilityBinding(effect->visible_user_binding, key, property);
+            if (! visible) continue;
+            if (effect_layer->SetEffectRuntimeVisible(*effect, *visible)) {
+                requires_graph_rebuild = true;
+            }
+        }
+    }
+    return requires_graph_rebuild;
+}
+
+bool Scene::ApplyUserLightVisibilityBindings(std::string_view key, const nlohmann::json& property) {
+    bool changed = false;
+    for (auto& light : lights) {
+        if (! light) continue;
+        auto visible =
+            ResolveSceneUserVisibilityBinding(light->visibleUserBinding(), key, property);
+        if (! visible) continue;
+        changed |= light->runtimeVisible() != *visible;
+        light->setRuntimeVisible(*visible);
+    }
+    return changed;
+}
+
+bool Scene::ApplyUserCameraPathVisibilityBindings(std::string_view      key,
+                                                  const nlohmann::json& property) {
+    auto it = camera_path_user_index.find(std::string(key));
+    if (it == camera_path_user_index.end()) return false;
+
+    bool changed = false;
+    for (auto& path : it->second) {
+        if (! path) continue;
+        auto enabled = ResolveSceneUserVisibilityBinding(path->visible_user_binding, key, property);
+        if (! enabled) continue;
+        changed |= path->enabled != *enabled;
+        path->SetEnabled(*enabled);
+    }
+    return changed;
 }
 
 std::vector<SceneMeshDirtyEvent> Scene::ConsumePreparedMeshDirtyEvents() {

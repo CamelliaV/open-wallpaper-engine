@@ -25,7 +25,9 @@ void CollectNodesById(const rstd::sync::Arc<owe::SceneNode>& root, std::int32_t 
     }
 }
 
-std::shared_ptr<owe::Scene> LoadWorkshopScene(std::string_view id) {
+std::shared_ptr<owe::Scene>
+LoadWorkshopScene(std::string_view                                id,
+                  std::unordered_map<std::string, nlohmann::json> overrides = {}) {
     const std::filesystem::path workshop_dir = std::filesystem::path(WAYWALLEN_WORKSHOP_DIR) / id;
     const std::filesystem::path pkg_path     = workshop_dir / "scene.pkg";
     if (! std::filesystem::exists(pkg_path)) return nullptr;
@@ -55,11 +57,18 @@ std::shared_ptr<owe::Scene> LoadWorkshopScene(std::string_view id) {
             }
         }
     }
+    for (auto& [key, value] : overrides) user_props[key] = std::move(value);
 
     wavsen::audio::SoundManager sm;
     owe::WPSceneParser          parser;
     parser.SetUserProperties(&user_props);
     return parser.Parse(std::string(id), *doc, vfs, sm);
+}
+
+nlohmann::json UserPropertyValue(nlohmann::json value) {
+    nlohmann::json out;
+    out["value"] = std::move(value);
+    return out;
 }
 
 } // namespace
@@ -87,6 +96,103 @@ TEST(SceneRuntimeScripts, EarthWorkshopMenuAlphaDefaultsHidden) {
         }
         EXPECT_TRUE(hidden_output) << "menu node " << id << " should hide";
     }
+}
+
+TEST(SceneVisibilityBindings, ComboConditionUpdatesWorkshop3462491575) {
+    auto scene = LoadWorkshopScene("3462491575");
+    if (! scene) GTEST_SKIP() << "workshop 3462491575 is not available";
+
+    std::vector<owe::SceneNode*> background_nodes;
+    std::vector<owe::SceneNode*> solid_nodes;
+    CollectNodesById(scene->sceneGraph, 10859, background_nodes);
+    CollectNodesById(scene->sceneGraph, 1143, solid_nodes);
+    ASSERT_FALSE(background_nodes.empty());
+    ASSERT_FALSE(solid_nodes.empty());
+    auto* background = background_nodes.front();
+    auto* solid      = solid_nodes.front();
+
+    EXPECT_TRUE(background->Visible());
+    EXPECT_EQ(scene->visibility_elidable_layer_ids.count(10859), 0u);
+    EXPECT_EQ(scene->visibility_elidable_layer_ids.count(1143), 1u);
+
+    EXPECT_TRUE(scene->ApplyUserNodeVisibilityBindings("beijing", UserPropertyValue("1")));
+    EXPECT_FALSE(background->Visible());
+    EXPECT_TRUE(solid->Visible());
+    EXPECT_EQ(scene->visibility_elidable_layer_ids.count(10859), 1u);
+    EXPECT_EQ(scene->visibility_elidable_layer_ids.count(1143), 0u);
+}
+
+TEST(SceneVisibilityBindings, ParticleBoolUpdatesWorkshop3480296606) {
+    auto scene = LoadWorkshopScene("3480296606");
+    if (! scene) GTEST_SKIP() << "workshop 3480296606 is not available";
+
+    std::vector<owe::SceneNode*> fog_nodes;
+    CollectNodesById(scene->sceneGraph, 225, fog_nodes);
+    ASSERT_FALSE(fog_nodes.empty());
+    auto* fog = fog_nodes.front();
+
+    EXPECT_TRUE(fog->Visible());
+    EXPECT_EQ(scene->visibility_elidable_layer_ids.count(225), 0u);
+
+    EXPECT_TRUE(scene->ApplyUserNodeVisibilityBindings("newproperty11", UserPropertyValue(false)));
+    EXPECT_FALSE(fog->Visible());
+    EXPECT_EQ(scene->visibility_elidable_layer_ids.count(225), 1u);
+
+    EXPECT_TRUE(scene->ApplyUserNodeVisibilityBindings("newproperty11", UserPropertyValue(true)));
+    EXPECT_TRUE(fog->Visible());
+    EXPECT_EQ(scene->visibility_elidable_layer_ids.count(225), 0u);
+}
+
+TEST(SceneVisibilityBindings, ImageEffectBoolUpdatesWorkshop3480296606) {
+    auto scene = LoadWorkshopScene("3480296606");
+    if (! scene) GTEST_SKIP() << "workshop 3480296606 is not available";
+
+    std::vector<owe::SceneNode*> green_nodes;
+    CollectNodesById(scene->sceneGraph, 900, green_nodes);
+    ASSERT_FALSE(green_nodes.empty());
+    auto* green = green_nodes.front();
+    ASSERT_FALSE(green->Camera().empty());
+    ASSERT_TRUE(scene->cameras.contains(green->Camera()));
+    auto& camera = scene->cameras.at(green->Camera());
+    ASSERT_TRUE(camera->HasImgEffect());
+    auto& effect_layer = camera->GetImgEffect();
+
+    owe::SceneImageEffect* audio_effect = nullptr;
+    for (std::size_t i = 0; i < effect_layer->EffectCount(); ++i) {
+        auto& effect = effect_layer->GetEffect(i);
+        if (effect && effect->visible_user_binding.key == "newproperty1") {
+            audio_effect = effect.get();
+            break;
+        }
+    }
+    ASSERT_NE(audio_effect, nullptr);
+    EXPECT_TRUE(audio_effect->runtime_visible);
+    EXPECT_TRUE(effect_layer->HasRuntimeVisibleEffect());
+
+    EXPECT_TRUE(
+        scene->ApplyUserImageEffectVisibilityBindings("newproperty1", UserPropertyValue(false)));
+    EXPECT_FALSE(audio_effect->runtime_visible);
+    EXPECT_FALSE(effect_layer->HasRuntimeVisibleEffect());
+
+    EXPECT_TRUE(
+        scene->ApplyUserImageEffectVisibilityBindings("newproperty1", UserPropertyValue(true)));
+    EXPECT_TRUE(audio_effect->runtime_visible);
+    EXPECT_TRUE(effect_layer->HasRuntimeVisibleEffect());
+
+    auto hidden_scene =
+        LoadWorkshopScene("3480296606", { { "newproperty1", UserPropertyValue(false) } });
+    ASSERT_NE(hidden_scene, nullptr);
+    green_nodes.clear();
+    CollectNodesById(hidden_scene->sceneGraph, 900, green_nodes);
+    ASSERT_FALSE(green_nodes.empty());
+    auto* hidden_green = green_nodes.front();
+    ASSERT_TRUE(hidden_scene->cameras.contains(hidden_green->Camera()));
+    auto& hidden_effect_layer = hidden_scene->cameras.at(hidden_green->Camera())->GetImgEffect();
+    ASSERT_TRUE(hidden_effect_layer);
+    EXPECT_FALSE(hidden_effect_layer->HasRuntimeVisibleEffect());
+    EXPECT_TRUE(hidden_scene->ApplyUserImageEffectVisibilityBindings("newproperty1",
+                                                                     UserPropertyValue(true)));
+    EXPECT_TRUE(hidden_effect_layer->HasRuntimeVisibleEffect());
 }
 
 TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlpha) {
