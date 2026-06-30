@@ -35,6 +35,8 @@ struct SceneUniformInfo {
     bool has_LCR { false };
     bool has_USERALPHA { false };
     bool has_COLOR4 { false };
+    bool has_COLOR { false };
+    bool has_ALPHA { false };
     bool has_BRIGHTNESS { false };
 
     // WE audio-bar shaders. Each pair is a (Left, Right) float[N] array

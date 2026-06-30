@@ -277,9 +277,12 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
     SceneImageEffectLayer* imgeff = nullptr;
     if (! node->Camera().empty()) {
         auto& cam = scene.cameras.at(node->Camera());
-        if (cam->HasImgEffect() && cam->GetImgEffect()->HasRuntimeVisibleEffect()) {
-            imgeff = cam->GetImgEffect().get();
-            output = imgeff->FirstTarget();
+        if (cam->HasImgEffect()) {
+            auto* effect = cam->GetImgEffect().get();
+            if (effect->EffectCount() == 0 || effect->HasRuntimeVisibleEffect()) {
+                imgeff = effect;
+                output = imgeff->FirstTarget();
+            }
         }
     }
 
@@ -404,8 +407,7 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
             });
     }
 
-    // load effect
-    if (imgeff != nullptr) loadEffect(imgeff);
+    if (imgeff != nullptr && imgeff->HasRuntimeVisibleEffect()) loadEffect(imgeff);
 }
 
 // Bottom-up collect: identify SceneNode subtrees whose every node is in

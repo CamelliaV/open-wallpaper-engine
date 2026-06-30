@@ -509,9 +509,11 @@ void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
 
         float                alpha = binding.node ? binding.node->BaseAlpha() : 1.0f;
         std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
+        std::array<float, 3> color3 { color.x(), color.y(), color.z() };
         for (auto* material : binding.materials) {
             if (! material) continue;
             scene.SetMaterialShaderValue(*material, "g_Color4", color4);
+            scene.SetMaterialShaderValue(*material, "g_Color", color3);
         }
     }
 }

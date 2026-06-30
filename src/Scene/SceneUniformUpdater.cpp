@@ -142,6 +142,8 @@ void SceneUniformUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& 
     info.has_LCR              = existsOp(G_LCR);
     info.has_USERALPHA        = existsOp("g_UserAlpha");
     info.has_COLOR4           = existsOp("g_Color4");
+    info.has_COLOR            = existsOp("g_Color");
+    info.has_ALPHA            = existsOp("g_Alpha");
     info.has_BRIGHTNESS       = existsOp("g_Brightness");
     info.has_audio_16_l       = existsOp(G_AUDIO_SPEC_16_L);
     info.has_audio_16_r       = existsOp(G_AUDIO_SPEC_16_R);
@@ -420,10 +422,16 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     auto push_color4 = [&updateOp](const Eigen::Vector3f& color, float alpha) {
         updateOp("g_Color4", std::array<float, 4> { color.x(), color.y(), color.z(), alpha });
     };
+    auto push_color = [&updateOp](const Eigen::Vector3f& color) {
+        updateOp("g_Color", std::array<float, 3> { color.x(), color.y(), color.z() });
+    };
     if (pNode->IsAlphaOverridden()) {
         const float eff_alpha = pNode->EffectiveAlpha();
         if (info.has_USERALPHA) {
             updateOp("g_UserAlpha", eff_alpha);
+        }
+        if (info.has_ALPHA) {
+            updateOp("g_Alpha", eff_alpha);
         }
         if (info.has_COLOR4) {
             if (! info.has_USERALPHA) {
@@ -433,9 +441,15 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
                 push_color4(pNode->Color(), pNode->BaseAlpha());
             }
         }
+        if (info.has_COLOR && pNode->IsColorOverridden()) {
+            push_color(pNode->Color());
+        }
     } else if (pNode->IsColorOverridden()) {
         if (info.has_COLOR4) {
             push_color4(pNode->Color(), pNode->BaseAlpha());
+        }
+        if (info.has_COLOR) {
+            push_color(pNode->Color());
         }
     }
     if (pNode->IsBrightnessOverridden() && info.has_BRIGHTNESS) {

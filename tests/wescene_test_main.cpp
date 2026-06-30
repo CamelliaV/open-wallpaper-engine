@@ -1280,35 +1280,39 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
         if (mesh && mesh->Material()) {
             std::string tag =
                 "[node id=" + std::to_string(n->ID()) + " depth=" + std::to_string(depth) + "]";
-            DumpPass(out, tag, *n, owe::SpecTex_Default);
-
-            // If the node's camera carries an image-effect chain, ResolveEffect
-            // and dump the resolved nodes. ResolveEffect mutates the layer; we
-            // don't reuse the scene for rendering so this is fine.
+            std::string                                 output { owe::SpecTex_Default };
+            std::shared_ptr<owe::SceneImageEffectLayer> eff_layer;
             if (! n->Camera().empty() && scene.cameras.count(n->Camera())) {
                 auto& cam = scene.cameras.at(n->Camera());
                 if (cam->HasImgEffect()) {
-                    auto eff_layer = cam->GetImgEffect();
-                    eff_layer->ResolveEffect(scene.default_effect_mesh, "effect");
-                    std::fprintf(
-                        out, "    image-effect chain (%zu effects):\n", eff_layer->EffectCount());
-                    for (std::size_t ei = 0; ei < eff_layer->EffectCount(); ++ei) {
-                        auto&       eff = eff_layer->GetEffect(ei);
-                        std::size_t ni  = 0;
-                        for (auto cmd_it = eff->commands.begin(); cmd_it != eff->commands.end();
-                             ++cmd_it) {
-                            std::fprintf(out,
-                                         "      [eff %zu cmd] copy %s -> %s (afterpos=%d)\n",
-                                         ei,
-                                         cmd_it->src.c_str(),
-                                         cmd_it->dst.c_str(),
-                                         cmd_it->afterpos);
-                        }
-                        for (auto& enode : eff->nodes) {
-                            std::string tag2 = "[eff " + std::to_string(ei) + " node " +
-                                               std::to_string(ni++) + "]";
-                            DumpPass(out, "    " + tag2, *enode.sceneNode.as_ptr(), enode.output);
-                        }
+                    eff_layer = cam->GetImgEffect();
+                    if (eff_layer->EffectCount() == 0 || eff_layer->HasRuntimeVisibleEffect()) {
+                        output = eff_layer->FirstTarget();
+                    }
+                }
+            }
+            DumpPass(out, tag, *n, output);
+
+            if (eff_layer && eff_layer->HasRuntimeVisibleEffect()) {
+                eff_layer->ResolveEffect(scene.default_effect_mesh, "effect");
+                std::fprintf(
+                    out, "    image-effect chain (%zu effects):\n", eff_layer->EffectCount());
+                for (std::size_t ei = 0; ei < eff_layer->EffectCount(); ++ei) {
+                    auto&       eff = eff_layer->GetEffect(ei);
+                    std::size_t ni  = 0;
+                    for (auto cmd_it = eff->commands.begin(); cmd_it != eff->commands.end();
+                         ++cmd_it) {
+                        std::fprintf(out,
+                                     "      [eff %zu cmd] copy %s -> %s (afterpos=%d)\n",
+                                     ei,
+                                     cmd_it->src.c_str(),
+                                     cmd_it->dst.c_str(),
+                                     cmd_it->afterpos);
+                    }
+                    for (auto& enode : eff->nodes) {
+                        std::string tag2 =
+                            "[eff " + std::to_string(ei) + " node " + std::to_string(ni++) + "]";
+                        DumpPass(out, "    " + tag2, *enode.sceneNode.as_ptr(), enode.output);
                     }
                 }
             }
