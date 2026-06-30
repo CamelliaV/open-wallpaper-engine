@@ -7,6 +7,7 @@ import wescene.json;
 import :animation_layer;
 export import :field_binding;
 import :visibility_binding;
+import :image_object;
 import :scene_document;
 
 // Object kinds beyond image/light/particle/sound: text overlays, .mdl
@@ -63,23 +64,24 @@ struct TextObject {
     std::string        visible_user_key;
 
     // Visual/material overlap with image kind.
-    std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
-    float                alpha { 1.0f };
-    float                brightness { 1.0f };
-    int32_t              colorBlendMode { 0 };
-    std::array<float, 2> size { 0.0f, 0.0f };
-    bool                 perspective { false };
-    bool                 copybackground { false };
-    bool                 solid { false };
-    bool                 opaquebackground { false };
-    bool                 ledsource { false };
-    std::array<float, 3> backgroundcolor { 0.0f, 0.0f, 0.0f };
-    float                backgroundbrightness { 1.0f };
+    std::array<float, 3>     color { 1.0f, 1.0f, 1.0f };
+    float                    alpha { 1.0f };
+    float                    brightness { 1.0f };
+    int32_t                  colorBlendMode { 0 };
+    std::array<float, 2>     size { 0.0f, 0.0f };
+    bool                     perspective { false };
+    bool                     copybackground { false };
+    bool                     solid { false };
+    bool                     opaquebackground { false };
+    bool                     ledsource { false };
+    std::array<float, 3>     backgroundcolor { 0.0f, 0.0f, 0.0f };
+    float                    backgroundbrightness { 1.0f };
+    std::vector<ImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
-    bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
+    bool FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "id", id, false);
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "origin", origin, false);
@@ -125,6 +127,13 @@ struct TextObject {
         owe::GetJsonValue(json, "ledsource", ledsource, false);
         owe::GetJsonValue(json, "backgroundcolor", backgroundcolor, false);
         owe::GetJsonValue(json, "backgroundbrightness", backgroundbrightness, false);
+        if (json.contains("effects")) {
+            for (const auto& jE : json.at("effects")) {
+                ImageEffect wpeff;
+                wpeff.FromJson(jE, vfs);
+                effects.push_back(std::move(wpeff));
+            }
+        }
         AbsorbAllFieldBindings(json, field_bindings);
         return true;
     }
