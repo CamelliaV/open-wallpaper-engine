@@ -17,8 +17,7 @@ bool LightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*
     owe::GetJsonValue(json, "light", light);
     owe::GetJsonValue(json, "radius", radius);
     owe::GetJsonValue(json, "intensity", intensity);
-    owe::GetJsonValue(json, "visible", visible, false);
-    ReadVisibleUserBinding(json, visible_user);
+    ReadVisibleProperty(json, visible, visible_user);
     visible_user_key = visible_user.name;
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "id", id, false);

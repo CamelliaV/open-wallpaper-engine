@@ -230,8 +230,7 @@ bool ParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 
 bool ParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     owe::GetJsonValue(json, "particle", particle);
-    owe::GetJsonValue(json, "visible", visible, false);
-    ReadVisibleUserBinding(json, visible_user);
+    ReadVisibleProperty(json, visible, visible_user);
     visible_user_key = visible_user.name;
 
     owe::GetJsonValue(json, "name", name, false);

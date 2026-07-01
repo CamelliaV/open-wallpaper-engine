@@ -66,8 +66,7 @@ struct SoundObject {
         owe::GetJsonValue(json, "scale", scale, false);
         owe::GetJsonValue(json, "mintime", mintime, false);
         owe::GetJsonValue(json, "maxtime", maxtime, false);
-        owe::GetJsonValue(json, "visible", visible, false);
-        ReadVisibleUserBinding(json, visible_user);
+        ReadVisibleProperty(json, visible, visible_user);
         visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "id", id, false);

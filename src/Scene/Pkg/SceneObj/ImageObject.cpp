@@ -83,8 +83,7 @@ bool ImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 bool ImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     std::string filePath;
     owe::GetJsonValue(json, "file", filePath);
-    owe::GetJsonValue(json, "visible", visible, false);
-    ReadVisibleUserBinding(json, visible_user);
+    ReadVisibleProperty(json, visible, visible_user);
     visible_user_key = visible_user.name;
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "username", username, false);
@@ -178,8 +177,7 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 
 bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
     owe::GetJsonValue(json, "image", image);
-    owe::GetJsonValue(json, "visible", visible, false);
-    ReadVisibleUserBinding(json, visible_user);
+    ReadVisibleProperty(json, visible, visible_user);
     visible_user_key = visible_user.name;
     owe::GetJsonValue(json, "alignment", alignment, false);
     nlohmann::json jImage;

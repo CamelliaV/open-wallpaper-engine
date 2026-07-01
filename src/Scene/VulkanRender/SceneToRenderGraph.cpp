@@ -434,6 +434,15 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32
     return false;
 }
 
+static bool ShouldSkipNoRuntimeEffect(SceneNode* node, Scene& scene) {
+    if (node == nullptr || node->Camera().empty()) return false;
+    auto camera_it = scene.cameras.find(node->Camera());
+    if (camera_it == scene.cameras.end() || ! camera_it->second->HasImgEffect()) return false;
+    const auto& effect_layer = camera_it->second->GetImgEffect();
+    return effect_layer && effect_layer->SkipWhenNoRuntimeEffect() &&
+           effect_layer->EffectCount() > 0 && ! effect_layer->HasRuntimeVisibleEffect();
+}
+
 std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
                                                          const RenderSceneSnapshot& render_scene) {
     std::unique_ptr<rg::RenderGraph> rgraph = std::make_unique<rg::RenderGraph>();
@@ -458,8 +467,10 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                 
         [&extra, &scene, &linked_ids](SceneNode* node) {
             const i32  nid      = node->ID();
             const bool elidable = scene.elidable_layer_ids.count(nid) != 0;
+            const bool linked   = linked_ids.count(nid) != 0;
+            if (! linked && ShouldSkipNoRuntimeEffect(node, scene)) return;
             if (elidable) {
-                if (linked_ids.count(nid) == 0) return;
+                if (! linked) return;
                 auto* link_source =
                     extra.render_scene->linkSource(WallpaperLayerId { .value = nid });
                 if (link_source == nullptr) {

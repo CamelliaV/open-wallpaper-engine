@@ -88,8 +88,7 @@ struct TextObject {
         owe::GetJsonValue(json, "scale", scale, false);
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
-        owe::GetJsonValue(json, "visible", visible, false);
-        ReadVisibleUserBinding(json, visible_user);
+        ReadVisibleProperty(json, visible, visible_user);
         visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
@@ -177,8 +176,7 @@ struct ModelObject {
         owe::GetJsonValue(json, "scale", scale, false);
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
-        owe::GetJsonValue(json, "visible", visible, false);
-        ReadVisibleUserBinding(json, visible_user);
+        ReadVisibleProperty(json, visible, visible_user);
         visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
@@ -237,8 +235,7 @@ struct CameraObject {
         owe::GetJsonValue(json, "scale", scale, false);
         owe::GetJsonValue(json, "angles", angles, false);
         owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
-        owe::GetJsonValue(json, "visible", visible, false);
-        ReadVisibleUserBinding(json, visible_user);
+        ReadVisibleProperty(json, visible, visible_user);
         visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);

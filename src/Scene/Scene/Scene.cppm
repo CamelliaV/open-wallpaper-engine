@@ -1377,6 +1377,8 @@ public:
         m_resolved     = false;
     }
     const auto& FinalTarget() const { return m_final_target; }
+    void        SetSkipWhenNoRuntimeEffect(bool value) { m_skip_when_no_runtime_effect = value; }
+    bool        SkipWhenNoRuntimeEffect() const { return m_skip_when_no_runtime_effect; }
 
     // Idempotent: second and later calls are no-ops until any of the
     // mutating setters above (or AddEffect) flips m_resolved back to false.
@@ -1394,6 +1396,7 @@ private:
     bool                       m_final_depth_write { false };
     CullMode                   m_final_cull_mode { CullMode::None };
     std::string                m_final_target { SpecTex_Default };
+    bool                       m_skip_when_no_runtime_effect { false };
     bool                       m_resolved { false };
 
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;

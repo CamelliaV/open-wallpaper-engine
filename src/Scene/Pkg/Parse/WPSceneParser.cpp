@@ -1993,6 +1993,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         {
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
+            imgEffectLayer->SetSkipWhenNoRuntimeEffect(wpimgobj.fullscreen || isPassthrough);
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
             scene.cameras.at(nodeAddr)->AttatchImgEffect(imgEffectLayer);
         }
@@ -3555,9 +3556,8 @@ ResolveObjectVisibility(const nlohmann::json&                                  j
                         const std::unordered_map<std::string, nlohmann::json>* user_props) {
     ObjectVisibilityInfo info;
     owe::GetJsonValue(json_obj, "parent", info.parent, false);
-    owe::GetJsonValue(json_obj, "visible", info.visible, false);
     wpscene::VisibleUserBinding binding;
-    wpscene::ReadVisibleUserBinding(json_obj, binding);
+    wpscene::ReadVisibleProperty(json_obj, info.visible, binding);
     info.user_bound = ! binding.empty();
     ResolveVisibleUserBinding(info.visible, binding, user_props);
     return info;
@@ -3627,13 +3627,16 @@ void AddSceneObject(std::vector<SceneObjectVar>& objs, const nlohmann::json& jso
         ! scene_obj.visible && linked_source_ids != nullptr &&
         linked_source_ids->count(static_cast<std::int32_t>(scene_obj.id)) != 0;
     const bool preserve_hidden_user_bound = ! scene_obj.visible && ! scene_obj.visible_user.empty();
+    const bool preserve_hidden_visible_script =
+        ! scene_obj.visible && scene_obj.field_bindings.scripts.count("visible") != 0;
     // Image objects keep going even when visible=false: another layer's
     // material may reference them via `_rt_imageLayerComposite_<id>`. The
     // render-graph builder later decides whether to actually emit passes.
     if constexpr (! std::is_same_v<T, wpscene::ImageObject>) {
         constexpr bool preserve_user_visibility = ! std::is_same_v<T, wpscene::SoundObject>;
         if (! scene_obj.visible && ! preserve_hidden_link_source &&
-            ! (preserve_user_visibility && preserve_hidden_user_bound))
+            ! (preserve_user_visibility &&
+               (preserve_hidden_user_bound || preserve_hidden_visible_script)))
             return;
         if (preserve_hidden_link_source) scene_obj.visible = true;
     }

@@ -47,6 +47,29 @@ inline void ReadVisibleUserBinding(const nlohmann::json& json, VisibleUserBindin
     }
 }
 
+inline void ReadVisibleProperty(const nlohmann::json& json, bool& visible,
+                                VisibleUserBinding& out) {
+    out = {};
+    if (! json.contains("visible")) return;
+
+    const auto& value = json.at("visible");
+    if (value.is_boolean()) {
+        visible = value.get<bool>();
+        return;
+    }
+    if (! value.is_object()) return;
+
+    if (value.contains("value")) {
+        const auto& initial = value.at("value");
+        if (initial.is_boolean()) {
+            visible = initial.get<bool>();
+        } else if (initial.is_number_integer()) {
+            visible = initial.get<int>() != 0;
+        }
+    }
+    ReadVisibleUserBinding(json, out);
+}
+
 inline void ReadUserValueBinding(const nlohmann::json& json, std::string_view field,
                                  UserValueBinding& out) {
     out     = {};
