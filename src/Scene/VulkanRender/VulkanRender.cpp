@@ -51,14 +51,10 @@ RenderItemsForMaterials(const owe::RenderSceneSnapshot&       render_scene,
     return render_items;
 }
 
-constexpr std::array base_inst_exts {
-    Extension { false, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME },
-};
+constexpr std::array<Extension, 0> base_inst_exts {};
 constexpr std::array base_device_exts {
     Extension { false, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME },
     Extension { true, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME },
-    Extension { true, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME },
-    Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME },
     Extension { true, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME },

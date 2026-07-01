@@ -267,9 +267,6 @@ uint32_t parse_u32(const char* s, uint32_t def) {
 bool resolve_render_node_to_uuid(const std::string&                 path,
                                  std::array<uint8_t, VK_UUID_SIZE>& out_uuid,
                                  std::string&                       err_msg) {
-    static const char* k_inst_exts[] = {
-        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-    };
     VkApplicationInfo app {};
     app.sType            = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app.pApplicationName = "wescene-render-node-probe";
@@ -277,8 +274,8 @@ bool resolve_render_node_to_uuid(const std::string&                 path,
     VkInstanceCreateInfo ici {};
     ici.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     ici.pApplicationInfo        = &app;
-    ici.enabledExtensionCount   = sizeof(k_inst_exts) / sizeof(k_inst_exts[0]);
-    ici.ppEnabledExtensionNames = k_inst_exts;
+    ici.enabledExtensionCount   = 0;
+    ici.ppEnabledExtensionNames = nullptr;
     VkInstance inst             = VK_NULL_HANDLE;
     if (vkCreateInstance(&ici, nullptr, &inst) != VK_SUCCESS) {
         err_msg = "vkCreateInstance failed";

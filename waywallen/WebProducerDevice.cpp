@@ -173,16 +173,18 @@ bool WebProducerDevice::PickPhysicalDevice() {
 
     for (auto pd : devs) {
         uint32_t qcount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, nullptr);
-        std::vector<VkQueueFamilyProperties> qfp(qcount);
-        vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, qfp.data());
+        vkGetPhysicalDeviceQueueFamilyProperties2(pd, &qcount, nullptr);
+        std::vector<VkQueueFamilyProperties2> qfp(
+            qcount,
+            VkQueueFamilyProperties2 { .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2 });
+        vkGetPhysicalDeviceQueueFamilyProperties2(pd, &qcount, qfp.data());
 
         uint32_t picked_qf = UINT32_MAX;
         for (uint32_t i = 0; i < qcount; ++i) {
             // GRAPHICS_BIT implies TRANSFER_BIT; the bridge wants both
             // for vkCmdBlitImage and the producer needs no presentation
             // support because there's no surface.
-            if (qfp[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            if (qfp[i].queueFamilyProperties.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
                 picked_qf = i;
                 break;
             }
@@ -233,7 +235,10 @@ bool WebProducerDevice::PickPhysicalDevice() {
 
         phys_         = pd;
         queue_family_ = picked_qf;
-        vkGetPhysicalDeviceMemoryProperties(phys_, &mem_props_);
+        VkPhysicalDeviceMemoryProperties2 mem_props2 {};
+        mem_props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+        vkGetPhysicalDeviceMemoryProperties2(phys_, &mem_props2);
+        mem_props_ = mem_props2.memoryProperties;
 
         VkPhysicalDeviceIDProperties id_props {};
         id_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
