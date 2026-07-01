@@ -42,200 +42,6 @@ std::optional<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::st
     return MakeRenderTargetTextureRequest(name, it->second);
 }
 
-template<typename T>
-void HashVkScalar(std::size_t& seed, T value) {
-    utils::hash_combine(seed, static_cast<uint64_t>(value));
-}
-
-std::size_t HashDescriptorBindings(std::span<const VkDescriptorSetLayoutBinding> bindings) {
-    auto sorted = std::vector<VkDescriptorSetLayoutBinding>(bindings.begin(), bindings.end());
-    std::sort(sorted.begin(), sorted.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.binding < rhs.binding;
-    });
-
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, sorted.size());
-    for (const auto& binding : sorted) {
-        HashVkScalar(seed, binding.binding);
-        HashVkScalar(seed, binding.descriptorType);
-        HashVkScalar(seed, binding.descriptorCount);
-        HashVkScalar(seed, binding.stageFlags);
-    }
-    return seed;
-}
-
-std::size_t HashShaderSpvs(std::span<const Uni_ShaderSpv> spvs) {
-    struct StageRecord {
-        owe::ShaderType stage;
-        std::string     entry_point;
-        std::size_t     code_hash { 0 };
-    };
-
-    std::vector<StageRecord> records;
-    records.reserve(spvs.size());
-    for (const auto& spv : spvs) {
-        if (! spv) continue;
-        records.push_back(StageRecord {
-            .stage       = spv->stage,
-            .entry_point = spv->entry_point,
-            .code_hash   = owe::SceneShaderStageCodeHash(spv->spirv),
-        });
-    }
-    std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.stage != rhs.stage) return lhs.stage < rhs.stage;
-        return lhs.entry_point < rhs.entry_point;
-    });
-
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, records.size());
-    for (const auto& record : records) {
-        HashVkScalar(seed, record.stage);
-        utils::hash_combine(seed, record.entry_point);
-        utils::hash_combine(seed, record.code_hash);
-    }
-    return seed;
-}
-
-std::size_t HashVertexInputState(std::span<const VkVertexInputBindingDescription>   bindings,
-                                 std::span<const VkVertexInputAttributeDescription> attrs) {
-    auto sorted_bindings =
-        std::vector<VkVertexInputBindingDescription>(bindings.begin(), bindings.end());
-    std::sort(sorted_bindings.begin(), sorted_bindings.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.binding < rhs.binding;
-    });
-
-    auto sorted_attrs = std::vector<VkVertexInputAttributeDescription>(attrs.begin(), attrs.end());
-    std::sort(sorted_attrs.begin(), sorted_attrs.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.location != rhs.location) return lhs.location < rhs.location;
-        return lhs.binding < rhs.binding;
-    });
-
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, sorted_bindings.size());
-    for (const auto& binding : sorted_bindings) {
-        HashVkScalar(seed, binding.binding);
-        HashVkScalar(seed, binding.stride);
-        HashVkScalar(seed, binding.inputRate);
-    }
-    utils::hash_combine(seed, sorted_attrs.size());
-    for (const auto& attr : sorted_attrs) {
-        HashVkScalar(seed, attr.location);
-        HashVkScalar(seed, attr.binding);
-        HashVkScalar(seed, attr.format);
-        HashVkScalar(seed, attr.offset);
-    }
-    return seed;
-}
-
-std::size_t HashMultisampleState(const VkPipelineMultisampleStateCreateInfo& state) {
-    std::size_t seed { 0 };
-    HashVkScalar(seed, state.rasterizationSamples);
-    HashVkScalar(seed, state.sampleShadingEnable);
-    utils::hash_combine(seed, state.minSampleShading);
-    HashVkScalar(seed, state.alphaToCoverageEnable);
-    HashVkScalar(seed, state.alphaToOneEnable);
-    return seed;
-}
-
-std::size_t HashRasterizationState(const VkPipelineRasterizationStateCreateInfo& state) {
-    std::size_t seed { 0 };
-    HashVkScalar(seed, state.depthClampEnable);
-    HashVkScalar(seed, state.rasterizerDiscardEnable);
-    HashVkScalar(seed, state.polygonMode);
-    HashVkScalar(seed, state.cullMode);
-    HashVkScalar(seed, state.frontFace);
-    HashVkScalar(seed, state.depthBiasEnable);
-    utils::hash_combine(seed, state.depthBiasConstantFactor);
-    utils::hash_combine(seed, state.depthBiasClamp);
-    utils::hash_combine(seed, state.depthBiasSlopeFactor);
-    utils::hash_combine(seed, state.lineWidth);
-    return seed;
-}
-
-template<typename T>
-std::size_t HashStencilOpState(const T& state) {
-    std::size_t seed { 0 };
-    HashVkScalar(seed, state.failOp);
-    HashVkScalar(seed, state.passOp);
-    HashVkScalar(seed, state.depthFailOp);
-    HashVkScalar(seed, state.compareOp);
-    HashVkScalar(seed, state.compareMask);
-    HashVkScalar(seed, state.writeMask);
-    HashVkScalar(seed, state.reference);
-    return seed;
-}
-
-std::size_t HashDepthStencilState(const VkPipelineDepthStencilStateCreateInfo& state) {
-    std::size_t seed { 0 };
-    HashVkScalar(seed, state.depthTestEnable);
-    HashVkScalar(seed, state.depthWriteEnable);
-    HashVkScalar(seed, state.depthCompareOp);
-    HashVkScalar(seed, state.depthBoundsTestEnable);
-    HashVkScalar(seed, state.stencilTestEnable);
-    utils::hash_combine(seed, HashStencilOpState(state.front));
-    utils::hash_combine(seed, HashStencilOpState(state.back));
-    utils::hash_combine(seed, state.minDepthBounds);
-    utils::hash_combine(seed, state.maxDepthBounds);
-    return seed;
-}
-
-std::size_t HashColorBlendState(const VkPipelineColorBlendAttachmentState& state) {
-    std::size_t seed { 0 };
-    HashVkScalar(seed, state.blendEnable);
-    HashVkScalar(seed, state.srcColorBlendFactor);
-    HashVkScalar(seed, state.dstColorBlendFactor);
-    HashVkScalar(seed, state.colorBlendOp);
-    HashVkScalar(seed, state.srcAlphaBlendFactor);
-    HashVkScalar(seed, state.dstAlphaBlendFactor);
-    HashVkScalar(seed, state.alphaBlendOp);
-    HashVkScalar(seed, state.colorWriteMask);
-    return seed;
-}
-
-std::size_t
-HashPipelineFingerprint(const owe::SceneMaterial& material, const owe::SceneShader& shader,
-                        std::span<const Uni_ShaderSpv>                     shader_spvs,
-                        std::span<const VkDescriptorSetLayoutBinding>      descriptor_bindings,
-                        std::span<const VkVertexInputBindingDescription>   vertex_bindings,
-                        std::span<const VkVertexInputAttributeDescription> vertex_attrs,
-                        const VkPipelineColorBlendAttachmentState&         color_blend,
-                        const VkPipelineDepthStencilStateCreateInfo&       depth_state,
-                        const VkPipelineRasterizationStateCreateInfo&      raster_state,
-                        const VkPipelineMultisampleStateCreateInfo&        multisample_state,
-                        VkPrimitiveTopology topology, VkSampleCountFlagBits samples,
-                        bool push_descriptor, VkFormat color_format,
-                        VkImageLayout color_final_layout, VkAttachmentLoadOp color_load_op,
-                        VkAttachmentLoadOp depth_load_op, bool has_depth_attachment) {
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, SceneShaderCodeHash(shader));
-    utils::hash_combine(seed, HashShaderSpvs(shader_spvs));
-    utils::hash_combine(seed,
-                        material.customShader.variant
-                            ? material.customShader.variant->descriptor_layout_hash
-                            : HashDescriptorBindings(descriptor_bindings));
-    HashVkScalar(seed, push_descriptor);
-    utils::hash_combine(seed, HashDescriptorBindings(descriptor_bindings));
-    utils::hash_combine(seed, HashVertexInputState(vertex_bindings, vertex_attrs));
-    utils::hash_combine(seed, HashColorBlendState(color_blend));
-    utils::hash_combine(seed, HashDepthStencilState(depth_state));
-    utils::hash_combine(seed, HashRasterizationState(raster_state));
-    utils::hash_combine(seed, HashMultisampleState(multisample_state));
-    HashVkScalar(seed, topology);
-    HashVkScalar(seed, samples);
-    HashVkScalar(seed, color_format);
-    HashVkScalar(seed, VK_FORMAT_D32_SFLOAT);
-    HashVkScalar(seed, color_final_layout);
-    HashVkScalar(seed, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    HashVkScalar(seed, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-    HashVkScalar(seed, color_load_op);
-    HashVkScalar(seed, depth_load_op);
-    HashVkScalar(seed, has_depth_attachment);
-    HashVkScalar(seed, material.depth_test);
-    HashVkScalar(seed, material.depth_write);
-    HashVkScalar(seed, material.cull_mode);
-    HashVkScalar(seed, material.blenmode);
-    return seed;
-}
 } // namespace
 
 PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
@@ -306,8 +112,6 @@ PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
 std::optional<owe::RenderItemId> CustomShaderPass::renderItemId() const {
     return m_desc.render_item;
 }
-
-std::size_t CustomShaderPass::pipelineFingerprint() const { return m_desc.pipeline_fingerprint; }
 
 std::optional<PipelineCacheKey> CustomShaderPass::pipelineCacheKey() const {
     return m_desc.pipeline_cache_key;
@@ -531,7 +335,10 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         img_slots             = std::move(*opt);
         m_desc.vk_textures[i] = img_slots;
     }
-    bool out_force_clear { false };
+    bool                          out_force_clear { false };
+    std::optional<TextureRequest> output_attachment_request;
+    std::optional<TextureRequest> msaa_attachment_request;
+    std::optional<TextureRequest> depth_attachment_request;
     {
         auto& tex_name = m_desc.output;
         rstd_assert(IsSpecTex(tex_name));
@@ -540,7 +347,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         out_force_clear = rt.force_clear;
         auto request = m_desc.output_request.value_or(MakeRenderTargetTextureRequest(tex_name, rt));
         if (auto opt = resources.EnsureTexture(request); opt.has_value()) {
-            m_desc.vk_output = opt.value();
+            m_desc.vk_output          = opt.value();
+            output_attachment_request = request;
         } else
             return;
 
@@ -552,7 +360,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             auto        msaa_request = m_desc.output_msaa_request.value_or(
                 MakeMsaaTextureRequest(twin_name, rt, m_desc.samples));
             if (auto opt = resources.EnsureTexture(msaa_request); opt.has_value()) {
-                m_desc.vk_output_msaa = opt.value();
+                m_desc.vk_output_msaa   = opt.value();
+                msaa_attachment_request = msaa_request;
             } else {
                 rstd_error("MSAA twin Query failed for {}", tex_name);
                 return;
@@ -578,7 +387,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         auto depth_request =
             m_desc.depth_request.value_or(MakeDepthTextureRequest(depth_name, output_rt));
         if (auto opt = resources.EnsureTexture(depth_request); opt.has_value()) {
-            m_desc.vk_depth = opt.value();
+            m_desc.vk_depth          = opt.value();
+            depth_attachment_request = depth_request;
         } else {
             return;
         }
@@ -588,10 +398,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     DescriptorSetInfo             descriptor_info;
     const CachedShaderReflection* shader_reflection { nullptr };
     const ShaderReflected*        ref { nullptr };
-    SceneShader*                  shader_ref { nullptr };
     {
         SceneShader& shader = *(material_ref.customShader.shader);
-        shader_ref          = &shader;
 
         if (rr.shader_reflection_cache != nullptr) {
             shader_reflection = rr.shader_reflection_cache->Query(shader);
@@ -712,24 +520,6 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                                  : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
             break;
         }
-        m_desc.pipeline_fingerprint = HashPipelineFingerprint(material_ref,
-                                                              *shader_ref,
-                                                              spvs,
-                                                              descriptor_info.bindings,
-                                                              bind_descriptions,
-                                                              attr_descriptions,
-                                                              color_blend,
-                                                              pipeline_state.depth,
-                                                              pipeline_state.raster,
-                                                              pipeline_state.multisample,
-                                                              topology,
-                                                              m_desc.samples,
-                                                              descriptor_info.push_descriptor,
-                                                              color_format,
-                                                              color_final_layout,
-                                                              loadOp,
-                                                              depthLoadOp,
-                                                              has_depth_attachment);
         PipelineResourceSystem pipeline_resources(
             device, &rr.pipeline_cache, &rr.render_pass_cache);
         PipelineResourceRequest pipeline_request {
@@ -767,15 +557,24 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
 
     {
-        const bool                 has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
-        std::array<VkImageView, 3> views {
-            has_msaa ? m_desc.vk_output_msaa.view : m_desc.vk_output.view,
-            m_desc.vk_output.view,
-            m_desc.vk_depth.view,
-        };
-        const uint32_t depth_view_index = has_msaa ? 2u : 1u;
-        if (has_depth_attachment) views[depth_view_index] = m_desc.vk_depth.view;
-        const uint32_t attachment_count = (has_msaa ? 2u : 1u) + (has_depth_attachment ? 1u : 0u);
+        const bool has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
+        if (! output_attachment_request.has_value()) return;
+        if (has_msaa && ! msaa_attachment_request.has_value()) return;
+        if (has_depth_attachment && ! depth_attachment_request.has_value()) return;
+
+        std::vector<FramebufferAttachmentDesc> attachments;
+        attachments.reserve((has_msaa ? 2u : 1u) + (has_depth_attachment ? 1u : 0u));
+        if (has_msaa) {
+            attachments.push_back(
+                MakeFramebufferAttachment(*msaa_attachment_request, m_desc.vk_output_msaa));
+        }
+        attachments.push_back(
+            MakeFramebufferAttachment(*output_attachment_request, m_desc.vk_output));
+        if (has_depth_attachment) {
+            attachments.push_back(
+                MakeFramebufferAttachment(*depth_attachment_request, m_desc.vk_depth));
+        }
+
         m_desc.framebuffer_cache_key.reset();
         m_desc.framebuffer_cache_hit            = false;
         m_desc.framebuffer_cache_observed_count = 0;
@@ -784,9 +583,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         auto framebuffer = framebuffer_resources.CreateFramebuffer(FramebufferResourceRequest {
             .render_pass     = **m_desc.pipeline->pipeline.pass,
             .render_pass_key = m_desc.render_pass_cache_key.value_or(RenderPassCacheKey {}),
-            .attachments =
-                std::vector<VkImageView>(views.begin(), views.begin() + attachment_count),
-            .extent = { m_desc.vk_output.extent.width, m_desc.vk_output.extent.height },
+            .attachments     = std::move(attachments),
+            .extent          = { m_desc.vk_output.extent.width, m_desc.vk_output.extent.height },
         });
         if (! framebuffer.has_value()) return;
         m_desc.fb                               = std::move(framebuffer->framebuffer);

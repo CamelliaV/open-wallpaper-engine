@@ -87,7 +87,6 @@ struct PreparedPassDiagnostic {
     std::optional<rg::PassNode::Type>         pass_type;
     std::optional<RenderItemId>               render_item;
     PassInvalidationFlags                     invalidation_flags { PassInvalidationNone };
-    std::size_t                               pipeline_fingerprint { 0 };
     std::optional<PipelineCacheKey>           pipeline_cache_key;
     bool                                      pipeline_cache_hit { false };
     uint64_t                                  pipeline_cache_observed_count { 0 };

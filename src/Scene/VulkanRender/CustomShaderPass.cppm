@@ -62,7 +62,6 @@ public:
         VkAttachmentLoadOp                     depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
         std::shared_ptr<vvk::Framebuffer>      fb;
         std::shared_ptr<PipelineResourceEntry> pipeline;
-        std::size_t                            pipeline_fingerprint { 0 };
         std::optional<PipelineCacheKey>        pipeline_cache_key;
         std::optional<RenderPassCacheKey>      render_pass_cache_key;
         std::optional<FramebufferCacheKey>     framebuffer_cache_key;
@@ -82,7 +81,6 @@ public:
 
     PassInvalidationFlags                     finalizeResourceRequests(Scene&) override;
     std::optional<RenderItemId>               renderItemId() const override;
-    std::size_t                               pipelineFingerprint() const override;
     std::optional<PipelineCacheKey>           pipelineCacheKey() const override;
     bool                                      pipelineCacheHit() const override;
     uint64_t                                  pipelineCacheObservedCount() const override;

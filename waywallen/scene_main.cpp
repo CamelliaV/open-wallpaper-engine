@@ -144,7 +144,7 @@ void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnost
                 ? std::to_string(diagnostic.framebuffer_cache_key->value)
                 : "-";
         rstd_info("waywallen-wescene-renderer: pass '{}' type={} graph={} render_item={} "
-                  "dirty={} fingerprint={} pipeline_key={} pipeline_seen={} pipeline_count={} "
+                  "dirty={} pipeline_key={} pipeline_seen={} pipeline_count={} "
                   "render_pass_key={} render_pass_seen={} render_pass_count={} "
                   "framebuffer_key={} framebuffer_seen={} framebuffer_count={} "
                   "prepared={} releases={}",
@@ -153,7 +153,6 @@ void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnost
                   graph_node,
                   render_item_text(diagnostic.render_item),
                   diagnostic.invalidation_flags,
-                  diagnostic.pipeline_fingerprint,
                   pipeline_cache_key,
                   diagnostic.pipeline_cache_hit,
                   diagnostic.pipeline_cache_observed_count,

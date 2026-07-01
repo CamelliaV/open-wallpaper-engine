@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <vulkan/vulkan_core.h>
 
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
@@ -46,7 +47,9 @@ GraphicsPipeline::GraphicsPipeline() { toDefault(); }
 GraphicsPipeline::~GraphicsPipeline() {}
 
 void GraphicsPipeline::toDefault() {
-    m_view = VkPipelineViewportStateCreateInfo {
+    m_create_flags = 0;
+    m_subpass      = 0;
+    m_view         = VkPipelineViewportStateCreateInfo {
         .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .pNext         = nullptr,
         .viewportCount = 1,
@@ -112,9 +115,23 @@ GraphicsPipeline::setColorBlendStates(std::span<const VkPipelineColorBlendAttach
     return *this;
 }
 
+GraphicsPipeline& GraphicsPipeline::setColorBlendOptions(VkPipelineColorBlendStateCreateFlags flags,
+                                                         const std::array<float, 4>& constants) {
+    m_color.flags = flags;
+    std::copy(constants.begin(), constants.end(), std::begin(m_color.blendConstants));
+    return *this;
+}
+
 GraphicsPipeline& GraphicsPipeline::setLogicOp(bool enable, VkLogicOp op) {
     m_color.logicOp       = op;
     m_color.logicOpEnable = enable;
+    return *this;
+}
+
+GraphicsPipeline& GraphicsPipeline::setCreateInfoOptions(VkPipelineCreateFlags flags,
+                                                         uint32_t              subpass) {
+    m_create_flags = flags;
+    m_subpass      = subpass;
     return *this;
 }
 
@@ -146,6 +163,23 @@ GraphicsPipeline& GraphicsPipeline::addInputBindingDescription(
 }
 GraphicsPipeline& GraphicsPipeline::setTopology(VkPrimitiveTopology topology) {
     m_input_assembly.topology = topology;
+    return *this;
+}
+
+GraphicsPipeline& GraphicsPipeline::setPrimitiveRestartEnable(bool enable) {
+    m_input_assembly.primitiveRestartEnable = enable;
+    return *this;
+}
+
+GraphicsPipeline& GraphicsPipeline::setViewportScissorCount(uint32_t viewport_count,
+                                                            uint32_t scissor_count) {
+    m_view.viewportCount = viewport_count;
+    m_view.scissorCount  = scissor_count;
+    return *this;
+}
+
+GraphicsPipeline& GraphicsPipeline::setDynamicStates(std::span<const VkDynamicState> states) {
+    m_dynamic_states = { states.begin(), states.end() };
     return *this;
 }
 
@@ -219,6 +253,7 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
     VkGraphicsPipelineCreateInfo create {
         .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext               = nullptr,
+        .flags               = m_create_flags,
         .stageCount          = (uint32_t)shaderStages.size(),
         .pStages             = shaderStages.data(),
         .pVertexInputState   = &input,
@@ -231,6 +266,7 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
         .pDynamicState       = &dynamic_info,
         .layout              = *pipeline.layout,
         .renderPass          = pass,
+        .subpass             = m_subpass,
     };
     VVK_CHECK_BOOL_RE(device.handle().CreateGraphicsPipeline(create, pipeline.handle));
     return true;

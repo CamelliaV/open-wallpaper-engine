@@ -167,6 +167,7 @@ target_sources(owe-render
          VulkanRender/VulkanRender.cppm
          VulkanRender/VulkanPass.cppm
          VulkanRender/ShaderReflectionCache.cppm
+         VulkanRender/ResourceKey.cppm
          VulkanRender/Resource.cppm
          VulkanRender/BufferResolver.cppm
          VulkanRender/PassCommon.cppm

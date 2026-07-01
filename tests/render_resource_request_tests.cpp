@@ -1,9 +1,46 @@
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <unordered_map>
+#include <vector>
+#include <vulkan/vulkan_core.h>
+
 #include <gtest/gtest.h>
 
 import wescene.scene;
 import wescene.types;
 import wescene.vulkan;
 import wescene.vulkan_render;
+
+namespace
+{
+
+std::vector<std::byte> Bytes(std::initializer_list<unsigned char> values) {
+    std::vector<std::byte> bytes;
+    bytes.reserve(values.size());
+    for (auto value : values) bytes.push_back(static_cast<std::byte>(value));
+    return bytes;
+}
+
+VkImageView ImageView(std::uintptr_t value) { return reinterpret_cast<VkImageView>(value); }
+
+owe::vulkan::FramebufferAttachmentIdentity
+AttachmentIdentity(std::size_t value, std::initializer_list<unsigned char> bytes) {
+    return owe::vulkan::FramebufferAttachmentIdentity {
+        .value = value,
+        .bytes = Bytes(bytes),
+    };
+}
+
+owe::vulkan::FramebufferAttachmentDesc Attachment(std::uintptr_t view, std::size_t identity,
+                                                  std::initializer_list<unsigned char> bytes) {
+    return owe::vulkan::FramebufferAttachmentDesc {
+        .view     = ImageView(view),
+        .identity = AttachmentIdentity(identity, bytes),
+    };
+}
+
+} // namespace
 
 TEST(TextureRequest, BuildsImportedRequestWithoutCacheKey) {
     auto request = owe::vulkan::MakeImportedTextureRequest("textures/main.png");
@@ -239,9 +276,57 @@ TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
     auto key_b =
         owe::vulkan::MakePipelineCacheKey(make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST));
     auto key_c = owe::vulkan::MakePipelineCacheKey(make_request(VK_PRIMITIVE_TOPOLOGY_POINT_LIST));
+    auto desc_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    auto key_from_desc =
+        owe::vulkan::MakePipelineCacheKey(owe::vulkan::MakePipelineResourceDesc(desc_request));
+    auto primitive_restart_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    primitive_restart_request.primitive_restart_enable = true;
+    auto key_primitive_restart       = owe::vulkan::MakePipelineCacheKey(primitive_restart_request);
+    auto viewport_request            = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    viewport_request.viewport_count  = 2u;
+    auto key_viewport                = owe::vulkan::MakePipelineCacheKey(viewport_request);
+    auto logic_op_request            = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    logic_op_request.logic_op_enable = true;
+    logic_op_request.logic_op        = VK_LOGIC_OP_XOR;
+    auto key_logic_op                = owe::vulkan::MakePipelineCacheKey(logic_op_request);
+    auto create_flags_request        = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    create_flags_request.create_flags =
+        static_cast<VkPipelineCreateFlags>(VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT);
+    auto key_create_flags        = owe::vulkan::MakePipelineCacheKey(create_flags_request);
+    auto subpass_request         = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    subpass_request.subpass      = 1u;
+    auto key_subpass             = owe::vulkan::MakePipelineCacheKey(subpass_request);
+    auto blend_constants_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    blend_constants_request.blend_constants[0] = 1.0f;
+    auto key_blend_constants   = owe::vulkan::MakePipelineCacheKey(blend_constants_request);
+    auto dynamic_state_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    dynamic_state_request.dynamic_states = { VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT };
+    auto key_dynamic_state_order         = owe::vulkan::MakePipelineCacheKey(dynamic_state_request);
+    dynamic_state_request.dynamic_states = { VK_DYNAMIC_STATE_VIEWPORT };
+    auto key_dynamic_state               = owe::vulkan::MakePipelineCacheKey(dynamic_state_request);
 
+    EXPECT_FALSE(key_a.bytes.empty());
     EXPECT_TRUE(owe::vulkan::SamePipelineCacheKey(key_a, key_b));
+    EXPECT_TRUE(owe::vulkan::SamePipelineCacheKey(key_a, key_from_desc));
     EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_c));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_primitive_restart));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_viewport));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_logic_op));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_create_flags));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_subpass));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_blend_constants));
+    EXPECT_TRUE(owe::vulkan::SamePipelineCacheKey(key_a, key_dynamic_state_order));
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(key_a, key_dynamic_state));
+
+    auto colliding_a = owe::vulkan::PipelineCacheKey {
+        .value = key_a.value,
+        .bytes = Bytes({ 0x01u }),
+    };
+    auto colliding_b = owe::vulkan::PipelineCacheKey {
+        .value = key_a.value,
+        .bytes = Bytes({ 0x02u }),
+    };
+    EXPECT_FALSE(owe::vulkan::SamePipelineCacheKey(colliding_a, colliding_b));
 
     owe::vulkan::PipelineCacheDiagnostics diagnostics;
     auto                                  first = diagnostics.Record(key_a);
@@ -255,6 +340,23 @@ TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
     auto third = diagnostics.Record(key_c);
     EXPECT_FALSE(third.hit);
     EXPECT_EQ(third.observed_count, 1u);
+
+    auto collision_first = diagnostics.Record(colliding_a);
+    EXPECT_FALSE(collision_first.hit);
+    EXPECT_EQ(collision_first.observed_count, 1u);
+
+    auto collision_second = diagnostics.Record(colliding_b);
+    EXPECT_FALSE(collision_second.hit);
+    EXPECT_EQ(collision_second.observed_count, 1u);
+
+    std::unordered_map<owe::vulkan::PipelineCacheKey,
+                       int,
+                       owe::vulkan::CanonicalCacheKeyHash,
+                       owe::vulkan::PipelineCacheKeyEqual>
+        cache_entries;
+    cache_entries.emplace(colliding_a, 1);
+    cache_entries.emplace(colliding_b, 2);
+    EXPECT_EQ(cache_entries.size(), 2u);
 }
 
 TEST(RenderPassCacheKey, TracksRenderPassCompatibilityInputs) {
@@ -279,22 +381,52 @@ TEST(RenderPassCacheKey, TracksRenderPassCompatibilityInputs) {
         make_request(VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_4_BIT, true));
     auto key_depth = owe::vulkan::MakeRenderPassCacheKey(
         make_request(VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, false));
+    auto desc_store = owe::vulkan::MakeRenderPassResourceDesc(
+        make_request(VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, true));
+    desc_store.color_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    auto key_store            = owe::vulkan::MakeRenderPassCacheKey(desc_store);
+    auto desc_layout          = owe::vulkan::MakeRenderPassResourceDesc(
+        make_request(VK_FORMAT_R8G8B8A8_UNORM, VK_SAMPLE_COUNT_1_BIT, true));
+    desc_layout.color_attachment_layout = VK_IMAGE_LAYOUT_GENERAL;
+    auto key_layout                     = owe::vulkan::MakeRenderPassCacheKey(desc_layout);
 
+    EXPECT_FALSE(key_a.bytes.empty());
     EXPECT_TRUE(owe::vulkan::SameRenderPassCacheKey(key_a, key_b));
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_format));
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_samples));
     EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_depth));
+    EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_store));
+    EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(key_a, key_layout));
+
+    auto colliding_a = owe::vulkan::RenderPassCacheKey {
+        .value = key_a.value,
+        .bytes = Bytes({ 0x01u }),
+    };
+    auto colliding_b = owe::vulkan::RenderPassCacheKey {
+        .value = key_a.value,
+        .bytes = Bytes({ 0x02u }),
+    };
+    EXPECT_FALSE(owe::vulkan::SameRenderPassCacheKey(colliding_a, colliding_b));
+
+    std::unordered_map<owe::vulkan::RenderPassCacheKey,
+                       int,
+                       owe::vulkan::CanonicalCacheKeyHash,
+                       owe::vulkan::RenderPassCacheKeyEqual>
+        cache_entries;
+    cache_entries.emplace(colliding_a, 1);
+    cache_entries.emplace(colliding_b, 2);
+    EXPECT_EQ(cache_entries.size(), 2u);
 }
 
 TEST(FramebufferCacheDiagnostics, RecordsStableFramebufferKeys) {
-    auto image_view = [](std::uintptr_t value) {
-        return reinterpret_cast<VkImageView>(value);
-    };
-
     owe::vulkan::FramebufferResourceRequest request {
-        .render_pass_key = owe::vulkan::RenderPassCacheKey { .value = 17u },
-        .attachments     = { image_view(0x101u), image_view(0x102u) },
-        .extent          = { 320u, 180u },
+        .render_pass_key =
+            owe::vulkan::RenderPassCacheKey {
+                .value = 17u,
+                .bytes = Bytes({ 0x17u }),
+            },
+        .attachments = { Attachment(0x101u, 101u, { 0x01u }), Attachment(0x102u, 102u, { 0x02u }) },
+        .extent      = { 320u, 180u },
     };
 
     auto key_a = owe::vulkan::MakeFramebufferCacheKey(request);
@@ -304,18 +436,48 @@ TEST(FramebufferCacheDiagnostics, RecordsStableFramebufferKeys) {
     resized.extent.width = 640u;
     auto key_resized     = owe::vulkan::MakeFramebufferCacheKey(resized);
 
+    auto layered    = request;
+    layered.layers  = 2u;
+    auto key_layers = owe::vulkan::MakeFramebufferCacheKey(layered);
+
     auto different_attachment           = request;
-    different_attachment.attachments[1] = image_view(0x103u);
+    different_attachment.attachments[1] = Attachment(0x103u, 103u, { 0x03u });
     auto key_attachment = owe::vulkan::MakeFramebufferCacheKey(different_attachment);
 
+    auto different_attachment_identity                    = request;
+    different_attachment_identity.attachments[1].identity = AttachmentIdentity(104u, { 0x04u });
+    auto key_attachment_identity =
+        owe::vulkan::MakeFramebufferCacheKey(different_attachment_identity);
+
+    auto different_attachment_view                = request;
+    different_attachment_view.attachments[1].view = ImageView(0x104u);
+    auto key_attachment_view = owe::vulkan::MakeFramebufferCacheKey(different_attachment_view);
+
     auto different_render_pass            = request;
-    different_render_pass.render_pass_key = owe::vulkan::RenderPassCacheKey { .value = 19u };
+    different_render_pass.render_pass_key = owe::vulkan::RenderPassCacheKey {
+        .value = 17u,
+        .bytes = Bytes({ 0x18u }),
+    };
     auto key_render_pass = owe::vulkan::MakeFramebufferCacheKey(different_render_pass);
 
+    EXPECT_FALSE(key_a.bytes.empty());
     EXPECT_TRUE(owe::vulkan::SameFramebufferCacheKey(key_a, key_b));
     EXPECT_FALSE(owe::vulkan::SameFramebufferCacheKey(key_a, key_resized));
+    EXPECT_FALSE(owe::vulkan::SameFramebufferCacheKey(key_a, key_layers));
     EXPECT_FALSE(owe::vulkan::SameFramebufferCacheKey(key_a, key_attachment));
+    EXPECT_FALSE(owe::vulkan::SameFramebufferCacheKey(key_a, key_attachment_identity));
+    EXPECT_FALSE(owe::vulkan::SameFramebufferCacheKey(key_a, key_attachment_view));
     EXPECT_FALSE(owe::vulkan::SameFramebufferCacheKey(key_a, key_render_pass));
+
+    auto colliding_a = owe::vulkan::FramebufferCacheKey {
+        .value = key_a.value,
+        .bytes = Bytes({ 0x01u }),
+    };
+    auto colliding_b = owe::vulkan::FramebufferCacheKey {
+        .value = key_a.value,
+        .bytes = Bytes({ 0x02u }),
+    };
+    EXPECT_FALSE(owe::vulkan::SameFramebufferCacheKey(colliding_a, colliding_b));
 
     owe::vulkan::FramebufferCacheDiagnostics diagnostics;
     auto                                     first = diagnostics.Record(key_a);
@@ -329,6 +491,63 @@ TEST(FramebufferCacheDiagnostics, RecordsStableFramebufferKeys) {
     auto third = diagnostics.Record(key_resized);
     EXPECT_FALSE(third.hit);
     EXPECT_EQ(third.observed_count, 1u);
+
+    auto collision_first = diagnostics.Record(colliding_a);
+    EXPECT_FALSE(collision_first.hit);
+    EXPECT_EQ(collision_first.observed_count, 1u);
+
+    auto collision_second = diagnostics.Record(colliding_b);
+    EXPECT_FALSE(collision_second.hit);
+    EXPECT_EQ(collision_second.observed_count, 1u);
+
+    std::unordered_map<owe::vulkan::FramebufferCacheKey,
+                       int,
+                       owe::vulkan::CanonicalCacheKeyHash,
+                       owe::vulkan::FramebufferCacheKeyEqual>
+        cache_entries;
+    cache_entries.emplace(colliding_a, 1);
+    cache_entries.emplace(colliding_b, 2);
+    EXPECT_EQ(cache_entries.size(), 2u);
+}
+
+TEST(FramebufferAttachmentIdentity, TracksTextureGeneration) {
+    owe::SceneRenderTarget rt {
+        .width      = 320,
+        .height     = 180,
+        .allowReuse = true,
+    };
+    auto request = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", rt);
+
+    owe::vulkan::ImageParameters image_a;
+    image_a.handle       = reinterpret_cast<VkImage>(0x201u);
+    image_a.view         = ImageView(0x301u);
+    image_a.extent       = { 320u, 180u, 1u };
+    image_a.mipmap_level = 1u;
+    image_a.generation   = 10u;
+    auto image_b       = image_a;
+    image_b.generation = 11u;
+
+    auto attachment_a = owe::vulkan::MakeFramebufferAttachment(request, image_a);
+    auto attachment_b = owe::vulkan::MakeFramebufferAttachment(request, image_b);
+    EXPECT_NE(attachment_a.identity.value, 0u);
+    EXPECT_FALSE(attachment_a.identity.bytes.empty());
+    EXPECT_NE(attachment_a.identity.bytes, attachment_b.identity.bytes);
+
+    owe::vulkan::FramebufferResourceRequest framebuffer_a {
+        .render_pass_key =
+            owe::vulkan::RenderPassCacheKey {
+                .value = 17u,
+                .bytes = Bytes({ 0x17u }),
+            },
+        .attachments = { attachment_a },
+        .extent      = { 320u, 180u },
+    };
+    auto framebuffer_b        = framebuffer_a;
+    framebuffer_b.attachments = { attachment_b };
+
+    EXPECT_FALSE(
+        owe::vulkan::SameFramebufferCacheKey(owe::vulkan::MakeFramebufferCacheKey(framebuffer_a),
+                                             owe::vulkan::MakeFramebufferCacheKey(framebuffer_b)));
 }
 
 TEST(PipelineRetireQueue, IgnoresEmptyPipelineParameters) {

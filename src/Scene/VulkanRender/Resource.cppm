@@ -1,5 +1,6 @@
 module;
 
+#include <cstdint>
 #include <rstd/macro.hpp>
 
 export module wescene.vulkan_render:resource;
@@ -9,6 +10,8 @@ import rstd.cppstd;
 import wescene.types;
 import wescene.vulkan;
 import wescene.scene;
+
+export import :resource_key;
 
 export namespace owe::vulkan
 {
@@ -74,6 +77,83 @@ inline bool SameTextureRequest(const std::optional<TextureRequest>& lhs,
 inline bool SameTextureBindingRequest(const TextureBindingRequest& lhs,
                                       const TextureBindingRequest& rhs) {
     return lhs.name == rhs.name && SameTextureRequest(lhs.request, rhs.request);
+}
+
+inline void WriteTextureSampleIdentity(PipelineKeyWriter& writer, const TextureSample& sample) {
+    WritePipelineScalar(writer, sample.wrapS);
+    WritePipelineScalar(writer, sample.wrapT);
+    WritePipelineScalar(writer, sample.magFilter);
+    WritePipelineScalar(writer, sample.minFilter);
+}
+
+inline void WriteTextureKeyIdentity(PipelineKeyWriter& writer, const TextureKey& key) {
+    writer.writeU32(static_cast<std::uint32_t>(key.width));
+    writer.writeU32(static_cast<std::uint32_t>(key.height));
+    WritePipelineScalar(writer, key.usage);
+    WritePipelineScalar(writer, key.format);
+    WriteTextureSampleIdentity(writer, key.sample);
+    writer.writeU32(key.mipmap_level);
+    WritePipelineScalar(writer, key.samples);
+}
+
+inline void WriteRenderTextureDescIdIdentity(PipelineKeyWriter&         writer,
+                                             const RenderTextureDescId& id) {
+    writer.writeU64(static_cast<std::uint64_t>(id.index));
+    writer.writeU64(static_cast<std::uint64_t>(id.generation));
+}
+
+inline void WriteTextureRequestIdentity(PipelineKeyWriter& writer, const TextureRequest& request) {
+    WritePipelineScalar(writer, request.kind);
+    writer.writeString(request.name);
+    writer.writeBool(request.imported_texture.has_value());
+    if (request.imported_texture.has_value()) {
+        WriteRenderTextureDescIdIdentity(writer, *request.imported_texture);
+    }
+    writer.writeBool(request.cache_key.has_value());
+    if (request.cache_key.has_value()) WriteTextureKeyIdentity(writer, *request.cache_key);
+    writer.writeBool(request.persist);
+}
+
+inline void WriteImageParametersIdentity(PipelineKeyWriter& writer, const ImageParameters& image) {
+    writer.writeU64(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(image.handle)));
+    writer.writeU64(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(image.view)));
+    writer.writeU32(image.extent.width);
+    writer.writeU32(image.extent.height);
+    writer.writeU32(image.extent.depth);
+    writer.writeU32(image.mipmap_level);
+    writer.writeU64(image.generation);
+}
+
+inline FramebufferAttachmentIdentity
+MakeFramebufferAttachmentIdentity(const TextureRequest& request, const ImageParameters& image) {
+    PipelineKeyWriter writer;
+    writer.writeString("framebuffer-attachment-v1");
+    WriteTextureRequestIdentity(writer, request);
+    WriteImageParametersIdentity(writer, image);
+    return ToFramebufferAttachmentIdentity(std::move(writer).finish());
+}
+
+inline FramebufferAttachmentIdentity
+MakeFramebufferAttachmentIdentity(const ImageParameters& image) {
+    PipelineKeyWriter writer;
+    writer.writeString("framebuffer-attachment-image-v1");
+    WriteImageParametersIdentity(writer, image);
+    return ToFramebufferAttachmentIdentity(std::move(writer).finish());
+}
+
+inline FramebufferAttachmentDesc MakeFramebufferAttachment(const TextureRequest&  request,
+                                                           const ImageParameters& image) {
+    return FramebufferAttachmentDesc {
+        .view     = image.view,
+        .identity = MakeFramebufferAttachmentIdentity(request, image),
+    };
+}
+
+inline FramebufferAttachmentDesc MakeFramebufferAttachment(const ImageParameters& image) {
+    return FramebufferAttachmentDesc {
+        .view     = image.view,
+        .identity = MakeFramebufferAttachmentIdentity(image),
+    };
 }
 
 inline bool SetTextureRequestIfChanged(std::optional<TextureRequest>& target,
@@ -258,48 +338,6 @@ private:
     const Device*            m_device { nullptr };
 };
 
-struct PipelineResourceRequest {
-    std::vector<DescriptorSetInfo>                 descriptor_sets;
-    std::vector<VkVertexInputBindingDescription>   vertex_bindings;
-    std::vector<VkVertexInputAttributeDescription> vertex_attrs;
-    std::vector<Uni_ShaderSpv>                     shader_stages;
-    VkPipelineColorBlendAttachmentState            color_blend {};
-    VkPipelineDepthStencilStateCreateInfo          depth {};
-    VkPipelineRasterizationStateCreateInfo         raster {};
-    VkPipelineMultisampleStateCreateInfo           multisample {};
-    VkPrimitiveTopology topology { VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP };
-    VkFormat            color_format { VK_FORMAT_R8G8B8A8_UNORM };
-    VkImageLayout       color_final_layout { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkAttachmentLoadOp  color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-    VkAttachmentLoadOp  depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-    bool                has_depth_attachment { false };
-};
-
-struct PipelineCacheKey {
-    std::size_t value { 0 };
-};
-
-struct RenderPassCacheKey {
-    std::size_t value { 0 };
-};
-
-struct FramebufferCacheKey {
-    std::size_t value { 0 };
-};
-
-struct FramebufferResourceRequest {
-    VkRenderPass             render_pass { VK_NULL_HANDLE };
-    RenderPassCacheKey       render_pass_key;
-    std::vector<VkImageView> attachments;
-    VkExtent2D               extent { 0, 0 };
-};
-
-struct PipelineCacheProbe {
-    PipelineCacheKey key;
-    bool             hit { false };
-    uint64_t         observed_count { 0 };
-};
-
 struct PipelineResourceEntry {
     PipelineParameters pipeline;
 };
@@ -321,233 +359,22 @@ struct FramebufferResourceResult {
     uint64_t                          cache_observed_count { 0 };
 };
 
-inline bool SamePipelineCacheKey(PipelineCacheKey lhs, PipelineCacheKey rhs) {
-    return lhs.value == rhs.value;
-}
-
-inline bool SameRenderPassCacheKey(RenderPassCacheKey lhs, RenderPassCacheKey rhs) {
-    return lhs.value == rhs.value;
-}
-
-inline bool SameFramebufferCacheKey(FramebufferCacheKey lhs, FramebufferCacheKey rhs) {
-    return lhs.value == rhs.value;
-}
-
-template<typename T>
-inline void HashPipelineScalar(std::size_t& seed, T value) {
-    utils::hash_combine(seed, static_cast<uint64_t>(value));
-}
-
-inline std::size_t HashPipelineShaderStages(std::span<const Uni_ShaderSpv> stages) {
-    struct StageRecord {
-        owe::ShaderType stage;
-        std::string     entry_point;
-        std::size_t     code_hash { 0 };
-    };
-
-    std::vector<StageRecord> records;
-    records.reserve(stages.size());
-    for (const auto& stage : stages) {
-        if (! stage) continue;
-        records.push_back(StageRecord {
-            .stage       = stage->stage,
-            .entry_point = stage->entry_point,
-            .code_hash   = owe::SceneShaderStageCodeHash(stage->spirv),
-        });
-    }
-    std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.stage != rhs.stage) return lhs.stage < rhs.stage;
-        return lhs.entry_point < rhs.entry_point;
-    });
-
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, records.size());
-    for (const auto& record : records) {
-        HashPipelineScalar(seed, record.stage);
-        utils::hash_combine(seed, record.entry_point);
-        utils::hash_combine(seed, record.code_hash);
-    }
-    return seed;
-}
-
-inline std::size_t HashPipelineDescriptorSets(std::span<const DescriptorSetInfo> sets) {
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, sets.size());
-    for (const auto& set : sets) {
-        HashPipelineScalar(seed, set.push_descriptor);
-        auto bindings = set.bindings;
-        std::sort(bindings.begin(), bindings.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.binding < rhs.binding;
-        });
-        utils::hash_combine(seed, bindings.size());
-        for (const auto& binding : bindings) {
-            HashPipelineScalar(seed, binding.binding);
-            HashPipelineScalar(seed, binding.descriptorType);
-            HashPipelineScalar(seed, binding.descriptorCount);
-            HashPipelineScalar(seed, binding.stageFlags);
-        }
-    }
-    return seed;
-}
-
-inline std::size_t
-HashPipelineVertexInput(std::span<const VkVertexInputBindingDescription>   bindings,
-                        std::span<const VkVertexInputAttributeDescription> attrs) {
-    auto sorted_bindings =
-        std::vector<VkVertexInputBindingDescription>(bindings.begin(), bindings.end());
-    std::sort(sorted_bindings.begin(), sorted_bindings.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.binding < rhs.binding;
-    });
-
-    auto sorted_attrs = std::vector<VkVertexInputAttributeDescription>(attrs.begin(), attrs.end());
-    std::sort(sorted_attrs.begin(), sorted_attrs.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.location != rhs.location) return lhs.location < rhs.location;
-        return lhs.binding < rhs.binding;
-    });
-
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, sorted_bindings.size());
-    for (const auto& binding : sorted_bindings) {
-        HashPipelineScalar(seed, binding.binding);
-        HashPipelineScalar(seed, binding.stride);
-        HashPipelineScalar(seed, binding.inputRate);
-    }
-    utils::hash_combine(seed, sorted_attrs.size());
-    for (const auto& attr : sorted_attrs) {
-        HashPipelineScalar(seed, attr.location);
-        HashPipelineScalar(seed, attr.binding);
-        HashPipelineScalar(seed, attr.format);
-        HashPipelineScalar(seed, attr.offset);
-    }
-    return seed;
-}
-
-inline std::size_t HashPipelineColorBlend(const VkPipelineColorBlendAttachmentState& state) {
-    std::size_t seed { 0 };
-    HashPipelineScalar(seed, state.blendEnable);
-    HashPipelineScalar(seed, state.srcColorBlendFactor);
-    HashPipelineScalar(seed, state.dstColorBlendFactor);
-    HashPipelineScalar(seed, state.colorBlendOp);
-    HashPipelineScalar(seed, state.srcAlphaBlendFactor);
-    HashPipelineScalar(seed, state.dstAlphaBlendFactor);
-    HashPipelineScalar(seed, state.alphaBlendOp);
-    HashPipelineScalar(seed, state.colorWriteMask);
-    return seed;
-}
-
-template<typename T>
-inline std::size_t HashPipelineStencil(const T& state) {
-    std::size_t seed { 0 };
-    HashPipelineScalar(seed, state.failOp);
-    HashPipelineScalar(seed, state.passOp);
-    HashPipelineScalar(seed, state.depthFailOp);
-    HashPipelineScalar(seed, state.compareOp);
-    HashPipelineScalar(seed, state.compareMask);
-    HashPipelineScalar(seed, state.writeMask);
-    HashPipelineScalar(seed, state.reference);
-    return seed;
-}
-
-inline std::size_t HashPipelineDepthStencil(const VkPipelineDepthStencilStateCreateInfo& state) {
-    std::size_t seed { 0 };
-    HashPipelineScalar(seed, state.depthTestEnable);
-    HashPipelineScalar(seed, state.depthWriteEnable);
-    HashPipelineScalar(seed, state.depthCompareOp);
-    HashPipelineScalar(seed, state.depthBoundsTestEnable);
-    HashPipelineScalar(seed, state.stencilTestEnable);
-    utils::hash_combine(seed, HashPipelineStencil(state.front));
-    utils::hash_combine(seed, HashPipelineStencil(state.back));
-    utils::hash_combine(seed, state.minDepthBounds);
-    utils::hash_combine(seed, state.maxDepthBounds);
-    return seed;
-}
-
-inline std::size_t HashPipelineRaster(const VkPipelineRasterizationStateCreateInfo& state) {
-    std::size_t seed { 0 };
-    HashPipelineScalar(seed, state.depthClampEnable);
-    HashPipelineScalar(seed, state.rasterizerDiscardEnable);
-    HashPipelineScalar(seed, state.polygonMode);
-    HashPipelineScalar(seed, state.cullMode);
-    HashPipelineScalar(seed, state.frontFace);
-    HashPipelineScalar(seed, state.depthBiasEnable);
-    utils::hash_combine(seed, state.depthBiasConstantFactor);
-    utils::hash_combine(seed, state.depthBiasClamp);
-    utils::hash_combine(seed, state.depthBiasSlopeFactor);
-    utils::hash_combine(seed, state.lineWidth);
-    return seed;
-}
-
-inline std::size_t HashPipelineMultisample(const VkPipelineMultisampleStateCreateInfo& state) {
-    std::size_t seed { 0 };
-    HashPipelineScalar(seed, state.rasterizationSamples);
-    HashPipelineScalar(seed, state.sampleShadingEnable);
-    utils::hash_combine(seed, state.minSampleShading);
-    HashPipelineScalar(seed, state.alphaToCoverageEnable);
-    HashPipelineScalar(seed, state.alphaToOneEnable);
-    return seed;
-}
-
-inline PipelineCacheKey MakePipelineCacheKey(const PipelineResourceRequest& request) {
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, HashPipelineShaderStages(request.shader_stages));
-    utils::hash_combine(seed, HashPipelineDescriptorSets(request.descriptor_sets));
-    utils::hash_combine(seed,
-                        HashPipelineVertexInput(request.vertex_bindings, request.vertex_attrs));
-    utils::hash_combine(seed, HashPipelineColorBlend(request.color_blend));
-    utils::hash_combine(seed, HashPipelineDepthStencil(request.depth));
-    utils::hash_combine(seed, HashPipelineRaster(request.raster));
-    utils::hash_combine(seed, HashPipelineMultisample(request.multisample));
-    HashPipelineScalar(seed, request.topology);
-    HashPipelineScalar(seed, request.color_format);
-    HashPipelineScalar(seed, request.color_final_layout);
-    HashPipelineScalar(seed, request.color_load_op);
-    HashPipelineScalar(seed, request.depth_load_op);
-    HashPipelineScalar(seed, request.has_depth_attachment);
-    HashPipelineScalar(seed, VK_FORMAT_D32_SFLOAT);
-    HashPipelineScalar(seed, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    HashPipelineScalar(seed, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-    return PipelineCacheKey { .value = seed };
-}
-
-inline RenderPassCacheKey MakeRenderPassCacheKey(const PipelineResourceRequest& request) {
-    std::size_t seed { 0 };
-    HashPipelineScalar(seed, request.color_format);
-    HashPipelineScalar(seed, VK_FORMAT_D32_SFLOAT);
-    HashPipelineScalar(seed, request.multisample.rasterizationSamples);
-    HashPipelineScalar(seed, request.color_final_layout);
-    HashPipelineScalar(seed, request.color_load_op);
-    HashPipelineScalar(seed, request.depth_load_op);
-    HashPipelineScalar(seed, request.has_depth_attachment);
-    HashPipelineScalar(seed, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    HashPipelineScalar(seed, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-    return RenderPassCacheKey { .value = seed };
-}
-
-inline FramebufferCacheKey MakeFramebufferCacheKey(const FramebufferResourceRequest& request) {
-    std::size_t seed { 0 };
-    utils::hash_combine(seed, request.render_pass_key.value);
-    utils::hash_combine(seed, request.attachments.size());
-    for (auto view : request.attachments) utils::hash_combine(seed, view);
-    HashPipelineScalar(seed, request.extent.width);
-    HashPipelineScalar(seed, request.extent.height);
-    return FramebufferCacheKey { .value = seed };
-}
-
 class PipelineCacheDiagnostics {
 public:
     PipelineCacheProbe Record(PipelineCacheKey key) {
-        auto& count = m_seen[key.value];
+        auto& count = m_seen[key];
         bool  hit   = count > 0;
         ++count;
         return PipelineCacheProbe {
-            .key            = key,
+            .key            = std::move(key),
             .hit            = hit,
             .observed_count = count,
         };
     }
 
 private:
-    std::unordered_map<std::size_t, uint64_t> m_seen;
+    std::unordered_map<PipelineCacheKey, uint64_t, CanonicalCacheKeyHash, PipelineCacheKeyEqual>
+        m_seen;
 };
 
 class FramebufferCacheDiagnostics {
@@ -559,18 +386,20 @@ public:
     };
 
     Probe Record(FramebufferCacheKey key) {
-        auto& count = m_seen[key.value];
+        auto& count = m_seen[key];
         bool  hit   = count > 0;
         ++count;
         return Probe {
-            .key            = key,
+            .key            = std::move(key),
             .hit            = hit,
             .observed_count = count,
         };
     }
 
 private:
-    std::unordered_map<std::size_t, uint64_t> m_seen;
+    std::unordered_map<FramebufferCacheKey, uint64_t, CanonicalCacheKeyHash,
+                       FramebufferCacheKeyEqual>
+        m_seen;
 };
 
 class FramebufferResourceCache {
@@ -581,8 +410,9 @@ public:
             return std::nullopt;
         }
 
-        auto  key  = MakeFramebufferCacheKey(request);
-        auto& slot = m_entries[key.value];
+        auto  desc = MakeFramebufferResourceDesc(request);
+        auto  key  = MakeFramebufferCacheKey(desc);
+        auto& slot = m_entries[key];
         if (auto existing = slot.framebuffer.lock()) {
             ++slot.observed_count;
             return FramebufferResourceResult {
@@ -593,15 +423,19 @@ public:
             };
         }
 
+        std::vector<VkImageView> attachment_views;
+        attachment_views.reserve(desc.attachments.size());
+        for (const auto& attachment : desc.attachments) attachment_views.push_back(attachment.view);
+
         VkFramebufferCreateInfo info {
             .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .pNext           = nullptr,
-            .renderPass      = request.render_pass,
-            .attachmentCount = static_cast<uint32_t>(request.attachments.size()),
-            .pAttachments    = request.attachments.data(),
-            .width           = request.extent.width,
-            .height          = request.extent.height,
-            .layers          = 1,
+            .renderPass      = desc.render_pass,
+            .attachmentCount = static_cast<uint32_t>(attachment_views.size()),
+            .pAttachments    = attachment_views.data(),
+            .width           = desc.extent.width,
+            .height          = desc.extent.height,
+            .layers          = desc.layers,
         };
         vvk::Framebuffer framebuffer;
         if (device.handle().CreateFramebuffer(info, framebuffer) != VK_SUCCESS) {
@@ -636,7 +470,8 @@ private:
         uint64_t                        observed_count { 0 };
     };
 
-    std::unordered_map<std::size_t, Entry> m_entries;
+    std::unordered_map<FramebufferCacheKey, Entry, CanonicalCacheKeyHash, FramebufferCacheKeyEqual>
+        m_entries;
 };
 
 inline bool HasPipelineResources(const PipelineParameters& pipeline) {
@@ -657,10 +492,10 @@ struct RenderPassResourceResult {
 
 class RenderPassResourceCache {
 public:
-    std::optional<RenderPassResourceResult> Ensure(const Device&                  device,
-                                                   const PipelineResourceRequest& request) {
-        auto  key  = MakeRenderPassCacheKey(request);
-        auto& slot = m_entries[key.value];
+    std::optional<RenderPassResourceResult> Ensure(const Device&                 device,
+                                                   const RenderPassResourceDesc& desc) {
+        auto  key  = MakeRenderPassCacheKey(desc);
+        auto& slot = m_entries[key];
         if (auto existing = slot.render_pass.lock()) {
             ++slot.observed_count;
             return RenderPassResourceResult {
@@ -671,7 +506,7 @@ public:
             };
         }
 
-        auto created = CreateRenderPass(device, request);
+        auto created = CreateRenderPass(device, desc);
         if (! created.has_value()) return std::nullopt;
         auto shared      = std::make_shared<vvk::RenderPass>(std::move(*created));
         slot.render_pass = shared;
@@ -682,6 +517,11 @@ public:
             .cache_hit            = false,
             .cache_observed_count = slot.observed_count,
         };
+    }
+
+    std::optional<RenderPassResourceResult> Ensure(const Device&                  device,
+                                                   const PipelineResourceRequest& request) {
+        return Ensure(device, MakeRenderPassResourceDesc(request));
     }
 
     void PruneExpired() {
@@ -702,74 +542,67 @@ private:
         uint64_t                       observed_count { 0 };
     };
 
-    static std::optional<vvk::RenderPass> CreateRenderPass(const Device&                  device,
-                                                           const PipelineResourceRequest& request) {
-        const bool has_resolve = request.multisample.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT;
+    static std::optional<vvk::RenderPass> CreateRenderPass(const Device&                 device,
+                                                           const RenderPassResourceDesc& desc) {
+        const bool              has_resolve = desc.samples != VK_SAMPLE_COUNT_1_BIT;
         VkAttachmentDescription color {
-            .format         = request.color_format,
-            .samples        = request.multisample.rasterizationSamples,
-            .loadOp         = request.color_load_op,
-            .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout =
-                has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : request.color_final_layout,
+            .format         = desc.color_format,
+            .samples        = desc.samples,
+            .loadOp         = desc.color_load_op,
+            .storeOp        = desc.color_store_op,
+            .stencilLoadOp  = desc.color_stencil_load_op,
+            .stencilStoreOp = desc.color_stencil_store_op,
+            .initialLayout  = desc.color_initial_layout,
+            .finalLayout    = has_resolve ? desc.color_attachment_layout : desc.color_final_layout,
         };
-        if (request.color_load_op == VK_ATTACHMENT_LOAD_OP_LOAD) {
-            color.initialLayout = has_resolve ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                                              : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        }
 
         VkAttachmentDescription resolve {
-            .format         = request.color_format,
+            .format         = desc.color_format,
             .samples        = VK_SAMPLE_COUNT_1_BIT,
-            .loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout    = request.color_final_layout,
+            .loadOp         = desc.resolve_load_op,
+            .storeOp        = desc.resolve_store_op,
+            .stencilLoadOp  = desc.resolve_stencil_load_op,
+            .stencilStoreOp = desc.resolve_stencil_store_op,
+            .initialLayout  = desc.resolve_initial_layout,
+            .finalLayout    = desc.resolve_final_layout,
         };
 
         VkAttachmentDescription depth {
-            .format         = VK_FORMAT_D32_SFLOAT,
-            .samples        = request.multisample.rasterizationSamples,
-            .loadOp         = request.depth_load_op,
-            .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-            .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .initialLayout  = request.depth_load_op == VK_ATTACHMENT_LOAD_OP_LOAD
-                                  ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                  : VK_IMAGE_LAYOUT_UNDEFINED,
-            .finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .format         = desc.depth_format,
+            .samples        = desc.samples,
+            .loadOp         = desc.depth_load_op,
+            .storeOp        = desc.depth_store_op,
+            .stencilLoadOp  = desc.depth_stencil_load_op,
+            .stencilStoreOp = desc.depth_stencil_store_op,
+            .initialLayout  = desc.depth_initial_layout,
+            .finalLayout    = desc.depth_final_layout,
         };
 
         VkAttachmentReference color_ref {
             .attachment = 0,
-            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .layout     = desc.color_attachment_layout,
         };
         VkAttachmentReference resolve_ref {
             .attachment = 1,
-            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .layout     = desc.resolve_attachment_layout,
         };
         VkAttachmentReference depth_ref {
             .attachment = has_resolve ? 2u : 1u,
-            .layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .layout     = desc.depth_attachment_layout,
         };
 
         std::vector<VkAttachmentDescription> attachments;
         attachments.reserve(3);
         attachments.push_back(color);
         if (has_resolve) attachments.push_back(resolve);
-        if (request.has_depth_attachment) attachments.push_back(depth);
+        if (desc.has_depth_attachment) attachments.push_back(depth);
 
         VkSubpassDescription subpass {
             .pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS,
             .colorAttachmentCount    = 1,
             .pColorAttachments       = &color_ref,
             .pResolveAttachments     = has_resolve ? &resolve_ref : nullptr,
-            .pDepthStencilAttachment = request.has_depth_attachment ? &depth_ref : nullptr,
+            .pDepthStencilAttachment = desc.has_depth_attachment ? &depth_ref : nullptr,
         };
 
         VkSubpassDependency dependency {
@@ -804,7 +637,8 @@ private:
         return pass;
     }
 
-    std::unordered_map<std::size_t, Entry> m_entries;
+    std::unordered_map<RenderPassCacheKey, Entry, CanonicalCacheKeyHash, RenderPassCacheKeyEqual>
+        m_entries;
 };
 
 class PipelineResourceCache {
@@ -812,8 +646,9 @@ public:
     std::optional<PipelineResourceResult> Ensure(const Device&            device,
                                                  PipelineResourceRequest  request,
                                                  RenderPassResourceCache& render_pass_cache) {
-        auto  key  = MakePipelineCacheKey(request);
-        auto& slot = m_entries[key.value];
+        auto  desc = MakePipelineResourceDesc(request);
+        auto  key  = MakePipelineCacheKey(desc);
+        auto& slot = m_entries[key];
         if (auto existing = slot.pipeline.lock()) {
             ++slot.observed_count;
             return PipelineResourceResult {
@@ -827,23 +662,31 @@ public:
             };
         }
 
-        auto render_pass = render_pass_cache.Ensure(device, request);
+        auto render_pass = render_pass_cache.Ensure(device, desc.render_pass);
         if (! render_pass.has_value() || ! render_pass->render_pass) return std::nullopt;
 
         auto             entry = std::make_shared<PipelineResourceEntry>();
         GraphicsPipeline pipeline;
         pipeline.toDefault();
-        pipeline.depth       = request.depth;
-        pipeline.raster      = request.raster;
-        pipeline.multisample = request.multisample;
+        pipeline.depth       = desc.depth;
+        pipeline.raster      = desc.raster;
+        pipeline.multisample = desc.multisample;
         pipeline
             .setColorBlendStates(
-                std::span<const VkPipelineColorBlendAttachmentState>(&request.color_blend, 1))
-            .setTopology(request.topology)
-            .addInputBindingDescription(request.vertex_bindings)
-            .addInputAttributeDescription(request.vertex_attrs)
-            .addDescriptorSetInfo(request.descriptor_sets);
-        for (auto& spv : request.shader_stages) pipeline.addStage(std::move(spv));
+                std::span<const VkPipelineColorBlendAttachmentState>(&desc.color_blend, 1))
+            .setCreateInfoOptions(desc.create_flags, desc.subpass)
+            .setColorBlendOptions(desc.color_blend_flags, desc.blend_constants)
+            .setLogicOp(desc.logic_op_enable, desc.logic_op)
+            .setTopology(desc.topology)
+            .setPrimitiveRestartEnable(desc.primitive_restart_enable)
+            .setViewportScissorCount(desc.viewport_count, desc.scissor_count)
+            .setDynamicStates(desc.dynamic_states)
+            .addInputBindingDescription(desc.vertex_bindings)
+            .addInputAttributeDescription(desc.vertex_attrs)
+            .addDescriptorSetInfo(desc.descriptor_sets);
+        for (auto& spv : desc.shader_stages) {
+            pipeline.addStage(std::make_unique<ShaderSpv>(std::move(spv)));
+        }
         if (! pipeline.create(device, **render_pass->render_pass, entry->pipeline)) {
             return std::nullopt;
         }
@@ -881,7 +724,8 @@ private:
         uint64_t                             observed_count { 0 };
     };
 
-    std::unordered_map<std::size_t, Entry> m_entries;
+    std::unordered_map<PipelineCacheKey, Entry, CanonicalCacheKeyHash, PipelineCacheKeyEqual>
+        m_entries;
 };
 
 class PipelineRetireQueue {

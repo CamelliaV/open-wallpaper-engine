@@ -85,7 +85,6 @@ struct RenderProgram {
         VulkanPass*                            pass { nullptr };
         std::vector<std::string>               release_textures;
         PassInvalidationFlags                  invalidation_flags { PassInvalidationNone };
-        std::size_t                            pipeline_fingerprint { 0 };
 
         void applyReleaseTextures() const {
             if (pass == nullptr) return;
@@ -133,10 +132,7 @@ struct RenderProgram {
             if (! pass->prepared()) {
                 pass->prepare(scene, device, rr);
             }
-            if (pass->prepared()) {
-                pipeline_fingerprint = pass->pipelineFingerprint();
-                clearInvalidation();
-            }
+            if (pass->prepared()) clearInvalidation();
         }
     };
 
@@ -209,13 +205,12 @@ struct RenderProgram {
         out.reserve(pass_records.size());
         for (const auto& record : pass_records) {
             out.push_back(PreparedPassDiagnostic {
-                .frame_pass           = record.kind == PreparedPassKind::Frame,
-                .graph_node           = record.graph_node,
-                .pass_name            = record.pass_name,
-                .pass_type            = record.pass_type,
-                .render_item          = record.pass ? record.pass->renderItemId() : std::nullopt,
-                .invalidation_flags   = record.invalidation_flags,
-                .pipeline_fingerprint = record.pipeline_fingerprint,
+                .frame_pass         = record.kind == PreparedPassKind::Frame,
+                .graph_node         = record.graph_node,
+                .pass_name          = record.pass_name,
+                .pass_type          = record.pass_type,
+                .render_item        = record.pass ? record.pass->renderItemId() : std::nullopt,
+                .invalidation_flags = record.invalidation_flags,
                 .pipeline_cache_key = record.pass ? record.pass->pipelineCacheKey() : std::nullopt,
                 .pipeline_cache_hit = record.pass != nullptr && record.pass->pipelineCacheHit(),
                 .pipeline_cache_observed_count =

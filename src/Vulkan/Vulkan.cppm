@@ -52,6 +52,7 @@ struct ImageParameters {
     VkSampler   sampler {};
     VkExtent3D  extent {};
     uint32_t    mipmap_level { 1 };
+    uint64_t    generation { 0 };
 
     ImageParameters()  = default;
     ~ImageParameters() = default;
@@ -270,6 +271,7 @@ struct VmaImageParameters : NoCopy {
     vvk::Sampler   sampler;
     VkExtent3D     extent;
     unsigned       mipmap_level { 1 };
+    uint64_t       generation { 0 };
 
     VmaImageParameters();
     ~VmaImageParameters();
@@ -286,6 +288,7 @@ struct ExImageParameters : NoCopy {
     vvk::Sampler   sampler;
     VkExtent3D     extent;
     unsigned       mipmap_level { 1 };
+    uint64_t       generation { 0 };
     int            fd { 0 };
 
     uint32_t drm_fourcc { 0 };
@@ -310,6 +313,7 @@ inline ImageParameters ToImageParameters(const VmaImageParameters& o) noexcept {
     out.sampler      = *o.sampler;
     out.extent       = o.extent;
     out.mipmap_level = o.mipmap_level;
+    out.generation   = o.generation;
     return out;
 }
 inline ImageParameters ToImageParameters(const ExImageParameters& o) noexcept {
@@ -319,6 +323,7 @@ inline ImageParameters ToImageParameters(const ExImageParameters& o) noexcept {
     out.sampler      = *o.sampler;
     out.extent       = o.extent;
     out.mipmap_level = o.mipmap_level;
+    out.generation   = o.generation;
     return out;
 }
 
@@ -433,6 +438,9 @@ public:
 
 private:
     std::optional<VmaImageParameters> CreateTex(TextureKey);
+    uint64_t                          nextImageGeneration();
+    void                              AssignImageGeneration(VmaImageParameters&);
+    void                              AssignImageGeneration(ExImageParameters&);
     /* VIDEO-typed Image branch of CreateTex: registers a wavsen
      * VideoDecoder + stable RGBA8 VkImage and returns an ImageSlotsRef
      * pointing at that same VkImage so material binding is transparent. */
@@ -444,6 +452,7 @@ private:
     const Device&                m_device;
     Map<std::string, ImageSlots> m_tex_map;
     VideoDecodeOptions           m_video_decode_options;
+    uint64_t                     m_next_image_generation { 1 };
 
     /* Opaque pImpl for the active video-tex set. Defined inside
      * TextureCache.cpp to keep wavsen.video out of the public
@@ -724,6 +733,8 @@ public:
     const auto& pass() const { return m_pass; }
 
     GraphicsPipeline& setColorBlendStates(std::span<const VkPipelineColorBlendAttachmentState>);
+    GraphicsPipeline& setColorBlendOptions(VkPipelineColorBlendStateCreateFlags,
+                                           const std::array<float, 4>&);
     GraphicsPipeline& setLogicOp(bool enable, VkLogicOp);
 
     GraphicsPipeline& setRenderPass(vvk::RenderPass);
@@ -732,11 +743,18 @@ public:
     GraphicsPipeline&
         addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
     GraphicsPipeline& addInputBindingDescription(std::span<const VkVertexInputBindingDescription>);
+    GraphicsPipeline& setCreateInfoOptions(VkPipelineCreateFlags flags, uint32_t subpass);
     GraphicsPipeline& setTopology(VkPrimitiveTopology);
+    GraphicsPipeline& setPrimitiveRestartEnable(bool);
+    GraphicsPipeline& setViewportScissorCount(uint32_t viewport_count, uint32_t scissor_count);
+    GraphicsPipeline& setDynamicStates(std::span<const VkDynamicState>);
     GraphicsPipeline& setSampleCount(VkSampleCountFlagBits);
 
 private:
     vvk::RenderPass m_pass;
+
+    VkPipelineCreateFlags m_create_flags { 0 };
+    uint32_t              m_subpass { 0 };
 
     VkPipelineInputAssemblyStateCreateInfo         m_input_assembly {};
     std::vector<VkVertexInputBindingDescription>   m_input_bind_descriptions;
