@@ -1123,6 +1123,16 @@ bool UsesEffectQuadPositionSpace(const wpscene::Material& wpmat) {
     return mode_it != wpmat.combos.end() && mode_it->second == 1;
 }
 
+void NormalizeEffectPositionCurve(SceneAnimationCurve& curve) {
+    auto normalize_axis = [&](std::vector<SceneAnimationKey>& keys) {
+        for (auto& key : keys) {
+            key.value = curve.relative ? key.value * 2.0f : key.value * 2.0f - 1.0f;
+        }
+    };
+    normalize_axis(curve.c0);
+    normalize_axis(curve.c1);
+}
+
 // Register a (material, shader-info, wpmat) triple into the scene-wide user
 // variable index. Must be called AFTER the SceneMaterial has been moved into
 // a shared_ptr (e.g. `mesh->AddMaterial(std::move(local))`) and `stable_mat`
@@ -1329,29 +1339,27 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
                     const WPShaderInfo& info) {
     // load glname from alias and load to constvalue
     for (const auto& cs : wpmat.constantshadervalues) {
-        const auto&               name  = cs.first;
-        const std::vector<float>& value = cs.second;
-        std::string               glname;
-        if (info.alias.count(name) != 0) {
-            glname = info.alias.at(name);
-        } else {
-            for (const auto& el : info.alias) {
-                if (el.second.substr(2) == name) {
-                    glname = el.second;
-                    break;
-                }
-            }
-        }
+        const auto&               name   = cs.first;
+        const std::vector<float>& value  = cs.second;
+        std::string               glname = ResolveShaderMaterialKey(info, name);
         if (glname.empty()) {
             rstd_error("ShaderValue: {} not found in glsl", name);
         } else {
             std::vector<float> const_value = value;
-            if (UsesEffectQuadPositionSpace(wpmat) && IsShaderPositionUniform(info, glname) &&
-                const_value.size() >= 2) {
+            bool               normalize_position =
+                UsesEffectQuadPositionSpace(wpmat) && IsShaderPositionUniform(info, glname);
+            if (normalize_position && const_value.size() >= 2) {
                 const_value[0] = const_value[0] * 2.0f - 1.0f;
                 const_value[1] = const_value[1] * 2.0f - 1.0f;
             }
             material.customShader.constValues[glname] = const_value;
+            if (auto it = wpmat.constantshadervalues_animations.find(name);
+                it != wpmat.constantshadervalues_animations.end()) {
+                auto curve =
+                    std::make_shared<SceneAnimationCurve>(ToSceneAnimationCurve(it->second));
+                if (normalize_position) NormalizeEffectPositionCurve(*curve);
+                material.SetShaderValueAnimation(glname, std::move(curve));
+            }
         }
     }
 }

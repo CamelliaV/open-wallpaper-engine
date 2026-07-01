@@ -30,6 +30,26 @@ void MergeUserTextures(const std::vector<nlohmann::json>& src, std::vector<nlohm
     }
 }
 
+void LoadConstantShaderValue(std::string name, const nlohmann::json& json,
+                             std::unordered_map<std::string, std::vector<float>>& constant_values,
+                             std::unordered_map<std::string, std::string>&        user_values,
+                             std::unordered_map<std::string, AnimCurve>&          animations) {
+    std::vector<float> value;
+    owe::GetJsonValue(json, value);
+    constant_values[name] = value;
+    if (! json.is_object()) return;
+
+    if (json.contains("user") && json.at("user").is_string()) {
+        user_values[name] = json.at("user").get<std::string>();
+    }
+    if (json.contains("animation")) {
+        AnimCurve curve;
+        if (ParseAnimCurve(json.at("animation"), curve)) {
+            animations[name] = std::move(curve);
+        }
+    }
+}
+
 } // namespace
 
 bool MaterialPassBindItem::FromJson(const nlohmann::json& json) {
@@ -52,6 +72,9 @@ void MaterialPass::Update(const MaterialPass& p) {
     }
     for (const auto& el : p.constantshadervalues_user) {
         constantshadervalues_user[el.first] = el.second;
+    }
+    for (const auto& el : p.constantshadervalues_animations) {
+        constantshadervalues_animations[el.first] = el.second;
     }
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
@@ -76,6 +99,9 @@ void Material::MergePass(const MaterialPass& p) {
     }
     for (const auto& el : p.constantshadervalues_user) {
         constantshadervalues_user[el.first] = el.second;
+    }
+    for (const auto& el : p.constantshadervalues_animations) {
+        constantshadervalues_animations[el.first] = el.second;
     }
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
@@ -102,18 +128,13 @@ bool MaterialPass::FromJson(const nlohmann::json& json) {
     }
     if (json.contains("constantshadervalues")) {
         for (const auto& jC : json.at("constantshadervalues").items()) {
-            std::string        name;
-            std::vector<float> value;
+            std::string name;
             owe::GetJsonValue(jC.key(), name);
-            owe::GetJsonValue(jC.value(), value);
-            constantshadervalues[name] = value;
-            // Capture scene.json instance-level user binding so the parser can
-            // bridge effect-internal keys ("Opacity") to wallpaper-level
-            // project.json keys ("luzopacidad").
-            if (jC.value().is_object() && jC.value().contains("user") &&
-                jC.value().at("user").is_string()) {
-                constantshadervalues_user[name] = jC.value().at("user").get<std::string>();
-            }
+            LoadConstantShaderValue(std::move(name),
+                                    jC.value(),
+                                    constantshadervalues,
+                                    constantshadervalues_user,
+                                    constantshadervalues_animations);
         }
     }
     LoadUserShaderValues(json, user_shader_values);
@@ -168,15 +189,13 @@ bool Material::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
     }
     if (jContent.contains("constantshadervalues")) {
         for (const auto& jC : jContent.at("constantshadervalues").items()) {
-            std::string        name;
-            std::vector<float> value;
+            std::string name;
             owe::GetJsonValue(jC.key(), name);
-            owe::GetJsonValue(jC.value(), value);
-            constantshadervalues[name] = value;
-            if (jC.value().is_object() && jC.value().contains("user") &&
-                jC.value().at("user").is_string()) {
-                constantshadervalues_user[name] = jC.value().at("user").get<std::string>();
-            }
+            LoadConstantShaderValue(std::move(name),
+                                    jC.value(),
+                                    constantshadervalues,
+                                    constantshadervalues_user,
+                                    constantshadervalues_animations);
         }
     }
     LoadUserShaderValues(jContent, user_shader_values);

@@ -341,10 +341,18 @@ MakeAttrSet(std::initializer_list<VertexAttrSpec> specs) {
 // SceneMaterial.h
 // ============================================================================
 
+struct SceneAnimationCurve;
+
+struct SceneShaderValueAnimation {
+    ShaderValue                          base;
+    std::shared_ptr<SceneAnimationCurve> curve;
+};
+
 struct SceneMaterialCustomShader {
-    std::shared_ptr<SceneShader>          shader;
-    ShaderValues                          constValues;
-    std::optional<SceneShaderVariantDesc> variant;
+    std::shared_ptr<SceneShader>                shader;
+    ShaderValues                                constValues;
+    Map<std::string, SceneShaderValueAnimation> valueAnimations;
+    std::optional<SceneShaderVariantDesc>       variant;
     // Set when constValues was mutated outside of prepare()/parse — e.g. a
     // RenderSetUserProperty handler writing a new user-property value. The
     // pass's per-frame update_op picks this up, re-writes the affected cbuffer
@@ -575,10 +583,18 @@ public:
     }
     bool SetShaderValue(std::string uniform_name, const ShaderValue& value) {
         if (uniform_name.empty()) return false;
-        customShader.constValues[uniform_name] = ShapeShaderValue(uniform_name, value);
-        customShader.dirty                     = true;
+        auto shaped                            = ShapeShaderValue(uniform_name, value);
+        customShader.constValues[uniform_name] = shaped;
+        if (auto it = customShader.valueAnimations.find(uniform_name);
+            it != customShader.valueAnimations.end()) {
+            it->second.base = shaped;
+        }
+        customShader.dirty = true;
         return true;
     }
+    bool SetShaderValueAnimation(std::string                          uniform_name,
+                                 std::shared_ptr<SceneAnimationCurve> curve);
+    bool TickShaderValueAnimations(double runtime);
     bool SetShaderVariant(std::shared_ptr<SceneShader> shader, SceneShaderVariantDesc variant) {
         if (! shader || ! variant.Valid()) return false;
         SceneMaterialDirtyFlags flags =
@@ -2373,6 +2389,7 @@ public:
     }
 
     void        TickCameraPaths();
+    void        TickMaterialShaderAnimations();
     void        CaptureCameraPathViewports();
     std::string EnsureLinkRenderTarget(WallpaperLayerId source_layer, const SceneNode& source_node);
     bool        EnsureTextureDescriptor(std::string_view key);

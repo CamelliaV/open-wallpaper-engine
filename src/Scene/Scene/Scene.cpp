@@ -160,6 +160,37 @@ eval_lookat_tracks(std::span<const SceneCameraLookAtTrack> tracks, double runtim
     return eval_lookat_track(tracks.back(), tracks.back().duration);
 }
 
+bool shader_values_equal(const ShaderValue& a, const ShaderValue& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) return false;
+    }
+    return true;
+}
+
+ShaderValue eval_shader_value_animation(const SceneShaderValueAnimation& animation,
+                                        double                           runtime) {
+    if (! animation.curve || animation.curve->Empty() || animation.base.size() == 0)
+        return animation.base;
+
+    std::vector<float> value(animation.base.size());
+    for (std::size_t i = 0; i < animation.base.size(); ++i) value[i] = animation.base[i];
+
+    if (value.size() == 1) {
+        value[0] = animation.curve->EvaluateScalar(value[0], runtime);
+        return ShaderValue(std::span<const float>(value));
+    }
+
+    Eigen::Vector3f base { value[0],
+                           value.size() > 1 ? value[1] : 0.0f,
+                           value.size() > 2 ? value[2] : 0.0f };
+    auto            animated = animation.curve->EvaluateVec3(base, runtime);
+    value[0]                 = animated.x();
+    if (value.size() > 1) value[1] = animated.y();
+    if (value.size() > 2) value[2] = animated.z();
+    return ShaderValue(std::span<const float>(value));
+}
+
 void collect_linked_ids_from_material(const SceneMaterial& material, Set<i32>& out) {
     for (const auto& texture : material.textures) {
         if (IsSpecLinkTex(texture)) out.insert(static_cast<i32>(ParseLinkTex(texture)));
@@ -743,6 +774,42 @@ Scene::Scene()
       m_resource_generation(next_scene_resource_generation()) {}
 Scene::~Scene() = default;
 
+bool SceneMaterial::SetShaderValueAnimation(std::string                          uniform_name,
+                                            std::shared_ptr<SceneAnimationCurve> curve) {
+    if (uniform_name.empty() || ! curve || curve->Empty()) return false;
+
+    ShaderValue base;
+    if (auto it = customShader.constValues.find(uniform_name);
+        it != customShader.constValues.end()) {
+        base = it->second;
+    } else if (customShader.shader) {
+        if (auto it = customShader.shader->default_uniforms.find(uniform_name);
+            it != customShader.shader->default_uniforms.end()) {
+            base = ShapeShaderValue(uniform_name, it->second);
+        }
+    }
+    if (base.size() == 0) return false;
+
+    customShader.valueAnimations[std::move(uniform_name)] =
+        SceneShaderValueAnimation { .base = base, .curve = std::move(curve) };
+    return true;
+}
+
+bool SceneMaterial::TickShaderValueAnimations(double runtime) {
+    bool changed = false;
+    for (auto& [uniform_name, animation] : customShader.valueAnimations) {
+        ShaderValue value = eval_shader_value_animation(animation, runtime);
+        if (auto it = customShader.constValues.find(uniform_name);
+            it != customShader.constValues.end() && shader_values_equal(it->second, value)) {
+            continue;
+        }
+        customShader.constValues[uniform_name] = std::move(value);
+        changed                                = true;
+    }
+    if (changed) customShader.dirty = true;
+    return changed;
+}
+
 void Scene::RebuildResourceIndex() { m_resource_index.Rebuild(*this, m_resource_generation); }
 
 bool Scene::EnsureTextureDescriptor(std::string_view key) {
@@ -1007,6 +1074,15 @@ void Scene::TickCameraPaths() {
     }
 
     for (const auto& name : touched) UpdateLinkedCamera(name);
+}
+
+void Scene::TickMaterialShaderAnimations() {
+    if (m_resource_index.Empty()) RebuildResourceIndex();
+
+    for (auto* material : m_resource_index.Materials()) {
+        if (material == nullptr) continue;
+        material->TickShaderValueAnimations(elapsingTime);
+    }
 }
 
 void Scene::TickTransformUpdaters() {

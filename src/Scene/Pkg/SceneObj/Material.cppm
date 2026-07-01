@@ -6,6 +6,7 @@ export module wescene.pkg.scene_obj:material;
 import rstd.cppstd;
 import wescene.fs;
 import :scene_document;
+export import :field_binding;
 
 export namespace owe
 
@@ -35,6 +36,7 @@ public:
     // The fallback `value` is already extracted into `constantshadervalues`
     // by GetJsonValue's auto-unwrap.
     std::unordered_map<std::string, std::string> constantshadervalues_user;
+    std::unordered_map<std::string, AnimCurve>   constantshadervalues_animations;
     // Legacy `usershadervalues`: project.json key -> shader material key.
     std::unordered_map<std::string, std::string> user_shader_values;
     std::string                                  target;
@@ -56,6 +58,7 @@ public:
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;
+    std::unordered_map<std::string, AnimCurve>          constantshadervalues_animations;
     std::unordered_map<std::string, std::string>        user_shader_values;
 
     bool use_puppet { false };
