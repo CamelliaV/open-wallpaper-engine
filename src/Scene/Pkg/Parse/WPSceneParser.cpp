@@ -584,11 +584,12 @@ namespace
 {
 // mapRate < 1.0
 void GenCardMesh(SceneMesh& mesh, const std::array<float, 2> size,
-                 const std::array<float, 2> mapRate = { 1.0f, 1.0f }) {
-    float left   = -(size[0] / 2.0f);
-    float right  = size[0] / 2.0f;
-    float bottom = -(size[1] / 2.0f);
-    float top    = size[1] / 2.0f;
+                 const std::array<float, 2> mapRate         = { 1.0f, 1.0f },
+                 const Vector3f&            position_offset = Vector3f::Zero()) {
+    float left   = -(size[0] / 2.0f) + position_offset.x();
+    float right  = size[0] / 2.0f + position_offset.x();
+    float bottom = -(size[1] / 2.0f) + position_offset.y();
+    float top    = size[1] / 2.0f + position_offset.y();
     float z      = 0.0f;
 
     float tw = mapRate[0], th = mapRate[1];
@@ -1209,8 +1210,8 @@ void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
     }
 }
 
-void LoadAlignment(SceneNode& node, std::string_view align, Vector2f size) {
-    Vector3f trans = node.Translate();
+Vector3f AlignmentOffset(std::string_view align, Vector2f size) {
+    Vector3f offset = Vector3f::Zero();
     size *= 0.5f;
     size.y() *= 1.0f;
 
@@ -1219,12 +1220,12 @@ void LoadAlignment(SceneNode& node, std::string_view align, Vector2f size) {
     };
 
     // topleft top center ...
-    if (contains("top")) trans.y() -= size.y();
-    if (contains("left")) trans.x() += size.x();
-    if (contains("right")) trans.x() -= size.x();
-    if (contains("bottom")) trans.y() += size.y();
+    if (contains("top")) offset.y() -= size.y();
+    if (contains("left")) offset.x() += size.x();
+    if (contains("right")) offset.x() -= size.x();
+    if (contains("bottom")) offset.y() += size.y();
 
-    node.SetTranslate(trans);
+    return offset;
 }
 
 // Apply effect-pass `bind` overrides onto wpmat.textures by index, using
@@ -1638,11 +1639,12 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     }
 
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
-    auto spImgNode = rstd::sync::Arc<SceneNode>::make(Vector3f(wpimgobj.origin.data()),
-                                                      Vector3f(wpimgobj.scale.data()),
-                                                      Vector3f(wpimgobj.angles.data()),
-                                                      wpimgobj.name);
-    LoadAlignment(*spImgNode.as_ptr(), wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
+    auto           spImgNode = rstd::sync::Arc<SceneNode>::make(Vector3f(wpimgobj.origin.data()),
+                                                                Vector3f(wpimgobj.scale.data()),
+                                                                Vector3f(wpimgobj.angles.data()),
+                                                                wpimgobj.name);
+    const Vector3f alignment_offset =
+        AlignmentOffset(wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
     spImgNode->SetPerspective(wpimgobj.perspective);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
@@ -1798,13 +1800,15 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             for (const auto& mb : pmesh.masks) {
                 target.Submeshes().emplace_back();
                 auto& pre_sm = target.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm, pmesh, mb.part_ids_b, mapRate);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    pre_sm, pmesh, mb.part_ids_b, mapRate, alignment_offset);
                 pre_sm.material_slot   = slot++;
                 pre_sm.output_override = std::string(PUPPET_MASK_RT);
 
                 target.Submeshes().emplace_back();
                 auto& clip_sm = target.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm, pmesh, mb.part_ids_a, mapRate);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    clip_sm, pmesh, mb.part_ids_a, mapRate, alignment_offset);
                 clip_sm.material_slot = slot++;
             }
         }
@@ -1812,11 +1816,12 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     if (puppet) {
         if (hasEffect) {
-            GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate);
+            GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate, alignment_offset);
             for (const auto& m : puppet->meshes) {
                 if (m.positions.empty()) continue;
                 effct_final_mesh.Submeshes().emplace_back();
-                WPMdlParser::GenMeshFromMdl(effct_final_mesh.Submeshes().back(), m, mapRate);
+                WPMdlParser::GenMeshFromMdl(
+                    effct_final_mesh.Submeshes().back(), m, mapRate, alignment_offset);
             }
             if (has_bones) add_puppet_mask_submeshes(effct_final_mesh, 1);
 
@@ -1833,13 +1838,16 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             for (const auto& m : puppet->meshes) {
                 if (m.positions.empty()) continue;
                 mesh.Submeshes().emplace_back();
-                WPMdlParser::GenMeshFromMdl(mesh.Submeshes().back(), m, mapRate);
+                WPMdlParser::GenMeshFromMdl(mesh.Submeshes().back(), m, mapRate, alignment_offset);
             }
         }
     }
     if (! puppet) {
-        GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate);
-        GenCardMesh(effct_final_mesh, { wpimgobj.size[0], wpimgobj.size[1] });
+        GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate, alignment_offset);
+        GenCardMesh(effct_final_mesh,
+                    { wpimgobj.size[0], wpimgobj.size[1] },
+                    { 1.0f, 1.0f },
+                    alignment_offset);
     }
     // material blendmode for last step to use
     auto finalMaterialState = material;
@@ -1923,7 +1931,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 track_image_color_material(mesh.MaterialSlots().back().get());
                 mesh.Submeshes().emplace_back();
                 auto& pre_sm = mesh.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm, pmesh, mb.part_ids_b, mapRate);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    pre_sm, pmesh, mb.part_ids_b, mapRate, alignment_offset);
                 pre_sm.material_slot   = pre_slot;
                 pre_sm.output_override = std::string(PUPPET_MASK_RT);
 
@@ -1955,7 +1964,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 track_image_color_material(mesh.MaterialSlots().back().get());
                 mesh.Submeshes().emplace_back();
                 auto& clip_sm = mesh.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm, pmesh, mb.part_ids_a, mapRate);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    clip_sm, pmesh, mb.part_ids_a, mapRate, alignment_offset);
                 clip_sm.material_slot = clip_slot;
             }
         }

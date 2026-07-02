@@ -71,6 +71,17 @@ nlohmann::json UserPropertyValue(nlohmann::json value) {
     return out;
 }
 
+std::array<float, 3> VertexPosition(const owe::SceneVertexArray& vertices, std::size_t index) {
+    auto offsets = vertices.GetAttrOffsetMap();
+    auto it      = offsets.find(std::string(owe::WE_IN_POSITION));
+    EXPECT_NE(it, offsets.end());
+    if (it == offsets.end()) return { 0.0f, 0.0f, 0.0f };
+
+    const std::size_t offset = it->second.offset / sizeof(float);
+    const float*      p      = vertices.Data() + index * vertices.OneSize() + offset;
+    return { p[0], p[1], p[2] };
+}
+
 } // namespace
 
 TEST(SceneRuntimeScripts, EarthWorkshopMenuAlphaDefaultsHidden) {
@@ -193,6 +204,35 @@ TEST(SceneVisibilityBindings, ImageEffectBoolUpdatesWorkshop3480296606) {
     EXPECT_TRUE(hidden_scene->ApplyUserImageEffectVisibilityBindings("newproperty1",
                                                                      UserPropertyValue(true)));
     EXPECT_TRUE(hidden_effect_layer->HasRuntimeVisibleEffect());
+}
+
+TEST(SceneImageAlignment, TopLeftAlignedImageOffsetsLocalGeometry) {
+    auto scene = LoadWorkshopScene("3002120692");
+    if (! scene) GTEST_SKIP() << "workshop 3002120692 is not available";
+
+    std::vector<owe::SceneNode*> nodes;
+    CollectNodesById(scene->sceneGraph, 204, nodes);
+    ASSERT_FALSE(nodes.empty());
+    auto* node = nodes.front();
+    ASSERT_NE(node->Mesh(), nullptr);
+    ASSERT_EQ(node->Mesh()->VertexCount(), 1u);
+
+    const auto& vertices = node->Mesh()->GetVertexArray(0);
+    ASSERT_EQ(vertices.VertexCount(), 4u);
+
+    const auto top_left     = VertexPosition(vertices, 0);
+    const auto bottom_left  = VertexPosition(vertices, 1);
+    const auto top_right    = VertexPosition(vertices, 2);
+    const auto bottom_right = VertexPosition(vertices, 3);
+
+    EXPECT_NEAR(top_left[0], 0.0f, 0.001f);
+    EXPECT_NEAR(top_right[0], 818.0f, 0.001f);
+    EXPECT_NEAR(bottom_left[0], 0.0f, 0.001f);
+    EXPECT_NEAR(bottom_right[0], 818.0f, 0.001f);
+    EXPECT_NEAR(top_left[1], 0.0f, 0.001f);
+    EXPECT_NEAR(top_right[1], 0.0f, 0.001f);
+    EXPECT_NEAR(bottom_left[1], -818.0f, 0.001f);
+    EXPECT_NEAR(bottom_right[1], -818.0f, 0.001f);
 }
 
 TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlpha) {

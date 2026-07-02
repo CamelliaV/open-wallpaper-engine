@@ -1025,7 +1025,8 @@ std::optional<wpscene::Material> WPMdlParser::ParseMaterial(std::string_view ref
 }
 
 void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
-                                 std::array<float, 2> texcoord_scale) {
+                                 std::array<float, 2> texcoord_scale,
+                                 Eigen::Vector3f      position_offset) {
     const size_t vert_num = src.positions.size();
     if (vert_num == 0) return;
     if (! src.part_uv2.empty() || ! src.parts.empty()) {
@@ -1040,8 +1041,10 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
 
     // Position is always present (the parser would have failed otherwise).
     specs.push_back(VAttr::Position);
-    packers.push_back([&src](size_t i, float* dst) {
-        std::memcpy(dst, src.positions[i].data(), sizeof(src.positions[i]));
+    packers.push_back([&src, position_offset](size_t i, float* dst) {
+        dst[0] = src.positions[i][0] + position_offset.x();
+        dst[1] = src.positions[i][1] + position_offset.y();
+        dst[2] = src.positions[i][2] + position_offset.z();
     });
     if (! src.normals.empty()) {
         specs.push_back(VAttr::Normal);
@@ -1136,8 +1139,9 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
 
 void WPMdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
                                         std::span<const uint32_t> clip_part_indices,
-                                        std::array<float, 2>      texcoord_scale) {
-    GenMeshFromMdl(submesh, src, texcoord_scale);
+                                        std::array<float, 2>      texcoord_scale,
+                                        Eigen::Vector3f           position_offset) {
+    GenMeshFromMdl(submesh, src, texcoord_scale, position_offset);
     // `clip_part_indices` are positions in src.parts[] (0-based), not `part.id`.
     std::vector<SceneMesh::DrawRange> ranges;
     for (uint32_t idx : clip_part_indices) {
