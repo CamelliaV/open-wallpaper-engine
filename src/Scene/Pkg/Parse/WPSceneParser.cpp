@@ -2264,7 +2264,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
 
-        if (! wpimgobj.fullscreen && ! isPassthrough &&
+        if (! wpimgobj.fullscreen && ! isPassthrough && ! wpimgobj.copybackground &&
             ! IsLayerCompositeShader(last_effect_shader)) {
             nlohmann::json    json;
             wpscene::Material passthrough_mat;
