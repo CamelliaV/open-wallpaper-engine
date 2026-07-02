@@ -389,6 +389,8 @@ void set_fps(HostState& s, uint32_t fps) {
     s.wp->setFps(fps);
 }
 
+std::string bridge_string(char* value) { return value ? std::string(value) : std::string(); }
+
 void apply_control(HostState& s, ww_bridge_control_t& msg) {
     switch (msg.op) {
     case WW_EVT_IN_INIT:
@@ -458,6 +460,22 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     }
     case WW_EVT_IN_POINTER_AXIS: break;
+    case WW_EVT_IN_MPRIS: {
+        ww_bridge_mpris_t mpris {};
+        if (ww_bridge_mpris_from_control(&msg, &mpris) == 0 && s.wp) {
+            s.wp->setMediaStatus(owe::MediaStatus {
+                .state            = mpris.state,
+                .title            = bridge_string(mpris.title),
+                .artist           = bridge_string(mpris.artist),
+                .album            = bridge_string(mpris.album),
+                .album_artist     = bridge_string(mpris.album_artist),
+                .art_url          = bridge_string(mpris.art_url),
+                .previous_art_url = bridge_string(mpris.previous_art_url),
+            });
+        }
+        ww_bridge_mpris_free(&mpris);
+        break;
+    }
     case WW_EVT_IN_SET_FPS: set_fps(s, msg.u.set_fps.fps); break;
     case WW_EVT_IN_SHUTDOWN: signal_shutdown(s); break;
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {

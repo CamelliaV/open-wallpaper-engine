@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <filesystem>
 #include <lz4.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -164,9 +165,98 @@ void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
     header.mipmap_larger = mip_0_w * mip_0_h > header.mapWidth * header.mapHeight;
 }
 
+std::optional<uint8_t> HexValue(char c) {
+    if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
+    return std::nullopt;
+}
+
+std::optional<std::string> PercentDecode(std::string_view raw) {
+    std::string out;
+    out.reserve(raw.size());
+    for (usize i = 0; i < raw.size();) {
+        if (raw[i] != '%') {
+            out.push_back(raw[i++]);
+            continue;
+        }
+        if (i + 2 >= raw.size()) return std::nullopt;
+        auto hi = HexValue(raw[i + 1]);
+        auto lo = HexValue(raw[i + 2]);
+        if (! hi || ! lo) return std::nullopt;
+        out.push_back(static_cast<char>((*hi << 4) | *lo));
+        i += 3;
+    }
+    return out;
+}
+
+std::optional<std::string> ResolveExternalImagePath(std::string_view name) {
+    std::string path;
+    if (name.starts_with("file://localhost/")) {
+        path = "/" + std::string(name.substr(std::string_view("file://localhost/").size()));
+    } else if (name.starts_with("file:///")) {
+        path = std::string(name.substr(std::string_view("file://").size()));
+    } else if (! name.empty() && name[0] == '/') {
+        path = std::string(name);
+    } else {
+        return std::nullopt;
+    }
+    auto            decoded = PercentDecode(path).value_or(path);
+    std::error_code ec;
+    if (! std::filesystem::is_regular_file(decoded, ec)) return std::nullopt;
+    return decoded;
+}
+
+ImageHeader MakeExternalImageHeader(int width, int height) {
+    ImageHeader header;
+    header.width     = width;
+    header.height    = height;
+    header.mapWidth  = width;
+    header.mapHeight = height;
+    header.format    = TextureFormat::RGBA8;
+    header.type      = ImageType::PNG;
+    header.count     = 1;
+    header.sample    = TextureSample { TextureWrap::CLAMP_TO_EDGE,
+                                       TextureWrap::CLAMP_TO_EDGE,
+                                       TextureFilter::LINEAR,
+                                       TextureFilter::LINEAR };
+    SetHeaderPow2(header, width, height);
+    return header;
+}
+
+std::shared_ptr<Image> ParseExternalImage(std::string_view key, const std::string& path) {
+    int   width = 0, height = 0, channels = 0;
+    auto* pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
+    if (! pixels || width <= 0 || height <= 0) {
+        if (pixels) stbi_image_free(pixels);
+        return nullptr;
+    }
+
+    auto img_ptr    = std::make_shared<Image>();
+    img_ptr->key    = std::string(key);
+    img_ptr->header = MakeExternalImageHeader(width, height);
+    img_ptr->slots.resize(1);
+    auto& slot  = img_ptr->slots[0];
+    slot.width  = width;
+    slot.height = height;
+    slot.mipmaps.resize(1);
+    auto& mipmap  = slot.mipmaps[0];
+    mipmap.width  = width;
+    mipmap.height = height;
+    mipmap.size   = width * height * 4;
+    mipmap.data   = ImageDataPtr(reinterpret_cast<uint8_t*>(pixels), [](uint8_t* data) {
+        stbi_image_free(data);
+    });
+    return img_ptr;
+}
+
 } // namespace
 
 std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
+    if (auto path = ResolveExternalImagePath(name)) {
+        return ParseExternalImage(name, *path);
+    }
+
     std::string            path    = "/assets/materials/" + name + ".tex";
     std::shared_ptr<Image> img_ptr = std::make_shared<Image>();
     auto&                  img     = *img_ptr;
@@ -295,6 +385,12 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
 
 ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
     ImageHeader header;
+    if (auto path = ResolveExternalImagePath(name)) {
+        int width = 0, height = 0, channels = 0;
+        if (stbi_info(path->c_str(), &width, &height, &channels) && width > 0 && height > 0)
+            return MakeExternalImageHeader(width, height);
+        return header;
+    }
     // WE "_alias_*" textures are runtime aliases the engine resolves
     // internally (light cookies, etc.). We don't model that, so just
     // return an empty header without spamming a vfs miss.

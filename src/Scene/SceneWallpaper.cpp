@@ -44,6 +44,9 @@ struct RenderSetUserProperty {
     std::string    key;
     nlohmann::json property;
 };
+struct RenderSetMediaStatus {
+    MediaStatus status;
+};
 struct RenderStop {
     bool stop;
 };
@@ -62,8 +65,8 @@ struct RenderRequestPreparedPassDiagnostics {
 // type sits in namespace std.
 struct RenderMsg {
     std::variant<RenderInit, RenderSetScene, RenderSetFillMode, RenderSetSpeed,
-                 RenderSetUserProperty, RenderStop, RenderDraw, RenderSwapchainReady,
-                 RenderRequestPreparedPassDiagnostics>
+                 RenderSetUserProperty, RenderSetMediaStatus, RenderStop, RenderDraw,
+                 RenderSwapchainReady, RenderRequestPreparedPassDiagnostics>
         v;
 };
 
@@ -361,6 +364,23 @@ std::vector<SceneMaterialId> ApplyUserPropertyToMaterialTextures(Scene&         
     }
 
     return changed_materials;
+}
+
+nlohmann::json RuntimeTextureProperty(std::string value) {
+    nlohmann::json prop = nlohmann::json::object();
+    prop["type"]        = "scenetexture";
+    prop["value"]       = std::move(value);
+    return prop;
+}
+
+owe::script::MediaStatus ToScriptMediaStatus(const MediaStatus& status) {
+    return owe::script::MediaStatus { .state            = status.state,
+                                      .title            = status.title,
+                                      .artist           = status.artist,
+                                      .album            = status.album,
+                                      .album_artist     = status.album_artist,
+                                      .art_url          = status.art_url,
+                                      .previous_art_url = status.previous_art_url };
 }
 
 std::vector<SceneUserPropertyDiagnostic> CollectUserPropertyDiagnostics(const Scene&     scene,
@@ -754,6 +774,7 @@ public:
     void on(RenderSetFillMode&&);
     void on(RenderSetSpeed&&);
     void on(RenderSetUserProperty&&);
+    void on(RenderSetMediaStatus&&);
     void on(RenderStop&&);
     void on(RenderDraw&&);
     void on(RenderSwapchainReady&&);
@@ -1051,6 +1072,38 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
         auto diagnostics = CollectUserPropertyDiagnostics(*m_scene, key);
         (void)m_main_tx->send(
             MainMsg { MainUserPropertyDiagnostics { .diagnostics = std::move(diagnostics) } });
+    }
+    if (requires_graph_rebuild) {
+        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+        return;
+    }
+    if (renderInited() && m_rg) refreshPreparedMaterialDirtyEvents();
+}
+
+void SceneRenderController::on(RenderSetMediaStatus&& m) {
+    if (! m_scene) return;
+
+    owe::script::SetSceneMediaStatus(*m_scene, ToScriptMediaStatus(m.status));
+
+    std::vector<SceneMaterialId> texture_materials;
+    for (auto material : ApplyUserPropertyToMaterialTextures(
+             *m_scene, "$mediaThumbnail", RuntimeTextureProperty(m.status.art_url))) {
+        PushUniqueMaterialId(texture_materials, material);
+    }
+    for (auto material :
+         ApplyUserPropertyToMaterialTextures(*m_scene,
+                                             "$mediaPreviousThumbnail",
+                                             RuntimeTextureProperty(m.status.previous_art_url))) {
+        PushUniqueMaterialId(texture_materials, material);
+    }
+
+    bool requires_graph_rebuild = false;
+    if (! texture_materials.empty() && renderInited() && m_rg) {
+        m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
+        if (! m_render->refreshPreparedMaterialTextures(
+                *m_scene, m_render_scene, texture_materials)) {
+            requires_graph_rebuild = true;
+        }
     }
     if (requires_graph_rebuild) {
         rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
@@ -1457,6 +1510,10 @@ void SceneWallpaper::setFillMode(FillMode mode) {
 
 void SceneWallpaper::setSpeed(float speed) {
     (void)m_runtime->mainSender().send(MainMsg { MainSetSpeed { speed } });
+}
+
+void SceneWallpaper::setMediaStatus(MediaStatus status) {
+    (void)m_runtime->renderSender().send(RenderMsg { RenderSetMediaStatus { std::move(status) } });
 }
 
 void SceneWallpaper::setUserPropertyRaw(std::string_view name, std::string value) {

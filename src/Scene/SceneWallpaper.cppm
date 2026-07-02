@@ -29,6 +29,16 @@ using RenderPassDiagnosticCallback =
 // always opaque).
 using ClearColorCallback = std::function<void(float r, float g, float b)>;
 
+struct MediaStatus {
+    uint32_t    state { 0 };
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string album_artist;
+    std::string art_url;
+    std::string previous_art_url;
+};
+
 struct SceneWallpaperConfig {
     std::string                                     source_pkg_path;
     std::string                                     assets_dir;
@@ -73,6 +83,7 @@ public:
     void setMuted(bool);
     void setFillMode(FillMode);
     void setSpeed(float);
+    void setMediaStatus(MediaStatus);
     void setUserPropertyRaw(std::string_view, std::string);
     void setUserPropertyJson(std::string_view, nlohmann::json);
     void setOnFirstFrame(FirstFrameCallback);

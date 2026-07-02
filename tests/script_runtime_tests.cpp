@@ -1200,6 +1200,46 @@ TEST(ScriptUserProperty, ApplyUserPropertiesReceivesUnwrappedValue) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptMedia, DispatchesPropertiesPlaybackAndThumbnailEvents) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = MakeProbe(rt,
+                         "test/media_events",
+                         R"JS(
+        let props = 0, playback = 0, thumb = 0;
+        export function mediaPropertiesChanged(event) {
+            if (event.title === "Song" && event.artist === "Artist" &&
+                event.album === "Album" && event.albumArtist === "Album Artist") {
+                props = 1;
+            }
+        }
+        export function mediaPlaybackChanged(event) {
+            if (event.state === MediaPlaybackEvent.PLAYBACK_PLAYING) playback = 1;
+        }
+        export function mediaThumbnailChanged(event) {
+            thisObject.visible = event.hasThumbnail;
+            if (event.hasThumbnail && event.thumbnail === "/tmp/cover.png" &&
+                event.previousThumbnail === "/tmp/previous.png" &&
+                event.primaryColor.x === 1 && event.secondaryColor.x === 0) {
+                thumb = 1;
+            }
+        }
+        export function update() { return props && playback && thumb && thisObject.visible ? 1 : 0; }
+    )JS");
+    ASSERT_NE(fs, nullptr);
+
+    rt.SetMediaStatus(MediaStatus { .state            = 1,
+                                    .title            = "Song",
+                                    .artist           = "Artist",
+                                    .album            = "Album",
+                                    .album_artist     = "Album Artist",
+                                    .art_url          = "/tmp/cover.png",
+                                    .previous_art_url = "/tmp/previous.png" });
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
 TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
     JsRuntime   rt;
     FrameInputs fi {};

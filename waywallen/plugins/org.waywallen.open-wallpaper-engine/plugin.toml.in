@@ -21,7 +21,7 @@ types = ["scene"]
 priority = 100
 spawn_version = 6
 extras = ["assets", "workshop_id"]
-events = ["pointer"]
+events = ["pointer", "mpris"]
 
 [renderers.wescene-renderer.settings]
 enable_audio = { type = "bool", default = true, identity = true, label_key = "settings.wescene.enable_audio", group = "audio", order = 5 }

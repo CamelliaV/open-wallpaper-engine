@@ -84,6 +84,16 @@ struct FrameInputs {
     uint32_t mouse_buttons_released { 0 };
 };
 
+struct MediaStatus {
+    uint32_t    state { 0 };
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string album_artist;
+    std::string art_url;
+    std::string previous_art_url;
+};
+
 // --- script properties (configuration) --------------------------------------
 
 // One descriptor produced by createScriptProperties().addX() calls inside
@@ -150,6 +160,10 @@ public:
     // `property` should be the descriptor object shape used by project.json
     // (`{value: ...}` plus optional metadata).
     void SetUserProperty(std::string_view key, const nlohmann::json& property);
+
+    // Dispatch Wallpaper Engine media callbacks for the current media
+    // snapshot. Call from the renderer owner thread.
+    void SetMediaStatus(const MediaStatus& status);
 
     using BoneIndexResolver = std::function<uint32_t(owe::SceneNode*, std::string_view)>;
     using BoneTransformResolver =
@@ -263,6 +277,8 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi);
 // Patch `engine.userProperties` on the ScriptScene attached to `scene`.
 // No-op when the scene has no script runtime.
 void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const nlohmann::json& property);
+
+void SetSceneMediaStatus(owe::Scene& scene, const MediaStatus& status);
 
 // Forward `SetPersistence` to the ScriptScene attached to `scene`. No-op
 // when the scene has no script runtime.

@@ -1189,10 +1189,20 @@ void RegisterShaderUserVarIndex(Scene* pScene, SceneMaterial* stable_mat,
 }
 
 std::optional<std::string> UserTexturePropertyKey(const nlohmann::json& binding) {
-    if (! binding.is_string()) return std::nullopt;
-    auto key = binding.get<std::string>();
-    if (key.empty()) return std::nullopt;
-    return key;
+    if (binding.is_string()) {
+        auto key = binding.get<std::string>();
+        if (key.empty()) return std::nullopt;
+        return key;
+    }
+    if (! binding.is_object()) return std::nullopt;
+    auto type = binding.find("type");
+    auto name = binding.find("name");
+    if (type == binding.end() || name == binding.end()) return std::nullopt;
+    if (! type->is_string() || ! name->is_string()) return std::nullopt;
+    if (type->get<std::string>() != "system") return std::nullopt;
+    auto value = name->get<std::string>();
+    if (value != "$mediaThumbnail" && value != "$mediaPreviousThumbnail") return std::nullopt;
+    return value;
 }
 
 void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
@@ -1244,14 +1254,7 @@ void ApplyTextureBinds(wpscene::Material&                                  wpmat
 }
 
 bool IsSystemMediaTextureBinding(const nlohmann::json& binding) {
-    if (! binding.is_object()) return false;
-    auto type = binding.find("type");
-    auto name = binding.find("name");
-    if (type == binding.end() || name == binding.end()) return false;
-    if (! type->is_string() || ! name->is_string()) return false;
-    if (type->get<std::string>() != "system") return false;
-    const auto value = name->get<std::string>();
-    return value == "$mediaThumbnail" || value == "$mediaPreviousThumbnail";
+    return UserTexturePropertyKey(binding).has_value() && binding.is_object();
 }
 
 std::string ResolveSceneTextureProperty(const ParseContext& context, std::string_view key) {
