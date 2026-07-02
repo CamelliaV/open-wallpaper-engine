@@ -246,7 +246,7 @@ private:
 
     usize m_render_size { std::numeric_limits<usize>::max() };
 
-    uint32_t m_id;
+    uint32_t m_id { std::numeric_limits<uint32_t>::max() };
     uint64_t m_generation { 1 };
 };
 

@@ -142,6 +142,16 @@ void main(){}
     EXPECT_EQ(info.alias.at("brightness"), "g_Brightness");
 }
 
+TEST(WPShaderParser, ScalarAnnotationAcceptsLeadingZeroRangeNumber) {
+    const std::string src  = R"(
+uniform float u_userSpeed; // {"material":"Speed","default":1,"range":[0,01]}
+void main(){}
+)";
+    auto              info = Parse(src);
+    ASSERT_EQ(info.svs.count("u_userSpeed"), 1u);
+    EXPECT_EQ(info.alias.at("Speed"), "u_userSpeed");
+}
+
 TEST(WPShaderParser, TextureAliasRecorded) {
     const std::string src  = R"(
 uniform sampler2D g_Texture0; // {"material":"albedo","label":"Albedo","default":"util/white"}

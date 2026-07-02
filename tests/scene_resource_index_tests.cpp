@@ -609,6 +609,38 @@ TEST(SceneGeometryDataGeneration, IncrementsWhenGeometryDataChanges) {
     EXPECT_GT(indices.DataGeneration(), index_generation);
 }
 
+TEST(SceneVertexArray, AddVertexAppendsAndMoveKeepsOwnedState) {
+    std::vector<owe::SceneVertexArray::SceneVertexAttribute> attrs {
+        { .name = "a_Position", .type = owe::VertexType::FLOAT3 },
+        { .name = "a_TexCoord", .type = owe::VertexType::FLOAT2 },
+    };
+    owe::SceneVertexArray vertices(attrs, 2);
+    vertices.SetOption("dynamic", true);
+
+    std::array<float, 5> a { 1.0f, 2.0f, 3.0f, 0.25f, 0.5f };
+    std::array<float, 5> b { 4.0f, 5.0f, 6.0f, 0.75f, 1.0f };
+    ASSERT_TRUE(vertices.AddVertex(a.data()));
+    ASSERT_TRUE(vertices.AddVertex(b.data()));
+
+    owe::SceneVertexArray moved(std::move(vertices));
+    EXPECT_TRUE(moved.GetOption("dynamic"));
+    ASSERT_EQ(moved.VertexCount(), 2u);
+
+    auto       offsets    = moved.GetAttrOffsetMap();
+    const auto pos_offset = offsets.at("a_Position").offset / sizeof(float);
+    const auto uv_offset  = offsets.at("a_TexCoord").offset / sizeof(float);
+    EXPECT_FLOAT_EQ(moved.Data()[pos_offset + 0], 1.0f);
+    EXPECT_FLOAT_EQ(moved.Data()[pos_offset + moved.OneSize() + 0], 4.0f);
+    EXPECT_FLOAT_EQ(moved.Data()[uv_offset + 0], 0.25f);
+    EXPECT_FLOAT_EQ(moved.Data()[uv_offset + moved.OneSize() + 0], 0.75f);
+
+    owe::SceneVertexArray assigned(attrs, 1);
+    assigned = std::move(moved);
+    EXPECT_TRUE(assigned.GetOption("dynamic"));
+    ASSERT_EQ(assigned.VertexCount(), 2u);
+    EXPECT_FLOAT_EQ(assigned.Data()[pos_offset + assigned.OneSize() + 1], 5.0f);
+}
+
 TEST(SceneMeshDirtyEvents, RoutesDataAndLayoutDirtyByOwner) {
     owe::Scene scene;
     scene.sceneGraph->ID() = 1;

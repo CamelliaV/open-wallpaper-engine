@@ -38,6 +38,18 @@ std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(
 
 namespace
 {
+struct SceneNodeArcHold {
+    rstd::sync::Arc<SceneNode> node;
+
+    explicit SceneNodeArcHold(rstd::sync::Arc<SceneNode> n): node(rstd::move(n)) {}
+    SceneNodeArcHold(const SceneNodeArcHold& other): node(other.node.clone()) {}
+    SceneNodeArcHold(SceneNodeArcHold&&) noexcept            = default;
+    SceneNodeArcHold& operator=(SceneNodeArcHold&&) noexcept = default;
+    SceneNodeArcHold& operator=(const SceneNodeArcHold&)     = delete;
+
+    SceneNode* get() const { return node.as_ptr(); }
+};
+
 // Detect the WE audio-bar fanout pattern: scripts that bind a layer's
 // `visible` field, call engine.registerAudioBuffers(N), and then create
 // N-1 sibling layers in init() via thisScene.createLayer(...). owe doesn't
@@ -3367,9 +3379,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         sp_node->SetCamera(addr);
     }
 
-    SceneNode* compose_ptr       = compose_node.as_ptr();
-    auto       apply_text_anchor = [compose_ptr, anchor_state]() {
-        auto contains = [](const std::string& value, std::string_view token) {
+    auto compose_hold      = SceneNodeArcHold(compose_node.clone());
+    auto apply_text_anchor = [compose_hold, anchor_state]() {
+        auto* compose_ptr = compose_hold.get();
+        auto  contains    = [](const std::string& value, std::string_view token) {
             return value.find(token) != std::string::npos;
         };
         const auto& scale = compose_ptr->Scale();
@@ -3389,7 +3402,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // bbox; UVs subsample the central text region of ppong_a (since the
     // ortho is layer-sized but glyphs occupy only text-bbox in the
     // middle).
-    auto rebuild_compose = [compose_ptr,
+    auto rebuild_compose = [compose_hold,
                             anchor_state,
                             apply_text_anchor,
                             layer_w,
@@ -3397,6 +3410,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                             has_text_effect,
                             object_w,
                             object_h](float tw, float th, float source_w, float source_h) {
+        auto* compose_ptr = compose_hold.get();
         if (tw <= 0.0f) tw = 1.0f;
         if (th <= 0.0f) th = 1.0f;
         if (source_w <= 0.0f) source_w = tw;
@@ -3441,9 +3455,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         anchor_state->origin = *next;
         apply_text_anchor();
     };
-    auto apply_text_scale = [compose_ptr, apply_text_anchor](const script::ScriptValue& value) {
-        Vector3f current = compose_ptr->Scale();
-        auto     next    = ScriptValueAsVec3(value, current);
+    auto apply_text_scale = [compose_hold, apply_text_anchor](const script::ScriptValue& value) {
+        auto*    compose_ptr = compose_hold.get();
+        Vector3f current     = compose_ptr->Scale();
+        auto     next        = ScriptValueAsVec3(value, current);
         if (! next) return;
         compose_ptr->SetScale(*next);
         apply_text_anchor();
