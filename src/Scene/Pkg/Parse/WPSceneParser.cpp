@@ -3135,9 +3135,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     const float dynamic_h_budget =
         std::max({ text_source_bbox_h, text_bbox_h, object_h * 2.0f, 256.0f });
     const float layer_max_w =
-        has_text_effect ? object_w : (wants_dynamic_text ? dynamic_w_budget : text_source_bbox_w);
+        wants_dynamic_text ? dynamic_w_budget : (has_text_effect ? object_w : text_source_bbox_w);
     const float layer_max_h =
-        has_text_effect ? object_h : (wants_dynamic_text ? dynamic_h_budget : text_source_bbox_h);
+        wants_dynamic_text ? dynamic_h_budget : (has_text_effect ? object_h : text_source_bbox_h);
     const i32 layer_w = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_w, layer_max_w)));
     const i32 layer_h = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_h, layer_max_h)));
     {
@@ -3422,18 +3422,28 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                             layer_w,
                             layer_h,
                             has_text_effect,
+                            wants_dynamic_text,
                             object_w,
-                            object_h](float tw, float th, float source_w, float source_h) {
+                            object_h,
+                            text_padding =
+                                style.padding](float tw, float th, float source_w, float source_h) {
         auto* compose_ptr = compose_hold.get();
         if (tw <= 0.0f) tw = 1.0f;
         if (th <= 0.0f) th = 1.0f;
         if (source_w <= 0.0f) source_w = tw;
         if (source_h <= 0.0f) source_h = th;
         if (has_text_effect) {
-            tw       = object_w;
-            th       = object_h;
-            source_w = object_w;
-            source_h = object_h;
+            if (wants_dynamic_text) {
+                tw       = std::max(object_w, source_w + 2.0f * text_padding);
+                th       = object_h;
+                source_w = tw;
+                source_h = std::max(object_h, source_h + 2.0f * text_padding);
+            } else {
+                tw       = object_w;
+                th       = object_h;
+                source_w = object_w;
+                source_h = object_h;
+            }
         }
         anchor_state->width  = tw;
         anchor_state->height = th;
