@@ -5,6 +5,7 @@ local M = {}
 local _locale_cache = {}
 
 local LOCALE_REL = "/steamapps/common/wallpaper_engine/locale/ui_en-us.json"
+local PROPERTY_TITLE_PREFIX = "<style>\n  img { max-width: 100%; }\n  </style>\n"
 
 local function load_locale(ctx, library_root)
     if library_root == nil or library_root == "" then return nil end
@@ -44,6 +45,14 @@ local function map_property_keys(props)
     end
 end
 
+local function prefix_property_titles(props)
+    for _, v in pairs(props) do
+        if type(v) == "table" and type(v.text) == "string" then
+            v.text = PROPERTY_TITLE_PREFIX .. v.text
+        end
+    end
+end
+
 function M.properties(entry, ctx)
     local dir = project_util.project_dir_of(entry)
     if not dir then return nil end
@@ -68,6 +77,8 @@ function M.properties(entry, ctx)
             end
         end
     end
+
+    prefix_property_titles(props)
 
     return ctx.json_encode(props)
 end
