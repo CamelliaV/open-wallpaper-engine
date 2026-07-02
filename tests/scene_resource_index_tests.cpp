@@ -641,6 +641,37 @@ TEST(SceneVertexArray, AddVertexAppendsAndMoveKeepsOwnedState) {
     EXPECT_FLOAT_EQ(assigned.Data()[pos_offset + assigned.OneSize() + 1], 5.0f);
 }
 
+TEST(SceneNodeFieldAnimation, AlphaAnimationTicksThroughScene) {
+    owe::Scene scene;
+    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    node->SetBaseColor({ 1.0f, 1.0f, 1.0f }, 0.3f);
+
+    owe::SceneAnimationCurve curve;
+    curve.fps    = 30.0f;
+    curve.length = 180;
+    curve.mode   = "single";
+    curve.c0     = {
+        { .frame = 0, .value = 0.0f },
+        { .frame = 60, .value = 0.5f },
+        { .frame = 100, .value = 0.0f },
+    };
+    node->SetAlphaAnimation(std::move(curve));
+    scene.sceneGraph->AppendChild(node.clone());
+
+    scene.elapsingTime = 0.0;
+    scene.TickNodeFieldAnimations();
+    EXPECT_TRUE(node->IsAlphaOverridden());
+    EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.0f);
+
+    scene.elapsingTime = 2.0;
+    scene.TickNodeFieldAnimations();
+    EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.5f);
+
+    scene.elapsingTime = 8.8;
+    scene.TickNodeFieldAnimations();
+    EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.0f);
+}
+
 TEST(SceneMeshDirtyEvents, RoutesDataAndLayoutDirtyByOwner) {
     owe::Scene scene;
     scene.sceneGraph->ID() = 1;

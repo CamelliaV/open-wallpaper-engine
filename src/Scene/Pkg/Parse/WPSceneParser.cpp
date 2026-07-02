@@ -363,6 +363,11 @@ void AssignCurve(SceneAnimationCurve& dst, const wpscene::FieldBindings& binding
     if (it != bindings.animations.end()) dst = ToSceneAnimationCurve(it->second);
 }
 
+void AssignNodeFieldAnimations(SceneNode& node, const wpscene::FieldBindings& bindings) {
+    auto it = bindings.animations.find("alpha");
+    if (it != bindings.animations.end()) node.SetAlphaAnimation(ToSceneAnimationCurve(it->second));
+}
+
 std::optional<SceneCameraLookAtKey> ParseLookAtKey(const nlohmann::json& json) {
     if (! json.is_object()) return std::nullopt;
     SceneCameraLookAtKey key;
@@ -1614,14 +1619,21 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     for (const auto& wpeffobj : wpimgobj.effects) {
         if (wpeffobj.visible || ! wpeffobj.visible_user.empty()) count_eff++;
     }
-    bool hasEffect     = count_eff > 0;
-    bool isPassthrough = wpimgobj.config.passthrough;
+    bool       hasEffect        = count_eff > 0;
+    bool       isPassthrough    = wpimgobj.config.passthrough;
+    const bool alpha_can_change = ! wpimgobj.alpha_user_key.empty() ||
+                                  wpimgobj.field_bindings.animations.count("alpha") != 0 ||
+                                  wpimgobj.field_bindings.scripts.count("alpha") != 0;
 
     // No-effect fullscreen / compose layers contribute nothing on their own
     // (they just sample `_rt_default` and write it back). Mark as elidable
     // so the render-graph builder drops them when unreferenced, or routes
     // them to `_rt_link_<id>` when another layer reads their composite.
     if (! hasEffect && wpimgobj.visible && (wpimgobj.fullscreen || isPassthrough)) {
+        context.scene->MarkLayerStaticElidable(
+            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
+    }
+    if (! hasEffect && wpimgobj.visible && wpimgobj.alpha <= 0.0f && ! alpha_can_change) {
         context.scene->MarkLayerStaticElidable(
             WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
     }
@@ -2343,6 +2355,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
     }
+    AssignNodeFieldAnimations(*spImgNode.as_ptr(), wpimgobj.field_bindings);
     WireFieldScripts(context, spImgNode, wpimgobj.field_bindings);
     if (! wpimgobj.color_user_key.empty()) {
         context.scene->image_color_user_index[wpimgobj.color_user_key].push_back(
@@ -3266,9 +3279,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                 std::max(1.0f, object_h / static_cast<float>(wpfbo.scale))),
                         };
                     }();
-                    scene.renderTargets[rtname] = { .width      = fbo_size[0],
-                                                    .height     = fbo_size[1],
-                                                    .allowReuse = true };
+                    scene.renderTargets[rtname] = { .width                = fbo_size[0],
+                                                    .height               = fbo_size[1],
+                                                    .allowReuse           = true,
+                                                    .clear_on_first_write = true };
                     fboMap[wpfbo.name]          = rtname;
                 }
 
@@ -3487,6 +3501,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
     // Transform-style script bindings (origin/scale/angles) animate the
     // composite quad in world space, not the layer-space glyph node.
+    AssignNodeFieldAnimations(*compose_node.as_ptr(), obj.field_bindings);
     WireFieldScripts(
         context, compose_node, obj.field_bindings, apply_text_origin, apply_text_scale);
     if (! obj.visible) compose_node->SetVisible(false);

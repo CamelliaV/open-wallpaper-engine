@@ -272,6 +272,58 @@ TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlp
     EXPECT_EQ(values.count("g_UserAlpha"), 0u);
 }
 
+TEST(SceneUniformUpdaterRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
+    owe::Scene        scene;
+    owe::SceneNode    node;
+    owe::sprite_map_t sprites;
+
+    auto camera_node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
+    camera->AttatchNode(camera_node.as_ptr());
+    scene.cameras["default"] = camera;
+    scene.activeCamera       = camera.get();
+
+    auto mesh = std::make_shared<owe::SceneMesh>();
+    mesh->AddMaterial(owe::SceneMaterial {});
+    node.AddMesh(mesh);
+    node.SetBaseColor({ 0.0f, 0.0f, 0.0f }, 0.35f);
+
+    owe::SceneUniformUpdater updater(&scene);
+    updater.InitUniforms(&node, [](std::string_view name) {
+        return name == "g_Color4";
+    });
+
+    std::unordered_map<std::string, owe::ShaderValue> values;
+    node.SetVisible(true);
+    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
+        values[std::string(name)] = value;
+    });
+    ASSERT_EQ(values.count("g_Color4"), 1u);
+    const auto& visible_color = values.at("g_Color4");
+    ASSERT_EQ(visible_color.size(), 4u);
+    EXPECT_FLOAT_EQ(visible_color[3], 0.35f);
+
+    values.clear();
+    node.SetVisible(false);
+    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
+        values[std::string(name)] = value;
+    });
+    ASSERT_EQ(values.count("g_Color4"), 1u);
+    const auto& hidden_color = values.at("g_Color4");
+    ASSERT_EQ(hidden_color.size(), 4u);
+    EXPECT_FLOAT_EQ(hidden_color[3], 0.0f);
+
+    values.clear();
+    node.SetVisible(true);
+    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
+        values[std::string(name)] = value;
+    });
+    ASSERT_EQ(values.count("g_Color4"), 1u);
+    const auto& restored_color = values.at("g_Color4");
+    ASSERT_EQ(restored_color.size(), 4u);
+    EXPECT_FLOAT_EQ(restored_color[3], 0.35f);
+}
+
 TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource) {
     owe::Scene scene;
     scene.ortho[0] = 3840;

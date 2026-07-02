@@ -710,6 +710,10 @@ Eigen::Vector3f SceneAnimationCurve::EvaluateVec3(const Eigen::Vector3f& base,
     return value;
 }
 
+void SceneNode::TickFieldAnimations(double runtime) {
+    if (m_alpha_curve) SetUserAlpha(m_alpha_curve->EvaluateScalar(m_base_alpha, runtime));
+}
+
 void SceneCameraPath::CaptureViewport() {
     if (! camera) return;
     default_width  = camera->Width();
@@ -1083,6 +1087,16 @@ void Scene::TickMaterialShaderAnimations() {
         if (material == nullptr) continue;
         material->TickShaderValueAnimations(elapsingTime);
     }
+}
+
+void Scene::TickNodeFieldAnimations() {
+    auto tick_node = [runtime = elapsingTime](auto&                             self,
+                                              const rstd::sync::Arc<SceneNode>& node) -> void {
+        if (! node) return;
+        node->TickFieldAnimations(runtime);
+        for (const auto& child : node->GetChildren()) self(self, child);
+    };
+    tick_node(tick_node, sceneGraph);
 }
 
 void Scene::TickTransformUpdaters() {
