@@ -1142,6 +1142,9 @@ globalThis.engine.isScreensaver     = function() { return false; };
 // these methods covers the audio-responsive cluster (1023 instances).
 class Vec2 {
   constructor(x, y) {
+    if (typeof x === 'object' && x !== null) {
+      this.x = x.x ?? 0; this.y = x.y ?? 0; return;
+    }
     // Single-number arg splats to both components (WE convention,
     // e.g. `new Vec2(0.5)` => Vec2(0.5, 0.5)).
     if (typeof x === 'number' && y === undefined) { this.x = x; this.y = x; return; }

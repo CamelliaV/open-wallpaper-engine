@@ -991,6 +991,33 @@ TEST(ScriptVector, InstanceMixInterpolatesVectors) {
     EXPECT_NEAR(v.z, 7.0, 0.001);
 }
 
+TEST(ScriptVector, Vec2ConstructorCopiesVectorComponents) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update(value) {
+                let fromVec3 = new Vec2(new Vec3(100, 200, 300));
+                let fromObject = new Vec2({ x: 3, y: 4, z: 5 });
+                return new Vec3(fromVec3.x, fromVec3.y, fromObject.length());
+            }
+        )JS",
+        "test/vector_vec2_copy_ctor",
+        FieldKind::Vec3,
+        nlohmann::json::object(),
+        nlohmann::json("0.0 0.0 0.0"),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    ASSERT_TRUE(std::holds_alternative<Vec3Value>(fs->last_value()));
+    const auto& v = std::get<Vec3Value>(fs->last_value());
+    EXPECT_NEAR(v.x, 100.0, 0.001);
+    EXPECT_NEAR(v.y, 200.0, 0.001);
+    EXPECT_NEAR(v.z, 5.0, 0.001);
+}
+
 TEST(ScriptVector, LengthSqrMatchesWallpaperEngineVectors) {
     JsRuntime   rt;
     FrameInputs fi {};
