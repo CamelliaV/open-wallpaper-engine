@@ -99,7 +99,8 @@ inline float AudioResponseScale(std::span<const float> audio, const ParticleAudi
 }
 
 inline Particle Spwan(GenParticleOp gen, std::vector<ParticleInitOp>& inis, double duration) {
-    auto particle = gen();
+    auto particle   = gen();
+    particle.random = Random::get(0.0f, 1.0f);
     for (auto& el : inis) el(particle, duration);
     return particle;
 }

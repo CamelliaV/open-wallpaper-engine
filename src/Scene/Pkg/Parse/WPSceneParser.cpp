@@ -2490,7 +2490,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         shaderInfo.combos["TRAILSUBDIVISION"] = std::to_string(subdiv);
     }
 
-    if (! particle_obj.flags[wpscene::Particle::FlagEnum::spritenoframeblending]) {
+    auto animationmode = ToAnimMode(particle_obj.animationmode);
+    if (animationmode == ParticleAnimationMode::SEQUENCE &&
+        ! particle_obj.flags[wpscene::Particle::FlagEnum::spritenoframeblending]) {
         shaderInfo.combos["SPRITESHEETBLEND"] = "1";
     }
 
@@ -2516,7 +2518,6 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     LoadConstvalue(material, particle_obj.material, shaderInfo);
     auto  spMesh             = std::make_shared<SceneMesh>(true);
     auto& mesh               = *spMesh;
-    auto  animationmode      = ToAnimMode(particle_obj.animationmode);
     auto  sequencemultiplier = particle_obj.sequencemultiplier;
     bool  hasSprite          = material.hasSprite;
     (void)hasSprite;
@@ -2567,7 +2568,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                 return;
             }
             switch (animationmode) {
-            case ParticleAnimationMode::RANDOMONE: lifetime = std::floor(p.init.lifetime); break;
+            case ParticleAnimationMode::RANDOMONE:
+                lifetime = std::clamp(p.random, 0.0f, std::nextafter(1.0f, 0.0f));
+                break;
             case ParticleAnimationMode::SEQUENCE:
                 lifetime = (1.0f - (p.lifetime / p.init.lifetime)) * sequencemultiplier;
                 break;
@@ -2575,7 +2578,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         },
         follow_anchor,
         trail_length,
-        static_cast<double>(particle_obj.starttime));
+        static_cast<double>(particle_obj.starttime),
+        particle_obj.flags[wpscene::Particle::FlagEnum::wordspace]);
 
     particleSub->SetOwnerNode(spNode.as_ptr());
     LoadEmitter(*particleSub,

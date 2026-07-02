@@ -1467,6 +1467,7 @@ struct Particle {
     Eigen::Vector3f angularVelocity { 0.0f, 0.0f, 0.0f };
     Eigen::Vector3f angularAcceleration { 0.0f, 0.0f, 0.0f };
 
+    float     random { 0.0f };
     bool      mark_new { true };
     InitValue init {};
 };
@@ -1487,6 +1488,7 @@ struct ParticleInfo {
     std::span<const ParticleControlpoint> controlpoints;
     Eigen::Matrix3d                       world_from_local_dir { Eigen::Matrix3d::Identity() };
     Eigen::Matrix3d                       local_from_world_dir { Eigen::Matrix3d::Identity() };
+    bool                                  world_space { false };
     double                                time;
     double                                time_pass;
 };
@@ -1827,7 +1829,7 @@ public:
     ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, uint32_t maxcount,
                       double rate, u32 maxcount_instance, double probability, SpawnType type,
                       ParticleRawGenSpecOp specOp, ParticleFollowAnchor follow_anchor = {},
-                      u32 trail_length = 0, double start_time = 0.0);
+                      u32 trail_length = 0, double start_time = 0.0, bool world_space = false);
     ~ParticleSubSystem();
 
     void Emitt();
@@ -1874,6 +1876,7 @@ private:
     double               m_rate;
     double               m_time;
     double               m_start_time { 0.0 };
+    bool                 m_world_space { false };
     bool                 m_started { false };
 
     std::vector<std::unique_ptr<ParticleSubSystem>> m_children;

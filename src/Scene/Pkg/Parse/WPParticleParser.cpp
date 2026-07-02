@@ -455,8 +455,12 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(
                 for (auto& p : info.particles) {
                     Vector3d world_velocity =
                         info.world_from_local_dir * PM::GetVelocity(p).cast<double>();
-                    Vector3d world_acc = algorism::DragForce(world_velocity, drag) + vecG;
-                    Vector3d acc       = info.local_from_world_dir * world_acc;
+                    Vector3d acc =
+                        info.local_from_world_dir * algorism::DragForce(world_velocity, drag);
+                    if (info.world_space)
+                        acc += info.local_from_world_dir * vecG;
+                    else
+                        acc += vecG;
                     PM::Accelerate(p, speed * acc, info.time_pass);
                 }
             };

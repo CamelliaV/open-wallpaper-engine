@@ -35,7 +35,7 @@ ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMes
                                      double probability, SpawnType type,
                                      ParticleRawGenSpecOp specOp,
                                      ParticleFollowAnchor follow_anchor, u32 trail_length,
-                                     double start_time)
+                                     double start_time, bool world_space)
     : m_sys(p),
       m_mesh(sm),
       m_maxcount(maxcount),
@@ -44,6 +44,7 @@ ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMes
       m_follow_anchor(follow_anchor),
       m_time(0),
       m_start_time(start_time),
+      m_world_space(world_space),
       m_maxcount_instance(maxcount_instance),
       m_probability(probability),
       m_spawn_type(type),
@@ -127,8 +128,8 @@ void ParticleSubSystem::Warmup() {
 }
 
 void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
-    double particleTime = frame_time * m_rate;
-    m_time += particleTime;
+    double simulation_time = frame_time * m_rate;
+    m_time += simulation_time;
 
     // Cursor in canvas-absolute world coords. The "global" camera lives at
     // (ortho_w/2, ortho_h/2) with width=ortho_w (SceneCamera::Ortho uses
@@ -229,10 +230,11 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
 
         if (! inst->IsDeath()) {
             for (auto& emittOp : m_emiters) {
+                // m_rate scales particle simulation, not emitter cadence.
                 emittOp(inst->ParticlesVec(),
                         m_initializers,
                         m_maxcount,
-                        particleTime,
+                        frame_time,
                         std::span<const float> { audio_average.data(), audio_average.size() },
                         std::span<const ParticleControlpoint> { m_controlpoints });
             }
@@ -246,8 +248,9 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
             .controlpoints        = m_controlpoints,
             .world_from_local_dir = world_from_local_dir,
             .local_from_world_dir = local_from_world_dir,
+            .world_space          = m_world_space,
             .time                 = m_time,
-            .time_pass            = particleTime,
+            .time_pass            = simulation_time,
         };
 
         bool  has_live = false;
@@ -282,7 +285,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
                 continue;
             }
             ParticleModify::Reset(p);
-            ParticleModify::ChangeLifetime(p, -particleTime);
+            ParticleModify::ChangeLifetime(p, -simulation_time);
 
             if (! ParticleModify::LifetimeOk(p)) {
                 // new dead
