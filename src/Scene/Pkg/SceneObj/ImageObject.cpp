@@ -211,6 +211,8 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
     ReadUserValueBinding(json, "color", color_user);
     color_user_key = color_user.name;
     owe::GetJsonValue(json, "alpha", alpha, false);
+    ReadUserValueBinding(json, "alpha", alpha_user);
+    alpha_user_key = alpha_user.name;
     owe::GetJsonValue(json, "brightness", brightness, false);
 
     owe::GetJsonValue(jImage, "puppet", puppet, false);

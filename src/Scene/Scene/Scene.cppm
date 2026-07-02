@@ -2296,11 +2296,12 @@ public:
 
     Map<std::string, std::vector<std::shared_ptr<SceneSoundControl>>> sound_volume_user_index;
 
-    struct ImageColorBinding {
+    struct ImagePropertyBinding {
         SceneNode*                  node { nullptr };
         std::vector<SceneMaterial*> materials;
     };
-    Map<std::string, std::vector<ImageColorBinding>> image_color_user_index;
+    Map<std::string, std::vector<ImagePropertyBinding>> image_color_user_index;
+    Map<std::string, std::vector<ImagePropertyBinding>> image_alpha_user_index;
 
     struct MaterialTextureUserBinding {
         SceneMaterial* material { nullptr };

@@ -515,6 +515,28 @@ bool ApplyUserPropertyToShaderCombos(Scene& scene, const std::string& key,
     return requires_graph_rebuild;
 }
 
+float CurrentImagePropertyAlpha(SceneNode* node) {
+    if (! node) return 1.0f;
+    return node->IsAlphaOverridden() ? node->EffectiveAlpha() : node->BaseAlpha();
+}
+
+Eigen::Vector3f CurrentImagePropertyColor(SceneNode* node) {
+    if (! node) return { 1.0f, 1.0f, 1.0f };
+    return node->IsColorOverridden() ? node->Color() : node->BaseColor();
+}
+
+bool MaterialHasShaderUniform(const SceneMaterial& material, std::string_view uniform_name) {
+    const std::string name(uniform_name);
+    if (material.customShader.constValues.contains(name)) return true;
+    if (material.customShader.shader &&
+        material.customShader.shader->default_uniforms.contains(name))
+        return true;
+    if (material.customShader.variant &&
+        material.customShader.variant->default_uniforms.contains(name))
+        return true;
+    return false;
+}
+
 void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
                                    const nlohmann::json& prop) {
     auto it = scene.image_color_user_index.find(key);
@@ -527,13 +549,44 @@ void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
     for (const auto& binding : it->second) {
         if (binding.node) binding.node->SetColor(color);
 
-        float                alpha = binding.node ? binding.node->BaseAlpha() : 1.0f;
-        std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
         std::array<float, 3> color3 { color.x(), color.y(), color.z() };
         for (auto* material : binding.materials) {
             if (! material) continue;
-            scene.SetMaterialShaderValue(*material, "g_Color4", color4);
-            scene.SetMaterialShaderValue(*material, "g_Color", color3);
+            const bool  has_user_alpha = MaterialHasShaderUniform(*material, "g_UserAlpha");
+            const float alpha          = has_user_alpha && binding.node
+                                             ? binding.node->BaseAlpha()
+                                             : CurrentImagePropertyAlpha(binding.node);
+            std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
+            if (MaterialHasShaderUniform(*material, "g_Color4"))
+                scene.SetMaterialShaderValue(*material, "g_Color4", color4);
+            if (MaterialHasShaderUniform(*material, "g_Color"))
+                scene.SetMaterialShaderValue(*material, "g_Color", color3);
+        }
+    }
+}
+
+void ApplyUserPropertyToImageAlpha(Scene& scene, const std::string& key,
+                                   const nlohmann::json& prop) {
+    auto it = scene.image_alpha_user_index.find(key);
+    if (it == scene.image_alpha_user_index.end()) return;
+
+    auto coerced = CoerceUserPropertyValue(prop);
+    if (! coerced.ok || coerced.value.size() < 1) return;
+
+    const float alpha = std::clamp(coerced.value[0], 0.0f, 1.0f);
+    for (const auto& binding : it->second) {
+        if (binding.node) binding.node->SetUserAlpha(alpha);
+
+        Eigen::Vector3f      color = CurrentImagePropertyColor(binding.node);
+        std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
+        for (auto* material : binding.materials) {
+            if (! material) continue;
+            const bool has_user_alpha = MaterialHasShaderUniform(*material, "g_UserAlpha");
+            if (has_user_alpha) scene.SetMaterialShaderValue(*material, "g_UserAlpha", alpha);
+            if (MaterialHasShaderUniform(*material, "g_Alpha"))
+                scene.SetMaterialShaderValue(*material, "g_Alpha", alpha);
+            if (! has_user_alpha && MaterialHasShaderUniform(*material, "g_Color4"))
+                scene.SetMaterialShaderValue(*material, "g_Color4", color4);
         }
     }
 }
@@ -1051,6 +1104,7 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
     auto texture_materials = ApplyUserPropertyToMaterialTextures(*m_scene, key, m.property);
     bool shader_combo_requires_graph = ApplyUserPropertyToShaderCombos(*m_scene, key, m.property);
     ApplyUserPropertyToImageColor(*m_scene, key, m.property);
+    ApplyUserPropertyToImageAlpha(*m_scene, key, m.property);
     ApplyUserPropertyToParticles(*m_scene, key, m.property);
     ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
     ApplyUserPropertyToCameraParallax(*m_scene, key, m.property);

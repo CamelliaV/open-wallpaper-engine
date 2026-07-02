@@ -143,6 +143,8 @@ public:
     std::string        visible_user_key;
     UserValueBinding   color_user;
     std::string        color_user_key;
+    UserValueBinding   alpha_user;
+    std::string        alpha_user_key;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(EffectFbo, name, scale);
