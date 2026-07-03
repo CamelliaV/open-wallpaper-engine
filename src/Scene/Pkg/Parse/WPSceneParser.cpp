@@ -107,6 +107,55 @@ unsigned DetectAudioFanoutCount(std::string_view src) {
     return 0;
 }
 
+std::vector<std::string> DetectRegisteredAssets(std::string_view src) {
+    std::vector<std::string> out;
+    auto                     seen = std::unordered_set<std::string> {};
+    for (usize pos = 0; (pos = src.find("registerAsset", pos)) != std::string_view::npos;) {
+        pos += std::string_view("registerAsset").size();
+        while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\n')) ++pos;
+        if (pos >= src.size() || src[pos] != '(') continue;
+        ++pos;
+        while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\n')) ++pos;
+        if (pos >= src.size() || (src[pos] != '\'' && src[pos] != '"')) continue;
+        char  quote = src[pos++];
+        usize begin = pos;
+        while (pos < src.size()) {
+            if (src[pos] == '\\' && pos + 1 < src.size()) {
+                pos += 2;
+                continue;
+            }
+            if (src[pos] == quote) break;
+            ++pos;
+        }
+        if (pos >= src.size()) break;
+        std::string asset { src.substr(begin, pos - begin) };
+        if (seen.insert(asset).second) out.push_back(std::move(asset));
+    }
+    return out;
+}
+
+std::optional<std::array<float, 2>> ResolveImageAssetSize(ParseContext&    context,
+                                                          std::string_view image_path) {
+    auto info = wpscene::LoadImageAssetInfo(*context.vfs, image_path);
+    if (! info) return std::nullopt;
+    if (info->size) return info->size;
+    if (info->first_texture.empty()) return std::nullopt;
+
+    int32_t    w      = 0;
+    int32_t    h      = 0;
+    const auto header = context.scene->imageParser->ParseHeader(info->first_texture);
+    if (header.isSprite && header.spriteAnim.numFrames() > 0) {
+        const auto& frame = header.spriteAnim.GetCurFrame();
+        w                 = static_cast<int32_t>(std::round(frame.width));
+        h                 = static_cast<int32_t>(std::round(frame.height));
+    } else {
+        w = header.width > 0 ? header.width : header.mapWidth;
+        h = header.height > 0 ? header.height : header.mapHeight;
+    }
+    if (w <= 0 || h <= 0) return std::nullopt;
+    return std::array { static_cast<float>(w), static_cast<float>(h) };
+}
+
 std::shared_ptr<WPPuppetLayer> MakePuppetLayer(std::shared_ptr<WPPuppet>                puppet,
                                                std::span<WPPuppetLayer::AnimationLayer> layers) {
     if (! puppet) return nullptr;
@@ -493,6 +542,11 @@ void WireFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNode>& n
         auto* fs    = rt.MakeFieldScript(
             sb.source, sha, kind, props, sb.initial_value, node, std::move(clones));
         if (! fs) continue;
+        if (sb.source.find("createLayer") != std::string_view::npos &&
+            sb.source.find("registerAsset") != std::string_view::npos) {
+            context.create_layer_asset_requests.push_back(
+                { fs, node->ID(), std::string(sb.source) });
+        }
         if (! has_actuator) continue;
         if (is_alpha)
             ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp.clone()) });
@@ -3849,6 +3903,60 @@ ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::Scen
     return context;
 }
 
+std::unordered_map<std::string, std::vector<owe::SceneNode*>>
+SpawnCreateLayerAssetClones(ParseContext& context, std::int32_t owner_id, std::string_view source) {
+    constexpr unsigned                                            pool_size = 8;
+    std::unordered_map<std::string, std::vector<owe::SceneNode*>> out;
+    if (source.find("createLayer") == std::string_view::npos) return out;
+
+    auto owner_it = context.node_id_map.find(owner_id);
+    if (owner_it == context.node_id_map.end() || owner_it->second.node.is_none()) return out;
+
+    for (const auto& asset : DetectRegisteredAssets(source)) {
+        if (! sstart_with(asset, "models/") || ! asset.ends_with(".json")) continue;
+        auto size = ResolveImageAssetSize(context, asset);
+        if (! size) continue;
+        auto& nodes = out[asset];
+        nodes.reserve(pool_size);
+        for (unsigned i = 0; i < pool_size; ++i) {
+            wpscene::ImageObject image;
+            auto           size_str = std::to_string((*size)[0]) + " " + std::to_string((*size)[1]);
+            nlohmann::json json {
+                { "id", context.next_dynamic_layer_id-- },
+                { "name", "__createLayer:" + asset },
+                { "image", asset },
+                { "origin", "0 0 0" },
+                { "angles", "0 0 0" },
+                { "scale", "1 1 1" },
+                { "size", size_str },
+                { "visible", true },
+            };
+            if (! image.FromJson(json, *context.vfs)) continue;
+            ParseImageObj(context, image);
+            auto it = context.node_id_map.find(image.id);
+            if (it == context.node_id_map.end() || it->second.node.is_none()) continue;
+            auto node = (*it->second.node).clone();
+            node->SetVisible(false);
+            nodes.push_back(node.as_ptr());
+            context.layer_clones[owner_id].push_back(std::move(node));
+            context.node_id_map.erase(it);
+        }
+        if (nodes.empty()) out.erase(asset);
+    }
+    return out;
+}
+
+void ResolveCreateLayerAssetRequests(ParseContext& context) {
+    for (auto& req : context.create_layer_asset_requests) {
+        if (! req.script) continue;
+        auto queues = SpawnCreateLayerAssetClones(context, req.owner_id, req.source);
+        for (auto& [asset, nodes] : queues) {
+            req.script->AddAssetCloneQueue(std::move(asset), std::move(nodes));
+        }
+    }
+    context.create_layer_asset_requests.clear();
+}
+
 void ProcessObjects(ParseContext& context, std::span<SceneObjectVar> scene_objs,
                     wavsen::audio::SoundManager* sm, ProcessOpts opts) {
     WPShaderParser::InitGlslang();
@@ -3887,6 +3995,7 @@ void ProcessObjects(ParseContext& context, std::span<SceneObjectVar> scene_objs,
                    obj);
     }
 
+    ResolveCreateLayerAssetRequests(context);
     WPShaderParser::FinalGlslang();
 }
 

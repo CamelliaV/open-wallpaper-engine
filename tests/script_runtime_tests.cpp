@@ -1117,6 +1117,81 @@ TEST(ScriptScene, InitialLayerConfigIsAvailable) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptScene, DestroyLayerHidesSceneNode) {
+    auto root  = rstd::sync::Arc<owe::SceneNode>::make();
+    auto child = rstd::sync::Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "coin");
+    root->AppendChild(child.clone());
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    rt.SetSceneRoot(root.as_ptr());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let hidden = 0;
+            export function init() {
+                const coin = thisScene.getLayer("coin");
+                thisScene.destroyLayer(coin);
+                hidden = coin.visible ? 0 : 1;
+            }
+            export function update() { return hidden; }
+        )JS",
+        "test/destroy_layer_hides_node",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        root.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_FALSE(child->Visible());
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
+TEST(ScriptScene, CreateLayerUsesRegisteredAssetQueue) {
+    auto root = rstd::sync::Arc<owe::SceneNode>::make();
+    auto coin = rstd::sync::Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "coin-clone");
+    coin->SetVisible(false);
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    rt.SetSceneRoot(root.as_ptr());
+
+    std::unordered_map<std::string, std::vector<owe::SceneNode*>> assets;
+    assets["models/coin_0.json"].push_back(coin.as_ptr());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let ok = 0;
+            export function init() {
+                const asset = engine.registerAsset('models/coin_0.json');
+                const coin = thisScene.createLayer(asset);
+                coin.origin = new Vec3(42, 7, 0);
+                thisScene.destroyLayer(coin);
+                const again = thisScene.createLayer(asset);
+                again.origin = new Vec3(8, 9, 0);
+                ok = again.visible && again.origin.x === 8 && again.origin.y === 9 ? 1 : 0;
+            }
+            export function update() { return ok; }
+        )JS",
+        "test/create_layer_asset_queue",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        root.as_ptr(),
+        std::vector<owe::SceneNode*> {},
+        std::move(assets));
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_TRUE(coin->Visible());
+    EXPECT_FLOAT_EQ(coin->Translate().x(), 8.0f);
+    EXPECT_FLOAT_EQ(coin->Translate().y(), 9.0f);
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
 // ---------------------------------------------------------------------------
 // Workshop 3327063360 repro: scripted-origin layer should land at canvas
 // center when scriptProperties.{x,y} fall back to their declared 0.5.

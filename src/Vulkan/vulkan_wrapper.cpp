@@ -57,10 +57,9 @@ bool Load(VkInstance instance, InstanceDispatch& dld) noexcept {
     return X(vkDestroyInstance) && X(vkCreateDevice) && X(vkDestroyDevice) && X(vkDestroyDevice) &&
            X(vkEnumerateDeviceExtensionProperties) && X(vkEnumeratePhysicalDevices) &&
            X(vkGetDeviceProcAddr) && X(vkGetPhysicalDeviceFeatures2) &&
-           X(vkGetPhysicalDeviceFormatProperties) &&
-           X(vkGetPhysicalDeviceMemoryProperties) && X(vkGetPhysicalDeviceMemoryProperties2) &&
-           X(vkGetPhysicalDeviceProperties) && X(vkGetPhysicalDeviceProperties2) &&
-           X(vkGetPhysicalDeviceQueueFamilyProperties) &&
+           X(vkGetPhysicalDeviceFormatProperties) && X(vkGetPhysicalDeviceMemoryProperties) &&
+           X(vkGetPhysicalDeviceMemoryProperties2) && X(vkGetPhysicalDeviceProperties) &&
+           X(vkGetPhysicalDeviceProperties2) && X(vkGetPhysicalDeviceQueueFamilyProperties) &&
            X(vkGetPhysicalDeviceQueueFamilyProperties2);
 #undef X
 }

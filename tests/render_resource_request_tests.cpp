@@ -524,8 +524,8 @@ TEST(FramebufferAttachmentIdentity, TracksTextureGeneration) {
     image_a.extent       = { 320u, 180u, 1u };
     image_a.mipmap_level = 1u;
     image_a.generation   = 10u;
-    auto image_b       = image_a;
-    image_b.generation = 11u;
+    auto image_b         = image_a;
+    image_b.generation   = 11u;
 
     auto attachment_a = owe::vulkan::MakeFramebufferAttachment(request, image_a);
     auto attachment_b = owe::vulkan::MakeFramebufferAttachment(request, image_b);

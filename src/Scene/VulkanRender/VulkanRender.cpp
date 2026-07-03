@@ -52,7 +52,7 @@ RenderItemsForMaterials(const owe::RenderSceneSnapshot&       render_scene,
 }
 
 constexpr std::array<Extension, 0> base_inst_exts {};
-constexpr std::array base_device_exts {
+constexpr std::array               base_device_exts {
     Extension { false, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME },
     Extension { true, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME },
