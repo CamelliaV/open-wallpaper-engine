@@ -657,6 +657,16 @@ bool IsLayerCompositeShader(std::string_view shader) {
            shader == "genericimage4" || shader == "passthrough";
 }
 
+// TODO: Confirm WE's exact semantics for zero-height audio-buffer layers.
+i32 NonZeroRenderTargetDimension(float value) {
+    if (! std::isfinite(value) || value < 1.0f) return 1;
+    return static_cast<i32>(value);
+}
+
+std::array<i32, 2> NonZeroRenderTargetExtent(float width, float height) {
+    return { NonZeroRenderTargetDimension(width), NonZeroRenderTargetDimension(height) };
+}
+
 void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
                          bool thick_format) {
     (void)particle;
@@ -2023,8 +2033,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             scene.linkedCameras.at("global").push_back(nodeAddr);
         } else {
             // applly scale to crop
-            i32 w                   = (i32)wpimgobj.size[0];
-            i32 h                   = (i32)wpimgobj.size[1];
+            const auto effect_extent =
+                NonZeroRenderTargetExtent(wpimgobj.size[0], wpimgobj.size[1]);
+            i32 w                   = effect_extent[0];
+            i32 h                   = effect_extent[1];
             scene.cameras[nodeAddr] = std::make_shared<SceneCamera>(w, h, -1.0f, 1.0f);
             // Attach the per-layer effect camera to spImgNode itself so the
             // camera follows the layer through any parent-container world
@@ -2038,8 +2050,13 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         effect_ppong_a = OWE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
         effect_ppong_b = OWE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
         // set image effect
-        auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
-            spImgNode.as_ptr(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
+        const auto effect_extent = NonZeroRenderTargetExtent(wpimgobj.size[0], wpimgobj.size[1]);
+        auto       imgEffectLayer =
+            std::make_shared<SceneImageEffectLayer>(spImgNode.as_ptr(),
+                                                    static_cast<float>(effect_extent[0]),
+                                                    static_cast<float>(effect_extent[1]),
+                                                    effect_ppong_a,
+                                                    effect_ppong_b);
         {
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
@@ -2050,8 +2067,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         // set renderTarget for ping-pong operate
         {
             scene.renderTargets[effect_ppong_a] = {
-                .width                = (uint16_t)wpimgobj.size[0],
-                .height               = (uint16_t)wpimgobj.size[1],
+                .width                = effect_extent[0],
+                .height               = effect_extent[1],
                 .allowReuse           = true,
                 .force_clear          = ! wpimgobj.fullscreen,
                 .clear_on_first_write = true,
@@ -2116,14 +2133,18 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                 if (max_size > 0.0f) {
                                     const float fit_scale =
                                         static_cast<float>(wpfbo.fit) / max_size;
-                                    return { static_cast<uint16_t>(std::max(
-                                                 1.0f, std::round(wpimgobj.size[0] * fit_scale))),
-                                             static_cast<uint16_t>(std::max(
-                                                 1.0f, std::round(wpimgobj.size[1] * fit_scale))) };
+                                    const auto fit_extent = NonZeroRenderTargetExtent(
+                                        std::round(wpimgobj.size[0] * fit_scale),
+                                        std::round(wpimgobj.size[1] * fit_scale));
+                                    return { static_cast<uint16_t>(fit_extent[0]),
+                                             static_cast<uint16_t>(fit_extent[1]) };
                                 }
                             }
-                            return { static_cast<uint16_t>(wpimgobj.size[0] / (float)wpfbo.scale),
-                                     static_cast<uint16_t>(wpimgobj.size[1] / (float)wpfbo.scale) };
+                            const auto scaled_extent = NonZeroRenderTargetExtent(
+                                wpimgobj.size[0] / static_cast<float>(wpfbo.scale),
+                                wpimgobj.size[1] / static_cast<float>(wpfbo.scale));
+                            return { static_cast<uint16_t>(scaled_extent[0]),
+                                     static_cast<uint16_t>(scaled_extent[1]) };
                         }();
                         scene.renderTargets[rtname] = { .width      = fbo_size[0],
                                                         .height     = fbo_size[1],
@@ -2212,7 +2233,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                        wpimgobj.parallaxDepth[1] };
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                     svData.effect_projection_node = spImgNode.as_ptr();
-                    svData.effect_projection_size = { wpimgobj.size[0], wpimgobj.size[1] };
+                    svData.effect_projection_size = { static_cast<float>(effect_extent[0]),
+                                                      static_cast<float>(effect_extent[1]) };
                     if (puppet && wpmat.use_puppet) {
                         svData.puppet_layer =
                             MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
