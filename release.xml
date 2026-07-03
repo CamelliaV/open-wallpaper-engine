@@ -1,3 +1,34 @@
+<release version="0.1.9" date="2026-07-03">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>MPRIS media events for scene scripts.</li>
+      <li>Script Vec2 object constructor support.</li>
+      <li>Dynamic scene script asset layers for registerAsset/createLayer.</li>
+      <li>Render resource diagnostics and resource-index test coverage.</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>Vaapi/Vulkan hwdec tex wrong color.</li>
+      <li>Scene-node ownership across parser, render graph and script runtime.</li>
+      <li>Text layer bounds, parallax, render targets, flat colors, effect order, dynamic loading and effect sizing.</li>
+      <li>Visible/user binding handling for image, light, particle and sound objects.</li>
+      <li>Image alpha user bindings and runtime alpha visibility.</li>
+      <li>Image alignment in local geometry.</li>
+      <li>Hidden passthrough, transform, scroll, copybackground and copybackground color-blend final composites.</li>
+      <li>Image effect render target clamping.</li>
+      <li>Particle random frame motion.</li>
+      <li>Material shader constant animations.</li>
+      <li>User-property title images overflowing in the Waywallen Lua source UI.</li>
+    </ul>
+    <p>Improved:</p>
+    <ul>
+      <li>Render resource cache keys and framebuffer/resource reuse diagnostics.</li>
+      <li>Vulkan physical-device warning handling.</li>
+      <li>Renderer test surface by removing obsolete workshop runtime tests.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.1.8" date="2026-06-21">
   <description>
     <p>Added:</p>
