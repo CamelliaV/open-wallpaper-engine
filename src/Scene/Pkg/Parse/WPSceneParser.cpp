@@ -788,6 +788,13 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
+std::optional<BlendMode> CopyBackgroundFixedBlendMode(int32_t color_blend_mode) {
+    switch (color_blend_mode) {
+    case 31: return BlendMode::Additive;
+    default: return std::nullopt;
+    }
+}
+
 bool ParseEnabled(std::string_view str) { return str == "enabled"; }
 
 CullMode ParseCullMode(std::string_view str) {
@@ -1613,8 +1620,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     auto& vfs = *context.vfs;
 
-    // coloBlendMode load passthrough manaully
-    if (wpimgobj.colorBlendMode != 0) {
+    // copybackground colorBlendMode uses direct fixed blending when it maps cleanly.
+    if (wpimgobj.colorBlendMode != 0 && ! wpimgobj.copybackground) {
         wpscene::ImageEffect colorEffect;
         wpscene::Material    colorMat;
         nlohmann::json       json;
@@ -1772,6 +1779,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             return;
         };
         LoadConstvalue(material, image_wpmat, shaderInfo);
+        if (wpimgobj.copybackground) {
+            if (auto fixed_blend = CopyBackgroundFixedBlendMode(wpimgobj.colorBlendMode)) {
+                material.blenmode = *fixed_blend;
+            }
+        }
     }
 
     // Whether the layer's base texture is point-sampled (noInterpolation).
