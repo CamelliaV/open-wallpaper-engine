@@ -1136,9 +1136,13 @@ bool IsShaderPositionUniform(const WPShaderInfo& info, const std::string& glname
 }
 
 bool UsesEffectQuadPositionSpace(const wpscene::Material& wpmat) {
-    if (wpmat.shader != "effects/spin") return false;
+    if (wpmat.shader != "effects/spin" && wpmat.shader != "effects/transform") return false;
     auto mode_it = wpmat.combos.find("MODE");
     return mode_it != wpmat.combos.end() && mode_it->second == 1;
+}
+
+bool CanCompositeFinalEffectShader(std::string_view shader) {
+    return IsLayerCompositeShader(shader) || shader == "effects/transform";
 }
 
 void NormalizeEffectPositionCurve(SceneAnimationCurve& curve) {
@@ -2292,7 +2296,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 spEffNode->AddMesh(spMesh);
 
                 context.shader_updater->SetNodeData(spEffNode.as_ptr(), svData);
-                imgEffect->nodes.push_back(SceneImageEffectNode { matOutRT, spEffNode.clone() });
+                imgEffect->nodes.push_back(SceneImageEffectNode {
+                    .output                   = matOutRT,
+                    .sceneNode                = spEffNode.clone(),
+                    .uses_quad_position_space = UsesEffectQuadPositionSpace(wpmat),
+                });
             }
 
             if (eff_mat_ok)
@@ -2303,7 +2311,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         }
 
         if (! wpimgobj.fullscreen && ! isPassthrough && ! wpimgobj.copybackground &&
-            ! IsLayerCompositeShader(last_effect_shader)) {
+            ! CanCompositeFinalEffectShader(last_effect_shader)) {
             nlohmann::json    json;
             wpscene::Material passthrough_mat;
             if (! owe::ParseJson(
@@ -3363,7 +3371,11 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     }
                     effect_node->AddMesh(mesh);
                     context.shader_updater->SetNodeData(effect_node.as_ptr(), sv);
-                    effect->nodes.push_back(SceneImageEffectNode { matOutRT, effect_node.clone() });
+                    effect->nodes.push_back(SceneImageEffectNode {
+                        .output                   = matOutRT,
+                        .sceneNode                = effect_node.clone(),
+                        .uses_quad_position_space = UsesEffectQuadPositionSpace(wpmat),
+                    });
                 }
 
                 if (effect_ok)

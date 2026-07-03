@@ -1335,6 +1335,7 @@ private:
 struct SceneImageEffectNode {
     std::string                output; // render target
     rstd::sync::Arc<SceneNode> sceneNode;
+    bool                       uses_quad_position_space { false };
 };
 
 struct SceneImageEffect {
@@ -1407,6 +1408,8 @@ public:
 
 private:
     SceneNode*  m_worldNode;
+    float       m_width { 1.0f };
+    float       m_height { 1.0f };
     std::string m_pingpong_a;
     std::string m_pingpong_b;
 
