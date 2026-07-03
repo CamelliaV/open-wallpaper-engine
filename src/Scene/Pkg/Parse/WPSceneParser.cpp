@@ -1159,7 +1159,8 @@ bool UsesEffectQuadPositionSpace(const wpscene::Material& wpmat) {
 }
 
 bool CanCompositeFinalEffectShader(std::string_view shader) {
-    return IsLayerCompositeShader(shader) || shader == "effects/transform";
+    return IsLayerCompositeShader(shader) || shader == "effects/transform" ||
+           shader == "effects/scroll";
 }
 
 void NormalizeEffectPositionCurve(SceneAnimationCurve& curve) {
