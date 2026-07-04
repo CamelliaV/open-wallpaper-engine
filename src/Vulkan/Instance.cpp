@@ -23,16 +23,12 @@ VkBool32 DebugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT mess
                                      VkDebugUtilsMessageTypeFlagsEXT /*messageType*/,
                                      const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
                                      void* /*pUserData*/) {
-    VkBool32 result = VK_FALSE;
     if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-        result |= VK_TRUE;
-        // stderr (unbuffered) so messages survive an abort() right after.
-        // printf to stdout was line-buffered and eaten on assertion failure.
         rstd_error("validation layer: {}", pCallbackData->pMessage);
     } else if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
         rstd_warn("validation layer: {}", pCallbackData->pMessage);
     }
-    return result;
+    return VK_FALSE;
 }
 
 vvk::DebugUtilsMessenger SetupDebugCallback(vvk::Instance& instance) {
@@ -53,14 +49,15 @@ vvk::DebugUtilsMessenger SetupDebugCallback(vvk::Instance& instance) {
 }
 
 VkResult CreatInstance(vvk::Instance* inst, std::span<const std::string_view> exts,
-                       std::span<const std::string_view> layers, vvk::InstanceDispatch& dld) {
+                       std::span<const std::string_view> layers, vvk::InstanceDispatch& dld,
+                       std::uint32_t api_version) {
     VkApplicationInfo app_info {
         .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pNext              = nullptr,
         .pApplicationName   = WP_APPLICATION_NAME,
-        .applicationVersion = WP_VULKAN_VERSION,
+        .applicationVersion = api_version,
         .pEngineName        = "vulkan",
-        .apiVersion         = WP_VULKAN_VERSION,
+        .apiVersion         = api_version,
     };
 
     std::vector<const char*> extension_names_c;
@@ -149,7 +146,7 @@ bool Instance::supportLayer(std::string_view name) const { return exists(m_layer
 void Instance::Destroy() {}
 
 bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
-                      std::span<const InstanceLayer> instLayers) {
+                      std::span<const InstanceLayer> instLayers, std::uint32_t api_version) {
     vvk::LoadLibrary(inst.m_vklib, inst.m_dld);
     vvk::Load(inst.m_dld);
 
@@ -183,8 +180,10 @@ bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
     std::vector<std::string_view> exts_vec { exts.begin(), exts.end() },
         layers_vec { layers.begin(), layers.end() };
 
-    VVK_CHECK_BOOL_RE(CreatInstance(&inst.m_vinst, exts_vec, layers_vec, inst.m_dld));
+    VVK_CHECK_BOOL_RE(CreatInstance(&inst.m_vinst, exts_vec, layers_vec, inst.m_dld, api_version));
     vvk::Load(*inst.m_vinst, inst.m_dld);
+    inst.m_api_version = api_version;
+    inst.m_enabled_extensions.assign(exts.begin(), exts.end());
 
     inst.m_debug_utils = SetupDebugCallback(inst.m_vinst);
     return true;

@@ -51,13 +51,19 @@ RenderItemsForMaterials(const owe::RenderSceneSnapshot&       render_scene,
     return render_items;
 }
 
-constexpr std::array<Extension, 0> base_inst_exts {};
-constexpr std::array               base_device_exts {
+constexpr std::array base_inst_exts {
+    Extension { false, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME },
+    Extension { false, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME },
+    Extension { false, VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME },
+    Extension { false, VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME },
+};
+constexpr std::array base_device_exts {
     Extension { false, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME },
     Extension { true, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME },
     Extension { true, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME },
+    Extension { false, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME },
     // Optional. When present we can report the picked physical device's
     // DRM render-node major/minor via `getDrmRenderNode()` so the
     // waywallen daemon can match it against each connected display's
@@ -65,6 +71,21 @@ constexpr std::array               base_device_exts {
     // (0, 0); the daemon then conservatively assumes cross-GPU.
     Extension { false, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME },
 };
+
+void AppendVideoDeviceExtensions(std::vector<Extension>& device_exts) {
+    device_exts.push_back({ false, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_KHR_VIDEO_QUEUE_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_KHR_VIDEO_DECODE_AV1_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME });
+    device_exts.push_back({ false, VK_EXT_SHADER_OBJECT_EXTENSION_NAME });
+}
 
 struct RenderProgram {
     enum class PreparedPassKind
@@ -784,6 +805,9 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
 
     std::vector<Extension> inst_exts { base_inst_exts.begin(), base_inst_exts.end() };
     std::vector<Extension> device_exts { base_device_exts.begin(), base_device_exts.end() };
+    if (info.video_hwdec != "none") {
+        AppendVideoDeviceExtensions(device_exts);
+    }
 
     if (! info.offscreen) {
         std::transform(info.surface_info.instanceExts.begin(),
@@ -813,7 +837,9 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
         rstd_info("vulkan valid layer \"{}\" enabled", VALIDATION_LAYER_NAME);
     }
 
-    if (! Instance::Create(m_instance, inst_exts, inst_layers)) {
+    const auto instance_api_version =
+        info.video_hwdec == "none" ? WP_VULKAN_VERSION : VK_API_VERSION_1_3;
+    if (! Instance::Create(m_instance, inst_exts, inst_layers, instance_api_version)) {
         rstd_error("init vulkan failed");
         return false;
     }
