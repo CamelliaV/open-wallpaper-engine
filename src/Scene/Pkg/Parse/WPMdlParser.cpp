@@ -3,7 +3,7 @@ module;
 
 module wescene.pkg.parse;
 import nlohmann.json;
-import wescene.spec_texs;
+import wescene.spec_names;
 import wescene.core;
 import wescene.types;
 import rstd.log;

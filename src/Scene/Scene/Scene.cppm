@@ -11,7 +11,7 @@ import rstd;
 import wescene.core;
 import rstd.cppstd;
 import wescene.types;
-import wescene.spec_texs;
+import wescene.spec_names;
 
 // SceneLight + SceneLightType live in this partition. Re-exported here so
 // existing `import wescene.scene` consumers see them transparently.

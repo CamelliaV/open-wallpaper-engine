@@ -6,6 +6,7 @@ module wescene.scene_wallpaper;
 import wescene.types;
 import wescene.utils;
 import wescene.scene;
+import wescene.spec_names;
 
 import eigen;
 import nlohmann.json;
@@ -552,15 +553,15 @@ void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
         std::array<float, 3> color3 { color.x(), color.y(), color.z() };
         for (auto* material : binding.materials) {
             if (! material) continue;
-            const bool  has_user_alpha = MaterialHasShaderUniform(*material, "g_UserAlpha");
-            const float alpha          = has_user_alpha && binding.node
-                                             ? binding.node->BaseAlpha()
-                                             : CurrentImagePropertyAlpha(binding.node);
+            const bool           has_user_alpha = MaterialHasShaderUniform(*material, G_USERALPHA);
+            const float          alpha          = has_user_alpha && binding.node
+                                                      ? binding.node->BaseAlpha()
+                                                      : CurrentImagePropertyAlpha(binding.node);
             std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
-            if (MaterialHasShaderUniform(*material, "g_Color4"))
-                scene.SetMaterialShaderValue(*material, "g_Color4", color4);
-            if (MaterialHasShaderUniform(*material, "g_Color"))
-                scene.SetMaterialShaderValue(*material, "g_Color", color3);
+            if (MaterialHasShaderUniform(*material, G_COLOR4))
+                scene.SetMaterialShaderValue(*material, G_COLOR4, color4);
+            if (MaterialHasShaderUniform(*material, G_COLOR))
+                scene.SetMaterialShaderValue(*material, G_COLOR, color3);
         }
     }
 }
@@ -581,12 +582,12 @@ void ApplyUserPropertyToImageAlpha(Scene& scene, const std::string& key,
         std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
         for (auto* material : binding.materials) {
             if (! material) continue;
-            const bool has_user_alpha = MaterialHasShaderUniform(*material, "g_UserAlpha");
-            if (has_user_alpha) scene.SetMaterialShaderValue(*material, "g_UserAlpha", alpha);
-            if (MaterialHasShaderUniform(*material, "g_Alpha"))
-                scene.SetMaterialShaderValue(*material, "g_Alpha", alpha);
-            if (! has_user_alpha && MaterialHasShaderUniform(*material, "g_Color4"))
-                scene.SetMaterialShaderValue(*material, "g_Color4", color4);
+            const bool has_user_alpha = MaterialHasShaderUniform(*material, G_USERALPHA);
+            if (has_user_alpha) scene.SetMaterialShaderValue(*material, G_USERALPHA, alpha);
+            if (MaterialHasShaderUniform(*material, G_ALPHA))
+                scene.SetMaterialShaderValue(*material, G_ALPHA, alpha);
+            if (! has_user_alpha && MaterialHasShaderUniform(*material, G_COLOR4))
+                scene.SetMaterialShaderValue(*material, G_COLOR4, color4);
         }
     }
 }

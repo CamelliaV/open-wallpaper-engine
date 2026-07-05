@@ -1,7 +1,7 @@
 module;
 
 export module wescene.vulkan_render:fin_pass;
-import wescene.spec_texs;
+import wescene.spec_names;
 import rstd.cppstd;
 import wescene.vulkan;
 import wescene.scene;

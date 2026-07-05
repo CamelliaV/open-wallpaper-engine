@@ -5,7 +5,7 @@ import wescene.fs;
 import wescene.pkg_fs;
 import wescene.pkg.parse;
 import wescene.scene;
-import wescene.spec_texs;
+import wescene.spec_names;
 
 namespace
 {

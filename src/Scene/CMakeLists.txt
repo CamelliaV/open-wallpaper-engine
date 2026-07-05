@@ -39,7 +39,7 @@ add_library(owe-base STATIC
   Particle/WPParticleRawGener.cpp)
 target_sources(owe-base
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-         SpecTexs.cppm
+         SpecNames.cppm
          Pkg/mod.cppm
          Pkg/AssetVersion.cppm
          Pkg/PkgFs.cppm

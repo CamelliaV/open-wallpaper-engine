@@ -14,7 +14,7 @@ import rstd.cppstd;
 import wescene.vulkan;
 import wescene.utils;
 import wescene.scene;
-import wescene.spec_texs;
+import wescene.spec_names;
 import wescene.text;
 
 import wescene.rgraph;

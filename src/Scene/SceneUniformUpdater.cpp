@@ -6,7 +6,7 @@ module;
 
 module wescene.scene_uniform_updater;
 import eigen;
-import wescene.spec_texs;
+import wescene.spec_names;
 import wescene.core;
 import rstd.cppstd;
 import wescene.utils;
@@ -140,11 +140,11 @@ void SceneUniformUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& 
     info.has_SCREEN           = existsOp(G_SCREEN);
     info.has_LP               = existsOp(G_LP);
     info.has_LCR              = existsOp(G_LCR);
-    info.has_USERALPHA        = existsOp("g_UserAlpha");
-    info.has_COLOR4           = existsOp("g_Color4");
-    info.has_COLOR            = existsOp("g_Color");
-    info.has_ALPHA            = existsOp("g_Alpha");
-    info.has_BRIGHTNESS       = existsOp("g_Brightness");
+    info.has_USERALPHA        = existsOp(G_USERALPHA);
+    info.has_COLOR4           = existsOp(G_COLOR4);
+    info.has_COLOR            = existsOp(G_COLOR);
+    info.has_ALPHA            = existsOp(G_ALPHA);
+    info.has_BRIGHTNESS       = existsOp(G_BRIGHTNESS);
     info.has_audio_16_l       = existsOp(G_AUDIO_SPEC_16_L);
     info.has_audio_16_r       = existsOp(G_AUDIO_SPEC_16_R);
     info.has_audio_32_l       = existsOp(G_AUDIO_SPEC_32_L);
@@ -420,18 +420,18 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     // baked constValue for this draw; we only push when the script has
     // actually written to avoid clobbering the bake.
     auto push_color4 = [&updateOp](const Eigen::Vector3f& color, float alpha) {
-        updateOp("g_Color4", std::array<float, 4> { color.x(), color.y(), color.z(), alpha });
+        updateOp(G_COLOR4, std::array<float, 4> { color.x(), color.y(), color.z(), alpha });
     };
     auto push_color = [&updateOp](const Eigen::Vector3f& color) {
-        updateOp("g_Color", std::array<float, 3> { color.x(), color.y(), color.z() });
+        updateOp(G_COLOR, std::array<float, 3> { color.x(), color.y(), color.z() });
     };
     if (pNode->IsAlphaOverridden()) {
         const float eff_alpha = pNode->EffectiveAlpha();
         if (info.has_USERALPHA) {
-            updateOp("g_UserAlpha", eff_alpha);
+            updateOp(G_USERALPHA, eff_alpha);
         }
         if (info.has_ALPHA) {
-            updateOp("g_Alpha", eff_alpha);
+            updateOp(G_ALPHA, eff_alpha);
         }
         if (info.has_COLOR4) {
             if (! info.has_USERALPHA) {
@@ -453,7 +453,7 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
         }
     }
     if (pNode->IsBrightnessOverridden() && info.has_BRIGHTNESS) {
-        updateOp("g_Brightness", pNode->Brightness());
+        updateOp(G_BRIGHTNESS, pNode->Brightness());
     }
 
     // WE audio-bar shaders. std140 array stride is 16 bytes per element, so

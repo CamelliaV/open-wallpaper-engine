@@ -5,7 +5,7 @@ import rstd;
 import eigen;
 import wescene.scene;
 import wescene.scene_uniform_updater;
-import wescene.spec_texs;
+import wescene.spec_names;
 
 TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlpha) {
     owe::Scene        scene;
@@ -26,7 +26,7 @@ TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlp
 
     owe::SceneUniformUpdater updater(&scene);
     updater.InitUniforms(&node, [](std::string_view name) {
-        return name == "g_Color4";
+        return name == owe::G_COLOR4;
     });
 
     std::unordered_map<std::string, owe::ShaderValue> values;
@@ -34,14 +34,14 @@ TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlp
         values[std::string(name)] = value;
     });
 
-    ASSERT_EQ(values.count("g_Color4"), 1u);
-    const auto& color = values.at("g_Color4");
+    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
+    const auto& color = values.at(std::string(owe::G_COLOR4));
     ASSERT_EQ(color.size(), 4u);
     EXPECT_FLOAT_EQ(color[0], 0.25f);
     EXPECT_FLOAT_EQ(color[1], 0.5f);
     EXPECT_FLOAT_EQ(color[2], 0.75f);
     EXPECT_FLOAT_EQ(color[3], 0.125f);
-    EXPECT_EQ(values.count("g_UserAlpha"), 0u);
+    EXPECT_EQ(values.count(std::string(owe::G_USERALPHA)), 0u);
 }
 
 TEST(SceneUniformUpdaterRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
@@ -62,7 +62,7 @@ TEST(SceneUniformUpdaterRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
 
     owe::SceneUniformUpdater updater(&scene);
     updater.InitUniforms(&node, [](std::string_view name) {
-        return name == "g_Color4";
+        return name == owe::G_COLOR4;
     });
 
     std::unordered_map<std::string, owe::ShaderValue> values;
@@ -70,8 +70,8 @@ TEST(SceneUniformUpdaterRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
     updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
         values[std::string(name)] = value;
     });
-    ASSERT_EQ(values.count("g_Color4"), 1u);
-    const auto& visible_color = values.at("g_Color4");
+    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
+    const auto& visible_color = values.at(std::string(owe::G_COLOR4));
     ASSERT_EQ(visible_color.size(), 4u);
     EXPECT_FLOAT_EQ(visible_color[3], 0.35f);
 
@@ -80,8 +80,8 @@ TEST(SceneUniformUpdaterRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
     updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
         values[std::string(name)] = value;
     });
-    ASSERT_EQ(values.count("g_Color4"), 1u);
-    const auto& hidden_color = values.at("g_Color4");
+    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
+    const auto& hidden_color = values.at(std::string(owe::G_COLOR4));
     ASSERT_EQ(hidden_color.size(), 4u);
     EXPECT_FLOAT_EQ(hidden_color[3], 0.0f);
 
@@ -90,8 +90,8 @@ TEST(SceneUniformUpdaterRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
     updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
         values[std::string(name)] = value;
     });
-    ASSERT_EQ(values.count("g_Color4"), 1u);
-    const auto& restored_color = values.at("g_Color4");
+    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
+    const auto& restored_color = values.at(std::string(owe::G_COLOR4));
     ASSERT_EQ(restored_color.size(), 4u);
     EXPECT_FLOAT_EQ(restored_color[3], 0.35f);
 }

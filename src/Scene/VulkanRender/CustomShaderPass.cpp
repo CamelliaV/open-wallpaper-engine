@@ -5,7 +5,7 @@ module;
 #include "vvk/macros.hpp"
 
 module wescene.vulkan_render;
-import wescene.spec_texs;
+import wescene.spec_names;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;

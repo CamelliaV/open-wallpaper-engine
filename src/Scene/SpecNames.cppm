@@ -2,7 +2,7 @@ module;
 
 #include "Utils/String.h" // STRTONUM macro (uses __SHORT_FILE__)
 
-export module wescene.spec_texs;
+export module wescene.spec_names;
 import rstd.cppstd;
 import wescene.types;
 
@@ -107,6 +107,8 @@ inline constexpr std::string_view G_ETVPI { "g_EffectTextureProjectionMatrixInve
 inline constexpr std::string_view G_LP { "g_LightsPosition" };
 inline constexpr std::string_view G_LCP { "g_LightsColorPremultiplied" };
 inline constexpr std::string_view G_LCR { "g_LightsColorRadius" };
+inline constexpr std::string_view G_LIGHTAMBIENTCOLOR { "g_LightAmbientColor" };
+inline constexpr std::string_view G_LIGHTSKYLIGHTCOLOR { "g_LightSkylightColor" };
 
 inline constexpr std::string_view G_TIME { "g_Time" };
 inline constexpr std::string_view G_DAYTIME { "g_DayTime" };
@@ -116,6 +118,20 @@ inline constexpr std::string_view G_TEXELSIZEHALF { "g_TexelSizeHalf" };
 inline constexpr std::string_view G_BONES { "g_Bones" };
 inline constexpr std::string_view G_SCREEN { "g_Screen" };
 inline constexpr std::string_view G_PARALLAXPOSITION { "g_ParallaxPosition" };
+inline constexpr std::string_view G_VIEWUP { "g_ViewUp" };
+inline constexpr std::string_view G_VIEWRIGHT { "g_ViewRight" };
+inline constexpr std::string_view G_VIEWFORWARD { "g_ViewForward" };
+inline constexpr std::string_view G_ORIENTATIONUP { "g_OrientationUp" };
+inline constexpr std::string_view G_ORIENTATIONRIGHT { "g_OrientationRight" };
+inline constexpr std::string_view G_ORIENTATIONFORWARD { "g_OrientationForward" };
+inline constexpr std::string_view G_NORMALMODELMATRIX { "g_NormalModelMatrix" };
+inline constexpr std::string_view G_COLOR4 { "g_Color4" };
+inline constexpr std::string_view G_COLOR { "g_Color" };
+inline constexpr std::string_view G_ALPHA { "g_Alpha" };
+inline constexpr std::string_view G_USERALPHA { "g_UserAlpha" };
+inline constexpr std::string_view G_BRIGHTNESS { "g_Brightness" };
+inline constexpr std::string_view G_RENDERVAR0 { "g_RenderVar0" };
+inline constexpr std::string_view G_RENDERVAR1 { "g_RenderVar1" };
 
 // WE audio-bar shaders read one of three (Left, Right) array pairs depending
 // on the chosen Frequency Resolution combo. owe sources from wavsen's 64-bin

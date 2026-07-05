@@ -12,7 +12,7 @@ module;
 module wescene.pkg.parse;
 import eigen;
 import nlohmann.json;
-import wescene.spec_texs;
+import wescene.spec_names;
 import wescene.core;
 import wescene.types;
 import rstd;
@@ -1113,7 +1113,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
                         resolution[2] = resolution[0] - resolution[0] % (int)f1.width;
                         resolution[3] = resolution[1] - resolution[1] % (int)f1.height;
                     }
-                    materialShader.constValues["g_RenderVar1"] = std::array {
+                    materialShader.constValues[std::string(G_RENDERVAR1)] = std::array {
                         f1.xAxis[0], f1.yAxis[1], (float)(texh.spriteAnim.numFrames()), f1.rate
                     };
                 }
@@ -1624,17 +1624,17 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc
     context.ortho_h = scene.ortho[1];
 
     {
-        auto& gb              = context.global_base_uniforms;
-        gb["g_ViewUp"]        = std::array { 0.0f, 1.0f, 0.0f };
-        gb["g_ViewRight"]     = std::array { 1.0f, 0.0f, 0.0f };
-        gb["g_ViewForward"]   = std::array { 0.0f, 0.0f, -1.0f };
-        gb["g_EyePosition"]   = std::array { 0.0f, 0.0f, 0.0f };
-        gb["g_TexelSize"]     = std::array { 1.0f / 1920.0f, 1.0f / 1080.0f };
-        gb["g_TexelSizeHalf"] = std::array { 1.0f / 1920.0f / 2.0f, 1.0f / 1080.0f / 2.0f };
-
-        gb["g_LightAmbientColor"]  = sc.general.ambientcolor;
-        gb["g_LightSkylightColor"] = sc.general.skylightcolor;
-        gb["g_NormalModelMatrix"]  = ShaderValue::fromMatrix(Matrix4f::Identity());
+        auto& gb                       = context.global_base_uniforms;
+        gb[std::string(G_VIEWUP)]      = std::array { 0.0f, 1.0f, 0.0f };
+        gb[std::string(G_VIEWRIGHT)]   = std::array { 1.0f, 0.0f, 0.0f };
+        gb[std::string(G_VIEWFORWARD)] = std::array { 0.0f, 0.0f, -1.0f };
+        gb[std::string(G_EYEPOSITION)] = std::array { 0.0f, 0.0f, 0.0f };
+        gb[std::string(G_TEXELSIZE)]   = std::array { 1.0f / 1920.0f, 1.0f / 1080.0f };
+        gb[std::string(G_TEXELSIZEHALF)] =
+            std::array { 1.0f / 1920.0f / 2.0f, 1.0f / 1080.0f / 2.0f };
+        gb[std::string(G_LIGHTAMBIENTCOLOR)]  = sc.general.ambientcolor;
+        gb[std::string(G_LIGHTSKYLIGHTCOLOR)] = sc.general.skylightcolor;
+        gb[std::string(G_NORMALMODELMATRIX)]  = ShaderValue::fromMatrix(Matrix4f::Identity());
     }
 
     {
@@ -1816,14 +1816,14 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
 
-        baseConstSvs["g_Color4"] = std::array<float, 4> {
+        baseConstSvs[std::string(G_COLOR4)] = std::array<float, 4> {
             wpimgobj.color[0], wpimgobj.color[1], wpimgobj.color[2], wpimgobj.alpha
         };
-        baseConstSvs["g_Color"] =
+        baseConstSvs[std::string(G_COLOR)] =
             std::array<float, 3> { wpimgobj.color[0], wpimgobj.color[1], wpimgobj.color[2] };
-        baseConstSvs["g_Alpha"]      = wpimgobj.alpha;
-        baseConstSvs["g_UserAlpha"]  = wpimgobj.alpha;
-        baseConstSvs["g_Brightness"] = wpimgobj.brightness;
+        baseConstSvs[std::string(G_ALPHA)]      = wpimgobj.alpha;
+        baseConstSvs[std::string(G_USERALPHA)]  = wpimgobj.alpha;
+        baseConstSvs[std::string(G_BRIGHTNESS)] = wpimgobj.brightness;
 
         shaderInfo.baseConstSvs = baseConstSvs;
 
@@ -2273,9 +2273,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 std::string  effmataddr = getAddr(spEffNode.as_ptr());
                 WPShaderInfo wpEffShaderInfo;
                 wpEffShaderInfo.baseConstSvs = baseConstSvs;
-                wpEffShaderInfo.baseConstSvs["g_EffectTextureProjectionMatrix"] =
+                wpEffShaderInfo.baseConstSvs[std::string(G_ETVP)] =
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
-                wpEffShaderInfo.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
+                wpEffShaderInfo.baseConstSvs[std::string(G_ETVPI)] =
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
                 SceneMaterial        material;
                 SceneUniformNodeData svData;
@@ -2577,13 +2577,13 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     svData.use_camera_eye_position = particle_obj.flags[wpscene::Particle::FlagEnum::perspective];
 
     WPShaderInfo shaderInfo;
-    shaderInfo.baseConstSvs                         = context.global_base_uniforms;
-    shaderInfo.baseConstSvs["g_OrientationUp"]      = std::array { 0.0f, 1.0f, 0.0f };
-    shaderInfo.baseConstSvs["g_OrientationRight"]   = std::array { 1.0f, 0.0f, 0.0f };
-    shaderInfo.baseConstSvs["g_OrientationForward"] = std::array { 0.0f, 0.0f, 1.0f };
-    shaderInfo.baseConstSvs["g_ViewUp"]             = std::array { 0.0f, 1.0f, 0.0f };
-    shaderInfo.baseConstSvs["g_ViewRight"]          = std::array { 1.0f, 0.0f, 0.0f };
-    shaderInfo.baseConstSvs["g_EyePosition"]        = std::array {
+    shaderInfo.baseConstSvs                                    = context.global_base_uniforms;
+    shaderInfo.baseConstSvs[std::string(G_ORIENTATIONUP)]      = std::array { 0.0f, 1.0f, 0.0f };
+    shaderInfo.baseConstSvs[std::string(G_ORIENTATIONRIGHT)]   = std::array { 1.0f, 0.0f, 0.0f };
+    shaderInfo.baseConstSvs[std::string(G_ORIENTATIONFORWARD)] = std::array { 0.0f, 0.0f, 1.0f };
+    shaderInfo.baseConstSvs[std::string(G_VIEWUP)]             = std::array { 0.0f, 1.0f, 0.0f };
+    shaderInfo.baseConstSvs[std::string(G_VIEWRIGHT)]          = std::array { 1.0f, 0.0f, 0.0f };
+    shaderInfo.baseConstSvs[std::string(G_EYEPOSITION)]        = std::array {
         static_cast<float>(context.ortho_w) / 2.0f,
         static_cast<float>(context.ortho_h) / 2.0f,
         1000.0f,
@@ -2593,9 +2593,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     maxcount     = std::min(maxcount, 20000u);
 
     if (hastrail) {
-        double in_SegmentUVTimeOffset           = 0.0;
-        double in_SegmentMaxCount               = maxcount - 1.0;
-        shaderInfo.baseConstSvs["g_RenderVar0"] = std::array {
+        double in_SegmentUVTimeOffset                      = 0.0;
+        double in_SegmentMaxCount                          = maxcount - 1.0;
+        shaderInfo.baseConstSvs[std::string(G_RENDERVAR0)] = std::array {
             (float)wppartRenderer.length,
             (float)wppartRenderer.maxlength,
             (float)in_SegmentUVTimeOffset,
@@ -3276,12 +3276,12 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         compose_sv.propagatedParallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
 
-        ShaderValueMap effect_base  = context.global_base_uniforms;
-        effect_base["g_Color4"]     = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
-        effect_base["g_Color"]      = std::array<float, 3> { 1.0f, 1.0f, 1.0f };
-        effect_base["g_Alpha"]      = 1.0f;
-        effect_base["g_UserAlpha"]  = 1.0f;
-        effect_base["g_Brightness"] = 1.0f;
+        ShaderValueMap effect_base             = context.global_base_uniforms;
+        effect_base[std::string(G_COLOR4)]     = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+        effect_base[std::string(G_COLOR)]      = std::array<float, 3> { 1.0f, 1.0f, 1.0f };
+        effect_base[std::string(G_ALPHA)]      = 1.0f;
+        effect_base[std::string(G_USERALPHA)]  = 1.0f;
+        effect_base[std::string(G_BRIGHTNESS)] = 1.0f;
 
         struct LoadedTextMaterial {
             wpscene::Material    source;
@@ -3426,9 +3426,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     auto         effect_node = rstd::sync::Arc<SceneNode>::make();
                     WPShaderInfo shader_info;
                     shader_info.baseConstSvs = effect_base;
-                    shader_info.baseConstSvs["g_EffectTextureProjectionMatrix"] =
+                    shader_info.baseConstSvs[std::string(G_ETVP)] =
                         ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
-                    shader_info.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
+                    shader_info.baseConstSvs[std::string(G_ETVPI)] =
                         ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
 
                     SceneMaterial        mat;
@@ -4199,7 +4199,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
             return std::array { x, y, -x, -y };
         };
         auto set_render_var = [](WPShaderInfo& info, std::array<float, 4> value) {
-            info.baseConstSvs["g_RenderVar0"] = value;
+            info.baseConstSvs[std::string(G_RENDERVAR0)] = value;
         };
         float threshold = g.bloomhdrthreshold;
         float knee      = threshold * g.bloomhdrfeather;

@@ -3,7 +3,7 @@ module;
 #include <rstd/macro.hpp>
 
 module wescene.scene;
-import wescene.spec_texs;
+import wescene.spec_names;
 import wescene.core;
 import wescene.types;
 import rstd.cppstd;
