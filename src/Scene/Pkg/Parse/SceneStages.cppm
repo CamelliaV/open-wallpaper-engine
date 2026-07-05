@@ -93,6 +93,7 @@ struct ParseContext {
 
     std::unordered_map<std::int32_t, std::string> image_texture_fallbacks;
     Set<std::int32_t>                             hidden_link_source_ids;
+    bool                                          scene_layer_text_writes { false };
 };
 
 struct ProcessOpts {

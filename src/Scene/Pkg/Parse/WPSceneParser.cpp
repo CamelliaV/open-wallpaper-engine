@@ -107,6 +107,36 @@ unsigned DetectAudioFanoutCount(std::string_view src) {
     return 0;
 }
 
+bool SourceWritesLayerText(std::string_view src) {
+    const bool writes_text = src.find(".text") != std::string_view::npos ||
+                             src.find("[\"text\"]") != std::string_view::npos ||
+                             src.find("['text']") != std::string_view::npos;
+    if (! writes_text) return false;
+    return src.find("getLayer") != std::string_view::npos;
+}
+
+bool FieldBindingsWriteLayerText(const wpscene::FieldBindings& fb) {
+    for (const auto& [_, sb] : fb.scripts) {
+        if (SourceWritesLayerText(sb.source)) return true;
+    }
+    return false;
+}
+
+bool SceneWritesLayerText(std::span<const SceneObjectVar> scene_objs) {
+    for (const auto& obj : scene_objs) {
+        bool found = false;
+        std::visit(
+            visitor::overload {
+                [&found](const auto& scene_obj) {
+                    found = FieldBindingsWriteLayerText(scene_obj.field_bindings);
+                },
+            },
+            obj);
+        if (found) return true;
+    }
+    return false;
+}
+
 std::vector<std::string> DetectRegisteredAssets(std::string_view src) {
     std::vector<std::string> out;
     auto                     seen = std::unordered_set<std::string> {};
@@ -3005,8 +3035,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             }
         }
     }
-    bool wants_dynamic_text = has_text_script || has_indirect_text_script;
-    bool has_text_effect    = false;
+    bool wants_dynamic_text =
+        has_text_script || has_indirect_text_script || context.scene_layer_text_writes;
+    bool has_text_effect = false;
     for (const auto& effect : obj.effects) {
         if (effect.visible || ! effect.visible_user.empty()) {
             has_text_effect = true;
@@ -3203,10 +3234,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     if (text_source_w <= 0.0f) text_source_w = text_w;
     if (text_source_h <= 0.0f) text_source_h = text_h;
 
-    auto sp_node                   = rstd::sync::Arc<SceneNode>::make(Vector3f(obj.origin.data()),
-                                                                      Vector3f(obj.scale.data()),
-                                                                      Vector3f(obj.angles.data()),
-                                                                      obj.name);
+    auto sp_node = rstd::sync::Arc<SceneNode>::make(
+        Vector3f(obj.origin.data()), Vector3f(obj.scale.data()), Vector3f(obj.angles.data()));
     sp_node->ID()                  = obj.id;
     const float text_bbox_w        = text_w + 2.0f * style.padding;
     const float text_bbox_h        = text_h + 2.0f * style.padding;
@@ -3254,7 +3283,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         .height     = text_bbox_h,
     });
 
-    auto compose_node = rstd::sync::Arc<SceneNode>::make();
+    auto compose_node = rstd::sync::Arc<SceneNode>::make(
+        Vector3f::Zero(), Vector3f::Ones(), Vector3f::Zero(), obj.name);
     // Layer RT must cover the source glyph bounds, not the main canvas.
     // Clock/date scripts often render a large text source and shrink it with
     // the scene transform when composing into the world.
@@ -4349,7 +4379,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
     auto scene_objs =
         ExpandObjects(json, vfs, sc.pkg_version, m_user_properties, &linked_source_ids);
     AdjustAutoOrthoProjection(sc, scene_objs);
-    auto context = BuildContext(vfs, scene_id, sc, m_user_properties);
+    auto context                    = BuildContext(vfs, scene_id, sc, m_user_properties);
+    context.scene_layer_text_writes = SceneWritesLayerText(scene_objs);
     context.hidden_link_source_ids =
         CollectHiddenLinkedSourceIds(json, linked_source_ids, m_user_properties);
 
