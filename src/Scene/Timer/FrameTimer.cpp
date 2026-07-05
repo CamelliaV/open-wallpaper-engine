@@ -46,7 +46,7 @@ void FrameTimer::UpdateFrametime() {
 
 void FrameTimer::SetRequiredFps(u16 value) {
     m_req_fps             = value;
-    microseconds ideatime = milliseconds(1000 / m_req_fps);
+    microseconds ideatime = microseconds(1'000'000 / m_req_fps);
     m_ideatime            = ideatime;
     for (usize i = 0; i < FrameTimer::FRAMETIME_QUEUE_SIZE; i++) {
         AddFrametime(ideatime);

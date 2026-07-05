@@ -2188,7 +2188,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             ? wpfbo.name + "_" + effaddr
                             : std::string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
                     if (wpimgobj.fullscreen) {
-                        scene.renderTargets[rtname]      = { 2, 2, true };
+                        scene.renderTargets[rtname] = {
+                            .width      = 2,
+                            .height     = 2,
+                            .allowReuse = ! wpfbo.unique,
+                        };
                         scene.renderTargets[rtname].bind = {
                             .enable = true,
                             .screen = true,
@@ -2216,7 +2220,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                         }();
                         scene.renderTargets[rtname] = { .width      = fbo_size[0],
                                                         .height     = fbo_size[1],
-                                                        .allowReuse = true };
+                                                        .allowReuse = ! wpfbo.unique };
                     }
                     fboMap[wpfbo.name] = rtname;
                 }
@@ -3234,9 +3238,11 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     const float dynamic_h_budget =
         std::max({ text_source_bbox_h, text_bbox_h, object_h * 2.0f, 256.0f });
     const float layer_max_w =
-        wants_dynamic_text ? dynamic_w_budget : (has_text_effect ? object_w : text_source_bbox_w);
+        wants_dynamic_text ? (has_text_effect ? object_w : dynamic_w_budget)
+                           : (has_text_effect ? object_w : text_source_bbox_w);
     const float layer_max_h =
-        wants_dynamic_text ? dynamic_h_budget : (has_text_effect ? object_h : text_source_bbox_h);
+        wants_dynamic_text ? (has_text_effect ? object_h : dynamic_h_budget)
+                           : (has_text_effect ? object_h : text_source_bbox_h);
     const i32 layer_w = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_w, layer_max_w)));
     const i32 layer_h = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_h, layer_max_h)));
     {
@@ -3380,7 +3386,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     }();
                     scene.renderTargets[rtname] = { .width                = fbo_size[0],
                                                     .height               = fbo_size[1],
-                                                    .allowReuse           = true,
+                                                    .allowReuse           = ! wpfbo.unique,
                                                     .clear_on_first_write = true };
                     fboMap[wpfbo.name]          = rtname;
                 }
@@ -3536,17 +3542,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         if (source_w <= 0.0f) source_w = tw;
         if (source_h <= 0.0f) source_h = th;
         if (has_text_effect) {
-            if (wants_dynamic_text) {
-                tw       = std::max(object_w, source_w + 2.0f * text_padding);
-                th       = object_h;
-                source_w = tw;
-                source_h = std::max(object_h, source_h + 2.0f * text_padding);
-            } else {
-                tw       = object_w;
-                th       = object_h;
-                source_w = object_w;
-                source_h = object_h;
-            }
+            tw       = object_w;
+            th       = object_h;
+            source_w = object_w;
+            source_h = object_h;
         }
         anchor_state->width  = tw;
         anchor_state->height = th;

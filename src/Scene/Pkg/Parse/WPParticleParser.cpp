@@ -35,6 +35,14 @@ inline Vector3d GenRandomVec3(const std::array<float, 3>& min, const std::array<
     return result;
 }
 
+inline float UiColorToLinear(float value) {
+    return value * value;
+}
+
+inline float UiScalarToLinear(float value) {
+    return value * value;
+}
+
 } // namespace
 
 struct SingleRandom {
@@ -201,17 +209,22 @@ ParticleInitOp
 WPParticleParser::genOverrideInitOp(std::shared_ptr<const wpscene::ParticleInstanceoverride> over) {
     return [over = std::move(over)](Particle& p, double) {
         PM::MutiplyInitLifeTime(p, over->lifetime);
-        PM::MutiplyInitAlpha(p, over->alpha);
+        PM::MutiplyInitAlpha(p, UiScalarToLinear(over->alpha));
         PM::MutiplyInitSize(p, over->size);
         PM::MutiplyVelocity(p, over->speed);
         if (over->overColor) {
-            PM::InitColor(
-                p, over->color[0] / 255.0f, over->color[1] / 255.0f, over->color[2] / 255.0f);
+            PM::InitColor(p,
+                          UiColorToLinear(over->color[0] / 255.0f),
+                          UiColorToLinear(over->color[1] / 255.0f),
+                          UiColorToLinear(over->color[2] / 255.0f));
         } else if (over->overColorn) {
             // `colorn` = "color (normalized)" -> absolute 0..1 RGB override
             // (matches WE editor behaviour: picking red in the UI yields a
             // red trail regardless of the base colorrandom initializer).
-            PM::InitColor(p, over->colorn[0], over->colorn[1], over->colorn[2]);
+            PM::InitColor(p,
+                          UiColorToLinear(over->colorn[0]),
+                          UiColorToLinear(over->colorn[1]),
+                          UiColorToLinear(over->colorn[2]));
         }
     };
 }

@@ -37,6 +37,7 @@ public:
     std::string format;
     uint32_t    scale { 1 };
     uint32_t    fit { 0 };
+    bool        unique { false };
 };
 
 // objects[].instance — PKGV0018+. Embedded WE-format material binding
