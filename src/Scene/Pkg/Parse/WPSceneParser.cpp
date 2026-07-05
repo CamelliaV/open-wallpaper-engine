@@ -3122,7 +3122,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         material.name                = "text";
         material.textures            = { atlas_url };
         material.defines             = { "g_Texture0" };
-        material.blenmode            = BlendMode::Translucent;
+        material.blenmode            = BlendMode::Normal;
         material.customShader.shader = shader;
         sp_mesh->AddMaterial(std::move(material));
     }
@@ -3195,7 +3195,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // --- per-layer compose -------------------------------------------------
     // Render the glyphs into a private bbox-sized RT via an ortho camera
     // that maps text-mesh pixel coords 1:1 onto the RT, then composite that
-    // RT onto _rt_default with a Translucent fullscreen-quad pass.
+    // RT onto _rt_default with a Translucent fullscreen-quad pass. The glyph
+    // pass writes straight RGBA into ppong_a; composing applies alpha once.
     //
     // Two sibling nodes:
     //   * sp_node — text glyphs, layer camera, identity world transform,
