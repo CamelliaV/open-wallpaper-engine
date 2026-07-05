@@ -413,6 +413,15 @@ void AssignCurve(SceneAnimationCurve& dst, const wpscene::FieldBindings& binding
 }
 
 void AssignNodeFieldAnimations(SceneNode& node, const wpscene::FieldBindings& bindings) {
+    auto origin_it = bindings.animations.find("origin");
+    if (origin_it != bindings.animations.end())
+        node.SetOriginAnimation(ToSceneAnimationCurve(origin_it->second));
+    auto scale_it = bindings.animations.find("scale");
+    if (scale_it != bindings.animations.end())
+        node.SetScaleAnimation(ToSceneAnimationCurve(scale_it->second));
+    auto angles_it = bindings.animations.find("angles");
+    if (angles_it != bindings.animations.end())
+        node.SetRotationAnimation(ToSceneAnimationCurve(angles_it->second));
     auto it = bindings.animations.find("alpha");
     if (it != bindings.animations.end()) node.SetAlphaAnimation(ToSceneAnimationCurve(it->second));
 }
@@ -2752,6 +2761,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     else
         context.scene->paritileSys->subsystems.emplace_back(std::move(particleSub));
 
+    if (! is_child) AssignNodeFieldAnimations(*spNode.as_ptr(), wppartobj.field_bindings);
     WireFieldScripts(context, spNode, wppartobj.field_bindings);
     if (is_child)
         child_ptr.node_parent->AppendChild(spNode.clone());
@@ -2781,6 +2791,7 @@ void ParseSoundObj(ParseContext& context, wpscene::SoundObject& obj,
     if (control && ! obj.volume_user_key.empty())
         context.scene->sound_volume_user_index[obj.volume_user_key].push_back(control);
 
+    AssignNodeFieldAnimations(*node.as_ptr(), obj.field_bindings);
     WireFieldScripts(context, node, obj.field_bindings);
     context.node_id_map[obj.id] = { obj.parent, rstd::Some(node.clone()) };
 }
@@ -2824,6 +2835,8 @@ void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
         light.setVisibleUserBinding(ToSceneUserVisibilityBinding(light_obj.visible_user));
     }
 
+    AssignNodeFieldAnimations(*node.as_ptr(), light_obj.field_bindings);
+    WireFieldScripts(context, node, light_obj.field_bindings);
     context.node_id_map[light_obj.id] = { light_obj.parent, rstd::Some(node.clone()) };
 }
 
@@ -2909,6 +2922,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
 
     node->AddMesh(mesh);
     context.shader_updater->SetNodeData(node.as_ptr(), svData);
+    AssignNodeFieldAnimations(*node.as_ptr(), model_obj.field_bindings);
     WireFieldScripts(context, node, model_obj.field_bindings);
     context.node_id_map[model_obj.id] = { model_obj.parent,
                                           rstd::Some(node.clone()),
@@ -3237,12 +3251,12 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         std::max({ text_source_bbox_w, text_bbox_w, object_w * 3.0f, 1024.0f });
     const float dynamic_h_budget =
         std::max({ text_source_bbox_h, text_bbox_h, object_h * 2.0f, 256.0f });
-    const float layer_max_w =
-        wants_dynamic_text ? (has_text_effect ? object_w : dynamic_w_budget)
-                           : (has_text_effect ? object_w : text_source_bbox_w);
-    const float layer_max_h =
-        wants_dynamic_text ? (has_text_effect ? object_h : dynamic_h_budget)
-                           : (has_text_effect ? object_h : text_source_bbox_h);
+    const float layer_max_w = wants_dynamic_text
+                                  ? (has_text_effect ? object_w : dynamic_w_budget)
+                                  : (has_text_effect ? object_w : text_source_bbox_w);
+    const float layer_max_h = wants_dynamic_text
+                                  ? (has_text_effect ? object_h : dynamic_h_budget)
+                                  : (has_text_effect ? object_h : text_source_bbox_h);
     const i32 layer_w = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_w, layer_max_w)));
     const i32 layer_h = std::max<i32>(1, (i32)std::ceil(std::max(text_source_bbox_h, layer_max_h)));
     {

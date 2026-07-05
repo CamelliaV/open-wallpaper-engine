@@ -1160,6 +1160,18 @@ public:
         m_user_alpha       = v;
         m_alpha_overridden = true;
     }
+    void SetOriginAnimation(SceneAnimationCurve curve) {
+        m_origin_base  = m_translate;
+        m_origin_curve = std::move(curve);
+    }
+    void SetScaleAnimation(SceneAnimationCurve curve) {
+        m_scale_base  = m_scale;
+        m_scale_curve = std::move(curve);
+    }
+    void SetRotationAnimation(SceneAnimationCurve curve) {
+        m_rotation_base  = m_rotation;
+        m_rotation_curve = std::move(curve);
+    }
     void SetAlphaAnimation(SceneAnimationCurve curve) { m_alpha_curve = std::move(curve); }
     void TickFieldAnimations(double runtime);
     void SetAlphaSource(SceneNode* node) { m_alpha_source = node; }
@@ -1303,6 +1315,12 @@ private:
     float                              m_user_alpha { 1.0f };
     bool                               m_alpha_overridden { false };
     SceneNode*                         m_alpha_source { nullptr };
+    Eigen::Vector3f                    m_origin_base { 0.0f, 0.0f, 0.0f };
+    Eigen::Vector3f                    m_scale_base { 1.0f, 1.0f, 1.0f };
+    Eigen::Vector3f                    m_rotation_base { 0.0f, 0.0f, 0.0f };
+    std::optional<SceneAnimationCurve> m_origin_curve;
+    std::optional<SceneAnimationCurve> m_scale_curve;
+    std::optional<SceneAnimationCurve> m_rotation_curve;
     std::optional<SceneAnimationCurve> m_alpha_curve;
     float                              m_brightness { 1.0f };
     bool                               m_brightness_overridden { false };
