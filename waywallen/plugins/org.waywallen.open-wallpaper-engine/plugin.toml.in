@@ -12,7 +12,7 @@
 id = "@OWE_WAYWALLEN_PLUGIN_ID@"
 name = "Wallpaper Engine"
 version = "@OWE_PLUGIN_VERSION@"
-update = "https://github.com/waywallen/open-wallpaper-engine/blob/main/update.json"
+update = "@OWE_WAYWALLEN_PLUGIN_UPDATE_URL@"
 entry = "main.lua"
 entry_version = 2
 

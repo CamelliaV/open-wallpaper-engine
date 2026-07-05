@@ -9,6 +9,9 @@ endif()
 
 set(OWE_PLUGIN_VERSION 0.1.9)
 set(OWE_WAYWALLEN_PLUGIN_ID org.waywallen.open-wallpaper-engine)
+set(OWE_WAYWALLEN_PLUGIN_UPDATE_URL
+    "https://github.com/waywallen/open-wallpaper-engine/blob/main/update.json"
+    CACHE STRING "URL of the waywallen plugin update manifest")
 
 project(owe VERSION ${OWE_PLUGIN_VERSION})
 
