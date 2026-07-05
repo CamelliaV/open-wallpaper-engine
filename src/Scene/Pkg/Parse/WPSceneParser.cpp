@@ -842,11 +842,14 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
-std::optional<BlendMode> CopyBackgroundFixedBlendMode(int32_t color_blend_mode) {
-    switch (color_blend_mode) {
-    case 31: return BlendMode::Additive;
-    default: return std::nullopt;
-    }
+bool UseCopyBackgroundShaderBlend(const wpscene::ImageObject& image) {
+    return image.copybackground && image.colorBlendMode != 0;
+}
+
+void ApplyCopyBackgroundColorBlend(wpscene::Material& material, const wpscene::ImageObject& image) {
+    if (! UseCopyBackgroundShaderBlend(image)) return;
+    material.combos["BLENDMODE"] = image.colorBlendMode;
+    material.blending            = "disabled";
 }
 
 bool ParseEnabled(std::string_view str) { return str == "enabled"; }
@@ -1675,7 +1678,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     auto& vfs = *context.vfs;
 
-    // copybackground colorBlendMode uses direct fixed blending when it maps cleanly.
+    // Without copybackground, colorBlendMode needs a final passthrough blend pass.
     if (wpimgobj.colorBlendMode != 0 && ! wpimgobj.copybackground) {
         wpscene::ImageEffect colorEffect;
         wpscene::Material    colorMat;
@@ -1801,6 +1804,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     WPShaderInfo      shaderInfo;
     wpscene::Material image_wpmat                 = wpimgobj.material;
     wpscene::Material image_user_texture_fallback = image_wpmat;
+    ApplyCopyBackgroundColorBlend(image_wpmat, wpimgobj);
     ApplyUserTextureBindings(context, image_wpmat);
     {
         svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
@@ -1834,11 +1838,6 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             return;
         };
         LoadConstvalue(material, image_wpmat, shaderInfo);
-        if (wpimgobj.copybackground) {
-            if (auto fixed_blend = CopyBackgroundFixedBlendMode(wpimgobj.colorBlendMode)) {
-                material.blenmode = *fixed_blend;
-            }
-        }
     }
 
     // Whether the layer's base texture is point-sampled (noInterpolation).

@@ -1248,6 +1248,7 @@ function __wwCreateNodeStub() {
             if (key === 'getName')             return () => '';
             if (key === 'getLayer')            return (_n) => __wwCreateNodeStub();
             if (key === 'getTextureAnimation') return () => __wwCreateTexAnimStub();
+            if (key === 'getVideoTexture')     return () => __wwCreateVideoTextureStub();
             if (key === 'getAnimation')        return ()   => __wwCreateAnimationStub();
             if (key === 'getAnimationLayer')   return (_n) => __wwCreateAnimationStub();
             if (key === 'destroyLayer')        return (_layer) => undefined;
@@ -1271,6 +1272,25 @@ function __wwCreateTexAnimStub() {
         isPlaying(){ return playing;  },
     };
 }
+
+function __wwCreateVideoTextureStub() {
+    let current = 0, playing = false;
+    return {
+        duration: 0,
+        rate: 1,
+        volume: 1,
+        play()     { playing = true;  },
+        stop()     { playing = false; current = 0; },
+        pause()    { playing = false; },
+        setCurrentTime(t) {
+            t = Number(t);
+            current = Number.isFinite(t) && t > 0 ? t : 0;
+        },
+        getCurrentTime() { return current; },
+        isPlaying()     { return playing; },
+    };
+}
+
 // Sprite-image / puppet-bone animation handle. Scripts commonly adjust
 // playback rate and manually drive the current frame from init/update.
 function __wwCreateAnimationStub() {
@@ -1288,6 +1308,7 @@ function __wwCreateAnimationStub() {
     return o;
 }
 globalThis.__wwCreateAnimationStub = __wwCreateAnimationStub;
+globalThis.__wwCreateVideoTextureStub = __wwCreateVideoTextureStub;
 globalThis.thisLayer = __wwCreateNodeStub();
 globalThis.thisObject = globalThis.thisLayer;
 globalThis.thisScene = __wwCreateNodeStub();
@@ -2126,6 +2147,15 @@ JSValue NodeGetAnimationStub(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     return r;
 }
 
+JSValue NodeGetVideoTextureStub(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue f = JS_GetPropertyStr(ctx, g, "__wwCreateVideoTextureStub");
+    JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 0, nullptr);
+    JS_FreeValue(ctx, f);
+    JS_FreeValue(ctx, g);
+    return r;
+}
+
 const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("origin", NodeGetOrigin, NodeSetOrigin),
     JS_CGETSET_DEF("scale", NodeGetScale, NodeSetScale),
@@ -2151,6 +2181,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getBoneIndex", 1, NodeGetBoneIndex),
     JS_CFUNC_DEF("getBoneTransform", 1, NodeGetBoneTransform),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
+    JS_CFUNC_DEF("getVideoTexture", 0, NodeGetVideoTextureStub),
     JS_CFUNC_DEF("getAnimation", 0, NodeGetAnimationStub),
     JS_CFUNC_DEF("getAnimationLayer", 1, NodeGetAnimationStub),
     JS_CFUNC_DEF("createLayer", 1, NodeSceneCreateLayer),
