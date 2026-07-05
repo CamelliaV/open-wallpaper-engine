@@ -36,7 +36,8 @@ struct Options {
     uint32_t    initial_fps { 30 };
     bool        test_pattern { false };
     float       initial_volume { 1.0f };
-    bool        enable_audio { true };
+    bool        settings_enable_audio { true };
+    bool        property_enable_audio { true };
     std::string render_node;
     std::string video_hwdec;
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
@@ -44,6 +45,9 @@ struct Options {
     std::unordered_map<std::string, nlohmann::json> initial_user_properties;
     std::shared_ptr<owe::wpscene::SceneDocument>    initial_scene_document;
 };
+
+constexpr const char* kSettingsEnableAudioKey = "enable_audio";
+constexpr const char* kPropertyEnableAudioKey = "waywallen.enable_audio";
 
 [[noreturn]] void die(const std::string& msg) {
     rstd_error("waywallen-wescene-renderer: {}", msg);
@@ -234,14 +238,48 @@ float parse_f32(const char* s, float def) {
     return static_cast<float>(v);
 }
 
-// Daemon serializes bool settings as the literal "true"/"false". Anything
-// else falls back to `def` so a malformed wire value doesn't silently
-// flip the gate.
+bool parse_bool_wire(const char* raw, bool& out) {
+    if (! raw) return false;
+    std::string s     = raw;
+    const auto  first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return false;
+    const auto last = s.find_last_not_of(" \t\r\n");
+    s               = s.substr(first, last - first + 1);
+    for (char& ch : s) {
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+    }
+    if (s == "true" || s == "1" || s == "yes" || s == "on") {
+        out = true;
+        return true;
+    }
+    if (s == "false" || s == "0" || s == "no" || s == "off") {
+        out = false;
+        return true;
+    }
+    return false;
+}
+
 bool parse_bool(const char* s, bool def) {
-    if (! s || ! *s) return def;
-    if (std::strcmp(s, "true") == 0) return true;
-    if (std::strcmp(s, "false") == 0) return false;
-    return def;
+    bool out = def;
+    return parse_bool_wire(s, out) ? out : def;
+}
+
+bool parse_user_property_bool(const nlohmann::json& raw, bool& out) {
+    const nlohmann::json* value = &raw;
+    if (raw.is_object()) {
+        const auto it = raw.find("value");
+        if (it == raw.end()) return false;
+        value = &*it;
+    }
+    if (value->is_boolean()) {
+        out = value->get<bool>();
+        return true;
+    }
+    if (value->is_string()) {
+        const auto s = value->get<std::string>();
+        return parse_bool_wire(s.c_str(), out);
+    }
+    return false;
 }
 
 int32_t parse_i32(const char* s, int32_t def) {
@@ -327,6 +365,8 @@ struct HostState {
     std::atomic<bool> shutdown { false };
     std::atomic<bool> paused { false };
     std::atomic<bool> muted { false };
+    std::atomic<bool> settings_enable_audio { true };
+    std::atomic<bool> property_enable_audio { true };
     float             base_volume { 1.0f };
 
     // Daemon enforces "Ready before any ReportState" during the spawn
@@ -343,12 +383,18 @@ void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_re
 
 float effective_volume(const HostState& s) { return std::clamp(s.base_volume, 0.0f, 1.0f); }
 
+bool effective_audio_enabled(const HostState& s) {
+    return s.settings_enable_audio.load(std::memory_order_acquire) &&
+           s.property_enable_audio.load(std::memory_order_acquire);
+}
+
 void apply_volume_scale(HostState& s, float scale, uint32_t fade_ms) {
     if (s.wp) s.wp->setVolumeScale(std::clamp(scale, 0.0f, 1.0f), fade_ms);
 }
 
 float runtime_volume_scale(const HostState& s) {
-    return (! s.paused.load(std::memory_order_acquire) && ! s.muted.load(std::memory_order_acquire))
+    return (effective_audio_enabled(s) && ! s.paused.load(std::memory_order_acquire) &&
+            ! s.muted.load(std::memory_order_acquire))
                ? 1.0f
                : 0.0f;
 }
@@ -363,8 +409,9 @@ void set_base_volume(HostState& s, float volume) {
 }
 
 void set_runtime_pause(HostState& s, bool paused, uint32_t fade_ms) {
-    const bool was_paused  = s.paused.exchange(paused, std::memory_order_acq_rel);
-    const bool was_audible = ! was_paused && ! s.muted.load(std::memory_order_acquire);
+    const bool was_paused = s.paused.exchange(paused, std::memory_order_acq_rel);
+    const bool was_audible =
+        effective_audio_enabled(s) && ! was_paused && ! s.muted.load(std::memory_order_acquire);
     if (! s.wp) return;
 
     if (paused) {
@@ -380,6 +427,41 @@ void set_runtime_pause(HostState& s, bool paused, uint32_t fade_ms) {
 void set_runtime_mute(HostState& s, bool muted, uint32_t fade_ms) {
     s.muted.store(muted, std::memory_order_release);
     apply_runtime_volume_scale(s, fade_ms);
+}
+
+void apply_audio_enabled(HostState& s, bool was_enabled) {
+    if (! s.wp) return;
+    const bool enabled = effective_audio_enabled(s);
+    if (enabled == was_enabled) return;
+    s.wp->setMuted(! enabled);
+    if (enabled && ! s.paused.load(std::memory_order_acquire)) s.wp->play();
+    apply_runtime_volume_scale(s, 0);
+}
+
+void set_settings_enable_audio(HostState& s, const char* value) {
+    bool enabled = true;
+    if (! parse_bool_wire(value, enabled)) {
+        rstd_warn("waywallen-wescene-renderer: invalid {} value '{}'; ignoring",
+                  kSettingsEnableAudioKey,
+                  value ? value : "");
+        return;
+    }
+    const bool was_enabled = effective_audio_enabled(s);
+    s.settings_enable_audio.store(enabled, std::memory_order_release);
+    apply_audio_enabled(s, was_enabled);
+}
+
+void set_property_enable_audio(HostState& s, const char* value) {
+    bool enabled = true;
+    if (! parse_bool_wire(value, enabled)) {
+        rstd_warn("waywallen-wescene-renderer: invalid {} value '{}'; ignoring",
+                  kPropertyEnableAudioKey,
+                  value ? value : "");
+        return;
+    }
+    const bool was_enabled = effective_audio_enabled(s);
+    s.property_enable_audio.store(enabled, std::memory_order_release);
+    apply_audio_enabled(s, was_enabled);
 }
 
 // Apply a single fps change through the same path WW_EVT_IN_SET_FPS would
@@ -401,8 +483,9 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         break;
     case WW_EVT_IN_SETTING_CHANGED: {
         // v5 hot-reload. Peel the typed view, dispatch known keys
-        // (volume) through the SceneWallpaper looper; route fps through
-        // the same path WW_EVT_IN_SET_FPS used to. Unknown keys warn.
+        // through the SceneWallpaper looper; route fps through the same
+        // path WW_EVT_IN_SET_FPS used to. Unknown keys are scene user
+        // properties.
         ww_bridge_setting_changed_t as {};
         if (ww_bridge_setting_changed_from_control(&msg, &as) != 0) break;
         for (uint32_t i = 0; i < as.settings.count; ++i) {
@@ -416,6 +499,10 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                 char*         end = nullptr;
                 unsigned long n   = std::strtoul(val, &end, 10);
                 if (end != val) set_fps(s, static_cast<uint32_t>(n));
+            } else if (std::strcmp(key, kSettingsEnableAudioKey) == 0) {
+                set_settings_enable_audio(s, val);
+            } else if (std::strcmp(key, kPropertyEnableAudioKey) == 0) {
+                set_property_enable_audio(s, val);
             } else if (std::strcmp(key, "test_pattern") == 0) {
                 // Wescene's test_pattern flag is set on initial spawn
                 // through RenderInit; runtime toggling is not wired
@@ -619,9 +706,8 @@ int main(int argc, char** argv) {
         }
         // Wire format is u32 0..100; engine takes 0..1 ratio.
         opts.initial_volume = parse_f32(kv_get(init.settings, "volume"), 100.0f) / 100.0f;
-        // identity=true: respawn-only. Reflected into SceneWallpaperConfig below
-        // so SoundManager::init() short-circuits and no audio device opens.
-        opts.enable_audio = parse_bool(kv_get(init.settings, "enable_audio"), true);
+        opts.settings_enable_audio =
+            parse_bool(kv_get(init.settings, kSettingsEnableAudioKey), true);
         // CLI `--render-node` wins over Init kv (mirroring mpv/video).
         // Empty ⇒ let SceneWallpaper pick the default Vulkan device.
         if (opts.render_node.empty()) {
@@ -656,6 +742,17 @@ int main(int argc, char** argv) {
                 for (auto it = parsed.begin(); it != parsed.end(); ++it) {
                     const std::string& k = it.key();
                     const auto&        v = it.value();
+                    if (k == kPropertyEnableAudioKey) {
+                        bool enabled = true;
+                        if (parse_user_property_bool(v, enabled)) {
+                            opts.property_enable_audio = enabled;
+                        } else {
+                            rstd_warn("waywallen-wescene-renderer: invalid {} initial value; "
+                                      "using true",
+                                      kPropertyEnableAudioKey);
+                        }
+                        continue;
+                    }
                     opts.initial_user_properties.emplace(k, v);
                 }
             } else if (! parsed.is_discarded()) {
@@ -673,6 +770,8 @@ int main(int argc, char** argv) {
     host.width       = opts.width;
     host.height      = opts.height;
     host.base_volume = opts.initial_volume;
+    host.settings_enable_audio.store(opts.settings_enable_audio, std::memory_order_release);
+    host.property_enable_audio.store(opts.property_enable_audio, std::memory_order_release);
 
     // Forward the scene's `general.clearcolor` to the daemon every
     // time a scene loads. Alpha is forced to 1.0 — the rendered
@@ -716,7 +815,7 @@ int main(int argc, char** argv) {
     wp_config.volume          = effective_volume(host);
     // Mute first so loadScene's SoundManager::init() short-circuits when
     // audio is disabled; the audio device + system output never open.
-    wp_config.muted = ! opts.enable_audio;
+    wp_config.muted = ! effective_audio_enabled(host);
     wp.configure(std::move(wp_config));
 
     // The factory runs inside VulkanRender::init after the GPU is picked

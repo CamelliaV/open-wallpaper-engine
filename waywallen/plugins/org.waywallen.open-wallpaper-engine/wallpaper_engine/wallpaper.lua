@@ -35,6 +35,14 @@ local PROPERTY_KEY_MAP = {
     schemecolor = "waywallen.scheme_color"
 }
 
+local PREDEFINED_PROPERTIES = {
+    ["waywallen.enable_audio"] = {
+        text = "Enable audio",
+        type = "bool",
+        value = true,
+    },
+}
+
 local function map_property_keys(props)
     for from, to in pairs(PROPERTY_KEY_MAP) do
         local v = props[from]
@@ -53,6 +61,13 @@ local function prefix_property_titles(props)
     end
 end
 
+local function add_predefined_properties(entry, props)
+    if entry.wp_type == "web" then return end
+    for k, v in pairs(PREDEFINED_PROPERTIES) do
+        if props[k] == nil then props[k] = v end
+    end
+end
+
 function M.properties(entry, ctx)
     local dir = project_util.project_dir_of(entry)
     if not dir then return nil end
@@ -62,8 +77,8 @@ function M.properties(entry, ctx)
     if not content then return nil end
     local parsed = ctx.json_parse(content)
     if not parsed or type(parsed) ~= "table" then return nil end
-    local props = parsed.general and parsed.general.properties or nil
-    if not props or type(props) ~= "table" or next(props) == nil then return nil end
+    local props = parsed.general and parsed.general.properties or {}
+    if type(props) ~= "table" then props = {} end
     map_property_keys(props)
 
     local locale = load_locale(ctx, entry.library_root)
@@ -79,6 +94,7 @@ function M.properties(entry, ctx)
     end
 
     prefix_property_titles(props)
+    add_predefined_properties(entry, props)
 
     return ctx.json_encode(props)
 end
