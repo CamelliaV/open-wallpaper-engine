@@ -1351,9 +1351,10 @@ private:
 // ============================================================================
 
 struct SceneImageEffectNode {
-    std::string                output; // render target
-    rstd::sync::Arc<SceneNode> sceneNode;
-    bool                       uses_quad_position_space { false };
+    std::string                                 output; // render target
+    rstd::sync::Arc<SceneNode>                  sceneNode;
+    bool                                        uses_quad_position_space { false };
+    Map<std::string, SceneShaderValueAnimation> final_quad_shader_values;
 };
 
 struct SceneImageEffect {

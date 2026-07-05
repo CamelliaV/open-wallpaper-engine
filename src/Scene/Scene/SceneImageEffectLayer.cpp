@@ -119,6 +119,14 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                 last_output->sceneNode->SetTranslate({ -m_width * 0.5f, -m_height * 0.5f, 0.0f });
                 last_output->sceneNode->SetScale({ m_width, m_height, 1.0f });
                 ChangeMeshToUnitQuad(mesh);
+                for (const auto& [name, value] : last_output->final_quad_shader_values) {
+                    material.SetShaderValue(name, value.base);
+                    if (value.curve && ! value.curve->Empty()) {
+                        material.customShader.valueAnimations[name] = value;
+                    } else {
+                        material.customShader.valueAnimations.erase(name);
+                    }
+                }
             } else {
                 mesh.ChangeMeshDataFrom(*m_final_mesh);
             }

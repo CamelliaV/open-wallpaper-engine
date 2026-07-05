@@ -1446,8 +1446,9 @@ void IndexImageTextureFallbacks(ParseContext& context, std::span<SceneObjectVar>
     }
 }
 
-void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
-                    const WPShaderInfo& info) {
+void LoadConstvalue(
+    SceneMaterial& material, const wpscene::Material& wpmat, const WPShaderInfo& info,
+    owe::Map<std::string, SceneShaderValueAnimation>* final_quad_shader_values = nullptr) {
     // load glname from alias and load to constvalue
     for (const auto& cs : wpmat.constantshadervalues) {
         const auto&               name   = cs.first;
@@ -1459,17 +1460,27 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
             std::vector<float> const_value = value;
             bool               normalize_position =
                 UsesEffectQuadPositionSpace(wpmat) && IsShaderPositionUniform(info, glname);
+            std::optional<SceneShaderValueAnimation> final_quad_value;
             if (normalize_position && const_value.size() >= 2) {
-                const_value[0] = const_value[0] * 2.0f - 1.0f;
-                const_value[1] = const_value[1] * 2.0f - 1.0f;
+                final_quad_value.emplace();
+                final_quad_value->base = ShaderValue(value);
+                const_value[0]         = const_value[0] * 2.0f - 1.0f;
+                const_value[1]         = const_value[1] * 2.0f - 1.0f;
             }
             material.customShader.constValues[glname] = const_value;
             if (auto it = wpmat.constantshadervalues_animations.find(name);
                 it != wpmat.constantshadervalues_animations.end()) {
                 auto curve =
                     std::make_shared<SceneAnimationCurve>(ToSceneAnimationCurve(it->second));
-                if (normalize_position) NormalizeEffectPositionCurve(*curve);
+                if (final_quad_value) final_quad_value->curve = curve;
+                if (normalize_position) {
+                    curve = std::make_shared<SceneAnimationCurve>(*curve);
+                    NormalizeEffectPositionCurve(*curve);
+                }
                 material.SetShaderValueAnimation(glname, std::move(curve));
+            }
+            if (final_quad_value && final_quad_shader_values) {
+                (*final_quad_shader_values)[glname] = std::move(*final_quad_value);
             }
         }
     }
@@ -2295,6 +2306,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 SceneMaterial        material;
                 SceneUniformNodeData svData;
                 svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
+                owe::Map<std::string, SceneShaderValueAnimation> final_quad_shader_values;
                 if (! LoadMaterial(vfs,
                                    wpmat,
                                    context.scene.get(),
@@ -2307,7 +2319,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 }
 
                 // load glname from alias and load to constvalue
-                LoadConstvalue(material, wpmat, wpEffShaderInfo);
+                LoadConstvalue(material, wpmat, wpEffShaderInfo, &final_quad_shader_values);
                 auto spMesh = std::make_shared<SceneMesh>();
                 {
                     svData.propagatedParallaxDepth = { wpimgobj.parallaxDepth[0],
@@ -2403,6 +2415,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     .output                   = matOutRT,
                     .sceneNode                = spEffNode.clone(),
                     .uses_quad_position_space = UsesEffectQuadPositionSpace(wpmat),
+                    .final_quad_shader_values = std::move(final_quad_shader_values),
                 });
             }
 
@@ -3461,6 +3474,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
                     sv.effect_projection_node  = compose_node.as_ptr();
                     sv.effect_projection_size  = { object_w, object_h };
+                    owe::Map<std::string, SceneShaderValueAnimation> final_quad_shader_values;
                     if (! LoadMaterial(*context.vfs,
                                        wpmat,
                                        &scene,
@@ -3471,7 +3485,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                         effect_ok = false;
                         break;
                     }
-                    LoadConstvalue(mat, wpmat, shader_info);
+                    LoadConstvalue(mat, wpmat, shader_info, &final_quad_shader_values);
 
                     auto mesh = std::make_shared<SceneMesh>();
                     mesh->AddMaterial(std::move(mat));
@@ -3486,6 +3500,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                         .output                   = matOutRT,
                         .sceneNode                = effect_node.clone(),
                         .uses_quad_position_space = UsesEffectQuadPositionSpace(wpmat),
+                        .final_quad_shader_values = std::move(final_quad_shader_values),
                     });
                 }
 
