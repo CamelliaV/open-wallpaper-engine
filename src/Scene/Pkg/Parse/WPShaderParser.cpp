@@ -5,6 +5,7 @@ module;
 
 module wescene.pkg.parse;
 import nlohmann.json;
+import wescene.spec_names;
 import wescene.core;
 import wescene.types;
 import rstd.log;
@@ -1934,8 +1935,8 @@ WPShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs
         result.info.combos[key]          = value;
         result.variant.input_combos[key] = value;
     }
-    if (has_geometry_stage && ! result.info.combos.contains("GS_ENABLED")) {
-        result.info.combos["GS_ENABLED"] = "1";
+    if (has_geometry_stage && ! result.info.combos.contains(std::string(WE_CB_GS_ENABLED))) {
+        result.info.combos[std::string(WE_CB_GS_ENABLED)] = "1";
     }
     MergeVariantFallbackMetadata(result.info, desc);
 
@@ -2022,14 +2023,16 @@ WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::V
     for (const auto& kv : combos_override) {
         r.info.combos[kv.first] = kv.second;
     }
-    if (r.info.combos.find("BLENDMODE") == r.info.combos.end()) r.info.combos["BLENDMODE"] = "0";
-    if (r.info.combos.find("BONECOUNT") == r.info.combos.end()) r.info.combos["BONECOUNT"] = "1";
+    if (r.info.combos.find(std::string(WE_CB_BLENDMODE)) == r.info.combos.end())
+        r.info.combos[std::string(WE_CB_BLENDMODE)] = "0";
+    if (r.info.combos.find(std::string(WE_CB_BONECOUNT)) == r.info.combos.end())
+        r.info.combos[std::string(WE_CB_BONECOUNT)] = "1";
 
     std::vector<WPShaderUnit> units;
     units.push_back({ ShaderType::VERTEX, std::move(vert_src), {} });
     if (! geom_src.empty()) {
         units.push_back({ ShaderType::GEOMETRY, std::move(geom_src), {} });
-        r.info.combos["GS_ENABLED"] = "1";
+        r.info.combos[std::string(WE_CB_GS_ENABLED)] = "1";
     }
     units.push_back({ ShaderType::FRAGMENT, std::move(frag_src), {} });
 
