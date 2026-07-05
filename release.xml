@@ -1,3 +1,20 @@
+<release version="0.1.10" date="2026-07-05">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Dynamic wescene audio enable/disable handling for renderer settings and per-wallpaper properties. #44 #47</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>Copybackground video blend and transparent video texture composition.</li>
+      <li>Initial user-property string parsing after renderer restart. #46</li>
+      <li>Text alpha composition and clock highlight rendering.</li>
+      <li>Node field animations, spin-effect quad centers and calendar text scripts.</li>
+      <li>Atmosphere effect rendering.</li>
+      <li>Looped video texture frame pacing.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.1.9" date="2026-07-03">
   <description>
     <p>Added:</p>
