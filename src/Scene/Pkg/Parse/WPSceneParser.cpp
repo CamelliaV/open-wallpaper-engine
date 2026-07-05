@@ -760,6 +760,15 @@ std::array<i32, 2> NonZeroRenderTargetExtent(float width, float height) {
     return { NonZeroRenderTargetDimension(width), NonZeroRenderTargetDimension(height) };
 }
 
+std::array<float, 2> ImageEffectTargetSize(const ParseContext&         context,
+                                           const wpscene::ImageObject& obj, bool is_passthrough) {
+    if ((obj.fullscreen || is_passthrough) && context.scene && context.scene->activeCamera) {
+        return { static_cast<float>(context.scene->activeCamera->Width()),
+                 static_cast<float>(context.scene->activeCamera->Height()) };
+    }
+    return { obj.size[0], obj.size[1] };
+}
+
 void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
                          bool thick_format) {
     (void)particle;
@@ -957,6 +966,74 @@ owe::Map<std::string, std::string> MaterialCombosToShaderCombos(const wpscene::M
     return combos;
 }
 
+bool IsLegacyAtmosphereMaterial(const wpscene::Material& material) {
+    return material.shader == "workshop/2839476907/effects/atmosphere";
+}
+
+void ApplyLegacyAtmosphereLightCombo(const wpscene::Material& material, WPShaderInfo& info) {
+    if (! IsLegacyAtmosphereMaterial(material)) return;
+    if (! info.combos.contains("LIGHT_INDEX") || material.combos.contains("LIGHT_INDEX")) return;
+    if (! material.combos.contains("LIGHT1")) return;
+
+    info.combos["LIGHT_INDEX"] = "4";
+}
+
+void ApplyLegacyAtmosphereUniformAliases(const wpscene::Material& material, WPShaderInfo& info) {
+    if (! IsLegacyAtmosphereMaterial(material)) return;
+    info.baseConstSvs[std::string(G_VIEWFORWARD)] = std::array { 0.0f, 0.0f, 1.0f };
+
+    auto prefer_legacy = [&](std::string_view legacy, std::string_view current) {
+        if (! material.constantshadervalues.contains(std::string(legacy))) return;
+        auto current_it = info.alias.find(std::string(current));
+        if (current_it == info.alias.end()) return;
+        info.alias[std::string(legacy)] = current_it->second;
+        info.alias.erase(current_it);
+    };
+
+    prefer_legacy("Planet position", "Position");
+    prefer_legacy("Planet radius", "Planet size");
+    prefer_legacy("Atmosphere radius", "Atmosphere size");
+    prefer_legacy("Thickness", "Density falloff");
+    prefer_legacy("Color", "Light color");
+    prefer_legacy("Intensity", "Brightness");
+}
+
+void ReplaceAllInPlace(std::string& body, std::string_view needle, std::string_view repl) {
+    for (usize pos = 0; (pos = body.find(needle, pos)) != std::string::npos; pos += repl.size()) {
+        body.replace(pos, needle.size(), repl);
+    }
+}
+
+void ApplyLegacyAtmosphereShaderCompat(const wpscene::Material&   material,
+                                       std::vector<WPShaderUnit>& units) {
+    if (! IsLegacyAtmosphereMaterial(material)) return;
+    for (auto& unit : units) {
+        if (unit.stage != ShaderType::FRAGMENT) continue;
+        ReplaceAllInPlace(unit.src,
+                          "float pointDensity, opticalDepth;",
+                          "float pointDensity = 0.0, opticalDepth = 0.0;");
+        ReplaceAllInPlace(unit.src,
+                          "float localDensity, cameraOpticalDepth, sunRayLength, "
+                          "sunOpticalDepth, lightInstensity = 1.0;",
+                          "float localDensity = 0.0, cameraOpticalDepth = 0.0, "
+                          "sunRayLength = 0.0, sunOpticalDepth = 0.0, lightInstensity = 1.0;");
+    }
+}
+
+bool IsLegacyAtmosphereShadowValue(const wpscene::Material& material, std::string_view name) {
+    if (! IsLegacyAtmosphereMaterial(material)) return false;
+
+    static constexpr std::string_view shadow_values[] = {
+        "Position",    "Planet size", "Atmosphere size", "Density falloff",
+        "Light color", "Brightness",  "Radius",
+    };
+
+    for (std::string_view shadow_value : shadow_values) {
+        if (name == shadow_value) return true;
+    }
+    return false;
+}
+
 std::vector<SceneShaderDefaultTexture> ToSceneShaderDefaultTextures(const WPShaderInfo& info) {
     std::vector<SceneShaderDefaultTexture> out;
     out.reserve(info.defTexs.size());
@@ -1072,12 +1149,15 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     for (auto& unit : sd_units) {
         unit.src = WPShaderParser::PreShaderSrc(vfs, unit.src, pWPShaderInfo, texinfos);
     }
+    ApplyLegacyAtmosphereUniformAliases(wpmat, *pWPShaderInfo);
+    ApplyLegacyAtmosphereShaderCompat(wpmat, sd_units);
 
     shader->default_uniforms = pWPShaderInfo->svs;
 
     for (const auto& el : wpmat.combos) {
         pWPShaderInfo->combos[el.first] = std::to_string(el.second);
     }
+    ApplyLegacyAtmosphereLightCombo(wpmat, *pWPShaderInfo);
 
     auto textures = wpmat.textures;
     if (pWPShaderInfo->defTexs.size() > 0) {
@@ -1485,6 +1565,7 @@ void LoadConstvalue(
         const std::vector<float>& value  = cs.second;
         std::string               glname = ResolveShaderMaterialKey(info, name);
         if (glname.empty()) {
+            if (IsLegacyAtmosphereShadowValue(wpmat, name)) continue;
             rstd_error("ShaderValue: {} not found in glsl", name);
         } else {
             std::vector<float> const_value = value;
@@ -1750,11 +1831,13 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     for (const auto& wpeffobj : wpimgobj.effects) {
         if (wpeffobj.visible || ! wpeffobj.visible_user.empty()) count_eff++;
     }
-    bool       hasEffect        = count_eff > 0;
-    bool       isPassthrough    = wpimgobj.config.passthrough;
-    const bool alpha_can_change = ! wpimgobj.alpha_user_key.empty() ||
-                                  wpimgobj.field_bindings.animations.count("alpha") != 0 ||
-                                  wpimgobj.field_bindings.scripts.count("alpha") != 0;
+    bool       hasEffect          = count_eff > 0;
+    bool       isPassthrough      = wpimgobj.config.passthrough;
+    const bool alpha_can_change   = ! wpimgobj.alpha_user_key.empty() ||
+                                    wpimgobj.field_bindings.animations.count("alpha") != 0 ||
+                                    wpimgobj.field_bindings.scripts.count("alpha") != 0;
+    const auto geometry_size      = wpimgobj.size;
+    const auto effect_target_size = ImageEffectTargetSize(context, wpimgobj, isPassthrough);
 
     // No-effect fullscreen / compose layers contribute nothing on their own
     // (they just sample `_rt_default` and write it back). Mark as elidable
@@ -1802,8 +1885,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                                 Vector3f(wpimgobj.angles.data()),
                                                                 wpimgobj.name);
     const Vector3f alignment_offset =
-        AlignmentOffset(wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
-    spImgNode->SetSize({ wpimgobj.size[0], wpimgobj.size[1] });
+        AlignmentOffset(wpimgobj.alignment, { geometry_size[0], geometry_size[1] });
+    spImgNode->SetSize({ geometry_size[0], geometry_size[1] });
     spImgNode->SetPerspective(wpimgobj.perspective);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID() = wpimgobj.id;
@@ -1976,7 +2059,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     if (puppet) {
         if (hasEffect) {
-            GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate, alignment_offset);
+            GenCardMesh(mesh, { geometry_size[0], geometry_size[1] }, mapRate, alignment_offset);
             for (const auto& m : puppet->meshes) {
                 if (m.positions.empty()) continue;
                 effct_final_mesh.Submeshes().emplace_back();
@@ -2003,9 +2086,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         }
     }
     if (! puppet) {
-        GenCardMesh(mesh, { wpimgobj.size[0], wpimgobj.size[1] }, mapRate, alignment_offset);
+        GenCardMesh(mesh, { geometry_size[0], geometry_size[1] }, mapRate, alignment_offset);
         GenCardMesh(effct_final_mesh,
-                    { wpimgobj.size[0], wpimgobj.size[1] },
+                    { geometry_size[0], geometry_size[1] },
                     { 1.0f, 1.0f },
                     alignment_offset);
     }
@@ -2152,7 +2235,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         } else {
             // applly scale to crop
             const auto effect_extent =
-                NonZeroRenderTargetExtent(wpimgobj.size[0], wpimgobj.size[1]);
+                NonZeroRenderTargetExtent(effect_target_size[0], effect_target_size[1]);
             i32 w                   = effect_extent[0];
             i32 h                   = effect_extent[1];
             scene.cameras[nodeAddr] = std::make_shared<SceneCamera>(w, h, -1.0f, 1.0f);
@@ -2168,8 +2251,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         effect_ppong_a = OWE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
         effect_ppong_b = OWE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
         // set image effect
-        const auto effect_extent = NonZeroRenderTargetExtent(wpimgobj.size[0], wpimgobj.size[1]);
-        auto       imgEffectLayer =
+        const auto effect_extent =
+            NonZeroRenderTargetExtent(effect_target_size[0], effect_target_size[1]);
+        auto imgEffectLayer =
             std::make_shared<SceneImageEffectLayer>(spImgNode.as_ptr(),
                                                     static_cast<float>(effect_extent[0]),
                                                     static_cast<float>(effect_extent[1]),
@@ -2251,20 +2335,21 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     } else {
                         auto fbo_size = [&]() -> std::array<uint16_t, 2> {
                             if (wpfbo.fit > 0) {
-                                const float max_size = std::max(wpimgobj.size[0], wpimgobj.size[1]);
+                                const float max_size =
+                                    std::max(effect_target_size[0], effect_target_size[1]);
                                 if (max_size > 0.0f) {
                                     const float fit_scale =
                                         static_cast<float>(wpfbo.fit) / max_size;
                                     const auto fit_extent = NonZeroRenderTargetExtent(
-                                        std::round(wpimgobj.size[0] * fit_scale),
-                                        std::round(wpimgobj.size[1] * fit_scale));
+                                        std::round(effect_target_size[0] * fit_scale),
+                                        std::round(effect_target_size[1] * fit_scale));
                                     return { static_cast<uint16_t>(fit_extent[0]),
                                              static_cast<uint16_t>(fit_extent[1]) };
                                 }
                             }
                             const auto scaled_extent = NonZeroRenderTargetExtent(
-                                wpimgobj.size[0] / static_cast<float>(wpfbo.scale),
-                                wpimgobj.size[1] / static_cast<float>(wpfbo.scale));
+                                effect_target_size[0] / static_cast<float>(wpfbo.scale),
+                                effect_target_size[1] / static_cast<float>(wpfbo.scale));
                             return { static_cast<uint16_t>(scaled_extent[0]),
                                      static_cast<uint16_t>(scaled_extent[1]) };
                         }();
