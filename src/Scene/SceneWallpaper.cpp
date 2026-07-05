@@ -159,6 +159,11 @@ nlohmann::json JsonUserProperty(nlohmann::json value) {
     return MakeUserPropertyDescriptor(std::move(value));
 }
 
+nlohmann::json InitialUserProperty(nlohmann::json value) {
+    if (value.is_string()) return RawUserProperty(value.get<std::string>());
+    return MakeUserPropertyDescriptor(std::move(value));
+}
+
 bool IsShaderGraphUserProperty(const nlohmann::json& prop) {
     return prop.is_object() && prop.contains("type") && prop.at("type").is_string() &&
            prop.at("type").get<std::string>() == "combo";
@@ -745,7 +750,7 @@ NormalizeUserProperties(const std::unordered_map<std::string, nlohmann::json>& i
     for (const auto& [key, value] : input) {
         std::string canonical = CanonicalUserPropertyKey(key);
         if (key == canonical || ! out.contains(canonical)) {
-            out[std::move(canonical)] = MakeUserPropertyDescriptor(value);
+            out[std::move(canonical)] = InitialUserProperty(value);
         }
     }
     return out;
