@@ -94,9 +94,10 @@ void SceneUniformUpdater::FrameBegin() {
     // Guard against parallax.delay == 0: scenes with cameraparallaxdelay=0
     // would otherwise produce 0/0 = NaN here, propagating through the MVP
     // and disappearing the wallpaper entirely (issue: gray-screen render).
-    double t   = m_parallax.delay > 0.0 ? new_time / m_parallax.delay : 1.0;
-    m_mousePos = std::array { (float)algorism::lerp(t, m_mousePos[0], m_mousePosInput[0]),
-                              (float)algorism::lerp(t, m_mousePos[1], m_mousePosInput[1]) };
+    double t       = m_parallax.delay > 0.0 ? new_time / m_parallax.delay : 1.0;
+    m_mousePosLast = m_mousePos;
+    m_mousePos     = std::array { (float)algorism::lerp(t, m_mousePos[0], m_mousePosInput[0]),
+                                  (float)algorism::lerp(t, m_mousePos[1], m_mousePosInput[1]) };
 }
 
 void SceneUniformUpdater::FrameEnd() {}
@@ -124,33 +125,39 @@ void SceneUniformUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& 
     info.has_MVP                = existsOp(G_MVP);
     info.has_MVPI               = existsOp(G_MVPI);
     info.has_EYEPOSITION        = existsOp(G_EYEPOSITION);
+    info.has_EFFECTMODELMATRIX  = existsOp(G_EFFECTMODELMATRIX);
     info.has_EMVP               = existsOp(G_EMVP);
+    info.has_EMVPI              = existsOp(G_EFFECTMODELVIEWPROJECTIONMATRIXINVERSE);
+    info.has_LAYERMODELMATRIX   = existsOp(G_LAYERMODELMATRIX);
     info.has_ETVP               = existsOp(G_ETVP);
     info.has_ETVPI              = existsOp(G_ETVPI);
 
     info.has_VP = existsOp(G_VP);
 
-    info.has_BONES            = existsOp(G_BONES);
-    info.has_TIME             = existsOp(G_TIME);
-    info.has_DAYTIME          = existsOp(G_DAYTIME);
-    info.has_POINTERPOSITION  = existsOp(G_POINTERPOSITION);
-    info.has_PARALLAXPOSITION = existsOp(G_PARALLAXPOSITION);
-    info.has_TEXELSIZE        = existsOp(G_TEXELSIZE);
-    info.has_TEXELSIZEHALF    = existsOp(G_TEXELSIZEHALF);
-    info.has_SCREEN           = existsOp(G_SCREEN);
-    info.has_LP               = existsOp(G_LP);
-    info.has_LCR              = existsOp(G_LCR);
-    info.has_USERALPHA        = existsOp(G_USERALPHA);
-    info.has_COLOR4           = existsOp(G_COLOR4);
-    info.has_COLOR            = existsOp(G_COLOR);
-    info.has_ALPHA            = existsOp(G_ALPHA);
-    info.has_BRIGHTNESS       = existsOp(G_BRIGHTNESS);
-    info.has_audio_16_l       = existsOp(G_AUDIO_SPEC_16_L);
-    info.has_audio_16_r       = existsOp(G_AUDIO_SPEC_16_R);
-    info.has_audio_32_l       = existsOp(G_AUDIO_SPEC_32_L);
-    info.has_audio_32_r       = existsOp(G_AUDIO_SPEC_32_R);
-    info.has_audio_64_l       = existsOp(G_AUDIO_SPEC_64_L);
-    info.has_audio_64_r       = existsOp(G_AUDIO_SPEC_64_R);
+    info.has_BONES               = existsOp(G_BONES);
+    info.has_TIME                = existsOp(G_TIME);
+    info.has_FRAMETIME           = existsOp(G_FRAMETIME);
+    info.has_DAYTIME             = existsOp(G_DAYTIME);
+    info.has_DAYTIME_LEGACY      = existsOp(G_DAYTIME_LEGACY);
+    info.has_POINTERPOSITION     = existsOp(G_POINTERPOSITION);
+    info.has_POINTERPOSITIONLAST = existsOp(G_POINTERPOSITIONLAST);
+    info.has_PARALLAXPOSITION    = existsOp(G_PARALLAXPOSITION);
+    info.has_TEXELSIZE           = existsOp(G_TEXELSIZE);
+    info.has_TEXELSIZEHALF       = existsOp(G_TEXELSIZEHALF);
+    info.has_SCREEN              = existsOp(G_SCREEN);
+    info.has_LP                  = existsOp(G_LP);
+    info.has_LCR                 = existsOp(G_LCR);
+    info.has_USERALPHA           = existsOp(G_USERALPHA);
+    info.has_COLOR4              = existsOp(G_COLOR4);
+    info.has_COLOR               = existsOp(G_COLOR);
+    info.has_ALPHA               = existsOp(G_ALPHA);
+    info.has_BRIGHTNESS          = existsOp(G_BRIGHTNESS);
+    info.has_audio_16_l          = existsOp(G_AUDIO_SPEC_16_L);
+    info.has_audio_16_r          = existsOp(G_AUDIO_SPEC_16_R);
+    info.has_audio_32_l          = existsOp(G_AUDIO_SPEC_32_L);
+    info.has_audio_32_r          = existsOp(G_AUDIO_SPEC_32_R);
+    info.has_audio_64_l          = existsOp(G_AUDIO_SPEC_64_L);
+    info.has_audio_64_r          = existsOp(G_AUDIO_SPEC_64_R);
 
     std::accumulate(begin(info.texs), end(info.texs), 0, [&existsOp](unsigned index, auto& value) {
         value.has_resolution = existsOp(WE_GLTEX_RESOLUTION_NAMES[index]);
@@ -215,6 +222,9 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     bool reqMVP   = info.has_MVP;
     bool reqMVPI  = info.has_MVPI;
     bool reqEMVP  = info.has_EMVP;
+    bool reqEMVPI = info.has_EMVPI;
+    bool reqEffectModel =
+        info.has_EFFECTMODELMATRIX || reqEMVP || reqEMVPI || info.has_LAYERMODELMATRIX;
     bool reqETVP  = info.has_ETVP;
     bool reqETVPI = info.has_ETVPI;
 
@@ -242,7 +252,7 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
         const auto eye = camera->GetPosition().cast<float>();
         updateOp(G_EYEPOSITION, std::array<float, 3> { eye.x(), eye.y(), eye.z() });
     }
-    if (reqM || reqMVP || reqMI || reqMVPI || reqEMVP) {
+    if (reqM || reqMVP || reqMI || reqMVPI || reqEffectModel) {
         Matrix4d modelTrans = pNode->ModelTrans();
         if (hasNodeData && cam_name != "effect") {
             const auto& nodeData   = m_nodeDataMap.at(pNode);
@@ -294,13 +304,15 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
             updateOp(G_MVP, ShaderValue::fromMatrix(mvpTrans));
             if (reqMVPI) updateOp(G_MVPI, ShaderValue::fromMatrix(mvpTrans.inverse()));
         }
-        if (reqEMVP) {
+        if (reqEffectModel) {
+            Matrix4d layerModel  = modelTrans;
             Matrix4d effectModel = modelTrans;
             if (hasNodeData && m_nodeDataMap.at(pNode).effect_projection_node != nullptr) {
                 const auto& nodeData = m_nodeDataMap.at(pNode);
                 auto*       source   = nodeData.effect_projection_node;
                 source->UpdateTrans();
-                effectModel = source->ModelTrans();
+                layerModel  = source->ModelTrans();
+                effectModel = layerModel;
                 if (nodeData.effect_projection_size[0] > 0.0f &&
                     nodeData.effect_projection_size[1] > 0.0f) {
                     effectModel =
@@ -312,10 +324,18 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
                             .matrix();
                 }
             }
-            SceneCamera* effect_camera = m_scene->activeCamera ? m_scene->activeCamera : camera;
-            updateOp(
-                G_EMVP,
-                ShaderValue::fromMatrix(effect_camera->GetViewProjectionMatrix() * effectModel));
+            if (info.has_LAYERMODELMATRIX)
+                updateOp(G_LAYERMODELMATRIX, ShaderValue::fromMatrix(layerModel));
+            if (info.has_EFFECTMODELMATRIX)
+                updateOp(G_EFFECTMODELMATRIX, ShaderValue::fromMatrix(effectModel));
+            if (reqEMVP || reqEMVPI) {
+                SceneCamera* effect_camera = m_scene->activeCamera ? m_scene->activeCamera : camera;
+                const Matrix4d effect_mvp  = effect_camera->GetViewProjectionMatrix() * effectModel;
+                if (reqEMVP) updateOp(G_EMVP, ShaderValue::fromMatrix(effect_mvp));
+                if (reqEMVPI)
+                    updateOp(G_EFFECTMODELVIEWPROJECTIONMATRIXINVERSE,
+                             ShaderValue::fromMatrix(effect_mvp.inverse()));
+            }
         }
         if (reqETVP || reqETVPI) {
             /*
@@ -334,9 +354,13 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
     // ShaderValue::ValueOf(Eigen::Matrix4f::Identity())});
     if (info.has_TIME) updateOp(G_TIME, (float)m_scene->elapsingTime);
 
+    if (info.has_FRAMETIME) updateOp(G_FRAMETIME, (float)m_scene->frameTime);
+
     if (info.has_DAYTIME) updateOp(G_DAYTIME, (float)m_dayTime);
+    if (info.has_DAYTIME_LEGACY) updateOp(G_DAYTIME_LEGACY, (float)m_dayTime);
 
     if (info.has_POINTERPOSITION) updateOp(G_POINTERPOSITION, m_mousePos);
+    if (info.has_POINTERPOSITIONLAST) updateOp(G_POINTERPOSITIONLAST, m_mousePosLast);
 
     if (info.has_TEXELSIZE) updateOp(G_TEXELSIZE, m_texelSize);
 

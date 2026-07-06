@@ -18,15 +18,21 @@ struct SceneUniformInfo {
     bool has_MVP { false };
     bool has_MVPI { false };
     bool has_EYEPOSITION { false };
+    bool has_EFFECTMODELMATRIX { false };
     bool has_EMVP { false };
+    bool has_EMVPI { false };
+    bool has_LAYERMODELMATRIX { false };
     bool has_ETVP { false };
     bool has_ETVPI { false };
     bool has_VP { false };
 
     bool has_BONES { false };
     bool has_TIME { false };
+    bool has_FRAMETIME { false };
     bool has_DAYTIME { false };
+    bool has_DAYTIME_LEGACY { false };
     bool has_POINTERPOSITION { false };
+    bool has_POINTERPOSITIONLAST { false };
     bool has_PARALLAXPOSITION { false };
     bool has_TEXELSIZE { false };
     bool has_TEXELSIZEHALF { false };
@@ -120,6 +126,7 @@ private:
     std::array<float, 2> m_texelSize { 1.0f / 1920.0f, 1.0f / 1080.0f };
 
     std::array<float, 2> m_mousePos { 0.5f, 0.5f };
+    std::array<float, 2> m_mousePosLast { 0.5f, 0.5f };
     std::array<float, 2> m_mousePosInput { 0.5f, 0.5f };
     double               m_mouseDelayedTime { 0.0f };
     unsigned             m_mouseInputCount { 0 };

@@ -122,6 +122,20 @@ inline constexpr std::string_view G_ALTVIEWPROJECTIONMATRIX { "g_AltViewProjecti
 inline constexpr std::string_view G_MI { "g_ModelMatrixInverse" };
 inline constexpr std::string_view G_MVPI { "g_ModelViewProjectionMatrixInverse" };
 inline constexpr std::string_view G_EYEPOSITION { "g_EyePosition" };
+inline constexpr std::string_view G_EFFECTMODELMATRIX { "g_EffectModelMatrix" };
+inline constexpr std::string_view G_EFFECTMODELVIEWPROJECTIONMATRIX {
+    "g_EffectModelViewProjectionMatrix"
+};
+inline constexpr std::string_view G_EFFECTMODELVIEWPROJECTIONMATRIXINVERSE {
+    "g_EffectModelViewProjectionMatrixInverse"
+};
+inline constexpr std::string_view G_EFFECTTEXTUREPROJECTIONMATRIX {
+    "g_EffectTextureProjectionMatrix"
+};
+inline constexpr std::string_view G_EFFECTTEXTUREPROJECTIONMATRIXINVERSE {
+    "g_EffectTextureProjectionMatrixInverse"
+};
+inline constexpr std::string_view G_LAYERMODELMATRIX { "g_LayerModelMatrix" };
 inline constexpr std::string_view G_EMVP { "g_EffectModelViewProjectionMatrix" };
 inline constexpr std::string_view G_ETVP { "g_EffectTextureProjectionMatrix" };
 inline constexpr std::string_view G_ETVPI { "g_EffectTextureProjectionMatrixInverse" };
@@ -133,7 +147,8 @@ inline constexpr std::string_view G_LIGHTSKYLIGHTCOLOR { "g_LightSkylightColor" 
 
 inline constexpr std::string_view G_TIME { "g_Time" };
 inline constexpr std::string_view G_FRAMETIME { "g_Frametime" };
-inline constexpr std::string_view G_DAYTIME { "g_DayTime" };
+inline constexpr std::string_view G_DAYTIME { "g_Daytime" };
+inline constexpr std::string_view G_DAYTIME_LEGACY { "g_DayTime" };
 inline constexpr std::string_view G_POINTERPOSITION { "g_PointerPosition" };
 inline constexpr std::string_view G_POINTERPOSITIONLAST { "g_PointerPositionLast" };
 inline constexpr std::string_view G_TEXELSIZE { "g_TexelSize" };
