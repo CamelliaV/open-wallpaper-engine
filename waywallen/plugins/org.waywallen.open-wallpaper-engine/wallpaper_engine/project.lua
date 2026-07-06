@@ -36,10 +36,15 @@ function M.classify(ctx, dir, project, project_type)
             end
         end
     else
-        if ctx.file_exists(dir .. "/scene.pkg") then
-            return "scene", dir .. "/scene.pkg"
-        elseif ctx.file_exists(dir .. "/scene.json") then
-            return "scene", dir .. "/scene.json"
+        local file = project and project.file
+        local base = "scene"
+        if file then
+            base = file:match("^(.*)%.json$") or file:match("^(.*)%.pkg$") or base
+        end
+        if ctx.file_exists(dir .. "/" .. base .. ".pkg") then
+            return "scene", dir .. "/" .. base .. ".pkg"
+        elseif ctx.file_exists(dir .. "/" .. base .. ".json") then
+            return "scene", dir .. "/" .. base .. ".json"
         end
     end
     return nil, nil
