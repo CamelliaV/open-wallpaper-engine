@@ -931,6 +931,33 @@ TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptLayerLookup, MissingLayerKeepsDefaultTransformShape) {
+    auto root = rstd::sync::Arc<owe::SceneNode>::make();
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    rt.SetSceneRoot(root.as_ptr());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let resolved = -1;
+            export function init() {
+                const late = thisScene.getLayer("late-sound");
+                resolved = late.scale.x + late.origin.x + late.angles.x;
+            }
+            export function update() { return resolved; }
+        )JS",
+        "test/lazy_layer_default_transform",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        root.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
 TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
     // ~165 corpus callsites use camelCase smoothStep; lowercase exists too.
     JsRuntime   rt;

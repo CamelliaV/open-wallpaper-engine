@@ -1620,7 +1620,7 @@ inline bool ReadXYZ(JSContext* ctx, JSValueConst v, double& x, double& y, double
 
 JSValue NodeGetOrigin(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
-    if (! n) return JS_UNDEFINED;
+    if (! n) return MakeVec3(ctx, 0, 0, 0);
     auto v = n->Translate();
     return MakeVec3(ctx, v.x(), v.y(), v.z());
 }
@@ -1634,7 +1634,7 @@ JSValue NodeSetOrigin(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
 }
 JSValue NodeGetScale(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
-    if (! n) return JS_UNDEFINED;
+    if (! n) return MakeVec3(ctx, 1, 1, 1);
     auto v = n->Scale();
     return MakeVec3(ctx, v.x(), v.y(), v.z());
 }
@@ -1651,7 +1651,7 @@ constexpr double kRadToDeg = 180.0 / rstd::f64_::consts::PI;
 constexpr double kDegToRad = rstd::f64_::consts::PI / 180.0;
 JSValue          NodeGetAngles(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
-    if (! n) return JS_UNDEFINED;
+    if (! n) return MakeVec3(ctx, 0, 0, 0);
     auto v = n->Rotation();
     return MakeVec3(ctx, v.x() * kRadToDeg, v.y() * kRadToDeg, v.z() * kRadToDeg);
 }
