@@ -401,6 +401,111 @@ nlohmann::json ScriptPropertiesForField(const ParseContext& context, std::string
     return props;
 }
 
+std::array<i32, 2> TextLayerExtent(const text::TextGeometry& geometry) {
+    return {
+        std::max<i32>(1, static_cast<i32>(std::ceil(geometry.rt_width))),
+        std::max<i32>(1, static_cast<i32>(std::ceil(geometry.rt_height))),
+    };
+}
+
+std::array<i32, 2> TextEffectFboExtent(const text::TextGeometry& geometry, std::uint32_t scale,
+                                       std::uint32_t fit) {
+    if (fit > 0) {
+        const float max_size = std::max(geometry.effect_frame_width, geometry.effect_frame_height);
+        if (max_size > 0.0f) {
+            const float fit_scale = static_cast<float>(fit) / max_size;
+            return {
+                std::max<i32>(
+                    1, static_cast<i32>(std::round(geometry.effect_frame_width * fit_scale))),
+                std::max<i32>(
+                    1, static_cast<i32>(std::round(geometry.effect_frame_height * fit_scale))),
+            };
+        }
+    }
+    const float fbo_scale = std::max(1.0f, static_cast<float>(scale));
+    return {
+        std::max<i32>(1, static_cast<i32>(std::round(geometry.effect_frame_width / fbo_scale))),
+        std::max<i32>(1, static_cast<i32>(std::round(geometry.effect_frame_height / fbo_scale))),
+    };
+}
+
+bool ResizeRenderTarget(Scene& scene, const std::string& name, i32 width, i32 height) {
+    auto it = scene.renderTargets.find(name);
+    if (it == scene.renderTargets.end()) return false;
+    auto& rt = it->second;
+    if (rt.width == width && rt.height == height) return false;
+    rt.width  = width;
+    rt.height = height;
+    return true;
+}
+
+struct TextRuntimeFbo {
+    std::string   name;
+    std::uint32_t scale { 1 };
+    std::uint32_t fit { 0 };
+};
+
+struct TextRuntimeEffectNode {
+    SceneNode*           node { nullptr };
+    SceneUniformNodeData data;
+};
+
+struct TextRuntimeTargets {
+    Scene*                             scene { nullptr };
+    SceneUniformUpdater*               shader_updater { nullptr };
+    std::string                        camera_key;
+    std::string                        ppong_a;
+    std::string                        ppong_b;
+    std::string                        effect_final;
+    bool                               has_effect { false };
+    i32                                layer_w { 1 };
+    i32                                layer_h { 1 };
+    std::vector<TextRuntimeFbo>        fbos;
+    std::vector<TextRuntimeEffectNode> effect_nodes;
+
+    bool Apply(const text::TextGeometry& geometry) {
+        if (scene == nullptr) return false;
+
+        bool changed          = false;
+        auto [next_w, next_h] = TextLayerExtent(geometry);
+        changed |= ResizeRenderTarget(*scene, ppong_a, next_w, next_h);
+        if (has_effect) {
+            changed |= ResizeRenderTarget(*scene, ppong_b, next_w, next_h);
+            changed |= ResizeRenderTarget(*scene, effect_final, next_w, next_h);
+        }
+
+        if (auto it = scene->cameras.find(camera_key); it != scene->cameras.end() && it->second) {
+            auto& camera = *it->second;
+            if (camera.Width() != static_cast<double>(next_w) ||
+                camera.Height() != static_cast<double>(next_h)) {
+                camera.SetWidth(next_w);
+                camera.SetHeight(next_h);
+                camera.Update();
+                changed = true;
+            }
+        }
+
+        for (const auto& fbo : fbos) {
+            auto [w, h] = TextEffectFboExtent(geometry, fbo.scale, fbo.fit);
+            changed |= ResizeRenderTarget(*scene, fbo.name, w, h);
+        }
+
+        const std::array<float, 2> effect_size {
+            geometry.effect_frame_width,
+            geometry.effect_frame_height,
+        };
+        for (auto& item : effect_nodes) {
+            if (item.node == nullptr) continue;
+            item.data.effect_projection_size = effect_size;
+            if (shader_updater) shader_updater->SetNodeData(item.node, item.data);
+        }
+
+        layer_w = next_w;
+        layer_h = next_h;
+        return changed;
+    }
+};
+
 SceneAnimationKey ToSceneAnimationKey(const wpscene::AnimKeyframe& key) {
     return {
         .frame         = key.frame,
@@ -2306,8 +2411,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
         }
 
-        int32_t     i_eff = -1;
-        bool        last_effect_can_composite_final { false };
+        int32_t i_eff = -1;
+        bool    last_effect_can_composite_final { false };
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
             if (! wpeffobj.visible && wpeffobj.visible_user.empty()) {
@@ -2649,7 +2754,7 @@ struct ParticleChildPtr {
 };
 
 wpscene::ParticleInstanceoverride ParticleOverrideForNode(const wpscene::ParticleObject& obj,
-                                                          bool is_child) {
+                                                          bool                           is_child) {
     if (! is_child) return obj.instanceoverride;
 
     wpscene::ParticleInstanceoverride out;
@@ -2732,9 +2837,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
 
     // Child presets inherit the placed object's opacity/tint but keep their
     // own size, lifetime, rate and count.
-    auto override_state =
-        std::make_shared<wpscene::ParticleInstanceoverride>(
-            ParticleOverrideForNode(wppartobj, is_child));
+    auto override_state = std::make_shared<wpscene::ParticleInstanceoverride>(
+        ParticleOverrideForNode(wppartobj, is_child));
     auto& override = *override_state;
 
     auto& particle_obj = *p_particle_obj;
@@ -3426,8 +3530,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         .effect_frame_bound = obj.copybackground,
     };
     const auto initial_geometry = text::ResolveTextGeometry(geometry_policy, layouter->Metrics());
-    const i32  layer_w          = std::max<i32>(1, (i32)std::ceil(initial_geometry.rt_width));
-    const i32  layer_h          = std::max<i32>(1, (i32)std::ceil(initial_geometry.rt_height));
+    const auto [initial_layer_w, initial_layer_h] = TextLayerExtent(initial_geometry);
+    auto runtime_targets                          = std::make_shared<TextRuntimeTargets>();
     {
         auto&             scene   = *context.scene;
         const std::string addr    = getAddr(sp_node.as_ptr());
@@ -3435,16 +3539,26 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         const std::string ppong_b = std::string(OWE_EFFECT_PPONG_PREFIX_B) + addr;
         const std::string effect_final =
             std::string(OWE_EFFECT_PPONG_PREFIX_A) + "text_final_" + addr;
+        runtime_targets->scene          = &scene;
+        runtime_targets->shader_updater = context.shader_updater;
+        runtime_targets->camera_key     = addr;
+        runtime_targets->ppong_a        = ppong_a;
+        runtime_targets->ppong_b        = ppong_b;
+        runtime_targets->effect_final   = effect_final;
+        runtime_targets->has_effect     = has_text_effect;
+        runtime_targets->layer_w        = initial_layer_w;
+        runtime_targets->layer_h        = initial_layer_h;
 
         // Per-layer ortho camera. effect_camera_node sits at origin so the
         // view matrix is identity; ortho extents = bbox so glyph pixel
         // coords (centered around 0) map directly to [-1, +1] NDC.
-        scene.cameras[addr] = std::make_shared<SceneCamera>(layer_w, layer_h, -1.0f, 1.0f);
+        scene.cameras[addr] =
+            std::make_shared<SceneCamera>(initial_layer_w, initial_layer_h, -1.0f, 1.0f);
         scene.cameras.at(addr)->AttatchNode((*context.effect_camera_node).as_ptr());
 
         scene.renderTargets[ppong_a] = {
-            .width       = layer_w,
-            .height      = layer_h,
+            .width       = initial_layer_w,
+            .height      = initial_layer_h,
             .allowReuse  = true,
             .force_clear = true,
         };
@@ -3457,8 +3571,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
         auto layer = std::make_shared<SceneImageEffectLayer>(has_text_effect ? compose_node.as_ptr()
                                                                              : sp_node.as_ptr(),
-                                                             (float)layer_w,
-                                                             (float)layer_h,
+                                                             static_cast<float>(initial_layer_w),
+                                                             static_cast<float>(initial_layer_h),
                                                              ppong_a,
                                                              has_text_effect ? ppong_b : ppong_a);
         scene.cameras.at(addr)->AttatchImgEffect(layer);
@@ -3546,38 +3660,17 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                         sstart_with(wpfbo.name, WE_SPEC_PREFIX)
                             ? wpfbo.name + "_" + effaddr
                             : std::string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
-                    auto fbo_size = [&]() -> std::array<uint16_t, 2> {
-                        if (wpfbo.fit > 0) {
-                            const float max_size = std::max(initial_geometry.effect_frame_width,
-                                                            initial_geometry.effect_frame_height);
-                            if (max_size > 0.0f) {
-                                const float fit_scale = static_cast<float>(wpfbo.fit) / max_size;
-                                return {
-                                    static_cast<uint16_t>(
-                                        std::max(1.0f,
-                                                 std::round(initial_geometry.effect_frame_width *
-                                                            fit_scale))),
-                                    static_cast<uint16_t>(
-                                        std::max(1.0f,
-                                                 std::round(initial_geometry.effect_frame_height *
-                                                            fit_scale))),
-                                };
-                            }
-                        }
-                        return {
-                            static_cast<uint16_t>(std::max(1.0f,
-                                                           initial_geometry.effect_frame_width /
-                                                               static_cast<float>(wpfbo.scale))),
-                            static_cast<uint16_t>(std::max(1.0f,
-                                                           initial_geometry.effect_frame_height /
-                                                               static_cast<float>(wpfbo.scale))),
-                        };
-                    }();
+                    auto fbo_size = TextEffectFboExtent(initial_geometry, wpfbo.scale, wpfbo.fit);
                     scene.renderTargets[rtname] = { .width                = fbo_size[0],
                                                     .height               = fbo_size[1],
                                                     .allowReuse           = ! wpfbo.unique,
                                                     .clear_on_first_write = true };
                     fboMap[wpfbo.name]          = rtname;
+                    runtime_targets->fbos.push_back(TextRuntimeFbo {
+                        .name  = rtname,
+                        .scale = wpfbo.scale,
+                        .fit   = wpfbo.fit,
+                    });
                 }
 
                 for (const auto& cmd : wpeffobj.commands) {
@@ -3659,6 +3752,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     }
                     effect_node->AddMesh(mesh);
                     context.shader_updater->SetNodeData(effect_node.as_ptr(), sv);
+                    runtime_targets->effect_nodes.push_back(TextRuntimeEffectNode {
+                        .node = effect_node.as_ptr(),
+                        .data = sv,
+                    });
                     effect->nodes.push_back(SceneImageEffectNode {
                         .output                   = matOutRT,
                         .sceneNode                = effect_node.clone(),
@@ -3675,7 +3772,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         }
 
         auto compose_mesh = std::make_shared<SceneMesh>(/*dynamic=*/wants_dynamic_text);
-        GenCardMesh(*compose_mesh, { static_cast<float>(layer_w), static_cast<float>(layer_h) });
+        GenCardMesh(*compose_mesh,
+                    { static_cast<float>(runtime_targets->layer_w),
+                      static_cast<float>(runtime_targets->layer_h) });
         auto loaded = load_passthrough_material(compose_node.as_ptr(),
                                                 has_text_effect ? effect_final : ppong_a);
         if (! loaded.has_value()) return;
@@ -3720,22 +3819,23 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     auto rebuild_compose = [compose_hold,
                             anchor_state,
                             apply_text_anchor,
-                            layer_w,
-                            layer_h,
+                            runtime_targets,
+                            sp_mesh,
                             geometry_policy,
                             text_padding =
                                 style.padding](float tw, float th, float source_w, float source_h) {
-        auto*      compose_ptr = compose_hold.get();
-        const auto geometry    = text::ResolveTextGeometry(geometry_policy,
-                                                           text::TextLayoutMetrics {
-                                                               .text_width    = tw,
-                                                               .text_height   = th,
-                                                               .source_width  = source_w,
-                                                               .source_height = source_h,
-                                                               .padding       = text_padding,
-                                                           });
-        anchor_state->width    = geometry.draw_width;
-        anchor_state->height   = geometry.draw_height;
+        auto*      compose_ptr    = compose_hold.get();
+        const auto geometry       = text::ResolveTextGeometry(geometry_policy,
+                                                              text::TextLayoutMetrics {
+                                                                  .text_width    = tw,
+                                                                  .text_height   = th,
+                                                                  .source_width  = source_w,
+                                                                  .source_height = source_h,
+                                                                  .padding       = text_padding,
+                                                              });
+        const bool target_changed = runtime_targets->Apply(geometry);
+        anchor_state->width       = geometry.draw_width;
+        anchor_state->height      = geometry.draw_height;
         compose_ptr->SetSize({ geometry.draw_width, geometry.draw_height });
         apply_text_anchor();
         const float                 hx = geometry.draw_width * 0.5f;
@@ -3743,12 +3843,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         const std::array<float, 12> pos {
             -hx, -hy, 0.0f, -hx, +hy, 0.0f, +hx, -hy, 0.0f, +hx, +hy, 0.0f,
         };
-        const float u_half = 0.5f * std::min(1.0f, geometry.uv_source_width / float(layer_w));
-        const float v_half = 0.5f * std::min(1.0f, geometry.uv_source_height / float(layer_h));
-        const float u_l    = 0.5f - u_half;
-        const float u_r    = 0.5f + u_half;
-        const float v_t    = 0.5f - v_half;
-        const float v_b    = 0.5f + v_half;
+        const float u_half =
+            0.5f * std::min(1.0f, geometry.uv_source_width / float(runtime_targets->layer_w));
+        const float v_half =
+            0.5f * std::min(1.0f, geometry.uv_source_height / float(runtime_targets->layer_h));
+        const float                u_l = 0.5f - u_half;
+        const float                u_r = 0.5f + u_half;
+        const float                v_t = 0.5f - v_half;
+        const float                v_b = 0.5f + v_half;
         const std::array<float, 8> uv {
             u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
         };
@@ -3758,6 +3860,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         v.SetVertex(WE_IN_POSITION, pos);
         v.SetVertex(WE_IN_TEXCOORD, uv);
         mesh->SetDirty();
+        if (target_changed) {
+            mesh->SetLayoutDirty();
+            if (sp_mesh) sp_mesh->SetLayoutDirty();
+        }
     };
     rebuild_compose(text_w, text_h, text_source_w, text_source_h);
 

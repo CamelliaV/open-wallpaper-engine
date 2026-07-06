@@ -15,12 +15,7 @@ inline void SetBlend(BlendMode bm, VkPipelineColorBlendAttachmentState& state) {
     state.alphaBlendOp = VK_BLEND_OP_ADD;
     switch (bm) {
     case BlendMode::Disable: state.blendEnable = false; break;
-    case BlendMode::Normal:
-        state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        state.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-        state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        break;
+    case BlendMode::Normal: state.blendEnable = false; break;
     case BlendMode::Translucent:
         state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -36,7 +31,8 @@ inline void SetBlend(BlendMode bm, VkPipelineColorBlendAttachmentState& state) {
     }
 }
 
-inline void SetAlphaBlendWritePolicy(VkPipelineColorBlendAttachmentState& state, bool writes_alpha) {
+inline void SetAlphaBlendWritePolicy(VkPipelineColorBlendAttachmentState& state,
+                                     bool                                 writes_alpha) {
     if (writes_alpha) return;
     state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;

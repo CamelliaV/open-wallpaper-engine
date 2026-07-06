@@ -950,7 +950,8 @@ void CustomShaderPass::destory(const Device& device, RenderingResources& rr) {
     m_desc.framebuffer_cache_observed_count = 0;
     RenderBufferResolver resolver(device, *rr.dyn_buf);
     resolver.releaseDynamicDrawBuffers(m_desc.draw_buffers);
-    rr.dyn_buf->unallocateSubRef(m_desc.ubo_buf);
+    if (m_desc.ubo_buf) rr.dyn_buf->unallocateSubRef(m_desc.ubo_buf);
+    m_desc.ubo_buf      = {};
     m_desc.draw_buffers = {};
 }
 
