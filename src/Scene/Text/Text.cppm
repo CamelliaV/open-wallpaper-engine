@@ -201,6 +201,36 @@ struct TextLayoutStyle {
     float       padding { 0.0f };
 };
 
+struct TextLayoutMetrics {
+    float text_width { 0.0f };
+    float text_height { 0.0f };
+    float source_width { 0.0f };
+    float source_height { 0.0f };
+    float padding { 0.0f };
+};
+
+struct TextGeometryPolicy {
+    float frame_width { 1.0f };
+    float frame_height { 1.0f };
+    bool  dynamic { false };
+    bool  has_effect { false };
+    bool  effect_frame_bound { false };
+};
+
+struct TextGeometry {
+    float rt_width { 1.0f };
+    float rt_height { 1.0f };
+    float draw_width { 1.0f };
+    float draw_height { 1.0f };
+    float uv_source_width { 1.0f };
+    float uv_source_height { 1.0f };
+    float effect_frame_width { 1.0f };
+    float effect_frame_height { 1.0f };
+};
+
+TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
+                                 const TextLayoutMetrics&  metrics);
+
 class TextLayouter {
 public:
     // `face` must outlive the layouter (held non-owning; the scene-owned
@@ -219,10 +249,11 @@ public:
     void SetHorizontalAlign(std::string_view align);
 
     // For ParseTextObj's initial-bbox log; reflects the most recent layout.
-    float TextWidth() const noexcept;
-    float TextHeight() const noexcept;
-    float SourceWidth() const noexcept;
-    float SourceHeight() const noexcept;
+    float             TextWidth() const noexcept;
+    float             TextHeight() const noexcept;
+    float             SourceWidth() const noexcept;
+    float             SourceHeight() const noexcept;
+    TextLayoutMetrics Metrics() const noexcept;
 
 private:
     struct Impl;

@@ -632,10 +632,78 @@ TextLayouter::TextLayouter(FontFace* face, std::shared_ptr<owe::SceneMesh> mesh,
 
 TextLayouter::~TextLayouter() = default;
 
-float TextLayouter::TextWidth() const noexcept { return m_impl->last_text_w; }
-float TextLayouter::TextHeight() const noexcept { return m_impl->last_text_h; }
-float TextLayouter::SourceWidth() const noexcept { return m_impl->last_source_w; }
-float TextLayouter::SourceHeight() const noexcept { return m_impl->last_source_h; }
+float             TextLayouter::TextWidth() const noexcept { return m_impl->last_text_w; }
+float             TextLayouter::TextHeight() const noexcept { return m_impl->last_text_h; }
+float             TextLayouter::SourceWidth() const noexcept { return m_impl->last_source_w; }
+float             TextLayouter::SourceHeight() const noexcept { return m_impl->last_source_h; }
+TextLayoutMetrics TextLayouter::Metrics() const noexcept {
+    return {
+        .text_width    = m_impl->last_text_w,
+        .text_height   = m_impl->last_text_h,
+        .source_width  = m_impl->last_source_w,
+        .source_height = m_impl->last_source_h,
+        .padding       = m_impl->style.padding,
+    };
+}
+
+TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
+                                 const TextLayoutMetrics&  metrics) {
+    auto positive = [](float value, float fallback) {
+        return value > 0.0f ? value : fallback;
+    };
+    const float frame_w = positive(policy.frame_width, 1.0f);
+    const float frame_h = positive(policy.frame_height, 1.0f);
+    const float text_w  = positive(metrics.text_width, 1.0f);
+    const float text_h  = positive(metrics.text_height, 1.0f);
+    const float src_w   = positive(metrics.source_width, text_w);
+    const float src_h   = positive(metrics.source_height, text_h);
+    const float pad     = std::max(0.0f, metrics.padding);
+
+    const float text_bbox_w = text_w + 2.0f * pad;
+    const float text_bbox_h = text_h + 2.0f * pad;
+    const float src_bbox_w  = src_w + 2.0f * pad;
+    const float src_bbox_h  = src_h + 2.0f * pad;
+
+    const float dynamic_w = std::max({ src_bbox_w, text_bbox_w, frame_w * 3.0f, 1024.0f });
+    const float dynamic_h = std::max({ src_bbox_h, text_bbox_h, frame_h * 2.0f, 256.0f });
+    const bool  dynamic_effect_can_overflow =
+        policy.dynamic && policy.has_effect && ! policy.effect_frame_bound;
+
+    const float rt_max_w =
+        policy.dynamic ? (dynamic_effect_can_overflow || ! policy.has_effect ? dynamic_w : frame_w)
+                       : (policy.has_effect ? frame_w : src_bbox_w);
+    const float rt_max_h =
+        policy.dynamic ? (dynamic_effect_can_overflow || ! policy.has_effect ? dynamic_h : frame_h)
+                       : (policy.has_effect ? frame_h : src_bbox_h);
+
+    TextGeometry out;
+    out.rt_width            = std::max(src_bbox_w, rt_max_w);
+    out.rt_height           = std::max(src_bbox_h, rt_max_h);
+    out.effect_frame_width  = frame_w;
+    out.effect_frame_height = frame_h;
+
+    if (! policy.has_effect) {
+        out.draw_width       = text_bbox_w;
+        out.draw_height      = text_bbox_h;
+        out.uv_source_width  = src_bbox_w;
+        out.uv_source_height = src_bbox_h;
+        return out;
+    }
+
+    if (dynamic_effect_can_overflow) {
+        out.draw_width       = std::max(frame_w, src_bbox_w);
+        out.draw_height      = frame_h;
+        out.uv_source_width  = out.draw_width;
+        out.uv_source_height = std::max(frame_h, src_bbox_h);
+        return out;
+    }
+
+    out.draw_width       = frame_w;
+    out.draw_height      = frame_h;
+    out.uv_source_width  = frame_w;
+    out.uv_source_height = frame_h;
+    return out;
+}
 
 void TextLayouter::SetText(std::string_view utf8) {
     auto& im = *m_impl;
