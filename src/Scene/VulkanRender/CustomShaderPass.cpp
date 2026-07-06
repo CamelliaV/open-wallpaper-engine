@@ -486,14 +486,15 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         {
             VkColorComponentFlags colorMask =
                 VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
-            bool alpha =
+            bool writes_alpha =
                 ! (m_desc.node->Camera().empty() || sstart_with(m_desc.node->Camera(), "global"));
 
-            if (alpha) colorMask |= VK_COLOR_COMPONENT_A_BIT;
+            if (writes_alpha) colorMask |= VK_COLOR_COMPONENT_A_BIT;
             color_blend.colorWriteMask = colorMask;
 
             auto blendmode = material_ref.blenmode;
             SetBlend(blendmode, color_blend);
+            SetAlphaBlendWritePolicy(color_blend, writes_alpha);
             m_desc.blending = color_blend.blendEnable;
 
             SetAttachmentLoadOp(blendmode, loadOp);

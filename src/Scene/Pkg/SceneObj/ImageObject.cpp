@@ -9,6 +9,17 @@ import rstd.cppstd;
 
 using namespace owe::wpscene;
 
+namespace
+{
+
+float NormalizeLayerAlpha(float alpha) {
+    // Older WE scene JSON stores layer alpha as 0..100 percent.
+    if (alpha > 1.0f) alpha /= 100.0f;
+    return std::clamp(alpha, 0.0f, 1.0f);
+}
+
+} // namespace
+
 bool EffectCommand::FromJson(const nlohmann::json& json) {
     owe::GetJsonValue(json, "command", command);
     owe::GetJsonValue(json, "target", target);
@@ -238,6 +249,7 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
     ReadUserValueBinding(json, "color", color_user);
     color_user_key = color_user.name;
     owe::GetJsonValue(json, "alpha", alpha, false);
+    alpha = NormalizeLayerAlpha(alpha);
     ReadUserValueBinding(json, "alpha", alpha_user);
     alpha_user_key = alpha_user.name;
     owe::GetJsonValue(json, "brightness", brightness, false);

@@ -35,6 +35,13 @@ inline void SetBlend(BlendMode bm, VkPipelineColorBlendAttachmentState& state) {
         break;
     }
 }
+
+inline void SetAlphaBlendWritePolicy(VkPipelineColorBlendAttachmentState& state, bool writes_alpha) {
+    if (writes_alpha) return;
+    state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+}
+
 inline void SetAttachmentLoadOp(BlendMode bm, VkAttachmentLoadOp& load_op) {
     switch (bm) {
     case BlendMode::Disable:
