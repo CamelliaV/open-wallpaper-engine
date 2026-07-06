@@ -42,8 +42,9 @@ struct WPShaderInfo {
 
     // Full annotation metadata. Renderer reads `combos / svs / defTexs /
     // alias` on the hot path; the editor / material UI and the user-property
-    // bridge for `u_*` uniforms read `combo_defs / scalar_uniforms`.
+    // bridge for `u_*` uniforms read the vectors below.
     std::vector<wpscene::WPCombo>      combo_defs;
+    std::vector<wpscene::WPUniformTex> texture_uniforms;
     std::vector<wpscene::WPUniformVar> scalar_uniforms;
 
     // Filled by LoadMaterial for the direct-binding u_* route. The
