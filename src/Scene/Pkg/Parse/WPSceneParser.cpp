@@ -890,16 +890,6 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
-bool UseCopyBackgroundShaderBlend(const wpscene::ImageObject& image) {
-    return image.copybackground && image.colorBlendMode != 0;
-}
-
-void ApplyCopyBackgroundColorBlend(wpscene::Material& material, const wpscene::ImageObject& image) {
-    if (! UseCopyBackgroundShaderBlend(image)) return;
-    material.combos[std::string(WE_CB_BLENDMODE)] = image.colorBlendMode;
-    material.blending                             = "disabled";
-}
-
 bool ParseEnabled(std::string_view str) { return str == "enabled"; }
 
 CullMode ParseCullMode(std::string_view str) {
@@ -1818,8 +1808,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         return false;
     };
 
-    const bool use_final_shader_color_blend =
-        wpimgobj.colorBlendMode != 0 && (! wpimgobj.copybackground || has_runtime_effect());
+    const bool use_final_shader_color_blend = wpimgobj.colorBlendMode != 0;
     if (use_final_shader_color_blend) {
         wpscene::ImageEffect colorEffect;
         wpscene::Material    colorMat;
@@ -1947,7 +1936,6 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     WPShaderInfo      shaderInfo;
     wpscene::Material image_wpmat                 = wpimgobj.material;
     wpscene::Material image_user_texture_fallback = image_wpmat;
-    if (! hasEffect) ApplyCopyBackgroundColorBlend(image_wpmat, wpimgobj);
     ApplyUserTextureBindings(context, image_wpmat);
     {
         svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
