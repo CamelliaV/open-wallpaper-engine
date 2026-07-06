@@ -2648,6 +2648,26 @@ struct ParticleChildPtr {
     Eigen::Vector3f world_scale { 1.f, 1.f, 1.f };
 };
 
+wpscene::ParticleInstanceoverride ParticleOverrideForNode(const wpscene::ParticleObject& obj,
+                                                          bool is_child) {
+    if (! is_child) return obj.instanceoverride;
+
+    wpscene::ParticleInstanceoverride out;
+    const auto&                       parent = obj.instanceoverride;
+    out.enabled                              = parent.enabled;
+    out.alpha                                = parent.alpha;
+    out.overColor                            = parent.overColor;
+    out.overColorn                           = parent.overColorn;
+    out.color                                = parent.color;
+    out.colorn                               = parent.colorn;
+    for (std::string_view field : { "alpha", "color", "colorn" }) {
+        if (auto it = parent.bindings.find(std::string(field)); it != parent.bindings.end()) {
+            out.bindings.emplace(it->first, it->second);
+        }
+    }
+    return out;
+}
+
 void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                       ParticleChildPtr child_ptr = {}) {
     struct ChildData {
@@ -2710,10 +2730,11 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     // this node's local scale. Propagated to child particle nodes.
     Eigen::Vector3f node_world_scale = child_ptr.world_scale.cwiseProduct(spNode->Scale());
 
-    // shared_ptr so RenderSetUserProperty can mutate the override at runtime
-    // and the new value is observed by every initializer / operator closure.
+    // Child presets inherit the placed object's opacity/tint but keep their
+    // own size, lifetime, rate and count.
     auto override_state =
-        std::make_shared<wpscene::ParticleInstanceoverride>(wppartobj.instanceoverride);
+        std::make_shared<wpscene::ParticleInstanceoverride>(
+            ParticleOverrideForNode(wppartobj, is_child));
     auto& override = *override_state;
 
     auto& particle_obj = *p_particle_obj;

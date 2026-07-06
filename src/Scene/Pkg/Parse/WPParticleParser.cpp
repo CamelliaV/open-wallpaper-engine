@@ -37,7 +37,7 @@ inline Vector3d GenRandomVec3(const std::array<float, 3>& min, const std::array<
 
 inline float UiColorToLinear(float value) { return value * value; }
 
-inline float UiScalarToLinear(float value) { return value * value; }
+inline float UiScalarToLinear(float value) { return value; }
 
 } // namespace
 
