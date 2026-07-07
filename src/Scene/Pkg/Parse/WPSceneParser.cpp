@@ -3276,6 +3276,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             break;
         }
     }
+    const bool copy_background_seed = has_text_effect || obj.copybackground;
 
     std::string s_text;
     if (obj.text.is_string()) {
@@ -3343,6 +3344,12 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     auto shader = text::GetTextSceneShader();
     if (! shader) {
         rstd_error("text '{}': text shader compile failed", obj.name);
+        return;
+    }
+    auto copy_background_shader =
+        copy_background_seed ? text::GetTextCopyBackgroundSceneShader() : nullptr;
+    if (copy_background_seed && ! copy_background_shader) {
+        rstd_error("text '{}': copy-background shader compile failed", obj.name);
         return;
     }
 
@@ -3490,16 +3497,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // RT onto _rt_default with a Translucent fullscreen-quad pass. The glyph
     // pass writes straight RGBA into ppong_a; composing applies alpha once.
     //
-    // Two sibling nodes:
-    //   * sp_node — text glyphs, layer camera, identity world transform,
-    //               appended at scene root (NOT in node_id_map → never
-    //               reparented; parent-chain world translation would
-    //               otherwise leak through modelTrans and push the glyph
-    //               quads past the layer camera's [-bbox/2, +bbox/2]
-    //               ortho range, producing post-VS clip outside NDC).
-    //   * compose_node — fullscreen quad sampling ppong_a, Translucent
-    //               blend, world-positioned. node_id_map registers IT for
-    //               parent-chain reparenting + script transforms.
+    // Glyphs render immediately before compose_node. Attaching the layer
+    // camera to sp_node cancels parent transforms inside the private RT.
     struct TextAnchorState {
         std::string horizontal;
         std::string vertical;
@@ -3554,13 +3553,15 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         // coords (centered around 0) map directly to [-1, +1] NDC.
         scene.cameras[addr] =
             std::make_shared<SceneCamera>(initial_layer_w, initial_layer_h, -1.0f, 1.0f);
-        scene.cameras.at(addr)->AttatchNode((*context.effect_camera_node).as_ptr());
+        scene.cameras.at(addr)->AttatchNode(sp_node.as_ptr());
 
         scene.renderTargets[ppong_a] = {
-            .width       = initial_layer_w,
-            .height      = initial_layer_h,
-            .allowReuse  = true,
-            .force_clear = true,
+            .width                = initial_layer_w,
+            .height               = initial_layer_h,
+            .allowReuse           = true,
+            .force_clear          = ! copy_background_seed,
+            .clear_on_first_write = false,
+            .preserve_on_write    = copy_background_seed,
         };
         if (has_text_effect) scene.renderTargets[ppong_b] = scene.renderTargets.at(ppong_a);
         if (has_text_effect) scene.renderTargets[effect_final] = scene.renderTargets.at(ppong_a);
@@ -3576,6 +3577,35 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                              ppong_a,
                                                              has_text_effect ? ppong_b : ppong_a);
         scene.cameras.at(addr)->AttatchImgEffect(layer);
+
+        if (copy_background_seed) {
+            auto bg_node = rstd::sync::Arc<SceneNode>::make();
+            bg_node->SetCamera("effect");
+            auto bg_mesh = std::make_shared<SceneMesh>();
+            bg_mesh->ChangeMeshDataFrom(scene.default_effect_mesh);
+            SceneMaterial bg_material;
+            bg_material.name                = "text_copybackground";
+            bg_material.textures            = { std::string(SpecTex_Default) };
+            bg_material.defines             = { "g_Texture0" };
+            bg_material.blenmode            = BlendMode::Normal;
+            bg_material.customShader.shader = copy_background_shader;
+            bg_mesh->AddMaterial(std::move(bg_material));
+            bg_node->AddMesh(bg_mesh);
+
+            SceneUniformNodeData bg_sv;
+            bg_sv.effect_projection_node = compose_node.as_ptr();
+            bg_sv.effect_projection_size = { initial_geometry.effect_frame_width,
+                                             initial_geometry.effect_frame_height };
+            context.shader_updater->SetNodeData(bg_node.as_ptr(), bg_sv);
+            runtime_targets->effect_nodes.push_back(TextRuntimeEffectNode {
+                .node = bg_node.as_ptr(),
+                .data = bg_sv,
+            });
+            layer->AddPrefillNode(SceneImageEffectNode {
+                .output    = ppong_a,
+                .sceneNode = bg_node.clone(),
+            });
+        }
 
         SceneUniformNodeData compose_sv;
         compose_sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
@@ -3958,11 +3988,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                            });
     }
 
-    // sp_node renders glyphs to its private RT and stays outside the
-    // parent chain — append directly to scene root, never reparented.
-    // compose_node owns the world position and goes through the JSON-order
-    // attach phase (FinalizeScene) like any other layer.
-    context.scene->sceneGraph->AppendChild(sp_node.clone());
+    std::vector<rstd::sync::Arc<SceneNode>> text_before_nodes;
+    text_before_nodes.push_back(sp_node.clone());
     context.node_id_map[obj.id] = {
         obj.parent,
         rstd::Some(compose_node.clone()),
@@ -3973,6 +4000,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             anchor_state->origin += offset;
             apply_text_anchor();
         },
+        std::move(text_before_nodes),
     };
 
     const char* scripted_tag = has_text_script            ? " [scripted]"
@@ -4369,6 +4397,9 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
                     apply_bind_offset();
                 }
             }
+        }
+        for (auto& before_node : ref.ordered_before_nodes) {
+            parent_node->AppendChild(before_node.clone());
         }
         parent_node->AppendChild((*ref.node).clone());
         attached++;

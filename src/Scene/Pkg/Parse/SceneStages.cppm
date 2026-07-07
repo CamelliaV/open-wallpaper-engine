@@ -69,6 +69,7 @@ struct ParseContext {
         std::string                                 attachment;
         std::shared_ptr<WPPuppetLayer>              puppet_layer;
         std::function<void(const Eigen::Vector3f&)> apply_attachment_offset;
+        std::vector<rstd::sync::Arc<SceneNode>>     ordered_before_nodes;
     };
     std::unordered_map<std::int32_t, NodeRef> node_id_map;
     // Scene.json declaration order. Reparenting in this order keeps each

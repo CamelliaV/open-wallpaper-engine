@@ -179,6 +179,10 @@ std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face, const std::str
 // Returns nullptr if the SPIR-V compile fails.
 std::shared_ptr<owe::SceneShader> GetTextSceneShader();
 
+// Mirrors WE's text-effect background seed draw: sample the current scene into
+// the text RT and keep alpha at zero.
+std::shared_ptr<owe::SceneShader> GetTextCopyBackgroundSceneShader();
+
 // --- TextLayouter -----------------------------------------------------------
 // Lays out a UTF-8 string of glyphs into a SceneMesh's vertex / index arrays.
 // SetText() only reads from the face's atlas via Lookup(); the caller is

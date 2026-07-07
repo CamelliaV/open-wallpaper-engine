@@ -640,12 +640,48 @@ float4 main_ps(PSInput i) : SV_Target {
 }
 )hlsl";
 
-std::shared_ptr<owe::SceneShader> CompileTextShader() {
+constexpr const char* kTextCopyBackgroundShaderHlsl = R"hlsl(
+[[vk::binding(0, 0)]] cbuffer ww_Uniforms {
+    column_major float4x4 g_ModelViewProjectionMatrix;
+    column_major float4x4 g_EffectModelViewProjectionMatrix;
+};
+
+struct VSInput {
+    float3 a_Position : a_Position;
+    float2 a_TexCoord : a_TexCoord;
+};
+struct PSInput {
+    float4 sv_pos : SV_Position;
+    float4 v_proj : TEXCOORD0;
+};
+
+PSInput main_vs(VSInput i) {
+    float4 pos = float4(i.a_Position, 1.0);
+    PSInput o;
+    o.sv_pos = mul(g_ModelViewProjectionMatrix, pos);
+    o.v_proj = mul(g_EffectModelViewProjectionMatrix, pos);
+    return o;
+}
+
+[[vk::combinedImageSampler]][[vk::binding(1, 0)]]
+Texture2D<float4> g_Texture0;
+[[vk::combinedImageSampler]][[vk::binding(1, 0)]]
+SamplerState g_Texture0_sampler;
+
+float4 main_ps(PSInput i) : SV_Target {
+    float2 uv = (i.v_proj.xy / i.v_proj.w) * 0.5 + 0.5;
+    return float4(g_Texture0.Sample(g_Texture0_sampler, uv).rgb, 0.0);
+}
+)hlsl";
+
+std::shared_ptr<owe::SceneShader> CompileInlineShader(std::string_view name,
+                                                      std::string_view source) {
     using namespace owe::vulkan;
+    std::string src(source);
 
     std::array<ShaderCompUnit, 2> units {
-        ShaderCompUnit { owe::ShaderType::VERTEX, kTextShaderHlsl, "main_vs", SourceLang::Hlsl },
-        ShaderCompUnit { owe::ShaderType::FRAGMENT, kTextShaderHlsl, "main_ps", SourceLang::Hlsl },
+        ShaderCompUnit { owe::ShaderType::VERTEX, src, "main_vs", SourceLang::Hlsl },
+        ShaderCompUnit { owe::ShaderType::FRAGMENT, src, "main_ps", SourceLang::Hlsl },
     };
     ShaderCompOpt opt {};
     opt.target   = VulkanTarget::Vulkan_1_1;
@@ -653,13 +689,13 @@ std::shared_ptr<owe::SceneShader> CompileTextShader() {
 
     std::vector<Uni_ShaderSpv> spvs;
     if (! CompileAndLinkShaderUnits(units, opt, spvs)) {
-        rstd_error("text shader compile failed");
+        rstd_error("{} shader compile failed", name);
         return nullptr;
     }
 
     auto shader  = std::make_shared<owe::SceneShader>();
     shader->id   = 0;
-    shader->name = "text";
+    shader->name = std::string(name);
     shader->codes.reserve(spvs.size());
     for (auto& spv : spvs) {
         shader->codes.emplace_back(std::move(spv->spirv));
@@ -673,7 +709,16 @@ std::shared_ptr<owe::SceneShader> GetTextSceneShader() {
     static std::once_flag                    once;
     static std::shared_ptr<owe::SceneShader> shader;
     std::call_once(once, [] {
-        shader = CompileTextShader();
+        shader = CompileInlineShader("text", kTextShaderHlsl);
+    });
+    return shader;
+}
+
+std::shared_ptr<owe::SceneShader> GetTextCopyBackgroundSceneShader() {
+    static std::once_flag                    once;
+    static std::shared_ptr<owe::SceneShader> shader;
+    std::call_once(once, [] {
+        shader = CompileInlineShader("text_copybackground", kTextCopyBackgroundShaderHlsl);
     });
     return shader;
 }

@@ -286,6 +286,13 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
             }
         }
     }
+    if (imgeff != nullptr) {
+        for (auto& prefill : imgeff->PrefillNodes()) {
+            std::string_view prefill_output =
+                prefill.output.empty() ? output : std::string_view(prefill.output);
+            ToGraphPass(prefill.sceneNode.as_ptr(), prefill_output, node->ID(), extra);
+        }
+    }
 
     for (uint32_t smi = 0; smi < mesh->Submeshes().size(); smi++) {
         const auto& submesh = mesh->Submeshes()[smi];

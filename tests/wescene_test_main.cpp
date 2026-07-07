@@ -1291,6 +1291,13 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
                     }
                 }
             }
+            if (eff_layer) {
+                std::size_t ni = 0;
+                for (auto& enode : eff_layer->PrefillNodes()) {
+                    std::string tag2 = "[prefill node " + std::to_string(ni++) + "]";
+                    DumpPass(out, "    " + tag2, *enode.sceneNode.as_ptr(), enode.output);
+                }
+            }
             DumpPass(out, tag, *n, output);
 
             if (eff_layer && eff_layer->HasRuntimeVisibleEffect()) {
