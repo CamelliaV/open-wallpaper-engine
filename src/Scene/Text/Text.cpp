@@ -995,9 +995,9 @@ void TextLayouter::SetText(std::string_view utf8) {
     }
 
     std::array<float, 4> text_rgba {
-        im.style.color[0] * im.style.brightness,
-        im.style.color[1] * im.style.brightness,
-        im.style.color[2] * im.style.brightness,
+        im.style.color[0],
+        im.style.color[1],
+        im.style.color[2],
         im.style.alpha,
     };
 
