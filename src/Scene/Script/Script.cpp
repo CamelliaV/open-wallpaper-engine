@@ -2,6 +2,7 @@ module;
 
 #include <rstd/macro.hpp>
 #include <algorithm>
+#include <cmath>
 #include "quickjs.h"
 
 module wescene.script;
@@ -59,6 +60,20 @@ const char* KindName(FieldKind k) {
     return "?";
 }
 
+bool IsFinite(double value) { return std::isfinite(value); }
+
+JSValue MakeVecValue(JSContext* ctx, double x, double y, double z, int n) {
+    JSValue global  = JS_GetGlobalObject(ctx);
+    JSValue ctor    = JS_GetPropertyStr(ctx, global, n == 2 ? "Vec2" : "Vec3");
+    JSValue argv[3] = { JS_NewFloat64(ctx, x), JS_NewFloat64(ctx, y), JS_NewFloat64(ctx, z) };
+    JSValue obj     = JS_CallConstructor(ctx, ctor, n, argv);
+    for (int i = 0; i < n; ++i) JS_FreeValue(ctx, argv[i]);
+    if (n < 3) JS_FreeValue(ctx, argv[2]);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    return obj;
+}
+
 // JSValue→ScriptValue coercion. Mirrors the table in the API doc; never
 // throws, returns monostate for unrecognised shapes.
 ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
@@ -73,7 +88,7 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
         double d  = 0.0;
         int    rc = JS_ToFloat64(ctx, &d, v);
         JS_FreeValue(ctx, v);
-        if (rc < 0) return false;
+        if (rc < 0 || ! IsFinite(d)) return false;
         out = d;
         return true;
     };
@@ -86,7 +101,7 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
         double d  = 0.0;
         int    rc = JS_ToFloat64(ctx, &d, v);
         JS_FreeValue(ctx, v);
-        if (rc < 0) return false;
+        if (rc < 0 || ! IsFinite(d)) return false;
         out = d;
         return true;
     };
@@ -102,7 +117,7 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
             return ScalarValue { b > 0 ? 1.0 : 0.0 };
         }
         double d = 0.0;
-        if (JS_ToFloat64(ctx, &d, ret) >= 0) return ScalarValue { d };
+        if (JS_ToFloat64(ctx, &d, ret) >= 0 && IsFinite(d)) return ScalarValue { d };
         return {};
     }
     case FieldKind::Vec2: {
@@ -133,6 +148,7 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
             // to scale (vec3). Splat into all three components.
             double d = 0.0;
             JS_ToFloat64(ctx, &d, ret);
+            if (! IsFinite(d)) return {};
             return Vec3Value { d, d, d };
         } else {
             return {};
@@ -164,6 +180,23 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
     case FieldKind::Unknown: return {};
     }
     return {};
+}
+
+JSValue ScriptValueToJs(JSContext* ctx, const ScriptValue& value) {
+    if (auto* p = std::get_if<ScalarValue>(&value)) return JS_NewFloat64(ctx, p->v);
+    if (auto* p = std::get_if<BoolValue>(&value)) return JS_NewBool(ctx, p->v);
+    if (auto* p = std::get_if<Vec2Value>(&value)) return MakeVecValue(ctx, p->x, p->y, 0.0, 2);
+    if (auto* p = std::get_if<Vec3Value>(&value)) return MakeVecValue(ctx, p->x, p->y, p->z, 3);
+    if (auto* p = std::get_if<ColorValue>(&value)) {
+        JSValue arr = JS_NewArray(ctx);
+        JS_DefinePropertyValueUint32(ctx, arr, 0, JS_NewFloat64(ctx, p->r), JS_PROP_C_W_E);
+        JS_DefinePropertyValueUint32(ctx, arr, 1, JS_NewFloat64(ctx, p->g), JS_PROP_C_W_E);
+        JS_DefinePropertyValueUint32(ctx, arr, 2, JS_NewFloat64(ctx, p->b), JS_PROP_C_W_E);
+        return arr;
+    }
+    if (auto* p = std::get_if<StringValue>(&value))
+        return JS_NewStringLen(ctx, p->s.data(), p->s.size());
+    return JS_UNDEFINED;
 }
 
 // JSON → JSValue conversion for the initial-value seed. Recursive but
@@ -240,29 +273,16 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
         }
         return out;
     };
-    auto build_vec = [&](double x, double y, double z, int n) -> JSValue {
-        // Vec2/Vec3 are JS classes installed in the bootstrap. Construct
-        // by getting the global ctor and calling new on it.
-        JSValue global  = JS_GetGlobalObject(ctx);
-        JSValue ctor    = JS_GetPropertyStr(ctx, global, n == 2 ? "Vec2" : "Vec3");
-        JSValue argv[3] = { JS_NewFloat64(ctx, x), JS_NewFloat64(ctx, y), JS_NewFloat64(ctx, z) };
-        JSValue obj     = JS_CallConstructor(ctx, ctor, n, argv);
-        for (int i = 0; i < n; ++i) JS_FreeValue(ctx, argv[i]);
-        if (n < 3) JS_FreeValue(ctx, argv[2]);
-        JS_FreeValue(ctx, ctor);
-        JS_FreeValue(ctx, global);
-        return obj;
-    };
-
     switch (kind) {
     case FieldKind::Vec2: {
         if (v.is_string()) {
             auto fs = parse_floats(v.get_ref<const std::string&>());
-            return build_vec(fs.size() > 0 ? fs[0] : 0.0, fs.size() > 1 ? fs[1] : 0.0, 0.0, 2);
+            return MakeVecValue(
+                ctx, fs.size() > 0 ? fs[0] : 0.0, fs.size() > 1 ? fs[1] : 0.0, 0.0, 2);
         }
         if (v.is_array() && v.size() >= 2)
-            return build_vec(v[0].get<double>(), v[1].get<double>(), 0.0, 2);
-        if (v.is_number()) return build_vec(v.get<double>(), v.get<double>(), 0.0, 2);
+            return MakeVecValue(ctx, v[0].get<double>(), v[1].get<double>(), 0.0, 2);
+        if (v.is_number()) return MakeVecValue(ctx, v.get<double>(), v.get<double>(), 0.0, 2);
         break;
     }
     case FieldKind::Vec3: {
@@ -271,13 +291,13 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
             double x  = fs.size() > 0 ? fs[0] : 0.0;
             double y  = fs.size() > 1 ? fs[1] : x; // splat single scalar
             double z  = fs.size() > 2 ? fs[2] : (fs.size() > 1 ? 0.0 : x);
-            return build_vec(x, y, z, 3);
+            return MakeVecValue(ctx, x, y, z, 3);
         }
         if (v.is_array() && v.size() >= 3)
-            return build_vec(v[0].get<double>(), v[1].get<double>(), v[2].get<double>(), 3);
+            return MakeVecValue(ctx, v[0].get<double>(), v[1].get<double>(), v[2].get<double>(), 3);
         if (v.is_number()) {
             double d = v.get<double>();
-            return build_vec(d, d, d, 3);
+            return MakeVecValue(ctx, d, d, d, 3);
         }
         break;
     }
@@ -2558,13 +2578,14 @@ void JsRuntime::TickAll() {
             JS_FreeValue(ctx, ret);
             continue;
         }
-        // For (value)-form updates, also keep the latest as the next
-        // current_value so the script can mutate-and-return cumulatively.
-        if (I->update_takes_arg && ! JS_IsUndefined(ret) && ! JS_IsNull(ret)) {
-            JS_FreeValue(ctx, I->current_value);
-            I->current_value = JS_DupValue(ctx, ret);
-        }
         I->last_value = CoerceReturn(ctx, ret, I->kind);
+        // Keep the next argument in the field's coerced shape. Vec3 scripts
+        // often return a scalar for scale, but still read value.x next frame.
+        if (I->update_takes_arg && ! std::holds_alternative<std::monostate>(I->last_value)) {
+            JSValue next_value = ScriptValueToJs(ctx, I->last_value);
+            JS_FreeValue(ctx, I->current_value);
+            I->current_value = next_value;
+        }
         JS_FreeValue(ctx, ret);
     }
     m_impl->host.active_field_script = nullptr;
