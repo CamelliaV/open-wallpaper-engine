@@ -92,7 +92,7 @@ struct ParseContext {
     };
     std::vector<CreateLayerAssetRequest> create_layer_asset_requests;
 
-    std::unordered_map<std::int32_t, std::string> image_texture_fallbacks;
+    std::unordered_map<std::int32_t, std::string> system_media_image_fallbacks;
     Set<std::int32_t>                             hidden_link_source_ids;
     bool                                          scene_layer_text_writes { false };
 };

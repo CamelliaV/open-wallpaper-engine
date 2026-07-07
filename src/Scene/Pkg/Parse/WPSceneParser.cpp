@@ -866,8 +866,8 @@ std::array<i32, 2> NonZeroRenderTargetExtent(float width, float height) {
 }
 
 std::array<float, 2> ImageEffectTargetSize(const ParseContext&         context,
-                                           const wpscene::ImageObject& obj, bool is_passthrough) {
-    if ((obj.fullscreen || is_passthrough) && context.scene && context.scene->activeCamera) {
+                                           const wpscene::ImageObject& obj) {
+    if (obj.fullscreen && context.scene && context.scene->activeCamera) {
         return { static_cast<float>(context.scene->activeCamera->Width()),
                  static_cast<float>(context.scene->activeCamera->Height()) };
     }
@@ -1551,6 +1551,10 @@ std::optional<std::string> UserTexturePropertyKey(const nlohmann::json& binding)
     return value;
 }
 
+bool IsSystemMediaTextureBinding(const nlohmann::json& binding) {
+    return UserTexturePropertyKey(binding).has_value() && binding.is_object();
+}
+
 void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
                                       const wpscene::Material& fallback_material) {
     if (! pScene || ! stable_mat) return;
@@ -1559,6 +1563,10 @@ void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
         if (! key.has_value()) continue;
         std::string fallback;
         if (i < fallback_material.textures.size()) fallback = fallback_material.textures[i];
+        if (IsSystemMediaTextureBinding(fallback_material.usertextures[i]) &&
+            i < stable_mat->textures.size()) {
+            fallback = stable_mat->textures[i];
+        }
         pScene->material_texture_user_index[*key].push_back(
             Scene::MaterialTextureUserBinding { .material = stable_mat,
                                                 .slot     = static_cast<uint32_t>(i),
@@ -1597,10 +1605,6 @@ void ApplyTextureBinds(wpscene::Material&                                  wpmat
         if (wpmat.textures.size() <= (usize)el.index) wpmat.textures.resize((usize)el.index + 1);
         wpmat.textures[(usize)el.index] = fboMap.at(el.name);
     }
-}
-
-bool IsSystemMediaTextureBinding(const nlohmann::json& binding) {
-    return UserTexturePropertyKey(binding).has_value() && binding.is_object();
 }
 
 std::string ResolveSceneTextureProperty(const ParseContext& context, std::string_view key) {
@@ -1643,13 +1647,19 @@ std::string ResolveMaterialTextureSlot(const ParseContext&      context,
     return fallback;
 }
 
+bool CanUseImageAsSystemMediaFallback(const wpscene::ImageObject& image) {
+    if (! image.puppet.empty()) return false;
+    if (image.fullscreen || image.config.passthrough) return false;
+    return CountVisibleImageEffects(image.effects) == 0;
+}
+
 std::string ResolveLinkedImageFallback(const ParseContext& context, std::string_view texture) {
     std::optional<std::uint32_t> linked_id = ParseImageLayerCompositeId(texture);
     if (! linked_id && IsSpecLinkTex(texture)) linked_id = ParseLinkTex(texture);
     if (! linked_id) return {};
 
-    auto it = context.image_texture_fallbacks.find(static_cast<std::int32_t>(*linked_id));
-    if (it == context.image_texture_fallbacks.end()) return {};
+    auto it = context.system_media_image_fallbacks.find(static_cast<std::int32_t>(*linked_id));
+    if (it == context.system_media_image_fallbacks.end()) return {};
     return it->second;
 }
 
@@ -1675,13 +1685,15 @@ void ApplyUserTextureBindings(ParseContext& context, wpscene::Material& material
     }
 }
 
-void IndexImageTextureFallbacks(ParseContext& context, std::span<SceneObjectVar> scene_objs) {
-    context.image_texture_fallbacks.clear();
+void IndexSystemMediaImageFallbacks(ParseContext& context, std::span<SceneObjectVar> scene_objs) {
+    context.system_media_image_fallbacks.clear();
     for (const auto& obj : scene_objs) {
-        if (const auto* image = std::get_if<wpscene::ImageObject>(&obj)) {
-            auto texture = ResolveMaterialTextureSlot(context, image->material, 0);
-            if (! texture.empty()) context.image_texture_fallbacks[image->id] = std::move(texture);
-        }
+        const auto* image = std::get_if<wpscene::ImageObject>(&obj);
+        if (image == nullptr || ! CanUseImageAsSystemMediaFallback(*image)) continue;
+
+        auto texture = ResolveMaterialTextureSlot(context, image->material, 0);
+        if (texture.empty() || IsSpecTex(texture)) continue;
+        context.system_media_image_fallbacks[image->id] = std::move(texture);
     }
 }
 
@@ -1945,7 +1957,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                     wpimgobj.field_bindings.animations.count("alpha") != 0 ||
                                     wpimgobj.field_bindings.scripts.count("alpha") != 0;
     const auto geometry_size      = wpimgobj.size;
-    const auto effect_target_size = ImageEffectTargetSize(context, wpimgobj, isPassthrough);
+    const auto effect_target_size = ImageEffectTargetSize(context, wpimgobj);
 
     bool hasPuppet = ! wpimgobj.puppet.empty();
     (void)hasPuppet;
@@ -4290,7 +4302,7 @@ void ResolveCreateLayerAssetRequests(ParseContext& context) {
 void ProcessObjects(ParseContext& context, std::span<SceneObjectVar> scene_objs,
                     wavsen::audio::SoundManager* sm, ProcessOpts opts) {
     WPShaderParser::InitGlslang();
-    IndexImageTextureFallbacks(context, scene_objs);
+    IndexSystemMediaImageFallbacks(context, scene_objs);
 
     for (SceneObjectVar& obj : scene_objs) {
         std::visit(visitor::overload {
