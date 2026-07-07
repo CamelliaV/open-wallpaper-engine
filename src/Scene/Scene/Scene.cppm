@@ -1423,8 +1423,12 @@ public:
         m_resolved     = false;
     }
     const auto& FinalTarget() const { return m_final_target; }
-    void        SetSkipWhenNoRuntimeEffect(bool value) { m_skip_when_no_runtime_effect = value; }
-    bool        SkipWhenNoRuntimeEffect() const { return m_skip_when_no_runtime_effect; }
+    void        SetFinalLocal(bool value) {
+        m_final_local = value;
+        m_resolved    = false;
+    }
+    void SetSkipWhenNoRuntimeEffect(bool value) { m_skip_when_no_runtime_effect = value; }
+    bool SkipWhenNoRuntimeEffect() const { return m_skip_when_no_runtime_effect; }
 
     // Idempotent: second and later calls are no-ops until any of the
     // mutating setters above (or AddEffect) flips m_resolved back to false.
@@ -1438,6 +1442,7 @@ private:
     std::string m_pingpong_b;
 
     bool                       fullscreen { false };
+    bool                       m_final_local { false };
     std::unique_ptr<SceneMesh> m_final_mesh;
     BlendMode                  m_final_blend;
     bool                       m_final_depth_test { false };

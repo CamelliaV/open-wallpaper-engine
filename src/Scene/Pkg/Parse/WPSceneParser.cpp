@@ -186,6 +186,24 @@ std::optional<std::array<float, 2>> ResolveImageAssetSize(ParseContext&    conte
     return std::array { static_cast<float>(w), static_cast<float>(h) };
 }
 
+bool AppendLayerCompositePassthroughEffect(fs::VFS& vfs, wpscene::ImageObject& image) {
+    nlohmann::json    json;
+    wpscene::Material material;
+    if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
+                         json) ||
+        ! material.FromJson(json)) {
+        rstd_error("parse effectpassthrough.json failed for '{}'", image.name);
+        return false;
+    }
+
+    wpscene::ImageEffect effect;
+    effect.name    = "solidlayer composite";
+    effect.visible = true;
+    effect.materials.push_back(std::move(material));
+    image.effects.push_back(std::move(effect));
+    return true;
+}
+
 std::shared_ptr<WPPuppetLayer> MakePuppetLayer(std::shared_ptr<WPPuppet>                puppet,
                                                std::span<WPPuppetLayer::AnimationLayer> layers) {
     if (! puppet) return nullptr;
@@ -399,6 +417,32 @@ nlohmann::json ScriptPropertiesForField(const ParseContext& context, std::string
         }
     }
     return props;
+}
+
+nlohmann::json ScriptInitialValueForField(std::string_view field, const nlohmann::json& value) {
+    if (field != "angles") return value;
+
+    constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
+    if (value.is_null()) return value;
+    if (value.is_number()) return value.get<float>() * kRadToDeg;
+
+    if (value.is_object()) {
+        auto out = value;
+        for (auto* axis : { "x", "y", "z" }) {
+            if (out.contains(axis) && out.at(axis).is_number()) {
+                out[axis] = out.at(axis).get<float>() * kRadToDeg;
+            }
+        }
+        return out;
+    }
+
+    std::vector<float> values;
+    if (owe::GetJsonValue(value, values) && ! values.empty()) {
+        for (auto& axis : values) axis *= kRadToDeg;
+        return values;
+    }
+
+    return value;
 }
 
 std::array<i32, 2> TextLayerExtent(const text::TextGeometry& geometry) {
@@ -683,8 +727,9 @@ void WireFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNode>& n
             clones = SpawnLayerClones(context, node, n - 1);
         }
         auto  props = ScriptPropertiesForField(context, field, sb);
+        auto  initial_value = ScriptInitialValueForField(field, sb.initial_value);
         auto* fs    = rt.MakeFieldScript(
-            sb.source, sha, kind, props, sb.initial_value, node, std::move(clones));
+            sb.source, sha, kind, props, initial_value, node, std::move(clones));
         if (! fs) continue;
         if (sb.source.find("createLayer") != std::string_view::npos &&
             sb.source.find("registerAsset") != std::string_view::npos) {
@@ -758,7 +803,8 @@ void WireCameraFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNo
         }
 
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
-        auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, sb.initial_value, node);
+        auto initial_value = ScriptInitialValueForField(field, sb.initial_value);
+        auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, initial_value, node);
         if (! fs) continue;
 
         if (field == "origin") {
@@ -1450,23 +1496,41 @@ bool CanCompositeFinalEffectShader(std::string_view shader) {
 }
 
 bool HasShaderCombo(const WPShaderInfo& info, std::string_view combo_name) {
-    return std::any_of(info.combo_defs.begin(), info.combo_defs.end(), [&](const auto& combo) {
+    return std::ranges::any_of(info.combo_defs, [&](const auto& combo) {
         return combo.combo == combo_name;
     });
 }
 
 bool HasShaderTextureMaterial(const WPShaderInfo& info, std::string_view material_key) {
-    return std::any_of(
-        info.texture_uniforms.begin(), info.texture_uniforms.end(), [&](const auto& tex) {
-            return tex.material == material_key;
-        });
+    return std::ranges::any_of(info.texture_uniforms, [&](const auto& tex) {
+        return tex.material == material_key;
+    });
 }
 
-bool CanCompositeFinalEffectMaterial(std::string_view shader, const WPShaderInfo& info) {
-    if (CanCompositeFinalEffectShader(shader)) return true;
+bool HasSolidSceneContext(const ParseContext& context, const wpscene::ImageObject& obj) {
+    if (obj.solid || context.solid_layer_ids.contains(obj.id)) return true;
 
-    // TODO: WE does not document this as the final-composite rule. This is
-    // inferred from shaders that sample `previous` and expose TRANSPARENCY.
+    std::unordered_set<std::int32_t> seen;
+    std::uint32_t                    parent = obj.parent;
+    while (parent != 0 && seen.insert(static_cast<std::int32_t>(parent)).second) {
+        const auto parent_id = static_cast<std::int32_t>(parent);
+        if (context.solid_layer_ids.contains(parent_id)) return true;
+
+        auto it = context.object_parent_ids.find(parent_id);
+        if (it == context.object_parent_ids.end()) break;
+        parent = it->second;
+    }
+
+    return false;
+}
+
+bool CanCompositeFinalEffectMaterial(std::string_view shader, const WPShaderInfo& info,
+                                     bool allow_transparent_previous) {
+    if (CanCompositeFinalEffectShader(shader)) return true;
+    if (! allow_transparent_previous) return false;
+
+    // TODO: WE does not document this as the final-composite rule. This keeps
+    // the historical shortcut only for non-solid layer contexts.
     return HasShaderCombo(info, "TRANSPARENCY") && HasShaderTextureMaterial(info, "previous");
 }
 
@@ -2005,6 +2069,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         colorEffect.materials.push_back(colorMat);
         wpimgobj.effects.push_back(colorEffect);
     }
+    if ((wpimgobj.solid || wpimgobj.solid_layer) && ! has_author_effect) {
+        AppendLayerCompositePassthroughEffect(vfs, wpimgobj);
+    }
 
     bool hasEffect = CountVisibleImageEffects(wpimgobj.effects) > 0;
 
@@ -2030,8 +2097,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         wpimgobj.fullscreen
             ? Vector3f::Zero()
             : AlignmentOffset(wpimgobj.alignment, { geometry_size[0], geometry_size[1] });
+    const bool solid_scene_context = HasSolidSceneContext(context, wpimgobj);
     spImgNode->SetSize({ geometry_size[0], geometry_size[1] });
-    spImgNode->SetPerspective(wpimgobj.perspective);
+    spImgNode->SetPerspective(wpimgobj.perspective || solid_scene_context);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID() = wpimgobj.id;
     if (! wpimgobj.visible_user.empty())
@@ -2432,8 +2500,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
         }
 
-        int32_t i_eff = -1;
-        bool    last_effect_can_composite_final { false };
+        int32_t    i_eff = -1;
+        bool       last_effect_can_composite_final { false };
+        const bool allow_transparent_previous_final = ! solid_scene_context;
+        const bool passthrough_can_composite_final  = isPassthrough;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
             if (! wpeffobj.visible && wpeffobj.visible_user.empty()) {
@@ -2668,8 +2738,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     break;
                 }
                 if (auto* mat = spMesh->Material(); mat != nullptr) {
-                    last_effect_can_composite_final =
-                        CanCompositeFinalEffectMaterial(mat->name, wpEffShaderInfo);
+                    last_effect_can_composite_final = CanCompositeFinalEffectMaterial(
+                        mat->name, wpEffShaderInfo, allow_transparent_previous_final);
                 }
                 spEffNode->AddMesh(spMesh);
 
@@ -2689,7 +2759,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
 
-        if (! wpimgobj.fullscreen && ! isPassthrough && ! last_effect_can_composite_final) {
+        if (! wpimgobj.fullscreen && ! passthrough_can_composite_final &&
+            ! last_effect_can_composite_final) {
             nlohmann::json    json;
             wpscene::Material passthrough_mat;
             if (! owe::ParseJson(
@@ -4703,9 +4774,14 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             if (! o.is_object() || ! o.contains("id")) continue;
             std::int32_t id = o.at("id").get<std::int32_t>();
             context.node_id_order.push_back(id);
-            if (has_kind(o)) continue;
             std::uint32_t parent = 0;
             if (o.contains("parent")) parent = o.at("parent").get<std::uint32_t>();
+            context.object_parent_ids[id] = parent;
+            bool solid                    = false;
+            owe::GetJsonValue(o, "solid", solid, false);
+            if (solid) context.solid_layer_ids.insert(id);
+
+            if (has_kind(o)) continue;
             std::string name;
             if (o.contains("name") && o.at("name").is_string())
                 name = o.at("name").get<std::string>();

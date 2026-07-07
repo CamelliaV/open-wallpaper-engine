@@ -102,7 +102,12 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         material.depth_test  = m_final_depth_test;
         material.depth_write = m_final_depth_write;
         material.cull_mode   = m_final_cull_mode;
-        if (fullscreen) {
+        if (m_final_local) {
+            last_output->sceneNode->SetCamera(std::string(effect_cam));
+            last_output->sceneNode->SetParentAnchor(nullptr);
+            last_output->sceneNode->CopyTrans(default_node);
+            mesh.ChangeMeshDataFrom(default_mesh);
+        } else if (fullscreen) {
             last_output->sceneNode->SetCamera(std::string(effect_cam));
             last_output->sceneNode->SetParentAnchor(nullptr);
             last_output->sceneNode->CopyTrans(default_node);

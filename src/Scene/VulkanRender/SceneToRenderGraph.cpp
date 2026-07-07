@@ -493,6 +493,7 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                 
                     auto cit = scene.cameras.find(node->Camera());
                     if (cit != scene.cameras.end() && cit->second->HasImgEffect()) {
                         cit->second->GetImgEffect()->SetFinalTarget(link_key);
+                        cit->second->GetImgEffect()->SetFinalLocal(true);
                     }
                 }
                 ToGraphPass(node, link_key, nid, extra);

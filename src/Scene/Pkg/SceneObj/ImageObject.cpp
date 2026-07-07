@@ -194,7 +194,8 @@ std::optional<ImageAssetInfo> owe::wpscene::LoadImageAssetInfo(fs::VFS&         
         return std::nullopt;
 
     ImageAssetInfo info;
-    int32_t        w = 0, h = 0;
+    owe::GetJsonValue(j_image, "solidlayer", info.solid_layer, false);
+    int32_t w = 0, h = 0;
     if (j_image.contains("width") && j_image.contains("height")) {
         owe::GetJsonValue(j_image, "width", w, false);
         owe::GetJsonValue(j_image, "height", h, false);
@@ -245,6 +246,7 @@ bool ImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersio
         }
     }
     owe::GetJsonValue(jImage, "nopadding", nopadding, false);
+    owe::GetJsonValue(jImage, "solidlayer", solid_layer, false);
     owe::GetJsonValue(json, "color", color, false);
     ReadUserValueBinding(json, "color", color_user);
     color_user_key = color_user.name;

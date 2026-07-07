@@ -71,7 +71,9 @@ struct ParseContext {
         std::function<void(const Eigen::Vector3f&)> apply_attachment_offset;
         std::vector<rstd::sync::Arc<SceneNode>>     ordered_before_nodes;
     };
-    std::unordered_map<std::int32_t, NodeRef> node_id_map;
+    std::unordered_map<std::int32_t, NodeRef>       node_id_map;
+    std::unordered_map<std::int32_t, std::uint32_t> object_parent_ids;
+    Set<std::int32_t>                               solid_layer_ids;
     // Scene.json declaration order. Reparenting in this order keeps each
     // container's children in the order they appeared in scene.json (so
     // layer 28 stays the first child of layer 79). Iterating the unordered
