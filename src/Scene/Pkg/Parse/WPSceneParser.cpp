@@ -995,6 +995,19 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
+void ApplyImageColorBlend(wpscene::Material& material, const wpscene::ImageObject& image) {
+    if (image.colorBlendMode == 0) return;
+    material.combos[std::string(WE_CB_BLENDMODE)] = image.colorBlendMode;
+}
+
+i32 CountVisibleImageEffects(std::span<const wpscene::ImageEffect> effects) {
+    i32 count = 0;
+    for (const auto& effect : effects) {
+        if (effect.visible || ! effect.visible_user.empty()) ++count;
+    }
+    return count;
+}
+
 bool ParseEnabled(std::string_view str) { return str == "enabled"; }
 
 CullMode ParseCullMode(std::string_view str) {
@@ -1927,53 +1940,12 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     auto& vfs = *context.vfs;
 
-    auto has_runtime_effect = [&]() {
-        for (const auto& wpeffobj : wpimgobj.effects) {
-            if (wpeffobj.visible || ! wpeffobj.visible_user.empty()) return true;
-        }
-        return false;
-    };
-
-    const bool use_final_shader_color_blend = wpimgobj.colorBlendMode != 0;
-    if (use_final_shader_color_blend) {
-        wpscene::ImageEffect colorEffect;
-        wpscene::Material    colorMat;
-        nlohmann::json       json;
-        if (! owe::ParseJson(
-                fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"), json))
-            return;
-        colorMat.FromJson(json);
-        colorMat.combos[std::string(WE_CB_BONECOUNT)] = 1;
-        colorMat.combos[std::string(WE_CB_BLENDMODE)] = wpimgobj.colorBlendMode;
-        colorMat.blending                             = "disabled";
-        colorEffect.materials.push_back(colorMat);
-        wpimgobj.effects.push_back(colorEffect);
-    }
-
-    int32_t count_eff = 0;
-    for (const auto& wpeffobj : wpimgobj.effects) {
-        if (wpeffobj.visible || ! wpeffobj.visible_user.empty()) count_eff++;
-    }
-    bool       hasEffect          = count_eff > 0;
     bool       isPassthrough      = wpimgobj.config.passthrough;
     const bool alpha_can_change   = ! wpimgobj.alpha_user_key.empty() ||
                                     wpimgobj.field_bindings.animations.count("alpha") != 0 ||
                                     wpimgobj.field_bindings.scripts.count("alpha") != 0;
     const auto geometry_size      = wpimgobj.size;
     const auto effect_target_size = ImageEffectTargetSize(context, wpimgobj, isPassthrough);
-
-    // No-effect fullscreen / compose layers contribute nothing on their own
-    // (they just sample `_rt_default` and write it back). Mark as elidable
-    // so the render-graph builder drops them when unreferenced, or routes
-    // them to `_rt_link_<id>` when another layer reads their composite.
-    if (! hasEffect && wpimgobj.visible && (wpimgobj.fullscreen || isPassthrough)) {
-        context.scene->MarkLayerStaticElidable(
-            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
-    }
-    if (! hasEffect && wpimgobj.visible && wpimgobj.alpha <= 0.0f && ! alpha_can_change) {
-        context.scene->MarkLayerStaticElidable(
-            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
-    }
 
     bool hasPuppet = ! wpimgobj.puppet.empty();
     (void)hasPuppet;
@@ -2000,6 +1972,41 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 puppet = nullptr;
             }
         }
+    }
+
+    const bool has_author_effect       = CountVisibleImageEffects(wpimgobj.effects) > 0;
+    const bool layer_material_is_final = ! has_author_effect || has_bones;
+    const bool color_blend_uses_layer_material =
+        wpimgobj.colorBlendMode != 0 && layer_material_is_final;
+    const bool append_color_blend_final_effect =
+        wpimgobj.colorBlendMode != 0 && ! color_blend_uses_layer_material;
+    if (append_color_blend_final_effect) {
+        wpscene::ImageEffect colorEffect;
+        wpscene::Material    colorMat;
+        nlohmann::json       json;
+        if (! owe::ParseJson(
+                fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"), json))
+            return;
+        colorMat.FromJson(json);
+        colorMat.combos[std::string(WE_CB_BONECOUNT)] = 1;
+        ApplyImageColorBlend(colorMat, wpimgobj);
+        colorEffect.materials.push_back(colorMat);
+        wpimgobj.effects.push_back(colorEffect);
+    }
+
+    bool hasEffect = CountVisibleImageEffects(wpimgobj.effects) > 0;
+
+    // No-effect fullscreen / compose layers contribute nothing on their own
+    // (they just sample `_rt_default` and write it back). Mark as elidable
+    // so the render-graph builder drops them when unreferenced, or routes
+    // them to `_rt_link_<id>` when another layer reads their composite.
+    if (! hasEffect && wpimgobj.visible && (wpimgobj.fullscreen || isPassthrough)) {
+        context.scene->MarkLayerStaticElidable(
+            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
+    }
+    if (! hasEffect && wpimgobj.visible && wpimgobj.alpha <= 0.0f && ! alpha_can_change) {
+        context.scene->MarkLayerStaticElidable(
+            WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) });
     }
 
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
@@ -2064,6 +2071,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     WPShaderInfo      shaderInfo;
     wpscene::Material image_wpmat                 = wpimgobj.material;
     wpscene::Material image_user_texture_fallback = image_wpmat;
+    if (color_blend_uses_layer_material && ! hasEffect) ApplyImageColorBlend(image_wpmat, wpimgobj);
     ApplyUserTextureBindings(context, image_wpmat);
     {
         svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
@@ -2198,6 +2206,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 puppet_mat             = image_wpmat;
                 puppet_mat.textures[0] = "";
                 WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
+                if (color_blend_uses_layer_material) ApplyImageColorBlend(puppet_mat, wpimgobj);
                 puppet_effect.materials.push_back(puppet_mat);
                 wpimgobj.effects.push_back(puppet_effect);
             }
@@ -2668,8 +2677,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
 
-        if (! wpimgobj.fullscreen && ! isPassthrough && ! wpimgobj.copybackground &&
-            ! last_effect_can_composite_final) {
+        if (! wpimgobj.fullscreen && ! isPassthrough && ! last_effect_can_composite_final) {
             nlohmann::json    json;
             wpscene::Material passthrough_mat;
             if (! owe::ParseJson(
