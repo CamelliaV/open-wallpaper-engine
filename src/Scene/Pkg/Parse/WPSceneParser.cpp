@@ -726,10 +726,10 @@ void WireFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNode>& n
         if (unsigned n = DetectAudioFanoutCount(sb.source); n > 1) {
             clones = SpawnLayerClones(context, node, n - 1);
         }
-        auto  props = ScriptPropertiesForField(context, field, sb);
+        auto  props         = ScriptPropertiesForField(context, field, sb);
         auto  initial_value = ScriptInitialValueForField(field, sb.initial_value);
-        auto* fs    = rt.MakeFieldScript(
-            sb.source, sha, kind, props, initial_value, node, std::move(clones));
+        auto* fs =
+            rt.MakeFieldScript(sb.source, sha, kind, props, initial_value, node, std::move(clones));
         if (! fs) continue;
         if (sb.source.find("createLayer") != std::string_view::npos &&
             sb.source.find("registerAsset") != std::string_view::npos) {
@@ -802,8 +802,8 @@ void WireCameraFieldScripts(ParseContext& context, const rstd::sync::Arc<SceneNo
             continue;
         }
 
-        std::string sha = utils::genSha1(std::span<const char>(sb.source));
-        auto initial_value = ScriptInitialValueForField(field, sb.initial_value);
+        std::string sha           = utils::genSha1(std::span<const char>(sb.source));
+        auto        initial_value = ScriptInitialValueForField(field, sb.initial_value);
         auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, initial_value, node);
         if (! fs) continue;
 
@@ -2511,6 +2511,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 continue;
             }
             std::shared_ptr<SceneImageEffect> imgEffect = std::make_shared<SceneImageEffect>();
+            imgEffect->name                             = wpeffobj.name;
             imgEffect->runtime_visible                  = wpeffobj.visible;
             if (! wpeffobj.visible_user.empty()) {
                 imgEffect->visible_user_binding =
@@ -3765,6 +3766,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                 if (! wpeffobj.visible && wpeffobj.visible_user.empty()) continue;
 
                 auto effect             = std::make_shared<SceneImageEffect>();
+                effect->name            = wpeffobj.name;
                 effect->runtime_visible = wpeffobj.visible;
                 if (! wpeffobj.visible_user.empty()) {
                     effect->visible_user_binding =
@@ -4517,6 +4519,7 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
         // Hand the scene root to the JS runtime so `thisScene.getLayer(name)`
         // can resolve against the live graph. The renderer also ticks the
         // ScriptScene once per frame via owe::script::TickSceneScripts.
+        context.script_scene->runtime().SetScene(context.scene.get());
         context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.as_ptr());
         owe::script::InstallScriptScene(*context.scene, std::move(context.script_scene));
     }

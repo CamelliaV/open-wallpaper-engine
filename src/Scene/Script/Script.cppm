@@ -145,6 +145,7 @@ public:
 
     // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`
     // searches from this node. Call once per scene after parsing finishes.
+    void SetScene(owe::Scene* scene);
     void SetSceneRoot(owe::SceneNode* root);
 
     // Wire localStorage to a JSON file. Existing keys load synchronously;

@@ -937,6 +937,26 @@ bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const nlohmann
     return requires_graph_rebuild;
 }
 
+std::optional<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node,
+                                                              std::string_view name) {
+    if (node.Camera().empty()) return std::nullopt;
+    auto camera_it = cameras.find(node.Camera());
+    if (camera_it == cameras.end() || ! camera_it->second->HasImgEffect()) return std::nullopt;
+
+    auto& effect_layer = camera_it->second->GetImgEffect();
+    if (! effect_layer) return std::nullopt;
+    auto effect = effect_layer->FindEffect(name);
+    if (! effect) return std::nullopt;
+    return SceneImageEffectRef { .layer = effect_layer.get(), .effect = std::move(effect) };
+}
+
+bool Scene::SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible) {
+    if (! ref.layer || ! ref.effect) return false;
+    if (! ref.layer->SetEffectRuntimeVisible(*ref.effect, visible)) return false;
+    m_render_graph_dirty = true;
+    return true;
+}
+
 bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view      key,
                                                    const nlohmann::json& property) {
     if (m_resource_index.Empty()) RebuildResourceIndex();
@@ -954,7 +974,8 @@ bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view      key,
             auto visible =
                 ResolveSceneUserVisibilityBinding(effect->visible_user_binding, key, property);
             if (! visible) continue;
-            if (effect_layer->SetEffectRuntimeVisible(*effect, *visible)) {
+            if (SetImageEffectRuntimeVisible({ .layer = effect_layer.get(), .effect = effect },
+                                             *visible)) {
                 requires_graph_rebuild = true;
             }
         }

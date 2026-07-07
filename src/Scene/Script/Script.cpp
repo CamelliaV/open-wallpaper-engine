@@ -342,6 +342,7 @@ struct EngineHostState {
     FrameInputs inputs;
     MediaStatus media;
     bool        media_initialized { false };
+    owe::Scene* scene { nullptr };
     JSValue     audio_buffer { JS_UNDEFINED };
     uint32_t    audio_buffer_resolution { 64 };
     bool        audio_buffer_built { false };
@@ -1267,6 +1268,7 @@ function __wwCreateNodeStub() {
             if (key === 'getChildren')         return () => [];
             if (key === 'getName')             return () => '';
             if (key === 'getLayer')            return (_n) => __wwCreateNodeStub();
+            if (key === 'getEffect')           return (_n) => __wwCreateEffectStub();
             if (key === 'getTextureAnimation') return () => __wwCreateTexAnimStub();
             if (key === 'getVideoTexture')     return () => __wwCreateVideoTextureStub();
             if (key === 'getAnimation')        return ()   => __wwCreateAnimationStub();
@@ -1279,6 +1281,10 @@ function __wwCreateNodeStub() {
         has(target, key) { return key in target; },
     };
     return new Proxy(props, handler);
+}
+
+function __wwCreateEffectStub() {
+    return { visible: true };
 }
 
 function __wwCreateTexAnimStub() {
@@ -1560,7 +1566,8 @@ JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*)
 // the SceneNode pointer in JS_GetOpaque; lifetime is owned by Scene, the
 // finalizer is a no-op (we don't dereference on free, just drop the ref).
 
-static JSClassID s_layer_class_id = 0;
+static JSClassID s_layer_class_id  = 0;
+static JSClassID s_effect_class_id = 0;
 
 struct LayerHandle {
     EngineHostState* host { nullptr };
@@ -1584,6 +1591,21 @@ JSClassDef s_layer_class_def {
     .finalizer  = LayerFinalizer,
 };
 
+struct EffectHandle {
+    EngineHostState*                        host { nullptr };
+    std::optional<owe::SceneImageEffectRef> ref;
+    bool                                    fallback_visible { true };
+};
+
+void EffectFinalizer(JSRuntime*, JSValue v) {
+    delete static_cast<EffectHandle*>(JS_GetOpaque(v, s_effect_class_id));
+}
+
+JSClassDef s_effect_class_def {
+    .class_name = "WWEffect",
+    .finalizer  = EffectFinalizer,
+};
+
 inline owe::SceneNode* GetLayerNode(JSValueConst v) {
     return ResolveLayerNode(static_cast<LayerHandle*>(JS_GetOpaque(v, s_layer_class_id)));
 }
@@ -1602,6 +1624,38 @@ JSValue WrapLayerName(JSContext* ctx, std::string name) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     JS_SetOpaque(obj, new LayerHandle { .host = host, .node = nullptr, .name = std::move(name) });
     return obj;
+}
+
+EffectHandle* GetEffectHandle(JSValueConst v) {
+    return static_cast<EffectHandle*>(JS_GetOpaque(v, s_effect_class_id));
+}
+
+JSValue WrapEffect(JSContext* ctx, std::optional<owe::SceneImageEffectRef> ref) {
+    JSValue obj = JS_NewObjectClass(ctx, s_effect_class_id);
+    if (JS_IsException(obj)) return obj;
+    auto* host    = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    bool  visible = ref && ref->effect ? ref->effect->runtime_visible : true;
+    JS_SetOpaque(
+        obj, new EffectHandle { .host = host, .ref = std::move(ref), .fallback_visible = visible });
+    return obj;
+}
+
+JSValue EffectGetVisible(JSContext* ctx, JSValueConst this_val) {
+    auto* h = GetEffectHandle(this_val);
+    if (! h) return JS_NewBool(ctx, true);
+    if (h->ref && h->ref->effect) return JS_NewBool(ctx, h->ref->effect->runtime_visible);
+    return JS_NewBool(ctx, h->fallback_visible);
+}
+
+JSValue EffectSetVisible(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* h       = GetEffectHandle(this_val);
+    bool  visible = JS_ToBool(ctx, val) != 0;
+    if (! h) return JS_UNDEFINED;
+    h->fallback_visible = visible;
+    if (h->host && h->host->scene && h->ref) {
+        h->host->scene->SetImageEffectRuntimeVisible(*h->ref, visible);
+    }
+    return JS_UNDEFINED;
 }
 
 inline JSValue MakeVec3(JSContext* ctx, double x, double y, double z) {
@@ -1937,6 +1991,18 @@ JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     return hit ? WrapLayerNode(ctx, hit) : WrapLayerName(ctx, std::move(layer_name));
 }
 
+JSValue NodeGetEffect(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto* n    = GetLayerNode(this_val);
+    if (! host || ! host->scene || ! n || argc < 1) return WrapEffect(ctx, std::nullopt);
+
+    const char* name = JS_ToCString(ctx, argv[0]);
+    if (! name) return WrapEffect(ctx, std::nullopt);
+    auto effect = host->scene->FindNodeImageEffect(*n, name);
+    JS_FreeCString(ctx, name);
+    return WrapEffect(ctx, std::move(effect));
+}
+
 bool TreeContains(owe::SceneNode* root, owe::SceneNode* needle) {
     if (! root || ! needle) return false;
     if (root == needle) return true;
@@ -2196,6 +2262,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getChildren", 0, NodeGetChildren),
     JS_CFUNC_DEF("getName", 0, NodeGetName),
     JS_CFUNC_DEF("getLayer", 1, NodeGetLayer),
+    JS_CFUNC_DEF("getEffect", 1, NodeGetEffect),
     JS_CFUNC_DEF("enumerateLayers", 0, NodeSceneEnumerateLayers),
     JS_CFUNC_DEF("getInitialLayerConfig", 1, NodeSceneGetInitialLayerConfig),
     JS_CFUNC_DEF("getBoneIndex", 1, NodeGetBoneIndex),
@@ -2223,6 +2290,21 @@ void InitLayerClass(JSContext* ctx, JSRuntime* rt) {
                                s_layer_proto_funcs,
                                sizeof(s_layer_proto_funcs) / sizeof(s_layer_proto_funcs[0]));
     JS_SetClassProto(ctx, s_layer_class_id, proto);
+}
+
+const JSCFunctionListEntry s_effect_proto_funcs[] = {
+    JS_CGETSET_DEF("visible", EffectGetVisible, EffectSetVisible),
+};
+
+void InitEffectClass(JSContext* ctx, JSRuntime* rt) {
+    if (s_effect_class_id == 0) JS_NewClassID(rt, &s_effect_class_id);
+    JS_NewClass(rt, s_effect_class_id, &s_effect_class_def);
+    JSValue proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx,
+                               proto,
+                               s_effect_proto_funcs,
+                               sizeof(s_effect_proto_funcs) / sizeof(s_effect_proto_funcs[0]));
+    JS_SetClassProto(ctx, s_effect_class_id, proto);
 }
 
 // Stash the bootstrap's `thisLayer` / `thisScene` stubs for restore.
@@ -2331,6 +2413,7 @@ JsRuntime::JsRuntime(): m_impl(std::make_unique<Impl>()) {
     JS_SetModuleLoaderFunc(
         m_impl->rt, /*normalize=*/nullptr, BuiltinModuleLoader, /*opaque=*/nullptr);
     InitLayerClass(m_impl->ctx, m_impl->rt);
+    InitEffectClass(m_impl->ctx, m_impl->rt);
     InitTexAnimClass(m_impl->ctx, m_impl->rt);
     InstallEngineGlobal(m_impl->ctx);
     // Bootstrap created stub `thisLayer` / `thisScene` on globalThis.
@@ -2482,6 +2565,11 @@ void JsRuntime::SetPersistence(std::string path) {
 namespace
 {
 void RunFieldScriptInit(JSContext* ctx, JsRuntime::Impl* rt, FieldScript* fs);
+}
+
+void JsRuntime::SetScene(owe::Scene* scene) {
+    if (! m_impl) return;
+    m_impl->host.scene = scene;
 }
 
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {

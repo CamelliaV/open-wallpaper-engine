@@ -931,6 +931,52 @@ TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
+    owe::Scene scene;
+    auto       root  = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       layer = rstd::sync::Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "audio-layer");
+    root->AppendChild(layer.clone());
+    scene.sceneGraph = root.clone();
+
+    layer->SetCamera("audio-effect-camera");
+    auto camera       = std::make_shared<owe::SceneCamera>(256, 256, -1.0f, 1.0f);
+    auto effect_layer = std::make_shared<owe::SceneImageEffectLayer>(
+        layer.as_ptr(), 256.0f, 256.0f, "_rt_effect_pingpong_a_test", "_rt_effect_pingpong_b_test");
+    auto effect             = std::make_shared<owe::SceneImageEffect>();
+    effect->name            = "audio-color";
+    effect->runtime_visible = true;
+    effect_layer->AddEffect(effect);
+    camera->AttatchImgEffect(effect_layer);
+    scene.cameras["audio-effect-camera"] = camera;
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    rt.SetScene(&scene);
+    rt.SetSceneRoot(root.as_ptr());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update() {
+                const effect = thisScene.getLayer("audio-layer").getEffect("audio-color");
+                effect.visible = false;
+                return effect.visible ? 1 : 0;
+            }
+        )JS",
+        "test/layer_get_effect_visible",
+        FieldKind::Scalar,
+        nlohmann::json::object(),
+        nlohmann::json(0),
+        root.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 0.0);
+    EXPECT_FALSE(effect->runtime_visible);
+    EXPECT_TRUE(scene.ConsumeRenderGraphDirty());
+    EXPECT_FALSE(scene.ConsumeRenderGraphDirty());
+}
+
 TEST(ScriptLayerLookup, MissingLayerKeepsDefaultTransformShape) {
     auto root = rstd::sync::Arc<owe::SceneNode>::make();
 

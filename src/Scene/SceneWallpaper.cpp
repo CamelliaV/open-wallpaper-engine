@@ -994,6 +994,9 @@ void SceneRenderController::on(RenderDraw&&) {
             m_scene->TickCameraPaths();
             m_scene->TickMaterialShaderAnimations();
             m_scene->TickTransformUpdaters();
+            if (m_scene->ConsumeRenderGraphDirty()) {
+                rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+            }
         }
         m_scene->paritileSys->Emitt();
         refreshPreparedMeshDirtyEvents();
@@ -1041,6 +1044,7 @@ void SceneRenderController::rebuildRenderGraph(vulkan::RenderGraphResourceRetent
     m_render->compileRenderGraph(*m_scene, *m_rg, m_render_scene);
     m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     consumeDirtyEventsCoveredByGraphRebuild();
+    (void)m_scene->ConsumeRenderGraphDirty();
 }
 
 void SceneRenderController::consumeDirtyEventsCoveredByGraphRebuild() {

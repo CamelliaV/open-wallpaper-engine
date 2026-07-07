@@ -1368,6 +1368,7 @@ struct SceneImageEffect {
         std::string src;
         i32         afterpos { 0 };
     };
+    std::string                     name;
     std::vector<Command>            commands;
     std::list<SceneImageEffectNode> nodes;
     SceneUserVisibilityBinding      visible_user_binding;
@@ -1389,9 +1390,15 @@ public:
         m_resolved             = false;
         return true;
     }
-    std::size_t EffectCount() const { return m_effects.size(); }
-    auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
-    bool        HasRuntimeVisibleEffect() const {
+    std::size_t                       EffectCount() const { return m_effects.size(); }
+    auto&                             GetEffect(std::size_t index) { return m_effects.at(index); }
+    std::shared_ptr<SceneImageEffect> FindEffect(std::string_view name) {
+        auto it = std::find_if(m_effects.begin(), m_effects.end(), [name](const auto& effect) {
+            return effect && effect->name == name;
+        });
+        return it == m_effects.end() ? nullptr : *it;
+    }
+    bool HasRuntimeVisibleEffect() const {
         return std::any_of(m_effects.begin(), m_effects.end(), [](const auto& effect) {
             return effect && effect->runtime_visible;
         });
@@ -1454,6 +1461,11 @@ private:
 
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
     std::vector<SceneImageEffectNode>              m_prefill_nodes;
+};
+
+struct SceneImageEffectRef {
+    SceneImageEffectLayer*            layer { nullptr };
+    std::shared_ptr<SceneImageEffect> effect;
 };
 
 // ============================================================================
@@ -2354,6 +2366,14 @@ public:
 
     Map<std::string, std::vector<std::shared_ptr<SceneCameraPath>>> camera_path_user_index;
 
+    std::optional<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node,
+                                                           std::string_view name);
+    bool SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible);
+    bool ConsumeRenderGraphDirty() {
+        bool dirty           = m_render_graph_dirty;
+        m_render_graph_dirty = false;
+        return dirty;
+    }
     bool ApplyUserNodeVisibilityBindings(std::string_view key, const nlohmann::json& property);
     bool ApplyUserImageEffectVisibilityBindings(std::string_view      key,
                                                 const nlohmann::json& property);
@@ -2463,6 +2483,7 @@ private:
 
     uint32_t                                 m_resource_generation { 0 };
     SceneResourceIndex                       m_resource_index;
+    bool                                     m_render_graph_dirty { false };
     std::vector<SceneUserPropertyDiagnostic> m_user_property_diagnostics;
 };
 
