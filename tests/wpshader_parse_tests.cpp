@@ -188,6 +188,35 @@ TEST(WPShaderParser, UndefsBuiltinMacroBeforeUserRedefine) {
     EXPECT_LT(undef_pos, define_pos);
 }
 
+TEST(WPShaderParser, PreShaderHeaderFlattensPackedAudioSpectrumAccess) {
+    const std::string out = owe::WPShaderParser::PreShaderHeader(
+        R"(
+uniform float g_AudioSpectrum64Left[64];
+float sample(float barID) {
+    return g_AudioSpectrum64Left[barID / 4][barID % 4];
+}
+)",
+        {},
+        owe::ShaderType::FRAGMENT);
+
+    EXPECT_EQ(out.find("g_AudioSpectrum64Left[barID / 4][barID % 4]"), std::string::npos);
+    EXPECT_NE(out.find("g_AudioSpectrum64Left[(int)(barID)]"), std::string::npos);
+}
+
+TEST(WPShaderParser, PreShaderHeaderTransposesLocalMatrixConstructorMul) {
+    const std::string out = owe::WPShaderParser::PreShaderHeader(
+        R"(
+vec2 rotate(vec2 uv, float th) {
+    return mul(uv, mat2(cos(th), sin(th), -sin(th), cos(th)));
+}
+)",
+        {},
+        owe::ShaderType::FRAGMENT);
+
+    EXPECT_NE(out.find("mul(uv, transpose(mat2(cos(th), sin(th), -sin(th), cos(th))))"),
+              std::string::npos);
+}
+
 TEST(WPShaderParser, CommonPerspectiveIncludeCompensatesLocalMatrixMul) {
     auto root =
         std::filesystem::temp_directory_path() /
@@ -228,6 +257,45 @@ TEST(WPShaderParser, CompileSceneShaderVariantRejectsInvalidDescriptor) {
     EXPECT_FALSE(result.ok);
     EXPECT_FALSE(result.shader);
     EXPECT_FALSE(result.error.empty());
+}
+
+TEST(WPShaderParser, CompileSceneShaderVariantAcceptsPackedAudioSpectrumAccess) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "packed-audio-spectrum-test";
+    desc.shader_name = "packed-audio-spectrum-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/packed-audio-spectrum-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+varying vec2 v_TexCoord;
+void main() {
+    v_TexCoord = a_Position.xy;
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/packed-audio-spectrum-test.frag",
+        .source     = R"(
+varying vec2 v_TexCoord;
+uniform float g_AudioSpectrum64Left[64];
+void main() {
+    float barID = v_TexCoord.x * 8.0;
+    float value = g_AudioSpectrum64Left[barID / 4][barID % 4];
+    gl_FragColor = vec4(value, value, value, 1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    ASSERT_EQ(result.shader->codes.size(), 2u);
+    EXPECT_FALSE(result.shader->codes[1].empty());
 }
 
 TEST(WPShaderParser, CompileSceneShaderVariantUsesDescriptorAndComboOverride) {

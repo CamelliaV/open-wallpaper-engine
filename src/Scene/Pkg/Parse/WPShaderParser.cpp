@@ -430,6 +430,193 @@ inline bool Contains(std::span<const std::string> values, std::string_view value
     });
 }
 
+// Legacy WE shaders sometimes address audio float arrays as std140 vec4 groups.
+inline bool IsAudioSpectrumName(std::string_view name) {
+    return name == G_AUDIO_SPEC_16_L || name == G_AUDIO_SPEC_16_R || name == G_AUDIO_SPEC_32_L ||
+           name == G_AUDIO_SPEC_32_R || name == G_AUDIO_SPEC_64_L || name == G_AUDIO_SPEC_64_R;
+}
+
+struct ShaderBracketExpr {
+    std::size_t      close_end;
+    std::string_view expr;
+};
+
+inline std::optional<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx,
+                                                        std::string_view   src) {
+    auto open = NextShaderToken(lx);
+    if (! PunctIs(open, '[')) return std::nullopt;
+
+    int         depth      = 1;
+    std::size_t expr_start = open.offset + open.text.size();
+    for (;;) {
+        auto t = lx.Next();
+        if (t.kind == shader_lex::TokenKind::Eof) return std::nullopt;
+        if (! PunctIs(t, '[') && ! PunctIs(t, ']')) continue;
+
+        if (PunctIs(t, '[')) {
+            ++depth;
+            continue;
+        }
+
+        --depth;
+        if (depth == 0) {
+            return ShaderBracketExpr {
+                .close_end = t.offset + t.text.size(),
+                .expr      = src.substr(expr_start, t.offset - expr_start),
+            };
+        }
+    }
+}
+
+inline std::vector<shader_lex::Token> ExprTokens(std::string_view expr) {
+    std::vector<shader_lex::Token> tokens;
+    shader_lex::Lexer              lx(expr);
+    for (;;) {
+        auto t = NextShaderToken(lx);
+        if (t.kind == shader_lex::TokenKind::Eof) break;
+        tokens.push_back(t);
+    }
+    return tokens;
+}
+
+inline std::optional<std::string> TryFlattenPackedAudioIndex(std::string_view group,
+                                                             std::string_view component) {
+    auto g = ExprTokens(group);
+    auto c = ExprTokens(component);
+    if (g.size() == 3 && c.size() == 3 && g[0].kind == shader_lex::TokenKind::Ident &&
+        c[0].kind == shader_lex::TokenKind::Ident && g[0].text == c[0].text && PunctIs(g[1], '/') &&
+        PunctIs(c[1], '%') && g[2].kind == shader_lex::TokenKind::Int &&
+        c[2].kind == shader_lex::TokenKind::Int && g[2].text == "4" && c[2].text == "4") {
+        std::string out = "(int)(";
+        out.append(g[0].text);
+        out.append(")");
+        return out;
+    }
+    return std::nullopt;
+}
+
+inline std::string FlattenAudioSpectrumAccess(std::string_view group, std::string_view component) {
+    if (auto exact = TryFlattenPackedAudioIndex(group, component)) return *exact;
+
+    std::string out;
+    out.reserve(group.size() + component.size() + 32);
+    out.append("((int)(");
+    out.append(group);
+    out.append(") * 4 + (int)(");
+    out.append(component);
+    out.append("))");
+    return out;
+}
+
+inline std::string NormalizePackedAudioSpectrumAccess(std::string_view src) {
+    shader_lex::Lexer lx(src);
+    std::string       out;
+    std::size_t       copied  = 0;
+    bool              changed = false;
+
+    for (;;) {
+        auto name = lx.Next();
+        if (name.kind == shader_lex::TokenKind::Eof) break;
+        if (name.kind != shader_lex::TokenKind::Ident || ! IsAudioSpectrumName(name.text)) continue;
+
+        auto save      = lx.Save();
+        auto group     = ReadBracketExpr(lx, src);
+        auto component = group ? ReadBracketExpr(lx, src) : std::nullopt;
+        if (! group || ! component) {
+            lx.Restore(save);
+            continue;
+        }
+
+        out.append(src, copied, name.offset - copied);
+        out.append(name.text);
+        out.push_back('[');
+        out.append(FlattenAudioSpectrumAccess(group->expr, component->expr));
+        out.push_back(']');
+        copied  = component->close_end;
+        changed = true;
+    }
+
+    if (! changed) return std::string { src };
+    out.append(src, copied, std::string::npos);
+    return out;
+}
+
+inline bool IsLocalMatrixConstructor(std::string_view name) {
+    return name == "mat2" || name == "mat3" || name == "mat4" || name == "mat2x2" ||
+           name == "mat2x3" || name == "mat2x4" || name == "mat3x2" || name == "mat3x3" ||
+           name == "mat3x4" || name == "mat4x2" || name == "mat4x3" || name == "mat4x4" ||
+           name == "float2x2" || name == "float2x3" || name == "float2x4" || name == "float3x2" ||
+           name == "float3x3" || name == "float3x4" || name == "float4x2" || name == "float4x3" ||
+           name == "float4x4";
+}
+
+inline std::string NormalizeLocalMatrixMul(std::string_view src) {
+    shader_lex::Lexer lx(src);
+    std::string       out;
+    std::size_t       copied  = 0;
+    bool              changed = false;
+
+    for (;;) {
+        auto name = lx.Next();
+        if (name.kind == shader_lex::TokenKind::Eof) break;
+        if (! TokenIs(name, "mul")) continue;
+
+        auto save = lx.Save();
+        auto open = NextShaderToken(lx);
+        if (! PunctIs(open, '(')) {
+            lx.Restore(save);
+            continue;
+        }
+
+        int                        depth = 1;
+        std::optional<std::size_t> comma_end;
+        std::optional<std::size_t> close_start;
+        for (;;) {
+            auto t = lx.Next();
+            if (t.kind == shader_lex::TokenKind::Eof) break;
+            if (PunctIs(t, '(') || PunctIs(t, '[') || PunctIs(t, '{')) {
+                ++depth;
+                continue;
+            }
+            if (PunctIs(t, ')') || PunctIs(t, ']') || PunctIs(t, '}')) {
+                --depth;
+                if (depth == 0) {
+                    close_start = t.offset;
+                    break;
+                }
+                continue;
+            }
+            if (depth == 1 && PunctIs(t, ',') && ! comma_end) {
+                comma_end = t.offset + t.text.size();
+            }
+        }
+
+        if (! comma_end || ! close_start) {
+            lx.Restore(save);
+            continue;
+        }
+
+        shader_lex::Lexer probe(src);
+        probe.SeekTo(*comma_end);
+        auto second = NextShaderToken(probe);
+        if (second.kind != shader_lex::TokenKind::Ident ||
+            ! IsLocalMatrixConstructor(second.text)) {
+            continue;
+        }
+
+        out.append(src, copied, second.offset - copied);
+        out.append("transpose(");
+        out.append(src, second.offset, *close_start - second.offset);
+        out.push_back(')');
+        copied  = *close_start;
+        changed = true;
+    }
+
+    if (! changed) return std::string { src };
+    out.append(src, copied, std::string::npos);
+    return out;
+}
+
 inline bool LineDefinesMacro(std::string_view src, std::size_t line_start,
                              std::string_view macro_name) {
     shader_lex::Cursor c(src);
@@ -1534,7 +1721,8 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
-    const std::string user_src = UndefBeforeUserMacroDefines(src, "M_PI_2");
+    const std::string user_src = NormalizeLocalMatrixMul(
+        NormalizePackedAudioSpectrumAccess(UndefBeforeUserMacroDefines(src, "M_PI_2")));
 
     // All stages route through glslang's HLSL frontend.
     std::string pre;
