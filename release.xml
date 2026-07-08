@@ -1,3 +1,18 @@
+<release version="0.1.11" date="2026-07-08">
+  <description>
+    <p>Fixes:</p>
+    <ul>
+      <li>Text rendering with dynamic effect targets and degenerate node camera transforms.</li>
+      <li>Audio bar shader compatibility.</li>
+      <li>Runtime image effect visibility from scene scripts.</li>
+      <li>Hidden solid layer link composites.</li>
+      <li>Copybackground, color-blend and transparent previous-effect composition.</li>
+      <li>Hidden particles, rain drag and child particle override inheritance.</li>
+      <li>Media thumbnail image fallback handling.</li>
+      <li>Script safety for unresolved scene layers.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.1.10" date="2026-07-05">
   <description>
     <p>Added:</p>
