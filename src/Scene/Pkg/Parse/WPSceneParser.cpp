@@ -2069,7 +2069,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         colorEffect.materials.push_back(colorMat);
         wpimgobj.effects.push_back(colorEffect);
     }
-    if ((wpimgobj.solid || wpimgobj.solid_layer) && ! has_author_effect) {
+    const bool is_hidden_link_source =
+        context.hidden_link_source_ids.count(static_cast<std::int32_t>(wpimgobj.id)) != 0;
+    if ((wpimgobj.solid || wpimgobj.solid_layer) && ! has_author_effect && is_hidden_link_source) {
         AppendLayerCompositePassthroughEffect(vfs, wpimgobj);
     }
 

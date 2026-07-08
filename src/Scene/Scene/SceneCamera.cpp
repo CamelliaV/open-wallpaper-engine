@@ -1,5 +1,7 @@
 module;
 
+#include <cmath>
+
 #include <rstd/macro.hpp>
 module wescene.scene;
 import eigen;
@@ -10,6 +12,31 @@ import wescene.utils;
 
 using namespace owe;
 using namespace Eigen;
+
+namespace
+{
+Matrix4d NodeCameraFrame(SceneNode& node) {
+    node.UpdateTrans();
+
+    Matrix4d frame = node.ModelTrans();
+    if (! frame.allFinite()) return Matrix4d::Identity();
+
+    constexpr double kAxisEps = 1e-10;
+    Vector3d         x        = frame.block<3, 1>(0, 0);
+    Vector3d         y        = frame.block<3, 1>(0, 1);
+    Vector3d         z        = frame.block<3, 1>(0, 2);
+
+    if (! z.allFinite() || z.squaredNorm() <= kAxisEps) {
+        z = x.cross(y);
+        if (! z.allFinite() || z.squaredNorm() <= kAxisEps) z = Vector3d::UnitZ();
+        frame.block<3, 1>(0, 2) = z.normalized();
+    }
+
+    if (! frame.allFinite() || std::abs(frame.determinant()) <= kAxisEps)
+        return Matrix4d::Identity();
+    return frame;
+}
+} // namespace
 
 Vector3d SceneCamera::GetPosition() const {
     if (m_lookat) return m_eye;
@@ -46,8 +73,7 @@ void SceneCamera::CalculateViewProjectionMatrix() {
         // chain + local translate / scale / rotate). With LookAt-only the
         // node's local scale would leak into clip space and a 9× scaled
         // layer would only see 1/9 of its quad inside the ortho viewport.
-        m_node->UpdateTrans();
-        m_viewMat = m_node->ModelTrans().inverse();
+        m_viewMat = NodeCameraFrame(*m_node).inverse();
     } else
         m_viewMat = Matrix4d::Identity();
 
