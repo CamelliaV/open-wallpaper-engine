@@ -77,6 +77,10 @@ add_executable(wpmaterial_parse_tests wpmaterial_parse_tests.cpp)
 target_link_libraries(wpmaterial_parse_tests PRIVATE owe-parse GTest::gtest_main)
 set_target_properties(wpmaterial_parse_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
+add_executable(text_geometry_tests text_geometry_tests.cpp)
+target_link_libraries(text_geometry_tests PRIVATE owe-parse GTest::gtest_main)
+set_target_properties(text_geometry_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 add_executable(wpmdl_mesh_tests wpmdl_mesh_tests.cpp)
 target_link_libraries(wpmdl_mesh_tests PRIVATE wescene_test_lib GTest::gtest_main)
 set_target_properties(wpmdl_mesh_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
@@ -156,6 +160,11 @@ gtest_discover_tests(
 )
 gtest_discover_tests(
     wpmaterial_parse_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    text_geometry_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )
