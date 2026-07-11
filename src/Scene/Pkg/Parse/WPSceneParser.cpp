@@ -2233,10 +2233,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     // mesh
     SceneMesh                  effct_final_mesh {};
-    auto                       spMesh  = std::make_shared<SceneMesh>();
-    auto&                      mesh    = *spMesh;
-    const std::array<float, 2> mapRate = Texture0UvScale(material, wpimgobj.nopadding);
-    auto add_puppet_mask_submeshes     = [&](SceneMesh& target, uint32_t first_mask_slot) {
+    auto                       spMesh        = std::make_shared<SceneMesh>();
+    auto&                      mesh          = *spMesh;
+    const std::array<float, 2> mapRate       = Texture0UvScale(material, wpimgobj.nopadding);
+    const Vector3f source_alignment_offset   = hasEffect ? Vector3f::Zero() : alignment_offset;
+    auto           add_puppet_mask_submeshes = [&](SceneMesh& target, uint32_t first_mask_slot) {
         if (! puppet_has_masks) return;
         std::set<uint32_t> clipped_indices;
         for (const auto& pmesh : puppet->meshes) {
@@ -2283,7 +2284,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     if (puppet) {
         if (hasEffect) {
-            GenCardMesh(mesh, { geometry_size[0], geometry_size[1] }, mapRate, alignment_offset);
+            GenCardMesh(
+                mesh, { geometry_size[0], geometry_size[1] }, mapRate, source_alignment_offset);
             for (const auto& m : puppet->meshes) {
                 if (m.positions.empty()) continue;
                 effct_final_mesh.Submeshes().emplace_back();
@@ -2311,7 +2313,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         }
     }
     if (! puppet) {
-        GenCardMesh(mesh, { geometry_size[0], geometry_size[1] }, mapRate, alignment_offset);
+        GenCardMesh(mesh, { geometry_size[0], geometry_size[1] }, mapRate, source_alignment_offset);
         GenCardMesh(effct_final_mesh,
                     { geometry_size[0], geometry_size[1] },
                     { 1.0f, 1.0f },
