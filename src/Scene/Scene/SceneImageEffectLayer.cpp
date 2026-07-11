@@ -52,6 +52,7 @@ SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
 void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                                           std::string_view effect_cam) {
     if (m_resolved) return;
+    m_resolved_effects.clear();
     std::string_view ppong_a = m_pingpong_a, ppong_b = m_pingpong_b;
     auto             swap_pp = [&ppong_a, &ppong_b]() {
         std::swap(ppong_a, ppong_b);
@@ -59,41 +60,58 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
     auto default_node = SceneNode();
 
     SceneImageEffectNode* last_output { nullptr };
-    for (auto& eff : m_effects) {
-        if (! eff || ! eff->runtime_visible) continue;
-        for (auto& cmd : eff->commands) {
+    auto                  resolve_effect = [&](SceneImageEffect& eff) {
+        for (auto& cmd : eff.commands) {
+            auto state_it = m_command_resolve_state
+                                .try_emplace(&cmd,
+                                             EffectCommandResolveState {
+                                                 .src = cmd.src,
+                                                 .dst = cmd.dst,
+                                             })
+                                .first;
+            cmd.src       = state_it->second.src;
+            cmd.dst       = state_it->second.dst;
             if (sstart_with(cmd.src, OWE_EFFECT_PPONG_PREFIX_A)) cmd.src = ppong_a;
 
             if (sstart_with(cmd.dst, OWE_EFFECT_PPONG_PREFIX_A)) cmd.dst = ppong_a;
         }
-        for (auto it = eff->nodes.begin(); it != eff->nodes.end(); it++) {
+        for (auto it = eff.nodes.begin(); it != eff.nodes.end(); it++) {
+            rstd_assert(it->sceneNode->HasMaterial());
+            auto& material            = *(it->sceneNode->Mesh()->Material());
+            auto [state_it, inserted] = m_node_resolve_state.try_emplace(
+                &(*it), EffectNodeResolveState { .output = it->output });
+            auto& state = state_it->second;
+            if (inserted) {
+                for (usize i = 0; i < material.textures.size(); ++i) {
+                    if (sstart_with(material.textures[i], OWE_EFFECT_PPONG_PREFIX_A))
+                        state.pingpong_input_slots.push_back(i);
+                }
+            }
+            it->output = state.output;
+            for (usize slot : state.pingpong_input_slots) {
+                if (slot < material.textures.size()) material.textures[slot] = ppong_a;
+            }
+
             if (sstart_with(it->output, OWE_EFFECT_PPONG_PREFIX_B) ||
                 it->output == SpecTex_Default) {
                 it->output  = ppong_b;
                 last_output = &(*it);
             }
 
-            rstd_assert(it->sceneNode->HasMaterial());
-
-            auto& material = *(it->sceneNode->Mesh()->Material());
             {
                 material.blenmode = BlendMode::Normal;
                 it->sceneNode->SetCamera(effect_cam.data());
                 it->sceneNode->CopyTrans(default_node);
                 it->sceneNode->Mesh()->ChangeMeshDataFrom(default_mesh);
             }
-
-            auto& texs = material.textures;
-            std::replace_if(
-                texs.begin(),
-                texs.end(),
-                [](auto& t) {
-                    return sstart_with(t, OWE_EFFECT_PPONG_PREFIX_A);
-                },
-                ppong_a);
         }
+        m_resolved_effects.push_back(&eff);
         swap_pp();
+    };
+    for (auto& eff : m_effects) {
+        if (eff && eff->runtime_visible) resolve_effect(*eff);
     }
+    if (m_final_resolve_effect) resolve_effect(*m_final_resolve_effect);
     if (last_output != nullptr) {
         last_output->output  = m_final_target;
         auto& mesh           = *(last_output->sceneNode->Mesh());
@@ -114,7 +132,9 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             mesh.ChangeMeshDataFrom(default_mesh);
         } else {
             const bool perspective = m_worldNode != nullptr && m_worldNode->Perspective();
-            last_output->sceneNode->SetCamera(perspective ? "global_perspective" : "");
+            last_output->sceneNode->SetCamera(m_final_camera.empty()
+                                                  ? (perspective ? "global_perspective" : "")
+                                                  : m_final_camera);
             last_output->sceneNode->SetPerspective(perspective);
             // Anchor to the layer's primary SceneNode so the composite quad
             // inherits the layer's world transform (including any container

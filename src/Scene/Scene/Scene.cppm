@@ -1403,6 +1403,10 @@ public:
             return effect && effect->runtime_visible;
         });
     }
+    bool RequiresIntermediateTarget() const {
+        return m_final_resolve_effect || m_effects.empty() || HasRuntimeVisibleEffect();
+    }
+    bool HasRenderEffects() const { return m_final_resolve_effect || HasRuntimeVisibleEffect(); }
     const auto& FirstTarget() const { return m_pingpong_a; }
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
     void        AddPrefillNode(SceneImageEffectNode node) {
@@ -1430,6 +1434,16 @@ public:
         m_resolved     = false;
     }
     const auto& FinalTarget() const { return m_final_target; }
+    void        SetFinalCamera(std::string camera) {
+        if (m_final_camera == camera) return;
+        m_final_camera = std::move(camera);
+        m_resolved     = false;
+    }
+    void SetFinalResolveEffect(std::shared_ptr<SceneImageEffect> effect) {
+        m_final_resolve_effect = std::move(effect);
+        m_resolved             = false;
+    }
+    const auto& ResolvedEffects() const { return m_resolved_effects; }
     void        SetFinalLocal(bool value) {
         m_final_local = value;
         m_resolved    = false;
@@ -1442,6 +1456,16 @@ public:
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
 private:
+    struct EffectNodeResolveState {
+        std::string        output;
+        std::vector<usize> pingpong_input_slots;
+    };
+
+    struct EffectCommandResolveState {
+        std::string src;
+        std::string dst;
+    };
+
     SceneNode*  m_worldNode;
     float       m_width { 1.0f };
     float       m_height { 1.0f };
@@ -1456,11 +1480,17 @@ private:
     bool                       m_final_depth_write { false };
     CullMode                   m_final_cull_mode { CullMode::None };
     std::string                m_final_target { SpecTex_Default };
+    std::string                m_final_camera;
     bool                       m_skip_when_no_runtime_effect { false };
     bool                       m_resolved { false };
 
-    std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
-    std::vector<SceneImageEffectNode>              m_prefill_nodes;
+    std::vector<std::shared_ptr<SceneImageEffect>>                    m_effects;
+    std::shared_ptr<SceneImageEffect>                                 m_final_resolve_effect;
+    std::vector<SceneImageEffect*>                                    m_resolved_effects;
+    std::vector<SceneImageEffectNode>                                 m_prefill_nodes;
+    std::unordered_map<SceneImageEffectNode*, EffectNodeResolveState> m_node_resolve_state;
+    std::unordered_map<SceneImageEffect::Command*, EffectCommandResolveState>
+        m_command_resolve_state;
 };
 
 struct SceneImageEffectRef {
@@ -2464,7 +2494,15 @@ public:
          SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutation mutation);
     void MarkLayerStaticElidable(WallpaperLayerId id);
     void MarkLayerVisibilityElidable(WallpaperLayerId id);
-    bool SetNodeVisible(SceneNode& node, bool visible);
+    void RegisterRenderGroup(WallpaperLayerId id, std::string camera) {
+        m_render_group_cameras[id.value] = std::move(camera);
+    }
+    std::optional<std::string_view> RenderGroupCamera(WallpaperLayerId id) const {
+        auto it = m_render_group_cameras.find(id.value);
+        if (it == m_render_group_cameras.end()) return std::nullopt;
+        return it->second;
+    }
+    bool                                 SetNodeVisible(SceneNode& node, bool visible);
     std::vector<SceneMeshDirtyEvent>     ConsumePreparedMeshDirtyEvents();
     std::vector<SceneMaterialDirtyEvent> ConsumePreparedMaterialDirtyEvents();
     void                                 ClearUserPropertyDiagnostics(std::string_view key);
@@ -2484,6 +2522,7 @@ private:
     uint32_t                                 m_resource_generation { 0 };
     SceneResourceIndex                       m_resource_index;
     bool                                     m_render_graph_dirty { false };
+    Map<i32, std::string>                    m_render_group_cameras;
     std::vector<SceneUserPropertyDiagnostic> m_user_property_diagnostics;
 };
 

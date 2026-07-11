@@ -244,35 +244,39 @@ static rg::TextureNodeRef AddMipFramebufferCopy(ExtraInfo& extra, rg::RenderGrap
     return snapshot;
 }
 
-static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, ExtraInfo& extra) {
+static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output, i32 imgId,
+                                          ExtraInfo& extra, bool defer_effect = false);
+
+static void LoadGraphEffects(SceneNode* node, SceneImageEffectLayer* effs, ExtraInfo& extra) {
+    auto& scene = *extra.scene;
+
+    effs->ResolveEffect(scene.default_effect_mesh, "effect");
+
+    for (auto* eff : effs->ResolvedEffects()) {
+        if (eff == nullptr) continue;
+        auto cmdItor = eff->commands.begin();
+        auto cmdEnd  = eff->commands.end();
+        int  nodePos = 0;
+        for (auto& n : eff->nodes) {
+            if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos) {
+                AddCopyPass(extra, MakeTextureDesc(cmdItor->src), MakeTextureDesc(cmdItor->dst));
+                cmdItor++;
+            }
+            auto& name = n.output;
+            ToGraphPass(n.sceneNode.as_ptr(), name, node->ID(), extra);
+            nodePos++;
+        }
+    }
+}
+
+static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output, i32 imgId,
+                                          ExtraInfo& extra, bool defer_effect) {
     auto& rgraph = *extra.rgraph;
     auto& scene  = *extra.scene;
 
-    auto loadEffect = [node, &rgraph, &scene, &extra](SceneImageEffectLayer* effs) {
-        effs->ResolveEffect(scene.default_effect_mesh, "effect");
-
-        for (usize i = 0; i < effs->EffectCount(); i++) {
-            auto& eff = effs->GetEffect(i);
-            if (! eff || ! eff->runtime_visible) continue;
-            auto cmdItor = eff->commands.begin();
-            auto cmdEnd  = eff->commands.end();
-            int  nodePos = 0;
-            for (auto& n : eff->nodes) {
-                if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos) {
-                    AddCopyPass(
-                        extra, MakeTextureDesc(cmdItor->src), MakeTextureDesc(cmdItor->dst));
-                    cmdItor++;
-                }
-                auto& name = n.output;
-                ToGraphPass(n.sceneNode.as_ptr(), name, node->ID(), extra);
-                nodePos++;
-            }
-        }
-    };
-
-    if (node->Mesh() == nullptr) return;
+    if (node->Mesh() == nullptr) return nullptr;
     auto* mesh = node->Mesh();
-    if (mesh->Submeshes().empty()) return;
+    if (mesh->Submeshes().empty()) return nullptr;
     const auto& slots = mesh->MaterialSlots();
 
     SceneImageEffectLayer* imgeff = nullptr;
@@ -280,7 +284,7 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
         auto& cam = scene.cameras.at(node->Camera());
         if (cam->HasImgEffect()) {
             auto* effect = cam->GetImgEffect().get();
-            if (effect->EffectCount() == 0 || effect->HasRuntimeVisibleEffect()) {
+            if (effect->RequiresIntermediateTarget()) {
                 imgeff = effect;
                 output = imgeff->FirstTarget();
             }
@@ -415,7 +419,9 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
             });
     }
 
-    if (imgeff != nullptr && imgeff->HasRuntimeVisibleEffect()) loadEffect(imgeff);
+    if (! defer_effect && imgeff != nullptr && imgeff->HasRenderEffects())
+        LoadGraphEffects(node, imgeff, extra);
+    return imgeff;
 }
 
 // Bottom-up collect: identify SceneNode subtrees whose every node can be
@@ -454,6 +460,95 @@ static bool ShouldSkipNoRuntimeEffect(SceneNode* node, Scene& scene) {
            effect_layer->EffectCount() > 0 && ! effect_layer->HasRuntimeVisibleEffect();
 }
 
+static void ConfigureNestedOutput(SceneNode* node, std::string_view output,
+                                  std::string_view inherited_camera, Scene& scene) {
+    if (! inherited_camera.empty() && node->Camera().empty()) {
+        node->SetCamera(std::string(inherited_camera));
+    }
+    if (node->Camera().empty()) return;
+
+    auto camera_it = scene.cameras.find(node->Camera());
+    if (camera_it == scene.cameras.end() || ! camera_it->second->HasImgEffect()) return;
+    auto& effect_layer = camera_it->second->GetImgEffect();
+    if (! effect_layer) return;
+    if (output != SpecTex_Default && effect_layer->FinalTarget() == SpecTex_Default) {
+        effect_layer->SetFinalTarget(std::string(output));
+    }
+    if (effect_layer->FinalTarget() == output) {
+        effect_layer->SetFinalCamera(std::string(inherited_camera));
+    }
+}
+
+static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
+                          std::string_view inherited_camera, ExtraInfo& extra,
+                          const Set<const SceneNode*>& emit_skip_subtrees,
+                          const Set<i32>&              linked_ids) {
+    if (node == nullptr || emit_skip_subtrees.count(node) != 0) return;
+
+    auto&            scene    = *extra.scene;
+    const i32        nid      = node->ID();
+    const bool       elidable = scene.elidable_layer_ids.count(nid) != 0;
+    const bool       linked   = linked_ids.count(nid) != 0;
+    bool             emit     = true;
+    std::string      link_output;
+    std::string_view node_output = inherited_output;
+
+    if (! linked && ShouldSkipNoRuntimeEffect(node, scene)) emit = false;
+    if (elidable) {
+        if (! linked) {
+            emit = false;
+        } else {
+            auto* link_source = extra.render_scene->linkSource(WallpaperLayerId { .value = nid });
+            if (link_source == nullptr) {
+                rstd_error("link render target for layer {} not found in snapshot", nid);
+                emit = false;
+            } else {
+                link_output = link_source->render_target_key;
+                node_output = link_output;
+                if (! node->Camera().empty()) {
+                    auto camera_it = scene.cameras.find(node->Camera());
+                    if (camera_it != scene.cameras.end() && camera_it->second->HasImgEffect()) {
+                        camera_it->second->GetImgEffect()->SetFinalTarget(link_output);
+                        camera_it->second->GetImgEffect()->SetFinalLocal(true);
+                    }
+                }
+            }
+        }
+    }
+
+    auto group_camera = scene.RenderGroupCamera(WallpaperLayerId { .value = nid });
+    if (emit && group_camera) {
+        ConfigureNestedOutput(node, node_output, inherited_camera, scene);
+        auto* effect_layer = ToGraphPass(node, node_output, nid, extra, true);
+        if (effect_layer == nullptr) {
+            rstd_error("render group layer {} has no effect target", nid);
+        }
+        const std::string_view child_output =
+            effect_layer == nullptr ? node_output : std::string_view(effect_layer->FirstTarget());
+        for (auto& child : node->GetChildren()) {
+            EmitSceneNode(
+                child.as_ptr(), child_output, *group_camera, extra, emit_skip_subtrees, linked_ids);
+        }
+        if (effect_layer != nullptr && effect_layer->HasRenderEffects()) {
+            LoadGraphEffects(node, effect_layer, extra);
+        }
+        return;
+    }
+
+    if (emit) {
+        ConfigureNestedOutput(node, node_output, inherited_camera, scene);
+        ToGraphPass(node, node_output, nid, extra);
+    }
+    for (auto& child : node->GetChildren()) {
+        EmitSceneNode(child.as_ptr(),
+                      inherited_output,
+                      inherited_camera,
+                      extra,
+                      emit_skip_subtrees,
+                      linked_ids);
+    }
+}
+
 std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
                                                          const RenderSceneSnapshot& render_scene) {
     std::unique_ptr<rg::RenderGraph> rgraph = std::make_unique<rg::RenderGraph>();
@@ -471,38 +566,8 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                 
     Set<const SceneNode*> emit_skip_subtrees;
     CollectEmitSkipSubtrees(scene.sceneGraph.as_ptr(), scene, linked_ids, emit_skip_subtrees);
 
-    // Pass B: emit passes. For elidable layers with a link consumer, route
-    // into a private `_rt_link_<id>` RT instead of `_rt_default`; elidable
-    // layers without a link consumer fall through and emit nothing.
-    TraverseNode(
-        [&extra, &scene, &linked_ids](SceneNode* node) {
-            const i32  nid      = node->ID();
-            const bool elidable = scene.elidable_layer_ids.count(nid) != 0;
-            const bool linked   = linked_ids.count(nid) != 0;
-            if (! linked && ShouldSkipNoRuntimeEffect(node, scene)) return;
-            if (elidable) {
-                if (! linked) return;
-                auto* link_source =
-                    extra.render_scene->linkSource(WallpaperLayerId { .value = nid });
-                if (link_source == nullptr) {
-                    rstd_error("link render target for layer {} not found in snapshot", nid);
-                    return;
-                }
-                std::string link_key = link_source->render_target_key;
-                if (! node->Camera().empty()) {
-                    auto cit = scene.cameras.find(node->Camera());
-                    if (cit != scene.cameras.end() && cit->second->HasImgEffect()) {
-                        cit->second->GetImgEffect()->SetFinalTarget(link_key);
-                        cit->second->GetImgEffect()->SetFinalLocal(true);
-                    }
-                }
-                ToGraphPass(node, link_key, nid, extra);
-            } else {
-                ToGraphPass(node, SpecTex_Default, nid, extra);
-            }
-        },
-        scene.sceneGraph.as_ptr(),
-        &emit_skip_subtrees);
+    EmitSceneNode(
+        scene.sceneGraph.as_ptr(), SpecTex_Default, {}, extra, emit_skip_subtrees, linked_ids);
 
     // Emit global post-process passes after the main scene-graph traversal.
     // Each step is either a CustomShaderPass (built on the synthetic node's
