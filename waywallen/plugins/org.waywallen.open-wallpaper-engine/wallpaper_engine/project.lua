@@ -8,6 +8,16 @@ M.LOCAL_DIRS = { "defaultprojects", "myprojects" }
 
 local VIDEO_EXTS = { mp4 = true, webm = true, mkv = true, avi = true, mov = true }
 
+local SCENE_BASE_BY_FILE = {
+    ["assets.json"] = "assets",
+    ["audiophile.json"] = "audiophile",
+    ["fantasticcar.json"] = "fantasticcar",
+    ["gifscene.json"] = "gifscene",
+    ["ricepod.json"] = "ricepod",
+    ["scene.json"] = "scene",
+    ["techno.json"] = "techno",
+}
+
 function M.pick_preview(ctx, dir, project)
     if project and project.preview then
         local p = dir .. "/" .. project.preview
@@ -37,10 +47,7 @@ function M.classify(ctx, dir, project, project_type)
         end
     else
         local file = project and project.file
-        local base = "scene"
-        if file then
-            base = file:match("^(.*)%.json$") or file:match("^(.*)%.pkg$") or base
-        end
+        local base = SCENE_BASE_BY_FILE[file] or "scene"
         if ctx.file_exists(dir .. "/" .. base .. ".pkg") then
             return "scene", dir .. "/" .. base .. ".pkg"
         elseif ctx.file_exists(dir .. "/" .. base .. ".json") then

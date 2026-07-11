@@ -9,7 +9,6 @@ function M.auto_detect(ctx)
         home .. "/.steam/steam",
         home .. "/.local/share/Steam",
         home .. "/.var/app/com.valvesoftware.Steam/data/Steam",
-        home .. "/.var/app/com.valvesoftware.Steam/.local/share/Steam",
     }
     local found, seen = {}, {}
     for _, root in ipairs(candidates) do
