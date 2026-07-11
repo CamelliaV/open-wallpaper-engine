@@ -298,8 +298,10 @@ inline void WritePipelineShaderStages(PipelineKeyWriter&         writer,
         });
     }
     std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.stage != rhs.stage) return lhs.stage < rhs.stage;
-        return lhs.entry_point < rhs.entry_point;
+        if (lhs.stage != rhs.stage) {
+            return static_cast<int>(lhs.stage) < static_cast<int>(rhs.stage);
+        }
+        return lhs.entry_point.compare(rhs.entry_point) < 0;
     });
 
     writer.writeArraySize(records.size());
