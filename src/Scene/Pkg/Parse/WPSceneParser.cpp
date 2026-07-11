@@ -1506,7 +1506,7 @@ bool UsesUnitFinalQuad(const wpscene::Material& wpmat) {
 bool CanCompositeFinalEffectShader(std::string_view shader) {
     return IsLayerCompositeShader(shader) || shader == "effects/transform" ||
            shader == "effects/scroll" || shader == "effects/spin" ||
-           shader == "effects/perspective";
+           shader == "effects/perspective" || shader == "effects/foliagesway";
 }
 
 bool HasShaderCombo(const WPShaderInfo& info, std::string_view combo_name) {
@@ -1521,7 +1521,7 @@ bool HasShaderTextureMaterial(const WPShaderInfo& info, std::string_view materia
     });
 }
 
-bool HasSolidSceneContext(const ParseContext& context, const wpscene::ImageObject& obj) {
+bool HasSolidCompositeContext(const ParseContext& context, const wpscene::ImageObject& obj) {
     if (obj.solid || context.solid_layer_ids.contains(obj.id)) return true;
 
     std::unordered_set<std::int32_t> seen;
@@ -2116,9 +2116,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         wpimgobj.fullscreen
             ? Vector3f::Zero()
             : AlignmentOffset(wpimgobj.alignment, { geometry_size[0], geometry_size[1] });
-    const bool solid_scene_context = HasSolidSceneContext(context, wpimgobj);
+    const bool solid_composite_context = HasSolidCompositeContext(context, wpimgobj);
     spImgNode->SetSize({ geometry_size[0], geometry_size[1] });
-    spImgNode->SetPerspective(wpimgobj.perspective || solid_scene_context);
+    spImgNode->SetPerspective(wpimgobj.perspective);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID() = wpimgobj.id;
     if (! wpimgobj.visible_user.empty())
@@ -2534,7 +2534,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
         int32_t    i_eff = -1;
         bool       last_effect_can_composite_final { false };
-        const bool allow_transparent_previous_final = ! solid_scene_context;
+        const bool allow_transparent_previous_final = ! solid_composite_context;
         const bool passthrough_can_composite_final  = isPassthrough;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
