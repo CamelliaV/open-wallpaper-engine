@@ -210,6 +210,8 @@ struct TextLayoutMetrics {
     float text_height { 0.0f };
     float source_width { 0.0f };
     float source_height { 0.0f };
+    float source_center_x { 0.0f };
+    float source_center_y { 0.0f };
     float padding { 0.0f };
 };
 
@@ -218,6 +220,7 @@ struct TextGeometryPolicy {
     float frame_height { 1.0f };
     bool  dynamic { false };
     bool  has_effect { false };
+    bool  preserve_text_bbox { false };
 };
 
 struct TextGeometry {
@@ -225,6 +228,8 @@ struct TextGeometry {
     float rt_height { 1.0f };
     float draw_width { 1.0f };
     float draw_height { 1.0f };
+    float draw_offset_x { 0.0f };
+    float draw_offset_y { 0.0f };
     float uv_source_width { 1.0f };
     float uv_source_height { 1.0f };
     float effect_frame_width { 1.0f };
@@ -249,6 +254,7 @@ public:
     // Rewrites the vertex/index arrays in place, marks the mesh dirty.
     // Safe to call any number of times after construction.
     void SetText(std::string_view utf8);
+    void SetFace(FontFace* face);
     void SetHorizontalAlign(std::string_view align);
 
     // For ParseTextObj's initial-bbox log; reflects the most recent layout.
@@ -256,6 +262,7 @@ public:
     float             TextHeight() const noexcept;
     float             SourceWidth() const noexcept;
     float             SourceHeight() const noexcept;
+    FontFace*         Face() const noexcept;
     TextLayoutMetrics Metrics() const noexcept;
 
 private:

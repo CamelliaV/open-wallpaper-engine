@@ -192,7 +192,9 @@ public:
     void RegisterTextAlignSetters(owe::SceneNode* node, std::string horizontal,
                                   std::string vertical, double point_size,
                                   std::function<void(std::string_view)> set_horizontal,
-                                  std::function<void(std::string_view)> set_vertical);
+                                  std::function<void(std::string_view)> set_vertical,
+                                  std::function<double()>               get_point_size = {},
+                                  std::function<void(double)>           set_point_size = {});
 
     // Same exposure rule as FieldScript::Impl above: opaque outside the
     // module, but visible to peer module impl files.

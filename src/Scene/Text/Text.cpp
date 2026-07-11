@@ -750,6 +750,8 @@ struct TextLayouter::Impl {
     float       last_text_h { 0.0f };
     float       last_source_w { 0.0f };
     float       last_source_h { 0.0f };
+    float       last_source_center_x { 0.0f };
+    float       last_source_center_y { 0.0f };
     std::string current_text;
     bool        missing_glyph_logged { false };
     bool        truncate_logged { false };
@@ -784,14 +786,27 @@ float             TextLayouter::TextWidth() const noexcept { return m_impl->last
 float             TextLayouter::TextHeight() const noexcept { return m_impl->last_text_h; }
 float             TextLayouter::SourceWidth() const noexcept { return m_impl->last_source_w; }
 float             TextLayouter::SourceHeight() const noexcept { return m_impl->last_source_h; }
+FontFace*         TextLayouter::Face() const noexcept { return m_impl->face; }
 TextLayoutMetrics TextLayouter::Metrics() const noexcept {
     return {
-        .text_width    = m_impl->last_text_w,
-        .text_height   = m_impl->last_text_h,
-        .source_width  = m_impl->last_source_w,
-        .source_height = m_impl->last_source_h,
-        .padding       = m_impl->style.padding,
+        .text_width      = m_impl->last_text_w,
+        .text_height     = m_impl->last_text_h,
+        .source_width    = m_impl->last_source_w,
+        .source_height   = m_impl->last_source_h,
+        .source_center_x = m_impl->last_source_center_x,
+        .source_center_y = m_impl->last_source_center_y,
+        .padding         = m_impl->style.padding,
     };
+}
+
+void TextLayouter::SetFace(FontFace* face) {
+    auto& im = *m_impl;
+    if (face == nullptr || face == im.face) return;
+    im.face                 = face;
+    im.metrics              = face->Metrics();
+    im.missing_glyph_logged = false;
+    im.truncate_logged      = false;
+    SetText(im.current_text);
 }
 
 TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
@@ -806,6 +821,8 @@ TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
     const float src_w   = positive(metrics.source_width, text_w);
     const float src_h   = positive(metrics.source_height, text_h);
     const float pad     = std::max(0.0f, metrics.padding);
+    const float src_cx  = std::isfinite(metrics.source_center_x) ? metrics.source_center_x : 0.0f;
+    const float src_cy  = std::isfinite(metrics.source_center_y) ? metrics.source_center_y : 0.0f;
 
     const float text_bbox_w = text_w + 2.0f * pad;
     const float text_bbox_h = text_h + 2.0f * pad;
@@ -828,10 +845,13 @@ TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
     out.effect_frame_height = frame_h;
 
     if (! policy.has_effect) {
-        out.draw_width       = text_bbox_w;
-        out.draw_height      = text_bbox_h;
-        out.uv_source_width  = src_bbox_w;
-        out.uv_source_height = src_bbox_h;
+        const bool tight_bbox = ! policy.preserve_text_bbox;
+        out.draw_width        = tight_bbox ? src_w : text_bbox_w;
+        out.draw_height       = tight_bbox ? src_h : text_bbox_h;
+        out.draw_offset_x     = tight_bbox ? src_cx : 0.0f;
+        out.draw_offset_y     = tight_bbox ? src_cy : 0.0f;
+        out.uv_source_width   = tight_bbox ? src_w : src_bbox_w;
+        out.uv_source_height  = tight_bbox ? src_h : src_bbox_h;
         return out;
     }
 
@@ -909,10 +929,12 @@ void TextLayouter::SetText(std::string_view utf8) {
         if (l.width > text_w) text_w = l.width;
     float text_h =
         fm.ascender - fm.descender + static_cast<float>(lines.size() - 1) * fm.line_height;
-    im.last_text_w   = text_w;
-    im.last_text_h   = text_h;
-    im.last_source_w = text_w;
-    im.last_source_h = text_h;
+    im.last_text_w          = text_w;
+    im.last_text_h          = text_h;
+    im.last_source_w        = text_w;
+    im.last_source_h        = text_h;
+    im.last_source_center_x = 0.0f;
+    im.last_source_center_y = 0.0f;
 
     // Zero the unused tail so stale data from the previous (longer) text
     // doesn't show up. Cheaper than tracking exact quad count downstream.
@@ -1062,8 +1084,10 @@ void TextLayouter::SetText(std::string_view utf8) {
     if (have_glyph_bounds) {
         im.last_source_w               = std::max(1.0f, glyph_max_x - glyph_min_x);
         im.last_source_h               = std::max(1.0f, glyph_max_y - glyph_min_y);
-        const float       shift_x      = -0.5f * (glyph_min_x + glyph_max_x);
-        const float       shift_y      = -0.5f * (glyph_min_y + glyph_max_y);
+        im.last_source_center_x        = 0.5f * (glyph_min_x + glyph_max_x);
+        im.last_source_center_y        = 0.5f * (glyph_min_y + glyph_max_y);
+        const float       shift_x      = -im.last_source_center_x;
+        const float       shift_y      = -im.last_source_center_y;
         const std::size_t vertex_count = q * 4;
         for (std::size_t i = 0; i < vertex_count; ++i) {
             im.positions[i * 3 + 0] += shift_x;
