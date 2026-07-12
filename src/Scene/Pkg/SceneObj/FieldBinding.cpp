@@ -46,10 +46,10 @@ bool ParseAnimOptions(const owe::Json& json, AnimOptions& out) {
     owe::GetJsonValue(json, "name", out.name, false);
     owe::GetJsonValue(json, "startpaused", out.startpaused, false);
     owe::GetJsonValue(json, "wraploop", out.wraploop, false);
-    if (auto value = json.get("smoothing"); value.is_some()) out.smoothing = (**value).clone();
-    if (auto value = json.get("children"); value.is_some()) out.children = (**value).clone();
-    if (auto value = json.get("events"); value.is_some()) out.events = (**value).clone();
-    if (auto value = json.get("parent"); value.is_some()) out.parent = (**value).clone();
+    if (auto value = json.get("smoothing"); value.is_some()) out.smoothing = (*value)->clone();
+    if (auto value = json.get("children"); value.is_some()) out.children = (*value)->clone();
+    if (auto value = json.get("events"); value.is_some()) out.events = (*value)->clone();
+    if (auto value = json.get("parent"); value.is_some()) out.parent = (*value)->clone();
     return true;
 }
 
@@ -100,19 +100,19 @@ std::size_t AbsorbAllFieldBindings(const owe::Json& obj_json, FieldBindings& out
         }
         if (auto properties = field_value.get("scriptproperties"); properties.is_some()) {
             out.scriptproperties.insert(::alloc::string::String::make(rstd::cppstd::as_str(field)),
-                                        (**properties).clone());
+                                        (*properties)->clone());
             ++n;
         }
         auto script = field_value.get("script");
-        if (script.is_some() && (**script).is_string()) {
+        if (script.is_some() && (*script)->is_string()) {
             ScriptBinding sb;
-            sb.source = rstd::cppstd::to_string(*(**script).as_str());
+            sb.source = rstd::cppstd::to_string(*(*script)->as_str());
             if (auto properties = field_value.get("scriptproperties"); properties.is_some())
-                sb.properties = (**properties).clone();
+                sb.properties = (*properties)->clone();
             if (auto value = field_value.get("value"); value.is_some())
-                sb.initial_value = (**value).clone();
+                sb.initial_value = (*value)->clone();
             if (auto user = field_value.get("user"); user.is_some()) {
-                auto string = (**user).as_str();
+                auto string = (*user)->as_str();
                 if (string.is_some()) sb.user = rstd::cppstd::to_string(*string);
             }
             out.scripts[std::string(field)] = std::move(sb);

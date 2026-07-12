@@ -168,11 +168,11 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
         var.FromJson(sv_json, std::string(name));
         if (auto value = sv_json.get("default"); value.is_some()) {
             ShaderValue sv;
-            if ((**value).is_string()) {
+            if ((*value)->is_string()) {
                 std::vector<float> values;
                 GetJsonValue(**value, values);
                 sv = std::span<const float>(values);
-            } else if ((**value).is_number()) {
+            } else if ((*value)->is_number()) {
                 sv.setSize(1);
                 GetJsonValue(**value, sv[0]);
             }

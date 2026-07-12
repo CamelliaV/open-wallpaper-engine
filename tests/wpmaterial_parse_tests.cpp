@@ -17,7 +17,8 @@ TEST(MaterialParser, ParsesLegacyUserShaderValues) {
                 }
             }
         ]
-    })").unwrap();
+    })")
+                 .unwrap();
 
     owe::wpscene::Material material;
     ASSERT_TRUE(material.FromJson(j));

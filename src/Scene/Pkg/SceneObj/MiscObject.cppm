@@ -95,11 +95,11 @@ struct TextObject {
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "attachment", attachment, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
+        if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
 
-        if (auto value = json.get("text"); value.is_some()) text = (**value).clone();
+        if (auto value = json.get("text"); value.is_some()) text = (*value)->clone();
         ReadUserValueBinding(json, "text", text_user);
-        if (auto value = json.get("font"); value.is_some()) font = (**value).clone();
+        if (auto value = json.get("font"); value.is_some()) font = (*value)->clone();
 
         owe::GetJsonValue(json, "pointsize", pointsize, false);
         owe::GetJsonValue(json, "padding", padding, false);
@@ -125,7 +125,7 @@ struct TextObject {
         owe::GetJsonValue(json, "backgroundcolor", backgroundcolor, false);
         owe::GetJsonValue(json, "backgroundbrightness", backgroundbrightness, false);
         if (auto effect_values = json.get("effects"); effect_values.is_some()) {
-            auto array = (**effect_values).as_array();
+            auto array = (*effect_values)->as_array();
             if (array.is_some()) {
                 for (const auto& jE : **array) {
                     ImageEffect wpeff;
@@ -184,7 +184,7 @@ struct ModelObject {
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
+        if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
 
         owe::GetJsonValue(json, "model", model, false);
         owe::GetJsonValue(json, "attachment", attachment, false);
@@ -243,7 +243,7 @@ struct CameraObject {
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
+        if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
 
         owe::GetJsonValue(json, "camera", camera, false);
         owe::GetJsonValue(json, "path", path, false);

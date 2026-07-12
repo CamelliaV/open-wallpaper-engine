@@ -951,8 +951,7 @@ bool Scene::SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool vi
     return true;
 }
 
-bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view      key,
-                                                   const Json& property) {
+bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view key, const Json& property) {
     if (m_resource_index.Empty()) RebuildResourceIndex();
 
     bool                                  requires_graph_rebuild = false;
@@ -990,8 +989,7 @@ bool Scene::ApplyUserLightVisibilityBindings(std::string_view key, const Json& p
     return changed;
 }
 
-bool Scene::ApplyUserCameraPathVisibilityBindings(std::string_view      key,
-                                                  const Json& property) {
+bool Scene::ApplyUserCameraPathVisibilityBindings(std::string_view key, const Json& property) {
     auto it = camera_path_user_index.find(std::string(key));
     if (it == camera_path_user_index.end()) return false;
 

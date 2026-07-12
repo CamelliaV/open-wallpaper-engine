@@ -104,10 +104,10 @@ bool ParticleInstanceoverride::FromJosn(const owe::Json& json) {
     // GetJsonValue (which already looks through the `value` wrapper).
     auto bind = [&](const char* field) {
         auto sub = json.get(field);
-        if (sub.is_none() || ! (**sub).is_object()) return;
-        auto user = (**sub).get("user");
+        if (sub.is_none() || ! (*sub)->is_object()) return;
+        auto user = (*sub)->get("user");
         if (user.is_none()) return;
-        auto string = (**user).as_str();
+        auto string = (*user)->as_str();
         if (string.is_some()) bindings[field] = rstd::cppstd::to_string(*string);
     };
 
@@ -158,7 +158,7 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
         rstd_error("particle no emitter");
         return false;
     }
-    auto emitter_array = (**emitter_values).as_array();
+    auto emitter_array = (*emitter_values)->as_array();
     if (emitter_array.is_none()) {
         rstd_error("particle emitter is not an array");
         return false;
@@ -169,7 +169,7 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
         emitters.push_back(std::move(emi));
     }
     if (auto values = json.get("renderer"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& el : **array) {
                 ParticleRender pr;
@@ -185,17 +185,17 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
         renderers.push_back(pr);
     }
     if (auto values = json.get("initializer"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some())
             for (const auto& el : **array) initializers.push(el.clone());
     }
     if (auto values = json.get("operator"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some())
             for (const auto& el : **array) operators.push(el.clone());
     }
     if (auto values = json.get("controlpoint"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& el : **array) {
                 ParticleControlpoint pc;
@@ -206,7 +206,7 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
     }
 
     if (auto values = json.get("children"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& el : **array) {
                 ParticleChild child;
@@ -257,7 +257,7 @@ bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion 
     owe::GetJsonValue(json, "scale", scale);
     owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
 
-    if (auto value = json.get("instanceoverride"); value.is_some() && ! (**value).is_null()) {
+    if (auto value = json.get("instanceoverride"); value.is_some() && ! (*value)->is_null()) {
         instanceoverride.FromJosn(**value);
     }
 
@@ -268,8 +268,8 @@ bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion 
     owe::GetJsonValue(json, "attachment", attachment, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);
     owe::GetJsonValue(json, "controlpoint", controlpoint, false);
-    if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
-    if (auto value = json.get("particlesrc"); value.is_some()) particlesrc = (**value).clone();
+    if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
+    if (auto value = json.get("particlesrc"); value.is_some()) particlesrc = (*value)->clone();
 
     AbsorbAllFieldBindings(json, field_bindings);
 

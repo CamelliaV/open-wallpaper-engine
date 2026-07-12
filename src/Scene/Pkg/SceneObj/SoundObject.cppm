@@ -54,9 +54,9 @@ struct SoundObject {
     bool FromJson(const owe::Json& json, fs::VFS&, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "volume", volume);
         if (auto volume_json = json.get("volume");
-            volume_json.is_some() && (**volume_json).is_object()) {
-            if (auto user = (**volume_json).get("user"); user.is_some()) {
-                auto string = (**user).as_str();
+            volume_json.is_some() && (*volume_json)->is_object()) {
+            if (auto user = (*volume_json)->get("user"); user.is_some()) {
+                auto string = (*user)->as_str();
                 if (string.is_some()) volume_user_key = rstd::cppstd::to_string(*string);
             }
         }
@@ -75,7 +75,7 @@ struct SoundObject {
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
+        if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
 
         owe::GetJsonValue(json, "startsilent", startsilent, false);
         owe::GetJsonValue(json, "blockalign", blockalign, false);
@@ -84,7 +84,7 @@ struct SoundObject {
 
         auto sound_json = json.get("sound");
         if (sound_json.is_none()) return false;
-        auto sound_array = (**sound_json).as_array();
+        auto sound_array = (*sound_json)->as_array();
         if (sound_array.is_none()) return false;
         for (const auto& el : **sound_array) {
             std::string name;

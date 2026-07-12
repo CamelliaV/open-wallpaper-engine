@@ -33,12 +33,12 @@ struct PuppetLayerRegistry {
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
-    std::shared_ptr<Scene>                                 scene;
-    SceneUniformUpdater*                                   shader_updater { nullptr };
-    i32                                                    ortho_w { 0 };
-    i32                                                    ortho_h { 0 };
-    fs::VFS*                                               vfs { nullptr };
-    rstd::Option<rstd::ref<rstd::json::Map>>               user_properties;
+    std::shared_ptr<Scene>                   scene;
+    SceneUniformUpdater*                     shader_updater { nullptr };
+    i32                                      ortho_w { 0 };
+    i32                                      ortho_h { 0 };
+    fs::VFS*                                 vfs { nullptr };
+    rstd::Option<rstd::ref<rstd::json::Map>> user_properties;
 
     ShaderValueMap                           global_base_uniforms;
     rstd::Option<rstd::sync::Arc<SceneNode>> effect_camera_node;

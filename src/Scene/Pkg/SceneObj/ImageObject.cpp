@@ -58,7 +58,7 @@ bool ObjectInstance::FromJson(const owe::Json& json) {
     present = true;
     owe::GetJsonValue(json, "id", id, false);
     if (auto values = json.get("combos"); values.is_some()) {
-        auto object = (**values).as_object();
+        auto object = (*values)->as_object();
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {
                 auto [entry_key, entry_value] = entry;
@@ -68,7 +68,7 @@ bool ObjectInstance::FromJson(const owe::Json& json) {
             });
     }
     if (auto values = json.get("textures"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& value : **array) {
                 auto texture = value.as_str();
@@ -77,7 +77,7 @@ bool ObjectInstance::FromJson(const owe::Json& json) {
         }
     }
     if (auto values = json.get("usertextures"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& value : **array) usertextures.push(value.clone());
         }
@@ -119,7 +119,7 @@ bool ImageEffect::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     if (! FromFileJson(jEffect, vfs)) return false;
 
     if (auto injected_passes = json.get("passes"); injected_passes.is_some()) {
-        auto array = (**injected_passes).as_array();
+        auto array = (*injected_passes)->as_array();
         if (array.is_none()) return true;
         if ((*array)->len() > passes.size()) {
             rstd_error("passes is not injective");
@@ -142,7 +142,7 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
     owe::GetJsonValue(json, "version", version, false);
     owe::GetJsonValue(json, "name", name);
     if (auto values = json.get("fbos"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& jF : **array) {
                 EffectFbo fbo;
@@ -152,7 +152,7 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
         }
     }
     if (auto effect_passes = json.get("passes"); effect_passes.is_some()) {
-        auto array = (**effect_passes).as_array();
+        auto array = (*effect_passes)->as_array();
         if (array.is_none()) {
             rstd_error("passes in effect file is not an array");
             return false;
@@ -318,7 +318,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
         return false;
     }
     if (auto values = json.get("effects"); values.is_some()) {
-        auto array = (**values).as_array();
+        auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& jE : **array) {
                 ImageEffect wpeff;
@@ -349,7 +349,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     owe::GetJsonValue(json, "backgroundbrightness", backgroundbrightness, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);
     if (auto instance_json = json.get("instance");
-        instance_json.is_some() && (**instance_json).is_object()) {
+        instance_json.is_some() && (*instance_json)->is_object()) {
         instance.FromJson(**instance_json);
     }
     AbsorbAllFieldBindings(json, field_bindings);

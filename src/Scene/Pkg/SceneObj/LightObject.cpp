@@ -41,7 +41,7 @@ bool LightObject::FromJson(const owe::Json& json, fs::VFS&, SceneVersion /*v*/) 
     owe::GetJsonValue(json, "cascadedistance1", cascadedistance1, false);
     owe::GetJsonValue(json, "cascadedistance2", cascadedistance2, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);
-    if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
+    if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
     AbsorbAllFieldBindings(json, field_bindings);
     return true;
 }

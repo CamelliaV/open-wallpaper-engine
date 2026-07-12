@@ -111,13 +111,13 @@ struct PropDescriptor {
         Delimiter,
         Other
     };
-    Kind           kind { Kind::Other };
-    std::string    name;
-    std::string    label;
-    Json           default_value; // captured verbatim
-    double         min { 0.0 };
-    double         max { 1.0 };
-    bool           integer { false };
+    Kind        kind { Kind::Other };
+    std::string name;
+    std::string label;
+    Json        default_value; // captured verbatim
+    double      min { 0.0 };
+    double      max { 1.0 };
+    bool        integer { false };
 };
 
 // --- runtime ----------------------------------------------------------------
@@ -139,8 +139,8 @@ public:
     // stub (the JS-side default created at bootstrap).
     FieldScript* MakeFieldScript(
         std::string_view source, std::string_view script_sha, FieldKind field_kind,
-        const Json& properties_config, const Json& initial_value,
-        owe::SceneNode* node = nullptr, std::vector<owe::SceneNode*> clones = {},
+        const Json& properties_config, const Json& initial_value, owe::SceneNode* node = nullptr,
+        std::vector<owe::SceneNode*>                                  clones       = {},
         std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clones = {});
 
     // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`

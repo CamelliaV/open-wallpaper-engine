@@ -1274,7 +1274,7 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
     // ResolveConfigValue stores the {user, value} wrapper verbatim; the
     // bootstrap getter unwraps at access time. SetUserProperty in
     // between should win.
-    JsRuntime      rt;
+    JsRuntime rt;
     owe::Json properties = rstd::json::from_str(R"({"x":{"user":"x1","value":0.5}})").unwrap();
     rt.SetUserProperty("x1", rstd::json::from_str(R"({"type":"slider","value":-0.665})").unwrap());
     FrameInputs fi {};
@@ -1305,9 +1305,9 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
 }
 
 TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
-    JsRuntime      rt;
+    JsRuntime rt;
     owe::Json properties = rstd::json::from_str(R"({"x":{"user":"missing","value":0.5}})").unwrap();
-    FrameInputs    fi {};
+    FrameInputs fi {};
     fi.canvas_w = 3840.0f;
     fi.canvas_h = 2160.0f;
     rt.SetFrameInputs(fi);
@@ -1418,7 +1418,8 @@ TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
     rt.SetFrameInputs(fi);
 
     owe::Json properties =
-        rstd::json::from_str(R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})").unwrap();
+        rstd::json::from_str(R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})")
+            .unwrap();
 
     auto* fs = rt.MakeFieldScript(
         R"JS(

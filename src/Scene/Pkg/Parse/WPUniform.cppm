@@ -46,7 +46,7 @@ struct WPUniformTex {
         owe::GetJsonValue(json, "mode", mode, false);
         owe::GetJsonValue(json, "combo", combo, false);
         if (auto values = json.get("components"); values.is_some()) {
-            auto array = (**values).as_array();
+            auto array = (*values)->as_array();
             if (array.is_some())
                 for (const auto& el : **array) {
                     Component c;
@@ -57,7 +57,7 @@ struct WPUniformTex {
         }
         owe::GetJsonValue(json, "requireany", requireany, false);
         if (auto values = json.get("require"); values.is_some()) {
-            auto object = (**values).as_object();
+            auto object = (*values)->as_object();
             if (object.is_some())
                 (*object)->iter().for_each([&](auto entry) {
                     auto [entry_key, entry_value] = entry;
@@ -110,12 +110,12 @@ struct WPUniformVar {
         owe::GetJsonValue(json, "linked", linked, false);
         owe::GetJsonValue(json, "nobindings", nobindings, false);
         if (auto values = json.get("range"); values.is_some()) {
-            auto array = (**values).as_array();
+            auto array = (*values)->as_array();
             if (array.is_some() && (*array)->len() >= 2)
                 has_range = owe::GetJsonValue((**array)[0], range[0]) &&
                             owe::GetJsonValue((**array)[1], range[1]);
         }
-        if (auto value = json.get("default"); value.is_some()) default_value = (**value).clone();
+        if (auto value = json.get("default"); value.is_some()) default_value = (*value)->clone();
         return true;
     }
 };
@@ -137,7 +137,7 @@ struct WPCombo {
         owe::GetJsonValue(json, "type", type, false);
         owe::GetJsonValue(json, "default", default_, false);
         if (auto values = json.get("options"); values.is_some()) {
-            auto object = (**values).as_object();
+            auto object = (*values)->as_object();
             if (object.is_some())
                 (*object)->iter().for_each([&](auto entry) {
                     auto [entry_key, entry_value] = entry;
@@ -147,7 +147,7 @@ struct WPCombo {
                 });
         }
         if (auto values = json.get("require"); values.is_some()) {
-            auto object = (**values).as_object();
+            auto object = (*values)->as_object();
             if (object.is_some())
                 (*object)->iter().for_each([&](auto entry) {
                     auto [entry_key, entry_value] = entry;

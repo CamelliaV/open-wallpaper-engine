@@ -196,7 +196,7 @@ typename JsonTemplateTypeCheck<T>::type GetJsonValue(const Json& json, std::stri
                       loc.line());
         return false;
     }
-    if ((**member).is_null()) {
+    if ((*member)->is_null()) {
         if (warn)
             rstd_info("read json \"{}\" is null at {}({}:{})",
                       name_view,

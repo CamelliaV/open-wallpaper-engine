@@ -28,7 +28,7 @@ import wescene.testing.corpus;
 import wescene.testing.pkg_header;
 import wescene.testing.json_builder;
 
-namespace fs = std::filesystem;
+namespace fs   = std::filesystem;
 using Json     = owe::Json;
 using JsonSink = rstd::Option<rstd::mut_ref<Json>>;
 
@@ -240,7 +240,7 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
         err = "scene.json not in pkg";
         return false;
     }
-    const std::string text = stream->ReadAllStr();
+    const std::string text   = stream->ReadAllStr();
     auto              parsed = owe::ParseJson(text);
     if (parsed.is_err()) {
         err = "scene.json parse failed";
@@ -353,7 +353,7 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries, owe::fs
             }
             continue;
         }
-        const std::string text = stream->ReadAllStr();
+        const std::string text   = stream->ReadAllStr();
         auto              parsed = owe::ParseJson(text);
         if (parsed.is_err()) {
             ++c.shader_fail;

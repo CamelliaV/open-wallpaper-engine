@@ -57,14 +57,14 @@ public:
     bool                       FromJson(const owe::Json&, fs::VFS& vfs);               // legacy
     bool                       FromJson(const owe::Json&, fs::VFS& vfs, SceneVersion); // canonical
     bool                       FromFileJson(const owe::Json&, fs::VFS& vfs);
-    int32_t               id;
-    std::string           name;
-    std::string           username; // PKGV0001+; per-instance label override
-    bool                  visible { true };
-    VisibleUserBinding    visible_user;
-    std::string           visible_user_key;
-    int32_t               version;
-    std::vector<Material> materials;
+    int32_t                    id;
+    std::string                name;
+    std::string                username; // PKGV0001+; per-instance label override
+    bool                       visible { true };
+    VisibleUserBinding         visible_user;
+    std::string                visible_user_key;
+    int32_t                    version;
+    std::vector<Material>      materials;
     std::vector<MaterialPass>  passes;
     std::vector<EffectCommand> commands;
     std::vector<EffectFbo>     fbos;

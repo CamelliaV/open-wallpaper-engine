@@ -106,36 +106,36 @@ TEST_P(ScenePkgVersionTest, AllWorkshopsParseAndExposeSaneScene) {
 
         auto pkg = w.snapshot.get("pkg");
         ASSERT_TRUE(pkg.is_some());
-        auto pkg_version = (**pkg).get("version");
+        auto pkg_version = (*pkg)->get("version");
         ASSERT_TRUE(pkg_version.is_some());
-        EXPECT_EQ(rstd::cppstd::to_string(*(**pkg_version).as_str()), version);
-        auto file_count = (**pkg).get("file_count");
+        EXPECT_EQ(rstd::cppstd::to_string(*(*pkg_version)->as_str()), version);
+        auto file_count = (*pkg)->get("file_count");
         ASSERT_TRUE(file_count.is_some());
-        EXPECT_GT((**file_count).as_i64().unwrap_or(0), 0);
-        auto has_scene_json = (**pkg).get("has_scene_json");
+        EXPECT_GT((*file_count)->as_i64().unwrap_or(0), 0);
+        auto has_scene_json = (*pkg)->get("has_scene_json");
         ASSERT_TRUE(has_scene_json.is_some());
-        EXPECT_TRUE((**has_scene_json).as_bool().unwrap_or(false));
+        EXPECT_TRUE((*has_scene_json)->as_bool().unwrap_or(false));
 
         auto scene = w.snapshot.get("scene");
         ASSERT_TRUE(scene.is_some());
-        auto parsed = (**scene).get("parsed");
+        auto parsed = (*scene)->get("parsed");
         ASSERT_TRUE(parsed.is_some());
-        auto error = (**scene).get("error");
-        EXPECT_TRUE((**parsed).as_bool().unwrap_or(false))
+        auto error = (*scene)->get("error");
+        EXPECT_TRUE((*parsed)->as_bool().unwrap_or(false))
             << "scene.json failed: "
-            << (error.is_some() && (**error).as_str().is_some()
-                    ? rstd::cppstd::to_string(*(**error).as_str())
+            << (error.is_some() && (*error)->as_str().is_some()
+                    ? rstd::cppstd::to_string(*(*error)->as_str())
                     : "");
-        auto is_ortho = (**scene).get("is_ortho");
-        if (is_ortho.is_some() && (**is_ortho).as_bool().unwrap_or(false)) {
-            auto ortho = (**scene).get("ortho");
+        auto is_ortho = (*scene)->get("is_ortho");
+        if (is_ortho.is_some() && (*is_ortho)->as_bool().unwrap_or(false)) {
+            auto ortho = (*scene)->get("ortho");
             ASSERT_TRUE(ortho.is_some());
-            auto width  = (**ortho).get("width");
-            auto height = (**ortho).get("height");
+            auto width  = (*ortho)->get("width");
+            auto height = (*ortho)->get("height");
             ASSERT_TRUE(width.is_some());
             ASSERT_TRUE(height.is_some());
-            EXPECT_GT((**width).as_i64().unwrap_or(0), 0);
-            EXPECT_GT((**height).as_i64().unwrap_or(0), 0);
+            EXPECT_GT((*width)->as_i64().unwrap_or(0), 0);
+            EXPECT_GT((*height)->as_i64().unwrap_or(0), 0);
         }
     }
 }
@@ -159,8 +159,8 @@ static void CheckTexInvariants(const Corpus::TexRef& ref) {
     const auto& t    = *ref.tex;
     auto        path = t.get("path");
     SCOPED_TRACE("workshop " + w.id + " tex " +
-                 (path.is_some() && (**path).as_str().is_some()
-                      ? rstd::cppstd::to_string(*(**path).as_str())
+                 (path.is_some() && (*path)->as_str().is_some()
+                      ? rstd::cppstd::to_string(*(*path)->as_str())
                       : ""));
     auto ok         = t.get("ok");
     auto width      = t.get("width");
@@ -170,12 +170,12 @@ static void CheckTexInvariants(const Corpus::TexRef& ref) {
     auto count      = t.get("count");
     ASSERT_TRUE(ok.is_some() && width.is_some() && height.is_some() && map_width.is_some() &&
                 map_height.is_some() && count.is_some());
-    EXPECT_TRUE((**ok).as_bool().unwrap_or(false));
-    EXPECT_GT((**width).as_i64().unwrap_or(0), 0);
-    EXPECT_GT((**height).as_i64().unwrap_or(0), 0);
-    EXPECT_GT((**map_width).as_i64().unwrap_or(0), 0);
-    EXPECT_GT((**map_height).as_i64().unwrap_or(0), 0);
-    EXPECT_GT((**count).as_i64().unwrap_or(0), 0);
+    EXPECT_TRUE((*ok)->as_bool().unwrap_or(false));
+    EXPECT_GT((*width)->as_i64().unwrap_or(0), 0);
+    EXPECT_GT((*height)->as_i64().unwrap_or(0), 0);
+    EXPECT_GT((*map_width)->as_i64().unwrap_or(0), 0);
+    EXPECT_GT((*map_height)->as_i64().unwrap_or(0), 0);
+    EXPECT_GT((*count)->as_i64().unwrap_or(0), 0);
 }
 
 TEST_P(TextureTexvTest, AllInstancesParse) {
@@ -184,7 +184,7 @@ TEST_P(TextureTexvTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("texv");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -194,7 +194,7 @@ TEST_P(TextureTexiTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("texi");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -204,7 +204,7 @@ TEST_P(TextureTexbTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("texb");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -214,7 +214,7 @@ TEST_P(TextureFormatTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("format");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -249,8 +249,8 @@ static void CheckMdlInvariants(const Corpus::MdlRef& ref) {
     const auto& m    = *ref.mdl;
     auto        path = m.get("path");
     SCOPED_TRACE("workshop " + w.id + " mdl " +
-                 (path.is_some() && (**path).as_str().is_some()
-                      ? rstd::cppstd::to_string(*(**path).as_str())
+                 (path.is_some() && (*path)->as_str().is_some()
+                      ? rstd::cppstd::to_string(*(*path)->as_str())
                       : ""));
     // Failed parses are tolerated (some .mdl files are non-puppet 3D
     // models that WPMdlParser intentionally rejects), but the version
@@ -260,13 +260,13 @@ static void CheckMdlInvariants(const Corpus::MdlRef& ref) {
     auto mdla = m.get("mdla");
     auto ok   = m.get("ok");
     ASSERT_TRUE(mdlv.is_some() && mdls.is_some() && mdla.is_some() && ok.is_some());
-    EXPECT_GE((**mdlv).as_i64().unwrap_or(-1), 0);
-    EXPECT_GE((**mdls).as_i64().unwrap_or(-1), 0);
-    EXPECT_GE((**mdla).as_i64().unwrap_or(-1), 0);
-    if ((**ok).as_bool().unwrap_or(false)) {
+    EXPECT_GE((*mdlv)->as_i64().unwrap_or(-1), 0);
+    EXPECT_GE((*mdls)->as_i64().unwrap_or(-1), 0);
+    EXPECT_GE((*mdla)->as_i64().unwrap_or(-1), 0);
+    if ((*ok)->as_bool().unwrap_or(false)) {
         auto bones = m.get("bones");
         ASSERT_TRUE(bones.is_some());
-        EXPECT_GT((**bones).as_i64().unwrap_or(0), 0);
+        EXPECT_GT((*bones)->as_i64().unwrap_or(0), 0);
     }
 }
 
@@ -276,7 +276,7 @@ TEST_P(MdlMdlvTest, AllInstancesExposeStamps) {
     for (const auto& r : slice) {
         auto value = r.mdl->get("mdlv");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
         CheckMdlInvariants(r);
     }
 }
@@ -286,7 +286,7 @@ TEST_P(MdlMdlsTest, AllInstancesExposeStamps) {
     for (const auto& r : slice) {
         auto value = r.mdl->get("mdls");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
         CheckMdlInvariants(r);
     }
 }
@@ -296,7 +296,7 @@ TEST_P(MdlMdlaTest, AllInstancesExposeStamps) {
     for (const auto& r : slice) {
         auto value = r.mdl->get("mdla");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
         CheckMdlInvariants(r);
     }
 }

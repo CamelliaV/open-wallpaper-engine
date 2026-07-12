@@ -47,12 +47,12 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
     auto root = parsed.unwrap();
 
     auto type = root.get("type");
-    if (type.is_none() || (**type).as_str().is_none()) {
+    if (type.is_none() || (*type)->as_str().is_none()) {
         std::fprintf(stderr, "weweb: %s is missing a string \"type\" field\n", pj_path.c_str());
         return std::nullopt;
     }
     // WE corpus has both "web" and "Web" for the type field; fold case.
-    auto normalized_type = LowerAscii(rstd::cppstd::to_string(*(**type).as_str()));
+    auto normalized_type = LowerAscii(rstd::cppstd::to_string(*(*type)->as_str()));
     if (normalized_type != "web") {
         std::fprintf(stderr,
                      "weweb: %s has type=\"%s\", expected \"web\"\n",
@@ -64,23 +64,23 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
     WebManifest m;
     m.entry_html = "index.html";
     if (auto file = root.get("file"); file.is_some()) {
-        auto string = (**file).as_str();
+        auto string = (*file)->as_str();
         if (string.is_some()) m.entry_html = rstd::cppstd::to_string(*string);
     }
     m.title = "Wallpaper";
     if (auto title = root.get("title"); title.is_some()) {
-        auto string = (**title).as_str();
+        auto string = (*title)->as_str();
         if (string.is_some()) m.title = rstd::cppstd::to_string(*string);
     }
 
     if (auto preview = root.get("preview"); preview.is_some()) {
-        auto string = (**preview).as_str();
+        auto string = (*preview)->as_str();
         if (string.is_some()) m.preview = rstd::cppstd::to_string(*string);
     }
 
     if (auto general = root.get("general"); general.is_some())
-        if (auto properties = (**general).get("properties"); properties.is_some())
-            m.user_props = (**properties).clone();
+        if (auto properties = (*general)->get("properties"); properties.is_some())
+            m.user_props = (*properties)->clone();
 
     return m;
 }

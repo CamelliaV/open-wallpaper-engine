@@ -17,7 +17,7 @@ TEST(JsonAdapter, ParsesDumpsAndReportsMembers) {
     EXPECT_TRUE(value.get_mut(mutable_key).is_some());
     auto z = value.get("z");
     ASSERT_TRUE(z.is_some());
-    EXPECT_TRUE((**z).is_array());
+    EXPECT_TRUE((*z)->is_array());
     EXPECT_EQ(owe::Dump(value), R"({"a":1.0,"z":[true,null]})");
     EXPECT_EQ(owe::Dump(value, std::size_t { 2 }),
               "{\n  \"a\": 1.0,\n  \"z\": [\n    true,\n    null\n  ]\n}");
@@ -31,7 +31,7 @@ TEST(JsonAdapter, CommentsRequireExplicitOption) {
     auto value  = parsed.unwrap();
     auto member = value.get("value");
     ASSERT_TRUE(member.is_some());
-    EXPECT_EQ((**member).as_i64().unwrap_or(0), 1);
+    EXPECT_EQ((*member)->as_i64().unwrap_or(0), 1);
 }
 
 TEST(JsonAdapter, ClonesSubtreesExplicitly) {
@@ -41,7 +41,7 @@ TEST(JsonAdapter, ClonesSubtreesExplicitly) {
     auto clone    = original.clone();
     auto nested   = clone.get_mut("nested");
     ASSERT_TRUE(nested.is_some());
-    auto object = (**nested).as_object_mut();
+    auto object = (*nested)->as_object_mut();
     ASSERT_TRUE(object.is_some());
     (*object)->insert(::alloc::string::String::make("value"), rstd::into<owe::Json>(2));
     EXPECT_EQ(owe::Dump(original), R"({"nested":{"value":1}})");
@@ -90,14 +90,14 @@ TEST(JsonAdapter, NativeProjectionsPreserveOptions) {
     auto value  = parsed.unwrap();
     auto number = value.get("number");
     ASSERT_TRUE(number.is_some());
-    EXPECT_DOUBLE_EQ((**number).as_f64().unwrap_or(0.0), 1.75);
+    EXPECT_DOUBLE_EQ((*number)->as_f64().unwrap_or(0.0), 1.75);
     auto boolean = value.get("bool");
     ASSERT_TRUE(boolean.is_some());
-    EXPECT_TRUE((**boolean).as_bool().unwrap_or(false));
-    EXPECT_TRUE((**boolean).as_i64().is_none());
+    EXPECT_TRUE((*boolean)->as_bool().unwrap_or(false));
+    EXPECT_TRUE((*boolean)->as_i64().is_none());
     auto text = value.get("text");
     ASSERT_TRUE(text.is_some());
-    EXPECT_EQ(rstd::cppstd::as_string_view(*(**text).as_str()), "value");
+    EXPECT_EQ(rstd::cppstd::as_string_view(*(*text)->as_str()), "value");
     EXPECT_TRUE(value.get("missing").is_none());
 }
 

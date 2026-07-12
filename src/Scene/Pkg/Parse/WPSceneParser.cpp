@@ -372,7 +372,7 @@ script::ScriptScene& EnsureScriptScene(ParseContext& context) {
                 return script::BoneTranslation { t.x(), t.y(), t.z() };
             });
         if (context.user_properties.is_some())
-            (**context.user_properties).iter().for_each([&](auto entry) {
+            (*context.user_properties)->iter().for_each([&](auto entry) {
                 auto [entry_key, entry_value] = entry;
                 auto key                      = rstd::cppstd::as_string_view(entry_key->as_str());
                 context.script_scene->runtime().SetUserProperty(key, *entry_value);
@@ -409,17 +409,17 @@ bool IsFractionSliderProperty(const ParseContext& context, const Json& binding) 
     if (context.user_properties.is_none() || ! binding.is_object()) return false;
     auto user = binding.get("user");
     if (user.is_none()) return false;
-    auto key = (**user).as_str();
+    auto key = (*user)->as_str();
     if (key.is_none()) return false;
-    auto prop = (**context.user_properties).get(*key);
-    if (prop.is_none() || ! (**prop).is_object()) return false;
-    auto type = (**prop).get("type");
+    auto prop = (*context.user_properties)->get(*key);
+    if (prop.is_none() || ! (*prop)->is_object()) return false;
+    auto type = (*prop)->get("type");
     if (type.is_none()) return false;
-    auto type_string = (**type).as_str();
+    auto type_string = (*type)->as_str();
     if (type_string.is_none() || rstd::cppstd::as_string_view(*type_string) != "slider")
         return false;
-    auto fraction = (**prop).get("fraction");
-    return fraction.is_some() && (**fraction).as_bool().unwrap_or(false);
+    auto fraction = (*prop)->get("fraction");
+    return fraction.is_some() && (*fraction)->as_bool().unwrap_or(false);
 }
 
 Json ScriptPropertiesForField(const ParseContext& context, std::string_view field,
@@ -461,7 +461,7 @@ Json ScriptInitialValueForField(std::string_view field, const Json& value) {
         for (auto* axis : { "x", "y", "z" }) {
             auto member = out.get_mut(axis);
             if (member.is_none()) continue;
-            auto number = (**member).as_f64();
+            auto number = (*member)->as_f64();
             if (number.is_some() && *number >= std::numeric_limits<float>::lowest() &&
                 *number <= std::numeric_limits<float>::max())
                 **member = rstd::into<Json>(static_cast<float>(*number) * kRadToDeg);
@@ -666,7 +666,7 @@ std::optional<SceneCameraLookAtKey> ParseLookAtKey(const Json& json) {
 std::optional<SceneCameraLookAtTrack> ParseLookAtTrack(const Json& json) {
     auto transforms = json.get("transforms");
     if (transforms.is_none()) return std::nullopt;
-    auto transform_array = (**transforms).as_array();
+    auto transform_array = (*transforms)->as_array();
     if (transform_array.is_none()) return std::nullopt;
 
     SceneCameraLookAtTrack track;
@@ -719,7 +719,7 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::SceneMetadata& sc
         auto json   = parsed.unwrap();
         auto tracks = json.get("paths");
         if (tracks.is_none()) continue;
-        auto track_array = (**tracks).as_array();
+        auto track_array = (*tracks)->as_array();
         if (track_array.is_none()) continue;
         for (const auto& raw_track : **track_array) {
             auto track = ParseLookAtTrack(raw_track);
@@ -1667,8 +1667,8 @@ std::optional<std::string> UserTexturePropertyKey(const Json& binding) {
     auto type  = binding.get("type");
     auto value = binding.get("name");
     if (type.is_none() || value.is_none()) return std::nullopt;
-    auto type_string  = (**type).as_str();
-    auto value_string = (**value).as_str();
+    auto type_string  = (*type)->as_str();
+    auto value_string = (*value)->as_str();
     if (type_string.is_none() || value_string.is_none() ||
         rstd::cppstd::as_string_view(*type_string) != "system")
         return std::nullopt;
@@ -1735,7 +1735,7 @@ void ApplyTextureBinds(wpscene::Material&                                  wpmat
 
 std::string ResolveSceneTextureProperty(const ParseContext& context, std::string_view key) {
     if (context.user_properties.is_none()) return {};
-    auto prop = (**context.user_properties).get(rstd::cppstd::as_str(key));
+    auto prop = (*context.user_properties)->get(rstd::cppstd::as_str(key));
     if (prop.is_none()) return {};
     const auto& payload = **prop;
     if (payload.is_string()) {
@@ -1746,14 +1746,14 @@ std::string ResolveSceneTextureProperty(const ParseContext& context, std::string
 
     std::string type;
     if (auto value = payload.get("type"); value.is_some()) {
-        auto string = (**value).as_str();
+        auto string = (*value)->as_str();
         if (string.is_some()) type = rstd::cppstd::to_string(*string);
     }
     if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
         return {};
     auto value = payload.get("value");
     if (value.is_none()) return {};
-    auto string = (**value).as_str();
+    auto string = (*value)->as_str();
     return string.is_none() ? std::string {} : rstd::cppstd::to_string(*string);
 }
 
@@ -3493,7 +3493,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         auto value = obj.text.get("value");
         if (value.is_none()) value = obj.text.get("text");
         if (value.is_some()) {
-            auto string = (**value).as_str();
+            auto string = (*value)->as_str();
             if (string.is_some()) s_text = rstd::cppstd::to_string(*string);
         }
     }
@@ -3513,7 +3513,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         font_name = rstd::cppstd::to_string(*obj.font.as_str());
     } else if (obj.font.is_object()) {
         if (auto value = obj.font.get("value"); value.is_some()) {
-            auto string = (**value).as_str();
+            auto string = (*value)->as_str();
             if (string.is_some()) font_name = rstd::cppstd::to_string(*string);
         }
     }
@@ -4327,7 +4327,7 @@ BuildObjectVisibilityInfo(const Json& json, rstd::Option<rstd::ref<rstd::json::M
     std::unordered_map<std::int32_t, ObjectVisibilityInfo> out;
     auto                                                   objects = json.get("objects");
     if (objects.is_none()) return out;
-    auto array = (**objects).as_array();
+    auto array = (*objects)->as_array();
     if (array.is_none()) return out;
     for (const auto& obj : **array) {
         if (! obj.is_object()) continue;
@@ -4414,7 +4414,7 @@ std::vector<SceneObjectVar> ExpandObjects(const Json& json, fs::VFS& vfs, wpscen
     std::vector<SceneObjectVar> scene_objs;
     auto                        objects = json.get("objects");
     if (objects.is_none()) return scene_objs;
-    auto array = (**objects).as_array();
+    auto array = (*objects)->as_array();
     if (array.is_none()) return scene_objs;
     auto visibility_info = BuildObjectVisibilityInfo(json, user_props);
     for (const auto& obj : **array) {
@@ -4432,25 +4432,25 @@ std::vector<SceneObjectVar> ExpandObjects(const Json& json, fs::VFS& vfs, wpscen
         // image/particle/sound/light fields, so the renderer-supported
         // kinds get first pick. Falls through to the parsing-only kinds
         // (no rendering yet) so the data stays absorbed.
-        if (auto value = obj.get("image"); value.is_some() && ! (**value).is_null()) {
+        if (auto value = obj.get("image"); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::ImageObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (auto value = obj.get("particle"); value.is_some() && ! (**value).is_null()) {
+        } else if (auto value = obj.get("particle"); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::ParticleObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (auto value = obj.get("sound"); value.is_some() && ! (**value).is_null()) {
+        } else if (auto value = obj.get("sound"); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::SoundObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (auto value = obj.get("light"); value.is_some() && ! (**value).is_null()) {
+        } else if (auto value = obj.get("light"); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::LightObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (auto value = obj.get("text"); value.is_some() && ! (**value).is_null()) {
+        } else if (auto value = obj.get("text"); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::TextObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (auto value = obj.get("model"); value.is_some() && ! (**value).is_null()) {
+        } else if (auto value = obj.get("model"); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::ModelObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (auto value = obj.get("camera"); value.is_some() && ! (**value).is_null()) {
+        } else if (auto value = obj.get("camera"); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::CameraObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         }
@@ -4943,13 +4943,13 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
     //   bare SceneNode here so ParseImageObj children can find their parent.
     //   Their `visible:false` form is preserved as a parent anchor.
     if (auto objects = json.get("objects"); objects.is_some()) {
-        auto object_array = (**objects).as_array();
+        auto object_array = (*objects)->as_array();
         if (object_array.is_none()) return context.scene;
         auto visibility_info = BuildObjectVisibilityInfo(json, m_user_properties);
         auto has_kind        = [](const Json& o) {
             for (const char* k :
                  { "image", "particle", "sound", "light", "text", "model", "camera" }) {
-                if (auto value = o.get(k); value.is_some() && ! (**value).is_null()) return true;
+                if (auto value = o.get(k); value.is_some() && ! (*value)->is_null()) return true;
             }
             return false;
         };

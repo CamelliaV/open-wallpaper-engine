@@ -155,7 +155,7 @@ Json InitialUserProperty(Json value) {
 bool IsShaderGraphUserProperty(const Json& prop) {
     auto type = prop.get("type");
     if (type.is_none()) return false;
-    auto string = (**type).as_str();
+    auto string = (*type)->as_str();
     return string.is_some() && rstd::cppstd::as_string_view(*string) == "combo";
 }
 
@@ -204,7 +204,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const Json& prop) {
     // one, but inline {"value": ...} descriptors don't.
     std::string type;
     if (auto member = prop.get("type"); member.is_some()) {
-        auto string = (**member).as_str();
+        auto string = (*member)->as_str();
         if (string.is_some()) type = rstd::cppstd::to_string(*string);
     }
 
@@ -316,14 +316,14 @@ std::optional<std::string> ResolveRuntimeSceneTextureProperty(const Json& prop) 
 
     std::string type;
     if (auto member = prop.get("type"); member.is_some()) {
-        auto string = (**member).as_str();
+        auto string = (*member)->as_str();
         if (string.is_some()) type = rstd::cppstd::to_string(*string);
     }
     if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
         return std::nullopt;
     auto value = prop.get("value");
     if (value.is_none()) return std::nullopt;
-    auto string = (**value).as_str();
+    auto string = (*value)->as_str();
     return string.is_some() ? std::optional<std::string>(rstd::cppstd::to_string(*string))
                             : std::nullopt;
 }
@@ -728,9 +728,9 @@ void MergeProjectUserProperties(const std::filesystem::path& project_dir, rstd::
     auto root    = parsed.unwrap();
     auto general = root.get("general");
     if (general.is_none()) return;
-    auto properties = (**general).get("properties");
+    auto properties = (*general)->get("properties");
     if (properties.is_none()) return;
-    auto object = (**properties).as_object();
+    auto object = (*properties)->as_object();
     if (object.is_none()) return;
 
     (*object)->iter().for_each([&](auto entry) {

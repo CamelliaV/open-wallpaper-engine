@@ -12,7 +12,7 @@ inline void ReadPuppetAnimationLayers(const owe::Json&                          
                                       std::vector<WPPuppetLayer::AnimationLayer>& out) {
     auto layers = json.get("animationlayers");
     if (layers.is_none()) return;
-    auto array = (**layers).as_array();
+    auto array = (*layers)->as_array();
     if (array.is_none()) return;
     for (const auto& jLayer : **array) {
         WPPuppetLayer::AnimationLayer layer;

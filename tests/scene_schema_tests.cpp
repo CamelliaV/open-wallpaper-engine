@@ -341,7 +341,7 @@ template<typename F>
 void ForEachKey(const owe::Json& version, F&& function) {
     auto keys = version.get("keys");
     if (keys.is_none()) return;
-    auto object = (**keys).as_object();
+    auto object = (*keys)->as_object();
     if (object.is_none()) return;
     (*object)->iter().for_each([&](auto entry) {
         auto [entry_key, entry_value] = entry;
@@ -379,7 +379,7 @@ void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
             if (parsed.contains(k)) return;
             std::uint64_t present_in = 0;
             if (auto value = info.get("present_in"); value.is_some())
-                present_in = (**value).as_u64().unwrap_or(0);
+                present_in = (*value)->as_u64().unwrap_or(0);
             miss.push_back({ k, present_in });
         });
         std::sort(miss.begin(), miss.end(), [](auto& a, auto& b) {
@@ -516,7 +516,7 @@ TEST(SceneSchema, ReportTopUnparsedNestedKeys) {
                 const std::string k { path.substr(parent.size()) };
                 if (parsed.contains(k)) return;
                 if (auto value = info.get("present_in"); value.is_some())
-                    agg[k] += (**value).as_u64().unwrap_or(0);
+                    agg[k] += (*value)->as_u64().unwrap_or(0);
             });
         });
         std::vector<Entry> miss;

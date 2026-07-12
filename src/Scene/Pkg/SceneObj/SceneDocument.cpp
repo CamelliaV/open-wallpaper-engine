@@ -28,7 +28,7 @@ SceneVersion ParsePkgVersionStamp(std::string_view stamp) {
 SceneJsonVersion DetectSceneJsonVersion(const owe::Json& root) {
     auto version = root.get("version");
     if (version.is_none()) return kSceneJsonVersionDefault;
-    auto value = (**version).as_u64();
+    auto value = (*version)->as_u64();
     if (value.is_some() && *value <= std::numeric_limits<SceneJsonVersion>::max())
         return static_cast<SceneJsonVersion>(*value);
     return kSceneJsonVersionDefault;
@@ -52,7 +52,7 @@ bool SceneCamera::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "eye", eye);
     owe::GetJsonValue(json, "up", up);
     if (auto raw_paths = json.get("paths"); raw_paths.is_some()) {
-        auto array = (**raw_paths).as_array();
+        auto array = (*raw_paths)->as_array();
         if (array.is_none()) return true;
         for (const auto& path : **array) {
             auto value = path.as_str();
@@ -91,9 +91,9 @@ void capture_user_bindings(SceneGeneral& g, const owe::Json& json) {
         const auto& field             = *entry_value;
         if (! field.is_object()) return;
         auto user = field.get("user");
-        if (user.is_none() || ! (**user).is_string()) return;
+        if (user.is_none() || ! (*user)->is_string()) return;
         g.user_bindings[rstd::cppstd::to_string(entry_key->as_str())] =
-            rstd::cppstd::to_string(*(**user).as_str());
+            rstd::cppstd::to_string(*(*user)->as_str());
     });
 }
 
@@ -121,7 +121,7 @@ void parse_baseline(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "camerashakeroughness", g.camerashakeroughness, false);
     g.isOrtho = false;
     if (auto ortho = json.get("orthogonalprojection"); ortho.is_some()) {
-        if ((**ortho).is_null())
+        if ((*ortho)->is_null())
             g.isOrtho = false;
         else {
             g.isOrtho = true;
@@ -174,26 +174,26 @@ void parse_v23_plus(SceneGeneral& g, const owe::Json& json) {
 
 void parse_lightconfig(SceneGeneral& g, const owe::Json& json) {
     if (auto lightconfig = json.get("lightconfig");
-        lightconfig.is_some() && (**lightconfig).is_object()) {
+        lightconfig.is_some() && (*lightconfig)->is_object()) {
         g.lightconfig.FromJson(**lightconfig);
     }
 }
 
 SceneObjectKind object_kind(const owe::Json& obj) {
     if (! obj.is_object()) return SceneObjectKind::Unknown;
-    if (auto value = obj.get("image"); value.is_some() && ! (**value).is_null())
+    if (auto value = obj.get("image"); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Image;
-    if (auto value = obj.get("particle"); value.is_some() && ! (**value).is_null())
+    if (auto value = obj.get("particle"); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Particle;
-    if (auto value = obj.get("sound"); value.is_some() && ! (**value).is_null())
+    if (auto value = obj.get("sound"); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Sound;
-    if (auto value = obj.get("light"); value.is_some() && ! (**value).is_null())
+    if (auto value = obj.get("light"); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Light;
-    if (auto value = obj.get("text"); value.is_some() && ! (**value).is_null())
+    if (auto value = obj.get("text"); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Text;
-    if (auto value = obj.get("model"); value.is_some() && ! (**value).is_null())
+    if (auto value = obj.get("model"); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Model;
-    if (auto value = obj.get("camera"); value.is_some() && ! (**value).is_null())
+    if (auto value = obj.get("camera"); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Camera;
     return SceneObjectKind::Container;
 }
@@ -221,7 +221,7 @@ std::vector<SceneObjectMetadata> parse_objects_metadata(const owe::Json& root) {
     auto                             raw_objects = root.get("objects");
     if (raw_objects.is_none()) return objects;
 
-    auto array = (**raw_objects).as_array();
+    auto array = (*raw_objects)->as_array();
     if (array.is_none()) return objects;
     objects.reserve((*array)->len());
     for (std::size_t i = 0; i < (*array)->len(); ++i) {

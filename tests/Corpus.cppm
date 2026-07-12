@@ -265,11 +265,11 @@ void sort_by_path(Json& value) {
         std::string_view a_view;
         std::string_view b_view;
         if (a_path.is_some()) {
-            auto string = (**a_path).as_str();
+            auto string = (*a_path)->as_str();
             if (string.is_some()) a_view = rstd::cppstd::as_string_view(*string);
         }
         if (b_path.is_some()) {
-            auto string = (**b_path).as_str();
+            auto string = (*b_path)->as_str();
             if (string.is_some()) b_view = rstd::cppstd::as_string_view(*string);
         }
         return a_view.compare(b_view) < 0;
@@ -331,25 +331,25 @@ Json dump_effect_fbo(const owe::wpscene::EffectFbo& f) {
 Json dump_object_common(const Json& obj) {
     auto o  = owe::MakeObject();
     auto id = obj.get("id");
-    SetSnapshot(o, "id", id.is_some() ? static_cast<int>((**id).as_i64().unwrap_or(-1)) : -1);
+    SetSnapshot(o, "id", id.is_some() ? static_cast<int>((*id)->as_i64().unwrap_or(-1)) : -1);
     auto name = obj.get("name");
     SetSnapshot(o,
                 "name",
-                name.is_some() && (**name).as_str().is_some()
-                    ? rstd::cppstd::to_string(*(**name).as_str())
+                name.is_some() && (*name)->as_str().is_some()
+                    ? rstd::cppstd::to_string(*(*name)->as_str())
                     : "");
     // `visible` is sometimes a {script, value} object (scripted property);
     // json::value<bool> would throw type_error on that shape and tear down
     // the entire scene dump. Unwrap when present, default to true.
     bool visible = true;
     if (auto value = obj.get("visible"); value.is_some()) {
-        auto initial = (**value).get("value");
+        auto initial = (*value)->get("value");
         visible =
-            (initial.is_some() ? (**initial).as_bool() : (**value).as_bool()).unwrap_or(visible);
+            (initial.is_some() ? (*initial)->as_bool() : (*value)->as_bool()).unwrap_or(visible);
     }
     SetSnapshot(o, "visible", visible);
     for (const char* key : { "origin", "scale", "angles", "size", "parallaxDepth", "alignment" }) {
-        if (auto value = obj.get(key); value.is_some()) owe::SetJson(o, key, (**value).clone());
+        if (auto value = obj.get(key); value.is_some()) owe::SetJson(o, key, (*value)->clone());
     }
     return o;
 }
@@ -487,11 +487,11 @@ std::vector<Corpus::TexRef> tex_filter(const std::vector<WorkshopEntry>& es, Pre
     for (const auto& e : es) {
         auto textures = e.snapshot.get("textures");
         if (textures.is_none()) continue;
-        auto array = (**textures).as_array();
+        auto array = (*textures)->as_array();
         if (array.is_none()) continue;
         for (const auto& t : **array) {
             auto ok = t.get("ok");
-            if (ok.is_none() || ! (**ok).as_bool().unwrap_or(false)) continue;
+            if (ok.is_none() || ! (*ok)->as_bool().unwrap_or(false)) continue;
             if (pred(t)) out.push_back({ &e, &t });
         }
     }
@@ -504,7 +504,7 @@ std::vector<Corpus::MdlRef> mdl_filter(const std::vector<WorkshopEntry>& es, Pre
     for (const auto& e : es) {
         auto puppets = e.snapshot.get("puppets");
         if (puppets.is_none()) continue;
-        auto array = (**puppets).as_array();
+        auto array = (*puppets)->as_array();
         if (array.is_none()) continue;
         for (const auto& m : **array) {
             if (pred(m)) out.push_back({ &e, &m });
@@ -605,7 +605,7 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                 owe::SetJson(jscene, "general", std::move(jgen));
                 auto jobjects = owe::MakeArray();
                 if (auto objects = j.get("objects"); objects.is_some()) {
-                    auto object_array = (**objects).as_array();
+                    auto object_array = (*objects)->as_array();
                     if (object_array.is_some())
                         for (const auto& obj : **object_array) {
                             if (obj.get("image").is_some())
@@ -630,8 +630,8 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                 std::sort(ordered.begin(), ordered.end(), [](const Json* a, const Json* b) {
                     auto a_id = a->get("id");
                     auto b_id = b->get("id");
-                    return (a_id.is_some() ? (**a_id).as_i64().unwrap_or(-1) : -1) <
-                           (b_id.is_some() ? (**b_id).as_i64().unwrap_or(-1) : -1);
+                    return (a_id.is_some() ? (*a_id)->as_i64().unwrap_or(-1) : -1) <
+                           (b_id.is_some() ? (*b_id)->as_i64().unwrap_or(-1) : -1);
                 });
                 auto sorted_objects = owe::MakeArray();
                 for (const auto* object : ordered) owe::AppendJson(sorted_objects, object->clone());
@@ -929,38 +929,38 @@ void Corpus::build() {
         WorkshopEntry e { std::move(id), d.string(), std::move(snap) };
 
         if (auto pkg = e.snapshot.get("pkg"); pkg.is_some()) {
-            auto version = (**pkg).get("version");
-            if (version.is_some() && (**version).as_str().is_some())
-                pkg_versions_.insert(rstd::cppstd::to_string(*(**version).as_str()));
+            auto version = (*pkg)->get("version");
+            if (version.is_some() && (*version)->as_str().is_some())
+                pkg_versions_.insert(rstd::cppstd::to_string(*(*version)->as_str()));
         }
         if (auto textures = e.snapshot.get("textures"); textures.is_some()) {
-            auto array = (**textures).as_array();
+            auto array = (*textures)->as_array();
             if (array.is_some())
                 for (const auto& t : **array) {
                     auto ok = t.get("ok");
-                    if (ok.is_none() || ! (**ok).as_bool().unwrap_or(false)) continue;
+                    if (ok.is_none() || ! (*ok)->as_bool().unwrap_or(false)) continue;
                     if (auto value = t.get("texv"); value.is_some())
-                        texv_versions_.insert(static_cast<int>((**value).as_i64().unwrap_or(0)));
+                        texv_versions_.insert(static_cast<int>((*value)->as_i64().unwrap_or(0)));
                     if (auto value = t.get("texi"); value.is_some())
-                        texi_versions_.insert(static_cast<int>((**value).as_i64().unwrap_or(0)));
+                        texi_versions_.insert(static_cast<int>((*value)->as_i64().unwrap_or(0)));
                     if (auto value = t.get("texb"); value.is_some())
-                        texb_versions_.insert(static_cast<int>((**value).as_i64().unwrap_or(0)));
+                        texb_versions_.insert(static_cast<int>((*value)->as_i64().unwrap_or(0)));
                     if (auto value = t.get("texs"); value.is_some())
-                        texs_versions_.insert(static_cast<int>((**value).as_i64().unwrap_or(0)));
+                        texs_versions_.insert(static_cast<int>((*value)->as_i64().unwrap_or(0)));
                     if (auto value = t.get("format"); value.is_some())
-                        tex_formats_.insert(static_cast<int>((**value).as_i64().unwrap_or(-1)));
+                        tex_formats_.insert(static_cast<int>((*value)->as_i64().unwrap_or(-1)));
                 }
         }
         if (auto puppets = e.snapshot.get("puppets"); puppets.is_some()) {
-            auto array = (**puppets).as_array();
+            auto array = (*puppets)->as_array();
             if (array.is_some())
                 for (const auto& m : **array) {
                     if (auto value = m.get("mdlv"); value.is_some())
-                        mdlv_versions_.insert(static_cast<int>((**value).as_i64().unwrap_or(0)));
+                        mdlv_versions_.insert(static_cast<int>((*value)->as_i64().unwrap_or(0)));
                     if (auto value = m.get("mdls"); value.is_some())
-                        mdls_versions_.insert(static_cast<int>((**value).as_i64().unwrap_or(0)));
+                        mdls_versions_.insert(static_cast<int>((*value)->as_i64().unwrap_or(0)));
                     if (auto value = m.get("mdla"); value.is_some())
-                        mdla_versions_.insert(static_cast<int>((**value).as_i64().unwrap_or(0)));
+                        mdla_versions_.insert(static_cast<int>((*value)->as_i64().unwrap_or(0)));
                 }
         }
         entries_.push_back(std::move(e));
@@ -986,7 +986,7 @@ std::vector<Corpus::PkgRef> Corpus::workshops_with_pkg(const std::string& v) con
     for (const auto& e : entries_) {
         const auto version = e.snapshot.pointer("/pkg/version");
         if (version.is_some()) {
-            auto value = (**version).as_str();
+            auto value = (*version)->as_str();
             if (value.is_some() && rstd::cppstd::as_string_view(*value) == v) out.push_back({ &e });
         }
     }
@@ -996,49 +996,49 @@ std::vector<Corpus::PkgRef> Corpus::workshops_with_pkg(const std::string& v) con
 std::vector<Corpus::TexRef> Corpus::textures_with_texv(int v) const {
     return tex_filter(entries_, [v](const Json& t) {
         auto value = t.get("texv");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 std::vector<Corpus::TexRef> Corpus::textures_with_texi(int v) const {
     return tex_filter(entries_, [v](const Json& t) {
         auto value = t.get("texi");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 std::vector<Corpus::TexRef> Corpus::textures_with_texb(int v) const {
     return tex_filter(entries_, [v](const Json& t) {
         auto value = t.get("texb");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 std::vector<Corpus::TexRef> Corpus::textures_with_texs(int v) const {
     return tex_filter(entries_, [v](const Json& t) {
         auto value = t.get("texs");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 std::vector<Corpus::TexRef> Corpus::textures_with_format(int v) const {
     return tex_filter(entries_, [v](const Json& t) {
         auto value = t.get("format");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 std::vector<Corpus::MdlRef> Corpus::mdls_with_mdlv(int v) const {
     return mdl_filter(entries_, [v](const Json& m) {
         auto value = m.get("mdlv");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 std::vector<Corpus::MdlRef> Corpus::mdls_with_mdls(int v) const {
     return mdl_filter(entries_, [v](const Json& m) {
         auto value = m.get("mdls");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 std::vector<Corpus::MdlRef> Corpus::mdls_with_mdla(int v) const {
     return mdl_filter(entries_, [v](const Json& m) {
         auto value = m.get("mdla");
-        return value.is_some() && (**value).as_i64().unwrap_or(-1) == v;
+        return value.is_some() && (*value)->as_i64().unwrap_or(-1) == v;
     });
 }
 

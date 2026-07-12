@@ -41,7 +41,7 @@ public:
     bool                      nointerpolation { false };
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    owe::Json            instance;
+    owe::Json                 instance;
     FieldBindings             field_bindings;
 
     // Light-kind specifics.
