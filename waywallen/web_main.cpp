@@ -12,6 +12,7 @@
 
 import rstd.cppstd;
 import rstd.log;
+import owe.user_property;
 import wescene.json;
 import vulkan;
 import weweb;
@@ -35,6 +36,7 @@ struct Options {
     bool                  enable_audio { true };
     bool                  shared_texture_enabled { true };
     std::string           render_node;
+    rstd::json::Map       initial_user_properties;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -155,6 +157,7 @@ struct HostState {
     ww_pool_t*                      pool { nullptr };
     ww_wescene::BridgeProducerCore* core { nullptr };
     weweb::BrowserHost*             host { nullptr };
+    owe::Json*                      user_properties { nullptr };
 
     std::mutex                settings_mu;
     std::vector<SettingDelta> pending_settings;
@@ -198,6 +201,21 @@ void apply_effective_volume(HostState& s) {
     if (s.host) s.host->ApplyVolume(effective_volume(s));
 }
 
+void merge_user_property_overrides(owe::Json& properties, const rstd::json::Map& overrides) {
+    if (! properties.is_object()) properties = owe::Json::Object(rstd::json::Map::make());
+    overrides.iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        auto key                      = rstd::cppstd::as_string_view(entry_key->as_str());
+        auto current                  = properties.get(key);
+        auto descriptor =
+            current.is_some()
+                ? owe::MergeUserPropertyDescriptor(**current, *entry_value)
+                : owe::MergeUserPropertyDescriptor(owe::JsonFromStd(""), *entry_value);
+        auto object = properties.as_object_mut();
+        (*object)->insert(entry_key->clone(), std::move(descriptor));
+    });
+}
+
 void drain_settings(HostState& s) {
     std::vector<SettingDelta> drained;
     {
@@ -220,16 +238,19 @@ void drain_settings(HostState& s) {
                 s.host->SetFrameRate(static_cast<int>(fps));
             }
         } else {
-            // Forward unknown keys to the page as a user-property patch.
-            // Try parse as JSON first (so numbers / booleans / objects
-            // round-trip); fall back to string.
-            auto parsed =
-                rstd::json::from_str(rstd::cppstd::as_str(sd.value), { .allow_comments = true });
-            auto object = rstd::json::Map::make();
-            object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")),
-                          parsed.is_ok() ? parsed.unwrap() : owe::JsonFromStd(sd.value));
-            auto v = owe::Json::Object(rstd::move(object));
-            s.host->ApplyUserProperty(sd.key, v);
+            auto patch      = owe::MakeUserPropertyWirePatch(sd.value);
+            auto descriptor = patch.clone();
+            if (s.user_properties) {
+                auto current = s.user_properties->get(sd.key);
+                if (current.is_some())
+                    descriptor = owe::MergeUserPropertyDescriptor(**current, patch);
+                auto object = s.user_properties->as_object_mut();
+                if (object.is_some()) {
+                    (*object)->insert(::alloc::string::String::make(rstd::cppstd::as_str(sd.key)),
+                                      descriptor.clone());
+                }
+            }
+            s.host->ApplyUserProperty(sd.key, descriptor);
         }
     }
 }
@@ -470,12 +491,32 @@ int main(int argc, char** argv) {
         state.audio_enabled = opts.enable_audio;
         state.base_volume   = opts.initial_volume;
 
+        if (init.user_properties && *init.user_properties) {
+            auto parsed = owe::ParseJson(init.user_properties, { .allow_comments = true });
+            if (parsed.is_err()) {
+                rstd_warn("init.user_properties is invalid JSON; ignored: {}", parsed.unwrap_err());
+            } else {
+                auto value  = parsed.unwrap();
+                auto object = value.as_object();
+                if (object.is_some()) {
+                    (*object)->iter().for_each([&](auto entry) {
+                        auto [key, value] = entry;
+                        opts.initial_user_properties.insert(key->clone(), value->clone());
+                    });
+                } else {
+                    rstd_warn("init.user_properties is not a JSON object; ignored");
+                }
+            }
+        }
+
         ww_bridge_init_free(&init);
     }
 
     auto manifest_opt = weweb::LoadWebManifest(opts.workshop_dir);
     if (! manifest_opt) die("LoadWebManifest failed");
     auto& manifest = *manifest_opt;
+    merge_user_property_overrides(manifest.user_props, opts.initial_user_properties);
+    state.user_properties = &manifest.user_props;
 
     ww_wescene::WebProducerDevice producer;
     if (! opts.render_node.empty()) {

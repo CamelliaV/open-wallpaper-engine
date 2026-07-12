@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 import rstd.cppstd;
+import wescene.fs;
 import wescene.json;
 import wescene.pkg.scene_obj;
 import wescene.testing.scene_parse_probe;
@@ -46,6 +47,16 @@ TEST(SceneObjectClone, MembersProvideCloneTraitImplementation) {
     auto trait_material  = rstd::as<rstd::clone::Clone>(material).clone();
     EXPECT_EQ(direct_material.shader, "generic");
     EXPECT_EQ(trait_material.shader, "generic");
+}
+
+TEST(TextObjectJson, ReadsDirectUserValueBinding) {
+    auto parsed = owe::ParseJson(R"({"text":{"user":"title","value":"default"}})");
+    ASSERT_TRUE(parsed.is_ok());
+
+    owe::fs::VFS             vfs;
+    owe::wpscene::TextObject text;
+    ASSERT_TRUE(text.FromJson(parsed.unwrap(), vfs));
+    EXPECT_EQ(text.text_user.name, "title");
 }
 
 namespace

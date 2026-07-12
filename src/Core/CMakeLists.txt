@@ -6,13 +6,14 @@
 # header in the GMF.
 # ---------------------------------------------------------------------------
 add_library(owe-core STATIC)
-target_sources(owe-core PRIVATE Json.cpp)
+target_sources(owe-core PRIVATE Json.cpp UserProperty.cpp)
 target_sources(owe-core
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          Core.cppm
          eigen.cppm
          Fs.cppm
-         Json.cppm)
+         Json.cppm
+         UserProperty.cppm)
 target_link_libraries(owe-core
   PUBLIC rstd::rstd rstd.cppstd rstd.log Eigen3::Eigen)
 target_compile_features(owe-core PUBLIC cxx_std_20)

@@ -3437,6 +3437,15 @@ bool EnsureTextAtlas(Scene& scene, text::FontFace& face) {
     return true;
 }
 
+auto UserPropertyValue(rstd::Option<rstd::ref<rstd::json::Map>> user_props, std::string_view key)
+    -> rstd::Option<rstd::ref<Json>> {
+    if (key.empty()) return rstd::None();
+    auto        props   = rstd_try(user_props);
+    auto        value   = rstd_try(props->get(rstd::cppstd::as_str(key)));
+    const auto& payload = SceneUserPropertyPayload(*value);
+    return rstd::Some(rstd::ref<Json>::from_raw_parts(rstd::addressof(payload)));
+}
+
 void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     if (! obj.visible && obj.visible_user.empty()) return;
     if (! obj.visible) {
@@ -3445,7 +3454,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     }
     MarkHiddenLinkSource(context, obj.id);
 
-    // --- determine initial text + whether a script binding will rewrite it
+    // --- determine initial text + whether a runtime binding will rewrite it
     auto text_binding_it      = obj.field_bindings.scripts.find("text");
     bool has_text_script      = (text_binding_it != obj.field_bindings.scripts.end());
     auto pointsize_binding_it = obj.field_bindings.scripts.find("pointsize");
@@ -3465,8 +3474,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             }
         }
     }
+    const bool has_text_user = ! obj.text_user.empty();
     bool wants_dynamic_text = has_text_script || has_indirect_text_script || has_pointsize_script ||
-                              context.scene_layer_text_writes;
+                              has_text_user || context.scene_layer_text_writes;
     bool has_text_effect    = false;
     for (const auto& effect : obj.effects) {
         if (effect.visible || ! effect.visible_user.empty()) {
@@ -3485,6 +3495,13 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         if (value.is_some()) {
             auto string = (**value).as_str();
             if (string.is_some()) s_text = rstd::cppstd::to_string(*string);
+        }
+    }
+    if (has_text_user) {
+        auto value = UserPropertyValue(context.user_properties, obj.text_user.name);
+        if (value.is_some()) {
+            auto text = SceneJsonScalarString(**value);
+            if (text.is_some()) s_text = std::move(*text);
         }
     }
     if (s_text.empty() && ! wants_dynamic_text) return;
@@ -3571,7 +3588,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     }
 
     // --- mesh capacity. Static text exactly fits its initial layout;
-    //     dynamic (script-bound) text reserves headroom so SetText can grow
+    //     dynamic text reserves headroom so SetText can grow
     //     the string at runtime without reallocating GPU buffers.
     std::size_t initial_codepoints = text::DecodeUtf8(s_text).size();
     bool        has_bg             = obj.opaquebackground;
@@ -4192,6 +4209,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         layouter->SetText(s);
         rebuild_compose(layouter->Metrics());
     };
+    if (has_text_user) context.scene->RegisterUserTextBinding(obj.text_user.name, set_text);
     if (has_text_script) {
         const auto& sb = text_binding_it->second;
         if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
@@ -4273,15 +4291,6 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
               static_cast<int>(text_h),
               std::string_view(scripted_tag),
               resolved.source);
-}
-
-auto UserPropertyValue(rstd::Option<rstd::ref<rstd::json::Map>> user_props, std::string_view key)
-    -> rstd::Option<rstd::ref<Json>> {
-    if (key.empty()) return rstd::None();
-    auto        props   = rstd_try(user_props);
-    auto        value   = rstd_try(props->get(rstd::cppstd::as_str(key)));
-    const auto& payload = SceneUserPropertyPayload(*value);
-    return rstd::Some(rstd::ref<Json>::from_raw_parts(rstd::addressof(payload)));
 }
 
 bool ResolveVisibleUserBinding(bool& visible, const wpscene::VisibleUserBinding& binding,

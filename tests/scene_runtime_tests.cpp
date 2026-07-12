@@ -3,9 +3,40 @@
 import rstd.cppstd;
 import rstd;
 import eigen;
+import wescene.json;
 import wescene.scene;
 import wescene.scene_uniform_updater;
 import wescene.spec_names;
+
+TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {
+    owe::Scene  scene;
+    std::string first;
+    std::string second;
+    scene.RegisterUserTextBinding("title", [&](std::string_view value) {
+        first = value;
+    });
+    scene.RegisterUserTextBinding("title", [&](std::string_view value) {
+        second = value;
+    });
+
+    auto property = owe::ParseJson(R"({"type":"textinput","value":"updated"})").unwrap();
+    EXPECT_TRUE(scene.ApplyUserTextBindings("title", property));
+    EXPECT_EQ(first, "updated");
+    EXPECT_EQ(second, "updated");
+    EXPECT_FALSE(scene.ApplyUserTextBindings("other", property));
+}
+
+TEST(SceneUserTextBinding, AppliesEmptyString) {
+    owe::Scene  scene;
+    std::string value = "default";
+    scene.RegisterUserTextBinding("title", [&](std::string_view next) {
+        value = next;
+    });
+
+    auto property = owe::ParseJson(R"({"type":"textinput","value":""})").unwrap();
+    EXPECT_TRUE(scene.ApplyUserTextBindings("title", property));
+    EXPECT_TRUE(value.empty());
+}
 
 TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlpha) {
     owe::Scene        scene;

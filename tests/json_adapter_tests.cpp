@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 import rstd.cppstd;
+import owe.user_property;
 import wescene.json;
 import wescene.testing.json_builder;
 
@@ -45,6 +46,42 @@ TEST(JsonAdapter, ClonesSubtreesExplicitly) {
     (*object)->insert(::alloc::string::String::make("value"), rstd::into<owe::Json>(2));
     EXPECT_EQ(owe::Dump(original), R"({"nested":{"value":1}})");
     EXPECT_EQ(owe::Dump(clone), R"({"nested":{"value":2}})");
+}
+
+TEST(UserProperty, TextInputWireValuesStayStrings) {
+    auto schema =
+        owe::ParseJson(R"({"type":"textinput","text":"Text","order":7,"value":"default"})")
+            .unwrap();
+
+    for (const auto& raw :
+         { std::string("12"), std::string("true"), std::string("提醒喝水"), std::string() }) {
+        auto patch  = owe::MakeUserPropertyWirePatch(raw);
+        auto merged = owe::MergeUserPropertyDescriptor(schema, patch);
+        auto value  = merged.get("value");
+        ASSERT_TRUE(value.is_some());
+        ASSERT_TRUE((**value).is_string());
+        EXPECT_EQ(rstd::cppstd::as_string_view(*(**value).as_str()), raw);
+        EXPECT_TRUE(merged.get("text").is_some());
+        EXPECT_TRUE(merged.get("order").is_some());
+    }
+}
+
+TEST(UserProperty, NonTextWireValuesKeepExistingJsonCoercion) {
+    auto schema = owe::ParseJson(R"({"type":"slider","value":0})").unwrap();
+    auto patch  = owe::MakeUserPropertyWirePatch("1.5");
+    auto merged = owe::MergeUserPropertyDescriptor(schema, patch);
+    auto value  = merged.get("value");
+    ASSERT_TRUE(value.is_some());
+    EXPECT_DOUBLE_EQ((**value).as_f64().unwrap_or(0.0), 1.5);
+}
+
+TEST(UserProperty, UnknownTypeDefersWireValueCoercion) {
+    auto patch  = owe::MakeUserPropertyWirePatch("12");
+    auto merged = owe::MergeUserPropertyDescriptor(owe::JsonFromStd(""), patch);
+    auto value  = merged.get("value");
+    ASSERT_TRUE(value.is_some());
+    ASSERT_TRUE((**value).is_string());
+    EXPECT_EQ(rstd::cppstd::as_string_view(*(**value).as_str()), "12");
 }
 
 TEST(JsonAdapter, NativeProjectionsPreserveOptions) {

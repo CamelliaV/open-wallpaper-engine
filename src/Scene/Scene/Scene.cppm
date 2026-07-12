@@ -2377,6 +2377,19 @@ public:
     Map<std::string, std::vector<ImagePropertyBinding>> image_color_user_index;
     Map<std::string, std::vector<ImagePropertyBinding>> image_alpha_user_index;
 
+    void RegisterUserTextBinding(std::string key, std::function<void(std::string_view)> setter) {
+        m_text_user_index[std::move(key)].push_back(std::move(setter));
+    }
+    bool ApplyUserTextBindings(std::string_view key, const Json& property) {
+        auto it = m_text_user_index.find(key);
+        if (it == m_text_user_index.end()) return false;
+
+        auto value = SceneJsonScalarString(SceneUserPropertyPayload(property));
+        if (value.is_none()) return false;
+        for (const auto& setter : it->second) setter(*value);
+        return true;
+    }
+
     struct MaterialTextureUserBinding {
         SceneMaterial* material { nullptr };
         uint32_t       slot { 0 };
@@ -2399,11 +2412,9 @@ public:
         return dirty;
     }
     bool ApplyUserNodeVisibilityBindings(std::string_view key, const Json& property);
-    bool ApplyUserImageEffectVisibilityBindings(std::string_view      key,
-                                                const Json& property);
+    bool ApplyUserImageEffectVisibilityBindings(std::string_view key, const Json& property);
     bool ApplyUserLightVisibilityBindings(std::string_view key, const Json& property);
-    bool ApplyUserCameraPathVisibilityBindings(std::string_view      key,
-                                               const Json& property);
+    bool ApplyUserCameraPathVisibilityBindings(std::string_view key, const Json& property);
 
     // Scene-tree root. After parse handoff to the render thread, the tree
     // shape under `sceneGraph` is immutable until Scene destruction (see the
@@ -2511,6 +2522,8 @@ public:
     uint32_t                  ResourceGeneration() const { return m_resource_generation; }
 
 private:
+    Map<std::string, std::vector<std::function<void(std::string_view)>>> m_text_user_index;
+
     void RebuildElidableLayerIds();
 
     uint32_t                                 m_resource_generation { 0 };

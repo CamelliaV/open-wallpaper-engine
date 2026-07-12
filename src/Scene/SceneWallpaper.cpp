@@ -9,6 +9,7 @@ import wescene.scene;
 import wescene.spec_names;
 
 import eigen;
+import owe.user_property;
 import rstd.log;
 import rstd.cppstd;
 import wavsen.audio;
@@ -141,17 +142,7 @@ Json MakeUserPropertyDescriptor(Json value) {
     return Json::Object(rstd::move(object));
 }
 
-Json ParseSettingJsonValue(std::string_view raw) {
-    auto parsed = rstd::json::from_str(rstd::cppstd::as_str(raw), { .allow_comments = true });
-    if (parsed.is_ok()) return parsed.unwrap();
-    return JsonFromStd(raw);
-}
-
-Json RawUserProperty(std::string_view value) {
-    return MakeUserPropertyDescriptor(ParseSettingJsonValue(value));
-}
-
-Json JsonUserProperty(Json value) { return MakeUserPropertyDescriptor(std::move(value)); }
+Json RawUserProperty(std::string_view value) { return MakeUserPropertyWirePatch(value); }
 
 Json InitialUserProperty(Json value) {
     if (value.is_string()) {
@@ -747,9 +738,10 @@ void MergeProjectUserProperties(const std::filesystem::path& project_dir, rstd::
         const auto  raw_key           = rstd::cppstd::as_string_view(entry_key->as_str());
         const auto& value             = *entry_value;
         std::string key               = CanonicalUserPropertyKey(raw_key);
-        if (out.get(rstd::cppstd::as_str(key)).is_some()) return;
-        out.insert(::alloc::string::String::make(rstd::cppstd::as_str(key)),
-                   MakeUserPropertyDescriptor(value.clone()));
+        auto        current           = out.get(rstd::cppstd::as_str(key));
+        auto        descriptor = current.is_some() ? MergeUserPropertyDescriptor(value, **current)
+                                                   : MakeUserPropertyDescriptor(value.clone());
+        out.insert(::alloc::string::String::make(rstd::cppstd::as_str(key)), std::move(descriptor));
     });
 }
 
@@ -1128,6 +1120,7 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
     bool shader_combo_requires_graph = ApplyUserPropertyToShaderCombos(*m_scene, key, m.property);
     ApplyUserPropertyToImageColor(*m_scene, key, m.property);
     ApplyUserPropertyToImageAlpha(*m_scene, key, m.property);
+    m_scene->ApplyUserTextBindings(key, m.property);
     ApplyUserPropertyToParticles(*m_scene, key, m.property);
     ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
     ApplyUserPropertyToCameraParallax(*m_scene, key, m.property);
@@ -1291,8 +1284,10 @@ void SceneRuntimeController::on(MainSetSpeed&& m) {
 }
 
 void SceneRuntimeController::on(MainSetUserProperty&& m) {
-    Json              prop     = MakeUserPropertyDescriptor(std::move(m.value));
     const std::string property = CanonicalUserPropertyKey(m.key);
+    auto              current  = m_user_properties.get(rstd::cppstd::as_str(property));
+    Json              prop     = current.is_some() ? MergeUserPropertyDescriptor(**current, m.value)
+                                                   : MakeUserPropertyDescriptor(std::move(m.value));
     m_config.user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property)),
                                     prop.clone());
     m_user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property)),

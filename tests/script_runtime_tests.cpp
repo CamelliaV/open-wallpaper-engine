@@ -1349,6 +1349,27 @@ TEST(ScriptUserProperty, ApplyUserPropertiesReceivesUnwrappedValue) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptUserProperty, TextInputValueRemainsAString) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = MakeProbe(rt,
+                         "test/apply_text_user_property",
+                         R"JS(
+        let seen = 0;
+        export function applyUserProperties(changed) {
+            if (changed.text === "true" && typeof changed.text === "string") seen = 1;
+        }
+        export function update() { return seen; }
+    )JS");
+    ASSERT_NE(fs, nullptr);
+
+    rt.SetUserProperty("text",
+                       rstd::json::from_str(R"({"type":"textinput","value":"true"})").unwrap());
+    rt.TickAll();
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
 TEST(ScriptMedia, DispatchesPropertiesPlaybackAndThumbnailEvents) {
     JsRuntime   rt;
     FrameInputs fi {};

@@ -42,14 +42,15 @@ struct TextObject {
     FieldBindings             field_bindings;
 
     // Text-specific.
-    owe::Json     text; // string | {script: ...} | {value: ...}
-    owe::Json     font; // string | {value: ...}
-    float         pointsize { 12.0f };
-    std::uint32_t padding { 0 };
-    std::string   horizontalalign;
-    std::string   verticalalign;
-    std::string   anchor;
-    std::string   alignment { "center" };
+    owe::Json        text; // string | {script: ...} | {user: ..., value: ...}
+    UserValueBinding text_user;
+    owe::Json        font; // string | {value: ...}
+    float            pointsize { 12.0f };
+    std::uint32_t    padding { 0 };
+    std::string      horizontalalign;
+    std::string      verticalalign;
+    std::string      anchor;
+    std::string      alignment { "center" };
 
     // Text-flow controls (PKGV0018+).
     std::uint32_t maxrows { 0 };
@@ -97,6 +98,7 @@ struct TextObject {
         if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
 
         if (auto value = json.get("text"); value.is_some()) text = (**value).clone();
+        ReadUserValueBinding(json, "text", text_user);
         if (auto value = json.get("font"); value.is_some()) font = (**value).clone();
 
         owe::GetJsonValue(json, "pointsize", pointsize, false);
