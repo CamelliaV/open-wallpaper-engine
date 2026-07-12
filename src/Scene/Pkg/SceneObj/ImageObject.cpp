@@ -98,26 +98,6 @@ bool EffectFbo::FromJson(const owe::Json& json) {
     return true;
 }
 
-// Define and initialize the static property
-const std::unordered_set<std::string> ImageEffect::BLACKLISTED_WORKSHOP_EFFECTS = {
-    "2799421411" // Audio Responsive Oscilloscope   --  causes vulcan deadlock
-};
-
-bool ImageEffect::IsEffectBlacklisted(const std::string& filePath) {
-    std::filesystem::path path(filePath);
-    // Check if the path has a parent path
-    if (path.has_parent_path()) {
-        path = path.parent_path();
-        if (path.has_parent_path()) {
-            std::string effectId   = path.parent_path().filename().string();
-            std::string parentPath = path.parent_path().string();
-            return ImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.find(effectId) !=
-                   ImageEffect::BLACKLISTED_WORKSHOP_EFFECTS.end();
-        }
-    }
-    return false;
-}
-
 bool ImageEffect::FromJson(const owe::Json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
@@ -129,10 +109,6 @@ bool ImageEffect::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     visible_user_key = visible_user.name;
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "username", username, false);
-    if (this->IsEffectBlacklisted(filePath)) {
-        // hide blacklisted effects
-        visible = false;
-    }
     owe::GetJsonValue(json, "id", id, false);
     auto parsed_effect = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + filePath));
     if (parsed_effect.is_err()) {

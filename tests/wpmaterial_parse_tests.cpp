@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+import rstd.cppstd;
 import wescene.json;
 import wescene.pkg.parse;
 

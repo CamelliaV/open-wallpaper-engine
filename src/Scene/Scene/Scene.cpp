@@ -1,8 +1,3 @@
-module;
-
-#include <atomic>
-#include <cmath>
-
 module wescene.scene;
 import eigen;
 import rstd;

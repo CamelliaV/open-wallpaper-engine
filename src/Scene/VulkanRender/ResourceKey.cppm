@@ -1,9 +1,5 @@
 module;
 
-#include <bit>
-#include <array>
-#include <cstddef>
-#include <cstdint>
 #include <vulkan/vulkan_core.h>
 
 export module wescene.vulkan_render:resource_key;

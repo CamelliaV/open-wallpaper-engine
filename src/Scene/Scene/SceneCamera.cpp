@@ -1,7 +1,5 @@
 module;
 
-#include <cmath>
-
 #include <rstd/macro.hpp>
 module wescene.scene;
 import eigen;

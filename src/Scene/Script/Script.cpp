@@ -2,8 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 #include <rstd/enum.hpp>
-#include <algorithm>
-#include <cmath>
 #include "quickjs.h"
 
 module wescene.script;

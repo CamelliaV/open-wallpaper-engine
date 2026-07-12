@@ -1,8 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <iterator>
-#include <limits>
 
 module wescene.scene_wallpaper;
 import wescene.types;

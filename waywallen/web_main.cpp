@@ -1,7 +1,5 @@
 #include <rstd/macro.hpp>
 
-#include <algorithm>
-
 #include <argparse/argparse.hpp>
 
 #include <errno.h>

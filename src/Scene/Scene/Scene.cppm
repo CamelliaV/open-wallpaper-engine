@@ -1,9 +1,3 @@
-module;
-
-#include <atomic>
-#include <climits>
-#include <initializer_list>
-
 export module wescene.scene;
 import eigen;
 import rstd;

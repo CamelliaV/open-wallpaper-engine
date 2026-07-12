@@ -1,8 +1,3 @@
-module;
-
-#include <cstdint>
-#include <vector>
-
 export module wescene.pkg.scene_obj:field_binding;
 import rstd.cppstd;
 import wescene.json;

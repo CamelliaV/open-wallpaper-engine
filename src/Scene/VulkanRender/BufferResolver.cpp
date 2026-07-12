@@ -1,7 +1,3 @@
-module;
-
-#include <atomic>
-
 module wescene.vulkan_render;
 import wescene.core;
 import rstd.cppstd;

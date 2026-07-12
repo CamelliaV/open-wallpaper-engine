@@ -140,7 +140,7 @@ VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
 std::optional<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::PhysicalDevice gpu,
                                                 VkMemoryRequirements  reqs,
                                                 VkMemoryPropertyFlags property,
-                                                void*                 pNext = NULL) {
+                                                void*                 pNext = nullptr) {
     VkPhysicalDeviceMemoryProperties pros = gpu.GetMemoryProperties().memoryProperties;
     for (uint32_t i = 0; i < pros.memoryTypeCount; ++i) {
         if ((reqs.memoryTypeBits & (1 << i)) && (pros.memoryTypes[i].propertyFlags & property)) {
@@ -197,12 +197,12 @@ std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, 
 
         VkExternalMemoryImageCreateInfo ex_info {
             .sType       = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-            .pNext       = NULL,
+            .pNext       = nullptr,
             .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
         };
         VkExportMemoryAllocateInfo ex_mem_info {
             .sType       = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO,
-            .pNext       = NULL,
+            .pNext       = nullptr,
             .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
         };
         VkImageCreateInfo info {

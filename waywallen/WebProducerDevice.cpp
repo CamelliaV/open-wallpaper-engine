@@ -2,7 +2,6 @@ module;
 
 #include <cerrno>
 #include <cstdio>
-#include <cstring>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>

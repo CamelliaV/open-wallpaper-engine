@@ -1,16 +1,5 @@
 module;
 
-#include <algorithm>
-#include <array>
-#include <cstdint>
-#include <exception>
-#include <source_location>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include <type_traits>
-#include <vector>
-
 #include <rstd/macro.hpp>
 
 module wescene.json;

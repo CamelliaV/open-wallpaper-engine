@@ -6,9 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
-#include <fstream>
-
+import rstd.cppstd;
 import wescene.fs;
 import wescene.pkg.parse;
 import wescene.scene;

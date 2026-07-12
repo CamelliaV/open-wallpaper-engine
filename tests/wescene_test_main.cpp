@@ -13,8 +13,6 @@
 
 #include <argparse/argparse.hpp>
 
-#include <regex>
-
 import wescene.pkg.parse;
 import wescene.json;
 import wescene.fs;

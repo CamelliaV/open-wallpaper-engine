@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+import rstd.cppstd;
 import wescene.json;
 import wescene.pkg.scene_obj;
 import wescene.testing.scene_parse_probe;

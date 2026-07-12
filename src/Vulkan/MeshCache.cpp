@@ -4,6 +4,7 @@ module;
 
 module wescene.vulkan;
 
+import rstd.cppstd;
 import rstd.log;
 
 namespace owe::vulkan

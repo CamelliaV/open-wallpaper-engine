@@ -253,7 +253,7 @@ inline std::shared_ptr<TBinaryStream> t_CreateCBinaryStream(std::string_view pat
         return nullptr;
     }
     auto* file = std::fopen(std::string(path).c_str(), mode);
-    if (file == NULL) {
+    if (file == nullptr) {
         rstd_error("can't open: {}", path);
         return nullptr;
     }

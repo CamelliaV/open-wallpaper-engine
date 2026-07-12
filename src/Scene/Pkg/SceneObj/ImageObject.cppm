@@ -53,10 +53,6 @@ public:
 };
 
 class ImageEffect {
-private:
-    static const std::unordered_set<std::string> BLACKLISTED_WORKSHOP_EFFECTS;
-    bool                                         IsEffectBlacklisted(const std::string& filePath);
-
 public:
     bool                       FromJson(const owe::Json&, fs::VFS& vfs);               // legacy
     bool                       FromJson(const owe::Json&, fs::VFS& vfs, SceneVersion); // canonical

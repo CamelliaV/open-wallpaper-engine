@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include <cstdio>
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
@@ -98,7 +97,7 @@ bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
 
     for (const auto& d : deviceList) {
         VkPhysicalDeviceIDProperties device_id_props {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, .pNext = NULL
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, .pNext = nullptr
         };
         VkPhysicalDeviceProperties2 props2 { .sType =
                                                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,

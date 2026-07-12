@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
         }
 
         sf_info.createSurfaceOp = [window](VkInstance inst, VkSurfaceKHR* surface) {
-            return glfwCreateWindowSurface(inst, window, NULL, surface);
+            return glfwCreateWindowSurface(inst, window, nullptr, surface);
         };
     }
 
