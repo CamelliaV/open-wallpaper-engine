@@ -1,3 +1,19 @@
+<release version="0.1.12" date="2026-07-12">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Text user properties for scene and web wallpapers.</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>Dynamic and composited text sizing, clipping, glyph blending and effect rendering. #51</li>
+      <li>Image-effect source alignment and spin-effect final composition.</li>
+      <li>Hidden layer link composites and solid layer color blending.</li>
+      <li>Legacy foliage sway rendering.</li>
+      <li>Wallpaper Engine project discovery for non-standard package names. #48</li>
+    </ul>
+  </description>
+</release>
 <release version="0.1.11" date="2026-07-08">
   <description>
     <p>Fixes:</p>
