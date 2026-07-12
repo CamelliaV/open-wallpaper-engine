@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-import nlohmann.json;
+import wescene.json;
 import wescene.pkg.parse;
 
 TEST(MaterialParser, ParsesLegacyUserShaderValues) {
-    const auto j = nlohmann::json::parse(R"({
+    auto j = rstd::json::from_str(R"({
         "passes": [
             {
                 "shader": "flag",
@@ -16,7 +16,7 @@ TEST(MaterialParser, ParsesLegacyUserShaderValues) {
                 }
             }
         ]
-    })");
+    })").unwrap();
 
     owe::wpscene::Material material;
     ASSERT_TRUE(material.FromJson(j));

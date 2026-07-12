@@ -9,7 +9,7 @@ target_sources(owe-web-api
         Manifest.cppm
         BrowserHost.cppm)
 target_include_directories(owe-web-api PUBLIC .)
-target_link_libraries(owe-web-api PUBLIC nlohmann_json rstd.cppstd)
+target_link_libraries(owe-web-api PUBLIC owe-core rstd.cppstd)
 target_compile_features(owe-web-api PUBLIC cxx_std_20)
 set_target_properties(owe-web-api PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -34,8 +34,7 @@ target_link_libraries(owe-web-host
     PUBLIC
         owe-web-api
         libcef_lib
-        libcef_dll_wrapper
-        nlohmann_json)
+        libcef_dll_wrapper)
 target_compile_features(owe-web-host PUBLIC cxx_std_20)
 weweb_apply_cef_module_target_settings(owe-web-host)
 set_target_properties(owe-web-host PROPERTIES

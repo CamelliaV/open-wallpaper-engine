@@ -1,7 +1,6 @@
 module;
 
 export module wescene.pkg.parse:wp_shader_parser;
-import nlohmann.json;
 import wescene.core;
 import wescene.types;
 import rstd.cppstd;
@@ -29,7 +28,7 @@ using WPDefaultTexs = std::vector<std::pair<i32, std::string>>;
 struct UserVarRecord {
     std::string    material;      // project.json key (== shader annotation's material)
     std::string    name;          // GLSL identifier (e.g. "u_Brightness")
-    nlohmann::json default_value; // raw default from annotation; may be null
+    Json default_value; // raw default from annotation; may be null
 };
 
 struct WPShaderInfo {
@@ -137,8 +136,8 @@ public:
     // (color-blend mode, sprite-sheet flags, puppet bone count beyond
     // default, etc.) are NOT injected. Materials that hard-require them
     // will fail compile here; supply the right values via combos_override.
-    static CompileMaterialShaderResult CompileMaterialShader(const nlohmann::json& material_json,
-                                                             fs::VFS&              vfs,
+    static CompileMaterialShaderResult CompileMaterialShader(const Json& material_json,
+                                                             fs::VFS&    vfs,
                                                              std::string_view scene_id = "test",
                                                              const Combos&    combos_override = {});
 

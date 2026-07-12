@@ -1,6 +1,7 @@
 module;
 
-#include <nlohmann/json.hpp>
+#include <iterator>
+#include <cstdio>
 
 module weweb;
 
@@ -33,42 +34,54 @@ std::optional<WebManifest> LoadWebManifest(const std::filesystem::path& workshop
 
     // Invalid project.json is input data; keep parse failure on the
     // diagnostic return path.
-    auto j = nlohmann::json::parse(is,
-                                   /*callback=*/nullptr,
-                                   /*allow_exceptions=*/false,
-                                   /*ignore_comments=*/true);
-    if (j.is_discarded()) {
-        std::fprintf(stderr, "weweb: invalid JSON in %s\n", pj_path.c_str());
+    std::string source(std::istreambuf_iterator<char>(is), {});
+    auto        parsed = owe::ParseJson(source, { .allow_comments = true });
+    if (parsed.is_err()) {
+        auto error = parsed.unwrap_err();
+        std::fprintf(stderr,
+                     "weweb: invalid JSON in %s at line %zu column %zu\n",
+                     pj_path.c_str(),
+                     error.line(),
+                     error.column());
         return std::nullopt;
     }
+    auto root = parsed.unwrap();
 
-    auto type_it = j.find("type");
-    if (type_it == j.end() || ! type_it->is_string()) {
+    auto type = root.get("type");
+    if (type.is_none() || (**type).as_str().is_none()) {
         std::fprintf(stderr, "weweb: %s is missing a string \"type\" field\n", pj_path.c_str());
         return std::nullopt;
     }
     // WE corpus has both "web" and "Web" for the type field; fold case.
-    std::string type = LowerAscii(type_it->get<std::string>());
-    if (type != "web") {
-        std::fprintf(
-            stderr, "weweb: %s has type=\"%s\", expected \"web\"\n", pj_path.c_str(), type.c_str());
+    auto normalized_type = LowerAscii(rstd::cppstd::to_string(*(**type).as_str()));
+    if (normalized_type != "web") {
+        std::fprintf(stderr,
+                     "weweb: %s has type=\"%s\", expected \"web\"\n",
+                     pj_path.c_str(),
+                     normalized_type.c_str());
         return std::nullopt;
     }
 
     WebManifest m;
-    m.entry_html = j.value("file", std::string { "index.html" });
-    m.title      = j.value("title", std::string { "Wallpaper" });
-
-    if (auto pv = j.find("preview"); pv != j.end() && pv->is_string()) {
-        m.preview = pv->get<std::string>();
+    m.entry_html = "index.html";
+    if (auto file = root.get("file"); file.is_some()) {
+        auto string = (**file).as_str();
+        if (string.is_some()) m.entry_html = rstd::cppstd::to_string(*string);
+    }
+    m.title = "Wallpaper";
+    if (auto title = root.get("title"); title.is_some()) {
+        auto string = (**title).as_str();
+        if (string.is_some()) m.title = rstd::cppstd::to_string(*string);
     }
 
-    if (auto gen = j.find("general"); gen != j.end() && gen->is_object()) {
-        auto props = gen->find("properties");
-        if (props != gen->end() && props->is_object()) {
-            m.user_props = *props;
-        }
+    if (auto preview = root.get("preview"); preview.is_some()) {
+        auto string = (**preview).as_str();
+        if (string.is_some()) m.preview = rstd::cppstd::to_string(*string);
     }
+
+    if (auto general = root.get("general"); general.is_some())
+        if (auto properties = (**general).get("properties"); properties.is_some())
+            m.user_props = (**properties).clone();
 
     return m;
 }

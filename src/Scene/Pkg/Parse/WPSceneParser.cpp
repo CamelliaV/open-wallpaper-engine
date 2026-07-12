@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 #include <rstd/macro.hpp>
@@ -11,7 +12,6 @@ module;
 
 module wescene.pkg.parse;
 import eigen;
-import nlohmann.json;
 import wescene.spec_names;
 import wescene.core;
 import wescene.types;
@@ -187,11 +187,16 @@ std::optional<std::array<float, 2>> ResolveImageAssetSize(ParseContext&    conte
 }
 
 bool AppendLayerCompositePassthroughEffect(fs::VFS& vfs, wpscene::ImageObject& image) {
-    nlohmann::json    json;
     wpscene::Material material;
-    if (! owe::ParseJson(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
-                         json) ||
-        ! material.FromJson(json)) {
+    auto              parsed =
+        owe::ParseJson(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"));
+    if (parsed.is_err()) {
+        rstd_error(
+            "parse effectpassthrough.json failed for '{}': {}", image.name, parsed.unwrap_err());
+        return false;
+    }
+    auto json = parsed.unwrap();
+    if (! material.FromJson(json)) {
         rstd_error("parse effectpassthrough.json failed for '{}'", image.name);
         return false;
     }
@@ -233,31 +238,42 @@ SceneNode* RootOf(SceneNode* node) {
     return node;
 }
 
-void CollectLinkedSourceIdsFromJsonValue(const nlohmann::json& value, Set<std::int32_t>& out) {
+void CollectLinkedSourceIdsFromJsonValue(const Json& value, Set<std::int32_t>& out) {
     if (value.is_string()) {
-        const auto s = value.get<std::string>();
+        auto s = rstd::cppstd::to_string(*value.as_str());
         if (auto id = ParseImageLayerCompositeId(s)) out.insert(static_cast<std::int32_t>(*id));
         if (IsSpecLinkTex(s)) out.insert(static_cast<std::int32_t>(ParseLinkTex(s)));
         return;
     }
     if (value.is_array()) {
-        for (const auto& el : value) CollectLinkedSourceIdsFromJsonValue(el, out);
+        const auto values = value.as_array();
+        for (const auto& el : **values) CollectLinkedSourceIdsFromJsonValue(el, out);
         return;
     }
     if (! value.is_object()) return;
-    for (const auto& el : value.items()) {
-        if (el.key() == "dependencies" && el.value().is_array()) {
-            for (const auto& dep : el.value()) {
-                if (dep.is_number_integer()) out.insert(dep.get<std::int32_t>());
+    auto object = value.as_object();
+    (*object)->iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        const auto  key               = rstd::cppstd::as_string_view(entry_key->as_str());
+        const auto& child             = *entry_value;
+        if (key == "dependencies") {
+            if (auto values = child.as_array(); values.is_some()) {
+                for (const auto& dep : **values) {
+                    auto id = dep.as_i64();
+                    if (id.is_some() && *id >= std::numeric_limits<std::int32_t>::min() &&
+                        *id <= std::numeric_limits<std::int32_t>::max())
+                        out.insert(static_cast<std::int32_t>(*id));
+                }
             }
         }
-        CollectLinkedSourceIdsFromJsonValue(el.value(), out);
-    }
+        CollectLinkedSourceIdsFromJsonValue(child, out);
+    });
 }
 
-Set<std::int32_t> CollectLinkedSourceIdsFromJson(const nlohmann::json& json) {
+Set<std::int32_t> CollectLinkedSourceIdsFromJson(const Json& json) {
     Set<std::int32_t> out;
-    if (json.contains("objects")) CollectLinkedSourceIdsFromJsonValue(json.at("objects"), out);
+    if (auto objects = json.get("objects"); objects.is_some())
+        CollectLinkedSourceIdsFromJsonValue(**objects, out);
     return out;
 }
 
@@ -270,7 +286,7 @@ SceneUserVisibilityBinding
 ToSceneUserVisibilityBinding(const wpscene::VisibleUserBinding& binding) {
     SceneUserVisibilityBinding out;
     out.key           = binding.name;
-    out.condition     = binding.condition;
+    out.condition     = binding.condition.clone();
     out.has_condition = binding.has_condition;
     return out;
 }
@@ -360,11 +376,12 @@ script::ScriptScene& EnsureScriptScene(ParseContext& context) {
                 auto t                = (world * *bone).translation();
                 return script::BoneTranslation { t.x(), t.y(), t.z() };
             });
-        if (context.user_properties != nullptr) {
-            for (const auto& [key, prop] : *context.user_properties) {
-                context.script_scene->runtime().SetUserProperty(key, prop);
-            }
-        }
+        if (context.user_properties.is_some())
+            (**context.user_properties).iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                auto key                      = rstd::cppstd::as_string_view(entry_key->as_str());
+                context.script_scene->runtime().SetUserProperty(key, *entry_value);
+            });
     }
     return *context.script_scene;
 }
@@ -393,45 +410,66 @@ std::optional<Vector3f> ScriptValueAsVec3(const script::ScriptValue& value,
     return next;
 }
 
-bool IsFractionSliderProperty(const ParseContext& context, const nlohmann::json& binding) {
-    if (! context.user_properties || ! binding.is_object() || ! binding.contains("user") ||
-        ! binding.at("user").is_string())
+bool IsFractionSliderProperty(const ParseContext& context, const Json& binding) {
+    if (context.user_properties.is_none() || ! binding.is_object()) return false;
+    auto user = binding.get("user");
+    if (user.is_none()) return false;
+    auto key = (**user).as_str();
+    if (key.is_none()) return false;
+    auto prop = (**context.user_properties).get(*key);
+    if (prop.is_none() || ! (**prop).is_object()) return false;
+    auto type = (**prop).get("type");
+    if (type.is_none()) return false;
+    auto type_string = (**type).as_str();
+    if (type_string.is_none() || rstd::cppstd::as_string_view(*type_string) != "slider")
         return false;
-    const auto key = binding.at("user").get<std::string>();
-    auto       it  = context.user_properties->find(key);
-    if (it == context.user_properties->end() || ! it->second.is_object()) return false;
-    const auto& prop = it->second;
-    return prop.value("type", std::string {}) == "slider" && prop.value("fraction", false);
+    auto fraction = (**prop).get("fraction");
+    return fraction.is_some() && (**fraction).as_bool().unwrap_or(false);
 }
 
-nlohmann::json ScriptPropertiesForField(const ParseContext& context, std::string_view field,
-                                        const wpscene::ScriptBinding& binding) {
-    nlohmann::json props = binding.properties;
+Json ScriptPropertiesForField(const ParseContext& context, std::string_view field,
+                              const wpscene::ScriptBinding& binding) {
+    Json props = binding.properties.clone();
     if (field != "scale" || binding.source.find("/10000") == std::string::npos ||
         ! props.is_object())
         return props;
 
-    for (auto& item : props.items()) {
-        if (IsFractionSliderProperty(context, item.value())) {
-            item.value()["__scriptValueScale"] = 50.0;
+    auto object = props.as_object_mut();
+    (*object)->iter_mut().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        auto& item                    = *entry_value;
+        if (IsFractionSliderProperty(context, item)) {
+            auto item_object = item.as_object_mut();
+            (*item_object)
+                ->insert(::alloc::string::String::make(rstd::cppstd::as_str("__scriptValueScale")),
+                         rstd::into<Json>(50.0));
         }
-    }
+    });
     return props;
 }
 
-nlohmann::json ScriptInitialValueForField(std::string_view field, const nlohmann::json& value) {
-    if (field != "angles") return value;
+Json ScriptInitialValueForField(std::string_view field, const Json& value) {
+    if (field != "angles") return value.clone();
 
     constexpr float kRadToDeg = 180.0f / rstd::f32_::consts::PI;
-    if (value.is_null()) return value;
-    if (value.is_number()) return value.get<float>() * kRadToDeg;
+    if (value.is_null()) return Json::Null();
+    if (value.is_number()) {
+        auto number = value.as_f64();
+        return number.is_some() && *number >= std::numeric_limits<float>::lowest() &&
+                       *number <= std::numeric_limits<float>::max()
+                   ? rstd::into<Json>(static_cast<float>(*number) * kRadToDeg)
+                   : Json::Null();
+    }
 
     if (value.is_object()) {
-        auto out = value;
+        auto out = value.clone();
         for (auto* axis : { "x", "y", "z" }) {
-            if (out.contains(axis) && out.at(axis).is_number()) {
-                out[axis] = out.at(axis).get<float>() * kRadToDeg;
-            }
+            auto member = out.get_mut(axis);
+            if (member.is_none()) continue;
+            auto number = (**member).as_f64();
+            if (number.is_some() && *number >= std::numeric_limits<float>::lowest() &&
+                *number <= std::numeric_limits<float>::max())
+                **member = rstd::into<Json>(static_cast<float>(*number) * kRadToDeg);
         }
         return out;
     }
@@ -439,10 +477,12 @@ nlohmann::json ScriptInitialValueForField(std::string_view field, const nlohmann
     std::vector<float> values;
     if (owe::GetJsonValue(value, values) && ! values.empty()) {
         for (auto& axis : values) axis *= kRadToDeg;
-        return values;
+        auto out = rstd::json::Array::make();
+        for (float axis : values) out.push(rstd::into<Json>(axis));
+        return Json::Array(rstd::move(out));
     }
 
-    return value;
+    return value.clone();
 }
 
 std::array<i32, 2> TextLayerExtent(const text::TextGeometry& geometry) {
@@ -612,7 +652,7 @@ void AssignNodeFieldAnimations(SceneNode& node, const wpscene::FieldBindings& bi
     if (it != bindings.animations.end()) node.SetAlphaAnimation(ToSceneAnimationCurve(it->second));
 }
 
-std::optional<SceneCameraLookAtKey> ParseLookAtKey(const nlohmann::json& json) {
+std::optional<SceneCameraLookAtKey> ParseLookAtKey(const Json& json) {
     if (! json.is_object()) return std::nullopt;
     SceneCameraLookAtKey key;
     std::array<float, 3> eye {};
@@ -628,13 +668,15 @@ std::optional<SceneCameraLookAtKey> ParseLookAtKey(const nlohmann::json& json) {
     return key;
 }
 
-std::optional<SceneCameraLookAtTrack> ParseLookAtTrack(const nlohmann::json& json) {
-    if (! json.is_object() || ! json.contains("transforms") || ! json.at("transforms").is_array())
-        return std::nullopt;
+std::optional<SceneCameraLookAtTrack> ParseLookAtTrack(const Json& json) {
+    auto transforms = json.get("transforms");
+    if (transforms.is_none()) return std::nullopt;
+    auto transform_array = (**transforms).as_array();
+    if (transform_array.is_none()) return std::nullopt;
 
     SceneCameraLookAtTrack track;
     owe::GetJsonValue(json, "duration", track.duration, false);
-    for (const auto& raw_key : json.at("transforms")) {
+    for (const auto& raw_key : **transform_array) {
         auto key = ParseLookAtKey(raw_key);
         if (key) track.keys.push_back(*key);
     }
@@ -674,10 +716,17 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::SceneMetadata& sc
     for (const auto& rel : sc.camera.paths) {
         auto file = context.vfs->Open("/assets/" + rel);
         if (! file) continue;
-        auto json = nlohmann::json::parse(file->ReadAllStr(), nullptr, false);
-        if (json.is_discarded() || ! json.contains("paths") || ! json.at("paths").is_array())
+        auto parsed = ParseJson(file->ReadAllStr());
+        if (parsed.is_err()) {
+            rstd_warn("Can't parse camera path json {}: {}", rel, parsed.unwrap_err());
             continue;
-        for (const auto& raw_track : json.at("paths")) {
+        }
+        auto json   = parsed.unwrap();
+        auto tracks = json.get("paths");
+        if (tracks.is_none()) continue;
+        auto track_array = (**tracks).as_array();
+        if (track_array.is_none()) continue;
+        for (const auto& raw_track : **track_array) {
             auto track = ParseLookAtTrack(raw_track);
             if (track) path->lookat_tracks.push_back(std::move(*track));
         }
@@ -1456,7 +1505,8 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     // along by the move into the shared_ptr.
     for (const auto& var : pWPShaderInfo->scalar_uniforms) {
         if (! var.is_user || var.material.empty()) continue;
-        pWPShaderInfo->user_var_staging.push_back({ var.material, var.name, var.default_value });
+        pWPShaderInfo->user_var_staging.push_back(
+            { var.material, var.name, var.default_value.clone() });
         if (! var.default_value.is_null()) {
             ShaderValue sv;
             const auto& v = var.default_value;
@@ -1612,31 +1662,34 @@ void RegisterShaderUserVarIndex(Scene* pScene, SceneMaterial* stable_mat,
     }
 }
 
-std::optional<std::string> UserTexturePropertyKey(const nlohmann::json& binding) {
+std::optional<std::string> UserTexturePropertyKey(const Json& binding) {
     if (binding.is_string()) {
-        auto key = binding.get<std::string>();
+        auto key = rstd::cppstd::to_string(*binding.as_str());
         if (key.empty()) return std::nullopt;
         return key;
     }
     if (! binding.is_object()) return std::nullopt;
-    auto type = binding.find("type");
-    auto name = binding.find("name");
-    if (type == binding.end() || name == binding.end()) return std::nullopt;
-    if (! type->is_string() || ! name->is_string()) return std::nullopt;
-    if (type->get<std::string>() != "system") return std::nullopt;
-    auto value = name->get<std::string>();
-    if (value != "$mediaThumbnail" && value != "$mediaPreviousThumbnail") return std::nullopt;
-    return value;
+    auto type  = binding.get("type");
+    auto value = binding.get("name");
+    if (type.is_none() || value.is_none()) return std::nullopt;
+    auto type_string  = (**type).as_str();
+    auto value_string = (**value).as_str();
+    if (type_string.is_none() || value_string.is_none() ||
+        rstd::cppstd::as_string_view(*type_string) != "system")
+        return std::nullopt;
+    auto name = rstd::cppstd::as_string_view(*value_string);
+    if (name != "$mediaThumbnail" && name != "$mediaPreviousThumbnail") return std::nullopt;
+    return std::string(name);
 }
 
-bool IsSystemMediaTextureBinding(const nlohmann::json& binding) {
+bool IsSystemMediaTextureBinding(const Json& binding) {
     return UserTexturePropertyKey(binding).has_value() && binding.is_object();
 }
 
 void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
                                       const wpscene::Material& fallback_material) {
     if (! pScene || ! stable_mat) return;
-    for (usize i = 0; i < fallback_material.usertextures.size(); ++i) {
+    for (usize i = 0; i < fallback_material.usertextures.len(); ++i) {
         auto key = UserTexturePropertyKey(fallback_material.usertextures[i]);
         if (! key.has_value()) continue;
         std::string fallback;
@@ -1686,38 +1739,40 @@ void ApplyTextureBinds(wpscene::Material&                                  wpmat
 }
 
 std::string ResolveSceneTextureProperty(const ParseContext& context, std::string_view key) {
-    if (! context.user_properties) return {};
-    auto it = context.user_properties->find(std::string(key));
-    if (it == context.user_properties->end()) return {};
-
-    const auto& prop = it->second;
-    if (prop.is_string()) {
-        auto value = prop.get<std::string>();
-        return value.empty() ? std::string {} : value;
+    if (context.user_properties.is_none()) return {};
+    auto prop = (**context.user_properties).get(rstd::cppstd::as_str(key));
+    if (prop.is_none()) return {};
+    const auto& payload = **prop;
+    if (payload.is_string()) {
+        auto text = rstd::cppstd::to_string(*payload.as_str());
+        return text.empty() ? std::string {} : text;
     }
-    if (! prop.is_object()) return {};
+    if (! payload.is_object()) return {};
 
     std::string type;
-    if (prop.contains("type") && prop.at("type").is_string())
-        type = prop.at("type").get<std::string>();
+    if (auto value = payload.get("type"); value.is_some()) {
+        auto string = (**value).as_str();
+        if (string.is_some()) type = rstd::cppstd::to_string(*string);
+    }
     if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
         return {};
-    if (! prop.contains("value") || ! prop.at("value").is_string()) return {};
-
-    const auto value = prop.at("value").get<std::string>();
-    return value.empty() ? std::string {} : value;
+    auto value = payload.get("value");
+    if (value.is_none()) return {};
+    auto string = (**value).as_str();
+    return string.is_none() ? std::string {} : rstd::cppstd::to_string(*string);
 }
 
-std::string ResolveUserTextureProperty(const ParseContext& context, const nlohmann::json& binding) {
+std::string ResolveUserTextureProperty(const ParseContext& context, const Json& binding) {
     if (! binding.is_string()) return {};
-    return ResolveSceneTextureProperty(context, binding.get<std::string>());
+    auto key = rstd::cppstd::to_string(*binding.as_str());
+    return ResolveSceneTextureProperty(context, key);
 }
 
 std::string ResolveMaterialTextureSlot(const ParseContext&      context,
                                        const wpscene::Material& material, usize slot) {
     std::string fallback;
     if (slot < material.textures.size()) fallback = material.textures[slot];
-    if (slot >= material.usertextures.size()) return fallback;
+    if (slot >= material.usertextures.len()) return fallback;
 
     if (auto prop = ResolveUserTextureProperty(context, material.usertextures[slot]);
         ! prop.empty())
@@ -1748,7 +1803,7 @@ std::string ResolveSystemMediaFallback(const ParseContext&      context,
 }
 
 void ApplyUserTextureBindings(ParseContext& context, wpscene::Material& material) {
-    for (usize i = 0; i < material.usertextures.size(); ++i) {
+    for (usize i = 0; i < material.usertextures.len(); ++i) {
         const auto& binding = material.usertextures[i];
         if (binding.is_null()) continue;
 
@@ -1818,7 +1873,7 @@ void LoadConstvalue(
 
 // parse
 
-void ParseCamera(ParseContext& context, wpscene::SceneMetadata& sc) {
+void ParseCamera(ParseContext& context, const wpscene::SceneMetadata& sc) {
     auto& scene   = *context.scene;
     auto& general = sc.general;
     // effect camera
@@ -1955,7 +2010,8 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
     context.node_id_map[cam.id] = { cam.parent, rstd::Some(node.clone()) };
 }
 
-void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc) {
+void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetadata& sc,
+                 std::array<i32, 2> ortho_extent) {
     context.scene            = std::make_shared<Scene>();
     context.vfs              = &vfs;
     auto& scene              = *context.scene;
@@ -1970,8 +2026,8 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::SceneMetadata& sc
         it != sc.general.user_bindings.end()) {
         scene.clearColorUserKey = it->second;
     }
-    scene.ortho[0]  = sc.general.orthogonalprojection.width;
-    scene.ortho[1]  = sc.general.orthogonalprojection.height;
+    scene.ortho[0]  = ortho_extent[0];
+    scene.ortho[1]  = ortho_extent[1];
     context.ortho_w = scene.ortho[0];
     context.ortho_h = scene.ortho[1];
 
@@ -2076,15 +2132,18 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     if (append_color_blend_final_effect) {
         wpscene::ImageEffect colorEffect;
         wpscene::Material    colorMat;
-        nlohmann::json       json;
-        if (! owe::ParseJson(
-                fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"), json))
+        auto                 parsed = owe::ParseJson(
+            fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"));
+        if (parsed.is_err()) {
+            rstd_error("parse effectpassthrough.json failed: {}", parsed.unwrap_err());
             return;
+        }
+        auto json = parsed.unwrap();
         colorMat.FromJson(json);
         colorMat.combos[std::string(WE_CB_BONECOUNT)] = 1;
         ApplyImageColorBlend(colorMat, wpimgobj);
-        colorEffect.materials.push_back(colorMat);
-        wpimgobj.effects.push_back(colorEffect);
+        colorEffect.materials.push_back(std::move(colorMat));
+        wpimgobj.effects.push_back(std::move(colorEffect));
     }
     const bool is_hidden_link_source =
         context.hidden_link_source_ids.count(static_cast<std::int32_t>(wpimgobj.id)) != 0;
@@ -2168,8 +2227,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     ShaderValueMap    baseConstSvs = context.global_base_uniforms;
     WPShaderInfo      shaderInfo;
-    wpscene::Material image_wpmat                 = wpimgobj.material;
-    wpscene::Material image_user_texture_fallback = image_wpmat;
+    wpscene::Material image_wpmat                 = wpimgobj.material.clone();
+    wpscene::Material image_user_texture_fallback = image_wpmat.clone();
     if (color_blend_uses_layer_material && ! hasEffect) ApplyImageColorBlend(image_wpmat, wpimgobj);
     ApplyUserTextureBindings(context, image_wpmat);
     {
@@ -2303,13 +2362,12 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
             if (has_bones) {
                 wpscene::ImageEffect puppet_effect;
-                wpscene::Material    puppet_mat;
-                puppet_mat             = image_wpmat;
-                puppet_mat.textures[0] = "";
+                wpscene::Material    puppet_mat = image_wpmat.clone();
+                puppet_mat.textures[0]          = "";
                 WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
                 if (color_blend_uses_layer_material) ApplyImageColorBlend(puppet_mat, wpimgobj);
-                puppet_effect.materials.push_back(puppet_mat);
-                wpimgobj.effects.push_back(puppet_effect);
+                puppet_effect.materials.push_back(std::move(puppet_mat));
+                wpimgobj.effects.push_back(std::move(puppet_effect));
             }
         } else {
             for (const auto& m : puppet->meshes) {
@@ -2414,7 +2472,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 pre_sm.output_override = std::string(PUPPET_MASK_RT);
 
                 // (2) clipped-main submesh: main material + CLIPPINGTARGET
-                wpscene::Material clip_wpmat        = image_wpmat;
+                wpscene::Material clip_wpmat        = image_wpmat.clone();
                 clip_wpmat.combos["CLIPPINGTARGET"] = 1;
                 clip_wpmat.combos["CLIPPINGUVS"]    = 1;
                 if (clip_wpmat.textures.size() < 9) clip_wpmat.textures.resize(9);
@@ -2630,14 +2688,14 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             bool eff_mat_ok { true };
 
             for (usize i_mat = 0; i_mat < wpeffobj.materials.size(); i_mat++) {
-                wpscene::Material                wpmat = wpeffobj.materials.at(i_mat);
+                wpscene::Material                wpmat = wpeffobj.materials.at(i_mat).clone();
                 std::string                      matOutRT { OWE_EFFECT_PPONG_PREFIX_B };
                 std::optional<wpscene::Material> user_texture_fallback;
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
                     wpmat.MergePass(wppass);
                     ApplyTextureBinds(wpmat, std::span(wppass.bind), fboMap);
-                    user_texture_fallback = wpmat;
+                    user_texture_fallback = wpmat.clone();
                     ApplyUserTextureBindings(context, wpmat);
                     if (! wppass.target.empty()) {
                         if (fboMap.count(wppass.target) == 0) {
@@ -2739,7 +2797,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             spMesh->AddMaterial(std::move(mask_material));
                             track_image_property_material(spMesh->MaterialSlots().back().get());
 
-                            wpscene::Material clip_wpmat        = wpmat;
+                            wpscene::Material clip_wpmat        = wpmat.clone();
                             clip_wpmat.combos["CLIPPINGTARGET"] = 1;
                             clip_wpmat.combos["CLIPPINGUVS"]    = 1;
                             if (clip_wpmat.textures.size() < 9) clip_wpmat.textures.resize(9);
@@ -2794,53 +2852,58 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
         if (! wpimgobj.fullscreen && ! passthrough_can_composite_final &&
             ! last_effect_can_composite_final) {
-            nlohmann::json    json;
             wpscene::Material passthrough_mat;
-            if (! owe::ParseJson(
-                    fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"),
-                    json) ||
-                ! passthrough_mat.FromJson(json)) {
-                rstd_error("parse effectpassthrough.json failed for '{}'", wpimgobj.name);
+            auto              parsed = owe::ParseJson(
+                fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"));
+            if (parsed.is_err()) {
+                rstd_error("parse effectpassthrough.json failed for '{}': {}",
+                           wpimgobj.name,
+                           parsed.unwrap_err());
             } else {
-                if (passthrough_mat.textures.empty())
-                    passthrough_mat.textures.push_back(effect_ppong_a);
-                else
-                    passthrough_mat.textures[0] = effect_ppong_a;
-
-                auto finalEffect = std::make_shared<SceneImageEffect>();
-                auto spFinalNode = rstd::sync::Arc<SceneNode>::make();
-
-                WPShaderInfo wpFinalShaderInfo;
-                wpFinalShaderInfo.baseConstSvs = baseConstSvs;
-                SceneMaterial        finalMaterial;
-                SceneUniformNodeData finalSvData;
-                finalSvData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
-                finalSvData.propagatedParallaxDepth        = { wpimgobj.parallaxDepth[0],
-                                                               wpimgobj.parallaxDepth[1] };
-                finalSvData.parallaxDepth                  = { wpimgobj.parallaxDepth[0],
-                                                               wpimgobj.parallaxDepth[1] };
-                if (LoadMaterial(vfs,
-                                 passthrough_mat,
-                                 context.scene.get(),
-                                 spFinalNode.as_ptr(),
-                                 &finalMaterial,
-                                 &finalSvData,
-                                 &wpFinalShaderInfo)) {
-                    LoadConstvalue(finalMaterial, passthrough_mat, wpFinalShaderInfo);
-                    auto spFinalMesh = std::make_shared<SceneMesh>();
-                    spFinalMesh->AddMaterial(std::move(finalMaterial));
-                    track_image_property_material(spFinalMesh->MaterialSlots().back().get());
-                    RegisterShaderUserVarIndex(context.scene.get(),
-                                               spFinalMesh->Material(),
-                                               passthrough_mat,
-                                               wpFinalShaderInfo);
-                    spFinalNode->AddMesh(spFinalMesh);
-                    context.shader_updater->SetNodeData(spFinalNode.as_ptr(), finalSvData);
-                    finalEffect->nodes.push_back(
-                        SceneImageEffectNode { effect_ppong_b, spFinalNode.clone() });
-                    imgEffectLayer->AddEffect(finalEffect);
+                auto json = parsed.unwrap();
+                if (! passthrough_mat.FromJson(json)) {
+                    rstd_error("parse effectpassthrough.json failed for '{}'", wpimgobj.name);
                 } else {
-                    rstd_error("effect passthrough failed to load for '{}'", wpimgobj.name);
+                    if (passthrough_mat.textures.empty())
+                        passthrough_mat.textures.push_back(effect_ppong_a);
+                    else
+                        passthrough_mat.textures[0] = effect_ppong_a;
+
+                    auto finalEffect = std::make_shared<SceneImageEffect>();
+                    auto spFinalNode = rstd::sync::Arc<SceneNode>::make();
+
+                    WPShaderInfo wpFinalShaderInfo;
+                    wpFinalShaderInfo.baseConstSvs = baseConstSvs;
+                    SceneMaterial        finalMaterial;
+                    SceneUniformNodeData finalSvData;
+                    finalSvData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
+                    finalSvData.propagatedParallaxDepth        = { wpimgobj.parallaxDepth[0],
+                                                                   wpimgobj.parallaxDepth[1] };
+                    finalSvData.parallaxDepth                  = { wpimgobj.parallaxDepth[0],
+                                                                   wpimgobj.parallaxDepth[1] };
+                    if (LoadMaterial(vfs,
+                                     passthrough_mat,
+                                     context.scene.get(),
+                                     spFinalNode.as_ptr(),
+                                     &finalMaterial,
+                                     &finalSvData,
+                                     &wpFinalShaderInfo)) {
+                        LoadConstvalue(finalMaterial, passthrough_mat, wpFinalShaderInfo);
+                        auto spFinalMesh = std::make_shared<SceneMesh>();
+                        spFinalMesh->AddMaterial(std::move(finalMaterial));
+                        track_image_property_material(spFinalMesh->MaterialSlots().back().get());
+                        RegisterShaderUserVarIndex(context.scene.get(),
+                                                   spFinalMesh->Material(),
+                                                   passthrough_mat,
+                                                   wpFinalShaderInfo);
+                        spFinalNode->AddMesh(spFinalMesh);
+                        context.shader_updater->SetNodeData(spFinalNode.as_ptr(), finalSvData);
+                        finalEffect->nodes.push_back(
+                            SceneImageEffectNode { effect_ppong_b, spFinalNode.clone() });
+                        imgEffectLayer->AddEffect(finalEffect);
+                    } else {
+                        rstd_error("effect passthrough failed to load for '{}'", wpimgobj.name);
+                    }
                 }
             }
         }
@@ -3420,12 +3483,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
     std::string s_text;
     if (obj.text.is_string()) {
-        s_text = obj.text.get<std::string>();
+        s_text = rstd::cppstd::to_string(*obj.text.as_str());
     } else if (obj.text.is_object()) {
-        if (obj.text.contains("value") && obj.text.at("value").is_string())
-            s_text = obj.text.at("value").get<std::string>();
-        else if (obj.text.contains("text") && obj.text.at("text").is_string())
-            s_text = obj.text.at("text").get<std::string>();
+        auto value = obj.text.get("value");
+        if (value.is_none()) value = obj.text.get("text");
+        if (value.is_some()) {
+            auto string = (**value).as_str();
+            if (string.is_some()) s_text = rstd::cppstd::to_string(*string);
+        }
     }
     if (s_text.empty() && ! wants_dynamic_text) return;
 
@@ -3433,10 +3498,12 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     //     then host system font dirs.
     std::string font_name;
     if (obj.font.is_string()) {
-        font_name = obj.font.get<std::string>();
+        font_name = rstd::cppstd::to_string(*obj.font.as_str());
     } else if (obj.font.is_object()) {
-        if (obj.font.contains("value") && obj.font.at("value").is_string())
-            font_name = obj.font.at("value").get<std::string>();
+        if (auto value = obj.font.get("value"); value.is_some()) {
+            auto string = (**value).as_str();
+            if (string.is_some()) font_name = rstd::cppstd::to_string(*string);
+        }
     }
 
     text::FontCache::ResolvedBlob resolved;
@@ -3760,13 +3827,15 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         };
         auto load_passthrough_material =
             [&](SceneNode* owner, std::string_view input) -> std::optional<LoadedTextMaterial> {
-            nlohmann::json pt_json;
-            if (! owe::ParseJson(fs::GetFileContent(
-                                     *context.vfs, "/assets/materials/util/effectpassthrough.json"),
-                                 pt_json)) {
-                rstd_error("text '{}': parse effectpassthrough.json failed", obj.name);
+            auto parsed = owe::ParseJson(
+                fs::GetFileContent(*context.vfs, "/assets/materials/util/effectpassthrough.json"));
+            if (parsed.is_err()) {
+                rstd_error("text '{}': parse effectpassthrough.json failed: {}",
+                           obj.name,
+                           parsed.unwrap_err());
                 return std::nullopt;
             }
+            auto              pt_json = parsed.unwrap();
             wpscene::Material pt_mat;
             if (! pt_mat.FromJson(pt_json)) {
                 rstd_error("text '{}': Material::FromJson failed", obj.name);
@@ -3856,14 +3925,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
                 bool effect_ok = true;
                 for (usize i_mat = 0; i_mat < wpeffobj.materials.size(); ++i_mat) {
-                    wpscene::Material                wpmat = wpeffobj.materials.at(i_mat);
+                    wpscene::Material                wpmat = wpeffobj.materials.at(i_mat).clone();
                     std::string                      matOutRT { OWE_EFFECT_PPONG_PREFIX_B };
                     std::optional<wpscene::Material> user_texture_fallback;
                     if (wpeffobj.passes.size() > i_mat) {
                         const auto& pass = wpeffobj.passes.at(i_mat);
                         wpmat.MergePass(pass);
                         ApplyTextureBinds(wpmat, std::span(pass.bind), fboMap);
-                        user_texture_fallback = wpmat;
+                        user_texture_fallback = wpmat.clone();
                         ApplyUserTextureBindings(context, wpmat);
                         if (! pass.target.empty()) {
                             if (fboMap.count(pass.target) == 0)
@@ -4211,22 +4280,22 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
               resolved.source);
 }
 
-const nlohmann::json*
-UserPropertyValue(const std::unordered_map<std::string, nlohmann::json>* user_props,
-                  std::string_view                                       key) {
-    if (user_props == nullptr || key.empty()) return nullptr;
-    auto it = user_props->find(std::string(key));
-    if (it == user_props->end()) return nullptr;
-    return &SceneUserPropertyPayload(it->second);
+auto UserPropertyValue(rstd::Option<rstd::ref<rstd::json::Map>> user_props, std::string_view key)
+    -> rstd::Option<rstd::ref<Json>> {
+    if (key.empty()) return rstd::None();
+    auto        props   = rstd_try(user_props);
+    auto        value   = rstd_try(props->get(rstd::cppstd::as_str(key)));
+    const auto& payload = SceneUserPropertyPayload(*value);
+    return rstd::Some(rstd::ref<Json>::from_raw_parts(rstd::addressof(payload)));
 }
 
 bool ResolveVisibleUserBinding(bool& visible, const wpscene::VisibleUserBinding& binding,
-                               const std::unordered_map<std::string, nlohmann::json>* user_props) {
+                               rstd::Option<rstd::ref<rstd::json::Map>> user_props) {
     if (binding.empty()) return false;
-    const nlohmann::json* value = UserPropertyValue(user_props, binding.name);
-    if (value != nullptr) {
+    auto value = UserPropertyValue(user_props, binding.name);
+    if (value.is_some()) {
         if (auto resolved =
-                ResolveSceneUserVisibilityBinding(ToSceneUserVisibilityBinding(binding), *value))
+                ResolveSceneUserVisibilityBinding(ToSceneUserVisibilityBinding(binding), **value))
             visible = *resolved;
     }
     return true;
@@ -4238,9 +4307,8 @@ struct ObjectVisibilityInfo {
     bool          user_bound { false };
 };
 
-ObjectVisibilityInfo
-ResolveObjectVisibility(const nlohmann::json&                                  json_obj,
-                        const std::unordered_map<std::string, nlohmann::json>* user_props) {
+ObjectVisibilityInfo ResolveObjectVisibility(const Json&                              json_obj,
+                                             rstd::Option<rstd::ref<rstd::json::Map>> user_props) {
     ObjectVisibilityInfo info;
     owe::GetJsonValue(json_obj, "parent", info.parent, false);
     wpscene::VisibleUserBinding binding;
@@ -4251,14 +4319,17 @@ ResolveObjectVisibility(const nlohmann::json&                                  j
 }
 
 std::unordered_map<std::int32_t, ObjectVisibilityInfo>
-BuildObjectVisibilityInfo(const nlohmann::json&                                  json,
-                          const std::unordered_map<std::string, nlohmann::json>* user_props) {
+BuildObjectVisibilityInfo(const Json& json, rstd::Option<rstd::ref<rstd::json::Map>> user_props) {
     std::unordered_map<std::int32_t, ObjectVisibilityInfo> out;
-    if (! json.contains("objects") || ! json.at("objects").is_array()) return out;
-    for (const auto& obj : json.at("objects")) {
-        if (! obj.is_object() || ! obj.contains("id") || ! obj.at("id").is_number_integer())
-            continue;
-        out[obj.at("id").get<std::int32_t>()] = ResolveObjectVisibility(obj, user_props);
+    auto                                                   objects = json.get("objects");
+    if (objects.is_none()) return out;
+    auto array = (**objects).as_array();
+    if (array.is_none()) return out;
+    for (const auto& obj : **array) {
+        if (! obj.is_object()) continue;
+        std::int32_t id {};
+        if (! owe::GetJsonValue(obj, "id", id, false)) continue;
+        out[id] = ResolveObjectVisibility(obj, user_props);
     }
     return out;
 }
@@ -4279,8 +4350,8 @@ bool HasHiddenUserAncestor(std::uint32_t                                        
 }
 
 Set<std::int32_t>
-CollectHiddenLinkedSourceIds(const nlohmann::json& json, const Set<std::int32_t>& linked_source_ids,
-                             const std::unordered_map<std::string, nlohmann::json>* user_props) {
+CollectHiddenLinkedSourceIds(const Json& json, const Set<std::int32_t>& linked_source_ids,
+                             rstd::Option<rstd::ref<rstd::json::Map>> user_props) {
     Set<std::int32_t> out;
     auto              visibility_info = BuildObjectVisibilityInfo(json, user_props);
     for (std::int32_t id : linked_source_ids) {
@@ -4295,9 +4366,8 @@ CollectHiddenLinkedSourceIds(const nlohmann::json& json, const Set<std::int32_t>
 }
 
 template<typename T>
-void AddSceneObject(std::vector<SceneObjectVar>& objs, const nlohmann::json& json_obj, fs::VFS& vfs,
-                    wpscene::SceneVersion                                  v,
-                    const std::unordered_map<std::string, nlohmann::json>* user_props,
+void AddSceneObject(std::vector<SceneObjectVar>& objs, const Json& json_obj, fs::VFS& vfs,
+                    wpscene::SceneVersion v, rstd::Option<rstd::ref<rstd::json::Map>> user_props,
                     const Set<std::int32_t>* linked_source_ids, bool force_invisible) {
     T scene_obj;
     if (! scene_obj.FromJson(json_obj, vfs, v)) {
@@ -4327,49 +4397,56 @@ void AddSceneObject(std::vector<SceneObjectVar>& objs, const nlohmann::json& jso
             return;
         if (preserve_hidden_link_source) scene_obj.visible = true;
     }
-    objs.push_back(scene_obj);
+    objs.push_back(std::move(scene_obj));
 }
 } // namespace
 
 namespace owe
 {
 
-std::vector<SceneObjectVar>
-ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v,
-              const std::unordered_map<std::string, nlohmann::json>* user_props,
-              const Set<std::int32_t>*                               linked_source_ids) {
+std::vector<SceneObjectVar> ExpandObjects(const Json& json, fs::VFS& vfs, wpscene::SceneVersion v,
+                                          rstd::Option<rstd::ref<rstd::json::Map>> user_props,
+                                          const Set<std::int32_t>* linked_source_ids) {
     std::vector<SceneObjectVar> scene_objs;
-    if (! json.contains("objects")) return scene_objs;
+    auto                        objects = json.get("objects");
+    if (objects.is_none()) return scene_objs;
+    auto array = (**objects).as_array();
+    if (array.is_none()) return scene_objs;
     auto visibility_info = BuildObjectVisibilityInfo(json, user_props);
-    for (auto& obj : json.at("objects")) {
-        bool force_invisible = false;
-        if (obj.is_object() && obj.contains("id") && obj.at("id").is_number_integer()) {
-            force_invisible = HasHiddenUserAncestor((std::uint32_t)obj.at("id").get<std::int32_t>(),
-                                                    visibility_info);
+    for (const auto& obj : **array) {
+        bool                       force_invisible = false;
+        rstd::Option<std::int32_t> id;
+        if (obj.is_object()) {
+            std::int32_t value {};
+            if (owe::GetJsonValue(obj, "id", value, false)) id = rstd::Some(value);
+        }
+        if (id.is_some()) {
+            force_invisible =
+                HasHiddenUserAncestor(static_cast<std::uint32_t>(*id), visibility_info);
         }
         // Order matters: text/model/camera kinds coexist with null
         // image/particle/sound/light fields, so the renderer-supported
         // kinds get first pick. Falls through to the parsing-only kinds
         // (no rendering yet) so the data stays absorbed.
-        if (obj.contains("image") && ! obj.at("image").is_null()) {
+        if (auto value = obj.get("image"); value.is_some() && ! (**value).is_null()) {
             AddSceneObject<wpscene::ImageObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
+        } else if (auto value = obj.get("particle"); value.is_some() && ! (**value).is_null()) {
             AddSceneObject<wpscene::ParticleObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
+        } else if (auto value = obj.get("sound"); value.is_some() && ! (**value).is_null()) {
             AddSceneObject<wpscene::SoundObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (obj.contains("light") && ! obj.at("light").is_null()) {
+        } else if (auto value = obj.get("light"); value.is_some() && ! (**value).is_null()) {
             AddSceneObject<wpscene::LightObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (obj.contains("text") && ! obj.at("text").is_null()) {
+        } else if (auto value = obj.get("text"); value.is_some() && ! (**value).is_null()) {
             AddSceneObject<wpscene::TextObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (obj.contains("model") && ! obj.at("model").is_null()) {
+        } else if (auto value = obj.get("model"); value.is_some() && ! (**value).is_null()) {
             AddSceneObject<wpscene::ModelObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
-        } else if (obj.contains("camera") && ! obj.at("camera").is_null()) {
+        } else if (auto value = obj.get("camera"); value.is_some() && ! (**value).is_null()) {
             AddSceneObject<wpscene::CameraObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         }
@@ -4377,10 +4454,13 @@ ExpandObjects(const nlohmann::json& json, fs::VFS& vfs, wpscene::SceneVersion v,
     return scene_objs;
 }
 
-void AdjustAutoOrthoProjection(wpscene::SceneMetadata&         sc,
-                               std::span<const SceneObjectVar> scene_objs) {
-    if (! sc.general.orthogonalprojection.auto_) return;
-    i32 w = 0, h = 0;
+std::array<i32, 2> ResolveOrthoProjectionExtent(const wpscene::SceneMetadata&   sc,
+                                                std::span<const SceneObjectVar> scene_objs) {
+    i32 w = sc.general.orthogonalprojection.width;
+    i32 h = sc.general.orthogonalprojection.height;
+    if (! sc.general.orthogonalprojection.auto_) return { w, h };
+    w = 0;
+    h = 0;
     for (const auto& obj : scene_objs) {
         const auto* img = std::get_if<wpscene::ImageObject>(&obj);
         if (img == nullptr) continue;
@@ -4390,14 +4470,14 @@ void AdjustAutoOrthoProjection(wpscene::SceneMetadata&         sc,
             h = (i32)img->size.at(1);
         }
     }
-    sc.general.orthogonalprojection.width  = w;
-    sc.general.orthogonalprojection.height = h;
+    return { w, h };
 }
 
-ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, wpscene::SceneMetadata& sc,
-                          const std::unordered_map<std::string, nlohmann::json>* user_properties) {
+ParseContext BuildContext(fs::VFS& vfs, std::string_view scene_id, const wpscene::SceneMetadata& sc,
+                          std::array<i32, 2>                       ortho_extent,
+                          rstd::Option<rstd::ref<rstd::json::Map>> user_properties) {
     ParseContext context;
-    InitContext(context, vfs, sc);
+    InitContext(context, vfs, sc, ortho_extent);
     ParseCamera(context, sc);
     context.user_properties = user_properties;
 
@@ -4436,17 +4516,21 @@ SpawnCreateLayerAssetClones(ParseContext& context, std::int32_t owner_id, std::s
         nodes.reserve(pool_size);
         for (unsigned i = 0; i < pool_size; ++i) {
             wpscene::ImageObject image;
-            auto           size_str = std::to_string((*size)[0]) + " " + std::to_string((*size)[1]);
-            nlohmann::json json {
-                { "id", context.next_dynamic_layer_id-- },
-                { "name", "__createLayer:" + asset },
-                { "image", asset },
-                { "origin", "0 0 0" },
-                { "angles", "0 0 0" },
-                { "scale", "1 1 1" },
-                { "size", size_str },
-                { "visible", true },
+            auto size_str = std::to_string((*size)[0]) + " " + std::to_string((*size)[1]);
+            auto object   = rstd::json::Map::make();
+            auto set      = [&](std::string_view key, Json value) {
+                object.insert(::alloc::string::String::make(rstd::cppstd::as_str(key)),
+                              rstd::move(value));
             };
+            set("id", rstd::into<Json>(context.next_dynamic_layer_id--));
+            set("name", JsonFromStd("__createLayer:" + asset));
+            set("image", JsonFromStd(asset));
+            set("origin", JsonFromStd("0 0 0"));
+            set("angles", JsonFromStd("0 0 0"));
+            set("scale", JsonFromStd("1 1 1"));
+            set("size", JsonFromStd(size_str));
+            set("visible", rstd::into<Json>(true));
+            auto json = Json::Object(rstd::move(object));
             if (! image.FromJson(json, *context.vfs)) continue;
             ParseImageObj(context, image);
             auto it = context.node_id_map.find(image.id);
@@ -4661,12 +4745,14 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
                         std::string                             output_rt,
                         std::function<void(wpscene::Material&)> mutate         = nullptr,
                         std::function<void(WPShaderInfo&)>      configure_info = nullptr) -> bool {
-        nlohmann::json jMat;
-        if (! owe::ParseJson(fs::GetFileContent(vfs, std::string("/assets/") + mat_relpath),
-                             jMat)) {
-            rstd_error("bloom: parse material json failed: {}", mat_relpath);
+        auto parsed =
+            owe::ParseJson(fs::GetFileContent(vfs, std::string("/assets/") + mat_relpath));
+        if (parsed.is_err()) {
+            rstd_error(
+                "bloom: parse material json failed {}: {}", mat_relpath, parsed.unwrap_err());
             return false;
         }
+        auto              jMat = parsed.unwrap();
         wpscene::Material wpmat;
         if (! wpmat.FromJson(jMat)) {
             rstd_error("bloom: Material::FromJson failed: {}", mat_relpath);
@@ -4830,7 +4916,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
                                             const wpscene::SceneDocument& doc, fs::VFS& vfs,
                                             wavsen::audio::SoundManager& sm) {
     const auto& json = doc.root_json;
-    auto        sc   = doc.metadata;
+    const auto& sc   = doc.metadata;
     rstd_info("scene: pkg_version={} scene_json_version={}",
               static_cast<unsigned>(sc.pkg_version),
               static_cast<unsigned>(sc.scene_json_version));
@@ -4838,8 +4924,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
     auto linked_source_ids = CollectLinkedSourceIdsFromJson(json);
     auto scene_objs =
         ExpandObjects(json, vfs, sc.pkg_version, m_user_properties, &linked_source_ids);
-    AdjustAutoOrthoProjection(sc, scene_objs);
-    auto context                    = BuildContext(vfs, scene_id, sc, m_user_properties);
+    const auto ortho_extent = ResolveOrthoProjectionExtent(sc, scene_objs);
+    auto       context      = BuildContext(vfs, scene_id, sc, ortho_extent, m_user_properties);
     context.scene_layer_text_writes = SceneWritesLayerText(scene_objs);
     context.hidden_link_source_ids =
         CollectHiddenLinkedSourceIds(json, linked_source_ids, m_user_properties);
@@ -4852,34 +4938,27 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
     //   text/model/camera field, e.g. workshop 3327063360's "组件"), create the
     //   bare SceneNode here so ParseImageObj children can find their parent.
     //   Their `visible:false` form is preserved as a parent anchor.
-    if (json.contains("objects")) {
+    if (auto objects = json.get("objects"); objects.is_some()) {
+        auto object_array = (**objects).as_array();
+        if (object_array.is_none()) return context.scene;
         auto visibility_info = BuildObjectVisibilityInfo(json, m_user_properties);
-        auto has_kind        = [](const nlohmann::json& o) {
+        auto has_kind        = [](const Json& o) {
             for (const char* k :
                  { "image", "particle", "sound", "light", "text", "model", "camera" }) {
-                if (o.contains(k) && ! o.at(k).is_null()) return true;
+                if (auto value = o.get(k); value.is_some() && ! (**value).is_null()) return true;
             }
             return false;
         };
-        auto read_vec3 = [](const nlohmann::json& o, const char* key, std::array<float, 3>& out) {
-            if (! o.contains(key)) return;
-            const auto& v = o.at(key);
-            std::string s;
-            if (v.is_string()) {
-                s = v.get<std::string>();
-            } else if (v.is_object() && v.contains("value") && v.at("value").is_string()) {
-                s = v.at("value").get<std::string>();
-            } else {
-                return;
-            }
-            std::sscanf(s.c_str(), "%f %f %f", &out[0], &out[1], &out[2]);
+        auto read_vec3 = [](const Json& o, const char* key, std::array<float, 3>& out) {
+            owe::GetJsonValue(o, key, out, false);
         };
-        for (const auto& o : json.at("objects")) {
-            if (! o.is_object() || ! o.contains("id")) continue;
-            std::int32_t id = o.at("id").get<std::int32_t>();
+        for (const auto& o : **object_array) {
+            if (! o.is_object()) continue;
+            std::int32_t id {};
+            if (! owe::GetJsonValue(o, "id", id, false)) continue;
             context.node_id_order.push_back(id);
             std::uint32_t parent = 0;
-            if (o.contains("parent")) parent = o.at("parent").get<std::uint32_t>();
+            owe::GetJsonValue(o, "parent", parent, false);
             context.object_parent_ids[id] = parent;
             bool solid                    = false;
             owe::GetJsonValue(o, "solid", solid, false);
@@ -4887,8 +4966,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
 
             if (has_kind(o)) continue;
             std::string name;
-            if (o.contains("name") && o.at("name").is_string())
-                name = o.at("name").get<std::string>();
+            owe::GetJsonValue(o, "name", name, false);
             std::array<float, 3> origin { 0, 0, 0 }, scale { 1, 1, 1 }, angles { 0, 0, 0 };
             read_vec3(o, "origin", origin);
             read_vec3(o, "scale", scale);
@@ -4909,8 +4987,9 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             }
             auto vit = visibility_info.find(id);
             if (vit != visibility_info.end()) {
-                bool visible = vit->second.visible &&
-                               ! HasHiddenUserAncestor((std::uint32_t)id, visibility_info);
+                bool visible =
+                    vit->second.visible &&
+                    ! HasHiddenUserAncestor(static_cast<std::uint32_t>(id), visibility_info);
                 if (! visible) node->SetVisible(false);
             }
             wpscene::VisibleUserBinding visible_user;
@@ -4921,9 +5000,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             wpscene::AbsorbAllFieldBindings(o, fb);
             WireFieldScripts(context, node, fb);
             std::string attachment;
-            if (o.contains("attachment") && o.at("attachment").is_string()) {
-                attachment = o.at("attachment").get<std::string>();
-            }
+            owe::GetJsonValue(o, "attachment", attachment, false);
             context.node_id_map[id] = {
                 parent, rstd::Some(node.clone()), nullptr, std::move(attachment), nullptr
             };

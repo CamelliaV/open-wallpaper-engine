@@ -1,7 +1,3 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 export module wescene.pkg.scene_obj:particle_object;
 import wescene.core;
 import rstd.cppstd;
@@ -31,7 +27,7 @@ public:
     };
     using EFlags = BitFlags<FlagEnum>;
 
-    bool                 FromJson(const nlohmann::json&);
+    bool                 FromJson(const owe::Json&);
     EFlags               flags { 0 };
     i32                  id { -1 };
     std::array<float, 3> offset { 0, 0, 0 };
@@ -40,7 +36,7 @@ public:
 
 class ParticleRender {
 public:
-    bool        FromJson(const nlohmann::json&);
+    bool        FromJson(const owe::Json&);
     std::string name;
     float       length { 0.05f };
     float       maxlength { 10.0f };
@@ -52,7 +48,7 @@ public:
 
 class Initializer {
 public:
-    bool                 FromJson(const nlohmann::json&);
+    bool                 FromJson(const owe::Json&);
     std::array<float, 3> max { 0, 0, 0 };
     std::array<float, 3> min { 0, 0, 0 };
     std::string          name;
@@ -67,7 +63,7 @@ public:
     using EFlags = BitFlags<FlagEnum>;
 
 public:
-    bool                   FromJson(const nlohmann::json&);
+    bool                   FromJson(const owe::Json&);
     std::array<float, 3>   directions { 1.0f, 1.0f, 0.0f };
     std::array<float, 3>   distancemax { 256.0f, 256.0f, 256.0f };
     std::array<float, 3>   distancemin { 0.0f, 0.0f, 0.0f };
@@ -101,11 +97,11 @@ public:
     using EFlags = BitFlags<FlagEnum>;
 
 public:
-    bool FromJson(const nlohmann::json&, fs::VFS&);
+    bool FromJson(const owe::Json&, fs::VFS&);
 
     std::vector<Emitter>              emitters;
-    std::vector<nlohmann::json>       initializers;
-    std::vector<nlohmann::json>       operators;
+    rstd::json::Array                 initializers;
+    rstd::json::Array                 operators;
     std::vector<ParticleRender>       renderers;
     std::vector<ParticleControlpoint> controlpoints;
 
@@ -121,7 +117,7 @@ public:
 };
 class ParticleChild {
 public:
-    bool FromJson(const nlohmann::json&, fs::VFS&);
+    bool FromJson(const owe::Json&, fs::VFS&);
 
     // static
     // eventfollow
@@ -144,7 +140,7 @@ public:
 
 class ParticleInstanceoverride {
 public:
-    bool FromJosn(const nlohmann::json&);
+    bool FromJosn(const owe::Json&);
     bool enabled { false };
     bool overColor { false };
     bool overColorn { false };
@@ -177,8 +173,8 @@ public:
 
 class ParticleObject {
 public:
-    bool                     FromJson(const nlohmann::json&, fs::VFS&);               // legacy
-    bool                     FromJson(const nlohmann::json&, fs::VFS&, SceneVersion); // canonical
+    bool                     FromJson(const owe::Json&, fs::VFS&);               // legacy
+    bool                     FromJson(const owe::Json&, fs::VFS&, SceneVersion); // canonical
     int32_t                  id;
     std::string              name;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
@@ -197,8 +193,8 @@ public:
     std::uint32_t             parent { 0 };
     std::string               attachment;
     std::vector<std::int32_t> dependencies;
-    nlohmann::json            instance;
-    nlohmann::json            particlesrc;                       // PKGV0001+; always null in corpus
+    owe::Json                 instance;
+    owe::Json                 particlesrc;                       // PKGV0001+; always null in corpus
     std::array<float, 3>      controlpoint { 0.0f, 0.0f, 0.0f }; // PKGV0019+
     FieldBindings             field_bindings;
 
@@ -206,10 +202,5 @@ public:
     std::string        visible_user_key;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Emitter, name, distancemax, distancemin, rate, directions);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Particle, initializers, operators, emitters);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ParticleObject, name, origin, angles, scale, visible, particle,
-                                   particleObj);
 } // namespace wpscene
 } // namespace owe

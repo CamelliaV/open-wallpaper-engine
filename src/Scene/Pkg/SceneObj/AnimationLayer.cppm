@@ -8,10 +8,13 @@ export import wescene.pkg.puppet;
 export namespace owe::wpscene
 {
 
-inline void ReadPuppetAnimationLayers(const nlohmann::json&                       json,
+inline void ReadPuppetAnimationLayers(const owe::Json&                            json,
                                       std::vector<WPPuppetLayer::AnimationLayer>& out) {
-    if (! json.contains("animationlayers")) return;
-    for (const auto& jLayer : json.at("animationlayers")) {
+    auto layers = json.get("animationlayers");
+    if (layers.is_none()) return;
+    auto array = (**layers).as_array();
+    if (array.is_none()) return;
+    for (const auto& jLayer : **array) {
         WPPuppetLayer::AnimationLayer layer;
         owe::GetJsonValue(jLayer, "animation", layer.id);
         owe::GetJsonValue(jLayer, "blend", layer.blend);

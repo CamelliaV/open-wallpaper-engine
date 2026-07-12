@@ -1,6 +1,6 @@
 module;
 
-#include <nlohmann/json.hpp>
+#include <cstdio>
 
 module weweb;
 
@@ -111,7 +111,7 @@ bool BrowserHost::OpenWallpaper(const WebManifest&           manifest,
         impl_->osr->SetCpuPaintCallback(impl_->cpu_cb);
     }
 
-    impl_->client = new ClientHandler(manifest.user_props, impl_->osr);
+    impl_->client = new ClientHandler(manifest.user_props.clone(), impl_->osr);
     impl_->client->SetCloseCallback([this] {
         impl_->should_exit.store(true);
     });
@@ -218,8 +218,10 @@ void BrowserHost::Pump() {
 }
 
 void BrowserHost::ApplyVolume(float volume) {
-    nlohmann::json v;
-    v["value"] = volume;
+    auto object = rstd::json::Map::make();
+    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")),
+                  rstd::into<owe::Json>(volume));
+    auto v = owe::Json::Object(rstd::move(object));
     ApplyUserProperty("audio", v);
 }
 
@@ -235,7 +237,7 @@ void BrowserHost::SetPaused(bool paused) {
     if (b && b->GetHost()) b->GetHost()->WasHidden(paused);
 }
 
-void BrowserHost::ApplyUserProperty(std::string_view key, const nlohmann::json& value) {
+void BrowserHost::ApplyUserProperty(std::string_view key, const owe::Json& value) {
     if (! impl_->client) return;
     auto b = impl_->client->GetBrowser();
     if (! b) return;
@@ -244,16 +246,17 @@ void BrowserHost::ApplyUserProperty(std::string_view key, const nlohmann::json& 
 
     // Page-side listener convention (mirrors BuildPropertyListenerSnippet):
     //   window.wallpaperPropertyListener.applyUserProperties({key: {value: V}}).
+    auto object = rstd::json::Map::make();
+    object.insert(::alloc::string::String::make(rstd::cppstd::as_str(key)), value.clone());
+    auto        properties = owe::Json::Object(rstd::move(object));
     std::string snippet =
         "(function(){"
         "  if (typeof window.wallpaperPropertyListener !== 'object') return;"
         "  if (typeof window.wallpaperPropertyListener.applyUserProperties !== 'function') return;"
         "  try {"
-        "    window.wallpaperPropertyListener.applyUserProperties({\"";
-    snippet.append(key);
-    snippet += "\": ";
-    snippet += value.dump();
-    snippet += "});"
+        "    window.wallpaperPropertyListener.applyUserProperties(";
+    snippet += owe::Dump(properties);
+    snippet += ");"
                "  } catch (e) {"
                "    console.error('weweb: applyUserProperties patch threw:', e);"
                "  }"

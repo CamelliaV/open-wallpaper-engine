@@ -1,15 +1,14 @@
 module;
 
 module wescene.pkg.scene_obj;
-import nlohmann.json;
 
 using namespace owe::wpscene;
 
-bool LightObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+bool LightObject::FromJson(const owe::Json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
 
-bool LightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
+bool LightObject::FromJson(const owe::Json& json, fs::VFS&, SceneVersion /*v*/) {
     owe::GetJsonValue(json, "origin", origin);
     owe::GetJsonValue(json, "angles", angles);
     owe::GetJsonValue(json, "scale", scale);
@@ -23,12 +22,10 @@ bool LightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*
     owe::GetJsonValue(json, "id", id, false);
     owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
     owe::GetJsonValue(json, "shape", shape, false);
-
     owe::GetJsonValue(json, "locktransforms", locktransforms, false);
     owe::GetJsonValue(json, "muteineditor", muteineditor, false);
     owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
     owe::GetJsonValue(json, "parent", parent, false);
-
     owe::GetJsonValue(json, "ledsource", ledsource, false);
     owe::GetJsonValue(json, "castshadow", castshadow, false);
     owe::GetJsonValue(json, "castvolumetrics", castvolumetrics, false);
@@ -44,7 +41,7 @@ bool LightObject::FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*
     owe::GetJsonValue(json, "cascadedistance1", cascadedistance1, false);
     owe::GetJsonValue(json, "cascadedistance2", cascadedistance2, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);
-    if (json.contains("instance")) instance = json.at("instance");
+    if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
     AbsorbAllFieldBindings(json, field_bindings);
     return true;
 }

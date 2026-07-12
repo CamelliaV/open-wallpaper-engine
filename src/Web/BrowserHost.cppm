@@ -1,10 +1,7 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 export module weweb:browser_host;
 
 import rstd.cppstd;
+import wescene.json;
 
 import :frame;
 import :manifest;
@@ -65,7 +62,7 @@ public:
     void ApplyVolume(float volume);
     void SetFrameRate(int fps);
     void SetPaused(bool paused);
-    void ApplyUserProperty(std::string_view key, const nlohmann::json& value);
+    void ApplyUserProperty(std::string_view key, const owe::Json& value);
     void PushAudioData(const float* data, std::size_t count);
 
     bool ShouldExit() const;

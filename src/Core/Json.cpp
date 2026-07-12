@@ -1,54 +1,61 @@
 module;
 
-#include <rstd/macro.hpp>
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <exception>
+#include <source_location>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <vector>
+
+#include <rstd/macro.hpp>
 
 module wescene.json;
-import rstd.log;
 import rstd.cppstd;
-import nlohmann.json;
+import rstd.json;
+import rstd.log;
 
 namespace owe
 {
-
-bool ParseJson(std::string_view source, nlohmann::json& result, std::source_location loc) {
-    try {
-        result = nlohmann::json::parse(source);
-    } catch (nlohmann::json::parse_error& e) {
-        rstd_error("parse json({}), {} at {}:{}",
-                   std::string_view(loc.function_name()),
-                   std::string_view(e.what()),
-                   std::string_view(loc.file_name()),
-                   loc.line());
-        return false;
-    }
-    return true;
-}
 
 namespace
 {
 
 template<typename>
-struct JsonArrayTarget {};
+struct JsonArrayTarget {
+    static constexpr bool enabled = false;
+};
 
 template<typename T>
 struct JsonArrayTarget<std::vector<T>> {
-    using type       = std::vector<T>;
-    using value_type = T;
+    static constexpr bool enabled = true;
+    using value_type              = T;
 };
 
 template<typename T, std::size_t N>
 struct JsonArrayTarget<std::array<T, N>> {
-    using type       = std::array<T, N>;
-    using value_type = T;
+    static constexpr bool enabled = true;
+    using value_type              = T;
 };
 
-struct WrongArraySizeExp : public std::exception {
-    const char* what() const noexcept override { return "Wrong size of the array"; }
+struct WrongJsonType : std::exception {
+    auto what() const noexcept -> const char* override { return "Wrong json value type"; }
 };
+
+struct WrongArraySize : std::exception {
+    auto what() const noexcept -> const char* override { return "Wrong size of the array"; }
+};
+
+auto InitialJsonValue(const Json& json) -> const Json& {
+    if (auto value = json.get("value"); value.is_some()) return **value;
+    return json;
+}
 
 template<typename T>
-T ParseNumber(std::string_view value) {
+auto ParseNumber(std::string_view value) -> T {
     std::string text { value };
     if constexpr (std::is_same_v<T, float>) {
         return std::stof(text);
@@ -61,22 +68,27 @@ T ParseNumber(std::string_view value) {
     }
 }
 
-std::vector<std::string_view> Split(std::string_view value, char delimiter) {
-    std::vector<std::string_view> result;
-    while (true) {
-        std::size_t pos = value.find(delimiter);
-        if (pos == std::string_view::npos) {
-            result.push_back(value);
-            return result;
-        }
-        result.push_back(value.substr(0, pos));
-        value.remove_prefix(pos + 1);
-    }
+template<typename T>
+auto ConvertNumber(const Json& json) -> T {
+    auto number = json.as_number();
+    if (number.is_none()) throw WrongJsonType {};
+    if ((*number)->is_f64()) return static_cast<T>(*(*number)->as_f64());
+    if ((*number)->is_u64()) return static_cast<T>(*(*number)->as_u64());
+    return static_cast<T>(*(*number)->as_i64());
 }
 
 template<typename T>
-bool ConvertArray(std::string_view value, std::vector<T>& target) {
-    const auto parts = Split(value, ' ');
+auto ConvertArray(std::string_view value, std::vector<T>& target) -> bool {
+    std::vector<std::string_view> parts;
+    while (true) {
+        const auto delimiter = value.find(' ');
+        if (delimiter == std::string_view::npos) {
+            parts.push_back(value);
+            break;
+        }
+        parts.push_back(value.substr(0, delimiter));
+        value.remove_prefix(delimiter + 1);
+    }
     if (target.size() < parts.size()) target.resize(parts.size());
     std::transform(parts.begin(), parts.end(), target.begin(), [](std::string_view part) {
         return ParseNumber<T>(part);
@@ -85,76 +97,87 @@ bool ConvertArray(std::string_view value, std::vector<T>& target) {
 }
 
 template<typename T, std::size_t N>
-bool ConvertArray(std::string_view value, std::array<T, N>& target) {
-    const auto parts = Split(value, ' ');
-    if (parts.size() != N) throw WrongArraySizeExp();
+auto ConvertArray(std::string_view value, std::array<T, N>& target) -> bool {
+    std::array<std::string_view, N> parts;
+    std::size_t                     count = 0;
+    while (true) {
+        const auto delimiter = value.find(' ');
+        if (count == N) throw WrongArraySize {};
+        if (delimiter == std::string_view::npos) {
+            parts[count++] = value;
+            break;
+        }
+        parts[count++] = value.substr(0, delimiter);
+        value.remove_prefix(delimiter + 1);
+    }
+    if (count != N) throw WrongArraySize {};
     std::transform(parts.begin(), parts.end(), target.begin(), [](std::string_view part) {
         return ParseNumber<T>(part);
     });
     return true;
 }
 
-} // namespace
-
 template<typename T>
-inline bool _GetJsonValue(const nlohmann::json& json, typename JsonArrayTarget<T>::type& value) {
-    using Tv          = typename JsonArrayTarget<T>::value_type;
-    const auto* pjson = &json;
-    if (json.contains("value")) pjson = &json.at("value");
-    const auto& njson = *pjson;
-    if (njson.is_number()) {
-        value = { njson.get<Tv>() };
+auto ReadJsonValue(const Json& json, T& value) -> bool {
+    const auto& input = InitialJsonValue(json);
+    if constexpr (JsonArrayTarget<T>::enabled) {
+        using Value = typename JsonArrayTarget<T>::value_type;
+        if (input.is_number()) {
+            value = { ConvertNumber<Value>(input) };
+            return true;
+        }
+        auto string = input.as_str();
+        if (string.is_none()) throw WrongJsonType {};
+        return ConvertArray(rstd::cppstd::as_string_view(*string), value);
+    } else if constexpr (std::is_same_v<T, bool>) {
+        auto boolean = input.as_bool();
+        if (boolean.is_none()) throw WrongJsonType {};
+        value = *boolean;
         return true;
-    } else {
-        std::string strvalue;
-        strvalue = njson.get<std::string>();
-        return ConvertArray(strvalue, value);
+    } else if constexpr (std::is_arithmetic_v<T>) {
+        auto boolean = input.as_bool();
+        value        = boolean.is_some() ? static_cast<T>(*boolean) : ConvertNumber<T>(input);
+        return true;
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        auto string = input.as_str();
+        if (string.is_none()) throw WrongJsonType {};
+        value = rstd::cppstd::to_string(*string);
+        return true;
     }
 }
 
 template<typename T>
-inline bool _GetJsonValue(const nlohmann::json& json, T& value) {
-    if (json.contains("value"))
-        value = json.at("value").get<T>();
-    else
-        value = json.get<T>();
-    return true;
-}
-
-template<typename T>
-inline bool _GetJsonValue(const nlohmann::json& json, T& value, const char* name,
-                          std::source_location loc) {
-    using njson = nlohmann::json;
-    std::string nameinfo;
-    if (name != nullptr) nameinfo = std::string("(key: ") + name + ")";
+auto ReadJsonValue(const Json& json, T& value, const char* name, std::source_location loc) -> bool {
+    std::string name_info;
+    if (name != nullptr) name_info = std::string("(key: ") + name + ")";
     try {
-        return _GetJsonValue<T>(json, value);
-    } catch (const njson::type_error& e) {
+        return ReadJsonValue(json, value);
+    } catch (const WrongJsonType& error) {
         rstd_info("{} {} at {} {}:{}\n{}",
-                  std::string_view(e.what()),
-                  nameinfo,
+                  std::string_view(error.what()),
+                  name_info,
                   std::string_view(loc.function_name()),
                   std::string_view(loc.file_name()),
                   loc.line(),
-                  json.dump(4));
-    } catch (const std::invalid_argument& e) {
+                  Dump(json, 4));
+    } catch (const std::invalid_argument& error) {
         rstd_error("{} {} at {} {}:{}",
-                   std::string_view(e.what()),
-                   nameinfo,
+                   std::string_view(error.what()),
+                   name_info,
                    std::string_view(loc.function_name()),
                    std::string_view(loc.file_name()),
                    loc.line());
-    } catch (const std::out_of_range& e) {
+    } catch (const std::out_of_range& error) {
         rstd_error("{} {} at {} {}:{}",
-                   std::string_view(e.what()),
-                   nameinfo,
+                   std::string_view(error.what()),
+                   name_info,
                    std::string_view(loc.function_name()),
                    std::string_view(loc.file_name()),
                    loc.line());
-    } catch (const WrongArraySizeExp& e) {
+    } catch (const WrongArraySize& error) {
         rstd_error("{} {} at {} {}:{}",
-                   std::string_view(e.what()),
-                   nameinfo,
+                   std::string_view(error.what()),
+                   name_info,
                    std::string_view(loc.function_name()),
                    std::string_view(loc.file_name()),
                    loc.line());
@@ -162,59 +185,77 @@ inline bool _GetJsonValue(const nlohmann::json& json, T& value, const char* name
     return false;
 }
 
+} // namespace
+
 template<typename T>
-typename JsonTemplateTypeCheck<T>::type GetJsonValue(const nlohmann::json& json, T& value,
+typename JsonTemplateTypeCheck<T>::type GetJsonValue(const Json& json, T& value,
                                                      std::source_location loc) {
-    return _GetJsonValue<T>(json, value, nullptr, loc);
+    return ReadJsonValue(json, value, nullptr, loc);
 }
 
 template<typename T>
-typename JsonTemplateTypeCheck<T>::type GetJsonValue(const nlohmann::json& json,
-                                                     std::string_view name_view, T& value,
-                                                     bool warn, std::source_location loc) {
-    std::string name { name_view };
-    if (! json.contains(name)) {
+typename JsonTemplateTypeCheck<T>::type GetJsonValue(const Json& json, std::string_view name_view,
+                                                     T& value, bool warn,
+                                                     std::source_location loc) {
+    auto member = json.get(name_view);
+    if (member.is_none()) {
         if (warn)
             rstd_info("read json \"{}\" not a key at {}({}:{})",
-                      name,
-                      std::string_view(loc.function_name()),
-                      std::string_view(loc.file_name()),
-                      loc.line());
-        return false;
-    } else if (json.at(name).is_null()) {
-        if (warn)
-            rstd_info("read json \"{}\" is null at {}({}:{})",
-                      name,
+                      name_view,
                       std::string_view(loc.function_name()),
                       std::string_view(loc.file_name()),
                       loc.line());
         return false;
     }
-    return _GetJsonValue<T>(json.at(name), value, name.c_str(), loc);
+    if ((**member).is_null()) {
+        if (warn)
+            rstd_info("read json \"{}\" is null at {}({}:{})",
+                      name_view,
+                      std::string_view(loc.function_name()),
+                      std::string_view(loc.file_name()),
+                      loc.line());
+        return false;
+    }
+    std::string name { name_view };
+    return ReadJsonValue(**member, value, name.c_str(), loc);
 }
 
-#define T_IMPL_GET_JSON(TYPE)                                      \
+#define OWE_IMPL_GET_JSON(TYPE)                                    \
     template JsonTemplateTypeCheck<TYPE>::type GetJsonValue<TYPE>( \
-        const nlohmann::json&, TYPE&, std::source_location);       \
+        const Json&, TYPE&, std::source_location);                 \
     template JsonTemplateTypeCheck<TYPE>::type GetJsonValue<TYPE>( \
-        const nlohmann::json&, std::string_view, TYPE&, bool, std::source_location);
+        const Json&, std::string_view, TYPE&, bool, std::source_location)
 
-T_IMPL_GET_JSON(bool);
-T_IMPL_GET_JSON(int32_t);
-T_IMPL_GET_JSON(uint32_t);
-T_IMPL_GET_JSON(float);
-T_IMPL_GET_JSON(double);
-T_IMPL_GET_JSON(std::string);
-T_IMPL_GET_JSON(std::vector<float>);
-T_IMPL_GET_JSON(std::vector<int32_t>);
+OWE_IMPL_GET_JSON(bool);
+OWE_IMPL_GET_JSON(std::int32_t);
+OWE_IMPL_GET_JSON(std::uint32_t);
+OWE_IMPL_GET_JSON(float);
+OWE_IMPL_GET_JSON(double);
+OWE_IMPL_GET_JSON(std::string);
+OWE_IMPL_GET_JSON(std::vector<float>);
+OWE_IMPL_GET_JSON(std::vector<std::int32_t>);
 
-template<std::size_t N>
-using iarray = std::array<int, N>;
-T_IMPL_GET_JSON(iarray<3>);
+using IntArray3   = std::array<int, 3>;
+using FloatArray2 = std::array<float, 2>;
+using FloatArray3 = std::array<float, 3>;
+OWE_IMPL_GET_JSON(IntArray3);
+OWE_IMPL_GET_JSON(FloatArray2);
+OWE_IMPL_GET_JSON(FloatArray3);
 
-template<std::size_t N>
-using farray = std::array<float, N>;
-T_IMPL_GET_JSON(farray<2>);
-T_IMPL_GET_JSON(farray<3>);
+#undef OWE_IMPL_GET_JSON
+
+auto ParseJson(std::string_view source, rstd::json::ParseOptions options)
+    -> rstd::json::ParseResult {
+    return rstd::json::from_str(rstd::cppstd::as_str(source), options);
+}
+
+auto Dump(const Json& value, std::optional<std::size_t> indent) -> std::string {
+    auto options = rstd::json::FormatOptions {};
+    if (indent) {
+        options.pretty = true;
+        options.indent = *indent;
+    }
+    return rstd::cppstd::to_string(rstd::json::to_string(value, options));
+}
 
 } // namespace owe

@@ -1,19 +1,17 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <rstd/enum.hpp>
 #include <algorithm>
 #include <cmath>
 #include "quickjs.h"
 
 module wescene.script;
 import eigen;
-import nlohmann.json;
 import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.scene;
-
-using nlohmann::json;
 
 namespace owe::script
 {
@@ -201,42 +199,47 @@ JSValue ScriptValueToJs(JSContext* ctx, const ScriptValue& value) {
 
 // JSON → JSValue conversion for the initial-value seed. Recursive but
 // scenescript values are tiny (numbers, short strings, small objects).
-JSValue JsonToJs(JSContext* ctx, const json& j) {
-    switch (j.type()) {
-    case json::value_t::null: return JS_NULL;
-    case json::value_t::boolean: return JS_NewBool(ctx, j.get<bool>());
-    case json::value_t::number_integer:
-    case json::value_t::number_unsigned: return JS_NewInt64(ctx, j.get<int64_t>());
-    case json::value_t::number_float: return JS_NewFloat64(ctx, j.get<double>());
-    case json::value_t::string: {
-        const auto& s = j.get_ref<const std::string&>();
-        return JS_NewStringLen(ctx, s.data(), s.size());
-    }
-    case json::value_t::array: {
-        JSValue  arr = JS_NewArray(ctx);
-        uint32_t i   = 0;
-        for (const auto& item : j) {
-            JS_DefinePropertyValueUint32(ctx, arr, i++, JsonToJs(ctx, item), JS_PROP_C_W_E);
+JSValue JsonToJs(JSContext* ctx, const Json& value) {
+    RSTD_MATCH(value) {
+        RSTD_CASE(Null) { return JS_NULL; }
+        RSTD_CASE(Bool, boolean) { return JS_NewBool(ctx, boolean); }
+        RSTD_CASE(Number, number) {
+            if (auto integer = number.as_i64(); integer.is_some())
+                return JS_NewInt64(ctx, *integer);
+            if (auto integer = number.as_u64(); integer.is_some())
+                return JS_NewInt64(ctx, static_cast<std::int64_t>(*integer));
+            return JS_NewFloat64(ctx, *number.as_f64());
         }
-        return arr;
-    }
-    case json::value_t::object: {
-        JSValue obj = JS_NewObject(ctx);
-        for (auto it = j.begin(); it != j.end(); ++it) {
-            JS_DefinePropertyValueStr(
-                ctx, obj, it.key().c_str(), JsonToJs(ctx, it.value()), JS_PROP_C_W_E);
+        RSTD_CASE(String, string) {
+            const auto view = rstd::cppstd::as_string_view(string.as_str());
+            return JS_NewStringLen(ctx, view.data(), view.size());
         }
-        return obj;
+        RSTD_CASE(Array, values) {
+            JSValue  array = JS_NewArray(ctx);
+            uint32_t index = 0;
+            for (const auto& item : values) {
+                JS_DefinePropertyValueUint32(
+                    ctx, array, index++, JsonToJs(ctx, item), JS_PROP_C_W_E);
+            }
+            return array;
+        }
+        RSTD_CASE(Object, values) {
+            JSValue object = JS_NewObject(ctx);
+            values.iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                const auto  key_view          = rstd::cppstd::as_string_view(entry_key->as_str());
+                std::string owned_key(key_view);
+                JS_DefinePropertyValueStr(
+                    ctx, object, owned_key.c_str(), JsonToJs(ctx, *entry_value), JS_PROP_C_W_E);
+            });
+            return object;
+        }
     }
-    case json::value_t::binary:
-    case json::value_t::discarded:
-    default: return JS_UNDEFINED;
-    }
+    rstd::unreachable();
 }
 
-JSValue UserPropertyValueToJs(JSContext* ctx, const json& property) {
-    if (property.is_object() && property.contains("value"))
-        return JsonToJs(ctx, property.at("value"));
+JSValue UserPropertyValueToJs(JSContext* ctx, const Json& property) {
+    if (auto value = property.get("value"); value.is_some()) return JsonToJs(ctx, **value);
     return JsonToJs(ctx, property);
 }
 
@@ -244,7 +247,7 @@ JSValue UserPropertyValueToJs(JSContext* ctx, const json& property) {
 // bootstrap getter resolves it lazily against engine.userProperties at
 // access time, so SetUserProperty calls after parse propagate.
 // Everything else passes through.
-JSValue ResolveConfigValue(JSContext* ctx, const json& v) { return JsonToJs(ctx, v); }
+JSValue ResolveConfigValue(JSContext* ctx, const Json& v) { return JsonToJs(ctx, v); }
 
 // Coerce a binding's initial-value JSON into the JS shape the script's
 // `init(value)` expects, given the bound field kind. Audio-response,
@@ -259,7 +262,7 @@ JSValue ResolveConfigValue(JSContext* ctx, const json& v) { return JsonToJs(ctx,
 //
 // Falls back to JsonToJs for unknown shapes; better to pass garbage than
 // to fail to call init().
-JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
+JSValue CoerceInitialValue(JSContext* ctx, const Json& v, FieldKind kind) {
     auto parse_floats = [](const std::string& s) -> std::vector<double> {
         std::vector<double> out;
         const char*         p   = s.c_str();
@@ -276,35 +279,48 @@ JSValue CoerceInitialValue(JSContext* ctx, const json& v, FieldKind kind) {
     switch (kind) {
     case FieldKind::Vec2: {
         if (v.is_string()) {
-            auto fs = parse_floats(v.get_ref<const std::string&>());
+            auto source = rstd::cppstd::to_string(*v.as_str());
+            auto fs     = parse_floats(source);
             return MakeVecValue(
                 ctx, fs.size() > 0 ? fs[0] : 0.0, fs.size() > 1 ? fs[1] : 0.0, 0.0, 2);
         }
-        if (v.is_array() && v.size() >= 2)
-            return MakeVecValue(ctx, v[0].get<double>(), v[1].get<double>(), 0.0, 2);
-        if (v.is_number()) return MakeVecValue(ctx, v.get<double>(), v.get<double>(), 0.0, 2);
+        if (auto values = v.as_array(); values.is_some() && (*values)->len() >= 2) {
+            auto x = (**values)[0].as_f64();
+            auto y = (**values)[1].as_f64();
+            if (x.is_some() && y.is_some()) return MakeVecValue(ctx, *x, *y, 0.0, 2);
+        }
+        if (v.is_number()) {
+            auto number = v.as_f64();
+            if (number.is_some()) return MakeVecValue(ctx, *number, *number, 0.0, 2);
+        }
         break;
     }
     case FieldKind::Vec3: {
         if (v.is_string()) {
-            auto   fs = parse_floats(v.get_ref<const std::string&>());
-            double x  = fs.size() > 0 ? fs[0] : 0.0;
-            double y  = fs.size() > 1 ? fs[1] : x; // splat single scalar
-            double z  = fs.size() > 2 ? fs[2] : (fs.size() > 1 ? 0.0 : x);
+            auto   source = rstd::cppstd::to_string(*v.as_str());
+            auto   fs     = parse_floats(source);
+            double x      = fs.size() > 0 ? fs[0] : 0.0;
+            double y      = fs.size() > 1 ? fs[1] : x; // splat single scalar
+            double z      = fs.size() > 2 ? fs[2] : (fs.size() > 1 ? 0.0 : x);
             return MakeVecValue(ctx, x, y, z, 3);
         }
-        if (v.is_array() && v.size() >= 3)
-            return MakeVecValue(ctx, v[0].get<double>(), v[1].get<double>(), v[2].get<double>(), 3);
+        if (auto values = v.as_array(); values.is_some() && (*values)->len() >= 3) {
+            auto x = (**values)[0].as_f64();
+            auto y = (**values)[1].as_f64();
+            auto z = (**values)[2].as_f64();
+            if (x.is_some() && y.is_some() && z.is_some()) return MakeVecValue(ctx, *x, *y, *z, 3);
+        }
         if (v.is_number()) {
-            double d = v.get<double>();
-            return MakeVecValue(ctx, d, d, d, 3);
+            auto number = v.as_f64();
+            if (number.is_some()) return MakeVecValue(ctx, *number, *number, *number, 3);
         }
         break;
     }
     case FieldKind::Color: {
         if (v.is_string()) {
-            auto    fs  = parse_floats(v.get_ref<const std::string&>());
-            JSValue arr = JS_NewArray(ctx);
+            auto    source = rstd::cppstd::to_string(*v.as_str());
+            auto    fs     = parse_floats(source);
+            JSValue arr    = JS_NewArray(ctx);
             for (uint32_t i = 0; i < fs.size() && i < 3; ++i)
                 JS_DefinePropertyValueUint32(ctx, arr, i, JS_NewFloat64(ctx, fs[i]), JS_PROP_C_W_E);
             return arr;
@@ -702,15 +718,17 @@ struct PersistedLocalStorage {};
 
 void FlushLocalStorage(EngineHostState* host) {
     if (host->ls_path.empty()) return;
-    nlohmann::json out = nlohmann::json::object();
-    for (const auto& [k, v] : host->ls_data) out[k] = v;
+    auto object = rstd::json::Map::make();
+    for (const auto& [k, v] : host->ls_data)
+        object.insert(::alloc::string::String::make(rstd::cppstd::as_str(k)), JsonFromStd(v));
+    auto out = Json::Object(rstd::move(object));
     // ofstream defaults to ios_base::out | trunc, which is what we want.
     std::ofstream f(host->ls_path);
     if (! f) {
         rstd_warn("localStorage flush: cannot open {}", host->ls_path);
         return;
     }
-    f << out.dump();
+    f << Dump(out);
 }
 
 void LoadLocalStorage(EngineHostState* host) {
@@ -718,17 +736,22 @@ void LoadLocalStorage(EngineHostState* host) {
     if (host->ls_path.empty()) return;
     std::ifstream f(host->ls_path);
     if (! f) return;
-    nlohmann::json doc;
-    try {
-        f >> doc;
-    } catch (const std::exception& e) {
-        rstd_warn("localStorage load: bad JSON in {}: {}", host->ls_path, e.what());
+    std::string source(std::istreambuf_iterator<char>(f), {});
+    auto        parsed = ParseJson(source);
+    if (parsed.is_err()) {
+        rstd_warn("localStorage parse failed: {}", parsed.unwrap_err());
         return;
     }
-    if (! doc.is_object()) return;
-    for (auto it = doc.begin(); it != doc.end(); ++it) {
-        if (it.value().is_string()) host->ls_data[it.key()] = it.value().get<std::string>();
-    }
+    auto doc    = parsed.unwrap();
+    auto object = doc.as_object();
+    if (object.is_none()) return;
+    (*object)->iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        const auto  key               = rstd::cppstd::as_string_view(entry_key->as_str());
+        const auto& value             = *entry_value;
+        if (auto stored = value.as_str(); stored.is_some())
+            host->ls_data[std::string(key)] = rstd::cppstd::to_string(*stored);
+    });
 }
 
 JSValue LocalStorageGet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
@@ -2480,7 +2503,7 @@ void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
     if (m_impl->host.audio_buffer_built) RefreshAudioBuffer(m_impl->ctx);
 }
 
-void JsRuntime::SetUserProperty(std::string_view key, const json& property) {
+void JsRuntime::SetUserProperty(std::string_view key, const Json& property) {
     if (! m_impl || ! m_impl->ctx) return;
     std::string key_str { key };
     JSContext*  ctx    = m_impl->ctx;
@@ -2764,7 +2787,7 @@ void RunFieldScriptInit(JSContext* ctx, JsRuntime::Impl* rt, FieldScript* fs) {
 
 FieldScript* JsRuntime::MakeFieldScript(
     std::string_view source, std::string_view script_sha, FieldKind field_kind_in,
-    const json& properties_config, const json& initial_value, owe::SceneNode* node,
+    const Json& properties_config, const Json& initial_value, owe::SceneNode* node,
     std::vector<owe::SceneNode*>                                  clones,
     std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clones) {
     JSContext* ctx = m_impl->ctx;
@@ -2832,10 +2855,14 @@ FieldScript* JsRuntime::MakeFieldScript(
     if (! JS_IsUndefined(sp)) {
         JSValue hv = JS_GetPropertyStr(ctx, sp, "__hostValues");
         if (JS_IsObject(hv) && properties_config.is_object()) {
-            for (auto it = properties_config.begin(); it != properties_config.end(); ++it) {
+            auto object = properties_config.as_object();
+            (*object)->iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                auto        owned_key         = rstd::cppstd::to_string(entry_key->as_str());
+                const auto& value             = *entry_value;
                 JS_DefinePropertyValueStr(
-                    ctx, hv, it.key().c_str(), ResolveConfigValue(ctx, it.value()), JS_PROP_C_W_E);
-            }
+                    ctx, hv, owned_key.c_str(), ResolveConfigValue(ctx, value), JS_PROP_C_W_E);
+            });
         }
         JS_FreeValue(ctx, hv);
     }
@@ -2998,7 +3025,7 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi) {
     ss->Tick(fi);
 }
 
-void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const nlohmann::json& property) {
+void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const Json& property) {
     if (auto* ss = static_cast<ScriptScene*>(scene.script_scene.get()); ss != nullptr) {
         ss->runtime().SetUserProperty(key, property);
     }

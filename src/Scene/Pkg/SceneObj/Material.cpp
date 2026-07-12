@@ -3,48 +3,52 @@ module;
 #include <rstd/macro.hpp>
 
 module wescene.pkg.scene_obj;
-import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
+import wescene.json;
 
 using namespace owe::wpscene;
 
 namespace
 {
 
-void LoadUserShaderValues(const nlohmann::json&                         json,
+void LoadUserShaderValues(const owe::Json&                              json,
                           std::unordered_map<std::string, std::string>& out) {
-    auto it = json.find("usershadervalues");
-    if (it == json.end() || ! it->is_object()) return;
+    auto values = json.get("usershadervalues");
+    if (values.is_none()) return;
+    auto object = (**values).as_object();
+    if (object.is_none()) return;
+    (*object)->iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        auto text                     = entry_value->as_str();
+        if (text.is_some())
+            out[rstd::cppstd::to_string(entry_key->as_str())] = rstd::cppstd::to_string(*text);
+    });
+}
 
-    for (const auto& el : it->items()) {
-        if (! el.value().is_string()) continue;
-        out[el.key()] = el.value().get<std::string>();
+void MergeUserTextures(const rstd::json::Array& src, rstd::json::Array& dst) {
+    while (src.len() > dst.len()) dst.push(owe::Json::Null());
+    for (rstd::usize i = 0; i < src.len(); ++i) {
+        if (! src[i].is_null()) dst[i] = src[i].clone();
     }
 }
 
-void MergeUserTextures(const std::vector<nlohmann::json>& src, std::vector<nlohmann::json>& dst) {
-    if (src.size() > dst.size()) dst.resize(src.size());
-    for (std::size_t i = 0; i < src.size(); ++i) {
-        if (! src[i].is_null()) dst[i] = src[i];
-    }
-}
-
-void LoadConstantShaderValue(std::string name, const nlohmann::json& json,
+void LoadConstantShaderValue(std::string name, const owe::Json& json,
                              std::unordered_map<std::string, std::vector<float>>& constant_values,
                              std::unordered_map<std::string, std::string>&        user_values,
                              std::unordered_map<std::string, AnimCurve>&          animations) {
     std::vector<float> value;
     owe::GetJsonValue(json, value);
-    constant_values[name] = value;
+    constant_values[name] = std::move(value);
     if (! json.is_object()) return;
 
-    if (json.contains("user") && json.at("user").is_string()) {
-        user_values[name] = json.at("user").get<std::string>();
+    if (auto user = json.get("user"); user.is_some()) {
+        auto string = (**user).as_str();
+        if (string.is_some()) user_values[name] = rstd::cppstd::to_string(*string);
     }
-    if (json.contains("animation")) {
+    if (auto animation = json.get("animation"); animation.is_some()) {
         AnimCurve curve;
-        if (ParseAnimCurve(json.at("animation"), curve)) {
+        if (ParseAnimCurve(**animation, curve)) {
             animations[name] = std::move(curve);
         }
     }
@@ -52,7 +56,26 @@ void LoadConstantShaderValue(std::string name, const nlohmann::json& json,
 
 } // namespace
 
-bool MaterialPassBindItem::FromJson(const nlohmann::json& json) {
+auto owe::wpscene::Material::clone() const -> Material {
+    Material clone;
+    clone.blending                  = blending;
+    clone.cullmode                  = cullmode;
+    clone.shader                    = shader;
+    clone.depthtest                 = depthtest;
+    clone.depthwrite                = depthwrite;
+    clone.textures                  = textures;
+    clone.combos                    = combos;
+    clone.constantshadervalues      = constantshadervalues;
+    clone.constantshadervalues_user = constantshadervalues_user;
+    clone.user_shader_values        = user_shader_values;
+    clone.use_puppet                = use_puppet;
+    MergeUserTextures(usertextures, clone.usertextures);
+    for (const auto& [name, curve] : constantshadervalues_animations)
+        clone.constantshadervalues_animations[name] = curve.clone();
+    return clone;
+}
+
+bool MaterialPassBindItem::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "name", name);
     owe::GetJsonValue(json, "index", index);
     return true;
@@ -74,7 +97,7 @@ void MaterialPass::Update(const MaterialPass& p) {
         constantshadervalues_user[el.first] = el.second;
     }
     for (const auto& el : p.constantshadervalues_animations) {
-        constantshadervalues_animations[el.first] = el.second;
+        constantshadervalues_animations[el.first] = el.second.clone();
     }
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
@@ -101,7 +124,7 @@ void Material::MergePass(const MaterialPass& p) {
         constantshadervalues_user[el.first] = el.second;
     }
     for (const auto& el : p.constantshadervalues_animations) {
-        constantshadervalues_animations[el.first] = el.second;
+        constantshadervalues_animations[el.first] = el.second.clone();
     }
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
@@ -112,61 +135,75 @@ void Material::MergePass(const MaterialPass& p) {
     }
 }
 
-bool MaterialPass::FromJson(const nlohmann::json& json) {
+bool MaterialPass::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "id", id, false);
-    if (json.contains("textures")) {
-        for (const auto& jT : json.at("textures")) {
-            std::string tex;
-            if (! jT.is_null()) owe::GetJsonValue(jT, tex);
-            textures.push_back(tex);
+    if (auto values = json.get("textures"); values.is_some()) {
+        auto array = (**values).as_array();
+        if (array.is_some()) {
+            for (const auto& jT : **array) {
+                std::string tex;
+                if (! jT.is_null()) owe::GetJsonValue(jT, tex);
+                textures.push_back(std::move(tex));
+            }
         }
     }
-    if (json.contains("usertextures") && json.at("usertextures").is_array()) {
-        for (const auto& jU : json.at("usertextures")) {
-            usertextures.push_back(jU);
-        }
+    if (auto values = json.get("usertextures"); values.is_some()) {
+        auto array = (**values).as_array();
+        if (array.is_some())
+            for (const auto& jU : **array) usertextures.push(jU.clone());
     }
-    if (json.contains("constantshadervalues")) {
-        for (const auto& jC : json.at("constantshadervalues").items()) {
-            std::string name;
-            owe::GetJsonValue(jC.key(), name);
-            LoadConstantShaderValue(std::move(name),
-                                    jC.value(),
-                                    constantshadervalues,
-                                    constantshadervalues_user,
-                                    constantshadervalues_animations);
-        }
+    if (auto values = json.get("constantshadervalues"); values.is_some()) {
+        auto object = (**values).as_object();
+        if (object.is_some())
+            (*object)->iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                LoadConstantShaderValue(rstd::cppstd::to_string(entry_key->as_str()),
+                                        *entry_value,
+                                        constantshadervalues,
+                                        constantshadervalues_user,
+                                        constantshadervalues_animations);
+            });
     }
     LoadUserShaderValues(json, user_shader_values);
-    if (json.contains("combos")) {
-        for (const auto& jC : json.at("combos").items()) {
-            std::string name;
-            int32_t     value;
-            owe::GetJsonValue(jC.key(), name);
-            owe::GetJsonValue(jC.value(), value);
-            combos[name] = value;
-        }
+    if (auto values = json.get("combos"); values.is_some()) {
+        auto object = (**values).as_object();
+        if (object.is_some())
+            (*object)->iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                std::int32_t value { 0 };
+                owe::GetJsonValue(*entry_value, value);
+                combos[rstd::cppstd::to_string(entry_key->as_str())] = value;
+            });
     }
     owe::GetJsonValue(json, "target", target, false);
-    if (json.contains("bind")) {
-        for (const auto& jB : json.at("bind")) {
-            MaterialPassBindItem bindItem;
-            bindItem.FromJson(jB);
-            bind.push_back(bindItem);
+    if (auto values = json.get("bind"); values.is_some()) {
+        auto array = (**values).as_array();
+        if (array.is_some()) {
+            for (const auto& jB : **array) {
+                MaterialPassBindItem bindItem;
+                bindItem.FromJson(jB);
+                bind.push_back(bindItem);
+            }
         }
     }
     return true;
 }
 
-bool Material::FromJson(const nlohmann::json& json) { return FromJson(json, kSceneVersionUnknown); }
+bool Material::FromJson(const owe::Json& json) { return FromJson(json, kSceneVersionUnknown); }
 
-bool Material::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
-    if (! json.contains("passes") || json.at("passes").size() == 0) {
+bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
+    auto passes = json.get("passes");
+    if (passes.is_none()) {
         rstd_error("material no data");
         return false;
     }
-    const auto jContent = json.at("passes").at(0);
-    if (! jContent.contains("shader")) {
+    auto pass_array = (**passes).as_array();
+    if (pass_array.is_none() || (*pass_array)->is_empty()) {
+        rstd_error("material no data");
+        return false;
+    }
+    const auto& jContent = (**pass_array)[0];
+    if (jContent.get("shader").is_none()) {
         rstd_error("material no shader");
         return false;
     }
@@ -175,38 +212,43 @@ bool Material::FromJson(const nlohmann::json& json, SceneVersion /*v*/) {
     owe::GetJsonValue(jContent, "depthtest", depthtest);
     owe::GetJsonValue(jContent, "depthwrite", depthwrite);
     owe::GetJsonValue(jContent, "shader", shader);
-    if (jContent.contains("textures")) {
-        for (const auto& jT : jContent.at("textures")) {
-            std::string tex;
-            if (! jT.is_null()) owe::GetJsonValue(jT, tex);
-            textures.push_back(tex);
+    if (auto values = jContent.get("textures"); values.is_some()) {
+        auto array = (**values).as_array();
+        if (array.is_some()) {
+            for (const auto& jT : **array) {
+                std::string tex;
+                if (! jT.is_null()) owe::GetJsonValue(jT, tex);
+                textures.push_back(std::move(tex));
+            }
         }
     }
-    if (jContent.contains("usertextures") && jContent.at("usertextures").is_array()) {
-        for (const auto& jU : jContent.at("usertextures")) {
-            usertextures.push_back(jU);
-        }
+    if (auto values = jContent.get("usertextures"); values.is_some()) {
+        auto array = (**values).as_array();
+        if (array.is_some())
+            for (const auto& jU : **array) usertextures.push(jU.clone());
     }
-    if (jContent.contains("constantshadervalues")) {
-        for (const auto& jC : jContent.at("constantshadervalues").items()) {
-            std::string name;
-            owe::GetJsonValue(jC.key(), name);
-            LoadConstantShaderValue(std::move(name),
-                                    jC.value(),
-                                    constantshadervalues,
-                                    constantshadervalues_user,
-                                    constantshadervalues_animations);
-        }
+    if (auto values = jContent.get("constantshadervalues"); values.is_some()) {
+        auto object = (**values).as_object();
+        if (object.is_some())
+            (*object)->iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                LoadConstantShaderValue(rstd::cppstd::to_string(entry_key->as_str()),
+                                        *entry_value,
+                                        constantshadervalues,
+                                        constantshadervalues_user,
+                                        constantshadervalues_animations);
+            });
     }
     LoadUserShaderValues(jContent, user_shader_values);
-    if (jContent.contains("combos")) {
-        for (const auto& jC : jContent.at("combos").items()) {
-            std::string name;
-            int32_t     value;
-            owe::GetJsonValue(jC.key(), name);
-            owe::GetJsonValue(jC.value(), value);
-            combos[name] = value;
-        }
+    if (auto values = jContent.get("combos"); values.is_some()) {
+        auto object = (**values).as_object();
+        if (object.is_some())
+            (*object)->iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                std::int32_t value { 0 };
+                owe::GetJsonValue(*entry_value, value);
+                combos[rstd::cppstd::to_string(entry_key->as_str())] = value;
+            });
     }
     return true;
 }

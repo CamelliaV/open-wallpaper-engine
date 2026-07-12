@@ -1,7 +1,3 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 export module wescene.pkg.scene_obj:material;
 import rstd.cppstd;
 import wescene.fs;
@@ -16,18 +12,18 @@ namespace wpscene
 
 class MaterialPassBindItem {
 public:
-    bool        FromJson(const nlohmann::json&);
+    bool        FromJson(const owe::Json&);
     std::string name;
     int32_t     index;
 };
 
 class MaterialPass {
 public:
-    bool                                                FromJson(const nlohmann::json&);
+    bool                                                FromJson(const owe::Json&);
     void                                                Update(const MaterialPass&);
     std::uint32_t                                       id { 0 }; // pass id (PKGV0001+)
     std::vector<std::string>                            textures;
-    std::vector<nlohmann::json>                         usertextures; // PKGV0018+; polymorphic
+    rstd::json::Array                                   usertextures; // PKGV0018+; polymorphic
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     // scene.json instance-level user binding:
@@ -43,19 +39,26 @@ public:
     std::vector<MaterialPassBindItem>            bind;
 };
 
-class Material {
+class Material : public rstd::DefaultInClass<Material, rstd::clone::Clone> {
 public:
-    bool                        FromJson(const nlohmann::json&);               // legacy
-    bool                        FromJson(const nlohmann::json&, SceneVersion); // canonical
-    void                        MergePass(const MaterialPass&);
-    std::string                 blending { "translucent" };
-    std::string                 cullmode { "nocull" };
-    std::string                 shader;
-    std::string                 depthtest { "disabled" };
-    std::string                 depthwrite { "disabled" };
-    std::vector<std::string>    textures;
-    std::vector<nlohmann::json> usertextures;
-    std::unordered_map<std::string, int32_t>            combos;
+    Material()                               = default;
+    Material(const Material&)                = delete;
+    Material& operator=(const Material&)     = delete;
+    Material(Material&&) noexcept            = default;
+    Material& operator=(Material&&) noexcept = default;
+
+    bool                                     FromJson(const owe::Json&);               // legacy
+    bool                                     FromJson(const owe::Json&, SceneVersion); // canonical
+    auto                                     clone() const -> Material;
+    void                                     MergePass(const MaterialPass&);
+    std::string                              blending { "translucent" };
+    std::string                              cullmode { "nocull" };
+    std::string                              shader;
+    std::string                              depthtest { "disabled" };
+    std::string                              depthwrite { "disabled" };
+    std::vector<std::string>                 textures;
+    rstd::json::Array                        usertextures;
+    std::unordered_map<std::string, int32_t> combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;
     std::unordered_map<std::string, AnimCurve>          constantshadervalues_animations;
@@ -64,10 +67,5 @@ public:
     bool use_puppet { false };
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MaterialPassBindItem, name, index);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MaterialPass, bind, target, textures, combos,
-                                   constantshadervalues);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Material, blending, shader, textures, combos,
-                                   constantshadervalues);
 } // namespace wpscene
 } // namespace owe

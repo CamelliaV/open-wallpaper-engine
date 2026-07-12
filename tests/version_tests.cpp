@@ -16,9 +16,9 @@
 // the invariants below or it fails immediately.
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
 import rstd.cppstd;
+import wescene.json;
 import wescene.testing.corpus;
 
 using owe::testing::Corpus;
@@ -104,18 +104,38 @@ TEST_P(ScenePkgVersionTest, AllWorkshopsParseAndExposeSaneScene) {
         const auto& w = *ref.workshop;
         SCOPED_TRACE("workshop " + w.id);
 
-        ASSERT_TRUE(w.snapshot.contains("pkg"));
-        EXPECT_EQ(w.snapshot["pkg"].value("version", std::string {}), version);
-        EXPECT_GT(w.snapshot["pkg"].value("file_count", 0), 0);
-        EXPECT_TRUE(w.snapshot["pkg"].value("has_scene_json", false));
+        auto pkg = w.snapshot.get("pkg");
+        ASSERT_TRUE(pkg.is_some());
+        auto pkg_version = (**pkg).get("version");
+        ASSERT_TRUE(pkg_version.is_some());
+        EXPECT_EQ(rstd::cppstd::to_string(*(**pkg_version).as_str()), version);
+        auto file_count = (**pkg).get("file_count");
+        ASSERT_TRUE(file_count.is_some());
+        EXPECT_GT((**file_count).as_i64().unwrap_or(0), 0);
+        auto has_scene_json = (**pkg).get("has_scene_json");
+        ASSERT_TRUE(has_scene_json.is_some());
+        EXPECT_TRUE((**has_scene_json).as_bool().unwrap_or(false));
 
-        ASSERT_TRUE(w.snapshot.contains("scene"));
-        const auto& scene = w.snapshot["scene"];
-        EXPECT_TRUE(scene.value("parsed", false))
-            << "scene.json failed: " << scene.value("error", std::string {});
-        if (scene.value("is_ortho", false)) {
-            EXPECT_GT(scene["ortho"].value("width", 0), 0);
-            EXPECT_GT(scene["ortho"].value("height", 0), 0);
+        auto scene = w.snapshot.get("scene");
+        ASSERT_TRUE(scene.is_some());
+        auto parsed = (**scene).get("parsed");
+        ASSERT_TRUE(parsed.is_some());
+        auto error = (**scene).get("error");
+        EXPECT_TRUE((**parsed).as_bool().unwrap_or(false))
+            << "scene.json failed: "
+            << (error.is_some() && (**error).as_str().is_some()
+                    ? rstd::cppstd::to_string(*(**error).as_str())
+                    : "");
+        auto is_ortho = (**scene).get("is_ortho");
+        if (is_ortho.is_some() && (**is_ortho).as_bool().unwrap_or(false)) {
+            auto ortho = (**scene).get("ortho");
+            ASSERT_TRUE(ortho.is_some());
+            auto width  = (**ortho).get("width");
+            auto height = (**ortho).get("height");
+            ASSERT_TRUE(width.is_some());
+            ASSERT_TRUE(height.is_some());
+            EXPECT_GT((**width).as_i64().unwrap_or(0), 0);
+            EXPECT_GT((**height).as_i64().unwrap_or(0), 0);
         }
     }
 }
@@ -135,22 +155,36 @@ class TextureTexbTest : public ::testing::TestWithParam<int> {};
 class TextureFormatTest : public ::testing::TestWithParam<int> {};
 
 static void CheckTexInvariants(const Corpus::TexRef& ref) {
-    const auto& w = *ref.workshop;
-    const auto& t = *ref.tex;
-    SCOPED_TRACE("workshop " + w.id + " tex " + t.value("path", std::string {}));
-    EXPECT_TRUE(t.value("ok", false));
-    EXPECT_GT(t.value("width", 0), 0);
-    EXPECT_GT(t.value("height", 0), 0);
-    EXPECT_GT(t.value("map_width", 0), 0);
-    EXPECT_GT(t.value("map_height", 0), 0);
-    EXPECT_GT(t.value("count", 0), 0);
+    const auto& w    = *ref.workshop;
+    const auto& t    = *ref.tex;
+    auto        path = t.get("path");
+    SCOPED_TRACE("workshop " + w.id + " tex " +
+                 (path.is_some() && (**path).as_str().is_some()
+                      ? rstd::cppstd::to_string(*(**path).as_str())
+                      : ""));
+    auto ok         = t.get("ok");
+    auto width      = t.get("width");
+    auto height     = t.get("height");
+    auto map_width  = t.get("map_width");
+    auto map_height = t.get("map_height");
+    auto count      = t.get("count");
+    ASSERT_TRUE(ok.is_some() && width.is_some() && height.is_some() && map_width.is_some() &&
+                map_height.is_some() && count.is_some());
+    EXPECT_TRUE((**ok).as_bool().unwrap_or(false));
+    EXPECT_GT((**width).as_i64().unwrap_or(0), 0);
+    EXPECT_GT((**height).as_i64().unwrap_or(0), 0);
+    EXPECT_GT((**map_width).as_i64().unwrap_or(0), 0);
+    EXPECT_GT((**map_height).as_i64().unwrap_or(0), 0);
+    EXPECT_GT((**count).as_i64().unwrap_or(0), 0);
 }
 
 TEST_P(TextureTexvTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_texv(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        EXPECT_EQ(r.tex->value("texv", -1), GetParam());
+        auto value = r.tex->get("texv");
+        ASSERT_TRUE(value.is_some());
+        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -158,7 +192,9 @@ TEST_P(TextureTexiTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_texi(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        EXPECT_EQ(r.tex->value("texi", -1), GetParam());
+        auto value = r.tex->get("texi");
+        ASSERT_TRUE(value.is_some());
+        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -166,7 +202,9 @@ TEST_P(TextureTexbTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_texb(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        EXPECT_EQ(r.tex->value("texb", -1), GetParam());
+        auto value = r.tex->get("texb");
+        ASSERT_TRUE(value.is_some());
+        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -174,7 +212,9 @@ TEST_P(TextureFormatTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_format(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        EXPECT_EQ(r.tex->value("format", -1), GetParam());
+        auto value = r.tex->get("format");
+        ASSERT_TRUE(value.is_some());
+        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -205,17 +245,28 @@ class MdlMdlsTest : public ::testing::TestWithParam<int> {};
 class MdlMdlaTest : public ::testing::TestWithParam<int> {};
 
 static void CheckMdlInvariants(const Corpus::MdlRef& ref) {
-    const auto& w = *ref.workshop;
-    const auto& m = *ref.mdl;
-    SCOPED_TRACE("workshop " + w.id + " mdl " + m.value("path", std::string {}));
+    const auto& w    = *ref.workshop;
+    const auto& m    = *ref.mdl;
+    auto        path = m.get("path");
+    SCOPED_TRACE("workshop " + w.id + " mdl " +
+                 (path.is_some() && (**path).as_str().is_some()
+                      ? rstd::cppstd::to_string(*(**path).as_str())
+                      : ""));
     // Failed parses are tolerated (some .mdl files are non-puppet 3D
     // models that WPMdlParser intentionally rejects), but the version
     // stamps must still be readable.
-    EXPECT_GE(m.value("mdlv", -1), 0);
-    EXPECT_GE(m.value("mdls", -1), 0);
-    EXPECT_GE(m.value("mdla", -1), 0);
-    if (m.value("ok", false)) {
-        EXPECT_GT(m.value("bones", 0), 0);
+    auto mdlv = m.get("mdlv");
+    auto mdls = m.get("mdls");
+    auto mdla = m.get("mdla");
+    auto ok   = m.get("ok");
+    ASSERT_TRUE(mdlv.is_some() && mdls.is_some() && mdla.is_some() && ok.is_some());
+    EXPECT_GE((**mdlv).as_i64().unwrap_or(-1), 0);
+    EXPECT_GE((**mdls).as_i64().unwrap_or(-1), 0);
+    EXPECT_GE((**mdla).as_i64().unwrap_or(-1), 0);
+    if ((**ok).as_bool().unwrap_or(false)) {
+        auto bones = m.get("bones");
+        ASSERT_TRUE(bones.is_some());
+        EXPECT_GT((**bones).as_i64().unwrap_or(0), 0);
     }
 }
 
@@ -223,7 +274,9 @@ TEST_P(MdlMdlvTest, AllInstancesExposeStamps) {
     auto slice = Corpus::instance().mdls_with_mdlv(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        EXPECT_EQ(r.mdl->value("mdlv", -1), GetParam());
+        auto value = r.mdl->get("mdlv");
+        ASSERT_TRUE(value.is_some());
+        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
         CheckMdlInvariants(r);
     }
 }
@@ -231,7 +284,9 @@ TEST_P(MdlMdlsTest, AllInstancesExposeStamps) {
     auto slice = Corpus::instance().mdls_with_mdls(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        EXPECT_EQ(r.mdl->value("mdls", -1), GetParam());
+        auto value = r.mdl->get("mdls");
+        ASSERT_TRUE(value.is_some());
+        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
         CheckMdlInvariants(r);
     }
 }
@@ -239,7 +294,9 @@ TEST_P(MdlMdlaTest, AllInstancesExposeStamps) {
     auto slice = Corpus::instance().mdls_with_mdla(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        EXPECT_EQ(r.mdl->value("mdla", -1), GetParam());
+        auto value = r.mdl->get("mdla");
+        ASSERT_TRUE(value.is_some());
+        EXPECT_EQ((**value).as_i64().unwrap_or(-1), GetParam());
         CheckMdlInvariants(r);
     }
 }

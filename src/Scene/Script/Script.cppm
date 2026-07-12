@@ -1,8 +1,8 @@
 module;
 
 export module wescene.script;
-import nlohmann.json;
 import wescene.core;
+import wescene.json;
 import rstd;
 import rstd.cppstd;
 import wescene.scene;
@@ -114,7 +114,7 @@ struct PropDescriptor {
     Kind           kind { Kind::Other };
     std::string    name;
     std::string    label;
-    nlohmann::json default_value; // captured verbatim
+    Json           default_value; // captured verbatim
     double         min { 0.0 };
     double         max { 1.0 };
     bool           integer { false };
@@ -139,7 +139,7 @@ public:
     // stub (the JS-side default created at bootstrap).
     FieldScript* MakeFieldScript(
         std::string_view source, std::string_view script_sha, FieldKind field_kind,
-        const nlohmann::json& properties_config, const nlohmann::json& initial_value,
+        const Json& properties_config, const Json& initial_value,
         owe::SceneNode* node = nullptr, std::vector<owe::SceneNode*> clones = {},
         std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clones = {});
 
@@ -160,7 +160,7 @@ public:
     // Patch one Wallpaper Engine user property into engine.userProperties.
     // `property` should be the descriptor object shape used by project.json
     // (`{value: ...}` plus optional metadata).
-    void SetUserProperty(std::string_view key, const nlohmann::json& property);
+    void SetUserProperty(std::string_view key, const Json& property);
 
     // Dispatch Wallpaper Engine media callbacks for the current media
     // snapshot. Call from the renderer owner thread.
@@ -280,7 +280,7 @@ void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi);
 
 // Patch `engine.userProperties` on the ScriptScene attached to `scene`.
 // No-op when the scene has no script runtime.
-void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const nlohmann::json& property);
+void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const Json& property);
 
 void SetSceneMediaStatus(owe::Scene& scene, const MediaStatus& status);
 

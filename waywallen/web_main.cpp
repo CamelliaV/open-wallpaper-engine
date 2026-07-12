@@ -12,10 +12,9 @@
 #include <sys/prctl.h>
 #include <sys/socket.h>
 
-#include <nlohmann/json.hpp>
-
 import rstd.cppstd;
 import rstd.log;
+import wescene.json;
 import vulkan;
 import weweb;
 import wavsen.audio;
@@ -226,16 +225,12 @@ void drain_settings(HostState& s) {
             // Forward unknown keys to the page as a user-property patch.
             // Try parse as JSON first (so numbers / booleans / objects
             // round-trip); fall back to string.
-            nlohmann::json v;
-            auto           parsed = nlohmann::json::parse(sd.value,
-                                                          /*cb*/ nullptr,
-                                                          /*allow_exceptions*/ false,
-                                                          /*ignore_comments*/ true);
-            if (parsed.is_discarded()) {
-                v["value"] = sd.value;
-            } else {
-                v["value"] = parsed;
-            }
+            auto parsed =
+                rstd::json::from_str(rstd::cppstd::as_str(sd.value), { .allow_comments = true });
+            auto object = rstd::json::Map::make();
+            object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")),
+                          parsed.is_ok() ? parsed.unwrap() : owe::JsonFromStd(sd.value));
+            auto v = owe::Json::Object(rstd::move(object));
             s.host->ApplyUserProperty(sd.key, v);
         }
     }

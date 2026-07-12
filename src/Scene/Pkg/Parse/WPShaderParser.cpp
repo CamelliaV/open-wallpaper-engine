@@ -4,7 +4,6 @@ module;
 #include "Utils/String.h"
 
 module wescene.pkg.parse;
-import nlohmann.json;
 import wescene.spec_names;
 import wescene.core;
 import wescene.types;
@@ -1794,9 +1793,8 @@ namespace
 // raw post-PreShaderSrc state (includes resolved, prologue not yet
 // applied, regex extraction not yet run) so a replay through the full
 // pipeline exercises every transform downstream.
-nlohmann::json BuildShaderRecord(std::string_view scene_id, std::span<const WPShaderUnit> units,
-                                 const WPShaderInfo*              shader_info,
-                                 std::span<const WPShaderTexInfo> texs) {
+Json BuildShaderRecord(std::string_view scene_id, std::span<const WPShaderUnit> units,
+                       const WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs) {
     auto stage_name = [](ShaderType s) -> const char* {
         switch (s) {
         case ShaderType::VERTEX: return "VERTEX";
@@ -1806,32 +1804,46 @@ nlohmann::json BuildShaderRecord(std::string_view scene_id, std::span<const WPSh
         return "UNKNOWN";
     };
 
-    nlohmann::json rec;
-    rec["scene_id"] = std::string(scene_id);
+    auto rec = rstd::json::Map::make();
+    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("scene_id")),
+               JsonFromStd(scene_id));
 
-    nlohmann::json js_stages = nlohmann::json::array();
+    auto js_stages = rstd::json::Array::make();
     for (const auto& u : units) {
-        js_stages.push_back({ { "stage", stage_name(u.stage) }, { "src", u.src } });
+        auto stage = rstd::json::Map::make();
+        stage.insert(::alloc::string::String::make(rstd::cppstd::as_str("stage")),
+                     JsonFromStd(stage_name(u.stage)));
+        stage.insert(::alloc::string::String::make(rstd::cppstd::as_str("src")),
+                     JsonFromStd(u.src));
+        js_stages.push(Json::Object(rstd::move(stage)));
     }
-    rec["stages"] = std::move(js_stages);
+    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("stages")),
+               Json::Array(rstd::move(js_stages)));
 
-    nlohmann::json js_combos = nlohmann::json::object();
+    auto js_combos = rstd::json::Map::make();
     if (shader_info) {
-        for (const auto& [k, v] : shader_info->combos) js_combos[k] = v;
+        for (const auto& [k, v] : shader_info->combos)
+            js_combos.insert(::alloc::string::String::make(rstd::cppstd::as_str(k)),
+                             JsonFromStd(v));
     }
-    rec["combos"] = std::move(js_combos);
+    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("combos")),
+               Json::Object(rstd::move(js_combos)));
 
-    nlohmann::json js_texs = nlohmann::json::array();
+    auto js_texs = rstd::json::Array::make();
     for (const auto& t : texs) {
-        js_texs.push_back(
-            { { "enabled", t.enabled },
-              { "compos",
-                nlohmann::json::array(
-                    { t.composEnabled[0], t.composEnabled[1], t.composEnabled[2] }) } });
+        auto compos = rstd::json::Array::make();
+        for (bool enabled : t.composEnabled) compos.push(rstd::into<Json>(enabled));
+        auto tex = rstd::json::Map::make();
+        tex.insert(::alloc::string::String::make(rstd::cppstd::as_str("enabled")),
+                   rstd::into<Json>(bool { t.enabled }));
+        tex.insert(::alloc::string::String::make(rstd::cppstd::as_str("compos")),
+                   Json::Array(rstd::move(compos)));
+        js_texs.push(Json::Object(rstd::move(tex)));
     }
-    rec["tex_infos"] = std::move(js_texs);
+    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("tex_infos")),
+               Json::Array(rstd::move(js_texs)));
 
-    return rec;
+    return Json::Object(rstd::move(rec));
 }
 
 // Appends one JSONL line to WP_SHADER_RECORD's path. O_APPEND is atomic
@@ -1841,8 +1853,8 @@ void MaybeRecordCompile(std::string_view scene_id, std::span<const WPShaderUnit>
                         const WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs) {
     const char* path = std::getenv("WP_SHADER_RECORD");
     if (! path || path[0] == '\0') return;
-    nlohmann::json rec  = BuildShaderRecord(scene_id, units, shader_info, texs);
-    std::string    line = rec.dump();
+    Json        rec  = BuildShaderRecord(scene_id, units, shader_info, texs);
+    std::string line = Dump(rec);
     line.push_back('\n');
     if (FILE* f = std::fopen(path, "a")) {
         std::fwrite(line.data(), 1, line.size(), f);
@@ -2164,9 +2176,10 @@ WPShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs
     return result;
 }
 
-CompileMaterialShaderResult
-WPShaderParser::CompileMaterialShader(const nlohmann::json& material_json, fs::VFS& vfs,
-                                      std::string_view scene_id, const Combos& combos_override) {
+CompileMaterialShaderResult WPShaderParser::CompileMaterialShader(const Json&      material_json,
+                                                                  fs::VFS&         vfs,
+                                                                  std::string_view scene_id,
+                                                                  const Combos& combos_override) {
     CompileMaterialShaderResult r;
 
     wpscene::Material mat;

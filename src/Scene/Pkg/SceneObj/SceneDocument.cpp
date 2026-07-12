@@ -1,11 +1,14 @@
 module;
 
+#include <charconv>
+#include <limits>
+
 #include <rstd/macro.hpp>
 
 module wescene.pkg.scene_obj;
-import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
+import wescene.json;
 import wescene.pkg_fs;
 
 using namespace owe::wpscene;
@@ -25,18 +28,20 @@ SceneVersion ParsePkgVersionStamp(std::string_view stamp) {
     return v;
 }
 
-SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root) {
-    if (root.is_object() && root.contains("version") && root.at("version").is_number_unsigned()) {
-        return root.at("version").template get<SceneJsonVersion>();
-    }
+SceneJsonVersion DetectSceneJsonVersion(const owe::Json& root) {
+    auto version = root.get("version");
+    if (version.is_none()) return kSceneJsonVersionDefault;
+    auto value = (**version).as_u64();
+    if (value.is_some() && *value <= std::numeric_limits<SceneJsonVersion>::max())
+        return static_cast<SceneJsonVersion>(*value);
     return kSceneJsonVersionDefault;
 }
 
 } // namespace owe::wpscene
 
-bool Orthogonalprojection::FromJson(const nlohmann::json& json) {
+bool Orthogonalprojection::FromJson(const owe::Json& json) {
     if (json.is_null()) return false;
-    if (json.contains("auto")) {
+    if (json.get("auto").is_some()) {
         owe::GetJsonValue(json, "auto", auto_);
     } else {
         owe::GetJsonValue(json, "width", width);
@@ -45,19 +50,22 @@ bool Orthogonalprojection::FromJson(const nlohmann::json& json) {
     return true;
 }
 
-bool SceneCamera::FromJson(const nlohmann::json& json) {
+bool SceneCamera::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "center", center);
     owe::GetJsonValue(json, "eye", eye);
     owe::GetJsonValue(json, "up", up);
-    if (json.contains("paths") && json.at("paths").is_array()) {
-        for (const auto& path : json.at("paths")) {
-            if (path.is_string()) paths.push_back(path.get<std::string>());
+    if (auto raw_paths = json.get("paths"); raw_paths.is_some()) {
+        auto array = (**raw_paths).as_array();
+        if (array.is_none()) return true;
+        for (const auto& path : **array) {
+            auto value = path.as_str();
+            if (value.is_some()) paths.push_back(rstd::cppstd::to_string(*value));
         }
     }
     return true;
 }
 
-bool SceneLightConfig::FromJson(const nlohmann::json& json) {
+bool SceneLightConfig::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "directional", directional, false);
     owe::GetJsonValue(json, "directionalshadow", directionalshadow, false);
     owe::GetJsonValue(json, "point", point, false);
@@ -78,16 +86,21 @@ constexpr bool wants(SceneVersion v, SceneVersion gate) {
     return v == kSceneVersionUnknown || v >= gate;
 }
 
-void capture_user_bindings(SceneGeneral& g, const nlohmann::json& json) {
-    for (const auto& el : json.items()) {
-        if (! el.value().is_object()) continue;
-        auto it = el.value().find("user");
-        if (it == el.value().end() || ! it->is_string()) continue;
-        g.user_bindings[el.key()] = it->get<std::string>();
-    }
+void capture_user_bindings(SceneGeneral& g, const owe::Json& json) {
+    auto object = json.as_object();
+    if (object.is_none()) return;
+    (*object)->iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        const auto& field             = *entry_value;
+        if (! field.is_object()) return;
+        auto user = field.get("user");
+        if (user.is_none() || ! (**user).is_string()) return;
+        g.user_bindings[rstd::cppstd::to_string(entry_key->as_str())] =
+            rstd::cppstd::to_string(*(**user).as_str());
+    });
 }
 
-void parse_baseline(SceneGeneral& g, const nlohmann::json& json) {
+void parse_baseline(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "ambientcolor", g.ambientcolor);
     owe::GetJsonValue(json, "skylightcolor", g.skylightcolor);
     owe::GetJsonValue(json, "clearcolor", g.clearcolor);
@@ -110,18 +123,17 @@ void parse_baseline(SceneGeneral& g, const nlohmann::json& json) {
     owe::GetJsonValue(json, "camerashakespeed", g.camerashakespeed, false);
     owe::GetJsonValue(json, "camerashakeroughness", g.camerashakeroughness, false);
     g.isOrtho = false;
-    if (json.contains("orthogonalprojection")) {
-        const auto& ortho = json.at("orthogonalprojection");
-        if (ortho.is_null())
+    if (auto ortho = json.get("orthogonalprojection"); ortho.is_some()) {
+        if ((**ortho).is_null())
             g.isOrtho = false;
         else {
             g.isOrtho = true;
-            g.orthogonalprojection.FromJson(ortho);
+            g.orthogonalprojection.FromJson(**ortho);
         }
     }
 }
 
-void parse_v10_plus(SceneGeneral& g, const nlohmann::json& json) {
+void parse_v10_plus(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "hdr", g.hdr, false);
     owe::GetJsonValue(json, "norecompile", g.norecompile, false);
     owe::GetJsonValue(json, "bloomhdrfeather", g.bloomhdrfeather, false);
@@ -131,11 +143,11 @@ void parse_v10_plus(SceneGeneral& g, const nlohmann::json& json) {
     owe::GetJsonValue(json, "bloomhdrthreshold", g.bloomhdrthreshold, false);
 }
 
-void parse_v20_plus(SceneGeneral& g, const nlohmann::json& json) {
+void parse_v20_plus(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "bloomtint", g.bloomtint, false);
 }
 
-void parse_v21_plus(SceneGeneral& g, const nlohmann::json& json) {
+void parse_v21_plus(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "perspectiveoverridefov", g.perspectiveoverridefov, false);
     owe::GetJsonValue(json, "windenabled", g.windenabled, false);
     owe::GetJsonValue(json, "winddirection", g.winddirection, false);
@@ -144,7 +156,7 @@ void parse_v21_plus(SceneGeneral& g, const nlohmann::json& json) {
     owe::GetJsonValue(json, "gravitystrength", g.gravitystrength, false);
 }
 
-void parse_v22_plus(SceneGeneral& g, const nlohmann::json& json) {
+void parse_v22_plus(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "transparentsorting", g.transparentsorting, false);
     owe::GetJsonValue(json, "fogdistance", g.fogdistance, false);
     owe::GetJsonValue(json, "fogdistancestart", g.fogdistancestart, false);
@@ -154,7 +166,7 @@ void parse_v22_plus(SceneGeneral& g, const nlohmann::json& json) {
     owe::GetJsonValue(json, "fogdistanceenddensity", g.fogdistanceenddensity, false);
 }
 
-void parse_v23_plus(SceneGeneral& g, const nlohmann::json& json) {
+void parse_v23_plus(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "fogheight", g.fogheight, false);
     owe::GetJsonValue(json, "fogheightstart", g.fogheightstart, false);
     owe::GetJsonValue(json, "fogheightend", g.fogheightend, false);
@@ -163,26 +175,33 @@ void parse_v23_plus(SceneGeneral& g, const nlohmann::json& json) {
     owe::GetJsonValue(json, "fogheightenddensity", g.fogheightenddensity, false);
 }
 
-void parse_lightconfig(SceneGeneral& g, const nlohmann::json& json) {
-    if (json.contains("lightconfig") && json.at("lightconfig").is_object()) {
-        g.lightconfig.FromJson(json.at("lightconfig"));
+void parse_lightconfig(SceneGeneral& g, const owe::Json& json) {
+    if (auto lightconfig = json.get("lightconfig");
+        lightconfig.is_some() && (**lightconfig).is_object()) {
+        g.lightconfig.FromJson(**lightconfig);
     }
 }
 
-SceneObjectKind object_kind(const nlohmann::json& obj) {
+SceneObjectKind object_kind(const owe::Json& obj) {
     if (! obj.is_object()) return SceneObjectKind::Unknown;
-    if (obj.contains("image") && ! obj.at("image").is_null()) return SceneObjectKind::Image;
-    if (obj.contains("particle") && ! obj.at("particle").is_null())
+    if (auto value = obj.get("image"); value.is_some() && ! (**value).is_null())
+        return SceneObjectKind::Image;
+    if (auto value = obj.get("particle"); value.is_some() && ! (**value).is_null())
         return SceneObjectKind::Particle;
-    if (obj.contains("sound") && ! obj.at("sound").is_null()) return SceneObjectKind::Sound;
-    if (obj.contains("light") && ! obj.at("light").is_null()) return SceneObjectKind::Light;
-    if (obj.contains("text") && ! obj.at("text").is_null()) return SceneObjectKind::Text;
-    if (obj.contains("model") && ! obj.at("model").is_null()) return SceneObjectKind::Model;
-    if (obj.contains("camera") && ! obj.at("camera").is_null()) return SceneObjectKind::Camera;
+    if (auto value = obj.get("sound"); value.is_some() && ! (**value).is_null())
+        return SceneObjectKind::Sound;
+    if (auto value = obj.get("light"); value.is_some() && ! (**value).is_null())
+        return SceneObjectKind::Light;
+    if (auto value = obj.get("text"); value.is_some() && ! (**value).is_null())
+        return SceneObjectKind::Text;
+    if (auto value = obj.get("model"); value.is_some() && ! (**value).is_null())
+        return SceneObjectKind::Model;
+    if (auto value = obj.get("camera"); value.is_some() && ! (**value).is_null())
+        return SceneObjectKind::Camera;
     return SceneObjectKind::Container;
 }
 
-SceneObjectMetadata parse_object_metadata(const nlohmann::json& obj, std::size_t raw_index) {
+SceneObjectMetadata parse_object_metadata(const owe::Json& obj, std::size_t raw_index) {
     SceneObjectMetadata metadata;
     metadata.raw_index = raw_index;
     metadata.kind      = object_kind(obj);
@@ -200,14 +219,16 @@ SceneObjectMetadata parse_object_metadata(const nlohmann::json& obj, std::size_t
     return metadata;
 }
 
-std::vector<SceneObjectMetadata> parse_objects_metadata(const nlohmann::json& root) {
+std::vector<SceneObjectMetadata> parse_objects_metadata(const owe::Json& root) {
     std::vector<SceneObjectMetadata> objects;
-    if (! root.contains("objects") || ! root.at("objects").is_array()) return objects;
+    auto                             raw_objects = root.get("objects");
+    if (raw_objects.is_none()) return objects;
 
-    const auto& raw_objects = root.at("objects");
-    objects.reserve(raw_objects.size());
-    for (std::size_t i = 0; i < raw_objects.size(); ++i) {
-        objects.push_back(parse_object_metadata(raw_objects.at(i), i));
+    auto array = (**raw_objects).as_array();
+    if (array.is_none()) return objects;
+    objects.reserve((*array)->len());
+    for (std::size_t i = 0; i < (*array)->len(); ++i) {
+        objects.push_back(parse_object_metadata((**array)[i], i));
     }
     return objects;
 }
@@ -252,11 +273,9 @@ scene_canvas_extent(const SceneMetadata&                 metadata,
 
 } // namespace
 
-bool SceneGeneral::FromJson(const nlohmann::json& json) {
-    return FromJson(json, kSceneVersionUnknown);
-}
+bool SceneGeneral::FromJson(const owe::Json& json) { return FromJson(json, kSceneVersionUnknown); }
 
-bool SceneGeneral::FromJson(const nlohmann::json& json, SceneVersion v) {
+bool SceneGeneral::FromJson(const owe::Json& json, SceneVersion v) {
     parse_baseline(*this, json);
     if (wants(v, 10)) parse_v10_plus(*this, json);
     if (wants(v, 20)) parse_v20_plus(*this, json);
@@ -269,22 +288,20 @@ bool SceneGeneral::FromJson(const nlohmann::json& json, SceneVersion v) {
     return true;
 }
 
-bool SceneMetadata::FromJson(const nlohmann::json& json) {
-    return FromJson(json, kSceneVersionUnknown);
-}
+bool SceneMetadata::FromJson(const owe::Json& json) { return FromJson(json, kSceneVersionUnknown); }
 
-bool SceneMetadata::FromJson(const nlohmann::json& json, SceneVersion v) {
+bool SceneMetadata::FromJson(const owe::Json& json, SceneVersion v) {
     pkg_version        = v;
     scene_json_version = DetectSceneJsonVersion(json);
-    if (json.contains("camera")) {
+    if (auto camera_json = json.get("camera"); camera_json.is_some()) {
         // camera schema is identical across PKGV0001..PKGV0023; no version gate needed.
-        camera.FromJson(json.at("camera"));
+        camera.FromJson(**camera_json);
     } else {
         rstd_error("scene no camera");
         return false;
     }
-    if (json.contains("general")) {
-        general.FromJson(json.at("general"), v);
+    if (auto general_json = json.get("general"); general_json.is_some()) {
+        general.FromJson(**general_json, v);
     } else {
         rstd_error("scene no genera data");
         return false;
@@ -298,7 +315,12 @@ namespace owe::wpscene
 std::optional<SceneDocument> ParseSceneDocumentJson(std::string_view buf,
                                                     SceneVersion     pkg_version) {
     SceneDocument doc;
-    if (! owe::ParseJson(buf, doc.root_json)) return std::nullopt;
+    auto          parsed = owe::ParseJson(buf);
+    if (parsed.is_err()) {
+        rstd_error("Can't parse scene json: {}", parsed.unwrap_err());
+        return std::nullopt;
+    }
+    doc.root_json = parsed.unwrap();
     if (! doc.metadata.FromJson(doc.root_json, pkg_version)) return std::nullopt;
     doc.objects_metadata       = parse_objects_metadata(doc.root_json);
     doc.metadata.canvas_extent = scene_canvas_extent(doc.metadata, doc.objects_metadata);

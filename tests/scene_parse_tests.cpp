@@ -13,8 +13,39 @@
 
 #include <gtest/gtest.h>
 
-import rstd.cppstd;
+import wescene.json;
+import wescene.pkg.scene_obj;
 import wescene.testing.scene_parse_probe;
+
+TEST(FieldBindingJson, CompatibilityReaderPopulatesAnimationMetadata) {
+    auto parsed = owe::ParseJson(R"({"enabled":true,"x":{"value":1.5},"y":-2.0,"magic":7})");
+    ASSERT_TRUE(parsed.is_ok());
+
+    owe::wpscene::AnimKeyframeTangent tangent;
+    ASSERT_TRUE(owe::wpscene::ParseAnimKeyframeTangent(parsed.unwrap(), tangent));
+    EXPECT_TRUE(tangent.enabled);
+    EXPECT_FLOAT_EQ(tangent.x, 1.5f);
+    EXPECT_FLOAT_EQ(tangent.y, -2.0f);
+    EXPECT_EQ(tangent.magic, 7);
+}
+
+TEST(SceneObjectClone, MembersProvideCloneTraitImplementation) {
+    owe::wpscene::AnimCurve curve;
+    curve.relative = true;
+    curve.c0.push_back({ .frame = 3, .value = 1.5f });
+
+    auto direct_curve = curve.clone();
+    auto trait_curve  = rstd::as<rstd::clone::Clone>(curve).clone();
+    ASSERT_EQ(direct_curve.c0.size(), 1u);
+    EXPECT_FLOAT_EQ(trait_curve.c0[0].value, 1.5f);
+
+    owe::wpscene::Material material;
+    material.shader      = "generic";
+    auto direct_material = material.clone();
+    auto trait_material  = rstd::as<rstd::clone::Clone>(material).clone();
+    EXPECT_EQ(direct_material.shader, "generic");
+    EXPECT_EQ(trait_material.shader, "generic");
+}
 
 namespace
 {

@@ -5,10 +5,10 @@
 
 import rstd.cppstd;
 import rstd.log;
+import wescene.json;
 import wescene.scene_wallpaper;
 import wescene.utils;
 import viewer.common;
-import nlohmann.json;
 
 using namespace std;
 
@@ -141,17 +141,23 @@ int main(int argc, char** argv) {
         }
         std::stringstream ss;
         ss << is.rdbuf();
-        auto parsed = nlohmann::json::parse(ss.str(),
-                                            /*cb*/ nullptr,
-                                            /*allow_ex*/ false,
-                                            /*ignore_comments*/ true);
+        auto parsed_result = owe::ParseJson(ss.str(), { .allow_comments = true });
+        if (parsed_result.is_err()) {
+            auto error = parsed_result.unwrap_err();
+            std::cerr << "--user-properties: '" << up_path << "' is invalid JSON at line "
+                      << error.line() << " column " << error.column() << '\n';
+            return 1;
+        }
+        auto parsed = parsed_result.unwrap();
         if (! parsed.is_object()) {
             std::cerr << "--user-properties: '" << up_path << "' is not a JSON object\n";
             return 1;
         }
-        for (auto it = parsed.begin(); it != parsed.end(); ++it) {
-            config.user_properties.emplace(it.key(), it.value());
-        }
+        auto object = parsed.as_object();
+        (*object)->iter().for_each([&](auto entry) {
+            auto [entry_key, entry_value] = entry;
+            config.user_properties.insert(entry_key->clone(), entry_value->clone());
+        });
     }
 
     psw->configure(std::move(config));

@@ -12,11 +12,11 @@
 // validator succeeded.
 
 #include <argparse/argparse.hpp>
-#include <nlohmann/json.hpp>
 
 #include <regex>
 
 import wescene.pkg.parse;
+import wescene.json;
 import wescene.fs;
 import wescene.pkg_fs;
 import wescene.scene;
@@ -28,12 +28,30 @@ import rstd.log;
 import rstd.cppstd;
 import wescene.testing.corpus;
 import wescene.testing.pkg_header;
+import wescene.testing.json_builder;
 
 namespace fs = std::filesystem;
-using json   = nlohmann::json;
+using Json     = owe::Json;
+using JsonSink = rstd::Option<rstd::mut_ref<Json>>;
 
 namespace
 {
+
+template<typename T>
+void SetJsonField(Json& object, std::string_view key, T&& value) {
+    owe::SetMember(object, key, std::forward<T>(value));
+}
+
+Json StatusJson(bool ok, std::string_view error = {}) {
+    auto out = owe::MakeObject();
+    SetJsonField(out, "ok", ok);
+    if (! error.empty()) SetJsonField(out, "error", error);
+    return out;
+}
+
+void AppendJson(const JsonSink& array, Json value) {
+    if (array.is_some()) owe::AppendJson(**array, std::move(value));
+}
 
 constexpr const char* kDefaultWorkshopDir =
 #ifdef WAYWALLEN_WORKSHOP_DIR
@@ -225,20 +243,19 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
         return false;
     }
     const std::string text = stream->ReadAllStr();
-    json              j;
-    try {
-        j = json::parse(text);
-    } catch (const std::exception& e) {
-        err = std::string("scene.json parse: ") + e.what();
+    auto              parsed = owe::ParseJson(text);
+    if (parsed.is_err()) {
+        err = "scene.json parse failed";
         return false;
     }
+    auto                        j = parsed.unwrap();
     owe::wpscene::SceneMetadata sc;
     if (! sc.FromJson(j, pkg_v)) {
         err = "SceneMetadata::FromJson returned false";
         return false;
     }
     auto scene_objs = owe::ExpandObjects(j, vfs, pkg_v);
-    owe::AdjustAutoOrthoProjection(sc, scene_objs);
+    (void)owe::ResolveOrthoProjectionExtent(sc, scene_objs);
     (void)scene_objs;
     return true;
 }
@@ -266,7 +283,7 @@ bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
 }
 
 void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
-                      const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
+                      const std::string& pkg_id, Counters& c, bool quiet, const JsonSink& sink) {
     owe::WPTexImageParser      parser(&vfs);
     constexpr std::string_view prefix = "/materials/";
     constexpr std::string_view suffix = ".tex";
@@ -308,19 +325,21 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries, owe::f
                 stdout, "FAIL  %s tex %s  %s\n", pkg_id.c_str(), e.path.c_str(), err.c_str());
         }
         if (sink) {
-            json entry { { "path", e.path }, { "ok", ok } };
+            auto entry = owe::MakeObject();
+            SetJsonField(entry, "path", e.path);
+            SetJsonField(entry, "ok", ok);
             if (ok) {
-                if (video) entry["video"] = true;
+                if (video) SetJsonField(entry, "video", true);
             } else {
-                entry["error"] = err;
+                SetJsonField(entry, "error", err);
             }
-            sink->push_back(std::move(entry));
+            AppendJson(sink, std::move(entry));
         }
     }
 }
 
 void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
-                     const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
+                     const std::string& pkg_id, Counters& c, bool quiet, const JsonSink& sink) {
     for (const auto& e : entries) {
         if (! StartsWith(e.path, "/materials/") || ! EndsWith(e.path, ".json")) continue;
         const std::string vfs_path = "/assets" + e.path;
@@ -329,28 +348,27 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries, owe::fs
             ++c.shader_fail;
             std::fprintf(
                 stdout, "FAIL  %s shader %s  cannot open\n", pkg_id.c_str(), e.path.c_str());
-            if (sink)
-                sink->push_back(
-                    { { "path", e.path }, { "ok", false }, { "error", "cannot open" } });
+            if (sink) {
+                auto entry = StatusJson(false, "cannot open");
+                SetJsonField(entry, "path", e.path);
+                AppendJson(sink, std::move(entry));
+            }
             continue;
         }
         const std::string text = stream->ReadAllStr();
-        json              jmat;
-        try {
-            jmat = json::parse(text);
-        } catch (const std::exception& ex) {
+        auto              parsed = owe::ParseJson(text);
+        if (parsed.is_err()) {
             ++c.shader_fail;
-            std::fprintf(stdout,
-                         "FAIL  %s shader %s  json: %s\n",
-                         pkg_id.c_str(),
-                         e.path.c_str(),
-                         ex.what());
-            if (sink)
-                sink->push_back({ { "path", e.path },
-                                  { "ok", false },
-                                  { "error", std::string("json: ") + ex.what() } });
+            std::fprintf(
+                stdout, "FAIL  %s shader %s  invalid JSON\n", pkg_id.c_str(), e.path.c_str());
+            if (sink) {
+                auto entry = StatusJson(false, "invalid JSON");
+                SetJsonField(entry, "path", e.path);
+                AppendJson(sink, std::move(entry));
+            }
             continue;
         }
+        auto                             jmat = parsed.unwrap();
         owe::CompileMaterialShaderResult r;
         try {
             r = owe::WPShaderParser::CompileMaterialShader(jmat, vfs, pkg_id);
@@ -379,15 +397,16 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries, owe::fs
                          r.error.c_str());
         }
         if (sink) {
-            json entry { { "path", e.path }, { "ok", r.ok }, { "shader_name", r.shader_name } };
-            if (! r.ok) entry["error"] = r.error;
-            sink->push_back(std::move(entry));
+            auto entry = StatusJson(r.ok, r.ok ? std::string_view {} : std::string_view(r.error));
+            SetJsonField(entry, "path", e.path);
+            SetJsonField(entry, "shader_name", r.shader_name);
+            AppendJson(sink, std::move(entry));
         }
     }
 }
 
 void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
-                  const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
+                  const std::string& pkg_id, Counters& c, bool quiet, const JsonSink& sink) {
     for (const auto& e : entries) {
         if (! EndsWith(e.path, ".mdl")) continue;
         // WPMdlParser::Parse takes a path without /assets prefix.
@@ -412,9 +431,9 @@ void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::V
                 stdout, "FAIL  %s mdl %s  %s\n", pkg_id.c_str(), e.path.c_str(), err.c_str());
         }
         if (sink) {
-            json entry { { "path", e.path }, { "ok", ok } };
-            if (! ok) entry["error"] = err;
-            sink->push_back(std::move(entry));
+            auto entry = StatusJson(ok, ok ? std::string_view {} : std::string_view(err));
+            SetJsonField(entry, "path", e.path);
+            AppendJson(sink, std::move(entry));
         }
     }
 }
@@ -431,7 +450,7 @@ std::string FormatMdlFlag(uint32_t flag) {
 }
 
 void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::VFS& vfs,
-                        const std::string& pkg_id, Counters& c, bool quiet, json* sink) {
+                        const std::string& pkg_id, Counters& c, bool quiet, const JsonSink& sink) {
     for (const auto& e : entries) {
         if (! EndsWith(e.path, ".mdl")) continue;
         std::string      name(e.path.substr(1));
@@ -465,34 +484,39 @@ void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries, owe:
                          err.c_str());
         }
         if (sink) {
-            json entry { { "path", e.path }, { "ok", ok } };
+            auto entry = StatusJson(ok, ok ? std::string_view {} : std::string_view(err));
+            SetJsonField(entry, "path", e.path);
             if (ok) {
-                entry["mdlv"]       = h.mdlv;
-                entry["mesh_count"] = h.mesh_count;
-                json flag_arr       = json::array();
+                SetJsonField(entry, "mdlv", h.mdlv);
+                SetJsonField(entry, "mesh_count", h.mesh_count);
+                auto flag_arr = owe::MakeArray();
                 for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {
                     uint8_t     b = static_cast<uint8_t>((h.mdl_flag >> (byte_idx * 8)) & 0xFFu);
                     std::string bits(8, '0');
                     for (int i = 0; i < 8; ++i)
                         if (b & (1u << (7 - i))) bits[i] = '1';
-                    flag_arr.push_back(std::move(bits));
+                    owe::AppendElement(flag_arr, std::move(bits));
                 }
-                entry["flag"] = std::move(flag_arr);
-            } else {
-                entry["error"] = err;
+                owe::SetJson(entry, "flag", std::move(flag_arr));
             }
-            sink->push_back(std::move(entry));
+            AppendJson(sink, std::move(entry));
         }
     }
 }
 
-bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c, json* pkgs_arr) {
+bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
+                   const JsonSink& pkgs_arr) {
     const std::string pkg_id = pkg_dir.filename().string();
 
     for (const auto* sk : kSkipIds) {
         if (pkg_id == sk) {
             std::fprintf(stderr, "SKIP  %s (in kSkipIds)\n", pkg_id.c_str());
-            if (pkgs_arr) pkgs_arr->push_back({ { "id", pkg_id }, { "skipped", true } });
+            if (pkgs_arr.is_some()) {
+                auto entry = owe::MakeObject();
+                SetJsonField(entry, "id", pkg_id);
+                SetJsonField(entry, "skipped", true);
+                AppendJson(pkgs_arr, std::move(entry));
+            }
             return true;
         }
     }
@@ -501,11 +525,12 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
     if (! fs::exists(pkg_path)) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  scene.pkg not found\n", pkg_id.c_str());
-        if (pkgs_arr)
-            pkgs_arr->push_back({
-                { "id", pkg_id },
-                { "parse", { { "ok", false }, { "error", "scene.pkg not found" } } },
-            });
+        if (pkgs_arr.is_some()) {
+            auto entry = owe::MakeObject();
+            SetJsonField(entry, "id", pkg_id);
+            owe::SetJson(entry, "parse", StatusJson(false, "scene.pkg not found"));
+            AppendJson(pkgs_arr, std::move(entry));
+        }
         return false;
     }
 
@@ -514,11 +539,12 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
     if (! owe::testing::ReadPkgHeader(pkg_path, version_stamp, entries)) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  ReadPkgHeader\n", pkg_id.c_str());
-        if (pkgs_arr)
-            pkgs_arr->push_back({
-                { "id", pkg_id },
-                { "parse", { { "ok", false }, { "error", "ReadPkgHeader" } } },
-            });
+        if (pkgs_arr.is_some()) {
+            auto entry = owe::MakeObject();
+            SetJsonField(entry, "id", pkg_id);
+            owe::SetJson(entry, "parse", StatusJson(false, "ReadPkgHeader"));
+            AppendJson(pkgs_arr, std::move(entry));
+        }
         return false;
     }
     const auto pkg_v = owe::wpscene::ParsePkgVersionStamp(version_stamp);
@@ -535,12 +561,13 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
     if (! wfs) {
         ++c.parsed_fail;
         std::fprintf(stdout, "FAIL  %s parse  WPPkgFs::CreatePkgFs\n", pkg_id.c_str());
-        if (pkgs_arr)
-            pkgs_arr->push_back({
-                { "id", pkg_id },
-                { "pkg_version", (unsigned)pkg_v },
-                { "parse", { { "ok", false }, { "error", "WPPkgFs::CreatePkgFs" } } },
-            });
+        if (pkgs_arr.is_some()) {
+            auto entry = owe::MakeObject();
+            SetJsonField(entry, "id", pkg_id);
+            SetJsonField(entry, "pkg_version", (unsigned)pkg_v);
+            owe::SetJson(entry, "parse", StatusJson(false, "WPPkgFs::CreatePkgFs"));
+            AppendJson(pkgs_arr, std::move(entry));
+        }
         return false;
     }
     vfs.Mount("/assets", std::move(wfs));
@@ -568,27 +595,29 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
                      parse_err.c_str());
     }
 
-    json  pkg_obj;
-    json* tex_sink    = nullptr;
-    json* shader_sink = nullptr;
-    json* mdl_sink    = nullptr;
-    if (pkgs_arr) {
-        pkg_obj["id"]          = pkg_id;
-        pkg_obj["pkg_version"] = (unsigned)pkg_v;
-        pkg_obj["parse"] =
-            parse_ok ? json { { "ok", true } } : json { { "ok", false }, { "error", parse_err } };
+    auto     pkg_obj     = owe::MakeObject();
+    JsonSink tex_sink    = rstd::None();
+    JsonSink shader_sink = rstd::None();
+    JsonSink mdl_sink    = rstd::None();
+    if (pkgs_arr.is_some()) {
+        SetJsonField(pkg_obj, "id", pkg_id);
+        SetJsonField(pkg_obj, "pkg_version", (unsigned)pkg_v);
+        owe::SetJson(
+            pkg_obj,
+            "parse",
+            StatusJson(parse_ok, parse_ok ? std::string_view {} : std::string_view(parse_err)));
         if (opt.p_tex) {
-            pkg_obj["textures"] = json::array();
-            tex_sink            = &pkg_obj["textures"];
+            owe::SetJson(pkg_obj, "textures", owe::MakeArray());
+            tex_sink = pkg_obj.get_mut("textures");
         }
         if (opt.p_shader) {
-            pkg_obj["shaders"] = json::array();
-            shader_sink        = &pkg_obj["shaders"];
+            owe::SetJson(pkg_obj, "shaders", owe::MakeArray());
+            shader_sink = pkg_obj.get_mut("shaders");
         }
         if (opt.p_mdl) {
             const char* key = opt.p_mdl_full ? "mdls" : "mdls_header";
-            pkg_obj[key]    = json::array();
-            mdl_sink        = &pkg_obj[key];
+            owe::SetJson(pkg_obj, key, owe::MakeArray());
+            mdl_sink = pkg_obj.get_mut(key);
         }
     }
 
@@ -601,7 +630,7 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
             ValidateMdlsHeader(entries, vfs, pkg_id, c, opt.quiet, mdl_sink);
     }
 
-    if (pkgs_arr) pkgs_arr->push_back(std::move(pkg_obj));
+    AppendJson(pkgs_arr, std::move(pkg_obj));
 
     // --json-dir: write a per-workshop snapshot. Sections are gated by the
     // same --parse-* flags as scan's text/sink output.
@@ -613,14 +642,16 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
             .mdl_full = opt.p_mdl_full,
         };
         std::string derr;
-        json        snap = owe::testing::DumpWorkshop(pkg_dir.string(), derr, df);
+        Json        snap = owe::testing::DumpWorkshop(pkg_dir.string(), derr, df);
         if (! derr.empty()) {
-            snap = json { { "workshop_dir", pkg_id }, { "error", derr } };
+            snap = owe::MakeObject();
+            SetJsonField(snap, "workshop_dir", pkg_id);
+            SetJsonField(snap, "error", derr);
         }
         const auto    out_path = fs::path(opt.json_dir) / (pkg_id + ".json");
         std::ofstream ofs(out_path);
         if (ofs)
-            ofs << snap.dump(2) << "\n";
+            ofs << owe::Dump(snap, 2) << "\n";
         else
             std::fprintf(stderr, "wescene-test scan: cannot write %s\n", out_path.string().c_str());
     }
@@ -675,11 +706,11 @@ int CmdScan(const ScanOptions& opt) {
         return 1;
     }
 
-    json  doc;
-    json* pkgs_arr = nullptr;
+    auto     doc      = owe::MakeObject();
+    JsonSink pkgs_arr = rstd::None();
     if (! opt.json_out.empty()) {
-        doc["pkgs"] = json::array();
-        pkgs_arr    = &doc["pkgs"];
+        owe::SetJson(doc, "pkgs", owe::MakeArray());
+        pkgs_arr = doc.get_mut("pkgs");
     }
 
     Counters c;
@@ -717,18 +748,27 @@ int CmdScan(const ScanOptions& opt) {
                      c.mdl_ok + c.mdl_fail);
     std::fprintf(stderr, " | %lldms\n", (long long)ms);
 
-    if (pkgs_arr) {
-        json summary;
-        summary["pkgs"]  = dirs.size();
-        summary["ms"]    = (long long)ms;
-        summary["parse"] = { { "ok", c.parsed_ok }, { "fail", c.parsed_fail } };
-        if (opt.p_tex) summary["tex"] = { { "ok", c.tex_ok }, { "fail", c.tex_fail } };
-        if (opt.p_shader) summary["shader"] = { { "ok", c.shader_ok }, { "fail", c.shader_fail } };
+    if (pkgs_arr.is_some()) {
+        auto summary = owe::MakeObject();
+        SetJsonField(summary, "pkgs", dirs.size());
+        SetJsonField(summary, "ms", (long long)ms);
+        auto parse_summary = owe::MakeObject();
+        SetJsonField(parse_summary, "ok", c.parsed_ok);
+        SetJsonField(parse_summary, "fail", c.parsed_fail);
+        owe::SetJson(summary, "parse", std::move(parse_summary));
+        auto add_summary = [&summary](std::string_view key, int ok, int fail) {
+            auto value = owe::MakeObject();
+            SetJsonField(value, "ok", ok);
+            SetJsonField(value, "fail", fail);
+            owe::SetJson(summary, key, std::move(value));
+        };
+        if (opt.p_tex) add_summary("tex", c.tex_ok, c.tex_fail);
+        if (opt.p_shader) add_summary("shader", c.shader_ok, c.shader_fail);
         if (opt.p_mdl) {
             const char* key = opt.p_mdl_full ? "mdl" : "mdl-header";
-            summary[key]    = { { "ok", c.mdl_ok }, { "fail", c.mdl_fail } };
+            add_summary(key, c.mdl_ok, c.mdl_fail);
         }
-        doc["summary"] = std::move(summary);
+        owe::SetJson(doc, "summary", std::move(summary));
 
         std::ofstream out(opt.json_out);
         if (! out) {
@@ -736,7 +776,7 @@ int CmdScan(const ScanOptions& opt) {
                 stderr, "wescene-test scan: cannot open --json file '%s'\n", opt.json_out.c_str());
             return 1;
         }
-        out << doc.dump(2) << "\n";
+        out << owe::Dump(doc, 2) << "\n";
     }
 
     const int total_fail = c.parsed_fail + c.tex_fail + c.shader_fail + c.mdl_fail;
@@ -1087,7 +1127,7 @@ int CmdGrep(const GrepOptions& opt) {
         return 1;
     }
 
-    json doc     = json::array();
+    auto doc     = owe::MakeArray();
     long n_match = 0;
     int  n_files = 0;
     int  n_pkgs  = 0;
@@ -1135,10 +1175,14 @@ int CmdGrep(const GrepOptions& opt) {
             ++n_files;
 
             if (opt.json_out) {
-                json file_matches = json::array();
+                auto file_matches = owe::MakeArray();
                 for (const auto& [pos, len] : matches)
-                    file_matches.push_back(GrepContext(text, pos, len, opt.snippet));
-                doc.push_back({ { "id", pkg_id }, { "path", p }, { "matches", file_matches } });
+                    owe::AppendElement(file_matches, GrepContext(text, pos, len, opt.snippet));
+                auto entry = owe::MakeObject();
+                SetJsonField(entry, "id", pkg_id);
+                SetJsonField(entry, "path", p);
+                owe::SetJson(entry, "matches", std::move(file_matches));
+                owe::AppendJson(doc, std::move(entry));
                 continue;
             }
 
@@ -1177,7 +1221,8 @@ int CmdGrep(const GrepOptions& opt) {
     }
 
     if (opt.json_out) {
-        std::fprintf(stdout, "%s\n", doc.dump(2).c_str());
+        const auto dump = owe::Dump(doc, 2);
+        std::fprintf(stdout, "%s\n", dump.c_str());
     }
     std::fprintf(stderr,
                  "wescene-test grep: %ld match%s in %d file%s across %d/%zu pkg%s\n",
@@ -1468,7 +1513,7 @@ int CmdValid(const argparse::ArgumentParser& a) {
         return 1;
     }
 
-    const std::string dump = snap.dump(2);
+    const std::string dump = owe::Dump(snap, 2);
     if (! out_file.empty()) {
         std::ofstream out(out_file);
         if (! out) {

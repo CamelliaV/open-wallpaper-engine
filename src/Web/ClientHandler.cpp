@@ -1,6 +1,6 @@
 module;
 
-#include <nlohmann/json.hpp>
+#include <cstdio>
 
 module weweb;
 
@@ -12,7 +12,7 @@ import :cef_internal;
 namespace weweb
 {
 
-ClientHandler::ClientHandler(nlohmann::json user_props, CefRefPtr<OsrRenderHandler> render_handler)
+ClientHandler::ClientHandler(owe::Json user_props, CefRefPtr<OsrRenderHandler> render_handler)
     : user_props_(std::move(user_props)), render_handler_(std::move(render_handler)) {}
 
 void ClientHandler::SetCloseCallback(std::function<void()> cb) { close_cb_ = std::move(cb); }

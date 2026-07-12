@@ -4,7 +4,6 @@ module;
 #include "Utils/String.h"
 
 module wescene.pkg.parse;
-import nlohmann.json;
 import rstd.cppstd;
 import rstd.log;
 import :shader_lex;
@@ -24,16 +23,14 @@ namespace
 using shader_lex::Cursor;
 using shader_lex::LineWalker;
 
-bool TryParseAnnotationJson(std::string_view source, nlohmann::json& result) {
-    try {
-        result = nlohmann::json::parse(source);
-    } catch (nlohmann::json::parse_error&) {
-        return false;
-    }
+bool TryParseAnnotationJson(std::string_view source, Json& result) {
+    auto parsed = rstd::json::from_str(rstd::cppstd::as_str(source));
+    if (parsed.is_err()) return false;
+    result = parsed.unwrap();
     return true;
 }
 
-bool CanStartJsonNumber(std::string_view source, usize pos) {
+bool CanStartNumberToken(std::string_view source, usize pos) {
     while (pos > 0) {
         --pos;
         char ch = source[pos];
@@ -72,7 +69,7 @@ std::optional<std::string> NormalizeAnnotationNumbers(std::string_view source) {
             continue;
         }
 
-        if ((ch == '-' || (ch >= '0' && ch <= '9')) && CanStartJsonNumber(source, i)) {
+        if ((ch == '-' || (ch >= '0' && ch <= '9')) && CanStartNumberToken(source, i)) {
             if (ch == '-') {
                 if (i + 1 >= source.size() || source[i + 1] < '0' || source[i + 1] > '9') {
                     out.push_back(ch);
@@ -97,19 +94,18 @@ std::optional<std::string> NormalizeAnnotationNumbers(std::string_view source) {
     return out;
 }
 
-bool ParseAnnotationJson(std::string_view source, nlohmann::json& result) {
+bool ParseAnnotationJson(std::string_view source, Json& result) {
     if (TryParseAnnotationJson(source, result)) return true;
     auto normalized = NormalizeAnnotationNumbers(source);
-    if (normalized && TryParseAnnotationJson(*normalized, result)) return true;
-    return ParseJson(source, result);
+    return normalized && TryParseAnnotationJson(*normalized, result);
 }
 
 void HandleComboLine(WPShaderInfo* info, std::string_view line) {
     auto brace = line.find('{');
     if (brace == std::string_view::npos) return;
-    nlohmann::json j;
+    Json j;
     if (! ParseAnnotationJson(line.substr(brace), j)) return;
-    if (! j.contains("combo")) return;
+    if (j.get("combo").is_none()) return;
     wpscene::WPCombo combo;
     combo.FromJson(j);
     if (combo.combo.empty()) return;
@@ -135,7 +131,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     if (! c.MatchPunct("//")) return;
     while (! c.Eof() && c.Peek() != '{') c.Advance();
     if (c.Eof()) return;
-    nlohmann::json sv_json;
+    Json sv_json;
     if (! ParseAnnotationJson(line.substr(c.Pos()), sv_json)) return;
 
     auto name = tn->name;
@@ -170,20 +166,19 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     } else {
         wpscene::WPUniformVar var;
         var.FromJson(sv_json, std::string(name));
-        if (sv_json.contains("default")) {
-            const auto& value = sv_json.at("default");
+        if (auto value = sv_json.get("default"); value.is_some()) {
             ShaderValue sv;
-            if (value.is_string()) {
-                std::vector<float> v;
-                GetJsonValue(value, v);
-                sv = std::span<const float>(v);
-            } else if (value.is_number()) {
+            if ((**value).is_string()) {
+                std::vector<float> values;
+                GetJsonValue(**value, values);
+                sv = std::span<const float>(values);
+            } else if ((**value).is_number()) {
                 sv.setSize(1);
-                GetJsonValue(value, sv[0]);
+                GetJsonValue(**value, sv[0]);
             }
             info->svs[std::string(name)] = sv;
         }
-        if (sv_json.contains("combo")) {
+        if (auto combo = sv_json.get("combo"); combo.is_some()) {
             std::string cname;
             GetJsonValue(sv_json, "combo", cname);
             if (! cname.empty()) info->combos[cname] = "1";

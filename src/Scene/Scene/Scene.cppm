@@ -6,9 +6,9 @@ module;
 
 export module wescene.scene;
 import eigen;
-import nlohmann.json;
 import rstd;
 import wescene.core;
+import wescene.json;
 import rstd.cppstd;
 import wescene.types;
 import wescene.spec_names;
@@ -2404,12 +2404,12 @@ public:
         m_render_graph_dirty = false;
         return dirty;
     }
-    bool ApplyUserNodeVisibilityBindings(std::string_view key, const nlohmann::json& property);
+    bool ApplyUserNodeVisibilityBindings(std::string_view key, const Json& property);
     bool ApplyUserImageEffectVisibilityBindings(std::string_view      key,
-                                                const nlohmann::json& property);
-    bool ApplyUserLightVisibilityBindings(std::string_view key, const nlohmann::json& property);
+                                                const Json& property);
+    bool ApplyUserLightVisibilityBindings(std::string_view key, const Json& property);
     bool ApplyUserCameraPathVisibilityBindings(std::string_view      key,
-                                               const nlohmann::json& property);
+                                               const Json& property);
 
     // Scene-tree root. After parse handoff to the render thread, the tree
     // shape under `sceneGraph` is immutable until Scene destruction (see the

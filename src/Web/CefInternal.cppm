@@ -1,10 +1,7 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 module weweb:cef_internal;
 
 import rstd.cppstd;
+import wescene.json;
 
 import :cef;
 import :frame;
@@ -94,7 +91,7 @@ class ClientHandler : public CefClient,
                       public CefLoadHandler,
                       public CefDisplayHandler {
 public:
-    explicit ClientHandler(nlohmann::json user_props, CefRefPtr<OsrRenderHandler> render_handler);
+    explicit ClientHandler(owe::Json user_props, CefRefPtr<OsrRenderHandler> render_handler);
 
     ClientHandler(const ClientHandler&)            = delete;
     ClientHandler& operator=(const ClientHandler&) = delete;
@@ -129,7 +126,7 @@ public:
     bool HasAtLeastOneRef() const override { return ref_count_.HasAtLeastOneRef(); }
 
 private:
-    nlohmann::json              user_props_;
+    owe::Json                   user_props_;
     CefRefPtr<OsrRenderHandler> render_handler_;
     CefRefPtr<CefBrowser>       browser_;
     std::function<void()>       close_cb_;
@@ -137,7 +134,7 @@ private:
     CefRefCount                 ref_count_;
 };
 
-std::string BuildPropertyListenerSnippet(const nlohmann::json& props);
-void        InjectUserProperties(CefRefPtr<CefBrowser> browser, const nlohmann::json& props);
+std::string BuildPropertyListenerSnippet(const owe::Json& props);
+void        InjectUserProperties(CefRefPtr<CefBrowser> browser, const owe::Json& props);
 
 } // namespace weweb

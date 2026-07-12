@@ -1,7 +1,3 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 module weweb;
 
 import rstd.cppstd;
@@ -12,7 +8,7 @@ import :cef_internal;
 namespace weweb
 {
 
-std::string BuildPropertyListenerSnippet(const nlohmann::json& props) {
+std::string BuildPropertyListenerSnippet(const owe::Json& props) {
     // The page side typically registers a listener like:
     //
     //   window.wallpaperPropertyListener = {
@@ -28,7 +24,7 @@ std::string BuildPropertyListenerSnippet(const nlohmann::json& props) {
         "  if (typeof window.wallpaperPropertyListener.applyUserProperties !== 'function') return;"
         "  try {"
         "    window.wallpaperPropertyListener.applyUserProperties(";
-    snippet += props.is_object() ? props.dump() : std::string { "{}" };
+    snippet += props.is_object() ? owe::Dump(props) : std::string { "{}" };
     snippet += "    );"
                "  } catch (e) {"
                "    console.error('weweb: applyUserProperties threw:', e);"
@@ -37,7 +33,7 @@ std::string BuildPropertyListenerSnippet(const nlohmann::json& props) {
     return snippet;
 }
 
-void InjectUserProperties(CefRefPtr<CefBrowser> browser, const nlohmann::json& props) {
+void InjectUserProperties(CefRefPtr<CefBrowser> browser, const owe::Json& props) {
     if (! browser) return;
     auto frame = browser->GetMainFrame();
     if (! frame) return;

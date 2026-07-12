@@ -7,15 +7,16 @@
 module;
 
 #include <cstdio>
-
-#include <nlohmann/json.hpp>
+#include <rstd/enum.hpp>
 
 export module wescene.testing.scene_keys;
 
 import rstd.cppstd;
+import wescene.json;
 import wescene.pkg_fs;
 import wescene.fs;
 import wescene.testing.pkg_header;
+import wescene.testing.json_builder;
 
 export namespace owe::testing
 {
@@ -35,7 +36,7 @@ export namespace owe::testing
 //     },
 //     ...
 //   }
-nlohmann::json ScanSceneKeys(const std::string& workshop_root);
+owe::Json ScanSceneKeys(const std::string& workshop_root);
 
 } // namespace owe::testing
 
@@ -46,23 +47,22 @@ namespace
 {
 
 namespace fs = std::filesystem;
-using json   = nlohmann::json;
+using Json   = owe::Json;
 
-const char* TypeName(json::value_t t) {
-    using vt = json::value_t;
-    switch (t) {
-    case vt::null: return "null";
-    case vt::object: return "object";
-    case vt::array: return "array";
-    case vt::string: return "string";
-    case vt::boolean: return "boolean";
-    case vt::number_integer: return "number_integer";
-    case vt::number_unsigned: return "number_unsigned";
-    case vt::number_float: return "number_float";
-    case vt::binary: return "binary";
-    case vt::discarded: return "discarded";
+const char* TypeName(const Json& value) {
+    RSTD_MATCH(value) {
+        RSTD_CASE(Null) { return "null"; }
+        RSTD_CASE(Object) { return "object"; }
+        RSTD_CASE(Array) { return "array"; }
+        RSTD_CASE(String) { return "string"; }
+        RSTD_CASE(Bool) { return "boolean"; }
+        RSTD_CASE(Number, number) {
+            if (number.is_f64()) return "number_float";
+            if (number.is_u64()) return "number_unsigned";
+            return "number_integer";
+        }
     }
-    return "unknown";
+    rstd::unreachable();
 }
 
 struct LocalObs {
@@ -71,25 +71,37 @@ struct LocalObs {
 };
 using LocalMap = std::unordered_map<std::string, LocalObs>;
 
-void Walk(const json& node, std::string& path, LocalMap& out) {
+void Walk(const Json& node, std::string& path, LocalMap& out) {
     if (! path.empty()) {
         auto& obs = out[path];
         obs.occurrences += 1;
-        obs.types.insert(TypeName(node.type()));
+        obs.types.insert(TypeName(node));
     }
-    if (node.is_object()) {
-        for (auto it = node.begin(); it != node.end(); ++it) {
-            const std::size_t old = path.size();
-            if (! path.empty()) path += '.';
-            path += it.key();
-            Walk(it.value(), path, out);
-            path.resize(old);
+    RSTD_MATCH(node) {
+        RSTD_CASE(Object, object) {
+            object.iter().for_each([&](auto entry) {
+                auto [entry_key, entry_value] = entry;
+                const auto        key         = rstd::cppstd::as_string_view(entry_key->as_str());
+                const auto&       value       = *entry_value;
+                const std::size_t old         = path.size();
+                if (! path.empty()) path += '.';
+                path += key;
+                Walk(value, path, out);
+                path.resize(old);
+            });
+            return;
         }
-    } else if (node.is_array()) {
-        const std::size_t old = path.size();
-        path += "[]";
-        for (const auto& el : node) Walk(el, path, out);
-        path.resize(old);
+        RSTD_CASE(Array, array) {
+            const std::size_t old = path.size();
+            path += "[]";
+            for (const auto& el : array) Walk(el, path, out);
+            path.resize(old);
+            return;
+        }
+        RSTD_CASE(Null) { return; }
+        RSTD_CASE(Bool) { return; }
+        RSTD_CASE(Number) { return; }
+        RSTD_CASE(String) { return; }
     }
 }
 
@@ -150,13 +162,12 @@ bool ScanOneWorkshop(const fs::path& workshop_dir, std::map<std::string, Version
     }
     std::string text = stream->ReadAllStr();
 
-    json scene;
-    try {
-        scene = json::parse(text);
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "wpscan: skip %s: %s\n", id.c_str(), e.what());
+    auto parsed = owe::ParseJson(text);
+    if (parsed.is_err()) {
+        std::fprintf(stderr, "wpscan: skip %s: invalid scene JSON\n", id.c_str());
         return false;
     }
+    auto scene = parsed.unwrap();
 
     LocalMap    local;
     std::string path;
@@ -166,30 +177,30 @@ bool ScanOneWorkshop(const fs::path& workshop_dir, std::map<std::string, Version
     return true;
 }
 
-json AggToJson(const std::map<std::string, VersionAgg>& by_version) {
-    json out = json::object();
+Json AggToJson(const std::map<std::string, VersionAgg>& by_version) {
+    auto out = owe::MakeObject();
     for (const auto& [version, agg] : by_version) {
-        json jv;
-        jv["total_scenes"] = agg.total_scenes;
-        json jkeys         = json::object();
+        auto jv = owe::MakeObject();
+        owe::SetMember(jv, "total_scenes", agg.total_scenes);
+        auto jkeys = owe::MakeObject();
         for (const auto& [path, st] : agg.keys) {
-            json jk;
-            jk["present_in"]  = st.present_in;
-            jk["occurrences"] = st.occurrences;
-            json jtypes       = json::array();
-            for (const auto& t : st.value_types) jtypes.push_back(t);
-            jk["value_types"] = std::move(jtypes);
-            jkeys[path]       = std::move(jk);
+            auto jk = owe::MakeObject();
+            owe::SetMember(jk, "present_in", st.present_in);
+            owe::SetMember(jk, "occurrences", st.occurrences);
+            auto jtypes = owe::MakeArray();
+            for (const auto& t : st.value_types) owe::AppendElement(jtypes, t);
+            owe::SetMember(jk, "value_types", std::move(jtypes));
+            owe::SetMember(jkeys, path, std::move(jk));
         }
-        jv["keys"]   = std::move(jkeys);
-        out[version] = std::move(jv);
+        owe::SetMember(jv, "keys", std::move(jkeys));
+        owe::SetMember(out, version, std::move(jv));
     }
     return out;
 }
 
 } // namespace
 
-json ScanSceneKeys(const std::string& workshop_root) {
+Json ScanSceneKeys(const std::string& workshop_root) {
     std::map<std::string, VersionAgg> by_version;
 
     fs::path root { workshop_root };

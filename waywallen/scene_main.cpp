@@ -16,12 +16,12 @@
 
 import rstd.cppstd;
 import rstd.log;
+import wescene.json;
 import wescene.rgraph;
 import wescene.scene_wallpaper;
 import wescene.pkg.parse;
 import waywallen.bridge;
 import waywallen.bridge_ex_swapchain;
-import nlohmann.json;
 
 namespace
 {
@@ -41,9 +41,9 @@ struct Options {
     std::string render_node;
     std::string video_hwdec;
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
-    uint32_t                                        msaa_samples { 1 };
-    std::unordered_map<std::string, nlohmann::json> initial_user_properties;
-    std::shared_ptr<owe::wpscene::SceneDocument>    initial_scene_document;
+    uint32_t                                     msaa_samples { 1 };
+    rstd::json::Map                              initial_user_properties;
+    std::shared_ptr<owe::wpscene::SceneDocument> initial_scene_document;
 };
 
 constexpr const char* kSettingsEnableAudioKey = "enable_audio";
@@ -264,19 +264,15 @@ bool parse_bool(const char* s, bool def) {
     return parse_bool_wire(s, out) ? out : def;
 }
 
-bool parse_user_property_bool(const nlohmann::json& raw, bool& out) {
-    const nlohmann::json* value = &raw;
-    if (raw.is_object()) {
-        const auto it = raw.find("value");
-        if (it == raw.end()) return false;
-        value = &*it;
-    }
-    if (value->is_boolean()) {
-        out = value->get<bool>();
+bool parse_user_property_bool(const owe::Json& raw, bool& out) {
+    auto        member = raw.get("value");
+    const auto& value  = member.is_some() ? **member : raw;
+    if (value.is_boolean()) {
+        out = *value.as_bool();
         return true;
     }
-    if (value->is_string()) {
-        const auto s = value->get<std::string>();
+    if (value.is_string()) {
+        auto s = rstd::cppstd::to_string(*value.as_str());
         return parse_bool_wire(s.c_str(), out);
     }
     return false;
@@ -730,33 +726,35 @@ int main(int argc, char** argv) {
         // (the DB column verbatim) — decoupled from the schema-validated
         // plugin settings above so no name collision is possible.
         if (init.user_properties && *init.user_properties) {
-            auto parsed = nlohmann::json::parse(init.user_properties,
-                                                /*cb*/ nullptr,
-                                                /*allow_ex*/ false,
-                                                /*ignore_comments*/ true);
-            if (parsed.is_object()) {
-                // Iterator form: nlohmann's `items()` structured-binding
-                // dispatch chases `std::get` through ADL, which doesn't
-                // resolve cleanly when both this TU and nlohmann_json are
-                // imported as C++20 modules.
-                for (auto it = parsed.begin(); it != parsed.end(); ++it) {
-                    const std::string& k = it.key();
-                    const auto&        v = it.value();
-                    if (k == kPropertyEnableAudioKey) {
-                        bool enabled = true;
-                        if (parse_user_property_bool(v, enabled)) {
-                            opts.property_enable_audio = enabled;
-                        } else {
-                            rstd_warn("waywallen-wescene-renderer: invalid {} initial value; "
-                                      "using true",
-                                      kPropertyEnableAudioKey);
+            auto parsed_result = owe::ParseJson(init.user_properties, { .allow_comments = true });
+            if (parsed_result.is_err()) {
+                rstd_warn("init.user_properties is invalid JSON; ignored: {}",
+                          parsed_result.unwrap_err());
+            } else {
+                auto parsed = parsed_result.unwrap();
+                if (! parsed.is_object()) {
+                    rstd_warn("init.user_properties is not a JSON object; ignored");
+                } else {
+                    auto object = parsed.as_object();
+                    (*object)->iter().for_each([&](auto entry) {
+                        auto [entry_key, entry_value] = entry;
+                        std::string k = rstd::cppstd::to_string(entry_key->as_str());
+                        const auto& v = *entry_value;
+                        if (k == kPropertyEnableAudioKey) {
+                            bool enabled = true;
+                            if (parse_user_property_bool(v, enabled)) {
+                                opts.property_enable_audio = enabled;
+                            } else {
+                                rstd_warn("waywallen-wescene-renderer: invalid {} initial value; "
+                                          "using true",
+                                          kPropertyEnableAudioKey);
+                            }
+                            return;
                         }
-                        continue;
-                    }
-                    opts.initial_user_properties.emplace(k, v);
+                        opts.initial_user_properties.insert(
+                            ::alloc::string::String::make(rstd::cppstd::as_str(k)), v.clone());
+                    });
                 }
-            } else if (! parsed.is_discarded()) {
-                rstd_warn("init.user_properties is not a JSON object; ignored");
             }
         }
 
@@ -810,7 +808,7 @@ int main(int argc, char** argv) {
     wp_config.source_pkg_path = opts.initial_scene;
     wp_config.assets_dir      = opts.initial_assets;
     wp_config.scene_document  = opts.initial_scene_document;
-    wp_config.user_properties = opts.initial_user_properties;
+    wp_config.user_properties = std::move(opts.initial_user_properties);
     wp_config.fps             = opts.initial_fps;
     wp_config.volume          = effective_volume(host);
     // Mute first so loadScene's SoundManager::init() short-circuits when

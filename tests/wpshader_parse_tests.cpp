@@ -13,7 +13,6 @@ import wescene.fs;
 import wescene.pkg.parse;
 import wescene.scene;
 import wescene.types;
-import nlohmann.json;
 
 using owe::ParseWPShader;
 using owe::WPShaderInfo;

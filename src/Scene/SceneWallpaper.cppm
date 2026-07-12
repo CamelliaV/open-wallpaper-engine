@@ -3,8 +3,8 @@ module;
 
 export module wescene.scene_wallpaper;
 import wescene.core;
+import wescene.json;
 import rstd.cppstd;
-import nlohmann.json;
 
 export import wescene.scene;
 export import wescene.vulkan_render;
@@ -44,7 +44,7 @@ struct SceneWallpaperConfig {
     std::string                                     assets_dir;
     std::string                                     cache_dir;
     std::shared_ptr<wpscene::SceneDocument>         scene_document;
-    std::unordered_map<std::string, nlohmann::json> user_properties;
+    rstd::json::Map                                 user_properties;
     uint32_t                                        fps { 30 };
     float                                           volume { 1.0f };
     bool                                            muted { false };
@@ -85,7 +85,7 @@ public:
     void setSpeed(float);
     void setMediaStatus(MediaStatus);
     void setUserPropertyRaw(std::string_view, std::string);
-    void setUserPropertyJson(std::string_view, nlohmann::json);
+    void setUserPropertyJson(std::string_view, Json);
     void setOnFirstFrame(FirstFrameCallback);
     void setOnUserPropertyDiagnostics(UserPropertyDiagnosticCallback);
     void requestPreparedPassDiagnostics(RenderPassDiagnosticCallback);

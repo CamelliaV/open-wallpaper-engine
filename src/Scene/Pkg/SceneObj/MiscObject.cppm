@@ -1,5 +1,3 @@
-module;
-
 export module wescene.pkg.scene_obj:misc_object;
 import rstd.cppstd;
 import wescene.fs;
@@ -22,7 +20,7 @@ export namespace owe::wpscene
 // Text-overlay object (PKGV0005+). Discriminator: top-level `text` is
 // non-null. The `text` and `font` fields appear in two shapes — plain
 // string, or an object (e.g. `{"script": "..."}` for property-bound
-// text). Both are captured verbatim as nlohmann::json so future consumers
+// text). Both are captured verbatim as owe::Json so future consumers
 // can decode either path without re-parsing.
 struct TextObject {
     // Common positional/metadata (mirrors ImageObject prefix).
@@ -40,18 +38,18 @@ struct TextObject {
     std::uint32_t             parent { 0 };
     std::string               attachment;
     std::vector<std::int32_t> dependencies;
-    nlohmann::json            instance;
+    owe::Json                 instance;
     FieldBindings             field_bindings;
 
     // Text-specific.
-    nlohmann::json text; // string | {script: ...} | {value: ...}
-    nlohmann::json font; // string | {value: ...}
-    float          pointsize { 12.0f };
-    std::uint32_t  padding { 0 };
-    std::string    horizontalalign;
-    std::string    verticalalign;
-    std::string    anchor;
-    std::string    alignment { "center" };
+    owe::Json     text; // string | {script: ...} | {value: ...}
+    owe::Json     font; // string | {value: ...}
+    float         pointsize { 12.0f };
+    std::uint32_t padding { 0 };
+    std::string   horizontalalign;
+    std::string   verticalalign;
+    std::string   anchor;
+    std::string   alignment { "center" };
 
     // Text-flow controls (PKGV0018+).
     std::uint32_t maxrows { 0 };
@@ -78,10 +76,10 @@ struct TextObject {
     float                    backgroundbrightness { 1.0f };
     std::vector<ImageEffect> effects;
 
-    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    bool FromJson(const owe::Json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
-    bool FromJson(const nlohmann::json& json, fs::VFS& vfs, SceneVersion /*v*/) {
+    bool FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "id", id, false);
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "origin", origin, false);
@@ -96,10 +94,10 @@ struct TextObject {
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "attachment", attachment, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (json.contains("instance")) instance = json.at("instance");
+        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
 
-        if (json.contains("text")) text = json.at("text");
-        if (json.contains("font")) font = json.at("font");
+        if (auto value = json.get("text"); value.is_some()) text = (**value).clone();
+        if (auto value = json.get("font"); value.is_some()) font = (**value).clone();
 
         owe::GetJsonValue(json, "pointsize", pointsize, false);
         owe::GetJsonValue(json, "padding", padding, false);
@@ -107,13 +105,11 @@ struct TextObject {
         owe::GetJsonValue(json, "verticalalign", verticalalign, false);
         owe::GetJsonValue(json, "anchor", anchor, false);
         owe::GetJsonValue(json, "alignment", alignment, false);
-
         owe::GetJsonValue(json, "maxrows", maxrows, false);
         owe::GetJsonValue(json, "maxwidth", maxwidth, false);
         owe::GetJsonValue(json, "limitrows", limitrows, false);
         owe::GetJsonValue(json, "limitwidth", limitwidth, false);
         owe::GetJsonValue(json, "limituseellipsis", limituseellipsis, false);
-
         owe::GetJsonValue(json, "color", color, false);
         owe::GetJsonValue(json, "alpha", alpha, false);
         owe::GetJsonValue(json, "brightness", brightness, false);
@@ -126,11 +122,14 @@ struct TextObject {
         owe::GetJsonValue(json, "ledsource", ledsource, false);
         owe::GetJsonValue(json, "backgroundcolor", backgroundcolor, false);
         owe::GetJsonValue(json, "backgroundbrightness", backgroundbrightness, false);
-        if (json.contains("effects")) {
-            for (const auto& jE : json.at("effects")) {
-                ImageEffect wpeff;
-                wpeff.FromJson(jE, vfs);
-                effects.push_back(std::move(wpeff));
+        if (auto effect_values = json.get("effects"); effect_values.is_some()) {
+            auto array = (**effect_values).as_array();
+            if (array.is_some()) {
+                for (const auto& jE : **array) {
+                    ImageEffect wpeff;
+                    wpeff.FromJson(jE, vfs);
+                    effects.push_back(std::move(wpeff));
+                }
             }
         }
         AbsorbAllFieldBindings(json, field_bindings);
@@ -155,7 +154,7 @@ struct ModelObject {
     bool                      nointerpolation { false };
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json            instance;
+    owe::Json                 instance;
     FieldBindings             field_bindings;
 
     std::string model;
@@ -166,10 +165,10 @@ struct ModelObject {
     VisibleUserBinding                         visible_user;
     std::string                                visible_user_key;
 
-    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    bool FromJson(const owe::Json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
-    bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
+    bool FromJson(const owe::Json& json, fs::VFS&, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "id", id, false);
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "origin", origin, false);
@@ -183,7 +182,7 @@ struct ModelObject {
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (json.contains("instance")) instance = json.at("instance");
+        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
 
         owe::GetJsonValue(json, "model", model, false);
         owe::GetJsonValue(json, "attachment", attachment, false);
@@ -211,7 +210,7 @@ struct CameraObject {
     bool                      nointerpolation { false };
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json            instance;
+    owe::Json                 instance;
     FieldBindings             field_bindings;
 
     std::string camera; // camera name reference
@@ -225,10 +224,10 @@ struct CameraObject {
     VisibleUserBinding visible_user;
     std::string        visible_user_key;
 
-    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    bool FromJson(const owe::Json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
-    bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
+    bool FromJson(const owe::Json& json, fs::VFS&, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "id", id, false);
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "origin", origin, false);
@@ -242,7 +241,7 @@ struct CameraObject {
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (json.contains("instance")) instance = json.at("instance");
+        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
 
         owe::GetJsonValue(json, "camera", camera, false);
         owe::GetJsonValue(json, "path", path, false);

@@ -12,10 +12,9 @@ target_sources(owe-core
          Core.cppm
          eigen.cppm
          Fs.cppm
-         nlohmann_json.cppm
          Json.cppm)
 target_link_libraries(owe-core
-  PUBLIC rstd::rstd rstd.cppstd rstd.log Eigen3::Eigen nlohmann_json)
+  PUBLIC rstd::rstd rstd.cppstd rstd.log Eigen3::Eigen)
 target_compile_features(owe-core PUBLIC cxx_std_20)
 target_compile_options(owe-core PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-core PROPERTY POSITION_INDEPENDENT_CODE ON)

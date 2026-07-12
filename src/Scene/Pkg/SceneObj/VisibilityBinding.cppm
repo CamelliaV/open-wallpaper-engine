@@ -1,95 +1,98 @@
 module;
 
-#include <nlohmann/json.hpp>
+#include <limits>
 
 export module wescene.pkg.scene_obj:visibility_binding;
 import rstd.cppstd;
+import wescene.json;
 
 export namespace owe::wpscene
 {
 
 struct VisibleUserBinding {
-    std::string    name;
-    nlohmann::json condition;
-    bool           has_condition { false };
+    std::string name;
+    owe::Json   condition;
+    bool        has_condition { false };
 
     bool empty() const { return name.empty(); }
 };
 
 struct UserValueBinding {
-    std::string    name;
-    nlohmann::json condition;
-    bool           has_condition { false };
+    std::string name;
+    owe::Json   condition;
+    bool        has_condition { false };
 
     bool empty() const { return name.empty(); }
 };
 
-inline void ReadVisibleUserBinding(const nlohmann::json& json, VisibleUserBinding& out) {
-    out = {};
-    if (! json.contains("visible") || ! json.at("visible").is_object()) return;
+inline void ReadVisibleUserBinding(const owe::Json& json, VisibleUserBinding& out) {
+    out          = {};
+    auto visible = json.get("visible");
+    if (visible.is_none() || ! (**visible).is_object()) return;
 
-    const auto& visible = json.at("visible");
-    if (! visible.contains("user")) return;
-
-    const auto& user = visible.at("user");
-    if (user.is_string()) {
-        out.name = user.get<std::string>();
+    auto user = (**visible).get("user");
+    if (user.is_none()) return;
+    if ((**user).is_string()) {
+        out.name = rstd::cppstd::to_string(*(**user).as_str());
         return;
     }
 
-    if (! user.is_object()) return;
-    if (user.contains("name") && user.at("name").is_string()) {
-        out.name = user.at("name").get<std::string>();
+    if (! (**user).is_object()) return;
+    if (auto name = (**user).get("name"); name.is_some()) {
+        auto string = (**name).as_str();
+        if (string.is_some()) out.name = rstd::cppstd::to_string(*string);
     }
-    if (user.contains("condition")) {
-        out.condition     = user.at("condition");
+    if (auto condition = (**user).get("condition"); condition.is_some()) {
+        out.condition     = (**condition).clone();
         out.has_condition = true;
     }
 }
 
-inline void ReadVisibleProperty(const nlohmann::json& json, bool& visible,
-                                VisibleUserBinding& out) {
-    out = {};
-    if (! json.contains("visible")) return;
+inline void ReadVisibleProperty(const owe::Json& json, bool& visible, VisibleUserBinding& out) {
+    out        = {};
+    auto value = json.get("visible");
+    if (value.is_none()) return;
 
-    const auto& value = json.at("visible");
-    if (value.is_boolean()) {
-        visible = value.get<bool>();
+    if ((**value).is_boolean()) {
+        visible = *(**value).as_bool();
         return;
     }
-    if (! value.is_object()) return;
+    if (! (**value).is_object()) return;
 
-    if (value.contains("value")) {
-        const auto& initial = value.at("value");
-        if (initial.is_boolean()) {
-            visible = initial.get<bool>();
-        } else if (initial.is_number_integer()) {
-            visible = initial.get<int>() != 0;
+    if (auto initial = (**value).get("value"); initial.is_some()) {
+        if ((**initial).is_boolean()) {
+            visible = *(**initial).as_bool();
+        } else {
+            auto numeric = (**initial).as_f64();
+            if (numeric.is_some() && *numeric >= std::numeric_limits<int>::min() &&
+                *numeric <= std::numeric_limits<int>::max())
+                visible = static_cast<int>(*numeric) != 0;
         }
     }
     ReadVisibleUserBinding(json, out);
 }
 
-inline void ReadUserValueBinding(const nlohmann::json& json, std::string_view field,
+inline void ReadUserValueBinding(const owe::Json& json, std::string_view field,
                                  UserValueBinding& out) {
-    out     = {};
-    auto it = json.find(field);
-    if (it == json.end() || ! it->is_object()) return;
+    out        = {};
+    auto value = json.get(field);
+    if (value.is_none() || ! (**value).is_object()) return;
 
-    const auto user_it = it->find("user");
-    if (user_it == it->end()) return;
+    auto user = (**value).get("user");
+    if (user.is_none()) return;
 
-    if (user_it->is_string()) {
-        out.name = user_it->get<std::string>();
+    if ((**user).is_string()) {
+        out.name = rstd::cppstd::to_string(*(**user).as_str());
         return;
     }
 
-    if (! user_it->is_object()) return;
-    if (user_it->contains("name") && user_it->at("name").is_string()) {
-        out.name = user_it->at("name").get<std::string>();
+    if (! (**user).is_object()) return;
+    if (auto name = (**user).get("name"); name.is_some()) {
+        auto string = (**name).as_str();
+        if (string.is_some()) out.name = rstd::cppstd::to_string(*string);
     }
-    if (user_it->contains("condition")) {
-        out.condition     = user_it->at("condition");
+    if (auto condition = (**user).get("condition"); condition.is_some()) {
+        out.condition     = (**condition).clone();
         out.has_condition = true;
     }
 }

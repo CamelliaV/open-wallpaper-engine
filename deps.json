@@ -13,16 +13,6 @@
     }
   },
   {
-    "dest": "build/_flatpak_deps/nlohmann_json-src",
-    "type": "archive",
-    "url": "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz",
-    "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
-    "x-cmake": {
-      "name": "nlohmann_json",
-      "exclude_from_all": true
-    }
-  },
-  {
     "dest": "build/_flatpak_deps/spirv_reflect-src",
     "type": "archive",
     "sha256": "254ed36128e7abe8fb12ef804319d0790e059093c116e9fe55d4003880515f85",
@@ -58,7 +48,7 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": true,
-    "commit": "ebdd90d1e770b63f89be24204b17038fe412db81",
+    "commit": "3450215e6db41eaa534bd42dcbf8f1bd4463758c",
     "type": "git",
     "url": "https://github.com/hypengw/rstd.git",
     "x-cmake": {

@@ -22,6 +22,13 @@ set(BUILD_GMOCK OFF CACHE INTERNAL "")
 set(INSTALL_GTEST OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(googletest)
 
+add_library(wescene_test_json_builder STATIC)
+target_sources(wescene_test_json_builder
+    PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES JsonBuilder.cppm)
+target_link_libraries(wescene_test_json_builder PUBLIC owe-core)
+target_compile_features(wescene_test_json_builder PUBLIC cxx_std_20)
+set_target_properties(wescene_test_json_builder PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 # Shared test-side library: corpus index + dump + scene-key scanner +
 # scene-parse probe + pkg-header parser. Linked by every gtest binary
 # and by wescene-test.
@@ -38,7 +45,7 @@ target_link_libraries(
         owe-parse
         owe-shader-compile
         owe-base
-        nlohmann_json::nlohmann_json
+        wescene_test_json_builder
 )
 target_compile_features(wescene_test_lib PUBLIC cxx_std_20)
 set_target_properties(wescene_test_lib PROPERTIES CXX_SCAN_FOR_MODULES ON)
@@ -51,6 +58,10 @@ target_compile_definitions(
 add_executable(version_tests version_tests.cpp)
 target_link_libraries(version_tests PRIVATE wescene_test_lib GTest::gtest_main)
 set_target_properties(version_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+add_executable(json_adapter_tests json_adapter_tests.cpp)
+target_link_libraries(json_adapter_tests PRIVATE wescene_test_json_builder GTest::gtest_main)
+set_target_properties(json_adapter_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Consolidated CLI: walks pkgs, runs scene parse; --validate-{tex,shader,mdl}
 # add per-asset checks; --name / --pkgv / --limit filter the pkg set.
@@ -130,7 +141,8 @@ set_target_properties(tex_schema_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 # SceneNode wrapper surface. Stands separately from wescene_test_lib so
 # it can pull owe-script directly.
 add_executable(script_runtime_tests script_runtime_tests.cpp)
-target_link_libraries(script_runtime_tests PRIVATE owe-script GTest::gtest_main)
+target_link_libraries(
+    script_runtime_tests PRIVATE owe-script wescene_test_json_builder GTest::gtest_main)
 set_target_properties(script_runtime_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Per-version deep tests: one big TEST_P file. The fixture macro stamps
@@ -147,6 +159,11 @@ gtest_discover_tests(
     deep_version_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
+)
+gtest_discover_tests(
+    json_adapter_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
 )
 gtest_discover_tests(
     scene_parse_tests

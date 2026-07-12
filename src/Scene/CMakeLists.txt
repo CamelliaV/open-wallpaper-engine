@@ -52,7 +52,7 @@ target_sources(owe-base
          Lighting/Lighting.cppm
          Scene/Scene.cppm)
 target_link_libraries(owe-base
-  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio owe-types nlohmann_json
+  PUBLIC rstd::rstd rstd.cppstd Eigen3::Eigen wavsen::audio owe-types
   PRIVATE ${LZ4_LIBRARIES}
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 target_include_directories(owe-base
@@ -71,7 +71,7 @@ target_sources(owe-script
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Script/Script.cppm)
 target_link_libraries(owe-script
   PUBLIC  owe-base
-  PRIVATE qjs nlohmann_json)
+  PRIVATE qjs)
 target_include_directories(owe-script
   PUBLIC  .. . Utils/include
   PRIVATE Utils Utils/include/Utils Script)
@@ -130,7 +130,7 @@ target_sources(owe-parse
          Text/Text.cppm)
 target_link_libraries(owe-parse
   PUBLIC owe-base owe-shader-compile owe-script
-  PRIVATE nlohmann_json ${LZ4_LIBRARIES} Freetype::Freetype PkgConfig::FONTCONFIG)
+  PRIVATE ${LZ4_LIBRARIES} Freetype::Freetype PkgConfig::FONTCONFIG)
 target_include_directories(owe-parse
   PUBLIC  .. . Utils/include
   PRIVATE Utils Utils/include/Utils Scene Particle)

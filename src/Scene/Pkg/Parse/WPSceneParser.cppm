@@ -1,11 +1,8 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 export module wescene.pkg.parse:wp_scene_parser;
 import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;
+import wescene.json;
 import wescene.scene;
 import wescene.pkg.scene_obj;
 
@@ -34,13 +31,13 @@ public:
     // a layer resolve to the host's CURRENT bool at parse time, so a layer
     // the user has toggled off in the UI gets pruned (image kinds skip
     // render-graph emission; non-image kinds skip parse entirely). The
-    // pointed-to map must outlive the next Parse() call.
-    void SetUserProperties(const std::unordered_map<std::string, nlohmann::json>* p) {
-        m_user_properties = p;
+    // The borrowed map must outlive the next Parse() call.
+    void SetUserProperties(rstd::Option<rstd::ref<rstd::json::Map>> properties) {
+        m_user_properties = properties;
     }
 
 private:
-    const std::unordered_map<std::string, nlohmann::json>* m_user_properties { nullptr };
+    rstd::Option<rstd::ref<rstd::json::Map>> m_user_properties;
 };
 
 } // namespace owe

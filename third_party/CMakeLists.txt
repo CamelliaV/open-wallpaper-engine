@@ -9,15 +9,13 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 add_subdirectory(glad)
 
 # ------------------------------------------------------------------
-# JSON-driven FetchContent for eigen, nlohmann_json, spirv_reflect,
+# JSON-driven FetchContent for eigen, spirv_reflect,
 # glslang. To enable the flatpak-aware dependency provider, pass:
 #   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=cmake/FetchDepsProvider.cmake
 # ------------------------------------------------------------------
 include(${CMAKE_SOURCE_DIR}/cmake/FetchDeps.cmake)
 
 # Cache vars consumed by nested add_subdirectory calls inside fetchdeps().
-set(JSON_BuildTests         OFF CACHE INTERNAL "")
-set(JSON_Install            OFF CACHE INTERNAL "")
 set(SPIRV_REFLECT_STATIC_LIB  ON  CACHE INTERNAL "")
 set(SPIRV_REFLECT_EXECUTABLE  OFF CACHE INTERNAL "")
 set(SPIRV_REFLECT_BUILD_TESTS OFF CACHE INTERNAL "")

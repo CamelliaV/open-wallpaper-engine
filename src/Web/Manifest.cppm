@@ -1,10 +1,7 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 export module weweb:manifest;
 
 import rstd.cppstd;
+import wescene.json;
 
 export namespace weweb
 {
@@ -12,7 +9,7 @@ export namespace weweb
 struct WebManifest {
     std::string                title;
     std::string                entry_html;
-    nlohmann::json             user_props;
+    owe::Json                  user_props;
     std::optional<std::string> preview;
 };
 

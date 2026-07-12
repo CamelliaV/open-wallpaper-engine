@@ -4,7 +4,6 @@ module;
 
 module wescene.pkg.parse;
 import eigen;
-import nlohmann.json;
 import wescene.core;
 import rstd.log;
 import rstd.cppstd;
@@ -45,7 +44,7 @@ struct SingleRandom {
     float       min { 0.0f };
     float       max { 0.0f };
     float       exponent { 1.0f };
-    static void ReadFromJson(const nlohmann::json& j, SingleRandom& r) {
+    static void ReadFromJson(const Json& j, SingleRandom& r) {
         owe::GetJsonValue(j, "min", r.min, false);
         owe::GetJsonValue(j, "max", r.max, false);
     };
@@ -55,7 +54,7 @@ struct VecRandom {
     std::array<float, 3> max { 0.0f, 0.0f, 0.0f };
     float                exponent { 1.0f };
 
-    static void ReadFromJson(const nlohmann::json& j, VecRandom& r) {
+    static void ReadFromJson(const Json& j, VecRandom& r) {
         owe::GetJsonValue(j, "min", r.min, false);
         owe::GetJsonValue(j, "max", r.max, false);
     };
@@ -73,7 +72,7 @@ struct TurbulentRandom {
     std::array<float, 3> right { 0.0f, 0.0f, 1.0f };
     std::array<float, 3> up { 1.0f, 0.0f, 0.0f };
 
-    static void ReadFromJson(const nlohmann::json& j, TurbulentRandom& r) {
+    static void ReadFromJson(const Json& j, TurbulentRandom& r) {
         owe::GetJsonValue(j, "scale", r.scale, false);
         owe::GetJsonValue(j, "timescale", r.timescale, false);
         owe::GetJsonValue(j, "offset", r.offset, false);
@@ -93,10 +92,10 @@ std::array<float, N> mapVertex(const std::array<float, N>& v, float (*oper)(floa
     return result;
 };
 
-ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
+ParticleInitOp WPParticleParser::genParticleInitOp(const Json& wpj) {
     using namespace std::placeholders;
     do {
-        if (! wpj.contains("name")) break;
+        if (wpj.get("name").is_none()) break;
         std::string name;
         owe::GetJsonValue(wpj, "name", name);
 
@@ -242,7 +241,7 @@ struct ValueChange {
     float startvalue { 1.0f };
     float endvalue { 0.0f };
 
-    static auto ReadFromJson(const nlohmann::json& j) {
+    static auto ReadFromJson(const Json& j) {
         ValueChange v;
         owe::GetJsonValue(j, "starttime", v.starttime, false);
         owe::GetJsonValue(j, "endtime", v.endtime, false);
@@ -261,7 +260,7 @@ struct VecChange {
     std::array<float, 3> startvalue { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> endvalue { 0.0f, 0.0f, 0.0f };
 
-    static auto ReadFromJson(const nlohmann::json& j) {
+    static auto ReadFromJson(const Json& j) {
         VecChange v;
         owe::GetJsonValue(j, "starttime", v.starttime, false);
         owe::GetJsonValue(j, "endtime", v.endtime, false);
@@ -290,7 +289,7 @@ struct FrequencyValue {
 
     std::vector<StorageRandom> storage;
 
-    static auto ReadFromJson(const nlohmann::json& j, std::string_view name) {
+    static auto ReadFromJson(const Json& j, std::string_view name) {
         FrequencyValue v;
         if (name == "oscillatesize") {
             v.scalemin = 0.8f;
@@ -351,7 +350,7 @@ struct Turbulence {
 
     std::array<int32_t, 3> mask { 1, 1, 0 };
 
-    static auto ReadFromJson(const nlohmann::json& j) {
+    static auto ReadFromJson(const Json& j) {
         Turbulence v;
         owe::GetJsonValue(j, "phasemin", v.phasemin, false);
         owe::GetJsonValue(j, "phasemax", v.phasemax, false);
@@ -390,7 +389,7 @@ struct Vortex {
     // the axis to rotate around.
     std::array<float, 3> axis { 0.0f, 0.0f, 1.0f };
 
-    static auto ReadFromJson(const nlohmann::json& j) {
+    static auto ReadFromJson(const Json& j) {
         Vortex v;
         owe::GetJsonValue(j, "controlpoint", v.controlpoint, false);
         if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
@@ -423,7 +422,7 @@ struct ControlPointForce {
     // positional offset from the center of the control point.
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
 
-    static auto ReadFromJson(const nlohmann::json& j) {
+    static auto ReadFromJson(const Json& j) {
         ControlPointForce v;
         owe::GetJsonValue(j, "controlpoint", v.controlpoint, false);
         if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
@@ -438,10 +437,9 @@ struct ControlPointForce {
 };
 
 ParticleOperatorOp WPParticleParser::genParticleOperatorOp(
-    const nlohmann::json&                                    wpj,
-    std::shared_ptr<const wpscene::ParticleInstanceoverride> over_state) {
+    const Json& wpj, std::shared_ptr<const wpscene::ParticleInstanceoverride> over_state) {
     do {
-        if (! wpj.contains("name")) break;
+        if (wpj.get("name").is_none()) break;
         std::string name;
         owe::GetJsonValue(wpj, "name", name);
         if (name == "movement") {

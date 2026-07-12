@@ -1,5 +1,3 @@
-module;
-
 export module wescene.pkg.scene_obj:sound_object;
 import rstd.cppstd;
 import wavsen.audio;
@@ -36,7 +34,7 @@ struct SoundObject {
     bool                      nointerpolation { false };
     std::uint32_t             parent { 0 };
     std::vector<std::int32_t> dependencies;
-    nlohmann::json            instance;
+    owe::Json                 instance;
     FieldBindings             field_bindings;
 
     // Sound-kind specifics.
@@ -49,16 +47,18 @@ struct SoundObject {
     std::string        visible_user_key;
     std::string        volume_user_key;
 
-    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    bool FromJson(const owe::Json& json, fs::VFS& vfs) {
         return FromJson(json, vfs, kSceneVersionUnknown);
     }
 
-    bool FromJson(const nlohmann::json& json, fs::VFS&, SceneVersion /*v*/) {
+    bool FromJson(const owe::Json& json, fs::VFS&, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "volume", volume);
-        if (json.contains("volume") && json.at("volume").is_object()) {
-            const auto& jv = json.at("volume");
-            if (jv.contains("user") && jv.at("user").is_string())
-                volume_user_key = jv.at("user").get<std::string>();
+        if (auto volume_json = json.get("volume");
+            volume_json.is_some() && (**volume_json).is_object()) {
+            if (auto user = (**volume_json).get("user"); user.is_some()) {
+                auto string = (**user).as_str();
+                if (string.is_some()) volume_user_key = rstd::cppstd::to_string(*string);
+            }
         }
         owe::GetJsonValue(json, "playbackmode", playbackmode);
         owe::GetJsonValue(json, "origin", origin, false);
@@ -70,23 +70,23 @@ struct SoundObject {
         visible_user_key = visible_user.name;
         owe::GetJsonValue(json, "name", name, false);
         owe::GetJsonValue(json, "id", id, false);
-
         owe::GetJsonValue(json, "locktransforms", locktransforms, false);
         owe::GetJsonValue(json, "muteineditor", muteineditor, false);
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (json.contains("instance")) instance = json.at("instance");
+        if (auto value = json.get("instance"); value.is_some()) instance = (**value).clone();
 
         owe::GetJsonValue(json, "startsilent", startsilent, false);
         owe::GetJsonValue(json, "blockalign", blockalign, false);
         owe::GetJsonValue(json, "spatialization", spatialization, false);
         owe::GetJsonValue(json, "queuemode", queuemode, false);
 
-        if (! json.contains("sound") || ! json.at("sound").is_array()) {
-            return false;
-        }
-        for (const auto& el : json.at("sound")) {
+        auto sound_json = json.get("sound");
+        if (sound_json.is_none()) return false;
+        auto sound_array = (**sound_json).as_array();
+        if (sound_array.is_none()) return false;
+        for (const auto& el : **sound_array) {
             std::string name;
             owe::GetJsonValue(el, name);
             if (! name.empty()) sound.push_back(name);

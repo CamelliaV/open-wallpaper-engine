@@ -1,6 +1,8 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <iterator>
+#include <limits>
 
 module wescene.scene_wallpaper;
 import wescene.types;
@@ -9,7 +11,6 @@ import wescene.scene;
 import wescene.spec_names;
 
 import eigen;
-import nlohmann.json;
 import rstd.log;
 import rstd.cppstd;
 import wavsen.audio;
@@ -42,8 +43,8 @@ struct RenderSetSpeed {
     float speed;
 };
 struct RenderSetUserProperty {
-    std::string    key;
-    nlohmann::json property;
+    std::string key;
+    Json        property;
 };
 struct RenderSetMediaStatus {
     MediaStatus status;
@@ -106,8 +107,8 @@ struct MainSetSpeed {
     float speed { 1.0f };
 };
 struct MainSetUserProperty {
-    std::string    key;
-    nlohmann::json value;
+    std::string key;
+    Json        value;
 };
 struct MainSetFirstFrameCallback {
     FirstFrameCallback cb;
@@ -135,38 +136,38 @@ struct MainMsg {
 namespace
 {
 
-nlohmann::json MakeUserPropertyDescriptor(nlohmann::json value) {
-    if (value.is_object() && value.contains("value")) return value;
-    nlohmann::json out = nlohmann::json::object();
-    out["value"]       = std::move(value);
-    return out;
+Json MakeUserPropertyDescriptor(Json value) {
+    if (value.get("value").is_some()) return value;
+    auto object = rstd::json::Map::make();
+    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")), rstd::move(value));
+    return Json::Object(rstd::move(object));
 }
 
-nlohmann::json ParseSettingJsonValue(std::string_view raw) {
-    auto parsed = nlohmann::json::parse(raw,
-                                        /*callback=*/nullptr,
-                                        /*allow_exceptions=*/false,
-                                        /*ignore_comments=*/true);
-    if (! parsed.is_discarded()) return parsed;
-    return std::string(raw);
+Json ParseSettingJsonValue(std::string_view raw) {
+    auto parsed = rstd::json::from_str(rstd::cppstd::as_str(raw), { .allow_comments = true });
+    if (parsed.is_ok()) return parsed.unwrap();
+    return JsonFromStd(raw);
 }
 
-nlohmann::json RawUserProperty(std::string_view value) {
+Json RawUserProperty(std::string_view value) {
     return MakeUserPropertyDescriptor(ParseSettingJsonValue(value));
 }
 
-nlohmann::json JsonUserProperty(nlohmann::json value) {
+Json JsonUserProperty(Json value) { return MakeUserPropertyDescriptor(std::move(value)); }
+
+Json InitialUserProperty(Json value) {
+    if (value.is_string()) {
+        auto raw = rstd::cppstd::to_string(*value.as_str());
+        return RawUserProperty(raw);
+    }
     return MakeUserPropertyDescriptor(std::move(value));
 }
 
-nlohmann::json InitialUserProperty(nlohmann::json value) {
-    if (value.is_string()) return RawUserProperty(value.get<std::string>());
-    return MakeUserPropertyDescriptor(std::move(value));
-}
-
-bool IsShaderGraphUserProperty(const nlohmann::json& prop) {
-    return prop.is_object() && prop.contains("type") && prop.at("type").is_string() &&
-           prop.at("type").get<std::string>() == "combo";
+bool IsShaderGraphUserProperty(const Json& prop) {
+    auto type = prop.get("type");
+    if (type.is_none()) return false;
+    auto string = (**type).as_str();
+    return string.is_some() && rstd::cppstd::as_string_view(*string) == "combo";
 }
 
 constexpr std::string_view kSchemeColorKey          = "schemecolor";
@@ -207,14 +208,15 @@ struct UserPropertyCoerceResult {
     const char* skip_reason { nullptr };
 };
 
-UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
+UserPropertyCoerceResult CoerceUserPropertyValue(const Json& prop) {
     UserPropertyCoerceResult r;
 
     // Pull the explicit type if present; project.json properties always have
     // one, but inline {"value": ...} descriptors don't.
     std::string type;
-    if (prop.is_object() && prop.contains("type") && prop.at("type").is_string()) {
-        type = prop.at("type").get<std::string>();
+    if (auto member = prop.get("type"); member.is_some()) {
+        auto string = (**member).as_str();
+        if (string.is_some()) type = rstd::cppstd::to_string(*string);
     }
 
     // Combo / texture / file paths can't write a uniform.
@@ -228,13 +230,14 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
     }
 
     // Find the raw value.
-    const nlohmann::json* val_ptr = &prop;
-    if (prop.is_object() && prop.contains("value")) val_ptr = &prop.at("value");
-    const nlohmann::json& v = *val_ptr;
+    auto        value = prop.get("value");
+    const Json& v     = value.is_some() ? **value : prop;
 
     if (type == "color") {
         std::vector<float> nums;
-        if (v.is_string() && ParseFloatList(v.get<std::string>(), nums) && nums.size() >= 3) {
+        auto               value = v.as_str();
+        if (value.is_some() && ParseFloatList(rstd::cppstd::as_string_view(*value), nums) &&
+            nums.size() >= 3) {
             r.ok    = true;
             r.value = ShaderValue(std::span<const float>(nums));
             return r;
@@ -246,18 +249,21 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
     // Fallback inference when type is missing.
     if (v.is_boolean()) {
         r.ok    = true;
-        float f = v.get<bool>() ? 1.0f : 0.0f;
+        float f = *v.as_bool() ? 1.0f : 0.0f;
         r.value = ShaderValue(f);
         return r;
     }
     if (v.is_number()) {
-        r.ok    = true;
-        r.value = ShaderValue(v.get<float>());
+        auto number = v.as_f64();
+        r.ok        = number.is_some() && *number >= std::numeric_limits<float>::lowest() &&
+                      *number <= std::numeric_limits<float>::max();
+        if (r.ok) r.value = ShaderValue(static_cast<float>(*number));
         return r;
     }
     if (v.is_string()) {
         std::vector<float> nums;
-        if (ParseFloatList(v.get<std::string>(), nums)) {
+        auto               value = rstd::cppstd::as_string_view(*v.as_str());
+        if (ParseFloatList(value, nums)) {
             if (nums.size() == 1) {
                 r.ok    = true;
                 r.value = ShaderValue(nums[0]);
@@ -274,7 +280,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const nlohmann::json& prop) {
     return r;
 }
 
-void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const nlohmann::json& prop) {
+void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const Json& prop) {
     if (scene.clearColorUserKey.empty()) return;
     if (CanonicalUserPropertyKey(scene.clearColorUserKey) != key) return;
     auto coerced = CoerceUserPropertyValue(prop);
@@ -291,8 +297,7 @@ void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const nlohma
 
 // Push a user-property value to every material whose shader declared a
 // `u_*` uniform with this material-key.
-void ApplyUserPropertyToShaderUniforms(Scene& scene, const std::string& key,
-                                       const nlohmann::json& prop) {
+void ApplyUserPropertyToShaderUniforms(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.shader_user_var_index.find(key);
     if (it == scene.shader_user_var_index.end()) return;
 
@@ -314,17 +319,24 @@ void ApplyUserPropertyToShaderUniforms(Scene& scene, const std::string& key,
     }
 }
 
-std::optional<std::string> ResolveRuntimeSceneTextureProperty(const nlohmann::json& prop) {
-    if (prop.is_string()) return prop.get<std::string>();
+std::optional<std::string> ResolveRuntimeSceneTextureProperty(const Json& prop) {
+    if (prop.is_string()) {
+        return rstd::cppstd::to_string(*prop.as_str());
+    }
     if (! prop.is_object()) return std::nullopt;
 
     std::string type;
-    if (prop.contains("type") && prop.at("type").is_string())
-        type = prop.at("type").get<std::string>();
+    if (auto member = prop.get("type"); member.is_some()) {
+        auto string = (**member).as_str();
+        if (string.is_some()) type = rstd::cppstd::to_string(*string);
+    }
     if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
         return std::nullopt;
-    if (! prop.contains("value") || ! prop.at("value").is_string()) return std::nullopt;
-    return prop.at("value").get<std::string>();
+    auto value = prop.get("value");
+    if (value.is_none()) return std::nullopt;
+    auto string = (**value).as_str();
+    return string.is_some() ? std::optional<std::string>(rstd::cppstd::to_string(*string))
+                            : std::nullopt;
 }
 
 bool SameSceneMaterialId(SceneMaterialId lhs, SceneMaterialId rhs) {
@@ -350,9 +362,8 @@ vulkan::PassInvalidationFlags MaterialDirtyToPassInvalidationFlags(SceneMaterial
     return out;
 }
 
-std::vector<SceneMaterialId> ApplyUserPropertyToMaterialTextures(Scene&                scene,
-                                                                 const std::string&    key,
-                                                                 const nlohmann::json& prop) {
+std::vector<SceneMaterialId>
+ApplyUserPropertyToMaterialTextures(Scene& scene, const std::string& key, const Json& prop) {
     std::vector<SceneMaterialId> changed_materials;
     auto                         it = scene.material_texture_user_index.find(key);
     if (it == scene.material_texture_user_index.end()) return changed_materials;
@@ -372,11 +383,12 @@ std::vector<SceneMaterialId> ApplyUserPropertyToMaterialTextures(Scene&         
     return changed_materials;
 }
 
-nlohmann::json RuntimeTextureProperty(std::string value) {
-    nlohmann::json prop = nlohmann::json::object();
-    prop["type"]        = "scenetexture";
-    prop["value"]       = std::move(value);
-    return prop;
+Json RuntimeTextureProperty(std::string value) {
+    auto object = rstd::json::Map::make();
+    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("type")),
+                  JsonFromStd("scenetexture"));
+    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")), JsonFromStd(value));
+    return Json::Object(rstd::move(object));
 }
 
 owe::script::MediaStatus ToScriptMediaStatus(const MediaStatus& status) {
@@ -399,20 +411,22 @@ std::vector<SceneUserPropertyDiagnostic> CollectUserPropertyDiagnostics(const Sc
 }
 
 std::optional<std::string>
-ResolveRuntimeShaderComboValue(const nlohmann::json&                prop,
-                               const Scene::ShaderComboUserBinding& binding) {
-    const nlohmann::json* val_ptr = &prop;
-    if (prop.is_object() && prop.contains("value")) val_ptr = &prop.at("value");
-    const auto& value = *val_ptr;
+ResolveRuntimeShaderComboValue(const Json& prop, const Scene::ShaderComboUserBinding& binding) {
+    auto        member = prop.get("value");
+    const auto& value  = member.is_some() ? **member : prop;
 
     if (value.is_null()) return binding.fallback;
-    if (value.is_boolean()) return value.get<bool>() ? "1" : "0";
-    if (value.is_number_integer()) return std::to_string(value.get<int>());
-    if (value.is_number_unsigned()) return std::to_string(value.get<unsigned>());
-    if (value.is_number_float()) return std::to_string(static_cast<int>(value.get<float>()));
+    if (value.is_boolean()) return *value.as_bool() ? "1" : "0";
+    if (value.is_number()) {
+        auto number = value.as_f64();
+        if (number.is_some() && *number >= std::numeric_limits<int>::min() &&
+            *number <= std::numeric_limits<int>::max())
+            return std::to_string(static_cast<int>(*number));
+        return std::nullopt;
+    }
     if (! value.is_string()) return std::nullopt;
 
-    auto text = value.get<std::string>();
+    auto text = rstd::cppstd::to_string(*value.as_str());
     if (text.empty()) return binding.fallback;
     if (auto it = binding.options.find(text); it != binding.options.end()) return it->second;
     if (text == "true") return "1";
@@ -439,8 +453,7 @@ void RecordShaderComboDiagnostic(Scene& scene, std::string key,
     });
 }
 
-bool ApplyUserPropertyToShaderCombos(Scene& scene, const std::string& key,
-                                     const nlohmann::json& prop) {
+bool ApplyUserPropertyToShaderCombos(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.shader_combo_user_index.find(key);
     if (it == scene.shader_combo_user_index.end()) return false;
 
@@ -543,8 +556,7 @@ bool MaterialHasShaderUniform(const SceneMaterial& material, std::string_view un
     return false;
 }
 
-void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
-                                   const nlohmann::json& prop) {
+void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.image_color_user_index.find(key);
     if (it == scene.image_color_user_index.end()) return;
 
@@ -571,8 +583,7 @@ void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key,
     }
 }
 
-void ApplyUserPropertyToImageAlpha(Scene& scene, const std::string& key,
-                                   const nlohmann::json& prop) {
+void ApplyUserPropertyToImageAlpha(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.image_alpha_user_index.find(key);
     if (it == scene.image_alpha_user_index.end()) return;
 
@@ -602,8 +613,7 @@ void ApplyUserPropertyToImageAlpha(Scene& scene, const std::string& key,
 // its fields. The override sits behind a shared_ptr; mutating it through the
 // scene-wide binding index is observed by every initializer / operator
 // closure on next emission.
-void ApplyUserPropertyToParticles(Scene& scene, const std::string& key,
-                                  const nlohmann::json& prop) {
+void ApplyUserPropertyToParticles(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.particle_user_var_index.find(key);
     if (it == scene.particle_user_var_index.end()) return;
 
@@ -661,8 +671,7 @@ void ApplyUserPropertyToParticles(Scene& scene, const std::string& key,
     }
 }
 
-void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key,
-                                    const nlohmann::json& prop) {
+void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.sound_volume_user_index.find(key);
     if (it == scene.sound_volume_user_index.end()) return;
 
@@ -674,8 +683,7 @@ void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key,
     }
 }
 
-void ApplyUserPropertyToCameraParallax(Scene& scene, const std::string& key,
-                                       const nlohmann::json& prop) {
+void ApplyUserPropertyToCameraParallax(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.camera_parallax_user_var_index.find(key);
     if (it == scene.camera_parallax_user_var_index.end() || ! scene.shaderValueUpdater) return;
 
@@ -689,8 +697,7 @@ void ApplyUserPropertyToCameraParallax(Scene& scene, const std::string& key,
     }
 }
 
-void ApplyUserPropertyToCameraShake(Scene& scene, const std::string& key,
-                                    const nlohmann::json& prop) {
+void ApplyUserPropertyToCameraShake(Scene& scene, const std::string& key, const Json& prop) {
     auto it = scene.camera_shake_user_var_index.find(key);
     if (it == scene.camera_shake_user_var_index.end() || ! scene.shaderValueUpdater) return;
 
@@ -710,49 +717,56 @@ void ApplyUserPropertyToCameraShake(Scene& scene, const std::string& key,
     }
 }
 
-void ApplyUserPropertyToCameraPath(Scene& scene, const std::string& key,
-                                   const nlohmann::json& prop) {
+void ApplyUserPropertyToCameraPath(Scene& scene, const std::string& key, const Json& prop) {
     scene.ApplyUserCameraPathVisibilityBindings(key, prop);
 }
 
-bool ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key,
-                                       const nlohmann::json& prop) {
+bool ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key, const Json& prop) {
     return scene.ApplyUserNodeVisibilityBindings(key, prop);
 }
 
-void MergeProjectUserProperties(const std::filesystem::path&                     project_dir,
-                                std::unordered_map<std::string, nlohmann::json>& out) {
+void MergeProjectUserProperties(const std::filesystem::path& project_dir, rstd::json::Map& out) {
     const auto    project_path = project_dir / "project.json";
     std::ifstream is(project_path);
     if (! is) return;
 
-    auto j = nlohmann::json::parse(is,
-                                   /*callback=*/nullptr,
-                                   /*allow_exceptions=*/false,
-                                   /*ignore_comments=*/true);
-    if (j.is_discarded()) return;
-    auto gen = j.find("general");
-    if (gen == j.end() || ! gen->is_object()) return;
-    auto props = gen->find("properties");
-    if (props == gen->end() || ! props->is_object()) return;
-
-    for (auto it = props->begin(); it != props->end(); ++it) {
-        std::string key = CanonicalUserPropertyKey(it.key());
-        if (out.contains(key)) continue;
-        out.emplace(std::move(key), MakeUserPropertyDescriptor(it.value()));
+    std::string source(std::istreambuf_iterator<char>(is), {});
+    auto        parsed = ParseJson(source, { .allow_comments = true });
+    if (parsed.is_err()) {
+        rstd_warn("Can't parse {}: {}", project_path.string(), parsed.unwrap_err());
+        return;
     }
+    auto root    = parsed.unwrap();
+    auto general = root.get("general");
+    if (general.is_none()) return;
+    auto properties = (**general).get("properties");
+    if (properties.is_none()) return;
+    auto object = (**properties).as_object();
+    if (object.is_none()) return;
+
+    (*object)->iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        const auto  raw_key           = rstd::cppstd::as_string_view(entry_key->as_str());
+        const auto& value             = *entry_value;
+        std::string key               = CanonicalUserPropertyKey(raw_key);
+        if (out.get(rstd::cppstd::as_str(key)).is_some()) return;
+        out.insert(::alloc::string::String::make(rstd::cppstd::as_str(key)),
+                   MakeUserPropertyDescriptor(value.clone()));
+    });
 }
 
-std::unordered_map<std::string, nlohmann::json>
-NormalizeUserProperties(const std::unordered_map<std::string, nlohmann::json>& input) {
-    std::unordered_map<std::string, nlohmann::json> out;
-    out.reserve(input.size());
-    for (const auto& [key, value] : input) {
-        std::string canonical = CanonicalUserPropertyKey(key);
-        if (key == canonical || ! out.contains(canonical)) {
-            out[std::move(canonical)] = InitialUserProperty(value);
+rstd::json::Map NormalizeUserProperties(const rstd::json::Map& input) {
+    auto out = rstd::json::Map::make();
+    input.iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        const auto  key               = rstd::cppstd::as_string_view(entry_key->as_str());
+        const auto& value             = *entry_value;
+        std::string canonical         = CanonicalUserPropertyKey(key);
+        if (key == canonical || out.get(rstd::cppstd::as_str(canonical)).is_none()) {
+            out.insert(::alloc::string::String::make(rstd::cppstd::as_str(canonical)),
+                       InitialUserProperty(value.clone()));
         }
-    }
+    });
     return out;
 }
 
@@ -801,8 +815,8 @@ private:
 
     bool m_inited { false };
 
-    SceneWallpaperConfig                            m_config;
-    std::unordered_map<std::string, nlohmann::json> m_user_properties;
+    SceneWallpaperConfig m_config;
+    rstd::json::Map      m_user_properties;
 
     WPSceneParser                                m_scene_parser;
     std::unique_ptr<wavsen::audio::SoundManager> m_sound_manager;
@@ -1279,13 +1293,14 @@ void SceneRuntimeController::on(MainSetSpeed&& m) {
 }
 
 void SceneRuntimeController::on(MainSetUserProperty&& m) {
-    nlohmann::json    prop             = MakeUserPropertyDescriptor(std::move(m.value));
-    const std::string property         = CanonicalUserPropertyKey(m.key);
-    m_config.user_properties[property] = prop;
-    m_user_properties[property]        = prop;
-    const nlohmann::json prop_for_rt   = prop;
+    Json              prop     = MakeUserPropertyDescriptor(std::move(m.value));
+    const std::string property = CanonicalUserPropertyKey(m.key);
+    m_config.user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property)),
+                                    prop.clone());
+    m_user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property)),
+                             prop.clone());
     (void)m_render_loop.sender().send(
-        RenderMsg { RenderSetUserProperty { property, prop_for_rt } });
+        RenderMsg { RenderSetUserProperty { property, std::move(prop) } });
 }
 
 void SceneRuntimeController::on(MainSetFirstFrameCallback&& m) {
@@ -1402,13 +1417,17 @@ void SceneRuntimeController::loadScene() {
         // Hand the (already-merged project.json defaults + any host-supplied
         // overrides) user-property map to the parser so visible-binding
         // pruning sees the user's saved values, not the scene.json defaults.
-        m_scene_parser.SetUserProperties(&m_user_properties);
+        m_scene_parser.SetUserProperties(rstd::Some(
+            rstd::ref<rstd::json::Map>::from_raw_parts(rstd::addressof(m_user_properties))));
         scene = m_scene_parser.Parse(scene_id, *scene_doc, vfs, *m_sound_manager);
-        m_scene_parser.SetUserProperties(nullptr);
-        for (const auto& [key, prop] : m_user_properties) {
+        m_scene_parser.SetUserProperties(rstd::None());
+        m_user_properties.iter().for_each([&](auto entry) {
+            auto [entry_key, entry_value] = entry;
+            auto        key               = rstd::cppstd::to_string(entry_key->as_str());
+            const auto& prop              = *entry_value;
             ApplyUserPropertyToClear(*scene, key, prop);
             owe::script::SetSceneUserProperty(*scene, key, prop);
-        }
+        });
         if (! m_config.cache_dir.empty() && scene) {
             std::filesystem::path ls_dir =
                 std::filesystem::path(m_config.cache_dir) / "script_localstorage";
@@ -1434,9 +1453,12 @@ void SceneRuntimeController::loadScene() {
     // replay every collected user property (project.json defaults + any
     // mutations the host already pushed during scene load) so the shader
     // cbuffer matches what the host UI displays.
-    for (const auto& [key, prop] : m_user_properties) {
-        (void)rtx.send(RenderMsg { RenderSetUserProperty { key, prop } });
-    }
+    m_user_properties.iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        auto        key               = rstd::cppstd::to_string(entry_key->as_str());
+        const auto& prop              = *entry_value;
+        (void)rtx.send(RenderMsg { RenderSetUserProperty { rstd::move(key), prop.clone() } });
+    });
     // draw first frame
     (void)rtx.send(RenderMsg { RenderDraw {} });
 }
@@ -1586,7 +1608,7 @@ void SceneWallpaper::setUserPropertyRaw(std::string_view name, std::string value
         MainMsg { MainSetUserProperty { std::string(name), RawUserProperty(value) } });
 }
 
-void SceneWallpaper::setUserPropertyJson(std::string_view name, nlohmann::json value) {
+void SceneWallpaper::setUserPropertyJson(std::string_view name, Json value) {
     (void)m_runtime->mainSender().send(
         MainMsg { MainSetUserProperty { std::string(name), std::move(value) } });
 }

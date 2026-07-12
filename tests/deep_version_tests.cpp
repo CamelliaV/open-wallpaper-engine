@@ -3,7 +3,7 @@
 // One TEST_P fixture per category (pkg / texb / mdlv / format) parameterised
 // on a list of (workshop_id, fixture_path) pairs. The TEST_P body calls
 // VerifyFixture(), which re-runs DumpWorkshop and EXPECT_EQs the result
-// against a checked-in snapshot json. A JSON Patch (RFC 6902) diff is
+// against a checked-in snapshot json. The first unequal JSON path is
 // emitted on mismatch.
 //
 // To regenerate a fixture after a parser change:
@@ -14,9 +14,8 @@
 
 #include <gtest/gtest.h>
 
-#include <nlohmann/json.hpp>
-
 import rstd.cppstd;
+import wescene.json;
 import wescene.testing.corpus;
 
 namespace owe::testing
@@ -26,6 +25,50 @@ struct FixturePick {
     const char* workshop_id;
     const char* fixture_path;
 };
+
+std::optional<std::string> FirstDifference(const Json& expected, const Json& actual,
+                                           std::string path = "$") {
+    if (expected == actual) return std::nullopt;
+    if (auto expected_values = expected.as_array(); expected_values.is_some()) {
+        auto actual_values = actual.as_array();
+        if (actual_values.is_none() || (*expected_values)->len() != (*actual_values)->len())
+            return path;
+        for (rstd::usize i = 0; i < (*expected_values)->len(); ++i) {
+            if (auto difference = FirstDifference((**expected_values)[i],
+                                                  (**actual_values)[i],
+                                                  path + "[" + std::to_string(i) + "]"))
+                return difference;
+        }
+        return path;
+    }
+    if (expected.is_object() && actual.is_object()) {
+        std::optional<std::string> difference;
+        auto                       expected_object = expected.as_object();
+        (*expected_object)->iter().for_each([&](auto entry) {
+            auto [entry_key, entry_value] = entry;
+            if (difference) return;
+            const auto  key            = rstd::cppstd::as_string_view(entry_key->as_str());
+            const auto& expected_value = *entry_value;
+            auto        actual_value   = actual.get(key);
+            if (actual_value.is_none()) {
+                difference = path + "." + std::string(key);
+                return;
+            }
+            difference =
+                FirstDifference(expected_value, **actual_value, path + "." + std::string(key));
+        });
+        if (difference) return difference;
+        auto actual_object = actual.as_object();
+        (*actual_object)->iter().for_each([&](auto entry) {
+            auto [entry_key, entry_value] = entry;
+            const auto key                = rstd::cppstd::as_string_view(entry_key->as_str());
+            if (! difference && expected.get(key).is_none())
+                difference = path + "." + std::string(key);
+        });
+        return difference.value_or(path);
+    }
+    return path;
+}
 
 inline void VerifyFixture(const FixturePick& pick) {
     SCOPED_TRACE(std::string("workshop=") + pick.workshop_id + " fixture=" + pick.fixture_path);
@@ -38,16 +81,18 @@ inline void VerifyFixture(const FixturePick& pick) {
 
     std::ifstream in(pick.fixture_path);
     ASSERT_TRUE(in.good()) << "cannot open fixture " << pick.fixture_path;
-    nlohmann::json expected;
-    ASSERT_NO_THROW(in >> expected) << "fixture is not valid JSON: " << pick.fixture_path;
+    std::stringstream source;
+    source << in.rdbuf();
+    auto parsed = ParseJson(source.str());
+    ASSERT_TRUE(parsed.is_ok()) << "fixture is not valid JSON: " << pick.fixture_path;
+    auto expected = parsed.unwrap();
 
     if (actual == expected) return;
 
-    auto patch = nlohmann::json::diff(expected, actual);
+    auto difference = FirstDifference(expected, actual);
     ADD_FAILURE() << "snapshot drift for workshop " << pick.workshop_id << "\n"
                   << "fixture:  " << pick.fixture_path << "\n"
-                  << "diff (expected -> actual):\n"
-                  << patch.dump(2);
+                  << "first unequal path: " << difference.value_or("$") << "\n";
 }
 
 } // namespace owe::testing

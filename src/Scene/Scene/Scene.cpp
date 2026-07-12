@@ -5,7 +5,6 @@ module;
 
 module wescene.scene;
 import eigen;
-import nlohmann.json;
 import rstd;
 import rstd.cppstd;
 
@@ -924,7 +923,7 @@ bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
     return was_elidable != is_elidable;
 }
 
-bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const nlohmann::json& property) {
+bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const Json& property) {
     bool requires_graph_rebuild = false;
     if (m_resource_index.Empty()) RebuildResourceIndex();
     for (auto* node : m_resource_index.Nodes()) {
@@ -958,7 +957,7 @@ bool Scene::SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool vi
 }
 
 bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view      key,
-                                                   const nlohmann::json& property) {
+                                                   const Json& property) {
     if (m_resource_index.Empty()) RebuildResourceIndex();
 
     bool                                  requires_graph_rebuild = false;
@@ -983,7 +982,7 @@ bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view      key,
     return requires_graph_rebuild;
 }
 
-bool Scene::ApplyUserLightVisibilityBindings(std::string_view key, const nlohmann::json& property) {
+bool Scene::ApplyUserLightVisibilityBindings(std::string_view key, const Json& property) {
     bool changed = false;
     for (auto& light : lights) {
         if (! light) continue;
@@ -997,7 +996,7 @@ bool Scene::ApplyUserLightVisibilityBindings(std::string_view key, const nlohman
 }
 
 bool Scene::ApplyUserCameraPathVisibilityBindings(std::string_view      key,
-                                                  const nlohmann::json& property) {
+                                                  const Json& property) {
     auto it = camera_path_user_index.find(std::string(key));
     if (it == camera_path_user_index.end()) return false;
 

@@ -3,9 +3,10 @@
 import rstd.cppstd;
 import rstd;
 import eigen;
-import nlohmann.json;
+import wescene.json;
 import wescene.scene;
 import wescene.script;
+import wescene.testing.json_builder;
 
 using namespace owe::script;
 
@@ -20,8 +21,8 @@ FieldScript* MakeProbe(JsRuntime& rt, const char* sha, const char* src) {
     return rt.MakeFieldScript(src,
                               sha,
                               FieldKind::Scalar,
-                              /*properties_config=*/nlohmann::json::object(),
-                              /*initial_value=*/nlohmann::json(0),
+                              /*properties_config=*/owe::MakeObject(),
+                              /*initial_value=*/owe::IntoJson(0),
                               /*node=*/nullptr);
 }
 
@@ -201,8 +202,8 @@ TEST(ScriptNodeSize, ParserSetSizeFlowsToScript) {
         )JS",
         "test/node_size_real",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -224,8 +225,8 @@ TEST(ScriptNodeSoftMutation, VisibleAndAlphaWrites) {
         )JS",
         "test/visible_alpha_writes",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -249,8 +250,8 @@ TEST(ScriptNodeSoftMutation, VisibleTrueRestoresUserAlpha) {
         )JS",
         "test/visible_restore",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -270,8 +271,8 @@ TEST(ScriptNodeSoftMutation, PerspectiveWritesNodeFlag) {
         )JS",
         "test/perspective_write",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -290,8 +291,8 @@ TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
         )JS",
         "test/alpha_field_return",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(1.0),
+        owe::MakeObject(),
+        owe::IntoJson(1.0),
         node.as_ptr());
     ASSERT_NE(fs, nullptr);
     ss.AddActuator({ fs, MakeNodeAlphaApply(node.clone()) });
@@ -336,8 +337,8 @@ TEST(ScriptNodeSoftMutation, BrightnessAndColorWrites) {
         )JS",
         "test/brightness_color",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -363,8 +364,8 @@ TEST(ScriptNodeSoftMutation, NoWritesLeaveOverridesUnset) {
         )JS",
         "test/no_writes",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -405,8 +406,8 @@ TEST(ScriptCursor, EnterLeaveAndMove) {
         )JS",
         "test/cursor_enter_leave_move",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -457,8 +458,8 @@ TEST(ScriptCursor, ClickAndDownUpInside) {
         )JS",
         "test/cursor_click",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -498,8 +499,8 @@ TEST(ScriptCursor, ClickOutsideIsIgnored) {
         )JS",
         "test/cursor_outside_click",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -529,8 +530,8 @@ TEST(ScriptCursor, CursorOutOfWindowSuppressesEvents) {
         )JS",
         "test/cursor_out_of_window",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -557,8 +558,8 @@ TEST(ScriptCursor, GlobalInputRefreshesFrameFields) {
         )JS",
         "test/global_input_refresh",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0));
+        owe::MakeObject(),
+        owe::IntoJson(0));
     ASSERT_NE(fs, nullptr);
 
     auto fi               = MakeFi();
@@ -593,8 +594,8 @@ TEST(ScriptCursor, WorldPositionFlipsTopDownInputY) {
         )JS",
         "test/global_input_world_y",
         FieldKind::Vec3,
-        nlohmann::json::object(),
-        nlohmann::json("0.0 0.0 0.0"));
+        owe::MakeObject(),
+        owe::IntoJson("0.0 0.0 0.0"));
     ASSERT_NE(fs, nullptr);
 
     auto fi     = MakeFi();
@@ -629,8 +630,8 @@ TEST(ScriptTexAnim, SetFramePinsAndStopsPlayback) {
         )JS",
         "test/texanim_setframe",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -655,8 +656,8 @@ TEST(ScriptTexAnim, PlayResumesAutoAdvance) {
         )JS",
         "test/texanim_play",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -677,8 +678,8 @@ TEST(ScriptTexAnim, PauseFreezesAtCurrent) {
         )JS",
         "test/texanim_pause",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -701,8 +702,8 @@ TEST(ScriptTexAnim, UnboundLayerFallsBackToJsStub) {
         )JS",
         "test/texanim_unbound",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -740,8 +741,8 @@ TEST(ScriptLocalStorage, InMemoryWithoutPersistencePath) {
         )JS",
         "test/ls_inmemory",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -764,8 +765,8 @@ TEST(ScriptLocalStorage, RemoveDeletesKey) {
         )JS",
         "test/ls_remove",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -789,8 +790,8 @@ TEST(ScriptLocalStorage, PersistsAcrossRuntimes) {
             )JS",
             "test/ls_writer",
             FieldKind::Scalar,
-            nlohmann::json::object(),
-            nlohmann::json(0),
+            owe::MakeObject(),
+            owe::IntoJson(0),
             nullptr);
         ASSERT_NE(fs, nullptr);
     }
@@ -811,8 +812,8 @@ TEST(ScriptLocalStorage, PersistsAcrossRuntimes) {
             )JS",
             "test/ls_reader",
             FieldKind::Scalar,
-            nlohmann::json::object(),
-            nlohmann::json(0),
+            owe::MakeObject(),
+            owe::IntoJson(0),
             nullptr);
         ASSERT_NE(fs, nullptr);
         rt.TickAll();
@@ -838,8 +839,8 @@ TEST(ScriptLocalStorage, ObjectRoundTrip) {
             )JS",
             "test/ls_obj_write",
             FieldKind::Scalar,
-            nlohmann::json::object(),
-            nlohmann::json(0),
+            owe::MakeObject(),
+            owe::IntoJson(0),
             nullptr);
     }
     {
@@ -856,8 +857,8 @@ TEST(ScriptLocalStorage, ObjectRoundTrip) {
             )JS",
             "test/ls_obj_read",
             FieldKind::Scalar,
-            nlohmann::json::object(),
-            nlohmann::json(0),
+            owe::MakeObject(),
+            owe::IntoJson(0),
             nullptr);
         rt.TickAll();
         EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
@@ -888,8 +889,8 @@ TEST(ScriptNodeChildren, WalksSceneNodeChildren) {
         )JS",
         "test/getChildren_walk",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         parent.as_ptr());
     ASSERT_NE(fs, nullptr);
 
@@ -918,15 +919,15 @@ TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
         )JS",
         "test/lazy_layer_lookup",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         root.as_ptr());
     ASSERT_NE(fs, nullptr);
 
     auto late = rstd::sync::Arc<owe::SceneNode>::make(
         Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "late-sound");
     root->AppendChild(late.clone());
-    rt.SetUserProperty("go", nlohmann::json::parse(R"({"type":"bool","value":true})"));
+    rt.SetUserProperty("go", rstd::json::from_str(R"({"type":"bool","value":true})").unwrap());
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
@@ -965,8 +966,8 @@ TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
         )JS",
         "test/layer_get_effect_visible",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         root.as_ptr());
     ASSERT_NE(fs, nullptr);
 
@@ -995,8 +996,8 @@ TEST(ScriptLayerLookup, MissingLayerKeepsDefaultTransformShape) {
         )JS",
         "test/lazy_layer_default_transform",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         root.as_ptr());
     ASSERT_NE(fs, nullptr);
 
@@ -1025,8 +1026,8 @@ TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
         )JS",
         "test/wemath_smoothstep",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1051,8 +1052,8 @@ TEST(ScriptVector, InstanceMixInterpolatesVectors) {
         )JS",
         "test/vector_mix",
         FieldKind::Vec3,
-        nlohmann::json::object(),
-        nlohmann::json("0.0 0.0 0.0"),
+        owe::MakeObject(),
+        owe::IntoJson("0.0 0.0 0.0"),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1078,8 +1079,8 @@ TEST(ScriptVector, Vec2ConstructorCopiesVectorComponents) {
         )JS",
         "test/vector_vec2_copy_ctor",
         FieldKind::Vec3,
-        nlohmann::json::object(),
-        nlohmann::json("0.0 0.0 0.0"),
+        owe::MakeObject(),
+        owe::IntoJson("0.0 0.0 0.0"),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1103,8 +1104,8 @@ TEST(ScriptVector, LengthSqrMatchesWallpaperEngineVectors) {
         )JS",
         "test/vector_length_sqr",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1127,8 +1128,8 @@ TEST(ScriptVector, NormalizeReturnsUnitVectors) {
         )JS",
         "test/vector_normalize",
         FieldKind::Vec3,
-        nlohmann::json::object(),
-        nlohmann::json("0.0 0.0 0.0"),
+        owe::MakeObject(),
+        owe::IntoJson("0.0 0.0 0.0"),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1155,8 +1156,8 @@ TEST(ScriptVector, EngineCanvasSizeSupportsVectorMethods) {
         )JS",
         "test/canvas_size_vec2_methods",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1181,8 +1182,8 @@ TEST(ScriptScene, InitialLayerConfigIsAvailable) {
         )JS",
         "test/initial_layer_config",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 
@@ -1212,8 +1213,8 @@ TEST(ScriptScene, DestroyLayerHidesSceneNode) {
         )JS",
         "test/destroy_layer_hides_node",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         root.as_ptr());
     ASSERT_NE(fs, nullptr);
 
@@ -1251,8 +1252,8 @@ TEST(ScriptScene, CreateLayerUsesRegisteredAssetQueue) {
         )JS",
         "test/create_layer_asset_queue",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         root.as_ptr(),
         std::vector<owe::SceneNode*> {},
         std::move(assets));
@@ -1274,8 +1275,8 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
     // bootstrap getter unwraps at access time. SetUserProperty in
     // between should win.
     JsRuntime      rt;
-    nlohmann::json properties = nlohmann::json::parse(R"({"x":{"user":"x1","value":0.5}})");
-    rt.SetUserProperty("x1", nlohmann::json::parse(R"({"type":"slider","value":-0.665})"));
+    owe::Json properties = rstd::json::from_str(R"({"x":{"user":"x1","value":0.5}})").unwrap();
+    rt.SetUserProperty("x1", rstd::json::from_str(R"({"type":"slider","value":-0.665})").unwrap());
     FrameInputs fi {};
     fi.canvas_w = 3840.0f;
     fi.canvas_h = 2160.0f;
@@ -1290,7 +1291,7 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
         "test/user_prop_override",
         FieldKind::Scalar,
         properties,
-        nlohmann::json(0),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1305,7 +1306,7 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
 
 TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
     JsRuntime      rt;
-    nlohmann::json properties = nlohmann::json::parse(R"({"x":{"user":"missing","value":0.5}})");
+    owe::Json properties = rstd::json::from_str(R"({"x":{"user":"missing","value":0.5}})").unwrap();
     FrameInputs    fi {};
     fi.canvas_w = 3840.0f;
     fi.canvas_h = 2160.0f;
@@ -1320,7 +1321,7 @@ TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
         "test/user_prop_fallback",
         FieldKind::Scalar,
         properties,
-        nlohmann::json(0),
+        owe::IntoJson(0),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1343,7 +1344,7 @@ TEST(ScriptUserProperty, ApplyUserPropertiesReceivesUnwrappedValue) {
     )JS");
     ASSERT_NE(fs, nullptr);
 
-    rt.SetUserProperty("music", nlohmann::json::parse(R"({"type":"combo","value":"5"})"));
+    rt.SetUserProperty("music", rstd::json::from_str(R"({"type":"combo","value":"5"})").unwrap());
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
@@ -1395,8 +1396,8 @@ TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
     fi.canvas_h = 2160.0f;
     rt.SetFrameInputs(fi);
 
-    nlohmann::json properties =
-        nlohmann::json::parse(R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})");
+    owe::Json properties =
+        rstd::json::from_str(R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})").unwrap();
 
     auto* fs = rt.MakeFieldScript(
         R"JS(
@@ -1414,7 +1415,7 @@ TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
         "test/workshop_3327_repro",
         FieldKind::Vec3,
         properties,
-        nlohmann::json("1315.0 1419.0 0.0"),
+        owe::IntoJson("1315.0 1419.0 0.0"),
         nullptr);
     ASSERT_NE(fs, nullptr);
 
@@ -1467,8 +1468,8 @@ TEST(ScriptNodeSize, UnsetFallsBackTo100x100) {
         )JS",
         "test/node_size_unset",
         FieldKind::Scalar,
-        nlohmann::json::object(),
-        nlohmann::json(0),
+        owe::MakeObject(),
+        owe::IntoJson(0),
         &node);
     ASSERT_NE(fs, nullptr);
 

@@ -1,10 +1,7 @@
-module;
-
-#include <nlohmann/json.hpp>
-
 export module wescene.pkg.scene_obj:scene_document;
 import rstd.cppstd;
 import wescene.fs;
+import wescene.json;
 import :field_binding;
 
 export namespace owe
@@ -32,11 +29,11 @@ SceneVersion ParsePkgVersionStamp(std::string_view stamp);
 
 // Read top-level "version" number_unsigned; returns kSceneJsonVersionDefault
 // when absent or wrong type.
-SceneJsonVersion DetectSceneJsonVersion(const nlohmann::json& root);
+SceneJsonVersion DetectSceneJsonVersion(const owe::Json& root);
 
 class Orthogonalprojection {
 public:
-    bool    FromJson(const nlohmann::json&);
+    bool    FromJson(const owe::Json&);
     int32_t width;
     int32_t height;
     bool    auto_ { false };
@@ -44,7 +41,7 @@ public:
 
 class SceneCamera {
 public:
-    bool                     FromJson(const nlohmann::json&);
+    bool                     FromJson(const owe::Json&);
     std::array<float, 3>     center { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>     eye { 0.0f, 0.0f, 1.0f };
     std::array<float, 3>     up { 0.0f, 1.0f, 0.0f };
@@ -55,7 +52,7 @@ public:
 // (per WE editor configuration). All entries default to 0 if absent.
 class SceneLightConfig {
 public:
-    bool          FromJson(const nlohmann::json&);
+    bool          FromJson(const owe::Json&);
     std::uint32_t directional { 0 };
     std::uint32_t directionalshadow { 0 };
     std::uint32_t point { 0 };
@@ -66,8 +63,8 @@ public:
 
 class SceneGeneral {
 public:
-    bool FromJson(const nlohmann::json&);               // legacy
-    bool FromJson(const nlohmann::json&, SceneVersion); // canonical
+    bool FromJson(const owe::Json&);               // legacy
+    bool FromJson(const owe::Json&, SceneVersion); // canonical
 
     // ---- baseline (PKGV0001+) ------------------------------------------
     std::array<float, 3> clearcolor { 0.0f, 0.0f, 0.0f };
@@ -142,8 +139,8 @@ public:
 
 class SceneMetadata {
 public:
-    bool             FromJson(const nlohmann::json&); // legacy: defaults to unknown version
-    bool             FromJson(const nlohmann::json&, SceneVersion); // canonical entry
+    bool             FromJson(const owe::Json&); // legacy: defaults to unknown version
+    bool             FromJson(const owe::Json&, SceneVersion); // canonical entry
     SceneVersion     pkg_version { kSceneVersionUnknown };
     SceneJsonVersion scene_json_version { kSceneJsonVersionDefault };
     SceneCamera      camera;
@@ -177,7 +174,7 @@ public:
 
 class SceneDocument {
 public:
-    nlohmann::json                   root_json;
+    owe::Json                        root_json;
     SceneMetadata                    metadata;
     std::vector<SceneObjectMetadata> objects_metadata;
 };
@@ -187,9 +184,5 @@ std::optional<SceneDocument> LoadSceneDocumentFromVfs(fs::VFS&, std::string_view
 std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view);
 std::optional<SceneDocument> LoadSceneDocumentFromSource(std::string_view);
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Orthogonalprojection, width, height);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneCamera, center, eye, up);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneGeneral, clearcolor, orthogonalprojection, zoom);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SceneMetadata, camera, general);
 } // namespace wpscene
 } // namespace owe

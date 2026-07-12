@@ -29,9 +29,9 @@
 // top-level field, list it here too.
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
 import rstd.cppstd;
+import wescene.json;
 import wescene.testing.scene_keys;
 
 namespace
@@ -211,9 +211,9 @@ std::set<std::string> AllParsedGeneral() {
     return out;
 }
 
-unsigned PkgIntFromStamp(const std::string& s) {
+unsigned PkgIntFromStamp(std::string_view s) {
     if (s.size() < 5) return 0;
-    return static_cast<unsigned>(std::stoi(s.substr(4)));
+    return static_cast<unsigned>(std::stoi(std::string(s.substr(4))));
 }
 
 // Accepts only paths of shape "<prefix><X>" with no further '.' or '['
@@ -322,9 +322,31 @@ const std::map<std::string, std::set<std::string>>& kParsedNestedKeys() {
     return m;
 }
 
-const nlohmann::json& Report() {
-    static const nlohmann::json r = owe::testing::ScanSceneKeys(WAYWALLEN_WORKSHOP_DIR);
+const owe::Json& Report() {
+    static const owe::Json r = owe::testing::ScanSceneKeys(WAYWALLEN_WORKSHOP_DIR);
     return r;
+}
+
+template<typename F>
+void ForEachVersion(F&& function) {
+    auto object = Report().as_object();
+    if (object.is_none()) return;
+    (*object)->iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        function(rstd::cppstd::as_string_view(entry_key->as_str()), *entry_value);
+    });
+}
+
+template<typename F>
+void ForEachKey(const owe::Json& version, F&& function) {
+    auto keys = version.get("keys");
+    if (keys.is_none()) return;
+    auto object = (**keys).as_object();
+    if (object.is_none()) return;
+    (*object)->iter().for_each([&](auto entry) {
+        auto [entry_key, entry_value] = entry;
+        function(rstd::cppstd::as_string_view(entry_key->as_str()), *entry_value);
+    });
 }
 
 // Print top-N unparsed direct-child keys per pkg version for the given
@@ -337,25 +359,29 @@ void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
               << top_n << " by present_in count) ===\n";
 
     std::vector<std::pair<unsigned, std::string>> stamps;
-    for (const auto& [stamp, _] : Report().items())
+    ForEachVersion([&](std::string_view stamp, const owe::Json&) {
         stamps.emplace_back(PkgIntFromStamp(stamp), stamp);
+    });
     std::sort(stamps.begin(), stamps.end());
 
     for (const auto& [v, stamp] : stamps) {
-        const auto& ver_data = Report()[stamp];
-        if (! ver_data.contains("keys")) continue;
+        auto ver_data = (Report()).get(stamp);
+        if (ver_data.is_none()) continue;
 
         struct Entry {
             std::string   key;
             std::uint64_t present_in;
         };
         std::vector<Entry> miss;
-        for (const auto& [path, info] : ver_data["keys"].items()) {
-            if (! IsDirectChildOf(prefix, path)) continue;
+        ForEachKey(**ver_data, [&](std::string_view path, const owe::Json& info) {
+            if (! IsDirectChildOf(prefix, path)) return;
             const std::string k { path.substr(prefix.size()) };
-            if (parsed.contains(k)) continue;
-            miss.push_back({ k, info.value("present_in", std::uint64_t { 0 }) });
-        }
+            if (parsed.contains(k)) return;
+            std::uint64_t present_in = 0;
+            if (auto value = info.get("present_in"); value.is_some())
+                present_in = (**value).as_u64().unwrap_or(0);
+            miss.push_back({ k, present_in });
+        });
         std::sort(miss.begin(), miss.end(), [](auto& a, auto& b) {
             return a.present_in > b.present_in;
         });
@@ -379,13 +405,12 @@ void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
 
 TEST(SceneSchema, EveryParsedGeneralKeyIsObservedSomewhere) {
     std::set<std::string> observed;
-    for (const auto& [_, ver_data] : Report().items()) {
-        if (! ver_data.contains("keys")) continue;
-        for (const auto& [path, __] : ver_data["keys"].items()) {
-            if (! IsDirectChildOf(kGeneralPrefix, path)) continue;
-            observed.insert(path.substr(kGeneralPrefix.size()));
-        }
-    }
+    ForEachVersion([&](std::string_view, const owe::Json& ver_data) {
+        ForEachKey(ver_data, [&](std::string_view path, const owe::Json&) {
+            if (! IsDirectChildOf(kGeneralPrefix, path)) return;
+            observed.insert(std::string(path.substr(kGeneralPrefix.size())));
+        });
+    });
 
     for (const auto& k : AllParsedGeneral()) {
         EXPECT_TRUE(observed.contains(k))
@@ -400,16 +425,15 @@ TEST(SceneSchema, ParsedKeyDeclarationLowerBoundIsRespected) {
     // some scene whose pkg version >= min_v. Catches off-by-one in the
     // version gating (e.g. listing a v21 field as v22).
     std::map<std::string, unsigned /*earliest_observed_pkg*/> earliest;
-    for (const auto& [stamp, ver_data] : Report().items()) {
+    ForEachVersion([&](std::string_view stamp, const owe::Json& ver_data) {
         const unsigned v = PkgIntFromStamp(stamp);
-        if (! ver_data.contains("keys")) continue;
-        for (const auto& [path, _] : ver_data["keys"].items()) {
-            if (! IsDirectChildOf(kGeneralPrefix, path)) continue;
+        ForEachKey(ver_data, [&](std::string_view path, const owe::Json&) {
+            if (! IsDirectChildOf(kGeneralPrefix, path)) return;
             const std::string k { path.substr(kGeneralPrefix.size()) };
             auto              it = earliest.find(k);
             if (it == earliest.end() || v < it->second) earliest[k] = v;
-        }
-    }
+        });
+    });
     for (const auto& [min_v, keys] : kParsedGeneralKeys()) {
         for (const auto& k : keys) {
             auto it = earliest.find(k);
@@ -427,13 +451,12 @@ TEST(SceneSchema, ParsedKeyDeclarationLowerBoundIsRespected) {
 
 TEST(SceneSchema, EveryParsedObjectKeyIsObservedSomewhere) {
     std::set<std::string> observed;
-    for (const auto& [_, ver_data] : Report().items()) {
-        if (! ver_data.contains("keys")) continue;
-        for (const auto& [path, __] : ver_data["keys"].items()) {
-            if (! IsDirectChildOf(kObjectsPrefix, path)) continue;
-            observed.insert(path.substr(kObjectsPrefix.size()));
-        }
-    }
+    ForEachVersion([&](std::string_view, const owe::Json& ver_data) {
+        ForEachKey(ver_data, [&](std::string_view path, const owe::Json&) {
+            if (! IsDirectChildOf(kObjectsPrefix, path)) return;
+            observed.insert(std::string(path.substr(kObjectsPrefix.size())));
+        });
+    });
 
     for (const auto& k : kParsedObjectKeys()) {
         EXPECT_TRUE(observed.contains(k))
@@ -459,13 +482,12 @@ TEST(SceneSchema, EveryParsedNestedKeyIsObservedSomewhere) {
     // sub-struct field names exactly the same way as the top-level test.
     for (const auto& [parent, parsed] : kParsedNestedKeys()) {
         std::set<std::string> observed;
-        for (const auto& [_, ver_data] : Report().items()) {
-            if (! ver_data.contains("keys")) continue;
-            for (const auto& [path, __] : ver_data["keys"].items()) {
-                if (! IsDirectChildOf(parent, path)) continue;
-                observed.insert(path.substr(parent.size()));
-            }
-        }
+        ForEachVersion([&](std::string_view, const owe::Json& ver_data) {
+            ForEachKey(ver_data, [&](std::string_view path, const owe::Json&) {
+                if (! IsDirectChildOf(parent, path)) return;
+                observed.insert(std::string(path.substr(parent.size())));
+            });
+        });
         for (const auto& k : parsed) {
             EXPECT_TRUE(observed.contains(k))
                 << parent << k
@@ -488,15 +510,15 @@ TEST(SceneSchema, ReportTopUnparsedNestedKeys) {
             std::uint64_t present_in;
         };
         std::map<std::string, std::uint64_t> agg;
-        for (const auto& [_, ver_data] : Report().items()) {
-            if (! ver_data.contains("keys")) continue;
-            for (const auto& [path, info] : ver_data["keys"].items()) {
-                if (! IsDirectChildOf(parent, path)) continue;
+        ForEachVersion([&](std::string_view, const owe::Json& ver_data) {
+            ForEachKey(ver_data, [&](std::string_view path, const owe::Json& info) {
+                if (! IsDirectChildOf(parent, path)) return;
                 const std::string k { path.substr(parent.size()) };
-                if (parsed.contains(k)) continue;
-                agg[k] += info.value("present_in", std::uint64_t { 0 });
-            }
-        }
+                if (parsed.contains(k)) return;
+                if (auto value = info.get("present_in"); value.is_some())
+                    agg[k] += (**value).as_u64().unwrap_or(0);
+            });
+        });
         std::vector<Entry> miss;
         miss.reserve(agg.size());
         for (auto& kv : agg) miss.push_back({ kv.first, kv.second });

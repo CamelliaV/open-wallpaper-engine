@@ -1,9 +1,20 @@
+module;
+
+#include <cstddef>
+#include <optional>
+#include <source_location>
+#include <string>
+#include <string_view>
+#include <type_traits>
+
 export module wescene.json;
 import rstd.cppstd;
-export import nlohmann.json;
+export import rstd.json;
 
 export namespace owe
 {
+
+using Json = rstd::json::Value;
 
 template<typename T>
 struct JsonTemplateTypeCheck {
@@ -12,16 +23,21 @@ struct JsonTemplateTypeCheck {
 };
 
 template<typename T>
-typename owe::JsonTemplateTypeCheck<T>::type
-GetJsonValue(const nlohmann::json& json, T& value,
+typename JsonTemplateTypeCheck<T>::type
+GetJsonValue(const Json& json, T& value,
              std::source_location loc = std::source_location::current());
 
 template<typename T>
-typename owe::JsonTemplateTypeCheck<T>::type
-GetJsonValue(const nlohmann::json& json, std::string_view name, T& value, bool warn = true,
+typename JsonTemplateTypeCheck<T>::type
+GetJsonValue(const Json& json, std::string_view name, T& value, bool warn = true,
              std::source_location loc = std::source_location::current());
 
-bool ParseJson(std::string_view source, nlohmann::json& result,
-               std::source_location loc = std::source_location::current());
+auto ParseJson(std::string_view source, rstd::json::ParseOptions options = {})
+    -> rstd::json::ParseResult;
+auto Dump(const Json& value, std::optional<std::size_t> indent = std::nullopt) -> std::string;
+
+inline auto JsonFromStd(std::string_view value) -> Json {
+    return rstd::into<Json>(::alloc::string::String::make(rstd::cppstd::as_str(value)));
+}
 
 } // namespace owe
