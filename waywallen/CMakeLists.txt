@@ -40,9 +40,11 @@ set_target_properties(waywallen-bridge-producer PROPERTIES
 
 add_executable(waywallen-wescene-renderer
     scene_main.cpp
+    scene_entry.cpp
 )
 target_sources(waywallen-wescene-renderer
     PRIVATE FILE_SET cxx_modules TYPE CXX_MODULES FILES
+        scene_entry.cppm
         BridgeExSwapchain.cppm
 )
 target_sources(waywallen-wescene-renderer PRIVATE BridgeExSwapchain.cpp)
@@ -101,6 +103,11 @@ if(BUILD_WEWEB)
 
     add_executable(waywallen-weweb-renderer
         web_main.cpp
+        web_entry.cpp
+    )
+    target_sources(waywallen-weweb-renderer
+        PRIVATE FILE_SET cxx_modules TYPE CXX_MODULES FILES
+            web_entry.cppm
     )
     target_compile_features(waywallen-weweb-renderer PRIVATE cxx_std_20)
     set_target_properties(waywallen-weweb-renderer PROPERTIES
