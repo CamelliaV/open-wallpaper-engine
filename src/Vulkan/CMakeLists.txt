@@ -11,7 +11,6 @@ target_link_libraries(owe-shader-compile
 target_include_directories(owe-shader-compile
   PUBLIC  .. ../Scene/Utils/include
   PRIVATE ../Scene/Utils ../Scene/Utils/include/Utils .)
-target_compile_options(owe-shader-compile PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-shader-compile PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-shader-compile PROPERTY CXX_SCAN_FOR_MODULES ON)
 
@@ -43,6 +42,5 @@ target_link_libraries(owe-vulkan
 target_include_directories(owe-vulkan
   PUBLIC  .. ../Scene ../Scene/Swapchain ../Scene/Utils/include include
   PRIVATE ../Scene/Utils ../Scene/Utils/include/Utils .)
-target_compile_options(owe-vulkan PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-vulkan PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-vulkan PROPERTY CXX_SCAN_FOR_MODULES ON)

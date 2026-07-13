@@ -36,11 +36,21 @@ endif()
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 
-if(CMAKE_USE_PTHREADS_INIT)
-    # Clang records pthread support in C++ module BMIs; keep all module targets compatible.
-    add_compile_options("$<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:-pthread>")
-    add_link_options("$<$<LINK_LANG_AND_ID:CXX,Clang,GNU>:-pthread>")
-endif()
+
+set(OWE_CXX_COMPILE_OPTIONS
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wno-missing-field-initializers
+    -Wno-gnu-zero-variadic-macro-arguments
+    -fno-direct-access-external-data
+    # pthread
+    -pthread 
+    -D_REENTRANT
+    )
+
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${OWE_CXX_COMPILE_OPTIONS}>")
+add_link_options(-pthread)
 
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
@@ -60,7 +70,7 @@ add_subdirectory(src)
 
 option(BUILD_TESTS "Build the wescene-renderer test suite" OFF)
 if(BUILD_WESCENE AND BUILD_TESTS)
-    include(CTest)
+    enable_testing()
     add_subdirectory(tests)
 endif()
 

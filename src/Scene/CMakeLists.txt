@@ -11,7 +11,6 @@ target_link_libraries(owe-types
   PUBLIC rstd::rstd rstd.cppstd owe-core)
 target_include_directories(owe-types PUBLIC ..)
 target_compile_features(owe-types PUBLIC cxx_std_20)
-target_compile_options(owe-types PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-types PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-types PROPERTY CXX_SCAN_FOR_MODULES ON)
 
@@ -58,7 +57,6 @@ target_link_libraries(owe-base
 target_include_directories(owe-base
   PUBLIC  .. . Utils/include
   PRIVATE Utils Utils/include/Utils Scene Particle)
-target_compile_options(owe-base PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-base PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-base PROPERTY CXX_SCAN_FOR_MODULES ON)
 
@@ -75,7 +73,6 @@ target_link_libraries(owe-script
 target_include_directories(owe-script
   PUBLIC  .. . Utils/include
   PRIVATE Utils Utils/include/Utils Script)
-target_compile_options(owe-script PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-script PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-script PROPERTY CXX_SCAN_FOR_MODULES ON)
 
@@ -134,7 +131,6 @@ target_link_libraries(owe-parse
 target_include_directories(owe-parse
   PUBLIC  .. . Utils/include
   PRIVATE Utils Utils/include/Utils Scene Particle)
-target_compile_options(owe-parse PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-parse PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-parse PROPERTY CXX_SCAN_FOR_MODULES ON)
 
@@ -180,6 +176,5 @@ target_link_libraries(owe-render
 target_include_directories(owe-render
   PUBLIC  .. . Swapchain Utils/include RenderGraph/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
-target_compile_options(owe-render PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-render PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-render PROPERTY CXX_SCAN_FOR_MODULES ON)

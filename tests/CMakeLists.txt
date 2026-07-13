@@ -154,6 +154,7 @@ set_target_properties(deep_version_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 # Use gtest_discover_tests so each TEST_P instance becomes its own ctest
 # entry, runnable individually with `ctest -R ScenePkgVersionTest`.
+set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
 include(GoogleTest)
 gtest_discover_tests(
     deep_version_tests

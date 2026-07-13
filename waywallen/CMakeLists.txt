@@ -57,7 +57,6 @@ target_include_directories(waywallen-wescene-renderer
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/src/Vulkan/include
         ${CMAKE_SOURCE_DIR}/src/VulkanRender/include
-        ${CMAKE_SOURCE_DIR}/third_party
 )
 
 target_link_libraries(waywallen-wescene-renderer
@@ -67,10 +66,6 @@ target_link_libraries(waywallen-wescene-renderer
         waywallen-bridge-producer
         argparse::argparse
         rstd.cppstd
-)
-
-target_compile_options(waywallen-wescene-renderer PRIVATE
-    -Wall -Wextra -Wpedantic
 )
 
 install(TARGETS waywallen-wescene-renderer
@@ -128,9 +123,6 @@ if(BUILD_WEWEB)
             wavsen::audio
             rstd::rstd
             rstd.cppstd
-    )
-    target_compile_options(waywallen-weweb-renderer PRIVATE
-        -Wall -Wextra -Wpedantic
     )
     weweb_stage_cef_runtime(waywallen-weweb-renderer)
 

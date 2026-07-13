@@ -15,10 +15,6 @@ if(ENDIAN)
   add_compile_definitions(WP_BIG_ENDIAN)
 endif()
 
-set(warn_opts
-    -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wno-unused-variable
-    CACHE INTERNAL "")
-
 add_subdirectory(Core)
 add_subdirectory(Vulkan)
 add_subdirectory(Scene)

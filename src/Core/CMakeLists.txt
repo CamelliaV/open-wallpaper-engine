@@ -15,8 +15,7 @@ target_sources(owe-core
          Json.cppm
          UserProperty.cppm)
 target_link_libraries(owe-core
-  PUBLIC rstd::rstd rstd.cppstd rstd.log Eigen3::Eigen)
+  PUBLIC rstd::rstd rstd.cppstd rstd.json rstd.log Eigen3::Eigen)
 target_compile_features(owe-core PUBLIC cxx_std_20)
-target_compile_options(owe-core PRIVATE -Wno-missing-field-initializers)
 set_property(TARGET owe-core PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-core PROPERTY CXX_SCAN_FOR_MODULES ON)
