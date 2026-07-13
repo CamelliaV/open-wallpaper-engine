@@ -47,7 +47,7 @@ Json StatusJson(bool ok, std::string_view error = {}) {
     return out;
 }
 
-void AppendJson(const JsonSink& array, Json value) {
+void AppendJson(JsonSink array, Json value) {
     if (array.is_some()) owe::AppendJson(**array, std::move(value));
 }
 
