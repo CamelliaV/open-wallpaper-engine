@@ -11,6 +11,7 @@ import wescene.core;
 import wescene.types;
 import rstd.log;
 import rstd.cppstd;
+import wescene.render;
 import wescene.vulkan;
 import wescene.utils;
 import wescene.scene;
@@ -538,7 +539,9 @@ void ReleaseCompletedRetiredResources(RenderingResources& rr) {
 }
 
 struct VulkanRender::Impl {
-    Impl()  = default;
+    Impl() = default;
+    explicit Impl(render::ResourceRegistries registries)
+        : m_rendering_resources(std::move(registries)) {}
     ~Impl() = default;
 
     bool init(RenderInitInfo);
@@ -609,6 +612,8 @@ struct VulkanRender::Impl {
 };
 
 VulkanRender::VulkanRender(): pImpl(std::make_unique<Impl>()) {}
+VulkanRender::VulkanRender(render::ResourceRegistries registries)
+    : pImpl(std::make_unique<Impl>(std::move(registries))) {}
 VulkanRender::~VulkanRender() {};
 
 bool VulkanRender::inited() const { return pImpl->m_inited; }

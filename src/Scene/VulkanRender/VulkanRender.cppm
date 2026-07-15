@@ -8,6 +8,7 @@ import wescene.scene;
 
 import wescene.rgraph;
 
+export import wescene.render;
 export import :vulkan_pass;
 export import :shader_reflection_cache;
 export import :resource;
@@ -104,6 +105,7 @@ struct PreparedPassDiagnostic {
 class VulkanRender {
 public:
     VulkanRender();
+    explicit VulkanRender(render::ResourceRegistries);
     ~VulkanRender();
 
     bool init(RenderInitInfo);

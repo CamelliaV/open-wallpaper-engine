@@ -4,9 +4,11 @@ module;
 
 export module wescene.vulkan_render:resource;
 import wescene.core;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.types;
+import wescene.render;
 import wescene.vulkan;
 import wescene.scene;
 
@@ -822,6 +824,10 @@ private:
 };
 
 struct RenderingResources {
+    RenderingResources() = default;
+    explicit RenderingResources(render::ResourceRegistries registries)
+        : resource_registries(rstd::Some(rstd::move(registries))) {}
+
     vvk::CommandBuffer command;
 
     vvk::Semaphore sem_swap_wait_image;
@@ -833,14 +839,15 @@ struct RenderingResources {
 
     // Static vertex/index buffers are owned by Device::mesh_cache() now;
     // only the per-rebuild dyn_buf lives here.
-    StagingBuffer*              dyn_buf { nullptr };
-    ShaderReflectionCache*      shader_reflection_cache { nullptr };
-    ImportedTextureProvider*    imported_texture_provider { nullptr };
-    PipelineResourceCache       pipeline_cache;
-    RenderPassResourceCache     render_pass_cache;
-    FramebufferResourceCache    framebuffer_cache;
-    FramebufferCacheDiagnostics framebuffer_cache_diagnostics;
-    PipelineRetireQueue         pipeline_retire_queue;
+    StagingBuffer*                           dyn_buf { nullptr };
+    ShaderReflectionCache*                   shader_reflection_cache { nullptr };
+    ImportedTextureProvider*                 imported_texture_provider { nullptr };
+    PipelineResourceCache                    pipeline_cache;
+    RenderPassResourceCache                  render_pass_cache;
+    FramebufferResourceCache                 framebuffer_cache;
+    FramebufferCacheDiagnostics              framebuffer_cache_diagnostics;
+    PipelineRetireQueue                      pipeline_retire_queue;
+    rstd::Option<render::ResourceRegistries> resource_registries;
 };
 
 } // namespace owe::vulkan

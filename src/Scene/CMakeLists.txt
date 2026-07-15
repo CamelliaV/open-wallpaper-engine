@@ -136,10 +136,9 @@ set_property(TARGET owe-parse PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 
 # ---------------------------------------------------------------------------
-# owe-render (RenderGraph + VulkanRender + SceneWallpaper)
+# owe-render (RenderGraph + VulkanRender)
 # ---------------------------------------------------------------------------
 add_library(owe-render STATIC
-  SceneWallpaper.cpp
   RenderGraph/DependencyGraph.cpp
   RenderGraph/PassNode.cpp
   RenderGraph/TexNode.cpp
@@ -154,7 +153,6 @@ add_library(owe-render STATIC
   VulkanRender/PrePass.cpp)
 target_sources(owe-render
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-         SceneWallpaper.cppm
          RenderGraph/RGraph.cppm
          RenderGraph/DependencyGraph.cppm
          RenderGraph/PassNode.cppm
@@ -163,6 +161,7 @@ target_sources(owe-render
          VulkanRender/VulkanRender.cppm
          VulkanRender/VulkanPass.cppm
          VulkanRender/ShaderReflectionCache.cppm
+         VulkanRender/RenderResource.cppm
          VulkanRender/ResourceKey.cppm
          VulkanRender/Resource.cppm
          VulkanRender/BufferResolver.cppm
@@ -178,3 +177,24 @@ target_include_directories(owe-render
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
 set_property(TARGET owe-render PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-render PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+
+# ---------------------------------------------------------------------------
+# owe-resource
+# ---------------------------------------------------------------------------
+add_subdirectory(Resource)
+
+
+# ---------------------------------------------------------------------------
+# owe-scene-wallpaper
+# ---------------------------------------------------------------------------
+add_library(owe-scene-wallpaper STATIC SceneWallpaper.cpp)
+target_sources(owe-scene-wallpaper
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES SceneWallpaper.cppm)
+target_link_libraries(owe-scene-wallpaper
+  PUBLIC owe-render owe-resource owe-parse owe-script wavsen::audio)
+target_include_directories(owe-scene-wallpaper
+  PUBLIC  .. . Swapchain Utils/include RenderGraph/include ../Vulkan/include
+  PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
+set_property(TARGET owe-scene-wallpaper PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET owe-scene-wallpaper PROPERTY CXX_SCAN_FOR_MODULES ON)

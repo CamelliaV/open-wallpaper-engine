@@ -24,8 +24,8 @@ add_subdirectory(Scene)
 # ---------------------------------------------------------------------------
 add_library(owe-renderer INTERFACE)
 target_link_libraries(owe-renderer
-  INTERFACE owe-render owe-parse owe-script
-            owe-vulkan owe-shader-compile owe-base)
+  INTERFACE owe-scene-wallpaper owe-render owe-parse owe-script
+            owe-resource owe-vulkan owe-shader-compile owe-base)
 
 endif()  # BUILD_WESCENE
 
