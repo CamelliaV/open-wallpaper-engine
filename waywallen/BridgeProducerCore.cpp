@@ -9,6 +9,7 @@ module waywallen.bridge_producer_core;
 import rstd.cppstd;
 import vulkan;
 import waywallen.bridge;
+import waywallen.bridge_session;
 
 namespace ww_wescene
 {
@@ -48,7 +49,8 @@ VkFormat fourcc_to_vk_format(uint32_t fourcc) {
 
 } // namespace
 
-BridgeProducerCore::BridgeProducerCore(ww_pool_t* pool, int sock): m_pool(pool), m_sock(sock) {}
+BridgeProducerCore::BridgeProducerCore(std::shared_ptr<BridgeSession> session)
+    : m_session(std::move(session)) {}
 
 BridgeProducerCore::~BridgeProducerCore() = default;
 
@@ -104,11 +106,10 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
         std::fprintf(stderr,
                      "BridgeProducerCore: fourcc 0x%08x has no VkFormat mapping\n",
                      directive.fourcc);
-        ww_bridge_send_bind_failed(m_sock,
-                                   directive.fourcc,
-                                   directive.modifier,
-                                   /*reason*/ 1,
-                                   "fourcc unsupported by producer");
+        m_session->sendBindFailed(directive.fourcc,
+                                  directive.modifier,
+                                  /*reason*/ 1,
+                                  "fourcc unsupported by producer");
         return -EINVAL;
     }
     if (directive.count == 0 || directive.count > kMaxSlots) {
@@ -122,14 +123,15 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     // Bridge's apply_directive tears down old slots and allocates new
     // ones. Producer-side has nothing to wind down — the blit dst is
     // the bridge slot directly, no cached views or intermediates.
-    m_slot_count   = 0;
-    m_next_slot    = 0;
-    m_have_pending = false;
+    m_slot_count       = 0;
+    m_next_slot        = 0;
+    m_have_pending     = false;
+    m_pending_identity = {};
     // Don't publish new geometry yet — wait for apply_directive to
     // succeed. If we publish early and apply fails, the producer sees
     // format()/ready() reporting state that has no slots behind it.
 
-    int rc = ww_bridge_pool_apply_directive(m_pool, m_sock, &directive);
+    int rc = m_session->applyDirective(directive);
     if (rc < 0) {
         std::fprintf(stderr, "BridgeProducerCore: apply_directive dry-run failed: %d\n", rc);
         return rc;
@@ -144,7 +146,7 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     // Read the actual slot dimensions back from the bridge — they were
     // sized from the `probe_width/height` we passed into advertise_caps.
     ww_pool_slot_t s0 {};
-    if (int srx = ww_bridge_pool_acquire_slot(m_pool, 0, &s0); srx != 0) {
+    if (int srx = m_session->acquireSlot(0, s0); srx != 0) {
         std::fprintf(stderr, "BridgeProducerCore: acquire_slot(0) post-apply failed: %d\n", srx);
         return srx;
     }
@@ -158,31 +160,158 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     return 0;
 }
 
-bool BridgeProducerCore::acquireSlot(VkImage* out_image, uint32_t* out_width,
-                                     uint32_t* out_height) {
-    if (m_slot_count == 0) return false;
+BridgeSlotAcquireResult BridgeProducerCore::acquireSlot(uint32_t timeout_ms) {
+    BridgeSlotAcquireResult result;
+    if (m_slot_count == 0) return result;
+    if (m_have_pending) {
+        result.status     = BridgeSlotAcquireStatus::Error;
+        result.error_code = -EBUSY;
+        return result;
+    }
 
     uint32_t idx = m_next_slot;
     m_next_slot  = (m_next_slot + 1) % m_slot_count;
 
-    // Producer back-pressure on the bridge slot. Bridge contract
-    // (pool.h wait_slot_release): non-zero return means "consumer still
-    // using; render anyway". Producer-runs-ahead is documented.
-    (void)ww_bridge_pool_wait_slot_release(m_pool, idx, /*timeout_ms*/ 16);
-
-    ww_pool_slot_t s {};
-    if (int rc = ww_bridge_pool_acquire_slot(m_pool, idx, &s); rc != 0) {
-        std::fprintf(stderr, "BridgeProducerCore: acquire_slot(%u) failed: %d\n", idx, rc);
-        return false;
+    ww_pool_slot_acquire_result_t acquired {};
+    if (int rc = m_session->acquireSlotForRender(idx, timeout_ms, acquired); rc != 0) {
+        result.status     = BridgeSlotAcquireStatus::Error;
+        result.error_code = rc;
+        return result;
     }
 
-    if (out_image) *out_image = static_cast<VkImage>(s.vk_image);
-    if (out_width) *out_width = s.width;
-    if (out_height) *out_height = s.height;
+    switch (acquired.status) {
+    case WW_POOL_SLOT_ACQUIRE_READY_UNUSED:
+        result.status = BridgeSlotAcquireStatus::ReadyUnused;
+        break;
+    case WW_POOL_SLOT_ACQUIRE_READY_RELEASED:
+        result.status = BridgeSlotAcquireStatus::ReadyReleased;
+        break;
+    case WW_POOL_SLOT_ACQUIRE_BUSY: result.status = BridgeSlotAcquireStatus::Busy; return result;
+    case WW_POOL_SLOT_ACQUIRE_FORCED_RELEASE:
+        result.status = BridgeSlotAcquireStatus::ForcedRelease;
+        return result;
+    case WW_POOL_SLOT_ACQUIRE_SESSION_LOST:
+        result.status     = BridgeSlotAcquireStatus::SessionLost;
+        result.error_code = acquired.error_code;
+        return result;
+    case WW_POOL_SLOT_ACQUIRE_ERROR:
+    default:
+        result.status     = BridgeSlotAcquireStatus::Error;
+        result.error_code = acquired.error_code;
+        return result;
+    }
 
-    m_pending_slot = idx;
-    m_have_pending = true;
+    uint64_t acquire_serial = m_next_acquire_serial++;
+    if (acquire_serial == 0) {
+        result.status     = BridgeSlotAcquireStatus::Error;
+        result.error_code = -EOVERFLOW;
+        return result;
+    }
+
+    result.identity = BridgeSlotIdentity {
+        .bind_generation        = acquired.bind_generation,
+        .slot_index             = acquired.slot.index,
+        .previous_release_point = acquired.previous_release_point,
+        .acquire_serial         = acquire_serial,
+    };
+    result.image  = static_cast<VkImage>(acquired.slot.vk_image);
+    result.width  = acquired.slot.width;
+    result.height = acquired.slot.height;
+    if (! result.acquired()) {
+        result.status     = BridgeSlotAcquireStatus::Error;
+        result.error_code = -EINVAL;
+        return result;
+    }
+
+    m_pending_slot     = idx;
+    m_pending_identity = result.identity;
+    m_have_pending     = true;
+    return result;
+}
+
+bool BridgeProducerCore::acquireSlot(VkImage* out_image, uint32_t* out_width,
+                                     uint32_t* out_height) {
+    auto result = acquireSlot(16);
+    if (! result.acquired()) return false;
+
+    if (out_image) *out_image = result.image;
+    if (out_width) *out_width = result.width;
+    if (out_height) *out_height = result.height;
     return true;
+}
+
+BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdentity& identity,
+                                                          int producer_sync_fd) {
+    if (! m_have_pending) {
+        if (producer_sync_fd >= 0) ::close(producer_sync_fd);
+        return BridgeSlotCompletionResult {
+            .status   = BridgeSlotCompletionStatus::NotPending,
+            .identity = identity,
+        };
+    }
+    if (identity != m_pending_identity) {
+        if (producer_sync_fd >= 0) ::close(producer_sync_fd);
+        return BridgeSlotCompletionResult {
+            .status   = BridgeSlotCompletionStatus::StaleIdentity,
+            .identity = identity,
+        };
+    }
+
+    uint32_t slot      = m_pending_slot;
+    m_have_pending     = false;
+    m_pending_identity = {};
+
+    ww_pool_slot_submit_result_t submitted {};
+    int rc = m_session->submitSlotForRender(slot, producer_sync_fd, submitted);
+    if (rc != 0) {
+        std::fprintf(stderr, "BridgeProducerCore: submit_slot(%u) rc=%d\n", slot, rc);
+        // Bridge contract: bridge always closes the fd. We don't dup-close.
+        return BridgeSlotCompletionResult {
+            .status     = BridgeSlotCompletionStatus::ProtocolError,
+            .identity   = identity,
+            .error_code = rc,
+        };
+    }
+    if (submitted.status == WW_POOL_SLOT_SUBMIT_SESSION_LOST) {
+        return BridgeSlotCompletionResult {
+            .status     = BridgeSlotCompletionStatus::SessionLost,
+            .identity   = identity,
+            .error_code = submitted.error_code,
+        };
+    }
+    if (submitted.status != WW_POOL_SLOT_SUBMIT_SUBMITTED) {
+        return BridgeSlotCompletionResult {
+            .status     = BridgeSlotCompletionStatus::ProtocolError,
+            .identity   = identity,
+            .error_code = submitted.error_code,
+        };
+    }
+    return BridgeSlotCompletionResult {
+        .status   = BridgeSlotCompletionStatus::Submitted,
+        .identity = identity,
+    };
+}
+
+BridgeSlotCompletionResult BridgeProducerCore::abortSlot(const BridgeSlotIdentity& identity) {
+    if (! m_have_pending) {
+        return BridgeSlotCompletionResult {
+            .status   = BridgeSlotCompletionStatus::NotPending,
+            .identity = identity,
+        };
+    }
+    if (identity != m_pending_identity) {
+        return BridgeSlotCompletionResult {
+            .status   = BridgeSlotCompletionStatus::StaleIdentity,
+            .identity = identity,
+        };
+    }
+
+    m_have_pending     = false;
+    m_pending_identity = {};
+    return BridgeSlotCompletionResult {
+        .status   = BridgeSlotCompletionStatus::Aborted,
+        .identity = identity,
+    };
 }
 
 void BridgeProducerCore::submitSlot(int producer_sync_fd) {
@@ -190,14 +319,7 @@ void BridgeProducerCore::submitSlot(int producer_sync_fd) {
         if (producer_sync_fd >= 0) ::close(producer_sync_fd);
         return;
     }
-    uint32_t slot  = m_pending_slot;
-    m_have_pending = false;
-
-    int rc = ww_bridge_pool_submit_slot(m_pool, m_sock, slot, producer_sync_fd);
-    if (rc != 0) {
-        std::fprintf(stderr, "BridgeProducerCore: submit_slot(%u) rc=%d\n", slot, rc);
-        // Bridge contract: bridge always closes the fd. We don't dup-close.
-    }
+    (void)submitSlot(m_pending_identity, producer_sync_fd);
 }
 
 } // namespace ww_wescene

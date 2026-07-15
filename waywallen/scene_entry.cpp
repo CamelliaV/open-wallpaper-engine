@@ -24,6 +24,7 @@ import wescene.scene_wallpaper;
 import wescene.pkg.parse;
 import waywallen.bridge;
 import waywallen.bridge_ex_swapchain;
+import waywallen.bridge_session;
 
 namespace
 {
@@ -346,8 +347,8 @@ bool resolve_render_node_to_uuid(const std::string&                 path,
 // ---------------------------------------------------------------------------
 
 struct HostState {
-    int        sock { -1 };
-    ww_pool_t* pool { nullptr };
+    int                                      sock { -1 };
+    std::weak_ptr<ww_wescene::BridgeSession> session;
     // Non-owning pointer; the unique_ptr lives inside VulkanRender.
     ww_wescene::BridgeExSwapchain* swapchain { nullptr };
     // Non-owning pointer to the SceneWallpaper that lives in main's
@@ -563,6 +564,15 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     }
     case WW_EVT_IN_SET_FPS: set_fps(s, msg.u.set_fps.fps); break;
     case WW_EVT_IN_SHUTDOWN: signal_shutdown(s); break;
+    case WW_EVT_IN_RELEASE_RESOLVED: {
+        auto session = s.session.lock();
+        if (! session) break;
+        if (int rc = session->reportRelease(msg.u.release_resolved); rc != 0) {
+            rstd_warn("waywallen-wescene-renderer: release_resolved rejected: {}", rc);
+            if (rc == -EPIPE) signal_shutdown(s);
+        }
+        break;
+    }
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         const auto&         nb = msg.u.negotiate_buffers;
         ww_pool_directive_t d {};
@@ -787,7 +797,9 @@ int run(int argc, char** argv) {
             host.clear_pending = std::array<float, 3> { r, g, b };
             return;
         }
-        if (int rc = ww_bridge_send_report_state_clear_color(host.sock, r, g, b, 1.0f); rc != 0) {
+        auto session = host.session.lock();
+        if (! session) return;
+        if (int rc = session->sendClearColor(r, g, b, 1.0f); rc != 0) {
             rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
         }
     });
@@ -822,8 +834,8 @@ int run(int argc, char** argv) {
 
     // The factory runs inside VulkanRender::init after the GPU is picked
     // and the VkDevice is created; that's when ww_bridge_pool_create can
-    // succeed. The factory captures `host` by reference; after init both
-    // host.pool and host.swapchain point at live objects.
+    // succeed. The swapchain owns the bridge session; host keeps only a
+    // weak control-path reference.
     const bool msaa_enabled = opts.msaa_samples > 1;
     auto       factory =
         [&host, msaa_enabled](
@@ -859,12 +871,21 @@ int run(int argc, char** argv) {
         if (msaa_enabled) {
             pi.format_feature_flags |= VK_FORMAT_FEATURE_BLIT_DST_BIT;
         }
-        if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &host.pool); rc != 0) {
+        ww_pool_t* pool = nullptr;
+        if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &pool); rc != 0) {
             rstd_error("waywallen-wescene-renderer: ww_bridge_pool_create failed: {}", rc);
             return nullptr;
         }
+        auto session = ww_wescene::BridgeSession::Adopt(pool, host.sock);
+        if (! session) {
+            int error = errno;
+            ww_bridge_pool_destroy(pool);
+            rstd_error("waywallen-wescene-renderer: bridge session socket dup failed: {}", error);
+            return nullptr;
+        }
         (void)h; // Vulkan handles no longer needed by BridgeExSwapchain.
-        auto sw        = std::make_unique<ww_wescene::BridgeExSwapchain>(host.pool, host.sock);
+        auto sw        = std::make_unique<ww_wescene::BridgeExSwapchain>(session);
+        host.session   = session;
         host.swapchain = sw.get();
         return sw;
     };
@@ -906,8 +927,8 @@ int run(int argc, char** argv) {
 
     if (! wp.waitVulkanInited(/*timeout_ms*/ 10000))
         die("VulkanRender did not finish init within 10s");
-    if (! host.pool || ! host.swapchain)
-        die("ex_swapchain_factory did not produce a pool / swapchain");
+    if (host.session.expired() || ! host.swapchain)
+        die("ex_swapchain_factory did not produce a bridge session / swapchain");
 
     host.swapchain->setOnFirstNegotiated([&] {
         if (host.paused.load(std::memory_order_acquire)) {
@@ -919,11 +940,10 @@ int run(int argc, char** argv) {
     });
 
     // Bridge sends ready + release_syncobj + format_caps in one go.
-    if (int rc = ww_bridge_pool_advertise_caps(host.pool,
-                                               host.sock,
-                                               opts.width,
-                                               opts.height,
-                                               WW_MEM_HINT_DEVICE_LOCAL | WW_MEM_HINT_HOST_VISIBLE);
+    auto session = host.session.lock();
+    if (! session) die("bridge session expired before advertise");
+    if (int rc = session->advertiseCaps(
+            opts.width, opts.height, WW_MEM_HINT_DEVICE_LOCAL | WW_MEM_HINT_HOST_VISIBLE);
         rc != 0)
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
@@ -934,10 +954,9 @@ int run(int argc, char** argv) {
     {
         std::scoped_lock _(host.clear_mu);
         host.clear_ready_published = true;
-        if (host.clear_pending && host.sock >= 0) {
+        if (host.clear_pending) {
             auto c = *host.clear_pending;
-            if (int rc = ww_bridge_send_report_state_clear_color(host.sock, c[0], c[1], c[2], 1.0f);
-                rc != 0) {
+            if (int rc = session->sendClearColor(c[0], c[1], c[2], 1.0f); rc != 0) {
                 rstd_warn("waywallen-wescene-renderer: pending report_state(clear_color) "
                           "flush failed ({})",
                           rc);
@@ -959,7 +978,7 @@ int run(int argc, char** argv) {
         ::shutdown(host.sock, SHUT_RD);
         reader.join();
     }
-    if (host.pool) ww_bridge_pool_destroy(host.pool);
+    session.reset();
     ww_bridge_close(host.sock);
 
     return 0;

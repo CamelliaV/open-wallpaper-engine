@@ -23,9 +23,13 @@ add_library(waywallen-bridge-producer STATIC)
 target_sources(waywallen-bridge-producer
     PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
         Bridge.cppm
+        BridgeSession.cppm
         BridgeProducerCore.cppm
 )
-target_sources(waywallen-bridge-producer PRIVATE BridgeProducerCore.cpp)
+target_sources(waywallen-bridge-producer PRIVATE
+    BridgeSession.cpp
+    BridgeProducerCore.cpp
+)
 target_include_directories(waywallen-bridge-producer PUBLIC .)
 target_link_libraries(waywallen-bridge-producer
     PUBLIC

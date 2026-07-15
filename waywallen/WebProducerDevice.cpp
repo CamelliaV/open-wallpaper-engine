@@ -805,8 +805,7 @@ int WebProducerDevice::BlitToSlot(const ImportedFrame& imp, VkImage slot_image,
     // slot_image: TRANSFER_DST → GENERAL, releasing queue ownership to
     // VK_QUEUE_FAMILY_FOREIGN_EXT so the non-Vulkan consumer (KMS /
     // wlroots / Plasma compositor) can read. GENERAL matches
-    // BridgeExSwapchain::producerOutputLayout and the layout the
-    // wescene producer also leaves slots in.
+    // GENERAL matches the frame-surface lease published by both renderers.
     VkImageMemoryBarrier b_release {};
     b_release.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     b_release.oldLayout                   = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;

@@ -158,7 +158,6 @@ constexpr std::string_view kRuntimeMuteKey = "__waywallen_runtime_mute";
 
 struct HostState {
     int                             sock { -1 };
-    ww_pool_t*                      pool { nullptr };
     ww_wescene::BridgeProducerCore* core { nullptr };
     weweb::BrowserHost*             host { nullptr };
     owe::Json*                      user_properties { nullptr };
@@ -360,6 +359,14 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     }
     case WW_EVT_IN_SET_FPS: enqueue_setting(s, "fps", std::to_string(msg.u.set_fps.fps)); break;
     case WW_EVT_IN_SHUTDOWN: s.shutdown.store(true, std::memory_order_release); break;
+    case WW_EVT_IN_RELEASE_RESOLVED:
+        if (s.core) {
+            if (int rc = s.core->reportRelease(msg.u.release_resolved); rc != 0) {
+                rstd_warn("waywallen-weweb-renderer: release_resolved rejected: {}", rc);
+                if (rc == -EPIPE) s.shutdown.store(true, std::memory_order_release);
+            }
+        }
+        break;
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         const auto&         nb = msg.u.negotiate_buffers;
         ww_pool_directive_t d {};
@@ -561,10 +568,17 @@ int run(int argc, char** argv) {
     // matches the slot), so OR in BLIT_DST.
     pi.format_feature_flags = VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
 
-    if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &state.pool); rc != 0)
+    ww_pool_t* pool = nullptr;
+    if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pi, &pool); rc != 0)
         die("ww_bridge_pool_create failed: " + std::to_string(rc));
 
-    ww_wescene::BridgeProducerCore core(state.pool, state.sock);
+    auto session = ww_wescene::BridgeSession::Adopt(pool, state.sock);
+    if (! session) {
+        int error = errno;
+        ww_bridge_pool_destroy(pool);
+        die("bridge session socket dup failed: " + std::to_string(error));
+    }
+    ww_wescene::BridgeProducerCore core(session);
     state.core = &core;
     state.host = &host;
 
@@ -641,9 +655,7 @@ int run(int argc, char** argv) {
         die("BrowserHost::OpenWallpaper failed");
     }
 
-    if (int rc = ww_bridge_pool_advertise_caps(
-            state.pool, state.sock, opts.width, opts.height, WW_MEM_HINT_DEVICE_LOCAL);
-        rc != 0)
+    if (int rc = session->advertiseCaps(opts.width, opts.height, WW_MEM_HINT_DEVICE_LOCAL); rc != 0)
         die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
 
     rstd_info("waywallen-weweb-renderer: ready, advertised caps {}x{}", opts.width, opts.height);
@@ -694,7 +706,7 @@ int run(int argc, char** argv) {
         reader.join();
     }
     host.Shutdown();
-    if (state.pool) ww_bridge_pool_destroy(state.pool);
+    session.reset();
     ww_bridge_close(state.sock);
     return 0;
 }

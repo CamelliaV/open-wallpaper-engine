@@ -11,7 +11,7 @@ class BridgeExSwapchain : public owe::ExSwapchain {
 public:
     static constexpr uint32_t kMaxSlots = BridgeProducerCore::kMaxSlots;
 
-    BridgeExSwapchain(ww_pool_t* pool, int sock);
+    explicit BridgeExSwapchain(std::shared_ptr<BridgeSession> session);
     ~BridgeExSwapchain() override;
 
     void queueDirective(const ww_pool_directive_t& directive) { m_core.queueDirective(directive); }
@@ -23,17 +23,11 @@ public:
 
     void poll() override { m_core.drainPendingDirective(); }
 
-    bool acquireRenderTarget(owe::vulkan::ImageParameters& out) override;
-
-    void submitRendered(int producer_sync_fd) override { m_core.submitSlot(producer_sync_fd); }
+    owe::FrameSurfaceAcquireResult acquireRenderTarget() override;
 
     unsigned width() const override { return m_core.width(); }
     unsigned height() const override { return m_core.height(); }
     VkFormat format() const override { return m_core.format(); }
-
-    VkImageLayout producerOutputLayout() const override { return VK_IMAGE_LAYOUT_GENERAL; }
-
-    uint32_t releaseTargetQueueFamily() const override { return VK_QUEUE_FAMILY_FOREIGN_EXT; }
 
     bool ready() const override { return m_core.ready(); }
 
@@ -53,7 +47,13 @@ public:
     }
 
 private:
-    BridgeProducerCore m_core;
+    owe::FrameSurfaceCompletionResult CompleteRendered(owe::FrameSurfaceIdentity identity,
+                                                       int producer_sync_fd) override;
+    owe::FrameSurfaceCompletionResult
+    AbortRenderTarget(owe::FrameSurfaceIdentity identity) override;
+
+    BridgeProducerCore                m_core;
+    std::optional<BridgeSlotIdentity> m_pending_identity;
 };
 
 } // namespace ww_wescene
