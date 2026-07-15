@@ -147,10 +147,10 @@ add_library(owe-render STATIC
   VulkanRender/BufferResolver.cpp
   VulkanRender/ShaderReflectionCache.cpp
   VulkanRender/SceneToRenderGraph.cpp
-  VulkanRender/CopyPass.cpp
-  VulkanRender/CustomShaderPass.cpp
-  VulkanRender/FinPass.cpp
-  VulkanRender/PrePass.cpp)
+  VulkanRender/Pass/CopyPass.cpp
+  VulkanRender/Pass/CustomShaderPass.cpp
+  VulkanRender/Pass/FinPass.cpp
+  VulkanRender/Pass/PrePass.cpp)
 target_sources(owe-render
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          RenderGraph/RGraph.cppm
@@ -159,17 +159,17 @@ target_sources(owe-render
          RenderGraph/TexNode.cppm
          RenderGraph/RenderGraph.cppm
          VulkanRender/VulkanRender.cppm
-         VulkanRender/VulkanPass.cppm
+         VulkanRender/Pass/VulkanPass.cppm
          VulkanRender/ShaderReflectionCache.cppm
          VulkanRender/RenderResource.cppm
          VulkanRender/ResourceKey.cppm
          VulkanRender/Resource.cppm
          VulkanRender/BufferResolver.cppm
-         VulkanRender/PassCommon.cppm
-         VulkanRender/CopyPass.cppm
-         VulkanRender/CustomShaderPass.cppm
-         VulkanRender/FinPass.cppm
-         VulkanRender/PrePass.cppm)
+         VulkanRender/Pass/PassCommon.cppm
+         VulkanRender/Pass/CopyPass.cppm
+         VulkanRender/Pass/CustomShaderPass.cppm
+         VulkanRender/Pass/FinPass.cppm
+         VulkanRender/Pass/PrePass.cppm)
 target_link_libraries(owe-render
   PUBLIC owe-vulkan owe-parse owe-script wavsen::audio)
 target_include_directories(owe-render

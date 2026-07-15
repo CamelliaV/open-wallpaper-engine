@@ -7,6 +7,7 @@ module;
 module wescene.vulkan_render;
 import wescene.spec_names;
 import wescene.core;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.vulkan;
@@ -154,12 +155,14 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
             .subresourceRange = srang,
         };
 
-        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            VK_DEPENDENCY_BY_REGION_BIT,
-                            {},
-                            {},
-                            std::array { in_bar, out_bar });
+        auto barriers = std::array { in_bar, out_bar };
+        cmd.PipelineBarrier(
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_DEPENDENCY_BY_REGION_BIT,
+            {},
+            {},
+            rstd::slice<VkImageMemoryBarrier>::from_raw_parts(barriers.data(), barriers.size()));
     }
     cmd.CopyImage(src.handle,
                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -188,12 +191,14 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
             .subresourceRange = srang,
         };
 
-        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                            VK_DEPENDENCY_BY_REGION_BIT,
-                            {},
-                            {},
-                            std::array { in_bar, out_bar });
+        auto barriers = std::array { in_bar, out_bar };
+        cmd.PipelineBarrier(
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_DEPENDENCY_BY_REGION_BIT,
+            {},
+            {},
+            rstd::slice<VkImageMemoryBarrier>::from_raw_parts(barriers.data(), barriers.size()));
     }
 
     if (dst.mipmap_level > 1) {

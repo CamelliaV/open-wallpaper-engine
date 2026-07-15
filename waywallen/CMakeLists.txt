@@ -61,7 +61,6 @@ set_target_properties(waywallen-wescene-renderer PROPERTIES
 target_include_directories(waywallen-wescene-renderer
     PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/Vulkan/include
         ${CMAKE_SOURCE_DIR}/src/VulkanRender/include
 )
 

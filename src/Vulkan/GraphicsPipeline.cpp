@@ -9,6 +9,7 @@ module;
 module wescene.vulkan;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 
@@ -211,13 +212,14 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
         pipeline.descriptor_layouts.emplace_back(std::move(layout));
     }
     {
-        std::vector<VkDescriptorSetLayout> layouts =
-            vvk::ToVector<vvk::DescriptorSetLayout>(pipeline.descriptor_layouts);
+        auto layouts = vvk::ToVector<vvk::DescriptorSetLayout>(
+            rstd::slice<vvk::DescriptorSetLayout>::from_raw_parts(
+                pipeline.descriptor_layouts.data(), pipeline.descriptor_layouts.size()));
 
         VkPipelineLayoutCreateInfo ci {
             .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .pNext          = nullptr,
-            .setLayoutCount = (uint32_t)layouts.size(),
+            .setLayoutCount = (uint32_t)layouts.len(),
             .pSetLayouts    = layouts.data(),
         };
         VVK_CHECK(device.handle().CreatePipelineLayout(ci, pipeline.layout));

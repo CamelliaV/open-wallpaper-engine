@@ -1,13 +1,14 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "vk_mem_alloc.h"
+#include <vk_mem_alloc.h>
 
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 
@@ -17,7 +18,7 @@ namespace
 {
 
 void EnumateDeviceExts(const vvk::PhysicalDevice& gpu, owe::Set<std::string>& set) {
-    std::vector<VkExtensionProperties> properties;
+    rstd::vec::Vec<VkExtensionProperties> properties;
     VVK_CHECK_VOID_RE(gpu.EnumerateDeviceExtensionProperties(properties));
     for (auto& ext : properties) set.insert(ext.extensionName);
 }
@@ -98,7 +99,7 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
             m_present_queue.family_index = present_indexs.front();
         }
     }
-    for (uint32_t i = 0; i < props.size(); ++i) {
+    for (uint32_t i = 0; i < props.len(); ++i) {
         if (props[i].queueCount == 0) continue;
         VkDeviceQueueCreateInfo info {
             .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -182,13 +183,16 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
     };
     if (enable_sync2) enabled_timeline.pNext = &enabled_sync2;
 
-    VVK_CHECK_BOOL_RE(vvk::Device::Create(device.m_device,
-                                          *device.m_gpu,
-                                          device.ChooseDeviceQueue(*inst.surface()),
-                                          tested_exts_c,
-                                          &enabled_timeline,
-                                          device.dld,
-                                          &enabled));
+    auto queue_create_infos = device.ChooseDeviceQueue(*inst.surface());
+    VVK_CHECK_BOOL_RE(vvk::Device::Create(
+        device.m_device,
+        *device.m_gpu,
+        rstd::slice<VkDeviceQueueCreateInfo>::from_raw_parts(queue_create_infos.data(),
+                                                             queue_create_infos.size()),
+        rstd::slice<const char*>::from_raw_parts(tested_exts_c.data(), tested_exts_c.size()),
+        &enabled_timeline,
+        device.dld,
+        &enabled));
 
     device.m_graphics_queue.handle = device.m_device.GetQueue(device.m_graphics_queue.family_index);
     device.m_present_queue.handle  = device.m_device.GetQueue(device.m_present_queue.family_index);

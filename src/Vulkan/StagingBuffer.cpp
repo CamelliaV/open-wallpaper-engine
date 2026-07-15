@@ -1,7 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "vk_mem_alloc.h"
+#include <vk_mem_alloc.h>
 #include "vvk/macros.hpp"
 
 module wescene.vulkan;

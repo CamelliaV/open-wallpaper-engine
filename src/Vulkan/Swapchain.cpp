@@ -5,15 +5,16 @@ module;
 
 module wescene.vulkan;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 
 using namespace owe::vulkan;
 
 struct SwapChainSupportDetails {
-    VkSurfaceCapabilitiesKHR        capabilities;
-    std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR>   presentModes;
+    VkSurfaceCapabilitiesKHR              capabilities;
+    rstd::vec::Vec<VkSurfaceFormatKHR>    formats;
+    rstd::vec::Vec<VkPresentModeKHR>      presentModes;
 };
 
 namespace
@@ -27,8 +28,9 @@ bool querySwapChainSupport(const vvk::PhysicalDevice& gpu, VkSurfaceKHR surface,
     return true;
 }
 
-VkSurfaceFormatKHR chooseSwapSurfaceFormat(std::span<const VkSurfaceFormatKHR> availableFormats) {
-    for (const auto& availableFormat : availableFormats) {
+VkSurfaceFormatKHR chooseSwapSurfaceFormat(rstd::slice<VkSurfaceFormatKHR> availableFormats) {
+    for (rstd::usize i = 0; i < availableFormats.len(); ++i) {
+        const auto& availableFormat = availableFormats[i];
         if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM ||
             availableFormat.format == VK_FORMAT_R8G8B8A8_UNORM) {
             if (availableFormat.colorSpace == VK_COLORSPACE_SRGB_NONLINEAR_KHR)
@@ -93,7 +95,7 @@ bool Swapchain::Create(Device& device, VkSurfaceKHR surface, VkExtent2D extent, 
     SwapChainSupportDetails swap_details;
     if (! querySwapChainSupport(device.gpu(), surface, swap_details)) return false;
 
-    swap.m_format = chooseSwapSurfaceFormat(swap_details.formats);
+    swap.m_format = chooseSwapSurfaceFormat(swap_details.formats.as_slice());
 
     auto& surfaceCapabilities = swap_details.capabilities;
 
@@ -128,7 +130,7 @@ bool Swapchain::Create(Device& device, VkSurfaceKHR surface, VkExtent2D extent, 
 
     VVK_CHECK_BOOL_RE(device.device().CreateSwapchainKHR(sci, swap.m_handle));
     {
-        std::vector<VkImage> images;
+        rstd::vec::Vec<VkImage> images;
         VVK_CHECK_BOOL_RE(swap.m_handle.GetImages(images));
         std::transform(
             images.begin(), images.end(), std::back_inserter(swap.m_images), [&](auto image) {

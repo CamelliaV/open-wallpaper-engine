@@ -2,17 +2,15 @@ module;
 
 #include <unistd.h>
 
-// Vk types/enumerators/PFN typedefs flow in via `import vulkan;` (purview
-// below). vk_mem_alloc.h still needs the raw vulkan.h declarations, so we
-// let it pull them in transitively.
-#include "vk_mem_alloc.h"
+// VMA needs the raw Vulkan declarations in the global module fragment.
+#include <vk_mem_alloc.h>
 
 // Macros only — VVK_CHECK family.
 #include "vvk/macros.hpp"
 
 export module wescene.vulkan;
 import wescene.core;
-export import :vvk;
+export import :vma;
 import rstd.log;
 import rstd.cppstd;
 import wescene.types;
@@ -23,20 +21,13 @@ import wescene.types;
 // every Vk type / enumerator / PFN_* without needing their own
 // `import vulkan;`.
 export import vulkan;
+export import wavsen.vvk;
 
 // Re-export the host-only shader compile API. Lets existing consumers
 // (VulkanRender/* etc.) keep their `import wescene.vulkan;` without
 // caring that ShaderSpv / ShaderReflected / Preprocess / etc. now live
 // in a separate module.
 export import wescene.shader_compile;
-
-// =================================================================
-// Layer 1: vvk:: low-level Vulkan C++ wrapper
-// =================================================================
-
-// =================================================================
-// Layer 2: owe::vulkan:: high-level wrapper
-// =================================================================
 
 export namespace owe
 {
@@ -228,7 +219,6 @@ public:
     bool supportLayer(std::string_view) const;
 
 private:
-    utils::DynamicLibrary m_vklib;
     vvk::InstanceDispatch m_dld;
     vvk::Instance         m_vinst;
 

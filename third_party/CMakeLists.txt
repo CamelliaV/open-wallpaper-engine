@@ -3,7 +3,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
 # ------------------------------------------------------------------
 # Locally vendored deps still living under third_party/
-# (glad, effolkronium, vog, stb_image.h, vk_mem_alloc.h)
+# (glad, effolkronium, vog, stb_image.h)
 # argparse moved to FetchContent via deps.json.
 # ------------------------------------------------------------------
 add_subdirectory(glad)
@@ -24,6 +24,11 @@ set(SPIRV_REFLECT_INSTALL    OFF CACHE INTERNAL "")
 set(ARGPARSE_INSTALL        OFF CACHE INTERNAL "")
 set(ARGPARSE_BUILD_TESTS    OFF CACHE INTERNAL "")
 set(ARGPARSE_BUILD_SAMPLES  OFF CACHE INTERNAL "")
+
+# Vulkan Memory Allocator: consume only the interface target.
+set(VMA_BUILD_DOCUMENTATION OFF CACHE INTERNAL "")
+set(VMA_BUILD_SAMPLES       OFF CACHE INTERNAL "")
+set(VMA_ENABLE_INSTALL      OFF CACHE INTERNAL "")
 
 # QuickJS-NG: only the static library is needed; suppress the CLI / examples
 # / install rules so they don't clutter our tree.

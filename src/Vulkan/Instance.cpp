@@ -6,6 +6,7 @@ module;
 module wescene.vulkan;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 
@@ -70,15 +71,21 @@ VkResult CreatInstance(vvk::Instance* inst, std::span<const std::string_view> ex
             return layer.data();
         });
 
-    return vvk::Instance::Create(*inst, app_info, layer_names_c, extension_names_c, dld);
+    return vvk::Instance::Create(
+        *inst,
+        app_info,
+        rstd::slice<const char*>::from_raw_parts(layer_names_c.data(), layer_names_c.size()),
+        rstd::slice<const char*>::from_raw_parts(extension_names_c.data(),
+                                                 extension_names_c.size()),
+        dld);
 }
 void EnumateExts(owe::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
-    if (auto rv = vvk::EnumerateInstanceExtensionProperties(dld); rv.has_value()) {
+    if (auto rv = vvk::EnumerateInstanceExtensionProperties(dld); rv.is_some()) {
         for (const auto& ext : *rv) set.insert(ext.extensionName);
     }
 }
 void EnumateLayers(owe::Set<std::string>& set, const vvk::InstanceDispatch& dld) {
-    if (auto rv = vvk::EnumerateInstanceLayerProperties(dld); rv.has_value()) {
+    if (auto rv = vvk::EnumerateInstanceLayerProperties(dld); rv.is_some()) {
         for (const auto& ext : *rv) set.insert(ext.layerName);
     }
 }
@@ -146,8 +153,7 @@ void Instance::Destroy() {}
 
 bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
                       std::span<const InstanceLayer> instLayers, std::uint32_t api_version) {
-    vvk::LoadLibrary(inst.m_vklib, inst.m_dld);
-    vvk::Load(inst.m_dld);
+    if (! vvk::Load(inst.m_dld)) return false;
 
     EnumateExts(inst.m_extensions, inst.m_dld);
     Set<std::string> exts, layers;
