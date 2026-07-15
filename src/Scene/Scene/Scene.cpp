@@ -62,13 +62,24 @@ float animation_frame(const SceneAnimationCurve& curve, double runtime) {
     absorb_last(curve.c2);
     if (end <= 0) return frame;
 
-    bool loop = curve.wraploop || curve.mode == "loop" || curve.mode == "repeat";
+    const float ef  = static_cast<float>(end);
+    bool        loop = curve.wraploop || curve.mode == "loop" || curve.mode == "repeat";
     if (loop) {
-        frame = std::fmod(frame, static_cast<float>(end));
-        if (frame < 0.0f) frame += static_cast<float>(end);
+        frame = std::fmod(frame, ef);
+        if (frame < 0.0f) frame += ef;
         return frame;
     }
-    return std::clamp(frame, 0.0f, static_cast<float>(end));
+    // Mirror mode ping-pongs 0 -> end -> 0 with period 2*end. Without this it
+    // fell through to clamp(), pinning the value to the last keyframe forever
+    // after one forward pass — e.g. a blink's eye-closed pose (value=1 at the
+    // last key) would stick on, leaving the eye permanently transparent.
+    if (curve.mode == "mirror") {
+        float period = 2.0f * ef;
+        float m      = std::fmod(frame, period);
+        if (m < 0.0f) m += period;
+        return m <= ef ? m : (period - m);
+    }
+    return std::clamp(frame, 0.0f, ef);
 }
 
 float eval_segment(const SceneAnimationKey& a, const SceneAnimationKey& b, float frame) {
