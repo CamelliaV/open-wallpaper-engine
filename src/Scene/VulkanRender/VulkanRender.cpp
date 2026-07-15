@@ -3,6 +3,7 @@ module;
 
 #include "vvk/macros.hpp"
 
+#include <cerrno>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 
@@ -602,8 +603,9 @@ struct VulkanRender::Impl {
     // Resolved against device's framebufferColorSampleCounts in init().
     VkSampleCountFlagBits m_msaa_samples { VK_SAMPLE_COUNT_1_BIT };
 
-    std::unique_ptr<ExSwapchain> m_ex_swapchain;
+    std::shared_ptr<ExSwapchain> m_ex_swapchain;
     RenderingResources           m_rendering_resources;
+    uint64_t                     m_next_surface_acquire_serial { 1 };
 
     // for VUID-vkQueueSubmit-pSignalSemaphores-00067
     std::vector<vvk::Semaphore> m_sem_swap_finish_per_image;
@@ -938,26 +940,6 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
 bool VulkanRender::Impl::initRes() {
     m_prepass = std::make_unique<PrePass>(PrePass::Desc {});
     m_finpass = std::make_unique<FinPass>(FinPass::Desc {});
-    if (m_with_surface) {
-        // Surface mode: FinPass blits into the swapchain image, ending
-        // it in PRESENT_SRC_KHR. Queue-family transfer to the present
-        // queue is needed only when graphics != present family.
-        m_finpass->setPresentLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-        m_finpass->setPresentQueueIndex(m_device->present_queue().family_index);
-        m_finpass->setPresentFormat(m_device->swapchain().format());
-    } else {
-        // Offscreen: ExSwapchain implementation chooses both. Bridge
-        // returns (GENERAL, FOREIGN_EXT); local returns (GENERAL,
-        // IGNORED). Translate IGNORED to graphics_family so FinPass's
-        // release-barrier branch (`!= graphics_family`) skips cleanly.
-        m_finpass->setPresentLayout(m_ex_swapchain->producerOutputLayout());
-        uint32_t qf = m_ex_swapchain->releaseTargetQueueFamily();
-        if (qf == VK_QUEUE_FAMILY_IGNORED) {
-            qf = m_device->graphics_queue().family_index;
-        }
-        m_finpass->setPresentQueueIndex(qf);
-        m_finpass->setPresentFormat(m_ex_swapchain->format());
-    }
 
     m_dyn_buf = std::make_unique<StagingBuffer>(*m_device,
                                                 2 * 1024 * 1024,
@@ -1118,9 +1100,31 @@ void VulkanRender::Impl::drawFrameSwapchain() {
                                                                  {},
                                                                  &image_index));
     }
-    const auto& image = m_device->swapchain().images()[image_index];
-
-    m_finpass->setPresent(image);
+    const auto&    image          = m_device->swapchain().images()[image_index];
+    const uint64_t acquire_serial = m_next_surface_acquire_serial++;
+    if (acquire_serial == 0) {
+        rstd_error("window frame surface acquire serial overflow");
+        return;
+    }
+    owe::FrameSurfaceLease frame_surface {
+        .identity             = { .owner_generation = 1,
+                                  .image_index      = image_index,
+                                  .acquire_serial   = acquire_serial },
+        .reuse                = { .kind = owe::FrameSurfaceReuseKind::PresentationAcquired },
+        .image                = image,
+        .format               = m_device->swapchain().format(),
+        .initial_layout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .initial_queue_family = m_device->graphics_queue().family_index,
+        .acquire              = { .kind      = owe::FrameSurfaceAcquireKind::BinarySemaphore,
+                                  .semaphore = *rr.sem_swap_wait_image },
+        .final_layout         = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .final_queue_family   = m_device->present_queue().family_index,
+        .discard_content      = true,
+    };
+    if (! m_finpass->setFrameSurface(std::move(frame_surface))) {
+        rstd_error("window frame surface lease rejected");
+        return;
+    }
 
     (void)rr.command.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1203,13 +1207,22 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         return;
     }
 
-    RenderingResources& rr = m_rendering_resources;
-    ImageParameters     image;
-    if (! m_ex_swapchain->acquireRenderTarget(image)) {
+    RenderingResources& rr                    = m_rendering_resources;
+    auto                frame_surface_acquire = m_ex_swapchain->acquireRenderTarget();
+    if (! frame_surface_acquire.acquired()) {
+        if (frame_surface_acquire.status == owe::FrameSurfaceAcquireStatus::ProtocolError ||
+            frame_surface_acquire.status == owe::FrameSurfaceAcquireStatus::ForcedRelease ||
+            frame_surface_acquire.status == owe::FrameSurfaceAcquireStatus::SessionLost) {
+            rstd_error("offscreen frame surface acquisition failed: {}",
+                       frame_surface_acquire.error_code);
+        }
         return;
     }
 
-    m_finpass->setPresent(image);
+    if (! m_finpass->setFrameSurface(frame_surface_acquire.lease)) {
+        rstd_error("offscreen frame surface lease rejected");
+        return;
+    }
 
     (void)rr.command.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1300,7 +1313,12 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         }
     }
 
-    m_ex_swapchain->submitRendered(sync_fd);
+    auto completion = frame_surface_acquire.completion.Submit(sync_fd);
+    if (completion.status != owe::FrameSurfaceCompletionStatus::Submitted) {
+        rstd_error("offscreen frame surface completion failed: status={}, error={}",
+                   static_cast<int>(completion.status),
+                   completion.error_code);
+    }
 }
 
 bool VulkanRender::Impl::onSwapchainReady(unsigned width, unsigned height) {

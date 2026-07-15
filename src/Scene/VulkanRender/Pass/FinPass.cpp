@@ -10,18 +10,16 @@ import wescene.scene;
 using namespace owe::vulkan;
 
 FinPass::FinPass(const Desc& desc) {
-    m_desc.result              = desc.result;
-    m_desc.result_request      = desc.result_request;
-    m_desc.present_layout      = desc.present_layout;
-    m_desc.present_queue_index = desc.present_queue_index;
-    m_desc.present_format      = desc.present_format;
+    m_desc.result         = desc.result;
+    m_desc.result_request = desc.result_request;
 }
 FinPass::~FinPass() {}
 
-void FinPass::setPresent(ImageParameters img) { m_desc.vk_present = img; }
-void FinPass::setPresentLayout(VkImageLayout layout) { m_desc.present_layout = layout; }
-void FinPass::setPresentQueueIndex(uint32_t i) { m_desc.present_queue_index = i; }
-void FinPass::setPresentFormat(VkFormat fmt) { m_desc.present_format = fmt; }
+bool FinPass::setFrameSurface(owe::FrameSurfaceLease lease) {
+    if (! lease.valid()) return false;
+    m_desc.frame_surface = std::move(lease);
+    return true;
+}
 bool FinPass::setResultRequest(std::optional<TextureRequest> request) {
     return SetTextureRequestIfChanged(m_desc.result_request, std::move(request));
 }
@@ -56,8 +54,11 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& /*
 }
 
 void FinPass::execute(const Device& device, RenderingResources& rr) {
-    auto&    cmd = rr.command;
-    uint32_t gqf = device.graphics_queue().family_index;
+    if (! m_desc.frame_surface.has_value() || ! m_desc.frame_surface->valid()) return;
+    const auto& frame_surface = *m_desc.frame_surface;
+    const auto& present       = frame_surface.image;
+    auto&       cmd           = rr.command;
+    uint32_t    gqf           = device.graphics_queue().family_index;
 
     VkImageSubresourceRange sub {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -92,12 +93,16 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
             .pNext               = nullptr,
             .srcAccessMask       = 0,
             .dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED,
+            .oldLayout           = frame_surface.discard_content ? VK_IMAGE_LAYOUT_UNDEFINED
+                                                                 : frame_surface.initial_layout,
             .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image               = m_desc.vk_present.handle,
-            .subresourceRange    = sub,
+            .srcQueueFamilyIndex = frame_surface.initial_queue_family == gqf
+                                       ? VK_QUEUE_FAMILY_IGNORED
+                                       : frame_surface.initial_queue_family,
+            .dstQueueFamilyIndex =
+                frame_surface.initial_queue_family == gqf ? VK_QUEUE_FAMILY_IGNORED : gqf,
+            .image            = present.handle,
+            .subresourceRange = sub,
         };
         // srcStage = TRANSFER (not TOP_OF_PIPE) so the layout transition
         // observes the swapchain acquire-semaphore wait, which the submit
@@ -114,9 +119,9 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
         // Result is always R8G8B8A8_UNORM (screen RT). We can copy when
         // present matches that and dimensions are identical; otherwise
         // fall back to blit which handles size/format mismatch.
-        const bool can_copy = m_desc.vk_result.extent.width == m_desc.vk_present.extent.width &&
-                              m_desc.vk_result.extent.height == m_desc.vk_present.extent.height &&
-                              m_desc.present_format == VK_FORMAT_R8G8B8A8_UNORM;
+        const bool can_copy = m_desc.vk_result.extent.width == present.extent.width &&
+                              m_desc.vk_result.extent.height == present.extent.height &&
+                              frame_surface.format == VK_FORMAT_R8G8B8A8_UNORM;
 
         if (! m_path_logged) {
             rstd_info("FinPass: {}", can_copy ? "copy" : "blit");
@@ -133,7 +138,7 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
             };
             cmd.CopyImage(m_desc.vk_result.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                          m_desc.vk_present.handle,
+                          present.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                           region);
         } else {
@@ -147,13 +152,14 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
                 .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 .dstOffsets     = {
                     VkOffset3D { 0, 0, 0 },
-                    VkOffset3D { (int32_t)m_desc.vk_present.extent.width,
-                                 (int32_t)m_desc.vk_present.extent.height, 1 },
+                    VkOffset3D { (int32_t)present.extent.width,
+                                 (int32_t)present.extent.height,
+                                 1 },
                 },
             };
             cmd.BlitImage(m_desc.vk_result.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                          m_desc.vk_present.handle,
+                          present.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                           region,
                           VK_FILTER_LINEAR);
@@ -180,18 +186,19 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
     }
 
     {
-        bool                 xfer = (m_desc.present_queue_index != gqf);
+        bool                 xfer = frame_surface.final_queue_family != gqf;
         VkImageMemoryBarrier b {
             .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext               = nullptr,
             .srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT,
             .dstAccessMask       = 0,
             .oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout           = m_desc.present_layout,
+            .newLayout           = frame_surface.final_layout,
             .srcQueueFamilyIndex = xfer ? gqf : VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = xfer ? m_desc.present_queue_index : VK_QUEUE_FAMILY_IGNORED,
-            .image               = m_desc.vk_present.handle,
-            .subresourceRange    = sub,
+            .dstQueueFamilyIndex =
+                xfer ? frame_surface.final_queue_family : VK_QUEUE_FAMILY_IGNORED,
+            .image            = present.handle,
+            .subresourceRange = sub,
         };
         cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
@@ -201,6 +208,8 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
 }
 
 void FinPass::destory(const Device&, RenderingResources&) {
+    m_desc.vk_result = {};
+    m_desc.frame_surface.reset();
     setPrepared(false);
     clearReleaseTexs();
 }

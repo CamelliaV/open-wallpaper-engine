@@ -1,6 +1,7 @@
 module;
 
 #include <unistd.h>
+#include <cerrno>
 
 // VMA needs the raw Vulkan declarations in the global module fragment.
 #include <vk_mem_alloc.h>
@@ -59,6 +60,152 @@ struct ExSwapchainReadyEvent {
     unsigned width;
     unsigned height;
     VkFormat format;
+};
+
+enum class FrameSurfaceAcquireKind
+{
+    QueueOrdered,
+    BinarySemaphore,
+    ExternalProtocol,
+};
+
+struct FrameSurfaceIdentity {
+    uint64_t owner_generation { 0 };
+    uint32_t image_index { 0 };
+    uint64_t acquire_serial { 0 };
+
+    bool valid() const noexcept { return owner_generation != 0 && acquire_serial != 0; }
+    bool operator==(const FrameSurfaceIdentity&) const = default;
+};
+
+enum class FrameSurfaceReuseKind
+{
+    QueueOrdered,
+    PresentationAcquired,
+    NeverSubmitted,
+    ConsumerReleased,
+};
+
+struct FrameSurfaceReuseProof {
+    FrameSurfaceReuseKind kind { FrameSurfaceReuseKind::QueueOrdered };
+    uint64_t              release_point { 0 };
+
+    bool valid() const noexcept {
+        return (kind == FrameSurfaceReuseKind::ConsumerReleased) == (release_point != 0);
+    }
+};
+
+struct FrameSurfaceAcquireDependency {
+    FrameSurfaceAcquireKind kind { FrameSurfaceAcquireKind::QueueOrdered };
+    VkSemaphore             semaphore { VK_NULL_HANDLE };
+
+    bool valid() const noexcept {
+        return (kind == FrameSurfaceAcquireKind::BinarySemaphore) == (semaphore != VK_NULL_HANDLE);
+    }
+};
+
+struct FrameSurfaceLease {
+    FrameSurfaceIdentity          identity;
+    FrameSurfaceReuseProof        reuse;
+    vulkan::ImageParameters       image;
+    VkFormat                      format { VK_FORMAT_UNDEFINED };
+    VkImageLayout                 initial_layout { VK_IMAGE_LAYOUT_UNDEFINED };
+    uint32_t                      initial_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    FrameSurfaceAcquireDependency acquire;
+    VkImageLayout                 final_layout { VK_IMAGE_LAYOUT_UNDEFINED };
+    uint32_t                      final_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    bool                          discard_content { true };
+
+    bool valid() const noexcept {
+        const bool acquire_matches_reuse =
+            (acquire.kind == FrameSurfaceAcquireKind::QueueOrdered &&
+             reuse.kind == FrameSurfaceReuseKind::QueueOrdered) ||
+            (acquire.kind == FrameSurfaceAcquireKind::BinarySemaphore &&
+             reuse.kind == FrameSurfaceReuseKind::PresentationAcquired) ||
+            (acquire.kind == FrameSurfaceAcquireKind::ExternalProtocol &&
+             (reuse.kind == FrameSurfaceReuseKind::NeverSubmitted ||
+              reuse.kind == FrameSurfaceReuseKind::ConsumerReleased));
+        return identity.valid() && reuse.valid() && acquire_matches_reuse &&
+               image.handle != VK_NULL_HANDLE && image.extent.width != 0 &&
+               image.extent.height != 0 && image.extent.depth != 0 &&
+               format != VK_FORMAT_UNDEFINED && acquire.valid() && discard_content &&
+               final_layout != VK_IMAGE_LAYOUT_UNDEFINED &&
+               initial_queue_family != VK_QUEUE_FAMILY_IGNORED &&
+               final_queue_family != VK_QUEUE_FAMILY_IGNORED;
+    }
+};
+
+enum class FrameSurfaceCompletionStatus
+{
+    Submitted,
+    Aborted,
+    NotPending,
+    StaleIdentity,
+    SessionLost,
+    ProtocolError,
+};
+
+struct FrameSurfaceCompletionResult {
+    FrameSurfaceCompletionStatus status { FrameSurfaceCompletionStatus::NotPending };
+    FrameSurfaceIdentity         identity;
+    int32_t                      error_code { 0 };
+
+    bool completed() const noexcept {
+        return status == FrameSurfaceCompletionStatus::Submitted ||
+               status == FrameSurfaceCompletionStatus::Aborted;
+    }
+};
+
+class ExSwapchain;
+
+class FrameSurfaceCompletionCapability {
+public:
+    FrameSurfaceCompletionCapability() = default;
+    ~FrameSurfaceCompletionCapability();
+
+    FrameSurfaceCompletionCapability(const FrameSurfaceCompletionCapability&)            = delete;
+    FrameSurfaceCompletionCapability& operator=(const FrameSurfaceCompletionCapability&) = delete;
+    FrameSurfaceCompletionCapability(FrameSurfaceCompletionCapability&&) noexcept;
+    FrameSurfaceCompletionCapability& operator=(FrameSurfaceCompletionCapability&&) noexcept;
+
+    bool valid() const noexcept { return m_owner != nullptr && m_identity.valid(); }
+
+    FrameSurfaceCompletionResult Submit(int producer_sync_fd);
+    FrameSurfaceCompletionResult Abort();
+
+private:
+    friend class ExSwapchain;
+
+    FrameSurfaceCompletionCapability(std::shared_ptr<ExSwapchain> owner,
+                                     FrameSurfaceIdentity         identity)
+        : m_owner(std::move(owner)), m_identity(identity) {}
+
+    std::shared_ptr<ExSwapchain> m_owner;
+    FrameSurfaceIdentity         m_identity;
+};
+
+enum class FrameSurfaceAcquireStatus
+{
+    Acquired,
+    Suboptimal,
+    Busy,
+    NotReady,
+    ForcedRelease,
+    SessionLost,
+    ProtocolError,
+};
+
+struct FrameSurfaceAcquireResult {
+    FrameSurfaceAcquireStatus        status { FrameSurfaceAcquireStatus::NotReady };
+    FrameSurfaceLease                lease;
+    FrameSurfaceCompletionCapability completion;
+    int32_t                          error_code { 0 };
+
+    bool acquired() const noexcept {
+        return (status == FrameSurfaceAcquireStatus::Acquired ||
+                status == FrameSurfaceAcquireStatus::Suboptimal) &&
+               lease.valid() && completion.valid();
+    }
 };
 
 enum class TexTiling
@@ -138,9 +285,8 @@ private:
 //     drive bind_buffers / frame_ready themselves and consume `eatFrame()`
 //     / `snapshot_all_slots()`.
 //   - BridgeExSwapchain: wraps a `ww_pool_t`; bridge owns the slot images
-//     and emits bind_buffers / frame_ready itself when the host calls
-//     `submitRendered`.
-class ExSwapchain {
+//     and completes submission through the acquired frame capability.
+class ExSwapchain : public std::enable_shared_from_this<ExSwapchain> {
 public:
     virtual ~ExSwapchain() = default;
 
@@ -151,9 +297,7 @@ public:
 
     virtual void poll() {}
 
-    virtual bool acquireRenderTarget(vulkan::ImageParameters& out) = 0;
-
-    virtual void submitRendered(int acquire_sync_fd) = 0;
+    virtual FrameSurfaceAcquireResult acquireRenderTarget() = 0;
 
     virtual int takeLastFrameSyncFd() { return -1; }
 
@@ -164,17 +308,63 @@ public:
     virtual unsigned height() const = 0;
     virtual VkFormat format() const = 0;
 
-    virtual VkImageLayout producerOutputLayout() const = 0;
-
-    virtual uint32_t releaseTargetQueueFamily() const = 0;
-
     virtual bool ready() const = 0;
 
     virtual void setOnReadyChanged(std::function<void(const ExSwapchainReadyEvent&)>) = 0;
 
 protected:
     ExSwapchain() = default;
+
+    FrameSurfaceCompletionCapability MakeCompletionCapability(FrameSurfaceIdentity identity) {
+        return FrameSurfaceCompletionCapability(shared_from_this(), identity);
+    }
+
+private:
+    friend class FrameSurfaceCompletionCapability;
+
+    virtual FrameSurfaceCompletionResult CompleteRendered(FrameSurfaceIdentity identity,
+                                                          int producer_sync_fd)           = 0;
+    virtual FrameSurfaceCompletionResult AbortRenderTarget(FrameSurfaceIdentity identity) = 0;
 };
+
+inline FrameSurfaceCompletionCapability::~FrameSurfaceCompletionCapability() {
+    if (valid()) (void)Abort();
+}
+
+inline FrameSurfaceCompletionCapability::FrameSurfaceCompletionCapability(
+    FrameSurfaceCompletionCapability&& other) noexcept
+    : m_owner(std::move(other.m_owner)), m_identity(other.m_identity) {
+    other.m_identity = {};
+}
+
+inline FrameSurfaceCompletionCapability&
+FrameSurfaceCompletionCapability::operator=(FrameSurfaceCompletionCapability&& other) noexcept {
+    if (this == &other) return *this;
+    if (valid()) (void)Abort();
+    m_owner          = std::move(other.m_owner);
+    m_identity       = other.m_identity;
+    other.m_identity = {};
+    return *this;
+}
+
+inline FrameSurfaceCompletionResult FrameSurfaceCompletionCapability::Submit(int producer_sync_fd) {
+    if (! valid()) {
+        if (producer_sync_fd >= 0) ::close(producer_sync_fd);
+        return {};
+    }
+    auto owner    = std::move(m_owner);
+    auto identity = m_identity;
+    m_identity    = {};
+    return owner->CompleteRendered(identity, producer_sync_fd);
+}
+
+inline FrameSurfaceCompletionResult FrameSurfaceCompletionCapability::Abort() {
+    if (! valid()) return {};
+    auto owner    = std::move(m_owner);
+    auto identity = m_identity;
+    m_identity    = {};
+    return owner->AbortRenderTarget(identity);
+}
 
 namespace vulkan
 {
@@ -812,8 +1002,8 @@ struct LocalExHandle : NoCopy {
 class LocalExSwapchain final : public ::owe::ExSwapchain,
                                public ::owe::TripleSwapchain<::owe::ExHandle> {
 public:
-    LocalExSwapchain(std::array<LocalExHandle, 3> handles, VkExtent2D ext)
-        : m_handles(std::move(handles)), m_extent(ext) {
+    LocalExSwapchain(std::array<LocalExHandle, 3> handles, VkExtent2D ext, uint32_t queue_family)
+        : m_handles(std::move(handles)), m_extent(ext), m_queue_family(queue_family) {
         int index = 0;
         for (auto& h : m_handles) {
             auto& handle         = h.handle;
@@ -837,17 +1027,40 @@ public:
         if (fd >= 0) ::close(fd);
     }
 
-    bool acquireRenderTarget(ImageParameters& out) override {
-        out = ToImageParameters(m_handles.at((std::size_t)(*this->inprogress()).id()).image);
-        return true;
-    }
-
-    void submitRendered(int acquire_sync_fd) override {
-        if (acquire_sync_fd >= 0) {
-            int old = m_last_sync_fd.exchange(acquire_sync_fd, std::memory_order_acq_rel);
-            if (old >= 0) ::close(old);
+    ::owe::FrameSurfaceAcquireResult acquireRenderTarget() override {
+        if (m_surface_pending) {
+            return { .status = ::owe::FrameSurfaceAcquireStatus::Busy };
         }
-        this->renderFrame();
+        const uint32_t slot_index     = static_cast<uint32_t>(this->getInprogress()->id());
+        const uint64_t acquire_serial = m_next_acquire_serial++;
+        if (acquire_serial == 0) {
+            return { .status     = ::owe::FrameSurfaceAcquireStatus::ProtocolError,
+                     .error_code = -EOVERFLOW };
+        }
+        ::owe::FrameSurfaceLease lease {
+            .identity = { .owner_generation = 1,
+                          .image_index      = slot_index,
+                          .acquire_serial   = acquire_serial },
+            .reuse    = { .kind = ::owe::FrameSurfaceReuseKind::QueueOrdered },
+            .image    = ToImageParameters(m_handles.at(static_cast<std::size_t>(slot_index)).image),
+            .format   = VK_FORMAT_R8G8B8A8_UNORM,
+            .initial_layout       = VK_IMAGE_LAYOUT_GENERAL,
+            .initial_queue_family = m_queue_family,
+            .acquire              = { .kind = ::owe::FrameSurfaceAcquireKind::QueueOrdered },
+            .final_layout         = VK_IMAGE_LAYOUT_GENERAL,
+            .final_queue_family   = m_queue_family,
+            .discard_content      = true,
+        };
+        if (! lease.valid()) {
+            return { .status     = ::owe::FrameSurfaceAcquireStatus::ProtocolError,
+                     .error_code = -EINVAL };
+        }
+        m_surface_pending  = true;
+        m_pending_identity = lease.identity;
+        auto completion    = MakeCompletionCapability(lease.identity);
+        return { .status     = ::owe::FrameSurfaceAcquireStatus::Acquired,
+                 .lease      = std::move(lease),
+                 .completion = std::move(completion) };
     }
 
     int takeLastFrameSyncFd() override {
@@ -865,9 +1078,7 @@ public:
     unsigned height() const override { return m_extent.height; }
     VkFormat format() const override { return VK_FORMAT_R8G8B8A8_UNORM; }
 
-    VkImageLayout producerOutputLayout() const override { return VK_IMAGE_LAYOUT_GENERAL; }
-    uint32_t      releaseTargetQueueFamily() const override { return VK_QUEUE_FAMILY_IGNORED; }
-    bool          ready() const override { return true; }
+    bool ready() const override { return true; }
 
     void setOnReadyChanged(std::function<void(const ::owe::ExSwapchainReadyEvent&)> cb) override {
         if (cb) {
@@ -887,12 +1098,53 @@ protected:
     std::atomic<::owe::ExHandle*>& inprogress() override { return m_inprogress; }
 
 private:
+    ::owe::FrameSurfaceCompletionResult CompleteRendered(::owe::FrameSurfaceIdentity identity,
+                                                         int acquire_sync_fd) override {
+        if (! m_surface_pending) {
+            if (acquire_sync_fd >= 0) ::close(acquire_sync_fd);
+            return { .status   = ::owe::FrameSurfaceCompletionStatus::NotPending,
+                     .identity = identity };
+        }
+        if (identity != m_pending_identity) {
+            if (acquire_sync_fd >= 0) ::close(acquire_sync_fd);
+            return { .status   = ::owe::FrameSurfaceCompletionStatus::StaleIdentity,
+                     .identity = identity };
+        }
+        m_surface_pending  = false;
+        m_pending_identity = {};
+        if (acquire_sync_fd >= 0) {
+            int old = m_last_sync_fd.exchange(acquire_sync_fd, std::memory_order_acq_rel);
+            if (old >= 0) ::close(old);
+        }
+        this->renderFrame();
+        return { .status = ::owe::FrameSurfaceCompletionStatus::Submitted, .identity = identity };
+    }
+
+    ::owe::FrameSurfaceCompletionResult
+    AbortRenderTarget(::owe::FrameSurfaceIdentity identity) override {
+        if (! m_surface_pending) {
+            return { .status   = ::owe::FrameSurfaceCompletionStatus::NotPending,
+                     .identity = identity };
+        }
+        if (identity != m_pending_identity) {
+            return { .status   = ::owe::FrameSurfaceCompletionStatus::StaleIdentity,
+                     .identity = identity };
+        }
+        m_surface_pending  = false;
+        m_pending_identity = {};
+        return { .status = ::owe::FrameSurfaceCompletionStatus::Aborted, .identity = identity };
+    }
+
     std::array<LocalExHandle, 3>  m_handles;
     std::atomic<::owe::ExHandle*> m_presented { nullptr };
     std::atomic<::owe::ExHandle*> m_ready { nullptr };
     std::atomic<::owe::ExHandle*> m_inprogress { nullptr };
     VkExtent2D                    m_extent;
+    uint32_t                      m_queue_family { VK_QUEUE_FAMILY_IGNORED };
     std::atomic<int>              m_last_sync_fd { -1 };
+    uint64_t                      m_next_acquire_serial { 1 };
+    ::owe::FrameSurfaceIdentity   m_pending_identity;
+    bool                          m_surface_pending { false };
 };
 
 inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& device, unsigned w,
@@ -905,7 +1157,8 @@ inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& de
         else
             return nullptr;
     }
-    return std::make_unique<LocalExSwapchain>(std::move(handles), VkExtent2D { w, h });
+    return std::make_unique<LocalExSwapchain>(
+        std::move(handles), VkExtent2D { w, h }, device.graphics_queue().family_index);
 }
 
 } // namespace vulkan

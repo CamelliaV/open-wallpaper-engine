@@ -25,24 +25,13 @@ public:
         // resolved in prepare()
         ImageParameters vk_result;
 
-        // set per-frame via setPresent()
-        ImageParameters vk_present;
-
-        // configured once at init by VulkanRender
-        VkImageLayout present_layout { VK_IMAGE_LAYOUT_UNDEFINED };
-        uint32_t      present_queue_index { 0 };
-        // Format of the present image. Used to pick copy vs blit; UNDEFINED
-        // forces blit (the safe default for unknown formats).
-        VkFormat present_format { VK_FORMAT_UNDEFINED };
+        std::optional<owe::FrameSurfaceLease> frame_surface;
     };
 
     FinPass(const Desc&);
     virtual ~FinPass();
 
-    void                                      setPresent(ImageParameters);
-    void                                      setPresentLayout(VkImageLayout);
-    void                                      setPresentQueueIndex(uint32_t);
-    void                                      setPresentFormat(VkFormat);
+    bool                                      setFrameSurface(owe::FrameSurfaceLease);
     bool                                      setResultRequest(std::optional<TextureRequest>);
     std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const override;
 
