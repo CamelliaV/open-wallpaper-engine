@@ -1390,8 +1390,8 @@ void SceneRuntimeController::loadScene() {
     // load pkgfile. Read pkg version stamp before move-mounting so we can
     // pass it to the scene parser; on fallback (loose dir) we have no
     // version info and use kSceneVersionUnknown.
-    wpscene::SceneVersion pkg_v = wpscene::kSceneVersionUnknown;
-    auto                  wfs   = fs::WPPkgFs::CreatePkgFs(pkgPath);
+    wpscene::SceneVersion pkg_v       = wpscene::kSceneVersionUnknown;
+    auto                  wfs         = fs::WPPkgFs::open(fs::ToPath(pkgPath));
     bool                  pkg_mounted = false;
     if (wfs.is_ok()) {
         auto stamp = wfs->pkg_version_stamp();
@@ -1404,8 +1404,7 @@ void SceneRuntimeController::loadScene() {
         pkg_v = wpscene::kSceneVersionUnknown;
         // load pkg dir
         auto loose = fs::make_physical_fs(fs::ToPath(pkgDir));
-        if (loose.is_err() ||
-            vfs.mount("/assets", rstd::move(loose).unwrap_unchecked()).is_err()) {
+        if (loose.is_err() || vfs.mount("/assets", rstd::move(loose).unwrap_unchecked()).is_err()) {
             rstd_error("can't load pkg directory: {}", pkgDir);
             return;
         }

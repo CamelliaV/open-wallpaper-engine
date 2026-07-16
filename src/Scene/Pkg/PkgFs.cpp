@@ -64,8 +64,8 @@ auto LookupKey(Path path) -> rstd::io::Result<String> {
 
 } // namespace
 
-auto WPPkgFs::CreatePkgFs(std::string_view pkgpath) -> rstd::io::Result<PkgMount> {
-    auto file = rstd::fs::File::open(ToPath(pkgpath));
+auto WPPkgFs::open(Path pkg_path) -> rstd::io::Result<PkgMount> {
+    auto file = rstd::fs::File::open(pkg_path);
     if (file.is_err()) return rstd::Err(rstd::move(file).unwrap_err_unchecked());
     auto opened   = rstd::move(file).unwrap_unchecked();
     auto metadata = opened.metadata();

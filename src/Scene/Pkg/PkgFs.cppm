@@ -23,7 +23,7 @@ public:
     WPPkgFs(WPPkgFs&&) noexcept                    = default;
     auto operator=(WPPkgFs&&) noexcept -> WPPkgFs& = default;
 
-    static auto CreatePkgFs(std::string_view pkgpath) -> rstd::io::Result<PkgMount>;
+    static auto open(Path pkg_path) -> rstd::io::Result<PkgMount>;
 
     auto open_read(Path path) const -> rstd::io::Result<ReadRange>;
     auto open_write(Path path, WriteOptions options) const -> rstd::io::Result<WriteSeekHandle>;

@@ -42,12 +42,13 @@ TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
     }
 
     owe::fs::VFS vfs;
-    if (auto assets_fs = owe::fs::CreatePhysicalFs(WAYWALLEN_ASSETS_DIR)) {
-        ASSERT_TRUE(vfs.Mount("/assets", std::move(assets_fs)));
+    auto         assets_fs = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    if (assets_fs.is_ok()) {
+        ASSERT_TRUE(vfs.mount("/assets", std::move(assets_fs).unwrap_unchecked()).is_ok());
     }
-    auto pkg_fs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path.string());
-    ASSERT_NE(pkg_fs, nullptr);
-    ASSERT_TRUE(vfs.Mount("/assets", std::move(pkg_fs)));
+    auto pkg_fs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path.string()));
+    ASSERT_TRUE(pkg_fs.is_ok());
+    ASSERT_TRUE(vfs.mount("/assets", pkg_fs->mount_handle()).is_ok());
 
     owe::WPMdl mdl;
     ASSERT_TRUE(owe::WPMdlParser::Parse("models/球体01/球体01.mdl", vfs, mdl));

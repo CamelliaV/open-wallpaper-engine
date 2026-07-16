@@ -260,12 +260,12 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
     std::shared_ptr<Image> img_ptr = std::make_shared<Image>();
     auto&                  img     = *img_ptr;
     img.key                        = name;
-    auto source = m_vfs->open_read(fs::ToPath(path));
+    auto source                    = m_vfs->open_read(fs::ToPath(path));
     if (source.is_err()) return nullptr;
     auto tex_source = rstd::move(source).unwrap_unchecked();
     auto file       = fs::BinaryReader(tex_source.clone());
-    auto  startpos = file.Tell();
-    auto  ver      = LoadHeader(file, img.header);
+    auto startpos   = file.Tell();
+    auto ver        = LoadHeader(file, img.header);
 
     // image
     i32 _image_count = img.header.count;

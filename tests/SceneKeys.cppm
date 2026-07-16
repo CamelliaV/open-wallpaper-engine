@@ -147,16 +147,16 @@ bool ScanOneWorkshop(const fs::path& workshop_dir, std::map<std::string, Version
         }
     if (! has_scene_json) return false;
 
-    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
-    if (! wfs) {
-        std::fprintf(stderr, "wpscan: skip %s: WPPkgFs::CreatePkgFs failed\n", id.c_str());
+    auto wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path));
+    if (wfs.is_err()) {
+        std::fprintf(stderr, "wpscan: skip %s: WPPkgFs::open failed\n", id.c_str());
         return false;
     }
     owe::fs::VFS vfs;
-    vfs.Mount("/assets", std::move(wfs));
+    if (vfs.mount("/assets", wfs->mount_handle()).is_err()) return false;
 
-    auto stream = vfs.Open("/assets/scene.json");
-    if (! stream) {
+    auto stream = owe::fs::OpenBinary(vfs, "/assets/scene.json");
+    if (stream.is_err()) {
         std::fprintf(stderr, "wpscan: skip %s: scene.json open failed\n", id.c_str());
         return false;
     }

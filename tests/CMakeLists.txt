@@ -63,6 +63,10 @@ add_executable(json_adapter_tests json_adapter_tests.cpp)
 target_link_libraries(json_adapter_tests PRIVATE wescene_test_json_builder GTest::gtest_main)
 set_target_properties(json_adapter_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
+add_executable(vfs_tests vfs_tests.cpp)
+target_link_libraries(vfs_tests PRIVATE owe-base GTest::gtest_main)
+set_target_properties(vfs_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 # Consolidated CLI: walks pkgs, runs scene parse; --validate-{tex,shader,mdl}
 # add per-asset checks; --name / --pkgv / --limit filter the pkg set.
 # `valid` subcommand regenerates fixture JSONs via DumpWorkshop.
@@ -163,6 +167,11 @@ gtest_discover_tests(
 )
 gtest_discover_tests(
     json_adapter_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    vfs_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )

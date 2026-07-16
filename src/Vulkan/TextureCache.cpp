@@ -931,8 +931,8 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
     /* 3) Open the decoder. Each backend trial gets its own range cursor. */
     auto factory =
         rstd::boxed::Box<dyn<FnMut<rstd::boxed::Box<dyn<wavsen::video::InputStream>>()>>>::make(
-            [source = rstd::move(video_source)]()
-                -> rstd::boxed::Box<dyn<wavsen::video::InputStream>> {
+            [source =
+                 rstd::move(video_source)]() -> rstd::boxed::Box<dyn<wavsen::video::InputStream>> {
                 return rstd::boxed::Box<dyn<wavsen::video::InputStream>>::make(
                     RangeInputStream(source.clone()));
             });

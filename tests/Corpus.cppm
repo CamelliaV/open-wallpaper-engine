@@ -550,20 +550,25 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
     owe::SetJson(out, "pkg", std::move(jpkg));
 
     owe::fs::VFS vfs;
-    if (auto afs = owe::fs::CreatePhysicalFs(kAssetsDirMacro)) vfs.Mount("/assets", std::move(afs));
-    auto pfs = owe::fs::CreatePhysicalFs(workshop_dir);
-    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
-    if (! wfs) {
-        err = "WPPkgFs::CreatePkgFs failed";
+    auto         afs = owe::fs::make_physical_fs(owe::fs::ToPath(kAssetsDirMacro));
+    if (afs.is_ok()) {
+        (void)vfs.mount("/assets", std::move(afs).unwrap_unchecked());
+    }
+    auto pfs = owe::fs::make_physical_fs(owe::fs::ToPath(workshop_dir));
+    auto wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path));
+    if (wfs.is_err()) {
+        err = "WPPkgFs::open failed";
         SetSnapshot(out, "error", err);
         return out;
     }
-    vfs.Mount("/assets", std::move(wfs));
-    if (pfs) vfs.Mount("/assets", std::move(pfs));
+    (void)vfs.mount("/assets", wfs->mount_handle());
+    if (pfs.is_ok()) {
+        (void)vfs.mount("/assets", std::move(pfs).unwrap_unchecked());
+    }
 
     if (has_scene_json) {
-        auto stream = vfs.Open("/assets/scene.json");
-        if (stream) {
+        auto stream = owe::fs::OpenBinary(vfs, "/assets/scene.json");
+        if (stream.is_ok()) {
             std::string text        = stream->ReadAllStr();
             auto        parsed_json = owe::ParseJson(text);
             if (parsed_json.is_ok()) {
@@ -692,8 +697,8 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
             if (! ends_with(e.path, ".json")) continue;
             auto jm = owe::MakeObject();
             SetSnapshot(jm, "path", e.path);
-            auto stream = vfs.Open("/assets" + e.path);
-            if (! stream) {
+            auto stream = owe::fs::OpenBinary(vfs, "/assets" + e.path);
+            if (stream.is_err()) {
                 SetSnapshot(jm, "ok", false);
                 SetSnapshot(jm, "error", "cannot open");
                 owe::AppendJson(jsh, std::move(jm));

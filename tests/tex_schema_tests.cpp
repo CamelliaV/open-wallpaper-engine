@@ -274,10 +274,10 @@ const CorpusScan& AllScans() {
         for (const auto& pkg : pkgs) {
             std::string id = pkg.parent_path().filename().string();
 
-            auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg.string());
-            if (! wfs) continue;
+            auto wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg.string()));
+            if (wfs.is_err()) continue;
             auto vfs = std::make_shared<owe::fs::VFS>();
-            if (! vfs->Mount("/assets", std::move(wfs))) continue;
+            if (vfs->mount("/assets", wfs->mount_handle()).is_err()) continue;
 
             for (auto& te : ReadTexEntries(pkg)) {
                 auto m        = read_tex_meta(te.blob);

@@ -44,10 +44,10 @@ inline auto OpenPhysicalBinary(std::string_view path) -> rstd::io::Result<Binary
     return rstd::Ok(BinaryReader(rstd::move(range).unwrap_unchecked()));
 }
 
-inline std::string GetFileContent(VFS& vfs, std::string_view path) {
+inline auto ReadFileContent(VFS& vfs, std::string_view path) -> rstd::io::Result<std::string> {
     auto reader = OpenBinary(vfs, path);
-    if (reader.is_err()) return {};
-    return reader->ReadAllStr();
+    if (reader.is_err()) return rstd::Err(rstd::move(reader).unwrap_err_unchecked());
+    return reader->read_all_string();
 }
 
 } // namespace owe::fs

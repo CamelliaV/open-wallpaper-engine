@@ -238,6 +238,22 @@ auto ParseJson(std::string_view source, rstd::json::ParseOptions options)
     return rstd::json::from_str(rstd::cppstd::as_str(source), options);
 }
 
+auto ReadJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions options)
+    -> rstd::Result<Json, JsonFileError> {
+    auto content = fs::ReadFileContent(vfs, path);
+    if (content.is_err()) {
+        auto error = rstd::move(content).unwrap_err_unchecked();
+        return rstd::Err(JsonFileError { JsonFileErrorKind::Io, rstd::format("{}", error) });
+    }
+
+    auto parsed = ParseJson(*content, options);
+    if (parsed.is_err()) {
+        auto error = rstd::move(parsed).unwrap_err_unchecked();
+        return rstd::Err(JsonFileError { JsonFileErrorKind::Parse, rstd::format("{}", error) });
+    }
+    return rstd::Ok(rstd::move(parsed).unwrap_unchecked());
+}
+
 auto Dump(const Json& value, std::optional<std::size_t> indent) -> std::string {
     auto options = rstd::json::FormatOptions {};
     if (indent) {

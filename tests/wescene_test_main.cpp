@@ -90,14 +90,14 @@ bool StartsWith(std::string_view s, std::string_view prefix) {
     return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
 }
 
-std::string RootedPathString(owe::fs::RstdPath path) {
+std::string RootedPathString(owe::fs::Path path) {
     auto out        = rstd::path::PathBuf::from("/");
     auto components = path.components();
     while (true) {
         auto component = components.next();
         if (component.is_none()) break;
         if ((*component).is_root_dir() || (*component).is_cur_dir()) continue;
-        out.push(owe::fs::RstdPath((*component).as_os_str()));
+        out.push(owe::fs::Path((*component).as_os_str()));
     }
     return owe::fs::ToStdString(out.as_path());
 }
@@ -115,8 +115,8 @@ std::string ResolvePkgPath(std::string_view arg) {
 // "/scene.json", "scene.json", "/assets/scene.json", "assets/scene.json".
 std::string NormalisePkgAssetPath(std::string_view arg) {
     auto input = owe::fs::ToPath(arg);
-    auto path  = input.strip_prefix(owe::fs::RstdPath("/assets"));
-    if (path.is_none()) path = input.strip_prefix(owe::fs::RstdPath("assets"));
+    auto path  = input.strip_prefix(owe::fs::ToPath("/assets"));
+    if (path.is_none()) path = input.strip_prefix(owe::fs::ToPath("assets"));
     return RootedPathString(path.unwrap_or(input));
 }
 
@@ -235,8 +235,8 @@ struct Counters {
 // Runs scene parse base (FromJson + ExpandObjects + AdjustAuto). Cheap;
 // never touches glslang or scene-graph allocation.
 bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std::string& err) {
-    auto stream = vfs.Open("/assets/scene.json");
-    if (! stream) {
+    auto stream = owe::fs::OpenBinary(vfs, "/assets/scene.json");
+    if (stream.is_err()) {
         err = "scene.json not in pkg";
         return false;
     }
@@ -264,8 +264,8 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
 // objects parse without opening an audio device.
 bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
                        const std::string& pkg_id, std::string& err) {
-    auto stream = vfs.Open("/assets/scene.json");
-    if (! stream) {
+    auto stream = owe::fs::OpenBinary(vfs, "/assets/scene.json");
+    if (stream.is_err()) {
         err = "scene.json not in pkg";
         return false;
     }
@@ -341,8 +341,8 @@ void ValidateShaders(const std::vector<owe::testing::PkgEntry>& entries, owe::fs
     for (const auto& e : entries) {
         if (! StartsWith(e.path, "/materials/") || ! EndsWith(e.path, ".json")) continue;
         const std::string vfs_path = "/assets" + e.path;
-        auto              stream   = vfs.Open(vfs_path);
-        if (! stream) {
+        auto              stream   = owe::fs::OpenBinary(vfs, vfs_path);
+        if (stream.is_err()) {
             ++c.shader_fail;
             std::fprintf(
                 stdout, "FAIL  %s shader %s  cannot open\n", pkg_id.c_str(), e.path.c_str());
@@ -551,24 +551,25 @@ bool ProcessOnePkg(const fs::path& pkg_dir, const ScanOptions& opt, Counters& c,
 
     owe::fs::VFS vfs;
     if (! opt.assets_dir.empty()) {
-        if (auto pfs = owe::fs::CreatePhysicalFs(opt.assets_dir)) {
-            vfs.Mount("/assets", std::move(pfs));
+        auto pfs = owe::fs::make_physical_fs(owe::fs::ToPath(opt.assets_dir));
+        if (pfs.is_ok()) {
+            (void)vfs.mount("/assets", std::move(pfs).unwrap_unchecked());
         }
     }
-    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
-    if (! wfs) {
+    auto wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path));
+    if (wfs.is_err()) {
         ++c.parsed_fail;
-        std::fprintf(stdout, "FAIL  %s parse  WPPkgFs::CreatePkgFs\n", pkg_id.c_str());
+        std::fprintf(stdout, "FAIL  %s parse  WPPkgFs::open\n", pkg_id.c_str());
         if (pkgs_arr.is_some()) {
             auto entry = owe::MakeObject();
             SetJsonField(entry, "id", pkg_id);
             SetJsonField(entry, "pkg_version", (unsigned)pkg_v);
-            owe::SetJson(entry, "parse", StatusJson(false, "WPPkgFs::CreatePkgFs"));
+            owe::SetJson(entry, "parse", StatusJson(false, "WPPkgFs::open"));
             AppendJson(pkgs_arr, std::move(entry));
         }
         return false;
     }
-    vfs.Mount("/assets", std::move(wfs));
+    (void)vfs.mount("/assets", wfs->mount_handle());
 
     std::string parse_err;
     bool        parse_ok = false;
@@ -837,16 +838,16 @@ int CmdExtract(const argparse::ArgumentParser& a) {
     const std::string vfs_path    = "/assets" + in_pkg_path;
 
     owe::fs::VFS vfs;
-    auto         wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
-    if (! wfs) {
+    auto         wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path));
+    if (wfs.is_err()) {
         std::fprintf(
-            stderr, "wescene-test extract: WPPkgFs::CreatePkgFs failed on %s\n", pkg_path.c_str());
+            stderr, "wescene-test extract: WPPkgFs::open failed on %s\n", pkg_path.c_str());
         return 1;
     }
-    vfs.Mount("/assets", std::move(wfs));
+    (void)vfs.mount("/assets", wfs->mount_handle());
 
-    auto stream = vfs.Open(vfs_path);
-    if (! stream) {
+    auto stream = owe::fs::OpenBinary(vfs, vfs_path);
+    if (stream.is_err()) {
         std::fprintf(stderr, "wescene-test extract: '%s' not found in pkg\n", in_pkg_path.c_str());
         return 1;
     }
@@ -1142,12 +1143,12 @@ int CmdGrep(const GrepOptions& opt) {
         }
 
         owe::fs::VFS vfs;
-        auto         wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
-        if (! wfs) {
-            std::fprintf(stderr, "wescene-test grep: CreatePkgFs failed on %s\n", pkg_id.c_str());
+        auto         wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path));
+        if (wfs.is_err()) {
+            std::fprintf(stderr, "wescene-test grep: WPPkgFs::open failed on %s\n", pkg_id.c_str());
             continue;
         }
-        vfs.Mount("/assets", std::move(wfs));
+        (void)vfs.mount("/assets", wfs->mount_handle());
 
         std::vector<std::string> paths;
         paths.reserve(entries.size());
@@ -1157,8 +1158,8 @@ int CmdGrep(const GrepOptions& opt) {
 
         int pkg_count = 0;
         for (const auto& p : paths) {
-            auto stream = vfs.Open("/assets" + p);
-            if (! stream) continue;
+            auto stream = owe::fs::OpenBinary(vfs, "/assets" + p);
+            if (stream.is_err()) continue;
             const std::string text = stream->ReadAllStr();
 
             std::vector<std::pair<std::size_t, std::size_t>> matches; // (pos, len)
@@ -1422,20 +1423,20 @@ int CmdRendergraph(const argparse::ArgumentParser& a) {
     // Mount pkg over a physical-fs fallback (pkg shadows engine assets;
     // matches viewer/daemon).
     owe::fs::VFS vfs;
-    if (auto pfs = owe::fs::CreatePhysicalFs(kDefaultAssetsDir)) {
-        vfs.Mount("/assets", std::move(pfs));
+    auto         pfs = owe::fs::make_physical_fs(owe::fs::ToPath(kDefaultAssetsDir));
+    if (pfs.is_ok()) {
+        (void)vfs.mount("/assets", std::move(pfs).unwrap_unchecked());
     }
-    auto wfs = owe::fs::WPPkgFs::CreatePkgFs(pkg_path);
-    if (! wfs) {
-        std::fprintf(stderr,
-                     "wescene-test rendergraph: WPPkgFs::CreatePkgFs failed on %s\n",
-                     pkg_path.c_str());
+    auto wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path));
+    if (wfs.is_err()) {
+        std::fprintf(
+            stderr, "wescene-test rendergraph: WPPkgFs::open failed on %s\n", pkg_path.c_str());
         return 1;
     }
-    vfs.Mount("/assets", std::move(wfs));
+    (void)vfs.mount("/assets", wfs->mount_handle());
 
-    auto stream = vfs.Open("/assets/scene.json");
-    if (! stream) {
+    auto stream = owe::fs::OpenBinary(vfs, "/assets/scene.json");
+    if (stream.is_err()) {
         std::fprintf(stderr, "wescene-test rendergraph: scene.json not in pkg\n");
         return 1;
     }

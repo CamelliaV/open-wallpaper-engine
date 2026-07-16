@@ -47,11 +47,11 @@ namespace
 
 namespace fs = std::filesystem;
 
-// Mirrors WPPkgFs::CreatePkgFs's first read: just the length-prefixed
+// Mirrors WPPkgFs::open's first read: just the length-prefixed
 // version stamp. Avoids paying for the full pkg+vfs construction.
 bool ReadPkgVersionStamp(const std::string& pkg_path, std::string& out) {
-    auto stream = owe::fs::CreateCBinaryStream(pkg_path);
-    if (! stream) return false;
+    auto stream = owe::fs::OpenPhysicalBinary(pkg_path);
+    if (stream.is_err()) return false;
     std::int32_t len = stream->ReadInt32();
     if (len < 0) return false;
     out.resize(static_cast<std::size_t>(len));

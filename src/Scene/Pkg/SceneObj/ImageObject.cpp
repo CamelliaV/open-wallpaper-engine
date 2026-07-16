@@ -12,6 +12,16 @@ using namespace owe::wpscene;
 namespace
 {
 
+auto LoadJsonFile(owe::fs::VFS& vfs, const std::string& path) -> std::optional<owe::Json> {
+    auto parsed = owe::ReadJsonFile(vfs, path);
+    if (parsed.is_err()) {
+        auto error = rstd::move(parsed).unwrap_err_unchecked();
+        rstd_error("Can't load json {}: {}", path, error.message.as_str());
+        return std::nullopt;
+    }
+    return rstd::move(parsed).unwrap_unchecked();
+}
+
 float NormalizeLayerAlpha(float alpha) {
     // Older WE scene JSON stores layer alpha as 0..100 percent.
     if (alpha > 1.0f) alpha /= 100.0f;
@@ -110,13 +120,9 @@ bool ImageEffect::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "username", username, false);
     owe::GetJsonValue(json, "id", id, false);
-    auto parsed_effect = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + filePath));
-    if (parsed_effect.is_err()) {
-        rstd_error("Can't parse effect json {}: {}", filePath, parsed_effect.unwrap_err());
-        return false;
-    }
-    auto jEffect = parsed_effect.unwrap();
-    if (! FromFileJson(jEffect, vfs)) return false;
+    auto jEffect = LoadJsonFile(vfs, "/assets/" + filePath);
+    if (! jEffect) return false;
+    if (! FromFileJson(*jEffect, vfs)) return false;
 
     if (auto injected_passes = json.get("passes"); injected_passes.is_some()) {
         auto array = (*injected_passes)->as_array();
@@ -172,15 +178,10 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
             }
             std::string matPath;
             owe::GetJsonValue(jP, "material", matPath);
-            auto parsed_material = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath));
-            if (parsed_material.is_err()) {
-                rstd_error(
-                    "Can't parse material json {}: {}", matPath, parsed_material.unwrap_err());
-                return false;
-            }
-            auto     jMat = parsed_material.unwrap();
+            auto jMat = LoadJsonFile(vfs, "/assets/" + matPath);
+            if (! jMat) return false;
             Material material;
-            material.FromJson(jMat);
+            material.FromJson(*jMat);
             materials.push_back(std::move(material));
             MaterialPass pass;
             pass.FromJson(jP);
@@ -215,19 +216,15 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs) {
 
 std::optional<ImageAssetInfo> owe::wpscene::LoadImageAssetInfo(fs::VFS&         vfs,
                                                                std::string_view image) {
-    auto parsed_image = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + std::string(image)));
-    if (parsed_image.is_err()) {
-        rstd_error("Can't parse image json {}: {}", image, parsed_image.unwrap_err());
-        return std::nullopt;
-    }
-    auto j_image = parsed_image.unwrap();
+    auto j_image = LoadJsonFile(vfs, "/assets/" + std::string(image));
+    if (! j_image) return std::nullopt;
 
     ImageAssetInfo info;
-    owe::GetJsonValue(j_image, "solidlayer", info.solid_layer, false);
+    owe::GetJsonValue(*j_image, "solidlayer", info.solid_layer, false);
     int32_t w = 0, h = 0;
-    if (j_image.get("width").is_some() && j_image.get("height").is_some()) {
-        owe::GetJsonValue(j_image, "width", w, false);
-        owe::GetJsonValue(j_image, "height", h, false);
+    if (j_image->get("width").is_some() && j_image->get("height").is_some()) {
+        owe::GetJsonValue(*j_image, "width", w, false);
+        owe::GetJsonValue(*j_image, "height", h, false);
         if (w > 0 && h > 0) {
             info.size = std::array { static_cast<float>(w), static_cast<float>(h) };
             return info;
@@ -235,15 +232,11 @@ std::optional<ImageAssetInfo> owe::wpscene::LoadImageAssetInfo(fs::VFS&         
     }
 
     std::string mat_path;
-    if (! owe::GetJsonValue(j_image, "material", mat_path, false)) return info;
-    auto parsed_material = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + mat_path));
-    if (parsed_material.is_err()) {
-        rstd_error("Can't parse material json {}: {}", mat_path, parsed_material.unwrap_err());
-        return info;
-    }
-    auto     j_mat = parsed_material.unwrap();
+    if (! owe::GetJsonValue(*j_image, "material", mat_path, false)) return info;
+    auto j_mat = LoadJsonFile(vfs, "/assets/" + mat_path);
+    if (! j_mat) return info;
     Material mat;
-    if (mat.FromJson(j_mat) && ! mat.textures.empty()) info.first_texture = mat.textures.front();
+    if (mat.FromJson(*j_mat) && ! mat.textures.empty()) info.first_texture = mat.textures.front();
     return info;
 }
 
@@ -253,14 +246,10 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     ReadVisibleProperty(json, visible, visible_user);
     visible_user_key = visible_user.name;
     owe::GetJsonValue(json, "alignment", alignment, false);
-    auto parsed_image = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + image));
-    if (parsed_image.is_err()) {
-        rstd_error("Can't parse image json {}: {}", image, parsed_image.unwrap_err());
-        return false;
-    }
-    auto jImage = parsed_image.unwrap();
-    owe::GetJsonValue(jImage, "fullscreen", fullscreen, false);
-    owe::GetJsonValue(jImage, "passthrough", config.passthrough, false);
+    auto jImage = LoadJsonFile(vfs, "/assets/" + image);
+    if (! jImage) return false;
+    owe::GetJsonValue(*jImage, "fullscreen", fullscreen, false);
+    owe::GetJsonValue(*jImage, "passthrough", config.passthrough, false);
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "id", id, false);
     owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);
@@ -272,10 +261,10 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
             // WE gives composite containers the regular layer depth when the field is omitted.
             parallaxDepth = { 1.0f, 1.0f };
         }
-        if (jImage.get("width").is_some()) {
+        if (jImage->get("width").is_some()) {
             int32_t w = 0, h = 0;
-            owe::GetJsonValue(jImage, "width", w);
-            owe::GetJsonValue(jImage, "height", h);
+            owe::GetJsonValue(*jImage, "width", w);
+            owe::GetJsonValue(*jImage, "height", h);
             size = { (float)w, (float)h };
         } else if (json.get("size").is_some()) {
             owe::GetJsonValue(json, "size", size);
@@ -283,8 +272,8 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
             size = { origin.at(0) * 2, origin.at(1) * 2 };
         }
     }
-    owe::GetJsonValue(jImage, "nopadding", nopadding, false);
-    owe::GetJsonValue(jImage, "solidlayer", solid_layer, false);
+    owe::GetJsonValue(*jImage, "nopadding", nopadding, false);
+    owe::GetJsonValue(*jImage, "solidlayer", solid_layer, false);
     owe::GetJsonValue(json, "color", color, false);
     ReadUserValueBinding(json, "color", color_user);
     color_user_key = color_user.name;
@@ -294,22 +283,18 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     alpha_user_key = alpha_user.name;
     owe::GetJsonValue(json, "brightness", brightness, false);
 
-    owe::GetJsonValue(jImage, "puppet", puppet, false);
+    owe::GetJsonValue(*jImage, "puppet", puppet, false);
     bool copy_background_value { true };
     bool explicit_no_copy_background =
         owe::GetJsonValue(json, "copybackground", copy_background_value, false) &&
         ! copy_background_value;
 
-    if (jImage.get("material").is_some()) {
+    if (jImage->get("material").is_some()) {
         std::string matPath;
-        owe::GetJsonValue(jImage, "material", matPath);
-        auto parsed_material = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath));
-        if (parsed_material.is_err()) {
-            rstd_error("Can't parse material json {}: {}", matPath, parsed_material.unwrap_err());
-            return false;
-        }
-        auto jMat = parsed_material.unwrap();
-        material.FromJson(jMat, v);
+        owe::GetJsonValue(*jImage, "material", matPath);
+        auto jMat = LoadJsonFile(vfs, "/assets/" + matPath);
+        if (! jMat) return false;
+        material.FromJson(*jMat, v);
         if (image == "models/util/composelayer.json" && explicit_no_copy_background) {
             material.combos["CLEARALPHA"] = 1;
         }

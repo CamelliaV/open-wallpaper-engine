@@ -120,11 +120,11 @@ public:
         }
         const uint32_t base = SelectStartIndex(n);
         for (uint32_t tried = 0; tried < n; ++tried) {
-            const std::string& path = m_soundPaths[(base + tried) % n];
-            auto source = vfs.open_read(fs::ToPath("/assets/" + path));
+            const std::string& path   = m_soundPaths[(base + tried) % n];
+            auto               source = vfs.open_read(fs::ToPath("/assets/" + path));
             if (source.is_err()) continue;
-            auto handle = rstd::io::ReadSeekHandle::make(
-                rstd::move(source).unwrap_unchecked().into_reader());
+            auto handle =
+                rstd::io::ReadSeekHandle::make(rstd::move(source).unwrap_unchecked().into_reader());
             auto stream = wavsen::audio::make_stream(rstd::move(handle), m_desc);
             if (stream) {
                 m_curActive = std::move(stream);

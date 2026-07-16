@@ -235,10 +235,10 @@ union ImageExtra {
 using ImageDataPtr = std::unique_ptr<uint8_t, std::function<void(uint8_t*)>>;
 
 struct ImageData {
-    i32          width { 0 };
-    i32          height { 0 };
-    isize        size { 0 };
-    ImageDataPtr data {};
+    i32                               width { 0 };
+    i32                               height { 0 };
+    isize                             size { 0 };
+    ImageDataPtr                      data {};
     rstd::Option<rstd::io::ReadRange> video_source;
     ImageData() = default;
 };

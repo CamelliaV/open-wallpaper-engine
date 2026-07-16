@@ -33,6 +33,17 @@ std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(
 
 namespace
 {
+
+auto LoadJsonFile(fs::VFS& vfs, const std::string& path) -> std::optional<Json> {
+    auto parsed = owe::ReadJsonFile(vfs, path);
+    if (parsed.is_err()) {
+        auto error = rstd::move(parsed).unwrap_err_unchecked();
+        rstd_error("Can't load json {}: {}", path, error.message.as_str());
+        return std::nullopt;
+    }
+    return rstd::move(parsed).unwrap_unchecked();
+}
+
 struct SceneNodeArcHold {
     rstd::sync::Arc<SceneNode> node;
 
@@ -183,15 +194,8 @@ std::optional<std::array<float, 2>> ResolveImageAssetSize(ParseContext&    conte
 
 bool AppendLayerCompositePassthroughEffect(fs::VFS& vfs, wpscene::ImageObject& image) {
     wpscene::Material material;
-    auto              parsed =
-        owe::ParseJson(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"));
-    if (parsed.is_err()) {
-        rstd_error(
-            "parse effectpassthrough.json failed for '{}': {}", image.name, parsed.unwrap_err());
-        return false;
-    }
-    auto json = parsed.unwrap();
-    if (! material.FromJson(json)) {
+    auto              json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
+    if (! json || ! material.FromJson(*json)) {
         rstd_error("parse effectpassthrough.json failed for '{}'", image.name);
         return false;
     }
@@ -1307,7 +1311,13 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     std::vector<std::string>  sd_source_keys;
     std::vector<std::string>  sd_original_sources;
     auto                      add_shader_unit = [&](ShaderType stage, std::string source_key) {
-        auto source = fs::GetFileContent(vfs, source_key);
+        auto        loaded = fs::ReadFileContent(vfs, source_key);
+        std::string source;
+        if (loaded.is_ok()) {
+            source = rstd::move(loaded).unwrap_unchecked();
+        } else {
+            rstd_error("Can't read shader source {}", source_key);
+        }
         sd_source_keys.push_back(std::move(source_key));
         sd_original_sources.push_back(source);
         sd_units.push_back({
@@ -2127,14 +2137,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     if (append_color_blend_final_effect) {
         wpscene::ImageEffect colorEffect;
         wpscene::Material    colorMat;
-        auto                 parsed = owe::ParseJson(
-            fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"));
-        if (parsed.is_err()) {
-            rstd_error("parse effectpassthrough.json failed: {}", parsed.unwrap_err());
+        auto json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
+        if (! json) {
             return;
         }
-        auto json = parsed.unwrap();
-        colorMat.FromJson(json);
+        colorMat.FromJson(*json);
         colorMat.combos[std::string(WE_CB_BONECOUNT)] = 1;
         ApplyImageColorBlend(colorMat, wpimgobj);
         colorEffect.materials.push_back(std::move(colorMat));
@@ -2848,15 +2855,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         if (! wpimgobj.fullscreen && ! passthrough_can_composite_final &&
             ! last_effect_can_composite_final) {
             wpscene::Material passthrough_mat;
-            auto              parsed = owe::ParseJson(
-                fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough.json"));
-            if (parsed.is_err()) {
-                rstd_error("parse effectpassthrough.json failed for '{}': {}",
-                           wpimgobj.name,
-                           parsed.unwrap_err());
+            auto json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
+            if (! json) {
+                rstd_error("parse effectpassthrough.json failed for '{}'", wpimgobj.name);
             } else {
-                auto json = parsed.unwrap();
-                if (! passthrough_mat.FromJson(json)) {
+                if (! passthrough_mat.FromJson(*json)) {
                     rstd_error("parse effectpassthrough.json failed for '{}'", wpimgobj.name);
                 } else {
                     if (passthrough_mat.textures.empty())
@@ -3531,9 +3534,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         // VFS path is /assets/<font_name>.
         std::string vfs_path =
             (std::filesystem::path("/assets") / font_name).lexically_normal().native();
-        std::string blob_str = fs::GetFileContent(*context.vfs, vfs_path);
-        if (! blob_str.empty()) {
-            auto bytes = std::make_shared<std::vector<std::byte>>(blob_str.size());
+        auto blob = fs::ReadFileContent(*context.vfs, vfs_path);
+        if (blob.is_ok() && ! blob->empty()) {
+            auto blob_str = rstd::move(blob).unwrap_unchecked();
+            auto bytes    = std::make_shared<std::vector<std::byte>>(blob_str.size());
             std::memcpy(bytes->data(), blob_str.data(), blob_str.size());
             resolved.bytes  = std::move(bytes);
             resolved.source = vfs_path;
@@ -3839,17 +3843,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         };
         auto load_passthrough_material =
             [&](SceneNode* owner, std::string_view input) -> std::optional<LoadedTextMaterial> {
-            auto parsed = owe::ParseJson(
-                fs::GetFileContent(*context.vfs, "/assets/materials/util/effectpassthrough.json"));
-            if (parsed.is_err()) {
-                rstd_error("text '{}': parse effectpassthrough.json failed: {}",
-                           obj.name,
-                           parsed.unwrap_err());
+            auto pt_json =
+                LoadJsonFile(*context.vfs, "/assets/materials/util/effectpassthrough.json");
+            if (! pt_json) {
+                rstd_error("text '{}': parse effectpassthrough.json failed", obj.name);
                 return std::nullopt;
             }
-            auto              pt_json = parsed.unwrap();
             wpscene::Material pt_mat;
-            if (! pt_mat.FromJson(pt_json)) {
+            if (! pt_mat.FromJson(*pt_json)) {
                 rstd_error("text '{}': Material::FromJson failed", obj.name);
                 return std::nullopt;
             }
@@ -4749,16 +4750,13 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
                         std::string                             output_rt,
                         std::function<void(wpscene::Material&)> mutate         = nullptr,
                         std::function<void(WPShaderInfo&)>      configure_info = nullptr) -> bool {
-        auto parsed =
-            owe::ParseJson(fs::GetFileContent(vfs, std::string("/assets/") + mat_relpath));
-        if (parsed.is_err()) {
-            rstd_error(
-                "bloom: parse material json failed {}: {}", mat_relpath, parsed.unwrap_err());
+        auto jMat = LoadJsonFile(vfs, std::string("/assets/") + mat_relpath);
+        if (! jMat) {
+            rstd_error("bloom: parse material json failed {}", mat_relpath);
             return false;
         }
-        auto              jMat = parsed.unwrap();
         wpscene::Material wpmat;
-        if (! wpmat.FromJson(jMat)) {
+        if (! wpmat.FromJson(*jMat)) {
             rstd_error("bloom: Material::FromJson failed: {}", mat_relpath);
             return false;
         }

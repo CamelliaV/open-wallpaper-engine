@@ -35,7 +35,7 @@ namespace owe::testing
 namespace
 {
 
-std::string ReadSizedString(owe::fs::IBinaryStream& f) {
+std::string ReadSizedString(owe::fs::BinaryReader& f) {
     std::int32_t len = f.ReadInt32();
     if (len < 0) return {};
     std::string out;
@@ -48,8 +48,8 @@ std::string ReadSizedString(owe::fs::IBinaryStream& f) {
 
 bool ReadPkgHeader(const std::string& pkg_path, std::string& version,
                    std::vector<PkgEntry>& entries) {
-    auto stream = owe::fs::CreateCBinaryStream(pkg_path);
-    if (! stream) return false;
+    auto stream = owe::fs::OpenPhysicalBinary(pkg_path);
+    if (stream.is_err()) return false;
     version            = ReadSizedString(*stream);
     std::int32_t count = stream->ReadInt32();
     if (count < 0) return false;

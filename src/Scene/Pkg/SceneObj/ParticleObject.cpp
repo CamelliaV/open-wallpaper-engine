@@ -9,6 +9,21 @@ import rstd.cppstd;
 
 using namespace owe::wpscene;
 
+namespace
+{
+
+auto LoadJsonFile(owe::fs::VFS& vfs, const std::string& path) -> std::optional<owe::Json> {
+    auto parsed = owe::ReadJsonFile(vfs, path);
+    if (parsed.is_err()) {
+        auto error = rstd::move(parsed).unwrap_err_unchecked();
+        rstd_error("Can't load json {}: {}", path, error.message.as_str());
+        return std::nullopt;
+    }
+    return rstd::move(parsed).unwrap_unchecked();
+}
+
+} // namespace
+
 bool ParticleChild::FromJson(const owe::Json& json, fs::VFS& vfs) {
     owe::GetJsonValue(json, "name", name);
     owe::GetJsonValue(json, "type", type);
@@ -17,14 +32,10 @@ bool ParticleChild::FromJson(const owe::Json& json, fs::VFS& vfs) {
         return false;
     }
 
-    auto parsed_particle = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + name));
-    if (parsed_particle.is_err()) {
-        rstd_error("Can't parse particle json {}: {}", name, parsed_particle.unwrap_err());
-        return false;
-    }
-    auto jParticle = parsed_particle.unwrap();
+    auto jParticle = LoadJsonFile(vfs, "/assets/" + name);
+    if (! jParticle) return false;
 
-    if (! obj.FromJson(jParticle, vfs)) return false;
+    if (! obj.FromJson(*jParticle, vfs)) return false;
 
     owe::GetJsonValue(json, "maxcount", maxcount, false);
     owe::GetJsonValue(json, "controlpointstartindex", controlpointstartindex, false);
@@ -217,13 +228,9 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
     if (json.get("material").is_some()) {
         std::string matPath;
         owe::GetJsonValue(json, "material", matPath);
-        auto parsed_material = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + matPath));
-        if (parsed_material.is_err()) {
-            rstd_error("Can't parse material json {}: {}", matPath, parsed_material.unwrap_err());
-            return false;
-        }
-        auto jMat = parsed_material.unwrap();
-        material.FromJson(jMat);
+        auto jMat = LoadJsonFile(vfs, "/assets/" + matPath);
+        if (! jMat) return false;
+        material.FromJson(*jMat);
     } else {
         rstd_error("particle object no material");
         return false;
@@ -273,12 +280,8 @@ bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion 
 
     AbsorbAllFieldBindings(json, field_bindings);
 
-    auto parsed_particle = owe::ParseJson(fs::GetFileContent(vfs, "/assets/" + particle));
-    if (parsed_particle.is_err()) {
-        rstd_error("Can't parse particle json {}: {}", particle, parsed_particle.unwrap_err());
-        return false;
-    }
-    auto jParticle = parsed_particle.unwrap();
-    if (! particleObj.FromJson(jParticle, vfs)) return false;
+    auto jParticle = LoadJsonFile(vfs, "/assets/" + particle);
+    if (! jParticle) return false;
+    if (! particleObj.FromJson(*jParticle, vfs)) return false;
     return true;
 }

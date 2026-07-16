@@ -333,14 +333,14 @@ std::optional<SceneDocument> LoadSceneDocumentFromVfs(fs::VFS& vfs, std::string_
 
 std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path) {
     if (pkg_path.empty()) return std::nullopt;
-    auto pkg = fs::WPPkgFs::CreatePkgFs(pkg_path);
+    auto pkg = fs::WPPkgFs::open(fs::ToPath(pkg_path));
     if (pkg.is_err()) return std::nullopt;
 
     auto scene_source = pkg->open_read("/scene.json");
     if (scene_source.is_err()) return std::nullopt;
     auto scene_file = fs::BinaryReader(rstd::move(scene_source).unwrap_unchecked());
 
-    auto stamp = pkg->pkg_version_stamp();
+    auto       stamp       = pkg->pkg_version_stamp();
     const auto pkg_version = ParsePkgVersionStamp(
         std::string_view(reinterpret_cast<const char*>(stamp.data()), stamp.size()));
     return ParseSceneDocumentJson(scene_file.ReadAllStr(), pkg_version);

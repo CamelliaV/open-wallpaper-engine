@@ -758,8 +758,14 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
             continue;
         }
         std::string includeName = line.substr(in_p + 1, in_e - in_p - 1);
-        std::string includeSrc  = fs::GetFileContent(vfs, "/assets/shaders/" + includeName);
-        includeSrc              = PatchCommonPerspectiveInclude(includeName, std::move(includeSrc));
+        auto        include     = fs::ReadFileContent(vfs, "/assets/shaders/" + includeName);
+        std::string includeSrc;
+        if (include.is_ok()) {
+            includeSrc = rstd::move(include).unwrap_unchecked();
+        } else {
+            rstd_error("Can't read shader include {}", includeName);
+        }
+        includeSrc = PatchCommonPerspectiveInclude(includeName, std::move(includeSrc));
         output.append("\n//-----include ");
         output.append(includeName);
         output.append("\n");
@@ -1941,10 +1947,8 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
                 return false;
             }
             if (! compile(units, codes)) return false;
-            auto writer = fs::OpenBinaryWriter(vfs,
-                                               cache_file_path,
-                                               fs::WriteOptions { .create   = true,
-                                                                  .truncate = true });
+            auto writer = fs::OpenBinaryWriter(
+                vfs, cache_file_path, fs::WriteOptions { .create = true, .truncate = true });
             if (writer.is_ok()) {
                 ::SaveShaderToFile(codes, *writer);
             }
@@ -2204,11 +2208,22 @@ CompileMaterialShaderResult WPShaderParser::CompileMaterialShader(const Json&   
     }
 
     const std::string shader_path = "/assets/shaders/" + mat.shader;
-    std::string       vert_src    = fs::GetFileContent(vfs, shader_path + ".vert");
-    std::string       frag_src    = fs::GetFileContent(vfs, shader_path + ".frag");
-    std::string       geom_src;
+    auto              vert_source = fs::ReadFileContent(vfs, shader_path + ".vert");
+    auto              frag_source = fs::ReadFileContent(vfs, shader_path + ".frag");
+    if (vert_source.is_err() || frag_source.is_err()) {
+        r.error = "shader source missing: " + shader_path + ".{vert,frag}";
+        return r;
+    }
+    std::string vert_src = rstd::move(vert_source).unwrap_unchecked();
+    std::string frag_src = rstd::move(frag_source).unwrap_unchecked();
+    std::string geom_src;
     if (mat.shader == "genericropeparticle") {
-        geom_src = fs::GetFileContent(vfs, shader_path + ".geom");
+        auto geom_source = fs::ReadFileContent(vfs, shader_path + ".geom");
+        if (geom_source.is_err()) {
+            r.error = "shader source missing: " + shader_path + ".geom";
+            return r;
+        }
+        geom_src = rstd::move(geom_source).unwrap_unchecked();
     }
     if (vert_src.empty() || frag_src.empty()) {
         r.error = "shader source missing: " + shader_path + ".{vert,frag}";

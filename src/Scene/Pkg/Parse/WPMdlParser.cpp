@@ -921,7 +921,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     auto str_path = std::string(path);
     auto pfile    = fs::OpenBinary(vfs, "/assets/" + str_path);
     if (pfile.is_err()) return false;
-    auto  f = rstd::move(pfile).unwrap_unchecked();
+    auto f = rstd::move(pfile).unwrap_unchecked();
 
     if (! ReadHeaderFromStream(f, mdl.header, str_path)) return false;
 
@@ -1004,12 +1004,13 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 
 std::optional<wpscene::Material> WPMdlParser::ParseMaterial(std::string_view ref, fs::VFS& vfs) {
     const auto path   = ResolveMdlMaterialPath(ref);
-    auto       parsed = owe::ParseJson(fs::GetFileContent(vfs, path));
+    auto       parsed = owe::ReadJsonFile(vfs, path);
     if (parsed.is_err()) {
-        rstd_error("load mdl material '{}' failed: {}", path, parsed.unwrap_err());
+        auto error = rstd::move(parsed).unwrap_err_unchecked();
+        rstd_error("load mdl material '{}' failed: {}", path, error.message.as_str());
         return std::nullopt;
     }
-    auto json = parsed.unwrap();
+    auto json = rstd::move(parsed).unwrap_unchecked();
 
     wpscene::Material material;
     material.blending   = "disabled";

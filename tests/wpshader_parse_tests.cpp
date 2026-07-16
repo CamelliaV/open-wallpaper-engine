@@ -235,7 +235,9 @@ mat3 squareToQuad(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
     }
 
     owe::fs::VFS vfs;
-    ASSERT_TRUE(vfs.Mount("/assets", owe::fs::CreatePhysicalFs(root.string())));
+    auto         physical = owe::fs::make_physical_fs(owe::fs::ToPath(root.string()));
+    ASSERT_TRUE(physical.is_ok());
+    ASSERT_TRUE(vfs.mount("/assets", std::move(physical).unwrap_unchecked()).is_ok());
 
     const std::string out = owe::WPShaderParser::PreShaderSrc(
         vfs, "#include \"common_perspective.h\"\nvoid main(){}\n", nullptr, {});

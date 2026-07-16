@@ -166,12 +166,20 @@ public:
         return value;
     }
 
+    auto read_all_string() -> rstd::io::Result<std::string> {
+        if (remaining() > u64(std::numeric_limits<usize>::max())) {
+            return rstd::Err(rstd::io::error::Error::from_kind(
+                rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::InvalidData }));
+        }
+        std::string value(usize(remaining()), '\0');
+        auto        result = read_exact(value.data(), value.size());
+        if (result.is_err()) return rstd::Err(rstd::move(result).unwrap_err_unchecked());
+        return rstd::Ok(rstd::move(value));
+    }
+
     std::string ReadAllStr() {
-        std::string value;
-        value.resize(usize(remaining()));
-        auto count = Read(value.data(), value.size());
-        value.resize(count);
-        return value;
+        auto value = read_all_string();
+        return value.is_ok() ? rstd::move(value).unwrap_unchecked() : std::string {};
     }
 
 private:

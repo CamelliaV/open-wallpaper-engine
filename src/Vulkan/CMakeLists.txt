@@ -33,8 +33,8 @@ target_sources(owe-vulkan
          Vulkan.cppm)
 target_link_libraries(owe-vulkan
   PUBLIC wavsen::vvk owe-types owe-shader-compile
-  # owe-core supplies wescene.fs (IBinaryStream) needed by the video-tex
-  # AVIO shim; wavsen::video supplies the decoder + shared device API.
+  # owe-core supplies the video source range; wavsen::video supplies the
+  # decoder and shared device API.
   PRIVATE owe-core wavsen::video)
 target_include_directories(owe-vulkan
   PUBLIC  .. ../Scene ../Scene/Swapchain ../Scene/Utils/include
