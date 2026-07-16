@@ -370,7 +370,7 @@ struct RenderProgram {
         }
         for (auto& item : scene.renderTargets) {
             auto& rt = item.second;
-            if (! item.first.empty() && (rt.width * rt.height <= 4)) {
+            if (! item.first.empty() && (rt.width <= 0 || rt.height <= 0)) {
                 rstd_error("wrong size for render target: {}", item.first);
             } else if (rt.has_mipmap) {
                 rt.mipmap_level = std::max(3u,
