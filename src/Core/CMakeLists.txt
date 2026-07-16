@@ -5,6 +5,9 @@
 # `cppstd` for std:: re-exports plus the third_party effolkronium random
 # header in the GMF.
 # ---------------------------------------------------------------------------
+add_subdirectory(IO)
+add_subdirectory(Fs)
+
 add_library(owe-core STATIC)
 target_sources(owe-core PRIVATE Json.cpp UserProperty.cpp)
 target_sources(owe-core
