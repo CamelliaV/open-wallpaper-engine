@@ -8,6 +8,7 @@ import cppstd;
 
 using namespace rstd::prelude;
 using namespace owe::rg;
+namespace resource = owe::resource;
 
 namespace
 {
@@ -28,6 +29,8 @@ auto ToTextureDesc(const TexNode& node) -> TextureDesc {
         .name = node.name.clone(),
         .key  = node.key.clone(),
         .kind = ToTextureKind(node.type),
+        .request =
+            node.request.is_some() ? Some(node.request->clone()) : None<resource::TextureRequest>(),
     };
 }
 
@@ -141,6 +144,7 @@ auto RenderGraph::textureState(TextureNodeRef ref) const -> rstd::Option<Texture
     if (node.is_none()) return rstd::None();
     return rstd::Some(TextureNodeState {
         .ref     = ref,
+        .use     = resource::TextureUseHandle { .index = ref.handle.index, .generation = 1 },
         .desc    = ToTextureDesc(*node),
         .version = node->version,
     });
@@ -341,6 +345,8 @@ auto RenderGraph::createNewTextureNode(const TextureDesc& desc) -> TextureNodeRe
         .type   = ToTexType(desc.kind),
         .key    = desc.key.clone(),
         .name   = desc.name.clone(),
+        .request =
+            desc.request.is_some() ? Some(desc.request->clone()) : None<resource::TextureRequest>(),
     };
     if (current) {
         auto previous = getTexNode(**current);
@@ -417,4 +423,32 @@ auto RenderGraph::getLastReadTextures(rstd::slice<NodeHandle> nodes) const
         }
     }
     return result;
+}
+
+auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
+    resource::ResourcePlan plan { .generation = 1 };
+    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+        auto node = getTexNode(NodeHandle { .index = index });
+        if (node.is_none() || node->request.is_none()) continue;
+
+        bool read    = false;
+        auto targets = m_dg.GetNodeOut(node->handle);
+        for (usize target_index = 0; target_index < targets.len(); ++target_index) {
+            if (isPassNode(targets[target_index])) {
+                read = true;
+                break;
+            }
+        }
+        auto access = node->writer.is_some() ? (read ? resource::ResourceAccess::ReadWrite
+                                                     : resource::ResourceAccess::Write)
+                                             : resource::ResourceAccess::Read;
+        plan.textures.push(resource::TexturePlanEntry {
+            .handle  = resource::TextureUseHandle { .index      = node->handle.index,
+                                                    .generation = plan.generation },
+            .request = node->request->clone(),
+            .access  = access,
+            .version = static_cast<u32>(node->version),
+        });
+    }
+    return plan;
 }

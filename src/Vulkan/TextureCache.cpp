@@ -1289,7 +1289,7 @@ void TextureCache::MarkShareReady(std::string_view key) {
     }
 }
 
-void TextureCache::RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) const {
+void owe::vulkan::RecordGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) {
     VkImageMemoryBarrier barrier {
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .pNext               = nullptr,

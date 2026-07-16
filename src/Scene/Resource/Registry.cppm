@@ -1,0 +1,14 @@
+export module wescene.resource_registry;
+export import wescene.resource;
+export import :resource_key;
+export import :graphics;
+export import :texture_registry;
+export import :buffer_registry;
+export import :shader_registry;
+export import :owner;
+export import :descriptor;
+export import :prepared;
+export import :lifetime;
+export import :state;
+export import :policy;
+export import :external;

@@ -1,4 +1,5 @@
 export module wescene.vulkan_render:vulkan_pass;
+import rstd;
 import rstd.cppstd;
 import wescene.rgraph;
 import wescene.vulkan;
@@ -38,10 +39,16 @@ struct MaterialTextureBindingRefresh {
 };
 
 struct PassTextureRequestDiagnostic {
-    std::string                   role;
-    uint32_t                      slot { 0 };
-    std::string                   name;
-    std::optional<TextureRequest> request;
+    std::string                  role;
+    uint32_t                     slot { 0 };
+    std::string                  name;
+    rstd::Option<TextureRequest> request;
+};
+
+struct PassRecordContext {
+    rstd::mut_ref<vvk::CommandBuffer>                   command;
+    rstd::ref<resource_registry::PreparedResourceTable> prepared_resources;
+    rstd::Option<rstd::mut_ref<StagingBuffer>>          dynamic_buffer;
 };
 
 class VulkanPass : public rg::Pass {
@@ -49,9 +56,10 @@ public:
     VulkanPass()                                                                      = default;
     virtual ~VulkanPass()                                                             = default;
     virtual void                  prepare(Scene&, const Device&, RenderingResources&) = 0;
-    virtual void                  execute(const Device&, RenderingResources&)         = 0;
+    virtual void                  record(PassRecordContext&)                          = 0;
     virtual void                  destory(const Device&, RenderingResources&)         = 0;
     virtual PassInvalidationFlags finalizeResourceRequests(Scene&) { return PassInvalidationNone; }
+    virtual bool prepareResourceStates(resource_registry::ResourceStateTracker&) { return true; }
     virtual std::optional<RenderItemId>        renderItemId() const { return std::nullopt; }
     virtual std::optional<PipelineCacheKey>    pipelineCacheKey() const { return std::nullopt; }
     virtual bool                               pipelineCacheHit() const { return false; }
@@ -72,28 +80,19 @@ public:
     virtual bool setTextureBinding(uint32_t, TextureBindingRequest) { return false; }
     virtual bool supportsRenderScope() const { return false; }
     virtual bool canJoinRenderScopeAfter(const VulkanPass&) const { return false; }
-    virtual void prepareRenderScopeDraw(RenderingResources&) {}
-    virtual void beginRenderScope(RenderingResources&) {}
-    virtual void recordRenderScopeDraw(RenderingResources&) {}
-    virtual void endRenderScope(RenderingResources&) {}
+    virtual void prepareRenderScopeDraw(PassRecordContext&) {}
+    virtual void beginRenderScope(PassRecordContext&) {}
+    virtual void recordRenderScopeDraw(PassRecordContext&) {}
+    virtual void endRenderScope(PassRecordContext&) {}
 
-    void addReleaseTexs(std::span<const std::string_view> texs) {
-        m_release_texs.clear();
-        std::transform(texs.begin(), texs.end(), std::back_inserter(m_release_texs), [](auto& sv) {
-            return std::string(sv);
-        });
-    }
-    bool                         prepared() const { return m_prepared; }
-    std::span<const std::string> releaseTexs() const { return m_release_texs; }
-    void                         clearReleaseTexs() { m_release_texs.clear(); }
-    void                         resetPrepared() { setPrepared(false); }
+    bool prepared() const { return m_prepared; }
+    void resetPrepared() { setPrepared(false); }
 
 protected:
     void setPrepared(bool v = true) { m_prepared = v; }
 
 private:
-    bool                     m_prepared { false };
-    std::vector<std::string> m_release_texs;
+    bool m_prepared { false };
 };
 
 } // namespace vulkan

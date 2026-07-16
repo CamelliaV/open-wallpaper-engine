@@ -1,0 +1,171 @@
+export module wescene.resource:texture;
+import rstd;
+import wescene.types;
+import :handle;
+
+export namespace owe::resource
+{
+
+using namespace rstd::prelude;
+
+struct TextureDefinitionId {
+    u32 index { numeric_limits<u32>::max() };
+    u64 generation { 0 };
+
+    bool Valid() const noexcept { return index != numeric_limits<u32>::max() && generation != 0; }
+
+    friend bool operator==(const TextureDefinitionId&, const TextureDefinitionId&) = default;
+};
+
+enum class TextureDomain
+{
+    Asset,
+    RenderTarget,
+    Dynamic,
+    External,
+};
+
+enum class TextureLifetimeClass
+{
+    FrameLocal,
+    Retained,
+    Dedicated,
+    ExternalOwned,
+};
+
+using TextureContentFlags = u32;
+
+enum class TextureContent : TextureContentFlags
+{
+    SourceDefined        = 1u << 0u,
+    DiscardOnAcquire     = 1u << 1u,
+    ClearOnFirstWrite    = 1u << 2u,
+    ClearOnEveryWrite    = 1u << 3u,
+    PreserveWithinGraph  = 1u << 4u,
+    PreserveAcrossFrames = 1u << 5u,
+    ProducerUpdated      = 1u << 6u,
+    ExternalCurrentFrame = 1u << 7u,
+};
+
+inline constexpr TextureContentFlags TextureContentFlag(TextureContent content) {
+    return static_cast<TextureContentFlags>(content);
+}
+
+enum class TextureContractSource
+{
+    Explicit,
+    LegacyAdapter,
+};
+
+struct TextureResourceContract {
+    TextureDomain         domain { TextureDomain::Asset };
+    TextureLifetimeClass  lifetime { TextureLifetimeClass::Retained };
+    TextureContentFlags   content { TextureContentFlag(TextureContent::SourceDefined) };
+    TextureContractSource source { TextureContractSource::Explicit };
+
+    friend bool operator==(const TextureResourceContract&,
+                           const TextureResourceContract&) = default;
+};
+
+struct TextureResourceIntent {
+    TextureResourceContract contract;
+
+    friend bool operator==(const TextureResourceIntent&, const TextureResourceIntent&) = default;
+};
+
+enum class TextureUsage
+{
+    Color,
+    Depth,
+};
+
+struct TextureDefinition {
+    i32           width { 0 };
+    i32           height { 0 };
+    TextureUsage  usage { TextureUsage::Color };
+    TextureFormat format { TextureFormat::RGBA8 };
+    TextureSample sample;
+    u32           mip_levels { 1 };
+    u32           samples { 1 };
+
+    friend bool operator==(const TextureDefinition& lhs, const TextureDefinition& rhs) {
+        return lhs.width == rhs.width && lhs.height == rhs.height && lhs.usage == rhs.usage &&
+               lhs.format == rhs.format && lhs.sample.wrapS == rhs.sample.wrapS &&
+               lhs.sample.wrapT == rhs.sample.wrapT &&
+               lhs.sample.magFilter == rhs.sample.magFilter &&
+               lhs.sample.minFilter == rhs.sample.minFilter && lhs.mip_levels == rhs.mip_levels &&
+               lhs.samples == rhs.samples;
+    }
+};
+
+enum class TextureRequestKind
+{
+    Imported,
+    RenderTarget,
+    RenderTargetMsaa,
+    DepthAttachment,
+};
+
+struct TextureRequest {
+    TextureRequestKind          kind { TextureRequestKind::Imported };
+    String                      name;
+    Option<TextureDefinitionId> source;
+    Option<TextureDefinition>   definition;
+    TextureLifetimeClass        lifetime { TextureLifetimeClass::Retained };
+
+    auto clone() const -> TextureRequest {
+        return TextureRequest {
+            .kind       = kind,
+            .name       = name.clone(),
+            .source     = source,
+            .definition = definition,
+            .lifetime   = lifetime,
+        };
+    }
+};
+
+struct TextureBindingRequest {
+    String                   name;
+    Option<TextureUseHandle> use;
+    Option<TextureRequest>   request;
+
+    bool empty() const { return name.is_empty(); }
+
+    auto clone() const -> TextureBindingRequest {
+        return TextureBindingRequest {
+            .name    = name.clone(),
+            .use     = use,
+            .request = request.is_some() ? Some(request->clone()) : None<TextureRequest>(),
+        };
+    }
+};
+
+inline bool SameTextureRequest(const TextureRequest& lhs, const TextureRequest& rhs) {
+    return lhs.kind == rhs.kind && lhs.name == rhs.name.as_str() && lhs.source == rhs.source &&
+           lhs.definition == rhs.definition && lhs.lifetime == rhs.lifetime;
+}
+
+inline bool SameTextureRequest(const Option<TextureRequest>& lhs,
+                               const Option<TextureRequest>& rhs) {
+    if (lhs.is_some() != rhs.is_some()) return false;
+    return lhs.is_none() || SameTextureRequest(*lhs, *rhs);
+}
+
+inline bool SameTextureBindingRequest(const TextureBindingRequest& lhs,
+                                      const TextureBindingRequest& rhs) {
+    return lhs.name == rhs.name.as_str() && lhs.use == rhs.use &&
+           SameTextureRequest(lhs.request, rhs.request);
+}
+
+inline bool SetTextureRequestIfChanged(Option<TextureRequest>& target,
+                                       Option<TextureRequest>  request) {
+    if (SameTextureRequest(target, request)) return false;
+    target = rstd::move(request);
+    return true;
+}
+
+inline bool SetTextureRequestIfChanged(Option<TextureRequest>& target, TextureRequest request) {
+    return SetTextureRequestIfChanged(target, Some(rstd::move(request)));
+}
+
+} // namespace owe::resource

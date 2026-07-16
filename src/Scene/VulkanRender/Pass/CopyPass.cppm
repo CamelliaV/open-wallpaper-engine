@@ -14,23 +14,28 @@ export namespace owe::vulkan
 class CopyPass : public VulkanPass {
 public:
     struct Desc {
-        std::string                   src;
-        std::string                   dst;
-        std::optional<TextureRequest> src_request;
-        std::optional<TextureRequest> dst_request;
+        std::string                              src;
+        std::string                              dst;
+        rstd::Option<resource::TextureUseHandle> src_use;
+        rstd::Option<resource::TextureUseHandle> dst_use;
+        rstd::Option<TextureRequest>             src_request;
+        rstd::Option<TextureRequest>             dst_request;
 
-        ImageParameters vk_src;
-        ImageParameters vk_dst;
+        ImageParameters                         vk_src;
+        ImageParameters                         vk_dst;
+        resource_registry::PreparedBarrierBatch before_barriers;
+        resource_registry::PreparedBarrierBatch after_barriers;
     };
 
-    CopyPass(const Desc&);
+    CopyPass(Desc&&);
     virtual ~CopyPass();
 
-    PassInvalidationFlags                     finalizeResourceRequests(Scene&) override;
+    PassInvalidationFlags finalizeResourceRequests(Scene&) override;
+    bool                  prepareResourceStates(resource_registry::ResourceStateTracker&) override;
     std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const override;
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
-    void execute(const Device&, RenderingResources&) override;
+    void record(PassRecordContext&) override;
     void destory(const Device&, RenderingResources&) override;
 
 private:

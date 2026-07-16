@@ -31,7 +31,7 @@ struct Pass {
 struct VirtualPass : Pass {
     struct Desc {};
 
-    explicit VirtualPass(const Desc&) noexcept {}
+    explicit VirtualPass(Desc&&) noexcept {}
     ~VirtualPass() noexcept override = default;
 };
 

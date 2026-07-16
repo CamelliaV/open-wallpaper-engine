@@ -825,14 +825,7 @@ private:
 class SceneRenderController {
 public:
     explicit SceneRenderController(SceneRuntimeController& main)
-        : m_main(main),
-          m_render(std::make_unique<vulkan::VulkanRender>(owe::render::ResourceRegistries(
-              rstd::dyn<owe::render::TextureRegistry>::from_ref(
-                  static_cast<const resource::TextureRegistry&>(m_texture_registry)),
-              rstd::dyn<owe::render::PipelineRegistry>::from_ref(
-                  static_cast<const resource::PipelineRegistry&>(m_pipeline_registry)),
-              rstd::dyn<owe::render::ShaderRegistry>::from_ref(
-                  static_cast<const resource::ShaderRegistry&>(m_shader_registry))))) {
+        : m_main(main), m_render(std::make_unique<vulkan::VulkanRender>()) {
         // Best-effort: a failing init just leaves snapshots returning false
         // and audio_average at zeros — wallpapers still render fine.
         (void)m_audio_capture.init();
@@ -912,9 +905,6 @@ private:
 
     SceneRuntimeController& m_main;
 
-    resource::TextureRegistry             m_texture_registry;
-    resource::PipelineRegistry            m_pipeline_registry;
-    resource::ShaderRegistry              m_shader_registry;
     std::unique_ptr<vulkan::VulkanRender> m_render;
     std::shared_ptr<Scene>                m_scene { nullptr };
     RenderSceneSnapshot                   m_render_scene;

@@ -2,7 +2,9 @@ module;
 
 export module wescene.vulkan_render:buffer_resolver;
 import wescene.core;
+import rstd;
 import rstd.cppstd;
+import wescene.resource_registry;
 import wescene.vulkan;
 import wescene.scene;
 
@@ -33,8 +35,8 @@ struct DrawBufferRefs {
     std::vector<DrawBufferKey>   vertex_keys;
     std::optional<DrawBufferKey> index_key;
 
-    std::vector<MeshBufferRef> static_vertices;
-    MeshBufferRef              static_index;
+    rstd::vec::Vec<resource_registry::PreparedBuffer> static_vertices;
+    rstd::Option<resource_registry::PreparedBuffer>   static_index;
 
     std::vector<StagingBufferRef> dynamic_vertices;
     StagingBufferRef              dynamic_index;
@@ -46,7 +48,7 @@ struct DrawBufferRefs {
     DrawBufferRefs& operator=(DrawBufferRefs&&) noexcept = default;
 
     bool hasIndex() const {
-        return dynamic ? static_cast<bool>(dynamic_index) : static_cast<bool>(static_index);
+        return dynamic ? static_cast<bool>(dynamic_index) : static_index.is_some();
     }
 };
 
@@ -62,15 +64,16 @@ std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest&,
 
 class RenderBufferResolver {
 public:
-    RenderBufferResolver(const Device&, StagingBuffer&);
+    RenderBufferResolver(resource_registry::BufferRegistry&, MeshCache&, StagingBuffer&);
 
     std::optional<DrawBufferRefs> prepareDrawBuffers(const DrawBufferRequest&);
     bool updateDynamicDrawBuffers(const DrawBufferRequest&, DrawBufferRefs&);
     void releaseDynamicDrawBuffers(DrawBufferRefs&);
 
 private:
-    const Device&  m_device;
-    StagingBuffer& m_dynamic_buffer;
+    rstd::mut_ref<resource_registry::BufferRegistry> m_buffers;
+    rstd::mut_ref<MeshCache>                         m_mesh_cache;
+    StagingBuffer&                                   m_dynamic_buffer;
 };
 
 } // namespace owe::vulkan

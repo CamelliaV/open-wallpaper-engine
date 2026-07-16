@@ -1,6 +1,7 @@
 export module wescene.rgraph:render_graph;
 import rstd;
 import cppstd;
+import wescene.resource;
 
 import :dependency_graph;
 import :pass;
@@ -27,15 +28,17 @@ enum class TextureKind
 };
 
 struct TextureDesc {
-    String      name;
-    String      key;
-    TextureKind kind { TextureKind::Imported };
+    String                                 name;
+    String                                 key;
+    TextureKind                            kind { TextureKind::Imported };
+    rstd::Option<resource::TextureRequest> request;
 };
 
 struct TextureNodeState {
-    TextureNodeRef ref;
-    TextureDesc    desc;
-    usize          version { 0 };
+    TextureNodeRef             ref;
+    resource::TextureUseHandle use;
+    TextureDesc                desc;
+    usize                      version { 0 };
 };
 
 struct PassNodeState {
@@ -80,6 +83,7 @@ public:
     auto topologicalOrder() const -> rstd::vec::Vec<NodeHandle>;
     auto getLastReadTextures(rstd::slice<NodeHandle>) const
         -> rstd::vec::Vec<rstd::vec::Vec<TextureNodeState>>;
+    auto resourcePlan() const -> resource::ResourcePlan;
 
     void ToGraphviz(rstd::ref<rstd::str> path) const;
 
@@ -101,7 +105,7 @@ public:
         Desc               desc {};
         callback(builder, desc);
 
-        std::unique_ptr<Pass> pass = std::make_unique<TPass>(desc);
+        std::unique_ptr<Pass> pass = std::make_unique<TPass>(std::move(desc));
         (void)m_passes.insert(pass_handle, std::move(pass));
         return node_handle;
     }

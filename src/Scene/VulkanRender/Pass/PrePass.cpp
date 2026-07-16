@@ -64,65 +64,64 @@ std::optional<vvk::RenderPass> CreateMsaaClearPass(const vvk::Device&    device,
 }
 } // namespace
 
-PrePass::PrePass(const Desc& desc) {
-    m_desc.result              = desc.result;
-    m_desc.layout              = desc.layout;
-    m_desc.result_request      = desc.result_request;
-    m_desc.result_msaa_request = desc.result_msaa_request;
-}
+PrePass::PrePass(Desc&& desc): m_desc(std::move(desc)) {}
 PrePass::~PrePass() {}
 
-bool PrePass::setResultRequest(std::optional<TextureRequest> request,
-                               std::optional<TextureRequest> msaa_request) {
+bool PrePass::setResultRequest(rstd::Option<TextureRequest> request,
+                               rstd::Option<TextureRequest> msaa_request) {
     bool changed = SetTextureRequestIfChanged(m_desc.result_request, std::move(request));
     changed =
         SetTextureRequestIfChanged(m_desc.result_msaa_request, std::move(msaa_request)) || changed;
     return changed;
 }
 
+bool PrePass::prepareResourceStates(resource_registry::ResourceStateTracker& states) {
+    if (m_desc.result_use.is_some() &&
+        ! states.Set(*m_desc.result_use, resource_registry::TextureStateKind::Sampled)) {
+        return false;
+    }
+    return m_desc.result_msaa_use.is_none() ||
+           states.Set(*m_desc.result_msaa_use,
+                      resource_registry::TextureStateKind::ColorAttachment);
+}
+
 std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() const {
-    std::vector<PassTextureRequestDiagnostic> out {
-        PassTextureRequestDiagnostic {
-            .role    = "frame-result",
-            .name    = std::string(m_desc.result),
-            .request = m_desc.result_request,
-        },
-    };
-    if (m_desc.result_msaa_request.has_value()) {
+    std::vector<PassTextureRequestDiagnostic> out;
+    out.reserve(m_desc.result_msaa_request.is_some() ? 2 : 1);
+    out.push_back(PassTextureRequestDiagnostic {
+        .role    = "frame-result",
+        .name    = std::string(m_desc.result),
+        .request = m_desc.result_request.is_some() ? rstd::Some(m_desc.result_request->clone())
+                                                   : rstd::None<TextureRequest>(),
+    });
+    if (m_desc.result_msaa_request.is_some()) {
         out.push_back(PassTextureRequestDiagnostic {
             .role    = "frame-result-msaa",
-            .name    = m_desc.result_msaa_request->name,
-            .request = m_desc.result_msaa_request,
+            .name    = rstd::cppstd::to_string(m_desc.result_msaa_request->name.as_str()),
+            .request = rstd::Some(m_desc.result_msaa_request->clone()),
         });
     }
     return out;
 }
 
-void PrePass::prepare(Scene& scene, const Device& device, RenderingResources&) {
-    RenderResourceSystem resources(device);
-
+void PrePass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
     {
         auto tex_name = std::string(m_desc.result);
         if (scene.renderTargets.count(tex_name) == 0) return;
-        auto& rt = scene.renderTargets.at(tex_name);
-        auto  request =
-            m_desc.result_request.value_or(MakeRenderTargetNoMipTextureRequest(tex_name, rt));
-        if (auto opt = resources.EnsureTexture(request); opt.has_value()) {
-            m_desc.vk_result = opt.value();
-        } else
-            return;
+        if (m_desc.result_use.is_none()) return;
+        auto prepared = rr.prepared_resources.Resolve(*m_desc.result_use);
+        if (prepared.is_none()) return;
+        m_desc.vk_result = (**prepared).image.getActive();
     }
     {
         auto  tex_name = std::string(m_desc.result);
         auto& rt       = scene.renderTargets.at(tex_name);
         m_desc.samples = TextureSampleCount(rt.sample_count);
         if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
-            auto twin_name = MsaaTwinName(tex_name, m_desc.samples);
-            auto request   = m_desc.result_msaa_request.value_or(
-                MakeMsaaTextureRequest(twin_name, rt, m_desc.samples));
-            auto opt = resources.EnsureTexture(request);
-            if (! opt.has_value()) return;
-            m_desc.vk_result_msaa = opt.value();
+            if (m_desc.result_msaa_use.is_none()) return;
+            auto prepared = rr.prepared_resources.Resolve(*m_desc.result_msaa_use);
+            if (prepared.is_none()) return;
+            m_desc.vk_result_msaa = (**prepared).image.getActive();
 
             auto pass = CreateMsaaClearPass(device.handle(), m_desc.samples);
             if (! pass.has_value()) return;
@@ -143,13 +142,13 @@ void PrePass::prepare(Scene& scene, const Device& device, RenderingResources&) {
     }
     {
         auto& sc           = scene.clearColor;
-        m_desc.clear_value = VkClearValue { sc[0], sc[1], sc[2], 1.0f };
+        m_desc.clear_value = VkClearValue { .color = { .float32 = { sc[0], sc[1], sc[2], 1.0f } } };
     }
     setPrepared();
 }
 
-void PrePass::execute(const Device&, RenderingResources& rr) {
-    auto&                   cmd = rr.command;
+void PrePass::record(PassRecordContext& context) {
+    auto&                   cmd = *context.command;
     VkImageSubresourceRange base_srang {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel   = 0,
@@ -218,5 +217,4 @@ void PrePass::destory(const Device&, RenderingResources&) {
     m_desc.vk_result_msaa  = {};
     m_desc.samples         = VK_SAMPLE_COUNT_1_BIT;
     setPrepared(false);
-    clearReleaseTexs();
 }

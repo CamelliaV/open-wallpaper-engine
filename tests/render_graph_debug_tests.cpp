@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+import rstd;
 import rstd.cppstd;
+import wescene.resource;
 import wescene.rgraph;
 import wescene.vulkan_render;
 
@@ -121,6 +123,53 @@ TEST(RenderGraphDebug, PassStateExposesPublicDebugRecord) {
     EXPECT_EQ(state->type, owe::rg::PassNode::Type::CustomShader);
     EXPECT_TRUE(graph.passState(owe::rg::NodeHandle {}).is_none());
     EXPECT_TRUE(graph.getPass(owe::rg::PassHandle {}).is_none());
+}
+
+TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
+    owe::rg::RenderGraph graph;
+
+    graph.addPass<DebugPass>(
+        "draw/main",
+        owe::rg::PassNode::Type::CustomShader,
+        [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+            auto input = builder.createTexture(owe::rg::TextureDesc {
+                .name    = String::make("albedo"),
+                .key     = String::make("tex/albedo"),
+                .kind    = owe::rg::TextureKind::Imported,
+                .request = rstd::Some(owe::resource::TextureRequest {
+                    .kind = owe::resource::TextureRequestKind::Imported,
+                    .name = String::make("tex/albedo"),
+                }),
+            });
+            builder.read(input);
+
+            auto output = builder.createTexture(
+                owe::rg::TextureDesc {
+                    .name    = String::make("default"),
+                    .key     = String::make("_rt_default"),
+                    .kind    = owe::rg::TextureKind::Temp,
+                    .request = rstd::Some(owe::resource::TextureRequest {
+                        .kind       = owe::resource::TextureRequestKind::RenderTarget,
+                        .name       = String::make("_rt_default"),
+                        .definition = rstd::Some(owe::resource::TextureDefinition {
+                            .width  = 1920,
+                            .height = 1080,
+                        }),
+                    }),
+                },
+                true);
+            builder.write(output);
+        });
+
+    auto plan = graph.resourcePlan();
+    ASSERT_EQ(plan.textures.len(), 2u);
+    EXPECT_TRUE(plan.textures[0].handle.Valid());
+    EXPECT_EQ(plan.textures[0].access, owe::resource::ResourceAccess::Read);
+    EXPECT_EQ(plan.textures[0].request.kind, owe::resource::TextureRequestKind::Imported);
+    EXPECT_TRUE(plan.textures[1].handle.Valid());
+    EXPECT_EQ(plan.textures[1].access, owe::resource::ResourceAccess::Write);
+    ASSERT_TRUE(plan.textures[1].request.definition.is_some());
+    EXPECT_EQ(plan.textures[1].request.definition->width, 1920);
 }
 
 TEST(VulkanRenderDiagnostics, EmptyBeforeProgramBuild) {

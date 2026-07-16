@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+import rstd;
 import rstd.cppstd;
 import wescene.scene;
 import wescene.types;
@@ -42,23 +43,23 @@ TEST(TextureRequest, BuildsImportedRequestWithoutCacheKey) {
     auto request = owe::vulkan::MakeImportedTextureRequest("textures/main.png");
 
     EXPECT_EQ(request.kind, owe::vulkan::TextureRequestKind::Imported);
-    EXPECT_EQ(request.name, "textures/main.png");
-    EXPECT_FALSE(request.imported_texture.has_value());
-    EXPECT_FALSE(request.cache_key.has_value());
-    EXPECT_FALSE(request.persist);
+    EXPECT_EQ(rstd::cppstd::as_string_view(request.name.as_str()), "textures/main.png");
+    EXPECT_TRUE(request.source.is_none());
+    EXPECT_TRUE(request.definition.is_none());
+    EXPECT_EQ(request.lifetime, owe::resource::TextureLifetimeClass::Retained);
 }
 
 TEST(TextureBindingRequest, CarriesNameAndTypedRequest) {
     auto request = owe::vulkan::MakeImportedTextureRequest("texture-slot");
     owe::vulkan::TextureBindingRequest binding {
-        .name    = "texture-slot",
-        .request = request,
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("texture-slot")),
+        .request = rstd::Some(std::move(request)),
     };
 
     EXPECT_FALSE(binding.empty());
-    ASSERT_TRUE(binding.request.has_value());
+    ASSERT_TRUE(binding.request.is_some());
     EXPECT_EQ(binding.request->kind, owe::vulkan::TextureRequestKind::Imported);
-    EXPECT_EQ(binding.request->name, "texture-slot");
+    EXPECT_EQ(rstd::cppstd::as_string_view(binding.request->name.as_str()), "texture-slot");
 
     owe::vulkan::TextureBindingRequest empty;
     EXPECT_TRUE(empty.empty());
@@ -73,7 +74,7 @@ TEST(TextureRequest, ResolvesImportedTextureNameFromSnapshotCatalog) {
     ASSERT_TRUE(desc_id.has_value());
 
     auto request = owe::vulkan::MakeImportedTextureRequest("texture-slot", desc_id);
-    EXPECT_EQ(request.imported_texture->index, desc_id->index);
+    EXPECT_EQ(request.source->index, desc_id->index);
 
     auto resolved = owe::vulkan::ResolveImportedTextureName(snapshot, request);
     ASSERT_TRUE(resolved.has_value());
@@ -99,21 +100,22 @@ TEST(TextureRequest, BuildsRenderTargetCacheKey) {
     auto request = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", rt);
 
     EXPECT_EQ(request.kind, owe::vulkan::TextureRequestKind::RenderTarget);
-    EXPECT_EQ(request.name, "_rt_default");
-    ASSERT_TRUE(request.cache_key.has_value());
-    EXPECT_EQ(request.cache_key->width, 256);
-    EXPECT_EQ(request.cache_key->height, 128);
-    EXPECT_EQ(request.cache_key->usage, owe::vulkan::TexUsage::COLOR);
-    EXPECT_EQ(request.cache_key->format, owe::TextureFormat::RGBA8);
-    EXPECT_EQ(request.cache_key->mipmap_level, 3u);
-    EXPECT_TRUE(request.persist);
+    EXPECT_EQ(rstd::cppstd::as_string_view(request.name.as_str()), "_rt_default");
+    ASSERT_TRUE(request.definition.is_some());
+    EXPECT_EQ(request.definition->width, 256);
+    EXPECT_EQ(request.definition->height, 128);
+    EXPECT_EQ(request.definition->usage, owe::resource::TextureUsage::Color);
+    EXPECT_EQ(request.definition->format, owe::TextureFormat::RGBA8);
+    EXPECT_EQ(request.definition->mip_levels, 3u);
+    EXPECT_EQ(request.lifetime, owe::resource::TextureLifetimeClass::Retained);
 
     rt.allowReuse = true;
-    EXPECT_FALSE(owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", rt).persist);
+    EXPECT_EQ(owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", rt).lifetime,
+              owe::resource::TextureLifetimeClass::FrameLocal);
 
     auto no_mip = owe::vulkan::MakeRenderTargetNoMipTextureRequest("_rt_default", rt);
-    ASSERT_TRUE(no_mip.cache_key.has_value());
-    EXPECT_EQ(no_mip.cache_key->mipmap_level, 1u);
+    ASSERT_TRUE(no_mip.definition.is_some());
+    EXPECT_EQ(no_mip.definition->mip_levels, 1u);
 }
 
 TEST(TextureRequest, DetectsRequestChanges) {
@@ -133,12 +135,12 @@ TEST(TextureRequest, DetectsRequestChanges) {
     auto resized = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", rt);
     EXPECT_FALSE(owe::vulkan::SameTextureRequest(a, resized));
 
-    std::optional<owe::vulkan::TextureRequest> target = a;
-    EXPECT_FALSE(owe::vulkan::SetTextureRequestIfChanged(target, b));
-    EXPECT_TRUE(owe::vulkan::SetTextureRequestIfChanged(target, resized));
-    ASSERT_TRUE(target.has_value());
-    ASSERT_TRUE(target->cache_key.has_value());
-    EXPECT_EQ(target->cache_key->width, 512);
+    rstd::Option<owe::vulkan::TextureRequest> target = rstd::Some(a.clone());
+    EXPECT_FALSE(owe::vulkan::SetTextureRequestIfChanged(target, b.clone()));
+    EXPECT_TRUE(owe::vulkan::SetTextureRequestIfChanged(target, std::move(resized)));
+    ASSERT_TRUE(target.is_some());
+    ASSERT_TRUE(target->definition.is_some());
+    EXPECT_EQ(target->definition->width, 512);
 }
 
 TEST(TextureRequest, BuildsMsaaAndDepthCacheKeys) {
@@ -153,19 +155,19 @@ TEST(TextureRequest, BuildsMsaaAndDepthCacheKeys) {
     auto msaa =
         owe::vulkan::MakeMsaaTextureRequest("_rt_default::msaa4", rt, VK_SAMPLE_COUNT_4_BIT);
     EXPECT_EQ(msaa.kind, owe::vulkan::TextureRequestKind::RenderTargetMsaa);
-    EXPECT_EQ(msaa.name, "_rt_default::msaa4");
-    ASSERT_TRUE(msaa.cache_key.has_value());
-    EXPECT_EQ(msaa.cache_key->samples, VK_SAMPLE_COUNT_4_BIT);
-    EXPECT_TRUE(msaa.persist);
+    EXPECT_EQ(rstd::cppstd::as_string_view(msaa.name.as_str()), "_rt_default::msaa4");
+    ASSERT_TRUE(msaa.definition.is_some());
+    EXPECT_EQ(msaa.definition->samples, 4u);
+    EXPECT_EQ(msaa.lifetime, owe::resource::TextureLifetimeClass::Dedicated);
 
     auto depth = owe::vulkan::MakeDepthTextureRequest("_rt_default::depth", rt);
     EXPECT_EQ(depth.kind, owe::vulkan::TextureRequestKind::DepthAttachment);
-    ASSERT_TRUE(depth.cache_key.has_value());
-    EXPECT_EQ(depth.cache_key->usage, owe::vulkan::TexUsage::DEPTH);
-    EXPECT_EQ(depth.cache_key->format, owe::TextureFormat::D32F);
-    EXPECT_EQ(depth.cache_key->mipmap_level, 1u);
-    EXPECT_EQ(depth.cache_key->samples, VK_SAMPLE_COUNT_4_BIT);
-    EXPECT_TRUE(depth.persist);
+    ASSERT_TRUE(depth.definition.is_some());
+    EXPECT_EQ(depth.definition->usage, owe::resource::TextureUsage::Depth);
+    EXPECT_EQ(depth.definition->format, owe::TextureFormat::D32F);
+    EXPECT_EQ(depth.definition->mip_levels, 1u);
+    EXPECT_EQ(depth.definition->samples, 4u);
+    EXPECT_EQ(depth.lifetime, owe::resource::TextureLifetimeClass::Retained);
 }
 
 TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
@@ -184,13 +186,18 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
     auto depth = owe::vulkan::MakeDepthTextureRequest("_rt_default::depth", rt);
 
     owe::vulkan::CustomShaderPass custom(owe::vulkan::CustomShaderPass::Desc {
-        .texture_bindings = { owe::vulkan::TextureBindingRequest {
-            .name    = "textures/main.png",
-            .request = imported,
-        } },
-        .output           = "_rt_default",
-        .output_request   = output,
-        .depth_request    = depth,
+        .texture_bindings =
+            [](owe::vulkan::TextureRequest request) {
+                std::vector<owe::vulkan::TextureBindingRequest> bindings;
+                bindings.push_back(owe::vulkan::TextureBindingRequest {
+                    .name = rstd::string::String::make(rstd::cppstd::as_str("textures/main.png")),
+                    .request = rstd::Some(std::move(request)),
+                });
+                return bindings;
+            }(std::move(imported)),
+        .output         = "_rt_default",
+        .output_request = rstd::Some(output.clone()),
+        .depth_request  = rstd::Some(std::move(depth)),
     });
     auto                          custom_diag = custom.textureRequestDiagnostics();
     ASSERT_EQ(custom_diag.size(), 3u);
@@ -205,8 +212,8 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
     owe::vulkan::CopyPass copy(owe::vulkan::CopyPass::Desc {
         .src         = "_rt_a",
         .dst         = "_rt_b",
-        .src_request = output,
-        .dst_request = output,
+        .src_request = rstd::Some(output.clone()),
+        .dst_request = rstd::Some(output.clone()),
     });
     auto                  copy_diag = copy.textureRequestDiagnostics();
     ASSERT_EQ(copy_diag.size(), 2u);
@@ -215,8 +222,8 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
 
     owe::vulkan::PrePass pre(owe::vulkan::PrePass::Desc {
         .result              = "_rt_default",
-        .result_request      = output,
-        .result_msaa_request = msaa,
+        .result_request      = rstd::Some(output.clone()),
+        .result_msaa_request = rstd::Some(std::move(msaa)),
     });
     auto                 pre_diag = pre.textureRequestDiagnostics();
     ASSERT_EQ(pre_diag.size(), 2u);
@@ -225,7 +232,7 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
 
     owe::vulkan::FinPass fin(owe::vulkan::FinPass::Desc {
         .result         = "_rt_default",
-        .result_request = output,
+        .result_request = rstd::Some(std::move(output)),
     });
     auto                 fin_diag = fin.textureRequestDiagnostics();
     ASSERT_EQ(fin_diag.size(), 1u);

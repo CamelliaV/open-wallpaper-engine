@@ -15,91 +15,103 @@ import wescene.scene;
 
 using namespace owe::vulkan;
 
-CopyPass::CopyPass(const Desc& desc): m_desc(desc) {}
+CopyPass::CopyPass(Desc&& desc): m_desc(std::move(desc)) {}
 
 CopyPass::~CopyPass() {};
 
 PassInvalidationFlags CopyPass::finalizeResourceRequests(Scene& scene) {
     PassInvalidationFlags flags = PassInvalidationNone;
-    auto refresh                = [&scene](std::string_view name) -> std::optional<TextureRequest> {
-        if (name.empty() || ! IsSpecTex(name)) return std::nullopt;
+    auto refresh                = [&scene](std::string_view name) -> rstd::Option<TextureRequest> {
+        if (name.empty() || ! IsSpecTex(name)) return rstd::None();
         auto it = scene.renderTargets.find(std::string(name));
-        if (it == scene.renderTargets.end()) return std::nullopt;
-        return MakeRenderTargetTextureRequest(name, it->second);
+        if (it == scene.renderTargets.end()) return rstd::None();
+        return rstd::Some(MakeRenderTargetTextureRequest(name, it->second));
     };
 
     if (auto request = refresh(m_desc.src);
-        request && SetTextureRequestIfChanged(m_desc.src_request, std::move(request))) {
+        request.is_some() && SetTextureRequestIfChanged(m_desc.src_request, std::move(request))) {
         flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
     }
     if (auto request = refresh(m_desc.dst);
-        request && SetTextureRequestIfChanged(m_desc.dst_request, std::move(request))) {
+        request.is_some() && SetTextureRequestIfChanged(m_desc.dst_request, std::move(request))) {
         flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
     }
     return flags;
 }
 
 std::vector<PassTextureRequestDiagnostic> CopyPass::textureRequestDiagnostics() const {
-    return {
-        PassTextureRequestDiagnostic {
-            .role    = "copy-src",
-            .name    = m_desc.src,
-            .request = m_desc.src_request,
-        },
-        PassTextureRequestDiagnostic {
-            .role    = "copy-dst",
-            .name    = m_desc.dst,
-            .request = m_desc.dst_request,
-        },
-    };
+    std::vector<PassTextureRequestDiagnostic> out;
+    out.reserve(2);
+    out.push_back(PassTextureRequestDiagnostic {
+        .role    = "copy-src",
+        .name    = m_desc.src,
+        .request = m_desc.src_request.is_some() ? rstd::Some(m_desc.src_request->clone())
+                                                : rstd::None<TextureRequest>(),
+    });
+    out.push_back(PassTextureRequestDiagnostic {
+        .role    = "copy-dst",
+        .name    = m_desc.dst,
+        .request = m_desc.dst_request.is_some() ? rstd::Some(m_desc.dst_request->clone())
+                                                : rstd::None<TextureRequest>(),
+    });
+    return out;
 }
 
-void CopyPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
-    RenderResourceSystem resources(device);
+bool CopyPass::prepareResourceStates(resource_registry::ResourceStateTracker& states) {
+    m_desc.before_barriers.Clear();
+    m_desc.after_barriers.Clear();
+    if (m_desc.src_use.is_none() || m_desc.dst_use.is_none()) return true;
 
-    if (scene.renderTargets.count(m_desc.src) == 0) {
-        rstd_error("{} not found", m_desc.src);
-        return;
+    auto range = resource_registry::TextureSubresourceRange {
+        .level_count = 1,
+        .layer_count = 1,
+    };
+    auto src_before =
+        states.Prepare(*m_desc.src_use, resource_registry::TextureStateKind::TransferSource, range);
+    auto dst_before = states.Prepare(
+        *m_desc.dst_use, resource_registry::TextureStateKind::TransferDestination, range, true);
+    auto src_after =
+        states.Prepare(*m_desc.src_use, resource_registry::TextureStateKind::Sampled, range);
+    auto dst_after =
+        states.Prepare(*m_desc.dst_use, resource_registry::TextureStateKind::Sampled, range);
+    if (src_before.is_none() || dst_before.is_none() || src_after.is_none() ||
+        dst_after.is_none()) {
+        return false;
     }
-    if (scene.renderTargets.count(m_desc.dst) == 0) {
-        auto& rt                                   = scene.renderTargets.at(m_desc.src);
-        scene.renderTargets[m_desc.dst]            = rt;
-        scene.renderTargets[m_desc.dst].allowReuse = true;
-    }
+    m_desc.before_barriers.Add(rstd::move(src_before).unwrap_unchecked());
+    m_desc.before_barriers.Add(rstd::move(dst_before).unwrap_unchecked());
+    m_desc.after_barriers.Add(rstd::move(src_after).unwrap_unchecked());
+    m_desc.after_barriers.Add(rstd::move(dst_after).unwrap_unchecked());
+    return true;
+}
 
-    std::array<std::string, 2>                    textures    = { m_desc.src, m_desc.dst };
-    std::array<ImageParameters*, 2>               vk_textures = { &m_desc.vk_src, &m_desc.vk_dst };
-    std::array<std::optional<TextureRequest>*, 2> texture_requests = { &m_desc.src_request,
-                                                                       &m_desc.dst_request };
+void CopyPass::prepare(Scene&, const Device&, RenderingResources& rr) {
+    std::array<std::string, 2>      textures    = { m_desc.src, m_desc.dst };
+    std::array<ImageParameters*, 2> vk_textures = { &m_desc.vk_src, &m_desc.vk_dst };
+    std::array<rstd::Option<resource::TextureUseHandle>*, 2> texture_uses = {
+        &m_desc.src_use,
+        &m_desc.dst_use,
+    };
     for (usize i = 0; i < textures.size(); i++) {
         auto& tex_name = textures[i];
         if (tex_name.empty()) continue;
 
-        ImageParameters img;
-        if (IsSpecTex(tex_name)) {
-            auto& rt = scene.renderTargets.at(tex_name);
-            auto  request =
-                texture_requests[i]->value_or(MakeRenderTargetTextureRequest(tex_name, rt));
-            auto opt = resources.EnsureTexture(request);
-            if (opt.has_value())
-                img = opt.value();
-            else
-                rstd_error("query image from cache failed");
-        } else {
-            rstd_error("can't copy image source");
+        if (texture_uses[i]->is_none()) {
+            rstd_error("copy texture {} has no resource use", tex_name);
             return;
         }
-        *vk_textures[i] = img;
-    }
-
-    for (auto& tex : releaseTexs()) {
-        resources.MarkShareReady(tex);
+        auto prepared = rr.prepared_resources.Resolve(**texture_uses[i]);
+        if (prepared.is_none()) {
+            rstd_error("prepared copy texture {} not found", tex_name);
+            return;
+        }
+        *vk_textures[i] = (**prepared).image.getActive();
     }
 
     setPrepared();
 };
-void CopyPass::execute(const Device& device, RenderingResources& rr) {
-    auto& cmd = rr.command;
+void CopyPass::record(PassRecordContext& context) {
+    auto& cmd = *context.command;
     auto& src = m_desc.vk_src;
     auto& dst = m_desc.vk_dst;
 
@@ -133,7 +145,9 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
             },
         .extent = { src.extent.width, src.extent.height, 1 },
     };
-    {
+    if (! m_desc.before_barriers.Empty()) {
+        m_desc.before_barriers.Record(cmd);
+    } else {
         VkImageMemoryBarrier in_bar {
             .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext            = nullptr,
@@ -169,7 +183,9 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
                   dst.handle,
                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                   copy);
-    {
+    if (! m_desc.after_barriers.Empty()) {
+        m_desc.after_barriers.Record(cmd);
+    } else {
         VkImageMemoryBarrier in_bar {
             .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext            = nullptr,
@@ -202,7 +218,7 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
     }
 
     if (dst.mipmap_level > 1) {
-        device.tex_cache().RecGenerateMipmaps(cmd, dst);
+        RecordGenerateMipmaps(cmd, dst);
     }
 };
 void CopyPass::destory(const Device&, RenderingResources&) {}

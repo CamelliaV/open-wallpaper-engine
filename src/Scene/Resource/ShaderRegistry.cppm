@@ -1,72 +1,87 @@
-export module wescene.resource:shader_registry;
+export module wescene.resource_registry:shader_registry;
 import rstd;
-import wescene.render;
-import wescene.vulkan;
+import wescene.resource;
+
+export namespace owe::resource_registry
+{
 
 using namespace rstd::prelude;
 
-export namespace owe::resource
-{
+struct ShaderEntry {
+    resource::ShaderHandle   handle;
+    resource::ShaderRequest  request;
+    resource::ShaderArtifact artifact;
+    u64                      physical_generation { 1 };
+};
 
 class ShaderRegistry {
 public:
-    ShaderRegistry()                                 = default;
-    ShaderRegistry(const ShaderRegistry&)            = delete;
-    ShaderRegistry& operator=(const ShaderRegistry&) = delete;
+    auto Ensure(resource::ShaderRequest                        request,
+                mut_ref<dyn<resource::ShaderArtifactProvider>> provider)
+        -> Result<resource::ShaderHandle, resource::ResourceError> {
+        auto existing = m_names.get(request.name);
+        if (existing.is_some()) {
+            auto entry = m_entries.get_mut(**existing);
+            if (entry.is_none()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = rstd::format("shader registry entry is unavailable"),
+                });
+            }
+            if ((**entry).request.content_version == request.content_version &&
+                (**entry).request.source == request.source) {
+                return Ok((**entry).handle);
+            }
+            auto artifact = provider->LoadShader(request);
+            if (artifact.is_err()) return Err(rstd::move(artifact).unwrap_err_unchecked());
+            (**entry).request  = rstd::move(request);
+            (**entry).artifact = rstd::move(artifact).unwrap_unchecked();
+            ++(**entry).physical_generation;
+            return Ok((**entry).handle);
+        }
 
-    auto Register(vvk::ShaderModule resource) -> render::ShaderHandle {
+        auto artifact = provider->LoadShader(request);
+        if (artifact.is_err()) return Err(rstd::move(artifact).unwrap_err_unchecked());
         auto handle = NextHandle();
-        (void)m_resources.insert(handle, rstd::move(resource));
-        return handle;
+        auto name   = request.name.clone();
+        (void)m_entries.insert(handle,
+                               ShaderEntry {
+                                   .handle   = handle,
+                                   .request  = rstd::move(request),
+                                   .artifact = rstd::move(artifact).unwrap_unchecked(),
+                               });
+        (void)m_names.insert(rstd::move(name), handle);
+        return Ok(handle);
     }
 
-    auto Resolve(render::ShaderHandle handle) const noexcept -> const vvk::ShaderModule* {
-        auto resource = m_resources.get(handle);
-        return resource.is_some() ? resource->as_raw_ptr() : nullptr;
-    }
-
-    auto Remove(render::ShaderHandle handle) -> Option<vvk::ShaderModule> {
-        return m_resources.remove(handle);
+    auto Resolve(resource::ShaderHandle handle) const noexcept -> Option<ref<ShaderEntry>> {
+        return m_entries.get(handle);
     }
 
     void Reset() {
-        m_resources.clear();
+        m_entries.clear();
+        m_names.clear();
         m_next_index = 0;
         ++m_generation;
         if (m_generation == 0) ++m_generation;
     }
 
     auto Generation() const noexcept -> u64 { return m_generation; }
-    auto Size() const noexcept -> usize { return m_resources.len(); }
+    auto Size() const noexcept -> usize { return m_entries.len(); }
 
 private:
-    auto NextHandle() -> render::ShaderHandle {
-        return {
-            .index      = m_next_index++,
-            .generation = m_generation,
-        };
+    auto NextHandle() -> resource::ShaderHandle {
+        return { .index = m_next_index++, .generation = m_generation };
     }
 
-    using ResourceMap =
-        rstd::collections::HashMap<render::ShaderHandle, vvk::ShaderModule,
-                                   render::ResourceHandleHasher<render::ShaderHandle>>;
+    using EntryMap =
+        rstd::collections::HashMap<resource::ShaderHandle, ShaderEntry,
+                                   resource::ResourceHandleHasher<resource::ShaderHandle>>;
 
-    u64         m_generation { 1 };
-    u64         m_next_index { 0 };
-    ResourceMap m_resources;
+    u64                                                        m_generation { 1 };
+    u64                                                        m_next_index { 0 };
+    EntryMap                                                   m_entries;
+    rstd::collections::HashMap<String, resource::ShaderHandle> m_names;
 };
 
-} // namespace owe::resource
-
-namespace rstd
-{
-
-template<>
-struct Impl<owe::render::ShaderRegistry, owe::resource::ShaderRegistry>
-    : ImplBase<owe::resource::ShaderRegistry> {
-    auto Resolve(owe::render::ShaderHandle handle) const -> const vvk::ShaderModule* {
-        return this->self().Resolve(handle);
-    }
-};
-
-} // namespace rstd
+} // namespace owe::resource_registry

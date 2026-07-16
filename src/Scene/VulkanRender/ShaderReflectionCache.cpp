@@ -65,6 +65,60 @@ const CachedShaderReflection* ShaderReflectionCache::Query(const SceneShader& sh
 
 void ShaderReflectionCache::Clear() { m_entries.clear(); }
 
+SceneShaderArtifactProvider::SceneShaderArtifactProvider(ShaderReflectionCache& cache,
+                                                         const SceneShader&     shader)
+    : m_cache(&cache), m_shader(&shader) {}
+
+auto SceneShaderArtifactProvider::Request() const -> resource::ShaderRequest {
+    return resource::ShaderRequest {
+        .name = rstd::string::String::make(rstd::cppstd::as_str(m_shader->name)),
+        .source =
+            resource::ShaderDefinitionId {
+                .index      = m_shader->id,
+                .generation = 1,
+            },
+        .content_version = static_cast<rstd::u64>(SceneShaderCodeHash(*m_shader)),
+    };
+}
+
+auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& request)
+    -> rstd::Result<resource::ShaderArtifact, resource::ResourceError> {
+    if (request.source.index != m_shader->id ||
+        request.content_version != SceneShaderCodeHash(*m_shader)) {
+        return rstd::Err(resource::ResourceError {
+            .kind    = resource::ResourceErrorKind::MissingDefinition,
+            .message = rstd::format("shader request does not match {}", m_shader->name),
+        });
+    }
+    auto reflection = m_cache->Query(*m_shader);
+    if (reflection == nullptr) {
+        return rstd::Err(resource::ResourceError {
+            .kind    = resource::ResourceErrorKind::BackendFailure,
+            .message = rstd::format("compile shader {} failed", m_shader->name),
+        });
+    }
+
+    resource::ShaderArtifact artifact {
+        .source          = request.source,
+        .content_version = request.content_version,
+    };
+    artifact.stages.reserve(reflection->stages.size());
+    for (const auto& stage : reflection->stages) {
+        auto code = rstd::vec::Vec<rstd::u32>::with_capacity(stage.spirv.size());
+        for (auto word : stage.spirv) code.push(rstd::u32(word));
+        artifact.stages.push(resource::ShaderArtifactStage {
+            .stage       = stage.stage,
+            .entry_point = rstd::string::String::make(rstd::cppstd::as_str(stage.entry_point)),
+            .code        = rstd::move(code),
+        });
+    }
+    return rstd::Ok(rstd::move(artifact));
+}
+
+auto SceneShaderArtifactProvider::Reflection() -> const CachedShaderReflection* {
+    return m_cache->Query(*m_shader);
+}
+
 std::vector<Uni_ShaderSpv> CloneShaderSpvs(const CachedShaderReflection& cached) {
     std::vector<Uni_ShaderSpv> out;
     out.reserve(cached.stages.size());

@@ -5,11 +5,12 @@ import wescene.types;
 import rstd.cppstd;
 import wescene.vulkan;
 import wescene.scene;
+import wescene.resource_registry;
 
 import wescene.rgraph;
 
-export import wescene.render;
 export import :vulkan_pass;
+export import :program;
 export import :shader_reflection_cache;
 export import :resource;
 export import :buffer_resolver;
@@ -81,31 +82,9 @@ enum class RenderGraphResourceRetention
     ReleaseSceneTextures,
 };
 
-struct PreparedPassDiagnostic {
-    bool                                      frame_pass { false };
-    std::optional<rg::NodeHandle>             graph_node;
-    std::string                               pass_name;
-    std::optional<rg::PassNode::Type>         pass_type;
-    std::optional<RenderItemId>               render_item;
-    PassInvalidationFlags                     invalidation_flags { PassInvalidationNone };
-    std::optional<PipelineCacheKey>           pipeline_cache_key;
-    bool                                      pipeline_cache_hit { false };
-    uint64_t                                  pipeline_cache_observed_count { 0 };
-    std::optional<RenderPassCacheKey>         render_pass_cache_key;
-    bool                                      render_pass_cache_hit { false };
-    uint64_t                                  render_pass_cache_observed_count { 0 };
-    std::optional<FramebufferCacheKey>        framebuffer_cache_key;
-    bool                                      framebuffer_cache_hit { false };
-    uint64_t                                  framebuffer_cache_observed_count { 0 };
-    std::vector<std::string>                  release_textures;
-    std::vector<PassTextureRequestDiagnostic> texture_requests;
-    bool                                      prepared { false };
-};
-
 class VulkanRender {
 public:
     VulkanRender();
-    explicit VulkanRender(render::ResourceRegistries);
     ~VulkanRender();
 
     bool init(RenderInitInfo);

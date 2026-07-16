@@ -136,13 +136,38 @@ set_property(TARGET owe-parse PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 
 # ---------------------------------------------------------------------------
-# owe-render (RenderGraph + VulkanRender)
+# owe-resource / owe-resource-registry
 # ---------------------------------------------------------------------------
-add_library(owe-render STATIC
+add_subdirectory(Resource)
+
+
+# ---------------------------------------------------------------------------
+# owe-rdg
+# ---------------------------------------------------------------------------
+add_library(owe-rdg STATIC
   RenderGraph/DependencyGraph.cpp
   RenderGraph/PassNode.cpp
   RenderGraph/TexNode.cpp
-  RenderGraph/RenderGraph.cpp
+  RenderGraph/RenderGraph.cpp)
+target_sources(owe-rdg
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+         RenderGraph/RGraph.cppm
+         RenderGraph/DependencyGraph.cppm
+         RenderGraph/Pass.cppm
+         RenderGraph/PassNode.cppm
+         RenderGraph/TexNode.cppm
+         RenderGraph/RenderGraph.cppm)
+target_link_libraries(owe-rdg
+  PUBLIC rstd::rstd rstd.cppstd owe-resource)
+target_include_directories(owe-rdg PUBLIC .. .)
+set_property(TARGET owe-rdg PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET owe-rdg PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+
+# ---------------------------------------------------------------------------
+# owe-vulkan-renderer
+# ---------------------------------------------------------------------------
+add_library(owe-vulkan-renderer STATIC
   VulkanRender/VulkanRender.cpp
   VulkanRender/BufferResolver.cpp
   VulkanRender/ShaderReflectionCache.cpp
@@ -151,19 +176,12 @@ add_library(owe-render STATIC
   VulkanRender/Pass/CustomShaderPass.cpp
   VulkanRender/Pass/FinPass.cpp
   VulkanRender/Pass/PrePass.cpp)
-target_sources(owe-render
+target_sources(owe-vulkan-renderer
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-         RenderGraph/RGraph.cppm
-         RenderGraph/DependencyGraph.cppm
-         RenderGraph/Pass.cppm
-         RenderGraph/PassNode.cppm
-         RenderGraph/TexNode.cppm
-         RenderGraph/RenderGraph.cppm
          VulkanRender/VulkanRender.cppm
+         VulkanRender/Program.cppm
          VulkanRender/Pass/VulkanPass.cppm
          VulkanRender/ShaderReflectionCache.cppm
-         VulkanRender/RenderResource.cppm
-         VulkanRender/ResourceKey.cppm
          VulkanRender/Resource.cppm
          VulkanRender/BufferResolver.cppm
          VulkanRender/Pass/PassCommon.cppm
@@ -171,19 +189,20 @@ target_sources(owe-render
          VulkanRender/Pass/CustomShaderPass.cppm
          VulkanRender/Pass/FinPass.cppm
          VulkanRender/Pass/PrePass.cppm)
-target_link_libraries(owe-render
-  PUBLIC owe-vulkan owe-parse owe-script wavsen::audio)
-target_include_directories(owe-render
+target_link_libraries(owe-vulkan-renderer
+  PUBLIC owe-rdg owe-resource-registry owe-vulkan owe-parse owe-script wavsen::audio)
+target_include_directories(owe-vulkan-renderer
   PUBLIC  .. . Swapchain Utils/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
-set_property(TARGET owe-render PROPERTY POSITION_INDEPENDENT_CODE ON)
-set_property(TARGET owe-render PROPERTY CXX_SCAN_FOR_MODULES ON)
+set_property(TARGET owe-vulkan-renderer PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET owe-vulkan-renderer PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 
 # ---------------------------------------------------------------------------
-# owe-resource
+# owe-render compatibility umbrella
 # ---------------------------------------------------------------------------
-add_subdirectory(Resource)
+add_library(owe-render INTERFACE)
+target_link_libraries(owe-render INTERFACE owe-rdg owe-vulkan-renderer)
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +212,7 @@ add_library(owe-scene-wallpaper STATIC SceneWallpaper.cpp)
 target_sources(owe-scene-wallpaper
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES SceneWallpaper.cppm)
 target_link_libraries(owe-scene-wallpaper
-  PUBLIC owe-render owe-resource owe-parse owe-script wavsen::audio)
+  PUBLIC owe-render owe-resource-registry owe-parse owe-script wavsen::audio)
 target_include_directories(owe-scene-wallpaper
   PUBLIC  .. . Swapchain Utils/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)

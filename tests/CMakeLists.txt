@@ -120,6 +120,14 @@ add_executable(render_resource_request_tests render_resource_request_tests.cpp)
 target_link_libraries(render_resource_request_tests PRIVATE owe-render GTest::gtest_main)
 set_target_properties(render_resource_request_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
+add_executable(resource_model_tests resource_model_tests.cpp)
+target_link_libraries(resource_model_tests PRIVATE owe-resource GTest::gtest_main)
+set_target_properties(resource_model_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
+add_executable(resource_registry_tests resource_registry_tests.cpp)
+target_link_libraries(resource_registry_tests PRIVATE owe-resource-registry GTest::gtest_main)
+set_target_properties(resource_registry_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 add_executable(render_graph_debug_tests render_graph_debug_tests.cpp)
 target_link_libraries(render_graph_debug_tests PRIVATE owe-render GTest::gtest_main)
 set_target_properties(render_graph_debug_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
@@ -226,6 +234,16 @@ gtest_discover_tests(
 )
 gtest_discover_tests(
     render_resource_request_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    resource_model_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    resource_registry_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )

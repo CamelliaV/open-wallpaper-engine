@@ -147,8 +147,9 @@ GraphicsPipeline& GraphicsPipeline::addStage(Uni_ShaderSpv&& spv) {
     return *this;
 }
 
-GraphicsPipeline& GraphicsPipeline::addDescriptorSetInfo(std::span<const DescriptorSetInfo> info) {
-    for (auto& i : info) m_descriptor_set_infos.push_back(i);
+GraphicsPipeline&
+GraphicsPipeline::setDescriptorSetLayouts(std::span<const VkDescriptorSetLayout> layouts) {
+    m_descriptor_set_layouts.assign(layouts.begin(), layouts.end());
     return *this;
 }
 
@@ -197,30 +198,12 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
         .dynamicStateCount = (uint32_t)m_dynamic_states.size(),
         .pDynamicStates    = m_dynamic_states.data()
     };
-    for (auto& info : m_descriptor_set_infos) {
-        VkDescriptorSetLayoutCreateInfo create_info {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .pNext = nullptr
-        };
-        VkDescriptorSetLayoutCreateFlags flags {};
-        if (info.push_descriptor) flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-
-        create_info.bindingCount = (u32)info.bindings.size();
-        create_info.pBindings    = info.bindings.data();
-        create_info.flags        = flags;
-        vvk::DescriptorSetLayout layout;
-        VVK_CHECK(device.handle().CreateDescriptorSetLayout(create_info, layout));
-        pipeline.descriptor_layouts.emplace_back(std::move(layout));
-    }
     {
-        auto layouts = vvk::ToVector<vvk::DescriptorSetLayout>(
-            rstd::slice<vvk::DescriptorSetLayout>::from_raw_parts(
-                pipeline.descriptor_layouts.data(), pipeline.descriptor_layouts.size()));
-
         VkPipelineLayoutCreateInfo ci {
             .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .pNext          = nullptr,
-            .setLayoutCount = (uint32_t)layouts.len(),
-            .pSetLayouts    = layouts.data(),
+            .setLayoutCount = static_cast<uint32_t>(m_descriptor_set_layouts.size()),
+            .pSetLayouts    = m_descriptor_set_layouts.data(),
         };
         VVK_CHECK(device.handle().CreatePipelineLayout(ci, pipeline.layout));
     }

@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include <type_traits>
 
 #include "vvk/macros.hpp"
 
@@ -195,6 +196,19 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
 
     device.m_graphics_queue.handle = device.m_device.GetQueue(device.m_graphics_queue.family_index);
     device.m_present_queue.handle  = device.m_device.GetQueue(device.m_present_queue.family_index);
+    device.m_capabilities          = DeviceCapabilities {
+        .timeline_semaphore = true,
+        .synchronization2   = enable_sync2,
+        .push_descriptor    = exists(tested_exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
+        .memory_budget      = exists(tested_exts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME),
+        .external_memory_fd = exists(tested_exts, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
+        .external_memory_dma_buf =
+            exists(tested_exts, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME),
+        .drm_format_modifier = exists(tested_exts, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME),
+        .foreign_queue       = exists(tested_exts, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME),
+        .graphics_queue_family = device.m_graphics_queue.family_index,
+        .present_queue_family  = device.m_present_queue.family_index,
+    };
 
     if (rq_surface) {
         if (! Swapchain::Create(device, *inst.surface(), extent, device.m_swapchain)) {
@@ -217,24 +231,27 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         allocatorInfo.instance               = *inst.inst();
         VVK_CHECK_BOOL_RE(vvk::CreateVmaAllocator(allocatorInfo, device.m_allocator));
     }
-    device.m_tex_cache  = std::make_unique<TextureCache>(device);
-    device.m_mesh_cache = std::make_unique<MeshCache>(device);
-    if (! device.m_mesh_cache->init()) {
-        rstd_error("MeshCache init failed");
-        return false;
-    }
     return true;
 }
 
-VkDeviceSize Device::GetUsage() const {
-    VmaBudget budget;
-    vmaGetHeapBudgets(*m_allocator, &budget);
-    return budget.usage;
+VkDeviceSize Device::GetUsage() const { return MemoryBudget().usage; }
+
+auto Device::MemoryBudget() const -> MemoryBudgetSnapshot {
+    auto properties = m_gpu.GetMemoryProperties().memoryProperties;
+    std::array<VmaBudget, std::extent_v<decltype(properties.memoryHeaps)>> budgets {};
+    vmaGetHeapBudgets(*m_allocator, budgets.data());
+    MemoryBudgetSnapshot snapshot;
+    for (u32 index = 0; index < properties.memoryHeapCount; ++index) {
+        snapshot.usage += budgets[index].usage;
+        snapshot.budget +=
+            budgets[index].budget != 0 ? budgets[index].budget : properties.memoryHeaps[index].size;
+    }
+    return snapshot;
 }
 
 void Device::Destroy() { VVK_CHECK(m_device.WaitIdle()); }
 
-Device::Device(): m_tex_cache(std::make_unique<TextureCache>(*this)) {}
+Device::Device() = default;
 Device::~Device() {}
 
 bool Device::supportExt(std::string_view name) const { return exists(m_extensions, name); }

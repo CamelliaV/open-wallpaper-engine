@@ -2,7 +2,7 @@ module;
 
 #include <vulkan/vulkan_core.h>
 
-export module wescene.vulkan_render:resource_key;
+export module wescene.resource_registry:resource_key;
 import rstd.cppstd;
 import wescene.types;
 import wescene.vulkan;

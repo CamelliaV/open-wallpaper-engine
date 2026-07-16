@@ -8,6 +8,7 @@ module;
 
 export module wescene.vulkan;
 import wescene.core;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.types;
@@ -602,8 +603,6 @@ public:
 
     void MarkShareReady(std::string_view key);
 
-    void RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) const;
-
     /* Per-frame hook: advance every registered video-tex by `dt_seconds`,
      * pull as many decoded frames as needed to catch up to wall PTS,
      * convert NV12→RGBA on the CPU, and upload to the slot's stable
@@ -654,7 +653,44 @@ private:
     Map<std::string, QueryTex*>            m_query_map;
 };
 
+void RecordGenerateMipmaps(vvk::CommandBuffer&, const ImageParameters&);
+
 // ---------- Device.hpp ----------
+
+struct DeviceCapabilities {
+    bool     timeline_semaphore { false };
+    bool     synchronization2 { false };
+    bool     push_descriptor { false };
+    bool     memory_budget { false };
+    bool     external_memory_fd { false };
+    bool     external_memory_dma_buf { false };
+    bool     drm_format_modifier { false };
+    bool     foreign_queue { false };
+    uint32_t graphics_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    uint32_t present_queue_family { VK_QUEUE_FAMILY_IGNORED };
+};
+
+struct MemoryBudgetSnapshot {
+    VkDeviceSize usage { 0 };
+    VkDeviceSize budget { 0 };
+
+    VkDeviceSize available() const noexcept { return budget > usage ? budget - usage : 0; }
+};
+
+struct MemoryBudgetSource {
+    using Trait                  = MemoryBudgetSource;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = MemoryBudgetSource;
+
+        auto MemoryBudget() const -> MemoryBudgetSnapshot { return rstd::trait_call<0>(this); }
+    };
+
+    template<typename T>
+    using Funcs = rstd::TraitFuncs<&T::MemoryBudget>;
+};
 
 class PipelineParameters;
 
@@ -689,14 +725,13 @@ public:
     const auto& cmd_pool() const { return m_command_pool; }
     const auto& swapchain() const { return m_swapchain; }
     const auto& out_extent() const { return m_extent; }
+    const auto& capabilities() const { return m_capabilities; }
     void        set_out_extent(VkExtent2D v) { m_extent = v; }
 
     bool supportExt(std::string_view) const;
 
-    TextureCache& tex_cache() const { return *m_tex_cache; }
-    MeshCache&    mesh_cache() const { return *m_mesh_cache; }
-
     VkDeviceSize GetUsage() const;
+    auto         MemoryBudget() const -> MemoryBudgetSnapshot;
 
 private:
     std::vector<VkDeviceQueueCreateInfo> ChooseDeviceQueue(VkSurfaceKHR = {});
@@ -709,6 +744,7 @@ private:
     vvk::VmaAllocatorHandle m_allocator;
 
     VkPhysicalDeviceLimits   m_limits;
+    DeviceCapabilities       m_capabilities;
     Set<std::string>         m_extensions;
     std::vector<std::string> m_enabled_instance_extensions;
     std::vector<std::string> m_enabled_device_extensions;
@@ -721,9 +757,6 @@ private:
     QueueParameters m_present_queue;
 
     VkExtent2D m_extent { 1, 1 };
-
-    std::unique_ptr<TextureCache> m_tex_cache;
-    std::unique_ptr<MeshCache>    m_mesh_cache;
 };
 
 // ---------- Util.hpp ----------
@@ -901,8 +934,6 @@ struct PipelineParameters {
     vvk::Pipeline                    handle;
     vvk::PipelineLayout              layout;
     std::shared_ptr<vvk::RenderPass> pass;
-
-    std::vector<vvk::DescriptorSetLayout> descriptor_layouts;
 };
 
 struct DescriptorSetInfo {
@@ -932,7 +963,7 @@ public:
     GraphicsPipeline& setLogicOp(bool enable, VkLogicOp);
 
     GraphicsPipeline& setRenderPass(vvk::RenderPass);
-    GraphicsPipeline& addDescriptorSetInfo(std::span<const DescriptorSetInfo>);
+    GraphicsPipeline& setDescriptorSetLayouts(std::span<const VkDescriptorSetLayout>);
     GraphicsPipeline& addStage(Uni_ShaderSpv&&);
     GraphicsPipeline&
         addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
@@ -958,7 +989,7 @@ private:
     VkPipelineColorBlendStateCreateInfo              m_color;
     std::vector<VkDynamicState>                      m_dynamic_states;
     std::vector<VkPipelineColorBlendAttachmentState> m_color_attachments;
-    std::vector<DescriptorSetInfo>                   m_descriptor_set_infos;
+    std::vector<VkDescriptorSetLayout>               m_descriptor_set_layouts;
     Map<VkShaderStageFlagBits, Uni_ShaderSpv>        m_stage_spv_map;
 };
 
@@ -1144,12 +1175,12 @@ private:
     bool                          m_surface_pending { false };
 };
 
-inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& device, unsigned w,
+inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& device,
+                                                                TextureCache& textures, unsigned w,
                                                                 unsigned h, VkImageTiling tiling) {
     std::array<LocalExHandle, 3> handles;
     for (auto& handle : handles) {
-        if (auto rv = device.tex_cache().CreateExTex(w, h, VK_FORMAT_R8G8B8A8_UNORM, tiling);
-            rv.has_value())
+        if (auto rv = textures.CreateExTex(w, h, VK_FORMAT_R8G8B8A8_UNORM, tiling); rv.has_value())
             handle.image = std::move(rv.value());
         else
             return nullptr;
@@ -1160,3 +1191,15 @@ inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& de
 
 } // namespace vulkan
 } // namespace owe
+
+export namespace rstd
+{
+
+template<>
+struct Impl<owe::vulkan::MemoryBudgetSource, owe::vulkan::Device> : ImplBase<owe::vulkan::Device> {
+    auto MemoryBudget() const -> owe::vulkan::MemoryBudgetSnapshot {
+        return this->self().MemoryBudget();
+    }
+};
+
+} // namespace rstd

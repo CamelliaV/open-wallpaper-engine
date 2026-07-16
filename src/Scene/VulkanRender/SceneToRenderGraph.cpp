@@ -27,6 +27,8 @@ auto CloneTextureDesc(const rg::TextureDesc& desc) -> rg::TextureDesc {
         .name = desc.name.clone(),
         .key  = desc.key.clone(),
         .kind = desc.kind,
+        .request =
+            desc.request.is_some() ? Some(desc.request->clone()) : None<resource::TextureRequest>(),
     };
 }
 } // namespace
@@ -43,18 +45,12 @@ void doCopy(RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc, TextureNo
     auto out_state = builder.textureState(out);
     rstd_assert(in_state.is_some() && out_state.is_some());
     if (in_state.is_none() || out_state.is_none()) return;
-    desc.src = StdString(in_state->desc.key);
-    desc.dst = StdString(out_state->desc.key);
+    desc.src     = StdString(in_state->desc.key);
+    desc.dst     = StdString(out_state->desc.key);
+    desc.src_use = Some(in_state->use);
+    desc.dst_use = Some(out_state->use);
 }
 } // namespace owe::rg
-
-static void TraverseNode(const std::function<void(SceneNode*)>& func, SceneNode* node,
-                         const Set<const SceneNode*>* skip_subtrees = nullptr) {
-    if (skip_subtrees != nullptr && skip_subtrees->count(static_cast<const SceneNode*>(node)) != 0)
-        return;
-    func(node);
-    for (auto& child : node->GetChildren()) TraverseNode(func, child.as_ptr(), skip_subtrees);
-}
 
 static void CheckAndSetSprite(const RenderSceneSnapshot&      render_scene,
                               vulkan::CustomShaderPass::Desc& desc,
@@ -81,7 +77,7 @@ struct LinkTextureConsumer {
     uint32_t         texture_index;
 };
 
-static rg::TextureDesc MakeTextureDesc(std::string_view key) {
+static rg::TextureDesc MakeTextureDescBase(std::string_view key) {
     return rg::TextureDesc {
         .name = String::make(rstd::ref<rstd::str>(key)),
         .key  = String::make(rstd::ref<rstd::str>(key)),
@@ -129,19 +125,19 @@ struct ExtraInfo {
     GraphLinkFinalizer                link_finalizer;
 };
 
-static std::optional<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       extra,
-                                                                      std::string_view key) {
-    if (key.empty()) return std::nullopt;
+static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       extra,
+                                                               std::string_view key) {
+    if (key.empty()) return None();
     if (! IsSpecTex(key)) {
         std::optional<RenderTextureDescId> texture;
         if (extra.render_scene != nullptr) texture = extra.render_scene->textureDescId(key);
-        return vulkan::MakeImportedTextureRequest(key, texture);
+        return Some(vulkan::MakeImportedTextureRequest(key, texture));
     }
 
     if (extra.render_scene != nullptr) {
         if (auto desc_id = extra.render_scene->renderTargetDescId(key)) {
             if (auto* desc = extra.render_scene->renderTargetDesc(*desc_id)) {
-                return vulkan::MakeRenderTargetTextureRequest(key, desc->desc);
+                return Some(vulkan::MakeRenderTargetTextureRequest(key, desc->desc));
             }
         }
     }
@@ -149,11 +145,17 @@ static std::optional<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&
     if (extra.scene != nullptr) {
         auto it = extra.scene->renderTargets.find(std::string(key));
         if (it != extra.scene->renderTargets.end()) {
-            return vulkan::MakeRenderTargetTextureRequest(key, it->second);
+            return Some(vulkan::MakeRenderTargetTextureRequest(key, it->second));
         }
     }
 
-    return std::nullopt;
+    return None();
+}
+
+static rg::TextureDesc MakeTextureDesc(ExtraInfo& extra, std::string_view key) {
+    auto desc    = MakeTextureDescBase(key);
+    desc.request = BuildGraphTextureRequest(extra, key);
+    return desc;
 }
 
 static void FillCopyTextureRequests(ExtraInfo& extra, vulkan::CopyPass::Desc& desc) {
@@ -170,7 +172,8 @@ static GraphTextureOutput CaptureTextureOutput(ExtraInfo& extra, rg::TextureNode
         .ref = ref,
         .binding =
             vulkan::TextureBindingRequest {
-                .name    = key,
+                .name    = String::make(rstd::cppstd::as_str(key)),
+                .use     = Some(state->use),
                 .request = BuildGraphTextureRequest(extra, key),
             },
         .desc = rstd::move(state->desc),
@@ -232,18 +235,20 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
         const auto&        stored = output_it->second;
         GraphTextureOutput input {
             .ref     = stored.ref,
-            .binding = stored.binding,
+            .binding = stored.binding.clone(),
             .desc    = CloneTextureDesc(stored.desc),
         };
         auto link_key = GenLinkTex(static_cast<std::ptrdiff_t>(consumer.source_layer.value));
-        if (input.binding.name != link_key) {
+        if (input.binding.name != rstd::cppstd::as_str(link_key)) {
             auto copy_desc        = CloneTextureDesc(input.desc);
             copy_desc.key         = String::make(rstd::ref<rstd::str>(link_key));
             copy_desc.name        = copy_desc.key.clone();
             input.desc            = CloneTextureDesc(copy_desc);
             input.ref             = AddCopyPass(extra, input.ref, std::move(copy_desc));
-            input.binding.name    = link_key;
-            input.binding.request = BuildGraphTextureRequest(extra, input.binding.name);
+            input.binding.name    = String::make(rstd::cppstd::as_str(link_key));
+            input.binding.request = BuildGraphTextureRequest(extra, link_key);
+            auto copied_state     = extra.rgraph->textureState(input.ref);
+            if (copied_state.is_some()) input.binding.use = Some(copied_state->use);
         }
 
         if (! extra.rgraph->readTexture(consumer.node, input.ref)) {
@@ -261,8 +266,8 @@ static rg::TextureNodeRef AddMipFramebufferCopy(ExtraInfo& extra, rg::RenderGrap
         return *extra.mip_framebuffer_snapshot;
     }
 
-    auto source                    = builder.createTexture(MakeTextureDesc(SpecTex_Default));
-    auto copy_desc                 = MakeTextureDesc(WE_MIP_MAPPED_FRAME_BUFFER);
+    auto source                    = builder.createTexture(MakeTextureDesc(extra, SpecTex_Default));
+    auto copy_desc                 = MakeTextureDesc(extra, WE_MIP_MAPPED_FRAME_BUFFER);
     copy_desc.kind                 = rg::TextureKind::Temp;
     auto snapshot                  = AddCopyPass(extra, source, std::move(copy_desc));
     extra.mip_framebuffer_snapshot = snapshot;
@@ -284,7 +289,9 @@ static void LoadGraphEffects(SceneNode* node, SceneImageEffectLayer* effs, Extra
         int  nodePos = 0;
         for (auto& n : eff->nodes) {
             if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos) {
-                AddCopyPass(extra, MakeTextureDesc(cmdItor->src), MakeTextureDesc(cmdItor->dst));
+                AddCopyPass(extra,
+                            MakeTextureDesc(extra, cmdItor->src),
+                            MakeTextureDesc(extra, cmdItor->dst));
                 cmdItor++;
             }
             auto& name = n.output;
@@ -336,10 +343,10 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         rgraph.addPass<vulkan::CustomShaderPass>(
             passName,
             rg::PassNode::Type::CustomShader,
-            [material, node, smi, pass_output, &output, &imgId, &rgraph, &scene, &extra](
+            [material, node, smi, pass_output, &imgId, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
                 const auto& pass    = builder.workPassNode();
-                pdesc.node          = node;
+                pdesc.node          = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
                 pdesc.submesh_index = smi;
                 if (auto node_id = scene.ResourceIndex().nodeId(*node)) {
                     if (auto draw_item = scene.ResourceIndex().drawItemFor(*node_id, smi)) {
@@ -370,7 +377,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         pdesc.texture_bindings.emplace_back();
                         continue;
                     } else {
-                        auto desc = MakeTextureDesc(url);
+                        auto desc = MakeTextureDesc(extra, url);
                         if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
                             input = AddMipFramebufferCopy(extra, builder);
                         } else {
@@ -394,24 +401,37 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     }
                     auto sampled_key = StdString(sampled_state->desc.key);
                     pdesc.texture_bindings.emplace_back(vulkan::TextureBindingRequest {
-                        .name    = sampled_key,
+                        .name    = String::make(rstd::cppstd::as_str(sampled_key)),
+                        .use     = Some(sampled_state->use),
                         .request = BuildGraphTextureRequest(extra, sampled_key),
                     });
                 }
 
                 std::string pass_output_s(pass_output);
-                auto output_node  = builder.createTexture(MakeTextureDesc(pass_output_s), true);
+                auto        output_node =
+                    builder.createTexture(MakeTextureDesc(extra, pass_output_s), true);
                 auto output_state = builder.textureState(output_node);
                 rstd_assert(output_state.is_some());
                 if (output_state.is_none()) return;
                 const auto& output_rt          = scene.renderTargets.at(pass_output_s);
                 const bool  first_output_write = output_state->version == 0;
+                pdesc.output_use               = Some(output_state->use);
                 pdesc.output_request           = BuildGraphTextureRequest(extra, pass_output_s);
                 pdesc.samples                  = vulkan::TextureSampleCount(output_rt.sample_count);
                 if (pdesc.samples != VK_SAMPLE_COUNT_1_BIT) {
                     auto twin_name = vulkan::MsaaTwinName(pass_output_s, pdesc.samples);
                     pdesc.output_msaa_request =
-                        vulkan::MakeMsaaTextureRequest(twin_name, output_rt, pdesc.samples);
+                        Some(vulkan::MakeMsaaTextureRequest(twin_name, output_rt, pdesc.samples));
+                    auto msaa_node = builder.createTexture(
+                        rg::TextureDesc {
+                            .name    = String::make(rstd::cppstd::as_str(twin_name)),
+                            .key     = String::make(rstd::cppstd::as_str(twin_name)),
+                            .kind    = rg::TextureKind::Temp,
+                            .request = Some(pdesc.output_msaa_request->clone()),
+                        },
+                        true);
+                    auto msaa_state = builder.textureState(msaa_node);
+                    if (msaa_state) pdesc.output_msaa_use = Some(msaa_state->use);
                 }
                 pdesc.transparent_clear = first_output_write && output_rt.clear_on_first_write;
                 pdesc.clear_output =
@@ -421,8 +441,19 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     output_rt.withDepth && vulkan::UsesDepthAttachment(*material);
                 pdesc.has_depth_attachment = uses_depth;
                 if (uses_depth) {
+                    auto depth_name = pass_output_s + "::depth";
                     pdesc.depth_request =
-                        vulkan::MakeDepthTextureRequest(pass_output_s + "::depth", output_rt);
+                        Some(vulkan::MakeDepthTextureRequest(depth_name, output_rt));
+                    auto depth_node = builder.createTexture(
+                        rg::TextureDesc {
+                            .name    = String::make(rstd::cppstd::as_str(depth_name)),
+                            .key     = String::make(rstd::cppstd::as_str(depth_name)),
+                            .kind    = rg::TextureKind::Temp,
+                            .request = Some(pdesc.depth_request->clone()),
+                        },
+                        true);
+                    auto depth_state = builder.textureState(depth_node);
+                    if (depth_state) pdesc.depth_use = Some(depth_state->use);
                 }
                 pdesc.clear_depth =
                     uses_depth && (pdesc.clear_output || output_rt.force_clear ||
@@ -604,7 +635,8 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                 
                     sp->output.empty() ? SpecTex_Default : std::string_view(sp->output);
                 ToGraphPass(sp->node.as_ptr(), target, sp->node->ID(), extra);
             } else if (auto* cp = std::get_if<ScenePostProcessCopy>(&step)) {
-                AddCopyPass(extra, MakeTextureDesc(cp->src), MakeTextureDesc(cp->dst));
+                AddCopyPass(
+                    extra, MakeTextureDesc(extra, cp->src), MakeTextureDesc(extra, cp->dst));
             }
         }
     }
