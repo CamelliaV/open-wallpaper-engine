@@ -11,6 +11,8 @@ import rstd.log;
 import rstd.cppstd;
 import wescene.scene;
 
+using namespace rstd::prelude;
+
 namespace owe::script
 {
 
@@ -1615,9 +1617,9 @@ JSClassDef s_layer_class_def {
 };
 
 struct EffectHandle {
-    EngineHostState*                        host { nullptr };
-    std::optional<owe::SceneImageEffectRef> ref;
-    bool                                    fallback_visible { true };
+    EngineHostState*            host { nullptr };
+    Option<SceneImageEffectRef> ref;
+    bool                        fallback_visible { true };
 };
 
 void EffectFinalizer(JSRuntime*, JSValue v) {
@@ -1653,7 +1655,7 @@ EffectHandle* GetEffectHandle(JSValueConst v) {
     return static_cast<EffectHandle*>(JS_GetOpaque(v, s_effect_class_id));
 }
 
-JSValue WrapEffect(JSContext* ctx, std::optional<owe::SceneImageEffectRef> ref) {
+JSValue WrapEffect(JSContext* ctx, Option<SceneImageEffectRef> ref) {
     JSValue obj = JS_NewObjectClass(ctx, s_effect_class_id);
     if (JS_IsException(obj)) return obj;
     auto* host    = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
@@ -2032,10 +2034,10 @@ JSValue NodeGetLayer(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
 JSValue NodeGetEffect(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     auto* n    = GetLayerNode(this_val);
-    if (! host || ! host->scene || ! n || argc < 1) return WrapEffect(ctx, std::nullopt);
+    if (! host || ! host->scene || ! n || argc < 1) return WrapEffect(ctx, None());
 
     const char* name = JS_ToCString(ctx, argv[0]);
-    if (! name) return WrapEffect(ctx, std::nullopt);
+    if (! name) return WrapEffect(ctx, None());
     auto effect = host->scene->FindNodeImageEffect(*n, name);
     JS_FreeCString(ctx, name);
     return WrapEffect(ctx, std::move(effect));

@@ -22,11 +22,13 @@ import wescene.text;
 import wescene.rgraph;
 
 using namespace owe::vulkan;
+using namespace rstd::prelude;
 
-constexpr uint64_t             vk_wait_time { 10u * 1000u * 1000000u };
-constexpr uint32_t             vk_upload_command_num { 3 };
-constexpr uint32_t             vk_command_num { vk_upload_command_num + 1 };
-constexpr VkPipelineStageFlags vk_upload_wait_stages { VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+constexpr u64                  vk_wait_time { 10u * 1000u * 1000000u };
+constexpr u32                  vk_upload_command_num { 3 };
+constexpr u32                  vk_command_num { vk_upload_command_num + 1 };
+constexpr VkPipelineStageFlags vk_upload_wait_stages { VK_PIPELINE_STAGE_TRANSFER_BIT |
+                                                       VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
                                                        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
                                                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT };
 
@@ -53,13 +55,13 @@ RenderItemsForMaterials(const owe::RenderSceneSnapshot&       render_scene,
     return render_items;
 }
 
-constexpr std::array base_inst_exts {
+constexpr rstd::array<Extension, 4> base_inst_exts {
     Extension { false, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME },
     Extension { false, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME },
     Extension { false, VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME },
     Extension { false, VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME },
 };
-constexpr std::array base_device_exts {
+constexpr rstd::array<Extension, 7> base_device_exts {
     Extension { false, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME },
     Extension { false, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME },
     Extension { true, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME },
@@ -90,16 +92,8 @@ void AppendVideoDeviceExtensions(std::vector<Extension>& device_exts) {
 }
 
 void ReleaseCompletedRetiredResources(Device& device, RenderingResources& rr) {
-    rr.resource_registries.Retirement().ReleaseAllReady();
-    rr.resource_registries.PipelineCache().PruneExpired();
-    rr.resource_registries.RenderPassCache().PruneExpired();
-    rr.resource_registries.FramebufferCache().PruneExpired();
     auto memory = rstd::dyn<owe::vulkan::MemoryBudgetSource>::from_ref(device);
-    rr.resource_registries.Memory().Refresh(memory.as_ref());
-    if (rr.resource_registries.Memory().ShouldEvictTransient()) {
-        rr.resource_registries.Textures().ClearTransientGraphResources();
-        rr.resource_registries.Meshes().evictUnused();
-    }
+    rr.resources.Collect(memory.as_mut_ref());
 }
 
 struct VulkanRender::Impl {
@@ -132,29 +126,26 @@ struct VulkanRender::Impl {
     std::vector<PreparedPassDiagnostic> preparedPassDiagnostics() const;
     void                                UpdateCameraFillMode(Scene&, owe::FillMode);
 
-    bool                       initRes();
-    std::optional<std::size_t> acquireUploadCommandSlot(RenderingResources&);
-    void                       commitPreparedUploads();
-    void                       drawFrameSwapchain();
-    void                       drawFrameOffscreen();
-    bool                       onSwapchainReady(unsigned width, unsigned height);
+    bool                      initRes();
+    rstd::Option<rstd::usize> acquireUploadCommandSlot(RenderingResources&);
+    void                      commitPreparedUploads();
+    bool                      waitForPreparedUploads(RenderingResources&);
+    void                      drawFrameSwapchain();
+    void                      drawFrameOffscreen();
+    bool                      onSwapchainReady(unsigned width, unsigned height);
 
-    Instance                m_instance;
-    std::unique_ptr<Device> m_device;
+    Instance     m_instance;
+    Box<Device>  m_device { Box<Device>::make() };
+    Box<PrePass> m_prepass { Box<PrePass>::make(PrePass::Desc {}) };
+    Box<FinPass> m_finpass { Box<FinPass>::make(FinPass::Desc {}) };
+    ReDrawCB     m_redraw_cb;
 
-    std::unique_ptr<PrePass> m_prepass { nullptr };
-    std::unique_ptr<FinPass> m_finpass { nullptr };
-
-    std::unique_ptr<FinPass> m_testpass { nullptr };
-    ReDrawCB                 m_redraw_cb;
-
-    std::unique_ptr<StagingBuffer> m_dyn_buf { nullptr };
-    ShaderReflectionCache          m_shader_reflection_cache;
+    ShaderReflectionCache m_shader_reflection_cache;
 
     vvk::CommandBuffers             m_cmds;
     std::vector<vvk::CommandBuffer> m_upload_cmds;
-    std::vector<uint64_t>           m_upload_cmd_values;
-    std::size_t                     m_next_upload_cmd { 0 };
+    std::vector<u64>                m_upload_cmd_values;
+    usize                           m_next_upload_cmd { 0 };
     vvk::CommandBuffer              m_render_cmd;
 
     bool m_with_surface { false };
@@ -166,7 +157,7 @@ struct VulkanRender::Impl {
 
     std::shared_ptr<ExSwapchain> m_ex_swapchain;
     RenderingResources           m_rendering_resources;
-    uint64_t                     m_next_surface_acquire_serial { 1 };
+    u64                          m_next_surface_acquire_serial { 1 };
 
     // for VUID-vkQueueSubmit-pSignalSemaphores-00067
     std::vector<vvk::Semaphore> m_sem_swap_finish_per_image;
@@ -174,7 +165,7 @@ struct VulkanRender::Impl {
     RenderProgram m_program;
 };
 
-VulkanRender::VulkanRender(): pImpl(std::make_unique<Impl>()) {}
+VulkanRender::VulkanRender(): pImpl(Box<Impl>::make()) {}
 VulkanRender::~VulkanRender() {};
 
 bool VulkanRender::inited() const { return pImpl->m_inited; }
@@ -183,8 +174,8 @@ int VulkanRender::takeLastFrameSyncFd() {
     return pImpl->m_ex_swapchain ? pImpl->m_ex_swapchain->takeLastFrameSyncFd() : -1;
 }
 
-bool VulkanRender::getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) const {
-    if (! pImpl->m_inited || ! pImpl->m_device) return false;
+bool VulkanRender::getDrmRenderNode(u32& out_major, u32& out_minor) const {
+    if (! pImpl->m_inited) return false;
     VkPhysicalDeviceDrmPropertiesEXT drm {};
     drm.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT;
     VkPhysicalDeviceProperties2KHR props {};
@@ -192,12 +183,12 @@ bool VulkanRender::getDrmRenderNode(uint32_t& out_major, uint32_t& out_minor) co
     props.pNext = &drm;
     pImpl->m_device->gpu().GetProperties2KHR(props);
     if (! drm.hasRender) return false;
-    if (drm.renderMajor < 0 || drm.renderMinor < 0 || (uint64_t)drm.renderMajor > UINT32_MAX ||
-        (uint64_t)drm.renderMinor > UINT32_MAX) {
+    if (drm.renderMajor < 0 || drm.renderMinor < 0 || (u64)drm.renderMajor > UINT32_MAX ||
+        (u64)drm.renderMinor > UINT32_MAX) {
         return false;
     }
-    out_major = static_cast<uint32_t>(drm.renderMajor);
-    out_minor = static_cast<uint32_t>(drm.renderMinor);
+    out_major = static_cast<u32>(drm.renderMajor);
+    out_minor = static_cast<u32>(drm.renderMinor);
     return true;
 }
 
@@ -207,28 +198,28 @@ VkInstance VulkanRender::vkInstance() const {
 }
 
 VkPhysicalDevice VulkanRender::vkPhysicalDevice() const {
-    if (! pImpl->m_inited || ! pImpl->m_device) return VK_NULL_HANDLE;
+    if (! pImpl->m_inited) return VK_NULL_HANDLE;
     return *pImpl->m_device->gpu();
 }
 
 VkDevice VulkanRender::vkDevice() const {
-    if (! pImpl->m_inited || ! pImpl->m_device) return VK_NULL_HANDLE;
+    if (! pImpl->m_inited) return VK_NULL_HANDLE;
     return *pImpl->m_device->handle();
 }
 
 VkQueue VulkanRender::vkGraphicsQueue() const {
-    if (! pImpl->m_inited || ! pImpl->m_device) return VK_NULL_HANDLE;
+    if (! pImpl->m_inited) return VK_NULL_HANDLE;
     return *pImpl->m_device->graphics_queue().handle;
 }
 
-uint32_t VulkanRender::vkGraphicsQueueFamily() const {
-    if (! pImpl->m_inited || ! pImpl->m_device) return 0;
+u32 VulkanRender::vkGraphicsQueueFamily() const {
+    if (! pImpl->m_inited) return 0;
     return pImpl->m_device->graphics_queue().family_index;
 }
 
-void VulkanRender::deviceUuid(uint8_t out[16]) const {
+void VulkanRender::deviceUuid(u8 out[16]) const {
     std::memset(out, 0, 16);
-    if (! pImpl->m_inited || ! pImpl->m_device) return;
+    if (! pImpl->m_inited) return;
     VkPhysicalDeviceIDPropertiesKHR id {};
     id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR;
     VkPhysicalDeviceProperties2KHR props {};
@@ -239,15 +230,14 @@ void VulkanRender::deviceUuid(uint8_t out[16]) const {
 }
 
 void VulkanRender::pumpVideoTextures(double dt_seconds) {
-    if (! pImpl->m_inited || ! pImpl->m_device) return;
-    pImpl->m_rendering_resources.resource_registries.Textures().PumpVideoTextures(dt_seconds);
+    if (! pImpl->m_inited) return;
+    pImpl->m_rendering_resources.resources.PumpVideoTextures(dt_seconds);
 }
 
 void VulkanRender::pumpFontAtlases(Scene& scene) {
-    if (! pImpl->m_inited || ! pImpl->m_device) return;
+    if (! pImpl->m_inited) return;
     auto* fc = owe::text::SceneFontCache(scene);
     if (fc == nullptr) return;
-    auto& tex = pImpl->m_rendering_resources.resource_registries.Textures();
     for (auto* face : fc->Faces()) {
         if (face == nullptr) continue;
         auto rects = face->DirtyRects();
@@ -255,27 +245,27 @@ void VulkanRender::pumpFontAtlases(Scene& scene) {
         // Coalesce all dirty rects into one AABB. Typical: ≤ a handful of
         // glyph slots per frame, so a single upload covering the union beats
         // submitting one copy per rect.
-        std::uint32_t min_x = rects[0].x;
-        std::uint32_t min_y = rects[0].y;
-        std::uint32_t max_x = rects[0].x + rects[0].w;
-        std::uint32_t max_y = rects[0].y + rects[0].h;
+        u32 min_x = rects[0].x;
+        u32 min_y = rects[0].y;
+        u32 max_x = rects[0].x + rects[0].w;
+        u32 max_y = rects[0].y + rects[0].h;
         for (auto& r : rects.subspan(1)) {
             if (r.x < min_x) min_x = r.x;
             if (r.y < min_y) min_y = r.y;
-            const std::uint32_t rx2 = r.x + r.w;
-            const std::uint32_t ry2 = r.y + r.h;
+            const u32 rx2 = r.x + r.w;
+            const u32 ry2 = r.y + r.h;
             if (rx2 > max_x) max_x = rx2;
             if (ry2 > max_y) max_y = ry2;
         }
         const auto fm     = face->Metrics();
         const auto pixels = face->AtlasPixels();
-        (void)tex.UploadFontAtlasRegion(face->AtlasUrl(),
-                                        pixels.data(),
-                                        fm.atlas_w,
-                                        min_x,
-                                        min_y,
-                                        max_x - min_x,
-                                        max_y - min_y);
+        (void)pImpl->m_rendering_resources.resources.UploadFontAtlasRegion(face->AtlasUrl(),
+                                                                           pixels.data(),
+                                                                           fm.atlas_w,
+                                                                           min_x,
+                                                                           min_y,
+                                                                           max_x - min_x,
+                                                                           max_y - min_y);
         // Clear regardless: if VkImage didn't exist yet, the pixels are
         // already in the CPU buffer that CreateTex aliases on its first
         // call. Re-uploading would just duplicate work.
@@ -283,9 +273,9 @@ void VulkanRender::pumpFontAtlases(Scene& scene) {
     }
 }
 
-void VulkanRender::driverUuid(uint8_t out[16]) const {
+void VulkanRender::driverUuid(u8 out[16]) const {
     std::memset(out, 0, 16);
-    if (! pImpl->m_inited || ! pImpl->m_device) return;
+    if (! pImpl->m_inited) return;
     VkPhysicalDeviceIDPropertiesKHR id {};
     id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES_KHR;
     VkPhysicalDeviceProperties2KHR props {};
@@ -346,7 +336,7 @@ std::vector<PreparedPassDiagnostic> VulkanRender::preparedPassDiagnostics() cons
     return pImpl->preparedPassDiagnostics();
 }
 void VulkanRender::evictUnusedMeshes() {
-    if (pImpl->m_device) pImpl->m_rendering_resources.resource_registries.Meshes().evictUnused();
+    if (pImpl->m_inited) pImpl->m_rendering_resources.resources.EvictUnusedBuffers();
 };
 void VulkanRender::UpdateCameraFillMode(Scene& scene, owe::FillMode fill) {
     pImpl->UpdateCameraFillMode(scene, fill);
@@ -429,44 +419,38 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
     }
 
     {
-        m_device = std::make_unique<Device>();
         if (! Device::Create(m_instance, device_exts, extent, *m_device)) {
             rstd_error("init vulkan device failed");
             return false;
         }
-        if (! m_rendering_resources.resource_registries.Initialize(*m_device)) {
+        if (! m_rendering_resources.resources.Initialize(*m_device)) {
             rstd_error("resource registry init failed");
             return false;
         }
-        m_rendering_resources.resource_registries.Textures().SetVideoDecodeOptions(
-            TextureCache::VideoDecodeOptions {
-                .hwdec       = info.video_hwdec,
-                .render_node = info.video_render_node,
-            });
+        m_rendering_resources.resources.SetVideoDecodeOptions(TextureCache::VideoDecodeOptions {
+            .hwdec       = info.video_hwdec,
+            .render_node = info.video_render_node,
+        });
     }
 
     {
         // Map requested integer to a bit; clamp down to highest supported bit
         // not exceeding the request, given device's framebufferColorSampleCounts.
-        const uint32_t           requested = info.msaa_samples == 0 ? 1u : info.msaa_samples;
+        const u32                requested = info.msaa_samples == 0 ? 1u : info.msaa_samples;
         const VkSampleCountFlags supported = m_device->limits().framebufferColorSampleCounts;
         VkSampleCountFlagBits    chosen    = VK_SAMPLE_COUNT_1_BIT;
-        constexpr std::array<VkSampleCountFlagBits, 6> ladder { {
-            VK_SAMPLE_COUNT_64_BIT,
-            VK_SAMPLE_COUNT_32_BIT,
-            VK_SAMPLE_COUNT_16_BIT,
-            VK_SAMPLE_COUNT_8_BIT,
-            VK_SAMPLE_COUNT_4_BIT,
-            VK_SAMPLE_COUNT_2_BIT,
-        } };
+        constexpr rstd::array<VkSampleCountFlagBits, 6> ladder {
+            VK_SAMPLE_COUNT_64_BIT, VK_SAMPLE_COUNT_32_BIT, VK_SAMPLE_COUNT_16_BIT,
+            VK_SAMPLE_COUNT_8_BIT,  VK_SAMPLE_COUNT_4_BIT,  VK_SAMPLE_COUNT_2_BIT,
+        };
         for (auto bit : ladder) {
-            if ((uint32_t)bit <= requested && (supported & bit)) {
+            if (static_cast<u32>(bit) <= requested && (supported & bit)) {
                 chosen = bit;
                 break;
             }
         }
         m_msaa_samples = chosen;
-        rstd_info("msaa requested={} actual={}", requested, (uint32_t)m_msaa_samples);
+        rstd_info("msaa requested={} actual={}", requested, static_cast<u32>(m_msaa_samples));
     }
 
     if (info.offscreen) {
@@ -484,9 +468,8 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
                 return false;
             }
         } else {
-            m_ex_swapchain = CreateLocalExSwapchain(
+            m_ex_swapchain = m_rendering_resources.resources.CreateLocalSwapchain(
                 *m_device,
-                m_rendering_resources.resource_registries.Textures(),
                 extent.width,
                 extent.height,
                 (info.offscreen_tiling == TexTiling::OPTIMAL ? VK_IMAGE_TILING_OPTIMAL
@@ -503,21 +486,12 @@ bool VulkanRender::Impl::init(RenderInitInfo info) {
 }
 
 bool VulkanRender::Impl::initRes() {
-    m_prepass = std::make_unique<PrePass>(PrePass::Desc {});
-    m_finpass = std::make_unique<FinPass>(FinPass::Desc {});
-
-    m_dyn_buf = std::make_unique<StagingBuffer>(*m_device,
-                                                2 * 1024 * 1024,
-                                                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                                                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                                                    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    if (! m_dyn_buf->allocate()) return false;
     {
         auto& pool = m_device->cmd_pool();
         VVK_CHECK_BOOL_RE(pool.Allocate(vk_command_num, VK_COMMAND_BUFFER_LEVEL_PRIMARY, m_cmds));
         m_upload_cmds.clear();
         m_upload_cmds.reserve(vk_upload_command_num);
-        for (uint32_t i = 0; i < vk_upload_command_num; ++i) {
+        for (u32 i = 0; i < vk_upload_command_num; ++i) {
             m_upload_cmds.emplace_back(m_cmds[i], m_device->handle().Dispatch());
         }
         m_upload_cmd_values.assign(vk_upload_command_num, 0);
@@ -532,15 +506,14 @@ bool VulkanRender::Impl::initRes() {
 
 void VulkanRender::Impl::destroy() {
     if (! m_inited) return;
-    if (m_device && m_device->handle()) {
+    if (m_device->handle()) {
         VVK_CHECK(m_device->handle().WaitIdle());
 
         // res
-        m_program.destroyPasses(*m_device, m_rendering_resources);
+        m_program.destroyPasses(*m_device);
         ReleaseCompletedRetiredResources(*m_device, m_rendering_resources);
         m_program.clear();
-        m_dyn_buf->destroy();
-        m_rendering_resources.resource_registries.Reset();
+        m_rendering_resources.resources.Reset();
 
         m_device->Destroy();
     }
@@ -606,8 +579,6 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
         VVK_CHECK_BOOL_RE(m_device->handle().CreateSemaphore(ci, rr.sem_export));
     }
 
-    rr.dyn_buf =
-        rstd::Some(rstd::mut_ref<StagingBuffer>::from_raw_parts(rstd::addressof(*m_dyn_buf)));
     rr.shader_reflection_cache = rstd::Some(rstd::mut_ref<ShaderReflectionCache>::from_raw_parts(
         rstd::addressof(m_shader_reflection_cache)));
     return true;
@@ -615,31 +586,43 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
 
 void VulkanRender::Impl::DestroyRenderingResource(RenderingResources&) {}
 
-std::optional<std::size_t> VulkanRender::Impl::acquireUploadCommandSlot(RenderingResources& rr) {
-    if (m_upload_cmds.empty()) return std::nullopt;
-    const std::size_t slot = m_next_upload_cmd;
+rstd::Option<rstd::usize> VulkanRender::Impl::acquireUploadCommandSlot(RenderingResources& rr) {
+    if (m_upload_cmds.empty()) return rstd::None();
+    const rstd::usize slot = m_next_upload_cmd;
     m_next_upload_cmd      = (m_next_upload_cmd + 1) % m_upload_cmds.size();
 
-    const uint64_t wait_value = m_upload_cmd_values[slot];
+    const rstd::u64 wait_value = m_upload_cmd_values[slot];
     if (wait_value != 0) {
-        uint64_t counter = 0;
-        VVK_CHECK_ACT(return std::nullopt, rr.sem_upload.GetCounter(&counter));
+        rstd::u64 counter = 0;
+        VVK_CHECK_ACT(return rstd::None(), rr.sem_upload.GetCounter(&counter));
         if (counter < wait_value) {
-            VVK_CHECK_ACT(return std::nullopt, rr.sem_upload.Wait(wait_value, vk_wait_time));
+            VVK_CHECK_ACT(return rstd::None(), rr.sem_upload.Wait(wait_value, vk_wait_time));
         }
-        rr.resource_registries.Uploads().CompleteThrough(wait_value);
+        rr.resources.CompleteUploadsThrough(wait_value);
         m_upload_cmd_values[slot] = 0;
     }
-    return slot;
+    return rstd::Some<rstd::usize>(slot);
 }
 
 void VulkanRender::Impl::commitPreparedUploads() {
     auto slot = acquireUploadCommandSlot(m_rendering_resources);
-    if (! slot.has_value()) return;
+    if (slot.is_none()) return;
     auto signal_value =
         m_program.commitUploads(*m_device, m_rendering_resources, m_upload_cmds[*slot]);
     if (signal_value == 0) return;
     m_upload_cmd_values[*slot] = signal_value;
+}
+
+bool VulkanRender::Impl::waitForPreparedUploads(RenderingResources& rr) {
+    auto pending = rr.resources.PendingUpload();
+    if (pending.is_none()) return true;
+    rstd::u64 counter = 0;
+    VVK_CHECK_ACT(return false, rr.sem_upload.GetCounter(&counter));
+    if (counter < pending->value) {
+        VVK_CHECK_ACT(return false, rr.sem_upload.Wait(pending->value, vk_wait_time));
+    }
+    rr.resources.CompleteUploadsThrough(pending->value);
+    return true;
 }
 
 void VulkanRender::Impl::drawFrame(Scene&) {
@@ -655,11 +638,11 @@ void VulkanRender::Impl::drawFrame(Scene&) {
 }
 
 void VulkanRender::Impl::drawFrameSwapchain() {
-    static size_t resource_index = 0;
+    static usize resource_index = 0;
 
     RenderingResources& rr = m_rendering_resources;
     resource_index         = (resource_index + 1) % 3;
-    uint32_t image_index   = 0;
+    u32 image_index        = 0;
     {
         VVK_CHECK_VOID_RE(m_device->handle().AcquireNextImageKHR(*m_device->swapchain().handle(),
                                                                  vk_wait_time,
@@ -667,8 +650,8 @@ void VulkanRender::Impl::drawFrameSwapchain() {
                                                                  {},
                                                                  &image_index));
     }
-    const auto&    image          = m_device->swapchain().images()[image_index];
-    const uint64_t acquire_serial = m_next_surface_acquire_serial++;
+    const auto& image          = m_device->swapchain().images()[image_index];
+    const u64   acquire_serial = m_next_surface_acquire_serial++;
     if (acquire_serial == 0) {
         rstd_error("window frame surface acquire serial overflow");
         return;
@@ -688,20 +671,22 @@ void VulkanRender::Impl::drawFrameSwapchain() {
         .final_queue_family   = m_device->present_queue().family_index,
         .discard_content      = true,
     };
+    auto external_preparer =
+        rstd::dyn<resource_registry::ExternalResourcePreparer>::from_ref(rr.resources);
     if (! m_finpass->setFrameSurface(std::move(frame_surface),
-                                     rr.resource_registries.External(),
+                                     external_preparer.as_mut_ref(),
                                      m_device->capabilities(),
                                      m_device->graphics_queue().family_index)) {
         rstd_error("window frame surface lease rejected");
         return;
     }
+    if (! waitForPreparedUploads(rr)) return;
 
     (void)rr.command.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_dyn_buf->recordUpload(rr.command);
     m_program.execute(rr);
     (void)rr.command.End();
 
@@ -710,21 +695,21 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     // Swapchain image is only written via FinPass blit/copy (TRANSFER).
     // Waiting at COLOR_ATTACHMENT_OUTPUT lets the layout transition + transfer
     // race the presentation engine's read → sync-validation WRITE_AFTER_READ.
-    auto                       pending_upload = rr.resource_registries.Uploads().Pending();
-    const bool                 wait_upload    = pending_upload.is_some();
-    std::array<VkSemaphore, 2> wait_semaphores {
+    auto                        pending_upload = rr.resources.PendingUpload();
+    const bool                  wait_upload    = pending_upload.is_some();
+    rstd::array<VkSemaphore, 2> wait_semaphores {
         *rr.sem_swap_wait_image,
         *rr.sem_upload,
     };
-    std::array<VkPipelineStageFlags, 2> wait_stages {
+    rstd::array<VkPipelineStageFlags, 2> wait_stages {
         VK_PIPELINE_STAGE_TRANSFER_BIT,
         vk_upload_wait_stages,
     };
-    std::array<uint64_t, 2> wait_values {
-        0,
+    rstd::array<u64, 2> wait_values {
+        u64 { 0 },
         wait_upload ? pending_upload->value : 0,
     };
-    std::array<uint64_t, 1>       signal_values { 0 };
+    rstd::array<u64, 1>           signal_values { u64 { 0 } };
     VkTimelineSemaphoreSubmitInfo timeline_info {
         .sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
         .pNext                     = nullptr,
@@ -746,8 +731,7 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     };
 
     VVK_CHECK_VOID_RE(m_device->present_queue().handle.Submit(sub_info, *rr.fence_frame));
-    auto submission_completion = rr.resource_registries.Submissions().Begin(
-        rr.prepared_resources, rr.resource_registries.DescriptorAllocations());
+    auto submission_completion = rr.resources.BeginSubmission();
     if (! submission_completion.Valid()) {
         rstd_error("track frame submission failed");
     }
@@ -764,13 +748,11 @@ void VulkanRender::Impl::drawFrameSwapchain() {
 
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
     if (submission_completion.Valid() &&
-        rr.resource_registries.Submissions()
-            .Complete(submission_completion, rr.resource_registries.DescriptorAllocations())
-            .is_some()) {
+        rr.resources.CompleteSubmission(submission_completion).is_some()) {
         ReleaseCompletedRetiredResources(*m_device, rr);
     }
     if (pending_upload.is_some()) {
-        rr.resource_registries.Uploads().CompleteThrough(pending_upload->value);
+        rr.resources.CompleteUploadsThrough(pending_upload->value);
     }
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 }
@@ -802,37 +784,38 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         return;
     }
 
+    auto external_preparer =
+        rstd::dyn<resource_registry::ExternalResourcePreparer>::from_ref(rr.resources);
     if (! m_finpass->setFrameSurface(frame_surface_acquire.lease,
-                                     rr.resource_registries.External(),
+                                     external_preparer.as_mut_ref(),
                                      m_device->capabilities(),
                                      m_device->graphics_queue().family_index)) {
         rstd_error("offscreen frame surface lease rejected");
         return;
     }
+    if (! waitForPreparedUploads(rr)) return;
 
     (void)rr.command.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_dyn_buf->recordUpload(rr.command);
-
     m_program.execute(rr);
 
     (void)rr.command.End();
 
-    auto                       pending_upload = rr.resource_registries.Uploads().Pending();
-    const bool                 wait_upload    = pending_upload.is_some();
-    std::array<VkSemaphore, 1> wait_semaphores {
+    auto                        pending_upload = rr.resources.PendingUpload();
+    const bool                  wait_upload    = pending_upload.is_some();
+    rstd::array<VkSemaphore, 1> wait_semaphores {
         *rr.sem_upload,
     };
-    std::array<VkPipelineStageFlags, 1> wait_stages {
+    rstd::array<VkPipelineStageFlags, 1> wait_stages {
         vk_upload_wait_stages,
     };
-    std::array<uint64_t, 1> wait_values {
+    rstd::array<u64, 1> wait_values {
         wait_upload ? pending_upload->value : 0,
     };
-    std::array<uint64_t, 1>       signal_values { 0 };
+    rstd::array<u64, 1>           signal_values { u64 { 0 } };
     VkTimelineSemaphoreSubmitInfo timeline_info {
         .sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
         .pNext                     = nullptr,
@@ -853,21 +836,18 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         .pSignalSemaphores    = rr.sem_export.address(),
     };
     VVK_CHECK_VOID_RE(m_device->graphics_queue().handle.Submit(sub_info, *rr.fence_frame));
-    auto submission_completion = rr.resource_registries.Submissions().Begin(
-        rr.prepared_resources, rr.resource_registries.DescriptorAllocations());
+    auto submission_completion = rr.resources.BeginSubmission();
     if (! submission_completion.Valid()) {
         rstd_error("track offscreen submission failed");
     }
 
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
     if (submission_completion.Valid() &&
-        rr.resource_registries.Submissions()
-            .Complete(submission_completion, rr.resource_registries.DescriptorAllocations())
-            .is_some()) {
+        rr.resources.CompleteSubmission(submission_completion).is_some()) {
         ReleaseCompletedRetiredResources(*m_device, rr);
     }
     if (pending_upload.is_some()) {
-        rr.resource_registries.Uploads().CompleteThrough(pending_upload->value);
+        rr.resources.CompleteUploadsThrough(pending_upload->value);
     }
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 
@@ -890,8 +870,8 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         };
         VkResult vr = m_device->handle().GetSemaphoreFdKHR(gi, &sync_fd);
         if (vr != VK_SUCCESS) {
-            static std::atomic<uint64_t> n_failed { 0 };
-            uint64_t                     k = n_failed.fetch_add(1, std::memory_order_relaxed);
+            static std::atomic<u64> n_failed { 0 };
+            u64                     k = n_failed.fetch_add(1, std::memory_order_relaxed);
             if (k == 0 || (k & (k - 1)) == 0) { // 1st, 2nd, 4th, 8th...
                 rstd_error("VulkanRender: vkGetSemaphoreFdKHR failed (vr={}, count={})",
                            (int)vr,
@@ -902,8 +882,8 @@ void VulkanRender::Impl::drawFrameOffscreen() {
             // The driver returned VK_SUCCESS with fd=-1 — spec says this
             // means "the semaphore was unsignaled". Should not happen
             // because we just waited the fence; flag loudly.
-            static std::atomic<uint64_t> n_unsig { 0 };
-            uint64_t                     k = n_unsig.fetch_add(1, std::memory_order_relaxed);
+            static std::atomic<u64> n_unsig { 0 };
+            u64                     k = n_unsig.fetch_add(1, std::memory_order_relaxed);
             if (k == 0 || (k & (k - 1)) == 0) {
                 rstd_error("VulkanRender: GetSemaphoreFdKHR returned fd=-1 "
                            "(semaphore not signaled? count={})",
@@ -921,7 +901,7 @@ void VulkanRender::Impl::drawFrameOffscreen() {
 }
 
 bool VulkanRender::Impl::onSwapchainReady(unsigned width, unsigned height) {
-    if (! m_inited || ! m_device) return false;
+    if (! m_inited) return false;
     auto& cur            = m_device->out_extent();
     bool  extent_changed = (width != cur.width) || (height != cur.height);
     if (! extent_changed) {
@@ -929,10 +909,7 @@ bool VulkanRender::Impl::onSwapchainReady(unsigned width, unsigned height) {
         // are handled by drawFrameOffscreen's head check.
         return false;
     }
-    // Drain GPU work for the previous extent's resources before tearing
-    // down the texture cache + render passes inside compileRenderGraph
-    // (which the caller will run next).
-    VVK_CHECK(m_device->handle().WaitIdle());
+    if (! waitForPreparedUploads(m_rendering_resources)) return false;
     m_device->set_out_extent(VkExtent2D { width, height });
     return true;
 }
@@ -991,19 +968,16 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode f
 }
 
 void VulkanRender::Impl::clearLastRenderGraph(RenderGraphResourceRetention retention) {
-    m_program.destroyPasses(*m_device, m_rendering_resources);
+    m_program.destroyPasses(*m_device);
     ReleaseCompletedRetiredResources(*m_device, m_rendering_resources);
     m_program.clear();
     if (retention == RenderGraphResourceRetention::ReleaseSceneTextures) {
-        m_rendering_resources.resource_registries.Textures().Clear();
+        m_rendering_resources.resources.ClearTextures();
         m_shader_reflection_cache.Clear();
     } else {
-        m_rendering_resources.resource_registries.Textures().ClearTransientGraphResources();
+        m_rendering_resources.resources.ClearTransientTextures();
     }
-    m_rendering_resources.resource_registries.Meshes().onRenderGraphCleared();
-
-    m_dyn_buf->destroy();
-    m_dyn_buf->allocate();
+    m_rendering_resources.resources.EvictUnusedBuffers();
 }
 
 void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
@@ -1022,7 +996,7 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
     m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
     m_program.finalizeFramePassRequests(scene);
     m_program.finalizeResourceRequests(scene);
-    m_program.prepare(scene, *m_device, m_rendering_resources, render_scene);
+    if (! m_program.prepare(scene, *m_device, m_rendering_resources, render_scene)) return;
     m_program.rebuildScopes();
 
     commitPreparedUploads();
@@ -1040,7 +1014,7 @@ void VulkanRender::Impl::refreshPreparedResources(Scene&                     sce
     m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
     m_program.finalizeFramePassRequests(scene);
     m_program.finalizeResourceRequests(scene);
-    m_program.prepare(scene, *m_device, m_rendering_resources, render_scene);
+    if (! m_program.prepare(scene, *m_device, m_rendering_resources, render_scene)) return;
     m_program.rebuildScopes();
 
     commitPreparedUploads();
@@ -1070,7 +1044,7 @@ void VulkanRender::Impl::refreshPreparedMaterial(Scene&                     scen
 bool VulkanRender::Impl::refreshPreparedMaterialTextures(Scene&                     scene,
                                                          const RenderSceneSnapshot& render_scene,
                                                          owe::SceneMaterialId       material) {
-    std::array materials { material };
+    rstd::array<owe::SceneMaterialId, 1> materials { material };
     return refreshPreparedMaterialTextures(scene, render_scene, std::span(materials));
 }
 

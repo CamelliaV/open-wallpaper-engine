@@ -3,7 +3,7 @@ import rstd;
 import wescene.resource;
 import wescene.vulkan;
 
-import :state;
+import :barrier;
 
 export namespace owe::resource_registry
 {
@@ -18,8 +18,7 @@ struct PreparedExternalFrame {
 
 class ExternalResourceBridge {
 public:
-    auto Prepare(const vulkan::DeviceCapabilities& capabilities,
-                 const vulkan::ImageParameters& source, FrameSurfaceLease lease,
+    auto Prepare(const vulkan::DeviceCapabilities& capabilities, FrameSurfaceLease lease,
                  u32 graphics_queue_family)
         -> Result<PreparedExternalFrame, resource::ResourceError> {
         if (! lease.valid()) {
@@ -52,23 +51,6 @@ public:
             .layerCount     = 1,
         };
         PreparedExternalFrame prepared { .lease = rstd::move(lease) };
-        prepared.before_copy.Add(PreparedImageBarrier {
-            .src_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            .dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .barrier =
-                VkImageMemoryBarrier {
-                    .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                    .srcAccessMask       = VK_ACCESS_SHADER_READ_BIT,
-                    .dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT,
-                    .oldLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    .newLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .image               = source.handle,
-                    .subresourceRange    = range,
-                },
-        });
-
         const bool import_queue = prepared.lease.initial_queue_family != graphics_queue_family;
         prepared.before_copy.Add(PreparedImageBarrier {
             .src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -87,23 +69,6 @@ public:
                         import_queue ? graphics_queue_family : VK_QUEUE_FAMILY_IGNORED,
                     .image            = prepared.lease.image.handle,
                     .subresourceRange = range,
-                },
-        });
-
-        prepared.after_copy.Add(PreparedImageBarrier {
-            .src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .dst_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            .barrier =
-                VkImageMemoryBarrier {
-                    .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                    .srcAccessMask       = VK_ACCESS_TRANSFER_READ_BIT,
-                    .dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
-                    .oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    .newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .image               = source.handle,
-                    .subresourceRange    = range,
                 },
         });
 

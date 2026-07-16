@@ -10,7 +10,8 @@ export namespace owe::resource_registry
 using namespace rstd::prelude;
 
 struct UploadLease {
-    resource::ReadyToken ready;
+    resource::ReadyToken                ready;
+    rstd::vec::Vec<PreparedBufferLease> buffers;
 };
 
 class UploadScheduler {
@@ -21,9 +22,16 @@ public:
         return resource::ReadyToken { .value = m_next_value };
     }
 
-    bool MarkSubmitted(resource::ReadyToken ready) {
+    bool MarkSubmitted(resource::ReadyToken ready, const PreparedResourceTable& resources) {
         if (! ready.Valid() || ready.value > m_next_value) return false;
-        if (m_in_flight.insert(ready.value, UploadLease { .ready = ready }).is_some()) {
+        auto leases = resources.Leases();
+        if (m_in_flight
+                .insert(ready.value,
+                        UploadLease {
+                            .ready   = ready,
+                            .buffers = rstd::move(leases.buffers),
+                        })
+                .is_some()) {
             return false;
         }
         if (m_pending.is_none() || m_pending->value < ready.value) m_pending = Some(ready);
@@ -56,75 +64,52 @@ private:
     rstd::collections::HashMap<u64, UploadLease> m_in_flight;
 };
 
-class DescriptorArena {
-public:
-    bool Pin(resource::CompletionToken               completion,
-             rstd::vec::Vec<PreparedDescriptorLease> bindings) {
-        if (! completion.Valid()) return false;
-        return m_in_flight.insert(completion.value, rstd::move(bindings)).is_none();
-    }
-
-    bool Release(resource::CompletionToken completion) {
-        return m_in_flight.remove(completion.value).is_some();
-    }
-
-    void Reset() { m_in_flight.clear(); }
-
-    auto InFlightSubmissions() const noexcept -> usize { return m_in_flight.len(); }
-
-    auto InFlightBindings() const -> usize {
-        usize count       = 0;
-        auto  submissions = m_in_flight.values();
-        for (auto bindings = submissions.next(); bindings.is_some();
-             bindings      = submissions.next()) {
-            count += (**bindings).len();
-        }
-        return count;
-    }
-
-private:
-    rstd::collections::HashMap<u64, rstd::vec::Vec<PreparedDescriptorLease>> m_in_flight;
-};
-
 struct SubmissionLease {
-    resource::CompletionToken            completion;
-    u64                                  program_generation { 0 };
-    rstd::vec::Vec<PreparedTextureLease> textures;
+    resource::CompletionToken                completion;
+    u64                                      program_generation { 0 };
+    rstd::vec::Vec<PreparedTextureLease>     textures;
+    rstd::vec::Vec<PreparedBufferLease>      buffers;
+    rstd::vec::Vec<PreparedShaderLease>      shaders;
+    rstd::vec::Vec<PreparedPipelineLease>    pipelines;
+    rstd::vec::Vec<PreparedRenderPassLease>  render_passes;
+    rstd::vec::Vec<PreparedFramebufferLease> framebuffers;
+    rstd::vec::Vec<PreparedDescriptorLease>  descriptors;
+    rstd::vec::Vec<PreparedExternalLease>    externals;
 };
 
 class SubmissionTracker {
 public:
-    auto Begin(const PreparedResourceTable& resources, DescriptorArena& descriptors)
-        -> resource::CompletionToken {
+    auto Begin(const PreparedResourceTable& resources) -> resource::CompletionToken {
         ++m_next_value;
         if (m_next_value == 0) ++m_next_value;
         resource::CompletionToken completion { .value = m_next_value };
         auto                      leases = resources.Leases();
-        if (! descriptors.Pin(completion, rstd::move(leases.descriptors))) return {};
         if (m_in_flight
                 .insert(completion.value,
                         SubmissionLease {
                             .completion         = completion,
                             .program_generation = resources.Generation(),
                             .textures           = rstd::move(leases.textures),
+                            .buffers            = rstd::move(leases.buffers),
+                            .shaders            = rstd::move(leases.shaders),
+                            .pipelines          = rstd::move(leases.pipelines),
+                            .render_passes      = rstd::move(leases.render_passes),
+                            .framebuffers       = rstd::move(leases.framebuffers),
+                            .descriptors        = rstd::move(leases.descriptors),
+                            .externals          = rstd::move(leases.externals),
                         })
                 .is_some()) {
-            (void)descriptors.Release(completion);
             return {};
         }
         return completion;
     }
 
-    auto Complete(resource::CompletionToken completion, DescriptorArena& descriptors)
-        -> Option<SubmissionLease> {
-        auto lease = m_in_flight.remove(completion.value);
-        if (lease.is_some()) (void)descriptors.Release(completion);
-        return lease;
+    auto Complete(resource::CompletionToken completion) -> Option<SubmissionLease> {
+        return m_in_flight.remove(completion.value);
     }
 
-    void Reset(DescriptorArena& descriptors) {
+    void Reset() {
         m_in_flight.clear();
-        descriptors.Reset();
         m_next_value = 0;
     }
 

@@ -7,11 +7,12 @@ import wescene.vulkan;
 import :descriptor;
 import :resource_key;
 
+using namespace rstd::prelude;
+
 export namespace owe::resource_registry
 {
 
 using namespace owe::vulkan;
-using namespace rstd::prelude;
 
 struct PipelineResourceEntry {
     PipelineParameters                               pipeline;
@@ -19,42 +20,48 @@ struct PipelineResourceEntry {
 };
 
 struct PipelineResourceResult {
-    std::shared_ptr<PipelineResourceEntry> pipeline;
+    rstd::sync::Arc<PipelineResourceEntry> pipeline;
     resource::PipelineHandle               handle;
     resource::RenderPassHandle             render_pass;
+    rstd::sync::Arc<vvk::RenderPass>       render_pass_physical;
     PipelineCacheKey                       cache_key;
     RenderPassCacheKey                     render_pass_key;
     bool                                   cache_hit { false };
-    uint64_t                               cache_observed_count { 0 };
+    u64                                    cache_observed_count { 0 };
     bool                                   render_pass_cache_hit { false };
-    uint64_t                               render_pass_cache_observed_count { 0 };
+    u64                                    render_pass_cache_observed_count { 0 };
 };
 
 struct FramebufferResourceResult {
-    std::shared_ptr<vvk::Framebuffer> framebuffer;
+    rstd::sync::Arc<vvk::Framebuffer> framebuffer;
     resource::FramebufferHandle       handle;
     FramebufferCacheKey               cache_key;
     bool                              cache_hit { false };
-    uint64_t                          cache_observed_count { 0 };
+    u64                               cache_observed_count { 0 };
 };
 
 class PipelineCacheDiagnostics {
 public:
     PipelineCacheProbe Record(PipelineCacheKey key) {
-        auto& count = m_seen[key];
-        bool  hit   = count > 0;
-        ++count;
+        auto count = m_seen.get_mut(key);
+        bool hit   = count.is_some();
+        u64  observed_count { 1 };
+        if (count.is_some()) {
+            observed_count = ++**count;
+        } else {
+            (void)m_seen.insert(key, observed_count);
+        }
         return PipelineCacheProbe {
             .key            = std::move(key),
             .hit            = hit,
-            .observed_count = count,
+            .observed_count = observed_count,
         };
     }
 
     void Reset() { m_seen.clear(); }
 
 private:
-    std::unordered_map<PipelineCacheKey, uint64_t, CanonicalCacheKeyHash, PipelineCacheKeyEqual>
+    rstd::collections::HashMap<PipelineCacheKey, u64, CanonicalCacheKeyHash, PipelineCacheKeyEqual>
         m_seen;
 };
 
@@ -63,48 +70,53 @@ public:
     struct Probe {
         FramebufferCacheKey key;
         bool                hit { false };
-        uint64_t            observed_count { 0 };
+        u64                 observed_count { 0 };
     };
 
     Probe Record(FramebufferCacheKey key) {
-        auto& count = m_seen[key];
-        bool  hit   = count > 0;
-        ++count;
+        auto count = m_seen.get_mut(key);
+        bool hit   = count.is_some();
+        u64  observed_count { 1 };
+        if (count.is_some()) {
+            observed_count = ++**count;
+        } else {
+            (void)m_seen.insert(key, observed_count);
+        }
         return Probe {
             .key            = std::move(key),
             .hit            = hit,
-            .observed_count = count,
+            .observed_count = observed_count,
         };
     }
 
     void Reset() { m_seen.clear(); }
 
 private:
-    std::unordered_map<FramebufferCacheKey, uint64_t, CanonicalCacheKeyHash,
-                       FramebufferCacheKeyEqual>
+    rstd::collections::HashMap<FramebufferCacheKey, u64, CanonicalCacheKeyHash,
+                               FramebufferCacheKeyEqual>
         m_seen;
 };
 
 class FramebufferRegistry {
 public:
-    std::optional<FramebufferResourceResult> Ensure(const Device&                     device,
-                                                    const FramebufferResourceRequest& request) {
+    auto Ensure(const Device& device, const FramebufferResourceRequest& request)
+        -> Option<FramebufferResourceResult> {
         if (request.render_pass == VK_NULL_HANDLE || request.attachments.empty()) {
-            return std::nullopt;
+            return None();
         }
 
-        auto  desc = MakeFramebufferResourceDesc(request);
-        auto  key  = MakeFramebufferCacheKey(desc);
-        auto& slot = m_entries[key];
-        if (slot.framebuffer) {
-            ++slot.observed_count;
-            return FramebufferResourceResult {
-                .framebuffer          = slot.framebuffer,
-                .handle               = slot.handle,
+        auto desc = MakeFramebufferResourceDesc(request);
+        auto key  = MakeFramebufferCacheKey(desc);
+        auto slot = m_entries.get_mut(key);
+        if (slot.is_some()) {
+            ++(**slot).observed_count;
+            return Some(FramebufferResourceResult {
+                .framebuffer          = (**slot).framebuffer.clone(),
+                .handle               = (**slot).handle,
                 .cache_key            = key,
                 .cache_hit            = true,
-                .cache_observed_count = slot.observed_count,
-            };
+                .cache_observed_count = (**slot).observed_count,
+            });
         }
 
         std::vector<VkImageView> attachment_views;
@@ -123,31 +135,32 @@ public:
         };
         vvk::Framebuffer framebuffer;
         if (device.handle().CreateFramebuffer(info, framebuffer) != VK_SUCCESS) {
-            return std::nullopt;
+            return None();
         }
-        auto shared      = std::make_shared<vvk::Framebuffer>(std::move(framebuffer));
-        slot.framebuffer = shared;
-        slot.handle      = NextHandle();
-        (void)m_handles.insert(slot.handle, std::weak_ptr<vvk::Framebuffer>(shared));
-        ++slot.observed_count;
-        return FramebufferResourceResult {
-            .framebuffer          = std::move(shared),
-            .handle               = slot.handle,
+        auto shared = rstd::sync::Arc<vvk::Framebuffer>::make(std::move(framebuffer));
+        auto handle = NextHandle();
+        (void)m_handles.insert(handle, shared.downgrade());
+        (void)m_entries.insert(key,
+                               Entry {
+                                   .framebuffer    = shared.clone(),
+                                   .handle         = handle,
+                                   .observed_count = 1,
+                               });
+        return Some(FramebufferResourceResult {
+            .framebuffer          = rstd::move(shared),
+            .handle               = handle,
             .cache_key            = key,
             .cache_hit            = false,
-            .cache_observed_count = slot.observed_count,
-        };
+            .cache_observed_count = 1,
+        });
     }
 
     void PruneExpired() {
-        for (auto it = m_entries.begin(); it != m_entries.end();) {
-            if (! it->second.framebuffer || it->second.framebuffer.use_count() == 1) {
-                (void)m_handles.remove(it->second.handle);
-                it = m_entries.erase(it);
-            } else {
-                ++it;
-            }
-        }
+        m_entries.retain([&](const FramebufferCacheKey&, Entry& entry) {
+            if (entry.framebuffer.strong_count() > 1) return true;
+            (void)m_handles.remove(entry.handle);
+            return false;
+        });
     }
 
     void Reset() {
@@ -159,21 +172,21 @@ public:
     }
 
     auto Resolve(resource::FramebufferHandle handle) const
-        -> std::optional<std::shared_ptr<vvk::Framebuffer>> {
+        -> Option<rstd::sync::Arc<vvk::Framebuffer>> {
         auto entry = m_handles.get(handle);
-        if (entry.is_none()) return std::nullopt;
-        auto resource = (**entry).lock();
-        if (! resource) return std::nullopt;
-        return resource;
+        if (entry.is_none()) return None();
+        auto resource = (**entry).upgrade();
+        if (! resource) return None();
+        return Some(rstd::move(resource));
     }
 
-    std::size_t entryCount() const { return m_entries.size(); }
+    usize entryCount() const { return m_entries.len(); }
 
 private:
     struct Entry {
-        std::shared_ptr<vvk::Framebuffer> framebuffer;
+        rstd::sync::Arc<vvk::Framebuffer> framebuffer;
         resource::FramebufferHandle       handle;
-        uint64_t                          observed_count { 0 };
+        u64                               observed_count { 0 };
     };
 
     auto NextHandle() -> resource::FramebufferHandle {
@@ -181,10 +194,11 @@ private:
     }
 
     using HandleMap =
-        rstd::collections::HashMap<resource::FramebufferHandle, std::weak_ptr<vvk::Framebuffer>,
+        rstd::collections::HashMap<resource::FramebufferHandle, rstd::sync::Weak<vvk::Framebuffer>,
                                    resource::ResourceHandleHasher<resource::FramebufferHandle>>;
 
-    std::unordered_map<FramebufferCacheKey, Entry, CanonicalCacheKeyHash, FramebufferCacheKeyEqual>
+    rstd::collections::HashMap<FramebufferCacheKey, Entry, CanonicalCacheKeyHash,
+                               FramebufferCacheKeyEqual>
               m_entries;
     u64       m_generation { 1 };
     u64       m_next_index { 0 };
@@ -192,8 +206,7 @@ private:
 };
 
 inline bool HasPipelineResources(const PipelineParameters& pipeline) {
-    return static_cast<bool>(pipeline.handle) || static_cast<bool>(pipeline.layout) ||
-           static_cast<bool>(pipeline.pass);
+    return static_cast<bool>(pipeline.handle) || static_cast<bool>(pipeline.layout);
 }
 
 inline bool HasPipelineResources(const PipelineResourceEntry& entry) {
@@ -201,60 +214,61 @@ inline bool HasPipelineResources(const PipelineResourceEntry& entry) {
 }
 
 struct RenderPassResourceResult {
-    std::shared_ptr<vvk::RenderPass> render_pass;
+    rstd::sync::Arc<vvk::RenderPass> render_pass;
     resource::RenderPassHandle       handle;
     RenderPassCacheKey               cache_key;
     bool                             cache_hit { false };
-    uint64_t                         cache_observed_count { 0 };
+    u64                              cache_observed_count { 0 };
 };
 
 class RenderPassRegistry {
 public:
-    std::optional<RenderPassResourceResult> Ensure(const Device&                 device,
-                                                   const RenderPassResourceDesc& desc) {
-        auto  key  = MakeRenderPassCacheKey(desc);
-        auto& slot = m_entries[key];
-        if (slot.render_pass) {
-            ++slot.observed_count;
-            return RenderPassResourceResult {
-                .render_pass          = slot.render_pass,
-                .handle               = slot.handle,
+    auto Ensure(const Device& device, const RenderPassResourceDesc& desc)
+        -> Option<RenderPassResourceResult> {
+        auto key  = MakeRenderPassCacheKey(desc);
+        auto slot = m_entries.get_mut(key);
+        if (slot.is_some()) {
+            ++(**slot).observed_count;
+            return Some(RenderPassResourceResult {
+                .render_pass          = (**slot).render_pass.clone(),
+                .handle               = (**slot).handle,
                 .cache_key            = key,
                 .cache_hit            = true,
-                .cache_observed_count = slot.observed_count,
-            };
+                .cache_observed_count = (**slot).observed_count,
+            });
         }
 
         auto created = CreateRenderPass(device, desc);
-        if (! created.has_value()) return std::nullopt;
-        auto shared      = std::make_shared<vvk::RenderPass>(std::move(*created));
-        slot.render_pass = shared;
-        slot.handle      = NextHandle();
-        (void)m_handles.insert(slot.handle, std::weak_ptr<vvk::RenderPass>(shared));
-        ++slot.observed_count;
-        return RenderPassResourceResult {
-            .render_pass          = std::move(shared),
-            .handle               = slot.handle,
+        if (created.is_none()) return None();
+        auto shared = rstd::sync::Arc<vvk::RenderPass>::make(rstd::move(*created));
+        auto handle = NextHandle();
+        (void)m_handles.insert(handle, shared.downgrade());
+        (void)m_entries.insert(key,
+                               Entry {
+                                   .render_pass    = shared.clone(),
+                                   .handle         = handle,
+                                   .observed_count = 1,
+                               });
+        return Some(RenderPassResourceResult {
+            .render_pass          = rstd::move(shared),
+            .handle               = handle,
             .cache_key            = key,
             .cache_hit            = false,
-            .cache_observed_count = slot.observed_count,
-        };
+            .cache_observed_count = 1,
+        });
     }
 
-    std::optional<RenderPassResourceResult> Ensure(const Device&                  device,
-                                                   const PipelineResourceRequest& request) {
+    auto Ensure(const Device& device, const PipelineResourceRequest& request)
+        -> Option<RenderPassResourceResult> {
         return Ensure(device, MakeRenderPassResourceDesc(request));
     }
 
     void PruneExpired() {
-        for (auto it = m_entries.begin(); it != m_entries.end();) {
-            if (! it->second.render_pass || it->second.render_pass.use_count() == 1) {
-                (void)m_handles.remove(it->second.handle);
-                it = m_entries.erase(it);
-            } else {
-                ++it;
-            }
-        }
+        m_entries.retain([&](const RenderPassCacheKey&, Entry& entry) {
+            if (entry.render_pass.strong_count() > 1) return true;
+            (void)m_handles.remove(entry.handle);
+            return false;
+        });
     }
 
     void Reset() {
@@ -266,21 +280,21 @@ public:
     }
 
     auto Resolve(resource::RenderPassHandle handle) const
-        -> std::optional<std::shared_ptr<vvk::RenderPass>> {
+        -> Option<rstd::sync::Arc<vvk::RenderPass>> {
         auto entry = m_handles.get(handle);
-        if (entry.is_none()) return std::nullopt;
-        auto resource = (**entry).lock();
-        if (! resource) return std::nullopt;
-        return resource;
+        if (entry.is_none()) return None();
+        auto resource = (**entry).upgrade();
+        if (! resource) return None();
+        return Some(rstd::move(resource));
     }
 
-    std::size_t entryCount() const { return m_entries.size(); }
+    usize entryCount() const { return m_entries.len(); }
 
 private:
     struct Entry {
-        std::shared_ptr<vvk::RenderPass> render_pass;
+        rstd::sync::Arc<vvk::RenderPass> render_pass;
         resource::RenderPassHandle       handle;
-        uint64_t                         observed_count { 0 };
+        u64                              observed_count { 0 };
     };
 
     auto NextHandle() -> resource::RenderPassHandle {
@@ -288,12 +302,12 @@ private:
     }
 
     using HandleMap =
-        rstd::collections::HashMap<resource::RenderPassHandle, std::weak_ptr<vvk::RenderPass>,
+        rstd::collections::HashMap<resource::RenderPassHandle, rstd::sync::Weak<vvk::RenderPass>,
                                    resource::ResourceHandleHasher<resource::RenderPassHandle>>;
 
-    static std::optional<vvk::RenderPass> CreateRenderPass(const Device&                 device,
-                                                           const RenderPassResourceDesc& desc) {
-        const bool              has_resolve = desc.samples != VK_SAMPLE_COUNT_1_BIT;
+    static auto CreateRenderPass(const Device& device, const RenderPassResourceDesc& desc)
+        -> Option<vvk::RenderPass> {
+        const bool              has_resolve = desc.has_resolve_attachment;
         VkAttachmentDescription color {
             .format         = desc.color_format,
             .samples        = desc.samples,
@@ -382,11 +396,12 @@ private:
             .pDependencies   = &dependency,
         };
         vvk::RenderPass pass;
-        if (device.handle().CreateRenderPass(create, pass) != VK_SUCCESS) return std::nullopt;
-        return pass;
+        if (device.handle().CreateRenderPass(create, pass) != VK_SUCCESS) return None();
+        return Some(rstd::move(pass));
     }
 
-    std::unordered_map<RenderPassCacheKey, Entry, CanonicalCacheKeyHash, RenderPassCacheKeyEqual>
+    rstd::collections::HashMap<RenderPassCacheKey, Entry, CanonicalCacheKeyHash,
+                               RenderPassCacheKeyEqual>
               m_entries;
     u64       m_generation { 1 };
     u64       m_next_index { 0 };
@@ -395,41 +410,42 @@ private:
 
 class PipelineRegistry {
 public:
-    std::optional<PipelineResourceResult>
-    Ensure(const Device& device, PipelineResourceRequest request,
-           RenderPassRegistry&                          render_pass_cache,
-           resource_registry::DescriptorLayoutRegistry& descriptor_layouts) {
-        auto  desc = MakePipelineResourceDesc(request);
-        auto  key  = MakePipelineCacheKey(desc);
-        auto& slot = m_entries[key];
-        if (slot.pipeline) {
-            ++slot.observed_count;
-            return PipelineResourceResult {
-                .pipeline                         = slot.pipeline,
-                .handle                           = slot.handle,
-                .render_pass                      = slot.render_pass,
+    auto Ensure(const Device& device, PipelineResourceRequest request,
+                RenderPassRegistry&                          render_pass_cache,
+                resource_registry::DescriptorLayoutRegistry& descriptor_layouts)
+        -> Option<PipelineResourceResult> {
+        auto desc = MakePipelineResourceDesc(request);
+        auto key  = MakePipelineCacheKey(desc);
+        auto slot = m_entries.get_mut(key);
+        if (slot.is_some()) {
+            ++(**slot).observed_count;
+            return Some(PipelineResourceResult {
+                .pipeline                         = (**slot).pipeline.clone(),
+                .handle                           = (**slot).handle,
+                .render_pass                      = (**slot).render_pass,
+                .render_pass_physical             = (**slot).render_pass_physical.clone(),
                 .cache_key                        = key,
-                .render_pass_key                  = slot.render_pass_key,
+                .render_pass_key                  = (**slot).render_pass_key,
                 .cache_hit                        = true,
-                .cache_observed_count             = slot.observed_count,
+                .cache_observed_count             = (**slot).observed_count,
                 .render_pass_cache_hit            = true,
-                .render_pass_cache_observed_count = slot.observed_count,
-            };
+                .render_pass_cache_observed_count = (**slot).observed_count,
+            });
         }
 
         auto render_pass = render_pass_cache.Ensure(device, desc.render_pass);
-        if (! render_pass.has_value() || ! render_pass->render_pass) return std::nullopt;
+        if (render_pass.is_none()) return None();
 
-        auto entry = std::make_shared<PipelineResourceEntry>();
+        auto entry = rstd::sync::Arc<PipelineResourceEntry>::make();
         auto vk_descriptor_layouts =
             rstd::vec::Vec<VkDescriptorSetLayout>::with_capacity(desc.descriptor_sets.size());
         entry->descriptor_layouts.reserve(desc.descriptor_sets.size());
         for (const auto& descriptor_set : desc.descriptor_sets) {
             auto layout = descriptor_layouts.Ensure(device, descriptor_set);
-            if (layout.is_err()) return std::nullopt;
+            if (layout.is_err()) return None();
             auto handle   = rstd::move(layout).unwrap_unchecked();
             auto resolved = descriptor_layouts.Resolve(handle);
-            if (resolved.is_none()) return std::nullopt;
+            if (resolved.is_none()) return None();
             entry->descriptor_layouts.push(resource::DescriptorLayoutHandle {
                 .index      = handle.index,
                 .generation = handle.generation,
@@ -457,40 +473,42 @@ public:
             .setDescriptorSetLayouts(std::span<const VkDescriptorSetLayout>(
                 vk_descriptor_layouts.data(), vk_descriptor_layouts.len()));
         for (auto& spv : desc.shader_stages) {
-            pipeline.addStage(std::make_unique<ShaderSpv>(std::move(spv)));
+            pipeline.addStage(Box<ShaderSpv>::make(std::move(spv)));
         }
         if (! pipeline.create(device, **render_pass->render_pass, entry->pipeline)) {
-            return std::nullopt;
+            return None();
         }
-        entry->pipeline.pass = render_pass->render_pass;
-        slot.pipeline        = entry;
-        slot.handle          = NextHandle();
-        (void)m_handles.insert(slot.handle, std::weak_ptr<PipelineResourceEntry>(entry));
-        slot.render_pass_key = render_pass->cache_key;
-        slot.render_pass     = render_pass->handle;
-        ++slot.observed_count;
-        return PipelineResourceResult {
-            .pipeline                         = std::move(entry),
-            .handle                           = slot.handle,
+        auto handle = NextHandle();
+        (void)m_handles.insert(handle, entry.downgrade());
+        (void)m_entries.insert(key,
+                               Entry {
+                                   .pipeline             = entry.clone(),
+                                   .handle               = handle,
+                                   .render_pass          = render_pass->handle,
+                                   .render_pass_physical = render_pass->render_pass.clone(),
+                                   .render_pass_key      = render_pass->cache_key,
+                                   .observed_count       = 1,
+                               });
+        return Some(PipelineResourceResult {
+            .pipeline                         = rstd::move(entry),
+            .handle                           = handle,
             .render_pass                      = render_pass->handle,
+            .render_pass_physical             = render_pass->render_pass.clone(),
             .cache_key                        = key,
             .render_pass_key                  = render_pass->cache_key,
             .cache_hit                        = false,
-            .cache_observed_count             = slot.observed_count,
+            .cache_observed_count             = 1,
             .render_pass_cache_hit            = render_pass->cache_hit,
             .render_pass_cache_observed_count = render_pass->cache_observed_count,
-        };
+        });
     }
 
     void PruneExpired() {
-        for (auto it = m_entries.begin(); it != m_entries.end();) {
-            if (! it->second.pipeline || it->second.pipeline.use_count() == 1) {
-                (void)m_handles.remove(it->second.handle);
-                it = m_entries.erase(it);
-            } else {
-                ++it;
-            }
-        }
+        m_entries.retain([&](const PipelineCacheKey&, Entry& entry) {
+            if (entry.pipeline.strong_count() > 1) return true;
+            (void)m_handles.remove(entry.handle);
+            return false;
+        });
     }
 
     void Reset() {
@@ -502,23 +520,24 @@ public:
     }
 
     auto Resolve(resource::PipelineHandle handle) const
-        -> std::optional<std::shared_ptr<PipelineResourceEntry>> {
+        -> Option<rstd::sync::Arc<PipelineResourceEntry>> {
         auto entry = m_handles.get(handle);
-        if (entry.is_none()) return std::nullopt;
-        auto resource = (**entry).lock();
-        if (! resource) return std::nullopt;
-        return resource;
+        if (entry.is_none()) return None();
+        auto resource = (**entry).upgrade();
+        if (! resource) return None();
+        return Some(rstd::move(resource));
     }
 
-    std::size_t entryCount() const { return m_entries.size(); }
+    usize entryCount() const { return m_entries.len(); }
 
 private:
     struct Entry {
-        std::shared_ptr<PipelineResourceEntry> pipeline;
+        rstd::sync::Arc<PipelineResourceEntry> pipeline;
         resource::PipelineHandle               handle;
         resource::RenderPassHandle             render_pass;
+        rstd::sync::Arc<vvk::RenderPass>       render_pass_physical;
         RenderPassCacheKey                     render_pass_key;
-        uint64_t                               observed_count { 0 };
+        u64                                    observed_count { 0 };
     };
 
     auto NextHandle() -> resource::PipelineHandle {
@@ -526,10 +545,12 @@ private:
     }
 
     using HandleMap =
-        rstd::collections::HashMap<resource::PipelineHandle, std::weak_ptr<PipelineResourceEntry>,
+        rstd::collections::HashMap<resource::PipelineHandle,
+                                   rstd::sync::Weak<PipelineResourceEntry>,
                                    resource::ResourceHandleHasher<resource::PipelineHandle>>;
 
-    std::unordered_map<PipelineCacheKey, Entry, CanonicalCacheKeyHash, PipelineCacheKeyEqual>
+    rstd::collections::HashMap<PipelineCacheKey, Entry, CanonicalCacheKeyHash,
+                               PipelineCacheKeyEqual>
               m_entries;
     u64       m_generation { 1 };
     u64       m_next_index { 0 };
@@ -540,104 +561,55 @@ using PipelineResourceCache    = PipelineRegistry;
 using RenderPassResourceCache  = RenderPassRegistry;
 using FramebufferResourceCache = FramebufferRegistry;
 
-class PipelineRetireQueue {
-public:
-    void Retire(PipelineParameters&& pipeline) {
-        if (! HasPipelineResources(pipeline)) return;
-        m_retired.push_back(std::move(pipeline));
-    }
-
-    void Retire(std::shared_ptr<PipelineResourceEntry> pipeline) {
-        if (! pipeline || ! HasPipelineResources(*pipeline)) return;
-        m_pipeline_entries.push_back(std::move(pipeline));
-    }
-
-    void Retire(vvk::Framebuffer&& framebuffer) {
-        if (! framebuffer) return;
-        m_framebuffers.push_back(std::make_shared<vvk::Framebuffer>(std::move(framebuffer)));
-    }
-
-    void Retire(std::shared_ptr<vvk::Framebuffer> framebuffer) {
-        if (! framebuffer || ! *framebuffer) return;
-        m_framebuffers.push_back(std::move(framebuffer));
-    }
-
-    void ReleaseReady() {
-        m_pipeline_entries.clear();
-        m_retired.clear();
-    }
-
-    void ReleaseFramebuffersReady() { m_framebuffers.clear(); }
-
-    void ReleaseAllReady() {
-        ReleaseFramebuffersReady();
-        ReleaseReady();
-    }
-
-    std::size_t pending() const {
-        return m_pipeline_entries.size() + m_retired.size() + m_framebuffers.size();
-    }
-
-private:
-    std::vector<std::shared_ptr<PipelineResourceEntry>> m_pipeline_entries;
-    std::vector<PipelineParameters>                     m_retired;
-    std::vector<std::shared_ptr<vvk::Framebuffer>>      m_framebuffers;
-};
-
 class FramebufferResourceSystem {
 public:
-    explicit FramebufferResourceSystem(const Device&                device,
-                                       FramebufferResourceCache*    cache       = nullptr,
-                                       FramebufferCacheDiagnostics* diagnostics = nullptr)
-        : m_device(&device), m_cache(cache), m_diagnostics(diagnostics) {}
+    explicit FramebufferResourceSystem(const Device& device, FramebufferResourceCache& cache,
+                                       FramebufferCacheDiagnostics& diagnostics)
+        : m_device(ref<Device>::from_raw_parts(rstd::addressof(device))),
+          m_cache(mut_ref<FramebufferResourceCache>::from_raw_parts(rstd::addressof(cache))),
+          m_diagnostics(
+              mut_ref<FramebufferCacheDiagnostics>::from_raw_parts(rstd::addressof(diagnostics))) {}
 
-    std::optional<FramebufferResourceResult>
-    CreateFramebuffer(const FramebufferResourceRequest& request) const {
+    auto CreateFramebuffer(const FramebufferResourceRequest& request)
+        -> Option<FramebufferResourceResult> {
         if (request.render_pass == VK_NULL_HANDLE || request.attachments.empty()) {
-            return std::nullopt;
+            return None();
         }
-        if (m_diagnostics != nullptr) m_diagnostics->Record(MakeFramebufferCacheKey(request));
-        FramebufferRegistry local_cache;
-        auto&               cache = m_cache != nullptr ? *m_cache : local_cache;
-        return cache.Ensure(*m_device, request);
+        m_diagnostics->Record(MakeFramebufferCacheKey(request));
+        return m_cache->Ensure(*m_device, request);
     }
 
 private:
-    const Device*                m_device { nullptr };
-    FramebufferResourceCache*    m_cache { nullptr };
-    FramebufferCacheDiagnostics* m_diagnostics { nullptr };
+    ref<Device>                          m_device;
+    mut_ref<FramebufferResourceCache>    m_cache;
+    mut_ref<FramebufferCacheDiagnostics> m_diagnostics;
 };
 
 class PipelineResourceSystem {
 public:
     explicit PipelineResourceSystem(const Device&                                device,
                                     resource_registry::DescriptorLayoutRegistry& descriptor_layouts,
-                                    PipelineResourceCache*   pipeline_cache    = nullptr,
-                                    RenderPassResourceCache* render_pass_cache = nullptr)
-        : m_device(&device),
+                                    PipelineResourceCache&                       pipeline_cache,
+                                    RenderPassResourceCache&                     render_pass_cache)
+        : m_device(ref<Device>::from_raw_parts(rstd::addressof(device))),
           m_descriptor_layouts(
               rstd::mut_ref<resource_registry::DescriptorLayoutRegistry>::from_raw_parts(
                   rstd::addressof(descriptor_layouts))),
-          m_pipeline_cache(pipeline_cache),
-          m_render_pass_cache(render_pass_cache) {}
+          m_pipeline_cache(
+              mut_ref<PipelineResourceCache>::from_raw_parts(rstd::addressof(pipeline_cache))),
+          m_render_pass_cache(mut_ref<RenderPassResourceCache>::from_raw_parts(
+              rstd::addressof(render_pass_cache))) {}
 
-    std::optional<PipelineResourceResult>
-    CreateGraphicsPipeline(PipelineResourceRequest request) const {
-        PipelineRegistry   local_pipeline_cache;
-        RenderPassRegistry local_render_pass_cache;
-        auto&              pipeline_cache =
-            m_pipeline_cache != nullptr ? *m_pipeline_cache : local_pipeline_cache;
-        auto& render_pass_cache =
-            m_render_pass_cache != nullptr ? *m_render_pass_cache : local_render_pass_cache;
-        return pipeline_cache.Ensure(
-            *m_device, std::move(request), render_pass_cache, *m_descriptor_layouts.as_mut_ptr());
+    auto CreateGraphicsPipeline(PipelineResourceRequest request) -> Option<PipelineResourceResult> {
+        return m_pipeline_cache->Ensure(
+            *m_device, std::move(request), *m_render_pass_cache, *m_descriptor_layouts);
     }
 
 private:
-    const Device*                                              m_device { nullptr };
+    ref<Device>                                                m_device;
     rstd::mut_ref<resource_registry::DescriptorLayoutRegistry> m_descriptor_layouts;
-    PipelineResourceCache*                                     m_pipeline_cache { nullptr };
-    RenderPassResourceCache*                                   m_render_pass_cache { nullptr };
+    mut_ref<PipelineResourceCache>                             m_pipeline_cache;
+    mut_ref<RenderPassResourceCache>                           m_render_pass_cache;
 };
 
 } // namespace owe::resource_registry

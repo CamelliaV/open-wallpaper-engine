@@ -15,9 +15,11 @@ target_sources(owe-resource-registry
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          Registry.cppm
          Owner.cppm
+         System.cppm
          Descriptor.cppm
          Prepared.cppm
          Lifetime.cppm
+         Barrier.cppm
          State.cppm
          Policy.cppm
          External.cppm

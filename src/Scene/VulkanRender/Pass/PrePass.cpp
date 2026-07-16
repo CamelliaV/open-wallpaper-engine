@@ -7,63 +7,6 @@ import wescene.scene;
 
 using namespace owe::vulkan;
 
-namespace
-{
-std::optional<vvk::RenderPass> CreateMsaaClearPass(const vvk::Device&    device,
-                                                   VkSampleCountFlagBits samples) {
-    VkAttachmentDescription color {
-        .format         = VK_FORMAT_R8G8B8A8_UNORM,
-        .samples        = samples,
-        .loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp        = VK_ATTACHMENT_STORE_OP_STORE,
-        .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        .initialLayout  = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .finalLayout    = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
-    VkAttachmentReference color_ref {
-        .attachment = 0,
-        .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    };
-    VkSubpassDescription subpass {
-        .pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS,
-        .colorAttachmentCount = 1,
-        .pColorAttachments    = &color_ref,
-    };
-    std::array<VkSubpassDependency, 2> deps {
-        VkSubpassDependency {
-            .srcSubpass    = VK_SUBPASS_EXTERNAL,
-            .dstSubpass    = 0,
-            .srcStageMask  = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = 0,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        },
-        VkSubpassDependency {
-            .srcSubpass    = 0,
-            .dstSubpass    = VK_SUBPASS_EXTERNAL,
-            .srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstAccessMask =
-                VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        },
-    };
-    VkRenderPassCreateInfo info {
-        .sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments    = &color,
-        .subpassCount    = 1,
-        .pSubpasses      = &subpass,
-        .dependencyCount = (uint32_t)deps.size(),
-        .pDependencies   = deps.data(),
-    };
-    vvk::RenderPass pass;
-    if (device.CreateRenderPass(info, pass) != VK_SUCCESS) return std::nullopt;
-    return pass;
-}
-} // namespace
-
 PrePass::PrePass(Desc&& desc): m_desc(std::move(desc)) {}
 PrePass::~PrePass() {}
 
@@ -75,14 +18,45 @@ bool PrePass::setResultRequest(rstd::Option<TextureRequest> request,
     return changed;
 }
 
-bool PrePass::prepareResourceStates(resource_registry::ResourceStateTracker& states) {
-    if (m_desc.result_use.is_some() &&
-        ! states.Set(*m_desc.result_use, resource_registry::TextureStateKind::Sampled)) {
-        return false;
+void PrePass::declareResources(ResourceDeclarationContext& context) {
+    m_desc.render_pass_use = rstd::None();
+    m_desc.framebuffer_use = rstd::None();
+    if (m_desc.result_msaa_request.is_none()) return;
+    m_desc.render_pass_use = rstd::Some(context.ReserveRenderPass());
+    m_desc.framebuffer_use = rstd::Some(context.ReserveFramebuffer());
+}
+
+PassResourceUses PrePass::resourceUses() const {
+    PassResourceUses uses;
+    if (m_desc.result_use.is_some()) {
+        uses.textures.push(resource::TextureUseHandle(*m_desc.result_use));
     }
+    if (m_desc.result_msaa_use.is_some()) {
+        uses.textures.push(resource::TextureUseHandle(*m_desc.result_msaa_use));
+    }
+    if (m_desc.render_pass_use.is_some()) {
+        uses.render_passes.push(resource::RenderPassUseHandle(*m_desc.render_pass_use));
+    }
+    if (m_desc.framebuffer_use.is_some()) {
+        uses.framebuffers.push(resource::FramebufferUseHandle(*m_desc.framebuffer_use));
+    }
+    return uses;
+}
+
+bool PrePass::prepareResourceStates(
+    rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>> states) {
+    m_desc.before_clear.Clear();
+    m_desc.after_clear.Clear();
+    if (m_desc.result_use.is_none()) return false;
+    auto before = states->Prepare(
+        *m_desc.result_use, resource_registry::TextureStateKind::TransferDestination, {}, true);
+    auto after = states->Prepare(*m_desc.result_use, resource_registry::TextureStateKind::Sampled);
+    if (before.is_none() || after.is_none()) return false;
+    m_desc.before_clear.Add(rstd::move(before).unwrap_unchecked());
+    m_desc.after_clear.Add(rstd::move(after).unwrap_unchecked());
     return m_desc.result_msaa_use.is_none() ||
-           states.Set(*m_desc.result_msaa_use,
-                      resource_registry::TextureStateKind::ColorAttachment);
+           states->Set(*m_desc.result_msaa_use,
+                       resource_registry::TextureStateKind::ColorAttachment);
 }
 
 std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() const {
@@ -104,14 +78,12 @@ std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() c
     return out;
 }
 
-void PrePass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
+void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& context) {
     {
         auto tex_name = std::string(m_desc.result);
         if (scene.renderTargets.count(tex_name) == 0) return;
         if (m_desc.result_use.is_none()) return;
-        auto prepared = rr.prepared_resources.Resolve(*m_desc.result_use);
-        if (prepared.is_none()) return;
-        m_desc.vk_result = (**prepared).image.getActive();
+        if (context.resources->Resolve(*m_desc.result_use).is_none()) return;
     }
     {
         auto  tex_name = std::string(m_desc.result);
@@ -119,25 +91,34 @@ void PrePass::prepare(Scene& scene, const Device& device, RenderingResources& rr
         m_desc.samples = TextureSampleCount(rt.sample_count);
         if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
             if (m_desc.result_msaa_use.is_none()) return;
-            auto prepared = rr.prepared_resources.Resolve(*m_desc.result_msaa_use);
-            if (prepared.is_none()) return;
-            m_desc.vk_result_msaa = (**prepared).image.getActive();
-
-            auto pass = CreateMsaaClearPass(device.handle(), m_desc.samples);
-            if (! pass.has_value()) return;
-            m_desc.msaa_clear_pass = std::move(*pass);
-
-            VkImageView             view = m_desc.vk_result_msaa.view;
-            VkFramebufferCreateInfo info {
-                .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-                .renderPass      = *m_desc.msaa_clear_pass,
-                .attachmentCount = 1,
-                .pAttachments    = &view,
-                .width           = m_desc.vk_result_msaa.extent.width,
-                .height          = m_desc.vk_result_msaa.extent.height,
-                .layers          = 1,
+            auto prepared = context.resources->Resolve(*m_desc.result_msaa_use);
+            if (prepared.is_none() || m_desc.result_msaa_request.is_none() ||
+                m_desc.render_pass_use.is_none() || m_desc.framebuffer_use.is_none()) {
+                return;
+            }
+            auto render_pass = context.graphics->PrepareRenderPass(
+                *m_desc.render_pass_use,
+                device,
+                RenderPassResourceDesc {
+                    .samples                = m_desc.samples,
+                    .color_initial_layout   = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .color_final_layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    .color_load_op          = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    .has_resolve_attachment = false,
+                    .has_depth_attachment   = false,
+                });
+            if (render_pass.is_err()) return;
+            auto image       = (**prepared).image.getActive();
+            auto attachments = std::vector<FramebufferAttachmentDesc> {
+                MakeFramebufferAttachment(*m_desc.result_msaa_request, image),
             };
-            if (device.handle().CreateFramebuffer(info, m_desc.msaa_clear_fb) != VK_SUCCESS) return;
+            auto framebuffer =
+                context.graphics->PrepareFramebuffer(*m_desc.framebuffer_use,
+                                                     *m_desc.render_pass_use,
+                                                     device,
+                                                     std::move(attachments),
+                                                     { image.extent.width, image.extent.height });
+            if (framebuffer.is_err()) return;
         }
     }
     {
@@ -148,7 +129,11 @@ void PrePass::prepare(Scene& scene, const Device& device, RenderingResources& rr
 }
 
 void PrePass::record(PassRecordContext& context) {
-    auto&                   cmd = *context.command;
+    if (m_desc.result_use.is_none()) return;
+    auto prepared_result = context.resources->Resolve(*m_desc.result_use);
+    if (prepared_result.is_none()) return;
+    const auto&             result = (**prepared_result).image.getActive();
+    auto&                   cmd    = *context.command;
     VkImageSubresourceRange base_srang {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel   = 0,
@@ -157,52 +142,28 @@ void PrePass::record(PassRecordContext& context) {
         .layerCount     = VK_REMAINING_MIP_LEVELS,
 
     };
-    {
-        VkImageMemoryBarrier imb {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext            = nullptr,
-            .srcAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
-            .dstAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image            = m_desc.vk_result.handle,
-            .subresourceRange = base_srang,
-        };
-
-        cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            VK_PIPELINE_STAGE_TRANSFER_BIT,
-                            VK_DEPENDENCY_BY_REGION_BIT,
-                            imb);
-    }
-    cmd.ClearColorImage(m_desc.vk_result.handle,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        &m_desc.clear_value.color,
-                        base_srang);
-    VkImageMemoryBarrier imb {
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext            = nullptr,
-        .srcAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
-        .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout        = m_desc.layout,
-        .image            = m_desc.vk_result.handle,
-        .subresourceRange = base_srang,
-    };
-
-    cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                        VK_DEPENDENCY_BY_REGION_BIT,
-                        imb);
+    m_desc.before_clear.Record(cmd);
+    cmd.ClearColorImage(
+        result.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &m_desc.clear_value.color, base_srang);
+    m_desc.after_clear.Record(cmd);
     if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
+        if (m_desc.result_msaa_use.is_none() || m_desc.render_pass_use.is_none() ||
+            m_desc.framebuffer_use.is_none()) {
+            return;
+        }
+        auto prepared_msaa = context.resources->Resolve(*m_desc.result_msaa_use);
+        auto render_pass   = context.resources->Resolve(*m_desc.render_pass_use);
+        auto framebuffer   = context.resources->Resolve(*m_desc.framebuffer_use);
+        if (prepared_msaa.is_none() || render_pass.is_none() || framebuffer.is_none()) return;
+        const auto&           msaa = (**prepared_msaa).image.getActive();
         VkRenderPassBeginInfo pass_begin_info {
             .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass  = *m_desc.msaa_clear_pass,
-            .framebuffer = *m_desc.msaa_clear_fb,
+            .renderPass  = **(**render_pass).physical,
+            .framebuffer = **(**framebuffer).physical,
             .renderArea =
                 VkRect2D {
                     .offset = { 0, 0 },
-                    .extent = { m_desc.vk_result_msaa.extent.width,
-                                m_desc.vk_result_msaa.extent.height },
+                    .extent = { msaa.extent.width, msaa.extent.height },
                 },
             .clearValueCount = 1,
             .pClearValues    = &m_desc.clear_value,
@@ -211,10 +172,9 @@ void PrePass::record(PassRecordContext& context) {
         cmd.EndRenderPass();
     }
 }
-void PrePass::destory(const Device&, RenderingResources&) {
-    m_desc.msaa_clear_fb   = {};
-    m_desc.msaa_clear_pass = {};
-    m_desc.vk_result_msaa  = {};
-    m_desc.samples         = VK_SAMPLE_COUNT_1_BIT;
+void PrePass::destory(const Device&) {
+    m_desc.before_clear.Clear();
+    m_desc.after_clear.Clear();
+    m_desc.samples = VK_SAMPLE_COUNT_1_BIT;
     setPrepared(false);
 }

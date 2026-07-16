@@ -83,6 +83,24 @@ struct BufferContentProvider {
     using Funcs = TraitFuncs<&T::LoadBuffer>;
 };
 
+struct BufferContentWriter {
+    using Trait                  = BufferContentWriter;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = BufferContentWriter;
+
+        auto UpdateBuffer(BufferUseHandle use, slice<u8> content, u64 content_version)
+            -> Result<empty, ResourceError> {
+            return rstd::trait_call<0>(this, use, content, content_version);
+        }
+    };
+
+    template<typename T>
+    using Funcs = TraitFuncs<&T::UpdateBuffer>;
+};
+
 struct ShaderCatalog {
     using Trait                  = ShaderCatalog;
     static constexpr bool direct = false;

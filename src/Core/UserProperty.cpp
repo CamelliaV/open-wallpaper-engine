@@ -2,7 +2,10 @@ module;
 
 module owe.user_property;
 
+import rstd;
 import rstd.cppstd;
+
+using namespace rstd::prelude;
 
 namespace owe
 {
@@ -16,17 +19,17 @@ Json MakeDescriptor(Json value) {
     return Json::Object(std::move(object));
 }
 
-std::string DescriptorType(const Json& descriptor) {
+String DescriptorType(const Json& descriptor) {
     auto type = descriptor.get("type");
-    if (type.is_none()) return {};
+    if (type.is_none()) return String::make();
     auto string = (**type).as_str();
-    return string.is_some() ? rstd::cppstd::to_string(*string) : std::string {};
+    return string.is_some() ? String::make(*string) : String::make();
 }
 
 Json ParseWireValue(const Json& schema, const Json& value) {
     if (! value.is_string()) return value.clone();
     const auto type = DescriptorType(schema);
-    if (type.empty() || type == "textinput") return value.clone();
+    if (type.is_empty() || type == "textinput") return value.clone();
 
     auto raw    = rstd::cppstd::as_string_view(*value.as_str());
     auto parsed = rstd::json::from_str(rstd::cppstd::as_str(raw), { .allow_comments = true });

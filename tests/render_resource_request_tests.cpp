@@ -39,6 +39,52 @@ owe::vulkan::FramebufferAttachmentDesc Attachment(std::uintptr_t view, std::size
 
 } // namespace
 
+TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
+    owe::resource::ShaderArtifact artifact;
+    auto                          code = rstd::vec::Vec<rstd::u32>::make();
+    code.push(1);
+    code.push(2);
+    code.push(3);
+    artifact.stages.push(owe::resource::ShaderArtifactStage {
+        .stage       = owe::ShaderType::VERTEX,
+        .entry_point = rstd::string::String::make(rstd::cppstd::as_str("main")),
+        .code        = rstd::move(code),
+    });
+    auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("g_Time")),
+        .offset = 16,
+        .size   = 4,
+    });
+    artifact.uniform_blocks.push(owe::resource::ShaderArtifactUniformBlock {
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .size    = 32,
+        .members = rstd::move(members),
+    });
+    artifact.descriptor_bindings.push(owe::resource::ShaderArtifactDescriptorBinding {
+        .name             = rstd::string::String::make(rstd::cppstd::as_str("g_Texture0")),
+        .binding          = 2,
+        .descriptor_type  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptor_count = 1,
+        .stage_flags      = VK_SHADER_STAGE_FRAGMENT_BIT,
+    });
+    artifact.vertex_inputs.push(owe::resource::ShaderArtifactVertexInput {
+        .name     = rstd::string::String::make(rstd::cppstd::as_str("a_Position")),
+        .location = 3,
+        .format   = VK_FORMAT_R32G32_SFLOAT,
+    });
+
+    auto stages     = owe::vulkan::ShaderSpvsFromArtifact(artifact);
+    auto reflection = owe::vulkan::ShaderReflectionFromArtifact(artifact);
+    ASSERT_EQ(stages.size(), 1u);
+    EXPECT_EQ(stages[0]->entry_point, "main");
+    EXPECT_EQ(stages[0]->spirv.size(), 3u);
+    ASSERT_EQ(reflection.blocks.size(), 1u);
+    EXPECT_EQ(reflection.blocks[0].member_map.at("g_Time").offset, 16u);
+    EXPECT_EQ(reflection.binding_map.at("g_Texture0").binding, 2u);
+    EXPECT_EQ(reflection.input_location_map.at("a_Position").format, VK_FORMAT_R32G32_SFLOAT);
+}
+
 TEST(TextureRequest, BuildsImportedRequestWithoutCacheKey) {
     auto request = owe::vulkan::MakeImportedTextureRequest("textures/main.png");
 
@@ -65,28 +111,58 @@ TEST(TextureBindingRequest, CarriesNameAndTypedRequest) {
     EXPECT_TRUE(empty.empty());
 }
 
+TEST(PreparedPassResources, ResolvesOnlyDeclaredUses) {
+    owe::resource_registry::PreparedResourceTable table(6);
+    auto allowed = owe::resource::TextureUseHandle { .index = 1, .generation = 6 };
+    auto hidden  = owe::resource::TextureUseHandle { .index = 2, .generation = 6 };
+    auto insert  = [&](owe::resource::TextureUseHandle use, std::string_view name) {
+        owe::vulkan::ImageSlots slots;
+        slots.slots.resize(1);
+        auto allocation = rstd::sync::Arc<owe::vulkan::TextureAllocation>::make(rstd::move(slots));
+        return table.Insert(owe::resource_registry::PreparedTexture {
+            .use      = use,
+            .resource = owe::resource::TextureHandle { .index = use.index, .generation = 1 },
+            .request =
+                owe::resource::TextureRequest {
+                    .name = rstd::string::String::make(rstd::cppstd::as_str(name)),
+                },
+            .physical = allocation.clone(),
+            .image    = allocation->View(),
+        });
+    };
+    ASSERT_TRUE(insert(allowed, "allowed"));
+    ASSERT_TRUE(insert(hidden, "hidden"));
+
+    owe::vulkan::PassResourceUses uses;
+    uses.textures.push(owe::resource::TextureUseHandle(allowed));
+    owe::vulkan::PreparedPassResources view(table, uses);
+
+    EXPECT_TRUE(view.Resolve(allowed).is_some());
+    EXPECT_TRUE(view.Resolve(hidden).is_none());
+}
+
 TEST(TextureRequest, ResolvesImportedTextureNameFromSnapshotCatalog) {
     owe::Scene scene;
     scene.textures["texture-slot"] = owe::SceneTexture { .url = "textures/main.png" };
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
     auto desc_id  = snapshot.textureDescId("texture-slot");
-    ASSERT_TRUE(desc_id.has_value());
+    ASSERT_TRUE(desc_id.is_some());
 
     auto request = owe::vulkan::MakeImportedTextureRequest("texture-slot", desc_id);
     EXPECT_EQ(request.source->index, desc_id->index);
 
     auto resolved = owe::vulkan::ResolveImportedTextureName(snapshot, request);
-    ASSERT_TRUE(resolved.has_value());
+    ASSERT_TRUE(resolved.is_some());
     EXPECT_EQ(*resolved, "textures/main.png");
 
     auto lookup_request = owe::vulkan::MakeImportedTextureRequest("texture-slot");
     resolved            = owe::vulkan::ResolveImportedTextureName(snapshot, lookup_request);
-    ASSERT_TRUE(resolved.has_value());
+    ASSERT_TRUE(resolved.is_some());
     EXPECT_EQ(*resolved, "textures/main.png");
 
     auto missing_request = owe::vulkan::MakeImportedTextureRequest("missing");
-    EXPECT_FALSE(owe::vulkan::ResolveImportedTextureName(snapshot, missing_request).has_value());
+    EXPECT_TRUE(owe::vulkan::ResolveImportedTextureName(snapshot, missing_request).is_none());
 }
 
 TEST(TextureRequest, BuildsRenderTargetCacheKey) {
@@ -266,7 +342,7 @@ TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
             .format   = VK_FORMAT_R32G32B32A32_SFLOAT,
             .offset   = 0,
         });
-        auto spv         = std::make_unique<owe::vulkan::ShaderSpv>();
+        auto spv         = rstd::boxed::Box<owe::vulkan::ShaderSpv>::make();
         spv->stage       = owe::ShaderType::VERTEX;
         spv->entry_point = "main";
         spv->spirv       = { 1u, 2u, 3u, 4u };
@@ -551,17 +627,4 @@ TEST(FramebufferAttachmentIdentity, TracksTextureGeneration) {
     EXPECT_FALSE(
         owe::vulkan::SameFramebufferCacheKey(owe::vulkan::MakeFramebufferCacheKey(framebuffer_a),
                                              owe::vulkan::MakeFramebufferCacheKey(framebuffer_b)));
-}
-
-TEST(PipelineRetireQueue, IgnoresEmptyPipelineParameters) {
-    owe::vulkan::PipelineRetireQueue retire_queue;
-    owe::vulkan::PipelineParameters  empty;
-    vvk::Framebuffer                 empty_framebuffer;
-
-    retire_queue.Retire(std::move(empty));
-    retire_queue.Retire(std::move(empty_framebuffer));
-    EXPECT_EQ(retire_queue.pending(), 0u);
-
-    retire_queue.ReleaseAllReady();
-    EXPECT_EQ(retire_queue.pending(), 0u);
 }

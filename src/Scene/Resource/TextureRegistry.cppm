@@ -16,10 +16,12 @@ struct Texture {
 };
 
 struct TexturePhysical {
-    vulkan::ImageSlotsRef image;
-    u64                   generation { 1 };
-    u64                   source_generation { 0 };
-    ReadyToken            ready;
+    rstd::sync::Arc<vulkan::TextureAllocation> allocation;
+    u64                                        generation { 1 };
+    u64                                        source_generation { 0 };
+    u64                                        definition_version { 0 };
+    u64                                        content_version { 0 };
+    ReadyToken                                 ready;
 };
 
 class TextureRegistry {
@@ -63,25 +65,33 @@ public:
         return handle;
     }
 
-    auto Publish(resource::TextureHandle handle, vulkan::ImageSlotsRef image, ReadyToken ready)
+    auto Publish(resource::TextureHandle                    handle,
+                 rstd::sync::Arc<vulkan::TextureAllocation> allocation, ReadyToken ready)
         -> Option<u64> {
+        auto image = allocation->View();
         if (ResolveTexture(handle).is_none() || image.slots.empty()) return None();
 
+        auto logical = ResolveTexture(handle);
+        if (logical.is_none()) return None();
         auto source_generation = image.getActive().generation;
         auto physical          = m_resources.get_mut(handle);
         if (physical.is_some()) {
             if ((**physical).source_generation != source_generation) ++(**physical).generation;
-            (**physical).image             = rstd::move(image);
-            (**physical).source_generation = source_generation;
-            (**physical).ready             = ready;
+            (**physical).allocation         = rstd::move(allocation);
+            (**physical).source_generation  = source_generation;
+            (**physical).definition_version = (**logical).definition_version;
+            (**physical).content_version    = (**logical).content_version;
+            (**physical).ready              = ready;
             return Some((**physical).generation);
         }
 
         (void)m_resources.insert(handle,
                                  TexturePhysical {
-                                     .image             = rstd::move(image),
-                                     .source_generation = source_generation,
-                                     .ready             = ready,
+                                     .allocation         = rstd::move(allocation),
+                                     .source_generation  = source_generation,
+                                     .definition_version = (**logical).definition_version,
+                                     .content_version    = (**logical).content_version,
+                                     .ready              = ready,
                                  });
         return Some(u64(1));
     }
@@ -105,6 +115,18 @@ public:
         return m_resources.get(handle);
     }
 
+    auto ResolveCurrent(resource::TextureHandle handle) const noexcept
+        -> Option<ref<TexturePhysical>> {
+        auto logical  = ResolveTexture(handle);
+        auto physical = Resolve(handle);
+        if (logical.is_none() || physical.is_none()) return None();
+        if ((**logical).definition_version != (**physical).definition_version ||
+            (**logical).content_version != (**physical).content_version) {
+            return None();
+        }
+        return physical;
+    }
+
     auto Find(TextureRequestKind kind, ref<str> key) const -> Option<resource::TextureHandle> {
         auto handle = m_handles.get(Identity {
             .kind = kind,
@@ -116,6 +138,23 @@ public:
     }
 
     bool Unbind(resource::TextureHandle handle) { return m_resources.remove(handle).is_some(); }
+
+    void EvictUnused(bool transient_only = false) {
+        m_resources.retain([&](const resource::TextureHandle& handle, TexturePhysical& physical) {
+            if (physical.allocation.strong_count() > 1) return true;
+            if (! transient_only) return false;
+            auto texture = m_textures.get(handle);
+            return texture.is_none() ||
+                   (**texture).request.lifetime != TextureLifetimeClass::FrameLocal;
+        });
+    }
+
+    void ClearGraphResources() {
+        m_resources.retain([&](const resource::TextureHandle& handle, TexturePhysical&) {
+            auto texture = m_textures.get(handle);
+            return texture.is_some() && (**texture).request.kind == TextureRequestKind::Imported;
+        });
+    }
 
     void Reset() {
         m_resources.clear();

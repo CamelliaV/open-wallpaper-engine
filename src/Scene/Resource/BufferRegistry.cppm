@@ -21,12 +21,12 @@ struct BufferEntry {
 };
 
 struct BufferPhysical {
-    vulkan::MeshBufferRef buffer;
-    u64                   generation { 1 };
-    u64                   source_generation { 0 };
-    resource::ReadyToken  ready;
+    vulkan::BufferAllocation buffer;
+    u64                      generation { 1 };
+    u64                      source_generation { 0 };
+    resource::ReadyToken     ready;
 
-    BufferPhysical(vulkan::MeshBufferRef value, u64 physical_generation, u64 source,
+    BufferPhysical(vulkan::BufferAllocation value, u64 physical_generation, u64 source,
                    resource::ReadyToken ready_token)
         : buffer(rstd::move(value)),
           generation(physical_generation),
@@ -52,8 +52,8 @@ public:
         return Register(rstd::move(request));
     }
 
-    auto Ensure(resource::BufferRequest request, vulkan::MeshCacheKey backend_key,
-                slice<u8> content, vulkan::MeshCache& backend)
+    auto Ensure(resource::BufferRequest request, slice<u8> content,
+                mut_ref<dyn<vulkan::BufferUploadBackend>> backend)
         -> Result<PreparedBuffer, resource::ResourceError> {
         auto handle = Register(request.clone());
         if (! handle.Valid()) {
@@ -71,11 +71,13 @@ public:
             });
         }
 
-        auto uploaded =
-            backend.QueryOrUpload(backend_key,
-                                  std::span<const uint8_t>(content.as_raw_ptr(), content.len()),
-                                  static_cast<VkDeviceSize>(request.definition.alignment));
-        if (! uploaded.has_value()) {
+        auto uploaded = backend->UploadBuffer(content,
+                                              vulkan::BufferUploadRequest {
+                                                  .size      = request.definition.size,
+                                                  .alignment = request.definition.alignment,
+                                                  .usage = UploadUsage(request.definition.usage),
+                                              });
+        if (uploaded.is_none()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
                 .message = rstd::format("upload buffer {} failed", request.name.as_str()),
@@ -105,6 +107,39 @@ public:
         return m_entries.get(handle);
     }
 
+    auto Update(resource::BufferHandle handle, slice<u8> content, u64 content_version,
+                mut_ref<dyn<vulkan::BufferUploadBackend>> backend)
+        -> Result<empty, resource::ResourceError> {
+        auto entry    = m_entries.get_mut(handle);
+        auto physical = m_resources.get_mut(handle);
+        if (entry.is_none() || physical.is_none() ||
+            (**entry).request.lifetime != resource::BufferLifetimeClass::Dynamic) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::MissingDefinition,
+                .message = rstd::format("dynamic buffer is unavailable"),
+            });
+        }
+        auto allocation = mut_ref<vulkan::BufferAllocation>::from_raw_parts(
+            rstd::addressof((**physical)->buffer));
+        if (! backend->UpdateBuffer(allocation, content)) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("update buffer {} failed", (**entry).request.name.as_str()),
+            });
+        }
+        if ((**entry).request.content_version != content_version) ++(**entry).content_version;
+        (**entry).request.content_version = content_version;
+        (**physical)->source_generation   = content_version;
+        return Ok(empty {});
+    }
+
+    void EvictUnused() {
+        m_resources.retain(
+            [](const resource::BufferHandle&, rstd::sync::Arc<BufferPhysical>& value) {
+                return value.strong_count() > 1;
+            });
+    }
+
     void Reset() {
         m_resources.clear();
         m_entries.clear();
@@ -117,6 +152,17 @@ public:
     auto Size() const noexcept -> usize { return m_entries.len(); }
 
 private:
+    static auto UploadUsage(resource::BufferUsage usage) -> vulkan::BufferUploadClass {
+        switch (usage) {
+        case resource::BufferUsage::Vertex: return vulkan::BufferUploadClass::Vertex;
+        case resource::BufferUsage::Index: return vulkan::BufferUploadClass::Index;
+        case resource::BufferUsage::Uniform: return vulkan::BufferUploadClass::Uniform;
+        case resource::BufferUsage::Storage: return vulkan::BufferUploadClass::Storage;
+        case resource::BufferUsage::Transfer: return vulkan::BufferUploadClass::Transfer;
+        }
+        return vulkan::BufferUploadClass::Vertex;
+    }
+
     auto Register(resource::BufferRequest request) -> resource::BufferHandle {
         if (request.name.is_empty() || request.definition.size == 0) return {};
         auto existing = m_names.get(request.name);

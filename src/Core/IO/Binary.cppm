@@ -76,7 +76,9 @@ class BinaryReader {
 public:
     explicit BinaryReader(rstd::io::ReadRange range): BinaryReader(prepare(rstd::move(range))) {}
 
-    explicit BinaryReader(std::vector<u8>&& bytes): BinaryReader(prepare(rstd::move(bytes))) {}
+    explicit BinaryReader(Vec<u8> bytes): BinaryReader(prepare(rstd::move(bytes))) {}
+
+    explicit BinaryReader(std::vector<u8>&& bytes): BinaryReader(prepare_std(rstd::move(bytes))) {}
 
     explicit BinaryReader(BinaryReader& source): BinaryReader(read_remaining(source)) {}
 
@@ -97,17 +99,15 @@ public:
     auto read_exact(void* buffer, usize size) -> rstd::io::Result<empty> {
         auto* bytes = static_cast<u8*>(buffer);
         while (size > 0) {
-            auto result = read(bytes, size);
-            if (result.is_err()) return rstd::Err(rstd::move(result).unwrap_err_unchecked());
-            auto count = rstd::move(result).unwrap_unchecked();
+            auto count = rstd_try(read(bytes, size));
             if (count == 0) {
-                return rstd::Err(rstd::io::error::Error::from_kind(
+                return Err(rstd::io::error::Error::from_kind(
                     rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::UnexpectedEof }));
             }
             bytes += count;
             size -= count;
         }
-        return rstd::Ok(empty {});
+        return Ok(empty {});
     }
 
     auto seek(rstd::io::SeekFrom from) -> rstd::io::Result<u64> {
@@ -172,9 +172,8 @@ public:
                 rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::InvalidData }));
         }
         std::string value(usize(remaining()), '\0');
-        auto        result = read_exact(value.data(), value.size());
-        if (result.is_err()) return rstd::Err(rstd::move(result).unwrap_err_unchecked());
-        return rstd::Ok(rstd::move(value));
+        rstd_try(read_exact(value.data(), value.size()));
+        return Ok(rstd::move(value));
     }
 
     std::string ReadAllStr() {
@@ -194,19 +193,24 @@ private:
     explicit BinaryReader(Prepared prepared)
         : BinaryReader(rstd::move(prepared.handle), prepared.len) {}
 
-    static auto prepare(std::vector<u8>&& bytes) -> Prepared {
-        auto data = Vec<u8>::with_capacity(bytes.size());
-        for (auto value : bytes) data.push(u8(value));
-        auto len    = u64(data.len());
-        auto cursor = rstd::io::Cursor<Vec<u8>>(rstd::move(data));
+    static auto prepare(Vec<u8> bytes) -> Prepared {
+        auto len    = u64(bytes.len());
+        auto cursor = rstd::io::Cursor<Vec<u8>>(rstd::move(bytes));
         return Prepared { .handle = rstd::io::ReadSeekHandle::make(rstd::move(cursor)),
                           .len    = len };
     }
 
-    static auto read_remaining(BinaryReader& source) -> std::vector<u8> {
-        auto bytes = std::vector<u8>(usize(source.remaining()));
-        auto count = source.Read(bytes.data(), bytes.size());
-        bytes.resize(count);
+    static auto prepare_std(std::vector<u8>&& bytes) -> Prepared {
+        auto data = Vec<u8>::with_capacity(bytes.size());
+        for (auto value : bytes) data.push(u8(value));
+        return prepare(rstd::move(data));
+    }
+
+    static auto read_remaining(BinaryReader& source) -> Vec<u8> {
+        auto bytes = Vec<u8>::with_capacity(usize(source.remaining()));
+        bytes.resize(usize(source.remaining()), u8(0));
+        auto count = source.Read(bytes.data(), bytes.len());
+        bytes.truncate(count);
         return bytes;
     }
 
@@ -245,17 +249,15 @@ public:
     auto write(const void* buffer, usize size) -> rstd::io::Result<empty> {
         auto* bytes = static_cast<const u8*>(buffer);
         while (size > 0) {
-            auto result = m_handle->write(bytes, size);
-            if (result.is_err()) return rstd::Err(rstd::move(result).unwrap_err_unchecked());
-            auto count = rstd::move(result).unwrap_unchecked();
+            auto count = rstd_try(m_handle->write(bytes, size));
             if (count == 0) {
-                return rstd::Err(rstd::io::error::Error::from_kind(
+                return Err(rstd::io::error::Error::from_kind(
                     rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::WriteZero }));
             }
             bytes += count;
             size -= count;
         }
-        return rstd::Ok(empty {});
+        return Ok(empty {});
     }
 
     usize Write(const void* buffer, usize size) { return write(buffer, size).is_ok() ? size : 0; }

@@ -630,16 +630,16 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
         .enable    = wpe.audioprocessingmode != 0,
         .amount    = wpe.audioamount,
         .exponent  = wpe.audioexponent,
-        .frequency = wpe.audiofrequency,
-        .bounds    = wpe.audiobounds,
+        .frequency = array_cast<float>(wpe.audiofrequency),
+        .bounds    = array_cast<float>(wpe.audiobounds),
     };
     if (wpe.name == "boxrandom") {
         ParticleBoxEmitterArgs box;
         box.emitSpeed      = wpe.rate;
-        box.minDistance    = wpe.distancemin;
-        box.maxDistance    = wpe.distancemax;
-        box.directions     = wpe.directions;
-        box.orgin          = wpe.origin;
+        box.minDistance    = array_cast<float>(wpe.distancemin);
+        box.maxDistance    = array_cast<float>(wpe.distancemax);
+        box.directions     = array_cast<float>(wpe.directions);
+        box.orgin          = array_cast<float>(wpe.origin);
         box.one_per_frame  = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
         box.instantaneous  = wpe.instantaneous;
         box.minSpeed       = wpe.speedmin;
@@ -654,9 +654,9 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
         sphere.emitSpeed      = wpe.rate;
         sphere.minDistance    = wpe.distancemin[0];
         sphere.maxDistance    = wpe.distancemax[0];
-        sphere.directions     = wpe.directions;
-        sphere.orgin          = wpe.origin;
-        sphere.sign           = wpe.sign;
+        sphere.directions     = array_cast<float>(wpe.directions);
+        sphere.orgin          = array_cast<float>(wpe.origin);
+        sphere.sign           = array_cast<i32>(wpe.sign);
         sphere.one_per_frame  = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
         sphere.instantaneous  = wpe.instantaneous;
         sphere.minSpeed       = wpe.speedmin;

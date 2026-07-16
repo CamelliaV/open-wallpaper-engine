@@ -34,7 +34,7 @@ struct BufferPlanEntry {
 
 struct ShaderPlanEntry {
     ShaderUseHandle handle;
-    ShaderRequest request;
+    ShaderRequest   request;
     u32             version { 0 };
 };
 

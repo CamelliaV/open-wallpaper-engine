@@ -18,31 +18,54 @@ import :resource;
 import :pass_common;
 import :pre_pass;
 import :fin_pass;
+import :shader_reflection_cache;
 
 using namespace rstd::prelude;
 
 export namespace owe::vulkan
 {
+class DeclaredShaderArtifactProvider {
+public:
+    explicit DeclaredShaderArtifactProvider(const ResourceDeclarationContext& declarations)
+        : m_declarations(rstd::ref<ResourceDeclarationContext>::from_raw_parts(
+              rstd::addressof(declarations))) {}
+
+    auto LoadShader(const resource::ShaderRequest& request)
+        -> rstd::Result<resource::ShaderArtifact, resource::ResourceError> {
+        auto artifact = m_declarations->ShaderArtifact(request);
+        if (artifact.is_none()) {
+            return rstd::Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::MissingContent,
+                .message = rstd::format("shader artifact {} unavailable", request.name),
+            });
+        }
+        return rstd::Ok((**artifact).clone());
+    }
+
+private:
+    rstd::ref<ResourceDeclarationContext> m_declarations;
+};
+
 inline bool SameProgramRenderItemId(owe::RenderItemId lhs, owe::RenderItemId rhs) {
     return lhs.index == rhs.index && lhs.generation == rhs.generation;
 }
 
 struct PreparedPassDiagnostic {
     bool                                      frame_pass { false };
-    std::optional<rg::NodeHandle>             graph_node;
+    Option<rg::NodeHandle>                    graph_node;
     std::string                               pass_name;
-    std::optional<rg::PassNode::Type>         pass_type;
-    std::optional<RenderItemId>               render_item;
+    Option<rg::PassNode::Type>                pass_type;
+    Option<RenderItemId>                      render_item;
     PassInvalidationFlags                     invalidation_flags { PassInvalidationNone };
     std::optional<PipelineCacheKey>           pipeline_cache_key;
     bool                                      pipeline_cache_hit { false };
-    uint64_t                                  pipeline_cache_observed_count { 0 };
+    u64                                       pipeline_cache_observed_count { 0 };
     std::optional<RenderPassCacheKey>         render_pass_cache_key;
     bool                                      render_pass_cache_hit { false };
-    uint64_t                                  render_pass_cache_observed_count { 0 };
+    u64                                       render_pass_cache_observed_count { 0 };
     std::optional<FramebufferCacheKey>        framebuffer_cache_key;
     bool                                      framebuffer_cache_hit { false };
-    uint64_t                                  framebuffer_cache_observed_count { 0 };
+    u64                                       framebuffer_cache_observed_count { 0 };
     std::vector<std::string>                  release_textures;
     std::vector<PassTextureRequestDiagnostic> texture_requests;
     bool                                      prepared { false };
@@ -62,13 +85,14 @@ struct RenderProgram {
     };
 
     struct PreparedPassRecord {
-        PreparedPassKind                       kind { PreparedPassKind::Graph };
-        std::optional<owe::rg::NodeHandle>     graph_node;
-        String                                 pass_name;
-        std::optional<owe::rg::PassNode::Type> pass_type;
-        ProgramPassHandle                      pass;
-        rstd::vec::Vec<String>                 release_textures;
-        PassInvalidationFlags                  invalidation_flags { PassInvalidationNone };
+        PreparedPassKind                kind { PreparedPassKind::Graph };
+        Option<owe::rg::NodeHandle>     graph_node;
+        String                          pass_name;
+        Option<owe::rg::PassNode::Type> pass_type;
+        ProgramPassHandle               pass;
+        rstd::vec::Vec<String>          release_textures;
+        PassResourceUses                resources;
+        PassInvalidationFlags           invalidation_flags { PassInvalidationNone };
 
         bool invalidated() const { return invalidation_flags != 0; }
 
@@ -92,20 +116,20 @@ struct RenderProgram {
             return ! resolved.prepared() || invalidated();
         }
 
-        void resetPrepared(VulkanPass& resolved, const Device& device, RenderingResources& rr) {
+        void resetPrepared(VulkanPass& resolved, const Device& device) {
             if (resolved.prepared()) {
-                resolved.destory(device, rr);
+                resolved.destory(device);
             }
             resolved.resetPrepared();
         }
 
         void prepareIfNeeded(VulkanPass& resolved, owe::Scene& scene, const Device& device,
-                             RenderingResources& rr) {
+                             PassPrepareContext& context) {
             if (invalidated() && resolved.prepared()) {
-                resetPrepared(resolved, device, rr);
+                resetPrepared(resolved, device);
             }
             if (! resolved.prepared()) {
-                resolved.prepare(scene, device, rr);
+                resolved.prepare(scene, device, context);
             }
             if (resolved.prepared()) clearInvalidation();
         }
@@ -179,9 +203,9 @@ struct RenderProgram {
 
             PreparedPassRecord record {
                 .kind       = PreparedPassKind::Graph,
-                .graph_node = id,
+                .graph_node = Some(id),
                 .pass_name  = state->name.clone(),
-                .pass_type  = state->type,
+                .pass_type  = Some(state->type),
                 .pass =
                     ProgramPassHandle {
                         .kind  = PreparedPassKind::Graph,
@@ -230,7 +254,12 @@ struct RenderProgram {
         std::vector<PreparedPassDiagnostic> out;
         out.reserve(pass_records.len());
         for (const auto& record : pass_records) {
-            auto pass             = resolve(record);
+            auto pass        = resolve(record);
+            auto render_item = Option<RenderItemId> {};
+            if (pass.is_some()) {
+                auto id = pass->renderItemId();
+                if (id.is_some()) render_item = Some<RenderItemId>(*id);
+            }
             auto release_textures = std::vector<std::string> {};
             release_textures.reserve(record.release_textures.len());
             for (const auto& texture : record.release_textures) {
@@ -241,7 +270,7 @@ struct RenderProgram {
                 .graph_node                    = record.graph_node,
                 .pass_name                     = rstd::cppstd::to_string(record.pass_name.as_str()),
                 .pass_type                     = record.pass_type,
-                .render_item                   = pass ? pass->renderItemId() : std::nullopt,
+                .render_item                   = render_item,
                 .invalidation_flags            = record.invalidation_flags,
                 .pipeline_cache_key            = pass ? pass->pipelineCacheKey() : std::nullopt,
                 .pipeline_cache_hit            = pass && pass->pipelineCacheHit(),
@@ -283,7 +312,7 @@ struct RenderProgram {
             auto pass = resolve(record);
             if (pass.is_none()) continue;
             auto pass_render_item = pass->renderItemId();
-            if (! pass_render_item.has_value()) continue;
+            if (pass_render_item.is_none()) continue;
             auto matched = std::any_of(render_items.begin(), render_items.end(), [&](auto id) {
                 return SameProgramRenderItemId(*pass_render_item, id);
             });
@@ -302,7 +331,7 @@ struct RenderProgram {
             auto pass = resolve(record);
             if (pass.is_none()) continue;
             auto pass_render_item = pass->renderItemId();
-            if (! pass_render_item.has_value()) continue;
+            if (pass_render_item.is_none()) continue;
             auto matched = std::any_of(render_items.begin(), render_items.end(), [&](auto id) {
                 return SameProgramRenderItemId(*pass_render_item, id);
             });
@@ -408,10 +437,10 @@ struct RenderProgram {
         }
     }
 
-    void destroyPasses(const Device& device, RenderingResources& rr) {
+    void destroyPasses(const Device& device) {
         for (auto& record : pass_records) {
             auto pass = resolve(record);
-            if (pass) record.resetPrepared(*pass, device, rr);
+            if (pass) record.resetPrepared(*pass, device);
         }
     }
 
@@ -426,23 +455,44 @@ struct RenderProgram {
         }
     }
 
-    void prepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
+    bool prepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
                  const owe::RenderSceneSnapshot& render_scene) {
+        loaded = false;
+        resource_plan.buffers.clear();
+        resource_plan.shaders.clear();
+        if (rr.shader_reflection_cache.is_none()) {
+            rstd_error("shader artifact compiler unavailable");
+            return false;
+        }
+        ResourceDeclarationContext declarations(resource_plan, **rr.shader_reflection_cache);
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (pass) pass->declareResources(declarations);
+        }
+
         SnapshotImportedTextureProvider imported_textures(render_scene, scene.imageParser.get());
         auto                            content =
             rstd::dyn<owe::resource::TextureContentProvider>::from_ref(imported_textures);
-        owe::resource_registry::ResourcePrepareService prepare_service(
-            rr.resource_registries.TextureEntries(), rr.resource_registries.Textures());
-        auto prepared = prepare_service.Prepare(resource_plan, rstd::Some(content));
+        auto buffer_content =
+            rstd::dyn<owe::resource::BufferContentProvider>::from_ref(declarations);
+        DeclaredShaderArtifactProvider declared_shaders(declarations);
+        auto                           shader_artifacts =
+            rstd::dyn<owe::resource::ShaderArtifactProvider>::from_ref(declared_shaders);
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (pass && pass->prepared()) record.resetPrepared(*pass, device);
+        }
+        auto prepared =
+            rr.resources.PreparePlan(resource_plan,
+                                     owe::resource_registry::ResourceContentProviders {
+                                         .texture = rstd::Some(content),
+                                         .buffer  = rstd::Some(buffer_content.as_mut_ref()),
+                                         .shader  = rstd::Some(shader_artifacts.as_mut_ref()),
+                                     });
         if (prepared.is_err()) {
             auto error = rstd::move(prepared).unwrap_err_unchecked();
-            rstd_error("prepare resource plan failed: {}", error.message.as_str());
-            return;
-        }
-        rr.prepared_resources = rstd::move(prepared).unwrap_unchecked();
-        if (! rr.resource_registries.States().Compile(resource_plan, rr.prepared_resources)) {
-            rstd_error("compile resource state plan failed");
-            return;
+            rstd_error("prepare resource plan failed: {}", error.message);
+            return false;
         }
         rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
         rstd::Option<owe::resource::TextureUseHandle> frame_msaa_use   = rstd::None();
@@ -471,18 +521,35 @@ struct RenderProgram {
             (*frame_prepass)->setResultMsaaUse(frame_msaa_use);
         }
         if (frame_finpass) (*frame_finpass)->setResultUse(frame_result_use);
+        auto state_preparer = rstd::dyn<owe::resource_registry::TextureStatePreparer>::from_ref(
+            rr.resources.States());
         for (auto& record : pass_records) {
             auto pass = resolve(record);
             if (pass.is_none()) continue;
-            if (! pass->prepareResourceStates(rr.resource_registries.States())) {
-                rstd_error("prepare resource states failed for {}", record.pass_name.as_str());
-                return;
+            if (! pass->prepareResourceStates(state_preparer.as_mut_ref())) {
+                rstd_error("prepare resource states failed for {}", record.pass_name);
+                return false;
             }
         }
+        auto graphics =
+            rstd::dyn<owe::resource_registry::GraphicsResourcePreparer>::from_ref(rr.resources);
+        PassPrepareContext prepare_context {
+            .resources = rstd::ref<owe::resource_registry::PreparedResourceTable>::from_raw_parts(
+                rstd::addressof(rr.resources.Prepared())),
+            .graphics = graphics.as_mut_ref(),
+        };
         for (auto& record : pass_records) {
             auto pass = resolve(record);
-            if (pass) record.prepareIfNeeded(*pass, scene, device, rr);
+            if (pass) {
+                record.prepareIfNeeded(*pass, scene, device, prepare_context);
+                if (! pass->prepared()) {
+                    rstd_error("prepare pass failed for {}", record.pass_name);
+                    return false;
+                }
+                record.resources = pass->resourceUses();
+            }
         }
+        return true;
     }
 
     void invalidateAllPreparedPasses() {
@@ -490,19 +557,19 @@ struct RenderProgram {
         loaded = false;
     }
 
-    uint64_t commitUploads(const Device& device, RenderingResources& rr,
-                           vvk::CommandBuffer& upload_cmd) {
+    u64 commitUploads(const Device& device, RenderingResources& rr,
+                      vvk::CommandBuffer& upload_cmd) {
         VVK_CHECK_ACT(return 0,
                              upload_cmd.Begin(VkCommandBufferBeginInfo {
                                  .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                  .pNext = nullptr,
                                  .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                              }));
-        if (! rr.resource_registries.Meshes().recordPendingUploads(upload_cmd)) return 0;
+        if (! rr.resources.RecordPendingUploads(upload_cmd)) return 0;
         VVK_CHECK_ACT(return 0, upload_cmd.End());
         {
-            auto                          ready        = rr.resource_registries.Uploads().Reserve();
-            const uint64_t                signal_value = ready.value;
+            auto                          ready        = rr.resources.ReserveUpload();
+            const u64                     signal_value = ready.value;
             VkTimelineSemaphoreSubmitInfo timeline_info {
                 .sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
                 .pNext                     = nullptr,
@@ -520,7 +587,7 @@ struct RenderProgram {
                 .pSignalSemaphores    = rr.sem_upload.address(),
             };
             VVK_CHECK_ACT(return 0, device.graphics_queue().handle.Submit(sub_info, {}));
-            if (! rr.resource_registries.Uploads().MarkSubmitted(ready)) return 0;
+            if (! rr.resources.MarkUploadSubmitted(ready)) return 0;
             loaded = true;
             return signal_value;
         }
@@ -566,25 +633,48 @@ struct RenderProgram {
         flushScopePasses();
     }
 
-    void execute(RenderingResources& rr) {
-        auto dynamic_buffer = rstd::None<rstd::mut_ref<StagingBuffer>>();
-        if (rr.dyn_buf) {
-            dynamic_buffer = rstd::Some(
-                rstd::mut_ref<StagingBuffer>::from_raw_parts(rstd::addressof(**rr.dyn_buf)));
-        }
-        PassRecordContext context {
+    template<typename Callback>
+    void withRecordContext(rstd::usize index, RenderingResources& rr, Callback&& callback) {
+        if (index >= pass_records.len()) return;
+        auto pass = resolve(pass_records[index]);
+        if (pass.is_none()) return;
+
+        PreparedPassResources resources(rr.resources.Prepared(), pass_records[index].resources);
+        PassRecordContext     context {
             .command =
                 rstd::mut_ref<vvk::CommandBuffer>::from_raw_parts(rstd::addressof(rr.command)),
-            .prepared_resources =
-                rstd::ref<resource_registry::PreparedResourceTable>::from_raw_parts(
-                    rstd::addressof(rr.prepared_resources)),
-            .dynamic_buffer = rstd::move(dynamic_buffer),
+            .resources =
+                rstd::ref<PreparedPassResources>::from_raw_parts(rstd::addressof(resources)),
         };
+        callback(*pass, context);
+    }
+
+    void execute(RenderingResources& rr) {
+        auto buffer_writer = rstd::dyn<resource::BufferContentWriter>::from_ref(rr.resources);
+        PassUpdateContext update_context {
+            .buffers = buffer_writer.as_mut_ref(),
+        };
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (pass && pass->prepared() && ! pass->update(update_context)) {
+                rstd_error("update pass resources failed: {}", record.pass_name);
+                return;
+            }
+        }
+        if (! rr.resources.RecordPendingUploads(rr.command)) {
+            rstd_error("record dynamic buffer uploads failed");
+            return;
+        }
+
         for (auto& scope : scopes) {
             if (scope.single) {
-                auto pass = resolve(pass_records[*scope.single]);
+                auto index = *scope.single;
+                auto pass  = resolve(pass_records[index]);
                 if (pass && pass->prepared()) {
-                    pass->record(context);
+                    withRecordContext(
+                        index, rr, [](VulkanPass& target, PassRecordContext& context) {
+                            target.record(context);
+                        });
                 }
                 continue;
             }
@@ -594,7 +684,10 @@ struct RenderProgram {
             if (scoped_passes.len() == 1) {
                 auto pass = resolve(pass_records[scoped_passes[0]]);
                 if (pass && pass->prepared()) {
-                    pass->record(context);
+                    withRecordContext(
+                        scoped_passes[0], rr, [](VulkanPass& target, PassRecordContext& context) {
+                            target.record(context);
+                        });
                 }
                 continue;
             }
@@ -607,13 +700,23 @@ struct RenderProgram {
             }
 
             for (auto index : scoped_passes) {
-                resolve(pass_records[index])->prepareRenderScopeDraw(context);
+                withRecordContext(index, rr, [](VulkanPass& target, PassRecordContext& context) {
+                    target.prepareRenderScopeDraw(context);
+                });
             }
-            resolve(pass_records[scoped_passes[0]])->beginRenderScope(context);
+            withRecordContext(
+                scoped_passes[0], rr, [](VulkanPass& target, PassRecordContext& context) {
+                    target.beginRenderScope(context);
+                });
             for (auto index : scoped_passes) {
-                resolve(pass_records[index])->recordRenderScopeDraw(context);
+                withRecordContext(index, rr, [](VulkanPass& target, PassRecordContext& context) {
+                    target.recordRenderScopeDraw(context);
+                });
             }
-            resolve(pass_records[scoped_passes[0]])->endRenderScope(context);
+            withRecordContext(
+                scoped_passes[0], rr, [](VulkanPass& target, PassRecordContext& context) {
+                    target.endRenderScope(context);
+                });
         }
     }
 };

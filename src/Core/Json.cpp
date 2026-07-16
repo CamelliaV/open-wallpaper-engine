@@ -7,6 +7,8 @@ import rstd.cppstd;
 import rstd.json;
 import rstd.log;
 
+using namespace rstd::prelude;
+
 namespace owe
 {
 
@@ -26,6 +28,12 @@ struct JsonArrayTarget<std::vector<T>> {
 
 template<typename T, std::size_t N>
 struct JsonArrayTarget<std::array<T, N>> {
+    static constexpr bool enabled = true;
+    using value_type              = T;
+};
+
+template<typename T, usize N>
+struct JsonArrayTarget<rstd::array<T, N>> {
     static constexpr bool enabled = true;
     using value_type              = T;
 };
@@ -106,13 +114,37 @@ auto ConvertArray(std::string_view value, std::array<T, N>& target) -> bool {
     return true;
 }
 
+template<typename T, usize N>
+auto ConvertArray(std::string_view value, rstd::array<T, N>& target) -> bool {
+    rstd::array<std::string_view, N> parts;
+    usize                            count = 0;
+    while (true) {
+        const auto delimiter = value.find(' ');
+        if (count == N) throw WrongArraySize {};
+        if (delimiter == std::string_view::npos) {
+            parts[count++] = value;
+            break;
+        }
+        parts[count++] = value.substr(0, delimiter);
+        value.remove_prefix(delimiter + 1);
+    }
+    if (count != N) throw WrongArraySize {};
+    for (usize index = 0; index < N; ++index) target[index] = ParseNumber<T>(parts[index]);
+    return true;
+}
+
 template<typename T>
 auto ReadJsonValue(const Json& json, T& value) -> bool {
     const auto& input = InitialJsonValue(json);
     if constexpr (JsonArrayTarget<T>::enabled) {
         using Value = typename JsonArrayTarget<T>::value_type;
         if (input.is_number()) {
-            value = { ConvertNumber<Value>(input) };
+            if constexpr (requires { T::LENGTH; }) {
+                for (usize index = 0; index < value.len(); ++index) value[index] = Value {};
+                if constexpr (T::LENGTH > 0) value[0] = ConvertNumber<Value>(input);
+            } else {
+                value = { ConvertNumber<Value>(input) };
+            }
             return true;
         }
         auto string = input.as_str();
@@ -216,8 +248,8 @@ typename JsonTemplateTypeCheck<T>::type GetJsonValue(const Json& json, std::stri
         const Json&, std::string_view, TYPE&, bool, std::source_location)
 
 OWE_IMPL_GET_JSON(bool);
-OWE_IMPL_GET_JSON(std::int32_t);
-OWE_IMPL_GET_JSON(std::uint32_t);
+OWE_IMPL_GET_JSON(i32);
+OWE_IMPL_GET_JSON(u32);
 OWE_IMPL_GET_JSON(float);
 OWE_IMPL_GET_JSON(double);
 OWE_IMPL_GET_JSON(std::string);
@@ -231,6 +263,13 @@ OWE_IMPL_GET_JSON(IntArray3);
 OWE_IMPL_GET_JSON(FloatArray2);
 OWE_IMPL_GET_JSON(FloatArray3);
 
+using RstdIntArray3   = rstd::array<int, 3>;
+using RstdFloatArray2 = rstd::array<float, 2>;
+using RstdFloatArray3 = rstd::array<float, 3>;
+OWE_IMPL_GET_JSON(RstdIntArray3);
+OWE_IMPL_GET_JSON(RstdFloatArray2);
+OWE_IMPL_GET_JSON(RstdFloatArray3);
+
 #undef OWE_IMPL_GET_JSON
 
 auto ParseJson(std::string_view source, rstd::json::ParseOptions options)
@@ -240,21 +279,18 @@ auto ParseJson(std::string_view source, rstd::json::ParseOptions options)
 
 auto ReadJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions options)
     -> rstd::Result<Json, JsonFileError> {
-    auto content = fs::ReadFileContent(vfs, path);
-    if (content.is_err()) {
-        auto error = rstd::move(content).unwrap_err_unchecked();
-        return rstd::Err(JsonFileError { JsonFileErrorKind::Io, rstd::format("{}", error) });
-    }
-
-    auto parsed = ParseJson(*content, options);
-    if (parsed.is_err()) {
-        auto error = rstd::move(parsed).unwrap_err_unchecked();
-        return rstd::Err(JsonFileError { JsonFileErrorKind::Parse, rstd::format("{}", error) });
-    }
-    return rstd::Ok(rstd::move(parsed).unwrap_unchecked());
+    auto io_error = [](auto error) {
+        return JsonFileError { JsonFileErrorKind::Io, rstd::format("{}", error) };
+    };
+    auto parse_error = [](auto error) {
+        return JsonFileError { JsonFileErrorKind::Parse, rstd::format("{}", error) };
+    };
+    auto content = rstd_try(fs::ReadFileContent(vfs, path), io_error);
+    auto parsed  = rstd_try(ParseJson(content, options), parse_error);
+    return Ok(rstd::move(parsed));
 }
 
-auto Dump(const Json& value, std::optional<std::size_t> indent) -> std::string {
+auto Dump(const Json& value, Option<usize> indent) -> std::string {
     auto options = rstd::json::FormatOptions {};
     if (indent) {
         options.pretty = true;

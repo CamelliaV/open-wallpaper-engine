@@ -97,36 +97,47 @@ const char* texture_request_kind_name(owe::vulkan::TextureRequestKind kind) {
     return "unknown";
 }
 
-const char* texture_usage_name(owe::vulkan::TexUsage usage) {
+const char* texture_usage_name(owe::resource::TextureUsage usage) {
     switch (usage) {
-    case owe::vulkan::TexUsage::COLOR: return "color";
-    case owe::vulkan::TexUsage::DEPTH: return "depth";
+    case owe::resource::TextureUsage::Color: return "color";
+    case owe::resource::TextureUsage::Depth: return "depth";
     }
     return "unknown";
 }
 
-std::string render_item_text(const std::optional<owe::RenderItemId>& id) {
-    if (! id) return "-";
+const char* texture_lifetime_name(owe::resource::TextureLifetimeClass lifetime) {
+    switch (lifetime) {
+    case owe::resource::TextureLifetimeClass::FrameLocal: return "frame-local";
+    case owe::resource::TextureLifetimeClass::Retained: return "retained";
+    case owe::resource::TextureLifetimeClass::Dedicated: return "dedicated";
+    case owe::resource::TextureLifetimeClass::ExternalOwned: return "external-owned";
+    }
+    return "unknown";
+}
+
+std::string render_item_text(const rstd::Option<owe::RenderItemId>& id) {
+    if (id.is_none()) return "-";
     return std::to_string(id->index) + "/" + std::to_string(id->generation);
 }
 
 std::string texture_request_text(const owe::vulkan::PassTextureRequestDiagnostic& diagnostic) {
     if (! diagnostic.request) return "none";
     const auto& request = *diagnostic.request;
-    std::string text =
-        std::string(texture_request_kind_name(request.kind)) + " name='" + request.name + "'";
-    if (request.imported_texture) {
-        text += " desc=" + std::to_string(request.imported_texture->index) + "/" +
-                std::to_string(request.imported_texture->generation);
+    std::string text    = std::string(texture_request_kind_name(request.kind)) + " name='" +
+                          rstd::cppstd::to_string(request.name.as_str()) + "'";
+    if (request.source) {
+        text += " source=" + std::to_string(request.source->index) + "/" +
+                std::to_string(request.source->generation);
     }
-    if (request.cache_key) {
-        const auto& key = *request.cache_key;
-        text += " key=" + std::to_string(key.width) + "x" + std::to_string(key.height);
-        text += " usage=" + std::string(texture_usage_name(key.usage));
-        text += " mip=" + std::to_string(key.mipmap_level);
-        text += " samples=" + std::to_string(static_cast<uint32_t>(key.samples));
+    if (request.definition) {
+        const auto& definition = *request.definition;
+        text += " definition=" + std::to_string(definition.width) + "x" +
+                std::to_string(definition.height);
+        text += " usage=" + std::string(texture_usage_name(definition.usage));
+        text += " mip=" + std::to_string(definition.mip_levels);
+        text += " samples=" + std::to_string(definition.samples);
     }
-    text += request.persist ? " persist=true" : " persist=false";
+    text += " lifetime=" + std::string(texture_lifetime_name(request.lifetime));
     return text;
 }
 
@@ -135,8 +146,8 @@ void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnost
               diagnostics.size());
     for (const auto& diagnostic : diagnostics) {
         const std::string graph_node =
-            diagnostic.graph_node ? std::to_string(diagnostic.graph_node->index) : "-";
-        const std::string pass_type = diagnostic.pass_type
+            diagnostic.graph_node.is_some() ? std::to_string(diagnostic.graph_node->index) : "-";
+        const std::string pass_type = diagnostic.pass_type.is_some()
                                           ? pass_type_name(*diagnostic.pass_type)
                                           : (diagnostic.frame_pass ? "frame" : "unknown");
         const std::string pipeline_cache_key =

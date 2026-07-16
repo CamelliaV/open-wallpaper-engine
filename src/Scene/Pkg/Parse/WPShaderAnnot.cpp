@@ -1,12 +1,14 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Utils/String.h"
 
 module wescene.pkg.parse;
+import rstd;
 import rstd.cppstd;
 import rstd.log;
 import :shader_lex;
+
+using namespace rstd::prelude;
 
 // WE shader annotation collector. Walks the source line by line and pulls
 // `// [COMBO]` / `uniform NAME; // {json}` annotations into WPShaderInfo.
@@ -146,8 +148,13 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     if (is_tex) {
         wpscene::WPUniformTex wput;
         wput.FromJson(sv_json);
-        i32 index { 0 };
-        STRTONUM(name.substr(9), index);
+        i32  index { 0 };
+        auto parsed = rstd::from_str<i32>(rstd::cppstd::as_str(name.substr(9)));
+        if (parsed.is_ok()) {
+            index = rstd::move(parsed).unwrap();
+        } else {
+            rstd_error("invalid shader texture index: {}", name);
+        }
         if (! wput.default_.empty()) {
             info->defTexs.push_back({ index, wput.default_ });
         }

@@ -5,6 +5,8 @@ import rstd.cppstd;
 
 import wescene.fs;
 
+using namespace rstd::prelude;
+
 namespace owe
 {
 
@@ -12,37 +14,37 @@ namespace
 {
 void delete_vfs(void* p) noexcept { delete static_cast<fs::VFS*>(p); }
 
-uint32_t next_scene_resource_generation() {
-    static std::atomic_uint32_t next { 1 };
+u32 next_scene_resource_generation() {
+    static std::atomic<u32> next { 1 };
     return next.fetch_add(1, std::memory_order_relaxed);
 }
 
-uint64_t next_render_scene_version() {
-    static std::atomic_uint64_t next { 1 };
+u64 next_render_scene_version() {
+    static std::atomic<u64> next { 1 };
     return next.fetch_add(1, std::memory_order_relaxed);
 }
 
-uint32_t index_from_size(std::size_t size) { return static_cast<uint32_t>(size); }
+u32 index_from_size(usize size) { return static_cast<u32>(size); }
 
 template<typename Id>
-bool valid_index(Id id, uint32_t generation, std::size_t size) {
-    return id.generation == generation && static_cast<std::size_t>(id.index) < size;
+bool valid_index(Id id, u32 generation, usize size) {
+    return id.generation == generation && static_cast<usize>(id.index) < size;
 }
 
 template<typename Id>
-bool valid_render_index(Id id, uint64_t generation, std::size_t size) {
-    return id.generation == generation && static_cast<std::size_t>(id.index) < size;
+bool valid_render_index(Id id, u64 generation, usize size) {
+    return id.generation == generation && static_cast<usize>(id.index) < size;
 }
 
-uint64_t scene_id_key(uint32_t index, uint32_t generation) {
-    return (static_cast<uint64_t>(generation) << 32) | static_cast<uint64_t>(index);
+u64 scene_id_key(u32 index, u32 generation) {
+    return (static_cast<u64>(generation) << 32) | static_cast<u64>(index);
 }
 
-uint64_t scene_id_key(SceneDrawItemId id) { return scene_id_key(id.index, id.generation); }
+u64 scene_id_key(SceneDrawItemId id) { return scene_id_key(id.index, id.generation); }
 
-uint64_t scene_id_key(SceneMaterialId id) { return scene_id_key(id.index, id.generation); }
+u64 scene_id_key(SceneMaterialId id) { return scene_id_key(id.index, id.generation); }
 
-uint64_t scene_id_key(SceneMeshId id) { return scene_id_key(id.index, id.generation); }
+u64 scene_id_key(SceneMeshId id) { return scene_id_key(id.index, id.generation); }
 
 float cubic(float p0, float p1, float p2, float p3, float t) {
     float omt = 1.0f - t;
@@ -62,7 +64,7 @@ float animation_frame(const SceneAnimationCurve& curve, double runtime) {
     absorb_last(curve.c2);
     if (end <= 0) return frame;
 
-    const float ef  = static_cast<float>(end);
+    const float ef   = static_cast<float>(end);
     bool        loop = curve.wraploop || curve.mode == "loop" || curve.mode == "repeat";
     if (loop) {
         frame = std::fmod(frame, ef);
@@ -115,7 +117,7 @@ float eval_segment(const SceneAnimationKey& a, const SceneAnimationKey& b, float
 float eval_axis(const std::vector<SceneAnimationKey>& keys, float frame) {
     if (keys.empty()) return 0.0f;
     if (frame <= static_cast<float>(keys.front().frame)) return keys.front().value;
-    for (std::size_t i = 1; i < keys.size(); ++i) {
+    for (usize i = 1; i < keys.size(); ++i) {
         if (frame <= static_cast<float>(keys[i].frame))
             return eval_segment(keys[i - 1], keys[i], frame);
     }
@@ -129,7 +131,7 @@ Eigen::Vector3f lerp_vec3(const Eigen::Vector3f& a, const Eigen::Vector3f& b, fl
 SceneCameraLookAtKey eval_lookat_track(const SceneCameraLookAtTrack& track, float frame) {
     if (track.keys.empty()) return {};
     if (frame <= track.keys.front().frame) return track.keys.front();
-    for (std::size_t i = 1; i < track.keys.size(); ++i) {
+    for (usize i = 1; i < track.keys.size(); ++i) {
         const auto& a = track.keys[i - 1];
         const auto& b = track.keys[i];
         if (frame > b.frame) continue;
@@ -145,11 +147,11 @@ SceneCameraLookAtKey eval_lookat_track(const SceneCameraLookAtTrack& track, floa
     return track.keys.back();
 }
 
-std::optional<SceneCameraLookAtKey>
-eval_lookat_tracks(std::span<const SceneCameraLookAtTrack> tracks, double runtime, float fps) {
+Option<SceneCameraLookAtKey> eval_lookat_tracks(std::span<const SceneCameraLookAtTrack> tracks,
+                                                double runtime, float fps) {
     float total = 0.0f;
     for (const auto& track : tracks) total += std::max(track.duration, 0.0f);
-    if (total <= 0.0f) return std::nullopt;
+    if (total <= 0.0f) return None();
 
     float frame = static_cast<float>(runtime) * (fps > 0.0f ? fps : 1.0f);
     frame       = std::fmod(frame, total);
@@ -159,15 +161,15 @@ eval_lookat_tracks(std::span<const SceneCameraLookAtTrack> tracks, double runtim
     for (const auto& track : tracks) {
         float duration = std::max(track.duration, 0.0f);
         if (duration <= 0.0f) continue;
-        if (frame <= offset + duration) return eval_lookat_track(track, frame - offset);
+        if (frame <= offset + duration) return Some(eval_lookat_track(track, frame - offset));
         offset += duration;
     }
-    return eval_lookat_track(tracks.back(), tracks.back().duration);
+    return Some(eval_lookat_track(tracks.back(), tracks.back().duration));
 }
 
 bool shader_values_equal(const ShaderValue& a, const ShaderValue& b) {
     if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
+    for (usize i = 0; i < a.size(); ++i) {
         if (a[i] != b[i]) return false;
     }
     return true;
@@ -179,7 +181,7 @@ ShaderValue eval_shader_value_animation(const SceneShaderValueAnimation& animati
         return animation.base;
 
     std::vector<float> value(animation.base.size());
-    for (std::size_t i = 0; i < animation.base.size(); ++i) value[i] = animation.base[i];
+    for (usize i = 0; i < animation.base.size(); ++i) value[i] = animation.base[i];
 
     if (value.size() == 1) {
         value[0] = animation.curve->EvaluateScalar(value[0], runtime);
@@ -285,7 +287,7 @@ void ensure_snapshot_link_render_targets(Scene& scene, const Set<i32>& linked_id
 }
 } // namespace
 
-void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
+void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
     m_scene      = &scene;
     m_generation = generation;
 
@@ -327,20 +329,19 @@ void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
         SceneMeshId mesh_id = register_mesh(*mesh);
         const auto& slots   = mesh->MaterialSlots();
         const auto& parts   = mesh->Submeshes();
-        for (std::size_t smi = 0; smi < parts.size(); ++smi) {
+        for (usize smi = 0; smi < parts.size(); ++smi) {
             const auto& submesh    = parts[smi];
-            auto        slot_index = static_cast<std::size_t>(submesh.material_slot);
+            auto        slot_index = static_cast<usize>(submesh.material_slot);
             if (slot_index >= slots.size() || ! slots[slot_index]) continue;
 
             SceneMaterialId material_id = register_material(*slots[slot_index]);
             SceneDrawItemId draw_id { .index      = index_from_size(m_draw_items.size()),
                                       .generation = generation };
-            m_draw_items.push_back(
-                SceneDrawItemRecord { .id            = draw_id,
-                                      .node          = node_id,
-                                      .mesh          = mesh_id,
-                                      .material      = material_id,
-                                      .submesh_index = static_cast<uint32_t>(smi) });
+            m_draw_items.push_back(SceneDrawItemRecord { .id            = draw_id,
+                                                         .node          = node_id,
+                                                         .mesh          = mesh_id,
+                                                         .material      = material_id,
+                                                         .submesh_index = static_cast<u32>(smi) });
         }
     };
 
@@ -363,7 +364,7 @@ void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
             auto cam_it = scene.cameras.find(node->Camera());
             if (cam_it != scene.cameras.end() && cam_it->second->HasImgEffect()) {
                 auto& eff_layer = cam_it->second->GetImgEffect();
-                for (std::size_t ei = 0; ei < eff_layer->EffectCount(); ++ei) {
+                for (usize ei = 0; ei < eff_layer->EffectCount(); ++ei) {
                     auto& eff = eff_layer->GetEffect(ei);
                     for (auto& eff_node : eff->nodes) self(self, eff_node.sceneNode.as_ptr());
                 }
@@ -387,7 +388,7 @@ void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
         m_texture_keys.reserve(m_scene->textures.size());
         for (const auto& [key, _] : m_scene->textures) m_texture_keys.push_back(key);
         std::sort(m_texture_keys.begin(), m_texture_keys.end());
-        for (std::size_t i = 0; i < m_texture_keys.size(); ++i) {
+        for (usize i = 0; i < m_texture_keys.size(); ++i) {
             m_texture_ids.emplace(
                 m_texture_keys[i],
                 SceneTextureId { .index = index_from_size(i), .generation = generation });
@@ -398,7 +399,7 @@ void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
         m_render_target_keys.reserve(m_scene->renderTargets.size());
         for (const auto& [key, _] : m_scene->renderTargets) m_render_target_keys.push_back(key);
         std::sort(m_render_target_keys.begin(), m_render_target_keys.end());
-        for (std::size_t i = 0; i < m_render_target_keys.size(); ++i) {
+        for (usize i = 0; i < m_render_target_keys.size(); ++i) {
             m_render_target_ids.emplace(
                 m_render_target_keys[i],
                 SceneRenderTargetId { .index = index_from_size(i), .generation = generation });
@@ -409,7 +410,7 @@ void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
         m_camera_keys.reserve(m_scene->cameras.size());
         for (const auto& [key, _] : m_scene->cameras) m_camera_keys.push_back(key);
         std::sort(m_camera_keys.begin(), m_camera_keys.end());
-        for (std::size_t i = 0; i < m_camera_keys.size(); ++i) {
+        for (usize i = 0; i < m_camera_keys.size(); ++i) {
             m_camera_ids.emplace(
                 m_camera_keys[i],
                 SceneCameraId { .index = index_from_size(i), .generation = generation });
@@ -421,64 +422,64 @@ void SceneResourceIndex::Rebuild(Scene& scene, uint32_t generation) {
     collect_camera_ids();
 }
 
-std::optional<SceneNodeId> SceneResourceIndex::nodeId(const SceneNode& node) const {
+Option<SceneNodeId> SceneResourceIndex::nodeId(const SceneNode& node) const {
     auto it = m_node_ids.find(&node);
-    if (it == m_node_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_node_ids.end()) return None();
+    return Some<SceneNodeId>(it->second);
 }
 
-std::optional<SceneMeshId> SceneResourceIndex::meshId(const SceneMesh& mesh) const {
+Option<SceneMeshId> SceneResourceIndex::meshId(const SceneMesh& mesh) const {
     auto it = m_mesh_ids.find(&mesh);
-    if (it == m_mesh_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_mesh_ids.end()) return None();
+    return Some<SceneMeshId>(it->second);
 }
 
-std::optional<SceneMaterialId> SceneResourceIndex::materialId(const SceneMaterial& material) const {
+Option<SceneMaterialId> SceneResourceIndex::materialId(const SceneMaterial& material) const {
     auto it = m_material_ids.find(&material);
-    if (it == m_material_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_material_ids.end()) return None();
+    return Some<SceneMaterialId>(it->second);
 }
 
-std::optional<SceneDrawItemId> SceneResourceIndex::drawItemFor(SceneNodeId node,
-                                                               uint32_t    submesh_index) const {
-    if (node.generation != m_generation) return std::nullopt;
+Option<SceneDrawItemId> SceneResourceIndex::drawItemFor(SceneNodeId node, u32 submesh_index) const {
+    if (node.generation != m_generation) return None();
     for (const auto& item : m_draw_items) {
-        if (item.node.index == node.index && item.submesh_index == submesh_index) return item.id;
+        if (item.node.index == node.index && item.submesh_index == submesh_index)
+            return Some<SceneDrawItemId>(item.id);
     }
-    return std::nullopt;
+    return None();
 }
 
-std::optional<SceneTextureId> SceneResourceIndex::textureId(std::string_view url) const {
+Option<SceneTextureId> SceneResourceIndex::textureId(std::string_view url) const {
     auto it = m_texture_ids.find(std::string(url));
-    if (it == m_texture_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_texture_ids.end()) return None();
+    return Some<SceneTextureId>(it->second);
 }
 
-std::optional<SceneRenderTargetId> SceneResourceIndex::renderTargetId(std::string_view key) const {
+Option<SceneRenderTargetId> SceneResourceIndex::renderTargetId(std::string_view key) const {
     auto it = m_render_target_ids.find(std::string(key));
-    if (it == m_render_target_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_render_target_ids.end()) return None();
+    return Some<SceneRenderTargetId>(it->second);
 }
 
-std::optional<SceneCameraId> SceneResourceIndex::cameraId(std::string_view name) const {
+Option<SceneCameraId> SceneResourceIndex::cameraId(std::string_view name) const {
     auto it = m_camera_ids.find(std::string(name));
-    if (it == m_camera_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_camera_ids.end()) return None();
+    return Some<SceneCameraId>(it->second);
 }
 
-std::optional<DrawItemView> SceneResourceIndex::resolve(SceneDrawItemId id) const {
-    if (! valid_index(id, m_generation, m_draw_items.size())) return std::nullopt;
+Option<DrawItemView> SceneResourceIndex::resolve(SceneDrawItemId id) const {
+    if (! valid_index(id, m_generation, m_draw_items.size())) return None();
     const auto& item = m_draw_items[id.index];
     auto*       n    = node(item.node);
     auto*       me   = mesh(item.mesh);
     auto*       ma   = material(item.material);
-    if (n == nullptr || me == nullptr || ma == nullptr) return std::nullopt;
-    if (static_cast<std::size_t>(item.submesh_index) >= me->Submeshes().size()) return std::nullopt;
-    return DrawItemView { .node          = n,
-                          .mesh          = me,
-                          .submesh       = &me->Submeshes()[item.submesh_index],
-                          .material      = ma,
-                          .submesh_index = item.submesh_index };
+    if (n == nullptr || me == nullptr || ma == nullptr) return None();
+    if (static_cast<usize>(item.submesh_index) >= me->Submeshes().size()) return None();
+    return Some<DrawItemView>(DrawItemView { .node          = n,
+                                             .mesh          = me,
+                                             .submesh       = &me->Submeshes()[item.submesh_index],
+                                             .material      = ma,
+                                             .submesh_index = item.submesh_index });
 }
 
 SceneNode* SceneResourceIndex::node(SceneNodeId id) const {
@@ -557,7 +558,7 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
     for (const auto& key : texture_keys) {
         auto id       = RenderTextureDescId { .index      = index_from_size(m_texture_descs.size()),
                                               .generation = version.value };
-        auto scene_id = index.textureId(key).value_or(SceneTextureId {});
+        auto scene_id = index.textureId(key).unwrap_or(SceneTextureId {});
         auto desc_it  = scene.textures.find(key);
         m_texture_desc_ids.emplace(key, id);
         m_texture_descs.push_back(RenderTextureDescRecord {
@@ -576,7 +577,7 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
     for (const auto& key : render_target_keys) {
         auto id       = RenderTargetDescId { .index      = index_from_size(m_render_target_descs.size()),
                                              .generation = version.value };
-        auto scene_id = index.renderTargetId(key).value_or(SceneRenderTargetId {});
+        auto scene_id = index.renderTargetId(key).unwrap_or(SceneRenderTargetId {});
         auto desc_it  = scene.renderTargets.find(key);
         m_render_target_desc_ids.emplace(key, id);
         m_render_target_descs.push_back(RenderTargetDescRecord {
@@ -591,7 +592,7 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
         auto        id   = RenderItemId { .index      = index_from_size(m_render_items.size()),
                                           .generation = version.value };
         const auto* node = index.node(item.node);
-        std::optional<RenderTargetDescId> output_override;
+        Option<RenderTargetDescId> output_override;
         if (auto view = index.resolve(item.id)) {
             if (view->submesh != nullptr && ! view->submesh->output_override.empty()) {
                 output_override = renderTargetDescId(view->submesh->output_override);
@@ -643,23 +644,22 @@ const RenderTargetDescRecord* RenderSceneSnapshot::renderTargetDesc(RenderTarget
     return &m_render_target_descs[id.index];
 }
 
-std::optional<RenderItemId> RenderSceneSnapshot::renderItemFor(SceneDrawItemId id) const {
+Option<RenderItemId> RenderSceneSnapshot::renderItemFor(SceneDrawItemId id) const {
     auto it = m_render_item_ids.find(scene_id_key(id));
-    if (it == m_render_item_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_render_item_ids.end()) return None();
+    return Some<RenderItemId>(it->second);
 }
 
-std::optional<RenderTextureDescId> RenderSceneSnapshot::textureDescId(std::string_view key) const {
+Option<RenderTextureDescId> RenderSceneSnapshot::textureDescId(std::string_view key) const {
     auto it = m_texture_desc_ids.find(std::string(key));
-    if (it == m_texture_desc_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_texture_desc_ids.end()) return None();
+    return Some<RenderTextureDescId>(it->second);
 }
 
-std::optional<RenderTargetDescId>
-RenderSceneSnapshot::renderTargetDescId(std::string_view key) const {
+Option<RenderTargetDescId> RenderSceneSnapshot::renderTargetDescId(std::string_view key) const {
     auto it = m_render_target_desc_ids.find(std::string(key));
-    if (it == m_render_target_desc_ids.end()) return std::nullopt;
-    return it->second;
+    if (it == m_render_target_desc_ids.end()) return None();
+    return Some<RenderTargetDescId>(it->second);
 }
 
 std::span<const RenderItemId> RenderSceneSnapshot::renderItemsFor(WallpaperLayerId id) const {
@@ -782,7 +782,7 @@ bool SceneCameraPath::Tick(double runtime) {
 Scene::Scene()
     : sceneGraph(rstd::sync::Arc<SceneNode>::make()),
       vfs(nullptr, &delete_vfs),
-      paritileSys(std::make_unique<ParticleSystem>(*this)),
+      paritileSys(Box<ParticleSystem>::make(*this)),
       m_resource_generation(next_scene_resource_generation()) {}
 Scene::~Scene() = default;
 
@@ -847,11 +847,11 @@ bool Scene::SetMaterialShaderValue(SceneMaterial& material, std::string_view uni
     return material.SetShaderValue(std::string(uniform_name), value);
 }
 
-SceneMaterialTextureSlotMutation
-Scene::SetMaterialTextureSlot(SceneMaterial& material, uint32_t slot, std::string_view texture) {
+SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
+                                                               std::string_view texture) {
     if (! EnsureTextureDescriptor(texture)) return {};
 
-    auto slot_index = static_cast<std::size_t>(slot);
+    auto slot_index = static_cast<usize>(slot);
     if (material.textures.size() <= slot_index) material.textures.resize(slot_index + 1);
     auto& current = material.textures[slot_index];
     if (current == texture) return {};
@@ -942,17 +942,17 @@ bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const Json& pr
     return requires_graph_rebuild;
 }
 
-std::optional<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node,
-                                                              std::string_view name) {
-    if (node.Camera().empty()) return std::nullopt;
+Option<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node,
+                                                       std::string_view name) {
+    if (node.Camera().empty()) return None();
     auto camera_it = cameras.find(node.Camera());
-    if (camera_it == cameras.end() || ! camera_it->second->HasImgEffect()) return std::nullopt;
+    if (camera_it == cameras.end() || ! camera_it->second->HasImgEffect()) return None();
 
     auto& effect_layer = camera_it->second->GetImgEffect();
-    if (! effect_layer) return std::nullopt;
+    if (! effect_layer) return None();
     auto effect = effect_layer->FindEffect(name);
-    if (! effect) return std::nullopt;
-    return SceneImageEffectRef { .layer = effect_layer.get(), .effect = std::move(effect) };
+    if (! effect) return None();
+    return Some(SceneImageEffectRef { .layer = effect_layer.get(), .effect = std::move(effect) });
 }
 
 bool Scene::SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible) {

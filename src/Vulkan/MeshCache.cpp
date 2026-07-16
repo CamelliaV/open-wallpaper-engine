@@ -7,132 +7,120 @@ module wescene.vulkan;
 import rstd.cppstd;
 import rstd.log;
 
+using namespace rstd::prelude;
+
 namespace owe::vulkan
 {
 
-// ---------- MeshBufferRef ----------
+BufferAllocation::BufferAllocation(BufferUploadPool* owner, StagingBufferRef ref)
+    : m_owner(owner), m_ref(ref) {}
 
-MeshBufferRef::MeshBufferRef(MeshCache* owner, MeshCacheKey key, VkDeviceSize offset,
-                             VkDeviceSize size)
-    : m_owner(owner), m_key(key), m_offset(offset), m_size(size) {}
-
-MeshBufferRef::~MeshBufferRef() {
-    if (m_owner) m_owner->release(m_key);
+BufferAllocation::~BufferAllocation() {
+    if (m_owner) m_owner->Release(m_ref);
 }
 
-MeshBufferRef::MeshBufferRef(MeshBufferRef&& o) noexcept
-    : m_owner(o.m_owner), m_key(o.m_key), m_offset(o.m_offset), m_size(o.m_size) {
-    o.m_owner  = nullptr;
-    o.m_key    = {};
-    o.m_offset = 0;
-    o.m_size   = 0;
+BufferAllocation::BufferAllocation(BufferAllocation&& o) noexcept
+    : m_owner(o.m_owner), m_ref(o.m_ref) {
+    o.m_owner = nullptr;
+    o.m_ref   = {};
 }
 
-MeshBufferRef& MeshBufferRef::operator=(MeshBufferRef&& o) noexcept {
+BufferAllocation& BufferAllocation::operator=(BufferAllocation&& o) noexcept {
     if (this != &o) {
-        if (m_owner) m_owner->release(m_key);
-        m_owner    = o.m_owner;
-        m_key      = o.m_key;
-        m_offset   = o.m_offset;
-        m_size     = o.m_size;
-        o.m_owner  = nullptr;
-        o.m_key    = {};
-        o.m_offset = 0;
-        o.m_size   = 0;
+        if (m_owner) m_owner->Release(m_ref);
+        m_owner   = o.m_owner;
+        m_ref     = o.m_ref;
+        o.m_owner = nullptr;
+        o.m_ref   = {};
     }
     return *this;
 }
 
-VkBuffer MeshBufferRef::buffer() const noexcept {
+VkBuffer BufferAllocation::buffer() const noexcept {
     return m_owner ? m_owner->gpuBuf() : VK_NULL_HANDLE;
 }
 
-// ---------- MeshCache ----------
-
 namespace
 {
-// Match StagingBuffer's default seed size; vertex/index pools rarely need more
-// than a few MB for typical wallpapers.
 constexpr VkDeviceSize kSeedSize = 2 * 1024 * 1024;
 } // namespace
 
-MeshCache::MeshCache(const Device& d): m_device(d) {}
-MeshCache::~MeshCache() { destroy(); }
+BufferUploadPool::BufferUploadPool(const Device& d): m_device(d) {}
+BufferUploadPool::~BufferUploadPool() { destroy(); }
 
-bool MeshCache::init() {
-    if (m_buf) return true;
-    m_buf = std::make_unique<StagingBuffer>(
-        m_device, kSeedSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    if (! m_buf->allocate()) {
-        m_buf.reset();
+bool BufferUploadPool::init() {
+    if (m_buf.is_some()) return true;
+    m_buf = Some(Box<StagingBuffer>::make(
+        m_device,
+        kSeedSize,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT));
+    if (! m_buf->get()->allocate()) {
+        m_buf = None();
         return false;
     }
     return true;
 }
 
-void MeshCache::destroy() {
-    m_map.clear();
-    if (m_buf) {
-        m_buf->destroy();
-        m_buf.reset();
+void BufferUploadPool::destroy() {
+    if (m_buf.is_some()) {
+        m_buf->get()->destroy();
+        m_buf = None();
     }
     m_dirty = false;
 }
 
-std::optional<MeshBufferRef>
-MeshCache::QueryOrUpload(MeshCacheKey key, std::span<const uint8_t> data, VkDeviceSize alignment) {
-    if (! m_buf || key.array_ptr == nullptr) return std::nullopt;
-
-    if (auto it = m_map.find(key); it != m_map.end()) {
-        ++it->second.refcount;
-        return MeshBufferRef(this, key, it->second.ref.offset, it->second.ref.size);
+Option<BufferAllocation> BufferUploadPool::Upload(std::span<const u8>        data,
+                                                  const BufferUploadRequest& request) {
+    if (m_buf.is_none() || request.size == 0 || data.size() > request.size) {
+        return None();
     }
-
+    VkDeviceSize alignment = static_cast<VkDeviceSize>(request.alignment);
+    if (request.usage == BufferUploadClass::Uniform) {
+        alignment = std::max(alignment, m_device.limits().minUniformBufferOffsetAlignment);
+    } else if (request.usage == BufferUploadClass::Storage) {
+        alignment = std::max(alignment, m_device.limits().minStorageBufferOffsetAlignment);
+    }
     StagingBufferRef ref;
-    if (! m_buf->allocateSubRef(data.size(), ref, alignment)) return std::nullopt;
-    if (! m_buf->writeToBuf(ref, { const_cast<uint8_t*>(data.data()), data.size() })) {
-        m_buf->unallocateSubRef(ref);
-        return std::nullopt;
+    auto*            buffer = m_buf->get();
+    if (! buffer->allocateSubRef(request.size, ref, alignment)) return None();
+    if (! data.empty() &&
+        ! buffer->writeToBuf(ref, { const_cast<u8*>(data.data()), data.size() })) {
+        buffer->unallocateSubRef(ref);
+        return None();
     }
 
-    auto [it, _] = m_map.emplace(key, Entry { ref, 1 });
-    m_dirty      = true;
-    return MeshBufferRef(this, key, it->second.ref.offset, it->second.ref.size);
+    m_dirty = true;
+    return Some(BufferAllocation(this, ref));
 }
 
-void MeshCache::release(MeshCacheKey key) {
-    auto it = m_map.find(key);
-    if (it == m_map.end()) return;
-    if (it->second.refcount > 0) --it->second.refcount;
-}
-
-VkBuffer MeshCache::gpuBuf() const { return m_buf ? m_buf->gpuBuf() : VK_NULL_HANDLE; }
-
-bool MeshCache::recordPendingUploads(vvk::CommandBuffer& cmd) {
-    if (! m_buf || ! m_dirty) return true;
-    if (! m_buf->recordUpload(cmd)) return false;
-    m_dirty = false;
+bool BufferUploadPool::Update(BufferAllocation& allocation, std::span<const u8> data) {
+    if (m_buf.is_none() || allocation.m_owner != this || data.size() > allocation.m_ref.size) {
+        return false;
+    }
+    if (data.empty()) return true;
+    if (! m_buf->get()->writeToBuf(allocation.m_ref,
+                                   { const_cast<u8*>(data.data()), data.size() })) {
+        return false;
+    }
+    m_dirty = true;
     return true;
 }
 
-void MeshCache::onRenderGraphCleared() {
-    // refcounts get dropped naturally as CustomShaderPass::destory clears its
-    // MeshBufferRef vectors. Reserved as a future fence/eviction hook.
+void BufferUploadPool::Release(StagingBufferRef ref) {
+    if (m_buf.is_some() && ref) m_buf->get()->unallocateSubRef(ref);
 }
 
-void MeshCache::evictUnused() {
-    if (! m_buf) return;
-    size_t freed = 0;
-    for (auto it = m_map.begin(); it != m_map.end();) {
-        if (it->second.refcount == 0) {
-            m_buf->unallocateSubRef(it->second.ref);
-            it = m_map.erase(it);
-            ++freed;
-        } else {
-            ++it;
-        }
-    }
-    if (freed > 0) rstd_info("MeshCache evict: freed {} entries", freed);
+VkBuffer BufferUploadPool::gpuBuf() const {
+    return m_buf.is_some() ? m_buf->as_ptr().as_raw_ptr()->gpuBuf() : VK_NULL_HANDLE;
+}
+
+bool BufferUploadPool::recordPendingUploads(vvk::CommandBuffer& cmd) {
+    if (m_buf.is_none() || ! m_dirty) return true;
+    if (! m_buf->get()->recordUpload(cmd)) return false;
+    m_dirty = false;
+    return true;
 }
 
 } // namespace owe::vulkan

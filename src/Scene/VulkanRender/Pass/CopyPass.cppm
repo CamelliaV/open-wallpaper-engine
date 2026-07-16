@@ -21,8 +21,6 @@ public:
         rstd::Option<TextureRequest>             src_request;
         rstd::Option<TextureRequest>             dst_request;
 
-        ImageParameters                         vk_src;
-        ImageParameters                         vk_dst;
         resource_registry::PreparedBarrierBatch before_barriers;
         resource_registry::PreparedBarrierBatch after_barriers;
     };
@@ -31,12 +29,14 @@ public:
     virtual ~CopyPass();
 
     PassInvalidationFlags finalizeResourceRequests(Scene&) override;
-    bool                  prepareResourceStates(resource_registry::ResourceStateTracker&) override;
+    PassResourceUses      resourceUses() const override;
+    bool                  prepareResourceStates(
+        rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>>) override;
     std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const override;
 
-    void prepare(Scene&, const Device&, RenderingResources&) override;
+    void prepare(Scene&, const Device&, PassPrepareContext&) override;
     void record(PassRecordContext&) override;
-    void destory(const Device&, RenderingResources&) override;
+    void destory(const Device&) override;
 
 private:
     Desc m_desc;

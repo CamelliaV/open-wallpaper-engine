@@ -9,9 +9,12 @@ module;
 export module wescene.utils;
 import wescene.core;
 import eigen;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 export import wescene.types;
+
+using namespace rstd::prelude;
 
 // ---------- Module-purview entities ----------------------------------------
 
@@ -27,9 +30,9 @@ public:
     void RegisterFrame();
 
 private:
-    u32                                                m_fps;
-    u32                                                m_frameCount;
-    std::chrono::time_point<std::chrono::steady_clock> m_startTime;
+    u32                 m_fps;
+    u32                 m_frameCount;
+    rstd::time::Instant m_startTime;
 };
 
 namespace algorism
@@ -111,48 +114,15 @@ inline Eigen::Vector3d CurlNoise(Eigen::Vector3d p) noexcept {
 }
 } // namespace algorism
 
-namespace platform
-{
-// Was Utils/Platform.hpp.
-inline std::filesystem::path GetCachePath(std::string_view name) {
-    using namespace std::filesystem;
-
-    path             p_cache;
-    std::string_view home = sview_nullsafe(std::getenv("HOME"));
-    if (! home.empty()) {
-        std::string_view cache = sview_nullsafe(std::getenv("XDG_CACHE_HOME"));
-        if (cache.empty())
-            p_cache = path(home) / ".cache";
-        else
-            p_cache = path(cache);
-    }
-    return p_cache / name;
-}
-} // namespace platform
-
 } // namespace owe
 
-// ---------- Migrated from former Utils/{Hash,DynamicLibrary,Identity} -------
+// ---------- Migrated from former Utils/{Hash,DynamicLibrary} ----------------
 
 export namespace utils
 {
 
-// Re-exported from classic Sha.hpp (kept classic for classic-Logging.cpp).
+// Re-exported from classic Sha.hpp for non-module implementation consumers.
 using ::utils::genSha1;
-
-// hash_combine moved to wescene.types (re-exported above).
-
-// Was Utils/Identity.hpp.
-template<typename>
-struct is_std_array {};
-template<typename T>
-struct is_std_array<std::vector<T>> {
-    using type = std::vector<T>;
-};
-template<typename T, std::size_t N>
-struct is_std_array<std::array<T, N>> {
-    using type = std::array<T, N>;
-};
 
 // DynamicLibrary lives in wescene.types now (re-exported above).
 

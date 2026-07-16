@@ -3,9 +3,12 @@ module;
 #include <vulkan/vulkan_core.h>
 
 export module wescene.resource_registry:resource_key;
+import rstd;
 import rstd.cppstd;
 import wescene.types;
 import wescene.vulkan;
+
+using namespace rstd::prelude;
 
 export namespace owe::vulkan
 {
@@ -17,7 +20,7 @@ struct PipelineResourceRequest {
     std::vector<Uni_ShaderSpv>                     shader_stages;
     VkPipelineColorBlendAttachmentState            color_blend {};
     VkPipelineColorBlendStateCreateFlags           color_blend_flags { 0 };
-    std::array<float, 4>                           blend_constants { 0.0f, 0.0f, 0.0f, 0.0f };
+    rstd::array<float, 4>                          blend_constants { 0.0f, 0.0f, 0.0f, 0.0f };
     VkPipelineDepthStencilStateCreateInfo          depth {};
     VkPipelineRasterizationStateCreateInfo         raster {};
     VkPipelineMultisampleStateCreateInfo           multisample {};
@@ -96,6 +99,7 @@ struct RenderPassResourceDesc {
     VkAttachmentLoadOp    depth_stencil_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
     VkAttachmentStoreOp   depth_stencil_store_op { VK_ATTACHMENT_STORE_OP_DONT_CARE };
     VkImageLayout depth_attachment_layout { VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    bool          has_resolve_attachment { false };
     bool          has_depth_attachment { false };
 };
 
@@ -106,7 +110,7 @@ struct PipelineResourceDesc {
     std::vector<ShaderSpv>                         shader_stages;
     VkPipelineColorBlendAttachmentState            color_blend {};
     VkPipelineColorBlendStateCreateFlags           color_blend_flags { 0 };
-    std::array<float, 4>                           blend_constants { 0.0f, 0.0f, 0.0f, 0.0f };
+    rstd::array<float, 4>                          blend_constants { 0.0f, 0.0f, 0.0f, 0.0f };
     VkPipelineDepthStencilStateCreateInfo          depth {};
     VkPipelineRasterizationStateCreateInfo         raster {};
     VkPipelineMultisampleStateCreateInfo           multisample {};
@@ -476,14 +480,15 @@ inline void WritePipelineMultisample(PipelineKeyWriter&                         
 
 inline RenderPassResourceDesc MakeRenderPassResourceDesc(const PipelineResourceRequest& request) {
     RenderPassResourceDesc desc {
-        .color_format         = request.color_format,
-        .depth_format         = VK_FORMAT_D32_SFLOAT,
-        .samples              = request.multisample.rasterizationSamples,
-        .color_final_layout   = request.color_final_layout,
-        .color_load_op        = request.color_load_op,
-        .resolve_final_layout = request.color_final_layout,
-        .depth_load_op        = request.depth_load_op,
-        .has_depth_attachment = request.has_depth_attachment,
+        .color_format           = request.color_format,
+        .depth_format           = VK_FORMAT_D32_SFLOAT,
+        .samples                = request.multisample.rasterizationSamples,
+        .color_final_layout     = request.color_final_layout,
+        .color_load_op          = request.color_load_op,
+        .resolve_final_layout   = request.color_final_layout,
+        .depth_load_op          = request.depth_load_op,
+        .has_resolve_attachment = request.multisample.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT,
+        .has_depth_attachment   = request.has_depth_attachment,
     };
     if (request.color_load_op == VK_ATTACHMENT_LOAD_OP_LOAD) {
         desc.color_initial_layout =
@@ -540,7 +545,7 @@ MakeFramebufferResourceDesc(const FramebufferResourceRequest& request) {
 }
 
 inline void WriteRenderPassDesc(PipelineKeyWriter& writer, const RenderPassResourceDesc& desc) {
-    const bool has_resolve = desc.samples != VK_SAMPLE_COUNT_1_BIT;
+    const bool has_resolve = desc.has_resolve_attachment;
     WritePipelineScalar(writer, desc.color_format);
     WritePipelineScalar(writer, desc.depth_format);
     WritePipelineScalar(writer, desc.samples);

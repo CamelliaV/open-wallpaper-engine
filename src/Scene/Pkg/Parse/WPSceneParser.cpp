@@ -1,8 +1,10 @@
 module;
 
+#include <algorithm>
 #include <rstd/macro.hpp>
+#include <string>
+#include <vector>
 
-#include "Utils/String.h"
 #include "Utils/Sha.hpp"
 
 module wescene.pkg.parse;
@@ -20,6 +22,7 @@ import wescene.script;
 
 import wescene.scene_uniform_updater;
 
+using namespace rstd::prelude;
 using namespace owe;
 using namespace Eigen;
 
@@ -1165,7 +1168,9 @@ void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const W
 SceneShaderTextureCompileInfo ToSceneShaderTextureCompileInfo(const WPShaderTexInfo& info) {
     return SceneShaderTextureCompileInfo {
         .enabled    = info.enabled,
-        .components = info.composEnabled,
+        .components = rstd::array<bool, 3> { info.composEnabled[0],
+                                             info.composEnabled[1],
+                                             info.composEnabled[2] },
     };
 }
 
@@ -2026,7 +2031,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     GenCardMesh(scene.default_effect_mesh, { 2.0f, 2.0f });
     context.shader_updater = static_cast<SceneUniformUpdater*>(scene.shaderValueUpdater.get());
 
-    scene.clearColor = sc.general.clearcolor;
+    scene.clearColor = array_cast<float>(sc.general.clearcolor);
     if (auto it = sc.general.user_bindings.find("clearcolor");
         it != sc.general.user_bindings.end()) {
         scene.clearColorUserKey = it->second;
@@ -3154,7 +3159,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         }
     }
 
-    auto particleSub = std::make_unique<ParticleSubSystem>(
+    auto particleSub = Box<ParticleSubSystem>::make(
         *context.scene->paritileSys,
         spMesh,
         maxcount,
@@ -3219,7 +3224,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     if (is_child)
         child_ptr.particle_parent->AddChild(std::move(particleSub));
     else
-        context.scene->paritileSys->subsystems.emplace_back(std::move(particleSub));
+        context.scene->paritileSys->subsystems.push(rstd::move(particleSub));
 
     if (! is_child) AssignNodeFieldAnimations(*spNode.as_ptr(), wppartobj.field_bindings);
     WireFieldScripts(context, spNode, wppartobj.field_bindings);
@@ -3287,8 +3292,8 @@ void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
     desc.cast_shadow          = light_obj.castshadow;
     desc.cast_volumetrics     = light_obj.castvolumetrics;
 
-    context.scene->lights.emplace_back(std::make_unique<SceneLight>(desc));
-    auto& light = *(context.scene->lights.back());
+    context.scene->lights.push(Box<SceneLight>::make(desc));
+    auto& light = *context.scene->lights[context.scene->lights.len() - 1].get();
     light.setNode(node.as_ptr());
     light.setRuntimeVisible(light_obj.visible);
     if (! light_obj.visible_user.empty()) {

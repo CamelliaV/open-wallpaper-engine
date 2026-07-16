@@ -2,25 +2,26 @@ module;
 
 module wescene.utils;
 import wescene.core;
+import rstd;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe;
-using namespace std::chrono;
 
-FpsCounter::FpsCounter(): m_fps(0), m_frameCount(0), m_startTime(steady_clock::now()) {}
+FpsCounter::FpsCounter(): m_fps(0), m_frameCount(0), m_startTime(rstd::time::Instant::now()) {}
 
 namespace
 {
-constexpr seconds timeout { 2 };
+constexpr auto timeout = rstd::time::Duration::from_secs(2);
 }
 
 void FpsCounter::RegisterFrame() {
-    auto now  = steady_clock::now();
+    auto now  = rstd::time::Instant::now();
     auto diff = now - m_startTime;
 
     m_frameCount++;
     if (diff > timeout) {
-        m_fps        = (u32)(m_frameCount / duration<double>(diff).count());
+        m_fps        = u32(double(m_frameCount) / diff.as_secs_f64());
         m_frameCount = 0;
         m_startTime  = now;
         std::cerr << m_fps << std::endl;

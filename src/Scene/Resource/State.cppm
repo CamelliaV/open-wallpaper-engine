@@ -4,58 +4,34 @@ import wescene.resource;
 import wescene.vulkan;
 
 import :prepared;
+import :barrier;
 
 export namespace owe::resource_registry
 {
 
 using namespace rstd::prelude;
 
-enum class TextureStateKind
-{
-    Undefined,
-    Sampled,
-    TransferSource,
-    TransferDestination,
-    ColorAttachment,
-    DepthAttachment,
-};
+struct TextureStatePreparer {
+    using Trait                  = TextureStatePreparer;
+    static constexpr bool direct = false;
 
-struct TextureSubresourceRange {
-    VkImageAspectFlags aspect { VK_IMAGE_ASPECT_COLOR_BIT };
-    u32                base_mip_level { 0 };
-    u32                level_count { VK_REMAINING_MIP_LEVELS };
-    u32                base_array_layer { 0 };
-    u32                layer_count { VK_REMAINING_ARRAY_LAYERS };
-};
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = TextureStatePreparer;
 
-struct PreparedImageBarrier {
-    VkPipelineStageFlags src_stage { VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT };
-    VkPipelineStageFlags dst_stage { VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT };
-    VkDependencyFlags    dependency { VK_DEPENDENCY_BY_REGION_BIT };
-    VkImageMemoryBarrier barrier {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        auto Prepare(resource::TextureUseHandle use, TextureStateKind target,
+                     TextureSubresourceRange range = {}, bool discard = false)
+            -> Option<PreparedImageBarrier> {
+            return rstd::trait_call<0>(this, use, target, range, discard);
+        }
+
+        bool Set(resource::TextureUseHandle use, TextureStateKind state) {
+            return rstd::trait_call<1>(this, use, state);
+        }
     };
 
-    void Record(vvk::CommandBuffer& command) const {
-        command.PipelineBarrier(src_stage, dst_stage, dependency, barrier);
-    }
-};
-
-class PreparedBarrierBatch {
-public:
-    void Add(PreparedImageBarrier barrier) { m_barriers.push(rstd::move(barrier)); }
-
-    void Clear() { m_barriers.clear(); }
-
-    void Record(vvk::CommandBuffer& command) const {
-        for (const auto& barrier : m_barriers) barrier.Record(command);
-    }
-
-    auto Size() const noexcept -> usize { return m_barriers.len(); }
-    bool Empty() const noexcept { return m_barriers.is_empty(); }
-
-private:
-    rstd::vec::Vec<PreparedImageBarrier> m_barriers;
+    template<typename T>
+    using Funcs = TraitFuncs<&T::Prepare, &T::Set>;
 };
 
 class ResourceStateTracker {
@@ -194,3 +170,24 @@ private:
 };
 
 } // namespace owe::resource_registry
+
+export namespace rstd
+{
+
+template<>
+struct Impl<owe::resource_registry::TextureStatePreparer,
+            owe::resource_registry::ResourceStateTracker>
+    : ImplBase<owe::resource_registry::ResourceStateTracker> {
+    auto Prepare(owe::resource::TextureUseHandle                 use,
+                 owe::resource_registry::TextureStateKind        target,
+                 owe::resource_registry::TextureSubresourceRange range, bool discard)
+        -> Option<owe::resource_registry::PreparedImageBarrier> {
+        return this->self().Prepare(use, target, range, discard);
+    }
+
+    bool Set(owe::resource::TextureUseHandle use, owe::resource_registry::TextureStateKind state) {
+        return this->self().Set(use, state);
+    }
+};
+
+} // namespace rstd

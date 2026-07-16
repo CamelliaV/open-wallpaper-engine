@@ -10,11 +10,13 @@ import rstd;
 import rstd.log;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe::vulkan;
 
-constexpr std::array<InstanceLayer, 0> base_inst_layers {};
+constexpr rstd::array<InstanceLayer, 0> base_inst_layers {};
 
-constexpr std::array base_inst_exts { Extension { true, VK_EXT_DEBUG_UTILS_EXTENSION_NAME } };
+constexpr rstd::array<Extension, 1> base_inst_exts { Extension {
+    true, VK_EXT_DEBUG_UTILS_EXTENSION_NAME } };
 
 namespace
 {
@@ -50,7 +52,7 @@ vvk::DebugUtilsMessenger SetupDebugCallback(vvk::Instance& instance) {
 
 VkResult CreatInstance(vvk::Instance* inst, std::span<const std::string_view> exts,
                        std::span<const std::string_view> layers, vvk::InstanceDispatch& dld,
-                       std::uint32_t api_version) {
+                       u32 api_version) {
     VkApplicationInfo app_info {
         .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pNext              = nullptr,
@@ -91,8 +93,7 @@ void EnumateLayers(owe::Set<std::string>& set, const vvk::InstanceDispatch& dld)
 }
 } // namespace
 
-bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
-                                    std::span<const std::uint8_t> uuid) {
+bool Instance::ChoosePhysicalDevice(const CheckGpuOp& checkgpu, std::span<const u8> uuid) {
     auto deviceList = m_vinst.EnumeratePhysicalDevices();
 
     auto logGpu = [](const VkPhysicalDeviceProperties& props) {
@@ -152,12 +153,14 @@ bool Instance::supportLayer(std::string_view name) const { return exists(m_layer
 void Instance::Destroy() {}
 
 bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
-                      std::span<const InstanceLayer> instLayers, std::uint32_t api_version) {
+                      std::span<const InstanceLayer> instLayers, u32 api_version) {
     if (! vvk::Load(inst.m_dld)) return false;
 
     EnumateExts(inst.m_extensions, inst.m_dld);
-    Set<std::string> exts, layers;
-    std::array       test_exts_array { std::span<const Extension>(base_inst_exts), instExts };
+    Set<std::string>                           exts, layers;
+    rstd::array<std::span<const Extension>, 2> test_exts_array {
+        std::span<const Extension>(base_inst_exts.data(), base_inst_exts.len()), instExts
+    };
     for (auto& test_exts : test_exts_array) {
         for (auto& ext : test_exts) {
             bool ok = inst.supportExt(ext.name);
@@ -170,7 +173,9 @@ bool Instance::Create(Instance& inst, std::span<const Extension> instExts,
     }
 
     EnumateLayers(inst.m_layers, inst.m_dld);
-    std::array test_layers_array { std::span<const InstanceLayer>(base_inst_layers), instLayers };
+    rstd::array<std::span<const InstanceLayer>, 2> test_layers_array {
+        std::span<const InstanceLayer>(base_inst_layers.data(), base_inst_layers.len()), instLayers
+    };
     for (auto& test_layers : test_layers_array) {
         for (auto& layer : test_layers) {
             bool ok = inst.supportLayer(layer.name);

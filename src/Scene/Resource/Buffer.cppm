@@ -41,11 +41,11 @@ struct BufferDefinition {
 };
 
 struct BufferRequest {
-    String                    name;
+    String                     name;
     Option<BufferDefinitionId> source;
-    BufferDefinition          definition;
-    BufferLifetimeClass       lifetime { BufferLifetimeClass::Retained };
-    u64                       content_version { 1 };
+    BufferDefinition           definition;
+    BufferLifetimeClass        lifetime { BufferLifetimeClass::Retained };
+    u64                        content_version { 1 };
 
     auto clone() const -> BufferRequest {
         return BufferRequest {

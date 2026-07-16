@@ -8,25 +8,45 @@ import wescene.vulkan;
 import wescene.scene;
 
 using namespace owe::vulkan;
+using namespace rstd::prelude;
 
 FinPass::FinPass(Desc&& desc): m_desc(std::move(desc)) {}
 FinPass::~FinPass() {}
 
-bool FinPass::setFrameSurface(owe::FrameSurfaceLease                     lease,
-                              resource_registry::ExternalResourceBridge& bridge,
-                              const DeviceCapabilities& capabilities, u32 graphics_queue_family) {
-    auto prepared =
-        bridge.Prepare(capabilities, m_desc.vk_result, rstd::move(lease), graphics_queue_family);
+bool FinPass::setFrameSurface(
+    owe::FrameSurfaceLease                                                lease,
+    rstd::mut_ref<rstd::dyn<resource_registry::ExternalResourcePreparer>> resources,
+    const DeviceCapabilities& capabilities, u32 graphics_queue_family) {
+    if (m_desc.external_use.is_none() || m_desc.result_use.is_none()) return false;
+    auto prepared = resources->PrepareExternal(*m_desc.external_use,
+                                               *m_desc.result_use,
+                                               capabilities,
+                                               rstd::move(lease),
+                                               graphics_queue_family);
     if (prepared.is_err()) {
         auto error = rstd::move(prepared).unwrap_err_unchecked();
-        rstd_error("prepare external frame failed: {}", error.message.as_str());
+        rstd_error("prepare external frame failed: {}", error.message);
         return false;
     }
-    m_desc.frame_surface = rstd::Some(rstd::move(prepared).unwrap_unchecked());
     return true;
 }
 bool FinPass::setResultRequest(rstd::Option<TextureRequest> request) {
     return SetTextureRequestIfChanged(m_desc.result_request, std::move(request));
+}
+
+void FinPass::declareResources(ResourceDeclarationContext& context) {
+    m_desc.external_use = rstd::Some(context.ReserveExternal());
+}
+
+PassResourceUses FinPass::resourceUses() const {
+    PassResourceUses uses;
+    if (m_desc.result_use.is_some()) {
+        uses.textures.push(resource::TextureUseHandle(*m_desc.result_use));
+    }
+    if (m_desc.external_use.is_some()) {
+        uses.externals.push(resource::ExternalUseHandle(*m_desc.external_use));
+    }
+    return uses;
 }
 
 std::vector<PassTextureRequestDiagnostic> FinPass::textureRequestDiagnostics() const {
@@ -40,35 +60,38 @@ std::vector<PassTextureRequestDiagnostic> FinPass::textureRequestDiagnostics() c
     return out;
 }
 
-bool FinPass::prepareResourceStates(resource_registry::ResourceStateTracker& states) {
+bool FinPass::prepareResourceStates(
+    rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>> states) {
     m_desc.result_barrier.Clear();
     if (m_desc.result_use.is_none()) return false;
     auto barrier =
-        states.Prepare(*m_desc.result_use, resource_registry::TextureStateKind::TransferSource);
+        states->Prepare(*m_desc.result_use, resource_registry::TextureStateKind::TransferSource);
     if (barrier.is_none()) return false;
     m_desc.result_barrier.Add(rstd::move(barrier).unwrap_unchecked());
     return true;
 }
 
-void FinPass::prepare(Scene& scene, const Device&, RenderingResources& rr) {
+void FinPass::prepare(Scene& scene, const Device&, PassPrepareContext& context) {
     auto tex_name = std::string(m_desc.result);
     if (scene.renderTargets.count(tex_name) == 0) {
         rstd_error("FinPass: scene render target \"{}\" not found", tex_name);
         return;
     }
     if (m_desc.result_use.is_none()) return;
-    auto prepared = rr.prepared_resources.Resolve(*m_desc.result_use);
-    if (prepared.is_none()) {
+    if (context.resources->Resolve(*m_desc.result_use).is_none()) {
         rstd_error("FinPass: prepared texture \"{}\" unavailable", tex_name);
         return;
     }
-    m_desc.vk_result = (**prepared).image.getActive();
     setPrepared();
 }
 
 void FinPass::record(PassRecordContext& context) {
-    if (m_desc.frame_surface.is_none()) return;
-    const auto& prepared      = *m_desc.frame_surface;
+    if (m_desc.result_use.is_none() || m_desc.external_use.is_none()) return;
+    auto source   = context.resources->Resolve(*m_desc.result_use);
+    auto external = context.resources->Resolve(*m_desc.external_use);
+    if (source.is_none() || external.is_none()) return;
+    const auto& result        = (**source).image.getActive();
+    const auto& prepared      = (**external).frame;
     const auto& frame_surface = prepared.lease;
     const auto& present       = frame_surface.image;
     auto&       cmd           = *context.command;
@@ -79,8 +102,8 @@ void FinPass::record(PassRecordContext& context) {
         // Result is always R8G8B8A8_UNORM (screen RT). We can copy when
         // present matches that and dimensions are identical; otherwise
         // fall back to blit which handles size/format mismatch.
-        const bool can_copy = m_desc.vk_result.extent.width == present.extent.width &&
-                              m_desc.vk_result.extent.height == present.extent.height &&
+        const bool can_copy = result.extent.width == present.extent.width &&
+                              result.extent.height == present.extent.height &&
                               frame_surface.format == VK_FORMAT_R8G8B8A8_UNORM;
 
         if (! m_path_logged) {
@@ -94,9 +117,9 @@ void FinPass::record(PassRecordContext& context) {
                 .srcOffset      = { 0, 0, 0 },
                 .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 .dstOffset      = { 0, 0, 0 },
-                .extent = { m_desc.vk_result.extent.width, m_desc.vk_result.extent.height, 1 },
+                .extent         = { result.extent.width, result.extent.height, 1 },
             };
-            cmd.CopyImage(m_desc.vk_result.handle,
+            cmd.CopyImage(result.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                           present.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -106,18 +129,19 @@ void FinPass::record(PassRecordContext& context) {
                 .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 .srcOffsets     = {
                     VkOffset3D { 0, 0, 0 },
-                    VkOffset3D { (int32_t)m_desc.vk_result.extent.width,
-                                 (int32_t)m_desc.vk_result.extent.height, 1 },
+                    VkOffset3D { static_cast<i32>(result.extent.width),
+                                 static_cast<i32>(result.extent.height),
+                                 1 },
                 },
                 .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 .dstOffsets     = {
                     VkOffset3D { 0, 0, 0 },
-                    VkOffset3D { (int32_t)present.extent.width,
-                                 (int32_t)present.extent.height,
+                    VkOffset3D { static_cast<i32>(present.extent.width),
+                                 static_cast<i32>(present.extent.height),
                                  1 },
                 },
             };
-            cmd.BlitImage(m_desc.vk_result.handle,
+            cmd.BlitImage(result.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                           present.handle,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -129,9 +153,7 @@ void FinPass::record(PassRecordContext& context) {
     prepared.after_copy.Record(cmd);
 }
 
-void FinPass::destory(const Device&, RenderingResources&) {
-    m_desc.vk_result = {};
+void FinPass::destory(const Device&) {
     m_desc.result_barrier.Clear();
-    m_desc.frame_surface = rstd::None();
     setPrepared(false);
 }

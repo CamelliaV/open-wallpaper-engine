@@ -13,15 +13,20 @@ export namespace owe::vulkan
 {
 
 struct ShaderReflectionKey {
-    const SceneShader* shader { nullptr };
-    uint32_t           shader_id { 0 };
-    std::size_t        code_hash { 0 };
+    rstd::u32   shader_id { 0 };
+    rstd::usize code_hash { 0 };
 
     bool operator==(const ShaderReflectionKey&) const = default;
 };
 
 struct ShaderReflectionKeyHash {
-    std::size_t operator()(const ShaderReflectionKey&) const;
+    rstd::hash::RandomState state;
+
+    auto operator()(const ShaderReflectionKey& key) const noexcept -> rstd::u64 {
+        auto seed = state(key.shader_id);
+        seed ^= state(key.code_hash) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        return seed;
+    }
 };
 
 struct CachedShaderStage {
@@ -37,13 +42,15 @@ struct CachedShaderReflection {
 
 class ShaderReflectionCache : NoCopy, NoMove {
 public:
-    const CachedShaderReflection* Query(const SceneShader&);
-    void                          Clear();
+    auto Query(const SceneShader&) -> rstd::Option<rstd::ref<CachedShaderReflection>>;
+    void Clear();
 
 private:
-    std::unordered_map<ShaderReflectionKey, CachedShaderReflection, ShaderReflectionKeyHash>
+    rstd::collections::HashMap<ShaderReflectionKey, CachedShaderReflection, ShaderReflectionKeyHash>
         m_entries;
 };
+
+auto MakeSceneShaderRequest(const SceneShader&) -> resource::ShaderRequest;
 
 class SceneShaderArtifactProvider {
 public:
@@ -52,13 +59,13 @@ public:
     auto Request() const -> resource::ShaderRequest;
     auto LoadShader(const resource::ShaderRequest&)
         -> rstd::Result<resource::ShaderArtifact, resource::ResourceError>;
-    auto Reflection() -> const CachedShaderReflection*;
 
 private:
-    ShaderReflectionCache* m_cache { nullptr };
-    const SceneShader*     m_shader { nullptr };
+    rstd::mut_ref<ShaderReflectionCache> m_cache;
+    rstd::ref<SceneShader>               m_shader;
 };
 
-std::vector<Uni_ShaderSpv> CloneShaderSpvs(const CachedShaderReflection&);
+std::vector<Uni_ShaderSpv> ShaderSpvsFromArtifact(const resource::ShaderArtifact&);
+auto ShaderReflectionFromArtifact(const resource::ShaderArtifact&) -> ShaderReflected;
 
 } // namespace owe::vulkan

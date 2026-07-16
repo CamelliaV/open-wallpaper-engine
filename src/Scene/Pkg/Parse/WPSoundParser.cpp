@@ -5,6 +5,7 @@ import rstd.cppstd;
 import rstd.log;
 import rstd;
 
+using namespace rstd::prelude;
 using namespace owe;
 
 enum class PlaybackMode
@@ -67,8 +68,8 @@ public:
         PlaybackMode mode { PlaybackMode::Loop };
     };
     WPSoundStream(const std::vector<std::string>& paths, fs::VFS& vfs, Config c,
-                  std::shared_ptr<WPSoundState>       state,
-                  std::array<std::atomic<float>, 16>* audio_average)
+                  std::shared_ptr<WPSoundState>        state,
+                  rstd::array<std::atomic<float>, 16>* audio_average)
         : vfs(vfs),
           m_config(c),
           m_state(std::move(state)),
@@ -171,9 +172,9 @@ private:
         const auto   total   = static_cast<std::size_t>(frameReads * m_desc.channels);
         if (total == 0) return;
 
-        for (std::size_t bin = 0; bin < m_audioAverage->size(); ++bin) {
-            const auto begin = bin * total / m_audioAverage->size();
-            const auto end   = (bin + 1) * total / m_audioAverage->size();
+        for (usize bin = 0; bin < m_audioAverage->len(); ++bin) {
+            const auto begin = bin * total / m_audioAverage->len();
+            const auto end   = (bin + 1) * total / m_audioAverage->len();
             if (end <= begin) continue;
 
             float sum = 0.0f;
@@ -197,7 +198,7 @@ private:
 
     const std::vector<std::string>              m_soundPaths;
     std::unique_ptr<wavsen::audio::SoundStream> m_curActive;
-    std::array<std::atomic<float>, 16>*         m_audioAverage { nullptr };
+    rstd::array<std::atomic<float>, 16>*        m_audioAverage { nullptr };
 };
 
 std::shared_ptr<SceneSoundControl> WPSoundParser::Parse(const wpscene::SoundObject&  obj,

@@ -74,7 +74,7 @@ struct LinkTextureConsumer {
     rg::NodeHandle   node;
     rg::PassHandle   pass;
     WallpaperLayerId source_layer;
-    uint32_t         texture_index;
+    u32              texture_index;
 };
 
 static rg::TextureDesc MakeTextureDescBase(std::string_view key) {
@@ -99,8 +99,7 @@ public:
             m_source_outputs[source_layer.value] = std::move(output);
         }
     }
-    void addConsumer(const rg::PassNode& pass, WallpaperLayerId source_layer,
-                     uint32_t texture_index) {
+    void addConsumer(const rg::PassNode& pass, WallpaperLayerId source_layer, u32 texture_index) {
         m_consumers.push_back(LinkTextureConsumer {
             .node          = pass.handle,
             .pass          = pass.pass,
@@ -117,19 +116,19 @@ private:
 };
 
 struct ExtraInfo {
-    rg::RenderGraph*                  rgraph { nullptr };
-    Scene*                            scene { nullptr };
-    Set<std::string>                  depth_initialized_outputs {};
-    std::optional<rg::TextureNodeRef> mip_framebuffer_snapshot;
-    const RenderSceneSnapshot*        render_scene { nullptr };
-    GraphLinkFinalizer                link_finalizer;
+    rg::RenderGraph*           rgraph { nullptr };
+    Scene*                     scene { nullptr };
+    Set<std::string>           depth_initialized_outputs {};
+    Option<rg::TextureNodeRef> mip_framebuffer_snapshot;
+    const RenderSceneSnapshot* render_scene { nullptr };
+    GraphLinkFinalizer         link_finalizer;
 };
 
 static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       extra,
                                                                std::string_view key) {
     if (key.empty()) return None();
     if (! IsSpecTex(key)) {
-        std::optional<RenderTextureDescId> texture;
+        Option<RenderTextureDescId> texture;
         if (extra.render_scene != nullptr) texture = extra.render_scene->textureDescId(key);
         return Some(vulkan::MakeImportedTextureRequest(key, texture));
     }
@@ -194,7 +193,7 @@ static void AddCopyPass(ExtraInfo& extra, rg::TextureDesc in, rg::TextureDesc ou
 }
 
 static rg::TextureNodeRef AddCopyPass(ExtraInfo& extra, rg::TextureNodeRef in,
-                                      std::optional<rg::TextureDesc> out_desc = std::nullopt) {
+                                      Option<rg::TextureDesc> out_desc = None()) {
     rg::TextureNodeRef copy {};
     extra.rgraph->addPass<vulkan::CopyPass>(
         "copy",
@@ -204,8 +203,9 @@ static rg::TextureNodeRef AddCopyPass(ExtraInfo& extra, rg::TextureNodeRef in,
             auto state = builder.textureState(in);
             rstd_assert(state.is_some());
             if (state.is_none()) return;
-            auto desc = out_desc ? CloneTextureDesc(*out_desc) : CloneTextureDesc(state->desc);
-            if (! out_desc.has_value()) {
+            auto desc =
+                out_desc.is_some() ? CloneTextureDesc(*out_desc) : CloneTextureDesc(state->desc);
+            if (out_desc.is_none()) {
                 auto suffix = rstd::format("_{}_copy", state->version);
                 desc.key.push_str(suffix.as_str());
                 desc.name.push_str(suffix.as_str());
@@ -244,7 +244,7 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
             copy_desc.key         = String::make(rstd::ref<rstd::str>(link_key));
             copy_desc.name        = copy_desc.key.clone();
             input.desc            = CloneTextureDesc(copy_desc);
-            input.ref             = AddCopyPass(extra, input.ref, std::move(copy_desc));
+            input.ref             = AddCopyPass(extra, input.ref, Some(rstd::move(copy_desc)));
             input.binding.name    = String::make(rstd::cppstd::as_str(link_key));
             input.binding.request = BuildGraphTextureRequest(extra, link_key);
             auto copied_state     = extra.rgraph->textureState(input.ref);
@@ -262,15 +262,15 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
 }
 
 static rg::TextureNodeRef AddMipFramebufferCopy(ExtraInfo& extra, rg::RenderGraphBuilder& builder) {
-    if (extra.mip_framebuffer_snapshot) {
+    if (extra.mip_framebuffer_snapshot.is_some()) {
         return *extra.mip_framebuffer_snapshot;
     }
 
     auto source                    = builder.createTexture(MakeTextureDesc(extra, SpecTex_Default));
     auto copy_desc                 = MakeTextureDesc(extra, WE_MIP_MAPPED_FRAME_BUFFER);
     copy_desc.kind                 = rg::TextureKind::Temp;
-    auto snapshot                  = AddCopyPass(extra, source, std::move(copy_desc));
-    extra.mip_framebuffer_snapshot = snapshot;
+    auto snapshot                  = AddCopyPass(extra, source, Some(rstd::move(copy_desc)));
+    extra.mip_framebuffer_snapshot = Some<rg::TextureNodeRef>(snapshot);
     return snapshot;
 }
 
@@ -330,7 +330,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         }
     }
 
-    for (uint32_t smi = 0; smi < mesh->Submeshes().size(); smi++) {
+    for (u32 smi = 0; smi < mesh->Submeshes().size(); smi++) {
         const auto& submesh = mesh->Submeshes()[smi];
         if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) continue;
         SceneMaterial* material = slots[submesh.material_slot].get();
@@ -345,9 +345,10 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
             rg::PassNode::Type::CustomShader,
             [material, node, smi, pass_output, &imgId, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
-                const auto& pass    = builder.workPassNode();
-                pdesc.node          = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
-                pdesc.submesh_index = smi;
+                const auto& pass       = builder.workPassNode();
+                pdesc.node             = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
+                pdesc.submesh_index    = smi;
+                pdesc.graph_pass_index = pass.pass.index;
                 if (auto node_id = scene.ResourceIndex().nodeId(*node)) {
                     if (auto draw_item = scene.ResourceIndex().drawItemFor(*node_id, smi)) {
                         pdesc.draw_item = *draw_item;
@@ -363,8 +364,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     CheckAndSetSprite(*extra.render_scene, pdesc, material->textures);
                 }
                 for (usize i = 0; i < material->textures.size(); i++) {
-                    const auto&                       url = material->textures[i];
-                    std::optional<rg::TextureNodeRef> input;
+                    const auto&                url = material->textures[i];
+                    Option<rg::TextureNodeRef> input;
                     if (url.empty()) {
                         pdesc.texture_bindings.emplace_back();
                         continue;
@@ -373,15 +374,15 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         extra.link_finalizer.addConsumer(
                             pass,
                             WallpaperLayerId { .value = static_cast<i32>(id) },
-                            static_cast<uint32_t>(i));
+                            static_cast<u32>(i));
                         pdesc.texture_bindings.emplace_back();
                         continue;
                     } else {
                         auto desc = MakeTextureDesc(extra, url);
                         if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
-                            input = AddMipFramebufferCopy(extra, builder);
+                            input = Some(AddMipFramebufferCopy(extra, builder));
                         } else {
-                            input = builder.createTexture(desc);
+                            input = Some(builder.createTexture(desc));
                         }
                         if (IsSpecTex(url) && ! sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
                             builder.markVirtualWrite(*input);
@@ -390,7 +391,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
 
                     if (url == pass_output) {
                         builder.markSelfWrite(*input);
-                        input = AddCopyPass(extra, *input);
+                        input = Some(AddCopyPass(extra, *input));
                     }
                     builder.read(*input);
                     auto sampled_state = builder.textureState(*input);
@@ -605,9 +606,9 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
     }
 }
 
-std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
-                                                         const RenderSceneSnapshot& render_scene) {
-    std::unique_ptr<rg::RenderGraph> rgraph = std::make_unique<rg::RenderGraph>();
+Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
+                                             const RenderSceneSnapshot& render_scene) {
+    auto      rgraph = Box<rg::RenderGraph>::make();
     ExtraInfo extra { .rgraph = rgraph.get(), .scene = &scene, .render_scene = &render_scene };
 
     // The snapshot owns link-consumer discovery; graph build only consumes the
@@ -647,7 +648,7 @@ std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                 
     return rgraph;
 }
 
-std::unique_ptr<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
+Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene& scene) {
     auto render_scene = ExtractRenderSceneSnapshot(scene);
     return sceneToRenderGraph(scene, render_scene);
 }

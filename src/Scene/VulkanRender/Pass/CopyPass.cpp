@@ -1,8 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "Utils/AutoDeletor.hpp"
-#include "vvk/macros.hpp"
 
 module wescene.vulkan_render;
 import wescene.spec_names;
@@ -14,6 +12,7 @@ import wescene.vulkan;
 import wescene.scene;
 
 using namespace owe::vulkan;
+using namespace rstd::prelude;
 
 CopyPass::CopyPass(Desc&& desc): m_desc(std::move(desc)) {}
 
@@ -39,6 +38,13 @@ PassInvalidationFlags CopyPass::finalizeResourceRequests(Scene& scene) {
     return flags;
 }
 
+PassResourceUses CopyPass::resourceUses() const {
+    PassResourceUses uses;
+    if (m_desc.src_use.is_some()) uses.textures.push(resource::TextureUseHandle(*m_desc.src_use));
+    if (m_desc.dst_use.is_some()) uses.textures.push(resource::TextureUseHandle(*m_desc.dst_use));
+    return uses;
+}
+
 std::vector<PassTextureRequestDiagnostic> CopyPass::textureRequestDiagnostics() const {
     std::vector<PassTextureRequestDiagnostic> out;
     out.reserve(2);
@@ -57,23 +63,24 @@ std::vector<PassTextureRequestDiagnostic> CopyPass::textureRequestDiagnostics() 
     return out;
 }
 
-bool CopyPass::prepareResourceStates(resource_registry::ResourceStateTracker& states) {
+bool CopyPass::prepareResourceStates(
+    rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>> states) {
     m_desc.before_barriers.Clear();
     m_desc.after_barriers.Clear();
-    if (m_desc.src_use.is_none() || m_desc.dst_use.is_none()) return true;
+    if (m_desc.src_use.is_none() || m_desc.dst_use.is_none()) return false;
 
     auto range = resource_registry::TextureSubresourceRange {
         .level_count = 1,
         .layer_count = 1,
     };
-    auto src_before =
-        states.Prepare(*m_desc.src_use, resource_registry::TextureStateKind::TransferSource, range);
-    auto dst_before = states.Prepare(
+    auto src_before = states->Prepare(
+        *m_desc.src_use, resource_registry::TextureStateKind::TransferSource, range);
+    auto dst_before = states->Prepare(
         *m_desc.dst_use, resource_registry::TextureStateKind::TransferDestination, range, true);
     auto src_after =
-        states.Prepare(*m_desc.src_use, resource_registry::TextureStateKind::Sampled, range);
+        states->Prepare(*m_desc.src_use, resource_registry::TextureStateKind::Sampled, range);
     auto dst_after =
-        states.Prepare(*m_desc.dst_use, resource_registry::TextureStateKind::Sampled, range);
+        states->Prepare(*m_desc.dst_use, resource_registry::TextureStateKind::Sampled, range);
     if (src_before.is_none() || dst_before.is_none() || src_after.is_none() ||
         dst_after.is_none()) {
         return false;
@@ -85,14 +92,13 @@ bool CopyPass::prepareResourceStates(resource_registry::ResourceStateTracker& st
     return true;
 }
 
-void CopyPass::prepare(Scene&, const Device&, RenderingResources& rr) {
-    std::array<std::string, 2>      textures    = { m_desc.src, m_desc.dst };
-    std::array<ImageParameters*, 2> vk_textures = { &m_desc.vk_src, &m_desc.vk_dst };
-    std::array<rstd::Option<resource::TextureUseHandle>*, 2> texture_uses = {
+void CopyPass::prepare(Scene&, const Device&, PassPrepareContext& context) {
+    rstd::array<std::string, 2>                         textures { m_desc.src, m_desc.dst };
+    rstd::array<Option<resource::TextureUseHandle>*, 2> texture_uses {
         &m_desc.src_use,
         &m_desc.dst_use,
     };
-    for (usize i = 0; i < textures.size(); i++) {
+    for (usize i = 0; i < textures.len(); i++) {
         auto& tex_name = textures[i];
         if (tex_name.empty()) continue;
 
@@ -100,20 +106,23 @@ void CopyPass::prepare(Scene&, const Device&, RenderingResources& rr) {
             rstd_error("copy texture {} has no resource use", tex_name);
             return;
         }
-        auto prepared = rr.prepared_resources.Resolve(**texture_uses[i]);
+        auto prepared = context.resources->Resolve(**texture_uses[i]);
         if (prepared.is_none()) {
             rstd_error("prepared copy texture {} not found", tex_name);
             return;
         }
-        *vk_textures[i] = (**prepared).image.getActive();
     }
 
     setPrepared();
 };
 void CopyPass::record(PassRecordContext& context) {
+    if (m_desc.src_use.is_none() || m_desc.dst_use.is_none()) return;
+    auto prepared_src = context.resources->Resolve(*m_desc.src_use);
+    auto prepared_dst = context.resources->Resolve(*m_desc.dst_use);
+    if (prepared_src.is_none() || prepared_dst.is_none()) return;
     auto& cmd = *context.command;
-    auto& src = m_desc.vk_src;
-    auto& dst = m_desc.vk_dst;
+    auto& src = (**prepared_src).image.getActive();
+    auto& dst = (**prepared_dst).image.getActive();
 
     if (! (src.handle && dst.handle)) {
         rstd_assert(src.handle && dst.handle);
@@ -145,80 +154,16 @@ void CopyPass::record(PassRecordContext& context) {
             },
         .extent = { src.extent.width, src.extent.height, 1 },
     };
-    if (! m_desc.before_barriers.Empty()) {
-        m_desc.before_barriers.Record(cmd);
-    } else {
-        VkImageMemoryBarrier in_bar {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext            = nullptr,
-            .srcAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
-            .dstAccessMask    = VK_ACCESS_TRANSFER_READ_BIT,
-            .oldLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            .image            = src.handle,
-            .subresourceRange = srang,
-        };
-        VkImageMemoryBarrier out_bar {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext            = nullptr,
-            .srcAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
-            .dstAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image            = dst.handle,
-            .subresourceRange = srang,
-        };
-
-        auto barriers = std::array { in_bar, out_bar };
-        cmd.PipelineBarrier(
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_DEPENDENCY_BY_REGION_BIT,
-            {},
-            {},
-            rstd::slice<VkImageMemoryBarrier>::from_raw_parts(barriers.data(), barriers.size()));
-    }
+    m_desc.before_barriers.Record(cmd);
     cmd.CopyImage(src.handle,
                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                   dst.handle,
                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                   copy);
-    if (! m_desc.after_barriers.Empty()) {
-        m_desc.after_barriers.Record(cmd);
-    } else {
-        VkImageMemoryBarrier in_bar {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext            = nullptr,
-            .srcAccessMask    = VK_ACCESS_TRANSFER_READ_BIT,
-            .dstAccessMask    = VK_ACCESS_MEMORY_READ_BIT,
-            .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .image            = src.handle,
-            .subresourceRange = srang,
-        };
-        VkImageMemoryBarrier out_bar {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext            = nullptr,
-            .srcAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
-            .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .image            = dst.handle,
-            .subresourceRange = srang,
-        };
-
-        auto barriers = std::array { in_bar, out_bar };
-        cmd.PipelineBarrier(
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            VK_DEPENDENCY_BY_REGION_BIT,
-            {},
-            {},
-            rstd::slice<VkImageMemoryBarrier>::from_raw_parts(barriers.data(), barriers.size()));
-    }
+    m_desc.after_barriers.Record(cmd);
 
     if (dst.mipmap_level > 1) {
         RecordGenerateMipmaps(cmd, dst);
     }
 };
-void CopyPass::destory(const Device&, RenderingResources&) {}
+void CopyPass::destory(const Device&) {}

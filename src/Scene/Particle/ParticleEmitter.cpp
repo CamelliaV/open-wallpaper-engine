@@ -1,9 +1,11 @@
 module wescene.scene;
 import eigen;
 import wescene.core;
+import rstd;
 import rstd.cppstd;
 import wescene.utils;
 
+using namespace rstd::prelude;
 using namespace owe;
 
 typedef std::function<Particle()> GenParticleOp;
@@ -154,15 +156,14 @@ inline Eigen::Vector3d RandomDirectedUnit(const Eigen::Vector3d& directions) {
 // Resolve emitter spawn origin in particle-local space. wpe.origin is the
 // authored offset; controlpoints[N].offset adds the runtime cp delta (mouse
 // follow for link_mouse cps, etc).
-inline Eigen::Vector3d ResolveEmitterOrigin(std::span<const ParticleControlpoint> cps,
-                                            int32_t                               cp_index,
-                                            const std::array<float, 3>&           authored) {
+inline Eigen::Vector3d ResolveEmitterOrigin(std::span<const ParticleControlpoint> cps, i32 cp_index,
+                                            const rstd::array<float, 3>& authored) {
     Eigen::Vector3d o {
         static_cast<double>(authored[0]),
         static_cast<double>(authored[1]),
         static_cast<double>(authored[2]),
     };
-    if (cp_index >= 0 && static_cast<std::size_t>(cp_index) < cps.size()) {
+    if (cp_index >= 0 && static_cast<usize>(cp_index) < cps.size()) {
         o += cps[cp_index].offset;
     }
     return o;

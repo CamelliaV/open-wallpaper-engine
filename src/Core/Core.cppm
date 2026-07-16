@@ -3,7 +3,10 @@ module;
 #include "effolkronium/random.hpp"
 
 export module wescene.core;
+import rstd;
 import rstd.cppstd;
+
+using namespace rstd::prelude;
 
 // NoCopyMove (global scope, matches the original NoCopyMove.hpp)
 export struct NoCopy {
@@ -27,22 +30,20 @@ protected:
 export namespace owe
 {
 
-// Literals
-using i8  = std::int8_t;
-using i16 = std::int16_t;
-using i32 = std::int32_t;
-using i64 = std::int64_t;
+using rstd::i16;
+using rstd::i32;
+using rstd::i64;
+using rstd::i8;
+using rstd::isize;
+using rstd::u16;
+using rstd::u32;
+using rstd::u64;
+using rstd::u8;
+using rstd::usize;
 
-using u8  = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
+using idx = isize;
 
-using idx   = std::ptrdiff_t;
-using usize = std::size_t;
-using isize = std::ptrdiff_t;
-
-inline std::intptr_t Ptr2Int(void* p) noexcept { return reinterpret_cast<std::intptr_t>(p); }
+inline isize Ptr2Int(void* p) noexcept { return reinterpret_cast<isize>(p); }
 
 // StringHelper
 constexpr bool sstart_with(std::string_view str, std::string_view start) {
@@ -78,8 +79,8 @@ inline bool exists(const std::set<Key, std::less<>, Allocator>& m, const KeyLike
 
 // ArrayHelper
 template<typename T, typename Tarray>
-std::array<T, std::tuple_size<Tarray>::value> array_cast(const Tarray& array) noexcept {
-    std::array<T, std::tuple_size<Tarray>::value> res;
+rstd::array<T, std::tuple_size<Tarray>::value> array_cast(const Tarray& array) noexcept {
+    rstd::array<T, std::tuple_size<Tarray>::value> res;
     std::copy(array.begin(), array.end(), res.begin());
     return res;
 }
@@ -95,14 +96,14 @@ template<typename T>
 class spanone {
 public:
     using value_type = T;
-    using size_type  = std::size_t;
+    using size_type  = usize;
     using reference  = T&;
     using pointer    = T*;
 
     constexpr spanone(reference value) noexcept: ptr { &value } {}
     constexpr pointer   data() const noexcept { return ptr; }
     constexpr size_type size() const noexcept { return 1; }
-    constexpr reference operator[](std::size_t index) const noexcept { return ptr[index]; }
+    constexpr reference operator[](usize index) const noexcept { return ptr[index]; }
     constexpr pointer   begin() const noexcept { return ptr; }
     constexpr pointer   end() const noexcept { return ptr + 1; }
     constexpr pointer   cbegin() const noexcept { return ptr; }
@@ -141,80 +142,5 @@ struct EqualVisitor {
 
 // Random
 using Random = effolkronium::random_thread_local;
-
-// BlockingQueue
-template<typename T>
-class BlockingQueue {
-public:
-    using value_type      = T;
-    using size_type       = std::size_t;
-    using reference       = T&;
-    using const_reference = const T&;
-
-    using lock_type = std::unique_lock<std::mutex>;
-
-    constexpr static usize DEF_CAPACITY { 20 };
-
-    BlockingQueue(const usize cap = DEF_CAPACITY): m_capacity(cap) {}
-    ~BlockingQueue() = default;
-
-    BlockingQueue(const BlockingQueue&)            = delete;
-    BlockingQueue& operator=(const BlockingQueue&) = delete;
-    BlockingQueue(BlockingQueue&&)                 = delete;
-    BlockingQueue& operator=(BlockingQueue&&)      = delete;
-
-    void full() const {
-        lock_type lock(m_op_mtx);
-        return full_();
-    }
-    void empty() const {
-        lock_type lock(m_op_mtx);
-        return empty_();
-    }
-    void size() const {
-        lock_type lock(m_op_mtx);
-        return size_();
-    }
-
-    void push(const value_type& item) {
-        lock_type lock(m_op_mtx);
-        while (full_()) {
-            m_cond_not_full.wait(lock);
-        }
-        m_queue.push(item);
-        m_cond_not_empty.notify_all();
-    }
-
-    T pop() {
-        lock_type lock(m_op_mtx);
-        while (empty_()) {
-            m_cond_not_empty.wait(lock);
-        }
-        T front_item { m_queue.pop() };
-        m_cond_not_full.notify_all();
-        return front_item;
-    }
-
-    T front() {
-        lock_type lock(m_op_mtx);
-        return m_queue.front();
-    }
-    T back() {
-        lock_type lock(m_op_mtx);
-        return m_queue.back();
-    }
-
-private:
-    void full_() const { return m_capacity == m_queue.size(); }
-    void empty_() const { return m_queue.empty(); }
-    void size_() const { return m_queue.size(); }
-
-private:
-    mutable std::mutex      m_op_mtx;
-    std::condition_variable m_cond_not_full;
-    std::condition_variable m_cond_not_empty;
-    std::queue<T>           m_queue;
-    usize                   m_capacity;
-};
 
 } // namespace owe

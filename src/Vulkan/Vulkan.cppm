@@ -27,6 +27,8 @@ export import wavsen.vvk;
 // in a separate module.
 export import wescene.shader_compile;
 
+using namespace rstd::prelude;
+
 export namespace owe
 {
 
@@ -40,8 +42,8 @@ struct ImageParameters {
     VkImageView view {};
     VkSampler   sampler {};
     VkExtent3D  extent {};
-    uint32_t    mipmap_level { 1 };
-    uint64_t    generation { 0 };
+    u32         mipmap_level { 1 };
+    u64         generation { 0 };
 
     ImageParameters()  = default;
     ~ImageParameters() = default;
@@ -67,9 +69,9 @@ enum class FrameSurfaceAcquireKind
 };
 
 struct FrameSurfaceIdentity {
-    uint64_t owner_generation { 0 };
-    uint32_t image_index { 0 };
-    uint64_t acquire_serial { 0 };
+    u64 owner_generation { 0 };
+    u32 image_index { 0 };
+    u64 acquire_serial { 0 };
 
     bool valid() const noexcept { return owner_generation != 0 && acquire_serial != 0; }
     bool operator==(const FrameSurfaceIdentity&) const = default;
@@ -85,7 +87,7 @@ enum class FrameSurfaceReuseKind
 
 struct FrameSurfaceReuseProof {
     FrameSurfaceReuseKind kind { FrameSurfaceReuseKind::QueueOrdered };
-    uint64_t              release_point { 0 };
+    u64                   release_point { 0 };
 
     bool valid() const noexcept {
         return (kind == FrameSurfaceReuseKind::ConsumerReleased) == (release_point != 0);
@@ -107,10 +109,10 @@ struct FrameSurfaceLease {
     vulkan::ImageParameters       image;
     VkFormat                      format { VK_FORMAT_UNDEFINED };
     VkImageLayout                 initial_layout { VK_IMAGE_LAYOUT_UNDEFINED };
-    uint32_t                      initial_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    u32                           initial_queue_family { VK_QUEUE_FAMILY_IGNORED };
     FrameSurfaceAcquireDependency acquire;
     VkImageLayout                 final_layout { VK_IMAGE_LAYOUT_UNDEFINED };
-    uint32_t                      final_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    u32                           final_queue_family { VK_QUEUE_FAMILY_IGNORED };
     bool                          discard_content { true };
 
     bool valid() const noexcept {
@@ -145,7 +147,7 @@ enum class FrameSurfaceCompletionStatus
 struct FrameSurfaceCompletionResult {
     FrameSurfaceCompletionStatus status { FrameSurfaceCompletionStatus::NotPending };
     FrameSurfaceIdentity         identity;
-    int32_t                      error_code { 0 };
+    i32                          error_code { 0 };
 
     bool completed() const noexcept {
         return status == FrameSurfaceCompletionStatus::Submitted ||
@@ -196,7 +198,7 @@ struct FrameSurfaceAcquireResult {
     FrameSurfaceAcquireStatus        status { FrameSurfaceAcquireStatus::NotReady };
     FrameSurfaceLease                lease;
     FrameSurfaceCompletionCapability completion;
-    int32_t                          error_code { 0 };
+    i32                              error_code { 0 };
 
     bool acquired() const noexcept {
         return (status == FrameSurfaceAcquireStatus::Acquired ||
@@ -216,23 +218,23 @@ enum class TexTiling
 // keeps them empty (the bridge already published the metadata via
 // `bind_buffers` itself).
 struct ExHandle {
-    int         fd { -1 };
-    int32_t     width { 0 };
-    int32_t     height { 0 };
-    std::size_t size { 0 };
+    int   fd { -1 };
+    i32   width { 0 };
+    i32   height { 0 };
+    usize size { 0 };
 
-    uint32_t drm_fourcc { 0 };
-    uint64_t drm_modifier { 0 };
-    uint64_t plane0_offset { 0 };
-    uint32_t plane0_stride { 0 };
+    u32 drm_fourcc { 0 };
+    u64 drm_modifier { 0 };
+    u64 plane0_offset { 0 };
+    u32 plane0_stride { 0 };
 
     ExHandle() = default;
     ExHandle(int id): m_id(id) {};
 
-    int32_t id() const { return m_id; }
+    i32 id() const { return m_id; }
 
 private:
-    int32_t m_id { 0 };
+    i32 m_id { 0 };
 };
 
 template<typename T>
@@ -256,8 +258,8 @@ public:
     }
     T* getInprogress() { return inprogress(); }
 
-    std::array<T*, 3> snapshot_all_slots() {
-        return { presented().load(), ready().load(), inprogress().load() };
+    rstd::array<T*, 3> snapshot_all_slots() {
+        return rstd::array<T*, 3> { presented().load(), ready().load(), inprogress().load() };
     }
 
     virtual unsigned width() const  = 0;
@@ -298,8 +300,10 @@ public:
 
     virtual int takeLastFrameSyncFd() { return -1; }
 
-    virtual ExHandle*                eatFrame() { return nullptr; }
-    virtual std::array<ExHandle*, 3> snapshot_all_slots() { return { nullptr, nullptr, nullptr }; }
+    virtual ExHandle*                 eatFrame() { return nullptr; }
+    virtual rstd::array<ExHandle*, 3> snapshot_all_slots() {
+        return rstd::array<ExHandle*, 3> { nullptr, nullptr, nullptr };
+    }
 
     virtual unsigned width() const  = 0;
     virtual unsigned height() const = 0;
@@ -379,7 +383,7 @@ using CheckGpuOp = std::function<bool(vvk::PhysicalDevice)>;
 
 constexpr std::string_view VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
 
-constexpr uint32_t    WP_VULKAN_VERSION { VK_API_VERSION_1_1 };
+constexpr u32         WP_VULKAN_VERSION { VK_API_VERSION_1_1 };
 constexpr const char* WP_APPLICATION_NAME { "scene render" };
 
 class Device;
@@ -391,13 +395,13 @@ public:
     void Destroy();
 
     static bool Create(Instance&, std::span<const Extension>, std::span<const InstanceLayer>,
-                       std::uint32_t api_version = WP_VULKAN_VERSION);
-    bool ChoosePhysicalDevice(const CheckGpuOp& checkgpu, std::span<const std::uint8_t> uuid = {});
+                       u32 api_version = WP_VULKAN_VERSION);
+    bool        ChoosePhysicalDevice(const CheckGpuOp& checkgpu, std::span<const u8> uuid = {});
 
     const vvk::Instance&         inst() const;
     const vvk::PhysicalDevice&   gpu() const;
     const vvk::SurfaceKHR&       surface() const;
-    std::uint32_t                api_version() const { return m_api_version; }
+    u32                          api_version() const { return m_api_version; }
     std::span<const std::string> enabled_extensions() const { return m_enabled_extensions; }
 
     bool offscreen() const;
@@ -411,7 +415,7 @@ private:
 
     vvk::DebugUtilsMessenger m_debug_utils;
     vvk::PhysicalDevice      m_gpu {};
-    std::uint32_t            m_api_version { WP_VULKAN_VERSION };
+    u32                      m_api_version { WP_VULKAN_VERSION };
 
     vvk::SurfaceKHR          m_surface {};
     Set<std::string>         m_extensions;
@@ -425,12 +429,12 @@ private:
 
 struct QueueParameters {
     vvk::Queue handle;
-    uint32_t   family_index;
+    u32        family_index;
 };
 
 struct VmaBufferParameters {
     vvk::VmaBuffer handle;
-    std::size_t    req_size;
+    usize          req_size;
 
     VmaBufferParameters();
     ~VmaBufferParameters();
@@ -439,8 +443,8 @@ struct VmaBufferParameters {
 };
 
 struct BufferParameters {
-    VkBuffer    handle;
-    std::size_t req_size;
+    VkBuffer handle;
+    usize    req_size;
     BufferParameters()  = default;
     ~BufferParameters() = default;
     BufferParameters(const VmaBufferParameters& o) noexcept
@@ -453,7 +457,7 @@ struct VmaImageParameters : NoCopy {
     vvk::Sampler   sampler;
     VkExtent3D     extent;
     unsigned       mipmap_level { 1 };
-    uint64_t       generation { 0 };
+    u64            generation { 0 };
 
     VmaImageParameters();
     ~VmaImageParameters();
@@ -470,13 +474,13 @@ struct ExImageParameters : NoCopy {
     vvk::Sampler   sampler;
     VkExtent3D     extent;
     unsigned       mipmap_level { 1 };
-    uint64_t       generation { 0 };
+    u64            generation { 0 };
     int            fd { 0 };
 
-    uint32_t drm_fourcc { 0 };
-    uint64_t drm_modifier { 0 };
-    uint64_t plane0_offset { 0 };
-    uint32_t plane0_stride { 0 };
+    u32 drm_fourcc { 0 };
+    u64 drm_modifier { 0 };
+    u64 plane0_offset { 0 };
+    u32 plane0_stride { 0 };
 
     ExImageParameters();
     ~ExImageParameters();
@@ -532,6 +536,16 @@ struct ImageSlotsRef {
     ImageSlotsRef(const ImageSlots&);
 };
 
+class TextureAllocation {
+public:
+    explicit TextureAllocation(ImageSlots slots): m_slots(rstd::move(slots)) {}
+
+    auto View() const -> ImageSlotsRef { return ImageSlotsRef(m_slots); }
+
+private:
+    ImageSlots m_slots;
+};
+
 // ---------- Swapchain.hpp ----------
 
 class Swapchain {
@@ -564,7 +578,7 @@ enum class TexUsage
     DEPTH
 };
 
-using TexHash = std::size_t;
+using TexHash = usize;
 
 struct TextureKey {
     i32                   width;
@@ -589,19 +603,12 @@ public:
     ~TextureCache();
 
     void Clear();
-    void ClearTransientGraphResources();
 
     void SetVideoDecodeOptions(VideoDecodeOptions);
 
-    std::optional<ExImageParameters> CreateExTex(uint32_t witdh, uint32_t height, VkFormat,
-                                                 VkImageTiling);
-    ImageSlotsRef                    CreateTex(Image&);
-    std::optional<ImageSlotsRef>     FindImportedTexture(std::string_view key) const;
-
-    std::optional<ImageParameters> Query(std::string_view key, TextureKey content_hash,
-                                         bool persist = false);
-
-    void MarkShareReady(std::string_view key);
+    Option<ExImageParameters> CreateExTex(u32 witdh, u32 height, VkFormat, VkImageTiling);
+    rstd::Option<rstd::sync::Arc<TextureAllocation>> CreateTex(Image&);
+    rstd::Option<rstd::sync::Arc<TextureAllocation>> AllocateTexture(TextureKey);
 
     /* Per-frame hook: advance every registered video-tex by `dt_seconds`,
      * pull as many decoded frames as needed to catch up to wall PTS,
@@ -609,48 +616,54 @@ public:
      * VkImage. No-op if no video textures are registered. */
     void PumpVideoTextures(double dt_seconds);
 
-    /* vkCmdCopyBufferToImage a sub-rect of `atlas` into the VkImage stored
-     * under `key`. Returns false if `key` has no entry yet (the VkImage
-     * hasn't been allocated — CreateTex hasn't run); caller may retry
-     * next frame. */
-    bool UploadFontAtlasRegion(const std::string& key, const std::uint8_t* atlas,
-                               std::uint32_t atlas_w, std::uint32_t x, std::uint32_t y,
-                               std::uint32_t w, std::uint32_t h);
+    /* vkCmdCopyBufferToImage a sub-rect of `atlas` into the supplied texture. */
+    bool UploadFontAtlasRegion(ref<TextureAllocation> texture, const u8* atlas, u32 atlas_w, u32 x,
+                               u32 y, u32 w, u32 h);
 
 private:
-    std::optional<VmaImageParameters> CreateTex(TextureKey);
-    uint64_t                          nextImageGeneration();
-    void                              AssignImageGeneration(VmaImageParameters&);
-    void                              AssignImageGeneration(ExImageParameters&);
+    Option<VmaImageParameters> CreateTex(TextureKey);
+    u64                        nextImageGeneration();
+    void                       AssignImageGeneration(VmaImageParameters&);
+    void                       AssignImageGeneration(ExImageParameters&);
     /* VIDEO-typed Image branch of CreateTex: registers a wavsen
      * VideoDecoder + stable RGBA8 VkImage and returns an ImageSlotsRef
      * pointing at that same VkImage so material binding is transparent. */
-    ImageSlotsRef       CreateVideoTex(Image&);
-    void                allocateCmd();
-    vvk::CommandBuffers m_tex_cmds;
-    vvk::CommandBuffer  m_tex_cmd;
+    rstd::Option<rstd::sync::Arc<TextureAllocation>> CreateVideoTex(Image&);
+    void                                             allocateCmd();
+    vvk::CommandBuffers                              m_tex_cmds;
+    vvk::CommandBuffer                               m_tex_cmd;
 
-    const Device&                m_device;
-    Map<std::string, ImageSlots> m_tex_map;
-    VideoDecodeOptions           m_video_decode_options;
-    uint64_t                     m_next_image_generation { 1 };
+    const Device&      m_device;
+    VideoDecodeOptions m_video_decode_options;
+    u64                m_next_image_generation { 1 };
 
     /* Opaque pImpl for the active video-tex set. Defined inside
      * TextureCache.cpp to keep wavsen.video out of the public
      * wescene.vulkan module interface. */
     struct VideoRegistry;
-    std::unique_ptr<VideoRegistry> m_video_registry;
+    Option<Box<VideoRegistry>> m_video_registry;
+};
 
-    struct QueryTex {
-        idx                index { 0 };
-        bool               share_ready { false };
-        bool               persist { false };
-        TexHash            content_hash;
-        VmaImageParameters image;
-        Set<std::string>   query_keys;
+struct ImagePrepareBackend {
+    using Trait                  = ImagePrepareBackend;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = ImagePrepareBackend;
+
+        auto CreateImportedTexture(rstd::mut_ref<Image> image)
+            -> rstd::Option<rstd::sync::Arc<TextureAllocation>> {
+            return rstd::trait_call<0>(this, image);
+        }
+
+        auto AllocateTexture(TextureKey key) -> rstd::Option<rstd::sync::Arc<TextureAllocation>> {
+            return rstd::trait_call<1>(this, key);
+        }
     };
-    std::vector<std::unique_ptr<QueryTex>> m_query_texs;
-    Map<std::string, QueryTex*>            m_query_map;
+
+    template<typename T>
+    using Funcs = rstd::TraitFuncs<&T::CreateImportedTexture, &T::AllocateTexture>;
 };
 
 void RecordGenerateMipmaps(vvk::CommandBuffer&, const ImageParameters&);
@@ -658,16 +671,16 @@ void RecordGenerateMipmaps(vvk::CommandBuffer&, const ImageParameters&);
 // ---------- Device.hpp ----------
 
 struct DeviceCapabilities {
-    bool     timeline_semaphore { false };
-    bool     synchronization2 { false };
-    bool     push_descriptor { false };
-    bool     memory_budget { false };
-    bool     external_memory_fd { false };
-    bool     external_memory_dma_buf { false };
-    bool     drm_format_modifier { false };
-    bool     foreign_queue { false };
-    uint32_t graphics_queue_family { VK_QUEUE_FAMILY_IGNORED };
-    uint32_t present_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    bool timeline_semaphore { false };
+    bool synchronization2 { false };
+    bool push_descriptor { false };
+    bool memory_budget { false };
+    bool external_memory_fd { false };
+    bool external_memory_dma_buf { false };
+    bool drm_format_modifier { false };
+    bool foreign_queue { false };
+    u32  graphics_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    u32  present_queue_family { VK_QUEUE_FAMILY_IGNORED };
 };
 
 struct MemoryBudgetSnapshot {
@@ -692,9 +705,9 @@ struct MemoryBudgetSource {
     using Funcs = rstd::TraitFuncs<&T::MemoryBudget>;
 };
 
-class PipelineParameters;
+struct PipelineParameters;
 
-class MeshCache;
+class BufferUploadPool;
 
 class Device : NoCopy, NoMove {
 public:
@@ -713,7 +726,7 @@ public:
     const auto&                  handle() const { return m_device; }
     const auto&                  gpu() const { return m_gpu; }
     VkInstance                   instance_handle() const { return m_instance; }
-    std::uint32_t                instance_api_version() const { return m_instance_api_version; }
+    u32                          instance_api_version() const { return m_instance_api_version; }
     std::span<const std::string> enabled_instance_extensions() const {
         return m_enabled_instance_extensions;
     }
@@ -738,7 +751,7 @@ private:
 
     vvk::DeviceDispatch     dld;
     VkInstance              m_instance { VK_NULL_HANDLE };
-    std::uint32_t           m_instance_api_version { WP_VULKAN_VERSION };
+    u32                     m_instance_api_version { WP_VULKAN_VERSION };
     vvk::Device             m_device;
     vvk::PhysicalDevice     m_gpu;
     vvk::VmaAllocatorHandle m_allocator;
@@ -761,8 +774,7 @@ private:
 
 // ---------- Util.hpp ----------
 
-inline bool CreateStagingBuffer(VmaAllocator allocator, std::size_t size,
-                                VmaBufferParameters& buffer) {
+inline bool CreateStagingBuffer(VmaAllocator allocator, usize size, VmaBufferParameters& buffer) {
     VkBufferCreateInfo ci {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -791,7 +803,7 @@ public:
 private:
     friend class StagingBuffer;
     VmaVirtualAllocation m_allocation {};
-    size_t               m_virtual_index { 0 };
+    usize                m_virtual_index { 0 };
 };
 
 class StagingBuffer : NoCopy, NoMove {
@@ -804,8 +816,8 @@ public:
 
     bool allocateSubRef(VkDeviceSize size, StagingBufferRef&, VkDeviceSize alignment = 1);
     void unallocateSubRef(const StagingBufferRef&);
-    bool writeToBuf(const StagingBufferRef&, std::span<uint8_t>, size_t offset = 0);
-    bool fillBuf(const StagingBufferRef& ref, size_t offset, size_t size, uint8_t c);
+    bool writeToBuf(const StagingBufferRef&, std::span<u8>, usize offset = 0);
+    bool fillBuf(const StagingBufferRef& ref, usize offset, usize size, u8 c);
 
     bool recordUpload(vvk::CommandBuffer&);
 
@@ -815,7 +827,7 @@ private:
     struct VirtualBlock {
         VmaVirtualBlock handle {};
         bool            enabled { false };
-        size_t          index { 0 };
+        usize           index { 0 };
         VkDeviceSize    offset { 0 };
         VkDeviceSize    size { 0 };
     };
@@ -836,104 +848,97 @@ private:
     VmaBufferParameters m_gpu_buf;
 };
 
-// ---------- MeshCache.hpp ----------
+// ---------- BufferUploadPool.hpp ----------
 
-// Key identifying one mesh data block (vertex array or index array). We key
-// by pointer because SceneVertexArray/SceneIndexArray addresses are stable
-// across the owning SceneMesh's lifetime, and SceneMesh::ChangeMeshDataFrom
-// shares the underlying arrays via shared_ptr — so identical content shows
-// up as the same pointer automatically.
-struct MeshCacheKey {
-    const void* array_ptr { nullptr };
-    uint64_t    generation { 0 };
+class BufferUploadPool;
 
-    bool operator==(const MeshCacheKey& o) const noexcept {
-        return array_ptr == o.array_ptr && generation == o.generation;
-    }
-};
-
-struct MeshCacheKeyHash {
-    size_t operator()(const MeshCacheKey& k) const noexcept {
-        return std::hash<const void*>()(k.array_ptr) ^
-               (std::hash<uint64_t>()(k.generation) * 0x9E3779B97F4A7C15ULL);
-    }
-};
-
-class MeshCache;
-
-// RAII handle into MeshCache. Does NOT cache the VkBuffer — StagingBuffer's
-// increaseBuf may invalidate it. Callers resolve buffer() at execute time.
-class MeshBufferRef {
+class BufferAllocation {
 public:
-    MeshBufferRef() = default;
-    MeshBufferRef(MeshCache* owner, MeshCacheKey key, VkDeviceSize offset, VkDeviceSize size);
-    ~MeshBufferRef();
+    BufferAllocation() = default;
+    BufferAllocation(BufferUploadPool* owner, StagingBufferRef ref);
+    ~BufferAllocation();
 
-    MeshBufferRef(const MeshBufferRef&)            = delete;
-    MeshBufferRef& operator=(const MeshBufferRef&) = delete;
+    BufferAllocation(const BufferAllocation&)            = delete;
+    BufferAllocation& operator=(const BufferAllocation&) = delete;
 
-    MeshBufferRef(MeshBufferRef&& o) noexcept;
-    MeshBufferRef& operator=(MeshBufferRef&& o) noexcept;
+    BufferAllocation(BufferAllocation&& o) noexcept;
+    BufferAllocation& operator=(BufferAllocation&& o) noexcept;
 
-    explicit operator bool() const noexcept { return m_owner != nullptr && m_size > 0; }
+    explicit operator bool() const noexcept { return m_owner != nullptr && m_ref.size > 0; }
 
     VkBuffer     buffer() const noexcept;
-    VkDeviceSize offset() const noexcept { return m_offset; }
-    VkDeviceSize size() const noexcept { return m_size; }
+    VkDeviceSize offset() const noexcept { return m_ref.offset; }
+    VkDeviceSize size() const noexcept { return m_ref.size; }
 
 private:
-    MeshCache*   m_owner { nullptr };
-    MeshCacheKey m_key {};
-    VkDeviceSize m_offset { 0 };
-    VkDeviceSize m_size { 0 };
+    friend class BufferUploadPool;
+    BufferUploadPool* m_owner { nullptr };
+    StagingBufferRef  m_ref;
 };
 
-class MeshCache : NoCopy, NoMove {
+enum class BufferUploadClass
+{
+    Vertex,
+    Index,
+    Uniform,
+    Storage,
+    Transfer,
+};
+
+struct BufferUploadRequest {
+    rstd::usize       size { 0 };
+    rstd::usize       alignment { 1 };
+    BufferUploadClass usage { BufferUploadClass::Vertex };
+};
+
+class BufferUploadPool : NoCopy, NoMove {
 public:
-    explicit MeshCache(const Device&);
-    ~MeshCache();
+    explicit BufferUploadPool(const Device&);
+    ~BufferUploadPool();
 
     bool init();
     void destroy();
 
-    // Hit: refcount++, returns ref to existing sub-allocation.
-    // Miss: allocateSubRef + writeToBuf, marks dirty, returns fresh ref.
-    std::optional<MeshBufferRef> QueryOrUpload(MeshCacheKey key, std::span<const uint8_t> data,
-                                               VkDeviceSize alignment = 4);
-
-    // Called by ~MeshBufferRef; refcount--, no immediate free.
-    void release(MeshCacheKey key);
-
-    // Current GPU buffer handle. May change across increaseBuf in QueryOrUpload.
-    VkBuffer gpuBuf() const;
-
-    // Flushes any pending writes to GPU. No-op if nothing dirty since last flush.
-    bool recordPendingUploads(vvk::CommandBuffer& cmd);
-
-    // No-op for now; reserved as the hook downstream wires to clearLastRenderGraph.
-    void onRenderGraphCleared();
-
-    // Releases refcount==0 entries from the underlying StagingBuffer.
-    void evictUnused();
+    Option<BufferAllocation> Upload(std::span<const u8> data, const BufferUploadRequest& request);
+    bool                     Update(BufferAllocation&, std::span<const u8> data);
+    void                     Release(StagingBufferRef ref);
+    VkBuffer                 gpuBuf() const;
+    bool                     recordPendingUploads(vvk::CommandBuffer& cmd);
 
 private:
-    struct Entry {
-        StagingBufferRef ref;
-        uint32_t         refcount { 0 };
+    const Device&              m_device;
+    Option<Box<StagingBuffer>> m_buf;
+    bool                       m_dirty { false };
+};
+
+struct BufferUploadBackend {
+    using Trait                  = BufferUploadBackend;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = BufferUploadBackend;
+
+        auto UploadBuffer(rstd::slice<rstd::u8> content, const BufferUploadRequest& request)
+            -> rstd::Option<BufferAllocation> {
+            return rstd::trait_call<0>(this, content, request);
+        }
+
+        bool UpdateBuffer(rstd::mut_ref<BufferAllocation> allocation,
+                          rstd::slice<rstd::u8>           content) {
+            return rstd::trait_call<1>(this, allocation, content);
+        }
     };
 
-    const Device&                                             m_device;
-    std::unique_ptr<StagingBuffer>                            m_buf;
-    std::unordered_map<MeshCacheKey, Entry, MeshCacheKeyHash> m_map;
-    bool                                                      m_dirty { false };
+    template<typename T>
+    using Funcs = rstd::TraitFuncs<&T::UploadBuffer, &T::UpdateBuffer>;
 };
 
 // ---------- GraphicsPipeline.hpp ----------
 
 struct PipelineParameters {
-    vvk::Pipeline                    handle;
-    vvk::PipelineLayout              layout;
-    std::shared_ptr<vvk::RenderPass> pass;
+    vvk::Pipeline       handle;
+    vvk::PipelineLayout layout;
 };
 
 struct DescriptorSetInfo {
@@ -954,12 +959,12 @@ public:
     VkPipelineRasterizationStateCreateInfo raster {};
     VkPipelineDepthStencilStateCreateInfo  depth {};
 
-    ShaderSpv*  getShaderSpv(VkShaderStageFlagBits) const;
-    const auto& pass() const { return m_pass; }
+    const ShaderSpv* getShaderSpv(VkShaderStageFlagBits) const;
+    const auto&      pass() const { return m_pass; }
 
     GraphicsPipeline& setColorBlendStates(std::span<const VkPipelineColorBlendAttachmentState>);
     GraphicsPipeline& setColorBlendOptions(VkPipelineColorBlendStateCreateFlags,
-                                           const std::array<float, 4>&);
+                                           const rstd::array<float, 4>&);
     GraphicsPipeline& setLogicOp(bool enable, VkLogicOp);
 
     GraphicsPipeline& setRenderPass(vvk::RenderPass);
@@ -968,10 +973,10 @@ public:
     GraphicsPipeline&
         addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
     GraphicsPipeline& addInputBindingDescription(std::span<const VkVertexInputBindingDescription>);
-    GraphicsPipeline& setCreateInfoOptions(VkPipelineCreateFlags flags, uint32_t subpass);
+    GraphicsPipeline& setCreateInfoOptions(VkPipelineCreateFlags flags, u32 subpass);
     GraphicsPipeline& setTopology(VkPrimitiveTopology);
     GraphicsPipeline& setPrimitiveRestartEnable(bool);
-    GraphicsPipeline& setViewportScissorCount(uint32_t viewport_count, uint32_t scissor_count);
+    GraphicsPipeline& setViewportScissorCount(u32 viewport_count, u32 scissor_count);
     GraphicsPipeline& setDynamicStates(std::span<const VkDynamicState>);
     GraphicsPipeline& setSampleCount(VkSampleCountFlagBits);
 
@@ -979,7 +984,7 @@ private:
     vvk::RenderPass m_pass;
 
     VkPipelineCreateFlags m_create_flags { 0 };
-    uint32_t              m_subpass { 0 };
+    u32                   m_subpass { 0 };
 
     VkPipelineInputAssemblyStateCreateInfo         m_input_assembly {};
     std::vector<VkVertexInputBindingDescription>   m_input_bind_descriptions;
@@ -1030,7 +1035,7 @@ struct LocalExHandle : NoCopy {
 class LocalExSwapchain final : public ::owe::ExSwapchain,
                                public ::owe::TripleSwapchain<::owe::ExHandle> {
 public:
-    LocalExSwapchain(std::array<LocalExHandle, 3> handles, VkExtent2D ext, uint32_t queue_family)
+    LocalExSwapchain(rstd::array<LocalExHandle, 3> handles, VkExtent2D ext, u32 queue_family)
         : m_handles(std::move(handles)), m_extent(ext), m_queue_family(queue_family) {
         int index = 0;
         for (auto& h : m_handles) {
@@ -1059,20 +1064,20 @@ public:
         if (m_surface_pending) {
             return { .status = ::owe::FrameSurfaceAcquireStatus::Busy };
         }
-        const uint32_t slot_index     = static_cast<uint32_t>(this->getInprogress()->id());
-        const uint64_t acquire_serial = m_next_acquire_serial++;
+        const u32 slot_index     = static_cast<u32>(this->getInprogress()->id());
+        const u64 acquire_serial = m_next_acquire_serial++;
         if (acquire_serial == 0) {
             return { .status     = ::owe::FrameSurfaceAcquireStatus::ProtocolError,
                      .error_code = -EOVERFLOW };
         }
         ::owe::FrameSurfaceLease lease {
-            .identity = { .owner_generation = 1,
-                          .image_index      = slot_index,
-                          .acquire_serial   = acquire_serial },
-            .reuse    = { .kind = ::owe::FrameSurfaceReuseKind::QueueOrdered },
-            .image    = ToImageParameters(m_handles.at(static_cast<std::size_t>(slot_index)).image),
-            .format   = VK_FORMAT_R8G8B8A8_UNORM,
-            .initial_layout       = VK_IMAGE_LAYOUT_GENERAL,
+            .identity       = { .owner_generation = 1,
+                                .image_index      = slot_index,
+                                .acquire_serial   = acquire_serial },
+            .reuse          = { .kind = ::owe::FrameSurfaceReuseKind::QueueOrdered },
+            .image          = ToImageParameters(m_handles.at(static_cast<usize>(slot_index)).image),
+            .format         = VK_FORMAT_R8G8B8A8_UNORM,
+            .initial_layout = VK_IMAGE_LAYOUT_GENERAL,
             .initial_queue_family = m_queue_family,
             .acquire              = { .kind = ::owe::FrameSurfaceAcquireKind::QueueOrdered },
             .final_layout         = VK_IMAGE_LAYOUT_GENERAL,
@@ -1098,7 +1103,7 @@ public:
     ::owe::ExHandle* eatFrame() override {
         return this->TripleSwapchain<::owe::ExHandle>::eatFrame();
     }
-    std::array<::owe::ExHandle*, 3> snapshot_all_slots() override {
+    rstd::array<::owe::ExHandle*, 3> snapshot_all_slots() override {
         return this->TripleSwapchain<::owe::ExHandle>::snapshot_all_slots();
     }
 
@@ -1163,29 +1168,29 @@ private:
         return { .status = ::owe::FrameSurfaceCompletionStatus::Aborted, .identity = identity };
     }
 
-    std::array<LocalExHandle, 3>  m_handles;
+    rstd::array<LocalExHandle, 3> m_handles;
     std::atomic<::owe::ExHandle*> m_presented { nullptr };
     std::atomic<::owe::ExHandle*> m_ready { nullptr };
     std::atomic<::owe::ExHandle*> m_inprogress { nullptr };
     VkExtent2D                    m_extent;
-    uint32_t                      m_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    u32                           m_queue_family { VK_QUEUE_FAMILY_IGNORED };
     std::atomic<int>              m_last_sync_fd { -1 };
-    uint64_t                      m_next_acquire_serial { 1 };
+    u64                           m_next_acquire_serial { 1 };
     ::owe::FrameSurfaceIdentity   m_pending_identity;
     bool                          m_surface_pending { false };
 };
 
-inline std::unique_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& device,
+inline std::shared_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& device,
                                                                 TextureCache& textures, unsigned w,
                                                                 unsigned h, VkImageTiling tiling) {
-    std::array<LocalExHandle, 3> handles;
+    rstd::array<LocalExHandle, 3> handles;
     for (auto& handle : handles) {
-        if (auto rv = textures.CreateExTex(w, h, VK_FORMAT_R8G8B8A8_UNORM, tiling); rv.has_value())
-            handle.image = std::move(rv.value());
+        if (auto rv = textures.CreateExTex(w, h, VK_FORMAT_R8G8B8A8_UNORM, tiling); rv.is_some())
+            handle.image = rstd::move(rv).unwrap();
         else
             return nullptr;
     }
-    return std::make_unique<LocalExSwapchain>(
+    return std::make_shared<LocalExSwapchain>(
         std::move(handles), VkExtent2D { w, h }, device.graphics_queue().family_index);
 }
 
@@ -1199,6 +1204,37 @@ template<>
 struct Impl<owe::vulkan::MemoryBudgetSource, owe::vulkan::Device> : ImplBase<owe::vulkan::Device> {
     auto MemoryBudget() const -> owe::vulkan::MemoryBudgetSnapshot {
         return this->self().MemoryBudget();
+    }
+};
+
+template<>
+struct Impl<owe::vulkan::BufferUploadBackend, owe::vulkan::BufferUploadPool>
+    : ImplBase<owe::vulkan::BufferUploadPool> {
+    auto UploadBuffer(slice<u8> content, const owe::vulkan::BufferUploadRequest& request)
+        -> Option<owe::vulkan::BufferAllocation> {
+        auto uploaded =
+            this->self().Upload(std::span<const u8>(content.as_raw_ptr(), content.len()), request);
+        if (uploaded.is_none()) return None();
+        return Some(rstd::move(uploaded).unwrap());
+    }
+
+    bool UpdateBuffer(mut_ref<owe::vulkan::BufferAllocation> allocation, slice<u8> content) {
+        return this->self().Update(*allocation,
+                                   std::span<const u8>(content.as_raw_ptr(), content.len()));
+    }
+};
+
+template<>
+struct Impl<owe::vulkan::ImagePrepareBackend, owe::vulkan::TextureCache>
+    : ImplBase<owe::vulkan::TextureCache> {
+    auto CreateImportedTexture(mut_ref<owe::Image> image)
+        -> Option<sync::Arc<owe::vulkan::TextureAllocation>> {
+        return this->self().CreateTex(*image);
+    }
+
+    auto AllocateTexture(owe::vulkan::TextureKey key)
+        -> Option<sync::Arc<owe::vulkan::TextureAllocation>> {
+        return this->self().AllocateTexture(rstd::move(key));
     }
 };
 

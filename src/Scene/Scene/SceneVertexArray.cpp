@@ -5,11 +5,13 @@ module;
 module wescene.scene;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe;
 
-uint8_t SceneVertexArray::TypeCount(VertexType t) {
+u8 SceneVertexArray::TypeCount(VertexType t) {
     switch (t) {
     case VertexType::FLOAT1:
     case VertexType::UINT1: return 1;
@@ -23,7 +25,7 @@ uint8_t SceneVertexArray::TypeCount(VertexType t) {
     return 1;
 }
 
-uint8_t SceneVertexArray::RealAttributeSize(const SceneVertexArray::SceneVertexAttribute& attr) {
+u8 SceneVertexArray::RealAttributeSize(const SceneVertexArray::SceneVertexAttribute& attr) {
     return attr.padding ? 4 : TypeCount(attr.type);
 }
 
@@ -34,43 +36,37 @@ SceneVertexArray::SceneVertexArray(const std::vector<SceneVertexAttribute>& attr
         usize size = SceneVertexArray::RealAttributeSize(el);
         m_oneSize += size;
     }
-    m_capacity = m_oneSize * count;
-    m_pData    = new float[m_capacity];
-    std::fill(m_pData, m_pData + m_capacity, 0.0f);
+    auto capacity = m_oneSize * count;
+    m_data        = Vec<float>::with_capacity(capacity);
+    for (usize i = 0; i < capacity; ++i) m_data.push(0.0f);
 }
 
-SceneVertexArray::~SceneVertexArray() {
-    if (m_pData != nullptr) delete[] m_pData;
-}
-SceneVertexArray::SceneVertexArray(SceneVertexArray&& o) noexcept
-    : m_attributes(std::move(o.m_attributes)),
-      m_options(std::move(o.m_options)),
-      m_pData(std::exchange(o.m_pData, nullptr)),
-      m_oneSize(o.m_oneSize),
-      m_size(o.m_size),
-      m_capacity(o.m_capacity),
-      m_id(o.m_id),
-      m_generation(o.m_generation) {}
+SceneVertexArray::SceneVertexArray(SceneVertexArray&& other) noexcept
+    : m_attributes(rstd::move(other.m_attributes)),
+      m_options(rstd::move(other.m_options)),
+      m_data(rstd::move(other.m_data)),
+      m_oneSize(other.m_oneSize),
+      m_size(other.m_size),
+      m_id(other.m_id),
+      m_generation(other.m_generation) {}
 
-SceneVertexArray& SceneVertexArray::operator=(SceneVertexArray&& o) noexcept {
-    if (this == &o) return *this;
-    if (m_pData != nullptr) delete[] m_pData;
-    m_attributes = std::move(o.m_attributes);
-    m_options    = std::move(o.m_options);
-    m_pData      = std::exchange(o.m_pData, nullptr);
-    m_oneSize    = o.m_oneSize;
-    m_size       = o.m_size;
-    m_capacity   = o.m_capacity;
-    m_id         = o.m_id;
-    m_generation = o.m_generation;
+SceneVertexArray& SceneVertexArray::operator=(SceneVertexArray&& other) noexcept {
+    if (this == &other) return *this;
+    m_attributes = rstd::move(other.m_attributes);
+    m_options    = rstd::move(other.m_options);
+    m_data       = rstd::move(other.m_data);
+    m_oneSize    = other.m_oneSize;
+    m_size       = other.m_size;
+    m_id         = other.m_id;
+    m_generation = other.m_generation;
     return *this;
 }
 
 bool SceneVertexArray::AddVertex(const float* data) {
-    if (m_size + m_oneSize > m_capacity) return false;
+    if (m_size + m_oneSize > m_data.len()) return false;
     usize  pos   = 0;
     usize  mpos  = 0;
-    float* mData = m_pData + m_size;
+    float* mData = m_data.begin() + m_size;
     for (const auto& el : m_attributes) {
         auto typeSize = SceneVertexArray::TypeCount(el.type);
         std::copy(data + pos, data + pos + typeSize, mData + mpos);
@@ -93,7 +89,8 @@ bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> d
             for (usize i = 0; i < data.size(); i += typeSize) {
                 auto  start = data.begin() + (isize)i;
                 usize num   = i / typeSize;
-                std::copy(start, start + (isize)typeSize, m_pData + offset + num * m_oneSize);
+                std::copy(
+                    start, start + (isize)typeSize, m_data.begin() + offset + num * m_oneSize);
             }
             BumpDataGeneration();
             return true;
@@ -106,7 +103,7 @@ bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> d
 bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noexcept {
     usize start = index * m_oneSize;
     if (TrySetSize(start + data.size())) {
-        std::copy(data.begin(), data.end(), m_pData + start);
+        std::copy(data.begin(), data.end(), m_data.begin() + start);
         BumpDataGeneration();
         return true;
     }
@@ -120,8 +117,8 @@ void SceneVertexArray::ResetSize() noexcept {
 }
 
 bool SceneVertexArray::TrySetSize(usize new_size) noexcept {
-    rstd_assert(new_size <= m_capacity);
-    if (new_size > m_capacity) {
+    rstd_assert(new_size <= m_data.len());
+    if (new_size > m_data.len()) {
         return false;
     }
     if (new_size > m_size) m_size = new_size;

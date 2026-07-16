@@ -1,10 +1,14 @@
 module;
 
-#include "Utils/String.h" // STRTONUM macro (uses __SHORT_FILE__)
+#include <rstd/macro.hpp>
 
 export module wescene.spec_names;
+import rstd;
 import rstd.cppstd;
+import rstd.log;
 import wescene.types;
+
+using namespace rstd::prelude;
 
 #define BASE_GLTEX_NAMES(ext)                                                                      \
     "g_Texture0" #ext, "g_Texture1" #ext, "g_Texture2" #ext, "g_Texture3" #ext, "g_Texture4" #ext, \
@@ -193,16 +197,15 @@ inline constexpr std::string_view G_AUDIO_SPEC_64_R { "g_AudioSpectrum64Right" }
 
 inline bool IsSpecTex(const std::string_view name) { return name.starts_with(WE_SPEC_PREFIX); }
 inline bool IsSpecLinkTex(const std::string_view name) { return name.starts_with(SpecTex_Link); }
-inline std::uint32_t ParseLinkTex(const std::string_view name) {
-    std::string sid { name };
-    sid = sid.substr(9);
-    std::uint32_t result { 0 };
-    STRTONUM(sid, result);
-    return result;
+inline u32  ParseLinkTex(const std::string_view name) {
+    auto result = rstd::from_str<u32>(rstd::cppstd::as_str(name.substr(9)));
+    if (result.is_err()) {
+        rstd_error("invalid linked texture id: {}", name);
+        return 0;
+    }
+    return rstd::move(result).unwrap();
 }
-inline std::string GenLinkTex(std::ptrdiff_t id) {
-    return std::string(SpecTex_Link) + std::to_string(id);
-}
+inline std::string GenLinkTex(isize id) { return std::string(SpecTex_Link) + std::to_string(id); }
 
 inline bool IsImageLayerComposite(const std::string_view name) {
     return name.starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);

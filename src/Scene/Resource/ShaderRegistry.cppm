@@ -7,18 +7,37 @@ export namespace owe::resource_registry
 
 using namespace rstd::prelude;
 
-struct ShaderEntry {
-    resource::ShaderHandle   handle;
-    resource::ShaderRequest  request;
+struct ShaderPhysical {
     resource::ShaderArtifact artifact;
     u64                      physical_generation { 1 };
+
+    ShaderPhysical(resource::ShaderArtifact value, u64 generation)
+        : artifact(rstd::move(value)), physical_generation(generation) {}
+};
+
+struct ShaderEntry {
+    resource::ShaderHandle          handle;
+    resource::ShaderRequest         request;
+    rstd::sync::Arc<ShaderPhysical> physical;
+};
+
+struct PreparedShader {
+    resource::ShaderHandle          resource;
+    rstd::sync::Arc<ShaderPhysical> physical;
+
+    auto clone() const -> PreparedShader {
+        return PreparedShader {
+            .resource = resource,
+            .physical = physical.clone(),
+        };
+    }
 };
 
 class ShaderRegistry {
 public:
-    auto Ensure(resource::ShaderRequest                        request,
-                mut_ref<dyn<resource::ShaderArtifactProvider>> provider)
-        -> Result<resource::ShaderHandle, resource::ResourceError> {
+    auto Prepare(resource::ShaderRequest                        request,
+                 mut_ref<dyn<resource::ShaderArtifactProvider>> provider)
+        -> Result<PreparedShader, resource::ResourceError> {
         auto existing = m_names.get(request.name);
         if (existing.is_some()) {
             auto entry = m_entries.get_mut(**existing);
@@ -30,28 +49,48 @@ public:
             }
             if ((**entry).request.content_version == request.content_version &&
                 (**entry).request.source == request.source) {
-                return Ok((**entry).handle);
+                return Ok(PreparedShader {
+                    .resource = (**entry).handle,
+                    .physical = (**entry).physical.clone(),
+                });
             }
             auto artifact = provider->LoadShader(request);
             if (artifact.is_err()) return Err(rstd::move(artifact).unwrap_err_unchecked());
+            auto generation    = (**entry).physical->physical_generation + 1;
             (**entry).request  = rstd::move(request);
-            (**entry).artifact = rstd::move(artifact).unwrap_unchecked();
-            ++(**entry).physical_generation;
-            return Ok((**entry).handle);
+            (**entry).physical = rstd::sync::Arc<ShaderPhysical>::make(
+                rstd::move(artifact).unwrap_unchecked(), generation);
+            return Ok(PreparedShader {
+                .resource = (**entry).handle,
+                .physical = (**entry).physical.clone(),
+            });
         }
 
         auto artifact = provider->LoadShader(request);
         if (artifact.is_err()) return Err(rstd::move(artifact).unwrap_err_unchecked());
         auto handle = NextHandle();
         auto name   = request.name.clone();
+        auto physical =
+            rstd::sync::Arc<ShaderPhysical>::make(rstd::move(artifact).unwrap_unchecked(), u64(1));
         (void)m_entries.insert(handle,
                                ShaderEntry {
                                    .handle   = handle,
                                    .request  = rstd::move(request),
-                                   .artifact = rstd::move(artifact).unwrap_unchecked(),
+                                   .physical = physical.clone(),
                                });
         (void)m_names.insert(rstd::move(name), handle);
-        return Ok(handle);
+        return Ok(PreparedShader {
+            .resource = handle,
+            .physical = rstd::move(physical),
+        });
+    }
+
+    auto Ensure(resource::ShaderRequest                        request,
+                mut_ref<dyn<resource::ShaderArtifactProvider>> provider)
+        -> Result<resource::ShaderHandle, resource::ResourceError> {
+        auto prepared = Prepare(rstd::move(request), provider);
+        if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
+        return Ok(rstd::move(prepared).unwrap_unchecked().resource);
     }
 
     auto Resolve(resource::ShaderHandle handle) const noexcept -> Option<ref<ShaderEntry>> {

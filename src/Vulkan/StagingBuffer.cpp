@@ -8,6 +8,7 @@ import wescene.types;
 import rstd.log;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe::vulkan;
 
 #define CHECK_REF(ref, act)                                                   \
@@ -24,8 +25,8 @@ StagingBuffer::~StagingBuffer() {}
 
 namespace
 {
-std::optional<VmaBufferParameters> CreateGpuBuffer(VmaAllocator allocator, VkBufferUsageFlags usage,
-                                                   std::size_t size) {
+Option<VmaBufferParameters> CreateGpuBuffer(VmaAllocator allocator, VkBufferUsageFlags usage,
+                                            usize size) {
     do {
         VmaBufferParameters buffer;
         VkBufferCreateInfo  ci {
@@ -38,9 +39,9 @@ std::optional<VmaBufferParameters> CreateGpuBuffer(VmaAllocator allocator, VkBuf
         VmaAllocationCreateInfo vma_info = {};
         vma_info.usage                   = VMA_MEMORY_USAGE_GPU_ONLY;
         VVK_CHECK_ACT(break, vvk::CreateBuffer(allocator, ci, vma_info, buffer.handle));
-        return buffer;
+        return Some(rstd::move(buffer));
     } while (false);
-    return std::nullopt;
+    return None();
 }
 
 void RecordCopyBuffer(const BufferParameters& dst_buf, const BufferParameters& src_buf,
@@ -84,7 +85,7 @@ StagingBuffer::VirtualBlock* StagingBuffer::newVirtualBlock(VkDeviceSize nsize) 
         m_virtual_blocks.push_back({});
         it         = m_virtual_blocks.end() - 1;
         it->size   = nsize > m_size_step ? nsize : m_size_step;
-        it->index  = (size_t)std::distance(m_virtual_blocks.begin(), it);
+        it->index  = static_cast<usize>(std::distance(m_virtual_blocks.begin(), it));
         it->offset = offset;
     }
     auto& block = *it;
@@ -106,9 +107,9 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
     if (m_stage_raw == nullptr) {
         VVK_CHECK_BOOL_RE(mapStageBuf());
     }
-    auto                 newsize = m_stage_buf.req_size + nsize;
-    std::vector<uint8_t> tmp;
-    tmp.resize(newsize);
+    auto newsize = m_stage_buf.req_size + nsize;
+    auto tmp     = Vec<u8>::with_capacity(usize(newsize));
+    tmp.resize(usize(newsize), u8(0));
     std::memcpy(tmp.data(), m_stage_raw, m_stage_buf.req_size);
 
     m_stage_raw = nullptr;
@@ -117,7 +118,7 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
 
     if (! CreateStagingBuffer(m_device.vma_allocator(), newsize, m_stage_buf)) return false;
     VVK_CHECK_BOOL_RE(mapStageBuf());
-    std::memcpy(m_stage_raw, tmp.data(), newsize);
+    std::memcpy(m_stage_raw, tmp.data(), usize(newsize));
 
     m_gpu_buf.handle = nullptr;
     rstd_info("increase buffer size: {}", nsize);
@@ -210,24 +211,23 @@ void StagingBuffer::unallocateSubRef(const StagingBufferRef& ref) {
 
 VkResult StagingBuffer::mapStageBuf() { return m_stage_buf.handle.MapMemory(&m_stage_raw); }
 
-bool StagingBuffer::writeToBuf(const StagingBufferRef& ref, std::span<uint8_t> data,
-                               size_t offset) {
+bool StagingBuffer::writeToBuf(const StagingBufferRef& ref, std::span<u8> data, usize offset) {
     CHECK_REF(ref, return false);
 
     if (m_stage_raw == nullptr) mapStageBuf();
     VkDeviceSize size = std::min(ref.size - offset, data.size());
-    uint8_t*     raw  = (uint8_t*)m_stage_raw;
+    u8*          raw  = static_cast<u8*>(m_stage_raw);
     std::copy(data.begin(), data.begin() + size, raw + ref.offset + offset);
     return true;
 }
 
-bool StagingBuffer::fillBuf(const StagingBufferRef& ref, size_t offset, size_t size, uint8_t c) {
+bool StagingBuffer::fillBuf(const StagingBufferRef& ref, usize offset, usize size, u8 c) {
     CHECK_REF(ref, return false);
 
     if (m_stage_raw == nullptr) mapStageBuf();
     VkDeviceSize size_     = std::min(ref.size - offset, size);
-    uint8_t*     raw       = (uint8_t*)m_stage_raw;
-    uint8_t*     raw_begin = raw + ref.offset + offset;
+    u8*          raw       = static_cast<u8*>(m_stage_raw);
+    u8*          raw_begin = raw + ref.offset + offset;
     std::fill(raw_begin, raw_begin + size_, c);
     return true;
 }
@@ -235,8 +235,8 @@ bool StagingBuffer::fillBuf(const StagingBufferRef& ref, size_t offset, size_t s
 bool StagingBuffer::recordUpload(vvk::CommandBuffer& cmd) {
     if (! m_gpu_buf.handle) {
         if (auto opt = CreateGpuBuffer(m_device.vma_allocator(), m_usage, m_stage_buf.req_size);
-            opt.has_value()) {
-            m_gpu_buf = std::move(opt.value());
+            opt.is_some()) {
+            m_gpu_buf = rstd::move(opt).unwrap();
         } else
             return false;
     }

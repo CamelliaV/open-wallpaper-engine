@@ -8,6 +8,8 @@ import wescene.resource_registry;
 import wescene.vulkan;
 import wescene.scene;
 
+using namespace rstd::prelude;
+
 export namespace owe::vulkan
 {
 
@@ -20,26 +22,23 @@ enum class DrawBufferRole
 struct DrawBufferKey {
     RenderItemId   render_item;
     DrawBufferRole role { DrawBufferRole::Vertex };
-    uint32_t       submesh_index { 0 };
-    uint32_t       stream_index { 0 };
-    uint64_t       data_generation { 0 };
-    uint64_t       allocation_generation { 0 };
+    u32            submesh_index { 0 };
+    u32            stream_index { 0 };
+    u64            data_generation { 0 };
+    u64            allocation_generation { 0 };
 };
 
 struct DrawBufferRefs {
     RenderItemId render_item;
-    uint64_t     allocation_generation { 0 };
+    u64          allocation_generation { 0 };
     bool         dynamic { false };
     u32          draw_count { 0 };
 
-    std::vector<DrawBufferKey>   vertex_keys;
-    std::optional<DrawBufferKey> index_key;
+    std::vector<DrawBufferKey> vertex_keys;
+    Option<DrawBufferKey>      index_key;
 
-    rstd::vec::Vec<resource_registry::PreparedBuffer> static_vertices;
-    rstd::Option<resource_registry::PreparedBuffer>   static_index;
-
-    std::vector<StagingBufferRef> dynamic_vertices;
-    StagingBufferRef              dynamic_index;
+    Vec<resource::BufferUseHandle>    vertices;
+    Option<resource::BufferUseHandle> index;
 
     DrawBufferRefs()                                     = default;
     DrawBufferRefs(const DrawBufferRefs&)                = delete;
@@ -47,33 +46,30 @@ struct DrawBufferRefs {
     DrawBufferRefs(DrawBufferRefs&&) noexcept            = default;
     DrawBufferRefs& operator=(DrawBufferRefs&&) noexcept = default;
 
-    bool hasIndex() const {
-        return dynamic ? static_cast<bool>(dynamic_index) : static_index.is_some();
-    }
+    bool hasIndex() const { return index.is_some(); }
 };
 
 struct DrawBufferRequest {
-    RenderItemId render_item;
-    SceneMesh*   mesh { nullptr };
-    uint32_t     submesh_index { 0 };
-    uint64_t     dynamic_allocation_generation { 0 };
+    RenderItemId                           render_item;
+    SceneMesh*                             mesh { nullptr };
+    u32                                    submesh_index { 0 };
+    u64                                    dynamic_allocation_generation { 0 };
+    rstd::slice<resource::BufferUseHandle> buffer_uses;
 };
 
 std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest&,
-                                               uint64_t allocation_generation = 0);
+                                               u64 allocation_generation = 0);
 
 class RenderBufferResolver {
 public:
-    RenderBufferResolver(resource_registry::BufferRegistry&, MeshCache&, StagingBuffer&);
+    explicit RenderBufferResolver(const resource_registry::PreparedResourceTable&);
 
-    std::optional<DrawBufferRefs> prepareDrawBuffers(const DrawBufferRequest&);
-    bool updateDynamicDrawBuffers(const DrawBufferRequest&, DrawBufferRefs&);
-    void releaseDynamicDrawBuffers(DrawBufferRefs&);
+    Option<DrawBufferRefs> prepareDrawBuffers(const DrawBufferRequest&);
+    static bool updateDynamicDrawBuffers(const DrawBufferRequest&, DrawBufferRefs&,
+                                         rstd::mut_ref<rstd::dyn<resource::BufferContentWriter>>);
 
 private:
-    rstd::mut_ref<resource_registry::BufferRegistry> m_buffers;
-    rstd::mut_ref<MeshCache>                         m_mesh_cache;
-    StagingBuffer&                                   m_dynamic_buffer;
+    rstd::ref<resource_registry::PreparedResourceTable> m_resources;
 };
 
 } // namespace owe::vulkan

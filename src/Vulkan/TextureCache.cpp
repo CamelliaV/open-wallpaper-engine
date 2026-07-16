@@ -2,7 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include "Utils/AutoDeletor.hpp"
 #include "vvk/macros.hpp"
 
 #include <unistd.h>
@@ -138,12 +137,11 @@ VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
     return result;
 }
 
-std::optional<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::PhysicalDevice gpu,
-                                                VkMemoryRequirements  reqs,
-                                                VkMemoryPropertyFlags property,
-                                                void*                 pNext = nullptr) {
+Option<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::PhysicalDevice gpu,
+                                         VkMemoryRequirements reqs, VkMemoryPropertyFlags property,
+                                         void* pNext = nullptr) {
     VkPhysicalDeviceMemoryProperties pros = gpu.GetMemoryProperties().memoryProperties;
-    for (uint32_t i = 0; i < pros.memoryTypeCount; ++i) {
+    for (u32 i = 0; i < pros.memoryTypeCount; ++i) {
         if ((reqs.memoryTypeBits & (1 << i)) && (pros.memoryTypes[i].propertyFlags & property)) {
             VkMemoryAllocateInfo memory_allocate_info { .sType =
                                                             VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -153,15 +151,15 @@ std::optional<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::
             vvk::DeviceMemory    mem;
             VkResult             res = device.AllocateMemory(memory_allocate_info, mem);
             if (res == VK_SUCCESS) {
-                return mem;
+                return Some(rstd::move(mem));
             } else {
                 VVK_CHECK(res);
-                return std::nullopt;
+                return None();
             }
         }
     }
     rstd_error("vulkan allocate memory failed, no memory match requires");
-    return std::nullopt;
+    return None();
 }
 
 // DRM fourcc codes we emit. We currently only render R8G8B8A8_UNORM and
@@ -169,7 +167,7 @@ std::optional<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::
 // Vulkan component order X-Y-Z-W maps to the *first-byte-in-memory* ordering
 // used by DRM fourccs ('AB24' = little-endian 'AB24' bytes = A, B, 2, 4 →
 // DRM_FORMAT_ABGR8888).
-static uint32_t VkFormatToDrmFourcc(VkFormat fmt) {
+static u32 VkFormatToDrmFourcc(VkFormat fmt) {
     switch (fmt) {
     case VK_FORMAT_R8G8B8A8_UNORM: return 0x34324241u; // DRM_FORMAT_ABGR8888
     case VK_FORMAT_B8G8R8A8_UNORM: return 0x34324152u; // DRM_FORMAT_ARGB8888
@@ -177,11 +175,10 @@ static uint32_t VkFormatToDrmFourcc(VkFormat fmt) {
     }
 }
 
-std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, VkFormat format,
-                                               VkImageTiling       tiling,
-                                               VkSamplerCreateInfo sampler_info,
-                                               VkImageUsageFlags usage, const vvk::Device& device,
-                                               const vvk::PhysicalDevice& gpu) {
+Option<ExImageParameters> CreateExImage(u32 width, u32 height, VkFormat format,
+                                        VkImageTiling tiling, VkSamplerCreateInfo sampler_info,
+                                        VkImageUsageFlags usage, const vvk::Device& device,
+                                        const vvk::PhysicalDevice& gpu) {
     ExImageParameters image;
     do {
         // Iteration 1a: switch the external handle type from OPAQUE_FD to
@@ -229,8 +226,8 @@ std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, 
 
         if (auto opt = AllocateMemory(
                 device, gpu, image.mem_reqs, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &ex_mem_info);
-            opt.has_value()) {
-            image.mem = std::move(opt.value());
+            opt.is_some()) {
+            image.mem = rstd::move(opt).unwrap();
         } else
             break;
 
@@ -266,17 +263,17 @@ std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, 
         };
         VkSubresourceLayout layout = device.GetImageSubresourceLayout(*image.handle, subres);
         image.plane0_offset        = layout.offset;
-        image.plane0_stride        = static_cast<uint32_t>(layout.rowPitch);
+        image.plane0_stride        = static_cast<u32>(layout.rowPitch);
         image.drm_modifier         = 0; // DRM_FORMAT_MOD_LINEAR
         image.drm_fourcc           = VkFormatToDrmFourcc(format);
 
-        return image;
+        return Some(rstd::move(image));
 
     } while (false);
-    return std::nullopt;
+    return None();
 }
 
-inline std::optional<VmaImageParameters>
+inline Option<VmaImageParameters>
 CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat format,
             VkSamplerCreateInfo sampler_info, VkImageUsageFlags usage,
             VmaMemoryUsage        mem_usage = VMA_MEMORY_USAGE_GPU_ONLY,
@@ -334,14 +331,14 @@ CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat form
             VVK_CHECK_ACT(break, device.handle().CreateImageView(createinfo, image.view));
         }
         VVK_CHECK_ACT(break, device.handle().CreateSampler(sampler_info, image.sampler));
-        return image;
+        return Some(rstd::move(image));
     } while (false);
     /*
     if (result != vk::Result::eSuccess) {
         device.DestroyImageParameters(image);
     }
     */
-    return std::nullopt;
+    return None();
 }
 
 inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
@@ -359,7 +356,7 @@ inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
         VkImageSubresourceRange subresourceRange {
             .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel   = 0,
-            .levelCount     = (uint32_t)in_bufs.size(),
+            .levelCount     = static_cast<u32>(in_bufs.size()),
             .baseArrayLayer = 0,
             .layerCount     = 1,
         };
@@ -424,8 +421,8 @@ inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
 }
 } // namespace
 
-std::size_t TextureKey::HashValue(const TextureKey& k) {
-    std::size_t seed { 0 };
+usize TextureKey::HashValue(const TextureKey& k) {
+    usize seed { 0 };
     utils::hash_combine(seed, k.width);
     utils::hash_combine(seed, k.height);
     utils::hash_combine(seed, (int)k.usage);
@@ -439,8 +436,8 @@ std::size_t TextureKey::HashValue(const TextureKey& k) {
     return seed;
 }
 
-std::optional<ExImageParameters> TextureCache::CreateExTex(uint32_t width, uint32_t height,
-                                                           VkFormat format, VkImageTiling tiling) {
+Option<ExImageParameters> TextureCache::CreateExTex(u32 width, u32 height, VkFormat format,
+                                                    VkImageTiling tiling) {
     VkSamplerCreateInfo sampler_info {
         .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .pNext                   = nullptr,
@@ -469,9 +466,9 @@ std::optional<ExImageParameters> TextureCache::CreateExTex(uint32_t width, uint3
                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                              m_device.device(),
                              m_device.gpu());
-    if (opt.has_value()) {
+    if (opt.is_some()) {
         AssignImageGeneration(*opt);
-        const auto& eximg = opt.value();
+        const auto& eximg = *opt;
 
         if (! m_tex_cmd) allocateCmd();
         TransImgLayout(m_device.graphics_queue().handle,
@@ -483,11 +480,7 @@ std::optional<ExImageParameters> TextureCache::CreateExTex(uint32_t width, uint3
     return opt;
 }
 
-ImageSlotsRef TextureCache::CreateTex(Image& image) {
-    if (exists(m_tex_map, image.key)) {
-        return m_tex_map.at(image.key);
-    }
-
+Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateTex(Image& image) {
     if (image.header.type == ImageType::VIDEO) {
         return CreateVideoTex(image);
     }
@@ -506,7 +499,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
         auto  mipmap_levels = image_slot.mipmaps.size();
 
         // check data
-        if (! image_slot) return {};
+        if (! image_slot) return rstd::None();
         VkSamplerCreateInfo sampler_info {
             .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
             .pNext                   = nullptr,
@@ -534,8 +527,8 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
                                    format,
                                    sampler_info,
                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-            opt.has_value()) {
-            image_paras = std::move(opt.value());
+            opt.is_some()) {
+            image_paras = rstd::move(opt).unwrap();
             AssignImageGeneration(image_paras);
         } else
             break;
@@ -568,14 +561,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
 
         m_device.handle().WaitIdle();
     }
-    m_tex_map[image.key] = std::move(img_slots);
-    return m_tex_map[image.key];
-}
-
-std::optional<ImageSlotsRef> TextureCache::FindImportedTexture(std::string_view key) const {
-    auto found = m_tex_map.find(std::string(key));
-    if (found == m_tex_map.end()) return std::nullopt;
-    return ImageSlotsRef(found->second);
+    return rstd::Some(rstd::sync::Arc<TextureAllocation>::make(rstd::move(img_slots)));
 }
 
 void TextureCache::allocateCmd() {
@@ -584,7 +570,7 @@ void TextureCache::allocateCmd() {
     m_tex_cmd = vvk::CommandBuffer(m_tex_cmds[0], m_device.handle().Dispatch());
 }
 
-std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
+Option<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
     VmaImageParameters image_paras;
     do {
         VkSamplerCreateInfo sam_info = GenSamplerInfo(tex_key);
@@ -604,8 +590,8 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
                                    usage,
                                    VMA_MEMORY_USAGE_GPU_ONLY,
                                    tex_key.samples);
-            opt.has_value()) {
-            image_paras = std::move(opt.value());
+            opt.is_some()) {
+            image_paras = rstd::move(opt).unwrap();
             AssignImageGeneration(image_paras);
         } else
             break;
@@ -624,9 +610,17 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
                            : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
         VVK_CHECK_ACT(break, m_device.handle().WaitIdle());
-        return image_paras;
+        return Some(rstd::move(image_paras));
     } while (false);
-    return std::nullopt;
+    return None();
+}
+
+Option<rstd::sync::Arc<TextureAllocation>> TextureCache::AllocateTexture(TextureKey key) {
+    auto image = CreateTex(rstd::move(key));
+    if (image.is_none()) return None();
+    ImageSlots slots;
+    slots.slots.push_back(rstd::move(image).unwrap());
+    return Some(rstd::sync::Arc<TextureAllocation>::make(rstd::move(slots)));
 }
 
 /* ===========================================================================
@@ -662,14 +656,14 @@ public:
     explicit RangeInputStream(rstd::io::ReadRange source)
         : m_length(i64(source.len())), m_reader(rstd::move(source).into_reader()) {}
 
-    int read(std::uint8_t* buf, int size) {
+    int read(u8* buf, int size) {
         if (size <= 0) return 0;
         auto result = m_reader.read(buf, usize(size));
         if (result.is_err()) return -1;
         return int(rstd::move(result).unwrap_unchecked());
     }
 
-    std::int64_t seek(std::int64_t offset, int whence) {
+    i64 seek(i64 offset, int whence) {
         constexpr int AVSEEK_SIZE = 0x10000;
         if (whence == AVSEEK_SIZE) return m_length;
         rstd::io::SeekFrom from;
@@ -726,7 +720,7 @@ rstd::vec::Vec<const char*> ExtensionPtrs(std::span<const std::string> names) {
 rstd::vec::Vec<wavsen::video::QueueFamily> QueueFamiliesForFfmpeg(const Device& device) {
     auto props = device.gpu().GetQueueFamilyProperties();
     auto out   = rstd::vec::Vec<wavsen::video::QueueFamily>::with_capacity(props.len());
-    for (std::uint32_t i = 0; i < props.len(); ++i) {
+    for (u32 i = 0; i < props.len(); ++i) {
         out.push(wavsen::video::QueueFamily {
             .index      = i,
             .flags      = props[i].queueFlags,
@@ -736,8 +730,8 @@ rstd::vec::Vec<wavsen::video::QueueFamily> QueueFamiliesForFfmpeg(const Device& 
     return out;
 }
 
-wavsen::video::Producer::ExternalDeviceInfo
-MakeExternalProducerInfo(const Device& device, std::uint32_t width, std::uint32_t height) {
+wavsen::video::Producer::ExternalDeviceInfo MakeExternalProducerInfo(const Device& device,
+                                                                     u32 width, u32 height) {
     return wavsen::video::Producer::ExternalDeviceInfo {
         .instance                    = device.instance_handle(),
         .physical_device             = *device.gpu(),
@@ -760,45 +754,41 @@ void CloseSyncFd(int fd) {
 } // anonymous namespace
 
 struct TextureCache::VideoRegistry {
-    TextureCache::VideoDecodeOptions                         options;
-    rstd::Option<rstd::boxed::Box<wavsen::video::Producer>>  producer;
-    rstd::Option<rstd::boxed::Box<wavsen::video::YuvToRgba>> yuv;
-    std::uint32_t                                            yuv_max_width { 0 };
-    std::uint32_t                                            yuv_max_height { 0 };
+    TextureCache::VideoDecodeOptions      options;
+    Option<Box<wavsen::video::Producer>>  producer;
+    Option<Box<wavsen::video::YuvToRgba>> yuv;
+    u32                                   yuv_max_width { 0 };
+    u32                                   yuv_max_height { 0 };
 
     struct Slot {
-        std::string   key; /* matches m_tex_map */
-        std::uint32_t width { 0 };
-        std::uint32_t height { 0 };
-        /* RGBA8 target lives in m_tex_map[key].slots[0] (transferred
-         * during CreateVideoTex). Pump retrieves it via lookup so the
-         * single owner stays in the cache. */
-        VmaImageParameters image; /* moved into m_tex_map */
-        rstd::Option<rstd::boxed::Box<wavsen::video::VideoDecoder>> decoder;
-        wavsen::video::Nv12Frame                                    nv12_scratch;
-        double                                                      pts_acc { 0.0 };
-        double                                                      last_pts { -1.0 };
-        bool                                                        have_frame { false };
+        std::string                         key;
+        u32                                 width { 0 };
+        u32                                 height { 0 };
+        VmaImageParameters                  image;
+        rstd::sync::Weak<TextureAllocation> texture = rstd::sync::Weak<TextureAllocation>::make();
+        Option<Box<wavsen::video::VideoDecoder>> decoder;
+        wavsen::video::Nv12Frame                 nv12_scratch;
+        double                                   pts_acc { 0.0 };
+        double                                   last_pts { -1.0 };
+        bool                                     have_frame { false };
     };
-    std::vector<std::unique_ptr<Slot>> slots;
+    Vec<Box<Slot>> slots;
 
-    const wavsen::video::Producer* ensureProducer(const Device& device, std::uint32_t width,
-                                                  std::uint32_t height) {
+    const wavsen::video::Producer* ensureProducer(const Device& device, u32 width, u32 height) {
         if (producer.is_some()) return producer->get();
         auto r =
             wavsen::video::Producer::from_external(MakeExternalProducerInfo(device, width, height));
         if (r.is_err()) {
             rstd_warn(
                 "CreateVideoTex: shared-device producer unavailable; falling back to sw decode: {}",
-                std::move(r).unwrap_err().message.as_str());
+                std::move(r).unwrap_err().message);
             return nullptr;
         }
         producer = rstd::Some(std::move(r).unwrap());
         return producer->get();
     }
 
-    wavsen::video::YuvToRgba* ensureYuv(const Device& device, std::uint32_t width,
-                                        std::uint32_t height) {
+    wavsen::video::YuvToRgba* ensureYuv(const Device& device, u32 width, u32 height) {
         if (yuv.is_some() && width <= yuv_max_width && height <= yuv_max_height) return yuv->get();
         auto next_w = std::max(width, yuv_max_width);
         auto next_h = std::max(height, yuv_max_height);
@@ -811,7 +801,7 @@ struct TextureCache::VideoRegistry {
                                                        next_h);
         if (r.is_err()) {
             rstd_error("CreateVideoTex: YuvToRgba create failed: {}",
-                       std::move(r).unwrap_err().message.as_str());
+                       std::move(r).unwrap_err().message);
             return nullptr;
         }
         yuv            = rstd::Some(rstd::move(r).unwrap());
@@ -821,31 +811,32 @@ struct TextureCache::VideoRegistry {
     }
 };
 
-ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
-    if (image.slots.empty() || image.slots[0].mipmaps.empty()) return {};
+Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(Image& image) {
+    if (image.slots.empty() || image.slots[0].mipmaps.empty()) return rstd::None();
     auto& mip = image.slots[0].mipmaps[0];
     if (mip.video_source.is_none() || mip.width <= 0 || mip.height <= 0) {
         rstd_error("CreateVideoTex: incomplete video-tex slot for {}", image.key);
-        return {};
+        return rstd::None();
     }
 
-    if (! m_video_registry) {
-        m_video_registry          = std::make_unique<VideoRegistry>();
-        m_video_registry->options = m_video_decode_options;
+    if (m_video_registry.is_none()) {
+        m_video_registry                 = Some(Box<VideoRegistry>::make());
+        m_video_registry->get()->options = m_video_decode_options;
     }
+    auto* registry = m_video_registry->get();
     if (! m_tex_cmd) allocateCmd();
 
     auto video_source = (*mip.video_source).clone();
 
-    auto slot = std::make_unique<VideoRegistry::Slot>();
+    auto slot = Box<VideoRegistry::Slot>::make();
     slot->key = image.key;
     /* NV12 chroma is 4:2:0 → both dims even. */
-    slot->width  = static_cast<std::uint32_t>(mip.width | (mip.width & 1));
-    slot->height = static_cast<std::uint32_t>(mip.height | (mip.height & 1));
-    if (slot->width != static_cast<std::uint32_t>(mip.width))
-        slot->width = static_cast<std::uint32_t>(mip.width + 1);
-    if (slot->height != static_cast<std::uint32_t>(mip.height))
-        slot->height = static_cast<std::uint32_t>(mip.height + 1);
+    slot->width  = static_cast<u32>(mip.width | (mip.width & 1));
+    slot->height = static_cast<u32>(mip.height | (mip.height & 1));
+    if (slot->width != static_cast<u32>(mip.width)) slot->width = static_cast<u32>(mip.width + 1);
+    if (slot->height != static_cast<u32>(mip.height)) {
+        slot->height = static_cast<u32>(mip.height + 1);
+    }
 
     /* 1) Allocate the stable RGBA8 target. */
     VkSamplerCreateInfo sampler_info {
@@ -876,12 +867,12 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
                                          VK_IMAGE_USAGE_SAMPLED_BIT);
     if (! img_opt) {
         rstd_error("CreateVideoTex: VkImage allocation failed for {}", image.key);
-        return {};
+        return rstd::None();
     }
     slot->image = std::move(*img_opt);
     AssignImageGeneration(slot->image);
 
-    if (! m_video_registry->ensureYuv(m_device, slot->width, slot->height)) return {};
+    if (! registry->ensureYuv(m_device, slot->width, slot->height)) return None();
 
     /* 2) Initial layout: UNDEFINED → TRANSFER_DST → clear black →
      * SHADER_READ_ONLY. Mirrors the one-shot pattern used by the
@@ -942,14 +933,14 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
                 return rstd::boxed::Box<dyn<wavsen::video::InputStream>>::make(
                     RangeInputStream(source.clone()));
             });
-    const auto              requested_hwdec = ParseHwdec(m_video_registry->options.hwdec);
+    const auto              requested_hwdec = ParseHwdec(registry->options.hwdec);
     wavsen::video::OpenOpts opts {
         requested_hwdec,
-        rstd::string::String::make(m_video_registry->options.render_node.c_str()),
+        String::make(registry->options.render_node.c_str()),
     };
     const wavsen::video::Producer* producer = nullptr;
     if (requested_hwdec != wavsen::video::HwAccel::None) {
-        producer = m_video_registry->ensureProducer(m_device, slot->width, slot->height);
+        producer = registry->ensureProducer(m_device, slot->width, slot->height);
         if (! producer) opts.hwaccel = wavsen::video::HwAccel::None;
     }
     auto dec_r = wavsen::video::VideoDecoder::open_from_stream(std::move(factory),
@@ -961,8 +952,8 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
     if (dec_r.is_err()) {
         rstd_error("CreateVideoTex: open_from_stream failed for {}: {}",
                    image.key,
-                   dec_r.unwrap_err().message.as_str());
-        return {};
+                   dec_r.unwrap_err().message);
+        return None();
     }
     slot->decoder = rstd::Some(std::move(dec_r).unwrap());
     rstd_info("CreateVideoTex: {} hwdec={} decoder kind={}",
@@ -970,31 +961,31 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
               HwdecLabel(requested_hwdec),
               FrameKindLabel((*slot->decoder)->kind()));
 
-    /* 4) Move VkImage ownership into m_tex_map[key] (the canonical
-     * texture cache) and keep VideoRegistry::Slot referencing it by
-     * key — Pump fetches via lookup. This avoids dual ownership of
-     * VmaImageParameters (move-only) while keeping the same VkImage
-     * handle stable across frames. */
     ImageSlots img_slots {};
     img_slots.slots.resize(1);
-    img_slots.slots[0]   = std::move(slot->image);
-    m_tex_map[image.key] = std::move(img_slots);
-    m_video_registry->slots.push_back(std::move(slot));
-    return m_tex_map[image.key];
+    img_slots.slots[0] = std::move(slot->image);
+    auto allocation    = rstd::sync::Arc<TextureAllocation>::make(rstd::move(img_slots));
+    slot->texture      = allocation.downgrade();
+    registry->slots.push(rstd::move(slot));
+    return Some(rstd::move(allocation));
 }
 
 void TextureCache::PumpVideoTextures(double dt_seconds) {
-    if (! m_video_registry || m_video_registry->slots.empty()) return;
+    if (m_video_registry.is_none()) return;
+    auto* registry = m_video_registry->get();
+    if (registry->slots.is_empty()) return;
 
-    for (auto& up : m_video_registry->slots) {
+    for (auto& up : registry->slots) {
         auto& s = *up;
         s.pts_acc += dt_seconds;
-        auto* yuv = m_video_registry->ensureYuv(m_device, s.width, s.height);
+        auto* yuv = registry->ensureYuv(m_device, s.width, s.height);
         if (! yuv) continue;
 
-        auto it = m_tex_map.find(s.key);
-        if (it == m_tex_map.end() || it->second.slots.empty()) continue;
-        ImageParameters ip = ToImageParameters(it->second.slots[0]);
+        auto texture = s.texture.upgrade();
+        if (! texture) continue;
+        auto view = texture->View();
+        if (view.slots.empty()) continue;
+        ImageParameters ip = view.getActive();
 
         const auto                  fkind = (*s.decoder)->kind();
         wavsen::video::VkFrameView  vkv {};
@@ -1019,7 +1010,7 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
                 rstd_error("PumpVideoTextures[{}]: decode {}: {}",
                            s.key,
                            FrameKindLabel(fkind),
-                           std::move(r).unwrap_err().message.as_str());
+                           std::move(r).unwrap_err().message);
                 break;
             }
             auto kind = r.unwrap();
@@ -1043,8 +1034,8 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
         if (! got_new && s.have_frame) continue; /* nothing to upload */
         if (! got_new) continue;
 
-        std::uint32_t cs_id = 0;
-        std::uint32_t cr_id = 0;
+        u32 cs_id = 0;
+        u32 cr_id = 0;
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared:
             cs_id = vkv.colorspace;
@@ -1110,7 +1101,7 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
             rstd_error("PumpVideoTextures[{}]: yuv conversion {}: {}",
                        s.key,
                        FrameKindLabel(fkind),
-                       std::move(cv).unwrap_err().message.as_str());
+                       std::move(cv).unwrap_err().message);
             continue;
         }
         CloseSyncFd(std::move(cv).unwrap());
@@ -1118,27 +1109,25 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
     }
 }
 
-bool TextureCache::UploadFontAtlasRegion(const std::string& key, const std::uint8_t* atlas,
-                                         std::uint32_t atlas_w, std::uint32_t x, std::uint32_t y,
-                                         std::uint32_t w, std::uint32_t h) {
+bool TextureCache::UploadFontAtlasRegion(ref<TextureAllocation> texture, const u8* atlas,
+                                         u32 atlas_w, u32 x, u32 y, u32 w, u32 h) {
     if (w == 0 || h == 0) return true;
-    auto it = m_tex_map.find(key);
-    if (it == m_tex_map.end() || it->second.slots.empty()) return false;
-
-    ImageParameters ip = ToImageParameters(it->second.slots[0]);
+    auto view = texture->View();
+    if (view.slots.empty()) return false;
+    ImageParameters ip = view.getActive();
 
     // Tightly-packed staging buffer for the AABB. Allocating per-call keeps
     // this code path independent of the video-tex ring; atlas pumps are
     // small (a handful of glyphs per frame) so cost is negligible.
-    const std::uint32_t bytes = w * h;
+    const u32           bytes = w * h;
     VmaBufferParameters stage;
     if (! CreateStagingBuffer(m_device.vma_allocator(), bytes, stage)) return false;
 
     {
         void* v = nullptr;
         VVK_CHECK(stage.handle.MapMemory(&v));
-        auto* dst = static_cast<std::uint8_t*>(v);
-        for (std::uint32_t row = 0; row < h; ++row) {
+        auto* dst = static_cast<u8*>(v);
+        for (u32 row = 0; row < h; ++row) {
             std::memcpy(dst + row * w, atlas + (y + row) * atlas_w + x, w);
         }
         stage.handle.UnMapMemory();
@@ -1171,7 +1160,7 @@ bool TextureCache::UploadFontAtlasRegion(const std::string& key, const std::uint
     VkBufferImageCopy region {};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.layerCount = 1;
-    region.imageOffset                 = VkOffset3D { (int32_t)x, (int32_t)y, 0 };
+    region.imageOffset                 = VkOffset3D { static_cast<i32>(x), static_cast<i32>(y), 0 };
     region.imageExtent                 = VkExtent3D { w, h, 1 };
     m_tex_cmd.CopyBufferToImage(
         *stage.handle, ip.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
@@ -1201,7 +1190,7 @@ TextureCache::TextureCache(const Device& device): m_device(device) {}
 
 TextureCache::~TextureCache() {};
 
-uint64_t TextureCache::nextImageGeneration() { return m_next_image_generation++; }
+u64 TextureCache::nextImageGeneration() { return m_next_image_generation++; }
 
 void TextureCache::AssignImageGeneration(VmaImageParameters& image) {
     image.generation = nextImageGeneration();
@@ -1213,80 +1202,15 @@ void TextureCache::AssignImageGeneration(ExImageParameters& image) {
 
 void TextureCache::SetVideoDecodeOptions(VideoDecodeOptions options) {
     m_video_decode_options = std::move(options);
-    if (m_video_registry) {
-        m_video_registry->options = m_video_decode_options;
-        if (m_video_registry->slots.empty()) (void)m_video_registry->producer.take();
+    if (m_video_registry.is_some()) {
+        auto* registry    = m_video_registry->get();
+        registry->options = m_video_decode_options;
+        if (registry->slots.is_empty()) (void)registry->producer.take();
     }
 }
 
 void TextureCache::Clear() {
-    m_tex_map.clear();
-    ClearTransientGraphResources();
-    if (m_video_registry) m_video_registry->slots.clear();
-}
-
-void TextureCache::ClearTransientGraphResources() {
-    m_query_map.clear();
-    m_query_texs.clear();
-}
-
-std::optional<ImageParameters> TextureCache::Query(std::string_view key, TextureKey content_hash,
-                                                   bool persist) {
-    std::string query_key(key);
-    TexHash     tex_hash = TextureKey::HashValue(content_hash);
-
-    if (auto it = m_query_map.find(query_key); it != m_query_map.end()) {
-        auto& query = *(it->second);
-
-        if (query.content_hash != tex_hash) {
-            query.query_keys.erase(query_key);
-            query.share_ready = ! query.persist && query.query_keys.empty();
-            m_query_map.erase(it);
-        } else {
-            query.share_ready = false;
-            query.persist     = persist;
-
-            return ToImageParameters(query.image);
-        }
-    }
-
-    for (auto& query : m_query_texs) {
-        if (! (query->share_ready)) continue;
-        if (query->content_hash != tex_hash) continue;
-
-        query->share_ready = false;
-        query->persist     = persist;
-        query->query_keys.insert(query_key);
-
-        m_query_map[query_key] = &(*query);
-
-        return ToImageParameters(query->image);
-    }
-
-    m_query_texs.emplace_back(std::make_unique<QueryTex>());
-    auto& query            = *m_query_texs.back();
-    m_query_map[query_key] = &query;
-
-    query.index        = (idx)m_query_texs.size() - 1;
-    query.content_hash = tex_hash;
-    query.query_keys.insert(std::move(query_key));
-    query.persist = persist;
-    if (auto opt = CreateTex(content_hash); opt.has_value()) {
-        query.image = std::move(opt.value());
-        return ToImageParameters(query.image);
-    }
-    return std::nullopt;
-}
-
-void TextureCache::MarkShareReady(std::string_view key) {
-    auto it = m_query_map.find(key);
-    if (it != m_query_map.end()) {
-        auto& query = it->second;
-        if (query->persist) return;
-        query->query_keys.erase(std::string(key));
-        query->share_ready = query->query_keys.empty();
-        m_query_map.erase(it);
-    }
+    if (m_video_registry.is_some()) m_video_registry->get()->slots.clear();
 }
 
 void owe::vulkan::RecordGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) {

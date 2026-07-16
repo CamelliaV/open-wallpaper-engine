@@ -12,6 +12,8 @@ import wescene.spec_names;
 export import :visibility;
 export import :lighting;
 
+using namespace rstd::prelude;
+
 export namespace owe
 {
 
@@ -19,7 +21,7 @@ export namespace owe
 // SceneShader.h
 // ============================================================================
 
-using ShaderValueInter = std::array<float, 16>;
+using ShaderValueInter = rstd::array<float, 16>;
 
 class ShaderValue {
 public:
@@ -37,22 +39,22 @@ public:
     ShaderValue(const Range& range) noexcept {
         fromSpan(range);
     }
-    ShaderValue(const value_type* ptr, std::size_t num) noexcept { fromSpan({ ptr, num }); }
+    ShaderValue(const value_type* ptr, usize num) noexcept { fromSpan({ ptr, num }); }
 
     static ShaderValue fromMatrix(const Eigen::Ref<const Eigen::MatrixXf>& mat) {
-        return ShaderValue(std::span { mat.data(), (size_t)mat.size() });
+        return ShaderValue(std::span { mat.data(), static_cast<usize>(mat.size()) });
     }
     static ShaderValue fromMatrix(const Eigen::Ref<const Eigen::MatrixXd>& mat) {
         const Eigen::Ref<const Eigen::MatrixXf>& matf = mat.cast<float>();
         return fromMatrix(matf);
     };
-    const auto& operator[](std::size_t index) const { return _value()[index]; }
-    auto& operator[](std::size_t index) { return m_dynamic ? m_dvalue[index] : m_value[index]; }
+    const auto& operator[](usize index) const { return _value()[index]; }
+    auto&       operator[](usize index) { return m_dynamic ? m_dvalue[index] : m_value[index]; }
 
-    auto   data() const noexcept { return _value().data(); };
-    size_t size() const noexcept { return m_size; };
+    auto  data() const noexcept { return _value().data(); };
+    usize size() const noexcept { return m_size; };
 
-    void setSize(size_t v) noexcept { m_size = std::min(v, (size_t)_value().size()); }
+    void setSize(usize v) noexcept { m_size = std::min(v, _value().size()); }
 
 private:
     void fromSpan(std::span<const value_type> s) noexcept;
@@ -64,7 +66,7 @@ private:
     bool                    m_dynamic { false };
     ShaderValueInter        m_value;
     std::vector<value_type> m_dvalue;
-    size_t                  m_size { 0 };
+    usize                   m_size { 0 };
 };
 
 using ShaderValues   = Map<std::string, ShaderValue>;
@@ -74,12 +76,12 @@ using ShaderCode     = std::vector<unsigned int>;
 struct ShaderAttribute {
 public:
     std::string name;
-    uint32_t    location;
+    u32         location;
 };
 
 struct SceneShader {
 public:
-    uint32_t    id;
+    u32         id;
     std::string name;
 
     std::vector<ShaderCode> codes;
@@ -88,27 +90,27 @@ public:
     ShaderValues                 default_uniforms;
 };
 
-inline std::size_t SceneShaderStageCodeHash(const ShaderCode& code) {
-    std::size_t seed { 0 };
+inline usize SceneShaderStageCodeHash(const ShaderCode& code) {
+    usize seed { 0 };
     utils::hash_combine(seed, code.size());
     for (auto word : code) utils::hash_combine(seed, word);
     return seed;
 }
 
-inline std::size_t SceneShaderCodeHash(std::span<const ShaderCode> codes) {
-    std::size_t seed { 0 };
+inline usize SceneShaderCodeHash(std::span<const ShaderCode> codes) {
+    usize seed { 0 };
     utils::hash_combine(seed, codes.size());
     for (const auto& code : codes) utils::hash_combine(seed, SceneShaderStageCodeHash(code));
     return seed;
 }
 
-inline std::size_t SceneShaderCodeHash(const SceneShader& shader) {
+inline usize SceneShaderCodeHash(const SceneShader& shader) {
     return SceneShaderCodeHash(shader.codes);
 }
 
 struct SceneShaderTextureCompileInfo {
-    bool                enabled { false };
-    std::array<bool, 3> components { false, false, false };
+    bool                 enabled { false };
+    rstd::array<bool, 3> components { false, false, false };
 };
 
 struct SceneShaderVariantStage {
@@ -117,7 +119,7 @@ struct SceneShaderVariantStage {
     std::string                   source;
     Set<unsigned>                 active_texture_slots;
     Map<std::string, std::string> uniforms;
-    std::size_t                   code_hash { 0 };
+    usize                         code_hash { 0 };
 };
 
 struct SceneShaderDefaultTexture {
@@ -138,7 +140,7 @@ struct SceneShaderVariantDesc {
 
     std::vector<SceneShaderTextureCompileInfo> texture_infos;
     std::vector<SceneShaderVariantStage>       stages;
-    std::size_t                                descriptor_layout_hash { 0 };
+    usize                                      descriptor_layout_hash { 0 };
     bool                                       geometry_shader_enabled { false };
 
     bool Valid() const { return ! shader_name.empty() && ! stages.empty(); }
@@ -199,49 +201,48 @@ struct SceneRenderTarget {
 // ============================================================================
 
 class SceneIndexArray : NoCopy {
-    constexpr static size_t Unit_Byte_Size { sizeof(uint32_t) };
+    constexpr static usize Unit_Byte_Size { sizeof(u32) };
 
 public:
     SceneIndexArray(usize indexCount);
-    SceneIndexArray(std::span<const uint32_t> data);
+    SceneIndexArray(std::span<const u32> data);
 
     SceneIndexArray(SceneIndexArray&&) noexcept;
-    ~SceneIndexArray();
+    ~SceneIndexArray() = default;
 
-    void Assign(usize index, std::span<const uint32_t> data) {
+    void Assign(usize index, std::span<const u32> data) {
         if (! IncreaseCheckSet((index + data.size()) * Unit_Byte_Size)) return;
-        std::copy(data.begin(), data.end(), m_pData + index);
+        std::copy(data.begin(), data.end(), m_data.begin() + index);
         BumpDataGeneration();
     }
 
-    const uint32_t* Data() const { return m_pData; }
-    usize           DataCount() const { return m_size; }
-    usize           DataSizeOf() const { return m_size * Unit_Byte_Size; }
+    const u32* Data() const { return m_data.is_empty() ? nullptr : m_data.begin(); }
+    usize      DataCount() const { return m_size; }
+    usize      DataSizeOf() const { return m_size * Unit_Byte_Size; }
 
     usize RenderDataCount() const noexcept {
         return m_render_size > m_size ? m_size : m_render_size;
     }
     void SetRenderDataCount(usize val) noexcept { m_render_size = val; }
 
-    usize    CapacityCount() const { return m_capacity; }
-    usize    CapacitySizeof() const { return m_capacity * Unit_Byte_Size; }
-    uint64_t DataGeneration() const { return m_generation; }
+    usize CapacityCount() const { return m_data.len(); }
+    usize CapacitySizeof() const { return m_data.len() * Unit_Byte_Size; }
+    u64   DataGeneration() const { return m_generation; }
 
-    uint32_t ID() const { return m_id; }
-    void     SetID(uint32_t id) { m_id = id; }
+    u32  ID() const { return m_id; }
+    void SetID(u32 id) { m_id = id; }
 
 private:
-    bool IncreaseCheckSet(size_t size);
+    bool IncreaseCheckSet(usize size);
     void BumpDataGeneration() noexcept { ++m_generation; }
 
-    uint32_t* m_pData;
-    usize     m_size;
-    usize     m_capacity;
+    Vec<u32> m_data;
+    usize    m_size { 0 };
 
     usize m_render_size { std::numeric_limits<usize>::max() };
 
-    uint32_t m_id { std::numeric_limits<uint32_t>::max() };
-    uint64_t m_generation { 1 };
+    u32 m_id { std::numeric_limits<u32>::max() };
+    u64 m_generation { 1 };
 };
 
 // ============================================================================
@@ -260,15 +261,15 @@ public:
         usize                offset;
     };
 
-    SceneVertexArray(const std::vector<SceneVertexAttribute>& attrs, const std::size_t count);
-    ~SceneVertexArray();
+    SceneVertexArray(const std::vector<SceneVertexAttribute>& attrs, usize count);
+    ~SceneVertexArray() = default;
 
     SceneVertexArray(SceneVertexArray&&) noexcept;
     SceneVertexArray& operator=(SceneVertexArray&&) noexcept;
 
     bool AddVertex(const float*);
     bool SetVertex(std::string_view name, std::span<const float> data) noexcept;
-    bool SetVertexs(std::size_t index, std::span<const float> data) noexcept;
+    bool SetVertexs(usize index, std::span<const float> data) noexcept;
 
     // Drops the active size to zero without releasing capacity. Subsequent
     // SetVertexs calls regrow it. Used by per-frame dynamic geners (rope
@@ -279,24 +280,24 @@ public:
     bool GetOption(std::string_view) const;
     void SetOption(std::string_view, bool);
 
-    const float* Data() const { return m_pData; }
+    const float* Data() const { return m_data.is_empty() ? nullptr : m_data.begin(); }
     usize        DataSize() const { return m_size; }
     usize        DataSizeOf() const { return m_size * sizeof(float); }
     usize        VertexCount() const { return m_size / m_oneSize; }
-    usize        CapacitySize() const { return m_capacity; }
-    usize        CapacitySizeOf() const { return m_capacity * sizeof(float); }
+    usize        CapacitySize() const { return m_data.len(); }
+    usize        CapacitySizeOf() const { return m_data.len() * sizeof(float); }
     usize        OneSize() const { return m_oneSize; }
     usize        OneSizeOf() const { return m_oneSize * sizeof(float); }
-    uint64_t     DataGeneration() const { return m_generation; }
+    u64          DataGeneration() const { return m_generation; }
 
     const auto&                                  Attributes() const { return m_attributes; }
     Map<std::string, SceneVertexAttributeOffset> GetAttrOffsetMap() const;
 
-    uint32_t ID() const { return m_id; }
-    void     SetID(uint32_t id) { m_id = id; }
+    u32  ID() const { return m_id; }
+    void SetID(u32 id) { m_id = id; }
 
-    static uint8_t TypeCount(VertexType);
-    static uint8_t RealAttributeSize(const SceneVertexAttribute&);
+    static u8 TypeCount(VertexType);
+    static u8 RealAttributeSize(const SceneVertexAttribute&);
 
 private:
     bool TrySetSize(usize) noexcept;
@@ -306,13 +307,12 @@ private:
 
     Map<std::string, bool> m_options;
 
-    float* m_pData { nullptr };
-    usize  m_oneSize { 0 };
-    usize  m_size { 0 };
-    usize  m_capacity { 0 };
+    Vec<float> m_data;
+    usize      m_oneSize { 0 };
+    usize      m_size { 0 };
 
-    uint32_t m_id;
-    uint64_t m_generation { 1 };
+    u32 m_id;
+    u64 m_generation { 1 };
 };
 
 // Build a SceneVertexAttribute vector from compile-time VertexAttrSpec literals.
@@ -390,7 +390,7 @@ inline bool CanRefreshSceneMaterialTextureBinding(std::string_view old_texture,
            IsLocalSceneMaterialTextureDependency(new_dep);
 }
 
-using SceneMaterialDirtyFlags = uint32_t;
+using SceneMaterialDirtyFlags = u32;
 
 enum class SceneMaterialDirty : SceneMaterialDirtyFlags
 {
@@ -626,7 +626,7 @@ private:
     ShaderValue ShapeShaderValue(std::string_view uniform_name, const ShaderValue& value) const {
         if (value.size() != 1) return value;
 
-        size_t target_size = 0;
+        usize target_size = 0;
         if (auto it = customShader.constValues.find(std::string(uniform_name));
             it != customShader.constValues.end()) {
             target_size = it->second.size();
@@ -675,7 +675,7 @@ private:
 // SceneMesh.h
 // ============================================================================
 
-using SceneMeshDirtyFlags = uint32_t;
+using SceneMeshDirtyFlags = u32;
 
 enum class SceneMeshDirty : SceneMeshDirtyFlags
 {
@@ -702,8 +702,8 @@ public:
     // issued per range in vector order — matching the file's z-order. All
     // ranges in a submesh share the submesh's material slot.
     struct DrawRange {
-        uint32_t first_index;
-        uint32_t index_count;
+        u32 first_index;
+        u32 index_count;
     };
 
     // = glTF "primitive": one vertex-stream set + one index array + one
@@ -714,7 +714,7 @@ public:
         std::vector<SceneVertexArray> vertex_arrays;
         std::vector<SceneIndexArray>  index_arrays;
         std::vector<DrawRange>        draw_ranges;
-        uint32_t                      material_slot { 0 };
+        u32                           material_slot { 0 };
         // Non-empty value redirects this submesh's pass output to the
         // named RT (instead of the SceneNode's default). Used by puppet
         // clipping-mask submeshes to write into a shared `_rt_puppet_mask`
@@ -726,7 +726,7 @@ public:
         : m_dynamic(dynamic), m_dirty(false), m_data(std::make_shared<Data>()) {}
 
     MeshPrimitive Primitive() const { return m_primitive; }
-    uint32_t      PointSize() const { return m_pointSize; }
+    u32           PointSize() const { return m_pointSize; }
 
     bool        Dynamic() const { return m_dynamic; }
     const auto& Dirty() const { return m_dirty; }
@@ -746,11 +746,11 @@ public:
         return consumed;
     }
 
-    uint32_t ID() const { return m_id; };
-    void     SetID(uint32_t v) { m_id = v; };
+    u32  ID() const { return m_id; };
+    void SetID(u32 v) { m_id = v; };
 
     void SetPrimitive(MeshPrimitive v) { m_primitive = v; }
-    void SetPointSize(uint32_t v) { m_pointSize = v; }
+    void SetPointSize(u32 v) { m_pointSize = v; }
 
     // ---- New submesh API ----
     const std::vector<Submesh>& Submeshes() const { return m_data->submeshes; }
@@ -762,21 +762,17 @@ public:
     std::vector<std::shared_ptr<SceneMaterial>>&       MaterialSlots() { return m_materials; }
 
     // ---- Legacy single-slot compat (routes through submeshes[0] / materials[0]) ----
-    std::size_t VertexCount() const { return submesh0().vertex_arrays.size(); }
-    std::size_t IndexCount() const { return submesh0().index_arrays.size(); }
+    usize VertexCount() const { return submesh0().vertex_arrays.size(); }
+    usize IndexCount() const { return submesh0().index_arrays.size(); }
 
-    const SceneVertexArray& GetVertexArray(const std::size_t index) const {
+    const SceneVertexArray& GetVertexArray(usize index) const {
         return submesh0().vertex_arrays[index];
     }
-    const SceneIndexArray& GetIndexArray(const std::size_t index) const {
+    const SceneIndexArray& GetIndexArray(usize index) const {
         return submesh0().index_arrays[index];
     }
-    SceneVertexArray& GetVertexArray(const std::size_t index) {
-        return ensureSubmesh0().vertex_arrays[index];
-    }
-    SceneIndexArray& GetIndexArray(const std::size_t index) {
-        return ensureSubmesh0().index_arrays[index];
-    }
+    SceneVertexArray& GetVertexArray(usize index) { return ensureSubmesh0().vertex_arrays[index]; }
+    SceneIndexArray&  GetIndexArray(usize index) { return ensureSubmesh0().index_arrays[index]; }
 
     void AddIndexArray(SceneIndexArray&& array) {
         ensureSubmesh0().index_arrays.emplace_back(std::move(array));
@@ -814,9 +810,9 @@ private:
         return m_data->submeshes.empty() ? kEmpty : m_data->submeshes[0];
     }
 
-    uint32_t          m_id { std::numeric_limits<uint32_t>::max() };
+    u32               m_id { std::numeric_limits<u32>::max() };
     MeshPrimitive     m_primitive { MeshPrimitive::TRIANGLE };
-    uint32_t          m_pointSize { 1 };
+    u32               m_pointSize { 1 };
     bool              m_dynamic;
     std::atomic<bool> m_dirty;
 
@@ -947,14 +943,14 @@ private:
 };
 
 struct SceneAnimationKey {
-    std::int32_t frame { 0 };
-    float        value { 0.0f };
-    bool         front_enabled { false };
-    float        front_x { 0.0f };
-    float        front_y { 0.0f };
-    bool         back_enabled { false };
-    float        back_x { 0.0f };
-    float        back_y { 0.0f };
+    i32   frame { 0 };
+    float value { 0.0f };
+    bool  front_enabled { false };
+    float front_x { 0.0f };
+    float front_y { 0.0f };
+    bool  back_enabled { false };
+    float back_x { 0.0f };
+    float back_y { 0.0f };
 };
 
 struct SceneAnimationCurve {
@@ -962,7 +958,7 @@ struct SceneAnimationCurve {
     std::vector<SceneAnimationKey> c1;
     std::vector<SceneAnimationKey> c2;
     float                          fps { 30.0f };
-    std::int32_t                   length { 0 };
+    i32                            length { 0 };
     std::string                    mode;
     bool                           wraploop { false };
     bool                           relative { false };
@@ -1156,17 +1152,17 @@ public:
     }
     void SetOriginAnimation(SceneAnimationCurve curve) {
         m_origin_base  = m_translate;
-        m_origin_curve = std::move(curve);
+        m_origin_curve = Some(rstd::move(curve));
     }
     void SetScaleAnimation(SceneAnimationCurve curve) {
         m_scale_base  = m_scale;
-        m_scale_curve = std::move(curve);
+        m_scale_curve = Some(rstd::move(curve));
     }
     void SetRotationAnimation(SceneAnimationCurve curve) {
         m_rotation_base  = m_rotation;
-        m_rotation_curve = std::move(curve);
+        m_rotation_curve = Some(rstd::move(curve));
     }
-    void SetAlphaAnimation(SceneAnimationCurve curve) { m_alpha_curve = std::move(curve); }
+    void SetAlphaAnimation(SceneAnimationCurve curve) { m_alpha_curve = Some(rstd::move(curve)); }
     void TickFieldAnimations(double runtime);
     void SetAlphaSource(SceneNode* node) { m_alpha_source = node; }
 
@@ -1312,10 +1308,10 @@ private:
     Eigen::Vector3f                    m_origin_base { 0.0f, 0.0f, 0.0f };
     Eigen::Vector3f                    m_scale_base { 1.0f, 1.0f, 1.0f };
     Eigen::Vector3f                    m_rotation_base { 0.0f, 0.0f, 0.0f };
-    std::optional<SceneAnimationCurve> m_origin_curve;
-    std::optional<SceneAnimationCurve> m_scale_curve;
-    std::optional<SceneAnimationCurve> m_rotation_curve;
-    std::optional<SceneAnimationCurve> m_alpha_curve;
+    Option<SceneAnimationCurve>        m_origin_curve;
+    Option<SceneAnimationCurve>        m_scale_curve;
+    Option<SceneAnimationCurve>        m_rotation_curve;
+    Option<SceneAnimationCurve>        m_alpha_curve;
     float                              m_brightness { 1.0f };
     bool                               m_brightness_overridden { false };
     Eigen::Vector3f                    m_color { 1.0f, 1.0f, 1.0f };
@@ -1384,8 +1380,8 @@ public:
         m_resolved             = false;
         return true;
     }
-    std::size_t                       EffectCount() const { return m_effects.size(); }
-    auto&                             GetEffect(std::size_t index) { return m_effects.at(index); }
+    usize                             EffectCount() const { return m_effects.size(); }
+    auto&                             GetEffect(usize index) { return m_effects.at(index); }
     std::shared_ptr<SceneImageEffect> FindEffect(std::string_view name) {
         auto it = std::find_if(m_effects.begin(), m_effects.end(), [name](const auto& effect) {
             return effect && effect->name == name;
@@ -1401,9 +1397,10 @@ public:
         return m_final_resolve_effect || m_effects.empty() || HasRuntimeVisibleEffect();
     }
     bool HasRenderEffects() const { return m_final_resolve_effect || HasRuntimeVisibleEffect(); }
-    const auto& FirstTarget() const { return m_pingpong_a; }
-    SceneMesh&  FinalMesh() const { return *m_final_mesh; }
-    void        AddPrefillNode(SceneImageEffectNode node) {
+    const auto&      FirstTarget() const { return m_pingpong_a; }
+    SceneMesh&       FinalMesh() { return *m_final_mesh.get(); }
+    const SceneMesh& FinalMesh() const { return *m_final_mesh.as_ptr(); }
+    void             AddPrefillNode(SceneImageEffectNode node) {
         m_prefill_nodes.push_back(std::move(node));
         m_resolved = false;
     }
@@ -1466,17 +1463,17 @@ private:
     std::string m_pingpong_a;
     std::string m_pingpong_b;
 
-    bool                       fullscreen { false };
-    bool                       m_final_local { false };
-    std::unique_ptr<SceneMesh> m_final_mesh;
-    BlendMode                  m_final_blend;
-    bool                       m_final_depth_test { false };
-    bool                       m_final_depth_write { false };
-    CullMode                   m_final_cull_mode { CullMode::None };
-    std::string                m_final_target { SpecTex_Default };
-    std::string                m_final_camera;
-    bool                       m_skip_when_no_runtime_effect { false };
-    bool                       m_resolved { false };
+    bool           fullscreen { false };
+    bool           m_final_local { false };
+    Box<SceneMesh> m_final_mesh;
+    BlendMode      m_final_blend;
+    bool           m_final_depth_test { false };
+    bool           m_final_depth_write { false };
+    CullMode       m_final_cull_mode { CullMode::None };
+    std::string    m_final_target { SpecTex_Default };
+    std::string    m_final_camera;
+    bool           m_skip_when_no_runtime_effect { false };
+    bool           m_resolved { false };
 
     std::vector<std::shared_ptr<SceneImageEffect>>                    m_effects;
     std::shared_ptr<SceneImageEffect>                                 m_final_resolve_effect;
@@ -1571,15 +1568,15 @@ using ParticleInitOp     = std::function<void(Particle&, double)>;
 using ParticleOperatorOp = std::function<void(const ParticleInfo&)>;
 
 using ParticleEmittOp = std::function<void(
-    std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t maxcount, double timepass,
+    std::vector<Particle>&, std::vector<ParticleInitOp>&, u32 maxcount, double timepass,
     std::span<const float> audio_average, std::span<const ParticleControlpoint> controlpoints)>;
 
 struct ParticleAudioResponse {
-    bool                 enable { false };
-    float                amount { 1.0f };
-    float                exponent { 1.0f };
-    std::array<float, 2> frequency { 0.0f, 15.0f };
-    std::array<float, 2> bounds { 0.0f, 1.0f };
+    bool                  enable { false };
+    float                 amount { 1.0f };
+    float                 exponent { 1.0f };
+    rstd::array<float, 2> frequency { 0.0f, 15.0f };
+    rstd::array<float, 2> bounds { 0.0f, 1.0f };
 };
 
 struct ParticleFollowAnchor {
@@ -1590,38 +1587,38 @@ struct ParticleFollowAnchor {
 };
 
 struct ParticleBoxEmitterArgs {
-    std::array<float, 3>  directions;
-    std::array<float, 3>  minDistance;
-    std::array<float, 3>  maxDistance;
+    rstd::array<float, 3> directions;
+    rstd::array<float, 3> minDistance;
+    rstd::array<float, 3> maxDistance;
     float                 emitSpeed;
-    std::array<float, 3>  orgin;
+    rstd::array<float, 3> orgin;
     bool                  one_per_frame;
     bool                  sort;
     u32                   instantaneous;
     float                 minSpeed;
     float                 maxSpeed;
     float                 duration { 0.0f };
-    int32_t               controlpoint { 0 };
+    i32                   controlpoint { 0 };
     ParticleAudioResponse audio_response;
 
     static ParticleEmittOp MakeEmittOp(ParticleBoxEmitterArgs);
 };
 
 struct ParticleSphereEmitterArgs {
-    std::array<float, 3>   directions;
-    float                  minDistance;
-    float                  maxDistance;
-    float                  emitSpeed;
-    std::array<float, 3>   orgin;
-    std::array<int32_t, 3> sign;
-    bool                   one_per_frame;
-    bool                   sort;
-    u32                    instantaneous;
-    float                  minSpeed;
-    float                  maxSpeed;
-    float                  duration { 0.0f };
-    int32_t                controlpoint { 0 };
-    ParticleAudioResponse  audio_response;
+    rstd::array<float, 3> directions;
+    float                 minDistance;
+    float                 maxDistance;
+    float                 emitSpeed;
+    rstd::array<float, 3> orgin;
+    rstd::array<i32, 3>   sign;
+    bool                  one_per_frame;
+    bool                  sort;
+    u32                   instantaneous;
+    float                 minSpeed;
+    float                 maxSpeed;
+    float                 duration { 0.0f };
+    i32                   controlpoint { 0 };
+    ParticleAudioResponse audio_response;
 
     static ParticleEmittOp MakeEmittOp(ParticleSphereEmitterArgs);
 };
@@ -1660,7 +1657,7 @@ inline void MoveMultiply(Particle& p, double x, double y, double z) noexcept {
     MoveMultiply(p, { x, y, z });
 }
 
-inline void MoveApplySign(Particle& p, int32_t x, int32_t y, int32_t z) noexcept {
+inline void MoveApplySign(Particle& p, i32 x, i32 y, i32 z) noexcept {
     if (x != 0) {
         p.position[0] = std::abs(p.position[0]) * (float)x;
     }
@@ -1830,8 +1827,8 @@ class ParticleSubSystem;
 // SubSystem and is the same for every slot in one instance.
 struct ParticleTrail {
     std::vector<Eigen::Vector3f> positions;
-    uint16_t                     head { 0 };
-    uint16_t                     len { 0 };
+    u16                          head { 0 };
+    u16                          len { 0 };
 
     void Reset() noexcept {
         head = 0;
@@ -1839,15 +1836,15 @@ struct ParticleTrail {
     }
     void Push(const Eigen::Vector3f& p) noexcept {
         if (positions.empty()) return;
-        head            = (uint16_t)((head + 1) % positions.size());
+        head            = static_cast<u16>((head + 1) % positions.size());
         positions[head] = p;
         if (len < positions.size()) len++;
     }
     // Returns oldest -> newest sample at logical index i in [0, len).
-    Eigen::Vector3f At(uint16_t i) const noexcept {
+    Eigen::Vector3f At(u16 i) const noexcept {
         // newest is at head; oldest is len-1 back from head.
-        auto cap = (uint16_t)positions.size();
-        auto idx = (uint16_t)((head + cap - (len - 1 - i)) % cap);
+        auto cap = static_cast<u16>(positions.size());
+        auto idx = static_cast<u16>((head + cap - (len - 1 - i)) % cap);
         return positions[idx];
     }
 };
@@ -1879,7 +1876,8 @@ public:
     std::span<const ParticleTrail> Trails() const;
     std::vector<ParticleTrail>&    TrailsVec();
 
-    BoundedData& GetBoundedData();
+    BoundedData&       GetBoundedData();
+    const BoundedData& GetBoundedData() const;
 
 private:
     bool                       m_is_death { false };
@@ -1900,8 +1898,8 @@ public:
     };
 
 public:
-    ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, uint32_t maxcount,
-                      double rate, u32 maxcount_instance, double probability, SpawnType type,
+    ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, u32 maxcount, double rate,
+                      u32 maxcount_instance, double probability, SpawnType type,
                       ParticleRawGenSpecOp specOp, ParticleFollowAnchor follow_anchor = {},
                       u32 trail_length = 0, double start_time = 0.0, bool world_space = false);
     ~ParticleSubSystem();
@@ -1914,7 +1912,7 @@ public:
     void AddInitializer(ParticleInitOp&&);
     void AddOperator(ParticleOperatorOp&&);
 
-    void AddChild(std::unique_ptr<ParticleSubSystem>&&);
+    void AddChild(Box<ParticleSubSystem>&&);
 
     std::span<const ParticleControlpoint> Controlpoints() const;
     std::span<ParticleControlpoint>       Controlpoints();
@@ -1942,7 +1940,7 @@ private:
     std::vector<ParticleInitOp>     m_initializers;
     std::vector<ParticleOperatorOp> m_operators;
 
-    std::array<ParticleControlpoint, 8> m_controlpoints;
+    rstd::array<ParticleControlpoint, 8> m_controlpoints;
 
     ParticleRawGenSpecOp m_genSpecOp;
     ParticleFollowAnchor m_follow_anchor;
@@ -1953,8 +1951,8 @@ private:
     bool                 m_world_space { false };
     bool                 m_started { false };
 
-    std::vector<std::unique_ptr<ParticleSubSystem>> m_children;
-    std::vector<std::unique_ptr<ParticleInstance>>  m_instances;
+    Vec<Box<ParticleSubSystem>> m_children;
+    Vec<Box<ParticleInstance>>  m_instances;
 
     u32       m_maxcount_instance { 1 };
     double    m_probability { 1.0f };
@@ -1974,7 +1972,7 @@ public:
     IParticleRawGener()          = default;
     virtual ~IParticleRawGener() = default;
 
-    virtual void GenGLData(std::span<const std::unique_ptr<ParticleInstance>>, SceneMesh&,
+    virtual void GenGLData(std::span<const Box<ParticleInstance>>, SceneMesh&,
                            ParticleRawGenSpecOp&) = 0;
 };
 
@@ -1988,8 +1986,8 @@ public:
 
     Scene& scene;
 
-    std::vector<std::unique_ptr<ParticleSubSystem>> subsystems;
-    std::unique_ptr<IParticleRawGener>              gener;
+    Vec<Box<ParticleSubSystem>>        subsystems;
+    std::unique_ptr<IParticleRawGener> gener;
 };
 
 // ============================================================================
@@ -2001,7 +1999,7 @@ public:
     WPParticleRawGener() {};
     virtual ~WPParticleRawGener() {};
 
-    virtual void GenGLData(std::span<const std::unique_ptr<ParticleInstance>>, SceneMesh&,
+    virtual void GenGLData(std::span<const Box<ParticleInstance>>, SceneMesh&,
                            ParticleRawGenSpecOp&);
 };
 
@@ -2054,38 +2052,38 @@ public:
 };
 
 struct SceneNodeId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint32_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u32 generation { 0 };
 };
 
 struct SceneMaterialId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint32_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u32 generation { 0 };
 };
 
 struct SceneMeshId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint32_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u32 generation { 0 };
 };
 
 struct SceneDrawItemId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint32_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u32 generation { 0 };
 };
 
 struct SceneTextureId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint32_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u32 generation { 0 };
 };
 
 struct SceneRenderTargetId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint32_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u32 generation { 0 };
 };
 
 struct SceneCameraId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint32_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u32 generation { 0 };
 };
 
 struct WallpaperLayerId {
@@ -2093,8 +2091,8 @@ struct WallpaperLayerId {
 };
 
 struct SceneLayerId {
-    i32      value { -1 };
-    uint32_t generation { 0 };
+    i32 value { -1 };
+    u32 generation { 0 };
 };
 
 struct SceneDrawItemRecord {
@@ -2102,7 +2100,7 @@ struct SceneDrawItemRecord {
     SceneNodeId     node;
     SceneMeshId     mesh;
     SceneMaterialId material;
-    uint32_t        submesh_index { 0 };
+    u32             submesh_index { 0 };
 };
 
 struct DrawItemView {
@@ -2110,32 +2108,32 @@ struct DrawItemView {
     SceneMesh*                mesh { nullptr };
     const SceneMesh::Submesh* submesh { nullptr };
     SceneMaterial*            material { nullptr };
-    uint32_t                  submesh_index { 0 };
+    u32                       submesh_index { 0 };
 };
 
 class SceneResourceIndex : NoCopy, NoMove {
 public:
     SceneResourceIndex() = default;
 
-    void Rebuild(Scene& scene, uint32_t generation);
+    void Rebuild(Scene& scene, u32 generation);
 
-    uint32_t Generation() const { return m_generation; }
-    bool     Empty() const { return m_scene == nullptr; }
+    u32  Generation() const { return m_generation; }
+    bool Empty() const { return m_scene == nullptr; }
 
     std::span<const SceneDrawItemRecord> DrawItems() const {
         return { m_draw_items.data(), m_draw_items.size() };
     }
     std::span<SceneNode* const> Nodes() const { return { m_nodes.data(), m_nodes.size() }; }
 
-    std::optional<SceneNodeId>         nodeId(const SceneNode& node) const;
-    std::optional<SceneMeshId>         meshId(const SceneMesh& mesh) const;
-    std::optional<SceneMaterialId>     materialId(const SceneMaterial& material) const;
-    std::optional<SceneDrawItemId>     drawItemFor(SceneNodeId node, uint32_t submesh_index) const;
-    std::optional<SceneTextureId>      textureId(std::string_view url) const;
-    std::optional<SceneRenderTargetId> renderTargetId(std::string_view key) const;
-    std::optional<SceneCameraId>       cameraId(std::string_view name) const;
+    Option<SceneNodeId>         nodeId(const SceneNode& node) const;
+    Option<SceneMeshId>         meshId(const SceneMesh& mesh) const;
+    Option<SceneMaterialId>     materialId(const SceneMaterial& material) const;
+    Option<SceneDrawItemId>     drawItemFor(SceneNodeId node, u32 submesh_index) const;
+    Option<SceneTextureId>      textureId(std::string_view url) const;
+    Option<SceneRenderTargetId> renderTargetId(std::string_view key) const;
+    Option<SceneCameraId>       cameraId(std::string_view name) const;
 
-    std::optional<DrawItemView>     resolve(SceneDrawItemId id) const;
+    Option<DrawItemView>            resolve(SceneDrawItemId id) const;
     SceneNode*                      node(SceneNodeId id) const;
     SceneMesh*                      mesh(SceneMeshId id) const;
     SceneMaterial*                  material(SceneMaterialId id) const;
@@ -2149,8 +2147,8 @@ public:
     }
 
 private:
-    Scene*   m_scene { nullptr };
-    uint32_t m_generation { 0 };
+    Scene* m_scene { nullptr };
+    u32    m_generation { 0 };
 
     std::vector<SceneNode*>          m_nodes;
     std::vector<SceneMesh*>          m_meshes;
@@ -2169,33 +2167,37 @@ private:
 };
 
 struct RenderSceneVersion {
-    uint64_t value { 0 };
+    u64 value { 0 };
 };
 
 struct RenderItemId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint64_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u64 generation { 0 };
+
+    bool Valid() const noexcept {
+        return index != std::numeric_limits<u32>::max() && generation != 0;
+    }
 };
 
 struct RenderTextureDescId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint64_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u64 generation { 0 };
 };
 
 struct RenderTargetDescId {
-    uint32_t index { std::numeric_limits<uint32_t>::max() };
-    uint64_t generation { 0 };
+    u32 index { std::numeric_limits<u32>::max() };
+    u64 generation { 0 };
 };
 
 struct RenderItemRecord {
-    RenderItemId                      id;
-    SceneDrawItemId                   scene_draw_item;
-    SceneNodeId                       scene_node;
-    SceneMeshId                       scene_mesh;
-    SceneMaterialId                   scene_material;
-    WallpaperLayerId                  source_layer;
-    uint32_t                          submesh_index { 0 };
-    std::optional<RenderTargetDescId> output_override;
+    RenderItemId               id;
+    SceneDrawItemId            scene_draw_item;
+    SceneNodeId                scene_node;
+    SceneMeshId                scene_mesh;
+    SceneMaterialId            scene_material;
+    WallpaperLayerId           source_layer;
+    u32                        submesh_index { 0 };
+    Option<RenderTargetDescId> output_override;
 };
 
 struct RenderTextureDescRecord {
@@ -2229,8 +2231,8 @@ struct SceneMaterialDirtyEvent {
 };
 
 struct SceneMaterialTextureSlotMutation {
-    bool                           changed { false };
-    std::optional<SceneMaterialId> material;
+    bool                    changed { false };
+    Option<SceneMaterialId> material;
 };
 
 struct SceneShaderVariantMutation {
@@ -2239,8 +2241,8 @@ struct SceneShaderVariantMutation {
 };
 
 struct SceneMaterialShaderVariantMutation {
-    bool                           changed { false };
-    std::optional<SceneMaterialId> material;
+    bool                    changed { false };
+    Option<SceneMaterialId> material;
 };
 
 enum class SceneUserPropertyDiagnosticCode
@@ -2283,15 +2285,15 @@ public:
     const RenderTextureDescRecord* textureDesc(RenderTextureDescId id) const;
     const RenderTargetDescRecord*  renderTargetDesc(RenderTargetDescId id) const;
 
-    std::optional<RenderItemId>        renderItemFor(SceneDrawItemId id) const;
-    std::optional<RenderTextureDescId> textureDescId(std::string_view key) const;
-    std::optional<RenderTargetDescId>  renderTargetDescId(std::string_view key) const;
-    std::span<const RenderItemId>      renderItemsFor(WallpaperLayerId id) const;
-    std::span<const RenderItemId>      renderItemsFor(SceneMaterialId id) const;
-    std::span<const RenderItemId>      renderItemsFor(SceneMeshId id) const;
-    const RenderLinkSourceRecord*      linkSource(WallpaperLayerId id) const;
-    const Set<i32>&                    LinkedLayerIds() const { return m_linked_layer_ids; }
-    bool                               HasLinkConsumer(WallpaperLayerId id) const;
+    Option<RenderItemId>          renderItemFor(SceneDrawItemId id) const;
+    Option<RenderTextureDescId>   textureDescId(std::string_view key) const;
+    Option<RenderTargetDescId>    renderTargetDescId(std::string_view key) const;
+    std::span<const RenderItemId> renderItemsFor(WallpaperLayerId id) const;
+    std::span<const RenderItemId> renderItemsFor(SceneMaterialId id) const;
+    std::span<const RenderItemId> renderItemsFor(SceneMeshId id) const;
+    const RenderLinkSourceRecord* linkSource(WallpaperLayerId id) const;
+    const Set<i32>&               LinkedLayerIds() const { return m_linked_layer_ids; }
+    bool                          HasLinkConsumer(WallpaperLayerId id) const;
 
 private:
     RenderSceneVersion m_version;
@@ -2300,15 +2302,15 @@ private:
     std::vector<RenderTextureDescRecord> m_texture_descs;
     std::vector<RenderTargetDescRecord>  m_render_target_descs;
 
-    std::unordered_map<uint64_t, RenderItemId>              m_render_item_ids;
-    std::unordered_map<std::string, RenderTextureDescId>    m_texture_desc_ids;
-    std::unordered_map<std::string, RenderTargetDescId>     m_render_target_desc_ids;
-    std::unordered_map<i32, std::vector<RenderItemId>>      m_source_layer_items;
-    std::unordered_map<uint64_t, std::vector<RenderItemId>> m_material_render_items;
-    std::unordered_map<uint64_t, std::vector<RenderItemId>> m_mesh_render_items;
-    std::vector<RenderLinkSourceRecord>                     m_link_sources;
-    std::unordered_map<i32, uint32_t>                       m_link_source_ids;
-    Set<i32>                                                m_linked_layer_ids;
+    std::unordered_map<u64, RenderItemId>                m_render_item_ids;
+    std::unordered_map<std::string, RenderTextureDescId> m_texture_desc_ids;
+    std::unordered_map<std::string, RenderTargetDescId>  m_render_target_desc_ids;
+    std::unordered_map<i32, std::vector<RenderItemId>>   m_source_layer_items;
+    std::unordered_map<u64, std::vector<RenderItemId>>   m_material_render_items;
+    std::unordered_map<u64, std::vector<RenderItemId>>   m_mesh_render_items;
+    std::vector<RenderLinkSourceRecord>                  m_link_sources;
+    std::unordered_map<i32, u32>                         m_link_source_ids;
+    Set<i32>                                             m_linked_layer_ids;
 };
 
 RenderSceneSnapshot ExtractRenderSceneSnapshot(Scene& scene);
@@ -2341,7 +2343,7 @@ public:
     Set<i32> static_elidable_layer_ids;
     Set<i32> visibility_elidable_layer_ids;
 
-    std::vector<std::unique_ptr<SceneLight>> lights;
+    Vec<Box<SceneLight>> lights;
 
     // user-property key → list of (material pointer, GLSL uniform name) pairs
     // pulled out of every material's shader-side `u_*` annotations during
@@ -2349,8 +2351,7 @@ public:
     // identifier). Lets a future RenderSetUserProperty handler push the new
     // value into the affected materials' `customShader.constValues` without
     // a per-frame walk over the scene tree.
-    Map<std::string, std::vector<std::pair<class SceneMaterial*, std::string>>>
-        shader_user_var_index;
+    Map<std::string, std::vector<std::pair<SceneMaterial*, std::string>>> shader_user_var_index;
 
     struct ShaderComboUserBinding {
         SceneMaterial*                material { nullptr };
@@ -2398,7 +2399,7 @@ public:
 
     struct MaterialTextureUserBinding {
         SceneMaterial* material { nullptr };
-        uint32_t       slot { 0 };
+        u32            slot { 0 };
         std::string    fallback;
     };
     Map<std::string, std::vector<MaterialTextureUserBinding>> material_texture_user_index;
@@ -2409,8 +2410,7 @@ public:
 
     Map<std::string, std::vector<std::shared_ptr<SceneCameraPath>>> camera_path_user_index;
 
-    std::optional<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node,
-                                                           std::string_view name);
+    Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, std::string_view name);
     bool SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible);
     bool ConsumeRenderGraphDirty() {
         bool dirty           = m_render_graph_dirty;
@@ -2460,16 +2460,16 @@ public:
 
     std::vector<std::shared_ptr<ScenePostProcess>> post_processes;
 
-    std::unique_ptr<ParticleSystem> paritileSys;
+    Box<ParticleSystem> paritileSys;
 
     SceneCamera* activeCamera;
 
-    std::array<float, 2>               pointerPosition { 0.5f, 0.5f };
-    std::array<std::atomic<float>, 16> audioAverage {};
+    rstd::array<float, 2>               pointerPosition { 0.5f, 0.5f };
+    rstd::array<std::atomic<float>, 16> audioAverage {};
 
-    i32                  ortho[2] { 1920, 1080 };
-    std::array<float, 3> clearColor { 1.0f, 1.0f, 1.0f };
-    std::string          clearColorUserKey;
+    i32                   ortho[2] { 1920, 1080 };
+    rstd::array<float, 3> clearColor { 1.0f, 1.0f, 1.0f };
+    std::string           clearColorUserKey;
 
     double elapsingTime { 0.0f }, frameTime { 0.0f };
     void   PassFrameTime(double t) {
@@ -2499,7 +2499,7 @@ public:
     bool        EnsureTextureDescriptor(std::string_view key);
     bool        SetMaterialShaderValue(SceneMaterial& material, std::string_view uniform_name,
                                        const ShaderValue& value);
-    SceneMaterialTextureSlotMutation SetMaterialTextureSlot(SceneMaterial& material, uint32_t slot,
+    SceneMaterialTextureSlotMutation SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
                                                             std::string_view texture);
     SceneMaterialShaderVariantMutation
          SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutation mutation);
@@ -2508,10 +2508,10 @@ public:
     void RegisterRenderGroup(WallpaperLayerId id, std::string camera) {
         m_render_group_cameras[id.value] = std::move(camera);
     }
-    std::optional<std::string_view> RenderGroupCamera(WallpaperLayerId id) const {
+    Option<std::string_view> RenderGroupCamera(WallpaperLayerId id) const {
         auto it = m_render_group_cameras.find(id.value);
-        if (it == m_render_group_cameras.end()) return std::nullopt;
-        return it->second;
+        if (it == m_render_group_cameras.end()) return None();
+        return Some(std::string_view(it->second));
     }
     bool                                 SetNodeVisible(SceneNode& node, bool visible);
     std::vector<SceneMeshDirtyEvent>     ConsumePreparedMeshDirtyEvents();
@@ -2525,14 +2525,14 @@ public:
     void                      RebuildResourceIndex();
     SceneResourceIndex&       ResourceIndex() { return m_resource_index; }
     const SceneResourceIndex& ResourceIndex() const { return m_resource_index; }
-    uint32_t                  ResourceGeneration() const { return m_resource_generation; }
+    u32                       ResourceGeneration() const { return m_resource_generation; }
 
 private:
     Map<std::string, std::vector<std::function<void(std::string_view)>>> m_text_user_index;
 
     void RebuildElidableLayerIds();
 
-    uint32_t                                 m_resource_generation { 0 };
+    u32                                      m_resource_generation { 0 };
     SceneResourceIndex                       m_resource_index;
     bool                                     m_render_graph_dirty { false };
     Map<i32, std::string>                    m_render_group_cameras;

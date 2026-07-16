@@ -4,8 +4,10 @@ module;
 
 module wescene.scene;
 import wescene.core;
+import rstd;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe;
 
 void ParticleInstance::Refresh() {
@@ -28,20 +30,22 @@ std::vector<Particle>&    ParticleInstance::ParticlesVec() { return m_particles;
 std::span<const ParticleTrail> ParticleInstance::Trails() const { return m_trails; };
 std::vector<ParticleTrail>&    ParticleInstance::TrailsVec() { return m_trails; };
 
-ParticleInstance::BoundedData& ParticleInstance::GetBoundedData() { return m_bounded_data; }
+ParticleInstance::BoundedData&       ParticleInstance::GetBoundedData() { return m_bounded_data; }
+const ParticleInstance::BoundedData& ParticleInstance::GetBoundedData() const {
+    return m_bounded_data;
+}
 
-ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm,
-                                     uint32_t maxcount, double rate, u32 maxcount_instance,
-                                     double probability, SpawnType type,
-                                     ParticleRawGenSpecOp specOp,
+ParticleSubSystem::ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, u32 maxcount,
+                                     double rate, u32 maxcount_instance, double probability,
+                                     SpawnType type, ParticleRawGenSpecOp specOp,
                                      ParticleFollowAnchor follow_anchor, u32 trail_length,
                                      double start_time, bool world_space)
     : m_sys(p),
       m_mesh(sm),
-      m_maxcount(maxcount),
-      m_rate(rate),
       m_genSpecOp(specOp),
       m_follow_anchor(follow_anchor),
+      m_maxcount(maxcount),
+      m_rate(rate),
       m_time(0),
       m_start_time(start_time),
       m_world_space(world_space),
@@ -83,8 +87,8 @@ Eigen::Vector3f ParticleSubSystem::FollowPosition(const Particle& p) const {
     return pos + velocity.normalized() * visual_half_len;
 }
 
-void ParticleSubSystem::AddChild(std::unique_ptr<ParticleSubSystem>&& child) {
-    m_children.emplace_back(std::move(child));
+void ParticleSubSystem::AddChild(Box<ParticleSubSystem>&& child) {
+    m_children.push(rstd::move(child));
 }
 
 ParticleInstance* ParticleSubSystem::QueryNewInstance() {
@@ -95,9 +99,9 @@ ParticleInstance* ParticleSubSystem::QueryNewInstance() {
                 return inst.get();
             }
         }
-        if (m_instances.size() < m_maxcount_instance) {
-            m_instances.emplace_back(std::make_unique<ParticleInstance>());
-            return m_instances.back().get();
+        if (m_instances.len() < m_maxcount_instance) {
+            m_instances.push(Box<ParticleInstance>::make());
+            return m_instances[m_instances.len() - 1].get();
         }
     }
     return nullptr;
@@ -163,13 +167,13 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
         if (cp.link_mouse) cp.offset = cp.base_offset + mouse_local;
     }
 
-    std::array<float, 16> audio_average {};
-    for (std::size_t i = 0; i < audio_average.size(); ++i) {
+    rstd::array<float, 16> audio_average {};
+    for (usize i = 0; i < audio_average.len(); ++i) {
         audio_average[i] = m_sys.scene.audioAverage[i].load(std::memory_order_relaxed);
     }
 
     if (m_spawn_type == SpawnType::STATIC) {
-        if (m_instances.empty()) m_instances.emplace_back(std::make_unique<ParticleInstance>());
+        if (m_instances.is_empty()) m_instances.push(Box<ParticleInstance>::make());
     }
 
     auto spawn_inst = [this](ParticleInstance&  inst,
@@ -202,7 +206,8 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
         // bouded data and death
         if (bounded_data.parent != nullptr) {
             std::span particles = bounded_data.parent->Particles();
-            if (bounded_data.particle_idx != -1 && bounded_data.particle_idx < particles.size()) {
+            if (bounded_data.particle_idx != -1 &&
+                static_cast<usize>(bounded_data.particle_idx) < particles.size()) {
                 auto& p          = particles[bounded_data.particle_idx];
                 bounded_data.pos = bounded_data.parent_subsystem
                                        ? bounded_data.parent_subsystem->FollowPosition(p)
@@ -235,7 +240,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
                         m_initializers,
                         m_maxcount,
                         emitter_time,
-                        std::span<const float> { audio_average.data(), audio_average.size() },
+                        std::span<const float> { audio_average.data(), audio_average.len() },
                         std::span<const ParticleControlpoint> { m_controlpoints });
             }
         }
@@ -342,7 +347,10 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
 
     if (update_mesh) {
         m_mesh->SetDirty();
-        m_sys.gener->GenGLData(m_instances, *m_mesh, m_genSpecOp);
+        m_sys.gener->GenGLData(
+            std::span<const Box<ParticleInstance>> { m_instances.begin(), m_instances.len() },
+            *m_mesh,
+            m_genSpecOp);
     }
 
     for (auto& child : m_children) {

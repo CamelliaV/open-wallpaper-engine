@@ -13,19 +13,12 @@ export import wescene.resource_registry;
 import wescene.vulkan;
 import wescene.scene;
 
+using namespace rstd::prelude;
+
 export namespace owe::vulkan
 {
 
 class ShaderReflectionCache;
-
-using resource_registry::FramebufferCacheDiagnostics;
-using resource_registry::FramebufferResourceResult;
-using resource_registry::FramebufferResourceSystem;
-using resource_registry::PipelineCacheDiagnostics;
-using resource_registry::PipelineResourceEntry;
-using resource_registry::PipelineResourceResult;
-using resource_registry::PipelineResourceSystem;
-using resource_registry::PipelineRetireQueue;
 
 using resource::SetTextureRequestIfChanged;
 using resource::TextureBindingRequest;
@@ -35,6 +28,13 @@ using resource::TextureLifetimeClass;
 using resource::TextureRequest;
 using resource::TextureRequestKind;
 using resource::TextureUsage;
+using resource_registry::FramebufferCacheDiagnostics;
+using resource_registry::FramebufferResourceResult;
+using resource_registry::FramebufferResourceSystem;
+using resource_registry::PipelineCacheDiagnostics;
+using resource_registry::PipelineResourceEntry;
+using resource_registry::PipelineResourceResult;
+using resource_registry::PipelineResourceSystem;
 
 inline bool SameTextureSample(const TextureSample& lhs, const TextureSample& rhs) {
     return lhs.wrapS == rhs.wrapS && lhs.wrapT == rhs.wrapT && lhs.magFilter == rhs.magFilter &&
@@ -58,8 +58,8 @@ inline void WriteTextureSampleIdentity(PipelineKeyWriter& writer, const TextureS
 }
 
 inline void WriteTextureKeyIdentity(PipelineKeyWriter& writer, const TextureKey& key) {
-    writer.writeU32(static_cast<std::uint32_t>(key.width));
-    writer.writeU32(static_cast<std::uint32_t>(key.height));
+    writer.writeU32(static_cast<u32>(key.width));
+    writer.writeU32(static_cast<u32>(key.height));
     WritePipelineScalar(writer, key.usage);
     WritePipelineScalar(writer, key.format);
     WriteTextureSampleIdentity(writer, key.sample);
@@ -69,14 +69,14 @@ inline void WriteTextureKeyIdentity(PipelineKeyWriter& writer, const TextureKey&
 
 inline void WriteTextureDefinitionIdIdentity(PipelineKeyWriter&         writer,
                                              const TextureDefinitionId& id) {
-    writer.writeU64(static_cast<std::uint64_t>(id.index));
-    writer.writeU64(static_cast<std::uint64_t>(id.generation));
+    writer.writeU64(static_cast<u64>(id.index));
+    writer.writeU64(static_cast<u64>(id.generation));
 }
 
 inline void WriteTextureDefinitionIdentity(PipelineKeyWriter&       writer,
                                            const TextureDefinition& definition) {
-    writer.writeU32(static_cast<std::uint32_t>(definition.width));
-    writer.writeU32(static_cast<std::uint32_t>(definition.height));
+    writer.writeU32(static_cast<u32>(definition.width));
+    writer.writeU32(static_cast<u32>(definition.height));
     WritePipelineScalar(writer, definition.usage);
     WritePipelineScalar(writer, definition.format);
     WriteTextureSampleIdentity(writer, definition.sample);
@@ -97,8 +97,8 @@ inline void WriteTextureRequestIdentity(PipelineKeyWriter& writer, const Texture
 }
 
 inline void WriteImageParametersIdentity(PipelineKeyWriter& writer, const ImageParameters& image) {
-    writer.writeU64(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(image.handle)));
-    writer.writeU64(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(image.view)));
+    writer.writeU64(static_cast<u64>(reinterpret_cast<usize>(image.handle)));
+    writer.writeU64(static_cast<u64>(reinterpret_cast<usize>(image.view)));
     writer.writeU32(image.extent.width);
     writer.writeU32(image.extent.height);
     writer.writeU32(image.extent.depth);
@@ -194,22 +194,9 @@ inline TextureDefinition DepthTextureDefinition(owe::SceneRenderTarget rt) {
     };
 }
 
-inline TextureKey ToTextureKey(const TextureDefinition& definition) {
-    return TextureKey {
-        .width        = definition.width,
-        .height       = definition.height,
-        .usage        = definition.usage == TextureUsage::Depth ? TexUsage::DEPTH : TexUsage::COLOR,
-        .format       = definition.format,
-        .sample       = definition.sample,
-        .mipmap_level = definition.mip_levels,
-        .samples      = TextureSampleCount(definition.samples),
-    };
-}
-
-inline TextureRequest
-MakeImportedTextureRequest(std::string_view                   name,
-                           std::optional<RenderTextureDescId> texture = std::nullopt) {
-    auto source = texture.has_value()
+inline TextureRequest MakeImportedTextureRequest(std::string_view            name,
+                                                 Option<RenderTextureDescId> texture = None()) {
+    auto source = texture.is_some()
                       ? rstd::Some(TextureDefinitionId { .index      = texture->index,
                                                          .generation = texture->generation })
                       : rstd::None<TextureDefinitionId>();
@@ -262,18 +249,9 @@ inline TextureRequest MakeDepthTextureRequest(std::string_view name, const Scene
     };
 }
 
-inline std::optional<ImageParameters> QueryTextureRequest(TextureCache&         textures,
-                                                          const TextureRequest& request) {
-    if (request.definition.is_none()) return std::nullopt;
-    auto name = rstd::cppstd::as_string_view(request.name.as_str());
-    return textures.Query(name,
-                          ToTextureKey(*request.definition),
-                          request.lifetime != TextureLifetimeClass::FrameLocal);
-}
-
-inline std::optional<std::string>
-ResolveImportedTextureName(const RenderSceneSnapshot& render_scene, const TextureRequest& request) {
-    if (request.kind != TextureRequestKind::Imported) return std::nullopt;
+inline Option<std::string> ResolveImportedTextureName(const RenderSceneSnapshot& render_scene,
+                                                      const TextureRequest&      request) {
+    if (request.kind != TextureRequestKind::Imported) return None();
     auto catalog  = rstd::dyn<resource::TextureCatalog>::from_ref(render_scene);
     auto resolved = rstd::None<TextureRequest>();
     if (request.source.is_some()) {
@@ -282,8 +260,8 @@ ResolveImportedTextureName(const RenderSceneSnapshot& render_scene, const Textur
     if (resolved.is_none()) {
         resolved = catalog->FindTexture(request.name.as_str());
     }
-    if (resolved.is_none()) return std::nullopt;
-    return rstd::cppstd::to_string(resolved->name.as_str());
+    if (resolved.is_none()) return None();
+    return Some(rstd::cppstd::to_string(resolved->name.as_str()));
 }
 
 class SnapshotImportedTextureProvider {
@@ -306,14 +284,14 @@ public:
         if (m_image_parser.is_none()) {
             return rstd::Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::MissingContent,
-                .message = rstd::format("texture parser unavailable for {}", request.name.as_str()),
+                .message = rstd::format("texture parser unavailable for {}", request.name),
             });
         }
         auto image = (*m_image_parser)->Parse(name);
         if (! image) {
             return rstd::Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::MissingContent,
-                .message = rstd::format("parse texture {} failed", request.name.as_str()),
+                .message = rstd::format("parse texture {} failed", request.name),
             });
         }
         auto stored = m_loaded_content.emplace(rstd::move(name), rstd::move(image)).first;
@@ -342,12 +320,8 @@ struct RenderingResources {
     vvk::Semaphore sem_upload;
     vvk::Fence     fence_frame;
 
-    // Static vertex/index buffers are owned by the resource registries;
-    // only the per-rebuild dyn_buf lives here.
-    rstd::Option<rstd::mut_ref<StagingBuffer>>         dyn_buf;
     rstd::Option<rstd::mut_ref<ShaderReflectionCache>> shader_reflection_cache;
-    resource_registry::ResourceRegistries              resource_registries;
-    resource_registry::PreparedResourceTable           prepared_resources;
+    resource_registry::RenderResourceSystem            resources;
 };
 
 } // namespace owe::vulkan
@@ -366,12 +340,13 @@ struct Impl<owe::resource::TextureCatalog, owe::RenderSceneSnapshot>
         auto name = record->desc.url.empty() ? std::string_view(record->key)
                                              : std::string_view(record->desc.url);
         return Some(owe::vulkan::MakeImportedTextureRequest(
-            name, owe::RenderTextureDescId { .index = id.index, .generation = id.generation }));
+            name,
+            Some(owe::RenderTextureDescId { .index = id.index, .generation = id.generation })));
     }
 
     auto FindTexture(ref<str> name) const -> Option<owe::resource::TextureRequest> {
         auto id = this->self().textureDescId(rstd::cppstd::as_string_view(name));
-        if (! id.has_value()) return None();
+        if (id.is_none()) return None();
         return ResolveTexture(owe::resource::TextureDefinitionId { .index      = id->index,
                                                                    .generation = id->generation });
     }

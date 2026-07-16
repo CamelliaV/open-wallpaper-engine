@@ -6,8 +6,10 @@ module wescene.scene;
 import wescene.spec_names;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe;
 
 namespace
@@ -16,13 +18,13 @@ namespace
 void ChangeMeshToUnitQuad(SceneMesh& target) {
     SceneMesh mesh;
     // clang-format off
-    const std::array pos = {
+    const rstd::array<float, 12> pos = {
         0.0f, 1.0f, 0.0f,
         0.0f, 0.0f, 0.0f,
         1.0f, 1.0f, 0.0f,
         1.0f, 0.0f, 0.0f,
     };
-    const std::array tex_coord = {
+    const rstd::array<float, 8> tex_coord = {
         0.0f, 0.0f,
         0.0f, 1.0f,
         1.0f, 0.0f,
@@ -47,7 +49,7 @@ SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
       m_height(h),
       m_pingpong_a(pingpong_a),
       m_pingpong_b(pingpong_b),
-      m_final_mesh(std::make_unique<SceneMesh>()) {};
+      m_final_mesh(Box<SceneMesh>::make()) {};
 
 void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                                           std::string_view effect_cam) {
@@ -145,7 +147,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                 last_output->sceneNode->SetScale({ m_width, m_height, 1.0f });
                 ChangeMeshToUnitQuad(mesh);
             } else {
-                mesh.ChangeMeshDataFrom(*m_final_mesh);
+                mesh.ChangeMeshDataFrom(*m_final_mesh.as_ptr());
             }
             for (const auto& [name, value] : last_output->final_quad_shader_values) {
                 material.SetShaderValue(name, value.base);

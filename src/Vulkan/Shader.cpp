@@ -11,9 +11,11 @@ module;
 module wescene.shader_compile;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe;
 using namespace owe::vulkan;
 
@@ -125,9 +127,9 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
         spv_reflect::ShaderModule spv_ref(code, SPV_REFLECT_MODULE_FLAG_NO_COPY);
         VkShaderStageFlagBits     stage = ::ToVkType(spv_ref.GetShaderStage());
         {
-            Uni_ShaderSpv spv = std::make_unique<ShaderSpv>();
-            spv->stage        = ::FromSpvStage(spv_ref.GetShaderStage());
-            spv->spirv        = code;
+            auto spv   = Box<ShaderSpv>::make();
+            spv->stage = ::FromSpvStage(spv_ref.GetShaderStage());
+            spv->spirv = code;
             if (const char* ep = spv_ref.GetEntryPointName(); ep && ep[0] != '\0') {
                 spv->entry_point = ep;
             }
@@ -338,8 +340,8 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> comp
             // omit them from the info log on this glslang build.
             std::string log = shader.getInfoLog();
             std::string filtered;
-            for (std::size_t i = 0, e = log.size(); i < e;) {
-                std::size_t nl = log.find('\n', i);
+            for (usize i = 0, e = log.size(); i < e;) {
+                usize nl = log.find('\n', i);
                 if (nl == std::string::npos) nl = e;
                 std::string_view line(log.data() + i, nl - i);
                 if (line.find("WARNING") == std::string_view::npos) {
@@ -376,9 +378,9 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> comp
         spv_opts.disableOptimizer  = ! opt.optimize;
         spv::SpvBuildLogger logger;
 
-        Uni_ShaderSpv spv = std::make_unique<ShaderSpv>();
-        spv->stage        = unit.stage;
-        spv->entry_point  = entry_str;
+        auto spv         = Box<ShaderSpv>::make();
+        spv->stage       = unit.stage;
+        spv->entry_point = entry_str;
         glslang::GlslangToSpv(*intermediate, spv->spirv, &logger, &spv_opts);
 
         if (auto msgs = logger.getAllMessages(); ! msgs.empty()) {

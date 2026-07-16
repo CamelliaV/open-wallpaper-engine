@@ -118,7 +118,7 @@ TEST(ResourcePlan, VisitsTypedRequestsThroughPublicTrait) {
         .handle = owe::resource::ShaderUseHandle { .index = 3, .generation = 11 },
         .request =
             owe::resource::ShaderRequest {
-                .name = rstd::string::String::make(rstd::cppstd::as_str("sprite")),
+                .name   = rstd::string::String::make(rstd::cppstd::as_str("sprite")),
                 .source = owe::resource::ShaderDefinitionId { .index = 4, .generation = 2 },
             },
     });
@@ -144,7 +144,7 @@ TEST(ShaderArtifact, ClonesOwnedStageCode) {
     stage.code.push(7);
     artifact.stages.push(rstd::move(stage));
 
-    auto cloned = artifact.clone();
+    auto cloned              = artifact.clone();
     cloned.stages[0].code[0] = 9;
 
     EXPECT_EQ(artifact.stages[0].code[0], 7u);

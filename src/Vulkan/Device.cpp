@@ -12,6 +12,7 @@ import rstd;
 import rstd.log;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe::vulkan;
 
 namespace
@@ -75,8 +76,8 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
 
     auto props = m_gpu.GetQueueFamilyProperties();
 
-    std::vector<uint32_t> graphic_indexs, present_indexs;
-    uint32_t              index = 0;
+    std::vector<u32> graphic_indexs, present_indexs;
+    u32              index = 0;
     for (auto& prop : props) {
         if (prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) graphic_indexs.push_back(index);
         index++;
@@ -99,7 +100,7 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
             m_present_queue.family_index = present_indexs.front();
         }
     }
-    for (uint32_t i = 0; i < props.len(); ++i) {
+    for (u32 i = 0; i < props.len(); ++i) {
         if (props[i].queueCount == 0) continue;
         VkDeviceQueueCreateInfo info {
             .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -238,7 +239,7 @@ VkDeviceSize Device::GetUsage() const { return MemoryBudget().usage; }
 
 auto Device::MemoryBudget() const -> MemoryBudgetSnapshot {
     auto properties = m_gpu.GetMemoryProperties().memoryProperties;
-    std::array<VmaBudget, std::extent_v<decltype(properties.memoryHeaps)>> budgets {};
+    rstd::array<VmaBudget, std::extent_v<decltype(properties.memoryHeaps)>> budgets {};
     vmaGetHeapBudgets(*m_allocator, budgets.data());
     MemoryBudgetSnapshot snapshot;
     for (u32 index = 0; index < properties.memoryHeapCount; ++index) {

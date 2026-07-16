@@ -5,26 +5,28 @@ import rstd.cppstd;
 import wescene.vulkan;
 import wescene.scene;
 
+using namespace rstd::prelude;
+
 namespace owe::vulkan
 {
 
 namespace
 {
 
-std::span<uint8_t> mutableBytesOf(const float* data, usize size) {
-    return { const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(data)), size };
+auto bytesOf(const float* data, usize size) -> rstd::slice<rstd::u8> {
+    return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::u8*>(data), size);
 }
 
-std::span<uint8_t> mutableBytesOf(const uint32_t* data, usize size) {
-    return { const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(data)), size };
+auto bytesOf(const u32* data, usize size) -> rstd::slice<u8> {
+    return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::u8*>(data), size);
 }
 
-uint64_t next_dynamic_allocation_generation() {
+u64 next_dynamic_allocation_generation() {
     static std::atomic_uint64_t next { 1 };
     return next.fetch_add(1, std::memory_order_relaxed);
 }
 
-uint64_t resolve_allocation_generation(const DrawBufferRequest& request, bool dynamic) {
+u64 resolve_allocation_generation(const DrawBufferRequest& request, bool dynamic) {
     if (! dynamic) return 0;
     if (request.dynamic_allocation_generation != 0) return request.dynamic_allocation_generation;
     return next_dynamic_allocation_generation();
@@ -32,15 +34,13 @@ uint64_t resolve_allocation_generation(const DrawBufferRequest& request, bool dy
 
 } // namespace
 
-RenderBufferResolver::RenderBufferResolver(resource_registry::BufferRegistry& buffers,
-                                           MeshCache& mesh_cache, StagingBuffer& dynamic_buffer)
-    : m_buffers(rstd::mut_ref<resource_registry::BufferRegistry>::from_raw_parts(
-          rstd::addressof(buffers))),
-      m_mesh_cache(rstd::mut_ref<MeshCache>::from_raw_parts(rstd::addressof(mesh_cache))),
-      m_dynamic_buffer(dynamic_buffer) {}
+RenderBufferResolver::RenderBufferResolver(
+    const resource_registry::PreparedResourceTable& resources)
+    : m_resources(rstd::ref<resource_registry::PreparedResourceTable>::from_raw_parts(
+          rstd::addressof(resources))) {}
 
 std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest& request,
-                                               uint64_t                 allocation_generation) {
+                                               u64                      allocation_generation) {
     std::vector<DrawBufferKey> keys;
     if (request.mesh == nullptr) return keys;
     const SceneMesh& mesh = *request.mesh;
@@ -48,14 +48,14 @@ std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest& request,
 
     const auto& submesh = mesh.Submeshes()[request.submesh_index];
     keys.reserve(submesh.vertex_arrays.size() + (submesh.index_arrays.empty() ? 0u : 1u));
-    const uint64_t resolved_allocation = mesh.Dynamic() ? allocation_generation : 0;
+    const u64 resolved_allocation = mesh.Dynamic() ? allocation_generation : 0;
 
     for (usize i = 0; i < submesh.vertex_arrays.size(); ++i) {
         const auto& vertex = submesh.vertex_arrays[i];
         keys.push_back(DrawBufferKey { .render_item           = request.render_item,
                                        .role                  = DrawBufferRole::Vertex,
                                        .submesh_index         = request.submesh_index,
-                                       .stream_index          = static_cast<uint32_t>(i),
+                                       .stream_index          = static_cast<u32>(i),
                                        .data_generation       = vertex.DataGeneration(),
                                        .allocation_generation = resolved_allocation });
     }
@@ -73,12 +73,11 @@ std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest& request,
     return keys;
 }
 
-std::optional<DrawBufferRefs>
-RenderBufferResolver::prepareDrawBuffers(const DrawBufferRequest& request) {
-    if (request.mesh == nullptr) return std::nullopt;
+Option<DrawBufferRefs> RenderBufferResolver::prepareDrawBuffers(const DrawBufferRequest& request) {
+    if (request.mesh == nullptr) return None();
     SceneMesh& mesh          = *request.mesh;
     const auto submesh_index = request.submesh_index;
-    if (mesh.Submeshes().empty() || submesh_index >= mesh.Submeshes().size()) return std::nullopt;
+    if (mesh.Submeshes().empty() || submesh_index >= mesh.Submeshes().size()) return None();
 
     const auto& submesh = mesh.Submeshes()[submesh_index];
 
@@ -88,81 +87,36 @@ RenderBufferResolver::prepareDrawBuffers(const DrawBufferRequest& request) {
     out.allocation_generation = resolve_allocation_generation(request, out.dynamic);
     auto keys                 = BuildDrawBufferKeys(request, out.allocation_generation);
     out.vertex_keys.reserve(submesh.vertex_arrays.size());
-    if (out.dynamic) out.dynamic_vertices.resize(submesh.vertex_arrays.size());
 
-    auto& mesh_cache = *m_mesh_cache.as_raw_ptr();
     for (usize i = 0; i < submesh.vertex_arrays.size(); i++) {
         const auto& vertex = submesh.vertex_arrays[i];
         out.vertex_keys.push_back(keys[i]);
         out.draw_count += static_cast<u32>(vertex.DataSize() / vertex.OneSize());
 
-        if (out.dynamic) {
-            if (! m_dynamic_buffer.allocateSubRef(vertex.CapacitySizeOf(), out.dynamic_vertices[i]))
-                return std::nullopt;
-        } else {
-            auto name     = rstd::format("mesh:{}:{}:{}:vertex:{}",
-                                         request.render_item.index,
-                                         request.render_item.generation,
-                                         request.submesh_index,
-                                         i);
-            auto prepared = m_buffers->Ensure(
-                resource::BufferRequest {
-                    .name = rstd::move(name),
-                    .definition =
-                        resource::BufferDefinition {
-                            .size      = vertex.CapacitySizeOf(),
-                            .usage     = resource::BufferUsage::Vertex,
-                            .alignment = 4,
-                        },
-                    .content_version = vertex.DataGeneration(),
-                },
-                { &vertex, vertex.DataGeneration() },
-                rstd::slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(vertex.Data()),
-                                                vertex.CapacitySizeOf()),
-                mesh_cache);
-            if (prepared.is_err()) return std::nullopt;
-            out.static_vertices.push(rstd::move(prepared).unwrap_unchecked());
-        }
+        if (i >= request.buffer_uses.len()) return None();
+        auto prepared = m_resources->Resolve(request.buffer_uses[i]);
+        if (prepared.is_none()) return None();
+        out.vertices.push(resource::BufferUseHandle(request.buffer_uses[i]));
     }
 
     if (! submesh.index_arrays.empty()) {
         const auto& index = submesh.index_arrays[0];
         out.draw_count    = static_cast<u32>(index.DataCount());
-        out.index_key     = keys.back();
+        out.index_key     = Some<DrawBufferKey>(keys.back());
 
-        if (out.dynamic) {
-            if (! m_dynamic_buffer.allocateSubRef(index.CapacitySizeof(), out.dynamic_index))
-                return std::nullopt;
-        } else {
-            auto name     = rstd::format("mesh:{}:{}:{}:index",
-                                         request.render_item.index,
-                                         request.render_item.generation,
-                                         request.submesh_index);
-            auto prepared = m_buffers->Ensure(
-                resource::BufferRequest {
-                    .name = rstd::move(name),
-                    .definition =
-                        resource::BufferDefinition {
-                            .size      = index.CapacitySizeof(),
-                            .usage     = resource::BufferUsage::Index,
-                            .alignment = 4,
-                        },
-                    .content_version = index.DataGeneration(),
-                },
-                { &index, index.DataGeneration() },
-                rstd::slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(index.Data()),
-                                                index.CapacitySizeof()),
-                mesh_cache);
-            if (prepared.is_err()) return std::nullopt;
-            out.static_index = rstd::Some(rstd::move(prepared).unwrap_unchecked());
-        }
+        auto use_index = submesh.vertex_arrays.size();
+        if (use_index >= request.buffer_uses.len()) return None();
+        auto prepared = m_resources->Resolve(request.buffer_uses[use_index]);
+        if (prepared.is_none()) return None();
+        out.index = Some(resource::BufferUseHandle(request.buffer_uses[use_index]));
     }
 
-    return out;
+    return Some(rstd::move(out));
 }
 
-bool RenderBufferResolver::updateDynamicDrawBuffers(const DrawBufferRequest& request,
-                                                    DrawBufferRefs&          buffers) {
+bool RenderBufferResolver::updateDynamicDrawBuffers(
+    const DrawBufferRequest& request, DrawBufferRefs& buffers,
+    rstd::mut_ref<rstd::dyn<resource::BufferContentWriter>> writer) {
     if (! buffers.dynamic) return true;
     if (request.mesh == nullptr) return false;
     SceneMesh& mesh          = *request.mesh;
@@ -175,47 +129,34 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(const DrawBufferRequest& req
         mesh.SetLayoutDirty();
         return false;
     };
-    if (buffers.dynamic_vertices.size() != submesh.vertex_arrays.size()) return require_reprepare();
+    if (buffers.vertices.len() != submesh.vertex_arrays.size()) return require_reprepare();
     if (buffers.vertex_keys.size() != submesh.vertex_arrays.size()) return require_reprepare();
-    if (static_cast<bool>(buffers.dynamic_index) != ! submesh.index_arrays.empty())
-        return require_reprepare();
+    if (buffers.index.is_some() != ! submesh.index_arrays.empty()) return require_reprepare();
 
     for (usize i = 0; i < submesh.vertex_arrays.size(); i++) {
         const auto& vertex                     = submesh.vertex_arrays[i];
         buffers.vertex_keys[i].data_generation = vertex.DataGeneration();
-        if (! buffers.dynamic_vertices[i] || vertex.DataSizeOf() > buffers.dynamic_vertices[i].size)
-            return require_reprepare();
-        if (! m_dynamic_buffer.writeToBuf(buffers.dynamic_vertices[i],
-                                          mutableBytesOf(vertex.Data(), vertex.DataSizeOf())))
-            return false;
+        auto updated = writer->UpdateBuffer(buffers.vertices[i],
+                                            bytesOf(vertex.Data(), vertex.DataSizeOf()),
+                                            vertex.DataGeneration());
+        if (updated.is_err()) return require_reprepare();
     }
 
     if (! submesh.index_arrays.empty()) {
         const auto& index  = submesh.index_arrays[0];
         buffers.draw_count = static_cast<u32>(index.RenderDataCount());
-        if (buffers.index_key) buffers.index_key->data_generation = index.DataGeneration();
-        if (! buffers.dynamic_index || index.DataSizeOf() > buffers.dynamic_index.size)
-            return require_reprepare();
-        if (! m_dynamic_buffer.writeToBuf(buffers.dynamic_index,
-                                          mutableBytesOf(index.Data(), index.DataSizeOf())))
-            return false;
+        if (buffers.index_key.is_some()) {
+            buffers.index_key->data_generation = index.DataGeneration();
+        }
+        auto updated = writer->UpdateBuffer(
+            *buffers.index, bytesOf(index.Data(), index.DataSizeOf()), index.DataGeneration());
+        if (updated.is_err()) return require_reprepare();
     } else if (! submesh.vertex_arrays.empty()) {
         buffers.draw_count = static_cast<u32>(submesh.vertex_arrays[0].VertexCount());
     }
 
     (void)mesh.ConsumeDirtyFlags(SceneMeshDirtyData);
     return true;
-}
-
-void RenderBufferResolver::releaseDynamicDrawBuffers(DrawBufferRefs& buffers) {
-    for (auto& ref : buffers.dynamic_vertices) {
-        if (ref) m_dynamic_buffer.unallocateSubRef(ref);
-    }
-    buffers.dynamic_vertices.clear();
-    if (buffers.dynamic_index) m_dynamic_buffer.unallocateSubRef(buffers.dynamic_index);
-    buffers.dynamic_index = {};
-    buffers.vertex_keys.clear();
-    buffers.index_key = std::nullopt;
 }
 
 } // namespace owe::vulkan

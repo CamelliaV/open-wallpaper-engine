@@ -10,7 +10,10 @@ export module wescene.shader_compile;
 import wescene.core;
 export import vulkan;
 import wescene.types;
+import rstd;
 import rstd.cppstd;
+
+using namespace rstd::prelude;
 
 export namespace owe::vulkan
 {
@@ -24,16 +27,16 @@ struct ShaderSpv {
     std::vector<unsigned int> spirv;
 };
 
-using Uni_ShaderSpv = std::unique_ptr<ShaderSpv>;
+using Uni_ShaderSpv = Box<ShaderSpv>;
 
 // ---------- ShaderReflect.hpp ----------
 
 struct ShaderReflected {
     struct BlockedUniform {
-        int         block_index;
-        unsigned    offset;
-        std::size_t size { 0 };
-        std::size_t num { 1 };
+        int      block_index;
+        unsigned offset;
+        usize    size { 0 };
+        usize    num { 1 };
     };
     struct Block {
         int         index;

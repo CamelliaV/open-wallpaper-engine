@@ -9,12 +9,13 @@ import rstd;
 import rstd.log;
 import rstd.cppstd;
 
+using namespace rstd::prelude;
 using namespace owe::vulkan;
 
 struct SwapChainSupportDetails {
-    VkSurfaceCapabilitiesKHR              capabilities;
-    rstd::vec::Vec<VkSurfaceFormatKHR>    formats;
-    rstd::vec::Vec<VkPresentModeKHR>      presentModes;
+    VkSurfaceCapabilitiesKHR           capabilities;
+    rstd::vec::Vec<VkSurfaceFormatKHR> formats;
+    rstd::vec::Vec<VkPresentModeKHR>   presentModes;
 };
 
 namespace
@@ -60,8 +61,8 @@ VkExtent2D GetSwapChainExtent(VkSurfaceCapabilitiesKHR& surface_capabilities, Vk
     return surface_capabilities.currentExtent;
 }
 
-std::optional<vvk::ImageView> CreateSwapImageView(const vvk::Device& device, VkFormat format,
-                                                  VkImage image) {
+Option<vvk::ImageView> CreateSwapImageView(const vvk::Device& device, VkFormat format,
+                                           VkImage image) {
     VkImageViewCreateInfo ci {
         .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .pNext    = nullptr,
@@ -78,8 +79,10 @@ std::optional<vvk::ImageView> CreateSwapImageView(const vvk::Device& device, VkF
             },
     };
     vvk::ImageView view;
-    if (auto res = device.CreateImageView(ci, view); res == VK_SUCCESS) return view;
-    return std::nullopt;
+    if (auto res = device.CreateImageView(ci, view); res == VK_SUCCESS) {
+        return Some(rstd::move(view));
+    }
+    return None();
 }
 } // namespace
 
@@ -99,7 +102,7 @@ bool Swapchain::Create(Device& device, VkSurfaceKHR surface, VkExtent2D extent, 
 
     auto& surfaceCapabilities = swap_details.capabilities;
 
-    uint32_t image_count = surfaceCapabilities.minImageCount + 1;
+    u32 image_count = surfaceCapabilities.minImageCount + 1;
     if (surfaceCapabilities.maxImageCount > 0 && image_count > surfaceCapabilities.maxImageCount)
         image_count = surfaceCapabilities.maxImageCount;
     surfaceCapabilities.currentExtent = swap.m_extent;
@@ -138,8 +141,8 @@ bool Swapchain::Create(Device& device, VkSurfaceKHR surface, VkExtent2D extent, 
                 image_paras.handle = image;
                 image_paras.extent = { swap.m_extent.width, swap.m_extent.height, 1 };
                 if (auto opt = CreateSwapImageView(device.device(), swap.m_format.format, image);
-                    opt.has_value()) {
-                    swap.m_imageviews.emplace_back(std::move(opt.value()));
+                    opt.is_some()) {
+                    swap.m_imageviews.emplace_back(rstd::move(opt).unwrap());
                     image_paras.view = *swap.m_imageviews.back();
                 }
                 return image_paras;

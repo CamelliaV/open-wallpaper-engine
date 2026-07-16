@@ -62,54 +62,54 @@ TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
     const auto& index = scene.ResourceIndex();
 
     auto child_node_id = index.nodeId(*child.as_ptr());
-    ASSERT_TRUE(child_node_id.has_value());
+    ASSERT_TRUE(child_node_id.is_some());
     EXPECT_EQ(index.node(*child_node_id), child.as_ptr());
 
     auto child_draw_id = index.drawItemFor(*child_node_id, 0);
-    ASSERT_TRUE(child_draw_id.has_value());
+    ASSERT_TRUE(child_draw_id.is_some());
 
     auto child_draw = index.resolve(*child_draw_id);
-    ASSERT_TRUE(child_draw.has_value());
+    ASSERT_TRUE(child_draw.is_some());
     EXPECT_EQ(child_draw->node, child.as_ptr());
     EXPECT_EQ(child_draw->mesh, child_mesh.get());
     EXPECT_EQ(child_draw->material, child_mesh->MaterialSlots()[0].get());
     EXPECT_EQ(child_draw->submesh, &child_mesh->Submeshes()[0]);
 
     auto post_node_id = index.nodeId(*post_node.as_ptr());
-    ASSERT_TRUE(post_node_id.has_value());
+    ASSERT_TRUE(post_node_id.is_some());
     auto post_draw_id = index.drawItemFor(*post_node_id, 0);
-    ASSERT_TRUE(post_draw_id.has_value());
+    ASSERT_TRUE(post_draw_id.is_some());
     EXPECT_EQ(index.resolve(*post_draw_id)->material, post_mesh->MaterialSlots()[0].get());
 
     auto texture_id = index.textureId("tex/main");
-    ASSERT_TRUE(texture_id.has_value());
+    ASSERT_TRUE(texture_id.is_some());
     EXPECT_EQ(index.texture(*texture_id)->url, "tex/main");
 
     auto rt_id = index.renderTargetId("_rt_default");
-    ASSERT_TRUE(rt_id.has_value());
+    ASSERT_TRUE(rt_id.is_some());
     EXPECT_EQ(index.renderTarget(*rt_id)->width, 1920);
     EXPECT_EQ(index.mutableRenderTarget(*rt_id)->height, 1080);
 
     auto camera_id = index.cameraId("default");
-    ASSERT_TRUE(camera_id.has_value());
+    ASSERT_TRUE(camera_id.is_some());
     EXPECT_EQ(index.camera(*camera_id), scene.cameras["default"].get());
 
     owe::Scene other_scene;
     other_scene.RebuildResourceIndex();
     EXPECT_EQ(other_scene.ResourceIndex().node(*child_node_id), nullptr);
-    EXPECT_EQ(other_scene.ResourceIndex().resolve(*child_draw_id), std::nullopt);
+    EXPECT_TRUE(other_scene.ResourceIndex().resolve(*child_draw_id).is_none());
 }
 
 TEST(SceneResourceIndex, RebuildPicksUpNewRenderTargets) {
     owe::Scene scene;
     scene.RebuildResourceIndex();
-    EXPECT_FALSE(scene.ResourceIndex().renderTargetId("_rt_link_7").has_value());
+    EXPECT_TRUE(scene.ResourceIndex().renderTargetId("_rt_link_7").is_none());
 
     scene.renderTargets["_rt_link_7"] = owe::SceneRenderTarget { .width = 64, .height = 32 };
     scene.RebuildResourceIndex();
 
     auto id = scene.ResourceIndex().renderTargetId("_rt_link_7");
-    ASSERT_TRUE(id.has_value());
+    ASSERT_TRUE(id.is_some());
     ASSERT_NE(scene.ResourceIndex().mutableRenderTarget(*id), nullptr);
     EXPECT_EQ(scene.ResourceIndex().mutableRenderTarget(*id)->width, 64);
     EXPECT_EQ(scene.ResourceIndex().renderTarget(*id)->height, 32);
@@ -192,13 +192,13 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
 
     auto mutation = scene.SetMaterialTextureSlot(*material, 0, "tex/runtime");
     EXPECT_TRUE(mutation.changed);
-    ASSERT_TRUE(mutation.material.has_value());
+    ASSERT_TRUE(mutation.material.is_some());
     ASSERT_TRUE(scene.textures.contains("tex/runtime"));
     EXPECT_EQ(material->textures[0], "tex/runtime");
 
     auto unchanged = scene.SetMaterialTextureSlot(*material, 0, "tex/runtime");
     EXPECT_FALSE(unchanged.changed);
-    EXPECT_FALSE(unchanged.material.has_value());
+    EXPECT_TRUE(unchanged.material.is_none());
 
     auto spec = scene.SetMaterialTextureSlot(*material, 1, "_rt_default");
     EXPECT_TRUE(spec.changed);
@@ -286,7 +286,7 @@ TEST(SceneMaterialShaderVariant, AppliesCompiledVariantThroughSceneOwner) {
                                                    });
 
     EXPECT_TRUE(mutation.changed);
-    ASSERT_TRUE(mutation.material.has_value());
+    ASSERT_TRUE(mutation.material.is_some());
     EXPECT_EQ(material->customShader.shader, shader);
     ASSERT_TRUE(material->customShader.variant.has_value());
     EXPECT_EQ(material->customShader.variant->resolved_combos.at("USE_COLOR"), "1");
@@ -499,18 +499,18 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
     ASSERT_EQ(snapshot.RenderTargetDescs().size(), 2u);
 
     auto node_id = scene.ResourceIndex().nodeId(*child.as_ptr());
-    ASSERT_TRUE(node_id.has_value());
+    ASSERT_TRUE(node_id.is_some());
     auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
-    ASSERT_TRUE(draw_id.has_value());
+    ASSERT_TRUE(draw_id.is_some());
 
     auto render_item_id = snapshot.renderItemFor(*draw_id);
-    ASSERT_TRUE(render_item_id.has_value());
+    ASSERT_TRUE(render_item_id.is_some());
     const auto* render_item = snapshot.renderItem(*render_item_id);
     ASSERT_NE(render_item, nullptr);
     EXPECT_EQ(render_item->scene_draw_item.index, draw_id->index);
     EXPECT_EQ(render_item->scene_node.index, node_id->index);
     EXPECT_EQ(render_item->source_layer.value, 42);
-    ASSERT_TRUE(render_item->output_override.has_value());
+    ASSERT_TRUE(render_item->output_override.is_some());
 
     const auto* mask_desc = snapshot.renderTargetDesc(*render_item->output_override);
     ASSERT_NE(mask_desc, nullptr);
@@ -519,7 +519,7 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
     EXPECT_EQ(mask_desc->desc.height, 256);
 
     auto tex_desc_id = snapshot.textureDescId("tex/main");
-    ASSERT_TRUE(tex_desc_id.has_value());
+    ASSERT_TRUE(tex_desc_id.is_some());
     const auto* tex_desc = snapshot.textureDesc(*tex_desc_id);
     ASSERT_NE(tex_desc, nullptr);
     EXPECT_EQ(tex_desc->key, "tex/main");
@@ -692,7 +692,7 @@ TEST(SceneMeshDirtyEvents, RoutesDataAndLayoutDirtyByOwner) {
 
     scene.RebuildResourceIndex();
     auto static_id = scene.ResourceIndex().meshId(*static_mesh);
-    ASSERT_TRUE(static_id.has_value());
+    ASSERT_TRUE(static_id.is_some());
 
     static_mesh->SetDirty();
     dynamic_mesh->SetDirty();
@@ -724,7 +724,7 @@ TEST(SceneMaterialDirtyEvents, RoutesMaterialDirtyByOwner) {
     auto* material = mesh->MaterialSlots()[0].get();
     ASSERT_NE(material, nullptr);
     auto material_id = scene.ResourceIndex().materialId(*material);
-    ASSERT_TRUE(material_id.has_value());
+    ASSERT_TRUE(material_id.is_some());
 
     EXPECT_TRUE(material->SetBlendMode(owe::BlendMode::Normal));
     EXPECT_FALSE(material->SetBlendMode(owe::BlendMode::Normal));

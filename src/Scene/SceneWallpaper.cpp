@@ -25,6 +25,7 @@ import wescene.script;
 import wescene.vulkan_render;
 
 using namespace owe;
+using namespace rstd::prelude;
 
 namespace owe
 {
@@ -366,7 +367,7 @@ ApplyUserPropertyToMaterialTextures(Scene& scene, const std::string& key, const 
         if (binding.material == nullptr) continue;
         std::string next     = texture_value->empty() ? binding.fallback : *texture_value;
         auto        mutation = scene.SetMaterialTextureSlot(*binding.material, binding.slot, next);
-        if (mutation.changed && mutation.material.has_value()) {
+        if (mutation.changed && mutation.material.is_some()) {
             PushUniqueMaterialId(changed_materials, *mutation.material);
         }
     }
@@ -825,7 +826,7 @@ private:
 class SceneRenderController {
 public:
     explicit SceneRenderController(SceneRuntimeController& main)
-        : m_main(main), m_render(std::make_unique<vulkan::VulkanRender>()) {
+        : m_main(main), m_render(Box<vulkan::VulkanRender>::make()) {
         // Best-effort: a failing init just leaves snapshots returning false
         // and audio_average at zeros — wallpapers still render fine.
         (void)m_audio_capture.init();
@@ -851,7 +852,7 @@ public:
     bool         getDrmRenderNode(uint32_t& major, uint32_t& minor) const {
         return m_render->getDrmRenderNode(major, minor);
     }
-    vulkan::VulkanRender* render() const { return m_render.get(); }
+    const vulkan::VulkanRender* render() const { return m_render.as_ptr().as_raw_ptr(); }
 
     bool renderInited() const { return m_render->inited(); }
 
@@ -905,13 +906,13 @@ private:
 
     SceneRuntimeController& m_main;
 
-    std::unique_ptr<vulkan::VulkanRender> m_render;
-    std::shared_ptr<Scene>                m_scene { nullptr };
-    RenderSceneSnapshot                   m_render_scene;
-    std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
-    float                                 m_speed { 1.0f };
-    FillMode                              m_fillmode { FillMode::ASPECTCROP };
-    bool                                  m_stopped { false };
+    Box<vulkan::VulkanRender>    m_render;
+    std::shared_ptr<Scene>       m_scene { nullptr };
+    RenderSceneSnapshot          m_render_scene;
+    Option<Box<rg::RenderGraph>> m_rg;
+    float                        m_speed { 1.0f };
+    FillMode                     m_fillmode { FillMode::ASPECTCROP };
+    bool                         m_stopped { false };
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
     std::atomic<uint32_t>             m_buttons_down { 0 };
@@ -942,11 +943,11 @@ void SceneRenderController::on(RenderStop&& m) {
 
 void SceneRenderController::on(RenderDraw&&) {
     frame_timer.FrameBegin();
-    if (m_rg) {
+    if (m_rg.is_some()) {
         m_scene->shaderValueUpdater->FrameBegin();
         {
             auto pos                 = m_mouse_pos.load();
-            m_scene->pointerPosition = pos;
+            m_scene->pointerPosition = rstd::array<float, 2> { pos[0], pos[1] };
             m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
         }
         // Drive any per-Scene scenescripts before particle emission.
@@ -1042,13 +1043,13 @@ void SceneRenderController::on(RenderSetFillMode&& m) {
 void SceneRenderController::rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention,
                                                bool                                 evict_meshes) {
     if (! m_scene || ! renderInited()) return;
-    if (m_rg) m_render->clearLastRenderGraph(retention);
+    if (m_rg.is_some()) m_render->clearLastRenderGraph(retention);
     if (evict_meshes) m_render->evictUnusedMeshes();
     m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
-    m_rg           = sceneToRenderGraph(*m_scene, m_render_scene);
+    m_rg           = Some(sceneToRenderGraph(*m_scene, m_render_scene));
 
-    if (m_main.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");
-    m_render->compileRenderGraph(*m_scene, *m_rg, m_render_scene);
+    if (m_main.isGenGraphviz()) (*m_rg)->ToGraphviz("graph.dot");
+    m_render->compileRenderGraph(*m_scene, **m_rg, m_render_scene);
     m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     consumeDirtyEventsCoveredByGraphRebuild();
     (void)m_scene->ConsumeRenderGraphDirty();
@@ -1061,7 +1062,7 @@ void SceneRenderController::consumeDirtyEventsCoveredByGraphRebuild() {
 }
 
 void SceneRenderController::refreshPreparedMeshDirtyEvents() {
-    if (! m_scene || ! renderInited() || ! m_rg) return;
+    if (! m_scene || ! renderInited() || m_rg.is_none()) return;
     auto events = m_scene->ConsumePreparedMeshDirtyEvents();
     if (events.empty()) return;
 
@@ -1085,7 +1086,7 @@ void SceneRenderController::refreshPreparedMeshDirtyEvents() {
 }
 
 void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
-    if (! m_scene || ! renderInited() || ! m_rg) return;
+    if (! m_scene || ! renderInited() || m_rg.is_none()) return;
     auto events = m_scene->ConsumePreparedMaterialDirtyEvents();
     if (events.empty()) return;
 
@@ -1134,7 +1135,8 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
         m_scene->ApplyUserImageEffectVisibilityBindings(key, m.property) || requires_graph_rebuild;
     requires_graph_rebuild = requires_graph_rebuild || shader_combo_requires_graph;
 
-    if (! texture_materials.empty() && renderInited() && m_rg && ! requires_graph_rebuild) {
+    if (! texture_materials.empty() && renderInited() && m_rg.is_some() &&
+        ! requires_graph_rebuild) {
         m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
         if (! m_render->refreshPreparedMaterialTextures(
                 *m_scene, m_render_scene, texture_materials)) {
@@ -1150,7 +1152,7 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
         rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
         return;
     }
-    if (renderInited() && m_rg) refreshPreparedMaterialDirtyEvents();
+    if (renderInited() && m_rg.is_some()) refreshPreparedMaterialDirtyEvents();
 }
 
 void SceneRenderController::on(RenderSetMediaStatus&& m) {
@@ -1171,7 +1173,7 @@ void SceneRenderController::on(RenderSetMediaStatus&& m) {
     }
 
     bool requires_graph_rebuild = false;
-    if (! texture_materials.empty() && renderInited() && m_rg) {
+    if (! texture_materials.empty() && renderInited() && m_rg.is_some()) {
         m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
         if (! m_render->refreshPreparedMaterialTextures(
                 *m_scene, m_render_scene, texture_materials)) {
@@ -1182,7 +1184,7 @@ void SceneRenderController::on(RenderSetMediaStatus&& m) {
         rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
         return;
     }
-    if (renderInited() && m_rg) refreshPreparedMaterialDirtyEvents();
+    if (renderInited() && m_rg.is_some()) refreshPreparedMaterialDirtyEvents();
 }
 
 void SceneRenderController::on(RenderInit&& m) {
@@ -1218,7 +1220,7 @@ void SceneRenderController::on(RenderSwapchainReady&& m) {
         return;
     }
     bool extent_changed = m_render->onSwapchainReady(m.width, m.height);
-    if (extent_changed && m_scene && m_rg) {
+    if (extent_changed && m_scene && m_rg.is_some()) {
         m_render->refreshPreparedResources(*m_scene, m_render_scene);
         m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     }

@@ -1,7 +1,9 @@
 module;
 
+#include <algorithm>
+#include <cctype>
 #include <rstd/macro.hpp>
-#include "Utils/String.h"
+#include <string>
 
 module wescene.pkg.parse;
 import wescene.spec_names;
@@ -1915,7 +1917,8 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         opt.target   = vulkan::VulkanTarget::Vulkan_1_1;
         opt.optimize = false;
 
-        std::vector<vulkan::Uni_ShaderSpv> spvs(units.size());
+        std::vector<vulkan::Uni_ShaderSpv> spvs;
+        spvs.reserve(units.size());
 
         if (! vulkan::CompileAndLinkShaderUnits(vunits, opt, spvs)) {
             return false;
@@ -1965,15 +1968,18 @@ namespace
 
 WPShaderTexInfo ToWPShaderTexInfo(const SceneShaderTextureCompileInfo& info) {
     return WPShaderTexInfo {
-        .enabled       = info.enabled,
-        .composEnabled = info.components,
+        .enabled = info.enabled,
+        .composEnabled =
+            std::array<bool, 3> { info.components[0], info.components[1], info.components[2] },
     };
 }
 
 SceneShaderTextureCompileInfo ToSceneShaderTextureCompileInfo(const WPShaderTexInfo& info) {
     return SceneShaderTextureCompileInfo {
         .enabled    = info.enabled,
-        .components = info.composEnabled,
+        .components = rstd::array<bool, 3> { info.composEnabled[0],
+                                             info.composEnabled[1],
+                                             info.composEnabled[2] },
     };
 }
 

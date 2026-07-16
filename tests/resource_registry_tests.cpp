@@ -22,6 +22,39 @@ struct ShaderArtifactProvider {
     }
 };
 
+struct BufferContentProvider {
+    rstd::usize loads { 0 };
+
+    auto LoadBuffer(const owe::resource::BufferRequest&)
+        -> rstd::Result<rstd::vec::Vec<rstd::u8>, owe::resource::ResourceError> {
+        ++loads;
+        auto bytes = rstd::vec::Vec<rstd::u8>::make();
+        bytes.push(rstd::u8(1));
+        bytes.push(rstd::u8(2));
+        return rstd::Ok(rstd::move(bytes));
+    }
+};
+
+struct BufferUploadBackend {
+    rstd::usize                      uploads { 0 };
+    rstd::usize                      updates { 0 };
+    owe::vulkan::BufferUploadRequest last_request;
+
+    auto UploadBuffer(rstd::slice<rstd::u8>                   content,
+                      const owe::vulkan::BufferUploadRequest& request)
+        -> rstd::Option<owe::vulkan::BufferAllocation> {
+        ++uploads;
+        last_request = request;
+        if (request.size == 0 || request.size < content.len()) return rstd::None();
+        return rstd::Some(owe::vulkan::BufferAllocation {});
+    }
+
+    bool UpdateBuffer(rstd::mut_ref<owe::vulkan::BufferAllocation>, rstd::slice<rstd::u8>) {
+        ++updates;
+        return true;
+    }
+};
+
 auto ShaderRequest(rstd::u64 version) -> owe::resource::ShaderRequest {
     return owe::resource::ShaderRequest {
         .name = rstd::string::String::make(rstd::cppstd::as_str("sprite")),
@@ -32,6 +65,13 @@ auto ShaderRequest(rstd::u64 version) -> owe::resource::ShaderRequest {
             },
         .content_version = version,
     };
+}
+
+auto TextureAllocation(rstd::u64 generation) -> rstd::sync::Arc<owe::vulkan::TextureAllocation> {
+    owe::vulkan::ImageSlots slots;
+    slots.slots.resize(1);
+    slots.slots[0].generation = generation;
+    return rstd::sync::Arc<owe::vulkan::TextureAllocation>::make(rstd::move(slots));
 }
 
 } // namespace
@@ -105,20 +145,19 @@ TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
         }),
     });
 
-    owe::vulkan::ImageSlotsRef   image;
-    owe::vulkan::ImageParameters first_image;
-    first_image.generation = 7;
-    image.slots.push_back(first_image);
-    auto first = registry.Publish(handle, image, owe::resource::ReadyToken { .value = 3 });
+    auto allocation = TextureAllocation(7);
+    auto first =
+        registry.Publish(handle, allocation.clone(), owe::resource::ReadyToken { .value = 3 });
     ASSERT_TRUE(first.is_some());
     EXPECT_EQ(*first, 1u);
 
-    auto same = registry.Publish(handle, image, owe::resource::ReadyToken { .value = 4 });
+    auto same =
+        registry.Publish(handle, allocation.clone(), owe::resource::ReadyToken { .value = 4 });
     ASSERT_TRUE(same.is_some());
     EXPECT_EQ(*same, 1u);
 
-    image.slots[0].generation = 8;
-    auto replaced = registry.Publish(handle, image, owe::resource::ReadyToken { .value = 5 });
+    auto replaced =
+        registry.Publish(handle, TextureAllocation(8), owe::resource::ReadyToken { .value = 5 });
     ASSERT_TRUE(replaced.is_some());
     EXPECT_EQ(*replaced, 2u);
 
@@ -149,7 +188,7 @@ TEST(ShaderRegistry, OwnsVersionedArtifactsBehindStableHandles) {
     EXPECT_EQ(provider.loads, 2u);
     auto entry = registry.Resolve(handle);
     ASSERT_TRUE(entry.is_some());
-    EXPECT_EQ((**entry).physical_generation, 2u);
+    EXPECT_EQ((**entry).physical->physical_generation, 2u);
 
     registry.Reset();
     EXPECT_TRUE(registry.Resolve(handle).is_none());
@@ -179,13 +218,87 @@ TEST(BufferRegistry, OwnsLogicalDefinitionsBehindStableHandles) {
     EXPECT_TRUE(registry.ResolveBuffer(first).is_none());
 }
 
+TEST(BufferRegistry, UpdatesDynamicContentWithoutReplacingItsPlannedCapacity) {
+    owe::resource_registry::BufferRegistry registry;
+    BufferUploadBackend                    upload_backend;
+    auto upload  = rstd::dyn<owe::vulkan::BufferUploadBackend>::from_ref(upload_backend);
+    auto content = rstd::vec::Vec<rstd::u8>::make();
+    content.push(rstd::u8(1));
+    content.push(rstd::u8(2));
+    auto request = owe::resource::BufferRequest {
+        .name       = rstd::string::String::make(rstd::cppstd::as_str("dynamic-vertices")),
+        .definition = { .size = 128, .usage = owe::resource::BufferUsage::Vertex, .alignment = 16 },
+        .lifetime   = owe::resource::BufferLifetimeClass::Dynamic,
+    };
+
+    auto prepared = registry.Ensure(request.clone(), content.as_slice(), upload.as_mut_ref());
+    ASSERT_TRUE(prepared.is_ok());
+    auto buffer = rstd::move(prepared).unwrap_unchecked();
+    EXPECT_EQ(upload_backend.last_request.size, 128u);
+    EXPECT_EQ(upload_backend.last_request.alignment, 16u);
+    EXPECT_EQ(upload_backend.last_request.usage, owe::vulkan::BufferUploadClass::Vertex);
+
+    content.push(rstd::u8(3));
+    auto updated = registry.Update(buffer.resource, content.as_slice(), 2, upload.as_mut_ref());
+    ASSERT_TRUE(updated.is_ok());
+    EXPECT_EQ(upload_backend.updates, 1u);
+    auto physical = registry.Resolve(buffer.resource);
+    ASSERT_TRUE(physical.is_some());
+    EXPECT_EQ((**physical).source_generation, 2u);
+}
+
+TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
+    owe::resource::TextureRegistry         textures;
+    owe::resource_registry::BufferRegistry buffers;
+    owe::resource_registry::ShaderRegistry shaders;
+    BufferUploadBackend                    upload_backend;
+    BufferContentProvider                  buffer_provider;
+    ShaderArtifactProvider                 shader_provider;
+    auto upload = rstd::dyn<owe::vulkan::BufferUploadBackend>::from_ref(upload_backend);
+    auto buffer = rstd::dyn<owe::resource::BufferContentProvider>::from_ref(buffer_provider);
+    auto shader = rstd::dyn<owe::resource::ShaderArtifactProvider>::from_ref(shader_provider);
+
+    owe::resource::ResourcePlan plan { .generation = 12 };
+    plan.buffers.push(owe::resource::BufferPlanEntry {
+        .handle = owe::resource::BufferUseHandle { .index = 3, .generation = 12 },
+        .request =
+            owe::resource::BufferRequest {
+                .name            = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
+                .definition      = { .size = 2, .usage = owe::resource::BufferUsage::Vertex },
+                .content_version = 4,
+            },
+    });
+    plan.shaders.push(owe::resource::ShaderPlanEntry {
+        .handle  = owe::resource::ShaderUseHandle { .index = 7, .generation = 12 },
+        .request = ShaderRequest(5),
+    });
+
+    owe::resource_registry::ResourcePrepareService service(
+        textures,
+        rstd::None<rstd::mut_ref<rstd::dyn<owe::vulkan::ImagePrepareBackend>>>(),
+        buffers,
+        upload.as_mut_ref(),
+        shaders);
+    auto prepared = service.Prepare(plan,
+                                    owe::resource_registry::ResourceContentProviders {
+                                        .buffer = rstd::Some(buffer.as_mut_ref()),
+                                        .shader = rstd::Some(shader.as_mut_ref()),
+                                    });
+
+    ASSERT_TRUE(prepared.is_ok());
+    auto table = rstd::move(prepared).unwrap_unchecked();
+    EXPECT_EQ(table.Generation(), 12u);
+    EXPECT_EQ(table.BufferCount(), 1u);
+    EXPECT_EQ(table.ShaderCount(), 1u);
+    EXPECT_EQ(buffer_provider.loads, 1u);
+    EXPECT_EQ(upload_backend.uploads, 1u);
+    EXPECT_EQ(shader_provider.loads, 1u);
+}
+
 TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {
     owe::resource_registry::PreparedResourceTable table(9);
-    auto use = owe::resource::TextureUseHandle { .index = 4, .generation = 9 };
-    owe::vulkan::ImageSlotsRef   image;
-    owe::vulkan::ImageParameters prepared_image;
-    prepared_image.generation = 11;
-    image.slots.push_back(prepared_image);
+    auto use        = owe::resource::TextureUseHandle { .index = 4, .generation = 9 };
+    auto allocation = TextureAllocation(11);
 
     EXPECT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
         .use      = use,
@@ -195,7 +308,8 @@ TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {
                 .kind = owe::resource::TextureRequestKind::Imported,
                 .name = rstd::string::String::make(rstd::cppstd::as_str("prepared")),
             },
-        .image               = image,
+        .physical            = allocation.clone(),
+        .image               = allocation->View(),
         .physical_generation = 3,
         .ready               = owe::resource::ReadyToken { .value = 8 },
     }));
@@ -210,6 +324,106 @@ TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {
     ASSERT_EQ(leases.textures.len(), 1u);
     EXPECT_EQ(leases.textures[0].resource.index, 2u);
     EXPECT_EQ(leases.textures[0].physical_generation, 3u);
+}
+
+TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
+    owe::resource_registry::PreparedResourceTable table(4);
+
+    auto texture_physical = TextureAllocation(2);
+    auto texture_use      = owe::resource::TextureUseHandle { .index = 0, .generation = 4 };
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
+        .use      = texture_use,
+        .resource = owe::resource::TextureHandle { .index = 10, .generation = 2 },
+        .request =
+            owe::resource::TextureRequest {
+                .kind = owe::resource::TextureRequestKind::Imported,
+                .name = rstd::string::String::make(rstd::cppstd::as_str("leased")),
+            },
+        .physical = texture_physical.clone(),
+        .image    = texture_physical->View(),
+    }));
+
+    auto buffer_physical = rstd::sync::Arc<owe::resource_registry::BufferPhysical>::make(
+        owe::vulkan::BufferAllocation {},
+        rstd::u64(3),
+        rstd::u64(7),
+        owe::resource::ReadyToken { .value = 7 });
+    auto buffer_use = owe::resource::BufferUseHandle { .index = 1, .generation = 4 };
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedBufferUse {
+        .use = buffer_use,
+        .buffer =
+            owe::resource_registry::PreparedBuffer {
+                .resource = owe::resource::BufferHandle { .index = 11, .generation = 2 },
+                .physical = buffer_physical.clone(),
+            },
+    }));
+
+    auto shader_physical = rstd::sync::Arc<owe::resource_registry::ShaderPhysical>::make(
+        owe::resource::ShaderArtifact {}, rstd::u64(5));
+    auto shader_use = owe::resource::ShaderUseHandle { .index = 2, .generation = 4 };
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedShaderUse {
+        .use = shader_use,
+        .shader =
+            owe::resource_registry::PreparedShader {
+                .resource = owe::resource::ShaderHandle { .index = 12, .generation = 2 },
+                .physical = shader_physical.clone(),
+            },
+    }));
+
+    auto pipeline = rstd::sync::Arc<owe::resource_registry::PipelineResourceEntry>::make();
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedPipeline {
+        .use      = owe::resource::PipelineUseHandle { .index = 3, .generation = 4 },
+        .resource = owe::resource::PipelineHandle { .index = 13, .generation = 2 },
+        .physical = pipeline.clone(),
+    }));
+    auto render_pass = rstd::sync::Arc<vvk::RenderPass>::make();
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedRenderPass {
+        .use      = owe::resource::RenderPassUseHandle { .index = 4, .generation = 4 },
+        .resource = owe::resource::RenderPassHandle { .index = 14, .generation = 2 },
+        .physical = render_pass.clone(),
+    }));
+    auto framebuffer = rstd::sync::Arc<vvk::Framebuffer>::make();
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedFramebuffer {
+        .use      = owe::resource::FramebufferUseHandle { .index = 5, .generation = 4 },
+        .resource = owe::resource::FramebufferHandle { .index = 15, .generation = 2 },
+        .physical = framebuffer.clone(),
+    }));
+    auto external_use = owe::resource::ExternalUseHandle { .index = 6, .generation = 4 };
+    table.Insert(owe::resource_registry::PreparedExternalUse {
+        .use   = external_use,
+        .frame = owe::resource_registry::PreparedExternalFrame {},
+    });
+
+    ASSERT_TRUE(table.Resolve(texture_use).is_some());
+    ASSERT_TRUE(table.Resolve(buffer_use).is_some());
+    ASSERT_TRUE(table.Resolve(shader_use).is_some());
+    ASSERT_TRUE(table.Resolve(external_use).is_some());
+    auto leases = table.Leases();
+    EXPECT_EQ(leases.textures.len(), 1u);
+    EXPECT_EQ(leases.buffers.len(), 1u);
+    EXPECT_EQ(leases.shaders.len(), 1u);
+    EXPECT_EQ(leases.pipelines.len(), 1u);
+    EXPECT_EQ(leases.render_passes.len(), 1u);
+    EXPECT_EQ(leases.framebuffers.len(), 1u);
+    EXPECT_EQ(leases.externals.len(), 1u);
+    EXPECT_EQ(texture_physical.strong_count(), 3u);
+    EXPECT_EQ(buffer_physical.strong_count(), 3u);
+    EXPECT_EQ(shader_physical.strong_count(), 3u);
+    EXPECT_EQ(pipeline.strong_count(), 3u);
+    EXPECT_EQ(render_pass.strong_count(), 3u);
+    EXPECT_EQ(framebuffer.strong_count(), 3u);
+
+    owe::resource_registry::SubmissionTracker submissions;
+    auto                                      completion = submissions.Begin(table);
+    ASSERT_TRUE(completion.Valid());
+    auto submitted = submissions.Complete(completion);
+    ASSERT_TRUE(submitted.is_some());
+    EXPECT_EQ(submitted->textures.len(), 1u);
+    EXPECT_EQ(submitted->buffers.len(), 1u);
+    EXPECT_EQ(submitted->shaders.len(), 1u);
+    EXPECT_EQ(submitted->pipelines.len(), 1u);
+    EXPECT_EQ(submitted->render_passes.len(), 1u);
+    EXPECT_EQ(submitted->framebuffers.len(), 1u);
 }
 
 TEST(DescriptorLayoutRegistry, CanonicalizesBindingOrder) {
@@ -295,35 +509,49 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     EXPECT_EQ(table.DescriptorCount(), 1u);
     EXPECT_EQ((**resolved).images[0].image.generation, 17u);
 
-    owe::resource_registry::DescriptorArena   arena;
     owe::resource_registry::SubmissionTracker submissions;
-    auto                                      completion = submissions.Begin(table, arena);
+    auto                                      completion = submissions.Begin(table);
     EXPECT_TRUE(completion.Valid());
     EXPECT_EQ(submissions.InFlight(), 1u);
-    EXPECT_EQ(arena.InFlightSubmissions(), 1u);
-    EXPECT_EQ(arena.InFlightBindings(), 1u);
-    auto completed = submissions.Complete(completion, arena);
+    auto completed = submissions.Complete(completion);
     ASSERT_TRUE(completed.is_some());
     EXPECT_EQ(completed->program_generation, 0u);
+    EXPECT_EQ(completed->descriptors.len(), 1u);
     EXPECT_EQ(submissions.InFlight(), 0u);
-    EXPECT_EQ(arena.InFlightSubmissions(), 0u);
 }
 
 TEST(UploadScheduler, TracksTimelineReadiness) {
-    owe::resource_registry::UploadScheduler uploads;
-    auto                                    first  = uploads.Reserve();
-    auto                                    second = uploads.Reserve();
+    owe::resource_registry::UploadScheduler       uploads;
+    owe::resource_registry::PreparedResourceTable table(1);
+    auto physical = rstd::sync::Arc<owe::resource_registry::BufferPhysical>::make(
+        owe::vulkan::BufferAllocation {},
+        rstd::u64(1),
+        rstd::u64(1),
+        owe::resource::ReadyToken { .value = 1 });
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedBufferUse {
+        .use = owe::resource::BufferUseHandle { .index = 0, .generation = 1 },
+        .buffer =
+            owe::resource_registry::PreparedBuffer {
+                .resource = owe::resource::BufferHandle { .index = 0, .generation = 1 },
+                .physical = physical.clone(),
+            },
+    }));
+    auto first  = uploads.Reserve();
+    auto second = uploads.Reserve();
     EXPECT_LT(first.value, second.value);
-    EXPECT_TRUE(uploads.MarkSubmitted(first));
-    EXPECT_TRUE(uploads.MarkSubmitted(second));
+    EXPECT_TRUE(uploads.MarkSubmitted(first, table));
+    EXPECT_TRUE(uploads.MarkSubmitted(second, table));
+    EXPECT_EQ(physical.strong_count(), 4u);
     ASSERT_TRUE(uploads.Pending().is_some());
     EXPECT_EQ(uploads.Pending()->value, second.value);
     EXPECT_EQ(uploads.InFlight(), 2u);
 
     uploads.CompleteThrough(first.value);
+    EXPECT_EQ(physical.strong_count(), 3u);
     EXPECT_EQ(uploads.InFlight(), 1u);
     EXPECT_EQ(uploads.Pending()->value, second.value);
     uploads.CompleteThrough(second.value);
+    EXPECT_EQ(physical.strong_count(), 2u);
     EXPECT_EQ(uploads.InFlight(), 0u);
     EXPECT_TRUE(uploads.Pending().is_none());
 }
@@ -341,14 +569,14 @@ TEST(ResourceStateTracker, CompilesTypedUsesIntoBarrierPackets) {
         .access  = owe::resource::ResourceAccess::Read,
     });
 
-    owe::vulkan::ImageSlotsRef image;
-    image.slots.push_back(owe::vulkan::ImageParameters {});
+    auto                                          allocation = TextureAllocation(1);
     owe::resource_registry::PreparedResourceTable table(3);
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
         .use                 = use,
         .resource            = owe::resource::TextureHandle { .index = 8, .generation = 1 },
         .request             = rstd::move(request),
-        .image               = image,
+        .physical            = allocation.clone(),
+        .image               = allocation->View(),
         .physical_generation = 2,
         .ready               = owe::resource::ReadyToken { .value = 4 },
     }));
@@ -366,6 +594,18 @@ TEST(ResourceStateTracker, CompilesTypedUsesIntoBarrierPackets) {
     EXPECT_EQ(transfer->dst_stage, VK_PIPELINE_STAGE_TRANSFER_BIT);
     EXPECT_EQ(transfer->barrier.oldLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     EXPECT_EQ(transfer->barrier.newLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    auto discard = states.Prepare(
+        use, owe::resource_registry::TextureStateKind::TransferDestination, {}, true);
+    ASSERT_TRUE(discard.is_some());
+    EXPECT_EQ(discard->barrier.oldLayout, VK_IMAGE_LAYOUT_UNDEFINED);
+    EXPECT_EQ(discard->barrier.newLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    auto sampled_after_clear =
+        states.Prepare(use, owe::resource_registry::TextureStateKind::Sampled);
+    ASSERT_TRUE(sampled_after_clear.is_some());
+    EXPECT_EQ(sampled_after_clear->barrier.oldLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    EXPECT_EQ(sampled_after_clear->barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 TEST(MemoryBudgetPolicy, ClassifiesBudgetPressure) {
@@ -391,9 +631,6 @@ TEST(MemoryBudgetPolicy, ClassifiesBudgetPressure) {
 }
 
 TEST(ExternalResourceBridge, PreparesLayoutAndQueueOwnershipContract) {
-    owe::vulkan::ImageParameters source;
-    source.handle = reinterpret_cast<VkImage>(1);
-    source.extent = VkExtent3D { 64, 32, 1 };
     owe::FrameSurfaceLease lease {
         .identity =
             owe::FrameSurfaceIdentity {
@@ -420,10 +657,10 @@ TEST(ExternalResourceBridge, PreparesLayoutAndQueueOwnershipContract) {
     lease.image.extent = VkExtent3D { 64, 32, 1 };
 
     owe::resource_registry::ExternalResourceBridge bridge;
-    auto prepared = bridge.Prepare(owe::vulkan::DeviceCapabilities {}, source, lease, 3);
+    auto prepared = bridge.Prepare(owe::vulkan::DeviceCapabilities {}, lease, 3);
     ASSERT_TRUE(prepared.is_ok());
     auto contract = rstd::move(prepared).unwrap_unchecked();
-    EXPECT_EQ(contract.before_copy.Size(), 2u);
-    EXPECT_EQ(contract.after_copy.Size(), 2u);
+    EXPECT_EQ(contract.before_copy.Size(), 1u);
+    EXPECT_EQ(contract.after_copy.Size(), 1u);
     EXPECT_EQ(contract.lease.identity.acquire_serial, 4u);
 }

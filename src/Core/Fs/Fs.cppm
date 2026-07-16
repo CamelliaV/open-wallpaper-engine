@@ -128,37 +128,23 @@ public:
     auto operator=(PhysicalFs&&) noexcept -> PhysicalFs& = default;
 
     static auto make(Path root, bool create) -> rstd::io::Result<PhysicalFs> {
-        if (create) {
-            auto created = rstd::fs::create_dir_all(root);
-            if (created.is_err()) {
-                return rstd::Err(rstd::move(created).unwrap_err_unchecked());
-            }
+        if (create) rstd_try(rstd::fs::create_dir_all(root));
+
+        auto metadata = rstd_try(rstd::fs::metadata(root));
+        if (! metadata.is_dir()) {
+            return Err(detail::error(rstd::io::error::ErrorKind::NotADirectory));
         }
 
-        auto metadata = rstd::fs::metadata(root);
-        if (metadata.is_err()) return rstd::Err(rstd::move(metadata).unwrap_err_unchecked());
-        if (! rstd::move(metadata).unwrap_unchecked().is_dir()) {
-            return rstd::Err(detail::error(rstd::io::error::ErrorKind::NotADirectory));
-        }
-
-        auto canonical = rstd::fs::canonicalize(root);
-        if (canonical.is_err()) return rstd::Err(rstd::move(canonical).unwrap_err_unchecked());
-        return rstd::Ok(PhysicalFs(rstd::move(canonical).unwrap_unchecked()));
+        auto canonical = rstd_try(rstd::fs::canonicalize(root));
+        return Ok(PhysicalFs(rstd::move(canonical)));
     }
 
     auto open_read(Path path) const -> rstd::io::Result<ReadRange> {
-        auto resolved = resolve_existing(path);
-        if (resolved.is_err()) return rstd::Err(rstd::move(resolved).unwrap_err_unchecked());
-
-        auto file = rstd::fs::File::open(resolved->as_path());
-        if (file.is_err()) return rstd::Err(rstd::move(file).unwrap_err_unchecked());
-
-        auto opened   = rstd::move(file).unwrap_unchecked();
-        auto metadata = opened.metadata();
-        if (metadata.is_err()) return rstd::Err(rstd::move(metadata).unwrap_err_unchecked());
-        auto info = rstd::move(metadata).unwrap_unchecked();
+        auto resolved = rstd_try(resolve_existing(path));
+        auto opened   = rstd_try(rstd::fs::File::open(resolved.as_path()));
+        auto info     = rstd_try(opened.metadata());
         if (! info.is_file()) {
-            return rstd::Err(detail::error(rstd::io::error::ErrorKind::IsADirectory));
+            return Err(detail::error(rstd::io::error::ErrorKind::IsADirectory));
         }
 
         auto source = rstd::io::SharedReadAt::make(rstd::move(opened));
@@ -166,8 +152,7 @@ public:
     }
 
     auto open_write(Path path, WriteOptions options) const -> rstd::io::Result<WriteSeekHandle> {
-        auto resolved = resolve_write(path, options.create || options.create_new);
-        if (resolved.is_err()) return rstd::Err(rstd::move(resolved).unwrap_err_unchecked());
+        auto resolved = rstd_try(resolve_write(path, options.create || options.create_new));
 
         auto open = rstd::fs::File::options();
         open.write(! options.append)
@@ -175,30 +160,25 @@ public:
             .create(options.create)
             .create_new(options.create_new)
             .truncate(options.truncate);
-        auto file = open.open(resolved->as_path());
-        if (file.is_err()) return rstd::Err(rstd::move(file).unwrap_err_unchecked());
-        return rstd::Ok(WriteSeekHandle::make(rstd::move(file).unwrap_unchecked()));
+        auto file = rstd_try(open.open(resolved.as_path()));
+        return Ok(WriteSeekHandle::make(rstd::move(file)));
     }
 
     auto metadata(Path path) const -> rstd::io::Result<FileMetadata> {
-        auto resolved = resolve_existing(path);
-        if (resolved.is_err()) return rstd::Err(rstd::move(resolved).unwrap_err_unchecked());
-        auto metadata = rstd::fs::metadata(resolved->as_path());
-        if (metadata.is_err()) return rstd::Err(rstd::move(metadata).unwrap_err_unchecked());
-        auto value = rstd::move(metadata).unwrap_unchecked();
-        return rstd::Ok(FileMetadata { .len          = value.len(),
-                                       .is_file      = value.is_file(),
-                                       .is_directory = value.is_dir(),
-                                       .readonly     = value.permissions().readonly() });
+        auto resolved = rstd_try(resolve_existing(path));
+        auto value    = rstd_try(rstd::fs::metadata(resolved.as_path()));
+        return Ok(FileMetadata { .len          = value.len(),
+                                 .is_file      = value.is_file(),
+                                 .is_directory = value.is_dir(),
+                                 .readonly     = value.permissions().readonly() });
     }
 
 private:
     explicit PhysicalFs(rstd::path::PathBuf root): m_root(rstd::move(root)) {}
 
     auto local_path(Path path) const -> rstd::io::Result<rstd::path::PathBuf> {
-        auto local = detail::normalize_relative(path);
-        if (local.is_err()) return rstd::Err(rstd::move(local).unwrap_err_unchecked());
-        return rstd::Ok(m_root.join(local->as_path()));
+        auto local = rstd_try(detail::normalize_relative(path));
+        return Ok(m_root.join(local.as_path()));
     }
 
     auto ensure_in_root(rstd::path::PathBuf path) const -> rstd::io::Result<rstd::path::PathBuf> {
@@ -209,31 +189,25 @@ private:
     }
 
     auto resolve_existing(Path path) const -> rstd::io::Result<rstd::path::PathBuf> {
-        auto full = local_path(path);
-        if (full.is_err()) return rstd::Err(rstd::move(full).unwrap_err_unchecked());
-        auto canonical = rstd::fs::canonicalize(full->as_path());
-        if (canonical.is_err()) return rstd::Err(rstd::move(canonical).unwrap_err_unchecked());
-        return ensure_in_root(rstd::move(canonical).unwrap_unchecked());
+        auto full      = rstd_try(local_path(path));
+        auto canonical = rstd_try(rstd::fs::canonicalize(full.as_path()));
+        return ensure_in_root(rstd::move(canonical));
     }
 
     auto resolve_write(Path path, bool create) const -> rstd::io::Result<rstd::path::PathBuf> {
-        auto full = local_path(path);
-        if (full.is_err()) return rstd::Err(rstd::move(full).unwrap_err_unchecked());
+        auto full = rstd_try(local_path(path));
 
-        auto metadata = rstd::fs::metadata(full->as_path());
+        auto metadata = rstd::fs::metadata(full.as_path());
         if (metadata.is_ok()) {
-            auto canonical = rstd::fs::canonicalize(full->as_path());
-            if (canonical.is_err()) {
-                return rstd::Err(rstd::move(canonical).unwrap_err_unchecked());
-            }
-            return ensure_in_root(rstd::move(canonical).unwrap_unchecked());
+            auto canonical = rstd_try(rstd::fs::canonicalize(full.as_path()));
+            return ensure_in_root(rstd::move(canonical));
         }
         auto metadata_error = rstd::move(metadata).unwrap_err_unchecked();
         if (! detail::is_not_found(metadata_error) || ! create) {
             return rstd::Err(rstd::move(metadata_error));
         }
 
-        auto parent = full->as_path().parent();
+        auto parent = full.as_path().parent();
         if (parent.is_none()) {
             return rstd::Err(detail::error(rstd::io::error::ErrorKind::InvalidInput));
         }
@@ -247,22 +221,13 @@ private:
                 return rstd::Err(rstd::move(error));
             }
         }
-        auto canonical = rstd::fs::canonicalize(existing.as_path());
-        if (canonical.is_err()) return rstd::Err(rstd::move(canonical).unwrap_err_unchecked());
-        auto checked = ensure_in_root(rstd::move(canonical).unwrap_unchecked());
-        if (checked.is_err()) return rstd::Err(rstd::move(checked).unwrap_err_unchecked());
+        auto canonical = rstd_try(rstd::fs::canonicalize(existing.as_path()));
+        rstd_try(ensure_in_root(rstd::move(canonical)));
 
-        auto created = rstd::fs::create_dir_all(*parent);
-        if (created.is_err()) return rstd::Err(rstd::move(created).unwrap_err_unchecked());
-        auto parent_canonical = rstd::fs::canonicalize(*parent);
-        if (parent_canonical.is_err()) {
-            return rstd::Err(rstd::move(parent_canonical).unwrap_err_unchecked());
-        }
-        auto parent_checked = ensure_in_root(rstd::move(parent_canonical).unwrap_unchecked());
-        if (parent_checked.is_err()) {
-            return rstd::Err(rstd::move(parent_checked).unwrap_err_unchecked());
-        }
-        return rstd::Ok(rstd::move(full).unwrap_unchecked());
+        rstd_try(rstd::fs::create_dir_all(*parent));
+        auto parent_canonical = rstd_try(rstd::fs::canonicalize(*parent));
+        rstd_try(ensure_in_root(rstd::move(parent_canonical)));
+        return Ok(rstd::move(full));
     }
 
     rstd::path::PathBuf m_root;
@@ -277,12 +242,9 @@ public:
 
     auto mount(Path mount_point, MountHandle fs, rstd::ref<rstd::str> name = {})
         -> rstd::io::Result<MountId> {
-        auto normalized = detail::normalize_global(mount_point);
-        if (normalized.is_err()) {
-            return rstd::Err(rstd::move(normalized).unwrap_err_unchecked());
-        }
-        if (! detail::is_mount_point(normalized->as_path())) {
-            return rstd::Err(detail::error(rstd::io::error::ErrorKind::InvalidInput));
+        auto normalized = rstd_try(detail::normalize_global(mount_point));
+        if (! detail::is_mount_point(normalized.as_path())) {
+            return Err(detail::error(rstd::io::error::ErrorKind::InvalidInput));
         }
 
         auto state = m_state.lock().unwrap_unchecked();
@@ -292,9 +254,9 @@ public:
         auto id = MountId { state->next_id++ };
         state->mounts.push(MountedFs { .id          = id,
                                        .name        = String::make(name),
-                                       .mount_point = rstd::move(normalized).unwrap_unchecked(),
+                                       .mount_point = rstd::move(normalized),
                                        .fs          = rstd::move(fs) });
-        return rstd::Ok(id);
+        return Ok(id);
     }
 
     bool unmount(MountId id) {
@@ -317,14 +279,11 @@ public:
     }
 
     auto open_read(Path path) const -> rstd::io::Result<ReadRange> {
-        auto normalized = detail::normalize_global(path);
-        if (normalized.is_err()) {
-            return rstd::Err(rstd::move(normalized).unwrap_err_unchecked());
-        }
-        auto mounts = snapshot();
+        auto normalized = rstd_try(detail::normalize_global(path));
+        auto mounts     = snapshot();
         for (usize i = mounts.len(); i > 0; --i) {
             auto& mount = mounts[i - 1];
-            auto  local = normalized->as_path().strip_prefix(mount.mount_point.as_path());
+            auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
             if (local.is_none()) continue;
             auto opened = mount.fs->open_read(*local);
             if (opened.is_ok()) return opened;
@@ -344,11 +303,8 @@ public:
             if (! detail::is_not_found(error)) return rstd::Err(rstd::move(error));
         }
 
-        auto normalized = detail::normalize_global(path);
-        if (normalized.is_err()) {
-            return rstd::Err(rstd::move(normalized).unwrap_err_unchecked());
-        }
-        auto mounts = snapshot();
+        auto normalized = rstd_try(detail::normalize_global(path));
+        auto mounts     = snapshot();
 
         if (! options.create_new) {
             auto existing_options       = options;
@@ -356,7 +312,7 @@ public:
             existing_options.create_new = false;
             for (usize i = mounts.len(); i > 0; --i) {
                 auto& mount = mounts[i - 1];
-                auto  local = normalized->as_path().strip_prefix(mount.mount_point.as_path());
+                auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
                 if (local.is_none()) continue;
                 auto opened = mount.fs->open_write(*local, existing_options);
                 if (opened.is_ok()) return opened;
@@ -370,7 +326,7 @@ public:
         }
         for (usize i = mounts.len(); i > 0; --i) {
             auto& mount = mounts[i - 1];
-            auto  local = normalized->as_path().strip_prefix(mount.mount_point.as_path());
+            auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
             if (local.is_none()) continue;
             auto opened = mount.fs->open_write(*local, options);
             if (opened.is_ok()) return opened;
@@ -383,14 +339,11 @@ public:
     }
 
     auto metadata(Path path) const -> rstd::io::Result<FileMetadata> {
-        auto normalized = detail::normalize_global(path);
-        if (normalized.is_err()) {
-            return rstd::Err(rstd::move(normalized).unwrap_err_unchecked());
-        }
-        auto mounts = snapshot();
+        auto normalized = rstd_try(detail::normalize_global(path));
+        auto mounts     = snapshot();
         for (usize i = mounts.len(); i > 0; --i) {
             auto& mount = mounts[i - 1];
-            auto  local = normalized->as_path().strip_prefix(mount.mount_point.as_path());
+            auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
             if (local.is_none()) continue;
             auto result = mount.fs->metadata(*local);
             if (result.is_ok()) return result;
