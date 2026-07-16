@@ -465,10 +465,9 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     extra.depth_initialized_outputs.erase(pass_output_s);
                 }
                 builder.write(output_node);
-                if (pass_output == SpecTex_Default) {
-                    extra.link_finalizer.recordSource(WallpaperLayerId { .value = imgId },
-                                                      CaptureTextureOutput(extra, output_node));
-                } else if (IsSpecLinkTex(pass_output)) {
+                extra.link_finalizer.recordSource(WallpaperLayerId { .value = imgId },
+                                                  CaptureTextureOutput(extra, output_node));
+                if (IsSpecLinkTex(pass_output)) {
                     extra.link_finalizer.recordSource(
                         WallpaperLayerId { .value = static_cast<i32>(ParseLinkTex(pass_output)) },
                         CaptureTextureOutput(extra, output_node));
