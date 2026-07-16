@@ -83,7 +83,7 @@ enum class RenderGraphResourceRetention
 
 struct PreparedPassDiagnostic {
     bool                                      frame_pass { false };
-    std::optional<rg::NodeID>                 graph_node;
+    std::optional<rg::NodeHandle>             graph_node;
     std::string                               pass_name;
     std::optional<rg::PassNode::Type>         pass_type;
     std::optional<RenderItemId>               render_item;

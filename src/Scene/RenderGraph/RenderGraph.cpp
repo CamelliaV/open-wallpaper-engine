@@ -2,29 +2,20 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include "RenderGraph/Pass.hpp"
-
 module wescene.rgraph;
-import wescene.core;
-import rstd.cppstd;
-import :tex_node;
+import rstd;
+import cppstd;
 
+using namespace rstd::prelude;
 using namespace owe::rg;
-
-RenderGraph::RenderGraph() {}
 
 namespace
 {
-TexNode::Desc ToTexNodeDesc(const TextureDesc& desc) {
-    return TexNode::Desc {
-        .name = desc.name,
-        .key  = desc.key,
-        .type =
-            desc.kind == TextureKind::Temp ? TexNode::TexType::Temp : TexNode::TexType::Imported,
-    };
+auto ToTexType(TextureKind kind) -> TexNode::TexType {
+    return kind == TextureKind::Temp ? TexNode::TexType::Temp : TexNode::TexType::Imported;
 }
 
-TextureKind ToTextureKind(TexNode::TexType type) {
+auto ToTextureKind(TexNode::TexType type) -> TextureKind {
     switch (type) {
     case TexNode::TexType::Imported: return TextureKind::Imported;
     case TexNode::TexType::Temp: return TextureKind::Temp;
@@ -32,277 +23,254 @@ TextureKind ToTextureKind(TexNode::TexType type) {
     return TextureKind::Imported;
 }
 
-TextureDesc ToTextureDesc(const TexNode& node) {
+auto ToTextureDesc(const TexNode& node) -> TextureDesc {
     return TextureDesc {
-        .name = std::string(node.name()),
-        .key  = std::string(node.key()),
-        .kind = ToTextureKind(node.type()),
+        .name = node.name.clone(),
+        .key  = node.key.clone(),
+        .kind = ToTextureKind(node.type),
     };
 }
 
-std::string DotEscape(std::string_view value) {
-    std::string out;
-    out.reserve(value.size());
-    for (char c : value) {
-        switch (c) {
-        case '\\': out += R"(\\)"; break;
-        case '"': out += R"(\")"; break;
-        case '\n': out += R"(\n)"; break;
-        case '\r': break;
-        default: out += c; break;
-        }
-    }
-    return out;
+template<typename T>
+    requires rstd::Impled<T, Node>
+auto NodeGraphviz(const T& node) -> String {
+    return rstd::as<Node>(node).ToGraphviz();
 }
 
-std::string PassTypeName(PassNode::Type type) {
-    switch (type) {
-    case PassNode::Type::CustomShader: return "CustomShader";
-    case PassNode::Type::Copy: return "Copy";
-    case PassNode::Type::Virtual: return "Virtual";
-    }
-    return "Unknown";
-}
-
-std::string TextureTypeName(TexNode::TexType type) {
-    switch (type) {
-    case TexNode::TexType::Imported: return "Imported";
-    case TexNode::TexType::Temp: return "Temp";
-    }
-    return "Unknown";
-}
-
-std::string PassDebugLabel(const PassNode& node) {
-    return "ref=" + node.GraphID() + R"(\npass: )" + DotEscape(node.name()) + R"(\ntype=)" +
-           PassTypeName(node.type());
-}
-
-std::string TextureDebugLabel(const TexNode& node) {
-    std::string label = "ref=" + node.GraphID() + R"(\nresource: )" + DotEscape(node.name()) +
-                        R"(\nkey=)" + DotEscape(node.key()) + R"(\nkind=)" +
-                        TextureTypeName(node.type()) + R"(\nversion=)" +
-                        std::to_string(node.version());
-    if (auto* writer = node.writer()) {
-        label += R"(\nwriter=)" + writer->GraphID() + " " + DotEscape(writer->name());
-    }
-    if (auto* pre = node.preVer()) label += R"(\nprev=)" + pre->GraphID();
-    if (auto* next = node.nextVer()) label += R"(\nnext=)" + next->GraphID();
-    return label;
+auto Sorted(rstd::slice<NodeHandle> handles) -> rstd::vec::Vec<NodeHandle> {
+    auto sorted = rstd::vec::Vec<NodeHandle>::with_capacity(handles.len());
+    sorted.extend_from_slice(handles);
+    std::sort(sorted.begin(), sorted.end());
+    return sorted;
 }
 } // namespace
 
-PassNode* RenderGraph::getPassNode(NodeID id) const {
-    if (exists(m_set_passnode, id)) {
-        return static_cast<PassNode*>(m_dg.GetNode(id));
-    }
-    return nullptr;
+auto RenderGraph::getPassNode(NodeHandle handle) -> rstd::Option<PassNode&> {
+    auto node = m_pass_nodes.get_mut(handle);
+    if (node.is_none()) return rstd::None();
+    return rstd::Some<PassNode&>(**node);
 }
 
-Pass* RenderGraph::getPass(NodeID id) const {
-    if (exists(m_map_pass, id)) {
-        return m_map_pass.at(id).get();
-    }
-    return nullptr;
+auto RenderGraph::getPassNode(NodeHandle handle) const -> rstd::Option<const PassNode&> {
+    auto node = m_pass_nodes.get(handle);
+    if (node.is_none()) return rstd::None();
+    return rstd::Some<const PassNode&>(**node);
 }
 
-std::optional<PassNodeState> RenderGraph::passState(NodeID id) const {
-    auto* node = getPassNode(id);
-    if (node == nullptr) return std::nullopt;
-    return PassNodeState {
-        .id   = id,
-        .name = std::string(node->name()),
-        .type = node->type(),
-    };
+auto RenderGraph::getTexNode(NodeHandle handle) -> rstd::Option<TexNode&> {
+    auto node = m_tex_nodes.get_mut(handle);
+    if (node.is_none()) return rstd::None();
+    return rstd::Some<TexNode&>(**node);
 }
 
-void RenderGraph::ToGraphviz(std::string_view path) const {
-    std::ofstream fs;
-    fs.open(std::string(path), std::fstream::out | std::fstream::trunc);
-    if (! fs.is_open()) return;
+auto RenderGraph::getTexNode(NodeHandle handle) const -> rstd::Option<const TexNode&> {
+    auto node = m_tex_nodes.get(handle);
+    if (node.is_none()) return rstd::None();
+    return rstd::Some<const TexNode&>(**node);
+}
 
-    fs << "digraph framegraph {\n";
-    fs << "node [shape=box]\n";
+auto RenderGraph::getPass(PassHandle handle) -> rstd::Option<Pass&> {
+    auto pass = m_passes.get_mut(handle);
+    if (pass.is_none() || ! **pass) return rstd::None();
+    return rstd::Some<Pass&>(***pass);
+}
 
-    auto texture_node = [this](NodeID id) -> TexNode* {
-        if (id >= m_dg.NodeNum() || exists(m_set_passnode, id)) return nullptr;
-        return static_cast<TexNode*>(m_dg.GetNode(id));
-    };
+auto RenderGraph::getPass(PassHandle handle) const -> rstd::Option<const Pass&> {
+    auto pass = m_passes.get(handle);
+    if (pass.is_none() || ! **pass) return rstd::None();
+    return rstd::Some<const Pass&>(***pass);
+}
 
-    for (NodeID id = 0; id < m_dg.NodeNum(); ++id) {
-        if (auto* pass = getPassNode(id)) {
-            fs << pass->GraphID() << R"([label=")" << PassDebugLabel(*pass) << R"("])" << '\n';
-            continue;
+auto RenderGraph::passState(NodeHandle handle) const -> rstd::Option<PassNodeState> {
+    auto node = getPassNode(handle);
+    if (node.is_none()) return rstd::None();
+    return rstd::Some(PassNodeState {
+        .handle = handle,
+        .pass   = node->pass,
+        .name   = node->name.clone(),
+        .type   = node->type,
+    });
+}
+
+void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
+    auto output = String::make("digraph framegraph {\nnode [shape=box]\n");
+
+    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+        NodeHandle handle { .index = index };
+        if (auto pass = getPassNode(handle); pass.is_some()) {
+            auto declaration = NodeGraphviz(*pass);
+            output.push_str(declaration.as_str());
+            output.push_back('\n');
+        } else if (auto texture = getTexNode(handle); texture.is_some()) {
+            auto declaration = NodeGraphviz(*texture);
+            output.push_str(declaration.as_str());
+            output.push_back('\n');
         }
-        if (auto* tex = texture_node(id)) {
-            fs << tex->GraphID() << R"([label=")" << TextureDebugLabel(*tex)
-               << R"(" shape=ellipse])" << '\n';
-        }
     }
 
-    for (NodeID id = 0; id < m_dg.NodeNum(); ++id) {
-        auto outs = m_dg.GetNodeOut(id);
-        std::sort(outs.begin(), outs.end());
-        for (auto out : outs) {
-            std::string access = "order";
-            if (auto* tex = texture_node(id); tex != nullptr && getPassNode(out) != nullptr) {
-                access = tex->nextVer() != nullptr && tex->nextVer()->writer() == getPassNode(out)
-                             ? "read/version"
-                             : "read";
-            } else if (auto* pass = getPassNode(id); pass != nullptr) {
-                if (auto* tex = texture_node(out); tex != nullptr && tex->writer() == pass) {
+    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+        NodeHandle from { .index = index };
+        for (auto to : Sorted(m_dg.GetNodeOut(from))) {
+            rstd::ref<rstd::str> access       = "order";
+            auto                 texture_from = getTexNode(from);
+            auto                 pass_to      = getPassNode(to);
+            if (texture_from && pass_to) {
+                if (texture_from->next) {
+                    auto next = getTexNode(*texture_from->next);
+                    if (next && next->writer && *next->writer == to) access = "read/version";
+                }
+                if (access == "order") access = "read";
+            } else if (auto pass_from = getPassNode(from); pass_from) {
+                auto texture_to = getTexNode(to);
+                if (texture_to && texture_to->writer && *texture_to->writer == from) {
                     access = "write";
                 }
             }
-            fs << "n" << id << "->n" << out << R"([label="access=)" << access << R"("])" << '\n';
+            auto edge =
+                rstd::format("n{}->n{}[label=\"access={}\"]\n", from.index, to.index, access);
+            output.push_str(edge.as_str());
         }
     }
 
-    fs << "}";
+    output.push_back('}');
+    (void)rstd::fs::write(rstd::ref<rstd::path::Path>(path), rstd::str_::as_bytes(output.as_str()));
 }
 
-std::optional<TextureNodeState> RenderGraph::textureState(TextureNodeRef ref) const {
-    if (ref.id >= m_dg.NodeNum() || isPassNode(ref.id)) return std::nullopt;
-    auto* node = static_cast<TexNode*>(m_dg.GetNode(ref.id));
-    return TextureNodeState {
+auto RenderGraph::textureState(TextureNodeRef ref) const -> rstd::Option<TextureNodeState> {
+    auto node = getTexNode(ref.handle);
+    if (node.is_none()) return rstd::None();
+    return rstd::Some(TextureNodeState {
         .ref     = ref,
         .desc    = ToTextureDesc(*node),
-        .version = node->version(),
-    };
+        .version = node->version,
+    });
 }
 
-bool RenderGraph::readTexture(NodeID pass_node_id, TextureNodeRef texture) {
-    auto* pass_node = getPassNode(pass_node_id);
-    auto  tex_state = textureState(texture);
-    if (pass_node == nullptr || ! tex_state.has_value()) return false;
+auto RenderGraph::readTexture(NodeHandle pass_node, TextureNodeRef texture) -> bool {
+    if (getPassNode(pass_node).is_none() || textureState(texture).is_none()) return false;
 
-    RenderGraphBuilder builder(*this);
-    builder.setWorkPassNode(pass_node);
+    RenderGraphBuilder builder(*this, pass_node);
     builder.read(texture);
     return true;
 }
 
-std::vector<NodeID> RenderGraph::topologicalOrder() const {
-    const size_t node_count = m_dg.NodeNum();
-
-    std::vector<size_t> in_degree(node_count, 0);
-    for (NodeID id = 0; id < node_count; ++id) {
-        for (auto out : m_dg.GetNodeOut(id)) {
-            ++in_degree[out];
-        }
+auto RenderGraph::topologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
+    auto in_degree = rstd::vec::Vec<usize>::make();
+    in_degree.resize(m_dg.NodeNum(), 0);
+    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+        NodeHandle handle { .index = index };
+        in_degree[index] = m_dg.GetNodeIn(handle).len();
     }
 
-    std::vector<NodeID> ready;
-    ready.reserve(node_count);
-    for (NodeID id = 0; id < node_count; ++id) {
-        if (in_degree[id] == 0) ready.push_back(id);
+    auto ready = rstd::vec::Vec<NodeHandle>::with_capacity(m_dg.NodeNum());
+    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+        if (in_degree[index] == 0) ready.push(NodeHandle { .index = index });
     }
 
-    std::vector<NodeID>        passnodes;
-    std::optional<std::string> active_target;
-    size_t                     visited = 0;
+    auto                 pass_nodes = rstd::vec::Vec<NodeHandle>::make();
+    rstd::Option<String> active_target;
+    usize                visited = 0;
 
-    auto chooseReady = [&]() -> size_t {
+    auto choose_ready = [&]() -> usize {
         std::sort(ready.begin(), ready.end());
 
-        for (size_t i = 0; i < ready.size(); ++i) {
-            if (! isRenderPassNode(ready[i])) return i;
+        for (usize index = 0; index < ready.len(); ++index) {
+            if (! isRenderPassNode(ready[index])) return index;
         }
 
         if (active_target) {
-            for (size_t i = 0; i < ready.size(); ++i) {
-                auto target = passWriteTarget(ready[i]);
-                if (target && *target == *active_target) return i;
+            for (usize index = 0; index < ready.len(); ++index) {
+                auto target = passWriteTarget(ready[index]);
+                if (target && *target == *active_target) return index;
             }
         }
 
-        std::unordered_map<std::string, size_t> target_counts;
-        for (auto id : ready) {
-            if (auto target = passWriteTarget(id)) {
-                ++target_counts[*target];
-            }
+        using CountMap     = rstd::collections::HashMap<String, usize>;
+        auto target_counts = CountMap::make();
+        for (auto handle : ready) {
+            auto target = passWriteTarget(handle);
+            if (! target) continue;
+            auto count = target_counts.get_mut(*target);
+            if (count)
+                ++**count;
+            else
+                (void)target_counts.insert(target->clone(), 1);
         }
 
-        size_t best_index = 0;
-        size_t best_count = 0;
-        for (size_t i = 0; i < ready.size(); ++i) {
-            size_t count = 0;
-            if (auto target = passWriteTarget(ready[i])) {
-                count = target_counts[*target];
+        usize best_index = 0;
+        usize best_count = 0;
+        for (usize index = 0; index < ready.len(); ++index) {
+            usize count  = 0;
+            auto  target = passWriteTarget(ready[index]);
+            if (target) {
+                auto stored = target_counts.get(*target);
+                if (stored) count = **stored;
             }
             if (count > best_count) {
-                best_index = i;
+                best_index = index;
                 best_count = count;
             }
         }
         return best_index;
     };
 
-    while (! ready.empty()) {
-        const size_t pick_index = chooseReady();
-        const NodeID id         = ready[pick_index];
-        ready.erase(ready.begin() + static_cast<std::ptrdiff_t>(pick_index));
+    while (! ready.is_empty()) {
+        auto handle = ready.remove(choose_ready());
         ++visited;
 
-        if (isRenderPassNode(id)) {
-            passnodes.push_back(id);
-            active_target = passWriteTarget(id);
+        if (isRenderPassNode(handle)) {
+            pass_nodes.push(NodeHandle { handle });
+            active_target = passWriteTarget(handle);
         }
 
-        auto outs = m_dg.GetNodeOut(id);
-        std::sort(outs.begin(), outs.end());
-        for (auto out : outs) {
-            rstd_assert(in_degree[out] > 0);
-            --in_degree[out];
-            if (in_degree[out] == 0) ready.push_back(out);
+        for (auto next : Sorted(m_dg.GetNodeOut(handle))) {
+            rstd_assert(in_degree[next.index] > 0);
+            --in_degree[next.index];
+            if (in_degree[next.index] == 0) ready.push(NodeHandle { next });
         }
     }
 
-    if (visited == node_count) return passnodes;
+    if (visited == m_dg.NodeNum()) return pass_nodes;
 
-    std::vector<NodeID> allnodes = m_dg.TopologicalOrder();
-    passnodes.clear();
-    std::copy_if(
-        allnodes.begin(), allnodes.end(), std::back_inserter(passnodes), [this](auto item) {
-            return isRenderPassNode(item);
-        });
-    return passnodes;
+    pass_nodes.clear();
+    for (auto handle : m_dg.TopologicalOrder()) {
+        if (isRenderPassNode(handle)) pass_nodes.push(NodeHandle { handle });
+    }
+    return pass_nodes;
 }
 
-void RenderGraph::markPassNode(NodeID id) { m_set_passnode.insert(id); }
-
-bool RenderGraph::isPassNode(NodeID id) const { return exists(m_set_passnode, id); }
-
-bool RenderGraph::isVirtualPassNode(NodeID id) const { return exists(m_set_vitrual_passnode, id); }
-
-bool RenderGraph::isRenderPassNode(NodeID id) const {
-    return isPassNode(id) && ! isVirtualPassNode(id);
+auto RenderGraph::isPassNode(NodeHandle handle) const -> bool {
+    return m_pass_nodes.contains_key(handle);
 }
 
-std::optional<std::string> RenderGraph::passWriteTarget(NodeID id) const {
-    auto* pass_node = getPassNode(id);
-    if (pass_node == nullptr) return std::nullopt;
+auto RenderGraph::isVirtualPassNode(NodeHandle handle) const -> bool {
+    auto node = getPassNode(handle);
+    return node && node->type == PassNode::Type::Virtual;
+}
 
-    auto outs = m_dg.GetNodeOut(id);
-    std::sort(outs.begin(), outs.end());
-    for (auto out : outs) {
-        if (out >= m_dg.NodeNum() || isPassNode(out)) continue;
-        auto* tex_node = static_cast<TexNode*>(m_dg.GetNode(out));
-        if (tex_node->writer() == pass_node) {
-            return std::string(tex_node->key());
+auto RenderGraph::isRenderPassNode(NodeHandle handle) const -> bool {
+    return isPassNode(handle) && ! isVirtualPassNode(handle);
+}
+
+auto RenderGraph::passWriteTarget(NodeHandle handle) const -> rstd::Option<String> {
+    if (! isPassNode(handle)) return rstd::None();
+
+    for (auto out : Sorted(m_dg.GetNodeOut(handle))) {
+        auto texture = getTexNode(out);
+        if (texture && texture->writer && *texture->writer == handle) {
+            return rstd::Some(texture->key.clone());
         }
     }
-    return std::nullopt;
+    return rstd::None();
 }
 
-RenderGraphBuilder::RenderGraphBuilder(RenderGraph& rg): m_rg(rg) {};
-
-void RenderGraphBuilder::setWorkPassNode(PassNode* node) { m_passnode_wip = node; }
+RenderGraphBuilder::RenderGraphBuilder(RenderGraph& graph, NodeHandle pass_node)
+    : m_rg(graph), m_passnode_wip(pass_node) {}
 
 void RenderGraphBuilder::markSelfWrite(TextureNodeRef ref) {
     auto state = m_rg.textureState(ref);
-    rstd_assert(state.has_value());
-    if (! state.has_value()) return;
-    if (state->version > 0) return;
+    rstd_assert(state.is_some());
+    if (! state || state->version > 0) return;
     m_rg.addPass<VirtualPass>(
         "virtual pass", PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
             builder.write(ref);
@@ -311,59 +279,52 @@ void RenderGraphBuilder::markSelfWrite(TextureNodeRef ref) {
 
 void RenderGraphBuilder::markVirtualWrite(TextureNodeRef ref) {
     auto state = m_rg.textureState(ref);
-    rstd_assert(state.has_value());
-    if (! state.has_value()) return;
-    if (state->version > 0 || m_rg.textureHasWriter(ref)) return;
+    rstd_assert(state.is_some());
+    if (! state || state->version > 0 || m_rg.textureHasWriter(ref)) return;
     m_rg.addPass<VirtualPass>(
         "virtual pass", PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
             builder.write(ref);
         });
 }
 
-TextureNodeRef RenderGraphBuilder::createTexture(const TextureDesc& desc, bool write) {
+auto RenderGraphBuilder::createTexture(const TextureDesc& desc, bool write) -> TextureNodeRef {
     return createTextureNode(desc, write);
 }
 
 void RenderGraphBuilder::read(TextureNodeRef ref) {
     auto state = m_rg.textureState(ref);
-    rstd_assert(state.has_value());
-    if (! state.has_value()) return;
-    readTextureNode(ref);
+    rstd_assert(state.is_some());
+    if (state) readTextureNode(ref);
 }
 
 void RenderGraphBuilder::write(TextureNodeRef ref) {
     auto state = m_rg.textureState(ref);
-    rstd_assert(state.has_value());
-    if (! state.has_value()) return;
-    writeTextureNode(ref);
+    rstd_assert(state.is_some());
+    if (state) writeTextureNode(ref);
 }
 
-std::optional<TextureNodeState> RenderGraphBuilder::textureState(TextureNodeRef ref) const {
+auto RenderGraphBuilder::textureState(TextureNodeRef ref) const -> rstd::Option<TextureNodeState> {
     return m_rg.textureState(ref);
 }
 
-TextureNodeRef RenderGraphBuilder::createTextureNode(const TextureDesc& desc, bool write) {
+auto RenderGraphBuilder::createTextureNode(const TextureDesc& desc, bool write) -> TextureNodeRef {
     return m_rg.createTextureNode(desc, write);
 }
 
 void RenderGraphBuilder::readTextureNode(TextureNodeRef ref) {
-    m_rg.connectTextureRead(ref, m_passnode_wip->ID());
+    m_rg.connectTextureRead(ref, m_passnode_wip);
 }
 
 void RenderGraphBuilder::writeTextureNode(TextureNodeRef ref) {
-    m_rg.connectTextureWrite(ref, m_passnode_wip->ID());
+    m_rg.connectTextureWrite(ref, m_passnode_wip);
 }
 
-TextureNodeRef RenderGraph::createTextureNode(const TextureDesc& desc, bool write) {
-    TextureNodeRef ref {};
-    if (exists(m_key_texnode, desc.key)) {
-        auto id  = m_key_texnode.at(desc.key);
-        auto old = TextureNodeRef { .id = id };
-        if (write && textureHasWriter(old)) {
-            ref = createNewTextureNode(desc);
-        } else {
-            ref = old;
-        }
+auto RenderGraph::createTextureNode(const TextureDesc& desc, bool write) -> TextureNodeRef {
+    TextureNodeRef ref;
+    auto           current = m_key_texnode.get(desc.key);
+    if (current) {
+        TextureNodeRef old { .handle = **current };
+        ref = write && textureHasWriter(old) ? createNewTextureNode(desc) : old;
     } else {
         ref = createNewTextureNode(desc);
     }
@@ -371,96 +332,89 @@ TextureNodeRef RenderGraph::createTextureNode(const TextureDesc& desc, bool writ
     return ref;
 }
 
-TextureNodeRef RenderGraph::createNewTextureNode(const TextureDesc& desc) {
-    auto       legacy_desc = ToTexNodeDesc(desc);
-    TexNode*   node { nullptr };
-    const auto it = m_key_texnode.find(desc.key);
-    if (it != m_key_texnode.end()) {
-        auto* old = static_cast<TexNode*>(m_dg.GetNode(it->second));
-        node      = TexNode::addNewVersion(m_dg, old);
-    } else {
-        node = TexNode::addTexNode(m_dg, legacy_desc);
-    }
-    m_key_texnode[desc.key] = node->ID();
-    return TextureNodeRef { .id = node->ID() };
-}
+auto RenderGraph::createNewTextureNode(const TextureDesc& desc) -> TextureNodeRef {
+    auto handle  = m_dg.AddNode();
+    auto current = m_key_texnode.get(desc.key);
 
-void RenderGraph::connectTextureRead(TextureNodeRef ref, NodeID pass_node_id) {
-    if (! textureState(ref).has_value() || getPassNode(pass_node_id) == nullptr) return;
-    auto* texnode = static_cast<TexNode*>(m_dg.GetNode(ref.id));
-    m_dg.Connect(texnode->ID(), pass_node_id);
-
-    // reader before all new version's writer
-    auto* next = texnode->nextVer();
-    if (next != nullptr && next->writer() != nullptr) {
-        m_dg.Connect(pass_node_id, next->writer()->ID());
-    }
-}
-
-void RenderGraph::connectTextureWrite(TextureNodeRef ref, NodeID pass_node_id) {
-    if (! textureState(ref).has_value()) return;
-    auto* pass = getPassNode(pass_node_id);
-    if (pass == nullptr) return;
-
-    auto* node = static_cast<TexNode*>(m_dg.GetNode(ref.id));
-    // after all old reader
-    if (node->version() > 0) {
-        auto*       old  = node->preVer();
-        const auto& outs = m_dg.GetNodeOut(old->ID());
-        // after reader
-        for (auto id : outs) {
-            if (isPassNode(id)) {
-                m_dg.Connect(id, pass_node_id);
-            }
+    TexNode node {
+        .handle = handle,
+        .type   = ToTexType(desc.kind),
+        .key    = desc.key.clone(),
+        .name   = desc.name.clone(),
+    };
+    if (current) {
+        auto previous = getTexNode(**current);
+        rstd_assert(previous.is_some());
+        if (previous) {
+            node.version   = previous->version + 1;
+            node.previous  = rstd::Some(previous->handle);
+            previous->next = rstd::Some(handle);
         }
-        // after old tex if no old reader
-        if (outs.empty()) m_dg.Connect(old->ID(), pass_node_id);
     }
-    m_dg.Connect(pass_node_id, node->ID());
-    node->setWriter(pass);
+
+    (void)m_tex_nodes.insert(handle, std::move(node));
+    (void)m_key_texnode.insert(desc.key.clone(), handle);
+    return TextureNodeRef { .handle = handle };
 }
 
-bool RenderGraph::textureHasWriter(TextureNodeRef ref) const {
-    if (! textureState(ref).has_value()) return false;
-    auto* node = static_cast<TexNode*>(m_dg.GetNode(ref.id));
-    return node->writer() != nullptr;
+void RenderGraph::connectTextureRead(TextureNodeRef ref, NodeHandle pass_node) {
+    auto texture = getTexNode(ref.handle);
+    if (! texture || getPassNode(pass_node).is_none()) return;
+    (void)m_dg.Connect(ref.handle, pass_node);
+
+    if (texture->next) {
+        auto next = getTexNode(*texture->next);
+        if (next && next->writer) (void)m_dg.Connect(pass_node, *next->writer);
+    }
 }
 
-const PassNode& RenderGraphBuilder::workPassNode() const { return *m_passnode_wip; }
+void RenderGraph::connectTextureWrite(TextureNodeRef ref, NodeHandle pass_node) {
+    auto node = getTexNode(ref.handle);
+    if (! node || getPassNode(pass_node).is_none()) return;
 
-std::vector<std::vector<TextureNodeState>>
-RenderGraph::getLastReadTextures(std::span<const NodeID> nodes) const {
-    std::vector<std::vector<TextureNodeState>> res;
-    std::vector<Set<NodeID>>                   nodes_ids;
-    // get in
-    std::transform(
-        nodes.begin(), nodes.end(), std::back_inserter(nodes_ids), [this, &nodes_ids](auto& n) {
-            Set<NodeID> sets;
-            const auto& ids = m_dg.GetNodeIn(n);
-            for (const auto& id : ids) sets.insert(id);
-            return sets;
-        });
-    // get last in
-    {
-        Set<NodeID> sets;
-        std::for_each(std::rbegin(nodes_ids), std::rend(nodes_ids), [&sets](auto& ids) {
-            std::vector<NodeID> copy { ids.begin(), ids.end() };
-            std::for_each(copy.begin(), copy.end(), [&sets, &ids](auto& id) {
-                if (exists(sets, id))
-                    ids.erase(id);
-                else
-                    sets.insert(id);
-            });
-        });
-    }
-    // to tex node
-    std::transform(nodes_ids.begin(), nodes_ids.end(), std::back_inserter(res), [this](auto& ids) {
-        std::vector<TextureNodeState> texs;
-        for (auto& id : ids) {
-            auto state = textureState(TextureNodeRef { .id = id });
-            if (state.has_value()) texs.push_back(*state);
+    if (node->previous) {
+        auto previous = *node->previous;
+        auto readers  = m_dg.GetNodeOut(previous);
+        for (usize index = 0; index < readers.len(); ++index) {
+            auto reader = readers[index];
+            if (isPassNode(reader)) (void)m_dg.Connect(reader, pass_node);
         }
-        return texs;
-    });
-    return res;
+        if (readers.len() == 0) (void)m_dg.Connect(previous, pass_node);
+    }
+    (void)m_dg.Connect(pass_node, ref.handle);
+    node->writer = rstd::Some(pass_node);
+}
+
+auto RenderGraph::textureHasWriter(TextureNodeRef ref) const -> bool {
+    auto node = getTexNode(ref.handle);
+    return node && node->writer.is_some();
+}
+
+auto RenderGraphBuilder::workPassNode() const -> const PassNode& {
+    auto node = m_rg.getPassNode(m_passnode_wip);
+    rstd_assert(node.is_some());
+    return *node;
+}
+
+auto RenderGraph::getLastReadTextures(rstd::slice<NodeHandle> nodes) const
+    -> rstd::vec::Vec<rstd::vec::Vec<TextureNodeState>> {
+    auto result = rstd::vec::Vec<rstd::vec::Vec<TextureNodeState>>::with_capacity(nodes.len());
+    for (usize index = 0; index < nodes.len(); ++index) {
+        result.push(rstd::vec::Vec<TextureNodeState>::make());
+    }
+
+    using SeenMap = rstd::collections::HashMap<NodeHandle, bool, NodeHandleHasher>;
+    auto seen     = SeenMap::make();
+    for (usize offset = nodes.len(); offset > 0; --offset) {
+        auto index  = offset - 1;
+        auto inputs = m_dg.GetNodeIn(nodes[index]);
+        for (usize input_index = 0; input_index < inputs.len(); ++input_index) {
+            auto input = inputs[input_index];
+            if (seen.contains_key(input)) continue;
+            (void)seen.insert(input, true);
+            auto state = textureState(TextureNodeRef { .handle = input });
+            if (state) result[index].push(std::move(*state));
+        }
+    }
+    return result;
 }

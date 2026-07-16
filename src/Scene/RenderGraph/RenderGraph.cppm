@@ -1,13 +1,13 @@
-module;
-
-#include "RenderGraph/Pass.hpp"
-
 export module wescene.rgraph:render_graph;
-import wescene.core;
-import rstd.cppstd;
+import rstd;
+import cppstd;
 
 import :dependency_graph;
+import :pass;
 import :pass_node;
+import :tex_node;
+
+using namespace rstd::prelude;
 
 export namespace owe::rg
 {
@@ -15,9 +15,9 @@ export namespace owe::rg
 class RenderGraph;
 
 struct TextureNodeRef {
-    NodeID id { std::numeric_limits<NodeID>::max() };
+    NodeHandle handle;
 
-    bool valid() const { return id != std::numeric_limits<NodeID>::max(); }
+    bool valid() const noexcept { return handle.valid(); }
 };
 
 enum class TextureKind
@@ -27,99 +27,113 @@ enum class TextureKind
 };
 
 struct TextureDesc {
-    std::string name;
-    std::string key;
+    String      name;
+    String      key;
     TextureKind kind { TextureKind::Imported };
 };
 
 struct TextureNodeState {
     TextureNodeRef ref;
     TextureDesc    desc;
-    size_t         version { 0 };
+    usize          version { 0 };
 };
 
 struct PassNodeState {
-    NodeID         id { 0 };
-    std::string    name;
+    NodeHandle     handle;
+    PassHandle     pass;
+    String         name;
     PassNode::Type type { PassNode::Type::CustomShader };
 };
 
-class RenderGraphBuilder {
-public:
-    RenderGraphBuilder(RenderGraph&);
-
-    TextureNodeRef                  createTexture(const TextureDesc&, bool write = false);
-    void                            read(TextureNodeRef);
-    void                            write(TextureNodeRef);
-    std::optional<TextureNodeState> textureState(TextureNodeRef) const;
-    const PassNode&                 workPassNode() const;
-    void                            setWorkPassNode(PassNode*);
-    void                            markSelfWrite(TextureNodeRef);
-    void                            markVirtualWrite(TextureNodeRef);
+struct RenderGraphBuilder {
+    auto createTexture(const TextureDesc&, bool write = false) -> TextureNodeRef;
+    void read(TextureNodeRef);
+    void write(TextureNodeRef);
+    auto textureState(TextureNodeRef) const -> rstd::Option<TextureNodeState>;
+    auto workPassNode() const -> const PassNode&;
+    void markSelfWrite(TextureNodeRef);
+    void markVirtualWrite(TextureNodeRef);
 
 private:
-    TextureNodeRef createTextureNode(const TextureDesc&, bool write);
-    void           readTextureNode(TextureNodeRef);
-    void           writeTextureNode(TextureNodeRef);
+    friend class RenderGraph;
+
+    RenderGraphBuilder(RenderGraph&, NodeHandle);
+
+    auto createTextureNode(const TextureDesc&, bool write) -> TextureNodeRef;
+    void readTextureNode(TextureNodeRef);
+    void writeTextureNode(TextureNodeRef);
 
     RenderGraph& m_rg;
-    PassNode*    m_passnode_wip { nullptr };
+    NodeHandle   m_passnode_wip;
 };
 
 class RenderGraph {
 public:
-    RenderGraph();
+    RenderGraph() = default;
 
-    Pass*                           getPass(NodeID) const;
-    std::optional<PassNodeState>    passState(NodeID) const;
-    std::optional<TextureNodeState> textureState(TextureNodeRef) const;
-    bool                            readTexture(NodeID pass_node_id, TextureNodeRef texture);
+    auto getPass(PassHandle) -> rstd::Option<Pass&>;
+    auto getPass(PassHandle) const -> rstd::Option<const Pass&>;
+    auto passState(NodeHandle) const -> rstd::Option<PassNodeState>;
+    auto textureState(TextureNodeRef) const -> rstd::Option<TextureNodeState>;
+    auto readTexture(NodeHandle pass_node, TextureNodeRef texture) -> bool;
 
-    // all render pass
-    std::vector<NodeID>                        topologicalOrder() const;
-    std::vector<std::vector<TextureNodeState>> getLastReadTextures(std::span<const NodeID>) const;
+    auto topologicalOrder() const -> rstd::vec::Vec<NodeHandle>;
+    auto getLastReadTextures(rstd::slice<NodeHandle>) const
+        -> rstd::vec::Vec<rstd::vec::Vec<TextureNodeState>>;
 
-    void ToGraphviz(std::string_view path) const;
+    void ToGraphviz(rstd::ref<rstd::str> path) const;
 
     template<typename TPass, typename CB>
-    PassNode* addPass(std::string_view name, PassNode::Type type, CB&& callback) {
+    auto addPass(rstd::ref<rstd::str> name, PassNode::Type type, CB&& callback) -> NodeHandle {
         using Desc = typename TPass::Desc;
 
-        auto* node = PassNode::addPassNode(m_dg, type);
-        node->setName(name);
-        markPassNode(node->ID());
-        RenderGraphBuilder builder(*this);
-        builder.setWorkPassNode(node);
-        {
-            Desc desc {};
-            callback(builder, desc);
-            m_map_pass[node->ID()] = std::make_shared<TPass>(desc);
-        }
-        if (type == PassNode::Type::Virtual) m_set_vitrual_passnode.insert(node->ID());
-        return node;
+        auto node_handle = m_dg.AddNode();
+        auto pass_handle = PassHandle { .index = m_next_pass_index++ };
+        (void)m_pass_nodes.insert(node_handle,
+                                  PassNode {
+                                      .handle = node_handle,
+                                      .pass   = pass_handle,
+                                      .type   = type,
+                                      .name   = String::make(name),
+                                  });
+
+        RenderGraphBuilder builder(*this, node_handle);
+        Desc               desc {};
+        callback(builder, desc);
+
+        std::unique_ptr<Pass> pass = std::make_unique<TPass>(desc);
+        (void)m_passes.insert(pass_handle, std::move(pass));
+        return node_handle;
     }
 
 private:
-    friend class RenderGraphBuilder;
-    PassNode*                  getPassNode(NodeID) const;
-    TextureNodeRef             createTextureNode(const TextureDesc&, bool write);
-    TextureNodeRef             createNewTextureNode(const TextureDesc&);
-    void                       connectTextureRead(TextureNodeRef, NodeID pass_node_id);
-    void                       connectTextureWrite(TextureNodeRef, NodeID pass_node_id);
-    bool                       textureHasWriter(TextureNodeRef) const;
-    void                       markPassNode(NodeID);
-    bool                       isPassNode(NodeID) const;
-    bool                       isVirtualPassNode(NodeID) const;
-    bool                       isRenderPassNode(NodeID) const;
-    std::optional<std::string> passWriteTarget(NodeID) const;
+    friend struct RenderGraphBuilder;
 
+    using PassNodeMap = rstd::collections::HashMap<NodeHandle, PassNode, NodeHandleHasher>;
+    using TexNodeMap  = rstd::collections::HashMap<NodeHandle, TexNode, NodeHandleHasher>;
+    using PassMap = rstd::collections::HashMap<PassHandle, std::unique_ptr<Pass>, PassHandleHasher>;
+    using TextureKeyMap = rstd::collections::HashMap<String, NodeHandle>;
+
+    auto getPassNode(NodeHandle) -> rstd::Option<PassNode&>;
+    auto getPassNode(NodeHandle) const -> rstd::Option<const PassNode&>;
+    auto getTexNode(NodeHandle) -> rstd::Option<TexNode&>;
+    auto getTexNode(NodeHandle) const -> rstd::Option<const TexNode&>;
+    auto createTextureNode(const TextureDesc&, bool write) -> TextureNodeRef;
+    auto createNewTextureNode(const TextureDesc&) -> TextureNodeRef;
+    void connectTextureRead(TextureNodeRef, NodeHandle pass_node);
+    void connectTextureWrite(TextureNodeRef, NodeHandle pass_node);
+    auto textureHasWriter(TextureNodeRef) const -> bool;
+    auto isPassNode(NodeHandle) const -> bool;
+    auto isVirtualPassNode(NodeHandle) const -> bool;
+    auto isRenderPassNode(NodeHandle) const -> bool;
+    auto passWriteTarget(NodeHandle) const -> rstd::Option<String>;
+
+    usize           m_next_pass_index { 0 };
     DependencyGraph m_dg;
-    Set<NodeID>     m_set_passnode;
-    Set<NodeID>     m_set_vitrual_passnode;
-
-    Map<std::string, NodeID> m_key_texnode;
-
-    Map<NodeID, std::shared_ptr<Pass>> m_map_pass;
+    PassNodeMap     m_pass_nodes;
+    TexNodeMap      m_tex_nodes;
+    PassMap         m_passes;
+    TextureKeyMap   m_key_texnode;
 };
 
 } // namespace owe::rg

@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "RenderGraph/Pass.hpp"
 
 module wescene.vulkan_render;
 import wescene.spec_names;
@@ -15,6 +14,23 @@ import wescene.scene;
 import wescene.rgraph;
 
 using namespace owe;
+using namespace rstd::prelude;
+
+namespace
+{
+auto StdString(const String& value) -> std::string {
+    return rstd::cppstd::to_string(value.as_str());
+}
+
+auto CloneTextureDesc(const rg::TextureDesc& desc) -> rg::TextureDesc {
+    return rg::TextureDesc {
+        .name = desc.name.clone(),
+        .key  = desc.key.clone(),
+        .kind = desc.kind,
+    };
+}
+} // namespace
+
 namespace owe::rg
 {
 
@@ -25,10 +41,10 @@ void doCopy(RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc, TextureNo
 
     auto in_state  = builder.textureState(in);
     auto out_state = builder.textureState(out);
-    rstd_assert(in_state.has_value() && out_state.has_value());
-    if (! in_state.has_value() || ! out_state.has_value()) return;
-    desc.src = in_state->desc.key;
-    desc.dst = out_state->desc.key;
+    rstd_assert(in_state.is_some() && out_state.is_some());
+    if (in_state.is_none() || out_state.is_none()) return;
+    desc.src = StdString(in_state->desc.key);
+    desc.dst = StdString(out_state->desc.key);
 }
 } // namespace owe::rg
 
@@ -59,15 +75,16 @@ static void CheckAndSetSprite(const RenderSceneSnapshot&      render_scene,
 struct ExtraInfo;
 
 struct LinkTextureConsumer {
-    rg::NodeID       pass_id;
+    rg::NodeHandle   node;
+    rg::PassHandle   pass;
     WallpaperLayerId source_layer;
     uint32_t         texture_index;
 };
 
 static rg::TextureDesc MakeTextureDesc(std::string_view key) {
     return rg::TextureDesc {
-        .name = std::string(key),
-        .key  = std::string(key),
+        .name = String::make(rstd::ref<rstd::str>(key)),
+        .key  = String::make(rstd::ref<rstd::str>(key)),
         .kind = IsSpecTex(key) ? rg::TextureKind::Temp : rg::TextureKind::Imported,
     };
 }
@@ -86,9 +103,11 @@ public:
             m_source_outputs[source_layer.value] = std::move(output);
         }
     }
-    void addConsumer(rg::NodeID pass_id, WallpaperLayerId source_layer, uint32_t texture_index) {
+    void addConsumer(const rg::PassNode& pass, WallpaperLayerId source_layer,
+                     uint32_t texture_index) {
         m_consumers.push_back(LinkTextureConsumer {
-            .pass_id       = pass_id,
+            .node          = pass.handle,
+            .pass          = pass.pass,
             .source_layer  = source_layer,
             .texture_index = texture_index,
         });
@@ -144,16 +163,17 @@ static void FillCopyTextureRequests(ExtraInfo& extra, vulkan::CopyPass::Desc& de
 
 static GraphTextureOutput CaptureTextureOutput(ExtraInfo& extra, rg::TextureNodeRef ref) {
     auto state = extra.rgraph->textureState(ref);
-    rstd_assert(state.has_value());
-    if (! state.has_value()) return {};
+    rstd_assert(state.is_some());
+    if (state.is_none()) return {};
+    auto key = StdString(state->desc.key);
     return GraphTextureOutput {
         .ref = ref,
         .binding =
             vulkan::TextureBindingRequest {
-                .name    = state->desc.key,
-                .request = BuildGraphTextureRequest(extra, state->desc.key),
+                .name    = key,
+                .request = BuildGraphTextureRequest(extra, key),
             },
-        .desc = state->desc,
+        .desc = rstd::move(state->desc),
     };
 }
 
@@ -179,12 +199,13 @@ static rg::TextureNodeRef AddCopyPass(ExtraInfo& extra, rg::TextureNodeRef in,
         [&copy, in, out_desc = std::move(out_desc), &extra](rg::RenderGraphBuilder& builder,
                                                             vulkan::CopyPass::Desc& pdesc) {
             auto state = builder.textureState(in);
-            rstd_assert(state.has_value());
-            if (! state.has_value()) return;
-            auto desc = out_desc.value_or(state->desc);
+            rstd_assert(state.is_some());
+            if (state.is_none()) return;
+            auto desc = out_desc ? CloneTextureDesc(*out_desc) : CloneTextureDesc(state->desc);
             if (! out_desc.has_value()) {
-                desc.key += "_" + std::to_string(state->version) + "_copy";
-                desc.name += "_" + std::to_string(state->version) + "_copy";
+                auto suffix = rstd::format("_{}_copy", state->version);
+                desc.key.push_str(suffix.as_str());
+                desc.name.push_str(suffix.as_str());
             }
             copy = builder.createTexture(desc, true);
             rg::doCopy(builder, pdesc, in, copy);
@@ -201,26 +222,31 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
             continue;
         }
 
-        auto* rgpass = extra.rgraph->getPass(consumer.pass_id);
-        if (rgpass == nullptr) {
+        auto rgpass = extra.rgraph->getPass(consumer.pass);
+        if (rgpass.is_none()) {
             rstd_error("link tex {} pass not found", consumer.source_layer.value);
             continue;
         }
         auto& pass = static_cast<vulkan::VulkanPass&>(*rgpass);
 
-        GraphTextureOutput input = output_it->second;
+        const auto&        stored = output_it->second;
+        GraphTextureOutput input {
+            .ref     = stored.ref,
+            .binding = stored.binding,
+            .desc    = CloneTextureDesc(stored.desc),
+        };
         auto link_key = GenLinkTex(static_cast<std::ptrdiff_t>(consumer.source_layer.value));
         if (input.binding.name != link_key) {
-            auto copy_desc        = input.desc;
-            copy_desc.key         = std::move(link_key);
-            copy_desc.name        = copy_desc.key;
-            input.ref             = AddCopyPass(extra, input.ref, copy_desc);
-            input.binding.name    = copy_desc.key;
-            input.desc            = std::move(copy_desc);
+            auto copy_desc        = CloneTextureDesc(input.desc);
+            copy_desc.key         = String::make(rstd::ref<rstd::str>(link_key));
+            copy_desc.name        = copy_desc.key.clone();
+            input.desc            = CloneTextureDesc(copy_desc);
+            input.ref             = AddCopyPass(extra, input.ref, std::move(copy_desc));
+            input.binding.name    = link_key;
             input.binding.request = BuildGraphTextureRequest(extra, input.binding.name);
         }
 
-        if (! extra.rgraph->readTexture(consumer.pass_id, input.ref)) {
+        if (! extra.rgraph->readTexture(consumer.node, input.ref)) {
             rstd_error("link tex {} read failed", consumer.source_layer.value);
             continue;
         }
@@ -236,10 +262,9 @@ static rg::TextureNodeRef AddMipFramebufferCopy(ExtraInfo& extra, rg::RenderGrap
     }
 
     auto source                    = builder.createTexture(MakeTextureDesc(SpecTex_Default));
-    auto copy_desc                 = rg::TextureDesc { .name = WE_MIP_MAPPED_FRAME_BUFFER.data(),
-                                                       .key  = WE_MIP_MAPPED_FRAME_BUFFER.data(),
-                                                       .kind = rg::TextureKind::Temp };
-    auto snapshot                  = AddCopyPass(extra, source, copy_desc);
+    auto copy_desc                 = MakeTextureDesc(WE_MIP_MAPPED_FRAME_BUFFER);
+    copy_desc.kind                 = rg::TextureKind::Temp;
+    auto snapshot                  = AddCopyPass(extra, source, std::move(copy_desc));
     extra.mip_framebuffer_snapshot = snapshot;
     return snapshot;
 }
@@ -339,7 +364,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     } else if (IsSpecLinkTex(url)) {
                         auto id = ParseLinkTex(url);
                         extra.link_finalizer.addConsumer(
-                            pass.ID(),
+                            pass,
                             WallpaperLayerId { .value = static_cast<i32>(id) },
                             static_cast<uint32_t>(i));
                         pdesc.texture_bindings.emplace_back();
@@ -362,12 +387,12 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     }
                     builder.read(*input);
                     auto sampled_state = builder.textureState(*input);
-                    rstd_assert(sampled_state.has_value());
-                    if (! sampled_state.has_value()) {
+                    rstd_assert(sampled_state.is_some());
+                    if (sampled_state.is_none()) {
                         pdesc.texture_bindings.emplace_back();
                         continue;
                     }
-                    auto sampled_key = sampled_state->desc.key;
+                    auto sampled_key = StdString(sampled_state->desc.key);
                     pdesc.texture_bindings.emplace_back(vulkan::TextureBindingRequest {
                         .name    = sampled_key,
                         .request = BuildGraphTextureRequest(extra, sampled_key),
@@ -377,8 +402,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 std::string pass_output_s(pass_output);
                 auto output_node  = builder.createTexture(MakeTextureDesc(pass_output_s), true);
                 auto output_state = builder.textureState(output_node);
-                rstd_assert(output_state.has_value());
-                if (! output_state.has_value()) return;
+                rstd_assert(output_state.is_some());
+                if (output_state.is_none()) return;
                 const auto& output_rt          = scene.renderTargets.at(pass_output_s);
                 const bool  first_output_write = output_state->version == 0;
                 pdesc.output_request           = BuildGraphTextureRequest(extra, pass_output_s);

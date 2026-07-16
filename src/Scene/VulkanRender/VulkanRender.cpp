@@ -98,7 +98,7 @@ struct RenderProgram {
 
     struct PreparedPassRecord {
         PreparedPassKind                       kind { PreparedPassKind::Graph };
-        std::optional<owe::rg::NodeID>         graph_node;
+        std::optional<owe::rg::NodeHandle>     graph_node;
         std::string                            pass_name;
         std::optional<owe::rg::PassNode::Type> pass_type;
         VulkanPass*                            pass { nullptr };
@@ -176,27 +176,30 @@ struct RenderProgram {
 
     void buildFromGraph(owe::rg::RenderGraph& graph) {
         auto nodes             = graph.topologicalOrder();
-        auto node_release_texs = graph.getLastReadTextures(nodes);
+        auto node_release_texs = graph.getLastReadTextures(nodes.as_slice());
 
         clear();
-        pass_records.reserve(nodes.size());
+        pass_records.reserve(nodes.len());
 
-        for (std::size_t i = 0; i < nodes.size(); ++i) {
-            auto  id   = nodes[i];
-            auto* pass = graph.getPass(id);
-            rstd_assert(pass != nullptr);
-            auto* vpass = static_cast<VulkanPass*>(pass);
-            auto  state = graph.passState(id);
+        for (rstd::usize i = 0; i < nodes.len(); ++i) {
+            auto id    = nodes[i];
+            auto state = graph.passState(id);
+            rstd_assert(state.is_some());
+            if (state.is_none()) continue;
+            auto pass = graph.getPass(state->pass);
+            rstd_assert(pass.is_some());
+            if (pass.is_none()) continue;
+            auto& vpass = static_cast<VulkanPass&>(*pass);
 
             PreparedPassRecord record {
                 .kind       = PreparedPassKind::Graph,
                 .graph_node = id,
-                .pass_name  = state ? state->name : std::string {},
-                .pass_type  = state ? std::optional(state->type) : std::nullopt,
-                .pass       = vpass,
+                .pass_name  = rstd::cppstd::to_string(state->name.as_str()),
+                .pass_type  = state->type,
+                .pass       = &vpass,
             };
             for (const auto& tex : node_release_texs[i]) {
-                record.release_textures.push_back(tex.desc.key);
+                record.release_textures.push_back(rstd::cppstd::to_string(tex.desc.key.as_str()));
             }
             record.applyReleaseTextures();
             pass_records.push_back(std::move(record));

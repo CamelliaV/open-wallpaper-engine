@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-#include "RenderGraph/Pass.hpp"
-
 import rstd.cppstd;
 import wescene.rgraph;
 import wescene.vulkan_render;
+
+using namespace rstd::prelude;
 
 namespace
 {
@@ -22,6 +22,33 @@ std::string ReadFile(const std::filesystem::path& path) {
 
 } // namespace
 
+TEST(DependencyGraph, StoresHandlesAndDeduplicatesEdges) {
+    owe::rg::DependencyGraph graph;
+    auto                     first  = graph.AddNode();
+    auto                     second = graph.AddNode();
+    auto                     third  = graph.AddNode();
+
+    EXPECT_TRUE(first.valid());
+    EXPECT_TRUE(graph.Connect(first, second));
+    EXPECT_TRUE(graph.Connect(first, second));
+    EXPECT_TRUE(graph.Connect(second, third));
+    EXPECT_FALSE(graph.Connect(first, owe::rg::NodeHandle {}));
+    EXPECT_EQ(graph.NodeNum(), 3u);
+    EXPECT_EQ(graph.EdgeNum(), 2u);
+    EXPECT_EQ(graph.GetNodeOut(first).len(), 1u);
+    EXPECT_EQ(graph.GetNodeIn(third).len(), 1u);
+
+    auto order = graph.TopologicalOrder();
+    ASSERT_EQ(order.len(), 3u);
+    EXPECT_EQ(order[0], first);
+    EXPECT_EQ(order[1], second);
+    EXPECT_EQ(order[2], third);
+    EXPECT_FALSE(graph.HasCycle());
+
+    EXPECT_TRUE(graph.Connect(third, first));
+    EXPECT_TRUE(graph.HasCycle());
+}
+
 TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
     owe::rg::RenderGraph graph;
 
@@ -29,16 +56,16 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
                              owe::rg::PassNode::Type::CustomShader,
                              [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
                                  auto input = builder.createTexture(owe::rg::TextureDesc {
-                                     .name = "albedo",
-                                     .key  = "tex/albedo",
+                                     .name = String::make("albedo"),
+                                     .key  = String::make("tex/albedo"),
                                      .kind = owe::rg::TextureKind::Imported,
                                  });
                                  builder.read(input);
 
                                  auto output = builder.createTexture(
                                      owe::rg::TextureDesc {
-                                         .name = "default",
-                                         .key  = "_rt_default",
+                                         .name = String::make("default"),
+                                         .key  = String::make("_rt_default"),
                                          .kind = owe::rg::TextureKind::Temp,
                                      },
                                      true);
@@ -50,8 +77,8 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
                              [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
                                  auto output = builder.createTexture(
                                      owe::rg::TextureDesc {
-                                         .name = "default",
-                                         .key  = "_rt_default",
+                                         .name = String::make("default"),
+                                         .key  = String::make("_rt_default"),
                                          .kind = owe::rg::TextureKind::Temp,
                                      },
                                      true);
@@ -63,6 +90,7 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
 
     auto dot = ReadFile(path);
     EXPECT_NE(dot.find("ref=n"), std::string::npos);
+    EXPECT_NE(dot.find("pass-ref=p"), std::string::npos);
     EXPECT_NE(dot.find("pass: draw/main"), std::string::npos);
     EXPECT_NE(dot.find("type=CustomShader"), std::string::npos);
     EXPECT_NE(dot.find("resource: albedo"), std::string::npos);
@@ -79,17 +107,20 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
 TEST(RenderGraphDebug, PassStateExposesPublicDebugRecord) {
     owe::rg::RenderGraph graph;
 
-    auto* pass = graph.addPass<DebugPass>("draw/main",
-                                          owe::rg::PassNode::Type::CustomShader,
-                                          [](owe::rg::RenderGraphBuilder&, DebugPass::Desc&) {
-                                          });
+    auto pass = graph.addPass<DebugPass>("draw/main",
+                                         owe::rg::PassNode::Type::CustomShader,
+                                         [](owe::rg::RenderGraphBuilder&, DebugPass::Desc&) {
+                                         });
 
-    auto state = graph.passState(pass->ID());
-    ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->id, pass->ID());
-    EXPECT_EQ(state->name, "draw/main");
+    auto state = graph.passState(pass);
+    ASSERT_TRUE(state.is_some());
+    EXPECT_EQ(state->handle, pass);
+    EXPECT_TRUE(state->pass.valid());
+    EXPECT_TRUE(graph.getPass(state->pass).is_some());
+    EXPECT_EQ(rstd::cppstd::as_string_view(state->name.as_str()), "draw/main");
     EXPECT_EQ(state->type, owe::rg::PassNode::Type::CustomShader);
-    EXPECT_FALSE(graph.passState(std::numeric_limits<owe::rg::NodeID>::max()).has_value());
+    EXPECT_TRUE(graph.passState(owe::rg::NodeHandle {}).is_none());
+    EXPECT_TRUE(graph.getPass(owe::rg::PassHandle {}).is_none());
 }
 
 TEST(VulkanRenderDiagnostics, EmptyBeforeProgramBuild) {

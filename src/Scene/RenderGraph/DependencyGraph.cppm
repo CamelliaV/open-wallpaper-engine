@@ -1,68 +1,64 @@
-module;
-
 export module wescene.rgraph:dependency_graph;
-import wescene.core;
-import rstd.cppstd;
+import rstd;
+
+using namespace rstd::prelude;
 
 export namespace owe::rg
 {
 
-typedef size_t NodeID;
+struct NodeHandle {
+    usize index { numeric_limits<usize>::max() };
 
-class DependencyGraph : NoCopy {
-public:
-    class Node : NoCopy {
-        friend class DependencyGraph;
+    bool valid() const noexcept { return index != numeric_limits<usize>::max(); }
 
-    public:
-        Node()          = default;
-        virtual ~Node() = default;
+    friend auto operator<=>(const NodeHandle&, const NodeHandle&) = default;
+};
 
-        NodeID              ID() const { return id; }
-        std::string         GraphID() const { return "n" + std::to_string(id); }
-        virtual std::string ToGraphviz() const {
-            auto sid = std::to_string(id);
-            return "n" + sid + "[label=" + sid + "]";
-        };
+struct NodeHandleHasher {
+    rstd::hash::RandomState state;
 
-    private:
-        NodeID id;
+    auto operator()(NodeHandle handle) const noexcept -> rstd::u64 { return state(handle.index); }
+};
+
+struct Node {
+    using Trait                  = Node;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = Node;
+
+        auto Handle() const noexcept -> NodeHandle { return rstd::trait_call<0>(this); }
+        auto ToGraphviz() const -> String { return rstd::trait_call<1>(this); }
     };
 
-    DependencyGraph()  = default;
-    ~DependencyGraph() = default;
+    template<typename T>
+    using Funcs = rstd::TraitFuncs<&T::Handle, &T::ToGraphviz>;
+};
 
-    DependencyGraph(DependencyGraph&& o)
-        : m_nodeNext(std::move(o.m_nodeNext)), m_nodes(std::move(o.m_nodes)) {}
-    DependencyGraph& operator=(DependencyGraph&& o) {
-        m_nodeNext = std::move(o.m_nodeNext);
-        m_nodes    = std::move(o.m_nodes);
-        return *this;
-    }
+struct NodeLinks {
+    rstd::vec::Vec<NodeHandle> incoming;
+    rstd::vec::Vec<NodeHandle> outgoing;
+};
 
-    size_t NodeNum() const { return m_nodes.size(); }
-    size_t EdgeNum() const {
-        return std::accumulate(
-            m_nodeNext.begin(), m_nodeNext.end(), 0u, [](size_t sum, const auto& v) {
-                return sum + v.size();
-            });
-    }
-    Node* GetNode(NodeID i) const { return m_nodes[i].get(); }
+struct DependencyGraph {
+    auto AddNode() -> NodeHandle;
+    auto Connect(NodeHandle from, NodeHandle to) -> bool;
 
-    std::vector<NodeID> GetNodeOut(NodeID) const;
-    std::vector<NodeID> GetNodeIn(NodeID) const;
+    auto Contains(NodeHandle handle) const -> bool;
+    auto NodeNum() const noexcept -> usize;
+    auto EdgeNum() const noexcept -> usize;
+    auto GetNodeOut(NodeHandle handle) const -> rstd::slice<NodeHandle>;
+    auto GetNodeIn(NodeHandle handle) const -> rstd::slice<NodeHandle>;
 
-    NodeID AddNode(std::unique_ptr<Node>&&);
-    void   Connect(NodeID, NodeID);
-
-    bool                HasCycle() const;
-    std::vector<NodeID> TopologicalOrder() const;
-
-    void ToGraphviz(std::string_view) const;
+    auto HasCycle() const -> bool;
+    auto TopologicalOrder() const -> rstd::vec::Vec<NodeHandle>;
 
 private:
-    std::vector<std::unordered_set<NodeID>> m_nodeNext;
-    std::vector<std::unique_ptr<Node>>      m_nodes;
+    using LinkMap = rstd::collections::HashMap<NodeHandle, NodeLinks, NodeHandleHasher>;
+
+    usize   m_next_index { 0 };
+    LinkMap m_nodes;
 };
 
 } // namespace owe::rg

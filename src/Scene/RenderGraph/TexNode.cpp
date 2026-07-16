@@ -1,47 +1,57 @@
-module;
-
 module wescene.rgraph;
-import rstd.cppstd;
+import rstd;
 
+using namespace rstd::prelude;
 using namespace owe::rg;
 
-TexNode* TexNode::addTexNode(DependencyGraph& dg, const Desc& desc) {
-    std::unique_ptr<TexNode> node = std::make_unique<TexNode>();
-    node->m_type                  = desc.type;
-    node->m_name                  = desc.name;
-    node->m_key                   = desc.key;
-    TexNode* pNode                = node.get();
-    dg.AddNode(std::move(node));
-    return pNode;
+namespace
+{
+auto DotEscape(rstd::ref<rstd::str> value) -> String {
+    auto out = String::make();
+    for (usize index = 0; index < value.size(); ++index) {
+        switch (static_cast<char>(value.data()[index])) {
+        case '\\': out.push_str("\\\\"); break;
+        case '"': out.push_str("\\\""); break;
+        case '\n': out.push_str("\\n"); break;
+        case '\r': break;
+        default: out.push_back(value.data()[index]); break;
+        }
+    }
+    return out;
 }
 
-TexNode* TexNode::addNewVersion(DependencyGraph& dg, TexNode* pre) {
-    TexNode* node   = addTexNode(dg, pre->genDesc());
-    node->m_version = pre->m_version + 1;
-
-    pre->m_next = node;
-    node->m_pre = pre;
-
-    return node;
+auto TextureTypeName(TexNode::TexType type) -> rstd::ref<rstd::str> {
+    switch (type) {
+    case TexNode::TexType::Imported: return "Imported";
+    case TexNode::TexType::Temp: return "Temp";
+    }
+    return "Unknown";
 }
+} // namespace
 
-TexNode::Desc TexNode::genDesc() const {
-    return Desc { .name = m_name, .key = m_key, .type = m_type };
-}
-
-TexNode::TexType TexNode::type() const { return m_type; }
-std::string_view TexNode::name() const { return m_name; };
-std::string_view TexNode::key() const { return m_key; }
-size_t           TexNode::version() const { return m_version; };
-PassNode*        TexNode::writer() const { return m_writer; };
-TexNode*         TexNode::preVer() const { return m_pre; };
-TexNode*         TexNode::nextVer() const { return m_next; };
-
-void TexNode::setName(std::string_view in) { m_name = in; }
-void TexNode::setKey(std::string_view in) { m_key = in; }
-void TexNode::setWriter(PassNode* w) { m_writer = w; }
-
-std::string TexNode::ToGraphviz() const {
-    return GraphID() + "[label=\"" + m_key + " v:" + std::to_string(m_version) +
-           "\" shape=ellipse]";
+auto TexNode::ToGraphviz() const -> String {
+    auto graph_id     = rstd::format("n{}", handle.index);
+    auto escaped_key  = DotEscape(key.as_str());
+    auto escaped_name = DotEscape(name.as_str());
+    auto label = rstd::format("{}[label=\"ref={}\\nresource: {}\\nkey={}\\nkind={}\\nversion={}",
+                              graph_id.as_str(),
+                              graph_id.as_str(),
+                              escaped_name.as_str(),
+                              escaped_key.as_str(),
+                              TextureTypeName(type),
+                              version);
+    if (writer) {
+        auto field = rstd::format("\\nwriter=n{}", writer->index);
+        label.push_str(field.as_str());
+    }
+    if (previous) {
+        auto field = rstd::format("\\nprev=n{}", previous->index);
+        label.push_str(field.as_str());
+    }
+    if (next) {
+        auto field = rstd::format("\\nnext=n{}", next->index);
+        label.push_str(field.as_str());
+    }
+    label.push_str("\" shape=ellipse]");
+    return label;
 }

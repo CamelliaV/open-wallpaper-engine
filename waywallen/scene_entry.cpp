@@ -135,7 +135,7 @@ void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnost
               diagnostics.size());
     for (const auto& diagnostic : diagnostics) {
         const std::string graph_node =
-            diagnostic.graph_node ? std::to_string(*diagnostic.graph_node) : "-";
+            diagnostic.graph_node ? std::to_string(diagnostic.graph_node->index) : "-";
         const std::string pass_type = diagnostic.pass_type
                                           ? pass_type_name(*diagnostic.pass_type)
                                           : (diagnostic.frame_pass ? "frame" : "unknown");

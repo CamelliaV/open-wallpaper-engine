@@ -155,6 +155,7 @@ target_sources(owe-render
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          RenderGraph/RGraph.cppm
          RenderGraph/DependencyGraph.cppm
+         RenderGraph/Pass.cppm
          RenderGraph/PassNode.cppm
          RenderGraph/TexNode.cppm
          RenderGraph/RenderGraph.cppm
@@ -173,7 +174,7 @@ target_sources(owe-render
 target_link_libraries(owe-render
   PUBLIC owe-vulkan owe-parse owe-script wavsen::audio)
 target_include_directories(owe-render
-  PUBLIC  .. . Swapchain Utils/include RenderGraph/include ../Vulkan/include
+  PUBLIC  .. . Swapchain Utils/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
 set_property(TARGET owe-render PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-render PROPERTY CXX_SCAN_FOR_MODULES ON)
@@ -194,7 +195,7 @@ target_sources(owe-scene-wallpaper
 target_link_libraries(owe-scene-wallpaper
   PUBLIC owe-render owe-resource owe-parse owe-script wavsen::audio)
 target_include_directories(owe-scene-wallpaper
-  PUBLIC  .. . Swapchain Utils/include RenderGraph/include ../Vulkan/include
+  PUBLIC  .. . Swapchain Utils/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
 set_property(TARGET owe-scene-wallpaper PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-scene-wallpaper PROPERTY CXX_SCAN_FOR_MODULES ON)

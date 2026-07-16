@@ -1,34 +1,29 @@
-module;
-
 export module wescene.rgraph:pass_node;
-import rstd.cppstd;
+import rstd;
 
 import :dependency_graph;
+import :pass;
+
+using namespace rstd::prelude;
 
 export namespace owe::rg
 {
 
-class TexNode;
-class PassNode : public DependencyGraph::Node {
-public:
+struct PassNode {
     enum class Type
     {
         CustomShader,
         Copy,
-        Virtual // for mark a virual writer to update version
+        Virtual
     };
-    static PassNode* addPassNode(DependencyGraph& dg, Type type);
 
-    Type             type() const;
-    std::string_view name() const;
+    NodeHandle handle;
+    PassHandle pass;
+    Type       type { Type::CustomShader };
+    String     name { String::make("unknown pass") };
 
-    void setName(std::string_view);
-
-    std::string ToGraphviz() const override;
-
-private:
-    Type        m_type;
-    std::string m_name { "unknown pass" };
+    auto Handle() const noexcept -> NodeHandle { return handle; }
+    auto ToGraphviz() const -> String;
 };
 
 } // namespace owe::rg

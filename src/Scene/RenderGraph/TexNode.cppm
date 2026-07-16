@@ -1,57 +1,30 @@
-module;
-
 export module wescene.rgraph:tex_node;
-import rstd.cppstd;
-
+import rstd;
 import :dependency_graph;
+
+using namespace rstd::prelude;
 
 export namespace owe::rg
 {
 
-class RenderGraphBuilder;
-class PassNode;
-
-class TexNode : public DependencyGraph::Node {
-public:
+struct TexNode {
     enum class TexType
     {
         Imported,
         Temp
     };
-    struct Desc {
-        std::string name;
-        std::string key;
-        TexType     type;
-    };
-    static TexNode* addTexNode(DependencyGraph& dg, const Desc& type);
-    static TexNode* addNewVersion(DependencyGraph& dg, TexNode* pre);
 
-    TexType          type() const;
-    std::string_view name() const;
-    std::string_view key() const;
-    size_t           version() const;
-    PassNode*        writer() const;
-    Desc             genDesc() const;
+    NodeHandle               handle;
+    TexType                  type { TexType::Imported };
+    String                   key;
+    String                   name { String::make("unknown tex") };
+    usize                    version { 0 };
+    rstd::Option<NodeHandle> previous;
+    rstd::Option<NodeHandle> next;
+    rstd::Option<NodeHandle> writer;
 
-    TexNode* preVer() const;
-    TexNode* nextVer() const;
-
-    void setName(std::string_view);
-    void setKey(std::string_view);
-    void setWriter(PassNode*);
-
-    std::string ToGraphviz() const override;
-
-private:
-    friend class RenderGraphBuilder;
-    TexType     m_type;
-    std::string m_key;
-    std::string m_name { "unknown tex" };
-
-    size_t    m_version { 0 };
-    TexNode*  m_pre { nullptr };
-    TexNode*  m_next { nullptr };
-    PassNode* m_writer { nullptr };
+    auto Handle() const noexcept -> NodeHandle { return handle; }
+    auto ToGraphviz() const -> String;
 };
 
 } // namespace owe::rg
