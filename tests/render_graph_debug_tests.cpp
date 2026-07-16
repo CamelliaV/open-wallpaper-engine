@@ -172,6 +172,32 @@ TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
     EXPECT_EQ(plan.textures[1].request.definition->width, 1920);
 }
 
+TEST(RenderGraphResources, UsesGraphKeyAsTextureRequestIdentity) {
+    owe::rg::RenderGraph graph;
+    graph.addPass<DebugPass>(
+        "copy/snapshot",
+        owe::rg::PassNode::Type::Copy,
+        [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+            auto snapshot = builder.createTexture(
+                owe::rg::TextureDesc {
+                    .name    = String::make("_rt_default_1_copy"),
+                    .key     = String::make("_rt_default_1_copy"),
+                    .kind    = owe::rg::TextureKind::Temp,
+                    .request = rstd::Some(owe::resource::TextureRequest {
+                        .kind = owe::resource::TextureRequestKind::RenderTarget,
+                        .name = String::make("_rt_default"),
+                    }),
+                },
+                true);
+            builder.write(snapshot);
+        });
+
+    auto plan = graph.resourcePlan();
+    ASSERT_EQ(plan.textures.len(), 1u);
+    EXPECT_EQ(rstd::cppstd::as_string_view(plan.textures[0].request.name.as_str()),
+              "_rt_default_1_copy");
+}
+
 TEST(VulkanRenderDiagnostics, EmptyBeforeProgramBuild) {
     owe::vulkan::VulkanRender render;
     EXPECT_TRUE(render.preparedPassDiagnostics().empty());

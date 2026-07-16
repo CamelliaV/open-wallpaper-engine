@@ -38,17 +38,27 @@ class ResourceStateTracker {
 public:
     bool Compile(const resource::ResourcePlan& plan, const PreparedResourceTable& resources) {
         m_textures.clear();
+        m_uses.clear();
         if (plan.generation != resources.Generation()) return false;
         for (const auto& entry : plan.textures) {
             auto prepared = resources.Resolve(entry.handle);
             if (prepared.is_none()) return false;
+            auto texture = (**prepared).resource;
+            if (m_uses.insert(entry.handle, texture).is_some()) return false;
+
+            auto image    = (**prepared).image.getActive();
+            auto existing = m_textures.get(texture);
+            if (existing.is_some()) {
+                if ((**existing).image.handle != image.handle) return false;
+                continue;
+            }
             auto initial = entry.request.kind == resource::TextureRequestKind::Imported
                                ? TextureStateKind::Sampled
                                : TextureStateKind::Undefined;
             if (m_textures
-                    .insert(entry.handle,
+                    .insert(texture,
                             TrackedTexture {
-                                .image = (**prepared).image.getActive(),
+                                .image = image,
                                 .state = initial,
                             })
                     .is_some()) {
@@ -61,7 +71,9 @@ public:
     auto Prepare(resource::TextureUseHandle use, TextureStateKind target,
                  TextureSubresourceRange range = {}, bool discard = false)
         -> Option<PreparedImageBarrier> {
-        auto tracked = m_textures.get_mut(use);
+        auto texture = m_uses.get(use);
+        if (texture.is_none()) return None();
+        auto tracked = m_textures.get_mut(**texture);
         if (tracked.is_none()) return None();
 
         auto source      = State(discard ? TextureStateKind::Undefined : (**tracked).state);
@@ -95,13 +107,18 @@ public:
     }
 
     bool Set(resource::TextureUseHandle use, TextureStateKind state) {
-        auto tracked = m_textures.get_mut(use);
+        auto texture = m_uses.get(use);
+        if (texture.is_none()) return false;
+        auto tracked = m_textures.get_mut(**texture);
         if (tracked.is_none()) return false;
         (**tracked).state = state;
         return true;
     }
 
-    void Reset() { m_textures.clear(); }
+    void Reset() {
+        m_textures.clear();
+        m_uses.clear();
+    }
 
     auto Size() const noexcept -> usize { return m_textures.len(); }
 
@@ -163,10 +180,14 @@ private:
     }
 
     using TextureMap =
-        rstd::collections::HashMap<resource::TextureUseHandle, TrackedTexture,
+        rstd::collections::HashMap<resource::TextureHandle, TrackedTexture,
+                                   resource::ResourceHandleHasher<resource::TextureHandle>>;
+    using TextureUseMap =
+        rstd::collections::HashMap<resource::TextureUseHandle, resource::TextureHandle,
                                    resource::ResourceHandleHasher<resource::TextureUseHandle>>;
 
-    TextureMap m_textures;
+    TextureMap    m_textures;
+    TextureUseMap m_uses;
 };
 
 } // namespace owe::resource_registry

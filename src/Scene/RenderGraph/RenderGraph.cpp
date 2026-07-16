@@ -339,14 +339,16 @@ auto RenderGraph::createTextureNode(const TextureDesc& desc, bool write) -> Text
 auto RenderGraph::createNewTextureNode(const TextureDesc& desc) -> TextureNodeRef {
     auto handle  = m_dg.AddNode();
     auto current = m_key_texnode.get(desc.key);
+    auto request =
+        desc.request.is_some() ? Some(desc.request->clone()) : None<resource::TextureRequest>();
+    if (request.is_some()) request->name = desc.key.clone();
 
     TexNode node {
-        .handle = handle,
-        .type   = ToTexType(desc.kind),
-        .key    = desc.key.clone(),
-        .name   = desc.name.clone(),
-        .request =
-            desc.request.is_some() ? Some(desc.request->clone()) : None<resource::TextureRequest>(),
+        .handle  = handle,
+        .type    = ToTexType(desc.kind),
+        .key     = desc.key.clone(),
+        .name    = desc.name.clone(),
+        .request = rstd::move(request),
     };
     if (current) {
         auto previous = getTexNode(**current);
