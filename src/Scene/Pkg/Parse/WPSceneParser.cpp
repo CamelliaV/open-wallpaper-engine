@@ -709,8 +709,8 @@ void LoadRootCameraPaths(ParseContext& context, const wpscene::SceneMetadata& sc
     path->default_up        = Vector3f(sc.camera.up.data());
 
     for (const auto& rel : sc.camera.paths) {
-        auto file = context.vfs->Open("/assets/" + rel);
-        if (! file) continue;
+        auto file = fs::OpenBinary(*context.vfs, "/assets/" + rel);
+        if (file.is_err()) continue;
         auto parsed = ParseJson(file->ReadAllStr());
         if (parsed.is_err()) {
             rstd_warn("Can't parse camera path json {}: {}", rel, parsed.unwrap_err());
@@ -1320,7 +1320,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     bool geometry_shader_enabled = false;
     if (enable_geometry_shader) {
         std::string geom_path = shaderPath + ".geom";
-        if (vfs.Contains(geom_path)) {
+        if (vfs.metadata(fs::ToPath(geom_path)).is_ok()) {
             add_shader_unit(ShaderType::GEOMETRY, std::move(geom_path));
             pWPShaderInfo->combos[std::string(WE_CB_GS_ENABLED)] = "1";
             geometry_shader_enabled                              = true;

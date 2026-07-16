@@ -10,97 +10,150 @@ import rstd.cppstd;
 
 import wescene.fs;
 
+using ::alloc::collections::HashMap;
+using ::alloc::string::String;
 using namespace owe;
 using namespace owe::fs;
+using namespace rstd::prelude;
 
 namespace
 {
-std::optional<std::string> ReadSizedString(IBinaryStream& f, usize max_len) {
-    idx ilen = f.ReadInt32();
-    if (ilen < 0) return std::nullopt;
 
-    usize len = (usize)ilen;
+auto FsError(rstd::io::error::ErrorKind::Entity kind) -> rstd::io::error::Error {
+    return rstd::io::error::Error::from_kind(rstd::io::error::ErrorKind { kind });
+}
+
+std::optional<std::string> ReadSizedString(BinaryReader& file, usize max_len) {
+    auto signed_len = file.ReadInt32();
+    if (signed_len < 0) return std::nullopt;
+
+    auto len = usize(signed_len);
     if (len > max_len) return std::nullopt;
-    std::string result;
-    result.resize(len);
-    if (f.Read(result.data(), len) != len) return std::nullopt;
+    std::string result(len, '\0');
+    if (file.Read(result.data(), len) != len) return std::nullopt;
     return result;
 }
 
 bool IsPkgVersionStamp(std::string_view stamp) {
-    constexpr std::string_view kPrefix = "PKGV";
-    return stamp.size() > kPrefix.size() && stamp.substr(0, kPrefix.size()) == kPrefix;
+    constexpr std::string_view prefix = "PKGV";
+    return stamp.size() > prefix.size() && stamp.substr(0, prefix.size()) == prefix;
 }
 
-// WE pkgs were authored on Windows where NTFS is case-insensitive; some
-// shaders reference `effects/foo` while the pkg stores `Effects/foo`. Lower
-// every path going through the map so lookups match regardless of case.
-std::string LowerPath(std::string_view p) {
-    std::string s(p);
-    for (auto& c : s) {
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-    }
-    return s;
-}
-
-std::string RootedComponentPath(RstdPath path) {
-    auto out        = rstd::path::PathBuf::from("/");
+auto LookupKey(Path path) -> rstd::io::Result<String> {
+    auto output     = String::make("/");
     auto components = path.components();
     while (true) {
         auto component = components.next();
         if (component.is_none()) break;
-        if ((*component).is_root_dir() || (*component).is_cur_dir()) continue;
-        out.push(RstdPath((*component).as_os_str()));
+        if (component->is_parent_dir()) {
+            return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidInput));
+        }
+        if (! component->is_normal()) continue;
+        auto value = component->as_os_str().to_str();
+        if (value.is_none()) {
+            return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidFilename));
+        }
+        if (output.len() > 1) output.push_back('/');
+        for (auto byte : *value) {
+            auto lowered = byte >= 'A' && byte <= 'Z' ? u8(byte - 'A' + 'a') : byte;
+            output.push_back(lowered);
+        }
     }
-    return ToStdString(out.as_path());
+    return rstd::Ok(rstd::move(output));
 }
 
-std::string PkgLookupKey(RstdPath path) { return LowerPath(RootedComponentPath(path)); }
 } // namespace
 
-std::unique_ptr<WPPkgFs> WPPkgFs::CreatePkgFs(std::string_view pkgpath) {
-    auto ppkg = fs::CreateCBinaryStream(pkgpath);
-    if (! ppkg) return nullptr;
+auto WPPkgFs::CreatePkgFs(std::string_view pkgpath) -> rstd::io::Result<PkgMount> {
+    auto file = rstd::fs::File::open(ToPath(pkgpath));
+    if (file.is_err()) return rstd::Err(rstd::move(file).unwrap_err_unchecked());
+    auto opened   = rstd::move(file).unwrap_unchecked();
+    auto metadata = opened.metadata();
+    if (metadata.is_err()) return rstd::Err(rstd::move(metadata).unwrap_err_unchecked());
+    auto source = rstd::io::SharedReadAt::make(rstd::move(opened));
+    auto range =
+        ReadRange::make(rstd::move(source), 0, rstd::move(metadata).unwrap_unchecked().len());
+    if (range.is_err()) return rstd::Err(rstd::move(range).unwrap_err_unchecked());
+    auto pkg_source = rstd::move(range).unwrap_unchecked();
+    auto pkg        = BinaryReader(pkg_source.clone());
 
-    auto& pkg       = *ppkg;
-    auto  maybe_ver = ReadSizedString(pkg, 64);
-    if (! maybe_ver || ! IsPkgVersionStamp(*maybe_ver)) return nullptr;
-    std::string ver = std::move(*maybe_ver);
-    rstd_info("pkg version: {}", ver);
+    auto version = ReadSizedString(pkg, 64);
+    if (! version || ! IsPkgVersionStamp(*version)) {
+        return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
+    }
+    rstd_info("pkg version: {}", *version);
 
-    std::vector<PkgFile> pkgfiles;
-    i32                  entryCount = pkg.ReadInt32();
-    if (entryCount < 0) return nullptr;
-    for (i32 i = 0; i < entryCount; i++) {
-        auto maybe_path = ReadSizedString(pkg, 4096);
-        if (! maybe_path) return nullptr;
-        std::string path   = RootedComponentPath(ToPath(*maybe_path));
-        idx         offset = pkg.ReadInt32();
-        idx         length = pkg.ReadInt32();
-        if (offset < 0 || length < 0) return nullptr;
-        pkgfiles.push_back({ path, offset, length });
+    struct PendingFile {
+        String path;
+        u64    offset;
+        u64    length;
+    };
+    auto files = ::alloc::vec::Vec<PendingFile>::make();
+
+    auto entry_count = pkg.ReadInt32();
+    if (entry_count < 0) {
+        return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
     }
-    auto pkgfs           = std::unique_ptr<WPPkgFs>(new WPPkgFs());
-    pkgfs->m_pkgPath     = pkgpath;
-    pkgfs->m_pkg_version = std::move(ver);
-    idx headerSize       = pkg.Tell();
-    for (auto& el : pkgfiles) {
-        el.offset += headerSize;
-        pkgfs->m_files.insert({ LowerPath(el.path), el });
+    files.reserve(usize(entry_count));
+    for (i32 i = 0; i < entry_count; ++i) {
+        auto path = ReadSizedString(pkg, 4096);
+        if (! path) return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
+        auto key = LookupKey(ToPath(*path));
+        if (key.is_err()) return rstd::Err(rstd::move(key).unwrap_err_unchecked());
+
+        auto offset = pkg.ReadInt32();
+        auto length = pkg.ReadInt32();
+        if (offset < 0 || length < 0) {
+            return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
+        }
+        files.push(PendingFile { .path   = rstd::move(key).unwrap_unchecked(),
+                                 .offset = u64(offset),
+                                 .length = u64(length) });
     }
-    return pkgfs;
+
+    auto header_size = pkg.position();
+    auto entries     = HashMap<String, PkgFile>::with_capacity(files.len());
+    for (auto& file : files) {
+        if (file.offset > u64(-1) - header_size) {
+            return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
+        }
+        auto absolute = header_size + file.offset;
+        if (absolute > pkg_source.len() || file.length > pkg_source.len() - absolute) {
+            return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
+        }
+        entries.insert(rstd::move(file.path),
+                       PkgFile { .offset = absolute, .length = file.length });
+    }
+
+    auto version_string = String::make(rstd::ref<rstd::str>(*version));
+    auto mount_version  = version_string.clone();
+    auto mount          = MountHandle::make(
+        WPPkgFs(rstd::move(pkg_source), rstd::move(version_string), rstd::move(entries)));
+    return rstd::Ok(PkgMount(rstd::move(mount), rstd::move(mount_version)));
 }
 
-bool WPPkgFs::Contains(RstdPath path) const { return m_files.count(PkgLookupKey(path)) > 0; }
-
-std::shared_ptr<IBinaryStream> WPPkgFs::Open(RstdPath path) {
-    auto pkg = fs::CreateCBinaryStream(m_pkgPath);
-    if (! pkg) return nullptr;
-    auto it = m_files.find(PkgLookupKey(path));
-    if (it != m_files.end()) {
-        return std::make_shared<LimitedBinaryStream>(pkg, it->second.offset, it->second.length);
-    }
-    return nullptr;
+auto WPPkgFs::open_read(Path path) const -> rstd::io::Result<ReadRange> {
+    auto key = LookupKey(path);
+    if (key.is_err()) return rstd::Err(rstd::move(key).unwrap_err_unchecked());
+    auto file = m_files.get(*key);
+    if (file.is_none()) return rstd::Err(FsError(rstd::io::error::ErrorKind::NotFound));
+    return m_source.subrange((*file)->offset, (*file)->length);
 }
 
-std::shared_ptr<IBinaryStreamW> WPPkgFs::OpenW(RstdPath) { return nullptr; }
+auto WPPkgFs::open_write(Path path, WriteOptions) const -> rstd::io::Result<WriteSeekHandle> {
+    auto key = LookupKey(path);
+    if (key.is_err()) return rstd::Err(rstd::move(key).unwrap_err_unchecked());
+    if (! m_files.contains_key(*key)) {
+        return rstd::Err(FsError(rstd::io::error::ErrorKind::NotFound));
+    }
+    return rstd::Err(FsError(rstd::io::error::ErrorKind::ReadOnlyFilesystem));
+}
+
+auto WPPkgFs::metadata(Path path) const -> rstd::io::Result<FileMetadata> {
+    auto key = LookupKey(path);
+    if (key.is_err()) return rstd::Err(rstd::move(key).unwrap_err_unchecked());
+    auto file = m_files.get(*key);
+    if (file.is_none()) return rstd::Err(FsError(rstd::io::error::ErrorKind::NotFound));
+    return rstd::Ok(FileMetadata {
+        .len = (*file)->length, .is_file = true, .is_directory = false, .readonly = true });
+}

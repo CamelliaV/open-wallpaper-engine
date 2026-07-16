@@ -56,7 +56,7 @@ uint32_t compute_vertex_stride(uint32_t flag) {
 
 // Peek the next 4 bytes; restore cursor before returning. Used to detect
 // optional MDLS/MDAT/MDLA/MDMP/MDLE block headers without consuming them.
-bool peek_block_magic(fs::MemBinaryStream& f, std::string_view expect4) {
+bool peek_block_magic(fs::BinaryReader& f, std::string_view expect4) {
     if (expect4.size() != 4) return false;
     auto save = f.Tell();
     if (save + 4 > f.Size()) return false;
@@ -67,7 +67,7 @@ bool peek_block_magic(fs::MemBinaryStream& f, std::string_view expect4) {
     return ok;
 }
 
-bool peek_uint8_at(fs::MemBinaryStream& f, idx off, uint8_t& out) {
+bool peek_uint8_at(fs::BinaryReader& f, idx off, uint8_t& out) {
     if (off < 0 || off + 1 > f.Size()) return false;
     auto save = f.Tell();
     f.SeekSet(off);
@@ -76,7 +76,7 @@ bool peek_uint8_at(fs::MemBinaryStream& f, idx off, uint8_t& out) {
     return true;
 }
 
-bool peek_uint32_at(fs::MemBinaryStream& f, idx off, uint32_t& out) {
+bool peek_uint32_at(fs::BinaryReader& f, idx off, uint32_t& out) {
     if (off < 0 || off + 4 > f.Size()) return false;
     auto save = f.Tell();
     f.SeekSet(off);
@@ -91,12 +91,12 @@ bool is_anim_trans_main_size(uint32_t byte_size, int32_t length) {
     return byte_size == samples * singile_bone_frame || byte_size == samples * 4;
 }
 
-bool next_is_anim_trans_main(fs::MemBinaryStream& f, int32_t length) {
+bool next_is_anim_trans_main(fs::BinaryReader& f, int32_t length) {
     uint32_t byte_size = 0;
     return peek_uint32_at(f, f.Tell(), byte_size) && is_anim_trans_main_size(byte_size, length);
 }
 
-bool next_after_zero_is_anim_trans_main(fs::MemBinaryStream& f, int32_t length) {
+bool next_after_zero_is_anim_trans_main(fs::BinaryReader& f, int32_t length) {
     auto     off  = f.Tell();
     uint32_t zero = 0;
     if (! peek_uint32_at(f, off, zero) || zero != 0) return false;
@@ -104,7 +104,7 @@ bool next_after_zero_is_anim_trans_main(fs::MemBinaryStream& f, int32_t length) 
     return peek_uint32_at(f, off + 4, byte_size) && is_anim_trans_main_size(byte_size, length);
 }
 
-bool next_is_anim_bone_curves(fs::MemBinaryStream& f) {
+bool next_is_anim_bone_curves(fs::BinaryReader& f) {
     auto    off        = f.Tell();
     uint8_t has_curves = 0;
     if (! peek_uint8_at(f, off, has_curves)) return false;
@@ -116,7 +116,7 @@ bool next_is_anim_bone_curves(fs::MemBinaryStream& f) {
     return peek_uint32_at(f, off + 5, byte_size) && byte_size % 4 == 0;
 }
 
-bool next_is_anim_record_padding(fs::MemBinaryStream& f, uint32_t end_offset) {
+bool next_is_anim_record_padding(fs::BinaryReader& f, uint32_t end_offset) {
     auto off = f.Tell();
     if (end_offset == 0 || off + 12 > static_cast<idx>(end_offset)) return false;
     uint32_t zero = 0;
@@ -136,7 +136,7 @@ idx mdls_v2_indexed_trailer_start(uint32_t end_offset, uint16_t bones_num) {
     return static_cast<idx>(end_offset - trailer_size);
 }
 
-bool is_mdls_v2_indexed_trailer(fs::MemBinaryStream& f, idx start, uint32_t end_offset,
+bool is_mdls_v2_indexed_trailer(fs::BinaryReader& f, idx start, uint32_t end_offset,
                                 uint16_t bones_num) {
     if (start < 0 || start >= static_cast<idx>(end_offset)) return false;
     uint8_t has_offset_trans = 0;
@@ -149,7 +149,7 @@ bool is_mdls_v2_indexed_trailer(fs::MemBinaryStream& f, idx start, uint32_t end_
     return peek_uint8_at(f, has_index_off, has_index) && has_index == 1;
 }
 
-void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh);
+void ParseMasks(fs::BinaryReader& f, WPMdl::Mesh& mesh);
 
 bool UsesUint32Indices(const WPMdlHeader& header, uint32_t vertex_num) {
     return header.mdlv >= 23 && vertex_num > std::numeric_limits<uint16_t>::max();
@@ -159,7 +159,7 @@ bool UsesUint32Indices(const WPMdlHeader& header, uint32_t vertex_num) {
 //   CStr mat_json + u32 flag_a + (if flag_a==2: u32) + (if MdlV>=17: aabb)
 //   + (if MdlV>14: u32 mesh_flag) + u32 vertex_size + Vertex[]
 //   + u32 indices_size + Triangle[] + (if MdlV>=21: Parts) + (if MdlV>21: Masks)
-bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header, WPMdl::Mesh& mesh,
+bool ParseMesh(fs::BinaryReader& f, const WPMdlHeader& header, WPMdl::Mesh& mesh,
                std::string_view path) {
     mesh.mat_json_file = f.ReadStr();
     mesh.flag_a        = f.ReadUint32();
@@ -293,7 +293,7 @@ bool ParseMesh(fs::MemBinaryStream& f, const WPMdlHeader& header, WPMdl::Mesh& m
     return true;
 }
 
-bool ParseIkConfig(fs::MemBinaryStream& f, WPPuppet::IkConfig& ik) {
+bool ParseIkConfig(fs::BinaryReader& f, WPPuppet::IkConfig& ik) {
     for (int c = 0; c < 4; ++c)
         for (int r = 0; r < 4; ++r) ik.chain_a_target(r, c) = f.ReadFloat();
     ik.ik_version   = f.ReadUint8();
@@ -351,7 +351,7 @@ bool ParseIkConfig(fs::MemBinaryStream& f, WPPuppet::IkConfig& ik) {
     return true;
 }
 
-bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
+bool ParseMDLS(fs::BinaryReader& f, WPMdl& mdl, std::string_view path) {
     mdl.mdls = ReadMdlVersion(f);
 
     uint32_t end_offset = f.ReadUint32();
@@ -483,7 +483,7 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
     return true;
 }
 
-void ParseMDAT(fs::MemBinaryStream& f, WPMdl& mdl) {
+void ParseMDAT(fs::BinaryReader& f, WPMdl& mdl) {
     uint32_t end_offset      = f.ReadUint32();
     uint32_t num_attachments = f.ReadUint16();
     auto&    attachments     = mdl.puppet->attachments;
@@ -505,7 +505,7 @@ void ParseMDAT(fs::MemBinaryStream& f, WPMdl& mdl) {
 
 // hexpat AnimBoneCurves: u8 has_curves; if(has_curves) BoneFrameCurve[bone_count].
 // Each BoneFrameCurve = u32 zero + u32 byte_size + float[byte_size/4].
-bool ParseAnimBoneCurves(fs::MemBinaryStream& f, std::vector<WPPuppet::BoneFrameCurve>& out,
+bool ParseAnimBoneCurves(fs::BinaryReader& f, std::vector<WPPuppet::BoneFrameCurve>& out,
                          uint32_t bone_count) {
     uint8_t has_curves = f.ReadUint8();
     if (! has_curves) return true;
@@ -526,7 +526,7 @@ bool ParseAnimBoneCurves(fs::MemBinaryStream& f, std::vector<WPPuppet::BoneFrame
     return true;
 }
 
-bool ParseAnimTransMainTrack(fs::MemBinaryStream& f, std::vector<float>& out, int32_t length,
+bool ParseAnimTransMainTrack(fs::BinaryReader& f, std::vector<float>& out, int32_t length,
                              std::string_view path) {
     uint32_t byte_size = f.ReadUint32();
     if (! is_anim_trans_main_size(byte_size, length)) {
@@ -541,7 +541,7 @@ bool ParseAnimTransMainTrack(fs::MemBinaryStream& f, std::vector<float>& out, in
     return true;
 }
 
-bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim, int mdla_ver,
+bool ParseAnimation(fs::BinaryReader& f, WPPuppet::Animation& anim, int mdla_ver,
                     uint32_t mdla_end_offset, std::string_view path) {
     anim.id           = f.ReadInt32();
     anim.unk_after_id = f.ReadUint32();
@@ -679,7 +679,7 @@ bool ParseAnimation(fs::MemBinaryStream& f, WPPuppet::Animation& anim, int mdla_
     return true;
 }
 
-bool ParseMDLA(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag, std::string_view path) {
+bool ParseMDLA(fs::BinaryReader& f, WPMdl& mdl, std::string_view tag, std::string_view path) {
     mdl.mdla = std::stoi(std::string(tag.substr(4, 4)));
     if (mdl.mdla == 0) return true;
 
@@ -714,7 +714,7 @@ bool ParseMDLA(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag, std::st
     return ok;
 }
 
-void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh) {
+void ParseMasks(fs::BinaryReader& f, WPMdl::Mesh& mesh) {
     uint32_t mask_count = f.ReadUint32();
     mesh.masks.resize(mask_count);
     for (auto& m : mesh.masks) {
@@ -733,7 +733,7 @@ void ParseMasks(fs::MemBinaryStream& f, WPMdl::Mesh& mesh) {
     }
 }
 
-bool ParseMDMP(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag, std::string_view path) {
+bool ParseMDMP(fs::BinaryReader& f, WPMdl& mdl, std::string_view tag, std::string_view path) {
     mdl.mdmp            = std::stoi(std::string(tag.substr(4, 4)));
     uint32_t end_offset = f.ReadUint32();
     while (f.Tell() < end_offset) {
@@ -783,7 +783,7 @@ bool ParseMDMP(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag, std::st
     return true;
 }
 
-bool ParseMDLE(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag) {
+bool ParseMDLE(fs::BinaryReader& f, WPMdl& mdl, std::string_view tag) {
     mdl.mdle                   = std::stoi(std::string(tag.substr(4, 4)));
     uint32_t     end_offset    = f.ReadUint32();
     uint32_t     payload_bytes = f.ReadUint32();
@@ -890,7 +890,7 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
 }
 
 // hexpat Header: VersionTag mdlv + u32 mdl_flag + s32 always_one(==1) + u32 mesh_count.
-bool ReadHeaderFromStream(fs::MemBinaryStream& f, WPMdlHeader& h, std::string_view path_for_log) {
+bool ReadHeaderFromStream(fs::BinaryReader& f, WPMdlHeader& h, std::string_view path_for_log) {
     h.mdlv       = ReadMdlVersion(f);
     h.mdl_flag   = f.ReadUint32();
     h.unk_a      = f.ReadUint32();
@@ -911,18 +911,17 @@ std::string ResolveMdlMaterialPath(std::string_view ref) {
 } // namespace
 
 bool WPMdlParser::ParseHeader(std::string_view path, fs::VFS& vfs, WPMdlHeader& h) {
-    auto pfile = vfs.Open("/assets/" + std::string(path));
-    if (! pfile) return false;
-    auto f = fs::MemBinaryStream(*pfile);
+    auto pfile = fs::OpenBinary(vfs, "/assets/" + std::string(path));
+    if (pfile.is_err()) return false;
+    auto f = rstd::move(pfile).unwrap_unchecked();
     return ReadHeaderFromStream(f, h, path);
 }
 
 bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     auto str_path = std::string(path);
-    auto pfile    = vfs.Open("/assets/" + str_path);
-    if (! pfile) return false;
-    auto  memfile = fs::MemBinaryStream(*pfile);
-    auto& f       = memfile;
+    auto pfile    = fs::OpenBinary(vfs, "/assets/" + str_path);
+    if (pfile.is_err()) return false;
+    auto  f = rstd::move(pfile).unwrap_unchecked();
 
     if (! ReadHeaderFromStream(f, mdl.header, str_path)) return false;
 

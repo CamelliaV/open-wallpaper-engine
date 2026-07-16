@@ -1371,9 +1371,10 @@ void SceneRuntimeController::loadScene() {
     // mount assets dir
     std::unique_ptr<fs::VFS> pVfs = std::make_unique<fs::VFS>();
     auto&                    vfs  = *pVfs;
-    if (! vfs.IsMounted("assets")) {
-        bool sus = vfs.Mount("/assets", fs::CreatePhysicalFs(m_config.assets_dir), "assets");
-        if (! sus) {
+    if (! vfs.is_mounted("assets")) {
+        auto assets = fs::make_physical_fs(fs::ToPath(m_config.assets_dir));
+        if (assets.is_err() ||
+            vfs.mount("/assets", rstd::move(assets).unwrap_unchecked(), "assets").is_err()) {
             rstd_error("Mount assets dir failed");
             return;
         }
@@ -1391,18 +1392,28 @@ void SceneRuntimeController::loadScene() {
     // version info and use kSceneVersionUnknown.
     wpscene::SceneVersion pkg_v = wpscene::kSceneVersionUnknown;
     auto                  wfs   = fs::WPPkgFs::CreatePkgFs(pkgPath);
-    if (wfs) pkg_v = wpscene::ParsePkgVersionStamp(wfs->pkg_version_stamp());
-    if (! wfs || ! vfs.Mount("/assets", std::move(wfs))) {
+    bool                  pkg_mounted = false;
+    if (wfs.is_ok()) {
+        auto stamp = wfs->pkg_version_stamp();
+        pkg_v      = wpscene::ParsePkgVersionStamp(
+            std::string_view(reinterpret_cast<const char*>(stamp.data()), stamp.size()));
+        pkg_mounted = vfs.mount("/assets", wfs->mount_handle()).is_ok();
+    }
+    if (! pkg_mounted) {
         rstd_info("load pkg file {} failed, fallback to use dir", pkgPath);
         pkg_v = wpscene::kSceneVersionUnknown;
         // load pkg dir
-        if (! vfs.Mount("/assets", fs::CreatePhysicalFs(pkgDir))) {
+        auto loose = fs::make_physical_fs(fs::ToPath(pkgDir));
+        if (loose.is_err() ||
+            vfs.mount("/assets", rstd::move(loose).unwrap_unchecked()).is_err()) {
             rstd_error("can't load pkg directory: {}", pkgDir);
             return;
         }
     }
     if (! m_config.cache_dir.empty()) {
-        if (! vfs.Mount("/cache", fs::CreatePhysicalFs(m_config.cache_dir, true), "cache")) {
+        auto cache = fs::make_physical_fs(fs::ToPath(m_config.cache_dir), true);
+        if (cache.is_err() ||
+            vfs.mount("/cache", rstd::move(cache).unwrap_unchecked(), "cache").is_err()) {
             rstd_error("can't load cache folder: {}", m_config.cache_dir);
         } else {
             rstd_info("cache folder: {}", m_config.cache_dir);

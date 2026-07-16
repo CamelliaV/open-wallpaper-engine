@@ -100,7 +100,7 @@ TextureFormat ToTexFormate(int type) {
 // Version validation is permissive: unsupported (texv,texi,texb) tuples
 // log an error but the function still returns a populated struct so the
 // caller can decide whether to bail or attempt a best-effort read.
-WPTexFormatVersion LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
+WPTexFormatVersion LoadHeader(fs::BinaryReader& file, ImageHeader& header) {
     WPTexFormatVersion v;
     v.texv                         = ReadTexVersion(file);
     v.texi                         = ReadTexVersion(file);
@@ -260,10 +260,10 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
     std::shared_ptr<Image> img_ptr = std::make_shared<Image>();
     auto&                  img     = *img_ptr;
     img.key                        = name;
-    // std::ifstream file = fs::GetFileFstream(vfs, path);
-    auto pfile = m_vfs->Open(path);
-    if (! pfile) return nullptr;
-    auto& file     = *pfile;
+    auto source = m_vfs->open_read(fs::ToPath(path));
+    if (source.is_err()) return nullptr;
+    auto tex_source = rstd::move(source).unwrap_unchecked();
+    auto file       = fs::BinaryReader(tex_source.clone());
     auto  startpos = file.Tell();
     auto  ver      = LoadHeader(file, img.header);
 
@@ -305,8 +305,8 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             // Peek the first 16 bytes of the body so we can route MP4 /
             // WebM containers into the video-tex path without ever
             // pulling the (possibly hundreds of MiB) payload into RAM.
-            // The pkg's IBinaryStream is seekable, so we sniff, rewind,
-            // and either skip the body (video case) or read it normally.
+            // The range reader is seekable, so sniff without loading the
+            // complete video payload.
             if (ver.body_has_image_type() && img.header.type == ImageType::UNKNOWN &&
                 ! LZ4_compressed && src_size >= 16) {
                 idx           body_off = file.Tell();
@@ -316,14 +316,10 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 if (maybe_video == ImageType::VIDEO) {
                     img.header.type   = ImageType::VIDEO;
                     img.header.format = TextureFormat::RGBA8;
-                    /* Converting ctor: shared_ptr<IBinaryStream> →
-                     * shared_ptr<void>. Keeps the pkg stream alive for
-                     * the renderer's lifetime, without dragging
-                     * wescene.fs into wescene.types. */
-                    mipmap.videoStream = std::shared_ptr<void>(pfile);
-                    mipmap.videoOffset = body_off;
-                    mipmap.videoSize   = src_size;
-                    mipmap.size        = 0; /* signals "no CPU pixels" to TextureCache */
+                    auto video_source = tex_source.subrange(u64(body_off), u64(src_size));
+                    if (video_source.is_err()) return nullptr;
+                    mipmap.video_source = rstd::Some(rstd::move(video_source).unwrap_unchecked());
+                    mipmap.size         = 0;
                     file.SeekSet(body_off + src_size);
                     continue;
                 }
@@ -394,10 +390,10 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
     // internally (light cookies, etc.). We don't model that, so just
     // return an empty header without spamming a vfs miss.
     if (name.find("_alias_") != std::string::npos) return header;
-    std::string path  = "/assets/materials/" + name + ".tex";
-    auto        pfile = m_vfs->Open(path);
-    if (! pfile) return header;
-    auto& file = *pfile;
+    std::string path   = "/assets/materials/" + name + ".tex";
+    auto        source = m_vfs->open_read(fs::ToPath(path));
+    if (source.is_err()) return header;
+    auto file = fs::BinaryReader(rstd::move(source).unwrap_unchecked());
 
     auto ver = LoadHeader(file, header);
     if (header.count < 0) return header;

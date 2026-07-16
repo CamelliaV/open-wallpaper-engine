@@ -13,7 +13,7 @@ import wescene.fs;
 export namespace owe
 {
 
-int32_t ReadAssetVersion(std::string_view prefix, fs::IBinaryStream& file) {
+int32_t ReadAssetVersion(std::string_view prefix, fs::BinaryReader& file) {
     char str_v[9] { '\0' };
     file.Read(str_v, 9);
     if (! sstart_with(str_v, prefix)) return 0;
@@ -28,18 +28,18 @@ int32_t ReadAssetVersion(std::string_view prefix, fs::IBinaryStream& file) {
     return slot;
 }
 
-void WriteAssetVersion(std::string_view prefix, fs::IBinaryStreamW& file, int ver) {
+void WriteAssetVersion(std::string_view prefix, fs::BinaryWriter& file, int ver) {
     char buf[9] { '\0' };
     std::snprintf(buf, sizeof(buf), "%.4s%.4d", prefix.data(), ver);
     file.Write(buf, sizeof(buf));
 }
 
-int32_t ReadTexVersion(fs::IBinaryStream& file) { return ReadAssetVersion("TEX", file); }
-int32_t ReadMdlVersion(fs::IBinaryStream& file) { return ReadAssetVersion("MDL", file); }
+int32_t ReadTexVersion(fs::BinaryReader& file) { return ReadAssetVersion("TEX", file); }
+int32_t ReadMdlVersion(fs::BinaryReader& file) { return ReadAssetVersion("MDL", file); }
 
 // DIY
-int32_t ReadShaderCacheVersion(fs::IBinaryStream& file) { return ReadAssetVersion("SPV", file); }
-void    WriteShaderCacheVersion(fs::IBinaryStreamW& file, int ver) {
+int32_t ReadShaderCacheVersion(fs::BinaryReader& file) { return ReadAssetVersion("SPV", file); }
+void    WriteShaderCacheVersion(fs::BinaryWriter& file, int ver) {
     WriteAssetVersion("SPVS", file, ver);
 }
 

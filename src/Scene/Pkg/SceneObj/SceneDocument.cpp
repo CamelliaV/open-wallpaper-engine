@@ -326,21 +326,24 @@ std::optional<SceneDocument> ParseSceneDocumentJson(std::string_view buf,
 
 std::optional<SceneDocument> LoadSceneDocumentFromVfs(fs::VFS& vfs, std::string_view scene_path,
                                                       SceneVersion pkg_version) {
-    auto f = vfs.Open(scene_path);
-    if (! f) return std::nullopt;
+    auto f = fs::OpenBinary(vfs, scene_path);
+    if (f.is_err()) return std::nullopt;
     return ParseSceneDocumentJson(f->ReadAllStr(), pkg_version);
 }
 
 std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path) {
     if (pkg_path.empty()) return std::nullopt;
     auto pkg = fs::WPPkgFs::CreatePkgFs(pkg_path);
-    if (! pkg) return std::nullopt;
+    if (pkg.is_err()) return std::nullopt;
 
-    auto scene_file = pkg->Open("/scene.json");
-    if (! scene_file) return std::nullopt;
+    auto scene_source = pkg->open_read("/scene.json");
+    if (scene_source.is_err()) return std::nullopt;
+    auto scene_file = fs::BinaryReader(rstd::move(scene_source).unwrap_unchecked());
 
-    const auto pkg_version = ParsePkgVersionStamp(pkg->pkg_version_stamp());
-    return ParseSceneDocumentJson(scene_file->ReadAllStr(), pkg_version);
+    auto stamp = pkg->pkg_version_stamp();
+    const auto pkg_version = ParsePkgVersionStamp(
+        std::string_view(reinterpret_cast<const char*>(stamp.data()), stamp.size()));
+    return ParseSceneDocumentJson(scene_file.ReadAllStr(), pkg_version);
 }
 
 std::optional<SceneDocument> LoadSceneDocumentFromSource(std::string_view source_path) {
@@ -355,8 +358,8 @@ std::optional<SceneDocument> LoadSceneDocumentFromSource(std::string_view source
     if (ext == ".pkg") return LoadSceneDocumentFromPkg(source_path);
     if (ext != ".json") return std::nullopt;
 
-    auto scene_file = fs::CreateCBinaryStream(source_path);
-    if (! scene_file) return std::nullopt;
+    auto scene_file = fs::OpenPhysicalBinary(source_path);
+    if (scene_file.is_err()) return std::nullopt;
     return ParseSceneDocumentJson(scene_file->ReadAllStr(), kSceneVersionUnknown);
 }
 

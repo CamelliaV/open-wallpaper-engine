@@ -1,12 +1,9 @@
-module;
-
-#include <sys/types.h>
 module wescene.pkg.parse;
 import wescene.core;
 import wescene.scene;
 import rstd.cppstd;
 import rstd.log;
-import rstd; // rstd::io::Result / SeekFrom for IByteStream impl
+import rstd;
 
 using namespace owe;
 
@@ -29,39 +26,6 @@ static PlaybackMode ToPlaybackMode(std::string_view s) {
 
 namespace
 {
-
-// Adapter: owe::fs::IBinaryStream → wavsen::audio::IByteStream.
-class BStreamAdapter : public wavsen::audio::IByteStream {
-public:
-    explicit BStreamAdapter(std::shared_ptr<fs::IBinaryStream> s): inner(std::move(s)) {}
-
-    auto read(rstd::u8* dst, rstd::usize bytes) -> rstd::io::Result<rstd::usize> override {
-        const auto n = inner->Read(dst, bytes);
-        return rstd::Ok(static_cast<rstd::usize>(n));
-    }
-
-    auto seek(rstd::io::SeekFrom pos) -> rstd::io::Result<rstd::u64> override {
-        bool ok = false;
-        switch (pos.which) {
-        case rstd::io::SeekFrom::Which::Start:
-            ok = inner->SeekSet(static_cast<std::int64_t>(pos.offset));
-            break;
-        case rstd::io::SeekFrom::Which::Current: ok = inner->SeekCur(pos.offset); break;
-        case rstd::io::SeekFrom::Which::End: ok = inner->SeekEnd(pos.offset); break;
-        }
-        if (! ok) {
-            return rstd::Err(rstd::io::error::Error::from_kind(
-                rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::Other }));
-        }
-        // owe::fs::IBinaryStream doesn't expose post-seek absolute offset
-        // directly, so report 0 — wavsen's stream_decoder ignores the
-        // returned position (only checks is_err).
-        return rstd::Ok(rstd::u64 { 0 });
-    }
-
-private:
-    std::shared_ptr<fs::IBinaryStream> inner;
-};
 
 struct WPSoundState {
     std::atomic<bool>     playing { false };
@@ -157,10 +121,11 @@ public:
         const uint32_t base = SelectStartIndex(n);
         for (uint32_t tried = 0; tried < n; ++tried) {
             const std::string& path = m_soundPaths[(base + tried) % n];
-            auto               bin  = vfs.Open("/assets/" + path);
-            if (! bin) continue;
-            auto adapter = std::make_shared<BStreamAdapter>(std::move(bin));
-            auto stream  = wavsen::audio::make_stream(std::move(adapter), m_desc);
+            auto source = vfs.open_read(fs::ToPath("/assets/" + path));
+            if (source.is_err()) continue;
+            auto handle = rstd::io::ReadSeekHandle::make(
+                rstd::move(source).unwrap_unchecked().into_reader());
+            auto stream = wavsen::audio::make_stream(rstd::move(handle), m_desc);
             if (stream) {
                 m_curActive = std::move(stream);
                 return;

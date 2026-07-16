@@ -628,17 +628,14 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
  *
  * When WPTexImageParser detects an MP4 / WebM container inlined in a
  * .tex body (header.type == ImageType::VIDEO), it doesn't decompress
- * pixels — it stashes the pkg's IBinaryStream + byte range in
- * ImageData. CreateTex routes those Images here:
+ * pixels. It stores a typed read range in ImageData instead. CreateTex
+ * routes those Images here:
  *
  *   1. We allocate a stable RGBA8 VkImage at (w,h), cleared to black,
  *      and register it in m_tex_map under the Image's key so the rest
  *      of the renderer (descriptor sets, sprite-anim fallback, etc.)
  *      sees an ordinary single-slot texture.
- *   2. We wrap the pkg stream in a wavsen::video::IInputStream that
- *      clamps reads/seeks to [offset, offset+size). Lifetime: the
- *      shared_ptr<owe::fs::IBinaryStream> lands inside the adapter and
- *      stays alive as long as the VideoDecoder owns it.
+ *   2. Each decoder trial creates an independent reader over that range.
  *   3. We spin up a wavsen::video::VideoDecoder via open_from_stream.
  *      When hwdec is enabled, a lazily-created wavsen Producer supplies
  *      the hwdevice; otherwise the decoder stays sw-only. On Linux the
@@ -654,47 +651,38 @@ std::optional<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
 namespace
 {
 
-// Wraps an owe::fs::IBinaryStream sub-range as a wavsen avio source.
-// Holds the underlying stream alive via shared_ptr so the .pkg file
-// handle survives until the decoder closes.
-class PkgRangedInputStream {
+class RangeInputStream {
 public:
-    PkgRangedInputStream(std::shared_ptr<owe::fs::IBinaryStream> base, std::int64_t offset,
-                         std::int64_t length)
-        : m_base(std::move(base)), m_offset(offset), m_length(length) {}
+    explicit RangeInputStream(rstd::io::ReadRange source)
+        : m_length(i64(source.len())), m_reader(rstd::move(source).into_reader()) {}
 
     int read(std::uint8_t* buf, int size) {
-        if (! m_base || size <= 0) return 0;
-        if (m_cursor >= m_length) return 0; /* EOF — avio shim maps to AVERROR_EOF */
-        std::int64_t remain = m_length - m_cursor;
-        int          take   = size < remain ? size : static_cast<int>(remain);
-        m_base->SeekSet(static_cast<idx>(m_offset + m_cursor));
-        auto got = m_base->Read(buf, static_cast<usize>(take));
-        if (got == 0) return 0;
-        m_cursor += static_cast<std::int64_t>(got);
-        return static_cast<int>(got);
+        if (size <= 0) return 0;
+        auto result = m_reader.read(buf, usize(size));
+        if (result.is_err()) return -1;
+        return int(rstd::move(result).unwrap_unchecked());
     }
 
     std::int64_t seek(std::int64_t offset, int whence) {
         constexpr int AVSEEK_SIZE = 0x10000;
         if (whence == AVSEEK_SIZE) return m_length;
-        std::int64_t next;
+        rstd::io::SeekFrom from;
         switch (whence) {
-        case 0: /* SEEK_SET */ next = offset; break;
-        case 1: /* SEEK_CUR */ next = m_cursor + offset; break;
-        case 2: /* SEEK_END */ next = m_length + offset; break;
+        case 0:
+            if (offset < 0) return -1;
+            from = rstd::io::SeekFrom::from_start(u64(offset));
+            break;
+        case 1: from = rstd::io::SeekFrom::from_current(offset); break;
+        case 2: from = rstd::io::SeekFrom::from_end(offset); break;
         default: return -1;
         }
-        if (next < 0 || next > m_length) return -1;
-        m_cursor = next;
-        return m_cursor;
+        auto result = m_reader.seek(from);
+        return result.is_ok() ? i64(rstd::move(result).unwrap_unchecked()) : -1;
     }
 
 private:
-    std::shared_ptr<owe::fs::IBinaryStream> m_base;
-    std::int64_t                            m_offset { 0 };
-    std::int64_t                            m_length { 0 };
-    std::int64_t                            m_cursor { 0 };
+    i64                   m_length { 0 };
+    rstd::io::RangeReader m_reader;
 };
 
 wavsen::video::HwAccel ParseHwdec(std::string_view value) {
@@ -830,7 +818,7 @@ struct TextureCache::VideoRegistry {
 ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
     if (image.slots.empty() || image.slots[0].mipmaps.empty()) return {};
     auto& mip = image.slots[0].mipmaps[0];
-    if (! mip.videoStream || mip.videoSize <= 0 || mip.width <= 0 || mip.height <= 0) {
+    if (mip.video_source.is_none() || mip.width <= 0 || mip.height <= 0) {
         rstd_error("CreateVideoTex: incomplete video-tex slot for {}", image.key);
         return {};
     }
@@ -841,12 +829,7 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
     }
     if (! m_tex_cmd) allocateCmd();
 
-    /* Pull the IBinaryStream back out of the opaque shared_ptr<void>
-     * the parser stored. The cast is safe because WPTexImageParser is
-     * the only writer and always populates with shared_ptr<IBinaryStream>
-     * via the converting constructor. */
-    std::shared_ptr<owe::fs::IBinaryStream> pkg_stream(
-        mip.videoStream, static_cast<owe::fs::IBinaryStream*>(mip.videoStream.get()));
+    auto video_source = (*mip.video_source).clone();
 
     auto slot = std::make_unique<VideoRegistry::Slot>();
     slot->key = image.key;
@@ -945,17 +928,13 @@ ImageSlotsRef TextureCache::CreateVideoTex(Image& image) {
         VVK_CHECK(m_device.handle().WaitIdle());
     }
 
-    /* 3) Open the decoder. The factory hands out a fresh
-     * PkgRangedInputStream per trial; the captured shared_ptr keeps the
-     * underlying pkg file handle alive. */
+    /* 3) Open the decoder. Each backend trial gets its own range cursor. */
     auto factory =
         rstd::boxed::Box<dyn<FnMut<rstd::boxed::Box<dyn<wavsen::video::InputStream>>()>>>::make(
-            [pkg = pkg_stream,
-             off = static_cast<std::int64_t>(mip.videoOffset),
-             len = static_cast<std::int64_t>(
-                 mip.videoSize)]() -> rstd::boxed::Box<dyn<wavsen::video::InputStream>> {
+            [source = rstd::move(video_source)]()
+                -> rstd::boxed::Box<dyn<wavsen::video::InputStream>> {
                 return rstd::boxed::Box<dyn<wavsen::video::InputStream>>::make(
-                    PkgRangedInputStream(pkg, off, len));
+                    RangeInputStream(source.clone()));
             });
     const auto              requested_hwdec = ParseHwdec(m_video_registry->options.hwdec);
     wavsen::video::OpenOpts opts {

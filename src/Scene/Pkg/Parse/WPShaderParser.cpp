@@ -1639,7 +1639,7 @@ inline std::string GetCachePath(std::string_view scene_id, std::string_view file
            std::string(filename) + "." SHADER_SUFFIX;
 }
 
-inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream& file) {
+inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::BinaryReader& file) {
     codes.clear();
     i32 ver = ReadShaderCacheVersion(file);
 
@@ -1661,7 +1661,7 @@ inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream
     return true;
 }
 
-inline void SaveShaderToFile(std::span<const ShaderCode> codes, fs::IBinaryStreamW& file) {
+inline void SaveShaderToFile(std::span<const ShaderCode> codes, fs::BinaryWriter& file) {
     char nop[256] { '\0' };
 
     WriteShaderCacheVersion(file, 1);
@@ -1922,22 +1922,31 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         return true;
     };
 
-    bool has_cache_dir = vfs.IsMounted("cache");
+    bool has_cache_dir = vfs.is_mounted("cache");
 
     if (has_cache_dir) {
         std::string sha1            = GenSha1(units);
         std::string cache_file_path = GetCachePath(scene_id, sha1);
 
-        if (vfs.Contains(cache_file_path)) {
-            auto cache_file = vfs.Open(cache_file_path);
-            if (! cache_file || ! ::LoadShaderFromFile(codes, *cache_file)) {
+        auto cache_file = fs::OpenBinary(vfs, cache_file_path);
+        if (cache_file.is_ok()) {
+            if (! ::LoadShaderFromFile(codes, *cache_file)) {
                 rstd_error("load shader from \'{}\' failed", cache_file_path);
                 return false;
             }
         } else {
+            auto error = rstd::move(cache_file).unwrap_err_unchecked();
+            if (error.kind().code != rstd::io::error::ErrorKind::NotFound) {
+                rstd_error("open shader cache \'{}\' failed", cache_file_path);
+                return false;
+            }
             if (! compile(units, codes)) return false;
-            if (auto cache_file = vfs.OpenW(cache_file_path); cache_file) {
-                ::SaveShaderToFile(codes, *cache_file);
+            auto writer = fs::OpenBinaryWriter(vfs,
+                                               cache_file_path,
+                                               fs::WriteOptions { .create   = true,
+                                                                  .truncate = true });
+            if (writer.is_ok()) {
+                ::SaveShaderToFile(codes, *writer);
             }
         }
         return true;

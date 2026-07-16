@@ -15,7 +15,7 @@ target_sources(owe-core
          Json.cppm
          UserProperty.cppm)
 target_link_libraries(owe-core
-  PUBLIC rstd::rstd rstd.cppstd rstd.json rstd.log Eigen3::Eigen)
+  PUBLIC owe-io owe-fs rstd::rstd rstd.cppstd rstd.json rstd.log Eigen3::Eigen)
 target_compile_features(owe-core PUBLIC cxx_std_20)
 set_property(TARGET owe-core PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-core PROPERTY CXX_SCAN_FOR_MODULES ON)
