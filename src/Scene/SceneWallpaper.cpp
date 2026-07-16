@@ -1045,6 +1045,7 @@ void SceneRenderController::rebuildRenderGraph(vulkan::RenderGraphResourceRetent
     if (! m_scene || ! renderInited()) return;
     if (m_rg.is_some()) m_render->clearLastRenderGraph(retention);
     if (evict_meshes) m_render->evictUnusedMeshes();
+    m_render->configureRenderTargets(*m_scene);
     m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
     m_rg           = Some(sceneToRenderGraph(*m_scene, m_render_scene));
 
@@ -1221,8 +1222,7 @@ void SceneRenderController::on(RenderSwapchainReady&& m) {
     }
     bool extent_changed = m_render->onSwapchainReady(m.width, m.height);
     if (extent_changed && m_scene && m_rg.is_some()) {
-        m_render->refreshPreparedResources(*m_scene, m_render_scene);
-        m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
     }
     if (m_stopped)
         frame_timer.Stop();

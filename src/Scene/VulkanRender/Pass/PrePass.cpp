@@ -1,5 +1,9 @@
 module;
+
+#include <rstd/macro.hpp>
+
 module wescene.vulkan_render;
+import rstd.log;
 import wescene.types;
 import rstd.cppstd;
 import wescene.vulkan;
@@ -81,19 +85,32 @@ std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() c
 void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& context) {
     {
         auto tex_name = std::string(m_desc.result);
-        if (scene.renderTargets.count(tex_name) == 0) return;
-        if (m_desc.result_use.is_none()) return;
-        if (context.resources->Resolve(*m_desc.result_use).is_none()) return;
+        if (scene.renderTargets.count(tex_name) == 0) {
+            rstd_error("frame result render target {} not found", tex_name);
+            return;
+        }
+        if (m_desc.result_use.is_none()) {
+            rstd_error("frame result texture use {} not found", tex_name);
+            return;
+        }
+        if (context.resources->Resolve(*m_desc.result_use).is_none()) {
+            rstd_error("prepared frame result texture {} not found", tex_name);
+            return;
+        }
     }
     {
         auto  tex_name = std::string(m_desc.result);
         auto& rt       = scene.renderTargets.at(tex_name);
         m_desc.samples = TextureSampleCount(rt.sample_count);
         if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
-            if (m_desc.result_msaa_use.is_none()) return;
+            if (m_desc.result_msaa_use.is_none()) {
+                rstd_error("frame MSAA texture use {} not found", tex_name);
+                return;
+            }
             auto prepared = context.resources->Resolve(*m_desc.result_msaa_use);
             if (prepared.is_none() || m_desc.result_msaa_request.is_none() ||
                 m_desc.render_pass_use.is_none() || m_desc.framebuffer_use.is_none()) {
+                rstd_error("prepared frame MSAA resources {} incomplete", tex_name);
                 return;
             }
             auto render_pass = context.graphics->PrepareRenderPass(
@@ -107,7 +124,11 @@ void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& co
                     .has_resolve_attachment = false,
                     .has_depth_attachment   = false,
                 });
-            if (render_pass.is_err()) return;
+            if (render_pass.is_err()) {
+                auto error = rstd::move(render_pass).unwrap_err_unchecked();
+                rstd_error("prepare frame MSAA render pass failed: {}", error.message);
+                return;
+            }
             auto image       = (**prepared).image.getActive();
             auto attachments = std::vector<FramebufferAttachmentDesc> {
                 MakeFramebufferAttachment(*m_desc.result_msaa_request, image),
@@ -118,7 +139,11 @@ void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& co
                                                      device,
                                                      std::move(attachments),
                                                      { image.extent.width, image.extent.height });
-            if (framebuffer.is_err()) return;
+            if (framebuffer.is_err()) {
+                auto error = rstd::move(framebuffer).unwrap_err_unchecked();
+                rstd_error("prepare frame MSAA framebuffer failed: {}", error.message);
+                return;
+            }
         }
     }
     {

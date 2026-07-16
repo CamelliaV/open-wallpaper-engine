@@ -109,6 +109,7 @@ struct VulkanRender::Impl {
     void DestroyRenderingResource(RenderingResources&);
 
     void clearLastRenderGraph(RenderGraphResourceRetention);
+    void configureRenderTargets(Scene&);
     void compileRenderGraph(Scene&, rg::RenderGraph&);
     void compileRenderGraph(Scene&, rg::RenderGraph&, const RenderSceneSnapshot&);
     void refreshPreparedResources(Scene&);
@@ -291,6 +292,7 @@ void VulkanRender::drawFrame(Scene& scene) { pImpl->drawFrame(scene); };
 void VulkanRender::clearLastRenderGraph(RenderGraphResourceRetention retention) {
     pImpl->clearLastRenderGraph(retention);
 };
+void VulkanRender::configureRenderTargets(Scene& scene) { pImpl->configureRenderTargets(scene); }
 void VulkanRender::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     pImpl->compileRenderGraph(scene, rg);
 }
@@ -980,6 +982,11 @@ void VulkanRender::Impl::clearLastRenderGraph(RenderGraphResourceRetention reten
     m_rendering_resources.resources.EvictUnusedBuffers();
 }
 
+void VulkanRender::Impl::configureRenderTargets(Scene& scene) {
+    if (! m_inited) return;
+    m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
+}
+
 void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     auto render_scene = ExtractRenderSceneSnapshot(scene);
     compileRenderGraph(scene, rg, render_scene);
@@ -993,7 +1000,7 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
     m_program.buildFromGraph(rg);
     m_program.injectFramePasses(*m_prepass, *m_finpass);
 
-    m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
+    configureRenderTargets(scene);
     m_program.finalizeFramePassRequests(scene);
     m_program.finalizeResourceRequests(scene);
     if (! m_program.prepare(scene, *m_device, m_rendering_resources, render_scene)) return;
@@ -1011,7 +1018,7 @@ void VulkanRender::Impl::refreshPreparedResources(Scene&                     sce
                                                   const RenderSceneSnapshot& render_scene) {
     if (! m_inited || m_program.pass_records.is_empty()) return;
 
-    m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
+    configureRenderTargets(scene);
     m_program.finalizeFramePassRequests(scene);
     m_program.finalizeResourceRequests(scene);
     if (! m_program.prepare(scene, *m_device, m_rendering_resources, render_scene)) return;

@@ -98,6 +98,7 @@ public:
 
     void clearLastRenderGraph(
         RenderGraphResourceRetention retention = RenderGraphResourceRetention::KeepSceneTextures);
+    void configureRenderTargets(Scene&);
     void compileRenderGraph(Scene&, rg::RenderGraph&);
     void compileRenderGraph(Scene&, rg::RenderGraph&, const RenderSceneSnapshot&);
     void refreshPreparedResources(Scene&);
