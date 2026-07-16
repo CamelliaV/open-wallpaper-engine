@@ -3,15 +3,11 @@ module;
 #include <unistd.h>
 #include <cerrno>
 
-// VMA needs the raw Vulkan declarations in the global module fragment.
-#include <vk_mem_alloc.h>
-
 // Macros only — VVK_CHECK family.
 #include "vvk/macros.hpp"
 
 export module wescene.vulkan;
 import wescene.core;
-export import :vma;
 import rstd.log;
 import rstd.cppstd;
 import wescene.types;

@@ -48,8 +48,8 @@
   {
     "dest": "build/_flatpak_deps/vma-src",
     "disable-shallow-clone": false,
-    "tag": "v3.3.0",
-    "commit": "1d8f600fd424278486eade7ed3e877c99f0846b1",
+    "tag": "v3.4.0",
+    "commit": "3aa921224c154a0d2c43912bc88e1c42ce1f7607",
     "type": "git",
     "url": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git",
     "x-cmake": {

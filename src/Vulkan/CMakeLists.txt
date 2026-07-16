@@ -27,14 +27,12 @@ add_library(owe-vulkan STATIC
   StagingBuffer.cpp
   GraphicsPipeline.cpp
   TextureCache.cpp
-  MeshCache.cpp
-  Vma.cpp)
+  MeshCache.cpp)
 target_sources(owe-vulkan
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-         Vulkan.cppm
-         Vma.cppm)
+         Vulkan.cppm)
 target_link_libraries(owe-vulkan
-  PUBLIC wavsen::vvk GPUOpen::VulkanMemoryAllocator owe-types owe-shader-compile
+  PUBLIC wavsen::vvk owe-types owe-shader-compile
   # owe-core supplies wescene.fs (IBinaryStream) needed by the video-tex
   # AVIO shim; wavsen::video supplies the decoder + shared device API.
   PRIVATE owe-core wavsen::video)
