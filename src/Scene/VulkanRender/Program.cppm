@@ -349,6 +349,7 @@ struct RenderProgram {
     }
 
     void finalizeRenderTargetSizes(owe::Scene& scene, VkExtent2D extent,
+                                   VkExtent2D            max_framebuffer_extent,
                                    VkSampleCountFlagBits msaa_samples) {
         for (auto& item : scene.renderTargets) {
             auto& rt = item.second;
@@ -372,10 +373,30 @@ struct RenderProgram {
             auto& rt = item.second;
             if (! item.first.empty() && (rt.width <= 0 || rt.height <= 0)) {
                 rstd_error("wrong size for render target: {}", item.first);
-            } else if (rt.has_mipmap) {
+            }
+
+            const auto physical_width  = static_cast<owe::i32>(std::clamp<owe::u32>(
+                static_cast<owe::u32>(std::max(rt.width, 1)), 1, max_framebuffer_extent.width));
+            const auto physical_height = static_cast<owe::i32>(std::clamp<owe::u32>(
+                static_cast<owe::u32>(std::max(rt.height, 1)), 1, max_framebuffer_extent.height));
+            const bool physical_size_changed =
+                rt.physical_width != physical_width || rt.physical_height != physical_height;
+            rt.physical_width  = physical_width;
+            rt.physical_height = physical_height;
+            if (physical_size_changed &&
+                (rt.physical_width != rt.width || rt.physical_height != rt.height)) {
+                rstd_warn("clamp render target {} from {}x{} to {}x{}",
+                          item.first,
+                          rt.width,
+                          rt.height,
+                          rt.physical_width,
+                          rt.physical_height);
+            }
+
+            if (rt.has_mipmap) {
                 rt.mipmap_level = std::max(3u,
-                                           static_cast<unsigned>(std::floor(
-                                               std::log2(std::min(rt.width, rt.height))))) -
+                                           static_cast<unsigned>(std::floor(std::log2(
+                                               std::min(rt.physical_width, rt.physical_height))))) -
                                   2u;
             }
         }

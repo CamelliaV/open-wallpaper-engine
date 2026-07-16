@@ -984,7 +984,13 @@ void VulkanRender::Impl::clearLastRenderGraph(RenderGraphResourceRetention reten
 
 void VulkanRender::Impl::configureRenderTargets(Scene& scene) {
     if (! m_inited) return;
-    m_program.finalizeRenderTargetSizes(scene, m_device->out_extent(), m_msaa_samples);
+    const auto&      limits = m_device->limits();
+    const VkExtent2D max_framebuffer_extent {
+        std::min(limits.maxImageDimension2D, limits.maxFramebufferWidth),
+        std::min(limits.maxImageDimension2D, limits.maxFramebufferHeight),
+    };
+    m_program.finalizeRenderTargetSizes(
+        scene, m_device->out_extent(), max_framebuffer_extent, m_msaa_samples);
 }
 
 void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {

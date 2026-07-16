@@ -156,8 +156,8 @@ inline unsigned TextureSampleCountValue(VkSampleCountFlagBits sample_count) {
 
 inline TextureDefinition RenderTargetTextureDefinition(owe::SceneRenderTarget rt) {
     return TextureDefinition {
-        .width      = rt.width,
-        .height     = rt.height,
+        .width      = rt.PhysicalWidth(),
+        .height     = rt.PhysicalHeight(),
         .usage      = TextureUsage::Color,
         .format     = owe::TextureFormat::RGBA8,
         .sample     = rt.sample,
@@ -167,8 +167,8 @@ inline TextureDefinition RenderTargetTextureDefinition(owe::SceneRenderTarget rt
 
 inline TextureDefinition RenderTargetTextureDefinitionNoMip(owe::SceneRenderTarget rt) {
     return TextureDefinition {
-        .width  = rt.width,
-        .height = rt.height,
+        .width  = rt.PhysicalWidth(),
+        .height = rt.PhysicalHeight(),
         .usage  = TextureUsage::Color,
         .format = owe::TextureFormat::RGBA8,
         .sample = rt.sample,
@@ -184,8 +184,8 @@ inline TextureDefinition MsaaTextureDefinition(owe::SceneRenderTarget rt,
 
 inline TextureDefinition DepthTextureDefinition(owe::SceneRenderTarget rt) {
     return TextureDefinition {
-        .width      = rt.width,
-        .height     = rt.height,
+        .width      = rt.PhysicalWidth(),
+        .height     = rt.PhysicalHeight(),
         .usage      = TextureUsage::Depth,
         .format     = owe::TextureFormat::D32F,
         .sample     = rt.sample,

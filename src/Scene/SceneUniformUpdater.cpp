@@ -200,7 +200,10 @@ void SceneUniformUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites
             const auto& unifrom_tex = info.texs[el.first];
 
             if (unifrom_tex.has_resolution) {
-                std::array<i32, 4> resolution_uint({ rt.width, rt.height, rt.width, rt.height });
+                std::array<i32, 4> resolution_uint({ rt.PhysicalWidth(),
+                                                     rt.PhysicalHeight(),
+                                                     rt.PhysicalWidth(),
+                                                     rt.PhysicalHeight() });
                 updateOp(WE_GLTEX_RESOLUTION_NAMES[el.first],
                          ShaderValue(array_cast<float>(resolution_uint)));
             }

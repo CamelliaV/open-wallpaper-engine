@@ -169,8 +169,11 @@ struct SceneRenderTarget {
         double      scale { 1.0 };
     };
 
-    i32      width;
-    i32      height;
+    i32 width;
+    i32 height;
+    // Keep authored layout dimensions separate from backend-limited allocation dimensions.
+    i32      physical_width { 0 };
+    i32      physical_height { 0 };
     bool     allowReuse { false };
     bool     withDepth { false };
     bool     has_mipmap { false };
@@ -194,6 +197,9 @@ struct SceneRenderTarget {
     // Later graph versions of this RT keep earlier color content. Use this
     // for composition targets, not transient effect outputs.
     bool preserve_on_write { false };
+
+    i32 PhysicalWidth() const { return physical_width > 0 ? physical_width : width; }
+    i32 PhysicalHeight() const { return physical_height > 0 ? physical_height : height; }
 };
 
 // ============================================================================
