@@ -15,6 +15,8 @@ if(ENDIAN)
   add_compile_definitions(WP_BIG_ENDIAN)
 endif()
 
+add_subdirectory(IO)
+add_subdirectory(Fs)
 add_subdirectory(Core)
 add_subdirectory(Vulkan)
 add_subdirectory(Scene)
