@@ -595,6 +595,7 @@ public:
     std::optional<ExImageParameters> CreateExTex(uint32_t witdh, uint32_t height, VkFormat,
                                                  VkImageTiling);
     ImageSlotsRef                    CreateTex(Image&);
+    std::optional<ImageSlotsRef>     FindImportedTexture(std::string_view key) const;
 
     std::optional<ImageParameters> Query(std::string_view key, TextureKey content_hash,
                                          bool persist = false);

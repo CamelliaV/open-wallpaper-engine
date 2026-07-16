@@ -283,7 +283,8 @@ public:
     ImportedTextureProvider()          = default;
     virtual ~ImportedTextureProvider() = default;
 
-    virtual std::shared_ptr<Image> ParseImportedTexture(const TextureRequest&) const = 0;
+    virtual std::optional<ImageSlotsRef> EnsureImportedTexture(const TextureRequest&,
+                                                               const Device&) const = 0;
 };
 
 class SnapshotImportedTextureProvider : public ImportedTextureProvider {
@@ -292,15 +293,55 @@ public:
                                     IImageParser*              image_parser)
         : m_render_scene(&render_scene), m_image_parser(image_parser) {}
 
-    std::shared_ptr<Image> ParseImportedTexture(const TextureRequest& request) const override {
-        if (m_image_parser == nullptr) return nullptr;
-        auto name = ResolveImportedTextureName(*m_render_scene, request).value_or(request.name);
-        return m_image_parser->Parse(name);
+    void Preload(std::span<const TextureRequest> requests, const Device& device) {
+        constexpr usize batch_size = 4;
+        if (m_image_parser == nullptr) return;
+
+        std::vector<std::string> names;
+        names.reserve(requests.size());
+        for (const auto& request : requests) {
+            auto name = ResolveName(request);
+            if (name.empty() || ! m_attempted.insert(name).second) continue;
+            if (device.tex_cache().FindImportedTexture(name).has_value()) continue;
+            names.push_back(std::move(name));
+        }
+
+        for (usize offset = 0; offset < names.size(); offset += batch_size) {
+            auto count     = rstd::min(batch_size, names.size() - offset);
+            auto batch     = std::span<const std::string>(names).subspan(offset, count);
+            auto images    = m_image_parser->ParseMany(batch);
+            auto completed = std::min(images.size(), batch.size());
+            for (usize index = 0; index < completed; ++index) {
+                auto& image = images[index];
+                if (! image) {
+                    rstd_error("parse tex \"{}\" failed", batch[index]);
+                    continue;
+                }
+                (void)device.tex_cache().CreateTex(*image);
+            }
+        }
+    }
+
+    std::optional<ImageSlotsRef> EnsureImportedTexture(const TextureRequest& request,
+                                                       const Device& device) const override {
+        auto name = ResolveName(request);
+        if (auto cached = device.tex_cache().FindImportedTexture(name)) return cached;
+        if (m_image_parser == nullptr || m_attempted.contains(name)) return std::nullopt;
+
+        m_attempted.insert(name);
+        auto image = m_image_parser->Parse(name);
+        if (! image) return std::nullopt;
+        return device.tex_cache().CreateTex(*image);
     }
 
 private:
-    const RenderSceneSnapshot* m_render_scene { nullptr };
-    IImageParser*              m_image_parser { nullptr };
+    std::string ResolveName(const TextureRequest& request) const {
+        return ResolveImportedTextureName(*m_render_scene, request).value_or(request.name);
+    }
+
+    const RenderSceneSnapshot*              m_render_scene { nullptr };
+    IImageParser*                           m_image_parser { nullptr };
+    mutable std::unordered_set<std::string> m_attempted;
 };
 
 class RenderResourceSystem {
@@ -324,12 +365,12 @@ public:
         }
 
         if (m_imported_textures == nullptr) return std::nullopt;
-        auto image = m_imported_textures->ParseImportedTexture(request);
-        if (! image) {
+        auto texture = m_imported_textures->EnsureImportedTexture(request, *m_device);
+        if (! texture.has_value()) {
             rstd_error("parse tex \"{}\" failed", request.name);
             return std::nullopt;
         }
-        return m_device->tex_cache().CreateTex(*image);
+        return texture;
     }
 
     void MarkShareReady(std::string_view key) const { m_device->tex_cache().MarkShareReady(key); }

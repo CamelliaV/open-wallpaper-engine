@@ -572,6 +572,12 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
     return m_tex_map[image.key];
 }
 
+std::optional<ImageSlotsRef> TextureCache::FindImportedTexture(std::string_view key) const {
+    auto found = m_tex_map.find(std::string(key));
+    if (found == m_tex_map.end()) return std::nullopt;
+    return ImageSlotsRef(found->second);
+}
+
 void TextureCache::allocateCmd() {
     const auto& pool = m_device.cmd_pool();
     VVK_CHECK(pool.Allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY, m_tex_cmds));

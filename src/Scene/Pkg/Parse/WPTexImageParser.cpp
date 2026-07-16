@@ -8,6 +8,7 @@ module;
 module wescene.pkg.parse;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.utils;
@@ -376,6 +377,33 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
         }
     }
     return img_ptr;
+}
+
+std::vector<std::shared_ptr<Image>>
+WPTexImageParser::ParseMany(std::span<const std::string> names) {
+    constexpr usize max_workers = 4;
+    if (names.size() < 2) return IImageParser::ParseMany(names);
+
+    const auto worker_count = rstd::min(usize(names.size()), max_workers);
+    auto       group =
+        rstd::thread::BlockingTaskGroup<std::shared_ptr<Image>>::make(worker_count, worker_count);
+    if (group.is_err()) return IImageParser::ParseMany(names);
+
+    for (const auto& name : names) {
+        auto submitted = group->submit([this, name]() {
+            return Parse(name);
+        });
+        if (submitted.is_err()) return IImageParser::ParseMany(names);
+    }
+
+    auto                                outcomes = rstd::move(*group).join();
+    std::vector<std::shared_ptr<Image>> images;
+    images.reserve(outcomes.len());
+    for (auto& outcome : outcomes) {
+        auto value = rstd::move(outcome).into_value();
+        images.push_back(value.is_some() ? rstd::move(value).unwrap_unchecked() : nullptr);
+    }
+    return images;
 }
 
 ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {

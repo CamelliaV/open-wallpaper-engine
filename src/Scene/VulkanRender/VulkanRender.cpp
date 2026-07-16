@@ -408,9 +408,31 @@ struct RenderProgram {
         }
     }
 
+    std::vector<TextureRequest> pendingImportedTextureRequests() const {
+        std::vector<TextureRequest> requests;
+        for (const auto& record : pass_records) {
+            if (! record.needsPrepare()) continue;
+            for (const auto& diagnostic : record.pass->textureRequestDiagnostics()) {
+                if (diagnostic.role != "sampled") continue;
+                if (diagnostic.request.has_value()) {
+                    if (diagnostic.request->kind == TextureRequestKind::Imported) {
+                        requests.push_back(*diagnostic.request);
+                    }
+                    continue;
+                }
+                if (! diagnostic.name.empty() && ! owe::IsSpecTex(diagnostic.name)) {
+                    requests.push_back(MakeImportedTextureRequest(diagnostic.name));
+                }
+            }
+        }
+        return requests;
+    }
+
     void prepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
                  const owe::RenderSceneSnapshot& render_scene) {
         SnapshotImportedTextureProvider imported_textures(render_scene, scene.imageParser.get());
+        auto                            imported_requests = pendingImportedTextureRequests();
+        imported_textures.Preload(imported_requests, device);
         struct ProviderScope {
             RenderingResources& resources;
             ProviderScope(RenderingResources& resources, ImportedTextureProvider& provider)

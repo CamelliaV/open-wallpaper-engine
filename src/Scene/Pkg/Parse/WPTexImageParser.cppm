@@ -92,8 +92,9 @@ public:
     WPTexImageParser(fs::VFS* vfs): m_vfs(vfs) {}
     virtual ~WPTexImageParser() = default;
 
-    std::shared_ptr<Image> Parse(const std::string&) override;
-    ImageHeader            ParseHeader(const std::string&) override;
+    std::shared_ptr<Image>              Parse(const std::string&) override;
+    std::vector<std::shared_ptr<Image>> ParseMany(std::span<const std::string> names) override;
+    ImageHeader                         ParseHeader(const std::string&) override;
 
 private:
     fs::VFS* m_vfs;

@@ -3403,6 +3403,30 @@ public:
         if (auto it = m_synth.find(name); it != m_synth.end()) return it->second;
         return m_inner ? m_inner->Parse(name) : nullptr;
     }
+    std::vector<std::shared_ptr<Image>> ParseMany(std::span<const std::string> names) override {
+        std::vector<std::shared_ptr<Image>> images(names.size());
+        std::vector<std::string>            delegated_names;
+        std::vector<usize>                  delegated_indices;
+        delegated_names.reserve(names.size());
+        delegated_indices.reserve(names.size());
+
+        for (usize index = 0; index < names.size(); ++index) {
+            if (auto it = m_synth.find(names[index]); it != m_synth.end()) {
+                images[index] = it->second;
+            } else {
+                delegated_names.push_back(names[index]);
+                delegated_indices.push_back(index);
+            }
+        }
+        if (! m_inner || delegated_names.empty()) return images;
+
+        auto delegated = m_inner->ParseMany(delegated_names);
+        auto count     = std::min(delegated.size(), delegated_indices.size());
+        for (usize index = 0; index < count; ++index) {
+            images[delegated_indices[index]] = rstd::move(delegated[index]);
+        }
+        return images;
+    }
     ImageHeader ParseHeader(const std::string& name) override {
         if (auto it = m_synth.find(name); it != m_synth.end()) return it->second->header;
         return m_inner ? m_inner->ParseHeader(name) : ImageHeader {};

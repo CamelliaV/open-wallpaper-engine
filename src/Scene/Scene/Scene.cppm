@@ -2041,10 +2041,16 @@ public:
 
 class IImageParser {
 public:
-    IImageParser()                                                 = default;
-    virtual ~IImageParser()                                        = default;
-    virtual std::shared_ptr<Image> Parse(const std::string&)       = 0;
-    virtual ImageHeader            ParseHeader(const std::string&) = 0;
+    IImageParser()                                                        = default;
+    virtual ~IImageParser()                                               = default;
+    virtual std::shared_ptr<Image>              Parse(const std::string&) = 0;
+    virtual std::vector<std::shared_ptr<Image>> ParseMany(std::span<const std::string> names) {
+        std::vector<std::shared_ptr<Image>> images;
+        images.reserve(names.size());
+        for (const auto& name : names) images.push_back(Parse(name));
+        return images;
+    }
+    virtual ImageHeader ParseHeader(const std::string&) = 0;
 };
 
 struct SceneNodeId {
