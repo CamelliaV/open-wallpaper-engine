@@ -10,6 +10,7 @@ export namespace viewer
 {
 
 std::filesystem::path ExecutableDir(const char* argv0);
+std::filesystem::path DefaultCacheDir(std::string_view name);
 
 void InitGlfwPlatformHint(bool force_x11);
 

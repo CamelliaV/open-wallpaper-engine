@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
     config.fps             = static_cast<uint32_t>(program.get<int32_t>(viewer::OPT_FPS));
 
     std::string cache_path = program.get<std::string>(viewer::OPT_CACHE_PATH);
-    if (cache_path.empty()) cache_path = owe::platform::GetCachePath("wescene-renderer");
+    if (cache_path.empty()) cache_path = viewer::DefaultCacheDir("wescene-renderer").string();
     config.cache_dir = std::move(cache_path);
 
     // Apply --user-properties FILE before the scene loads so the first
