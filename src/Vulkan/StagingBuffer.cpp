@@ -232,7 +232,7 @@ bool StagingBuffer::fillBuf(const StagingBufferRef& ref, usize offset, usize siz
     return true;
 }
 
-bool StagingBuffer::recordUpload(vvk::CommandBuffer& cmd) {
+bool StagingBuffer::prepareGpuBuffer() {
     if (! m_gpu_buf.handle) {
         if (auto opt = CreateGpuBuffer(m_device.vma_allocator(), m_usage, m_stage_buf.req_size);
             opt.is_some()) {
@@ -240,6 +240,11 @@ bool StagingBuffer::recordUpload(vvk::CommandBuffer& cmd) {
         } else
             return false;
     }
+    return true;
+}
+
+bool StagingBuffer::recordUpload(vvk::CommandBuffer& cmd) {
+    if (! prepareGpuBuffer()) return false;
     if (m_stage_raw != nullptr) {
         m_stage_buf.handle.UnMapMemory();
         m_stage_raw = nullptr;

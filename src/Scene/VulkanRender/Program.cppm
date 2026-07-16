@@ -494,6 +494,10 @@ struct RenderProgram {
             rstd_error("prepare resource plan failed: {}", error.message);
             return false;
         }
+        if (! rr.resources.PreparePendingUploads()) {
+            rstd_error("prepare buffer upload backing failed");
+            return false;
+        }
         rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
         rstd::Option<owe::resource::TextureUseHandle> frame_msaa_use   = rstd::None();
         std::string                                   frame_msaa_name;

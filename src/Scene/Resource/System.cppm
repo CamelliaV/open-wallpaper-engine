@@ -297,6 +297,8 @@ public:
         return Ok(handle);
     }
 
+    bool PreparePendingUploads() { return m_registries.BufferUploads().preparePendingUploads(); }
+
     bool RecordPendingUploads(vvk::CommandBuffer& command) {
         return m_registries.BufferUploads().recordPendingUploads(command);
     }

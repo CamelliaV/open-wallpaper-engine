@@ -116,6 +116,11 @@ VkBuffer BufferUploadPool::gpuBuf() const {
     return m_buf.is_some() ? m_buf->as_ptr().as_raw_ptr()->gpuBuf() : VK_NULL_HANDLE;
 }
 
+bool BufferUploadPool::preparePendingUploads() {
+    if (m_buf.is_none()) return false;
+    return ! m_dirty || m_buf->get()->prepareGpuBuffer();
+}
+
 bool BufferUploadPool::recordPendingUploads(vvk::CommandBuffer& cmd) {
     if (m_buf.is_none() || ! m_dirty) return true;
     if (! m_buf->get()->recordUpload(cmd)) return false;

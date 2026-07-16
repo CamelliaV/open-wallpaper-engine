@@ -819,6 +819,7 @@ public:
     bool writeToBuf(const StagingBufferRef&, std::span<u8>, usize offset = 0);
     bool fillBuf(const StagingBufferRef& ref, usize offset, usize size, u8 c);
 
+    bool prepareGpuBuffer();
     bool recordUpload(vvk::CommandBuffer&);
 
     VkBuffer gpuBuf() const;
@@ -903,6 +904,7 @@ public:
     bool                     Update(BufferAllocation&, std::span<const u8> data);
     void                     Release(StagingBufferRef ref);
     VkBuffer                 gpuBuf() const;
+    bool                     preparePendingUploads();
     bool                     recordPendingUploads(vvk::CommandBuffer& cmd);
 
 private:
