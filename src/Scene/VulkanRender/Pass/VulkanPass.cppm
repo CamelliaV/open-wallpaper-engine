@@ -177,8 +177,8 @@ public:
         SceneShaderArtifactProvider provider(*m_shader_cache, shader);
         auto                        artifact = provider.LoadShader(request);
         if (artifact.is_err()) return {};
-        auto name = request.name.clone();
-        (void)m_shaders.insert(rstd::move(name), rstd::move(artifact).unwrap_unchecked());
+        auto artifact_key = request.clone();
+        (void)m_shaders.insert(rstd::move(artifact_key), rstd::move(artifact).unwrap_unchecked());
         m_plan.shaders.push(resource::ShaderPlanEntry {
             .handle  = handle,
             .request = rstd::move(request),
@@ -230,7 +230,7 @@ public:
 
     auto ShaderArtifact(const resource::ShaderRequest& request) const
         -> rstd::Option<rstd::ref<resource::ShaderArtifact>> {
-        return m_shaders.get(request.name);
+        return m_shaders.get(request);
     }
 
 private:
@@ -243,7 +243,9 @@ private:
     rstd::u64                                                    m_next_framebuffer { 0 };
     rstd::u64                                                    m_next_external { 0 };
     rstd::collections::HashMap<String, rstd::vec::Vec<rstd::u8>> m_buffers;
-    rstd::collections::HashMap<String, resource::ShaderArtifact> m_shaders;
+    rstd::collections::HashMap<resource::ShaderRequest, resource::ShaderArtifact,
+                               resource::ShaderRequestHasher>
+        m_shaders;
 };
 
 class VulkanPass : public rg::Pass {

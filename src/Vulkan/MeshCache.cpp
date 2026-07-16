@@ -96,7 +96,22 @@ Option<BufferAllocation> BufferUploadPool::Upload(std::span<const u8>        dat
 }
 
 bool BufferUploadPool::Update(BufferAllocation& allocation, std::span<const u8> data) {
-    if (m_buf.is_none() || allocation.m_owner != this || data.size() > allocation.m_ref.size) {
+    if (m_buf.is_none()) {
+        rstd_error("update buffer failed: upload pool is not initialized");
+        return false;
+    }
+    if (allocation.m_owner != this) {
+        rstd_error("update buffer failed: allocation belongs to another upload pool");
+        return false;
+    }
+    if (! allocation.m_ref) {
+        rstd_error("update buffer failed: staging allocation is unavailable");
+        return false;
+    }
+    if (data.size() > allocation.m_ref.size) {
+        rstd_error("update buffer failed: content size {} exceeds allocation size {}",
+                   data.size(),
+                   allocation.m_ref.size);
         return false;
     }
     if (data.empty()) return true;

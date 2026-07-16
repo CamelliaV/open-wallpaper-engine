@@ -38,28 +38,15 @@ public:
     auto Prepare(resource::ShaderRequest                        request,
                  mut_ref<dyn<resource::ShaderArtifactProvider>> provider)
         -> Result<PreparedShader, resource::ResourceError> {
-        auto existing = m_names.get(request.name);
+        auto existing = m_requests.get(request);
         if (existing.is_some()) {
-            auto entry = m_entries.get_mut(**existing);
+            auto entry = m_entries.get(**existing);
             if (entry.is_none()) {
                 return Err(resource::ResourceError {
                     .kind    = resource::ResourceErrorKind::BackendFailure,
                     .message = rstd::format("shader registry entry is unavailable"),
                 });
             }
-            if ((**entry).request.content_version == request.content_version &&
-                (**entry).request.source == request.source) {
-                return Ok(PreparedShader {
-                    .resource = (**entry).handle,
-                    .physical = (**entry).physical.clone(),
-                });
-            }
-            auto artifact = provider->LoadShader(request);
-            if (artifact.is_err()) return Err(rstd::move(artifact).unwrap_err_unchecked());
-            auto generation    = (**entry).physical->physical_generation + 1;
-            (**entry).request  = rstd::move(request);
-            (**entry).physical = rstd::sync::Arc<ShaderPhysical>::make(
-                rstd::move(artifact).unwrap_unchecked(), generation);
             return Ok(PreparedShader {
                 .resource = (**entry).handle,
                 .physical = (**entry).physical.clone(),
@@ -68,8 +55,8 @@ public:
 
         auto artifact = provider->LoadShader(request);
         if (artifact.is_err()) return Err(rstd::move(artifact).unwrap_err_unchecked());
-        auto handle = NextHandle();
-        auto name   = request.name.clone();
+        auto handle      = NextHandle();
+        auto request_key = request.clone();
         auto physical =
             rstd::sync::Arc<ShaderPhysical>::make(rstd::move(artifact).unwrap_unchecked(), u64(1));
         (void)m_entries.insert(handle,
@@ -78,7 +65,7 @@ public:
                                    .request  = rstd::move(request),
                                    .physical = physical.clone(),
                                });
-        (void)m_names.insert(rstd::move(name), handle);
+        (void)m_requests.insert(rstd::move(request_key), handle);
         return Ok(PreparedShader {
             .resource = handle,
             .physical = rstd::move(physical),
@@ -99,7 +86,7 @@ public:
 
     void Reset() {
         m_entries.clear();
-        m_names.clear();
+        m_requests.clear();
         m_next_index = 0;
         ++m_generation;
         if (m_generation == 0) ++m_generation;
@@ -117,10 +104,12 @@ private:
         rstd::collections::HashMap<resource::ShaderHandle, ShaderEntry,
                                    resource::ResourceHandleHasher<resource::ShaderHandle>>;
 
-    u64                                                        m_generation { 1 };
-    u64                                                        m_next_index { 0 };
-    EntryMap                                                   m_entries;
-    rstd::collections::HashMap<String, resource::ShaderHandle> m_names;
+    u64      m_generation { 1 };
+    u64      m_next_index { 0 };
+    EntryMap m_entries;
+    rstd::collections::HashMap<resource::ShaderRequest, resource::ShaderHandle,
+                               resource::ShaderRequestHasher>
+        m_requests;
 };
 
 } // namespace owe::resource_registry

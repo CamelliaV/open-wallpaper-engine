@@ -29,6 +29,22 @@ struct ShaderRequest {
             .content_version = content_version,
         };
     }
+
+    friend bool operator==(const ShaderRequest&, const ShaderRequest&) = default;
+};
+
+struct ShaderRequestHasher {
+    rstd::hash::RandomState state;
+
+    auto operator()(const ShaderRequest& request) const noexcept -> u64 {
+        auto seed = state(request.name);
+        seed ^= state(request.source.index) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        seed ^=
+            state(request.source.generation) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        seed ^=
+            state(request.content_version) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        return seed;
+    }
 };
 
 struct ShaderArtifactStage {

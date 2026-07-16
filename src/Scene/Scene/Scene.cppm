@@ -81,7 +81,7 @@ public:
 
 struct SceneShader {
 public:
-    u32         id;
+    u32         id { 0 };
     std::string name;
 
     std::vector<ShaderCode> codes;
