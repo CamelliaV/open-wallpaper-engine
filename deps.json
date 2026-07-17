@@ -2,8 +2,8 @@
   {
     "dest": "build/_flatpak_deps/eigen-src",
     "disable-shallow-clone": false,
-    "tag": "3.4.0",
-    "commit": "3147391d946bb4b6c68edd901f2add6ac1f31f8c",
+    "tag": "5.0.1",
+    "commit": "bc3b39870ecb690a623a3f49149a358b95c5781d",
     "type": "git",
     "url": "https://gitlab.com/libeigen/eigen.git",
     "x-cmake": {
