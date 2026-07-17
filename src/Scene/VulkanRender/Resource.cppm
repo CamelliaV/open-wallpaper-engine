@@ -94,6 +94,7 @@ inline void WriteTextureRequestIdentity(PipelineKeyWriter& writer, const Texture
     writer.writeBool(request.definition.is_some());
     if (request.definition.is_some()) WriteTextureDefinitionIdentity(writer, *request.definition);
     WritePipelineScalar(writer, request.lifetime);
+    writer.writeU32(request.content);
 }
 
 inline void WriteImageParametersIdentity(PipelineKeyWriter& writer, const ImageParameters& image) {

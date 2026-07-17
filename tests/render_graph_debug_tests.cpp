@@ -198,6 +198,50 @@ TEST(RenderGraphResources, UsesGraphKeyAsTextureRequestIdentity) {
               "_rt_default_1_copy");
 }
 
+TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
+    owe::rg::RenderGraph graph;
+    auto                 history      = owe::rg::TextureNodeRef {};
+    auto                 history_desc = [] {
+        return owe::rg::TextureDesc {
+            .name    = String::make("history"),
+            .key     = String::make("history"),
+            .kind    = owe::rg::TextureKind::Temp,
+            .request = rstd::Some(owe::resource::TextureRequest {
+                .kind       = owe::resource::TextureRequestKind::RenderTarget,
+                .name       = String::make("history"),
+                .definition = rstd::Some(owe::resource::TextureDefinition {
+                    .width  = 1920,
+                    .height = 1080,
+                }),
+                .lifetime   = owe::resource::TextureLifetimeClass::FrameLocal,
+            }),
+        };
+    };
+
+    graph.addPass<DebugPass>("motion/accumulate",
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 history = builder.createTexture(history_desc());
+                                 builder.markVirtualWrite(history);
+                                 builder.read(history);
+                             });
+    graph.addPass<DebugPass>("motion/store",
+                             owe::rg::PassNode::Type::Copy,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 auto next = builder.createTexture(history_desc(), true);
+                                 builder.write(next);
+                             });
+
+    auto plan = graph.resourcePlan();
+    ASSERT_EQ(plan.textures.len(), 2u);
+    for (const auto& entry : plan.textures) {
+        EXPECT_EQ(entry.request.lifetime, owe::resource::TextureLifetimeClass::Retained);
+        EXPECT_NE(entry.request.content & owe::resource::TextureContentFlag(
+                                              owe::resource::TextureContent::PreserveAcrossFrames),
+                  0u);
+    }
+}
+
 TEST(VulkanRenderDiagnostics, EmptyBeforeProgramBuild) {
     owe::vulkan::VulkanRender render;
     EXPECT_TRUE(render.preparedPassDiagnostics().empty());

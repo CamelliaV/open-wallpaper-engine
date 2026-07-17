@@ -428,6 +428,37 @@ auto RenderGraph::getLastReadTextures(rstd::slice<NodeHandle> nodes) const
 }
 
 auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
+    using BoundaryMap     = rstd::collections::HashMap<String, bool>;
+    auto frame_boundaries = BoundaryMap::make();
+    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+        auto node = getTexNode(NodeHandle { .index = index });
+        if (node.is_none() || node->version != 0 || node->writer.is_none() ||
+            ! isVirtualPassNode(*node->writer)) {
+            continue;
+        }
+
+        bool has_real_reader = false;
+        auto targets         = m_dg.GetNodeOut(node->handle);
+        for (usize target_index = 0; target_index < targets.len(); ++target_index) {
+            if (isRenderPassNode(targets[target_index])) {
+                has_real_reader = true;
+                break;
+            }
+        }
+        if (! has_real_reader) continue;
+
+        auto next = node->next;
+        while (next.is_some()) {
+            auto version = getTexNode(*next);
+            if (version.is_none()) break;
+            if (version->writer.is_some() && isRenderPassNode(*version->writer)) {
+                (void)frame_boundaries.insert(node->key.clone(), true);
+                break;
+            }
+            next = version->next;
+        }
+    }
+
     resource::ResourcePlan plan { .generation = 1 };
     for (usize index = 0; index < m_dg.NodeNum(); ++index) {
         auto node = getTexNode(NodeHandle { .index = index });
@@ -441,13 +472,19 @@ auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
                 break;
             }
         }
-        auto access = node->writer.is_some() ? (read ? resource::ResourceAccess::ReadWrite
-                                                     : resource::ResourceAccess::Write)
-                                             : resource::ResourceAccess::Read;
+        auto access  = node->writer.is_some() ? (read ? resource::ResourceAccess::ReadWrite
+                                                      : resource::ResourceAccess::Write)
+                                              : resource::ResourceAccess::Read;
+        auto request = node->request->clone();
+        if (frame_boundaries.contains_key(node->key)) {
+            request.lifetime = resource::TextureLifetimeClass::Retained;
+            request.content |=
+                resource::TextureContentFlag(resource::TextureContent::PreserveAcrossFrames);
+        }
         plan.textures.push(resource::TexturePlanEntry {
             .handle  = resource::TextureUseHandle { .index      = node->handle.index,
                                                     .generation = plan.generation },
-            .request = node->request->clone(),
+            .request = rstd::move(request),
             .access  = access,
             .version = static_cast<u32>(node->version),
         });

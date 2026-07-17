@@ -112,6 +112,7 @@ struct TextureRequest {
     Option<TextureDefinitionId> source;
     Option<TextureDefinition>   definition;
     TextureLifetimeClass        lifetime { TextureLifetimeClass::Retained };
+    TextureContentFlags         content { TextureContentFlag(TextureContent::SourceDefined) };
 
     auto clone() const -> TextureRequest {
         return TextureRequest {
@@ -120,6 +121,7 @@ struct TextureRequest {
             .source     = source,
             .definition = definition,
             .lifetime   = lifetime,
+            .content    = content,
         };
     }
 };
@@ -142,7 +144,8 @@ struct TextureBindingRequest {
 
 inline bool SameTextureRequest(const TextureRequest& lhs, const TextureRequest& rhs) {
     return lhs.kind == rhs.kind && lhs.name == rhs.name.as_str() && lhs.source == rhs.source &&
-           lhs.definition == rhs.definition && lhs.lifetime == rhs.lifetime;
+           lhs.definition == rhs.definition && lhs.lifetime == rhs.lifetime &&
+           lhs.content == rhs.content;
 }
 
 inline bool SameTextureRequest(const Option<TextureRequest>& lhs,

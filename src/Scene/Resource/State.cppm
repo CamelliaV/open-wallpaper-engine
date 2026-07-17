@@ -52,7 +52,11 @@ public:
                 if ((**existing).image.handle != image.handle) return false;
                 continue;
             }
-            auto initial = entry.request.kind == resource::TextureRequestKind::Imported
+            const bool preserve_across_frames =
+                (entry.request.content &
+                 resource::TextureContentFlag(resource::TextureContent::PreserveAcrossFrames)) != 0;
+            auto initial = entry.request.kind == resource::TextureRequestKind::Imported ||
+                                   preserve_across_frames
                                ? TextureStateKind::Sampled
                                : TextureStateKind::Undefined;
             if (m_textures

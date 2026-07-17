@@ -655,6 +655,39 @@ TEST(ResourceStateTracker, SharesStateAcrossUsesOfOneTexture) {
     EXPECT_EQ(barrier->barrier.newLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 }
 
+TEST(ResourceStateTracker, PreservesFrameBoundaryContentBeforeItsFirstRead) {
+    auto use     = owe::resource::TextureUseHandle { .index = 1, .generation = 3 };
+    auto request = owe::resource::TextureRequest {
+        .kind = owe::resource::TextureRequestKind::RenderTarget,
+        .name = rstd::string::String::make(rstd::cppstd::as_str("history")),
+        .content =
+            owe::resource::TextureContentFlag(owe::resource::TextureContent::PreserveAcrossFrames),
+    };
+    owe::resource::ResourcePlan plan { .generation = 3 };
+    plan.textures.push(owe::resource::TexturePlanEntry {
+        .handle  = use,
+        .request = request.clone(),
+        .access  = owe::resource::ResourceAccess::ReadWrite,
+    });
+
+    auto                                          allocation = TextureAllocation(1);
+    owe::resource_registry::PreparedResourceTable table(3);
+    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
+        .use      = use,
+        .resource = owe::resource::TextureHandle { .index = 8, .generation = 1 },
+        .request  = rstd::move(request),
+        .physical = allocation.clone(),
+        .image    = allocation->View(),
+    }));
+
+    owe::resource_registry::ResourceStateTracker states;
+    ASSERT_TRUE(states.Compile(plan, table));
+    auto sampled = states.Prepare(use, owe::resource_registry::TextureStateKind::Sampled);
+    ASSERT_TRUE(sampled.is_some());
+    EXPECT_EQ(sampled->barrier.oldLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    EXPECT_EQ(sampled->barrier.newLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
 TEST(MemoryBudgetPolicy, ClassifiesBudgetPressure) {
     owe::resource_registry::MemoryBudgetPolicy memory;
     memory.Refresh(owe::vulkan::MemoryBudgetSnapshot {
