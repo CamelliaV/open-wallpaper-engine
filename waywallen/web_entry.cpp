@@ -2,8 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include <argparse/argparse.hpp>
-
 #include <errno.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -14,9 +12,11 @@ module;
 
 module waywallen.web_entry;
 
+import rstd.argparse;
 import rstd.cppstd;
 import rstd.log;
 import owe.user_property;
+import wescene.cli;
 import wescene.json;
 import vulkan;
 import weweb;
@@ -48,34 +48,55 @@ struct Options {
     std::exit(1);
 }
 
+std::string ToStdString(const rstd::string::String& value) {
+    return { value.data(), value.size() };
+}
+
+template<typename T>
+const T& ArgValue(const rstd::argparse::Matches& matches, const rstd::argparse::ArgKey<T>& key) {
+    auto value = matches.get_one(key);
+    if (value.is_err() || value->is_none()) rstd::unreachable();
+    return ***value;
+}
+
 Options parse_args(int argc, char** argv) {
-    argparse::ArgumentParser program("waywallen-weweb-renderer");
-    program.add_argument("--ipc").required().help("Unix-domain socket path for daemon IPC");
-    program.add_argument("--path")
-        .default_value(std::string {})
-        .help("Workshop directory (containing project.json + index.html)");
-    program.add_argument("--workshop_id")
-        .default_value(std::string {})
-        .help("Optional Steam workshop id (informational; used for cache dir)");
-    program.add_argument("--render-node")
-        .default_value(std::string {})
-        .help("DRM render-node path to pin Vulkan/CEF GPU selection to "
-              "(empty => let the renderer pick the default)");
-    program.add_argument("remaining").remaining();
+    using namespace rstd::argparse;
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        rstd_error("{}", static_cast<const char*>(err.what()));
-        std::exit(1);
-    }
+    auto command = Command::make("waywallen-weweb-renderer");
+    auto ipc     = command.add_arg(Arg<rstd::string::String>::value("ipc", string_parser())
+                                       .long_name("ipc")
+                                       .help("Unix-domain socket path for daemon IPC")
+                                       .required());
+    auto path =
+        command.add_arg(Arg<rstd::string::String>::value("path", string_parser())
+                            .long_name("path")
+                            .help("Workshop directory (containing project.json + index.html)")
+                            .default_value(""));
+    auto workshop_id =
+        command.add_arg(Arg<rstd::string::String>::value("workshop_id", string_parser())
+                            .long_name("workshop_id")
+                            .help("Optional Steam workshop id (informational; used for cache dir)")
+                            .default_value(""));
+    auto render_node =
+        command.add_arg(Arg<rstd::string::String>::value("render-node", string_parser())
+                            .long_name("render-node")
+                            .help("DRM render-node path to pin Vulkan/CEF GPU selection to "
+                                  "(empty => let the renderer pick the default)")
+                            .default_value(""));
+    command.add_arg(Arg<rstd::string::String>::value("remaining", string_parser())
+                        .num_args(NumArgs::any())
+                        .allow_hyphen_values());
 
-    Options o;
-    o.ipc_path     = program.get<std::string>("--ipc");
-    o.workshop_dir = program.get<std::string>("--path");
-    o.workshop_id  = program.get<std::string>("--workshop_id");
-    o.render_node  = program.get<std::string>("--render-node");
-    return o;
+    auto parsed = owe::cli::ParseArgs(rstd::move(command), argc, argv);
+    if (parsed.is_err()) std::exit(parsed.unwrap_err().code);
+    auto matches = rstd::move(parsed).unwrap();
+
+    Options options;
+    options.ipc_path     = ToStdString(ArgValue(matches, ipc));
+    options.workshop_dir = ToStdString(ArgValue(matches, path));
+    options.workshop_id  = ToStdString(ArgValue(matches, workshop_id));
+    options.render_node  = ToStdString(ArgValue(matches, render_node));
+    return options;
 }
 
 const char* kv_get(const ww_kv_list_t& kv, const char* key) {

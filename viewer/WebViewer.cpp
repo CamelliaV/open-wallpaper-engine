@@ -2,9 +2,9 @@
 
 #include <GLFW/glfw3.h>
 
-#include <argparse/argparse.hpp>
-
+import rstd.argparse;
 import rstd.cppstd;
+import wescene.cli;
 import weweb;
 import wavsen.audio;
 import viewer.common;
@@ -12,6 +12,63 @@ import viewer.web;
 
 namespace
 {
+
+using namespace rstd::prelude;
+using namespace rstd::argparse;
+
+struct WebViewerArgs {
+    std::string workshop;
+    std::string presenter;
+    i32         width;
+    i32         height;
+    i32         remote_debugging_port;
+};
+
+std::string ToStdString(const String& value) { return { value.data(), value.size() }; }
+
+template<typename T>
+const T& Value(const Matches& matches, const ArgKey<T>& key) {
+    auto value = matches.get_one(key);
+    if (value.is_err() || value->is_none()) rstd::unreachable();
+    return ***value;
+}
+
+auto ParseWebViewerArgs(int argc, char** argv) -> Result<WebViewerArgs, owe::cli::ParseExit> {
+    auto command  = Command::make("webviewer");
+    auto workshop = command.add_arg(
+        Arg<String>::value("workshop", string_parser())
+            .value_name("WORKSHOP")
+            .help("path to a workshop/<id>/ directory containing project.json + index.html")
+            .required());
+    auto width  = command.add_arg(Arg<i32>::value("width", from_str_parser<i32>())
+                                      .long_name("width")
+                                      .help("initial window width in pixels")
+                                      .default_value("1280"));
+    auto height = command.add_arg(Arg<i32>::value("height", from_str_parser<i32>())
+                                      .long_name("height")
+                                      .help("initial window height in pixels")
+                                      .default_value("720"));
+    auto remote_debugging_port =
+        command.add_arg(Arg<i32>::value("remote-debugging-port", from_str_parser<i32>())
+                            .long_name("remote-debugging-port")
+                            .help("if non-zero, expose chrome devtools on this localhost port")
+                            .default_value("0"));
+    auto presenter = command.add_arg(Arg<String>::value("presenter", string_parser())
+                                         .long_name("presenter")
+                                         .help("present backend: egl (default) or vulkan")
+                                         .default_value("egl"));
+
+    auto parsed = owe::cli::ParseArgs(rstd::move(command), argc, argv);
+    if (parsed.is_err()) return Err(parsed.unwrap_err());
+    auto matches = rstd::move(parsed).unwrap();
+    return Ok(WebViewerArgs {
+        .workshop              = ToStdString(Value(matches, workshop)),
+        .presenter             = ToStdString(Value(matches, presenter)),
+        .width                 = Value(matches, width),
+        .height                = Value(matches, height),
+        .remote_debugging_port = Value(matches, remote_debugging_port),
+    });
+}
 
 struct ViewerCtx {
     weweb::BrowserHost* host { nullptr };
@@ -81,39 +138,17 @@ int main(int argc, char** argv) {
         return helper_exit;
     }
 
-    argparse::ArgumentParser p("webviewer");
-    p.add_argument("workshop")
-        .help("path to a workshop/<id>/ directory containing project.json + index.html");
-    p.add_argument("--width")
-        .help("initial window width in pixels")
-        .default_value(1280)
-        .scan<'i', int>();
-    p.add_argument("--height")
-        .help("initial window height in pixels")
-        .default_value(720)
-        .scan<'i', int>();
-    p.add_argument("--remote-debugging-port")
-        .help("if non-zero, expose chrome devtools on this localhost port")
-        .default_value(0)
-        .scan<'i', int>();
-    p.add_argument("--presenter")
-        .help("present backend: egl (default) or vulkan")
-        .default_value(std::string("egl"));
+    auto parsed_args = ParseWebViewerArgs(argc, argv);
+    if (parsed_args.is_err()) return parsed_args.unwrap_err().code;
+    auto args = rstd::move(parsed_args).unwrap();
 
-    try {
-        p.parse_args(argc, argv);
-    } catch (const std::exception& e) {
-        std::cerr << "webviewer: " << e.what() << "\n" << p;
-        return 2;
-    }
-
-    auto workshop_dir = std::filesystem::path(p.get<std::string>("workshop"));
+    auto workshop_dir = std::filesystem::path(args.workshop);
     if (! std::filesystem::is_directory(workshop_dir)) {
-        std::cerr << "webviewer: not a directory: " << workshop_dir << "\n";
+        std::cerr << "webviewer: not a directory: " << workshop_dir.string() << "\n";
         return 2;
     }
 
-    auto presenter_name = p.get<std::string>("--presenter");
+    auto presenter_name = args.presenter;
     if (presenter_name != "vulkan" && presenter_name != "egl") {
         std::cerr << "webviewer: --presenter must be 'vulkan' or 'egl', got '" << presenter_name
                   << "'\n";
@@ -142,8 +177,8 @@ int main(int argc, char** argv) {
     // want GLFW to leave the window context-less either way.
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    int         w_width  = p.get<int>("--width");
-    int         w_height = p.get<int>("--height");
+    int         w_width  = args.width;
+    int         w_height = args.height;
     GLFWwindow* window =
         glfwCreateWindow(w_width, w_height, manifest.title.c_str(), nullptr, nullptr);
     if (! window) {
@@ -169,7 +204,7 @@ int main(int argc, char** argv) {
     weweb::BrowserHost::InitOptions opts;
     opts.resources_dir = exe_dir;
     opts.locales_dir   = exe_dir / "locales";
-    if (int port = p.get<int>("--remote-debugging-port"); port > 0) {
+    if (int port = args.remote_debugging_port; port > 0) {
         opts.enable_remote_debugging = true;
         opts.remote_debugging_port   = port;
     }

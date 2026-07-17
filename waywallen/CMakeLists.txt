@@ -67,9 +67,9 @@ target_include_directories(waywallen-wescene-renderer
 target_link_libraries(waywallen-wescene-renderer
     PRIVATE
         owe-renderer
+        owe-cli
         waywallen::bridge
         waywallen-bridge-producer
-        argparse::argparse
         rstd.cppstd
 )
 
@@ -125,10 +125,10 @@ if(BUILD_WEWEB)
     target_link_libraries(waywallen-weweb-renderer
         PRIVATE
             owe-web-host
+            owe-cli
             waywallen::bridge
             waywallen-bridge-producer
             waywallen-web-producer-device
-            argparse::argparse
             wavsen::ffi::vulkan
             wavsen::audio
             rstd::rstd

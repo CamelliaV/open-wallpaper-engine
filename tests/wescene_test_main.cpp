@@ -11,8 +11,9 @@
 // GLFW. Exit 0 iff every selected pkg parsed AND every requested
 // validator succeeded.
 
-#include <argparse/argparse.hpp>
+#include <cstdio>
 
+import rstd.argparse;
 import wescene.pkg.parse;
 import wescene.json;
 import wescene.fs;
@@ -24,6 +25,7 @@ import wavsen.audio;
 import rstd;
 import rstd.log;
 import rstd.cppstd;
+import wescene.cli;
 import wescene.testing.corpus;
 import wescene.testing.pkg_header;
 import wescene.testing.json_builder;
@@ -34,6 +36,58 @@ using JsonSink = rstd::Option<rstd::mut_ref<Json>>;
 
 namespace
 {
+
+using rstd::argparse::Arg;
+using rstd::argparse::ArgGroup;
+using rstd::argparse::ArgKey;
+using rstd::argparse::Command;
+using rstd::argparse::from_str_parser;
+using rstd::argparse::Matches;
+using rstd::argparse::NumArgs;
+using rstd::argparse::string_parser;
+using rstd::string::String;
+
+std::string ToStdString(const String& value) { return { value.data(), value.size() }; }
+
+template<typename T>
+const T& ArgValue(const Matches& matches, const ArgKey<T>& key) {
+    auto value = matches.get_one(key);
+    if (value.is_err() || value->is_none()) rstd::unreachable();
+    return ***value;
+}
+
+bool ArgFlag(const Matches& matches, const ArgKey<bool>& key) {
+    auto value = matches.get_one(key);
+    if (value.is_err()) rstd::unreachable();
+    return value->is_some() && ***value;
+}
+
+std::string OptionalArgString(const Matches& matches, const ArgKey<String>& key) {
+    auto value = matches.get_one(key);
+    if (value.is_err()) rstd::unreachable();
+    return value->is_some() ? ToStdString(***value) : std::string {};
+}
+
+template<typename T>
+std::vector<T> ArgValues(const Matches& matches, const ArgKey<T>& key) {
+    std::vector<T> out;
+    auto           values = matches.get_many(key);
+    if (values.is_err()) rstd::unreachable();
+    if (values->is_none()) return out;
+    auto iterator = rstd::move(**values);
+    while (auto value = iterator.next()) out.push_back(**value);
+    return out;
+}
+
+std::vector<std::string> ArgStringValues(const Matches& matches, const ArgKey<String>& key) {
+    std::vector<std::string> out;
+    auto                     values = matches.get_many(key);
+    if (values.is_err()) rstd::unreachable();
+    if (values->is_none()) return out;
+    auto iterator = rstd::move(**values);
+    while (auto value = iterator.next()) out.push_back(ToStdString(**value));
+    return out;
+}
 
 template<typename T>
 void SetJsonField(Json& object, std::string_view key, T&& value) {
@@ -142,71 +196,115 @@ struct ScanOptions {
     std::string              json_dir; // empty = no per-workshop dump dir (--json-dir)
 };
 
-void AddScanArgs(argparse::ArgumentParser& p) {
-    p.add_description("Walk pkgs and run scene parse, optionally with per-asset passes.");
-    p.add_argument("--workshop-dir")
-        .default_value(std::string(kDefaultWorkshopDir))
-        .help("workshop root (children are <id>/scene.pkg) or a single pkg dir");
-    p.add_argument("--assets")
-        .default_value(std::string(kDefaultAssetsDir))
-        .help("shared engine assets, mounted at /assets fallback");
-    p.add_argument("--full").flag().help(
+struct ScanArgs {
+    ArgKey<String>        workshop_dir;
+    ArgKey<String>        assets;
+    ArgKey<bool>          full;
+    ArgKey<bool>          parse_tex;
+    ArgKey<bool>          parse_shader;
+    ArgKey<bool>          parse_mdl;
+    ArgKey<bool>          parse_mdl_full;
+    ArgKey<bool>          parse_all;
+    ArgKey<String>        name;
+    ArgKey<std::uint32_t> pkgv;
+    ArgKey<std::int32_t>  limit;
+    ArgKey<std::int32_t>  offset;
+    ArgKey<bool>          quiet;
+    ArgKey<bool>          stop_on_fail;
+    ArgKey<String>        json;
+    ArgKey<String>        json_dir;
+};
+
+ScanArgs AddScanArgs(Command& command) {
+    command.about("Walk pkgs and run scene parse, optionally with per-asset passes.");
+    auto workshop_dir = command.add_arg(
+        Arg<String>::value("workshop-dir", string_parser())
+            .long_name("workshop-dir")
+            .default_value(kDefaultWorkshopDir)
+            .help("workshop root (children are <id>/scene.pkg) or a single pkg dir"));
+    auto assets = command.add_arg(Arg<String>::value("assets", string_parser())
+                                      .long_name("assets")
+                                      .default_value(kDefaultAssetsDir)
+                                      .help("shared engine assets, mounted at /assets fallback"));
+    auto full   = command.add_arg(Arg<bool>::flag("full").long_name("full").help(
         "run full WPSceneParser::Parse (shader compile, bloom inject, glslang) "
-        "instead of the cheap FromJson+ExpandObjects+AdjustAuto base");
-    p.add_argument("--parse-tex").flag().help("run WPTexImageParser on every /materials/**/*.tex");
-    p.add_argument("--parse-shader")
-        .flag()
-        .help("run WPShaderParser::CompileMaterialShader on every /materials/**/*.json");
-    p.add_argument("--parse-mdl")
-        .flag()
-        .help("run WPMdlParser::ParseHeader on every /models/**/*.mdl (header-only)");
-    p.add_argument("--parse-mdl-full")
-        .flag()
-        .help("upgrade --parse-mdl to full WPMdlParser::Parse (slow; some hang/reject)");
-    p.add_argument("--parse-all")
-        .flag()
-        .help("--parse-tex + --parse-shader + --parse-mdl (header-only)");
-    p.add_argument("--name").append().help(
-        "only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
-    p.add_argument("--pkgv").append().scan<'i', unsigned>().help(
-        "only pkgs with PKGV stamp == N; repeatable, OR'd");
-    p.add_argument("--limit").default_value(0).scan<'i', int>().help(
-        "stop after N matched pkgs (default 0 = all)");
-    p.add_argument("--offset")
-        .default_value(0)
-        .scan<'i', int>()
-        .help("skip the first N matched pkgs before --limit applies");
-    p.add_argument("--quiet").flag().help("suppress per-asset OK lines; only FAIL + summary");
-    p.add_argument("--stop-on-fail")
-        .flag()
-        .help("exit non-zero on the first per-asset failure (resume at next --offset)");
-    auto& sink = p.add_mutually_exclusive_group();
-    sink.add_argument("--json")
-        .default_value(std::string())
-        .help("write structured validator results to FILE (pkgs[] + summary)");
-    sink.add_argument("--json-dir")
-        .default_value(std::string())
-        .help("write per-workshop DumpWorkshop snapshots to DIR/<id>.json");
+        "instead of the cheap FromJson+ExpandObjects+AdjustAuto base"));
+    auto parse_tex =
+        command.add_arg(Arg<bool>::flag("parse-tex")
+                            .long_name("parse-tex")
+                            .help("run WPTexImageParser on every /materials/**/*.tex"));
+    auto parse_shader = command.add_arg(
+        Arg<bool>::flag("parse-shader")
+            .long_name("parse-shader")
+            .help("run WPShaderParser::CompileMaterialShader on every /materials/**/*.json"));
+    auto parse_mdl = command.add_arg(
+        Arg<bool>::flag("parse-mdl")
+            .long_name("parse-mdl")
+            .help("run WPMdlParser::ParseHeader on every /models/**/*.mdl (header-only)"));
+    auto parse_mdl_full = command.add_arg(
+        Arg<bool>::flag("parse-mdl-full")
+            .long_name("parse-mdl-full")
+            .help("upgrade --parse-mdl to full WPMdlParser::Parse (slow; some hang/reject)"));
+    auto parse_all =
+        command.add_arg(Arg<bool>::flag("parse-all")
+                            .long_name("parse-all")
+                            .help("--parse-tex + --parse-shader + --parse-mdl (header-only)"));
+    auto name = command.add_arg(
+        Arg<String>::value("name", string_parser())
+            .long_name("name")
+            .append()
+            .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd"));
+    auto pkgv  = command.add_arg(Arg<std::uint32_t>::value("pkgv", from_str_parser<std::uint32_t>())
+                                     .long_name("pkgv")
+                                     .append()
+                                     .help("only pkgs with PKGV stamp == N; repeatable, OR'd"));
+    auto limit = command.add_arg(Arg<std::int32_t>::value("limit", from_str_parser<std::int32_t>())
+                                     .long_name("limit")
+                                     .default_value("0")
+                                     .help("stop after N matched pkgs (default 0 = all)"));
+    auto offset =
+        command.add_arg(Arg<std::int32_t>::value("offset", from_str_parser<std::int32_t>())
+                            .long_name("offset")
+                            .default_value("0")
+                            .help("skip the first N matched pkgs before --limit applies"));
+    auto quiet        = command.add_arg(Arg<bool>::flag("quiet").long_name("quiet").help(
+        "suppress per-asset OK lines; only FAIL + summary"));
+    auto stop_on_fail = command.add_arg(
+        Arg<bool>::flag("stop-on-fail")
+            .long_name("stop-on-fail")
+            .help("exit non-zero on the first per-asset failure (resume at next --offset)"));
+    auto json =
+        command.add_arg(Arg<String>::value("json", string_parser())
+                            .long_name("json")
+                            .help("write structured validator results to FILE (pkgs[] + summary)"));
+    auto json_dir =
+        command.add_arg(Arg<String>::value("json-dir", string_parser())
+                            .long_name("json-dir")
+                            .help("write per-workshop DumpWorkshop snapshots to DIR/<id>.json"));
+    command.add_group(ArgGroup::make("json-output").arg(json).arg(json_dir).multiple(false));
+    return { workshop_dir,   assets,       full, parse_tex, parse_shader, parse_mdl,
+             parse_mdl_full, parse_all,    name, pkgv,      limit,        offset,
+             quiet,          stop_on_fail, json, json_dir };
 }
 
-ScanOptions ReadScanOptions(const argparse::ArgumentParser& a) {
+ScanOptions ReadScanOptions(const Matches& matches, const ScanArgs& args) {
     ScanOptions opt;
-    opt.workshop_dir = a.get<std::string>("--workshop-dir");
-    opt.assets_dir   = a.get<std::string>("--assets");
-    const bool all   = a.get<bool>("--parse-all");
-    opt.full         = a.get<bool>("--full");
-    opt.p_mdl_full   = a.get<bool>("--parse-mdl-full");
-    opt.p_tex        = all || a.get<bool>("--parse-tex");
-    opt.p_shader     = all || a.get<bool>("--parse-shader");
-    opt.p_mdl        = all || opt.p_mdl_full || a.get<bool>("--parse-mdl");
-    if (auto v = a.present<std::vector<std::string>>("--name")) opt.name_filters = *v;
-    if (auto v = a.present<std::vector<unsigned>>("--pkgv")) opt.pkgv_filters = *v;
-    opt.limit        = a.get<int>("--limit");
-    opt.offset       = a.get<int>("--offset");
-    opt.quiet        = a.get<bool>("--quiet");
-    opt.stop_on_fail = a.get<bool>("--stop-on-fail");
-    opt.json_out     = a.get<std::string>("--json");
-    opt.json_dir     = a.get<std::string>("--json-dir");
+    opt.workshop_dir = ToStdString(ArgValue(matches, args.workshop_dir));
+    opt.assets_dir   = ToStdString(ArgValue(matches, args.assets));
+    const bool all   = ArgFlag(matches, args.parse_all);
+    opt.full         = ArgFlag(matches, args.full);
+    opt.p_mdl_full   = ArgFlag(matches, args.parse_mdl_full);
+    opt.p_tex        = all || ArgFlag(matches, args.parse_tex);
+    opt.p_shader     = all || ArgFlag(matches, args.parse_shader);
+    opt.p_mdl        = all || opt.p_mdl_full || ArgFlag(matches, args.parse_mdl);
+    opt.name_filters = ArgStringValues(matches, args.name);
+    opt.pkgv_filters = ArgValues(matches, args.pkgv);
+    opt.limit        = ArgValue(matches, args.limit);
+    opt.offset       = ArgValue(matches, args.offset);
+    opt.quiet        = ArgFlag(matches, args.quiet);
+    opt.stop_on_fail = ArgFlag(matches, args.stop_on_fail);
+    opt.json_out     = OptionalArgString(matches, args.json);
+    opt.json_dir     = OptionalArgString(matches, args.json_dir);
     return opt;
 }
 
@@ -786,22 +884,36 @@ int CmdScan(const ScanOptions& opt) {
 // extract subcommand
 // ---------------------------------------------------------------------------
 
-void AddExtractArgs(argparse::ArgumentParser& p) {
-    p.add_description("List entries of a single scene.pkg, or export one asset to stdout/-o FILE.");
-    p.add_argument("pkg").help("path to scene.pkg, or a directory containing one");
-    p.add_argument("asset")
-        .nargs(argparse::nargs_pattern::optional)
-        .default_value(std::string())
-        .help("in-pkg path to extract (e.g. /scene.json). Omit to list all entries.");
-    p.add_argument("-o", "--output")
-        .default_value(std::string())
-        .help("write to FILE (default stdout; '-' forces stdout)");
+struct ExtractArgs {
+    ArgKey<String> pkg;
+    ArgKey<String> asset;
+    ArgKey<String> output;
+};
+
+ExtractArgs AddExtractArgs(Command& command) {
+    command.about("List entries of a single scene.pkg, or export one asset to stdout/-o FILE.");
+    auto pkg   = command.add_arg(Arg<String>::value("pkg", string_parser())
+                                     .value_name("PKG")
+                                     .help("path to scene.pkg, or a directory containing one")
+                                     .required());
+    auto asset = command.add_arg(
+        Arg<String>::value("asset", string_parser())
+            .value_name("ASSET")
+            .num_args(NumArgs::optional())
+            .default_value("")
+            .help("in-pkg path to extract (e.g. /scene.json). Omit to list all entries."));
+    auto output = command.add_arg(Arg<String>::value("output", string_parser())
+                                      .short_name('o')
+                                      .long_name("output")
+                                      .default_value("")
+                                      .help("write to FILE (default stdout; '-' forces stdout)"));
+    return { pkg, asset, output };
 }
 
-int CmdExtract(const argparse::ArgumentParser& a) {
-    const std::string pkg_arg   = a.get<std::string>("pkg");
-    const std::string asset_arg = a.get<std::string>("asset");
-    const std::string out_file  = a.get<std::string>("--output");
+int CmdExtract(const Matches& matches, const ExtractArgs& args) {
+    const std::string pkg_arg   = ToStdString(ArgValue(matches, args.pkg));
+    const std::string asset_arg = ToStdString(ArgValue(matches, args.asset));
+    const std::string out_file  = ToStdString(ArgValue(matches, args.output));
 
     const std::string pkg_path = ResolvePkgPath(pkg_arg);
     if (pkg_path.empty()) {
@@ -913,80 +1025,135 @@ struct GrepOptions {
     bool line_context() const { return before > 0 || after > 0; }
 };
 
-void AddGrepArgs(argparse::ArgumentParser& p) {
-    p.add_description("Regex-search (ECMAScript / std::regex) the text entries inside each pkg's "
-                      "VFS. By default only .json entries are searched (scene.json + every "
-                      "materials/**.json + effects/**.json).");
-    p.add_argument("pattern").help("ECMAScript / std::regex pattern");
-    p.add_argument("--workshop-dir")
-        .default_value(std::string(kDefaultWorkshopDir))
-        .help("workshop root (children are <id>/scene.pkg) or a single pkg dir");
-    p.add_argument("--name").append().help(
-        "only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd");
-    p.add_argument("--limit").default_value(0).scan<'i', int>().help(
-        "stop after N matched pkgs (default 0 = all)");
-    p.add_argument("--offset")
-        .default_value(0)
-        .scan<'i', int>()
-        .help("skip the first N matched pkgs before --limit applies");
-    p.add_argument("--path-filter")
-        .default_value(std::string())
-        .help("only search in-pkg paths containing SUBSTR (ci); overrides .json gate");
-    p.add_argument("--all-text")
-        .flag()
-        .help("search every entry, not just .json (combine with --path-filter)");
-    p.add_argument("-i", "--ignore-case").flag().help("case-insensitive match");
-    p.add_argument("--snippet")
-        .default_value(GrepOptions {}.snippet)
-        .scan<'i', int>()
-        .help("chars of context around a match in the flat default mode "
-              "(ignored when -A/-B/-C is set)");
-    p.add_argument("-A", "--after")
-        .default_value(0)
-        .scan<'i', int>()
-        .help("print N lines after each match (grep -A); switches default mode to "
-              "line context with <path>:<lineno>: prefixes");
-    p.add_argument("-B", "--before")
-        .default_value(0)
-        .scan<'i', int>()
-        .help("print N lines before each match (grep -B)");
-    p.add_argument("-C", "--around")
-        .default_value(0)
-        .scan<'i', int>()
-        .help("print N lines before AND after each match (grep -C)");
-    p.add_argument("--json").flag().help("structured array of {id, path, matches[]}");
-    auto& mode = p.add_mutually_exclusive_group();
-    mode.add_argument("-o", "--only-matching")
-        .flag()
-        .help("print only the matched substring, one per line");
-    mode.add_argument("-l", "--files-with-matches")
-        .flag()
-        .help("print <id>\\t<path> once per matching entry");
-    mode.add_argument("-c", "--count")
-        .flag()
-        .help("print <id>\\t<count> per pkg with at least one match");
+struct GrepArgs {
+    ArgKey<String>       pattern;
+    ArgKey<String>       workshop_dir;
+    ArgKey<String>       name;
+    ArgKey<std::int32_t> limit;
+    ArgKey<std::int32_t> offset;
+    ArgKey<String>       path_filter;
+    ArgKey<bool>         all_text;
+    ArgKey<bool>         ignore_case;
+    ArgKey<std::int32_t> snippet;
+    ArgKey<std::int32_t> after;
+    ArgKey<std::int32_t> before;
+    ArgKey<std::int32_t> around;
+    ArgKey<bool>         json;
+    ArgKey<bool>         only_matching;
+    ArgKey<bool>         files_with_matches;
+    ArgKey<bool>         count;
+};
+
+GrepArgs AddGrepArgs(Command& command) {
+    command.about("Regex-search (ECMAScript / std::regex) the text entries inside each pkg's "
+                  "VFS. By default only .json entries are searched (scene.json + every "
+                  "materials/**.json + effects/**.json).");
+    auto pattern      = command.add_arg(Arg<String>::value("pattern", string_parser())
+                                            .value_name("PATTERN")
+                                            .help("ECMAScript / std::regex pattern")
+                                            .required());
+    auto workshop_dir = command.add_arg(
+        Arg<String>::value("workshop-dir", string_parser())
+            .long_name("workshop-dir")
+            .default_value(kDefaultWorkshopDir)
+            .help("workshop root (children are <id>/scene.pkg) or a single pkg dir"));
+    auto name = command.add_arg(
+        Arg<String>::value("name", string_parser())
+            .long_name("name")
+            .append()
+            .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd"));
+    auto limit = command.add_arg(Arg<std::int32_t>::value("limit", from_str_parser<std::int32_t>())
+                                     .long_name("limit")
+                                     .default_value("0")
+                                     .help("stop after N matched pkgs (default 0 = all)"));
+    auto offset =
+        command.add_arg(Arg<std::int32_t>::value("offset", from_str_parser<std::int32_t>())
+                            .long_name("offset")
+                            .default_value("0")
+                            .help("skip the first N matched pkgs before --limit applies"));
+    auto path_filter = command.add_arg(
+        Arg<String>::value("path-filter", string_parser())
+            .long_name("path-filter")
+            .default_value("")
+            .help("only search in-pkg paths containing SUBSTR (ci); overrides .json gate"));
+    auto all_text = command.add_arg(
+        Arg<bool>::flag("all-text")
+            .long_name("all-text")
+            .help("search every entry, not just .json (combine with --path-filter)"));
+    auto ignore_case = command.add_arg(Arg<bool>::flag("ignore-case")
+                                           .short_name('i')
+                                           .long_name("ignore-case")
+                                           .help("case-insensitive match"));
+    auto snippet =
+        command.add_arg(Arg<std::int32_t>::value("snippet", from_str_parser<std::int32_t>())
+                            .long_name("snippet")
+                            .default_value("48")
+                            .help("chars of context around a match in the flat default mode "
+                                  "(ignored when -A/-B/-C is set)"));
+    auto after = command.add_arg(
+        Arg<std::int32_t>::value("after", from_str_parser<std::int32_t>())
+            .short_name('A')
+            .long_name("after")
+            .default_value("0")
+            .help("print N lines after each match (grep -A); switches default mode to "
+                  "line context with <path>:<lineno>: prefixes"));
+    auto before =
+        command.add_arg(Arg<std::int32_t>::value("before", from_str_parser<std::int32_t>())
+                            .short_name('B')
+                            .long_name("before")
+                            .default_value("0")
+                            .help("print N lines before each match (grep -B)"));
+    auto around =
+        command.add_arg(Arg<std::int32_t>::value("around", from_str_parser<std::int32_t>())
+                            .short_name('C')
+                            .long_name("around")
+                            .default_value("0")
+                            .help("print N lines before AND after each match (grep -C)"));
+    auto json = command.add_arg(Arg<bool>::flag("json").long_name("json").help(
+        "structured array of {id, path, matches[]}"));
+    auto only_matching =
+        command.add_arg(Arg<bool>::flag("only-matching")
+                            .short_name('o')
+                            .long_name("only-matching")
+                            .help("print only the matched substring, one per line"));
+    auto files_with_matches =
+        command.add_arg(Arg<bool>::flag("files-with-matches")
+                            .short_name('l')
+                            .long_name("files-with-matches")
+                            .help("print <id>\\t<path> once per matching entry"));
+    auto count = command.add_arg(Arg<bool>::flag("count").short_name('c').long_name("count").help(
+        "print <id>\\t<count> per pkg with at least one match"));
+    command.add_group(ArgGroup::make("output-mode")
+                          .arg(only_matching)
+                          .arg(files_with_matches)
+                          .arg(count)
+                          .multiple(false));
+    return { pattern,     workshop_dir, name,        limit,         offset,
+             path_filter, all_text,     ignore_case, snippet,       after,
+             before,      around,       json,        only_matching, files_with_matches,
+             count };
 }
 
-GrepOptions ReadGrepOptions(const argparse::ArgumentParser& a) {
+GrepOptions ReadGrepOptions(const Matches& matches, const GrepArgs& args) {
     GrepOptions opt;
-    opt.pattern      = a.get<std::string>("pattern");
-    opt.workshop_dir = a.get<std::string>("--workshop-dir");
-    if (auto v = a.present<std::vector<std::string>>("--name")) opt.name_filters = *v;
-    opt.path_filter  = a.get<std::string>("--path-filter");
-    opt.search_all   = a.get<bool>("--all-text");
-    opt.icase        = a.get<bool>("--ignore-case");
-    opt.limit        = a.get<int>("--limit");
-    opt.offset       = a.get<int>("--offset");
-    opt.snippet      = a.get<int>("--snippet");
-    const int around = a.get<int>("--around");
-    opt.before       = std::max(a.get<int>("--before"), around);
-    opt.after        = std::max(a.get<int>("--after"), around);
-    opt.json_out     = a.get<bool>("--json");
-    if (a.get<bool>("--only-matching"))
+    opt.pattern      = ToStdString(ArgValue(matches, args.pattern));
+    opt.workshop_dir = ToStdString(ArgValue(matches, args.workshop_dir));
+    opt.name_filters = ArgStringValues(matches, args.name);
+    opt.path_filter  = ToStdString(ArgValue(matches, args.path_filter));
+    opt.search_all   = ArgFlag(matches, args.all_text);
+    opt.icase        = ArgFlag(matches, args.ignore_case);
+    opt.limit        = ArgValue(matches, args.limit);
+    opt.offset       = ArgValue(matches, args.offset);
+    opt.snippet      = ArgValue(matches, args.snippet);
+    const int around = ArgValue(matches, args.around);
+    opt.before       = std::max<int>(ArgValue(matches, args.before), around);
+    opt.after        = std::max<int>(ArgValue(matches, args.after), around);
+    opt.json_out     = ArgFlag(matches, args.json);
+    if (ArgFlag(matches, args.only_matching))
         opt.mode = GrepOptions::Mode::Only;
-    else if (a.get<bool>("--files-with-matches"))
+    else if (ArgFlag(matches, args.files_with_matches))
         opt.mode = GrepOptions::Mode::Files;
-    else if (a.get<bool>("--count"))
+    else if (ArgFlag(matches, args.count))
         opt.mode = GrepOptions::Mode::Count;
     return opt;
 }
@@ -1239,15 +1406,26 @@ int CmdGrep(const GrepOptions& opt) {
 // rendergraph subcommand
 // ---------------------------------------------------------------------------
 
-void AddRendergraphArgs(argparse::ArgumentParser& p) {
-    p.add_description("Parse one pkg with WPSceneParser::Parse and print every pass "
-                      "sceneToRenderGraph would emit, in execution order: shader, output RT, "
-                      "color-write mask, blend mode, sampled textures, resolved image-effect "
-                      "chains, and the post-process chain. No Vulkan; pure structural dump.");
-    p.add_argument("pkg").help("path to scene.pkg, or a directory containing one");
-    p.add_argument("-o", "--output")
-        .default_value(std::string())
-        .help("write to FILE (default stdout; '-' forces stdout)");
+struct RendergraphArgs {
+    ArgKey<String> pkg;
+    ArgKey<String> output;
+};
+
+RendergraphArgs AddRendergraphArgs(Command& command) {
+    command.about("Parse one pkg with WPSceneParser::Parse and print every pass "
+                  "sceneToRenderGraph would emit, in execution order: shader, output RT, "
+                  "color-write mask, blend mode, sampled textures, resolved image-effect "
+                  "chains, and the post-process chain. No Vulkan; pure structural dump.");
+    auto pkg    = command.add_arg(Arg<String>::value("pkg", string_parser())
+                                      .value_name("PKG")
+                                      .help("path to scene.pkg, or a directory containing one")
+                                      .required());
+    auto output = command.add_arg(Arg<String>::value("output", string_parser())
+                                      .short_name('o')
+                                      .long_name("output")
+                                      .default_value("")
+                                      .help("write to FILE (default stdout; '-' forces stdout)"));
+    return { pkg, output };
 }
 
 const char* BlendModeStr(owe::BlendMode m) {
@@ -1407,9 +1585,9 @@ void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
     }
 }
 
-int CmdRendergraph(const argparse::ArgumentParser& a) {
-    const std::string pkg_arg  = a.get<std::string>("pkg");
-    const std::string out_file = a.get<std::string>("--output");
+int CmdRendergraph(const Matches& matches, const RendergraphArgs& args) {
+    const std::string pkg_arg  = ToStdString(ArgValue(matches, args.pkg));
+    const std::string out_file = ToStdString(ArgValue(matches, args.output));
 
     const std::string pkg_path = ResolvePkgPath(pkg_arg);
     if (pkg_path.empty()) {
@@ -1491,19 +1669,29 @@ int CmdRendergraph(const argparse::ArgumentParser& a) {
 // valid subcommand
 // ---------------------------------------------------------------------------
 
-void AddValidArgs(argparse::ArgumentParser& p) {
-    p.add_description(
-        "Run DumpWorkshop on one pkg directory and write a deterministic JSON "
-        "snapshot (used to regenerate the checked-in fixtures under tests/fixtures/).");
-    p.add_argument("workshop_dir").help("pkg directory to snapshot");
-    p.add_argument("-o", "--output")
-        .default_value(std::string())
-        .help("write snapshot to FILE (default stdout)");
+struct ValidArgs {
+    ArgKey<String> workshop_dir;
+    ArgKey<String> output;
+};
+
+ValidArgs AddValidArgs(Command& command) {
+    command.about("Run DumpWorkshop on one pkg directory and write a deterministic JSON "
+                  "snapshot (used to regenerate the checked-in fixtures under tests/fixtures/).");
+    auto workshop_dir = command.add_arg(Arg<String>::value("workshop_dir", string_parser())
+                                            .value_name("WORKSHOP_DIR")
+                                            .help("pkg directory to snapshot")
+                                            .required());
+    auto output       = command.add_arg(Arg<String>::value("output", string_parser())
+                                            .short_name('o')
+                                            .long_name("output")
+                                            .default_value("")
+                                            .help("write snapshot to FILE (default stdout)"));
+    return { workshop_dir, output };
 }
 
-int CmdValid(const argparse::ArgumentParser& a) {
-    const std::string workshop_dir = a.get<std::string>("workshop_dir");
-    const std::string out_file     = a.get<std::string>("--output");
+int CmdValid(const Matches& matches, const ValidArgs& args) {
+    const std::string workshop_dir = ToStdString(ArgValue(matches, args.workshop_dir));
+    const std::string out_file     = ToStdString(ArgValue(matches, args.output));
 
     std::string err;
     auto        snap = owe::testing::DumpWorkshop(workshop_dir, err);
@@ -1535,52 +1723,42 @@ int main(int argc, char** argv) {
     rstd::log::set_logger(_logger);
     rstd::log::set_max_level(_logger.filter());
 
-    argparse::ArgumentParser program("wescene-test", "1.0", argparse::default_arguments::help);
-    program.add_description("Consolidated CLI for the wescene-renderer test surface. Host-only: no "
-                            "Vulkan device, no GLFW.");
+    auto program = Command::make("wescene-test");
+    program.version("1.0");
+    program.about("Consolidated CLI for the wescene-renderer test surface. Host-only: no Vulkan "
+                  "device, no GLFW.");
+    program.require_subcommand();
 
-    argparse::ArgumentParser scan("scan");
-    AddScanArgs(scan);
-    argparse::ArgumentParser extract("extract");
-    AddExtractArgs(extract);
-    argparse::ArgumentParser grep("grep");
-    AddGrepArgs(grep);
-    argparse::ArgumentParser rendergraph("rendergraph");
-    AddRendergraphArgs(rendergraph);
-    argparse::ArgumentParser valid("valid");
-    AddValidArgs(valid);
+    auto scan             = Command::make("scan");
+    auto scan_args        = AddScanArgs(scan);
+    auto extract          = Command::make("extract");
+    auto extract_args     = AddExtractArgs(extract);
+    auto grep             = Command::make("grep");
+    auto grep_args        = AddGrepArgs(grep);
+    auto rendergraph      = Command::make("rendergraph");
+    auto rendergraph_args = AddRendergraphArgs(rendergraph);
+    auto valid            = Command::make("valid");
+    auto valid_args       = AddValidArgs(valid);
 
-    program.add_subparser(scan);
-    program.add_subparser(extract);
-    program.add_subparser(grep);
-    program.add_subparser(rendergraph);
-    program.add_subparser(valid);
+    program.add_subcommand(rstd::move(scan));
+    program.add_subcommand(rstd::move(extract));
+    program.add_subcommand(rstd::move(grep));
+    program.add_subcommand(rstd::move(rendergraph));
+    program.add_subcommand(rstd::move(valid));
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::exception& err) {
-        std::cerr << err.what() << "\n";
-        if (program.is_subcommand_used("scan"))
-            std::cerr << scan;
-        else if (program.is_subcommand_used("extract"))
-            std::cerr << extract;
-        else if (program.is_subcommand_used("grep"))
-            std::cerr << grep;
-        else if (program.is_subcommand_used("rendergraph"))
-            std::cerr << rendergraph;
-        else if (program.is_subcommand_used("valid"))
-            std::cerr << valid;
-        else
-            std::cerr << program;
-        return 2;
-    }
+    auto parsed = owe::cli::ParseArgs(rstd::move(program), argc, argv);
+    if (parsed.is_err()) return parsed.unwrap_err().code;
+    auto matches = rstd::move(parsed).unwrap();
 
-    if (program.is_subcommand_used("scan")) return CmdScan(ReadScanOptions(scan));
-    if (program.is_subcommand_used("extract")) return CmdExtract(extract);
-    if (program.is_subcommand_used("grep")) return CmdGrep(ReadGrepOptions(grep));
-    if (program.is_subcommand_used("rendergraph")) return CmdRendergraph(rendergraph);
-    if (program.is_subcommand_used("valid")) return CmdValid(valid);
-
-    std::cerr << program;
+    if (auto child = matches.subcommand_matches("scan"); child.is_some())
+        return CmdScan(ReadScanOptions(**child, scan_args));
+    if (auto child = matches.subcommand_matches("extract"); child.is_some())
+        return CmdExtract(**child, extract_args);
+    if (auto child = matches.subcommand_matches("grep"); child.is_some())
+        return CmdGrep(ReadGrepOptions(**child, grep_args));
+    if (auto child = matches.subcommand_matches("rendergraph"); child.is_some())
+        return CmdRendergraph(**child, rendergraph_args);
+    if (auto child = matches.subcommand_matches("valid"); child.is_some())
+        return CmdValid(**child, valid_args);
     return 2;
 }

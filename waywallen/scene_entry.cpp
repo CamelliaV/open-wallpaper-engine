@@ -2,8 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include <argparse/argparse.hpp>
-
 #include <errno.h>
 #include <ctype.h>
 #include <signal.h>
@@ -16,8 +14,10 @@ module;
 
 module waywallen.scene_entry;
 
+import rstd.argparse;
 import rstd.cppstd;
 import rstd.log;
+import wescene.cli;
 import wescene.json;
 import wescene.rgraph;
 import wescene.scene_wallpaper;
@@ -192,44 +192,65 @@ void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnost
     }
 }
 
+std::string ToStdString(const rstd::string::String& value) {
+    return { value.data(), value.size() };
+}
+
+template<typename T>
+const T& ArgValue(const rstd::argparse::Matches& matches, const rstd::argparse::ArgKey<T>& key) {
+    auto value = matches.get_one(key);
+    if (value.is_err() || value->is_none()) rstd::unreachable();
+    return ***value;
+}
+
 Options parse_args(int argc, char** argv) {
-    argparse::ArgumentParser program("waywallen-wescene-renderer");
+    using namespace rstd::argparse;
 
-    program.add_argument("--ipc").required().help("Unix-domain socket path for daemon IPC");
-    program.add_argument("--path")
-        .default_value(std::string {})
-        .help("Wallpaper Engine .pkg path (canonical resource)");
-    program.add_argument("--assets")
-        .default_value(std::string {})
-        .help("Optional Wallpaper Engine assets directory");
-    program.add_argument("--workshop_id")
-        .default_value(std::string {})
-        .help("Optional Steam workshop id (informational)");
-    program.add_argument("--render-node")
-        .default_value(std::string {})
-        .help("DRM render-node path to pin Vulkan device selection to "
-              "(empty ⇒ let Vulkan pick the default)");
-    program.add_argument("--hwdec")
-        .default_value(std::string {})
-        .help("Video texture decoder mode: auto, vulkan, vaapi, or none");
-    program.add_argument("remaining").remaining();
+    auto command = Command::make("waywallen-wescene-renderer");
+    auto ipc     = command.add_arg(Arg<rstd::string::String>::value("ipc", string_parser())
+                                       .long_name("ipc")
+                                       .help("Unix-domain socket path for daemon IPC")
+                                       .required());
+    auto path    = command.add_arg(Arg<rstd::string::String>::value("path", string_parser())
+                                       .long_name("path")
+                                       .help("Wallpaper Engine .pkg path (canonical resource)")
+                                       .default_value(""));
+    auto assets  = command.add_arg(Arg<rstd::string::String>::value("assets", string_parser())
+                                       .long_name("assets")
+                                       .help("Optional Wallpaper Engine assets directory")
+                                       .default_value(""));
+    auto workshop_id =
+        command.add_arg(Arg<rstd::string::String>::value("workshop_id", string_parser())
+                            .long_name("workshop_id")
+                            .help("Optional Steam workshop id (informational)")
+                            .default_value(""));
+    auto render_node =
+        command.add_arg(Arg<rstd::string::String>::value("render-node", string_parser())
+                            .long_name("render-node")
+                            .help("DRM render-node path to pin Vulkan device selection to "
+                                  "(empty => let Vulkan pick the default)")
+                            .default_value(""));
+    auto hwdec =
+        command.add_arg(Arg<rstd::string::String>::value("hwdec", string_parser())
+                            .long_name("hwdec")
+                            .help("Video texture decoder mode: auto, vulkan, vaapi, or none")
+                            .default_value(""));
+    command.add_arg(Arg<rstd::string::String>::value("remaining", string_parser())
+                        .num_args(NumArgs::any())
+                        .allow_hyphen_values());
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::runtime_error& err) {
-        rstd_error("{}", static_cast<const char*>(err.what()));
-        std::cerr << program;
-        std::exit(1);
-    }
+    auto parsed = owe::cli::ParseArgs(rstd::move(command), argc, argv);
+    if (parsed.is_err()) std::exit(parsed.unwrap_err().code);
+    auto matches = rstd::move(parsed).unwrap();
 
-    Options o;
-    o.ipc_path       = program.get<std::string>("--ipc");
-    o.initial_scene  = program.get<std::string>("--path");
-    o.initial_assets = program.get<std::string>("--assets");
-    o.workshop_id    = program.get<std::string>("--workshop_id");
-    o.render_node    = program.get<std::string>("--render-node");
-    o.video_hwdec    = program.get<std::string>("--hwdec");
-    return o;
+    Options options;
+    options.ipc_path       = ToStdString(ArgValue(matches, ipc));
+    options.initial_scene  = ToStdString(ArgValue(matches, path));
+    options.initial_assets = ToStdString(ArgValue(matches, assets));
+    options.workshop_id    = ToStdString(ArgValue(matches, workshop_id));
+    options.render_node    = ToStdString(ArgValue(matches, render_node));
+    options.video_hwdec    = ToStdString(ArgValue(matches, hwdec));
+    return options;
 }
 
 // Linear-scan lookup for ww_kv_list_t. Lists are tiny (manifest-driven

@@ -35,17 +35,6 @@
     }
   },
   {
-    "dest": "build/_flatpak_deps/argparse-src",
-    "disable-shallow-clone": true,
-    "commit": "d924b84eba1f0f0adf38b20b7b4829f6f65b6570",
-    "type": "git",
-    "url": "https://github.com/p-ranav/argparse.git",
-    "x-cmake": {
-      "name": "argparse",
-      "exclude_from_all": true
-    }
-  },
-  {
     "dest": "build/_flatpak_deps/vma-src",
     "disable-shallow-clone": false,
     "tag": "v3.4.0",
@@ -60,7 +49,7 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": true,
-    "commit": "d9bf41b0f4019b6b57452803a17e4fae0e6e60c0",
+    "commit": "49cc38a6b4c2072176cd9b20c5fe2a988b70efb6",
     "type": "git",
     "url": "https://github.com/hypengw/rstd.git",
     "x-cmake": {

@@ -22,3 +22,11 @@ target_link_libraries(owe-core
 target_compile_features(owe-core PUBLIC cxx_std_20)
 set_property(TARGET owe-core PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET owe-core PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+add_library(owe-cli STATIC)
+target_sources(owe-cli
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES Cli.cppm)
+target_link_libraries(owe-cli PUBLIC rstd::argparse rstd.cppstd)
+target_compile_features(owe-cli PUBLIC cxx_std_20)
+set_property(TARGET owe-cli PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET owe-cli PROPERTY CXX_SCAN_FOR_MODULES ON)

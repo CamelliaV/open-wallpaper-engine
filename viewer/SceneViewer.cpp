@@ -1,8 +1,6 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include <argparse/argparse.hpp>
-
 import rstd.cppstd;
 import rstd.log;
 import wescene.json;
@@ -70,9 +68,8 @@ int main(int argc, char** argv) {
     rstd::log::set_logger(_logger);
     rstd::log::set_max_level(_logger.filter());
 
-    argparse::ArgumentParser program("scene-viewer");
-    viewer::setAndParseArg(program, argc, argv);
-    auto [w_width, w_height] = program.get<viewer::Resolution>(viewer::OPT_RESOLUTION);
+    auto args                = viewer::ParseSceneViewerArgs(argc, argv);
+    auto [w_width, w_height] = args.resolution;
 
     viewer::InitGlfwPlatformHint(/*force_x11=*/false);
     glfwInit();
@@ -90,10 +87,10 @@ int main(int argc, char** argv) {
     data.height = w_height;
 
     owe::RenderInitInfo info;
-    info.enable_valid_layer = program.get<bool>(viewer::OPT_VALID_LAYER);
+    info.enable_valid_layer = args.enable_valid_layer;
     info.width              = w_width;
     info.height             = w_height;
-    info.msaa_samples       = program.get<uint32_t>(viewer::OPT_MSAA);
+    info.msaa_samples       = args.msaa_samples;
 
     auto& sf_info = info.surface_info;
     {
@@ -120,12 +117,12 @@ int main(int argc, char** argv) {
     psw->init();
 
     owe::SceneWallpaperConfig config;
-    config.assets_dir      = program.get<std::string>(viewer::ARG_ASSETS);
-    config.source_pkg_path = program.get<std::string>(viewer::ARG_SCENE);
-    config.graphviz        = program.get<bool>(viewer::OPT_GRAPHVIZ);
-    config.fps             = static_cast<uint32_t>(program.get<int32_t>(viewer::OPT_FPS));
+    config.assets_dir      = std::move(args.assets_dir);
+    config.source_pkg_path = std::move(args.scene_path);
+    config.graphviz        = args.graphviz;
+    config.fps             = static_cast<uint32_t>(args.fps);
 
-    std::string cache_path = program.get<std::string>(viewer::OPT_CACHE_PATH);
+    std::string cache_path = std::move(args.cache_path);
     if (cache_path.empty()) cache_path = viewer::DefaultCacheDir("wescene-renderer").string();
     config.cache_dir = std::move(cache_path);
 
@@ -133,7 +130,7 @@ int main(int argc, char** argv) {
     // frame already reflects the user's edits. Mirrors the daemon path
     // (Init.user_properties): JSON object whose values can be strings,
     // numbers, or booleans.
-    if (auto up_path = program.get<std::string>(viewer::OPT_USER_PROPS); ! up_path.empty()) {
+    if (const auto& up_path = args.user_properties_path; ! up_path.empty()) {
         std::ifstream is(up_path);
         if (! is) {
             std::cerr << "--user-properties: cannot open '" << up_path << "'\n";
@@ -170,7 +167,7 @@ int main(int argc, char** argv) {
     glfwSetCursorPosCallback(window, cursor_position_callback);
     glfwSetCursorEnterCallback(window, cursor_enter_callback);
 
-    auto locked_mouse = parseMousePosition(program.get<std::string>(viewer::OPT_MOUSE_POS));
+    auto locked_mouse          = parseMousePosition(args.mouse_position);
     data.mouse_position_locked = locked_mouse.has_value();
     auto apply_locked_mouse    = [&]() {
         if (! locked_mouse) return;

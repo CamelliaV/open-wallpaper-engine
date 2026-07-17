@@ -13,7 +13,7 @@ target_sources(viewer-common
         Arg.cppm)
 target_sources(viewer-common PRIVATE Common.cpp)
 target_include_directories(viewer-common PUBLIC .)
-target_link_libraries(viewer-common PUBLIC PkgConfig::GLFW argparse::argparse rstd.cppstd)
+target_link_libraries(viewer-common PUBLIC PkgConfig::GLFW owe-cli rstd.cppstd)
 target_compile_features(viewer-common PUBLIC cxx_std_20)
 set_target_properties(viewer-common PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -61,8 +61,7 @@ if(BUILD_WESCENE AND BUILD_VIEWER)
         PRIVATE
             viewer-common
             PkgConfig::GLFW
-            owe-renderer
-            argparse::argparse)
+            owe-renderer)
     set_target_properties(SceneViewer PROPERTIES CXX_SCAN_FOR_MODULES ON)
 endif()
 
@@ -76,7 +75,6 @@ if(BUILD_WEWEB)
         wavsen::audio
         PkgConfig::GLFW
         Vulkan::Vulkan
-        argparse::argparse
         ${CEF_STANDARD_LIBS})
     set_target_properties(WebViewer PROPERTIES
         CXX_SCAN_FOR_MODULES ON
