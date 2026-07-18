@@ -43,7 +43,6 @@ target_sources(owe-base
          Pkg/AssetVersion.cppm
          Pkg/PkgFs.cppm
          Utils/Utils.cppm
-         MessageLoop/MessageLoop.cppm
          Timer/Timer.cppm
          Timer/ThreadTimer.cppm
          Timer/FrameTimer.cppm

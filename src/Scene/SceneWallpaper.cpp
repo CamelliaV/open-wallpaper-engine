@@ -15,7 +15,6 @@ import rstd.log;
 import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;
-import wescene.message_loop;
 import wescene.timer;
 import wescene.pkg.parse;
 import wescene.pkg_fs;
@@ -55,6 +54,7 @@ struct RenderStop {
     bool stop;
 };
 struct RenderDraw {};
+struct RenderShutdown {};
 struct RenderSwapchainReady {
     bool     ready;
     uint32_t width;
@@ -70,7 +70,7 @@ struct RenderRequestPreparedPassDiagnostics {
 struct RenderMsg {
     std::variant<RenderInit, RenderSetScene, RenderSetFillMode, RenderSetSpeed,
                  RenderSetUserProperty, RenderSetMediaStatus, RenderStop, RenderDraw,
-                 RenderSwapchainReady, RenderRequestPreparedPassDiagnostics>
+                 RenderSwapchainReady, RenderRequestPreparedPassDiagnostics, RenderShutdown>
         v;
 };
 
@@ -86,6 +86,7 @@ struct MainPauseAudio {
     uint64_t generation { 0 };
 };
 struct MainFirstFrame {};
+struct MainShutdown {};
 struct MainConfigure {
     SceneWallpaperConfig config;
 };
@@ -131,7 +132,7 @@ struct MainMsg {
                  MainSetMuted, MainSetFillMode, MainSetSpeed, MainSetUserProperty,
                  MainSetFirstFrameCallback, MainSetUserPropertyDiagnosticCallback,
                  MainUserPropertyDiagnostics, MainPreparedPassDiagnostics, MainStop, MainPauseAudio,
-                 MainFirstFrame>
+                 MainFirstFrame, MainShutdown>
         v;
 };
 
@@ -765,8 +766,10 @@ rstd::json::Map NormalizeUserProperties(const rstd::json::Map& input) {
 
 } // namespace
 
-using MainSender   = msgloop::MessageLoop<MainMsg>::Sender;
-using RenderSender = msgloop::MessageLoop<RenderMsg>::Sender;
+using MainSender     = rstd::sync::mpsc::Sender<MainMsg>;
+using MainReceiver   = rstd::sync::mpsc::Receiver<MainMsg>;
+using RenderSender   = rstd::sync::mpsc::Sender<RenderMsg>;
+using RenderReceiver = rstd::sync::mpsc::Receiver<RenderMsg>;
 
 class SceneRenderController;
 
@@ -779,8 +782,8 @@ public:
     auto renderController() const { return m_render_controller.get(); }
     bool inited() const { return m_inited; }
 
-    MainSender   mainSender() { return m_main_loop.sender(); }
-    RenderSender renderSender() { return m_render_loop.sender(); }
+    void post(MainMsg);
+    void post(RenderMsg);
 
     void on(MainLoadScene&&);
     void on(MainConfigure&&);
@@ -804,7 +807,10 @@ public:
     void setOnClearColor(ClearColorCallback cb) { m_clear_color_cb = std::move(cb); }
 
 private:
-    void loadScene();
+    MainSender sender() const;
+    void       startMainLoop();
+    void       stopMainLoop();
+    void       loadScene();
 
     bool m_inited { false };
 
@@ -818,8 +824,9 @@ private:
     ClearColorCallback                           m_clear_color_cb;
     uint64_t                                     m_audio_pause_generation { 0 };
 
-    msgloop::MessageLoop<MainMsg>          m_main_loop;
-    msgloop::MessageLoop<RenderMsg>        m_render_loop;
+    std::optional<MainSender>              m_main_tx;
+    std::optional<MainReceiver>            m_main_rx;
+    std::thread                            m_main_thread;
     std::unique_ptr<SceneRenderController> m_render_controller;
 };
 
@@ -827,14 +834,24 @@ class SceneRenderController {
 public:
     explicit SceneRenderController(SceneRuntimeController& main)
         : m_main(main), m_render(Box<vulkan::VulkanRender>::make()) {
+        auto [tx, rx] = rstd::sync::mpsc::channel<RenderMsg>();
+        m_tx.emplace(std::move(tx));
+        m_rx.emplace(std::move(rx));
+
         // Best-effort: a failing init just leaves snapshots returning false
         // and audio_average at zeros — wallpapers still render fine.
         (void)m_audio_capture.init();
     }
     ~SceneRenderController() {
+        stop();
         m_render->destroy();
         rstd_info("render handler deleted");
     }
+
+    void start();
+    void stop();
+    void post(RenderMsg);
+    auto sender() const -> RenderSender;
 
     void on(RenderInit&&);
     void on(RenderSetScene&&);
@@ -879,20 +896,7 @@ public:
     uint32_t consumeReleased() { return m_buttons_released.exchange(0); }
     bool     cursorInWindow() const { return m_cursor_in_window.load(); }
 
-    void setSenders(RenderSender render_tx, MainSender main_tx) {
-        m_render_tx.emplace(std::move(render_tx));
-        m_main_tx.emplace(std::move(main_tx));
-    }
-
-    // Drop every Sender clone owned by this handler so the render channel
-    // can disconnect at shutdown. The swapchain callback's sender is held
-    // through `m_swapchain_tx` (strong) + a weak_ptr in the lambda — clearing
-    // the strong ref turns the lambda into a no-op.
-    void clearSenders() {
-        m_swapchain_tx.reset();
-        m_render_tx.reset();
-        m_main_tx.reset();
-    }
+    void setMainSender(MainSender main_tx) { m_main_tx.emplace(std::move(main_tx)); }
 
     FrameTimer frame_timer { [] {
     } };
@@ -920,16 +924,80 @@ private:
     std::atomic<uint32_t>             m_buttons_released { 0 };
     std::atomic<bool>                 m_cursor_in_window { false };
 
-    std::optional<RenderSender> m_render_tx;
-    std::optional<MainSender>   m_main_tx;
+    std::optional<RenderSender>   m_tx;
+    std::optional<RenderReceiver> m_rx;
+    std::thread                   m_thread;
+    std::optional<MainSender>     m_main_tx;
 
-    // Strong ref kept here, weak copy captured by the swapchain callback;
-    // nulling this out at shutdown lets the callback short-circuit so the
-    // render channel can actually reach Err on recv().
+    // Strong ref kept here, weak copy captured by the swapchain callback.
     std::shared_ptr<RenderSender> m_swapchain_tx;
 
     wavsen::audio::AudioCapture m_audio_capture;
 };
+
+auto SceneRenderController::sender() const -> RenderSender {
+    if (! m_tx) rstd::panic { "render mailbox is stopped" };
+    return *m_tx;
+}
+
+void SceneRenderController::post(RenderMsg msg) {
+    if (m_tx) (void)m_tx->send(std::move(msg));
+}
+
+void SceneRenderController::start() {
+    if (m_thread.joinable()) return;
+    if (! m_rx) rstd::panic { "render mailbox cannot be restarted" };
+
+    RenderReceiver rx(std::move(*m_rx));
+    m_rx.reset();
+    m_thread = std::thread([this, rx = std::move(rx)]() mutable {
+        rstd_info("render loop started");
+        while (true) {
+            auto received = rx.recv();
+            if (received.is_err()) break;
+
+            auto message  = std::move(received).unwrap();
+            bool shutdown = false;
+            std::visit(
+                [this, &shutdown](auto&& value) {
+                    using Message = std::remove_cvref_t<decltype(value)>;
+                    if constexpr (std::is_same_v<Message, RenderShutdown>) {
+                        frame_timer.Stop();
+                        frame_timer.SetCallback([] {
+                        });
+                        m_swapchain_tx.reset();
+                        shutdown = true;
+                    } else {
+                        on(std::move(value));
+                    }
+                },
+                std::move(message.v));
+            if (shutdown) break;
+        }
+        rstd_info("render loop stopped");
+    });
+}
+
+void SceneRenderController::stop() {
+    if (! m_thread.joinable()) {
+        frame_timer.Stop();
+        frame_timer.SetCallback([] {
+        });
+        m_swapchain_tx.reset();
+        m_tx.reset();
+        m_rx.reset();
+        m_main_tx.reset();
+        return;
+    }
+    if (std::this_thread::get_id() == m_thread.get_id()) {
+        rstd::panic { "SceneRenderController destroyed from render thread" };
+    }
+
+    post(RenderMsg { RenderShutdown {} });
+    m_thread.join();
+    m_tx.reset();
+    m_main_tx.reset();
+}
 
 // ---- SceneRenderController message handlers ---------------------------------
 
@@ -1199,8 +1267,8 @@ void SceneRenderController::on(RenderInit&& m) {
     // VulkanRender via ExSwapchain::format() directly; no need to
     // round-trip it through this message.
     if (auto* sw = m_render->exSwapchain()) {
-        if (m_render_tx) {
-            m_swapchain_tx                   = std::make_shared<RenderSender>(*m_render_tx);
+        if (m_tx) {
+            m_swapchain_tx                   = std::make_shared<RenderSender>(*m_tx);
             std::weak_ptr<RenderSender> weak = m_swapchain_tx;
             sw->setOnReadyChanged([weak](const ExSwapchainReadyEvent& e) {
                 if (auto tx = weak.lock()) {
@@ -1237,6 +1305,62 @@ void SceneRenderController::on(RenderRequestPreparedPassDiagnostics&& m) {
         .cb          = std::move(m.cb),
         .diagnostics = std::move(diagnostics),
     } });
+}
+
+auto SceneRuntimeController::sender() const -> MainSender {
+    if (! m_main_tx) rstd::panic { "main mailbox is stopped" };
+    return *m_main_tx;
+}
+
+void SceneRuntimeController::post(MainMsg msg) {
+    if (m_main_tx) (void)m_main_tx->send(std::move(msg));
+}
+
+void SceneRuntimeController::post(RenderMsg msg) { m_render_controller->post(std::move(msg)); }
+
+void SceneRuntimeController::startMainLoop() {
+    if (m_main_thread.joinable()) return;
+    if (! m_main_rx) rstd::panic { "main mailbox cannot be restarted" };
+
+    MainReceiver rx(std::move(*m_main_rx));
+    m_main_rx.reset();
+    m_main_thread = std::thread([this, rx = std::move(rx)]() mutable {
+        rstd_info("main loop started");
+        while (true) {
+            auto received = rx.recv();
+            if (received.is_err()) break;
+
+            auto message  = std::move(received).unwrap();
+            bool shutdown = false;
+            std::visit(
+                [this, &shutdown](auto&& value) {
+                    using Message = std::remove_cvref_t<decltype(value)>;
+                    if constexpr (std::is_same_v<Message, MainShutdown>) {
+                        shutdown = true;
+                    } else {
+                        on(std::move(value));
+                    }
+                },
+                std::move(message.v));
+            if (shutdown) break;
+        }
+        rstd_info("main loop stopped");
+    });
+}
+
+void SceneRuntimeController::stopMainLoop() {
+    if (! m_main_thread.joinable()) {
+        m_main_tx.reset();
+        m_main_rx.reset();
+        return;
+    }
+    if (std::this_thread::get_id() == m_main_thread.get_id()) {
+        rstd::panic { "SceneRuntimeController destroyed from main thread" };
+    }
+
+    post(MainMsg { MainShutdown {} });
+    m_main_thread.join();
+    m_main_tx.reset();
 }
 
 // ---- SceneRuntimeController message handlers --------------------------------
@@ -1280,12 +1404,12 @@ void SceneRuntimeController::on(MainSetMuted&& m) {
 
 void SceneRuntimeController::on(MainSetFillMode&& m) {
     m_config.fill_mode = m.mode;
-    (void)m_render_loop.sender().send(RenderMsg { RenderSetFillMode { m.mode } });
+    m_render_controller->post(RenderMsg { RenderSetFillMode { m.mode } });
 }
 
 void SceneRuntimeController::on(MainSetSpeed&& m) {
     m_config.speed = m.speed;
-    (void)m_render_loop.sender().send(RenderMsg { RenderSetSpeed { m.speed } });
+    m_render_controller->post(RenderMsg { RenderSetSpeed { m.speed } });
 }
 
 void SceneRuntimeController::on(MainSetUserProperty&& m) {
@@ -1297,8 +1421,7 @@ void SceneRuntimeController::on(MainSetUserProperty&& m) {
                                     prop.clone());
     m_user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property)),
                              prop.clone());
-    (void)m_render_loop.sender().send(
-        RenderMsg { RenderSetUserProperty { property, std::move(prop) } });
+    m_render_controller->post(RenderMsg { RenderSetUserProperty { property, std::move(prop) } });
 }
 
 void SceneRuntimeController::on(MainSetFirstFrameCallback&& m) {
@@ -1324,7 +1447,7 @@ void SceneRuntimeController::on(MainStop&& m) {
         if (m.fade_ms == 0 || ! m.scale_audio) {
             m_sound_manager->pause();
         } else {
-            auto     tx    = m_main_loop.sender();
+            auto     tx    = sender();
             uint32_t delay = m.fade_ms;
             std::thread([tx = std::move(tx), generation, delay]() mutable {
                 std::this_thread::sleep_for(std::chrono::milliseconds(delay));
@@ -1335,7 +1458,7 @@ void SceneRuntimeController::on(MainStop&& m) {
         m_sound_manager->play();
         if (m.scale_audio) m_sound_manager->set_volume_scale(1.0f, m.fade_ms);
     }
-    (void)m_render_loop.sender().send(RenderMsg { RenderStop { m.stop } });
+    m_render_controller->post(RenderMsg { RenderStop { m.stop } });
 }
 
 void SceneRuntimeController::on(MainPauseAudio&& m) {
@@ -1455,7 +1578,7 @@ void SceneRuntimeController::loadScene() {
         }
     }
 
-    auto rtx = m_render_loop.sender();
+    auto rtx = m_render_controller->sender();
     (void)rtx.send(RenderMsg { RenderSetScene { scene } });
     // First-frame default push: now that the render thread owns the scene,
     // replay every collected user property (project.json defaults + any
@@ -1476,26 +1599,14 @@ bool SceneRuntimeController::init() {
 
     // Wire render handler senders before starting the loops; otherwise an
     // early RenderInit could fire before they're set.
-    m_render_controller->setSenders(m_render_loop.sender(), m_main_loop.sender());
+    m_render_controller->setMainSender(sender());
 
-    m_main_loop.start([this](MainMsg&& m) {
-        std::visit(
-            [this](auto&& v) {
-                on(std::move(v));
-            },
-            std::move(m.v));
-    });
-    m_render_loop.start([this](RenderMsg&& m) {
-        std::visit(
-            [this](auto&& v) {
-                m_render_controller->on(std::move(v));
-            },
-            std::move(m.v));
-    });
+    startMainLoop();
+    m_render_controller->start();
 
     {
         auto& frameTimer = m_render_controller->frame_timer;
-        auto  rtx        = m_render_loop.sender();
+        auto  rtx        = m_render_controller->sender();
         frameTimer.SetCallback([rtx]() mutable {
             (void)rtx.send(RenderMsg { RenderDraw {} });
         });
@@ -1508,33 +1619,18 @@ bool SceneRuntimeController::init() {
 }
 
 SceneRuntimeController::SceneRuntimeController()
-    : m_sound_manager(std::make_unique<wavsen::audio::SoundManager>()),
-      m_main_loop("main"),
-      m_render_loop("render"),
-      m_render_controller(std::make_unique<SceneRenderController>(*this)) {}
+    : m_sound_manager(std::make_unique<wavsen::audio::SoundManager>()) {
+    auto [tx, rx] = rstd::sync::mpsc::channel<MainMsg>();
+    m_main_tx.emplace(std::move(tx));
+    m_main_rx.emplace(std::move(rx));
+    m_render_controller = std::make_unique<SceneRenderController>(*this);
+}
 
 SceneRuntimeController::~SceneRuntimeController() {
-    // Orderly shutdown: drain both loops *before* SceneRenderController dies, so
-    // m_render->destroy() doesn't race with an in-flight RenderDraw.
-    //
-    //   1. Stop the frame timer (joins its thread → no more Draw posts).
-    //   2. Replace the timer callback with a no-op so the captured render
-    //      Sender clone is released.
-    //   3. Drop every Sender clone the render handler holds, including the
-    //      strong ref the swapchain callback weak-captures.
-    //   4. Stop the render loop — drops engine sender, recv() returns Err
-    //      after the in-flight handler returns, thread joins.
-    //   5. Same for the main loop.
-    //   6. Default member destruction then runs SceneRenderController's dtor with
-    //      the render thread already gone, so destroy() is single-threaded.
-    if (m_render_controller) {
-        m_render_controller->frame_timer.Stop();
-        m_render_controller->frame_timer.SetCallback([] {
-        });
-        m_render_controller->clearSenders();
-    }
-    m_render_loop.stop();
-    m_main_loop.stop();
+    // Stop main before render so no main handler can enqueue more render work.
+    if (m_render_controller) m_render_controller->frame_timer.Stop();
+    stopMainLoop();
+    if (m_render_controller) m_render_controller->stop();
 }
 
 } // namespace owe
@@ -1550,20 +1646,18 @@ bool SceneWallpaper::init() { return m_runtime->init(); }
 void SceneWallpaper::initVulkan(RenderInitInfo info) {
     m_offscreen = info.offscreen;
     auto sp     = std::make_shared<RenderInitInfo>(std::move(info));
-    (void)m_runtime->renderSender().send(RenderMsg { RenderInit { std::move(sp) } });
+    m_runtime->post(RenderMsg { RenderInit { std::move(sp) } });
 }
 
-void SceneWallpaper::play() { (void)m_runtime->mainSender().send(MainMsg { MainStop { false } }); }
+void SceneWallpaper::play() { m_runtime->post(MainMsg { MainStop { false } }); }
 void SceneWallpaper::play(uint32_t fade_ms) {
-    (void)m_runtime->mainSender().send(MainMsg { MainStop { false, fade_ms, true } });
+    m_runtime->post(MainMsg { MainStop { false, fade_ms, true } });
 }
-void SceneWallpaper::pause() { (void)m_runtime->mainSender().send(MainMsg { MainStop { true } }); }
+void SceneWallpaper::pause() { m_runtime->post(MainMsg { MainStop { true } }); }
 void SceneWallpaper::pause(uint32_t fade_ms) {
-    (void)m_runtime->mainSender().send(MainMsg { MainStop { true, fade_ms, true } });
+    m_runtime->post(MainMsg { MainStop { true, fade_ms, true } });
 }
-void SceneWallpaper::requestFrame() {
-    (void)m_runtime->renderSender().send(RenderMsg { RenderDraw {} });
-}
+void SceneWallpaper::requestFrame() { m_runtime->post(RenderMsg { RenderDraw {} }); }
 
 void SceneWallpaper::mouseInput(double x, double y) {
     m_runtime->renderController()->setMousePos(x, y);
@@ -1578,47 +1672,39 @@ void SceneWallpaper::mouseEnter(bool in_window) {
 }
 
 void SceneWallpaper::configure(SceneWallpaperConfig config) {
-    (void)m_runtime->mainSender().send(MainMsg { MainConfigure { std::move(config) } });
+    m_runtime->post(MainMsg { MainConfigure { std::move(config) } });
 }
 
-void SceneWallpaper::setFps(uint32_t fps) {
-    (void)m_runtime->mainSender().send(MainMsg { MainSetFps { fps } });
-}
+void SceneWallpaper::setFps(uint32_t fps) { m_runtime->post(MainMsg { MainSetFps { fps } }); }
 
 void SceneWallpaper::setVolume(float volume) {
-    (void)m_runtime->mainSender().send(MainMsg { MainSetVolume { volume } });
+    m_runtime->post(MainMsg { MainSetVolume { volume } });
 }
 
 void SceneWallpaper::setVolumeScale(float scale) { setVolumeScale(scale, 0); }
 
 void SceneWallpaper::setVolumeScale(float scale, uint32_t fade_ms) {
-    (void)m_runtime->mainSender().send(MainMsg { MainSetVolumeScale { scale, fade_ms } });
+    m_runtime->post(MainMsg { MainSetVolumeScale { scale, fade_ms } });
 }
 
-void SceneWallpaper::setMuted(bool muted) {
-    (void)m_runtime->mainSender().send(MainMsg { MainSetMuted { muted } });
-}
+void SceneWallpaper::setMuted(bool muted) { m_runtime->post(MainMsg { MainSetMuted { muted } }); }
 
 void SceneWallpaper::setFillMode(FillMode mode) {
-    (void)m_runtime->mainSender().send(MainMsg { MainSetFillMode { mode } });
+    m_runtime->post(MainMsg { MainSetFillMode { mode } });
 }
 
-void SceneWallpaper::setSpeed(float speed) {
-    (void)m_runtime->mainSender().send(MainMsg { MainSetSpeed { speed } });
-}
+void SceneWallpaper::setSpeed(float speed) { m_runtime->post(MainMsg { MainSetSpeed { speed } }); }
 
 void SceneWallpaper::setMediaStatus(MediaStatus status) {
-    (void)m_runtime->renderSender().send(RenderMsg { RenderSetMediaStatus { std::move(status) } });
+    m_runtime->post(RenderMsg { RenderSetMediaStatus { std::move(status) } });
 }
 
 void SceneWallpaper::setUserPropertyRaw(std::string_view name, std::string value) {
-    (void)m_runtime->mainSender().send(
-        MainMsg { MainSetUserProperty { std::string(name), RawUserProperty(value) } });
+    m_runtime->post(MainMsg { MainSetUserProperty { std::string(name), RawUserProperty(value) } });
 }
 
 void SceneWallpaper::setUserPropertyJson(std::string_view name, Json value) {
-    (void)m_runtime->mainSender().send(
-        MainMsg { MainSetUserProperty { std::string(name), std::move(value) } });
+    m_runtime->post(MainMsg { MainSetUserProperty { std::string(name), std::move(value) } });
 }
 
 void SceneWallpaper::setOnClearColor(ClearColorCallback cb) {
@@ -1626,17 +1712,15 @@ void SceneWallpaper::setOnClearColor(ClearColorCallback cb) {
 }
 
 void SceneWallpaper::setOnFirstFrame(FirstFrameCallback cb) {
-    (void)m_runtime->mainSender().send(MainMsg { MainSetFirstFrameCallback { std::move(cb) } });
+    m_runtime->post(MainMsg { MainSetFirstFrameCallback { std::move(cb) } });
 }
 
 void SceneWallpaper::setOnUserPropertyDiagnostics(UserPropertyDiagnosticCallback cb) {
-    (void)m_runtime->mainSender().send(
-        MainMsg { MainSetUserPropertyDiagnosticCallback { std::move(cb) } });
+    m_runtime->post(MainMsg { MainSetUserPropertyDiagnosticCallback { std::move(cb) } });
 }
 
 void SceneWallpaper::requestPreparedPassDiagnostics(RenderPassDiagnosticCallback cb) {
-    (void)m_runtime->renderSender().send(
-        RenderMsg { RenderRequestPreparedPassDiagnostics { std::move(cb) } });
+    m_runtime->post(RenderMsg { RenderRequestPreparedPassDiagnostics { std::move(cb) } });
 }
 
 int SceneWallpaper::takeLastFrameSyncFd() {
