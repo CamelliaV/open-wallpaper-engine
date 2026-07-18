@@ -28,7 +28,6 @@ CachedShaderReflection MakeCachedReflection(std::vector<Uni_ShaderSpv> spvs,
     CachedShaderReflection out;
     out.stages.reserve(spvs.size());
     for (auto& spv : spvs) {
-        if (! spv) continue;
         out.stages.push_back(CachedShaderStage {
             .entry_point = spv->entry_point,
             .stage       = spv->stage,

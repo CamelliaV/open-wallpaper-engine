@@ -990,7 +990,6 @@ bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view key, const J
 bool Scene::ApplyUserLightVisibilityBindings(std::string_view key, const Json& property) {
     bool changed = false;
     for (auto& light : lights) {
-        if (! light) continue;
         auto visible =
             ResolveSceneUserVisibilityBinding(light->visibleUserBinding(), key, property);
         if (! visible) continue;

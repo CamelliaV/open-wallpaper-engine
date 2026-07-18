@@ -196,8 +196,6 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
     };
 
     for (auto& inst : m_instances) {
-        rstd_assert(inst);
-
         auto& bounded_data = inst->GetBoundedData();
 
         bool type_has_death =

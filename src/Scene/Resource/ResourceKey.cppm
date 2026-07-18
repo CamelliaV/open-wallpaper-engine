@@ -506,7 +506,7 @@ inline PipelineResourceDesc MakePipelineResourceDesc(const PipelineResourceReque
     std::vector<ShaderSpv> shader_stages;
     shader_stages.reserve(request.shader_stages.size());
     for (const auto& stage : request.shader_stages) {
-        if (stage) shader_stages.push_back(*stage);
+        shader_stages.push_back(*stage);
     }
 
     return PipelineResourceDesc {
