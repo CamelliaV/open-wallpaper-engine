@@ -258,10 +258,12 @@ static rg::TextureNodeRef AddMipFramebufferCopy(ExtraInfo& extra, rg::RenderGrap
     return snapshot;
 }
 
-static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output, i32 imgId,
-                                          ExtraInfo& extra, bool defer_effect = false);
+static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output,
+                                          Option<WallpaperLayerId> source_layer, ExtraInfo& extra,
+                                          bool defer_effect = false);
 
-static void LoadGraphEffects(SceneNode* node, SceneImageEffectLayer* effs, ExtraInfo& extra) {
+static void LoadGraphEffects(SceneImageEffectLayer* effs, Option<WallpaperLayerId> source_layer,
+                             ExtraInfo& extra) {
     auto& scene = *extra.scene;
 
     effs->ResolveEffect(scene.default_effect_mesh, "effect");
@@ -279,14 +281,15 @@ static void LoadGraphEffects(SceneNode* node, SceneImageEffectLayer* effs, Extra
                 cmdItor++;
             }
             auto& name = n.output;
-            ToGraphPass(n.sceneNode.as_ptr(), name, node->ID(), extra);
+            ToGraphPass(n.sceneNode.as_ptr(), name, source_layer, extra);
             nodePos++;
         }
     }
 }
 
-static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output, i32 imgId,
-                                          ExtraInfo& extra, bool defer_effect) {
+static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output,
+                                          Option<WallpaperLayerId> source_layer, ExtraInfo& extra,
+                                          bool defer_effect) {
     auto& rgraph = *extra.rgraph;
     auto& scene  = *extra.scene;
 
@@ -310,7 +313,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         for (auto& prefill : imgeff->PrefillNodes()) {
             std::string_view prefill_output =
                 prefill.output.empty() ? output : std::string_view(prefill.output);
-            ToGraphPass(prefill.sceneNode.as_ptr(), prefill_output, node->ID(), extra);
+            ToGraphPass(prefill.sceneNode.as_ptr(), prefill_output, source_layer, extra);
         }
     }
 
@@ -327,7 +330,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         rgraph.addPass<vulkan::CustomShaderPass>(
             passName,
             rg::PassNode::Type::CustomShader,
-            [material, node, smi, pass_output, &imgId, &scene, &extra](
+            [material, node, smi, pass_output, source_layer, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
                 const auto& pass       = builder.workPassNode();
                 pdesc.node             = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
@@ -446,8 +449,10 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     extra.depth_initialized_outputs.erase(pass_output_s);
                 }
                 builder.write(output_node);
-                extra.link_finalizer.recordSource(WallpaperLayerId { .value = imgId },
-                                                  CaptureTextureOutput(extra, output_node));
+                if (source_layer.is_some()) {
+                    extra.link_finalizer.recordSource(*source_layer,
+                                                      CaptureTextureOutput(extra, output_node));
+                }
                 if (IsSpecLinkTex(pass_output)) {
                     extra.link_finalizer.recordSource(
                         WallpaperLayerId { .value = static_cast<i32>(ParseLinkTex(pass_output)) },
@@ -457,7 +462,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
     }
 
     if (! defer_effect && imgeff != nullptr && imgeff->HasRenderEffects())
-        LoadGraphEffects(node, imgeff, extra);
+        LoadGraphEffects(imgeff, source_layer, extra);
     return imgeff;
 }
 
@@ -468,10 +473,12 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
 static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32>& linked_ids,
                                     Set<const SceneNode*>& out_skip,
                                     bool                   visibility_hidden_ancestor = false) {
-    const i32  nid    = node->ID();
-    const bool linked = nid >= 0 && linked_ids.count(nid) != 0;
+    const i32  nid         = node->ID();
+    const auto link_source = scene.ResolveLayerLinkSource(*node);
+    const i32  layer_id    = link_source.is_some() ? link_source->value : nid;
+    const bool linked      = link_source.is_some() && linked_ids.count(link_source->value) != 0;
     const bool visibility_hidden_self =
-        nid >= 0 && scene.visibility_elidable_layer_ids.count(nid) != 0 && ! linked;
+        layer_id >= 0 && scene.visibility_elidable_layer_ids.count(layer_id) != 0 && ! linked;
     const bool visibility_hidden = visibility_hidden_ancestor || visibility_hidden_self;
 
     bool all_children_skippable = true;
@@ -480,7 +487,8 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32
             all_children_skippable = false;
     }
     const bool self_skippable =
-        ! linked && (visibility_hidden || (nid >= 0 && scene.elidable_layer_ids.count(nid) != 0));
+        ! linked &&
+        (visibility_hidden || (layer_id >= 0 && scene.elidable_layer_ids.count(layer_id) != 0));
     if (self_skippable && all_children_skippable) {
         out_skip.insert(node);
         return true;
@@ -522,11 +530,13 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
                           const Set<i32>&              linked_ids) {
     if (node == nullptr || emit_skip_subtrees.count(node) != 0) return;
 
-    auto&            scene    = *extra.scene;
-    const i32        nid      = node->ID();
-    const bool       elidable = scene.elidable_layer_ids.count(nid) != 0;
-    const bool       linked   = linked_ids.count(nid) != 0;
-    bool             emit     = true;
+    auto&            scene       = *extra.scene;
+    const i32        nid         = node->ID();
+    const auto       link_source = scene.ResolveLayerLinkSource(*node);
+    const i32        layer_id    = link_source.is_some() ? link_source->value : nid;
+    const bool       elidable    = scene.elidable_layer_ids.count(layer_id) != 0;
+    const bool       linked = link_source.is_some() && linked_ids.count(link_source->value) != 0;
+    bool             emit   = true;
     std::string      link_output;
     std::string_view node_output = inherited_output;
 
@@ -535,12 +545,12 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
         if (! linked) {
             emit = false;
         } else {
-            auto* link_source = extra.render_scene->linkSource(WallpaperLayerId { .value = nid });
-            if (link_source == nullptr) {
-                rstd_error("link render target for layer {} not found in snapshot", nid);
+            auto* source_record = extra.render_scene->linkSource(*link_source);
+            if (source_record == nullptr) {
+                rstd_error("link render target for layer {} not found in snapshot", layer_id);
                 emit = false;
             } else {
-                link_output = link_source->render_target_key;
+                link_output = source_record->render_target_key;
                 node_output = link_output;
                 if (! node->Camera().empty()) {
                     auto camera_it = scene.cameras.find(node->Camera());
@@ -556,7 +566,7 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
     auto group_camera = scene.RenderGroupCamera(WallpaperLayerId { .value = nid });
     if (emit && group_camera) {
         ConfigureNestedOutput(node, node_output, inherited_camera, scene);
-        auto* effect_layer = ToGraphPass(node, node_output, nid, extra, true);
+        auto* effect_layer = ToGraphPass(node, node_output, link_source, extra, true);
         if (effect_layer == nullptr) {
             rstd_error("render group layer {} has no effect target", nid);
         }
@@ -567,14 +577,14 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
                 child.as_ptr(), child_output, *group_camera, extra, emit_skip_subtrees, linked_ids);
         }
         if (effect_layer != nullptr && effect_layer->HasRenderEffects()) {
-            LoadGraphEffects(node, effect_layer, extra);
+            LoadGraphEffects(effect_layer, link_source, extra);
         }
         return;
     }
 
     if (emit) {
         ConfigureNestedOutput(node, node_output, inherited_camera, scene);
-        ToGraphPass(node, node_output, nid, extra);
+        ToGraphPass(node, node_output, link_source, extra);
     }
     for (auto& child : node->GetChildren()) {
         EmitSceneNode(child.as_ptr(),
@@ -614,7 +624,8 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
             if (auto* sp = std::get_if<ScenePostProcessPass>(&step)) {
                 std::string_view target =
                     sp->output.empty() ? SpecTex_Default : std::string_view(sp->output);
-                ToGraphPass(sp->node.as_ptr(), target, sp->node->ID(), extra);
+                ToGraphPass(
+                    sp->node.as_ptr(), target, scene.ResolveLayerLinkSource(*sp->node), extra);
             } else if (auto* cp = std::get_if<ScenePostProcessCopy>(&step)) {
                 AddCopyPass(
                     extra, MakeTextureDesc(extra, cp->src), MakeTextureDesc(extra, cp->dst));

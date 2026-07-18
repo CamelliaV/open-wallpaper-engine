@@ -12,8 +12,8 @@ TEST(TextGeometry, DynamicEffectFollowsCurrentTextBounds) {
     const owe::text::TextLayoutMetrics metrics {
         .text_width    = 607.0f,
         .text_height   = 157.0f,
-        .source_width  = 607.0f,
-        .source_height = 157.0f,
+        .source_width  = 563.0f,
+        .source_height = 143.0f,
         .padding       = 32.0f,
     };
 
@@ -24,4 +24,6 @@ TEST(TextGeometry, DynamicEffectFollowsCurrentTextBounds) {
     EXPECT_FLOAT_EQ(geometry.uv_source_width, 671.0f);
     EXPECT_FLOAT_EQ(geometry.effect_frame_width, 671.0f);
     EXPECT_FLOAT_EQ(geometry.draw_height, 221.0f);
+    EXPECT_FLOAT_EQ(geometry.uv_source_height, 221.0f);
+    EXPECT_FLOAT_EQ(geometry.effect_frame_height, 221.0f);
 }

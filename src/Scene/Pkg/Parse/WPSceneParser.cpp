@@ -3723,11 +3723,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
     auto sp_node = rstd::sync::Arc<SceneNode>::make(
         Vector3f(obj.origin.data()), Vector3f(obj.scale.data()), Vector3f(obj.angles.data()));
-    sp_node->ID()                  = obj.id;
-    const float text_bbox_w        = text_w + 2.0f * style.padding;
-    const float text_bbox_h        = text_h + 2.0f * style.padding;
-    const float text_source_bbox_w = text_source_w + 2.0f * style.padding;
-    const float text_source_bbox_h = text_source_h + 2.0f * style.padding;
+    const float text_bbox_w = text_w + 2.0f * style.padding;
+    const float text_bbox_h = text_h + 2.0f * style.padding;
     sp_node->SetSize({ text_bbox_w, text_bbox_h });
     sp_node->AddMesh(sp_mesh);
 
@@ -3818,6 +3815,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_node->CopyTrans(*sp_node.as_ptr());
         compose_node->ID() = obj.id;
         compose_node->SetSize({ initial_geometry.draw_width, initial_geometry.draw_height });
+        scene.RegisterLayerLinkSource(WallpaperLayerId { .value = static_cast<i32>(obj.id) },
+                                      *sp_node.as_ptr());
 
         auto layer = std::make_shared<SceneImageEffectLayer>(has_text_effect ? compose_node.as_ptr()
                                                                              : sp_node.as_ptr(),

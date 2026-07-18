@@ -2526,7 +2526,10 @@ public:
          SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutation mutation);
     void MarkLayerStaticElidable(WallpaperLayerId id);
     void MarkLayerVisibilityElidable(WallpaperLayerId id);
-    void RegisterRenderGroup(WallpaperLayerId id, std::string camera) {
+    void RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node);
+    SceneNode*               RegisteredLayerLinkSource(WallpaperLayerId id) const;
+    Option<WallpaperLayerId> ResolveLayerLinkSource(const SceneNode& node) const;
+    void                     RegisterRenderGroup(WallpaperLayerId id, std::string camera) {
         m_render_group_cameras[id.value] = std::move(camera);
     }
     Option<std::string_view> RenderGroupCamera(WallpaperLayerId id) const {
@@ -2561,6 +2564,8 @@ private:
     SceneResourceIndex                       m_resource_index;
     bool                                     m_render_graph_dirty { false };
     Map<i32, std::string>                    m_render_group_cameras;
+    Map<i32, SceneNode*>                     m_layer_link_sources;
+    Map<const SceneNode*, WallpaperLayerId>  m_node_link_sources;
     std::vector<SceneUserPropertyDiagnostic> m_user_property_diagnostics;
 };
 

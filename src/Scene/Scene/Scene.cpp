@@ -285,8 +285,9 @@ void ensure_snapshot_link_render_targets(Scene& scene, const Set<i32>& linked_id
         auto layer = WallpaperLayerId { .value = id };
         auto key   = GenLinkTex(static_cast<std::ptrdiff_t>(id));
         if (scene.renderTargets.contains(key)) continue;
-        if (auto* source = find_layer_node(scene, layer))
-            scene.EnsureLinkRenderTarget(layer, *source);
+        auto* source = scene.RegisteredLayerLinkSource(layer);
+        if (source == nullptr) source = find_layer_node(scene, layer);
+        if (source != nullptr) scene.EnsureLinkRenderTarget(layer, *source);
     }
 }
 } // namespace
@@ -697,7 +698,9 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
             }
         }
 
-        auto source_layer = WallpaperLayerId { .value = node != nullptr ? node->ID() : -1 };
+        auto source_layer = node != nullptr ? scene.ResolveLayerLinkSource(*node).unwrap_or(
+                                                  WallpaperLayerId { .value = node->ID() })
+                                            : WallpaperLayerId { .value = -1 };
         m_render_item_ids.emplace(scene_id_key(item.id), id);
         m_source_layer_items[source_layer.value].push_back(id);
         m_material_render_items[scene_id_key(item.material)].push_back(id);
@@ -1130,6 +1133,32 @@ void Scene::MarkLayerStaticElidable(WallpaperLayerId id) {
 void Scene::MarkLayerVisibilityElidable(WallpaperLayerId id) {
     visibility_elidable_layer_ids.insert(id.value);
     elidable_layer_ids.insert(id.value);
+}
+
+void Scene::RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node) {
+    if (auto it = m_layer_link_sources.find(id.value); it != m_layer_link_sources.end()) {
+        m_node_link_sources.erase(it->second);
+    }
+    m_layer_link_sources[id.value] = &node;
+    m_node_link_sources[&node]     = id;
+}
+
+SceneNode* Scene::RegisteredLayerLinkSource(WallpaperLayerId id) const {
+    auto it = m_layer_link_sources.find(id.value);
+    return it != m_layer_link_sources.end() ? it->second : nullptr;
+}
+
+Option<WallpaperLayerId> Scene::ResolveLayerLinkSource(const SceneNode& node) const {
+    if (auto it = m_node_link_sources.find(&node); it != m_node_link_sources.end()) {
+        return Some<WallpaperLayerId>(it->second);
+    }
+    const i32 id = node.ID();
+    if (id < 0) return None();
+    if (auto it = m_layer_link_sources.find(id);
+        it != m_layer_link_sources.end() && it->second != &node) {
+        return None();
+    }
+    return Some(WallpaperLayerId { .value = id });
 }
 
 bool Scene::SetNodeVisible(SceneNode& node, bool visible) {

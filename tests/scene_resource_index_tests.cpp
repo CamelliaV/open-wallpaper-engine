@@ -845,6 +845,46 @@ TEST(RenderSceneSnapshot, PlansLinkRenderTargetForElidableLinkedSource) {
     EXPECT_EQ(link_desc->desc.height, 32);
 }
 
+TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
+    owe::Scene scene;
+    scene.ortho[0]                     = 1920;
+    scene.ortho[1]                     = 1080;
+    scene.renderTargets["_rt_default"] = owe::SceneRenderTarget { .width = 1920, .height = 1080 };
+    scene.sceneGraph->ID()             = 1;
+    scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = 7 });
+
+    auto producer = rstd::sync::Arc<owe::SceneNode>::make();
+    producer->SetSize({ 64.0f, 32.0f });
+    producer->AddMesh(MakeSingleSubmesh("producer-material"));
+    scene.sceneGraph->AppendChild(producer.clone());
+
+    auto public_node  = rstd::sync::Arc<owe::SceneNode>::make();
+    public_node->ID() = 7;
+    public_node->SetSize({ 320.0f, 180.0f });
+    public_node->AddMesh(MakeSingleSubmesh("public-material"));
+    scene.sceneGraph->AppendChild(public_node.clone());
+    scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = 7 }, *producer.as_ptr());
+
+    auto consumer      = rstd::sync::Arc<owe::SceneNode>::make();
+    consumer->ID()     = 42;
+    auto consumer_mesh = MakeSingleSubmesh("consumer-material");
+    consumer_mesh->MaterialSlots()[0]->textures.push_back("_rt_link_7");
+    consumer->AddMesh(consumer_mesh);
+    scene.sceneGraph->AppendChild(consumer.clone());
+
+    auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
+
+    EXPECT_EQ(scene.RegisteredLayerLinkSource(owe::WallpaperLayerId { .value = 7 }),
+              producer.as_ptr());
+    ASSERT_TRUE(scene.ResolveLayerLinkSource(*producer.as_ptr()).is_some());
+    EXPECT_EQ(scene.ResolveLayerLinkSource(*producer.as_ptr())->value, 7);
+    EXPECT_TRUE(scene.ResolveLayerLinkSource(*public_node.as_ptr()).is_none());
+    ASSERT_TRUE(scene.renderTargets.contains("_rt_link_7"));
+    EXPECT_EQ(scene.renderTargets.at("_rt_link_7").width, 64);
+    EXPECT_EQ(scene.renderTargets.at("_rt_link_7").height, 32);
+    EXPECT_NE(snapshot.linkSource(owe::WallpaperLayerId { .value = 7 }), nullptr);
+}
+
 TEST(SceneGeometryDataGeneration, IncrementsWhenGeometryDataChanges) {
     std::vector<owe::SceneVertexArray::SceneVertexAttribute> attrs {
         { .name = "a_Position", .type = owe::VertexType::FLOAT3 },

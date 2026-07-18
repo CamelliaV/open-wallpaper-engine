@@ -894,9 +894,11 @@ TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
     const float dynamic_h      = std::max({ src_bbox_h, text_bbox_h, frame_h * 2.0f, 256.0f });
     const bool  dynamic_effect = policy.dynamic && policy.has_effect;
 
-    const float rt_max_w = policy.dynamic ? (! policy.has_effect ? dynamic_w : frame_w)
+    const float dynamic_effect_w = std::max(frame_w, text_bbox_w);
+    const float dynamic_effect_h = std::max(frame_h, text_bbox_h);
+    const float rt_max_w = policy.dynamic ? (! policy.has_effect ? dynamic_w : dynamic_effect_w)
                                           : (policy.has_effect ? frame_w : src_bbox_w);
-    const float rt_max_h = policy.dynamic ? (! policy.has_effect ? dynamic_h : frame_h)
+    const float rt_max_h = policy.dynamic ? (! policy.has_effect ? dynamic_h : dynamic_effect_h)
                                           : (policy.has_effect ? frame_h : src_bbox_h);
 
     TextGeometry out;
@@ -917,10 +919,10 @@ TextGeometry ResolveTextGeometry(const TextGeometryPolicy& policy,
     }
 
     if (dynamic_effect) {
-        out.draw_width          = std::max(frame_w, src_bbox_w);
-        out.draw_height         = frame_h;
+        out.draw_width          = dynamic_effect_w;
+        out.draw_height         = dynamic_effect_h;
         out.uv_source_width     = out.draw_width;
-        out.uv_source_height    = std::max(frame_h, src_bbox_h);
+        out.uv_source_height    = out.draw_height;
         out.effect_frame_width  = out.uv_source_width;
         out.effect_frame_height = out.uv_source_height;
         return out;
