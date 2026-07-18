@@ -203,6 +203,7 @@ auto WPUniformCameraResolver::Resolve(const SceneNode& node) const -> std::share
 
 auto WPUniformSceneState::SetNodeState(SceneNodeId id, std::shared_ptr<WPUniformNodeState> state)
     -> std::shared_ptr<WPUniformNodeState> {
+    (void)m_nodes_by_address.insert(state->node.as_ptr().as_raw_ptr(), state);
     (void)m_nodes.insert(Key(id), state);
     return state;
 }
@@ -212,6 +213,19 @@ bool WPUniformSceneState::SetEffectProjectionSize(SceneNodeId id, rstd::array<f3
     if (found.is_none() || ! **found) return false;
     (**found)->effect_projection_size = size;
     return true;
+}
+
+auto WPUniformSceneState::ResolveParallaxState(const WPUniformNodeState& state) const
+    -> const WPUniformNodeState& {
+    auto* resolved = rstd::addressof(state);
+    for (auto* parent = state.node->Parent(); parent != nullptr; parent = parent->Parent()) {
+        auto found = m_nodes_by_address.get(parent);
+        if (found.is_none() || ! **found) continue;
+        auto& candidate = ***found;
+        if (! candidate.propagate_parallax_to_children) break;
+        resolved = rstd::addressof(candidate);
+    }
+    return *resolved;
 }
 
 void WPUniformSceneState::SetPointerInput(f64 x, f64 y) {
@@ -347,10 +361,11 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
         const bool  own_image_effect =
             camera.HasImgEffect() && attached.is_some() && *attached == m_node->node.as_ptr();
         if (node.Camera() != "effect" && parallax.enable && ! own_image_effect) {
-            m_node->parallax_node->UpdateTrans();
+            const auto& parallax_state = m_state->ResolveParallaxState(*m_node);
+            parallax_state.node->UpdateTrans();
             const Vector3f node_position =
-                m_node->parallax_node->ModelTrans().block<3, 1>(0, 3).cast<f32>();
-            const Vector2f depth(m_node->parallax_depth.data());
+                parallax_state.node->ModelTrans().block<3, 1>(0, 3).cast<f32>();
+            const Vector2f depth(parallax_state.propagated_parallax_depth.data());
             const auto     ortho_values = m_state->Ortho();
             const Vector2f ortho { ortho_values[0], ortho_values[1] };
             const Vector2f pointer(m_state->Inputs().pointer.data());

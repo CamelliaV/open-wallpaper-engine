@@ -184,6 +184,7 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     auto child  = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { -76.0f, -3.0f, 0.0f },
                                                         Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
                                                         Eigen::Vector3f::Zero());
+    auto effect = rstd::sync::Arc<owe::SceneNode>::make();
     auto mesh   = std::make_shared<owe::SceneMesh>();
     mesh->AddMaterial(owe::SceneMaterial {});
     owe::SceneMesh::Submesh submesh;
@@ -193,6 +194,7 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     parent->AppendChild(child.clone());
     scene.sceneGraph->AppendChild(parent.clone());
     scene.RebuildResourceIndex();
+    effect->SetParentAnchor(child.as_ptr());
 
     auto state              = std::make_shared<owe::WPUniformSceneState>();
     state->CameraParallax() = { true, 0.03f, 0.0f, 0.36f };
@@ -200,12 +202,25 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     state->SetPointerInput(0.0, 1.0);
     state->Advance(owe::SceneFrame {});
 
-    auto node_state            = std::make_shared<owe::WPUniformNodeState>(child.clone());
-    node_state->camera         = camera;
-    node_state->active_camera  = camera;
-    node_state->parallax_node  = parent.clone();
-    node_state->parallax_depth = { -1.56f, -0.79f };
-    owe::WPTransformUniformSource source(state, node_state);
+    auto camera_resolver = std::make_shared<owe::WPUniformCameraResolver>(camera);
+    camera_resolver->Add("default", camera);
+
+    auto parent_state             = std::make_shared<owe::WPUniformNodeState>(parent.clone());
+    parent_state->camera_resolver = camera_resolver;
+    parent_state->propagated_parallax_depth      = { -1.56f, -0.79f };
+    parent_state->propagate_parallax_to_children = true;
+    auto child_state             = std::make_shared<owe::WPUniformNodeState>(child.clone());
+    child_state->camera_resolver = camera_resolver;
+    child_state->propagated_parallax_depth      = { -1.12f, -1.36f };
+    child_state->propagate_parallax_to_children = true;
+    auto effect_state             = std::make_shared<owe::WPUniformNodeState>(effect.clone());
+    effect_state->camera_resolver = camera_resolver;
+    effect_state->propagated_parallax_depth      = { 0.0f, 0.0f };
+    effect_state->propagate_parallax_to_children = true;
+    (void)state->SetNodeState({ .index = 1, .generation = 1 }, parent_state);
+    (void)state->SetNodeState({ .index = 2, .generation = 1 }, child_state);
+    (void)state->SetNodeState({ .index = 3, .generation = 1 }, effect_state);
+    owe::WPTransformUniformSource source(state, effect_state);
 
     auto capture_mvp = [&]() {
         return scene_test::Capture(
@@ -228,15 +243,14 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     EXPECT_NEAR(mvp[12], expected_parent.x(), 1e-5f);
     EXPECT_NEAR(mvp[13], expected_parent.y(), 1e-5f);
 
-    node_state->parallax_node  = child.clone();
-    node_state->parallax_depth = { -1.12f, -1.36f };
-    mvp                        = capture_mvp();
-    auto expected_child        = expected_translation({ 1906.0f, 1050.0f }, { -1.12f, -1.36f });
+    parent_state->propagate_parallax_to_children = false;
+    mvp                                          = capture_mvp();
+    auto expected_child = expected_translation({ 1906.0f, 1050.0f }, { -1.12f, -1.36f });
     EXPECT_NEAR(mvp[12], expected_child.x(), 1e-5f);
     EXPECT_NEAR(mvp[13], expected_child.y(), 1e-5f);
 
     auto layer_camera = std::make_shared<owe::SceneCamera>(3840, 2160, -1.0, 1.0);
-    layer_camera->AttatchNode(child.as_ptr());
+    layer_camera->AttatchNode(effect.as_ptr());
     layer_camera->AttatchImgEffect(
         std::make_shared<owe::SceneImageEffectLayer>(child.as_ptr(),
                                                      3840.0f,
@@ -244,12 +258,10 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
                                                      "_rt_effect_pingpong_a_test",
                                                      "_rt_effect_pingpong_b_test"));
     scene.cameras["layer"] = layer_camera;
-    child->SetCamera("layer");
-
-    node_state->camera         = layer_camera;
-    node_state->parallax_node  = parent.clone();
-    node_state->parallax_depth = { -1.56f, -0.79f };
-    mvp                        = capture_mvp();
+    camera_resolver->Add("layer", layer_camera);
+    effect->SetCamera("layer");
+    parent_state->propagate_parallax_to_children = true;
+    mvp                                          = capture_mvp();
     EXPECT_NEAR(mvp[12], 0.0f, 1e-5f);
     EXPECT_NEAR(mvp[13], 0.0f, 1e-5f);
 }

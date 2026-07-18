@@ -4650,13 +4650,6 @@ void FinalizeUniformSources(ParseContext& context) {
         }
         return shared_camera(scene.activeCamera);
     };
-    auto config_entry = [&](const SceneNode& node) -> ParseContext::UniformConfigDraft* {
-        for (auto& candidate : context.uniform_configs) {
-            if (candidate.node.as_ptr() == &node) return &candidate;
-        }
-        return nullptr;
-    };
-
     auto camera_resolver =
         std::make_shared<WPUniformCameraResolver>(shared_camera(scene.activeCamera));
     camera_resolver->Reserve(scene.cameras.size());
@@ -4702,27 +4695,15 @@ void FinalizeUniformSources(ParseContext& context) {
         auto  node_id = scene.ResourceIndex().nodeId(*entry.node);
         if (node_id.is_none()) continue;
 
-        auto state                     = std::make_shared<WPUniformNodeState>(entry.node.clone());
-        state->camera_resolver         = camera_resolver;
-        state->use_camera_eye_position = draft.use_camera_eye_position;
-        state->effect_projection_size  = draft.effect_projection_size;
+        auto state                       = std::make_shared<WPUniformNodeState>(entry.node.clone());
+        state->camera_resolver           = camera_resolver;
+        state->propagated_parallax_depth = draft.propagated_parallax_depth;
+        state->propagate_parallax_to_children = draft.propagate_parallax_to_children;
+        state->use_camera_eye_position        = draft.use_camera_eye_position;
+        state->effect_projection_size         = draft.effect_projection_size;
         if (draft.effect_projection_node.is_some()) {
             state->effect_projection_node = Some((*draft.effect_projection_node).clone());
         }
-        auto* parallax_entry = &entry;
-        auto* cursor         = entry.node->Parent();
-        while (cursor != nullptr) {
-            auto* parent_entry = config_entry(*cursor);
-            if (parent_entry == nullptr || ! parent_entry->config.configured) {
-                cursor = cursor->Parent();
-                continue;
-            }
-            if (! parent_entry->config.propagate_parallax_to_children) break;
-            parallax_entry = parent_entry;
-            cursor         = cursor->Parent();
-        }
-        state->parallax_node  = parallax_entry->node.clone();
-        state->parallax_depth = parallax_entry->config.propagated_parallax_depth;
         context.uniform_state->SetNodeState(*node_id, state);
 
         const auto transform = registrar->Register(Box<dyn<UniformSource>>::make(

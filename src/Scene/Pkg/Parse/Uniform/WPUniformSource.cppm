@@ -147,15 +147,14 @@ private:
 
 struct WPUniformNodeState {
     rstd::sync::Arc<SceneNode>               node;
-    rstd::sync::Arc<SceneNode>               parallax_node;
     std::shared_ptr<WPUniformCameraResolver> camera_resolver;
-    rstd::array<f32, 2>                      parallax_depth { 0.0f, 0.0f };
+    rstd::array<f32, 2>                      propagated_parallax_depth { 0.0f, 0.0f };
+    bool                                     propagate_parallax_to_children { true };
     bool                                     use_camera_eye_position { false };
     Option<rstd::sync::Arc<SceneNode>>       effect_projection_node;
     rstd::array<f32, 2>                      effect_projection_size { 0.0f, 0.0f };
 
-    explicit WPUniformNodeState(rstd::sync::Arc<SceneNode> value)
-        : node(rstd::move(value)), parallax_node(node.clone()) {}
+    explicit WPUniformNodeState(rstd::sync::Arc<SceneNode> value): node(rstd::move(value)) {}
 };
 
 struct WPUniformFrameInputs {
@@ -170,6 +169,7 @@ public:
     auto SetNodeState(SceneNodeId, std::shared_ptr<WPUniformNodeState>)
         -> std::shared_ptr<WPUniformNodeState>;
     bool SetEffectProjectionSize(SceneNodeId, rstd::array<f32, 2>);
+    auto ResolveParallaxState(const WPUniformNodeState&) const -> const WPUniformNodeState&;
 
     WPUniformCameraParallax&       CameraParallax() noexcept { return m_camera_parallax; }
     const WPUniformCameraParallax& CameraParallax() const noexcept { return m_camera_parallax; }
@@ -191,14 +191,16 @@ private:
     }
 
     rstd::collections::HashMap<u64, std::shared_ptr<WPUniformNodeState>> m_nodes;
-    WPUniformFrameInputs                                                 m_inputs;
-    WPUniformCameraParallax                                              m_camera_parallax;
-    WPUniformCameraShake                                                 m_camera_shake;
-    rstd::array<f32, 2> m_ortho { 1920.0f, 1080.0f };
-    rstd::array<f32, 2> m_pointer_input { 0.5f, 0.5f };
-    f32                 m_pointer_delay { 0.0f };
-    f64                 m_pointer_delayed_time { 0.0 };
-    rstd::time::Instant m_last_pointer_input_time { rstd::time::Instant::now() };
+    rstd::collections::HashMap<const SceneNode*, std::shared_ptr<WPUniformNodeState>>
+                            m_nodes_by_address;
+    WPUniformFrameInputs    m_inputs;
+    WPUniformCameraParallax m_camera_parallax;
+    WPUniformCameraShake    m_camera_shake;
+    rstd::array<f32, 2>     m_ortho { 1920.0f, 1080.0f };
+    rstd::array<f32, 2>     m_pointer_input { 0.5f, 0.5f };
+    f32                     m_pointer_delay { 0.0f };
+    f64                     m_pointer_delayed_time { 0.0 };
+    rstd::time::Instant     m_last_pointer_input_time { rstd::time::Instant::now() };
 };
 
 class WPUniformRuntimeInput {
