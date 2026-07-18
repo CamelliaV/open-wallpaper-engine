@@ -1049,7 +1049,7 @@ void SceneRenderController::on(RenderDraw&&) {
 
         /* Advance video textures (no-op if none) before drawFrame so
          * the new RGBA frame is sampled by the same render pass. */
-        m_render->pumpVideoTextures(frame_timer.IdeaTime() * m_speed);
+        m_render->pumpVideoTextures(frame_timer.TargetFrameTime() * m_speed);
 
         /* Upload any glyph rects the actuators added this tick. Runs after
          * TickSceneScripts (which calls FontFace::Populate) and before
@@ -1058,7 +1058,7 @@ void SceneRenderController::on(RenderDraw&&) {
 
         m_render->drawFrame(*m_scene);
 
-        m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);
+        m_scene->PassFrameTime(frame_timer.TargetFrameTime() * m_speed);
 
         if (! m_scene->first_frame_ok) {
             m_scene->first_frame_ok = true;

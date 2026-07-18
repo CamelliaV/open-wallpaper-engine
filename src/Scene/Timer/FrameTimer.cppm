@@ -24,7 +24,7 @@ public:
     u16    RequiredFps() const;
     bool   Running() const;
     double FrameTime() const;
-    double IdeaTime() const;
+    double TargetFrameTime() const;
 
     void SetRequiredFps(u16);
 

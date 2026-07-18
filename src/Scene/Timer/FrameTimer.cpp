@@ -31,11 +31,8 @@ double FrameTimer::FrameTime() const {
     return duration_cast<duration<double>>(m_frametime.load()).count();
 }
 
-double FrameTimer::IdeaTime() const {
-    auto frametime = m_frametime.load();
-    auto ideatime  = m_ideatime.load();
-    auto time      = frametime > ideatime ? frametime : ideatime;
-    return duration_cast<duration<double>>(time).count();
+double FrameTimer::TargetFrameTime() const {
+    return duration_cast<duration<double>>(m_ideatime.load()).count();
 }
 
 void FrameTimer::UpdateFrametime() {
