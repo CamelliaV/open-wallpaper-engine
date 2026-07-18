@@ -13,6 +13,7 @@ import wescene.rgraph;
 export import :vulkan_pass;
 export import :program;
 export import :shader_reflection_cache;
+export import :uniform_buffer;
 export import :resource;
 export import :buffer_resolver;
 export import :pass_common;

@@ -46,7 +46,10 @@ target_sources(owe-base
          Timer/Timer.cppm
          Timer/ThreadTimer.cppm
          Timer/FrameTimer.cppm
+         Scene/Id.cppm
+         Scene/Runtime.cppm
          Scene/SceneVisibility.cppm
+         Scene/Uniform.cppm
          Lighting/Lighting.cppm
          Scene/Scene.cppm)
 target_link_libraries(owe-base
@@ -77,10 +80,9 @@ set_property(TARGET owe-script PROPERTY CXX_SCAN_FOR_MODULES ON)
 
 
 # ---------------------------------------------------------------------------
-# owe-parse (Pkg/Parse/* + Puppet + SceneUniformUpdater)
+# owe-parse (Pkg/Parse/* + Puppet)
 # ---------------------------------------------------------------------------
 add_library(owe-parse STATIC
-  SceneUniformUpdater.cpp
   Pkg/SceneObj/FieldBinding.cpp
   Pkg/SceneObj/ImageObject.cpp
   Pkg/SceneObj/LightObject.cpp
@@ -89,6 +91,7 @@ add_library(owe-parse STATIC
   Pkg/SceneObj/ParticleObject.cpp
   Pkg/Parse/WPParticleParser.cpp
   Pkg/Parse/WPPuppet.cpp
+  Pkg/Parse/Uniform/WPUniformSource.cpp
   Pkg/SceneObj/SceneDocument.cpp
   Pkg/Parse/WPSceneParser.cpp
   Pkg/Parse/WPShaderParser.cpp
@@ -98,7 +101,6 @@ add_library(owe-parse STATIC
   Text/Text.cpp)
 target_sources(owe-parse
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
-         SceneUniformUpdater.cppm
          Pkg/Parse/mod.cppm
          Pkg/Parse/Compat.cppm
          Pkg/Parse/PuppetCompat.cppm
@@ -114,6 +116,7 @@ target_sources(owe-parse
          Pkg/SceneObj/ParticleObject.cppm
          Pkg/Parse/WPParticleParser.cppm
          Pkg/Parse/WPPuppet.cppm
+         Pkg/Parse/Uniform/WPUniformSource.cppm
          Pkg/SceneObj/SceneDocument.cppm
          Pkg/Parse/SceneStages.cppm
          Pkg/Parse/WPSceneParser.cppm
@@ -170,6 +173,7 @@ add_library(owe-vulkan-renderer STATIC
   VulkanRender/VulkanRender.cpp
   VulkanRender/BufferResolver.cpp
   VulkanRender/ShaderReflectionCache.cpp
+  VulkanRender/UniformBuffer.cpp
   VulkanRender/SceneToRenderGraph.cpp
   VulkanRender/Pass/CopyPass.cpp
   VulkanRender/Pass/CustomShaderPass.cpp
@@ -181,6 +185,7 @@ target_sources(owe-vulkan-renderer
          VulkanRender/Program.cppm
          VulkanRender/Pass/VulkanPass.cppm
          VulkanRender/ShaderReflectionCache.cppm
+         VulkanRender/UniformBuffer.cppm
          VulkanRender/Resource.cppm
          VulkanRender/BufferResolver.cppm
          VulkanRender/Pass/PassCommon.cppm

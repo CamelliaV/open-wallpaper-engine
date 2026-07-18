@@ -1,12 +1,83 @@
 #include <gtest/gtest.h>
 
-import rstd.cppstd;
-import rstd;
 import eigen;
+import rstd;
+import rstd.cppstd;
 import wescene.json;
+import wescene.pkg.parse;
 import wescene.scene;
-import wescene.scene_uniform_updater;
-import wescene.spec_names;
+import wescene.text;
+
+namespace scene_test
+{
+
+class UniformSink {
+public:
+    explicit UniformSink(owe::UniformOutputId output): m_output(output) {}
+
+    bool Wants(owe::UniformOutputId output) const { return output == m_output; }
+
+    auto Write(owe::UniformOutputId output, owe::UniformValueView value)
+        -> rstd::Result<rstd::empty, owe::UniformError> {
+        if (! Wants(output)) {
+            return rstd::Err(owe::UniformError {
+                .message = rstd::string::String::make("unexpected uniform output"),
+            });
+        }
+        m_value   = owe::UniformValue(value.data, value.size);
+        m_written = true;
+        return rstd::Ok(rstd::empty {});
+    }
+
+    const owe::UniformValue& Value() const { return m_value; }
+    bool                     Written() const { return m_written; }
+
+private:
+    owe::UniformOutputId m_output;
+    owe::UniformValue    m_value;
+    bool                 m_written { false };
+};
+
+class EmptyResources {
+public:
+    auto Texture(rstd::usize) const -> rstd::Option<owe::UniformTextureView> {
+        return rstd::None();
+    }
+    auto Viewport() const -> rstd::array<rstd::f32, 2> { return { 1920.0f, 1080.0f }; }
+    auto TexelSize() const -> rstd::array<rstd::f32, 2> {
+        return { 1.0f / 1920.0f, 1.0f / 1080.0f };
+    }
+};
+
+class UpdateContext {
+public:
+    UpdateContext(const owe::SceneFrame& frame, const EmptyResources& resources)
+        : m_frame(rstd::ref<owe::SceneFrame>::from_raw_parts(rstd::addressof(frame))),
+          m_resources(rstd::dyn<owe::UniformResourceView>::from_ref(resources)) {}
+
+    auto Frame() const -> rstd::ref<owe::SceneFrame> { return m_frame; }
+    auto Resources() const -> rstd::ref<rstd::dyn<owe::UniformResourceView>> { return m_resources; }
+
+private:
+    rstd::ref<owe::SceneFrame>                     m_frame;
+    rstd::ref<rstd::dyn<owe::UniformResourceView>> m_resources;
+};
+
+template<typename Source, typename Output>
+auto Capture(const owe::SceneFrame& frame, const Source& source, Output output)
+    -> owe::UniformValue {
+    EmptyResources resources;
+    UpdateContext  context_impl(frame, resources);
+    UniformSink    sink_impl(owe::ToUniformOutput(output));
+    auto           context = rstd::dyn<owe::UniformUpdateContext>::from_ref(context_impl);
+    auto           sink    = rstd::dyn<owe::UniformValueSink>::from_ref(sink_impl);
+    auto           result  = source.Evaluate(context.as_ref(), sink.as_mut_ref());
+    EXPECT_TRUE(result.is_ok());
+    EXPECT_TRUE(sink_impl.Written());
+    return sink_impl.Value();
+}
+
+} // namespace scene_test
 
 TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {
     owe::Scene  scene;
@@ -38,96 +109,62 @@ TEST(SceneUserTextBinding, AppliesEmptyString) {
     EXPECT_TRUE(value.empty());
 }
 
-TEST(SceneUniformUpdaterRuntimeAlpha, Color4OnlyShaderUsesBaseColorAndRuntimeAlpha) {
-    owe::Scene        scene;
-    owe::SceneNode    node;
-    owe::sprite_map_t sprites;
+TEST(TextUniformSource, OwnsTextProjectionOutputs) {
+    owe::Scene scene;
+    auto       node   = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       camera = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
+    auto       state  = std::make_shared<owe::text::TextUniformState>(node.clone());
+    state->camera     = camera;
 
-    auto camera_node = rstd::sync::Arc<owe::SceneNode>::make();
-    auto camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
-    camera->AttatchNode(camera_node.as_ptr());
-    scene.cameras["default"] = camera;
-    scene.activeCamera       = camera.get();
+    owe::text::TextUniformSource source(state);
+    auto                         value = scene_test::Capture(
+        scene.Runtime().Frame(), source, owe::text::TextUniformOutput::ModelViewProjection);
 
-    auto mesh = std::make_shared<owe::SceneMesh>();
-    mesh->AddMaterial(owe::SceneMaterial {});
-    node.AddMesh(mesh);
-    node.SetBaseColor({ 0.25f, 0.5f, 0.75f }, 0.8f);
-    node.SetUserAlpha(0.125f);
+    EXPECT_EQ(value.size(), 16u);
+}
 
-    owe::SceneUniformUpdater updater(&scene);
-    updater.InitUniforms(&node, [](std::string_view name) {
-        return name == owe::G_COLOR4;
-    });
+TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
+    owe::Scene scene;
+    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    node->SetBaseColor({ 0.25f, 0.5f, 0.75f }, 0.8f);
+    node->SetUserAlpha(0.125f);
 
-    std::unordered_map<std::string, owe::ShaderValue> values;
-    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
-        values[std::string(name)] = value;
-    });
-
-    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
-    const auto& color = values.at(std::string(owe::G_COLOR4));
+    owe::WPColorUniformSource source(node.clone());
+    const auto                color =
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
     ASSERT_EQ(color.size(), 4u);
     EXPECT_FLOAT_EQ(color[0], 0.25f);
     EXPECT_FLOAT_EQ(color[1], 0.5f);
     EXPECT_FLOAT_EQ(color[2], 0.75f);
     EXPECT_FLOAT_EQ(color[3], 0.125f);
-    EXPECT_EQ(values.count(std::string(owe::G_USERALPHA)), 0u);
 }
 
-TEST(SceneUniformUpdaterRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
-    owe::Scene        scene;
-    owe::SceneNode    node;
-    owe::sprite_map_t sprites;
+TEST(WPUniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
+    owe::Scene scene;
+    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    node->SetBaseColor({ 0.0f, 0.0f, 0.0f }, 0.35f);
+    owe::WPColorUniformSource source(node.clone());
 
-    auto camera_node = rstd::sync::Arc<owe::SceneNode>::make();
-    auto camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
-    camera->AttatchNode(camera_node.as_ptr());
-    scene.cameras["default"] = camera;
-    scene.activeCamera       = camera.get();
+    node->SetVisible(true);
+    auto visible =
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
+    ASSERT_EQ(visible.size(), 4u);
+    EXPECT_FLOAT_EQ(visible[3], 0.35f);
 
-    auto mesh = std::make_shared<owe::SceneMesh>();
-    mesh->AddMaterial(owe::SceneMaterial {});
-    node.AddMesh(mesh);
-    node.SetBaseColor({ 0.0f, 0.0f, 0.0f }, 0.35f);
+    node->SetVisible(false);
+    auto hidden =
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
+    ASSERT_EQ(hidden.size(), 4u);
+    EXPECT_FLOAT_EQ(hidden[3], 0.0f);
 
-    owe::SceneUniformUpdater updater(&scene);
-    updater.InitUniforms(&node, [](std::string_view name) {
-        return name == owe::G_COLOR4;
-    });
-
-    std::unordered_map<std::string, owe::ShaderValue> values;
-    node.SetVisible(true);
-    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
-        values[std::string(name)] = value;
-    });
-    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
-    const auto& visible_color = values.at(std::string(owe::G_COLOR4));
-    ASSERT_EQ(visible_color.size(), 4u);
-    EXPECT_FLOAT_EQ(visible_color[3], 0.35f);
-
-    values.clear();
-    node.SetVisible(false);
-    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
-        values[std::string(name)] = value;
-    });
-    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
-    const auto& hidden_color = values.at(std::string(owe::G_COLOR4));
-    ASSERT_EQ(hidden_color.size(), 4u);
-    EXPECT_FLOAT_EQ(hidden_color[3], 0.0f);
-
-    values.clear();
-    node.SetVisible(true);
-    updater.UpdateUniforms(&node, sprites, [&](std::string_view name, owe::ShaderValue value) {
-        values[std::string(name)] = value;
-    });
-    ASSERT_EQ(values.count(std::string(owe::G_COLOR4)), 1u);
-    const auto& restored_color = values.at(std::string(owe::G_COLOR4));
-    ASSERT_EQ(restored_color.size(), 4u);
-    EXPECT_FLOAT_EQ(restored_color[3], 0.35f);
+    node->SetVisible(true);
+    auto restored =
+        scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
+    ASSERT_EQ(restored.size(), 4u);
+    EXPECT_FLOAT_EQ(restored[3], 0.35f);
 }
 
-TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource) {
+TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     owe::Scene scene;
     scene.ortho[0] = 3840;
     scene.ortho[1] = 2160;
@@ -149,36 +186,30 @@ TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource
                                                         Eigen::Vector3f::Zero());
     auto mesh   = std::make_shared<owe::SceneMesh>();
     mesh->AddMaterial(owe::SceneMaterial {});
+    owe::SceneMesh::Submesh submesh;
+    submesh.material_slot = 0;
+    mesh->Submeshes().push_back(std::move(submesh));
     child->AddMesh(mesh);
     parent->AppendChild(child.clone());
+    scene.sceneGraph->AppendChild(parent.clone());
+    scene.RebuildResourceIndex();
 
-    owe::SceneUniformUpdater updater(&scene);
-    updater.SetCameraParallax({ true, 0.03f, 0.0f, 0.36f });
-    updater.MouseInput(0.0, 1.0);
-    updater.FrameBegin();
+    auto state              = std::make_shared<owe::WPUniformSceneState>();
+    state->CameraParallax() = { true, 0.03f, 0.0f, 0.36f };
+    state->SetOrtho(3840.0f, 2160.0f);
+    state->SetPointerInput(0.0, 1.0);
+    state->Advance(owe::SceneFrame {});
 
-    owe::SceneUniformNodeData parent_data;
-    parent_data.parallaxDepth           = { -1.56f, -0.79f };
-    parent_data.propagatedParallaxDepth = parent_data.parallaxDepth;
-    updater.SetNodeData(parent.as_ptr(), parent_data);
-
-    owe::SceneUniformNodeData child_data;
-    child_data.parallaxDepth           = { -1.12f, -1.36f };
-    child_data.propagatedParallaxDepth = child_data.parallaxDepth;
-    updater.SetNodeData(child.as_ptr(), child_data);
-
-    updater.InitUniforms(child.as_ptr(), [](std::string_view name) {
-        return name == owe::G_MVP;
-    });
+    auto node_state            = std::make_shared<owe::WPUniformNodeState>(child.clone());
+    node_state->camera         = camera;
+    node_state->active_camera  = camera;
+    node_state->parallax_node  = parent.clone();
+    node_state->parallax_depth = { -1.56f, -0.79f };
+    owe::WPTransformUniformSource source(state, node_state);
 
     auto capture_mvp = [&]() {
-        owe::sprite_map_t                                 sprites;
-        std::unordered_map<std::string, owe::ShaderValue> values;
-        updater.UpdateUniforms(
-            child.as_ptr(), sprites, [&](std::string_view name, owe::ShaderValue value) {
-                values[std::string(name)] = value;
-            });
-        return values.at(std::string(owe::G_MVP));
+        return scene_test::Capture(
+            scene.Runtime().Frame(), source, owe::WPTransformUniformOutput::ModelViewProjection);
     };
     auto expected_translation = [](Eigen::Vector2f base, Eigen::Vector2f depth) {
         const Eigen::Vector2f camera_pos { 1920.0f, 1080.0f };
@@ -197,10 +228,10 @@ TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource
     EXPECT_NEAR(mvp[12], expected_parent.x(), 1e-5f);
     EXPECT_NEAR(mvp[13], expected_parent.y(), 1e-5f);
 
-    parent_data.propagate_parallax_to_children = false;
-    updater.SetNodeData(parent.as_ptr(), parent_data);
-    mvp                 = capture_mvp();
-    auto expected_child = expected_translation({ 1906.0f, 1050.0f }, { -1.12f, -1.36f });
+    node_state->parallax_node  = child.clone();
+    node_state->parallax_depth = { -1.12f, -1.36f };
+    mvp                        = capture_mvp();
+    auto expected_child        = expected_translation({ 1906.0f, 1050.0f }, { -1.12f, -1.36f });
     EXPECT_NEAR(mvp[12], expected_child.x(), 1e-5f);
     EXPECT_NEAR(mvp[13], expected_child.y(), 1e-5f);
 
@@ -215,9 +246,10 @@ TEST(SceneUniformUpdaterParallax, ParentPropagationSelectsAncestorParallaxSource
     scene.cameras["layer"] = layer_camera;
     child->SetCamera("layer");
 
-    parent_data.propagate_parallax_to_children = true;
-    updater.SetNodeData(parent.as_ptr(), parent_data);
-    mvp = capture_mvp();
+    node_state->camera         = layer_camera;
+    node_state->parallax_node  = parent.clone();
+    node_state->parallax_depth = { -1.56f, -0.79f };
+    mvp                        = capture_mvp();
     EXPECT_NEAR(mvp[12], 0.0f, 1e-5f);
     EXPECT_NEAR(mvp[13], 0.0f, 1e-5f);
 }

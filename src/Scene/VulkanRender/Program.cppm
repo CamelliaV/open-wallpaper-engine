@@ -19,6 +19,7 @@ import :pass_common;
 import :pre_pass;
 import :fin_pass;
 import :shader_reflection_cache;
+import :uniform_buffer;
 
 using namespace rstd::prelude;
 
@@ -147,9 +148,13 @@ struct RenderProgram {
     rstd::vec::Vec<rstd::mut_ref<VulkanPass>>         frame_passes;
     rstd::Option<rstd::mut_ref<PrePass>>              frame_prepass;
     rstd::Option<rstd::mut_ref<FinPass>>              frame_finpass;
+    rstd::vec::Vec<Box<dyn<UniformBufferUpdate>>>     uniform_update_owners;
+    rstd::vec::Vec<ref<dyn<UniformBufferUpdate>>>     uniform_updates;
     bool                                              loaded { false };
 
     void clear() {
+        uniform_updates.clear();
+        uniform_update_owners.clear();
         scopes.clear();
         pass_records.clear();
         resource_plan = {};
@@ -406,8 +411,6 @@ struct RenderProgram {
                 it->second.sample_count = static_cast<unsigned>(msaa_samples);
             }
         }
-        scene.shaderValueUpdater->SetScreenSize(static_cast<owe::i32>(extent.width),
-                                                static_cast<owe::i32>(extent.height));
     }
 
     void finalizeFramePassRequests(owe::Scene& scene) {
@@ -574,6 +577,31 @@ struct RenderProgram {
                 record.resources = pass->resourceUses();
             }
         }
+        uniform_updates.clear();
+        uniform_update_owners.clear();
+        SceneUniformBindingPrepareContext uniform_prepare_impl(scene);
+        auto uniform_prepare = dyn<UniformBindingPrepareContext>::from_ref(uniform_prepare_impl);
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (pass.is_none()) continue;
+            PreparedPassResources resources(rr.resources.Prepared(), record.resources);
+            auto created = pass->createUniformBufferUpdate(uniform_prepare.as_ref(), resources);
+            if (created.is_err()) {
+                auto error = rstd::move(created).unwrap_err_unchecked();
+                rstd_error("prepare uniform binding failed for {}: {}",
+                           record.pass_name,
+                           error.message.as_str());
+                return false;
+            }
+            auto binding = rstd::move(created).unwrap_unchecked();
+            if (binding.is_some()) {
+                uniform_update_owners.push(rstd::move(binding).unwrap_unchecked());
+            }
+        }
+        uniform_updates.reserve(uniform_update_owners.len());
+        for (const auto& binding : uniform_update_owners) {
+            uniform_updates.push(binding.as_ref());
+        }
         return true;
     }
 
@@ -674,8 +702,20 @@ struct RenderProgram {
         callback(*pass, context);
     }
 
-    void execute(RenderingResources& rr) {
+    bool update(const SceneFrame& frame, VkExtent2D extent,
+                ref<dyn<SceneTextureAnimationView>> textures, RenderingResources& rr) {
         auto buffer_writer = rstd::dyn<resource::BufferContentWriter>::from_ref(rr.resources);
+        ProgramUniformFrameContext frame_context(
+            frame, { static_cast<f32>(extent.width), static_cast<f32>(extent.height) }, textures);
+        auto context = dyn<UniformBufferFrameContext>::from_ref(frame_context);
+        for (auto& binding : uniform_updates) {
+            auto result = binding->Update(context.as_ref(), buffer_writer.as_mut_ref());
+            if (result.is_err()) {
+                auto error = rstd::move(result).unwrap_err_unchecked();
+                rstd_error("update uniform buffer failed: {}", error.message.as_str());
+                return false;
+            }
+        }
         PassUpdateContext update_context {
             .buffers = buffer_writer.as_mut_ref(),
         };
@@ -683,9 +723,13 @@ struct RenderProgram {
             auto pass = resolve(record);
             if (pass && pass->prepared() && ! pass->update(update_context)) {
                 rstd_error("update pass resources failed: {}", record.pass_name);
-                return;
+                return false;
             }
         }
+        return true;
+    }
+
+    void record(RenderingResources& rr) {
         if (! rr.resources.RecordPendingUploads(rr.command)) {
             rstd_error("record dynamic buffer uploads failed");
             return;

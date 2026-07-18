@@ -52,22 +52,6 @@ void doCopy(RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc, TextureNo
 }
 } // namespace owe::rg
 
-static void CheckAndSetSprite(const RenderSceneSnapshot&      render_scene,
-                              vulkan::CustomShaderPass::Desc& desc,
-                              std::span<const std::string>    texs) {
-    for (usize i = 0; i < texs.size(); i++) {
-        auto& tex = texs[i];
-        if (! tex.empty() && ! IsSpecTex(tex)) {
-            if (auto tex_id = render_scene.textureDescId(tex)) {
-                const auto* stex = render_scene.textureDesc(*tex_id);
-                if (stex != nullptr && stex->desc.isSprite) {
-                    desc.sprites_map[i] = stex->desc.spriteAnim;
-                }
-            }
-        }
-    }
-}
-
 struct ExtraInfo;
 
 struct LinkTextureConsumer {
@@ -360,9 +344,6 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     }
                 }
                 pdesc.output = std::string(pass_output);
-                if (extra.render_scene != nullptr) {
-                    CheckAndSetSprite(*extra.render_scene, pdesc, material->textures);
-                }
                 for (usize i = 0; i < material->textures.size(); i++) {
                     const auto&                url = material->textures[i];
                     Option<rg::TextureNodeRef> input;

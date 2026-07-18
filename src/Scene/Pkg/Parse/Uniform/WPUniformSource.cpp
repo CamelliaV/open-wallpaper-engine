@@ -1,0 +1,700 @@
+module;
+
+module wescene.pkg.parse;
+import eigen;
+import rstd;
+import rstd.cppstd;
+import wescene.scene;
+import wescene.spec_names;
+
+using namespace Eigen;
+using namespace rstd::prelude;
+
+namespace owe
+{
+
+namespace
+{
+
+template<usize N>
+void AverageResample64(slice<f32> bins, rstd::array<f32, N>& out) {
+    static_assert(64 % N == 0);
+    constexpr usize ratio = 64 / N;
+    for (usize index = 0; index < N; ++index) {
+        f32 sum = 0.0f;
+        for (usize offset = 0; offset < ratio; ++offset) {
+            sum += rstd::cmp::max(0.0f, bins[index * ratio + offset]);
+        }
+        out[index] = sum / static_cast<f32>(ratio);
+    }
+}
+
+f32 Smooth(f32 value) { return value * value * (3.0f - 2.0f * value); }
+
+template<typename T>
+constexpr T Clamp(T value, T minimum, T maximum) {
+    return rstd::cmp::min(rstd::cmp::max(value, minimum), maximum);
+}
+
+auto UserScalar(const Json& property) -> Option<f32> {
+    const auto& value = SceneUserPropertyPayload(property);
+    if (auto number = value.as_f64(); number.is_some()) return Some(static_cast<f32>(*number));
+    if (auto boolean = value.as_bool(); boolean.is_some()) return Some(*boolean ? 1.0f : 0.0f);
+    if (auto string = value.as_str(); string.is_some()) {
+        try {
+            return Some(std::stof(rstd::cppstd::to_string(*string)));
+        } catch (...) {
+        }
+    }
+    return None();
+}
+
+Vector2f ShakeOffset(f32 x, f32 roughness) {
+    const f32 r    = Clamp(roughness, 0.0f, 2.0f);
+    const f32 over = Clamp(r - 1.0f, 0.0f, 1.0f);
+    const f32 grow = over * over;
+
+    constexpr f32 pi       = static_cast<f32>(rstd::f64_::consts::PI);
+    const f32     beat_pos = rstd::cmp::max(0.0f, x) / (pi * 0.5f);
+    const i32     beat     = static_cast<i32>(std::floor(beat_pos));
+    const f32     local    = beat_pos - static_cast<f32>(beat);
+    const f32     amount   = Smooth(local);
+
+    static constexpr rstd::array<rstd::array<f32, 2>, 8> directions {
+        rstd::array<f32, 2> { -1.0f, 1.0f }, rstd::array<f32, 2> { 1.0f, -1.0f },
+        rstd::array<f32, 2> { -1.0f, 1.0f }, rstd::array<f32, 2> { 1.0f, -1.0f },
+        rstd::array<f32, 2> { 1.0f, 1.0f },  rstd::array<f32, 2> { -1.0f, -1.0f },
+        rstd::array<f32, 2> { 1.0f, 1.0f },  rstd::array<f32, 2> { -1.0f, -1.0f },
+    };
+    static constexpr rstd::array<f32, 8> base_factors {
+        0.8f, 1.0f, 0.45f, 0.6f, 0.8f, 1.0f, 0.45f, 0.6f,
+    };
+    static constexpr rstd::array<f32, 8> rough_factors {
+        6.0f, 8.0f, 1.0f, 1.0f, 6.0f, 8.0f, 1.0f, 1.0f,
+    };
+
+    auto sample = [&](i32 index) -> Vector2f {
+        if ((index % 2) != 0) return Vector2f::Zero();
+        const i32 direction = (index / 2) % static_cast<i32>(directions.len());
+        const f32 factor =
+            base_factors[direction] * (1.0f + (rough_factors[direction] - 1.0f) * grow);
+        return { directions[direction][0] * factor, directions[direction][1] * factor };
+    };
+
+    const Vector2f a     = sample(beat);
+    const Vector2f b     = sample(beat + 1);
+    const Vector2f delta = b - a;
+    Vector2f       curve { -delta.y(), delta.x() };
+    if (curve.squaredNorm() > 0.0f) curve.normalize();
+    const f32 bend = std::sin(local * pi) * (0.09f + grow * 0.04f) * delta.norm();
+    return a * (1.0f - amount) + b * amount + curve * bend;
+}
+
+class WPUniformWriter {
+public:
+    explicit WPUniformWriter(mut_ref<dyn<UniformValueSink>> sink): m_sink(sink) {}
+
+    template<typename Output>
+    bool Wants(Output output) {
+        return m_sink->Wants(ToUniformOutput(output));
+    }
+    bool Wants(UniformOutputId output) { return m_sink->Wants(output); }
+
+    template<typename Output, typename Value>
+    void Write(Output output, const Value& value) {
+        Write(ToUniformOutput(output), value);
+    }
+
+    template<typename Value>
+    void Write(UniformOutputId output, const Value& value) {
+        auto uniform = UniformValue(value);
+        WriteView(output, uniform.View());
+    }
+
+    void Write(UniformOutputId output, const UniformValue& value) {
+        WriteView(output, value.View());
+    }
+
+    void WriteView(UniformOutputId output, UniformValueView value) {
+        if (m_failed || ! m_sink->Wants(output)) return;
+        auto result = m_sink->Write(output, value);
+        if (result.is_err()) {
+            m_error  = rstd::move(result).unwrap_err_unchecked().message;
+            m_failed = true;
+        }
+    }
+
+    auto Finish() -> Result<empty, UniformError> {
+        if (m_failed) return Err(UniformError { .message = rstd::move(m_error) });
+        return Ok(empty {});
+    }
+
+private:
+    mut_ref<dyn<UniformValueSink>> m_sink;
+    String                         m_error;
+    bool                           m_failed { false };
+};
+
+template<typename Output>
+auto Bind(mut_ref<dyn<UniformBindingSink>> sink, Output output, std::string_view name,
+          UniformValueShape shape) -> Result<empty, UniformError> {
+    auto result = sink->Bind(ToUniformOutput(output), name, shape);
+    if (result.is_err()) return Err(rstd::move(result).unwrap_err_unchecked());
+    return Ok(empty {});
+}
+
+auto Bind(mut_ref<dyn<UniformBindingSink>> sink, UniformOutputId output, std::string_view name,
+          UniformValueShape shape) -> Result<empty, UniformError> {
+    auto result = sink->Bind(output, name, shape);
+    if (result.is_err()) return Err(rstd::move(result).unwrap_err_unchecked());
+    return Ok(empty {});
+}
+
+template<typename Output>
+struct BindingEntry {
+    Output           output;
+    std::string_view name;
+    u32              elements;
+};
+
+template<typename Output, usize N>
+auto BindEntries(mut_ref<dyn<UniformBindingSink>>            sink,
+                 const rstd::array<BindingEntry<Output>, N>& entries)
+    -> Result<empty, UniformError> {
+    for (const auto& entry : entries) {
+        auto result =
+            Bind(sink, entry.output, entry.name, UniformValueShape::Float(entry.elements));
+        if (result.is_err()) return result;
+    }
+    return Ok(empty {});
+}
+
+} // namespace
+
+auto WPUniformNodeConfigDraft::Clone() const -> WPUniformNodeConfigDraft {
+    WPUniformNodeConfigDraft result {
+        .configured                     = configured,
+        .parallax_depth                 = parallax_depth,
+        .propagated_parallax_depth      = propagated_parallax_depth,
+        .propagate_parallax_to_children = propagate_parallax_to_children,
+        .use_camera_eye_position        = use_camera_eye_position,
+        .effect_projection_node =
+            effect_projection_node.is_some() ? Some((*effect_projection_node).clone()) : None(),
+        .effect_projection_size = effect_projection_size,
+    };
+    return result;
+}
+
+void WPUniformCameraResolver::Add(std::string name, std::shared_ptr<SceneCamera> camera) {
+    m_cameras.push(Entry { .name = rstd::move(name), .camera = rstd::move(camera) });
+}
+
+auto WPUniformCameraResolver::Resolve(const SceneNode& node) const -> std::shared_ptr<SceneCamera> {
+    std::string_view name = node.Camera();
+    if (name.empty()) {
+        if (! node.Perspective()) return m_active_camera;
+        name = "global_perspective";
+    }
+    for (const auto& entry : m_cameras) {
+        if (entry.name == name) return entry.camera;
+    }
+    return nullptr;
+}
+
+auto WPUniformSceneState::SetNodeState(SceneNodeId id, std::shared_ptr<WPUniformNodeState> state)
+    -> std::shared_ptr<WPUniformNodeState> {
+    (void)m_nodes.insert(Key(id), state);
+    return state;
+}
+
+bool WPUniformSceneState::SetEffectProjectionSize(SceneNodeId id, rstd::array<f32, 2> size) {
+    auto found = m_nodes.get_mut(Key(id));
+    if (found.is_none() || ! **found) return false;
+    (**found)->effect_projection_size = size;
+    return true;
+}
+
+void WPUniformSceneState::SetPointerInput(f64 x, f64 y) {
+    const auto now            = rstd::time::Instant::now();
+    const auto elapsed        = (now - m_last_pointer_input_time).as_secs_f64();
+    m_pointer_delayed_time    = rstd::cmp::max(0.0, m_pointer_delayed_time - elapsed);
+    m_pointer_input           = { static_cast<f32>(x), static_cast<f32>(y) };
+    m_last_pointer_input_time = now;
+}
+
+void WPUniformSceneState::SetPointerDelay(f32 delay) {
+    m_pointer_delay = rstd::cmp::max(0.0f, delay);
+}
+
+void WPUniformSceneState::SetAudioSpectrum(slice<f32> left, slice<f32> right) {
+    if (left.len() != m_inputs.audio_left.len() || right.len() != m_inputs.audio_right.len()) {
+        return;
+    }
+    for (usize index = 0; index < m_inputs.audio_left.len(); ++index) {
+        m_inputs.audio_left[index]  = left[index];
+        m_inputs.audio_right[index] = right[index];
+    }
+}
+
+void WPUniformSceneState::Advance(const SceneFrame& frame) {
+    const auto delay       = static_cast<f64>(m_pointer_delay);
+    m_pointer_delayed_time = rstd::cmp::min(m_pointer_delayed_time + frame.delta, delay);
+    const auto amount      = delay > 0.0 ? m_pointer_delayed_time / delay : 1.0;
+
+    m_inputs.pointer_last = m_inputs.pointer;
+    for (usize index = 0; index < m_inputs.pointer.len(); ++index) {
+        const auto current = m_inputs.pointer[index];
+        m_inputs.pointer[index] =
+            static_cast<f32>(current + (m_pointer_input[index] - current) * amount);
+    }
+}
+
+void WPUniformSceneState::ApplyUserProperty(std::string_view field, const Json& property) {
+    auto value = UserScalar(property);
+    if (value.is_none()) return;
+    if (field == "cameraparallaxmouseinfluence") {
+        m_camera_parallax.mouse_influence = *value;
+    } else if (field == "camerashake") {
+        m_camera_shake.enable = *value >= 0.5f;
+    } else if (field == "camerashakeamplitude") {
+        m_camera_shake.amplitude = *value;
+    } else if (field == "camerashakespeed") {
+        m_camera_shake.speed = *value;
+    } else if (field == "camerashakeroughness") {
+        m_camera_shake.roughness = *value;
+    }
+}
+
+auto WPTransformUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = WPTransformUniformOutput;
+    const rstd::array<BindingEntry<Output>, 13> entries {
+        BindingEntry<Output> { Output::ModelInverse, G_MI, u32(16) },
+        BindingEntry<Output> { Output::Model, G_M, u32(16) },
+        BindingEntry<Output> { Output::AlternateModel, G_AM, u32(16) },
+        BindingEntry<Output> { Output::ModelViewProjection, G_MVP, u32(16) },
+        BindingEntry<Output> { Output::ModelViewProjectionInverse, G_MVPI, u32(16) },
+        BindingEntry<Output> { Output::EyePosition, G_EYEPOSITION, u32(3) },
+        BindingEntry<Output> { Output::EffectModel, G_EFFECTMODELMATRIX, u32(16) },
+        BindingEntry<Output> { Output::EffectModelViewProjection, G_EMVP, u32(16) },
+        BindingEntry<Output> { Output::EffectModelViewProjectionInverse,
+                               G_EFFECTMODELVIEWPROJECTIONMATRIXINVERSE,
+                               u32(16) },
+        BindingEntry<Output> { Output::LayerModel, G_LAYERMODELMATRIX, u32(16) },
+        BindingEntry<Output> { Output::EffectTextureViewProjection, G_ETVP, u32(16) },
+        BindingEntry<Output> { Output::EffectTextureViewProjectionInverse, G_ETVPI, u32(16) },
+        BindingEntry<Output> { Output::ViewProjection, G_VP, u32(16) },
+    };
+    return BindEntries(sink, entries);
+}
+
+auto WPTransformUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
+                                        mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    if (! m_state || ! m_node || ! m_node->camera_resolver) return Ok(empty {});
+
+    auto camera_ref = m_node->camera_resolver->Resolve(*m_node->node);
+    if (! camera_ref) return Ok(empty {});
+
+    using Output = WPTransformUniformOutput;
+    WPUniformWriter writer(sink);
+    auto&           node   = *m_node->node;
+    auto&           camera = *camera_ref;
+    node.UpdateTrans();
+
+    const auto frame            = context->Frame();
+    const bool req_mi           = writer.Wants(Output::ModelInverse);
+    const bool req_m            = writer.Wants(Output::Model);
+    const bool req_am           = writer.Wants(Output::AlternateModel);
+    const bool req_mvp          = writer.Wants(Output::ModelViewProjection);
+    const bool req_mvpi         = writer.Wants(Output::ModelViewProjectionInverse);
+    const bool req_emvp         = writer.Wants(Output::EffectModelViewProjection);
+    const bool req_emvpi        = writer.Wants(Output::EffectModelViewProjectionInverse);
+    const bool req_effect_model = writer.Wants(Output::EffectModel) || req_emvp || req_emvpi ||
+                                  writer.Wants(Output::LayerModel);
+
+    Matrix4d    view_projection   = camera.GetViewProjectionMatrix();
+    const auto& shake             = m_state->CameraShake();
+    const auto  active_camera_ref = m_node->camera_resolver->Active();
+    const bool  active_camera     = active_camera_ref && camera_ref == active_camera_ref;
+    if (shake.enable && active_camera && ! camera.IsPerspective() && shake.amplitude > 0.0f &&
+        shake.speed > 0.0f) {
+        const auto ortho       = m_state->Ortho();
+        const f32  base_extent = rstd::cmp::min(ortho[0], ortho[1]);
+        const f32  scale       = shake.amplitude * base_extent * 0.01f;
+        const f32  time        = static_cast<f32>(frame->elapsed) * shake.speed * 2.0f;
+        const auto offset      = ShakeOffset(time, shake.roughness);
+        view_projection =
+            view_projection *
+            Affine3d(Translation3d(Vector3d(offset.x() * scale, offset.y() * scale, 0.0))).matrix();
+    }
+
+    writer.Write(Output::ViewProjection, ShaderValue::fromMatrix(view_projection));
+    if (m_node->use_camera_eye_position) {
+        const auto position = camera.GetPosition().cast<f32>();
+        writer.Write(Output::EyePosition,
+                     rstd::array<f32, 3> { position.x(), position.y(), position.z() });
+    }
+
+    if (req_m || req_am || req_mvp || req_mi || req_mvpi || req_effect_model) {
+        Matrix4d    model    = node.ModelTrans();
+        const auto& parallax = m_state->CameraParallax();
+        auto        attached = camera.GetAttachedNode();
+        const bool  own_image_effect =
+            camera.HasImgEffect() && attached.is_some() && *attached == m_node->node.as_ptr();
+        if (node.Camera() != "effect" && parallax.enable && ! own_image_effect) {
+            m_node->parallax_node->UpdateTrans();
+            const Vector3f node_position =
+                m_node->parallax_node->ModelTrans().block<3, 1>(0, 3).cast<f32>();
+            const Vector2f depth(m_node->parallax_depth.data());
+            const auto     ortho_values = m_state->Ortho();
+            const Vector2f ortho { ortho_values[0], ortho_values[1] };
+            const Vector2f pointer(m_state->Inputs().pointer.data());
+            const Vector2f pointer_offset =
+                Scaling(1.0f, -1.0f) * (Vector2f { 0.5f, 0.5f } - pointer);
+            const Vector2f mouse = pointer_offset.cwiseProduct(ortho) * parallax.mouse_influence;
+            const auto     camera_position = camera.GetPosition().cast<f32>();
+            const Vector2f shift =
+                (node_position.head<2>() - camera_position.head<2>() + mouse).cwiseProduct(depth) *
+                parallax.amount;
+            model = Affine3d(Translation3d(Vector3d(shift.x(), shift.y(), 0.0))).matrix() * model;
+        }
+
+        if (req_m) writer.Write(Output::Model, ShaderValue::fromMatrix(model));
+        if (req_am) writer.Write(Output::AlternateModel, ShaderValue::fromMatrix(model));
+        if (req_mi) writer.Write(Output::ModelInverse, ShaderValue::fromMatrix(model.inverse()));
+        if (req_mvp || req_mvpi) {
+            const Matrix4d mvp = view_projection * model;
+            if (req_mvp) writer.Write(Output::ModelViewProjection, ShaderValue::fromMatrix(mvp));
+            if (req_mvpi)
+                writer.Write(Output::ModelViewProjectionInverse,
+                             ShaderValue::fromMatrix(mvp.inverse()));
+        }
+        if (req_effect_model) {
+            Matrix4d layer_model  = model;
+            Matrix4d effect_model = model;
+            if (m_node->effect_projection_node.is_some()) {
+                auto& source = **m_node->effect_projection_node;
+                source.UpdateTrans();
+                layer_model  = source.ModelTrans();
+                effect_model = layer_model;
+                if (m_node->effect_projection_size[0] > 0.0f &&
+                    m_node->effect_projection_size[1] > 0.0f) {
+                    effect_model =
+                        effect_model *
+                        Affine3d(Scaling(static_cast<f64>(m_node->effect_projection_size[0]) * 0.5,
+                                         static_cast<f64>(m_node->effect_projection_size[1]) * 0.5,
+                                         1.0))
+                            .matrix();
+                }
+            }
+            writer.Write(Output::LayerModel, ShaderValue::fromMatrix(layer_model));
+            writer.Write(Output::EffectModel, ShaderValue::fromMatrix(effect_model));
+            if (req_emvp || req_emvpi) {
+                const Matrix4d effect_view = active_camera_ref
+                                                 ? active_camera_ref->GetViewProjectionMatrix()
+                                                 : view_projection;
+                const Matrix4d effect_mvp  = effect_view * effect_model;
+                if (req_emvp)
+                    writer.Write(Output::EffectModelViewProjection,
+                                 ShaderValue::fromMatrix(effect_mvp));
+                if (req_emvpi)
+                    writer.Write(Output::EffectModelViewProjectionInverse,
+                                 ShaderValue::fromMatrix(effect_mvp.inverse()));
+            }
+        }
+    }
+
+    return writer.Finish();
+}
+
+auto WPFrameUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = WPFrameUniformOutput;
+    const rstd::array<BindingEntry<Output>, 10> entries {
+        BindingEntry<Output> { Output::Time, G_TIME, u32(1) },
+        BindingEntry<Output> { Output::FrameTime, G_FRAMETIME, u32(1) },
+        BindingEntry<Output> { Output::DayTime, G_DAYTIME, u32(1) },
+        BindingEntry<Output> { Output::DayTime, G_DAYTIME_LEGACY, u32(1) },
+        BindingEntry<Output> { Output::PointerPosition, G_POINTERPOSITION, u32(2) },
+        BindingEntry<Output> { Output::PointerPositionLast, G_POINTERPOSITIONLAST, u32(2) },
+        BindingEntry<Output> { Output::ParallaxPosition, G_PARALLAXPOSITION, u32(2) },
+        BindingEntry<Output> { Output::TexelSize, G_TEXELSIZE, u32(2) },
+        BindingEntry<Output> { Output::TexelSizeHalf, G_TEXELSIZEHALF, u32(2) },
+        BindingEntry<Output> { Output::Screen, G_SCREEN, u32(3) },
+    };
+    return BindEntries(sink, entries);
+}
+
+auto WPFrameUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPFrameUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
+                                    mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    if (! m_state) return Ok(empty {});
+    using Output = WPFrameUniformOutput;
+    WPUniformWriter writer(sink);
+    const auto      frame     = context->Frame();
+    const auto&     inputs    = m_state->Inputs();
+    auto            resources = context->Resources();
+    const auto      texel     = resources->TexelSize();
+    const auto      viewport  = resources->Viewport();
+
+    writer.Write(Output::Time, static_cast<f32>(frame->elapsed));
+    writer.Write(Output::FrameTime, static_cast<f32>(frame->delta));
+    writer.Write(Output::DayTime, 0.0f);
+    writer.Write(Output::PointerPosition, inputs.pointer);
+    writer.Write(Output::PointerPositionLast, inputs.pointer_last);
+    writer.Write(Output::TexelSize, texel);
+    writer.Write(Output::TexelSizeHalf, rstd::array<f32, 2> { texel[0] * 0.5f, texel[1] * 0.5f });
+    const f32 aspect = viewport[1] > 0.0f ? viewport[0] / viewport[1] : 1.0f;
+    writer.Write(Output::Screen, rstd::array<f32, 3> { viewport[0], viewport[1], aspect });
+
+    Vector2f    parallax_position { 0.5f, 0.5f };
+    const auto& parallax = m_state->CameraParallax();
+    if (parallax.enable) {
+        const Vector2f centered = Vector2f(inputs.pointer.data()) - Vector2f { 0.5f, 0.5f };
+        parallax_position =
+            Vector2f { 0.5f, 0.5f } + (Scaling(1.0f, -1.0f) * centered) * parallax.mouse_influence;
+    }
+    writer.Write(Output::ParallaxPosition,
+                 rstd::array<f32, 2> { parallax_position.x(), parallax_position.y() });
+    return writer.Finish();
+}
+
+auto WPAudioUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = WPAudioUniformOutput;
+    const rstd::array<BindingEntry<Output>, 6> entries {
+        BindingEntry<Output> { Output::Spectrum16Left, G_AUDIO_SPEC_16_L, u32(64) },
+        BindingEntry<Output> { Output::Spectrum16Right, G_AUDIO_SPEC_16_R, u32(64) },
+        BindingEntry<Output> { Output::Spectrum32Left, G_AUDIO_SPEC_32_L, u32(128) },
+        BindingEntry<Output> { Output::Spectrum32Right, G_AUDIO_SPEC_32_R, u32(128) },
+        BindingEntry<Output> { Output::Spectrum64Left, G_AUDIO_SPEC_64_L, u32(256) },
+        BindingEntry<Output> { Output::Spectrum64Right, G_AUDIO_SPEC_64_R, u32(256) },
+    };
+    return BindEntries(sink, entries);
+}
+
+auto WPAudioUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPAudioUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
+                                    mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    if (! m_state) return Ok(empty {});
+    using Output = WPAudioUniformOutput;
+    WPUniformWriter      writer(sink);
+    const auto&          inputs = m_state->Inputs();
+    rstd::array<f32, 16> audio_16_left {};
+    rstd::array<f32, 16> audio_16_right {};
+    rstd::array<f32, 32> audio_32_left {};
+    rstd::array<f32, 32> audio_32_right {};
+    AverageResample64(inputs.audio_left.as_slice(), audio_16_left);
+    AverageResample64(inputs.audio_right.as_slice(), audio_16_right);
+    AverageResample64(inputs.audio_left.as_slice(), audio_32_left);
+    AverageResample64(inputs.audio_right.as_slice(), audio_32_right);
+    auto write_audio = [&](Output output, slice<f32> values) {
+        if (! writer.Wants(output)) return;
+        auto packed = Vec<f32>::with_capacity(values.len() * 4);
+        packed.resize(values.len() * 4, 0.0f);
+        for (usize index = 0; index < values.len(); ++index) packed[index * 4] = values[index];
+        writer.Write(output, UniformValue(packed.data(), packed.len()));
+    };
+    write_audio(Output::Spectrum16Left, audio_16_left.as_slice());
+    write_audio(Output::Spectrum16Right, audio_16_right.as_slice());
+    write_audio(Output::Spectrum32Left, audio_32_left.as_slice());
+    write_audio(Output::Spectrum32Right, audio_32_right.as_slice());
+    write_audio(Output::Spectrum64Left, inputs.audio_left.as_slice());
+    write_audio(Output::Spectrum64Right, inputs.audio_right.as_slice());
+    return writer.Finish();
+}
+
+auto WPColorUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = WPColorUniformOutput;
+    const rstd::array<BindingEntry<Output>, 5> entries {
+        BindingEntry<Output> { Output::UserAlpha, G_USERALPHA, u32(1) },
+        BindingEntry<Output> { Output::Color4, G_COLOR4, u32(4) },
+        BindingEntry<Output> { Output::Color, G_COLOR, u32(3) },
+        BindingEntry<Output> { Output::Alpha, G_ALPHA, u32(1) },
+        BindingEntry<Output> { Output::Brightness, G_BRIGHTNESS, u32(1) },
+    };
+    return BindEntries(sink, entries);
+}
+
+auto WPColorUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPColorUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
+                                    mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = WPColorUniformOutput;
+    WPUniformWriter writer(sink);
+    const auto&     node           = *m_node;
+    const bool      has_user_alpha = writer.Wants(Output::UserAlpha);
+    const bool      has_alpha      = writer.Wants(Output::Alpha);
+    const bool      has_color4     = writer.Wants(Output::Color4);
+    const bool      has_color      = writer.Wants(Output::Color);
+    auto            write_color4   = [&](const Vector3f& color, f32 alpha) {
+        writer.Write(Output::Color4,
+                     rstd::array<f32, 4> { color.x(), color.y(), color.z(), alpha });
+    };
+    auto write_color = [&](const Vector3f& color) {
+        writer.Write(Output::Color, rstd::array<f32, 3> { color.x(), color.y(), color.z() });
+    };
+    if (node.IsAlphaOverridden()) {
+        if (has_user_alpha) writer.Write(Output::UserAlpha, node.EffectiveAlpha());
+        if (has_alpha) writer.Write(Output::Alpha, node.EffectiveAlpha());
+        if (has_color4) {
+            if (! has_user_alpha) {
+                write_color4(node.IsColorOverridden() ? node.Color() : node.BaseColor(),
+                             node.EffectiveAlpha());
+            } else if (node.IsColorOverridden()) {
+                write_color4(node.Color(), node.BaseAlpha());
+            }
+        }
+        if (has_color && node.IsColorOverridden()) write_color(node.Color());
+    } else if (node.IsColorOverridden()) {
+        if (has_color4) write_color4(node.Color(), node.BaseAlpha());
+        if (has_color) write_color(node.Color());
+    }
+    if (node.IsBrightnessOverridden()) writer.Write(Output::Brightness, node.Brightness());
+    return writer.Finish();
+}
+
+auto WPLightUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = WPLightUniformOutput;
+    const rstd::array<BindingEntry<Output>, 3> entries {
+        BindingEntry<Output> { Output::Position, G_LP, u32(16) },
+        BindingEntry<Output> { Output::ColorLegacy, G_LCP, u32(12) },
+        BindingEntry<Output> { Output::ColorRadius, G_LCR, u32(16) },
+    };
+    return BindEntries(sink, entries);
+}
+
+auto WPLightUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPLightUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
+                                    mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    using Output = WPLightUniformOutput;
+    WPUniformWriter      writer(sink);
+    constexpr usize      max_lights = 4;
+    rstd::array<f32, 16> positions {};
+    rstd::array<f32, 16> colors_radius {};
+    rstd::array<f32, 12> colors_legacy {};
+    for (usize index = 0; index < rstd::cmp::min(max_lights, m_lights.len()); ++index) {
+        const auto& light = *m_lights[index];
+        if (light.node() == nullptr || ! light.runtimeVisible()) continue;
+        const auto position          = light.node()->Translate();
+        positions[index * 4]         = position.x();
+        positions[index * 4 + 1]     = position.y();
+        positions[index * 4 + 2]     = position.z();
+        colors_radius[index * 4]     = light.color().x();
+        colors_radius[index * 4 + 1] = light.color().y();
+        colors_radius[index * 4 + 2] = light.color().z();
+        colors_radius[index * 4 + 3] = light.radius();
+        if (index < 3) {
+            const auto premultiplied = light.premultipliedColor();
+            for (usize component = 0; component < 3; ++component) {
+                colors_legacy[index * 4 + component] = premultiplied[component];
+            }
+        }
+    }
+    writer.Write(Output::Position, positions);
+    writer.Write(Output::ColorLegacy, colors_legacy);
+    writer.Write(Output::ColorRadius, colors_radius);
+    return writer.Finish();
+}
+
+auto WPTextureUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    for (usize index = 0; index < WE_GLTEX_NAMES.size(); ++index) {
+        auto resolution = Bind(sink,
+                               WPTextureResolutionOutput(index),
+                               WE_GLTEX_RESOLUTION_NAMES[index],
+                               UniformValueShape::Float(4));
+        if (resolution.is_err()) return resolution;
+        auto mipmap = Bind(sink,
+                           WPTextureMipmapOutput(index),
+                           WE_GLTEX_MIPMAPINFO_NAMES[index],
+                           UniformValueShape::Float(1));
+        if (mipmap.is_err()) return mipmap;
+        auto rotation = Bind(sink,
+                             WPTextureRotationOutput(index),
+                             WE_GLTEX_ROTATION_NAMES[index],
+                             UniformValueShape::Float(4));
+        if (rotation.is_err()) return rotation;
+        auto translation = Bind(sink,
+                                WPTextureTranslationOutput(index),
+                                WE_GLTEX_TRANSLATION_NAMES[index],
+                                UniformValueShape::Float(2));
+        if (translation.is_err()) return translation;
+    }
+    return Ok(empty {});
+}
+
+auto WPTextureUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPTextureUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
+                                      mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    WPUniformWriter writer(sink);
+    auto            resources = context->Resources();
+    for (usize index = 0; index < WE_GLTEX_NAMES.size(); ++index) {
+        auto texture = resources->Texture(index);
+        if (texture.is_none()) continue;
+        if (texture->has_extent) {
+            writer.Write(WPTextureResolutionOutput(index),
+                         rstd::array<f32, 4> { texture->source_extent[0],
+                                               texture->source_extent[1],
+                                               texture->sample_extent[0],
+                                               texture->sample_extent[1] });
+        }
+        if (texture->has_mipmap) {
+            writer.Write(WPTextureMipmapOutput(index), texture->mipmap_level);
+        }
+        if (texture->has_transform) {
+            writer.Write(WPTextureRotationOutput(index), texture->rotation);
+            writer.Write(WPTextureTranslationOutput(index), texture->translation);
+        }
+    }
+    return writer.Finish();
+}
+
+auto WPPuppetUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    return Bind(
+        sink, UniformOutputId { .value = 0 }, G_BONES, UniformValueShape::FloatRange(16, 4096));
+}
+
+auto WPPuppetUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPPuppetUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
+                                     mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    const auto output = UniformOutputId { .value = 0 };
+    if (! m_layer || ! m_layer->hasPuppet() || ! sink->Wants(output)) return Ok(empty {});
+    auto matrices = m_layer->genFrame(context->Frame()->elapsed);
+    if (matrices.empty()) return Ok(empty {});
+    auto value = UniformValue(matrices[0].data(), matrices.size() * usize { 16 });
+    return sink->Write(output, value.View());
+}
+
+} // namespace owe

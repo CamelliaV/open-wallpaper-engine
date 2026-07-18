@@ -5,6 +5,7 @@ import wescene.fs;
 import wescene.json;
 import wescene.scene;
 import wescene.pkg.scene_obj;
+import :wp_uniform_source;
 
 export namespace owe
 {
@@ -36,8 +37,11 @@ public:
         m_user_properties = properties;
     }
 
+    auto RuntimeInput() const -> std::shared_ptr<WPUniformRuntimeInput> { return m_runtime_input; }
+
 private:
     rstd::Option<rstd::ref<rstd::json::Map>> m_user_properties;
+    std::shared_ptr<WPUniformRuntimeInput>   m_runtime_input;
 };
 
 } // namespace owe

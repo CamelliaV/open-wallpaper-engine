@@ -20,8 +20,6 @@ import wescene.scene;
 import wescene.text;
 import wescene.script;
 
-import wescene.scene_uniform_updater;
-
 using namespace rstd::prelude;
 using namespace owe;
 using namespace Eigen;
@@ -222,7 +220,29 @@ std::shared_ptr<WPPuppetLayer> MakePuppetLayer(std::shared_ptr<WPPuppet>        
 void RegisterPuppetLayer(ParseContext& context, SceneNode* node,
                          std::shared_ptr<WPPuppetLayer> layer) {
     if (! node || ! layer) return;
-    context.puppet_layers->by_node[node] = std::move(layer);
+    context.puppet_layers->by_node[node] = layer;
+}
+
+void SetWPUniformConfig(ParseContext& context, const rstd::sync::Arc<SceneNode>& node,
+                        WPUniformNodeConfigDraft config) {
+    config.configured = true;
+    for (auto& entry : context.uniform_configs) {
+        if (entry.node.as_ptr() != node.as_ptr()) continue;
+        entry.config = rstd::move(config);
+        return;
+    }
+    context.uniform_configs.push_back(ParseContext::UniformConfigDraft {
+        .node   = node.clone(),
+        .config = rstd::move(config),
+    });
+}
+
+const WPUniformNodeConfigDraft* FindWPUniformConfig(const ParseContext& context,
+                                                    const SceneNode&    node) {
+    for (const auto& entry : context.uniform_configs) {
+        if (entry.node.as_ptr() == &node) return &entry.config;
+    }
+    return nullptr;
 }
 
 std::shared_ptr<WPPuppetLayer> LookupPuppetLayer(const std::shared_ptr<PuppetLayerRegistry>& layers,
@@ -337,7 +357,8 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
         if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
         clone->AddMesh(tmpl->MeshShared());
         clone->ID() = -((i32)i + 1); // negative IDs reserved for clones
-        context.shader_updater->CopyNodeData(tmpl, clone.as_ptr());
+        if (auto config = FindWPUniformConfig(context, *tmpl); config != nullptr)
+            SetWPUniformConfig(context, clone, config->Clone());
         if (auto layer = LookupPuppetLayer(context.puppet_layers, tmpl))
             RegisterPuppetLayer(context, clone.as_ptr(), std::move(layer));
         out.push_back(clone.as_ptr());
@@ -539,22 +560,22 @@ struct TextRuntimeFbo {
 };
 
 struct TextRuntimeEffectNode {
-    SceneNode*           node { nullptr };
-    SceneUniformNodeData data;
+    SceneNode*                                       node { nullptr };
+    std::shared_ptr<text::TextEffectProjectionState> text_projection;
 };
 
 struct TextRuntimeTargets {
-    Scene*                             scene { nullptr };
-    SceneUniformUpdater*               shader_updater { nullptr };
-    std::string                        camera_key;
-    std::string                        ppong_a;
-    std::string                        ppong_b;
-    std::string                        effect_final;
-    bool                               has_effect { false };
-    i32                                layer_w { 1 };
-    i32                                layer_h { 1 };
-    std::vector<TextRuntimeFbo>        fbos;
-    std::vector<TextRuntimeEffectNode> effect_nodes;
+    Scene*                               scene { nullptr };
+    std::shared_ptr<WPUniformSceneState> uniform_state;
+    std::string                          camera_key;
+    std::string                          ppong_a;
+    std::string                          ppong_b;
+    std::string                          effect_final;
+    bool                                 has_effect { false };
+    i32                                  layer_w { 1 };
+    i32                                  layer_h { 1 };
+    std::vector<TextRuntimeFbo>          fbos;
+    std::vector<TextRuntimeEffectNode>   effect_nodes;
 
     bool Apply(const text::TextGeometry& geometry) {
         if (scene == nullptr) return false;
@@ -583,14 +604,20 @@ struct TextRuntimeTargets {
             changed |= ResizeRenderTarget(*scene, fbo.name, w, h);
         }
 
-        const std::array<float, 2> effect_size {
+        const rstd::array<f32, 2> effect_size {
             geometry.effect_frame_width,
             geometry.effect_frame_height,
         };
         for (auto& item : effect_nodes) {
+            if (item.text_projection) {
+                item.text_projection->size = effect_size;
+                continue;
+            }
             if (item.node == nullptr) continue;
-            item.data.effect_projection_size = effect_size;
-            if (shader_updater) shader_updater->SetNodeData(item.node, item.data);
+            auto node = scene->ResourceIndex().nodeId(*item.node);
+            if (node.is_some() && uniform_state) {
+                (void)uniform_state->SetEffectProjectionSize(*node, effect_size);
+            }
         }
 
         layer_w = next_w;
@@ -825,19 +852,19 @@ void WireCameraShakeScripts(ParseContext& context, const wpscene::FieldBindings&
         auto*       fs  = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, sb.initial_value);
         if (! fs) continue;
 
-        auto* updater = context.shader_updater;
-        ss.AddActuator({ fs, [updater, field](const script::ScriptValue& value) {
-                            if (! updater) return;
+        auto state = context.uniform_state;
+        ss.AddActuator({ fs, [state, field](const script::ScriptValue& value) {
                             auto scalar = ScriptValueAsFloat(value);
                             if (! scalar) return;
+                            auto& shake = state->CameraShake();
                             if (field == "camerashake")
-                                updater->SetCameraShakeEnabled(*scalar >= 0.5f);
+                                shake.enable = *scalar >= 0.5f;
                             else if (field == "camerashakeamplitude")
-                                updater->SetCameraShakeAmplitude(*scalar);
+                                shake.amplitude = *scalar;
                             else if (field == "camerashakespeed")
-                                updater->SetCameraShakeSpeed(*scalar);
+                                shake.speed = *scalar;
                             else if (field == "camerashakeroughness")
-                                updater->SetCameraShakeRoughness(*scalar);
+                                shake.roughness = *scalar;
                         } });
     }
 }
@@ -1288,14 +1315,11 @@ SceneShaderVariantDesc MakeSceneShaderVariantDesc(
     return desc;
 }
 
-bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, SceneNode* pNode,
-                  SceneMaterial* pMaterial, SceneUniformNodeData* pSvData,
-                  WPShaderInfo* pWPShaderInfo = nullptr, bool enable_geometry_shader = false,
-                  bool* out_geometry_shader = nullptr) {
-    (void)pNode;
+bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene,
+                  SceneMaterial* pMaterial, WPShaderInfo* pWPShaderInfo = nullptr,
+                  bool enable_geometry_shader = false, bool* out_geometry_shader = nullptr) {
     if (out_geometry_shader) *out_geometry_shader = false;
 
-    auto& svData   = *pSvData;
     auto& material = *pMaterial;
 
     std::unique_ptr<WPShaderInfo> upWPShaderInfo(nullptr);
@@ -1309,7 +1333,6 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     auto& shader = materialShader.shader;
     shader       = std::make_shared<SceneShader>();
     shader->name = wpmat.shader;
-
     std::string shaderPath("/assets/shaders/" + wpmat.shader);
 
     std::vector<WPShaderUnit> sd_units;
@@ -1400,6 +1423,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
             pWPShaderInfo->combos[std::string(WE_CB_REFLECTION)] = "0";
         }
         material.textures.push_back(name);
+        material.texture_metadata.emplace_back();
         material.defines.push_back("g_Texture" + std::to_string(i));
         if (name.empty()) {
             continue;
@@ -1407,14 +1431,14 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
 
         std::array<i32, 4> resolution {};
         if (IsSpecTex(name)) {
-            if (IsSpecLinkTex(name)) {
-                svData.renderTargets.push_back({ i, name });
-            } else if (pScene->renderTargets.count(name) == 0) {
+            if (! IsSpecLinkTex(name) && pScene->renderTargets.count(name) == 0) {
                 rstd_error("{} not found in render targes", name);
             } else {
-                svData.renderTargets.push_back({ i, name });
-                const auto& rt = pScene->renderTargets.at(name);
-                resolution     = { rt.width, rt.height, rt.width, rt.height };
+                auto target = pScene->renderTargets.find(name);
+                if (target != pScene->renderTargets.end()) {
+                    const auto& rt = target->second;
+                    resolution     = { rt.width, rt.height, rt.width, rt.height };
+                }
             }
         } else {
             const ImageHeader& texh = texHeaders.count(name) == 0
@@ -1431,6 +1455,13 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
             } else {
                 resolution = { texh.mapWidth, texh.mapHeight, texh.mapWidth, texh.mapHeight };
             }
+            material.texture_metadata.back() = SceneMaterialTextureMetadata {
+                .has_extent    = true,
+                .source_extent = { static_cast<f32>(resolution[0]),
+                                   static_cast<f32>(resolution[1]) },
+                .sample_extent = { static_cast<f32>(resolution[2]),
+                                   static_cast<f32>(resolution[3]) },
+            };
 
             if (pScene->textures.count(name) == 0) {
                 SceneTexture stex;
@@ -1453,6 +1484,9 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
                         pWPShaderInfo->combos[std::string(WE_CB_SPRITESHEETBLENDNPOT)] = "1";
                         resolution[2] = resolution[0] - resolution[0] % (int)f1.width;
                         resolution[3] = resolution[1] - resolution[1] % (int)f1.height;
+                        material.texture_metadata.back().sample_extent = {
+                            static_cast<f32>(resolution[2]), static_cast<f32>(resolution[3])
+                        };
                     }
                     materialShader.constValues[std::string(G_RENDERVAR1)] = std::array {
                         f1.xAxis[0], f1.yAxis[1], (float)(texh.spriteAnim.numFrames()), f1.rate
@@ -1487,6 +1521,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene, S
     }
     WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
         variant_desc, sd_units, shader->codes);
+    shader->sampler_bindings = variant_desc.sampler_bindings;
 
     material.blenmode    = ParseBlendMode(wpmat.blending);
     material.depth_test  = ParseEnabled(wpmat.depthtest);
@@ -1982,7 +2017,6 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
 
     if (cam.visible) camera->AttatchNode(node.as_ptr());
     if (use_perspective) {
-        camera->SetAllowCameraShake(false);
         if (cam.fov > 0.0f) camera->SetFov(cam.fov);
         camera->SetAspect((double)context.ortho_w / (double)context.ortho_h);
         scene.activeCamera = camera.get();
@@ -2027,9 +2061,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     auto& scene              = *context.scene;
     scene.imageParser        = std::make_unique<WPTexImageParser>(&vfs);
     scene.paritileSys->gener = std::make_unique<WPParticleRawGener>();
-    scene.shaderValueUpdater = std::make_unique<SceneUniformUpdater>(&scene);
     GenCardMesh(scene.default_effect_mesh, { 2.0f, 2.0f });
-    context.shader_updater = static_cast<SceneUniformUpdater*>(scene.shaderValueUpdater.get());
 
     scene.clearColor = array_cast<float>(sc.general.clearcolor);
     if (auto it = sc.general.user_bindings.find("clearcolor");
@@ -2056,28 +2088,36 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     }
 
     {
-        SceneCameraParallax cam_para;
-        cam_para.enable         = sc.general.cameraparallax;
-        cam_para.amount         = sc.general.cameraparallaxamount;
-        cam_para.delay          = sc.general.cameraparallaxdelay;
-        cam_para.mouseinfluence = sc.general.cameraparallaxmouseinfluence;
-        context.shader_updater->SetCameraParallax(cam_para);
+        WPUniformCameraParallax cam_para;
+        cam_para.enable                         = sc.general.cameraparallax;
+        cam_para.amount                         = sc.general.cameraparallaxamount;
+        cam_para.delay                          = sc.general.cameraparallaxdelay;
+        cam_para.mouse_influence                = sc.general.cameraparallaxmouseinfluence;
+        context.uniform_state->CameraParallax() = cam_para;
+        context.uniform_state->SetPointerDelay(cam_para.delay);
         if (auto it = sc.general.user_bindings.find("cameraparallaxmouseinfluence");
             it != sc.general.user_bindings.end()) {
-            scene.camera_parallax_user_var_index[it->second].push_back(it->first);
+            auto state = context.uniform_state;
+            auto field = it->first;
+            scene.RegisterUserPropertyBinding(it->second, [state, field](const Json& property) {
+                state->ApplyUserProperty(field, property);
+            });
         }
     }
     {
-        SceneCameraShake cam_shake;
-        cam_shake.enable    = sc.general.camerashake;
-        cam_shake.amplitude = sc.general.camerashakeamplitude;
-        cam_shake.speed     = sc.general.camerashakespeed;
-        cam_shake.roughness = sc.general.camerashakeroughness;
-        context.shader_updater->SetCameraShake(cam_shake);
+        WPUniformCameraShake cam_shake;
+        cam_shake.enable                     = sc.general.camerashake;
+        cam_shake.amplitude                  = sc.general.camerashakeamplitude;
+        cam_shake.speed                      = sc.general.camerashakespeed;
+        cam_shake.roughness                  = sc.general.camerashakeroughness;
+        context.uniform_state->CameraShake() = cam_shake;
         for (const auto& [field, key] : sc.general.user_bindings) {
             if (field == "camerashake" || field == "camerashakeamplitude" ||
                 field == "camerashakespeed" || field == "camerashakeroughness") {
-                scene.camera_shake_user_var_index[key].push_back(field);
+                auto state = context.uniform_state;
+                scene.RegisterUserPropertyBinding(key, [state, field](const Json& property) {
+                    state->ApplyUserProperty(field, property);
+                });
             }
         }
         WireCameraShakeScripts(context, sc.general.field_bindings);
@@ -2228,9 +2268,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         context.scene->renderTargets[std::string(PUPPET_MASK_RT)] = rt;
     }
 
-    SceneMaterial        material;
-    SceneUniformNodeData svData;
-    svData.puppet_layer = image_puppet_layer;
+    SceneMaterial            material;
+    WPUniformNodeConfigDraft svData;
 
     ShaderValueMap    baseConstSvs = context.global_base_uniforms;
     WPShaderInfo      shaderInfo;
@@ -2240,9 +2279,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     ApplyUserTextureBindings(context, image_wpmat);
     {
         svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
-        svData.propagatedParallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+        svData.propagated_parallax_depth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
         if (! hasEffect) {
-            svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+            svData.parallax_depth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
             if (puppet && has_bones) {
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
             }
@@ -2259,13 +2298,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
         shaderInfo.baseConstSvs = baseConstSvs;
 
-        if (! LoadMaterial(vfs,
-                           image_wpmat,
-                           context.scene.get(),
-                           spImgNode.as_ptr(),
-                           &material,
-                           &svData,
-                           &shaderInfo)) {
+        if (! LoadMaterial(vfs, image_wpmat, context.scene.get(), &material, &shaderInfo)) {
             rstd_error("load imageobj '{}' material faild", wpimgobj.name);
             return;
         };
@@ -2454,17 +2487,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 mask_wpmat.textures[1] = mb.mat_json;
                 WPMdlParser::AddPuppetMatInfo(mask_wpmat, *puppet);
 
-                SceneMaterial        mask_scene_mat;
-                SceneUniformNodeData mask_svData;
-                WPShaderInfo         mask_shaderInfo;
+                SceneMaterial mask_scene_mat;
+                WPShaderInfo  mask_shaderInfo;
                 mask_shaderInfo.baseConstSvs = baseConstSvs;
-                if (! LoadMaterial(vfs,
-                                   mask_wpmat,
-                                   context.scene.get(),
-                                   spImgNode.as_ptr(),
-                                   &mask_scene_mat,
-                                   &mask_svData,
-                                   &mask_shaderInfo)) {
+                if (! LoadMaterial(
+                        vfs, mask_wpmat, context.scene.get(), &mask_scene_mat, &mask_shaderInfo)) {
                     rstd_warn("load mask pre-pass material failed for '{}'", wpimgobj.name);
                     continue;
                 }
@@ -2486,17 +2513,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 clip_wpmat.textures[8] = std::string(PUPPET_MASK_RT);
                 WPMdlParser::AddPuppetMatInfo(clip_wpmat, *puppet);
 
-                SceneMaterial        clip_scene_mat;
-                SceneUniformNodeData clip_svData;
-                WPShaderInfo         clip_shaderInfo;
+                SceneMaterial clip_scene_mat;
+                WPShaderInfo  clip_shaderInfo;
                 clip_shaderInfo.baseConstSvs = baseConstSvs;
-                if (! LoadMaterial(vfs,
-                                   clip_wpmat,
-                                   context.scene.get(),
-                                   spImgNode.as_ptr(),
-                                   &clip_scene_mat,
-                                   &clip_svData,
-                                   &clip_shaderInfo)) {
+                if (! LoadMaterial(
+                        vfs, clip_wpmat, context.scene.get(), &clip_scene_mat, &clip_shaderInfo)) {
                     rstd_warn("load clipped main material failed for '{}'", wpimgobj.name);
                     continue;
                 }
@@ -2515,7 +2536,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     spImgNode->AddMesh(spMesh);
 
-    context.shader_updater->SetNodeData(spImgNode.as_ptr(), svData);
+    SetWPUniformConfig(context, spImgNode, rstd::move(svData));
     if (hasEffect) {
         auto& scene = *context.scene;
         // currently use addr for unique
@@ -2731,17 +2752,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
                 wpEffShaderInfo.baseConstSvs[std::string(G_ETVPI)] =
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
-                SceneMaterial        material;
-                SceneUniformNodeData svData;
+                SceneMaterial            material;
+                WPUniformNodeConfigDraft svData;
                 svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
                 owe::Map<std::string, SceneShaderValueAnimation> final_quad_shader_values;
-                if (! LoadMaterial(vfs,
-                                   wpmat,
-                                   context.scene.get(),
-                                   spEffNode.as_ptr(),
-                                   &material,
-                                   &svData,
-                                   &wpEffShaderInfo)) {
+                if (! LoadMaterial(vfs, wpmat, context.scene.get(), &material, &wpEffShaderInfo)) {
                     eff_mat_ok = false;
                     break;
                 }
@@ -2750,16 +2765,17 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 LoadConstvalue(material, wpmat, wpEffShaderInfo, &final_quad_shader_values);
                 auto spMesh = std::make_shared<SceneMesh>();
                 {
-                    svData.propagatedParallaxDepth = { wpimgobj.parallaxDepth[0],
-                                                       wpimgobj.parallaxDepth[1] };
-                    svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
-                    svData.effect_projection_node = spImgNode.as_ptr();
-                    svData.effect_projection_size = { static_cast<float>(effect_extent[0]),
-                                                      static_cast<float>(effect_extent[1]) };
+                    svData.propagated_parallax_depth = { wpimgobj.parallaxDepth[0],
+                                                         wpimgobj.parallaxDepth[1] };
+                    svData.parallax_depth            = { wpimgobj.parallaxDepth[0],
+                                                         wpimgobj.parallaxDepth[1] };
+                    svData.effect_projection_node    = Some(spImgNode.clone());
+                    svData.effect_projection_size    = { static_cast<float>(effect_extent[0]),
+                                                         static_cast<float>(effect_extent[1]) };
                     if (puppet && wpmat.use_puppet) {
-                        svData.puppet_layer =
+                        auto effect_puppet_layer =
                             MakePuppetLayer(puppet->puppet, wpimgobj.puppet_layers);
-                        RegisterPuppetLayer(context, spEffNode.as_ptr(), svData.puppet_layer);
+                        RegisterPuppetLayer(context, spEffNode.as_ptr(), effect_puppet_layer);
                     }
                 }
                 spMesh->AddMaterial(std::move(material));
@@ -2787,16 +2803,13 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             mask_wpmat.textures[1] = mb.mat_json;
                             WPMdlParser::AddPuppetMatInfo(mask_wpmat, *puppet);
 
-                            SceneMaterial        mask_material;
-                            SceneUniformNodeData mask_svData;
-                            WPShaderInfo         mask_shaderInfo;
+                            SceneMaterial mask_material;
+                            WPShaderInfo  mask_shaderInfo;
                             mask_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
                             if (! LoadMaterial(vfs,
                                                mask_wpmat,
                                                context.scene.get(),
-                                               spEffNode.as_ptr(),
                                                &mask_material,
-                                               &mask_svData,
                                                &mask_shaderInfo)) {
                                 return false;
                             }
@@ -2811,16 +2824,13 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             clip_wpmat.textures[8] = std::string(PUPPET_MASK_RT);
                             WPMdlParser::AddPuppetMatInfo(clip_wpmat, *puppet);
 
-                            SceneMaterial        clip_material;
-                            SceneUniformNodeData clip_svData;
-                            WPShaderInfo         clip_shaderInfo;
+                            SceneMaterial clip_material;
+                            WPShaderInfo  clip_shaderInfo;
                             clip_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
                             if (! LoadMaterial(vfs,
                                                clip_wpmat,
                                                context.scene.get(),
-                                               spEffNode.as_ptr(),
                                                &clip_material,
-                                               &clip_svData,
                                                &clip_shaderInfo)) {
                                 return false;
                             }
@@ -2841,7 +2851,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 }
                 spEffNode->AddMesh(spMesh);
 
-                context.shader_updater->SetNodeData(spEffNode.as_ptr(), svData);
+                SetWPUniformConfig(context, spEffNode, rstd::move(svData));
                 imgEffect->nodes.push_back(SceneImageEffectNode {
                     .output                   = matOutRT,
                     .sceneNode                = spEffNode.clone(),
@@ -2877,19 +2887,17 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
                     WPShaderInfo wpFinalShaderInfo;
                     wpFinalShaderInfo.baseConstSvs = baseConstSvs;
-                    SceneMaterial        finalMaterial;
-                    SceneUniformNodeData finalSvData;
+                    SceneMaterial            finalMaterial;
+                    WPUniformNodeConfigDraft finalSvData;
                     finalSvData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
-                    finalSvData.propagatedParallaxDepth        = { wpimgobj.parallaxDepth[0],
+                    finalSvData.propagated_parallax_depth      = { wpimgobj.parallaxDepth[0],
                                                                    wpimgobj.parallaxDepth[1] };
-                    finalSvData.parallaxDepth                  = { wpimgobj.parallaxDepth[0],
+                    finalSvData.parallax_depth                 = { wpimgobj.parallaxDepth[0],
                                                                    wpimgobj.parallaxDepth[1] };
                     if (LoadMaterial(vfs,
                                      passthrough_mat,
                                      context.scene.get(),
-                                     spFinalNode.as_ptr(),
                                      &finalMaterial,
-                                     &finalSvData,
                                      &wpFinalShaderInfo)) {
                         LoadConstvalue(finalMaterial, passthrough_mat, wpFinalShaderInfo);
                         auto spFinalMesh = std::make_shared<SceneMesh>();
@@ -2900,7 +2908,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                    passthrough_mat,
                                                    wpFinalShaderInfo);
                         spFinalNode->AddMesh(spFinalMesh);
-                        context.shader_updater->SetNodeData(spFinalNode.as_ptr(), finalSvData);
+                        SetWPUniformConfig(context, spFinalNode, rstd::move(finalSvData));
                         finalEffect->nodes.push_back(
                             SceneImageEffectNode { effect_ppong_b, spFinalNode.clone() });
                         imgEffectLayer->AddEffect(finalEffect);
@@ -3047,12 +3055,13 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         spNode->SetCamera("global_perspective");
     }
 
-    SceneMaterial        material;
-    SceneUniformNodeData svData;
+    SceneMaterial            material;
+    WPUniformNodeConfigDraft svData;
 
     if (! is_child) {
-        svData.parallaxDepth           = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
-        svData.propagatedParallaxDepth = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
+        svData.parallax_depth = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
+        svData.propagated_parallax_depth = { wppartobj.parallaxDepth[0],
+                                             wppartobj.parallaxDepth[1] };
     }
     svData.use_camera_eye_position = particle_obj.flags[wpscene::Particle::FlagEnum::perspective];
 
@@ -3108,9 +3117,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         mat_ok = LoadMaterial(vfs,
                               particle_obj.material,
                               context.scene.get(),
-                              spNode.as_ptr(),
                               &material,
-                              &svData,
                               &shaderInfo,
                               render_desc.geometry_shader,
                               &use_geometry_shader);
@@ -3207,7 +3214,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     RegisterShaderUserVarIndex(
         context.scene.get(), mesh.Material(), particle_obj.material, shaderInfo);
     spNode->AddMesh(spMesh);
-    context.shader_updater->SetNodeData(spNode.as_ptr(), svData);
+    SetWPUniformConfig(context, spNode, rstd::move(svData));
 
     for (auto& child : particle_obj.children) {
         ParseParticleObj(context,
@@ -3330,14 +3337,15 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
 
     auto mesh = std::make_shared<SceneMesh>();
 
-    SceneUniformNodeData svData;
-    svData.parallaxDepth           = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
-    svData.propagatedParallaxDepth = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
-    svData.use_camera_eye_position = true;
+    WPUniformNodeConfigDraft svData;
+    svData.parallax_depth            = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
+    svData.propagated_parallax_depth = { model_obj.parallaxDepth[0], model_obj.parallaxDepth[1] };
+    svData.use_camera_eye_position   = true;
+    std::shared_ptr<WPPuppetLayer> model_puppet_layer;
     if (mdl.puppet && ! mdl.puppet->bones.empty()) {
-        svData.puppet_layer = MakePuppetLayer(
+        model_puppet_layer = MakePuppetLayer(
             mdl.puppet, std::span<WPPuppetLayer::AnimationLayer>(model_obj.puppet_layers));
-        RegisterPuppetLayer(context, node.as_ptr(), svData.puppet_layer);
+        RegisterPuppetLayer(context, node.as_ptr(), model_puppet_layer);
     }
 
     for (const auto& mdl_mesh : mdl.meshes) {
@@ -3355,13 +3363,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
             WPMdlParser::AddPuppetShaderInfo(shader_info, mdl);
         }
 
-        if (! LoadMaterial(vfs,
-                           *wpmat,
-                           context.scene.get(),
-                           node.as_ptr(),
-                           &scene_mat,
-                           &svData,
-                           &shader_info)) {
+        if (! LoadMaterial(vfs, *wpmat, context.scene.get(), &scene_mat, &shader_info)) {
             rstd_error(
                 "load model material '{}' failed for '{}'", mdl_mesh.mat_json_file, model_obj.name);
             continue;
@@ -3386,14 +3388,14 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     }
 
     node->AddMesh(mesh);
-    context.shader_updater->SetNodeData(node.as_ptr(), svData);
+    SetWPUniformConfig(context, node, rstd::move(svData));
     AssignNodeFieldAnimations(*node.as_ptr(), model_obj.field_bindings);
     WireFieldScripts(context, node, model_obj.field_bindings);
     context.node_id_map[model_obj.id] = { model_obj.parent,
                                           rstd::Some(node.clone()),
                                           mdl.puppet,
                                           model_obj.attachment,
-                                          svData.puppet_layer };
+                                          model_puppet_layer };
 }
 
 // Wrapping image parser: serves text-atlas Images for synthetic urls (set
@@ -3734,8 +3736,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // inside ppong_a, but the compose pass samples a fixed UV window, so the
     // shift would manifest as the text appearing to drift in the wrong frame
     // of reference. Parallax goes on compose_node below (world-space quad).
-    SceneUniformNodeData svData;
-    context.shader_updater->SetNodeData(sp_node.as_ptr(), svData);
+    context.text_uniform_configs.push_back(ParseContext::TextUniformConfigDraft {
+        .node = sp_node.clone(),
+    });
 
     // --- per-layer compose -------------------------------------------------
     // Render the glyphs into a private bbox-sized RT via an ortho camera
@@ -3784,15 +3787,15 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         const std::string ppong_b = std::string(OWE_EFFECT_PPONG_PREFIX_B) + addr;
         const std::string effect_final =
             std::string(OWE_EFFECT_PPONG_PREFIX_A) + "text_final_" + addr;
-        runtime_targets->scene          = &scene;
-        runtime_targets->shader_updater = context.shader_updater;
-        runtime_targets->camera_key     = addr;
-        runtime_targets->ppong_a        = ppong_a;
-        runtime_targets->ppong_b        = ppong_b;
-        runtime_targets->effect_final   = effect_final;
-        runtime_targets->has_effect     = has_text_effect;
-        runtime_targets->layer_w        = initial_layer_w;
-        runtime_targets->layer_h        = initial_layer_h;
+        runtime_targets->scene         = &scene;
+        runtime_targets->uniform_state = context.uniform_state;
+        runtime_targets->camera_key    = addr;
+        runtime_targets->ppong_a       = ppong_a;
+        runtime_targets->ppong_b       = ppong_b;
+        runtime_targets->effect_final  = effect_final;
+        runtime_targets->has_effect    = has_text_effect;
+        runtime_targets->layer_w       = initial_layer_w;
+        runtime_targets->layer_h       = initial_layer_h;
 
         // Per-layer ortho camera. effect_camera_node sits at origin so the
         // view matrix is identity; ortho extents = bbox so glyph pixel
@@ -3838,24 +3841,27 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             bg_mesh->AddMaterial(std::move(bg_material));
             bg_node->AddMesh(bg_mesh);
 
-            SceneUniformNodeData bg_sv;
-            bg_sv.effect_projection_node = compose_node.as_ptr();
-            bg_sv.effect_projection_size = { initial_geometry.effect_frame_width,
-                                             initial_geometry.effect_frame_height };
-            context.shader_updater->SetNodeData(bg_node.as_ptr(), bg_sv);
-            runtime_targets->effect_nodes.push_back(TextRuntimeEffectNode {
-                .node = bg_node.as_ptr(),
-                .data = bg_sv,
+            auto text_projection =
+                std::make_shared<text::TextEffectProjectionState>(text::TextEffectProjectionState {
+                    .node = compose_node.clone(),
+                    .size = { initial_geometry.effect_frame_width,
+                              initial_geometry.effect_frame_height },
+                });
+            context.text_uniform_configs.push_back(ParseContext::TextUniformConfigDraft {
+                .node              = bg_node.clone(),
+                .effect_projection = text_projection,
             });
+            runtime_targets->effect_nodes.push_back(TextRuntimeEffectNode {
+                .node = bg_node.as_ptr(), .text_projection = rstd::move(text_projection) });
             layer->AddPrefillNode(SceneImageEffectNode {
                 .output    = ppong_a,
                 .sceneNode = bg_node.clone(),
             });
         }
 
-        SceneUniformNodeData compose_sv;
-        compose_sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
-        compose_sv.propagatedParallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        WPUniformNodeConfigDraft compose_sv;
+        compose_sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        compose_sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
 
         ShaderValueMap effect_base             = context.global_base_uniforms;
         effect_base[std::string(G_COLOR4)]     = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -3865,13 +3871,13 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         effect_base[std::string(G_BRIGHTNESS)] = 1.0f;
 
         struct LoadedTextMaterial {
-            wpscene::Material    source;
-            SceneMaterial        material;
-            SceneUniformNodeData sv;
-            WPShaderInfo         shader_info;
+            wpscene::Material        source;
+            SceneMaterial            material;
+            WPUniformNodeConfigDraft sv;
+            WPShaderInfo             shader_info;
         };
         auto load_passthrough_material =
-            [&](SceneNode* owner, std::string_view input) -> std::optional<LoadedTextMaterial> {
+            [&](std::string_view input) -> std::optional<LoadedTextMaterial> {
             auto pt_json =
                 LoadJsonFile(*context.vfs, "/assets/materials/util/effectpassthrough.json");
             if (! pt_json) {
@@ -3888,11 +3894,11 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             else
                 pt_mat.textures[0] = std::string(input);
 
-            SceneMaterial        mat;
-            SceneUniformNodeData sv;
-            WPShaderInfo         si;
+            SceneMaterial            mat;
+            WPUniformNodeConfigDraft sv;
+            WPShaderInfo             si;
             si.baseConstSvs = effect_base;
-            if (! LoadMaterial(*context.vfs, pt_mat, &scene, owner, &mat, &sv, &si)) {
+            if (! LoadMaterial(*context.vfs, pt_mat, &scene, &mat, &si)) {
                 rstd_error("text '{}': compose LoadMaterial failed", obj.name);
                 return std::nullopt;
             }
@@ -3998,22 +4004,16 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     shader_info.baseConstSvs[std::string(G_ETVPI)] =
                         ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
 
-                    SceneMaterial        mat;
-                    SceneUniformNodeData sv;
+                    SceneMaterial            mat;
+                    WPUniformNodeConfigDraft sv;
                     sv.propagate_parallax_to_children = true;
-                    sv.propagatedParallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
-                    sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
-                    sv.effect_projection_node  = compose_node.as_ptr();
-                    sv.effect_projection_size  = { initial_geometry.effect_frame_width,
-                                                   initial_geometry.effect_frame_height };
+                    sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+                    sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+                    sv.effect_projection_node    = Some(compose_node.clone());
+                    sv.effect_projection_size    = { initial_geometry.effect_frame_width,
+                                                     initial_geometry.effect_frame_height };
                     owe::Map<std::string, SceneShaderValueAnimation> final_quad_shader_values;
-                    if (! LoadMaterial(*context.vfs,
-                                       wpmat,
-                                       &scene,
-                                       effect_node.as_ptr(),
-                                       &mat,
-                                       &sv,
-                                       &shader_info)) {
+                    if (! LoadMaterial(*context.vfs, wpmat, &scene, &mat, &shader_info)) {
                         effect_ok = false;
                         break;
                     }
@@ -4027,11 +4027,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                             &scene, mesh->Material(), *user_texture_fallback);
                     }
                     effect_node->AddMesh(mesh);
-                    context.shader_updater->SetNodeData(effect_node.as_ptr(), sv);
-                    runtime_targets->effect_nodes.push_back(TextRuntimeEffectNode {
-                        .node = effect_node.as_ptr(),
-                        .data = sv,
-                    });
+                    SetWPUniformConfig(context, effect_node, rstd::move(sv));
+                    runtime_targets->effect_nodes.push_back(
+                        TextRuntimeEffectNode { .node = effect_node.as_ptr() });
                     effect->nodes.push_back(SceneImageEffectNode {
                         .output                   = matOutRT,
                         .sceneNode                = effect_node.clone(),
@@ -4047,16 +4045,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             }
 
             auto resolve_node = rstd::sync::Arc<SceneNode>::make();
-            auto resolved     = load_passthrough_material(resolve_node.as_ptr(), ppong_a);
+            auto resolved     = load_passthrough_material(ppong_a);
             if (! resolved.has_value()) return;
             auto resolve_mesh = std::make_shared<SceneMesh>();
             resolve_mesh->AddMaterial(std::move(resolved->material));
             resolve_node->AddMesh(std::move(resolve_mesh));
-            context.shader_updater->SetNodeData(resolve_node.as_ptr(), resolved->sv);
-            runtime_targets->effect_nodes.push_back(TextRuntimeEffectNode {
-                .node = resolve_node.as_ptr(),
-                .data = resolved->sv,
-            });
+            SetWPUniformConfig(context, resolve_node, rstd::move(resolved->sv));
+            runtime_targets->effect_nodes.push_back(
+                TextRuntimeEffectNode { .node = resolve_node.as_ptr() });
             auto resolve_effect  = std::make_shared<SceneImageEffect>();
             resolve_effect->name = "text_resolve";
             resolve_effect->nodes.push_back(SceneImageEffectNode {
@@ -4070,17 +4066,16 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         GenCardMesh(*compose_mesh,
                     { static_cast<float>(runtime_targets->layer_w),
                       static_cast<float>(runtime_targets->layer_h) });
-        auto loaded = load_passthrough_material(compose_node.as_ptr(),
-                                                has_text_effect ? effect_final : ppong_a);
+        auto loaded = load_passthrough_material(has_text_effect ? effect_final : ppong_a);
         if (! loaded.has_value()) return;
-        compose_sv                         = std::move(loaded->sv);
-        compose_sv.parallaxDepth           = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
-        compose_sv.propagatedParallaxDepth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        compose_sv                           = std::move(loaded->sv);
+        compose_sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        compose_sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         compose_mesh->AddMaterial(std::move(loaded->material));
         RegisterShaderUserVarIndex(
             &scene, compose_mesh->Material(), loaded->source, loaded->shader_info);
         compose_node->AddMesh(compose_mesh);
-        context.shader_updater->SetNodeData(compose_node.as_ptr(), compose_sv);
+        SetWPUniformConfig(context, compose_node, rstd::move(compose_sv));
 
         // Move sp_node into layer space — identity transform so the glyph
         // mesh renders at the ortho origin.
@@ -4633,6 +4628,129 @@ void ProcessObjects(ParseContext& context, std::span<SceneObjectVar> scene_objs,
     WPShaderParser::FinalGlslang();
 }
 
+void FinalizeUniformSources(ParseContext& context) {
+    auto& scene = *context.scene;
+    scene.RebuildResourceIndex();
+
+    auto shared_camera = [&](SceneCamera* camera) -> std::shared_ptr<SceneCamera> {
+        if (camera == nullptr) return nullptr;
+        for (const auto& [name, candidate] : scene.cameras) {
+            (void)name;
+            if (candidate.get() == camera) return candidate;
+        }
+        return nullptr;
+    };
+    auto camera_for = [&](const SceneNode& node) -> std::shared_ptr<SceneCamera> {
+        if (! node.Camera().empty()) {
+            auto found = scene.cameras.find(node.Camera());
+            return found == scene.cameras.end() ? nullptr : found->second;
+        }
+        if (node.Perspective()) {
+            auto found = scene.cameras.find("global_perspective");
+            return found == scene.cameras.end() ? nullptr : found->second;
+        }
+        return shared_camera(scene.activeCamera);
+    };
+    auto config_entry = [&](const SceneNode& node) -> ParseContext::UniformConfigDraft* {
+        for (auto& candidate : context.uniform_configs) {
+            if (candidate.node.as_ptr() == &node) return &candidate;
+        }
+        return nullptr;
+    };
+
+    auto camera_resolver =
+        std::make_shared<WPUniformCameraResolver>(shared_camera(scene.activeCamera));
+    camera_resolver->Reserve(scene.cameras.size());
+    for (const auto& [name, camera] : scene.cameras) {
+        camera_resolver->Add(name, camera);
+    }
+
+    context.uniform_state->SetOrtho(static_cast<f32>(scene.ortho[0]),
+                                    static_cast<f32>(scene.ortho[1]));
+    scene.Runtime().RegisterSystem(WPUniformRuntimeSystem { context.uniform_state });
+
+    auto registrar = dyn<UniformSourceRegistrar>::from_ref(scene);
+    auto writer    = dyn<UniformAttachmentWriter>::from_ref(scene);
+
+    const auto frame_source = registrar->Register(
+        Box<dyn<UniformSource>>::make(WPFrameUniformSource { context.uniform_state }));
+    const auto audio_source = registrar->Register(
+        Box<dyn<UniformSource>>::make(WPAudioUniformSource { context.uniform_state }));
+    (void)writer->AttachGlobal(frame_source, 0);
+    (void)writer->AttachGlobal(audio_source, 0);
+
+    Vec<ref<SceneLight>> lights;
+    lights.reserve(scene.lights.len());
+    for (const auto& light : scene.lights) lights.push(light.as_ref());
+    const auto light_source = registrar->Register(
+        Box<dyn<UniformSource>>::make(WPLightUniformSource { rstd::move(lights) }));
+    (void)writer->AttachGlobal(light_source, 0);
+
+    for (auto& draft : context.text_uniform_configs) {
+        auto node_id = scene.ResourceIndex().nodeId(*draft.node);
+        if (node_id.is_none()) continue;
+        auto state               = std::make_shared<text::TextUniformState>(draft.node.clone());
+        state->camera            = camera_for(*draft.node);
+        state->active_camera     = shared_camera(scene.activeCamera);
+        state->effect_projection = draft.effect_projection;
+        const auto source        = registrar->Register(
+            Box<dyn<UniformSource>>::make(text::TextUniformSource { rstd::move(state) }));
+        (void)writer->AttachNode(*node_id, source, 0);
+    }
+
+    for (auto& entry : context.uniform_configs) {
+        auto& draft   = entry.config;
+        auto  node_id = scene.ResourceIndex().nodeId(*entry.node);
+        if (node_id.is_none()) continue;
+
+        auto state                     = std::make_shared<WPUniformNodeState>(entry.node.clone());
+        state->camera_resolver         = camera_resolver;
+        state->use_camera_eye_position = draft.use_camera_eye_position;
+        state->effect_projection_size  = draft.effect_projection_size;
+        if (draft.effect_projection_node.is_some()) {
+            state->effect_projection_node = Some((*draft.effect_projection_node).clone());
+        }
+        auto* parallax_entry = &entry;
+        auto* cursor         = entry.node->Parent();
+        while (cursor != nullptr) {
+            auto* parent_entry = config_entry(*cursor);
+            if (parent_entry == nullptr || ! parent_entry->config.configured) {
+                cursor = cursor->Parent();
+                continue;
+            }
+            if (! parent_entry->config.propagate_parallax_to_children) break;
+            parallax_entry = parent_entry;
+            cursor         = cursor->Parent();
+        }
+        state->parallax_node  = parallax_entry->node.clone();
+        state->parallax_depth = parallax_entry->config.propagated_parallax_depth;
+        context.uniform_state->SetNodeState(*node_id, state);
+
+        const auto transform = registrar->Register(Box<dyn<UniformSource>>::make(
+            WPTransformUniformSource { context.uniform_state, state }));
+        const auto color     = registrar->Register(
+            Box<dyn<UniformSource>>::make(WPColorUniformSource { entry.node.clone() }));
+        const auto texture =
+            registrar->Register(Box<dyn<UniformSource>>::make(WPTextureUniformSource {}));
+        (void)writer->AttachNode(*node_id, transform, 0);
+        (void)writer->AttachNode(*node_id, color, 0);
+        (void)writer->AttachNode(*node_id, texture, 0);
+    }
+
+    std::unordered_map<WPPuppetLayer*, UniformSourceId> puppet_sources;
+    for (const auto& [node, layer] : context.puppet_layers->by_node) {
+        if (node == nullptr || ! layer) continue;
+        auto node_id = scene.ResourceIndex().nodeId(*node);
+        if (node_id.is_none()) continue;
+        auto [source, inserted] = puppet_sources.try_emplace(layer.get());
+        if (inserted) {
+            source->second =
+                registrar->Register(Box<dyn<UniformSource>>::make(WPPuppetUniformSource { layer }));
+        }
+        (void)writer->AttachNode(*node_id, source->second, 10);
+    }
+}
+
 std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
     // Single attach phase. Each registered node was created in JSON
     // declaration order (node_id_order) but not yet inserted into the scene
@@ -4703,7 +4821,7 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
                         if (! bone) return;
                         node->SetTranslate(base + (*bone * attachment.local_xform).translation());
                     };
-                    update(context.scene->elapsingTime);
+                    update(context.scene->Runtime().Frame().elapsed);
                     context.scene->transform_updaters.push_back(std::move(update));
                 } else {
                     apply_bind_offset();
@@ -4742,6 +4860,7 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
         context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.as_ptr());
         owe::script::InstallScriptScene(*context.scene, std::move(context.script_scene));
     }
+    FinalizeUniformSources(context);
     return context.scene;
 }
 
@@ -4796,11 +4915,10 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         wpShaderInfo.baseConstSvs = context.global_base_uniforms;
         if (configure_info) configure_info(wpShaderInfo);
 
-        auto                 pp_node = rstd::sync::Arc<SceneNode>::make();
-        SceneMaterial        material;
-        SceneUniformNodeData svData;
-        if (! LoadMaterial(
-                vfs, wpmat, &scene, pp_node.as_ptr(), &material, &svData, &wpShaderInfo)) {
+        auto                     pp_node = rstd::sync::Arc<SceneNode>::make();
+        SceneMaterial            material;
+        WPUniformNodeConfigDraft svData;
+        if (! LoadMaterial(vfs, wpmat, &scene, &material, &wpShaderInfo)) {
             rstd_error("bloom: LoadMaterial failed: {}", mat_relpath);
             return false;
         }
@@ -4821,7 +4939,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         // Anchor to the existing "effect" cam (2x2 ortho, identity for
         // our NDC fullscreen quads) so A=1.0 from the shader survives.
         pp_node->SetCamera("effect");
-        context.shader_updater->SetNodeData(pp_node.as_ptr(), svData);
+        SetWPUniformConfig(context, pp_node, rstd::move(svData));
 
         pp->steps.emplace_back(ScenePostProcessPass {
             .node   = rstd::move(pp_node),
@@ -4938,6 +5056,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
                                             fs::VFS& vfs, wavsen::audio::SoundManager& sm,
                                             wpscene::SceneVersion pkg_version) {
+    m_runtime_input.reset();
     auto doc = wpscene::ParseSceneDocumentJson(buf, pkg_version);
     if (! doc) return nullptr;
     return Parse(scene_id, *doc, vfs, sm);
@@ -4952,11 +5071,13 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
               static_cast<unsigned>(sc.pkg_version),
               static_cast<unsigned>(sc.scene_json_version));
 
+    m_runtime_input.reset();
     auto linked_source_ids = CollectLinkedSourceIdsFromJson(json);
     auto scene_objs =
         ExpandObjects(json, vfs, sc.pkg_version, m_user_properties, &linked_source_ids);
     const auto ortho_extent = ResolveOrthoProjectionExtent(sc, scene_objs);
     auto       context      = BuildContext(vfs, scene_id, sc, ortho_extent, m_user_properties);
+    m_runtime_input         = std::make_shared<WPUniformRuntimeInput>(context.uniform_state);
     context.scene_layer_text_writes = SceneWritesLayerText(scene_objs);
     context.hidden_link_source_ids =
         CollectHiddenLinkedSourceIds(json, linked_source_ids, m_user_properties);
@@ -5010,11 +5131,11 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             owe::GetJsonValue(o, "parallaxDepth", parallax_depth, false);
             owe::GetJsonValue(o, "disablepropagation", disable_propagation, false);
             if (parallax_depth[0] != 0.0f || parallax_depth[1] != 0.0f || disable_propagation) {
-                SceneUniformNodeData sv_data;
+                WPUniformNodeConfigDraft sv_data;
                 sv_data.propagate_parallax_to_children = ! disable_propagation;
-                sv_data.parallaxDepth                  = { parallax_depth[0], parallax_depth[1] };
-                sv_data.propagatedParallaxDepth        = { parallax_depth[0], parallax_depth[1] };
-                context.shader_updater->SetNodeData(node.as_ptr(), sv_data);
+                sv_data.parallax_depth                 = { parallax_depth[0], parallax_depth[1] };
+                sv_data.propagated_parallax_depth      = { parallax_depth[0], parallax_depth[1] };
+                SetWPUniformConfig(context, node, rstd::move(sv_data));
             }
             auto vit = visibility_info.find(id);
             if (vit != visibility_info.end()) {

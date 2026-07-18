@@ -183,6 +183,42 @@ std::shared_ptr<owe::SceneShader> GetTextSceneShader();
 // the text RT and keep alpha at zero.
 std::shared_ptr<owe::SceneShader> GetTextCopyBackgroundSceneShader();
 
+enum class TextUniformOutput : rstd::u32
+{
+    ModelViewProjection,
+    EffectModelViewProjection,
+};
+
+struct TextEffectProjectionState {
+    rstd::sync::Arc<SceneNode> node;
+    rstd::array<rstd::f32, 2>  size { 0.0f, 0.0f };
+};
+
+struct TextUniformState {
+    rstd::sync::Arc<SceneNode>                 node;
+    std::shared_ptr<SceneCamera>               camera;
+    std::shared_ptr<SceneCamera>               active_camera;
+    std::shared_ptr<TextEffectProjectionState> effect_projection;
+
+    explicit TextUniformState(rstd::sync::Arc<SceneNode> value): node(rstd::move(value)) {}
+};
+
+class TextUniformSource {
+public:
+    explicit TextUniformSource(std::shared_ptr<TextUniformState> state)
+        : m_state(rstd::move(state)) {}
+
+    auto Describe(rstd::mut_ref<rstd::dyn<UniformBindingSink>>) const
+        -> rstd::Result<rstd::empty, UniformError>;
+    auto Version(rstd::ref<rstd::dyn<UniformUpdateContext>>) const -> rstd::u64;
+    auto Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
+                  rstd::mut_ref<rstd::dyn<UniformValueSink>>) const
+        -> rstd::Result<rstd::empty, UniformError>;
+
+private:
+    std::shared_ptr<TextUniformState> m_state;
+};
+
 // --- TextLayouter -----------------------------------------------------------
 // Lays out a UTF-8 string of glyphs into a SceneMesh's vertex / index arrays.
 // SetText() only reads from the face's atlas via Lookup(); the caller is

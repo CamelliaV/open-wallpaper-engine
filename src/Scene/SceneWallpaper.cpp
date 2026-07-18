@@ -35,7 +35,8 @@ struct RenderInit {
     std::shared_ptr<RenderInitInfo> info;
 };
 struct RenderSetScene {
-    std::shared_ptr<Scene> scene;
+    std::shared_ptr<Scene>                 scene;
+    std::shared_ptr<WPUniformRuntimeInput> uniform_input;
 };
 struct RenderSetFillMode {
     FillMode mode;
@@ -676,40 +677,6 @@ void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key, const 
     }
 }
 
-void ApplyUserPropertyToCameraParallax(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.camera_parallax_user_var_index.find(key);
-    if (it == scene.camera_parallax_user_var_index.end() || ! scene.shaderValueUpdater) return;
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < 1) return;
-
-    float value = coerced.value[0];
-    for (const auto& field : it->second) {
-        if (field == "cameraparallaxmouseinfluence")
-            scene.shaderValueUpdater->SetCameraParallaxMouseInfluence(value);
-    }
-}
-
-void ApplyUserPropertyToCameraShake(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.camera_shake_user_var_index.find(key);
-    if (it == scene.camera_shake_user_var_index.end() || ! scene.shaderValueUpdater) return;
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < 1) return;
-
-    float value = coerced.value[0];
-    for (const auto& field : it->second) {
-        if (field == "camerashake")
-            scene.shaderValueUpdater->SetCameraShakeEnabled(value >= 0.5f);
-        else if (field == "camerashakeamplitude")
-            scene.shaderValueUpdater->SetCameraShakeAmplitude(value);
-        else if (field == "camerashakespeed")
-            scene.shaderValueUpdater->SetCameraShakeSpeed(value);
-        else if (field == "camerashakeroughness")
-            scene.shaderValueUpdater->SetCameraShakeRoughness(value);
-    }
-}
-
 void ApplyUserPropertyToCameraPath(Scene& scene, const std::string& key, const Json& prop) {
     scene.ApplyUserCameraPathVisibilityBindings(key, prop);
 }
@@ -910,13 +877,14 @@ private:
 
     SceneRuntimeController& m_main;
 
-    Box<vulkan::VulkanRender>    m_render;
-    std::shared_ptr<Scene>       m_scene { nullptr };
-    RenderSceneSnapshot          m_render_scene;
-    Option<Box<rg::RenderGraph>> m_rg;
-    float                        m_speed { 1.0f };
-    FillMode                     m_fillmode { FillMode::ASPECTCROP };
-    bool                         m_stopped { false };
+    Box<vulkan::VulkanRender>              m_render;
+    std::shared_ptr<Scene>                 m_scene { nullptr };
+    std::shared_ptr<WPUniformRuntimeInput> m_uniform_input;
+    RenderSceneSnapshot                    m_render_scene;
+    Option<Box<rg::RenderGraph>>           m_rg;
+    float                                  m_speed { 1.0f };
+    FillMode                               m_fillmode { FillMode::ASPECTCROP };
+    bool                                   m_stopped { false };
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
     std::atomic<uint32_t>             m_buttons_down { 0 };
@@ -1012,22 +980,20 @@ void SceneRenderController::on(RenderStop&& m) {
 void SceneRenderController::on(RenderDraw&&) {
     frame_timer.FrameBegin();
     if (m_rg.is_some()) {
-        m_scene->shaderValueUpdater->FrameBegin();
         {
             auto pos                 = m_mouse_pos.load();
             m_scene->pointerPosition = rstd::array<float, 2> { pos[0], pos[1] };
-            m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
+            if (m_uniform_input) m_uniform_input->SetPointerInput(pos[0], pos[1]);
         }
         // Drive any per-Scene scenescripts before particle emission.
         // Scripts mutate SceneNode transforms (scale/origin/angles) so
         // they need to run before the matrix-derivation in the
-        // shaderValueUpdater's per-frame uniform pass — that's already
-        // what FrameBegin set up; UpdateUniforms runs inside drawFrame.
+        // uniform evaluation runs inside drawFrame after scripts have updated Scene state.
         // The runtime is a no-op when no ScriptScene is installed.
         {
             owe::script::FrameInputs fi;
-            fi.frametime = static_cast<float>(m_scene->frameTime * m_speed);
-            fi.runtime   = static_cast<float>(m_scene->elapsingTime);
+            fi.frametime = static_cast<float>(m_scene->Runtime().Frame().delta * m_speed);
+            fi.runtime   = static_cast<float>(m_scene->Runtime().Frame().elapsed);
             fi.canvas_w  = static_cast<float>(m_scene->ortho[0]);
             fi.canvas_h  = static_cast<float>(m_scene->ortho[1]);
             fi.screen_w  = fi.canvas_w;
@@ -1062,9 +1028,12 @@ void SceneRenderController::on(RenderDraw&&) {
             // monitor capture already picks it up; no need to overlay
             // Scene::audioAverage (driven by WPSoundParser). audioAverage
             // remains a particle-only signal — see ParticleSystem.
-            m_scene->shaderValueUpdater->SetAudioSpectrum(
-                std::span<const float, 64>(fi.audio_left),
-                std::span<const float, 64>(fi.audio_right));
+            if (m_uniform_input) {
+                m_uniform_input->SetAudioSpectrum(
+                    rstd::slice<float>::from_raw_parts(fi.audio_left.data(), fi.audio_left.size()),
+                    rstd::slice<float>::from_raw_parts(fi.audio_right.data(),
+                                                       fi.audio_right.size()));
+            }
             m_scene->TickNodeFieldAnimations();
             owe::script::TickSceneScripts(*m_scene, fi);
             m_scene->TickCameraPaths();
@@ -1090,8 +1059,6 @@ void SceneRenderController::on(RenderDraw&&) {
         m_render->drawFrame(*m_scene);
 
         m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);
-
-        m_scene->shaderValueUpdater->FrameEnd();
 
         if (! m_scene->first_frame_ok) {
             m_scene->first_frame_ok = true;
@@ -1176,7 +1143,8 @@ void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
 }
 
 void SceneRenderController::on(RenderSetScene&& m) {
-    m_scene = std::move(m.scene);
+    m_scene         = std::move(m.scene);
+    m_uniform_input = std::move(m.uniform_input);
     rebuildRenderGraph(vulkan::RenderGraphResourceRetention::ReleaseSceneTextures, true);
 }
 
@@ -1196,8 +1164,7 @@ void SceneRenderController::on(RenderSetUserProperty&& m) {
     m_scene->ApplyUserTextBindings(key, m.property);
     ApplyUserPropertyToParticles(*m_scene, key, m.property);
     ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
-    ApplyUserPropertyToCameraParallax(*m_scene, key, m.property);
-    ApplyUserPropertyToCameraShake(*m_scene, key, m.property);
+    m_scene->ApplyUserPropertyBindings(key, m.property);
     ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
     bool requires_graph_rebuild = ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
     requires_graph_rebuild =
@@ -1579,7 +1546,7 @@ void SceneRuntimeController::loadScene() {
     }
 
     auto rtx = m_render_controller->sender();
-    (void)rtx.send(RenderMsg { RenderSetScene { scene } });
+    (void)rtx.send(RenderMsg { RenderSetScene { scene, m_scene_parser.RuntimeInput() } });
     // First-frame default push: now that the render thread owns the scene,
     // replay every collected user property (project.json defaults + any
     // mutations the host already pushed during scene load) so the shader

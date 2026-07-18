@@ -11,11 +11,12 @@ import wescene.json;
 import wescene.fs;
 import wescene.scene;
 import wescene.script;
-import wescene.scene_uniform_updater;
+import wescene.text;
 import wescene.types;
 import wescene.pkg.scene_obj;
 
 import wescene.pkg.puppet;
+import :wp_uniform_source;
 
 export namespace owe
 {
@@ -34,7 +35,6 @@ struct PuppetLayerRegistry {
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
     std::shared_ptr<Scene>                   scene;
-    SceneUniformUpdater*                     shader_updater { nullptr };
     i32                                      ortho_w { 0 };
     i32                                      ortho_h { 0 };
     fs::VFS*                                 vfs { nullptr };
@@ -50,6 +50,17 @@ struct ParseContext {
     // Stays null when no object has any script binding.
     std::unique_ptr<owe::script::ScriptScene> script_scene;
     std::shared_ptr<PuppetLayerRegistry> puppet_layers { std::make_shared<PuppetLayerRegistry>() };
+    struct UniformConfigDraft {
+        rstd::sync::Arc<SceneNode> node;
+        WPUniformNodeConfigDraft   config;
+    };
+    std::vector<UniformConfigDraft>      uniform_configs;
+    std::shared_ptr<WPUniformSceneState> uniform_state { std::make_shared<WPUniformSceneState>() };
+    struct TextUniformConfigDraft {
+        rstd::sync::Arc<SceneNode>                       node;
+        std::shared_ptr<text::TextEffectProjectionState> effect_projection;
+    };
+    std::vector<TextUniformConfigDraft> text_uniform_configs;
 
     // ID → (parent_id, node) for every parseable object. Filled by each
     // ParseXObj. FinalizeScene re-parents nodes with non-zero parent_id

@@ -15,3 +15,4 @@ export import :wp_shader_parser;
 export import :wp_sound_parser;
 export import :wp_tex_image_parser;
 export import :wp_uniform;
+export import :wp_uniform_source;

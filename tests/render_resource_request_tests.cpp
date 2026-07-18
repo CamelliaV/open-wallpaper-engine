@@ -9,6 +9,99 @@ import wescene.types;
 import wescene.vulkan;
 import wescene.vulkan_render;
 
+namespace uniform_test
+{
+
+struct StaticSourceState {
+    float     value { 0.0f };
+    rstd::u64 version { 1 };
+};
+
+class BufferWriter {
+public:
+    auto UpdateBuffer(owe::resource::BufferUseHandle use, rstd::slice<rstd::u8> content,
+                      rstd::u64 content_version)
+        -> rstd::Result<rstd::empty, owe::resource::ResourceError> {
+        last_use     = use;
+        last_version = content_version;
+        ++update_count;
+        bytes.clear();
+        bytes.reserve(content.len());
+        for (rstd::usize index = 0; index < content.len(); ++index) {
+            bytes.push_back(content[index]);
+        }
+        return rstd::Ok(rstd::empty {});
+    }
+
+    owe::resource::BufferUseHandle last_use;
+    rstd::u64                      last_version { 0 };
+    rstd::u64                      update_count { 0 };
+    std::vector<rstd::u8>          bytes;
+};
+
+class StaticSource {
+public:
+    StaticSource(std::string name, float value)
+        : StaticSource(std::move(name),
+                       std::make_shared<StaticSourceState>(StaticSourceState { .value = value })) {}
+    StaticSource(std::string name, std::shared_ptr<StaticSourceState> state)
+        : m_name(std::move(name)), m_state(std::move(state)) {}
+
+    auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
+        -> rstd::Result<rstd::empty, owe::UniformError> {
+        auto result = sink->Bind(m_output, m_name, owe::UniformValueShape::FloatRange(1, 4));
+        if (result.is_err()) return rstd::Err(std::move(result).unwrap_err_unchecked());
+        return rstd::Ok(rstd::empty {});
+    }
+    auto Version(rstd::ref<rstd::dyn<owe::UniformUpdateContext>>) const -> rstd::u64 {
+        return m_state->version;
+    }
+    auto Evaluate(rstd::ref<rstd::dyn<owe::UniformUpdateContext>>,
+                  rstd::mut_ref<rstd::dyn<owe::UniformValueSink>> sink) const
+        -> rstd::Result<rstd::empty, owe::UniformError> {
+        if (! sink->Wants(m_output)) return rstd::Ok(rstd::empty {});
+        auto value = owe::UniformValue(m_state->value);
+        return sink->Write(m_output, value.View());
+    }
+
+private:
+    std::string                        m_name;
+    std::shared_ptr<StaticSourceState> m_state;
+    owe::UniformOutputId               m_output { .value = 0 };
+};
+
+class TextureMetadataSource {
+public:
+    auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
+        -> rstd::Result<rstd::empty, owe::UniformError> {
+        auto result = sink->Bind(m_output, "texture_extent", owe::UniformValueShape::Float(4));
+        if (result.is_err()) return rstd::Err(rstd::move(result).unwrap_err_unchecked());
+        return rstd::Ok(rstd::empty {});
+    }
+    auto Version(rstd::ref<rstd::dyn<owe::UniformUpdateContext>> context) const -> rstd::u64 {
+        return context->Frame()->revision;
+    }
+    auto Evaluate(rstd::ref<rstd::dyn<owe::UniformUpdateContext>> context,
+                  rstd::mut_ref<rstd::dyn<owe::UniformValueSink>> sink) const
+        -> rstd::Result<rstd::empty, owe::UniformError> {
+        if (! sink->Wants(m_output)) return rstd::Ok(rstd::empty {});
+        auto texture = context->Resources()->Texture(0);
+        if (texture.is_none() || ! texture->has_extent) return rstd::Ok(rstd::empty {});
+        auto value = owe::UniformValue(rstd::array<rstd::f32, 4> {
+            texture->source_extent[0],
+            texture->source_extent[1],
+            texture->sample_extent[0],
+            texture->sample_extent[1],
+        });
+        return sink->Write(m_output, value.View());
+    }
+
+private:
+    owe::UniformOutputId m_output { .value = 0 };
+};
+
+} // namespace uniform_test
+
 namespace
 {
 
@@ -37,7 +130,260 @@ owe::vulkan::FramebufferAttachmentDesc Attachment(std::uintptr_t view, std::size
     };
 }
 
+std::shared_ptr<owe::SceneMesh> MakeUniformMesh(std::shared_ptr<owe::SceneShader> shader) {
+    auto               mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial material;
+    material.customShader.shader = std::move(shader);
+    mesh->AddMaterial(std::move(material));
+    owe::SceneMesh::Submesh submesh;
+    submesh.material_slot = 0;
+    mesh->Submeshes().push_back(std::move(submesh));
+    return mesh;
+}
+
 } // namespace
+
+TEST(UniformBufferLayout, PreservesReflectedSlots) {
+    auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("g_Time")),
+        .offset = 0,
+        .size   = 4,
+    });
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("time_alias")),
+        .offset = 16,
+        .size   = 4,
+    });
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("unmapped")),
+        .offset = 32,
+        .size   = 4,
+    });
+    auto block = owe::resource::ShaderArtifactUniformBlock {
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .size    = 48,
+        .members = rstd::move(members),
+    };
+    auto result = owe::vulkan::CompileUniformBufferLayout(block);
+
+    ASSERT_TRUE(result.is_ok());
+    auto layout = std::move(result).unwrap_unchecked();
+    ASSERT_EQ(layout.slots.len(), 3u);
+    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[0].name.as_str()), "g_Time");
+    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[1].name.as_str()), "time_alias");
+    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[2].name.as_str()), "unmapped");
+}
+
+TEST(UniformBufferLayout, RejectsMemberOutsideBlock) {
+    auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("outside")),
+        .offset = 8,
+        .size   = 8,
+    });
+    auto block = owe::resource::ShaderArtifactUniformBlock {
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .size    = 12,
+        .members = rstd::move(members),
+    };
+
+    EXPECT_TRUE(owe::vulkan::CompileUniformBufferLayout(block).is_err());
+}
+
+TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
+    owe::Scene scene;
+    auto       camera_node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
+    camera->AttatchNode(camera_node.as_ptr());
+    scene.cameras["default"] = camera;
+    scene.activeCamera       = camera.get();
+
+    auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
+    auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
+    auto source      = registrar->Register(rstd::boxed::Box<rstd::dyn<owe::UniformSource>>::make(
+        uniform_test::StaticSource("scene_time", 2.5f)));
+    ASSERT_TRUE(attachments->AttachGlobal(source));
+
+    auto shader = std::make_shared<owe::SceneShader>();
+    auto node   = rstd::sync::Arc<owe::SceneNode>::make();
+    node->ID()  = 1;
+    node->AddMesh(MakeUniformMesh(std::move(shader)));
+    scene.sceneGraph->AppendChild(node.clone());
+    scene.RebuildResourceIndex();
+    auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
+    ASSERT_TRUE(node_id.is_some());
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    ASSERT_TRUE(draw_id.is_some());
+
+    auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("scene_time")),
+        .offset = 0,
+        .size   = 16,
+    });
+    auto block = owe::resource::ShaderArtifactUniformBlock {
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .size    = 16,
+        .members = rstd::move(members),
+    };
+    const auto buffer = owe::resource::BufferUseHandle { .index = 3, .generation = 1 };
+    owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
+    auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
+    auto binding = owe::vulkan::MakeUniformBufferBinding(prepare.as_ref(), *draw_id, buffer, block);
+    ASSERT_TRUE(binding.is_ok());
+
+    uniform_test::BufferWriter writer;
+    auto writer_trait   = rstd::dyn<owe::resource::BufferContentWriter>::from_ref(writer);
+    auto texture_frames = rstd::dyn<owe::SceneTextureAnimationView>::from_ref(scene);
+    owe::vulkan::ProgramUniformFrameContext frame_impl(
+        scene.Runtime().Frame(), { 1920.0f, 1080.0f }, texture_frames.as_ref());
+    auto frame   = rstd::dyn<owe::vulkan::UniformBufferFrameContext>::from_ref(frame_impl);
+    auto updated = binding.unwrap_unchecked()->Update(frame.as_ref(), writer_trait.as_mut_ref());
+
+    ASSERT_TRUE(updated.is_ok());
+    EXPECT_EQ(writer.last_use, buffer);
+    EXPECT_GT(writer.last_version, 0u);
+    ASSERT_EQ(writer.bytes.size(), 16u);
+    std::array<float, 4> values {};
+    std::memcpy(values.data(), writer.bytes.data(), writer.bytes.size());
+    EXPECT_FLOAT_EQ(values[0], 2.5f);
+    EXPECT_FLOAT_EQ(values[1], 0.0f);
+    EXPECT_FLOAT_EQ(values[2], 0.0f);
+    EXPECT_FLOAT_EQ(values[3], 0.0f);
+}
+
+TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {
+    owe::Scene scene;
+    auto       registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
+    auto       attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
+    auto       source = registrar->Register(rstd::boxed::Box<rstd::dyn<owe::UniformSource>>::make(
+        uniform_test::TextureMetadataSource {}));
+    ASSERT_TRUE(attachments->AttachGlobal(source));
+
+    auto shader = std::make_shared<owe::SceneShader>();
+    auto node   = rstd::sync::Arc<owe::SceneNode>::make();
+    node->AddMesh(MakeUniformMesh(std::move(shader)));
+    scene.sceneGraph->AppendChild(node.clone());
+    scene.RebuildResourceIndex();
+    auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
+    ASSERT_TRUE(node_id.is_some());
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    ASSERT_TRUE(draw_id.is_some());
+
+    auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("texture_extent")),
+        .offset = 0,
+        .size   = 16,
+    });
+    auto block = owe::resource::ShaderArtifactUniformBlock {
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .size    = 16,
+        .members = rstd::move(members),
+    };
+    auto textures = rstd::vec::Vec<owe::vulkan::PreparedUniformTextureMetadata>::make();
+    textures.push(owe::vulkan::PreparedUniformTextureMetadata {
+        .available     = true,
+        .source_extent = { 640.0f, 360.0f },
+        .sample_extent = { 1024.0f, 512.0f },
+        .revision      = 4,
+    });
+    owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
+    auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
+    auto binding = owe::vulkan::MakeUniformBufferBinding(
+        prepare.as_ref(),
+        *draw_id,
+        owe::resource::BufferUseHandle { .index = 3, .generation = 1 },
+        block,
+        rstd::move(textures));
+    ASSERT_TRUE(binding.is_ok());
+
+    uniform_test::BufferWriter writer;
+    auto writer_trait   = rstd::dyn<owe::resource::BufferContentWriter>::from_ref(writer);
+    auto texture_frames = rstd::dyn<owe::SceneTextureAnimationView>::from_ref(scene);
+    owe::vulkan::ProgramUniformFrameContext frame_impl(
+        scene.Runtime().Frame(), { 1920.0f, 1080.0f }, texture_frames.as_ref());
+    auto frame = rstd::dyn<owe::vulkan::UniformBufferFrameContext>::from_ref(frame_impl);
+    ASSERT_TRUE(
+        binding.unwrap_unchecked()->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
+
+    ASSERT_EQ(writer.bytes.size(), 16u);
+    std::array<float, 4> values {};
+    std::memcpy(values.data(), writer.bytes.data(), writer.bytes.size());
+    EXPECT_EQ(values, (std::array<float, 4> { 640.0f, 360.0f, 1024.0f, 512.0f }));
+}
+
+TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
+    owe::Scene scene;
+    auto       camera_node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
+    camera->AttatchNode(camera_node.as_ptr());
+    scene.cameras["default"] = camera;
+    scene.activeCamera       = camera.get();
+
+    auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
+    auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
+    auto low_state   = std::make_shared<uniform_test::StaticSourceState>(
+        uniform_test::StaticSourceState { .value = 3.0f });
+    auto high_priority = registrar->Register(rstd::boxed::Box<rstd::dyn<owe::UniformSource>>::make(
+        uniform_test::StaticSource("static_value", 7.0f)));
+    auto low_priority  = registrar->Register(rstd::boxed::Box<rstd::dyn<owe::UniformSource>>::make(
+        uniform_test::StaticSource("static_value", low_state)));
+    auto shader        = std::make_shared<owe::SceneShader>();
+    auto node          = rstd::sync::Arc<owe::SceneNode>::make();
+    node->ID()         = 1;
+    node->AddMesh(MakeUniformMesh(std::move(shader)));
+    scene.sceneGraph->AppendChild(node.clone());
+    scene.RebuildResourceIndex();
+    auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
+    ASSERT_TRUE(node_id.is_some());
+    ASSERT_TRUE(attachments->AttachNode(*node_id, high_priority, 10));
+    ASSERT_TRUE(attachments->AttachNode(*node_id, low_priority, -10));
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    ASSERT_TRUE(draw_id.is_some());
+
+    auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+    members.push(owe::resource::ShaderArtifactUniformMember {
+        .name   = rstd::string::String::make(rstd::cppstd::as_str("static_value")),
+        .offset = 0,
+        .size   = 4,
+    });
+    auto block = owe::resource::ShaderArtifactUniformBlock {
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .size    = 4,
+        .members = rstd::move(members),
+    };
+    owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
+    auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
+    auto binding = owe::vulkan::MakeUniformBufferBinding(
+        prepare.as_ref(),
+        *draw_id,
+        owe::resource::BufferUseHandle { .index = 3, .generation = 1 },
+        block);
+    ASSERT_TRUE(binding.is_ok());
+
+    uniform_test::BufferWriter writer;
+    auto writer_trait   = rstd::dyn<owe::resource::BufferContentWriter>::from_ref(writer);
+    auto update         = binding.unwrap_unchecked();
+    auto texture_frames = rstd::dyn<owe::SceneTextureAnimationView>::from_ref(scene);
+    owe::vulkan::ProgramUniformFrameContext frame_impl(
+        scene.Runtime().Frame(), { 1920.0f, 1080.0f }, texture_frames.as_ref());
+    auto frame = rstd::dyn<owe::vulkan::UniformBufferFrameContext>::from_ref(frame_impl);
+    ASSERT_TRUE(update->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
+    ASSERT_TRUE(update->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
+
+    EXPECT_EQ(writer.update_count, 1u);
+    low_state->value = 5.0f;
+    ++low_state->version;
+    ASSERT_TRUE(update->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
+
+    EXPECT_EQ(writer.update_count, 2u);
+    ASSERT_EQ(writer.bytes.size(), 4u);
+    float value = 0.0f;
+    std::memcpy(&value, writer.bytes.data(), writer.bytes.size());
+    EXPECT_FLOAT_EQ(value, 7.0f);
+}
 
 TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
     owe::resource::ShaderArtifact artifact;

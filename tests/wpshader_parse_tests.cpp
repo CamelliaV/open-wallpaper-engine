@@ -297,6 +297,47 @@ void main() {
     EXPECT_FALSE(result.shader->codes[1].empty());
 }
 
+TEST(WPShaderParser, CompileSceneShaderVariantExportsSamplerBindings) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "sampler-binding-test";
+    desc.shader_name = "sampler-binding-test";
+    desc.texture_infos.resize(4);
+    desc.texture_infos[3].enabled = true;
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/sampler-binding-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+varying vec2 v_TexCoord;
+void main() {
+    v_TexCoord = a_Position.xy;
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/sampler-binding-test.frag",
+        .source     = R"(
+varying vec2 v_TexCoord;
+uniform sampler2D g_Texture3;
+void main() {
+    gl_FragColor = texSample2D(g_Texture3, v_TexCoord);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    ASSERT_EQ(result.variant.sampler_bindings.size(), 1u);
+    EXPECT_EQ(result.variant.sampler_bindings[0].texture_slot, 3u);
+    EXPECT_EQ(result.variant.sampler_bindings[0].shader_member, "g_Texture3");
+    EXPECT_EQ(result.shader->SamplerMember(3), "g_Texture3");
+}
+
 TEST(WPShaderParser, CompileSceneShaderVariantUsesDescriptorAndComboOverride) {
     owe::SceneShaderVariantDesc desc;
     desc.scene_id        = "variant-test";

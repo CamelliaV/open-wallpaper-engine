@@ -2022,6 +2022,30 @@ void WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
     vulkan::ShaderReflected            reflected;
     if (! vulkan::GenReflect(codes, spvs, reflected)) return;
 
+    desc.sampler_bindings.clear();
+    constexpr std::string_view texture_prefix { "g_Texture" };
+    for (const auto& [name, binding] : reflected.binding_map) {
+        if (binding.descriptorType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+            ! std::string_view(name).starts_with(texture_prefix)) {
+            continue;
+        }
+        const auto suffix = std::string_view(name).substr(texture_prefix.size());
+        if (suffix.empty() || (suffix.size() > 1 && suffix.front() == '0')) continue;
+        usize slot { 0 };
+        const auto [end, error] =
+            std::from_chars(suffix.data(), suffix.data() + suffix.size(), slot);
+        if (error != std::errc() || end != suffix.data() + suffix.size()) continue;
+        desc.sampler_bindings.push_back(SceneSamplerBinding {
+            .texture_slot  = slot,
+            .shader_member = name,
+        });
+    }
+    std::sort(desc.sampler_bindings.begin(),
+              desc.sampler_bindings.end(),
+              [](const auto& lhs, const auto& rhs) {
+                  return lhs.texture_slot < rhs.texture_slot;
+              });
+
     struct BindingRecord {
         std::string name;
         uint32_t    binding { 0 };
@@ -2189,6 +2213,7 @@ WPShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs
     auto shader              = std::make_shared<SceneShader>();
     shader->name             = desc.shader_name;
     shader->codes            = std::move(spvs);
+    shader->sampler_bindings = result.variant.sampler_bindings;
     shader->default_uniforms = result.info.svs;
     result.shader            = std::move(shader);
     result.ok                = true;

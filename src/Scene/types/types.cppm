@@ -211,6 +211,7 @@ public:
     const SpriteFrame& GetFrame(idx i) const { return m_frames.at((usize)i); }
 
     usize numFrames() const { return m_frames.size(); }
+    usize CurrentFrameIndex() const { return static_cast<usize>(m_curFrame); }
 
 private:
     void SwitchToNext() {

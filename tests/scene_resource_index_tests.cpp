@@ -115,6 +115,250 @@ TEST(SceneResourceIndex, RebuildPicksUpNewRenderTargets) {
     EXPECT_EQ(scene.ResourceIndex().renderTarget(*id)->height, 32);
 }
 
+TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
+    owe::Scene scene;
+    auto       camera = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0f, 1.0f);
+    auto       layer  = std::make_shared<owe::SceneImageEffectLayer>(
+        scene.sceneGraph.as_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
+
+    auto prefill = rstd::sync::Arc<owe::SceneNode>::make();
+    prefill->AddMesh(MakeSingleSubmesh("prefill"));
+    layer->AddPrefillNode(owe::SceneImageEffectNode { .sceneNode = prefill.clone() });
+
+    auto effect_node = rstd::sync::Arc<owe::SceneNode>::make();
+    effect_node->AddMesh(MakeSingleSubmesh("effect"));
+    auto effect = std::make_shared<owe::SceneImageEffect>();
+    effect->nodes.push_back(owe::SceneImageEffectNode { .sceneNode = effect_node.clone() });
+    layer->AddEffect(effect);
+
+    auto final_node = rstd::sync::Arc<owe::SceneNode>::make();
+    final_node->AddMesh(MakeSingleSubmesh("final"));
+    auto final_effect = std::make_shared<owe::SceneImageEffect>();
+    final_effect->nodes.push_back(owe::SceneImageEffectNode { .sceneNode = final_node.clone() });
+    layer->SetFinalResolveEffect(final_effect);
+
+    camera->AttatchImgEffect(layer);
+    scene.cameras["effect"] = std::move(camera);
+    scene.RebuildResourceIndex();
+
+    for (auto node : { prefill.as_ptr(), effect_node.as_ptr(), final_node.as_ptr() }) {
+        auto node_id = scene.ResourceIndex().nodeId(*node);
+        ASSERT_TRUE(node_id.is_some());
+        EXPECT_TRUE(scene.ResourceIndex().drawItemFor(*node_id, 0).is_some());
+    }
+}
+
+TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterCameraBindingChanges) {
+    owe::Scene scene;
+    auto       camera = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0f, 1.0f);
+    auto       layer  = std::make_shared<owe::SceneImageEffectLayer>(
+        scene.sceneGraph.as_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
+
+    auto effect_node = rstd::sync::Arc<owe::SceneNode>::make();
+    effect_node->AddMesh(MakeSingleSubmesh("effect"));
+    auto effect = std::make_shared<owe::SceneImageEffect>();
+    effect->nodes.push_back(owe::SceneImageEffectNode { .sceneNode = effect_node.clone() });
+    layer->AddEffect(effect);
+    camera->AttatchImgEffect(layer);
+    scene.cameras["effect"] = std::move(camera);
+
+    auto source_node = rstd::sync::Arc<owe::SceneNode>::make();
+    source_node->AddMesh(MakeSingleSubmesh("source"));
+    scene.sceneGraph->AppendChild(source_node.clone());
+
+    auto sibling_node = rstd::sync::Arc<owe::SceneNode>::make();
+    sibling_node->AddMesh(MakeSingleSubmesh("sibling"));
+    scene.sceneGraph->AppendChild(sibling_node.clone());
+
+    scene.RebuildResourceIndex();
+    auto sibling_id = scene.ResourceIndex().nodeId(*sibling_node.as_ptr());
+    auto effect_id  = scene.ResourceIndex().nodeId(*effect_node.as_ptr());
+    ASSERT_TRUE(sibling_id.is_some());
+    ASSERT_TRUE(effect_id.is_some());
+    auto sibling_draw = scene.ResourceIndex().drawItemFor(*sibling_id, 0);
+    auto effect_draw  = scene.ResourceIndex().drawItemFor(*effect_id, 0);
+    ASSERT_TRUE(sibling_draw.is_some());
+    ASSERT_TRUE(effect_draw.is_some());
+
+    source_node->SetCamera("effect");
+    scene.RebuildResourceIndex();
+
+    auto rebuilt_sibling_id = scene.ResourceIndex().nodeId(*sibling_node.as_ptr());
+    auto rebuilt_effect_id  = scene.ResourceIndex().nodeId(*effect_node.as_ptr());
+    ASSERT_TRUE(rebuilt_sibling_id.is_some());
+    ASSERT_TRUE(rebuilt_effect_id.is_some());
+    EXPECT_EQ(rebuilt_sibling_id->index, sibling_id->index);
+    EXPECT_EQ(rebuilt_effect_id->index, effect_id->index);
+
+    auto rebuilt_sibling_draw = scene.ResourceIndex().drawItemFor(*rebuilt_sibling_id, 0);
+    auto rebuilt_effect_draw  = scene.ResourceIndex().drawItemFor(*rebuilt_effect_id, 0);
+    ASSERT_TRUE(rebuilt_sibling_draw.is_some());
+    ASSERT_TRUE(rebuilt_effect_draw.is_some());
+    EXPECT_EQ(rebuilt_sibling_draw->index, sibling_draw->index);
+    EXPECT_EQ(rebuilt_effect_draw->index, effect_draw->index);
+    EXPECT_EQ(scene.ResourceIndex().resolve(*sibling_draw)->node, sibling_node.as_ptr());
+    EXPECT_EQ(scene.ResourceIndex().resolve(*effect_draw)->node, effect_node.as_ptr());
+}
+
+TEST(SceneResourceIndex, RebuildAppendsNewDrawsWithoutRenumberingExistingDraws) {
+    owe::Scene scene;
+
+    auto existing_node = rstd::sync::Arc<owe::SceneNode>::make();
+    existing_node->AddMesh(MakeSingleSubmesh("existing"));
+    scene.sceneGraph->AppendChild(existing_node.clone());
+
+    auto pending_node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto pending_mesh = MakeSingleSubmesh("pending");
+    pending_mesh->Submeshes().clear();
+    pending_node->AddMesh(pending_mesh);
+    scene.sceneGraph->AppendChild(pending_node.clone());
+
+    scene.RebuildResourceIndex();
+    auto existing_node_id = scene.ResourceIndex().nodeId(*existing_node.as_ptr());
+    auto pending_node_id  = scene.ResourceIndex().nodeId(*pending_node.as_ptr());
+    ASSERT_TRUE(existing_node_id.is_some());
+    ASSERT_TRUE(pending_node_id.is_some());
+    auto existing_draw = scene.ResourceIndex().drawItemFor(*existing_node_id, 0);
+    ASSERT_TRUE(existing_draw.is_some());
+    EXPECT_TRUE(scene.ResourceIndex().drawItemFor(*pending_node_id, 0).is_none());
+    auto existing_mesh_id = scene.ResourceIndex().meshId(*existing_node->Mesh());
+    auto existing_material_id =
+        scene.ResourceIndex().materialId(*existing_node->Mesh()->MaterialSlots()[0]);
+    ASSERT_TRUE(existing_mesh_id.is_some());
+    ASSERT_TRUE(existing_material_id.is_some());
+
+    auto resolved_mesh = MakeSingleSubmesh("resolved");
+    pending_mesh->ChangeMeshDataFrom(*resolved_mesh);
+    scene.RebuildResourceIndex();
+
+    auto rebuilt_existing_draw = scene.ResourceIndex().drawItemFor(*existing_node_id, 0);
+    auto appended_draw         = scene.ResourceIndex().drawItemFor(*pending_node_id, 0);
+    ASSERT_TRUE(rebuilt_existing_draw.is_some());
+    ASSERT_TRUE(appended_draw.is_some());
+    EXPECT_EQ(rebuilt_existing_draw->index, existing_draw->index);
+    EXPECT_GT(appended_draw->index, existing_draw->index);
+    auto rebuilt_existing_mesh_id = scene.ResourceIndex().meshId(*existing_node->Mesh());
+    auto rebuilt_existing_material_id =
+        scene.ResourceIndex().materialId(*existing_node->Mesh()->MaterialSlots()[0]);
+    ASSERT_TRUE(rebuilt_existing_mesh_id.is_some());
+    ASSERT_TRUE(rebuilt_existing_material_id.is_some());
+    EXPECT_EQ(rebuilt_existing_mesh_id->index, existing_mesh_id->index);
+    EXPECT_EQ(rebuilt_existing_material_id->index, existing_material_id->index);
+    EXPECT_EQ(scene.ResourceIndex().resolve(*existing_draw)->node, existing_node.as_ptr());
+    EXPECT_EQ(scene.ResourceIndex().resolve(*appended_draw)->node, pending_node.as_ptr());
+}
+
+TEST(SceneResourceIndex, RebuildInvalidatesRemovedNodesWithoutRenumberingRemainingDraws) {
+    owe::Scene scene;
+
+    auto removed_node = rstd::sync::Arc<owe::SceneNode>::make();
+    removed_node->AddMesh(MakeSingleSubmesh("removed"));
+    scene.sceneGraph->AppendChild(removed_node.clone());
+
+    auto remaining_node = rstd::sync::Arc<owe::SceneNode>::make();
+    remaining_node->AddMesh(MakeSingleSubmesh("remaining"));
+    scene.sceneGraph->AppendChild(remaining_node.clone());
+
+    scene.RebuildResourceIndex();
+    auto removed_node_id   = scene.ResourceIndex().nodeId(*removed_node.as_ptr());
+    auto remaining_node_id = scene.ResourceIndex().nodeId(*remaining_node.as_ptr());
+    ASSERT_TRUE(removed_node_id.is_some());
+    ASSERT_TRUE(remaining_node_id.is_some());
+    auto removed_draw   = scene.ResourceIndex().drawItemFor(*removed_node_id, 0);
+    auto remaining_draw = scene.ResourceIndex().drawItemFor(*remaining_node_id, 0);
+    ASSERT_TRUE(removed_draw.is_some());
+    ASSERT_TRUE(remaining_draw.is_some());
+    auto removed_mesh_id = scene.ResourceIndex().meshId(*removed_node->Mesh());
+    auto removed_material_id =
+        scene.ResourceIndex().materialId(*removed_node->Mesh()->MaterialSlots()[0]);
+    auto remaining_mesh_id = scene.ResourceIndex().meshId(*remaining_node->Mesh());
+    auto remaining_material_id =
+        scene.ResourceIndex().materialId(*remaining_node->Mesh()->MaterialSlots()[0]);
+    ASSERT_TRUE(removed_mesh_id.is_some());
+    ASSERT_TRUE(removed_material_id.is_some());
+    ASSERT_TRUE(remaining_mesh_id.is_some());
+    ASSERT_TRUE(remaining_material_id.is_some());
+
+    scene.sceneGraph->GetChildren().clear();
+    scene.sceneGraph->AppendChild(remaining_node.clone());
+    scene.RebuildResourceIndex();
+
+    EXPECT_TRUE(scene.ResourceIndex().nodeId(*removed_node.as_ptr()).is_none());
+    EXPECT_EQ(scene.ResourceIndex().node(*removed_node_id), nullptr);
+    EXPECT_TRUE(scene.ResourceIndex().resolve(*removed_draw).is_none());
+    EXPECT_EQ(scene.ResourceIndex().mesh(*removed_mesh_id), nullptr);
+    EXPECT_EQ(scene.ResourceIndex().material(*removed_material_id), nullptr);
+
+    auto rebuilt_remaining_node_id = scene.ResourceIndex().nodeId(*remaining_node.as_ptr());
+    ASSERT_TRUE(rebuilt_remaining_node_id.is_some());
+    EXPECT_EQ(rebuilt_remaining_node_id->index, remaining_node_id->index);
+    auto rebuilt_remaining_draw = scene.ResourceIndex().drawItemFor(*rebuilt_remaining_node_id, 0);
+    ASSERT_TRUE(rebuilt_remaining_draw.is_some());
+    EXPECT_EQ(rebuilt_remaining_draw->index, remaining_draw->index);
+    auto rebuilt_remaining_mesh_id = scene.ResourceIndex().meshId(*remaining_node->Mesh());
+    auto rebuilt_remaining_material_id =
+        scene.ResourceIndex().materialId(*remaining_node->Mesh()->MaterialSlots()[0]);
+    ASSERT_TRUE(rebuilt_remaining_mesh_id.is_some());
+    ASSERT_TRUE(rebuilt_remaining_material_id.is_some());
+    EXPECT_EQ(rebuilt_remaining_mesh_id->index, remaining_mesh_id->index);
+    EXPECT_EQ(rebuilt_remaining_material_id->index, remaining_material_id->index);
+    EXPECT_EQ(scene.ResourceIndex().resolve(*remaining_draw)->node, remaining_node.as_ptr());
+}
+
+TEST(SceneTextureAnimation, AdvancesOncePerRuntimeFrame) {
+    owe::Scene scene;
+    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       mesh = MakeSingleSubmesh("sprite-a");
+    mesh->MaterialSlots()[0]->textures.push_back("tex/sprite");
+    node->AddMesh(mesh);
+    scene.sceneGraph->AppendChild(node.clone());
+    auto second_node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto second_mesh = MakeSingleSubmesh("sprite-b");
+    second_mesh->MaterialSlots()[0]->textures.push_back("tex/sprite");
+    second_node->AddMesh(second_mesh);
+    scene.sceneGraph->AppendChild(second_node.clone());
+
+    owe::SceneTexture texture { .url = "tex/sprite", .isSprite = true };
+    texture.spriteAnim.AppendFrame(owe::SpriteFrame { .frametime = 0.1f, .x = 0.0f });
+    texture.spriteAnim.AppendFrame(owe::SpriteFrame { .frametime = 0.1f, .x = 0.5f });
+    scene.textures[texture.url] = rstd::move(texture);
+    scene.RebuildResourceIndex();
+
+    auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
+    ASSERT_TRUE(node_id.is_some());
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    ASSERT_TRUE(draw_id.is_some());
+    auto second_node_id = scene.ResourceIndex().nodeId(*second_node.as_ptr());
+    ASSERT_TRUE(second_node_id.is_some());
+    auto second_draw_id = scene.ResourceIndex().drawItemFor(*second_node_id, 0);
+    ASSERT_TRUE(second_draw_id.is_some());
+
+    auto initial = scene.TextureFrame(*draw_id, 0);
+    ASSERT_TRUE(initial.is_some());
+    EXPECT_FLOAT_EQ(initial->translation[0], 0.0f);
+
+    scene.Runtime().Advance(0.01);
+    auto first_query  = scene.TextureFrame(*draw_id, 0);
+    auto second_query = scene.TextureFrame(*draw_id, 0);
+    auto shared_query = scene.TextureFrame(*second_draw_id, 0);
+    ASSERT_TRUE(first_query.is_some());
+    ASSERT_TRUE(second_query.is_some());
+    ASSERT_TRUE(shared_query.is_some());
+    EXPECT_FLOAT_EQ(first_query->translation[0], 0.5f);
+    EXPECT_EQ(first_query->translation, second_query->translation);
+    EXPECT_EQ(first_query->translation, shared_query->translation);
+    EXPECT_EQ(first_query->revision, shared_query->revision);
+
+    node->TexAnim().playing = false;
+    scene.Runtime().Advance(0.11);
+    auto paused  = scene.TextureFrame(*draw_id, 0);
+    auto playing = scene.TextureFrame(*second_draw_id, 0);
+    ASSERT_TRUE(paused.is_some());
+    ASSERT_TRUE(playing.is_some());
+    EXPECT_FLOAT_EQ(paused->translation[0], 0.5f);
+    EXPECT_FLOAT_EQ(playing->translation[0], 0.0f);
+}
+
 TEST(SceneTextures, EnsureTextureDescriptorRegistersImportedTexture) {
     owe::Scene scene;
     EXPECT_FALSE(scene.EnsureTextureDescriptor("tex/runtime"));
@@ -178,17 +422,18 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
         owe::ShaderValue(std::array<float, 4> { 0.0f, 0.0f, 0.0f, 0.0f });
     material->customShader.shader = std::move(shader);
 
+    const auto value_version = material->customShader.value_version;
     EXPECT_TRUE(scene.SetMaterialShaderValue(*material, "u_Color", owe::ShaderValue(0.5f)));
     auto color_it = material->customShader.constValues.find("u_Color");
     ASSERT_NE(color_it, material->customShader.constValues.end());
     ASSERT_EQ(color_it->second.size(), 4u);
     EXPECT_FLOAT_EQ(color_it->second[0], 0.5f);
     EXPECT_FLOAT_EQ(color_it->second[3], 0.5f);
-    EXPECT_TRUE(material->customShader.dirty);
+    EXPECT_GT(material->customShader.value_version, value_version);
 
-    material->customShader.dirty = false;
+    const auto updated_version = material->customShader.value_version;
     EXPECT_FALSE(scene.SetMaterialShaderValue(*material, "", owe::ShaderValue(1.0f)));
-    EXPECT_FALSE(material->customShader.dirty);
+    EXPECT_EQ(material->customShader.value_version, updated_version);
 
     auto mutation = scene.SetMaterialTextureSlot(*material, 0, "tex/runtime");
     EXPECT_TRUE(mutation.changed);
@@ -219,6 +464,8 @@ TEST(SceneMaterialShaderVariant, CarriesCompileDescriptorThroughMaterialMove) {
     variant.uniform_aliases = { { "brightness", "u_Brightness" } };
     variant.default_textures.push_back(
         owe::SceneShaderDefaultTexture { .slot = 0, .texture = "tex/default" });
+    variant.sampler_bindings.push_back(
+        owe::SceneSamplerBinding { .texture_slot = 0, .shader_member = "u_Albedo" });
     variant.texture_infos.push_back(owe::SceneShaderTextureCompileInfo {
         .enabled    = true,
         .components = { true, false, true },
@@ -243,10 +490,21 @@ TEST(SceneMaterialShaderVariant, CarriesCompileDescriptorThroughMaterialMove) {
     EXPECT_EQ(stored.resolved_combos.at("TEX0FORMAT"), "FORMAT_R8");
     ASSERT_EQ(stored.default_textures.size(), 1u);
     EXPECT_EQ(stored.default_textures[0].texture, "tex/default");
+    ASSERT_EQ(stored.sampler_bindings.size(), 1u);
+    EXPECT_EQ(stored.sampler_bindings[0].shader_member, "u_Albedo");
     ASSERT_EQ(stored.texture_infos.size(), 1u);
     EXPECT_TRUE(stored.texture_infos[0].components[2]);
     ASSERT_EQ(stored.stages.size(), 1u);
     EXPECT_EQ(stored.stages[0].source_key, "/assets/shaders/genericimage.vert");
+}
+
+TEST(SceneShader, ResolvesLoaderDefinedSamplerMember) {
+    owe::SceneShader shader;
+    shader.sampler_bindings.push_back(
+        owe::SceneSamplerBinding { .texture_slot = 3, .shader_member = "u_SourceImage" });
+
+    EXPECT_EQ(shader.SamplerMember(3), "u_SourceImage");
+    EXPECT_TRUE(shader.SamplerMember(0).empty());
 }
 
 TEST(SceneMaterialShaderVariant, AppliesCompiledVariantThroughSceneOwner) {
@@ -658,16 +916,15 @@ TEST(SceneNodeFieldAnimation, AlphaAnimationTicksThroughScene) {
     node->SetAlphaAnimation(std::move(curve));
     scene.sceneGraph->AppendChild(node.clone());
 
-    scene.elapsingTime = 0.0;
     scene.TickNodeFieldAnimations();
     EXPECT_TRUE(node->IsAlphaOverridden());
     EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.0f);
 
-    scene.elapsingTime = 2.0;
+    scene.Runtime().Advance(2.0);
     scene.TickNodeFieldAnimations();
     EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.5f);
 
-    scene.elapsingTime = 8.8;
+    scene.Runtime().Advance(6.8);
     scene.TickNodeFieldAnimations();
     EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.0f);
 }

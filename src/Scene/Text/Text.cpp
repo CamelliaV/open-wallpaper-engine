@@ -7,6 +7,7 @@ module;
 
 #include <fontconfig/fontconfig.h>
 module wescene.text;
+import eigen;
 import wescene.spec_names;
 import wescene.core;
 import wescene.types;
@@ -700,6 +701,10 @@ std::shared_ptr<owe::SceneShader> CompileInlineShader(std::string_view name,
     for (auto& spv : spvs) {
         shader->codes.emplace_back(std::move(spv->spirv));
     }
+    shader->sampler_bindings.push_back(owe::SceneSamplerBinding {
+        .texture_slot  = 0,
+        .shader_member = "g_Texture0",
+    });
     return shader;
 }
 
@@ -721,6 +726,62 @@ std::shared_ptr<owe::SceneShader> GetTextCopyBackgroundSceneShader() {
         shader = CompileInlineShader("text_copybackground", kTextCopyBackgroundShaderHlsl);
     });
     return shader;
+}
+
+auto TextUniformSource::Describe(rstd::mut_ref<rstd::dyn<UniformBindingSink>> sink) const
+    -> rstd::Result<rstd::empty, UniformError> {
+    auto bind = [&](TextUniformOutput output, std::string_view name) {
+        return sink->Bind(UniformOutputId { .value = static_cast<rstd::u32>(output) },
+                          name,
+                          UniformValueShape::Float(16));
+    };
+    auto model = bind(TextUniformOutput::ModelViewProjection, G_MVP);
+    if (model.is_err()) return rstd::Err(rstd::move(model).unwrap_err_unchecked());
+    auto effect = bind(TextUniformOutput::EffectModelViewProjection, G_EMVP);
+    if (effect.is_err()) return rstd::Err(rstd::move(effect).unwrap_err_unchecked());
+    return rstd::Ok(rstd::empty {});
+}
+
+auto TextUniformSource::Version(rstd::ref<rstd::dyn<UniformUpdateContext>> context) const
+    -> rstd::u64 {
+    return context->Frame()->revision;
+}
+
+auto TextUniformSource::Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
+                                 rstd::mut_ref<rstd::dyn<UniformValueSink>> sink) const
+    -> rstd::Result<rstd::empty, UniformError> {
+    if (! m_state || ! m_state->camera) return rstd::Ok(rstd::empty {});
+
+    auto write = [&](TextUniformOutput      output,
+                     const Eigen::Matrix4d& matrix) -> rstd::Result<rstd::empty, UniformError> {
+        const auto id = UniformOutputId { .value = static_cast<rstd::u32>(output) };
+        if (! sink->Wants(id)) return rstd::Ok(rstd::empty {});
+        const auto value = UniformValue(ShaderValue::fromMatrix(matrix));
+        return sink->Write(id, value.View());
+    };
+
+    m_state->node->UpdateTrans();
+    const Eigen::Matrix4d model =
+        m_state->camera->GetViewProjectionMatrix() * m_state->node->ModelTrans();
+    auto result = write(TextUniformOutput::ModelViewProjection, model);
+    if (result.is_err()) return result;
+
+    if (! m_state->effect_projection) return rstd::Ok(rstd::empty {});
+    auto& projection_node = *m_state->effect_projection->node;
+    projection_node.UpdateTrans();
+    Eigen::Matrix4d effect_model = projection_node.ModelTrans();
+    const auto&     size         = m_state->effect_projection->size;
+    if (size[0] > 0.0f && size[1] > 0.0f) {
+        effect_model =
+            effect_model * Eigen::Affine3d(Eigen::Scaling(static_cast<rstd::f64>(size[0]) * 0.5,
+                                                          static_cast<rstd::f64>(size[1]) * 0.5,
+                                                          1.0))
+                               .matrix();
+    }
+    const Eigen::Matrix4d effect_view = m_state->active_camera
+                                            ? m_state->active_camera->GetViewProjectionMatrix()
+                                            : m_state->camera->GetViewProjectionMatrix();
+    return write(TextUniformOutput::EffectModelViewProjection, effect_view * effect_model);
 }
 
 // -- TextLayouter ---------------------------------------------------------

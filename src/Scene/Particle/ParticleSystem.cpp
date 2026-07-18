@@ -107,7 +107,7 @@ ParticleInstance* ParticleSubSystem::QueryNewInstance() {
     return nullptr;
 }
 
-void ParticleSubSystem::Emitt() { Tick(m_sys.scene.frameTime, true); }
+void ParticleSubSystem::Emitt() { Tick(m_sys.scene.Runtime().Frame().delta, true); }
 
 void ParticleSubSystem::Tick(double frame_time, bool update_mesh) {
     if (! m_started) {

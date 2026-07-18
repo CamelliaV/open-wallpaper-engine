@@ -131,8 +131,8 @@ struct VulkanRender::Impl {
     rstd::Option<rstd::usize> acquireUploadCommandSlot(RenderingResources&);
     void                      commitPreparedUploads();
     bool                      waitForPreparedUploads(RenderingResources&);
-    void                      drawFrameSwapchain();
-    void                      drawFrameOffscreen();
+    void                      drawFrameSwapchain(Scene&);
+    void                      drawFrameOffscreen(Scene&);
     bool                      onSwapchainReady(unsigned width, unsigned height);
 
     Instance     m_instance;
@@ -627,19 +627,19 @@ bool VulkanRender::Impl::waitForPreparedUploads(RenderingResources& rr) {
     return true;
 }
 
-void VulkanRender::Impl::drawFrame(Scene&) {
+void VulkanRender::Impl::drawFrame(Scene& scene) {
     if (! (m_inited && m_program.loaded)) return;
 
     if (m_instance.offscreen()) {
-        drawFrameOffscreen();
+        drawFrameOffscreen(scene);
     } else {
-        drawFrameSwapchain();
+        drawFrameSwapchain(scene);
     }
 
     if (m_redraw_cb) m_redraw_cb();
 }
 
-void VulkanRender::Impl::drawFrameSwapchain() {
+void VulkanRender::Impl::drawFrameSwapchain(Scene& scene) {
     static usize resource_index = 0;
 
     RenderingResources& rr = m_rendering_resources;
@@ -683,13 +683,17 @@ void VulkanRender::Impl::drawFrameSwapchain() {
         return;
     }
     if (! waitForPreparedUploads(rr)) return;
+    auto texture_frames = rstd::dyn<SceneTextureAnimationView>::from_ref(scene);
+    if (! m_program.update(
+            scene.Runtime().Frame(), m_device->out_extent(), texture_frames.as_ref(), rr))
+        return;
 
     (void)rr.command.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_program.execute(rr);
+    m_program.record(rr);
     (void)rr.command.End();
 
     auto& sem_present_done = m_sem_swap_finish_per_image[image_index];
@@ -758,7 +762,7 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     }
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 }
-void VulkanRender::Impl::drawFrameOffscreen() {
+void VulkanRender::Impl::drawFrameOffscreen(Scene& scene) {
     if (! m_ex_swapchain) return;
 
     // Drain any pending bridge directive *before* committing to a slot.
@@ -796,13 +800,17 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         return;
     }
     if (! waitForPreparedUploads(rr)) return;
+    auto texture_frames = rstd::dyn<SceneTextureAnimationView>::from_ref(scene);
+    if (! m_program.update(
+            scene.Runtime().Frame(), m_device->out_extent(), texture_frames.as_ref(), rr))
+        return;
 
     (void)rr.command.Begin(VkCommandBufferBeginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_program.execute(rr);
+    m_program.record(rr);
 
     (void)rr.command.End();
 

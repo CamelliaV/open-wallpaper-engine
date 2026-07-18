@@ -7,6 +7,7 @@ import wescene.scene;
 
 import :resource;
 import :shader_reflection_cache;
+import :uniform_buffer;
 
 using namespace rstd::prelude;
 
@@ -259,6 +260,11 @@ public:
     virtual PassInvalidationFlags finalizeResourceRequests(Scene&) { return PassInvalidationNone; }
     virtual void                  declareResources(ResourceDeclarationContext&) {}
     virtual PassResourceUses      resourceUses() const { return {}; }
+    virtual auto                  createUniformBufferUpdate(ref<dyn<UniformBindingPrepareContext>>,
+                                                            const PreparedPassResources&)
+        -> Result<Option<Box<dyn<UniformBufferUpdate>>>, UniformBufferUpdateError> {
+        return Ok(Option<Box<dyn<UniformBufferUpdate>>>());
+    }
     virtual bool
     prepareResourceStates(rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>>) {
         return true;

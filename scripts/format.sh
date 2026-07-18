@@ -21,6 +21,7 @@ fi
 
 cxx_files=()
 while IFS= read -r file; do
+    [[ -f "$file" ]] || continue
     case "$file" in
         third_party/*)
             continue

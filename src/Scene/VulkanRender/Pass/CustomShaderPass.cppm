@@ -10,6 +10,7 @@ import wescene.scene;
 import :vulkan_pass;
 import :resource;
 import :buffer_resolver;
+import :uniform_buffer;
 
 using namespace rstd::prelude;
 
@@ -35,7 +36,6 @@ public:
         rstd::Option<TextureRequest>                 output_msaa_request;
         rstd::Option<resource::TextureUseHandle>     depth_use;
         rstd::Option<TextureRequest>                 depth_request;
-        sprite_map_t                                 sprites_map;
         rstd::Option<resource::ShaderUseHandle>      shader_use;
         rstd::vec::Vec<resource::BufferUseHandle>    buffer_uses;
         rstd::Option<resource::BufferUseHandle>      ubo_use;
@@ -52,9 +52,7 @@ public:
         bool                                    has_depth_attachment { false };
 
         // bufs
-        DrawBufferRefs           draw_buffers;
-        rstd::vec::Vec<rstd::u8> uniform_data;
-        rstd::u64                uniform_content_version { 1 };
+        DrawBufferRefs draw_buffers;
 
         // pipeline
         VkClearValue clear_value;
@@ -80,9 +78,6 @@ public:
         u64                                             render_pass_cache_observed_count { 0 };
         bool                                            framebuffer_cache_hit { false };
         u64                                             framebuffer_cache_observed_count { 0 };
-
-        // uniforms
-        std::function<void()> update_op;
     };
 
     CustomShaderPass(Desc&&);
@@ -91,7 +86,10 @@ public:
     PassInvalidationFlags finalizeResourceRequests(Scene&) override;
     void                  declareResources(ResourceDeclarationContext&) override;
     PassResourceUses      resourceUses() const override;
-    bool                  prepareResourceStates(
+    auto                  createUniformBufferUpdate(ref<dyn<UniformBindingPrepareContext>>,
+                                                    const PreparedPassResources&)
+        -> Result<Option<Box<dyn<UniformBufferUpdate>>>, UniformBufferUpdateError> override;
+    bool prepareResourceStates(
         rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>>) override;
     Option<RenderItemId>                      renderItemId() const override;
     std::optional<PipelineCacheKey>           pipelineCacheKey() const override;

@@ -340,101 +340,76 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
             old = std::move(binding);
             result.invalidation_flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
         }
-
-        if (next.empty()) {
-            m_desc.sprites_map.erase(i);
-            continue;
-        }
-
-        auto  texture_id = render_scene.textureDescId(next);
-        auto* texture    = texture_id.is_some() ? render_scene.textureDesc(*texture_id) : nullptr;
-        if (texture != nullptr && texture->desc.isSprite) {
-            m_desc.sprites_map[i] = texture->desc.spriteAnim;
-        } else {
-            m_desc.sprites_map.erase(i);
-        }
     }
 
     return result;
 }
 
-static std::span<u8> MakeUniformUploadBytes(const owe::ShaderValue& value, usize refl_size,
-                                            std::vector<owe::ShaderValue::value_type>& resized,
-                                            bool&                                      compatible) {
-    compatible               = true;
-    const usize   value_size = value.size() * sizeof(owe::ShaderValue::value_type);
-    std::span<u8> value_u8 {
-        const_cast<u8*>(reinterpret_cast<const u8*>(value.data())),
-        value_size,
-    };
-
-    if (refl_size != value_size && refl_size % sizeof(owe::ShaderValue::value_type) == 0) {
-        const usize refl_count = refl_size / sizeof(owe::ShaderValue::value_type);
-        resized.assign(refl_count, 0.0f);
-        std::copy_n(value.data(), std::min(value.size(), refl_count), resized.begin());
-        value_u8 = { reinterpret_cast<u8*>(resized.data()), refl_size };
-    } else if (refl_size != value_size) {
-        compatible = false;
-        value_u8   = value_u8.first(std::min(refl_size, value_u8.size()));
+auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareContext>> prepare,
+                                                 const PreparedPassResources&           resources)
+    -> Result<Option<Box<dyn<UniformBufferUpdate>>>, UniformBufferUpdateError> {
+    if (m_desc.ubo_use.is_none() || m_desc.shader_use.is_none()) {
+        return Ok(Option<Box<dyn<UniformBufferUpdate>>>());
     }
-    return value_u8;
-}
-
-static void UpdateUniform(rstd::vec::Vec<rstd::u8>&     destination,
-                          const ShaderReflected::Block& block, std::string_view name,
-                          const owe::ShaderValue& value) {
-    using namespace owe;
-    auto uni = block.member_map.find(name);
-    if (uni == block.member_map.end()) {
-        return;
+    auto prepared = resources.Resolve(*m_desc.shader_use);
+    if (prepared.is_none()) {
+        return Err(UniformBufferUpdateError {
+            .message = String::make("prepared uniform shader is unavailable"),
+        });
     }
-
-    const usize                          offset    = uni->second.offset;
-    const usize                          refl_size = uni->second.size;
-    bool                                 compatible {};
-    std::vector<ShaderValue::value_type> resized;
-    auto value_u8 = MakeUniformUploadBytes(value, refl_size, resized, compatible);
-    if (! compatible) {
-        rstd_warn("uniform \"{}\" size mismatch: reflected {} bytes, uploader {} bytes",
-                  name,
-                  refl_size,
-                  value.size() * sizeof(ShaderValue::value_type));
+    const auto& artifact = (**prepared).shader.physical->artifact;
+    if (artifact.uniform_blocks.is_empty()) {
+        return Ok(Option<Box<dyn<UniformBufferUpdate>>>());
     }
-    if (offset > destination.len() || value_u8.size() > destination.len() - offset) return;
-    std::copy(value_u8.begin(), value_u8.end(), destination.begin() + offset);
-}
-
-// Sanity-check the reflected cbuffer: members in `block.member_map` must not
-// overlap. An overlap means glslang packed two members at conflicting std140
-// offsets — uploader writes will clobber neighbouring slots (the failure mode
-// the EmitCBufferStd140 helper was added to prevent).
-static void CheckBlockOverlap(const ShaderReflected::Block& block, std::string_view shader_name) {
-    struct Span {
-        usize            off;
-        usize            end;
-        std::string_view name;
-    };
-    std::vector<Span> spans;
-    spans.reserve(block.member_map.size());
-    for (const auto& [n, u] : block.member_map) {
-        if (u.size == 0) continue;
-        spans.push_back({ u.offset, u.offset + u.size, n });
+    auto draw_item = m_desc.draw_item;
+    if (prepare->ResolveDraw(draw_item).is_none() && m_desc.node.is_some()) {
+        auto node    = ref<SceneNode>::from_raw_parts((*m_desc.node).as_ptr());
+        auto current = prepare->DrawItemFor(node, m_desc.submesh_index);
+        if (current.is_some()) draw_item = *current;
     }
-    std::sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) {
-        return a.off < b.off;
-    });
-    for (usize i = 1; i < spans.size(); ++i) {
-        if (spans[i].off < spans[i - 1].end) {
-            rstd_warn("cbuffer overlap in \"{}\": \"{}\"[{}..{}) overlaps \"{}\"[{}..{})",
-                      shader_name,
-                      spans[i - 1].name,
-                      spans[i - 1].off,
-                      spans[i - 1].end,
-                      spans[i].name,
-                      spans[i].off,
-                      spans[i].end);
+    auto draw = prepare->ResolveDraw(draw_item);
+    if (draw.is_none()) {
+        return Err(UniformBufferUpdateError {
+            .message = String::make("uniform texture metadata draw is unavailable"),
+        });
+    }
+    auto textures =
+        Vec<PreparedUniformTextureMetadata>::with_capacity(m_desc.texture_bindings.size());
+    for (usize index = 0; index < m_desc.texture_bindings.size(); ++index) {
+        PreparedUniformTextureMetadata metadata;
+        const auto&                    binding = m_desc.texture_bindings[index];
+        if (binding.use.is_some()) {
+            auto prepared = resources.Resolve(*binding.use);
+            if (prepared.is_none()) {
+                return Err(UniformBufferUpdateError {
+                    .message = rstd::format("prepared texture metadata {} is unavailable",
+                                            binding.name.as_str()),
+                });
+            }
+            const auto image       = (**prepared).image.getActive();
+            metadata.available     = true;
+            metadata.source_extent = { static_cast<f32>(image.extent.width),
+                                       static_cast<f32>(image.extent.height) };
+            metadata.sample_extent = metadata.source_extent;
+            metadata.has_mipmap    = (**prepared).request.kind == TextureRequestKind::RenderTarget;
+            metadata.mipmap_level  = static_cast<f32>(image.mipmap_level);
+            metadata.revision      = (**prepared).physical_generation ^ image.generation;
+            if (metadata.revision == 0) metadata.revision = 1;
         }
+        if (index < draw->material->texture_metadata.size()) {
+            const auto& authored = draw->material->texture_metadata[index];
+            if (authored.has_extent) {
+                metadata.available     = true;
+                metadata.source_extent = authored.source_extent;
+                metadata.sample_extent = authored.sample_extent;
+            }
+        }
+        textures.push(rstd::move(metadata));
     }
+    auto binding = MakeUniformBufferBinding(
+        prepare, draw_item, *m_desc.ubo_use, artifact.uniform_blocks[0], rstd::move(textures));
+    if (binding.is_err()) return Err(rstd::move(binding).unwrap_err_unchecked());
+    return Ok(Some(rstd::move(binding).unwrap_unchecked()));
 }
 
 bool CustomShaderPass::prepareResourceStates(
@@ -560,7 +535,6 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             return;
         }
         ref = &shader_reflection;
-        for (const auto& blk : ref->blocks) CheckBlockOverlap(blk, shader.name);
 
         auto& bindings = descriptor_info.bindings;
         bindings.resize(ref->binding_map.size());
@@ -585,9 +559,13 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         m_desc.vk_tex_binding.reserve(vk_textures.size());
 
         for (usize i = 0; i < vk_textures.size(); i++) {
-            i32 binding { -1 };
-            if (i < WE_GLTEX_NAMES.size() && exists(ref->binding_map, WE_GLTEX_NAMES[i])) {
-                binding = (i32)ref->binding_map.at(WE_GLTEX_NAMES[i]).binding;
+            i32        binding { -1 };
+            const auto member = shader.SamplerMember(i);
+            if (! member.empty()) {
+                auto reflected = ref->binding_map.find(std::string(member));
+                if (reflected != ref->binding_map.end()) {
+                    binding = static_cast<i32>(reflected->second.binding);
+                }
             }
             m_desc.vk_tex_binding.push_back(binding);
         }
@@ -783,63 +761,6 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         m_desc.descriptor_binding = rstd::Some(rstd::move(descriptor).unwrap_unchecked());
     }
 
-    if (! ref->blocks.empty()) {
-        auto block          = ref->blocks.front();
-        m_desc.uniform_data = rstd::vec::Vec<rstd::u8>::with_capacity(block.size);
-        m_desc.uniform_data.resize(block.size, rstd::u8(0));
-        auto uniform_data = rstd::mut_ref<rstd::vec::Vec<rstd::u8>>::from_raw_parts(
-            rstd::addressof(m_desc.uniform_data));
-
-        auto  node           = *m_desc.node;
-        auto* shader_updater = scene.shaderValueUpdater.get();
-        auto& sprites        = m_desc.sprites_map;
-
-        m_desc.update_op =
-            [shader_updater, block, uniform_data, node, &sprites, mat = &material_ref]() mutable {
-                // Re-push constValues when the host wrote a new user property since
-                // the last frame. Same-thread mutation (RenderHandler runs on the
-                // render loop), so no atomic needed.
-                if (mat->customShader.dirty) {
-                    for (auto& v : mat->customShader.constValues) {
-                        if (exists(block.member_map, v.first)) {
-                            UpdateUniform(*uniform_data, block, v.first, v.second);
-                        }
-                    }
-                    mat->customShader.dirty = false;
-                }
-                auto update_unf_op = [&block, uniform_data](std::string_view name,
-                                                            owe::ShaderValue value) mutable {
-                    UpdateUniform(*uniform_data, block, name, value);
-                };
-                shader_updater->UpdateUniforms(node.as_raw_ptr(), sprites, update_unf_op);
-            };
-
-        auto exists_unf_op = [&block](std::string_view name) {
-            return exists(block.member_map, name);
-        };
-        shader_updater->InitUniforms(node.as_raw_ptr(), exists_unf_op);
-
-        {
-            auto& default_values = material_ref.customShader.shader->default_uniforms;
-            auto& const_values   = material_ref.customShader.constValues;
-            rstd::array<decltype(&default_values), 2> values_array {
-                &default_values,
-                &const_values,
-            };
-            for (auto& values : values_array) {
-                for (auto& v : *values) {
-                    if (exists(block.member_map, v.first)) {
-                        UpdateUniform(*uniform_data, block, v.first, v.second);
-                    }
-                }
-            }
-            // const_values was just fully written — clear any pending re-push
-            // request from a prior RenderSetUserProperty.
-            material_ref.customShader.dirty = false;
-        }
-        m_desc.update_op();
-    }
-
     {
         if (out_force_clear || m_desc.transparent_clear) {
             // Some offscreen RTs need a transparent reset, not the scene's
@@ -884,26 +805,12 @@ bool CustomShaderPass::canJoinRenderScopeAfter(const VulkanPass& previous) const
 }
 
 bool CustomShaderPass::update(PassUpdateContext& context) {
-    if (m_desc.update_op) m_desc.update_op();
-
     if (m_desc.clear_value_src) {
         const auto& sc                      = **m_desc.clear_value_src;
         m_desc.clear_value.color.float32[0] = sc[0];
         m_desc.clear_value.color.float32[1] = sc[1];
         m_desc.clear_value.color.float32[2] = sc[2];
         m_desc.clear_value.color.float32[3] = 1.0f;
-    }
-
-    if (m_desc.ubo_use.is_some() && ! m_desc.uniform_data.is_empty()) {
-        ++m_desc.uniform_content_version;
-        if (m_desc.uniform_content_version == 0) ++m_desc.uniform_content_version;
-        auto updated = context.buffers->UpdateBuffer(
-            *m_desc.ubo_use, m_desc.uniform_data.as_slice(), m_desc.uniform_content_version);
-        if (updated.is_err()) {
-            auto error = rstd::move(updated).unwrap_err_unchecked();
-            rstd_error("update uniform buffer failed: {}", error.message);
-            return false;
-        }
     }
 
     if (m_desc.draw_buffers.dynamic) {
@@ -1039,7 +946,6 @@ void CustomShaderPass::record(PassRecordContext& context) {
 }
 
 void CustomShaderPass::destory(const Device&) {
-    m_desc.update_op          = {};
     m_desc.descriptor_binding = rstd::None();
     m_desc.pipeline_cache_key.reset();
     m_desc.render_pass_cache_key.reset();
@@ -1050,8 +956,7 @@ void CustomShaderPass::destory(const Device&) {
     m_desc.render_pass_cache_observed_count = 0;
     m_desc.framebuffer_cache_hit            = false;
     m_desc.framebuffer_cache_observed_count = 0;
-    m_desc.uniform_data.clear();
-    m_desc.draw_buffers = {};
+    m_desc.draw_buffers                     = {};
 }
 
 bool CustomShaderPass::setTextureBinding(u32 index, TextureBindingRequest binding) {

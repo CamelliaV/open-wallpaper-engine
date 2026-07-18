@@ -46,6 +46,10 @@ u64 scene_id_key(SceneMaterialId id) { return scene_id_key(id.index, id.generati
 
 u64 scene_id_key(SceneMeshId id) { return scene_id_key(id.index, id.generation); }
 
+u64 draw_item_key(SceneNodeId node, u32 submesh_index) {
+    return (static_cast<u64>(node.index) << 32) | static_cast<u64>(submesh_index);
+}
+
 float cubic(float p0, float p1, float p2, float p3, float t) {
     float omt = 1.0f - t;
     return omt * omt * omt * p0 + 3.0f * omt * omt * t * p1 + 3.0f * omt * t * t * p2 +
@@ -288,25 +292,51 @@ void ensure_snapshot_link_render_targets(Scene& scene, const Set<i32>& linked_id
 } // namespace
 
 void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
+    const bool preserve_node_ids = m_scene == &scene && m_generation == generation;
+    std::unordered_map<u64, SceneDrawItemId> preserved_draw_ids;
+    usize                                    preserved_draw_count = 0;
+    if (preserve_node_ids) {
+        preserved_draw_count = m_draw_items.size();
+        preserved_draw_ids.reserve(m_draw_items.size());
+        for (const auto& item : m_draw_items) {
+            if (! item.id.Valid() || ! item.node.Valid()) continue;
+            preserved_draw_ids.emplace(draw_item_key(item.node, item.submesh_index), item.id);
+        }
+    }
+
     m_scene      = &scene;
     m_generation = generation;
 
-    m_nodes.clear();
-    m_meshes.clear();
-    m_materials.clear();
+    if (! preserve_node_ids) {
+        m_nodes.clear();
+        m_node_ids.clear();
+        m_meshes.clear();
+        m_mesh_ids.clear();
+        m_materials.clear();
+        m_material_ids.clear();
+    } else {
+        for (auto& node : m_nodes) node = nullptr;
+        for (auto& mesh : m_meshes) mesh = nullptr;
+        for (auto& material : m_materials) material = nullptr;
+    }
     m_texture_keys.clear();
     m_render_target_keys.clear();
     m_camera_keys.clear();
     m_draw_items.clear();
-    m_node_ids.clear();
-    m_mesh_ids.clear();
-    m_material_ids.clear();
+    m_draw_items.resize(preserved_draw_count);
     m_texture_ids.clear();
     m_render_target_ids.clear();
     m_camera_ids.clear();
 
     auto register_mesh = [this, generation](SceneMesh& mesh) {
-        if (auto it = m_mesh_ids.find(&mesh); it != m_mesh_ids.end()) return it->second;
+        if (auto it = m_mesh_ids.find(&mesh); it != m_mesh_ids.end()) {
+            auto id = it->second;
+            if (valid_index(id, generation, m_meshes.size())) {
+                m_meshes[id.index] = &mesh;
+                return id;
+            }
+            m_mesh_ids.erase(it);
+        }
         SceneMeshId id { .index = index_from_size(m_meshes.size()), .generation = generation };
         m_meshes.push_back(&mesh);
         m_mesh_ids.emplace(&mesh, id);
@@ -314,7 +344,14 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
     };
 
     auto register_material = [this, generation](SceneMaterial& material) {
-        if (auto it = m_material_ids.find(&material); it != m_material_ids.end()) return it->second;
+        if (auto it = m_material_ids.find(&material); it != m_material_ids.end()) {
+            auto id = it->second;
+            if (valid_index(id, generation, m_materials.size())) {
+                m_materials[id.index] = &material;
+                return id;
+            }
+            m_material_ids.erase(it);
+        }
         SceneMaterialId id { .index      = index_from_size(m_materials.size()),
                              .generation = generation };
         m_materials.push_back(&material);
@@ -334,29 +371,46 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
             auto        slot_index = static_cast<usize>(submesh.material_slot);
             if (slot_index >= slots.size() || ! slots[slot_index]) continue;
 
-            SceneMaterialId material_id = register_material(*slots[slot_index]);
-            SceneDrawItemId draw_id { .index      = index_from_size(m_draw_items.size()),
-                                      .generation = generation };
-            m_draw_items.push_back(SceneDrawItemRecord { .id            = draw_id,
-                                                         .node          = node_id,
-                                                         .mesh          = mesh_id,
-                                                         .material      = material_id,
-                                                         .submesh_index = static_cast<u32>(smi) });
+            SceneMaterialId material_id   = register_material(*slots[slot_index]);
+            auto            submesh_index = static_cast<u32>(smi);
+            auto preserved = preserved_draw_ids.find(draw_item_key(node_id, submesh_index));
+            SceneDrawItemId     draw_id = preserved != preserved_draw_ids.end()
+                                              ? preserved->second
+                                              : SceneDrawItemId {
+                                                    .index = index_from_size(m_draw_items.size()),
+                                                    .generation = generation,
+                                                };
+            SceneDrawItemRecord record { .id            = draw_id,
+                                         .node          = node_id,
+                                         .mesh          = mesh_id,
+                                         .material      = material_id,
+                                         .submesh_index = submesh_index };
+            if (static_cast<usize>(draw_id.index) < m_draw_items.size())
+                m_draw_items[draw_id.index] = record;
+            else
+                m_draw_items.push_back(record);
         }
     };
 
     auto register_node = [&](SceneNode& node) {
-        if (auto it = m_node_ids.find(&node); it != m_node_ids.end()) return it->second;
+        if (auto it = m_node_ids.find(&node); it != m_node_ids.end()) {
+            auto id = it->second;
+            if (valid_index(id, generation, m_nodes.size())) {
+                m_nodes[id.index] = &node;
+                return id;
+            }
+            m_node_ids.erase(it);
+        }
         SceneNodeId id { .index = index_from_size(m_nodes.size()), .generation = generation };
         m_nodes.push_back(&node);
         m_node_ids.emplace(&node, id);
-        register_draw_items(node, id);
         return id;
     };
 
-    auto collect_node = [&](auto& self, SceneNode* node) -> void {
+    Set<SceneNode*> visited;
+    auto            collect_node = [&](auto& self, SceneNode* node) -> void {
         if (node == nullptr) return;
-        if (m_node_ids.count(node) != 0) return;
+        if (! visited.insert(node).second) return;
 
         register_node(*node);
 
@@ -375,6 +429,21 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
     };
 
     collect_node(collect_node, scene.sceneGraph.as_ptr());
+    auto collect_effect = [&](const std::shared_ptr<SceneImageEffect>& effect) {
+        if (! effect) return;
+        for (auto& node : effect->nodes) collect_node(collect_node, node.sceneNode.as_ptr());
+    };
+    for (auto& [_, camera] : scene.cameras) {
+        if (! camera || ! camera->HasImgEffect()) continue;
+        auto& layer = camera->GetImgEffect();
+        for (auto& node : layer->PrefillNodes()) {
+            collect_node(collect_node, node.sceneNode.as_ptr());
+        }
+        for (usize index = 0; index < layer->EffectCount(); ++index) {
+            collect_effect(layer->GetEffect(index));
+        }
+        collect_effect(layer->FinalResolveEffect());
+    }
     for (auto& pp : scene.post_processes) {
         if (! pp) continue;
         for (auto& step : pp->steps) {
@@ -382,6 +451,33 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
                 collect_node(collect_node, pass->node.as_ptr());
             }
         }
+    }
+
+    for (auto it = m_node_ids.begin(); it != m_node_ids.end();) {
+        if (node(it->second) == it->first)
+            ++it;
+        else
+            it = m_node_ids.erase(it);
+    }
+
+    for (usize index = 0; index < m_nodes.size(); ++index) {
+        if (m_nodes[index] == nullptr) continue;
+        register_draw_items(
+            *m_nodes[index],
+            SceneNodeId { .index = index_from_size(index), .generation = generation });
+    }
+
+    for (auto it = m_mesh_ids.begin(); it != m_mesh_ids.end();) {
+        if (mesh(it->second) == it->first)
+            ++it;
+        else
+            it = m_mesh_ids.erase(it);
+    }
+    for (auto it = m_material_ids.begin(); it != m_material_ids.end();) {
+        if (material(it->second) == it->first)
+            ++it;
+        else
+            it = m_material_ids.erase(it);
     }
 
     auto collect_texture_ids = [generation, this]() {
@@ -443,6 +539,7 @@ Option<SceneMaterialId> SceneResourceIndex::materialId(const SceneMaterial& mate
 Option<SceneDrawItemId> SceneResourceIndex::drawItemFor(SceneNodeId node, u32 submesh_index) const {
     if (node.generation != m_generation) return None();
     for (const auto& item : m_draw_items) {
+        if (! item.id.Valid()) continue;
         if (item.node.index == node.index && item.submesh_index == submesh_index)
             return Some<SceneDrawItemId>(item.id);
     }
@@ -589,6 +686,7 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
     }
 
     for (const auto& item : index.DrawItems()) {
+        if (! item.id.Valid()) continue;
         auto        id   = RenderItemId { .index      = index_from_size(m_render_items.size()),
                                           .generation = version.value };
         const auto* node = index.node(item.node);
@@ -783,7 +881,9 @@ Scene::Scene()
     : sceneGraph(rstd::sync::Arc<SceneNode>::make()),
       vfs(nullptr, &delete_vfs),
       paritileSys(Box<ParticleSystem>::make(*this)),
-      m_resource_generation(next_scene_resource_generation()) {}
+      m_resource_generation(next_scene_resource_generation()) {
+    m_runtime.RegisterSystem(SceneTextureAnimationRuntime { m_texture_animations });
+}
 Scene::~Scene() = default;
 
 bool SceneMaterial::SetShaderValueAnimation(std::string                          uniform_name,
@@ -818,11 +918,126 @@ bool SceneMaterial::TickShaderValueAnimations(double runtime) {
         customShader.constValues[uniform_name] = std::move(value);
         changed                                = true;
     }
-    if (changed) customShader.dirty = true;
+    if (changed) TouchShaderValues();
     return changed;
 }
 
-void Scene::RebuildResourceIndex() { m_resource_index.Rebuild(*this, m_resource_generation); }
+void SceneTextureAnimationRegistry::Rebuild(const Scene& scene) {
+    auto previous = rstd::move(m_animations);
+    m_animations.clear();
+    m_entries.clear();
+    const auto& resources = scene.ResourceIndex();
+    for (const auto& record : resources.DrawItems()) {
+        auto draw = resources.resolve(record.id);
+        if (draw.is_none() || draw->node == nullptr || draw->material == nullptr) continue;
+
+        Entry entry { .node = draw->node };
+        for (usize index = 0; index < draw->material->textures.size(); ++index) {
+            const auto& texture_key = draw->material->textures[index];
+            auto        texture     = scene.textures.find(texture_key);
+            if (texture == scene.textures.end() || ! texture->second.isSprite ||
+                texture->second.spriteAnim.numFrames() == 0) {
+                continue;
+            }
+
+            auto animation = m_animations.find(texture_key);
+            if (animation == m_animations.end()) {
+                auto old = previous.find(texture_key);
+                if (old != previous.end()) {
+                    animation = m_animations.emplace(texture_key, rstd::move(old->second)).first;
+                } else {
+                    animation = m_animations
+                                    .emplace(texture_key,
+                                             Animation { .sprite = texture->second.spriteAnim })
+                                    .first;
+                }
+            }
+            entry.bindings[index] = Binding {
+                .texture    = texture_key,
+                .held_frame = animation->second.sprite.CurrentFrameIndex(),
+            };
+        }
+        if (! entry.bindings.empty()) m_entries.emplace(Key(record.id), rstd::move(entry));
+    }
+}
+
+void SceneTextureAnimationRegistry::Advance(f64 delta) {
+    Set<std::string> active;
+    for (auto& [key, entry] : m_entries) {
+        (void)key;
+        if (entry.node == nullptr) continue;
+        const auto& override = entry.node->TexAnim();
+        const bool  playing  = override.playing && override.current_frame < 0;
+        for (auto& [index, binding] : entry.bindings) {
+            (void)index;
+            auto animation = m_animations.find(binding.texture);
+            if (animation == m_animations.end()) continue;
+            if (! playing && binding.was_playing) {
+                binding.held_frame = animation->second.sprite.CurrentFrameIndex();
+            }
+            binding.was_playing = playing;
+            if (playing) active.insert(binding.texture);
+        }
+    }
+
+    for (const auto& texture : active) {
+        auto animation = m_animations.find(texture);
+        if (animation == m_animations.end()) continue;
+        const auto before = animation->second.sprite.CurrentFrameIndex();
+        (void)animation->second.sprite.GetAnimateFrame(delta);
+        if (before != animation->second.sprite.CurrentFrameIndex()) {
+            ++animation->second.revision;
+            if (animation->second.revision == 0) animation->second.revision = 1;
+        }
+    }
+
+    for (auto& [key, entry] : m_entries) {
+        (void)key;
+        if (entry.node == nullptr) continue;
+        const auto& override = entry.node->TexAnim();
+        const bool  playing  = override.playing && override.current_frame < 0;
+        if (! playing) continue;
+        for (auto& [index, binding] : entry.bindings) {
+            (void)index;
+            auto animation = m_animations.find(binding.texture);
+            if (animation == m_animations.end()) continue;
+            binding.held_frame = animation->second.sprite.CurrentFrameIndex();
+        }
+    }
+}
+
+auto SceneTextureAnimationRegistry::Frame(SceneDrawItemId draw, usize texture_index) const
+    -> Option<SceneTextureFrameView> {
+    auto entry = m_entries.find(Key(draw));
+    if (entry == m_entries.end() || entry->second.node == nullptr) return None();
+    auto binding = entry->second.bindings.find(texture_index);
+    if (binding == entry->second.bindings.end()) return None();
+    auto animation = m_animations.find(binding->second.texture);
+    if (animation == m_animations.end() || animation->second.sprite.numFrames() == 0) return None();
+
+    const auto&        override = entry->second.node->TexAnim();
+    const SpriteFrame* frame;
+    if (override.current_frame >= 0) {
+        const auto selected =
+            i32(override.current_frame) % i32(animation->second.sprite.numFrames());
+        frame = rstd::addressof(animation->second.sprite.GetFrame(selected));
+    } else if (! override.playing) {
+        const auto selected = binding->second.held_frame % animation->second.sprite.numFrames();
+        frame = rstd::addressof(animation->second.sprite.GetFrame(static_cast<idx>(selected)));
+    } else {
+        frame = rstd::addressof(animation->second.sprite.GetCurFrame());
+    }
+    return Some(SceneTextureFrameView {
+        .rotation    = { frame->xAxis[0], frame->xAxis[1], frame->yAxis[0], frame->yAxis[1] },
+        .translation = { frame->x, frame->y },
+        .revision    = animation->second.revision,
+    });
+}
+
+void Scene::RebuildResourceIndex() {
+    m_resource_index.Rebuild(*this, m_resource_generation);
+    m_texture_animations.Rebuild(*this);
+}
 
 bool Scene::EnsureTextureDescriptor(std::string_view key) {
     if (key.empty() || IsSpecTex(key)) return true;
@@ -853,11 +1068,16 @@ SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& ma
 
     auto slot_index = static_cast<usize>(slot);
     if (material.textures.size() <= slot_index) material.textures.resize(slot_index + 1);
+    if (material.texture_metadata.size() <= slot_index) {
+        material.texture_metadata.resize(slot_index + 1);
+    }
     auto& current = material.textures[slot_index];
     if (current == texture) return {};
 
-    current = std::string(texture);
+    current                               = std::string(texture);
+    material.texture_metadata[slot_index] = {};
     if (m_resource_index.Empty()) RebuildResourceIndex();
+    m_texture_animations.Rebuild(*this);
     return SceneMaterialTextureSlotMutation {
         .changed  = true,
         .material = m_resource_index.materialId(material),
@@ -870,6 +1090,7 @@ Scene::SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutat
         return {};
 
     if (m_resource_index.Empty()) RebuildResourceIndex();
+    m_texture_animations.Rebuild(*this);
     return SceneMaterialShaderVariantMutation {
         .changed  = true,
         .material = m_resource_index.materialId(material),
@@ -1095,7 +1316,7 @@ void Scene::TickCameraPaths() {
     std::unordered_set<std::string> reset;
     for (const auto& path : camera_paths) {
         if (! path || ! path->enabled) continue;
-        if (path->Tick(elapsingTime)) touched.insert(path->camera_name);
+        if (path->Tick(m_runtime.Frame().elapsed)) touched.insert(path->camera_name);
     }
     for (const auto& path : camera_paths) {
         if (! path || has_enabled[path->camera_name] || reset.contains(path->camera_name)) continue;
@@ -1111,13 +1332,13 @@ void Scene::TickMaterialShaderAnimations() {
 
     for (auto* material : m_resource_index.Materials()) {
         if (material == nullptr) continue;
-        material->TickShaderValueAnimations(elapsingTime);
+        material->TickShaderValueAnimations(m_runtime.Frame().elapsed);
     }
 }
 
 void Scene::TickNodeFieldAnimations() {
-    auto tick_node = [runtime = elapsingTime](auto&                             self,
-                                              const rstd::sync::Arc<SceneNode>& node) -> void {
+    auto tick_node = [runtime = m_runtime.Frame().elapsed](
+                         auto& self, const rstd::sync::Arc<SceneNode>& node) -> void {
         if (! node) return;
         node->TickFieldAnimations(runtime);
         for (const auto& child : node->GetChildren()) self(self, child);
@@ -1126,7 +1347,7 @@ void Scene::TickNodeFieldAnimations() {
 }
 
 void Scene::TickTransformUpdaters() {
-    for (auto& update : transform_updaters) update(elapsingTime);
+    for (auto& update : transform_updaters) update(m_runtime.Frame().elapsed);
 }
 
 void Scene::CaptureCameraPathViewports() {
