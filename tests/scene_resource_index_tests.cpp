@@ -498,6 +498,32 @@ TEST(SceneMaterialShaderVariant, CarriesCompileDescriptorThroughMaterialMove) {
     EXPECT_EQ(stored.stages[0].source_key, "/assets/shaders/genericimage.vert");
 }
 
+TEST(SceneMaterial, PreservesTextureMetadataAcrossCopyAndMove) {
+    owe::SceneMaterial material;
+    material.textures = { "masks/padded" };
+    material.texture_metadata.push_back(owe::SceneMaterialTextureMetadata {
+        .has_extent    = true,
+        .source_extent = { 1024.0f, 1024.0f },
+        .sample_extent = { 960.0f, 540.0f },
+    });
+
+    owe::SceneMaterial copied = material;
+    ASSERT_EQ(copied.texture_metadata.size(), 1u);
+    EXPECT_TRUE(copied.texture_metadata[0].has_extent);
+    EXPECT_EQ(copied.texture_metadata[0].source_extent,
+              (rstd::array<rstd::f32, 2> { 1024.0f, 1024.0f }));
+    EXPECT_EQ(copied.texture_metadata[0].sample_extent,
+              (rstd::array<rstd::f32, 2> { 960.0f, 540.0f }));
+
+    auto mesh = std::make_shared<owe::SceneMesh>();
+    mesh->AddMaterial(std::move(material));
+    const auto* moved = mesh->MaterialSlots()[0].get();
+    ASSERT_NE(moved, nullptr);
+    ASSERT_EQ(moved->texture_metadata.size(), 1u);
+    EXPECT_EQ(moved->texture_metadata[0].sample_extent,
+              (rstd::array<rstd::f32, 2> { 960.0f, 540.0f }));
+}
+
 TEST(SceneShader, ResolvesLoaderDefinedSamplerMember) {
     owe::SceneShader shader;
     shader.sampler_bindings.push_back(

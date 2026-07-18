@@ -641,27 +641,29 @@ private:
     }
 
     void copyFrom(const SceneMaterial& other) {
-        name         = other.name;
-        textures     = other.textures;
-        defines      = other.defines;
-        hasSprite    = other.hasSprite;
-        customShader = other.customShader;
-        blenmode     = other.blenmode;
-        depth_test   = other.depth_test;
-        depth_write  = other.depth_write;
-        cull_mode    = other.cull_mode;
+        name             = other.name;
+        textures         = other.textures;
+        texture_metadata = other.texture_metadata;
+        defines          = other.defines;
+        hasSprite        = other.hasSprite;
+        customShader     = other.customShader;
+        blenmode         = other.blenmode;
+        depth_test       = other.depth_test;
+        depth_write      = other.depth_write;
+        cull_mode        = other.cull_mode;
         m_dirty_flags.store(other.m_dirty_flags.load());
     }
     void moveFrom(SceneMaterial&& other) {
-        name         = std::move(other.name);
-        textures     = std::move(other.textures);
-        defines      = std::move(other.defines);
-        hasSprite    = other.hasSprite;
-        customShader = std::move(other.customShader);
-        blenmode     = other.blenmode;
-        depth_test   = other.depth_test;
-        depth_write  = other.depth_write;
-        cull_mode    = other.cull_mode;
+        name             = std::move(other.name);
+        textures         = std::move(other.textures);
+        texture_metadata = std::move(other.texture_metadata);
+        defines          = std::move(other.defines);
+        hasSprite        = other.hasSprite;
+        customShader     = std::move(other.customShader);
+        blenmode         = other.blenmode;
+        depth_test       = other.depth_test;
+        depth_write      = other.depth_write;
+        cull_mode        = other.cull_mode;
         m_dirty_flags.store(other.m_dirty_flags.load());
     }
 
