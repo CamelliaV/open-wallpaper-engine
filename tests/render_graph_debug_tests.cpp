@@ -232,7 +232,13 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
                                  builder.write(next);
                              });
 
-    auto plan = graph.resourcePlan();
+    auto plan  = graph.resourcePlan();
+    auto order = graph.topologicalOrder();
+    ASSERT_EQ(order.len(), 2u);
+    EXPECT_EQ(rstd::cppstd::as_string_view(graph.passState(order[0])->name.as_str()),
+              "motion/accumulate");
+    EXPECT_EQ(rstd::cppstd::as_string_view(graph.passState(order[1])->name.as_str()),
+              "motion/store");
     ASSERT_EQ(plan.textures.len(), 2u);
     for (const auto& entry : plan.textures) {
         EXPECT_EQ(entry.request.lifetime, owe::resource::TextureLifetimeClass::Retained);

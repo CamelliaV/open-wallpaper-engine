@@ -103,7 +103,7 @@ struct ExtraInfo {
     rg::RenderGraph*           rgraph { nullptr };
     Scene*                     scene { nullptr };
     Set<std::string>           depth_initialized_outputs {};
-    Option<rg::TextureNodeRef> mip_framebuffer_snapshot;
+    Option<rg::TextureNodeRef> mip_framebuffer_history;
     const RenderSceneSnapshot* render_scene { nullptr };
     GraphLinkFinalizer         link_finalizer;
 };
@@ -245,17 +245,26 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
     }
 }
 
-static rg::TextureNodeRef AddMipFramebufferCopy(ExtraInfo& extra, rg::RenderGraphBuilder& builder) {
-    if (extra.mip_framebuffer_snapshot.is_some()) {
-        return *extra.mip_framebuffer_snapshot;
+static rg::TextureNodeRef AddMipFramebufferHistory(ExtraInfo&              extra,
+                                                   rg::RenderGraphBuilder& builder) {
+    if (extra.mip_framebuffer_history.is_some()) {
+        return *extra.mip_framebuffer_history;
     }
 
-    auto source                    = builder.createTexture(MakeTextureDesc(extra, SpecTex_Default));
-    auto copy_desc                 = MakeTextureDesc(extra, WE_MIP_MAPPED_FRAME_BUFFER);
-    copy_desc.kind                 = rg::TextureKind::Temp;
-    auto snapshot                  = AddCopyPass(extra, source, Some(rstd::move(copy_desc)));
-    extra.mip_framebuffer_snapshot = Some<rg::TextureNodeRef>(snapshot);
-    return snapshot;
+    auto history_desc = MakeTextureDesc(extra, WE_MIP_MAPPED_FRAME_BUFFER);
+    history_desc.kind = rg::TextureKind::Temp;
+    auto history      = builder.createTexture(history_desc);
+    builder.markVirtualWrite(history);
+    extra.mip_framebuffer_history = Some<rg::TextureNodeRef>(history);
+    return history;
+}
+
+static void StoreMipFramebufferHistory(ExtraInfo& extra) {
+    if (extra.mip_framebuffer_history.is_none()) return;
+
+    auto history_desc = MakeTextureDesc(extra, WE_MIP_MAPPED_FRAME_BUFFER);
+    history_desc.kind = rg::TextureKind::Temp;
+    AddCopyPass(extra, MakeTextureDesc(extra, SpecTex_Default), rstd::move(history_desc));
 }
 
 static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output,
@@ -364,7 +373,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     } else {
                         auto desc = MakeTextureDesc(extra, url);
                         if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
-                            input = Some(AddMipFramebufferCopy(extra, builder));
+                            input = Some(AddMipFramebufferHistory(extra, builder));
                         } else {
                             input = Some(builder.createTexture(desc));
                         }
@@ -634,6 +643,7 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
     }
 
     extra.link_finalizer.apply(extra);
+    StoreMipFramebufferHistory(extra);
 
     scene.RebuildResourceIndex();
     return rgraph;
