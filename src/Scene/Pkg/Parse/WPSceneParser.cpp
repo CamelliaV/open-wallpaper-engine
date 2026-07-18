@@ -2602,7 +2602,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 .width                = effect_extent[0],
                 .height               = effect_extent[1],
                 .allowReuse           = true,
-                .force_clear          = ! wpimgobj.fullscreen,
+                .force_clear          = ! wpimgobj.fullscreen && ! wpimgobj.composite_layer,
                 .clear_on_first_write = true,
                 .preserve_on_write    = wpimgobj.composite_layer,
             };
