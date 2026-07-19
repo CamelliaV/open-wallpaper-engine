@@ -73,7 +73,15 @@ void BridgeProducerCore::drainPendingDirective() {
     }
 
     int rc = applyDirective(d);
-    if (rc != 0) return; // applyDirective already logged; m_slot_count = 0
+    if (rc == -EBUSY) {
+        std::lock_guard<std::mutex> lk(m_pending_mu);
+        if (! m_pending_valid.load(std::memory_order_acquire)) {
+            m_pending_directive = d;
+            m_pending_valid.store(true, std::memory_order_release);
+        }
+        return;
+    }
+    if (rc != 0) return;
 
     // Snapshot callbacks under the lock and invoke unlocked so the
     // handler can re-enter the core (read width/height) without
@@ -101,6 +109,8 @@ void BridgeProducerCore::drainPendingDirective() {
 }
 
 int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
+    if (m_have_pending) return -EBUSY;
+
     VkFormat picked = fourcc_to_vk_format(directive.fourcc);
     if (picked == VK_FORMAT_UNDEFINED) {
         std::fprintf(stderr,
@@ -124,7 +134,6 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     // ones. Producer-side has nothing to wind down — the blit dst is
     // the bridge slot directly, no cached views or intermediates.
     m_slot_count       = 0;
-    m_next_slot        = 0;
     m_have_pending     = false;
     m_pending_identity = {};
     // Don't publish new geometry yet — wait for apply_directive to
@@ -145,22 +154,23 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
     // extent_w/h since the renderer is the authority on render extent).
     // Read the actual slot dimensions back from the bridge — they were
     // sized from the `probe_width/height` we passed into advertise_caps.
-    ww_pool_slot_t s0 {};
-    if (int srx = m_session->acquireSlot(0, s0); srx != 0) {
-        std::fprintf(stderr, "BridgeProducerCore: acquire_slot(0) post-apply failed: %d\n", srx);
+    uint32_t width  = 0;
+    uint32_t height = 0;
+    if (int srx = m_session->getExtent(width, height); srx != 0) {
+        std::fprintf(stderr, "BridgeProducerCore: get_extent post-apply failed: %d\n", srx);
         return srx;
     }
 
     // Publish atomically only after apply_directive succeeded.
-    m_width         = s0.width;
-    m_height        = s0.height;
+    m_width         = width;
+    m_height        = height;
     m_fourcc        = directive.fourcc;
     m_export_format = picked;
     m_slot_count    = directive.count;
     return 0;
 }
 
-BridgeSlotAcquireResult BridgeProducerCore::acquireSlot(uint32_t timeout_ms) {
+BridgeSlotAcquireResult BridgeProducerCore::acquireSlot() {
     BridgeSlotAcquireResult result;
     if (m_slot_count == 0) return result;
     if (m_have_pending) {
@@ -169,11 +179,8 @@ BridgeSlotAcquireResult BridgeProducerCore::acquireSlot(uint32_t timeout_ms) {
         return result;
     }
 
-    uint32_t idx = m_next_slot;
-    m_next_slot  = (m_next_slot + 1) % m_slot_count;
-
     ww_pool_slot_acquire_result_t acquired {};
-    if (int rc = m_session->acquireSlotForRender(idx, timeout_ms, acquired); rc != 0) {
+    if (int rc = m_session->tryAcquireAnyForRender(acquired); rc != 0) {
         result.status     = BridgeSlotAcquireStatus::Error;
         result.error_code = rc;
         return result;
@@ -187,9 +194,6 @@ BridgeSlotAcquireResult BridgeProducerCore::acquireSlot(uint32_t timeout_ms) {
         result.status = BridgeSlotAcquireStatus::ReadyReleased;
         break;
     case WW_POOL_SLOT_ACQUIRE_BUSY: result.status = BridgeSlotAcquireStatus::Busy; return result;
-    case WW_POOL_SLOT_ACQUIRE_FORCED_RELEASE:
-        result.status = BridgeSlotAcquireStatus::ForcedRelease;
-        return result;
     case WW_POOL_SLOT_ACQUIRE_SESSION_LOST:
         result.status     = BridgeSlotAcquireStatus::SessionLost;
         result.error_code = acquired.error_code;
@@ -201,29 +205,22 @@ BridgeSlotAcquireResult BridgeProducerCore::acquireSlot(uint32_t timeout_ms) {
         return result;
     }
 
-    uint64_t acquire_serial = m_next_acquire_serial++;
-    if (acquire_serial == 0) {
-        result.status     = BridgeSlotAcquireStatus::Error;
-        result.error_code = -EOVERFLOW;
-        return result;
-    }
-
     result.identity = BridgeSlotIdentity {
-        .bind_generation        = acquired.bind_generation,
-        .slot_index             = acquired.slot.index,
-        .previous_release_point = acquired.previous_release_point,
-        .acquire_serial         = acquire_serial,
+        .bind_generation        = acquired.identity.bind_generation,
+        .slot_index             = acquired.identity.slot_index,
+        .previous_release_point = acquired.identity.previous_release_point,
+        .acquire_serial         = acquired.identity.acquire_serial,
     };
     result.image  = static_cast<VkImage>(acquired.slot.vk_image);
     result.width  = acquired.slot.width;
     result.height = acquired.slot.height;
     if (! result.acquired()) {
+        (void)m_session->abortAcquiredSlot(acquired.identity);
         result.status     = BridgeSlotAcquireStatus::Error;
         result.error_code = -EINVAL;
         return result;
     }
 
-    m_pending_slot     = idx;
     m_pending_identity = result.identity;
     m_have_pending     = true;
     return result;
@@ -231,7 +228,7 @@ BridgeSlotAcquireResult BridgeProducerCore::acquireSlot(uint32_t timeout_ms) {
 
 bool BridgeProducerCore::acquireSlot(VkImage* out_image, uint32_t* out_width,
                                      uint32_t* out_height) {
-    auto result = acquireSlot(16);
+    auto result = acquireSlot();
     if (! result.acquired()) return false;
 
     if (out_image) *out_image = result.image;
@@ -257,15 +254,22 @@ BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdenti
         };
     }
 
-    uint32_t slot      = m_pending_slot;
-    m_have_pending     = false;
-    m_pending_identity = {};
+    ww_pool_slot_identity_t bridge_identity {
+        .bind_generation        = identity.bind_generation,
+        .slot_index             = identity.slot_index,
+        .previous_release_point = identity.previous_release_point,
+        .acquire_serial         = identity.acquire_serial,
+    };
 
     ww_pool_slot_submit_result_t submitted {};
-    int rc = m_session->submitSlotForRender(slot, producer_sync_fd, submitted);
+    int rc = m_session->submitAcquiredSlot(bridge_identity, producer_sync_fd, submitted);
     if (rc != 0) {
-        std::fprintf(stderr, "BridgeProducerCore: submit_slot(%u) rc=%d\n", slot, rc);
+        std::fprintf(
+            stderr, "BridgeProducerCore: submit_slot(%u) rc=%d\n", identity.slot_index, rc);
         // Bridge contract: bridge always closes the fd. We don't dup-close.
+        (void)m_session->abortAcquiredSlot(bridge_identity);
+        m_have_pending     = false;
+        m_pending_identity = {};
         return BridgeSlotCompletionResult {
             .status     = BridgeSlotCompletionStatus::ProtocolError,
             .identity   = identity,
@@ -273,6 +277,8 @@ BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdenti
         };
     }
     if (submitted.status == WW_POOL_SLOT_SUBMIT_SESSION_LOST) {
+        m_have_pending     = false;
+        m_pending_identity = {};
         return BridgeSlotCompletionResult {
             .status     = BridgeSlotCompletionStatus::SessionLost,
             .identity   = identity,
@@ -280,12 +286,17 @@ BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdenti
         };
     }
     if (submitted.status != WW_POOL_SLOT_SUBMIT_SUBMITTED) {
+        (void)m_session->abortAcquiredSlot(bridge_identity);
+        m_have_pending     = false;
+        m_pending_identity = {};
         return BridgeSlotCompletionResult {
             .status     = BridgeSlotCompletionStatus::ProtocolError,
             .identity   = identity,
             .error_code = submitted.error_code,
         };
     }
+    m_have_pending     = false;
+    m_pending_identity = {};
     return BridgeSlotCompletionResult {
         .status   = BridgeSlotCompletionStatus::Submitted,
         .identity = identity,
@@ -303,6 +314,22 @@ BridgeSlotCompletionResult BridgeProducerCore::abortSlot(const BridgeSlotIdentit
         return BridgeSlotCompletionResult {
             .status   = BridgeSlotCompletionStatus::StaleIdentity,
             .identity = identity,
+        };
+    }
+
+    ww_pool_slot_identity_t bridge_identity {
+        .bind_generation        = identity.bind_generation,
+        .slot_index             = identity.slot_index,
+        .previous_release_point = identity.previous_release_point,
+        .acquire_serial         = identity.acquire_serial,
+    };
+    int rc = m_session->abortAcquiredSlot(bridge_identity);
+    if (rc != 0) {
+        return BridgeSlotCompletionResult {
+            .status     = rc == -ESTALE ? BridgeSlotCompletionStatus::StaleIdentity
+                                        : BridgeSlotCompletionStatus::ProtocolError,
+            .identity   = identity,
+            .error_code = rc,
         };
     }
 

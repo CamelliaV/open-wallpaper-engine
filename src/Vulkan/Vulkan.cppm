@@ -189,7 +189,6 @@ enum class FrameSurfaceAcquireStatus
     Suboptimal,
     Busy,
     NotReady,
-    ForcedRelease,
     SessionLost,
     ProtocolError,
 };

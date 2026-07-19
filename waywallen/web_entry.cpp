@@ -380,14 +380,6 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     }
     case WW_EVT_IN_SET_FPS: enqueue_setting(s, "fps", std::to_string(msg.u.set_fps.fps)); break;
     case WW_EVT_IN_SHUTDOWN: s.shutdown.store(true, std::memory_order_release); break;
-    case WW_EVT_IN_RELEASE_RESOLVED:
-        if (s.core) {
-            if (int rc = s.core->reportRelease(msg.u.release_resolved); rc != 0) {
-                rstd_warn("waywallen-weweb-renderer: release_resolved rejected: {}", rc);
-                if (rc == -EPIPE) s.shutdown.store(true, std::memory_order_release);
-            }
-        }
-        break;
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         const auto&         nb = msg.u.negotiate_buffers;
         ww_pool_directive_t d {};
@@ -399,9 +391,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         d.sync_mode   = nb.sync_mode;
         d.color       = nb.color;
         d.mem_hint    = nb.mem_hint;
-        d.count       = nb.count > 0 ? nb.count : 3;
-        if (d.count > ww_wescene::BridgeProducerCore::kMaxSlots)
-            d.count = ww_wescene::BridgeProducerCore::kMaxSlots;
+        d.count       = nb.count;
         if (s.core) s.core->queueDirective(d);
         s.submitted_since_negotiate.store(false, std::memory_order_release);
         sync_pause_visibility(s);

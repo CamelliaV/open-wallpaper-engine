@@ -34,29 +34,23 @@ int BridgeSession::applyDirective(const ww_pool_directive_t& directive) {
     return ww_bridge_pool_apply_directive(m_pool, m_send_socket, &directive);
 }
 
-int BridgeSession::acquireSlot(uint32_t slot_index, ww_pool_slot_t& out_slot) {
-    return ww_bridge_pool_acquire_slot(m_pool, slot_index, &out_slot);
+int BridgeSession::getExtent(uint32_t& out_width, uint32_t& out_height) {
+    return ww_bridge_pool_get_extent(m_pool, &out_width, &out_height);
 }
 
-int BridgeSession::acquireSlotForRender(uint32_t slot_index, uint32_t timeout_ms,
-                                        ww_pool_slot_acquire_result_t& out_result) {
-    return ww_bridge_pool_acquire_slot_for_render(m_pool, slot_index, timeout_ms, &out_result);
+int BridgeSession::tryAcquireAnyForRender(ww_pool_slot_acquire_result_t& out_result) {
+    return ww_bridge_pool_try_acquire_any_for_render(m_pool, &out_result);
 }
 
-int BridgeSession::submitSlotForRender(uint32_t slot_index, int producer_sync_fd,
-                                       ww_pool_slot_submit_result_t& out_result) {
+int BridgeSession::submitAcquiredSlot(const ww_pool_slot_identity_t& identity, int producer_sync_fd,
+                                      ww_pool_slot_submit_result_t& out_result) {
     std::scoped_lock lock(m_send_mutex);
-    return ww_bridge_pool_submit_slot_for_render(
-        m_pool, m_send_socket, slot_index, producer_sync_fd, &out_result);
+    return ww_bridge_pool_submit_acquired_slot(
+        m_pool, m_send_socket, &identity, producer_sync_fd, &out_result);
 }
 
-int BridgeSession::reportRelease(const ww_evt_in_release_resolved_t& release) {
-    if (release.outcome > static_cast<uint32_t>(WW_POOL_RELEASE_FORCED)) return -EPROTO;
-    return ww_bridge_pool_report_release(m_pool,
-                                         release.buffer_generation,
-                                         release.buffer_index,
-                                         release.release_point,
-                                         static_cast<ww_pool_release_outcome_t>(release.outcome));
+int BridgeSession::abortAcquiredSlot(const ww_pool_slot_identity_t& identity) {
+    return ww_bridge_pool_abort_acquired_slot(m_pool, &identity);
 }
 
 int BridgeSession::sendBindFailed(uint32_t fourcc, uint64_t modifier, uint32_t reason,

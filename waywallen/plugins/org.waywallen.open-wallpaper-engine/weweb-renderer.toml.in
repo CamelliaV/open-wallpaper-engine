@@ -5,7 +5,7 @@
 bin = "@OWE_WEWEB_BIN@"
 types = ["web"]
 priority = 100
-spawn_version = 7
+spawn_version = 8
 extras = ["workshop_id"]
 events = ["pointer"]
 

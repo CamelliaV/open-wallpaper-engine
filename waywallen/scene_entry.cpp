@@ -596,15 +596,6 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     }
     case WW_EVT_IN_SET_FPS: set_fps(s, msg.u.set_fps.fps); break;
     case WW_EVT_IN_SHUTDOWN: signal_shutdown(s); break;
-    case WW_EVT_IN_RELEASE_RESOLVED: {
-        auto session = s.session.lock();
-        if (! session) break;
-        if (int rc = session->reportRelease(msg.u.release_resolved); rc != 0) {
-            rstd_warn("waywallen-wescene-renderer: release_resolved rejected: {}", rc);
-            if (rc == -EPIPE) signal_shutdown(s);
-        }
-        break;
-    }
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         const auto&         nb = msg.u.negotiate_buffers;
         ww_pool_directive_t d {};
@@ -616,9 +607,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         d.sync_mode   = nb.sync_mode;
         d.color       = nb.color;
         d.mem_hint    = nb.mem_hint;
-        d.count       = nb.count > 0 ? nb.count : 3;
-        if (d.count > ww_wescene::BridgeExSwapchain::kMaxSlots)
-            d.count = ww_wescene::BridgeExSwapchain::kMaxSlots;
+        d.count       = nb.count;
         // Hand off to the swapchain directly. The render thread drains
         // the pending directive at the head of its next acquireRenderTarget,
         // so this thread does no Vk / bridge slot work.

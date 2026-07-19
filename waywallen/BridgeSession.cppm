@@ -19,12 +19,11 @@ public:
 
     int advertiseCaps(uint32_t width, uint32_t height, uint32_t mem_hints);
     int applyDirective(const ww_pool_directive_t& directive);
-    int acquireSlot(uint32_t slot_index, ww_pool_slot_t& out_slot);
-    int acquireSlotForRender(uint32_t slot_index, uint32_t timeout_ms,
-                             ww_pool_slot_acquire_result_t& out_result);
-    int submitSlotForRender(uint32_t slot_index, int producer_sync_fd,
-                            ww_pool_slot_submit_result_t& out_result);
-    int reportRelease(const ww_evt_in_release_resolved_t& release);
+    int getExtent(uint32_t& out_width, uint32_t& out_height);
+    int tryAcquireAnyForRender(ww_pool_slot_acquire_result_t& out_result);
+    int submitAcquiredSlot(const ww_pool_slot_identity_t& identity, int producer_sync_fd,
+                           ww_pool_slot_submit_result_t& out_result);
+    int abortAcquiredSlot(const ww_pool_slot_identity_t& identity);
     int sendBindFailed(uint32_t fourcc, uint64_t modifier, uint32_t reason, const char* message);
     int sendClearColor(float r, float g, float b, float a);
 

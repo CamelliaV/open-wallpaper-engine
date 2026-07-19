@@ -782,7 +782,6 @@ void VulkanRender::Impl::drawFrameOffscreen(Scene& scene) {
     auto                frame_surface_acquire = m_ex_swapchain->acquireRenderTarget();
     if (! frame_surface_acquire.acquired()) {
         if (frame_surface_acquire.status == owe::FrameSurfaceAcquireStatus::ProtocolError ||
-            frame_surface_acquire.status == owe::FrameSurfaceAcquireStatus::ForcedRelease ||
             frame_surface_acquire.status == owe::FrameSurfaceAcquireStatus::SessionLost) {
             rstd_error("offscreen frame surface acquisition failed: {}",
                        frame_surface_acquire.error_code);

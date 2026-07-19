@@ -45,15 +45,13 @@ owe::FrameSurfaceCompletionStatus ToFrameCompletionStatus(BridgeSlotCompletionSt
 } // namespace
 
 owe::FrameSurfaceAcquireResult BridgeExSwapchain::acquireRenderTarget() {
-    auto acquired = m_core.acquireSlot(16);
+    auto acquired = m_core.acquireSlot();
     if (! acquired.acquired()) {
         switch (acquired.status) {
         case BridgeSlotAcquireStatus::Busy:
             return { .status = owe::FrameSurfaceAcquireStatus::Busy };
         case BridgeSlotAcquireStatus::NotReady:
             return { .status = owe::FrameSurfaceAcquireStatus::NotReady };
-        case BridgeSlotAcquireStatus::ForcedRelease:
-            return { .status = owe::FrameSurfaceAcquireStatus::ForcedRelease };
         case BridgeSlotAcquireStatus::SessionLost:
             return { .status     = owe::FrameSurfaceAcquireStatus::SessionLost,
                      .error_code = acquired.error_code };

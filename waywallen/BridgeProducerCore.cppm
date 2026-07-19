@@ -27,7 +27,6 @@ enum class BridgeSlotAcquireStatus
     ReadyReleased,
     Busy,
     NotReady,
-    ForcedRelease,
     SessionLost,
     Error,
 };
@@ -121,7 +120,7 @@ public:
 
     // Producer-thread-only. Busy/error outcomes do not expose a writable
     // image and do not create a pending acquisition.
-    BridgeSlotAcquireResult acquireSlot(uint32_t timeout_ms);
+    BridgeSlotAcquireResult acquireSlot();
 
     // Compatibility façade for producers not yet consuming typed outcomes.
     bool acquireSlot(VkImage* out_image, uint32_t* out_width = nullptr,
@@ -135,10 +134,6 @@ public:
 
     // Compatibility façade paired with the pointer-based acquire overload.
     void submitSlot(int producer_sync_fd);
-
-    int reportRelease(const ww_evt_in_release_resolved_t& release) {
-        return m_session->reportRelease(release);
-    }
 
     // Geometry / readiness accessors — readable from any thread, but
     // they can only update on the producer thread, so the caller is
@@ -174,11 +169,8 @@ private:
     std::function<void(const BridgeReadyEvent&)> m_on_ready_changed;
 
     uint32_t           m_slot_count { 0 };
-    uint32_t           m_next_slot { 0 };
-    uint32_t           m_pending_slot { 0 };
     bool               m_have_pending { false };
     BridgeSlotIdentity m_pending_identity;
-    uint64_t           m_next_acquire_serial { 1 };
     uint32_t           m_width { 0 };
     uint32_t           m_height { 0 };
     uint32_t           m_fourcc { 0 };
