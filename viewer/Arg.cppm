@@ -26,6 +26,7 @@ struct SceneViewerArgs {
     u32         msaa_samples;
     bool        enable_valid_layer;
     bool        graphviz;
+    bool        stdin_json;
 };
 
 SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv);
@@ -99,6 +100,12 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
                             .short_name('G')
                             .long_name("graphviz")
                             .help("generate graphviz of render graph, output to 'graph.dot'"));
+    auto stdin_json =
+        command.add_arg(Arg<bool>::flag("stdin-json")
+                            .long_name("stdin-json")
+                            .help("read JSONL commands from stdin, for example: "
+                                  "{\"command\":\"set_user_property\",\"key\":\"name\","
+                                  "\"value\":1}"));
     auto cache_path = command.add_arg(Arg<String>::value("cache-path", string_parser())
                                           .short_name('C')
                                           .long_name("cache-path")
@@ -142,6 +149,7 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
         .msaa_samples         = Value(matches, msaa),
         .enable_valid_layer   = Flag(matches, valid_layer),
         .graphviz             = Flag(matches, graphviz),
+        .stdin_json           = Flag(matches, stdin_json),
     };
 }
 

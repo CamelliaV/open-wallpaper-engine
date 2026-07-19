@@ -4,6 +4,7 @@ import rstd;
 import rstd.cppstd;
 import eigen;
 import wescene.types;
+import wescene.json;
 import wescene.scene;
 
 namespace
@@ -714,6 +715,26 @@ TEST(SceneVisibility, VisibleRuntimeChangeClearsOnlyVisibilityElideReason) {
     EXPECT_FALSE(scene.SetNodeVisible(*node.as_ptr(), true));
     EXPECT_EQ(scene.visibility_elidable_layer_ids.count(7), 0u);
     EXPECT_EQ(scene.static_elidable_layer_ids.count(7), 1u);
+    EXPECT_EQ(scene.elidable_layer_ids.count(7), 1u);
+}
+
+TEST(SceneVisibility, UserBindingVisibilityChangesRequireGraphRebuild) {
+    owe::Scene scene;
+    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    node->ID()      = 7;
+    node->SetVisible(false);
+    scene.sceneGraph->AppendChild(node.clone());
+
+    scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = 7 });
+    node->SetVisibleUserBinding(owe::SceneUserVisibilityBinding { .key = "variant" });
+    EXPECT_EQ(scene.visibility_elidable_layer_ids.count(7), 1u);
+    EXPECT_EQ(scene.elidable_layer_ids.count(7), 1u);
+    EXPECT_TRUE(scene.ApplyUserNodeVisibilityBindings("variant", rstd::into<owe::Json>(true)));
+    EXPECT_TRUE(node->Visible());
+    EXPECT_EQ(scene.elidable_layer_ids.count(7), 0u);
+    EXPECT_FALSE(scene.ApplyUserNodeVisibilityBindings("variant", rstd::into<owe::Json>(true)));
+    EXPECT_TRUE(scene.ApplyUserNodeVisibilityBindings("variant", rstd::into<owe::Json>(false)));
+    EXPECT_FALSE(node->Visible());
     EXPECT_EQ(scene.elidable_layer_ids.count(7), 1u);
 }
 

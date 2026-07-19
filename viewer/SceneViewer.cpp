@@ -1,5 +1,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
 
 import rstd.cppstd;
 import rstd.log;
@@ -9,8 +13,113 @@ import wescene.utils;
 import viewer.common;
 
 using namespace std;
+using namespace rstd::prelude;
 
 atomic<bool> renderCall(false);
+
+class StdinJsonControl {
+public:
+    explicit StdinJsonControl(bool enabled): m_enabled(enabled) {
+        if (! m_enabled) return;
+        m_original_flags = ::fcntl(STDIN_FILENO, F_GETFL, 0);
+        if (m_original_flags < 0 ||
+            ::fcntl(STDIN_FILENO, F_SETFL, m_original_flags | O_NONBLOCK) < 0) {
+            std::cerr << "--stdin-json: cannot make stdin non-blocking\n";
+            m_enabled = false;
+        }
+    }
+
+    ~StdinJsonControl() {
+        if (m_enabled && m_original_flags >= 0) {
+            (void)::fcntl(STDIN_FILENO, F_SETFL, m_original_flags);
+        }
+    }
+
+    void poll(owe::SceneWallpaper& wallpaper) {
+        if (! m_enabled || m_eof) return;
+
+        char buffer[4096];
+        for (;;) {
+            const auto count = ::read(STDIN_FILENO, buffer, sizeof(buffer));
+            if (count > 0) {
+                m_pending.append(buffer, static_cast<usize>(count));
+                consumeLines(wallpaper, false);
+                continue;
+            }
+            if (count == 0) {
+                m_eof = true;
+                consumeLines(wallpaper, true);
+                return;
+            }
+            if (errno == EINTR) continue;
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                std::cerr << "--stdin-json: stdin read failed: " << std::strerror(errno) << '\n';
+                m_eof = true;
+            }
+            return;
+        }
+    }
+
+private:
+    void consumeLines(owe::SceneWallpaper& wallpaper, bool flush) {
+        for (;;) {
+            const auto newline = m_pending.find('\n');
+            if (newline == std::string::npos) break;
+            auto line = m_pending.substr(0, newline);
+            m_pending.erase(0, newline + 1);
+            consumeLine(wallpaper, std::move(line));
+        }
+        if (flush && ! m_pending.empty()) {
+            consumeLine(wallpaper, std::move(m_pending));
+            m_pending.clear();
+        }
+    }
+
+    static void consumeLine(owe::SceneWallpaper& wallpaper, std::string line) {
+        if (! line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) return;
+
+        auto parsed_result = owe::ParseJson(line);
+        if (parsed_result.is_err()) {
+            const auto error = parsed_result.unwrap_err();
+            std::cerr << "--stdin-json: invalid JSON at line " << error.line() << " column "
+                      << error.column() << '\n';
+            return;
+        }
+        auto command = parsed_result.unwrap();
+        if (! command.is_object()) {
+            std::cerr << "--stdin-json: command must be a JSON object\n";
+            return;
+        }
+
+        auto command_name = command.get("command");
+        auto key          = command.get("key");
+        auto value        = command.get("value");
+        if (command_name.is_none() || ! (**command_name).is_string() ||
+            rstd::cppstd::as_string_view(*(**command_name).as_str()) != "set_user_property") {
+            std::cerr << "--stdin-json: unsupported command\n";
+            return;
+        }
+        if (key.is_none() || ! (**key).is_string() || value.is_none()) {
+            std::cerr
+                << "--stdin-json: set_user_property requires a string key and a value field\n";
+            return;
+        }
+
+        auto property = rstd::cppstd::to_string(*(**key).as_str());
+        if (property.empty()) {
+            std::cerr << "--stdin-json: set_user_property requires a non-empty key\n";
+            return;
+        }
+        wallpaper.setUserPropertyJson(property, (**value).clone());
+        std::cout << "scene-viewer: queued user property '" << property << "'\n" << std::flush;
+    }
+
+    bool        m_enabled { false };
+    bool        m_eof { false };
+    int         m_original_flags { -1 };
+    std::string m_pending;
+};
 
 struct UserData {
     owe::SceneWallpaper* psw { nullptr };
@@ -177,6 +286,8 @@ int main(int argc, char** argv) {
     };
     apply_locked_mouse();
 
+    StdinJsonControl stdin_control(args.stdin_json);
+
     // Bulk-scan path: WP_COMPILE_ONLY=N waits N seconds after scene load
     // to let the async shader-compile pass drain, then exits. Skips the
     // render loop so no swapchain present is required (which would deadlock
@@ -188,6 +299,7 @@ int main(int argc, char** argv) {
     } else {
         while (! glfwWindowShouldClose(window)) {
             glfwPollEvents();
+            stdin_control.poll(*psw);
             apply_locked_mouse();
         }
     }
