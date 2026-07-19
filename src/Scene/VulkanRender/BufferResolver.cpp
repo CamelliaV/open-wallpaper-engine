@@ -34,6 +34,16 @@ u64 resolve_allocation_generation(const DrawBufferRequest& request, bool dynamic
 
 } // namespace
 
+String BuildDrawBufferResourceName(SceneDrawItemId draw_item, DrawBufferRole role,
+                                   u32 stream_index) {
+    if (! draw_item.Valid()) return {};
+    const char* role_name = "uniform";
+    if (role == DrawBufferRole::Vertex) role_name = "vertex";
+    if (role == DrawBufferRole::Index) role_name = "index";
+    return rstd::format(
+        "draw:{}:{}:{}:{}", draw_item.generation, draw_item.index, role_name, stream_index);
+}
+
 RenderBufferResolver::RenderBufferResolver(
     const resource_registry::PreparedResourceTable& resources)
     : m_resources(rstd::ref<resource_registry::PreparedResourceTable>::from_raw_parts(

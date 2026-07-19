@@ -15,6 +15,7 @@ export namespace owe::vulkan
 
 enum class DrawBufferRole
 {
+    Uniform,
     Vertex,
     Index,
 };
@@ -57,6 +58,7 @@ struct DrawBufferRequest {
     rstd::slice<resource::BufferUseHandle> buffer_uses;
 };
 
+String BuildDrawBufferResourceName(SceneDrawItemId, DrawBufferRole, u32 stream_index = 0);
 std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest&,
                                                u64 allocation_generation = 0);
 

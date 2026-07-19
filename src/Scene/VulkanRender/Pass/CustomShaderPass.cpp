@@ -123,9 +123,13 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
     if (artifact.is_some() && ! (**artifact).uniform_blocks.is_empty()) {
         auto size = (**artifact).uniform_blocks[0].size;
         if (size != 0) {
+            auto name = m_desc.draw_item.Valid()
+                            ? BuildDrawBufferResourceName(m_desc.draw_item, DrawBufferRole::Uniform)
+                            : rstd::format("pass:{}:{}:uniform",
+                                           m_desc.graph_pass_index,
+                                           m_desc.submesh_index);
             m_desc.ubo_use = rstd::Some(context.AddBuffer(resource::BufferRequest {
-                .name = rstd::format(
-                    "pass:{}:{}:uniform", m_desc.graph_pass_index, m_desc.submesh_index),
+                .name = rstd::move(name),
                 .definition =
                     resource::BufferDefinition {
                         .size      = size,
@@ -139,8 +143,12 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
 
     for (usize index = 0; index < submesh.vertex_arrays.size(); ++index) {
         const auto& vertex = submesh.vertex_arrays[index];
-        auto        name   = rstd::format(
-            "pass:{}:{}:vertex:{}", m_desc.graph_pass_index, m_desc.submesh_index, index);
+        auto        name =
+            m_desc.draw_item.Valid()
+                ? BuildDrawBufferResourceName(
+                      m_desc.draw_item, DrawBufferRole::Vertex, static_cast<u32>(index))
+                : rstd::format(
+                      "pass:{}:{}:vertex:{}", m_desc.graph_pass_index, m_desc.submesh_index, index);
         auto use = context.AddBuffer(
             resource::BufferRequest {
                 .name = rstd::move(name),
@@ -161,8 +169,11 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
     if (submesh.index_arrays.empty()) return;
 
     const auto& index = submesh.index_arrays[0];
-    auto name = rstd::format("pass:{}:{}:index", m_desc.graph_pass_index, m_desc.submesh_index);
-    auto use  = context.AddBuffer(
+    auto        name =
+        m_desc.draw_item.Valid()
+            ? BuildDrawBufferResourceName(m_desc.draw_item, DrawBufferRole::Index)
+            : rstd::format("pass:{}:{}:index", m_desc.graph_pass_index, m_desc.submesh_index);
+    auto use = context.AddBuffer(
         resource::BufferRequest {
             .name = rstd::move(name),
             .definition =

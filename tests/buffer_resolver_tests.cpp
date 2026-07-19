@@ -29,6 +29,25 @@ owe::SceneMesh::Submesh MakeSubmesh() {
 
 } // namespace
 
+TEST(DrawBufferResourceName, UsesStableSceneDrawIdentity) {
+    owe::SceneDrawItemId draw { .index = 7, .generation = 11 };
+
+    auto vertex0 =
+        owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Vertex, 0);
+    auto vertex1 =
+        owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Vertex, 1);
+    auto index = owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Index);
+    auto uniform =
+        owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Uniform);
+
+    EXPECT_EQ(rstd::cppstd::as_string_view(vertex0.as_str()), "draw:11:7:vertex:0");
+    EXPECT_EQ(rstd::cppstd::as_string_view(vertex1.as_str()), "draw:11:7:vertex:1");
+    EXPECT_EQ(rstd::cppstd::as_string_view(index.as_str()), "draw:11:7:index:0");
+    EXPECT_EQ(rstd::cppstd::as_string_view(uniform.as_str()), "draw:11:7:uniform:0");
+    EXPECT_TRUE(owe::vulkan::BuildDrawBufferResourceName({}, owe::vulkan::DrawBufferRole::Vertex)
+                    .is_empty());
+}
+
 TEST(DrawBufferKey, BuildsStaticKeysFromRenderItemAndGeometryGeneration) {
     owe::SceneMesh mesh;
     mesh.Submeshes().push_back(MakeSubmesh());
