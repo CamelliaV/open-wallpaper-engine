@@ -7,7 +7,6 @@ types = ["web"]
 priority = 100
 spawn_version = 8
 extras = ["workshop_id"]
-events = ["pointer"]
 
 [renderers.weweb-renderer.settings]
 enable_audio = { type = "bool", default = true, identity = true, label_key = "settings.weweb.enable_audio", group = "audio", order = 5 }

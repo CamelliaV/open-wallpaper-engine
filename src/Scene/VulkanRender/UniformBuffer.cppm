@@ -95,6 +95,7 @@ struct BoundUniformSource {
     ref<dyn<UniformSource>> source;
     i32                     priority { 0 };
     Vec<BoundUniformOutput> outputs;
+    std::shared_ptr<void>   lease;
     u64                     version { 0 };
     bool                    evaluated { false };
 };

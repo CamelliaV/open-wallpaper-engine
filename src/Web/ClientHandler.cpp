@@ -17,6 +17,11 @@ ClientHandler::ClientHandler(owe::Json user_props, CefRefPtr<OsrRenderHandler> r
 
 void ClientHandler::SetCloseCallback(std::function<void()> cb) { close_cb_ = std::move(cb); }
 
+void ClientHandler::SetAudioDemandCallback(std::function<void(bool)> cb) {
+    audio_demand_cb_ = std::move(cb);
+    if (audio_demand_cb_) audio_demand_cb_(audio_demand_);
+}
+
 void ClientHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) { browser_ = browser; }
 
 bool ClientHandler::DoClose(CefRefPtr<CefBrowser> /*browser*/) {
@@ -24,8 +29,37 @@ bool ClientHandler::DoClose(CefRefPtr<CefBrowser> /*browser*/) {
 }
 
 void ClientHandler::OnBeforeClose(CefRefPtr<CefBrowser> /*browser*/) {
+    if (audio_demand_) {
+        audio_demand_ = false;
+        if (audio_demand_cb_) audio_demand_cb_(false);
+    }
     browser_ = nullptr;
     if (close_cb_) close_cb_();
+}
+
+bool ClientHandler::OnProcessMessageReceived(CefRefPtr<CefBrowser> /*browser*/,
+                                             CefRefPtr<CefFrame> /*frame*/,
+                                             CefProcessId                 source_process,
+                                             CefRefPtr<CefProcessMessage> message) {
+    if (source_process != PID_RENDERER || ! message || message->GetName() != "weweb.audio-demand")
+        return false;
+    auto args = message->GetArgumentList();
+    if (! args || args->GetSize() < 2) return true;
+    const int generation = args->GetInt(0);
+    if (generation < audio_context_generation_) return true;
+    if (generation > audio_context_generation_) {
+        audio_context_generation_ = generation;
+        if (audio_demand_) {
+            audio_demand_ = false;
+            if (audio_demand_cb_) audio_demand_cb_(false);
+        }
+    }
+    const bool active = args->GetBool(1);
+    if (active != audio_demand_) {
+        audio_demand_ = active;
+        if (audio_demand_cb_) audio_demand_cb_(active);
+    }
+    return true;
 }
 
 void ClientHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,

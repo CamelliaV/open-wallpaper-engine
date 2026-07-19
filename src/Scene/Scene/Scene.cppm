@@ -2260,6 +2260,22 @@ struct SceneUserPropertyDiagnostic {
     std::string message;
 };
 
+class AudioResponseDemand : NoCopy, NoMove {
+public:
+    AudioResponseDemand();
+    ~AudioResponseDemand();
+
+    std::shared_ptr<void> Acquire();
+    void                  SetCallback(std::function<void(bool)> callback);
+    void                  SetEnabled(bool enabled);
+    bool                  Active() const;
+
+private:
+    struct State;
+    static void            Update(const std::shared_ptr<State>& state, int delta);
+    std::shared_ptr<State> m_state;
+};
+
 class RenderSceneSnapshot {
 public:
     RenderSceneSnapshot() = default;
@@ -2429,8 +2445,9 @@ public:
     // shape under `sceneGraph` is immutable until Scene destruction (see the
     // invariant on SceneNode). Render-graph build is read-only; script ticks
     // only mutate per-node transform / visibility fields.
-    rstd::sync::Arc<SceneNode>    sceneGraph;
-    std::unique_ptr<IImageParser> imageParser;
+    rstd::sync::Arc<SceneNode>           sceneGraph;
+    std::unique_ptr<IImageParser>        imageParser;
+    std::shared_ptr<AudioResponseDemand> audioResponseDemand;
 
     auto Register(Box<dyn<UniformSource>> source) -> UniformSourceId {
         return m_uniforms.Register(rstd::move(source));

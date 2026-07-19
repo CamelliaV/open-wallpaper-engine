@@ -10,6 +10,51 @@ import :cef_internal;
 namespace weweb
 {
 
+namespace
+{
+
+constexpr const char* kAudioDemandMessage = "weweb.audio-demand";
+
+void SendAudioDemand(CefRefPtr<CefFrame> frame, int generation, bool active) {
+    if (! frame) return;
+    auto message = CefProcessMessage::Create(kAudioDemandMessage);
+    auto args    = message->GetArgumentList();
+    args->SetInt(0, generation);
+    args->SetBool(1, active);
+    frame->SendProcessMessage(PID_BROWSER, message);
+}
+
+class AudioDemandHandler final : public CefV8Handler {
+public:
+    AudioDemandHandler(CefRefPtr<CefFrame> frame, int generation)
+        : m_frame(std::move(frame)), m_generation(generation) {}
+
+    bool Execute(const CefString&, CefRefPtr<CefV8Value>, const CefV8ValueList& arguments,
+                 CefRefPtr<CefV8Value>&, CefString&) override {
+        if (arguments.size() != 1 || ! arguments[0]->IsBool()) return false;
+        SendAudioDemand(m_frame, m_generation, arguments[0]->GetBoolValue());
+        return true;
+    }
+
+    void AddRef() const override { m_ref_count.AddRef(); }
+    bool Release() const override {
+        if (m_ref_count.Release()) {
+            delete this;
+            return true;
+        }
+        return false;
+    }
+    bool HasOneRef() const override { return m_ref_count.HasOneRef(); }
+    bool HasAtLeastOneRef() const override { return m_ref_count.HasAtLeastOneRef(); }
+
+private:
+    CefRefPtr<CefFrame> m_frame;
+    int                 m_generation;
+    CefRefCount         m_ref_count;
+};
+
+} // namespace
+
 AppHandler::AppHandler() = default;
 
 /*
@@ -141,8 +186,16 @@ void AppHandler::OnContextInitialized() {
 }
 
 void AppHandler::OnContextCreated(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFrame> frame,
-                                  CefRefPtr<CefV8Context> /*context*/) {
-    if (! frame || ! frame->IsMain()) return;
+                                  CefRefPtr<CefV8Context> context) {
+    if (! frame || ! frame->IsMain() || ! context) return;
+
+    const int generation                       = m_next_audio_context_generation++;
+    m_audio_context_generations[context.get()] = generation;
+    auto handler = CefRefPtr<AudioDemandHandler>(new AudioDemandHandler(frame, generation));
+    context->GetGlobal()->SetValue("__weweb_setAudioDemand",
+                                   CefV8Value::CreateFunction("__weweb_setAudioDemand", handler),
+                                   V8_PROPERTY_ATTRIBUTE_DONTDELETE);
+    SendAudioDemand(frame, generation, false);
 
     // WE web audio-response API. The page calls wallpaperRegisterAudioListener
     // to subscribe; the browser process feeds samples each tick by invoking
@@ -154,10 +207,14 @@ void AppHandler::OnContextCreated(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<C
         "  window.__weweb_audio_installed = true;"
         "  var listeners = [];"
         "  window.wallpaperRegisterAudioListener = function(cb){"
-        "    if (typeof cb === 'function') listeners.push(cb);"
+        "    if (typeof cb !== 'function' || listeners.indexOf(cb) >= 0) return;"
+        "    listeners.push(cb);"
+        "    if (listeners.length === 1) window.__weweb_setAudioDemand(true);"
         "  };"
         "  window.wallpaperRemoveAudioListener = function(cb){"
-        "    var i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1);"
+        "    var i = listeners.indexOf(cb); if (i < 0) return;"
+        "    listeners.splice(i, 1);"
+        "    if (listeners.length === 0) window.__weweb_setAudioDemand(false);"
         "  };"
         "  window.__weweb_pushAudio = function(arr){"
         "    for (var i = 0; i < listeners.length; i++){"
@@ -166,6 +223,15 @@ void AppHandler::OnContextCreated(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<C
         "  };"
         "})();";
     frame->ExecuteJavaScript(kAudioApi, "weweb://internal/audio_api.js", 0);
+}
+
+void AppHandler::OnContextReleased(CefRefPtr<CefBrowser> /*browser*/, CefRefPtr<CefFrame> frame,
+                                   CefRefPtr<CefV8Context> context) {
+    if (! frame || ! frame->IsMain() || ! context) return;
+    auto found = m_audio_context_generations.find(context.get());
+    if (found == m_audio_context_generations.end()) return;
+    SendAudioDemand(frame, found->second, false);
+    m_audio_context_generations.erase(found);
 }
 
 } // namespace weweb

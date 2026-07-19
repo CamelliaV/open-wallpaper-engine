@@ -28,6 +28,8 @@ public:
     void OnContextInitialized() override;
     void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                           CefRefPtr<CefV8Context> context) override;
+    void OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                           CefRefPtr<CefV8Context> context) override;
 
     void AddRef() const override { ref_count_.AddRef(); }
     bool Release() const override {
@@ -41,10 +43,12 @@ public:
     bool HasAtLeastOneRef() const override { return ref_count_.HasAtLeastOneRef(); }
 
 private:
-    bool        m_mute_audio { false };
-    bool        m_shared_texture_enabled { true };
-    std::string m_render_node_override;
-    CefRefCount ref_count_;
+    bool                                 m_mute_audio { false };
+    bool                                 m_shared_texture_enabled { true };
+    std::string                          m_render_node_override;
+    int                                  m_next_audio_context_generation { 1 };
+    std::unordered_map<const void*, int> m_audio_context_generations;
+    CefRefCount                          ref_count_;
 };
 
 class OsrRenderHandler : public CefRenderHandler {
@@ -97,6 +101,7 @@ public:
     ClientHandler& operator=(const ClientHandler&) = delete;
 
     void                  SetCloseCallback(std::function<void()> cb);
+    void                  SetAudioDemandCallback(std::function<void(bool)> cb);
     CefRefPtr<CefBrowser> GetBrowser() const { return browser_; }
 
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -113,6 +118,9 @@ public:
 
     bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level,
                           const CefString& message, const CefString& source, int line) override;
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                  CefProcessId                 source_process,
+                                  CefRefPtr<CefProcessMessage> message) override;
 
     void AddRef() const override { ref_count_.AddRef(); }
     bool Release() const override {
@@ -130,6 +138,9 @@ private:
     CefRefPtr<OsrRenderHandler> render_handler_;
     CefRefPtr<CefBrowser>       browser_;
     std::function<void()>       close_cb_;
+    std::function<void(bool)>   audio_demand_cb_;
+    int                         audio_context_generation_ { 0 };
+    bool                        audio_demand_ { false };
     std::atomic<bool>           property_injected_ { false };
     CefRefCount                 ref_count_;
 };

@@ -398,7 +398,13 @@ struct HostState {
     std::atomic<bool> muted { false };
     std::atomic<bool> settings_enable_audio { true };
     std::atomic<bool> property_enable_audio { true };
+    std::atomic<bool> audio_response_demand { false };
+    uint64_t          last_audio_generation { 0 };
+    uint64_t          last_audio_sequence { 0 };
     float             base_volume { 1.0f };
+
+    std::mutex                                                subscription_mu;
+    std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
 
     // Daemon enforces "Ready before any ReportState" during the spawn
     // handshake; the scene-load path can fire `setOnClearColor` (and
@@ -411,6 +417,22 @@ struct HostState {
 };
 
 void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_release); }
+
+void set_audio_response_demand(HostState& s, bool active) {
+    s.audio_response_demand.store(active, std::memory_order_release);
+    if (! active && s.wp) {
+        const std::array<float, 64> silence {};
+        s.wp->setAudioSpectrum(silence, silence);
+    }
+    std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+    {
+        std::scoped_lock lock(s.subscription_mu);
+        subscriptions = s.subscriptions;
+    }
+    if (subscriptions && ! subscriptions->set("audio", active)) {
+        rstd_warn("waywallen-wescene-renderer: failed to update audio subscription");
+    }
+}
 
 float effective_volume(const HostState& s) { return std::clamp(s.base_volume, 0.0f, 1.0f); }
 
@@ -592,6 +614,43 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             });
         }
         ww_bridge_mpris_free(&mpris);
+        break;
+    }
+    case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED: {
+        ww_bridge_event_subscriptions_applied_t applied {};
+        if (ww_bridge_event_subscriptions_applied_from_control(&msg, &applied) == 0) {
+            std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+            {
+                std::scoped_lock lock(s.subscription_mu);
+                subscriptions = s.subscriptions;
+            }
+            if (subscriptions) subscriptions->applied(applied);
+        }
+        ww_bridge_event_subscriptions_applied_free(&applied);
+        break;
+    }
+    case WW_EVT_IN_AUDIO_SPECTRUM: {
+        ww_bridge_audio_spectrum_t audio {};
+        if (ww_bridge_audio_spectrum_from_control(&msg, &audio) != 0) break;
+        if (! s.audio_response_demand.load(std::memory_order_acquire)) break;
+        std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+        {
+            std::scoped_lock lock(s.subscription_mu);
+            subscriptions = s.subscriptions;
+        }
+        const bool fresh =
+            audio.generation > s.last_audio_generation ||
+            (audio.generation == s.last_audio_generation && audio.sequence > s.last_audio_sequence);
+        if (fresh && subscriptions && subscriptions->acceptsAudio(audio.subscription_revision) &&
+            s.wp) {
+            std::array<float, 64> left {};
+            std::array<float, 64> right {};
+            std::copy_n(audio.left, left.size(), left.begin());
+            std::copy_n(audio.right, right.size(), right.begin());
+            s.wp->setAudioSpectrum(left, right);
+            s.last_audio_generation = audio.generation;
+            s.last_audio_sequence   = audio.sequence;
+        }
         break;
     }
     case WW_EVT_IN_SET_FPS: set_fps(s, msg.u.set_fps.fps); break;
@@ -806,6 +865,10 @@ int run(int argc, char** argv) {
     host.settings_enable_audio.store(opts.settings_enable_audio, std::memory_order_release);
     host.property_enable_audio.store(opts.property_enable_audio, std::memory_order_release);
 
+    wp.setAudioResponseDemandCallback([&host](bool active) {
+        set_audio_response_demand(host, active);
+    });
+
     // Forward the scene's `general.clearcolor` to the daemon every
     // time a scene loads. Alpha is forced to 1.0 — the rendered
     // DMA-BUF is opaque; alpha only governs daemon-side letterbox bars.
@@ -970,6 +1033,19 @@ int run(int argc, char** argv) {
 
     rstd_info("waywallen-wescene-renderer: ready, advertise sent to daemon");
 
+    auto subscriptions = std::make_shared<ww_wescene::BridgeSubscriptionController>(session);
+    {
+        std::scoped_lock lock(host.subscription_mu);
+        host.subscriptions = subscriptions;
+    }
+    std::vector<std::string> event_kinds { "pointer", "mpris" };
+    if (host.audio_response_demand.load(std::memory_order_acquire)) {
+        event_kinds.emplace_back("audio");
+    }
+    if (! subscriptions->replace(std::move(event_kinds))) {
+        die("failed to register renderer event subscriptions");
+    }
+
     // Flip the clear-colour gate now that Ready has been emitted. Replay
     // any value the scene-load callback stashed during init.
     {
@@ -998,6 +1074,11 @@ int run(int argc, char** argv) {
     if (reader.joinable()) {
         ::shutdown(host.sock, SHUT_RD);
         reader.join();
+    }
+    (void)subscriptions->replace({});
+    {
+        std::scoped_lock lock(host.subscription_mu);
+        host.subscriptions.reset();
     }
     session.reset();
     ww_bridge_close(host.sock);

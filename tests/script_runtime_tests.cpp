@@ -186,6 +186,29 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
                          361.5);
 }
 
+TEST(ScriptAudio, RegisterAudioBuffersHoldsOneRuntimeDemandLease) {
+    auto              demand = std::make_shared<owe::AudioResponseDemand>();
+    std::vector<bool> changes;
+    demand->SetCallback([&changes](bool active) {
+        changes.push_back(active);
+    });
+    {
+        JsRuntime rt;
+        rt.SetAudioResponseDemand(demand);
+        auto* fs = MakeProbe(rt,
+                             "test/audio_demand",
+                             R"JS(
+            engine.registerAudioBuffers(64);
+            engine.registerAudioBuffers(32);
+            export function update() { return 1; }
+        )JS");
+        ASSERT_NE(fs, nullptr);
+        EXPECT_TRUE(demand->Active());
+    }
+    EXPECT_FALSE(demand->Active());
+    EXPECT_EQ(changes, (std::vector<bool> { false, true, false }));
+}
+
 // ---------------------------------------------------------------------------
 // SceneNode wrapper surface
 

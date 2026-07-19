@@ -130,7 +130,6 @@ if(BUILD_WEWEB)
             waywallen-bridge-producer
             waywallen-web-producer-device
             wavsen::ffi::vulkan
-            wavsen::audio
             rstd::rstd
             rstd.cppstd
     )

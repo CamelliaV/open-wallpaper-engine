@@ -355,13 +355,15 @@ struct DeferredCb {
 };
 
 struct EngineHostState {
-    FrameInputs inputs;
-    MediaStatus media;
-    bool        media_initialized { false };
-    owe::Scene* scene { nullptr };
-    JSValue     audio_buffer { JS_UNDEFINED };
-    uint32_t    audio_buffer_resolution { 64 };
-    bool        audio_buffer_built { false };
+    FrameInputs                          inputs;
+    MediaStatus                          media;
+    bool                                 media_initialized { false };
+    owe::Scene*                          scene { nullptr };
+    JSValue                              audio_buffer { JS_UNDEFINED };
+    uint32_t                             audio_buffer_resolution { 64 };
+    bool                                 audio_buffer_built { false };
+    std::shared_ptr<AudioResponseDemand> audio_response_demand;
+    std::shared_ptr<void>                audio_response_lease;
     // Cached `globalThis.Vec3` ctor, populated lazily on first node access.
     // Used by the SceneNode wrapper to hand back Vec3 instances so scripts
     // can call `.add` / `.subtract` on `thisLayer.origin`.
@@ -575,6 +577,8 @@ JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, in
                                    JSValueConst* argv) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     if (! host->audio_buffer_built) {
+        if (host->audio_response_demand && ! host->audio_response_lease)
+            host->audio_response_lease = host->audio_response_demand->Acquire();
         int32_t requested = 64;
         if (argc > 0) (void)JS_ToInt32(ctx, &requested, argv[0]);
         host->audio_buffer_resolution = NormalizeAudioResolution(requested);
@@ -2503,6 +2507,13 @@ void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
     if (m_impl->host.audio_buffer_built) RefreshAudioBuffer(m_impl->ctx);
 }
 
+void JsRuntime::SetAudioResponseDemand(std::shared_ptr<AudioResponseDemand> demand) {
+    m_impl->host.audio_response_lease.reset();
+    m_impl->host.audio_response_demand = std::move(demand);
+    if (m_impl->host.audio_buffer_built && m_impl->host.audio_response_demand)
+        m_impl->host.audio_response_lease = m_impl->host.audio_response_demand->Acquire();
+}
+
 void JsRuntime::SetUserProperty(std::string_view key, const Json& property) {
     if (! m_impl || ! m_impl->ctx) return;
     std::string key_str { key };
@@ -2906,7 +2917,10 @@ struct ScriptScene::Impl {
     std::vector<Actuator> actuators;
 };
 
-ScriptScene::ScriptScene(): m_impl(std::make_unique<Impl>()) {}
+ScriptScene::ScriptScene(std::shared_ptr<AudioResponseDemand> demand)
+    : m_impl(std::make_unique<Impl>()) {
+    m_impl->rt.SetAudioResponseDemand(std::move(demand));
+}
 ScriptScene::~ScriptScene() = default;
 
 JsRuntime& ScriptScene::runtime() noexcept { return m_impl->rt; }

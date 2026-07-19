@@ -429,6 +429,7 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
             });
         }
         if (bound.outputs.is_empty()) continue;
+        bound.lease = bound.source->AcquireBindingLease();
         for (const auto& output : bound.outputs) {
             auto previous = slot_sources.get(output.slot_index);
             if (previous.is_none()) {

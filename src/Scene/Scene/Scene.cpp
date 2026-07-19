@@ -10,6 +10,71 @@ using namespace rstd::prelude;
 namespace owe
 {
 
+struct AudioResponseDemand::State {
+    mutable std::mutex        mutex;
+    std::size_t               leases { 0 };
+    bool                      enabled { true };
+    std::function<void(bool)> callback;
+};
+
+void AudioResponseDemand::Update(const std::shared_ptr<State>& state, int delta) {
+    std::function<void(bool)> callback;
+    bool                      active = false;
+    {
+        std::scoped_lock lock(state->mutex);
+        const bool       before = state->enabled && state->leases > 0;
+        if (delta > 0)
+            state->leases += static_cast<std::size_t>(delta);
+        else if (state->leases > 0)
+            state->leases -= static_cast<std::size_t>(-delta);
+        active = state->enabled && state->leases > 0;
+        if (active != before) callback = state->callback;
+    }
+    if (callback) callback(active);
+}
+
+AudioResponseDemand::AudioResponseDemand(): m_state(std::make_shared<State>()) {}
+AudioResponseDemand::~AudioResponseDemand() = default;
+
+std::shared_ptr<void> AudioResponseDemand::Acquire() {
+    Update(m_state, 1);
+    std::weak_ptr<State> weak = m_state;
+    return std::shared_ptr<void>(new unsigned char(0), [weak](void* value) {
+        delete static_cast<unsigned char*>(value);
+        if (auto state = weak.lock()) AudioResponseDemand::Update(state, -1);
+    });
+}
+
+void AudioResponseDemand::SetCallback(std::function<void(bool)> callback) {
+    bool                      active;
+    std::function<void(bool)> notify;
+    {
+        std::scoped_lock lock(m_state->mutex);
+        m_state->callback = std::move(callback);
+        active            = m_state->enabled && m_state->leases > 0;
+        notify            = m_state->callback;
+    }
+    if (notify) notify(active);
+}
+
+void AudioResponseDemand::SetEnabled(bool enabled) {
+    std::function<void(bool)> callback;
+    bool                      active;
+    {
+        std::scoped_lock lock(m_state->mutex);
+        const bool       before = m_state->enabled && m_state->leases > 0;
+        m_state->enabled        = enabled;
+        active                  = m_state->enabled && m_state->leases > 0;
+        if (active != before) callback = m_state->callback;
+    }
+    if (callback) callback(active);
+}
+
+bool AudioResponseDemand::Active() const {
+    std::scoped_lock lock(m_state->mutex);
+    return m_state->enabled && m_state->leases > 0;
+}
+
 namespace
 {
 void delete_vfs(void* p) noexcept { delete static_cast<fs::VFS*>(p); }

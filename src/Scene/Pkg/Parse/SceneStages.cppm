@@ -55,7 +55,11 @@ struct ParseContext {
         WPUniformNodeConfigDraft   config;
     };
     std::vector<UniformConfigDraft>      uniform_configs;
-    std::shared_ptr<WPUniformSceneState> uniform_state { std::make_shared<WPUniformSceneState>() };
+    std::shared_ptr<AudioResponseDemand> audio_response_demand {
+        std::make_shared<AudioResponseDemand>()
+    };
+    std::shared_ptr<WPUniformSceneState> uniform_state { std::make_shared<WPUniformSceneState>(
+        audio_response_demand) };
     struct TextUniformConfigDraft {
         rstd::sync::Arc<SceneNode>                       node;
         std::shared_ptr<text::TextEffectProjectionState> effect_projection;

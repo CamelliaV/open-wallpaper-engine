@@ -19,6 +19,7 @@ struct BrowserHost::Impl {
     CefRefPtr<ClientHandler>    client;
     AcceleratedPaintCallback    accel_cb;
     CpuPaintCallback            cpu_cb;
+    std::function<void(bool)>   audio_demand_cb;
     std::atomic<bool>           should_exit { false };
     bool                        initialised { false };
     // Stash the original argv from RunOrExitIfHelper; CefInitialize needs
@@ -112,6 +113,7 @@ bool BrowserHost::OpenWallpaper(const WebManifest&           manifest,
     }
 
     impl_->client = new ClientHandler(manifest.user_props.clone(), impl_->osr);
+    impl_->client->SetAudioDemandCallback(impl_->audio_demand_cb);
     impl_->client->SetCloseCallback([this] {
         impl_->should_exit.store(true);
     });
@@ -139,6 +141,11 @@ void BrowserHost::SetAcceleratedPaintCallback(AcceleratedPaintCallback cb) {
 void BrowserHost::SetCpuPaintCallback(CpuPaintCallback cb) {
     impl_->cpu_cb = std::move(cb);
     if (impl_->osr) impl_->osr->SetCpuPaintCallback(impl_->cpu_cb);
+}
+
+void BrowserHost::SetAudioResponseDemandCallback(std::function<void(bool)> cb) {
+    impl_->audio_demand_cb = std::move(cb);
+    if (impl_->client) impl_->client->SetAudioDemandCallback(impl_->audio_demand_cb);
 }
 
 void BrowserHost::Invalidate() {

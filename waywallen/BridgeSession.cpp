@@ -1,6 +1,7 @@
 module;
 
 #include <cerrno>
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -62,6 +63,79 @@ int BridgeSession::sendBindFailed(uint32_t fourcc, uint64_t modifier, uint32_t r
 int BridgeSession::sendClearColor(float r, float g, float b, float a) {
     std::scoped_lock lock(m_send_mutex);
     return ww_bridge_send_report_state_clear_color(m_send_socket, r, g, b, a);
+}
+
+int BridgeSession::setEventSubscriptions(uint64_t revision, const std::vector<std::string>& kinds) {
+    std::vector<const char*> raw;
+    raw.reserve(kinds.size());
+    for (const auto& kind : kinds) raw.push_back(kind.c_str());
+    std::scoped_lock lock(m_send_mutex);
+    return ww_bridge_set_event_subscriptions(m_send_socket,
+                                             revision,
+                                             raw.empty() ? nullptr : raw.data(),
+                                             static_cast<uint32_t>(raw.size()));
+}
+
+bool BridgeSubscriptionController::replace(std::vector<std::string> kinds) {
+    std::sort(kinds.begin(), kinds.end(), [](const auto& left, const auto& right) {
+        return left.compare(right) < 0;
+    });
+    kinds.erase(std::unique(kinds.begin(), kinds.end()), kinds.end());
+    std::scoped_lock lock(m_mutex);
+    if (m_desired != kinds) {
+        m_desired = std::move(kinds);
+        m_dirty   = true;
+    }
+    if (! m_dirty) return true;
+    return sendLocked();
+}
+
+bool BridgeSubscriptionController::set(std::string_view kind, bool enabled) {
+    std::scoped_lock lock(m_mutex);
+    auto             found = std::lower_bound(
+        m_desired.begin(), m_desired.end(), kind, [](const auto& left, std::string_view right) {
+            return left.compare(right) < 0;
+        });
+    const bool present = found != m_desired.end() && *found == kind;
+    if (enabled == present) return ! m_dirty || sendLocked();
+    if (enabled)
+        m_desired.insert(found, std::string(kind));
+    else
+        m_desired.erase(found);
+    m_dirty = true;
+    return sendLocked();
+}
+
+bool BridgeSubscriptionController::sendLocked() {
+    const uint64_t revision = m_next_revision++;
+    if (m_session->setEventSubscriptions(revision, m_desired) != 0) return false;
+    m_sent_revision = revision;
+    m_dirty         = false;
+    return true;
+}
+
+void BridgeSubscriptionController::applied(const ww_bridge_event_subscriptions_applied_t& event) {
+    std::scoped_lock lock(m_mutex);
+    if (event.status != WW_BRIDGE_SUBSCRIPTION_APPLIED || event.revision < m_applied_revision ||
+        event.revision > m_sent_revision)
+        return;
+    m_applied_revision = event.revision;
+    m_applied.clear();
+    m_applied.reserve(event.kinds.count);
+    for (uint32_t index = 0; index < event.kinds.count; ++index) {
+        if (event.kinds.data[index]) m_applied.emplace_back(event.kinds.data[index]);
+    }
+    std::sort(m_applied.begin(), m_applied.end(), [](const auto& left, const auto& right) {
+        return left.compare(right) < 0;
+    });
+}
+
+bool BridgeSubscriptionController::acceptsAudio(uint64_t revision) const {
+    std::scoped_lock lock(m_mutex);
+    return revision == m_applied_revision &&
+           std::any_of(m_applied.begin(), m_applied.end(), [](const auto& kind) {
+               return kind == "audio";
+           });
 }
 
 } // namespace ww_wescene

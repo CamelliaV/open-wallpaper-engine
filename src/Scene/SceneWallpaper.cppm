@@ -15,7 +15,8 @@ export import wescene.pkg.parse;
 export namespace owe
 {
 
-using FirstFrameCallback = std::function<void()>;
+using FirstFrameCallback          = std::function<void()>;
+using AudioResponseDemandCallback = std::function<void(bool)>;
 using UserPropertyDiagnosticCallback =
     std::function<void(std::vector<SceneUserPropertyDiagnostic>)>;
 using RenderPassDiagnosticCallback =
@@ -84,6 +85,9 @@ public:
     void setFillMode(FillMode);
     void setSpeed(float);
     void setMediaStatus(MediaStatus);
+    void setAudioResponseDemandCallback(AudioResponseDemandCallback);
+    void setAudioResponseEnabled(bool);
+    void setAudioSpectrum(const std::array<float, 64>& left, const std::array<float, 64>& right);
     void setUserPropertyRaw(std::string_view, std::string);
     void setUserPropertyJson(std::string_view, Json);
     void setOnFirstFrame(FirstFrameCallback);

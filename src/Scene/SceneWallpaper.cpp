@@ -51,6 +51,17 @@ struct RenderSetUserProperty {
 struct RenderSetMediaStatus {
     MediaStatus status;
 };
+struct RenderSetAudioResponseDemandCallback {
+    AudioResponseDemandCallback callback;
+};
+struct RenderSetAudioResponseEnabled {
+    bool enabled;
+};
+struct RenderSetAudioSpectrum {
+    std::array<float, 64>                 left;
+    std::array<float, 64>                 right;
+    std::chrono::steady_clock::time_point received;
+};
 struct RenderStop {
     bool stop;
 };
@@ -70,7 +81,8 @@ struct RenderRequestPreparedPassDiagnostics {
 // type sits in namespace std.
 struct RenderMsg {
     std::variant<RenderInit, RenderSetScene, RenderSetFillMode, RenderSetSpeed,
-                 RenderSetUserProperty, RenderSetMediaStatus, RenderStop, RenderDraw,
+                 RenderSetUserProperty, RenderSetMediaStatus, RenderSetAudioResponseDemandCallback,
+                 RenderSetAudioResponseEnabled, RenderSetAudioSpectrum, RenderStop, RenderDraw,
                  RenderSwapchainReady, RenderRequestPreparedPassDiagnostics, RenderShutdown>
         v;
 };
@@ -804,10 +816,6 @@ public:
         auto [tx, rx] = rstd::sync::mpsc::channel<RenderMsg>();
         m_tx.emplace(std::move(tx));
         m_rx.emplace(std::move(rx));
-
-        // Best-effort: a failing init just leaves snapshots returning false
-        // and audio_average at zeros — wallpapers still render fine.
-        (void)m_audio_capture.init();
     }
     ~SceneRenderController() {
         stop();
@@ -826,6 +834,9 @@ public:
     void on(RenderSetSpeed&&);
     void on(RenderSetUserProperty&&);
     void on(RenderSetMediaStatus&&);
+    void on(RenderSetAudioResponseDemandCallback&&);
+    void on(RenderSetAudioResponseEnabled&&);
+    void on(RenderSetAudioSpectrum&&);
     void on(RenderStop&&);
     void on(RenderDraw&&);
     void on(RenderSwapchainReady&&);
@@ -885,6 +896,12 @@ private:
     float                                  m_speed { 1.0f };
     FillMode                               m_fillmode { FillMode::ASPECTCROP };
     bool                                   m_stopped { false };
+    AudioResponseDemandCallback            m_audio_response_demand_callback;
+    bool                                   m_audio_response_enabled { true };
+    std::array<float, 64>                  m_audio_left {};
+    std::array<float, 64>                  m_audio_right {};
+    std::chrono::steady_clock::time_point  m_audio_received {};
+    bool                                   m_audio_primed { false };
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
     std::atomic<uint32_t>             m_buttons_down { 0 };
@@ -899,8 +916,6 @@ private:
 
     // Strong ref kept here, weak copy captured by the swapchain callback.
     std::shared_ptr<RenderSender> m_swapchain_tx;
-
-    wavsen::audio::AudioCapture m_audio_capture;
 };
 
 auto SceneRenderController::sender() const -> RenderSender {
@@ -1003,31 +1018,21 @@ void SceneRenderController::on(RenderDraw&&) {
                 fi.cursor_x = pos[0];
                 fi.cursor_y = pos[1];
             }
-            fi.cursor_in_window       = cursorInWindow();
-            fi.mouse_buttons_down     = buttonsDown();
-            fi.mouse_buttons_pressed  = consumePressed();
-            fi.mouse_buttons_released = consumeReleased();
-            wavsen::audio::AudioSpectrum spec;
-            const bool                   primed = m_audio_capture.snapshot(spec);
-            // Treat as silence if wavsen hasn't published recently. Without
-            // this, a disconnected sink / suspended pipeline leaves the
-            // last snapshot frozen and bars stick at the last live value.
-            // 250 ms grace covers the worst-case pipewire batching (quantum
-            // ~21 ms + FFT trigger half-window) by ~10×.
-            constexpr std::int64_t kStaleMs = 250;
-            const auto             now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                std::chrono::steady_clock::now().time_since_epoch())
-                                                .count();
-            const bool             stale =
-                ! primed || spec.publish_ms == 0 || (now_ms - spec.publish_ms) > kStaleMs;
-            if (stale) spec.clear();
-            fi.audio_left    = spec.left;
-            fi.audio_right   = spec.right;
-            fi.audio_average = spec.average;
-            // pkg-internal music plays through the system sink, so wavsen's
-            // monitor capture already picks it up; no need to overlay
-            // Scene::audioAverage (driven by WPSoundParser). audioAverage
-            // remains a particle-only signal — see ParticleSystem.
+            fi.cursor_in_window             = cursorInWindow();
+            fi.mouse_buttons_down           = buttonsDown();
+            fi.mouse_buttons_pressed        = consumePressed();
+            fi.mouse_buttons_released       = consumeReleased();
+            constexpr auto kAudioStaleAfter = std::chrono::milliseconds(250);
+            const bool     stale =
+                ! m_audio_primed ||
+                std::chrono::steady_clock::now() - m_audio_received > kAudioStaleAfter;
+            if (! stale) {
+                fi.audio_left  = m_audio_left;
+                fi.audio_right = m_audio_right;
+                for (std::size_t i = 0; i < fi.audio_average.size(); ++i) {
+                    fi.audio_average[i] = (fi.audio_left[i] + fi.audio_right[i]) * 0.5f;
+                }
+            }
             if (m_uniform_input) {
                 m_uniform_input->SetAudioSpectrum(
                     rstd::slice<float>::from_raw_parts(fi.audio_left.data(), fi.audio_left.size()),
@@ -1143,8 +1148,18 @@ void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
 }
 
 void SceneRenderController::on(RenderSetScene&& m) {
+    if (m_scene && m_scene->audioResponseDemand) {
+        m_scene->audioResponseDemand->SetCallback({});
+    }
     m_scene         = std::move(m.scene);
     m_uniform_input = std::move(m.uniform_input);
+    m_audio_primed  = false;
+    m_audio_left.fill(0.0f);
+    m_audio_right.fill(0.0f);
+    if (m_scene && m_scene->audioResponseDemand) {
+        m_scene->audioResponseDemand->SetEnabled(m_audio_response_enabled);
+        m_scene->audioResponseDemand->SetCallback(m_audio_response_demand_callback);
+    }
     rebuildRenderGraph(vulkan::RenderGraphResourceRetention::ReleaseSceneTextures, true);
 }
 
@@ -1221,6 +1236,33 @@ void SceneRenderController::on(RenderSetMediaStatus&& m) {
         return;
     }
     if (renderInited() && m_rg.is_some()) refreshPreparedMaterialDirtyEvents();
+}
+
+void SceneRenderController::on(RenderSetAudioResponseDemandCallback&& m) {
+    m_audio_response_demand_callback = std::move(m.callback);
+    if (m_scene && m_scene->audioResponseDemand) {
+        m_scene->audioResponseDemand->SetCallback(m_audio_response_demand_callback);
+    }
+}
+
+void SceneRenderController::on(RenderSetAudioResponseEnabled&& m) {
+    m_audio_response_enabled = m.enabled;
+    if (m_scene && m_scene->audioResponseDemand) {
+        m_scene->audioResponseDemand->SetEnabled(m.enabled);
+    }
+}
+
+void SceneRenderController::on(RenderSetAudioSpectrum&& m) {
+    auto sanitize = [](float value) {
+        if (! std::isfinite(value)) return 0.0f;
+        return std::clamp(value, 0.0f, 1.0f);
+    };
+    for (std::size_t i = 0; i < m_audio_left.size(); ++i) {
+        m_audio_left[i]  = sanitize(m.left[i]);
+        m_audio_right[i] = sanitize(m.right[i]);
+    }
+    m_audio_received = m.received;
+    m_audio_primed   = true;
 }
 
 void SceneRenderController::on(RenderInit&& m) {
@@ -1664,6 +1706,23 @@ void SceneWallpaper::setSpeed(float speed) { m_runtime->post(MainMsg { MainSetSp
 
 void SceneWallpaper::setMediaStatus(MediaStatus status) {
     m_runtime->post(RenderMsg { RenderSetMediaStatus { std::move(status) } });
+}
+
+void SceneWallpaper::setAudioResponseDemandCallback(AudioResponseDemandCallback callback) {
+    m_runtime->post(RenderMsg { RenderSetAudioResponseDemandCallback { std::move(callback) } });
+}
+
+void SceneWallpaper::setAudioResponseEnabled(bool enabled) {
+    m_runtime->post(RenderMsg { RenderSetAudioResponseEnabled { enabled } });
+}
+
+void SceneWallpaper::setAudioSpectrum(const std::array<float, 64>& left,
+                                      const std::array<float, 64>& right) {
+    m_runtime->post(RenderMsg { RenderSetAudioSpectrum {
+        .left     = left,
+        .right    = right,
+        .received = std::chrono::steady_clock::now(),
+    } });
 }
 
 void SceneWallpaper::setUserPropertyRaw(std::string_view name, std::string value) {

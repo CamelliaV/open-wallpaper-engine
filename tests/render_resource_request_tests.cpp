@@ -46,6 +46,10 @@ public:
                        std::make_shared<StaticSourceState>(StaticSourceState { .value = value })) {}
     StaticSource(std::string name, std::shared_ptr<StaticSourceState> state)
         : m_name(std::move(name)), m_state(std::move(state)) {}
+    StaticSource(std::string name, float value, std::shared_ptr<owe::AudioResponseDemand> demand)
+        : StaticSource(std::move(name), value) {
+        m_demand = std::move(demand);
+    }
 
     auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
         -> rstd::Result<rstd::empty, owe::UniformError> {
@@ -63,11 +67,15 @@ public:
         auto value = owe::UniformValue(m_state->value);
         return sink->Write(m_output, value.View());
     }
+    auto AcquireBindingLease() const -> std::shared_ptr<void> {
+        return m_demand ? m_demand->Acquire() : std::shared_ptr<void> {};
+    }
 
 private:
-    std::string                        m_name;
-    std::shared_ptr<StaticSourceState> m_state;
-    owe::UniformOutputId               m_output { .value = 0 };
+    std::string                               m_name;
+    std::shared_ptr<StaticSourceState>        m_state;
+    std::shared_ptr<owe::AudioResponseDemand> m_demand;
+    owe::UniformOutputId                      m_output { .value = 0 };
 };
 
 class TextureMetadataSource {
@@ -95,6 +103,7 @@ public:
         });
         return sink->Write(m_output, value.View());
     }
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
     owe::UniformOutputId m_output { .value = 0 };
@@ -251,6 +260,65 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
     EXPECT_FLOAT_EQ(values[1], 0.0f);
     EXPECT_FLOAT_EQ(values[2], 0.0f);
     EXPECT_FLOAT_EQ(values[3], 0.0f);
+}
+
+TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
+    owe::Scene scene;
+    auto       demand = std::make_shared<owe::AudioResponseDemand>();
+    bool       active = false;
+    demand->SetCallback([&active](bool next) {
+        active = next;
+    });
+    auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
+    auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
+    auto source      = registrar->Register(rstd::boxed::Box<rstd::dyn<owe::UniformSource>>::make(
+        uniform_test::StaticSource("audio_signal", 0.0f, demand)));
+    ASSERT_TRUE(attachments->AttachGlobal(source));
+
+    auto node = rstd::sync::Arc<owe::SceneNode>::make();
+    node->AddMesh(MakeUniformMesh(std::make_shared<owe::SceneShader>()));
+    scene.sceneGraph->AppendChild(node.clone());
+    scene.RebuildResourceIndex();
+    auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
+    ASSERT_TRUE(node_id.is_some());
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    ASSERT_TRUE(draw_id.is_some());
+    owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
+    auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
+
+    auto make_block = [](std::string_view name) {
+        auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
+        members.push(owe::resource::ShaderArtifactUniformMember {
+            .name   = rstd::string::String::make(rstd::cppstd::as_str(name)),
+            .offset = 0,
+            .size   = 4,
+        });
+        return owe::resource::ShaderArtifactUniformBlock {
+            .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+            .size    = 4,
+            .members = rstd::move(members),
+        };
+    };
+
+    {
+        auto unbound = owe::vulkan::MakeUniformBufferBinding(
+            prepare.as_ref(),
+            *draw_id,
+            owe::resource::BufferUseHandle { .index = 1, .generation = 1 },
+            make_block("unrelated"));
+        ASSERT_TRUE(unbound.is_ok());
+        EXPECT_FALSE(active);
+    }
+    {
+        auto bound = owe::vulkan::MakeUniformBufferBinding(
+            prepare.as_ref(),
+            *draw_id,
+            owe::resource::BufferUseHandle { .index = 2, .generation = 1 },
+            make_block("audio_signal"));
+        ASSERT_TRUE(bound.is_ok());
+        EXPECT_TRUE(active);
+    }
+    EXPECT_FALSE(active);
 }
 
 TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {

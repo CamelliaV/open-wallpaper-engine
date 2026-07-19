@@ -20,7 +20,6 @@ import wescene.cli;
 import wescene.json;
 import vulkan;
 import weweb;
-import wavsen.audio;
 import waywallen.bridge;
 import waywallen.bridge_producer_core;
 import waywallen.web_producer_device;
@@ -194,11 +193,42 @@ struct HostState {
     float                 base_volume { 1.0f };
     bool                  muted { false };
 
+    std::mutex                                                subscription_mu;
+    std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+    std::atomic<bool>                                         audio_response_demand { false };
+    std::mutex                                                audio_mu;
+    std::array<float, 64>                                     audio_left {};
+    std::array<float, 64>                                     audio_right {};
+    std::chrono::steady_clock::time_point                     audio_received {};
+    bool                                                      audio_primed { false };
+    uint64_t                                                  last_audio_generation { 0 };
+    uint64_t                                                  last_audio_sequence { 0 };
+
     // Tracked locally on the reader thread so OnMouseMove can carry
     // the left-button-down flag CEF expects in modifiers (GLFW path
     // does the same — there's no protocol field for it).
     bool left_down { false };
 };
+
+void set_audio_response_demand(HostState& s, bool active) {
+    s.audio_response_demand.store(active, std::memory_order_release);
+    {
+        std::scoped_lock lock(s.audio_mu);
+        if (! active) {
+            s.audio_primed = false;
+            s.audio_left.fill(0.0f);
+            s.audio_right.fill(0.0f);
+        }
+    }
+    std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+    {
+        std::scoped_lock lock(s.subscription_mu);
+        subscriptions = s.subscriptions;
+    }
+    if (subscriptions && ! subscriptions->set("audio", active)) {
+        rstd_warn("waywallen-weweb-renderer: failed to update audio subscription");
+    }
+}
 
 // Linux input-event-code → CEF cef_mouse_button_type_t. -1 for codes
 // CEF can't represent (BTN_SIDE, BTN_EXTRA, …).
@@ -376,6 +406,42 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
                                  static_cast<int>(pa.delta_x * kPxPerNotch),
                                  static_cast<int>(pa.delta_y * kPxPerNotch));
         }
+        break;
+    }
+    case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED: {
+        ww_bridge_event_subscriptions_applied_t applied {};
+        if (ww_bridge_event_subscriptions_applied_from_control(&msg, &applied) == 0) {
+            std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+            {
+                std::scoped_lock lock(s.subscription_mu);
+                subscriptions = s.subscriptions;
+            }
+            if (subscriptions) subscriptions->applied(applied);
+        }
+        ww_bridge_event_subscriptions_applied_free(&applied);
+        break;
+    }
+    case WW_EVT_IN_AUDIO_SPECTRUM: {
+        ww_bridge_audio_spectrum_t audio {};
+        if (ww_bridge_audio_spectrum_from_control(&msg, &audio) != 0) break;
+        if (! s.audio_response_demand.load(std::memory_order_acquire)) break;
+        std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+        {
+            std::scoped_lock lock(s.subscription_mu);
+            subscriptions = s.subscriptions;
+        }
+        if (! subscriptions || ! subscriptions->acceptsAudio(audio.subscription_revision)) break;
+        if (audio.generation < s.last_audio_generation ||
+            (audio.generation == s.last_audio_generation &&
+             audio.sequence <= s.last_audio_sequence))
+            break;
+        std::scoped_lock lock(s.audio_mu);
+        std::copy_n(audio.left, s.audio_left.size(), s.audio_left.begin());
+        std::copy_n(audio.right, s.audio_right.size(), s.audio_right.begin());
+        s.audio_received        = std::chrono::steady_clock::now();
+        s.audio_primed          = true;
+        s.last_audio_generation = audio.generation;
+        s.last_audio_sequence   = audio.sequence;
         break;
     }
     case WW_EVT_IN_SET_FPS: enqueue_setting(s, "fps", std::to_string(msg.u.set_fps.fps)); break;
@@ -622,6 +688,10 @@ int run(int argc, char** argv) {
     }
     if (! host.Init(ho)) die("BrowserHost::Init failed");
 
+    host.SetAudioResponseDemandCallback([&state](bool active) {
+        set_audio_response_demand(state, active);
+    });
+
     // OnAcceleratedPaint runs synchronously on the CEF UI thread (=
     // the thread that drives Pump, which is this main thread). Drain
     // any pending negotiate directive first so the slot pool reflects
@@ -671,20 +741,24 @@ int run(int argc, char** argv) {
 
     rstd_info("waywallen-weweb-renderer: ready, advertised caps {}x{}", opts.width, opts.height);
 
+    auto subscriptions = std::make_shared<ww_wescene::BridgeSubscriptionController>(session);
+    {
+        std::scoped_lock lock(state.subscription_mu);
+        state.subscriptions = subscriptions;
+    }
+    std::vector<std::string> event_kinds { "pointer" };
+    if (state.audio_response_demand.load(std::memory_order_acquire)) {
+        event_kinds.emplace_back("audio");
+    }
+    if (! subscriptions->replace(std::move(event_kinds))) {
+        die("failed to register renderer event subscriptions");
+    }
+
     std::thread reader([&]() {
         reader_loop(state);
     });
 
-    // Audio-response capture: taps the system default-sink monitor and feeds
-    // the page's wallpaperRegisterAudioListener callbacks. Best-effort — a
-    // failed init just means audio-reactive pages stay idle.
-    wavsen::audio::AudioCapture audio_capture;
-    if (! audio_capture.init()) {
-        rstd_warn("waywallen-weweb-renderer: audio capture init failed; "
-                  "audio response disabled");
-    }
-    wavsen::audio::AudioSpectrum audio_spec;
-    unsigned                     audio_tick = 0;
+    auto next_audio_push = std::chrono::steady_clock::now();
 
     while (! state.shutdown.load(std::memory_order_acquire) && ! host.ShouldExit()) {
         drain_settings(state);
@@ -694,18 +768,20 @@ int run(int argc, char** argv) {
         // inside CEF at windowless_frame_rate.
         host.Invalidate();
 
-        // Push audio every other tick (~30 Hz, matching WE's audio cadence).
-        // wavsen is mono 64-bin; WE web expects 128 (64 L + 64 R), so the
-        // bins are duplicated into both halves.
-        if (audio_capture.is_inited() && (audio_tick++ & 1u) == 0) {
-            if (audio_capture.snapshot(audio_spec)) {
-                std::array<float, 128> arr {};
-                for (std::size_t i = 0; i < 64; ++i) {
-                    arr[i]      = audio_spec.bins[i];
-                    arr[64 + i] = audio_spec.bins[i];
+        const auto now = std::chrono::steady_clock::now();
+        if (state.audio_response_demand.load(std::memory_order_acquire) && now >= next_audio_push) {
+            next_audio_push = now + std::chrono::milliseconds(33);
+            std::array<float, 128> response {};
+            {
+                std::scoped_lock lock(state.audio_mu);
+                if (state.audio_primed &&
+                    now - state.audio_received <= std::chrono::milliseconds(250)) {
+                    std::copy(state.audio_left.begin(), state.audio_left.end(), response.begin());
+                    std::copy(
+                        state.audio_right.begin(), state.audio_right.end(), response.begin() + 64);
                 }
-                host.PushAudioData(arr.data(), arr.size());
             }
+            host.PushAudioData(response.data(), response.size());
         }
 
         std::this_thread::sleep_for(frame_delay(state));
@@ -715,6 +791,11 @@ int run(int argc, char** argv) {
     if (reader.joinable()) {
         ::shutdown(state.sock, SHUT_RD);
         reader.join();
+    }
+    (void)subscriptions->replace({});
+    {
+        std::scoped_lock lock(state.subscription_mu);
+        state.subscriptions.reset();
     }
     host.Shutdown();
     session.reset();

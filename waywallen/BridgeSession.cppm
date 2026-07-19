@@ -26,6 +26,7 @@ public:
     int abortAcquiredSlot(const ww_pool_slot_identity_t& identity);
     int sendBindFailed(uint32_t fourcc, uint64_t modifier, uint32_t reason, const char* message);
     int sendClearColor(float r, float g, float b, float a);
+    int setEventSubscriptions(uint64_t revision, const std::vector<std::string>& kinds);
 
 private:
     BridgeSession(ww_pool_t* pool, int send_socket): m_pool(pool), m_send_socket(send_socket) {}
@@ -33,6 +34,29 @@ private:
     ww_pool_t* m_pool { nullptr };
     int        m_send_socket { -1 };
     std::mutex m_send_mutex;
+};
+
+class BridgeSubscriptionController final {
+public:
+    explicit BridgeSubscriptionController(std::shared_ptr<BridgeSession> session)
+        : m_session(std::move(session)) {}
+
+    bool replace(std::vector<std::string> kinds);
+    bool set(std::string_view kind, bool enabled);
+    void applied(const ww_bridge_event_subscriptions_applied_t& event);
+    bool acceptsAudio(uint64_t revision) const;
+
+private:
+    bool sendLocked();
+
+    std::shared_ptr<BridgeSession> m_session;
+    mutable std::mutex             m_mutex;
+    std::vector<std::string>       m_desired;
+    uint64_t                       m_next_revision { 1 };
+    uint64_t                       m_sent_revision { 0 };
+    uint64_t                       m_applied_revision { 0 };
+    std::vector<std::string>       m_applied;
+    bool                           m_dirty { false };
 };
 
 } // namespace ww_wescene

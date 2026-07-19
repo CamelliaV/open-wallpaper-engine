@@ -41,6 +41,7 @@ public:
 
     void SetAcceleratedPaintCallback(AcceleratedPaintCallback cb);
     void SetCpuPaintCallback(CpuPaintCallback cb);
+    void SetAudioResponseDemandCallback(std::function<void(bool)> cb);
 
     bool OpenWallpaper(const WebManifest& manifest, const std::filesystem::path& workshop_dir,
                        int width, int height);

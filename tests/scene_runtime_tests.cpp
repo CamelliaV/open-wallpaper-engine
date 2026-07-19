@@ -79,6 +79,31 @@ auto Capture(const owe::SceneFrame& frame, const Source& source, Output output)
 
 } // namespace scene_test
 
+TEST(AudioResponseDemand, AggregatesLeasesAndHonorsRuntimeGate) {
+    owe::AudioResponseDemand demand;
+    std::vector<bool>        changes;
+    demand.SetCallback([&changes](bool active) {
+        changes.push_back(active);
+    });
+    ASSERT_EQ(changes, (std::vector<bool> { false }));
+
+    auto first  = demand.Acquire();
+    auto second = demand.Acquire();
+    EXPECT_TRUE(demand.Active());
+    EXPECT_EQ(changes, (std::vector<bool> { false, true }));
+    first.reset();
+    EXPECT_TRUE(demand.Active());
+    second.reset();
+    EXPECT_FALSE(demand.Active());
+    EXPECT_EQ(changes, (std::vector<bool> { false, true, false }));
+
+    auto gated = demand.Acquire();
+    demand.SetEnabled(false);
+    demand.SetEnabled(true);
+    gated.reset();
+    EXPECT_EQ(changes, (std::vector<bool> { false, true, false, true, false, true, false }));
+}
+
 TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {
     owe::Scene  scene;
     std::string first;

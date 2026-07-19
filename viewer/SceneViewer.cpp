@@ -7,6 +7,7 @@
 
 import rstd.cppstd;
 import rstd.log;
+import wavsen.audio;
 import wescene.json;
 import wescene.scene_wallpaper;
 import wescene.utils;
@@ -223,6 +224,11 @@ int main(int argc, char** argv) {
     auto* psw = new owe::SceneWallpaper();
     data.psw  = psw;
 
+    std::atomic<bool> audio_response_demand { false };
+    psw->setAudioResponseDemandCallback([&audio_response_demand](bool active) {
+        audio_response_demand.store(active, std::memory_order_release);
+    });
+
     psw->init();
 
     owe::SceneWallpaperConfig config;
@@ -286,7 +292,23 @@ int main(int argc, char** argv) {
     };
     apply_locked_mouse();
 
-    StdinJsonControl stdin_control(args.stdin_json);
+    StdinJsonControl            stdin_control(args.stdin_json);
+    wavsen::audio::AudioCapture audio_capture;
+    auto                        next_audio_update = std::chrono::steady_clock::now();
+    auto                        update_audio      = [&] {
+        if (! audio_response_demand.load(std::memory_order_acquire)) {
+            if (audio_capture.is_inited()) audio_capture.uninit();
+            return;
+        }
+        if (! audio_capture.is_inited() && ! audio_capture.init()) return;
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_audio_update) return;
+        next_audio_update = now + std::chrono::milliseconds(33);
+        wavsen::audio::AudioSpectrum spectrum;
+        if (audio_capture.snapshot(spectrum)) {
+            psw->setAudioSpectrum(spectrum.left, spectrum.right);
+        }
+    };
 
     // Bulk-scan path: WP_COMPILE_ONLY=N waits N seconds after scene load
     // to let the async shader-compile pass drain, then exits. Skips the
@@ -301,6 +323,7 @@ int main(int argc, char** argv) {
             glfwPollEvents();
             stdin_control.poll(*psw);
             apply_locked_mouse();
+            update_audio();
         }
     }
     delete psw;

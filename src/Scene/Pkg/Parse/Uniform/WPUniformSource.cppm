@@ -166,6 +166,9 @@ struct WPUniformFrameInputs {
 
 class WPUniformSceneState {
 public:
+    explicit WPUniformSceneState(std::shared_ptr<AudioResponseDemand> demand = {})
+        : m_audio_demand(std::move(demand)) {}
+
     auto SetNodeState(SceneNodeId, std::shared_ptr<WPUniformNodeState>)
         -> std::shared_ptr<WPUniformNodeState>;
     bool SetEffectProjectionSize(SceneNodeId, rstd::array<f32, 2>);
@@ -184,6 +187,9 @@ public:
     void SetAudioSpectrum(slice<f32>, slice<f32>);
     void Advance(const SceneFrame&);
     void ApplyUserProperty(std::string_view, const Json&);
+    auto AcquireAudioResponse() const -> std::shared_ptr<void> {
+        return m_audio_demand ? m_audio_demand->Acquire() : std::shared_ptr<void> {};
+    }
 
 private:
     static u64 Key(SceneNodeId node) {
@@ -192,15 +198,16 @@ private:
 
     rstd::collections::HashMap<u64, std::shared_ptr<WPUniformNodeState>> m_nodes;
     rstd::collections::HashMap<const SceneNode*, std::shared_ptr<WPUniformNodeState>>
-                            m_nodes_by_address;
-    WPUniformFrameInputs    m_inputs;
-    WPUniformCameraParallax m_camera_parallax;
-    WPUniformCameraShake    m_camera_shake;
-    rstd::array<f32, 2>     m_ortho { 1920.0f, 1080.0f };
-    rstd::array<f32, 2>     m_pointer_input { 0.5f, 0.5f };
-    f32                     m_pointer_delay { 0.0f };
-    f64                     m_pointer_delayed_time { 0.0 };
-    rstd::time::Instant     m_last_pointer_input_time { rstd::time::Instant::now() };
+                                         m_nodes_by_address;
+    WPUniformFrameInputs                 m_inputs;
+    WPUniformCameraParallax              m_camera_parallax;
+    WPUniformCameraShake                 m_camera_shake;
+    rstd::array<f32, 2>                  m_ortho { 1920.0f, 1080.0f };
+    rstd::array<f32, 2>                  m_pointer_input { 0.5f, 0.5f };
+    std::shared_ptr<AudioResponseDemand> m_audio_demand;
+    f32                                  m_pointer_delay { 0.0f };
+    f64                                  m_pointer_delayed_time { 0.0 };
+    rstd::time::Instant                  m_last_pointer_input_time { rstd::time::Instant::now() };
 };
 
 class WPUniformRuntimeInput {
@@ -242,6 +249,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
     std::shared_ptr<WPUniformSceneState> m_state;
@@ -257,6 +265,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
     std::shared_ptr<WPUniformSceneState> m_state;
@@ -271,6 +280,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void>;
 
 private:
     std::shared_ptr<WPUniformSceneState> m_state;
@@ -284,6 +294,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
     rstd::sync::Arc<SceneNode> m_node;
@@ -297,6 +308,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
     Vec<ref<SceneLight>> m_lights;
@@ -308,6 +320,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 };
 
 class WPPuppetUniformSource {
@@ -319,6 +332,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
     std::shared_ptr<WPPuppetLayer> m_layer;

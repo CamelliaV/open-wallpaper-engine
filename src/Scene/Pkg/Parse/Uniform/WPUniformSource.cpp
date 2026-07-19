@@ -501,6 +501,10 @@ auto WPAudioUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const
     return context->Frame()->revision;
 }
 
+auto WPAudioUniformSource::AcquireBindingLease() const -> std::shared_ptr<void> {
+    return m_state ? m_state->AcquireAudioResponse() : std::shared_ptr<void> {};
+}
+
 auto WPAudioUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
                                     mut_ref<dyn<UniformValueSink>> sink) const
     -> Result<empty, UniformError> {

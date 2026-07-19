@@ -156,6 +156,7 @@ public:
     // Push one frame's worth of host state into the runtime. The next
     // FieldScript::Update call will see these values via `engine.*`.
     void SetFrameInputs(const FrameInputs& fi);
+    void SetAudioResponseDemand(std::shared_ptr<AudioResponseDemand> demand);
 
     // Patch one Wallpaper Engine user property into engine.userProperties.
     // `property` should be the descriptor object shape used by project.json
@@ -253,7 +254,7 @@ std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::
 // (Scene::script_scene). Ticked once per frame by `TickSceneScripts`.
 class ScriptScene : NoCopy, NoMove {
 public:
-    ScriptScene();
+    explicit ScriptScene(std::shared_ptr<AudioResponseDemand> demand = {});
     ~ScriptScene();
 
     JsRuntime& runtime() noexcept;

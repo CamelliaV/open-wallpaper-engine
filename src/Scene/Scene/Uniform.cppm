@@ -215,10 +215,13 @@ struct UniformSource {
                       mut_ref<dyn<UniformValueSink>> sink) const -> Result<empty, UniformError> {
             return rstd::trait_call<2>(this, context, sink);
         }
+        auto AcquireBindingLease() const -> std::shared_ptr<void> {
+            return rstd::trait_call<3>(this);
+        }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Describe, &T::Version, &T::Evaluate>;
+    using Funcs = TraitFuncs<&T::Describe, &T::Version, &T::Evaluate, &T::AcquireBindingLease>;
 };
 
 struct UniformSourceRegistrar {

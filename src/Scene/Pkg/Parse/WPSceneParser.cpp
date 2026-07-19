@@ -371,7 +371,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
 
 script::ScriptScene& EnsureScriptScene(ParseContext& context) {
     if (! context.script_scene) {
-        context.script_scene = std::make_unique<script::ScriptScene>();
+        context.script_scene = std::make_unique<script::ScriptScene>(context.audio_response_demand);
         auto layers          = context.puppet_layers;
         context.script_scene->runtime().SetBoneResolvers(
             [layers](SceneNode* node, std::string_view name) -> uint32_t {
@@ -2056,11 +2056,12 @@ void ParseCameraObj(ParseContext& context, wpscene::CameraObject& cam) {
 
 void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetadata& sc,
                  std::array<i32, 2> ortho_extent) {
-    context.scene            = std::make_shared<Scene>();
-    context.vfs              = &vfs;
-    auto& scene              = *context.scene;
-    scene.imageParser        = std::make_unique<WPTexImageParser>(&vfs);
-    scene.paritileSys->gener = std::make_unique<WPParticleRawGener>();
+    context.scene                      = std::make_shared<Scene>();
+    context.scene->audioResponseDemand = context.audio_response_demand;
+    context.vfs                        = &vfs;
+    auto& scene                        = *context.scene;
+    scene.imageParser                  = std::make_unique<WPTexImageParser>(&vfs);
+    scene.paritileSys->gener           = std::make_unique<WPParticleRawGener>();
     GenCardMesh(scene.default_effect_mesh, { 2.0f, 2.0f });
 
     scene.clearColor = array_cast<float>(sc.general.clearcolor);
@@ -4201,8 +4202,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         rebuild_compose(layouter->Metrics());
     };
 
-    if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
-    context.script_scene->runtime().RegisterTextAlignSetters(
+    EnsureScriptScene(context).runtime().RegisterTextAlignSetters(
         compose_node.as_ptr(),
         anchor_state->horizontal,
         anchor_state->vertical,
@@ -4235,9 +4235,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     };
     if (has_text_user) context.scene->RegisterUserTextBinding(obj.text_user.name, set_text);
     if (has_text_script) {
-        const auto& sb = text_binding_it->second;
-        if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
-        auto&       ss  = *context.script_scene;
+        const auto& sb  = text_binding_it->second;
+        auto&       ss  = EnsureScriptScene(context);
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
         auto*       fs  = ss.runtime().MakeFieldScript(sb.source,
                                                        sha,
@@ -4255,9 +4254,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         }
     }
     if (has_pointsize_script) {
-        const auto& sb = pointsize_binding_it->second;
-        if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
-        auto&       ss  = *context.script_scene;
+        const auto& sb  = pointsize_binding_it->second;
+        auto&       ss  = EnsureScriptScene(context);
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
         auto*       fs  = ss.runtime().MakeFieldScript(sb.source,
                                                        sha,
@@ -4281,11 +4279,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // field-bound script's `thisLayer` resolves to (WireFieldScripts at
     // line above).
     if (wants_dynamic_text) {
-        if (! context.script_scene) context.script_scene = std::make_unique<script::ScriptScene>();
-        context.script_scene->runtime().RegisterTextSetter(compose_node.as_ptr(),
-                                                           [set_text](std::string_view s) {
-                                                               set_text(s);
-                                                           });
+        EnsureScriptScene(context).runtime().RegisterTextSetter(compose_node.as_ptr(),
+                                                                [set_text](std::string_view s) {
+                                                                    set_text(s);
+                                                                });
     }
 
     std::vector<rstd::sync::Arc<SceneNode>> text_before_nodes;

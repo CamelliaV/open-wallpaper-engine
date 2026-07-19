@@ -214,6 +214,7 @@ public:
     auto Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
                   rstd::mut_ref<rstd::dyn<UniformValueSink>>) const
         -> rstd::Result<rstd::empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
     std::shared_ptr<TextUniformState> m_state;
