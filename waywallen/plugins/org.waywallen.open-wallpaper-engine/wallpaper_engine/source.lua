@@ -70,4 +70,19 @@ function M.scan(ctx)
     return entries
 end
 
+function M.remove(ctx, item)
+    local root = item.library_root
+    local id = item.external_id
+    local rel = item.relative_path
+    if not root or root == "" or not id or id == "" or not rel then
+        return
+    end
+    -- Only downloaded items sit directly under <library_root>/<id>; scanned Steam
+    -- items nest under steamapps/, so never delete those off the user's disk.
+    if rel ~= id and rel:sub(1, #id + 1) ~= id .. "/" then
+        return
+    end
+    ctx.remove_dir(root .. "/" .. id)
+end
+
 return M
