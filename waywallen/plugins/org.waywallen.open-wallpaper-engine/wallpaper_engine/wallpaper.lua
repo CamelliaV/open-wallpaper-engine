@@ -99,11 +99,60 @@ function M.properties(entry, ctx)
     return ctx.json_encode(props)
 end
 
+local function data_home(ctx)
+    local xdg = ctx.env("XDG_DATA_HOME")
+    if xdg and xdg ~= "" then
+        return xdg
+    end
+    local home = ctx.env("HOME")
+    if home and home ~= "" then
+        return home .. "/.local/share"
+    end
+    return nil
+end
+
+-- Downloaded items have no Steam library_root, so fall back to a configured or
+-- daemon-managed assets tree, then any local Steam install.
+local function we_assets(ctx)
+    local configured = ctx.plugin_config and ctx.plugin_config("wallpaper_engine_assets")
+    if configured and configured ~= "" and ctx.file_exists(configured) then
+        return configured
+    end
+    local data = data_home(ctx)
+    if data then
+        local managed = data .. "/waywallen/wallpaper_engine/assets"
+        if ctx.file_exists(managed) then
+            return managed
+        end
+    end
+    local home = ctx.env("HOME") or ""
+    local roots = {
+        home .. "/.local/share/Steam",
+        home .. "/.steam/steam",
+        home .. "/.steam/root",
+        home .. "/.var/app/com.valvesoftware.Steam/data/Steam",
+    }
+    for _, root in ipairs(roots) do
+        local p = root .. project_util.ASSETS_REL
+        if ctx.file_exists(p) then
+            return p
+        end
+    end
+    return nil
+end
+
 function M.extras(entry, ctx)
     local out = { path = entry.resource }
-    if entry.wp_type == "scene" and entry.library_root then
-        local assets = entry.library_root .. project_util.ASSETS_REL
-        if ctx.file_exists(assets) then
+    if entry.wp_type == "scene" then
+        local assets
+        if entry.library_root and entry.library_root ~= "" then
+            local candidate = entry.library_root .. project_util.ASSETS_REL
+            if ctx.file_exists(candidate) then
+                assets = candidate
+            end
+        end
+        assets = assets or we_assets(ctx)
+        if assets then
             out.assets = assets
         end
     end

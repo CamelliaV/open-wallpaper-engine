@@ -57,6 +57,23 @@ function M.classify(ctx, dir, project, project_type)
     return nil, nil
 end
 
+-- Strip the item-directory prefix so resource/preview come back relative to it,
+-- the form the daemon's resolve upsert expects.
+function M.relpath(dir, abs)
+    if not abs then
+        return nil
+    end
+    local d = dir:gsub("/+$", "")
+    if abs == d then
+        return ""
+    end
+    local prefix = d .. "/"
+    if abs:sub(1, #prefix) == prefix then
+        return abs:sub(#prefix + 1)
+    end
+    return abs
+end
+
 function M.project_dir_of(entry)
     if entry.wp_type == "web" then return entry.resource end
     return entry.resource and entry.resource:match("^(.*)/[^/]+$") or nil

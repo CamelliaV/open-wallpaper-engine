@@ -197,6 +197,9 @@ install(FILES ${_OWE_PLUGIN_SRC}/main.lua
     DESTINATION ${_OWE_PLUGIN_DIR}
 )
 install(FILES
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/api.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/discover.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/map.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/project.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/source.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/wallpaper.lua
@@ -210,6 +213,9 @@ install(FILES
 set(_OWE_FILES
     main.lua
     plugin.toml
+    wallpaper_engine/api.lua
+    wallpaper_engine/discover.lua
+    wallpaper_engine/map.lua
     wallpaper_engine/project.lua
     wallpaper_engine/source.lua
     wallpaper_engine/wallpaper.lua
