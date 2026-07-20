@@ -2,6 +2,9 @@ local source = import("wallpaper_engine.source")
 local wallpaper = import("wallpaper_engine.wallpaper")
 local discover = import("wallpaper_engine.discover")
 local api = import("wallpaper_engine.api")
+local auth = import("wallpaper_engine.auth")
+local session = import("wallpaper_engine.session")
+local subscription = import("wallpaper_engine.subscription")
 
 local M = {}
 
@@ -22,8 +25,23 @@ function M.info()
             { id = "steam_account", label = "Status", group = "Steam account", order = 20 },
         },
         actions = {
-            { id = "steam_sign_in", label = "Sign in to Steam", group = "Steam account", order = 21 },
-            { id = "steam_sign_out", label = "Sign out", group = "Steam account", order = 22 },
+            {
+                id = "steam_sign_in",
+                kind = "qr_login",
+                label = "Sign in to Steam",
+                group = "Steam account",
+                order = 21,
+            },
+            {
+                id = "steam_sign_out",
+                kind = "invoke",
+                label = "Sign out",
+                group = "Steam account",
+                order = 22,
+            },
+        },
+        state_migrations = {
+            { schema_id = "waywallen-steam-session-v1", file = "steam-session.json" },
         },
         capabilities = {
             source = {
@@ -41,8 +59,10 @@ function M.info()
             discover = {
                 search = true,
                 details = true,
-                download = true,
-                resolve = true,
+                subscription = true,
+                remote_hint =
+                    "Steam downloads subscribed items. Refresh your configured Steam source " ..
+                    "library when you want waywallen to discover newly downloaded wallpapers.",
                 sorts = {
                     { key = "trend_day", label = "Trending today" },
                     { key = "trend_week", label = "Trending this week" },
@@ -67,5 +87,49 @@ end
 M.source = source
 M.wallpaper = wallpaper
 M.discover = discover
+M.subscription = subscription
+
+M.lifecycle = {}
+function M.lifecycle.load(blob)
+    session.load(blob)
+end
+function M.lifecycle.save()
+    return session.save()
+end
+function M.lifecycle.check(ctx)
+    return session.check(ctx)
+end
+function M.lifecycle.migrate(schema_id, raw)
+    return session.migrate(schema_id, raw)
+end
+
+M.actions = {}
+function M.actions.status(ctx)
+    local checked = session.current_check()
+    local active = checked.state == "signed_in"
+    return {
+        status = { steam_account = checked.display_value or "" },
+        actions = {
+            steam_sign_in = { visible = not active, enabled = not active },
+            steam_sign_out = { visible = session.signed_in(), enabled = true },
+        },
+    }
+end
+function M.actions.invoke(ctx, action_id)
+    if action_id ~= "steam_sign_out" then
+        error("unsupported Steam action")
+    end
+    session.sign_out()
+end
+
+M.qrlogin = {}
+function M.qrlogin.begin(ctx, action_id)
+    if action_id ~= "steam_sign_in" then
+        error("unsupported Steam QR action")
+    end
+    return auth.begin(ctx)
+end
+M.qrlogin.poll = auth.poll
+M.qrlogin.cancel = auth.cancel
 
 return M

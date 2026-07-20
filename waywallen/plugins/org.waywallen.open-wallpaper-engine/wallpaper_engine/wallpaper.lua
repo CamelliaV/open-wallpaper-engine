@@ -13,16 +13,16 @@ local function load_locale(ctx, library_root)
         return _locale_cache[library_root] or nil
     end
     local path = library_root .. LOCALE_REL
-    if not ctx.file_exists(path) then
+    if not ctx.fs.exists(path) then
         _locale_cache[library_root] = false
         return nil
     end
-    local content = ctx.read_file(path)
+    local content = ctx.fs.read(path)
     if not content then
         _locale_cache[library_root] = false
         return nil
     end
-    local parsed = ctx.json_parse(content)
+    local parsed = ctx.json.parse(content)
     if type(parsed) ~= "table" then
         _locale_cache[library_root] = false
         return nil
@@ -72,10 +72,10 @@ function M.properties(entry, ctx)
     local dir = project_util.project_dir_of(entry)
     if not dir then return nil end
     local proj = dir .. "/project.json"
-    if not ctx.file_exists(proj) then return nil end
-    local content = ctx.read_file(proj)
+    if not ctx.fs.exists(proj) then return nil end
+    local content = ctx.fs.read(proj)
     if not content then return nil end
-    local parsed = ctx.json_parse(content)
+    local parsed = ctx.json.parse(content)
     if not parsed or type(parsed) ~= "table" then return nil end
     local props = parsed.general and parsed.general.properties or {}
     if type(props) ~= "table" then props = {} end
@@ -96,34 +96,13 @@ function M.properties(entry, ctx)
     prefix_property_titles(props)
     add_predefined_properties(entry, props)
 
-    return ctx.json_encode(props)
+    return ctx.json.encode(props)
 end
 
-local function data_home(ctx)
-    local xdg = ctx.env("XDG_DATA_HOME")
-    if xdg and xdg ~= "" then
-        return xdg
-    end
-    local home = ctx.env("HOME")
-    if home and home ~= "" then
-        return home .. "/.local/share"
-    end
-    return nil
-end
-
--- Downloaded items have no Steam library_root, so fall back to a configured or
--- daemon-managed assets tree, then any local Steam install.
 local function we_assets(ctx)
-    local configured = ctx.plugin_config and ctx.plugin_config("wallpaper_engine_assets")
-    if configured and configured ~= "" and ctx.file_exists(configured) then
+    local configured = ctx.config.get("wallpaper_engine_assets")
+    if configured and configured ~= "" and ctx.fs.exists(configured) then
         return configured
-    end
-    local data = data_home(ctx)
-    if data then
-        local managed = data .. "/waywallen/wallpaper_engine/assets"
-        if ctx.file_exists(managed) then
-            return managed
-        end
     end
     local home = ctx.env("HOME") or ""
     local roots = {
@@ -134,7 +113,7 @@ local function we_assets(ctx)
     }
     for _, root in ipairs(roots) do
         local p = root .. project_util.ASSETS_REL
-        if ctx.file_exists(p) then
+        if ctx.fs.exists(p) then
             return p
         end
     end
@@ -147,7 +126,7 @@ function M.extras(entry, ctx)
         local assets
         if entry.library_root and entry.library_root ~= "" then
             local candidate = entry.library_root .. project_util.ASSETS_REL
-            if ctx.file_exists(candidate) then
+            if ctx.fs.exists(candidate) then
                 assets = candidate
             end
         end

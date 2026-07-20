@@ -70,17 +70,4 @@ function M.details(item)
     }
 end
 
-function M.download(item)
-    return {
-        provider = "steam_workshop",
-        wp_type = wp_type(item),
-        title = item.title or "",
-        preview_url = preview_url(item),
-        description = item.description or item.short_description or "",
-        tags = tag_names(item),
-        external_id = tostring(item.publishedfileid or ""),
-        size = tonumber(item.file_size),
-    }
-end
-
 return M

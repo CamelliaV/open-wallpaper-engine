@@ -12,8 +12,8 @@ function M.auto_detect(ctx)
     }
     local found, seen = {}, {}
     for _, root in ipairs(candidates) do
-        if not seen[root] and (ctx.file_exists(root .. project_util.WORKSHOP)
-            or ctx.file_exists(root .. project_util.PROJECTS_REL)) then
+        if not seen[root] and (ctx.fs.exists(root .. project_util.WORKSHOP)
+            or ctx.fs.exists(root .. project_util.PROJECTS_REL)) then
             seen[root] = true
             table.insert(found, root)
         end
@@ -22,14 +22,14 @@ function M.auto_detect(ctx)
 end
 
 local function scan_container(ctx, steam_root, container, name_prefix, entries)
-    if not ctx.file_exists(container) then return end
-    for _, dir in ipairs(ctx.list_dirs(container)) do
-        local id = ctx.basename(dir) or dir
+    if not ctx.fs.exists(container) then return end
+    for _, dir in ipairs(ctx.fs.list_dirs(container)) do
+        local id = ctx.fs.basename(dir) or dir
         local project = nil
         local project_path = dir .. "/project.json"
-        if ctx.file_exists(project_path) then
-            local content = ctx.read_file(project_path)
-            if content then project = ctx.json_parse(content) end
+        if ctx.fs.exists(project_path) then
+            local content = ctx.fs.read(project_path)
+            if content then project = ctx.json.parse(content) end
         end
         local project_type = project and project.type and string.lower(project.type) or nil
 
@@ -56,7 +56,7 @@ function M.scan(ctx)
 
     for _, steam_root in ipairs(ctx.libraries()) do
         local workshop = steam_root .. project_util.WORKSHOP
-        if not ctx.file_exists(workshop) then
+        if not ctx.fs.exists(workshop) then
             ctx.log("wallpaper_engine: no WE workshop under " .. steam_root)
         else
             scan_container(ctx, steam_root, workshop, "Workshop ", entries)
@@ -82,7 +82,7 @@ function M.remove(ctx, item)
     if rel ~= id and rel:sub(1, #id + 1) ~= id .. "/" then
         return
     end
-    ctx.remove_dir(root .. "/" .. id)
+    ctx.fs.remove_dir(root .. "/" .. id)
 end
 
 return M

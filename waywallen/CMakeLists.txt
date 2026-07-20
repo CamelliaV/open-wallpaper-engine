@@ -2,8 +2,8 @@ include(FetchContent)
 
 find_package(waywallen-bridge REQUIRED)
 
-# Single installable plugin providing the scene renderer + WE source,
-# plus the web renderer when BUILD_WEWEB.
+# Single installable plugin providing the scene renderer, WE source and Steam
+# Workshop subscription, plus the web renderer when BUILD_WEWEB.
 if(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT)
     set(_OWE_PLUGIN_DIR .)
     set(OWE_WESCENE_BIN bin/waywallen-wescene-renderer)
@@ -197,10 +197,13 @@ install(FILES ${_OWE_PLUGIN_SRC}/main.lua
 )
 install(FILES
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/api.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/auth.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/discover.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/map.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/project.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/session.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/source.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/subscription.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/wallpaper.lua
     DESTINATION ${_OWE_PLUGIN_DIR}/wallpaper_engine
 )
@@ -213,10 +216,13 @@ set(_OWE_FILES
     main.lua
     plugin.toml
     wallpaper_engine/api.lua
+    wallpaper_engine/auth.lua
     wallpaper_engine/discover.lua
     wallpaper_engine/map.lua
     wallpaper_engine/project.lua
+    wallpaper_engine/session.lua
     wallpaper_engine/source.lua
+    wallpaper_engine/subscription.lua
     wallpaper_engine/wallpaper.lua
     ${OWE_WESCENE_BIN}
 )

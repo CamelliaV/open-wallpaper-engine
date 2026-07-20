@@ -1,4 +1,5 @@
 local M = {}
+local session = import("wallpaper_engine.session")
 
 M.APPID = "431960"
 local QUERYFILES = "https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/"
@@ -69,17 +70,6 @@ function M.fetch_tags(ctx)
     return tags
 end
 
-local function access_token(ctx)
-    local token = ctx.steam_access_token and ctx.steam_access_token()
-    if not token or token == "" then
-        error(
-            "Sign in to Steam to browse the Workshop. Open the Steam Workshop "
-            .. "settings and use Sign in to Steam."
-        )
-    end
-    return token
-end
-
 function M.search(ctx, params)
     local sort = SORTS[params.sort] or SORTS.trend_week
 
@@ -99,7 +89,7 @@ function M.search(ctx, params)
     end
 
     local query = {
-        access_token = access_token(ctx),
+        access_token = session.ensure_access_token(ctx),
         appid = M.APPID,
         query_type = tostring(sort.query_type),
         page = tostring(params.page or 1),

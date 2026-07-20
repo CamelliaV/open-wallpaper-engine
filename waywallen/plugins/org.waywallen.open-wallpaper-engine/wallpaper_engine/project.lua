@@ -21,26 +21,26 @@ local SCENE_BASE_BY_FILE = {
 function M.pick_preview(ctx, dir, project)
     if project and project.preview then
         local p = dir .. "/" .. project.preview
-        if ctx.file_exists(p) then return p end
+        if ctx.fs.exists(p) then return p end
     end
     for _, p in ipairs({ dir .. "/preview.jpg", dir .. "/preview.png", dir .. "/preview.gif" }) do
-        if ctx.file_exists(p) then return p end
+        if ctx.fs.exists(p) then return p end
     end
     return nil
 end
 
 function M.classify(ctx, dir, project, project_type)
     if project_type == "web" then
-        if ctx.file_exists(dir .. "/project.json") then
+        if ctx.fs.exists(dir .. "/project.json") then
             return "web", dir
         end
     elseif project_type == "video" then
         local file = project and project.file
-        if file and ctx.file_exists(dir .. "/" .. file) then
+        if file and ctx.fs.exists(dir .. "/" .. file) then
             return "video", dir .. "/" .. file
         end
-        for _, path in ipairs(ctx.glob(dir .. "/*.*")) do
-            local ext = ctx.extension(path)
+        for _, path in ipairs(ctx.fs.glob(dir .. "/*.*")) do
+            local ext = ctx.fs.extension(path)
             if ext and VIDEO_EXTS[string.lower(ext)] then
                 return "video", path
             end
@@ -48,9 +48,9 @@ function M.classify(ctx, dir, project, project_type)
     else
         local file = project and project.file
         local base = SCENE_BASE_BY_FILE[file] or "scene"
-        if ctx.file_exists(dir .. "/" .. base .. ".pkg") then
+        if ctx.fs.exists(dir .. "/" .. base .. ".pkg") then
             return "scene", dir .. "/" .. base .. ".pkg"
-        elseif ctx.file_exists(dir .. "/" .. base .. ".json") then
+        elseif ctx.fs.exists(dir .. "/" .. base .. ".json") then
             return "scene", dir .. "/" .. base .. ".json"
         end
     end
