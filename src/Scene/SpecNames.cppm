@@ -88,11 +88,13 @@ inline constexpr std::string_view WE_CB_SKINNING { "SKINNING" };
 inline constexpr std::string_view WE_CB_POINTEMITTER { "POINTEMITTER" };
 inline constexpr std::string_view WE_CB_LINEEMITTER { "LINEEMITTER" };
 inline constexpr std::string_view WE_PRENDER_ROPE { "PRENDER_ROPE" };
+inline constexpr std::string_view WE_PRENDER_ROPE_TRAIL { "PRENDER_ROPE_TRAIL" };
 
 // Compile-time (name, type) pair for declarative attribute layouts.
 struct VertexAttrSpec {
     std::string_view name;
     VertexType       type;
+    bool             padding { true };
 };
 
 namespace VAttr
@@ -106,10 +108,10 @@ inline constexpr VertexAttrSpec TexCoordVec4 { WE_IN_TEXCOORDVEC4, VertexType::F
 inline constexpr VertexAttrSpec TexCoordVec4C1 { WE_IN_TEXCOORDVEC4C1, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4C2 { WE_IN_TEXCOORDVEC4C2, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec TexCoordVec4C3 { WE_IN_TEXCOORDVEC4C3, VertexType::FLOAT4 };
-inline constexpr VertexAttrSpec TexCoordVec3C2 { WE_IN_TEXCOORDVEC3C2, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordVec3C2 { WE_IN_TEXCOORDVEC3C2, VertexType::FLOAT3, false };
 inline constexpr VertexAttrSpec TexCoordC2 { WE_IN_TEXCOORDC2, VertexType::FLOAT2 };
-inline constexpr VertexAttrSpec TexCoordC3 { WE_IN_TEXCOORDC3, VertexType::FLOAT4 };
-inline constexpr VertexAttrSpec TexCoordC4 { WE_IN_TEXCOORDC4, VertexType::FLOAT4 };
+inline constexpr VertexAttrSpec TexCoordC3 { WE_IN_TEXCOORDC3, VertexType::FLOAT2, false };
+inline constexpr VertexAttrSpec TexCoordC4 { WE_IN_TEXCOORDC4, VertexType::FLOAT2, false };
 inline constexpr VertexAttrSpec Color { WE_IN_COLOR, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec BlendIndices { WE_IN_BLENDINDICES, VertexType::UINT4 };
 inline constexpr VertexAttrSpec BlendWeights { WE_IN_BLENDWEIGHTS, VertexType::FLOAT4 };

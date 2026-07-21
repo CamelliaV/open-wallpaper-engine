@@ -41,9 +41,7 @@ public:
     float       length { 0.05f };
     float       maxlength { 10.0f };
     float       subdivision { 3.0f };
-    // Trail history depth per rope-head particle (= number of trail nodes).
-    // Only consumed by rope/trail renderers; default matches WE behaviour.
-    i32 segments { 16 };
+    i32         segments { 4 };
 };
 
 class Initializer {
@@ -159,8 +157,9 @@ public:
     // controlpoint{0..7} carry "x y z" triplet strings (per-particle CP
     // overrides); controlpointangle{0..7} carry euler triplets in the same
     // string format. Captured into static arrays of array<float,3>.
-    std::array<std::array<float, 3>, 8> controlpoint {};
-    std::array<std::array<float, 3>, 8> controlpointangle {};
+    std::array<std::array<float, 3>, 8>  controlpoint {};
+    std::array<std::array<float, 3>, 8>  controlpointangle {};
+    std::shared_ptr<const FieldBindings> field_bindings;
 
     // field name (e.g. "alpha", "size", "color", "colorn", "lifetime",
     // "rate", "speed", "count", "brightness") -> user-property key when the

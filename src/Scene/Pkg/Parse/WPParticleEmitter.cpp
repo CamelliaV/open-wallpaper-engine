@@ -29,7 +29,7 @@ auto ResolveEmitCount(f64& timer, float speed, u32 instantaneous, bool one_per_f
     if (instantaneous > u32() && empty) return instantaneous;
     if (speed <= 0.0f) return u32();
     auto count = EmitCount(timer, speed);
-    return one_per_frame ? u32(1) : count;
+    return one_per_frame && count > u32(1) ? u32(1) : count;
 }
 
 auto EmitDuration(float speed) noexcept -> f64 {

@@ -298,7 +298,7 @@ inline std::vector<SceneVertexArray::SceneVertexAttribute>
 MakeAttrSet(std::span<const VertexAttrSpec> specs) {
     std::vector<SceneVertexArray::SceneVertexAttribute> out;
     out.reserve(specs.size());
-    for (auto& s : specs) out.push_back({ std::string(s.name), s.type });
+    for (auto& s : specs) out.push_back({ std::string(s.name), s.type, s.padding });
     return out;
 }
 

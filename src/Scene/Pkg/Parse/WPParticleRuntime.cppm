@@ -26,10 +26,12 @@ enum class WPParticleAnimationMode
 };
 
 struct WPParticleControlpoint {
-    bool            link_mouse { false };
-    bool            worldspace { false };
-    Eigen::Vector3d base_offset { 0.0, 0.0, 0.0 };
-    Eigen::Vector3d offset { 0.0, 0.0, 0.0 };
+    bool                        link_mouse { false };
+    bool                        worldspace { false };
+    Eigen::Vector3d             base_offset { 0.0, 0.0, 0.0 };
+    Eigen::Vector3d             offset { 0.0, 0.0, 0.0 };
+    Eigen::Matrix3d             rotation { Eigen::Matrix3d::Identity() };
+    Option<SceneAnimationCurve> angle_curve;
 };
 
 struct WPParticleAudioResponse {
@@ -195,8 +197,10 @@ struct WPOscillationAttributes {
 };
 
 struct WPTrailSlotState {
-    usize head {};
-    usize len {};
+    usize           head {};
+    usize           len {};
+    Eigen::Vector3f previous_position { Eigen::Vector3f::Zero() };
+    bool            has_previous_position { false };
 };
 
 struct WPTrailHistoryAttribute {
@@ -219,6 +223,7 @@ struct WPTrailHistoryAttribute {
     void Push(particle::ParticleSlot slot, const Eigen::Vector3f& position);
     auto At(particle::ParticleSlot slot, usize logical_index) const -> Eigen::Vector3f;
     auto State(particle::ParticleSlot slot) const -> WPTrailSlotState;
+    void SetPreviousPosition(particle::ParticleSlot slot, const Eigen::Vector3f& position);
     auto SampleCapacity() const noexcept -> usize { return m_sample_capacity; }
 
 private:
@@ -367,11 +372,13 @@ struct WPParticleInstanceState {
 
     bool death { false };
     bool no_live_particle { false };
+    f64  trail_sample_accumulator {};
 
     void Reset() {
-        bounded          = {};
-        death            = false;
-        no_live_particle = false;
+        bounded                  = {};
+        death                    = false;
+        no_live_particle         = false;
+        trail_sample_accumulator = f64();
     }
 };
 
@@ -393,8 +400,8 @@ public:
 
     WPParticleSubSystem(Scene&, std::shared_ptr<SceneMesh>, u32 max_count, f64 rate,
                         u32 max_instance_count, f64 probability, SpawnType, WPParticleAnimationSpec,
-                        WPParticleFollowAnchor = {}, u32 trail_length = {}, f64 start_time = {},
-                        bool world_space = false);
+                        WPParticleFollowAnchor = {}, u32 trail_length = {}, f64 trail_duration = {},
+                        f64 start_time = {}, bool world_space = false);
     ~WPParticleSubSystem();
 
     void Finalize();
@@ -418,6 +425,12 @@ public:
     }
     auto ControlpointsMut() noexcept -> mut_ref<WPParticleControlpoint[]> {
         return m_controlpoints.as_mut_slice();
+    }
+    void SetInstanceOverride(std::shared_ptr<const wpscene::ParticleInstanceoverride> value) {
+        m_instance_override = rstd::move(value);
+    }
+    void SetControlpointAngleCurve(usize index, SceneAnimationCurve curve) {
+        m_controlpoints[index].angle_curve = Some(rstd::move(curve));
     }
     void SetOwnerNode(SceneNode* node) noexcept { m_owner_node = node; }
 
@@ -460,6 +473,7 @@ private:
     rstd::vec::Vec<WPParticleInstanceState>                         m_instance_states;
     rstd::vec::Vec<Box<WPParticleSubSystem>>                        m_children;
     rstd::array<WPParticleControlpoint, 8>                          m_controlpoints;
+    std::shared_ptr<const wpscene::ParticleInstanceoverride>        m_instance_override;
     WPParticleFrame                                                 m_frame;
     WPParticleAnimationSpec                                         m_animation_spec;
     WPParticleFollowAnchor                                          m_follow_anchor;
@@ -473,6 +487,7 @@ private:
     f64                                                             m_probability { 1.0 };
     SpawnType m_spawn_type { SpawnType::STATIC };
     u32       m_trail_length {};
+    f64       m_trail_sample_interval {};
 };
 
 class WPParticleRuntime {

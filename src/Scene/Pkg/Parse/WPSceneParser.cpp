@@ -1018,7 +1018,7 @@ std::array<float, 2> ImageEffectTargetSize(const ParseContext&         context,
 }
 
 void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
-                         bool thick_format) {
+                         bool thick_format, bool trail_renderer) {
     (void)particle;
     std::vector<VertexAttrSpec> specs {
         VAttr::PositionVec4,
@@ -1034,12 +1034,14 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
     specs.push_back(VAttr::Color);
     mesh.SetPrimitive(MeshPrimitive::POINT);
     mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), usize(count)));
-    mesh.GetVertexArray(usize(0)).SetOption(WE_PRENDER_ROPE, true);
+    mesh.GetVertexArray(usize(0)).SetOption(
+        trail_renderer ? WE_PRENDER_ROPE_TRAIL : WE_PRENDER_ROPE, true);
     mesh.GetVertexArray(usize(0)).SetOption(WE_CB_THICK_FORMAT, thick_format);
 }
 
 struct ParticleRenderDesc {
     bool rope { false };
+    bool rope_trail { false };
     bool trail { false };
     bool geometry_shader { false };
 };
@@ -1047,8 +1049,9 @@ struct ParticleRenderDesc {
 ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render) {
     ParticleRenderDesc desc;
     desc.rope            = render.name == "rope";
+    desc.rope_trail      = render.name == "ropetrail";
     desc.trail           = send_with(render.name, "trail");
-    desc.geometry_shader = desc.rope || render.name == "sprite" || desc.trail;
+    desc.geometry_shader = desc.rope || desc.rope_trail || render.name == "sprite" || desc.trail;
     return desc;
 }
 
@@ -1062,7 +1065,8 @@ WPParticleAnimationMode ToAnimMode(const std::string& str) {
     }
 }
 
-void LoadControlPoint(WPParticleSubSystem& system, const wpscene::Particle& particle) {
+void LoadControlPoint(WPParticleSubSystem& system, const wpscene::Particle& particle,
+                      std::shared_ptr<const wpscene::ParticleInstanceoverride> instance_override) {
     auto points = system.ControlpointsMut();
     auto count  = rstd::cmp::min(points.len(), usize(particle.controlpoints.size()));
     for (usize index {}; index < count; ++index) {
@@ -1075,6 +1079,14 @@ void LoadControlPoint(WPParticleSubSystem& system, const wpscene::Particle& part
                                        .flags[wpscene::ParticleControlpoint::FlagEnum::link_mouse];
         points[index].worldspace = particle.controlpoints[source_index]
                                        .flags[wpscene::ParticleControlpoint::FlagEnum::worldspace];
+    }
+    system.SetInstanceOverride(instance_override);
+    if (! instance_override->field_bindings) return;
+    for (usize index {}; index < points.len(); ++index) {
+        auto field = std::string("controlpointangle") + std::to_string(index.to_primitive());
+        auto curve = instance_override->field_bindings->animations.find(field);
+        if (curve != instance_override->field_bindings->animations.end())
+            system.SetControlpointAngleCurve(index, ToSceneAnimationCurve(curve->second));
     }
 }
 void LoadInitializer(WPParticleSubSystem& system, const wpscene::Particle& particle,
@@ -3060,12 +3072,14 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     auto& particle_obj = *p_particle_obj;
     auto& vfs          = *context.vfs;
 
-    auto wppartRenderer = particle_obj.renderers.at(0);
-    auto render_desc    = DescribeParticleRender(wppartRenderer);
-    bool render_rope    = render_desc.rope;
-    bool hastrail       = render_desc.trail;
+    auto wppartRenderer    = particle_obj.renderers.at(0);
+    auto render_desc       = DescribeParticleRender(wppartRenderer);
+    bool render_rope       = render_desc.rope;
+    bool render_rope_trail = render_desc.rope_trail;
+    bool rope_shader       = render_rope || render_rope_trail;
+    bool hastrail          = render_desc.trail;
 
-    if (render_rope) particle_obj.material.shader = "genericropeparticle";
+    if (rope_shader) particle_obj.material.shader = "genericropeparticle";
 
     // wppartobj.origin[1] = context.ortho_h - wppartobj.origin[1];
 
@@ -3109,15 +3123,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             (float)in_SegmentMaxCount,
         };
         shaderInfo.combos[std::string(WE_CB_TRAILRENDERER)] = "1";
-        // Only the authored "rope" renderer uses genericropeparticle's segment
-        // layout. "*trail" renderers stay on genericparticle and need velocity
-        // in TexCoordVec4C1 for ComputeParticleTrailTangents.
-        if (! render_rope) shaderInfo.combos[std::string(WE_CB_THICK_FORMAT)] = "1";
+        if (! render_rope_trail) shaderInfo.combos[std::string(WE_CB_THICK_FORMAT)] = "1";
     }
-    if (render_rope) {
-        // genericropeparticle.geom branches on TRAILSUBDIVISION when present;
-        // 0 = no subdivision (straight quad per segment), positive = cubic
-        // Bezier subdivided into N+1 quads.
+    if (rope_shader) {
         std::int32_t subdiv = static_cast<std::int32_t>(std::round(wppartRenderer.subdivision));
         if (subdiv < 0) subdiv = 0;
         shaderInfo.combos["TRAILSUBDIVISION"] = std::to_string(subdiv);
@@ -3153,33 +3161,28 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     bool  hasSprite          = material.hasSprite;
     (void)hasSprite;
 
-    bool thick_format = material.hasSprite || (hastrail && ! render_rope);
-    // Trail history depth per rope-head particle. Clamp to [2, 256] so a buggy
-    // renderer spec can't allocate gigabytes; segments<2 would produce zero
-    // segments anyway.
+    bool          thick_format = material.hasSprite || (hastrail && ! render_rope_trail);
     std::uint32_t trail_length = 0;
-    if (render_rope) {
+    if (render_rope_trail) {
         std::int32_t seg = wppartRenderer.segments.to_primitive();
-        if (seg < 2) seg = 2;
+        if (seg < 1) seg = 1;
         if (seg > 256) seg = 256;
         trail_length = static_cast<std::uint32_t>(seg);
     }
     WPParticleFollowAnchor follow_anchor;
-    if (hastrail && ! render_rope) {
+    if (hastrail && ! render_rope_trail) {
         follow_anchor.trail_renderer = true;
         follow_anchor.length         = wppartRenderer.length;
         follow_anchor.max_length     = wppartRenderer.maxlength;
         follow_anchor.texture_ratio  = ParticleTextureRatio(material);
     }
     {
-        // Rope mesh capacity = maxcount * (trail_length-1) since each live
-        // particle produces (trail_length-1) GS-input segments. Non-rope path
-        // is unchanged: per-particle quad fan-out.
         std::uint32_t mesh_maxcount =
             maxcount * static_cast<std::uint32_t>(child_ptr.max_instancecount.to_primitive());
-        if (render_rope) {
-            std::uint32_t rope_segs = mesh_maxcount * (trail_length - 1);
-            SetRopeParticleMesh(mesh, particle_obj, rope_segs, thick_format);
+        if (rope_shader) {
+            std::uint32_t rope_vertices =
+                render_rope_trail ? mesh_maxcount * trail_length : mesh_maxcount;
+            SetRopeParticleMesh(mesh, particle_obj, rope_vertices, thick_format, render_rope_trail);
         } else {
             SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format, use_geometry_shader);
         }
@@ -3199,6 +3202,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         },
         follow_anchor,
         u32(trail_length),
+        f64(render_rope_trail ? static_cast<double>(wppartRenderer.length) : 0.0),
         f64(static_cast<double>(particle_obj.starttime)),
         particle_obj.flags[wpscene::Particle::FlagEnum::wordspace]);
 
@@ -3209,7 +3213,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                 is_child ? child_data.controlpointstartindex : i32());
     LoadInitializer(*particleSub, particle_obj, override_state);
     LoadOperator(*particleSub, particle_obj, override_state);
-    LoadControlPoint(*particleSub, particle_obj);
+    LoadControlPoint(*particleSub, particle_obj, override_state);
     particleSub->Finalize();
 
     // Register every {user:"<key>", value:...} binding on instanceoverride

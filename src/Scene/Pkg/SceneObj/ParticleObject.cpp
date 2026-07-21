@@ -60,6 +60,7 @@ bool ParticleControlpoint::FromJson(const owe::Json& json) {
 bool ParticleRender::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "name", name);
 
+    if (name == "ropetrail") subdivision = 1.0f;
     if (sstart_with(name, "rope")) {
         owe::GetJsonValue(json, "subdivision", subdivision, false);
     }
@@ -160,6 +161,9 @@ bool ParticleInstanceoverride::FromJosn(const owe::Json& json) {
             bind(cpa_keys[i]);
         }
     }
+    auto field_binding_state = std::make_shared<FieldBindings>();
+    AbsorbAllFieldBindings(json, *field_binding_state);
+    field_bindings = std::move(field_binding_state);
     return true;
 };
 

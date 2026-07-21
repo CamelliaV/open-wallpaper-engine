@@ -121,7 +121,6 @@ namespace PM = WPParticleModify;
 namespace
 {
 
-constexpr float  kPi    = rstd::f32::consts::PI.to_primitive();
 constexpr float  kTau   = rstd::f32::consts::TAU.to_primitive();
 constexpr double kTau64 = rstd::f64::consts::TAU.to_primitive();
 
@@ -141,6 +140,159 @@ inline Vector3d GenRandomVec3(const std::array<float, 3>& min, const std::array<
     }
     return result;
 }
+
+enum class SequenceLimitBehavior
+{
+    Repeat,
+    Mirror,
+    Clamp,
+};
+
+auto ParseSequenceLimitBehavior(const Json& json) -> SequenceLimitBehavior {
+    std::string value { "repeat" };
+    owe::GetJsonValue(json, "limitbehavior", value, false);
+    if (value == "mirror") return SequenceLimitBehavior::Mirror;
+    if (value == "clamp") return SequenceLimitBehavior::Clamp;
+    return SequenceLimitBehavior::Repeat;
+}
+
+auto SequenceIndex(u64 sequence, u64 count, SequenceLimitBehavior behavior) -> u64 {
+    if (count <= u64(1)) return u64();
+    if (behavior == SequenceLimitBehavior::Clamp) return rstd::cmp::min(sequence, count - u64(1));
+    if (behavior == SequenceLimitBehavior::Mirror) {
+        auto period = (count - u64(1)) * u64(2);
+        auto value  = sequence % period;
+        return value < count ? value : period - value;
+    }
+    return sequence % count;
+}
+
+auto SpawnSequence(const particle::ParticleSpawnContext& context) -> u64 {
+    return context.storage.Values(context.storage.SlotStateKey())[context.slot.index]
+        .spawn_sequence;
+}
+
+auto SequenceBasis(const Eigen::Vector3d& axis) -> Eigen::Vector3d {
+    if (std::abs(axis.z()) > 0.5) return Eigen::Vector3d { 0.0, 1.0, 0.0 };
+    return Eigen::Vector3d { 1.0, 0.0, 0.0 };
+}
+
+struct MapSequenceAroundControlPoint {
+    i32                   controlpoint {};
+    float                 count { 1.0f };
+    std::array<float, 2>  bounds { 0.0f, 1.0f };
+    std::array<float, 3>  axis { 0.0f, 0.0f, 1.0f };
+    std::array<float, 3>  speed_min { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3>  speed_max { 0.0f, 0.0f, 0.0f };
+    SequenceLimitBehavior limit_behavior { SequenceLimitBehavior::Repeat };
+
+    static auto ReadFromJson(const Json& json) -> MapSequenceAroundControlPoint {
+        MapSequenceAroundControlPoint value;
+        owe::GetJsonValue(json, "controlpoint", value.controlpoint, false);
+        owe::GetJsonValue(json, "count", value.count, false);
+        owe::GetJsonValue(json, "bounds", value.bounds, false);
+        owe::GetJsonValue(json, "axis", value.axis, false);
+        owe::GetJsonValue(json, "speedmin", value.speed_min, false);
+        owe::GetJsonValue(json, "speedmax", value.speed_max, false);
+        value.limit_behavior = ParseSequenceLimitBehavior(json);
+        return value;
+    }
+};
+
+class WPMapSequenceAroundControlPointProgram {
+public:
+    WPMapSequenceAroundControlPointProgram(WPParticleAttributes          attributes,
+                                           MapSequenceAroundControlPoint config)
+        : m_attributes(attributes), m_config(rstd::move(config)) {}
+
+    void Initialize(particle::ParticleSpawnContext& context) {
+        auto frame         = WPParticleFrameFrom(context.frame);
+        auto value         = MakeWPParticleRef(context.storage, m_attributes, context.slot);
+        auto sequence      = SpawnSequence(context);
+        auto controlpoints = frame->subsystem->Controlpoints();
+        auto controlpoint  = rstd::as_cast<usize>(m_config.controlpoint % i32(8));
+        auto center        = controlpoints[controlpoint].offset;
+
+        Eigen::Vector3d axis { Eigen::Vector3f { m_config.axis.data() }.cast<double>() };
+        if (axis.squaredNorm() <= 1e-12) axis = Eigen::Vector3d { 0.0, 0.0, 1.0 };
+        axis.normalize();
+        auto relative = value.position.cast<double>() - center;
+        auto parallel = axis * relative.dot(axis);
+        auto radius   = (relative - parallel).norm();
+        auto basis    = SequenceBasis(axis);
+        basis         = (basis - axis * basis.dot(axis)).normalized();
+        auto tangent  = basis.cross(axis).normalized();
+        auto angle    = kTau64 * static_cast<double>(sequence.to_primitive()) /
+                        std::max(1e-6, static_cast<double>(m_config.count));
+        angle *= static_cast<double>(m_config.bounds[1] - m_config.bounds[0]);
+        angle += kTau64 * static_cast<double>(m_config.bounds[0]);
+        value.position =
+            (center + parallel + radius * (std::cos(angle) * basis + std::sin(angle) * tangent))
+                .cast<float>();
+
+        auto velocity = GenRandomVec3(m_config.speed_min, m_config.speed_max);
+        if (velocity.squaredNorm() > 1e-12) {
+            value.velocity =
+                (value.velocity.cast<double>() + Eigen::AngleAxisd(-angle, axis) * velocity)
+                    .cast<float>();
+        }
+    }
+
+private:
+    WPParticleAttributes          m_attributes;
+    MapSequenceAroundControlPoint m_config;
+};
+
+struct MapSequenceBetweenControlPoints {
+    i32                   controlpoint_start {};
+    i32                   controlpoint_end { 1 };
+    u32                   count { 2 };
+    SequenceLimitBehavior limit_behavior { SequenceLimitBehavior::Repeat };
+
+    static auto ReadFromJson(const Json& json) -> MapSequenceBetweenControlPoints {
+        MapSequenceBetweenControlPoints value;
+        owe::GetJsonValue(json, "controlpointstart", value.controlpoint_start, false);
+        owe::GetJsonValue(json, "controlpointend", value.controlpoint_end, false);
+        owe::GetJsonValue(json, "count", value.count, false);
+        value.count          = rstd::cmp::max(value.count, u32(2));
+        value.limit_behavior = ParseSequenceLimitBehavior(json);
+        return value;
+    }
+};
+
+class WPMapSequenceBetweenControlPointsProgram {
+public:
+    WPMapSequenceBetweenControlPointsProgram(WPParticleAttributes            attributes,
+                                             MapSequenceBetweenControlPoints config)
+        : m_attributes(attributes), m_config(rstd::move(config)) {}
+
+    void Initialize(particle::ParticleSpawnContext& context) {
+        auto frame         = WPParticleFrameFrom(context.frame);
+        auto value         = MakeWPParticleRef(context.storage, m_attributes, context.slot);
+        auto sequence      = SpawnSequence(context);
+        auto controlpoints = frame->subsystem->Controlpoints();
+        auto start_index   = rstd::as_cast<usize>(m_config.controlpoint_start % i32(8));
+        auto end_index     = rstd::as_cast<usize>(m_config.controlpoint_end % i32(8));
+        auto start         = controlpoints[start_index].offset;
+        auto end           = controlpoints[end_index].offset;
+        auto path          = end - start;
+        auto count         = rstd::as_cast<u64>(m_config.count);
+        auto index         = SequenceIndex(sequence, count, m_config.limit_behavior);
+        auto amount        = static_cast<double>(index.to_primitive()) /
+                             static_cast<double>((count - u64(1)).to_primitive());
+
+        Eigen::Vector3d relative = value.position.cast<double>() - start;
+        if (path.squaredNorm() > 1e-12) {
+            auto direction = path.normalized();
+            relative -= direction * relative.dot(direction);
+        }
+        value.position = (start + amount * path + relative).cast<float>();
+    }
+
+private:
+    WPParticleAttributes            m_attributes;
+    MapSequenceBetweenControlPoints m_config;
+};
 
 inline float UiColorToLinear(float value) { return value * value; }
 
@@ -176,9 +328,8 @@ struct TurbulentRandom {
     float  phasemin { 0.0f };
     float  phasemax { 0.1f };
 
-    std::array<float, 3> forward { 0.0f, 1.0f, 0.0f }; // x y z
-    std::array<float, 3> right { 0.0f, 0.0f, 1.0f };
-    std::array<float, 3> up { 1.0f, 0.0f, 0.0f };
+    std::array<float, 3> forward { 0.0f, 1.0f, 0.0f };
+    std::array<float, 3> normal { 0.0f, 0.0f, 1.0f };
 
     static void ReadFromJson(const Json& j, TurbulentRandom& r) {
         owe::GetJsonValue(j, "scale", r.scale, false);
@@ -189,8 +340,8 @@ struct TurbulentRandom {
         owe::GetJsonValue(j, "phasemin", r.phasemin, false);
         owe::GetJsonValue(j, "phasemax", r.phasemax, false);
         owe::GetJsonValue(j, "forward", r.forward, false);
-        owe::GetJsonValue(j, "right", r.right, false);
-        owe::GetJsonValue(j, "up", r.up, false);
+        owe::GetJsonValue(j, "right", r.normal, false);
+        owe::GetJsonValue(j, "normal", r.normal, false);
     };
 };
 template<rstd::size_t N>
@@ -283,41 +434,54 @@ WPParticleParser::GenInitializer(const Json& wpj, WPParticleAttributes attribute
             return Box<dyn<particle::ParticleSpawnProgram>>::make(
                 WPParticleInitProgram(attributes, rstd::move(function)));
         } else if (name == "turbulentvelocityrandom") {
-            // to do
             TurbulentRandom r;
             TurbulentRandom::ReadFromJson(wpj, r);
+            Vector3f normal(r.normal.data());
+            if (normal.squaredNorm() <= 1e-8f) normal = Vector3f::UnitZ();
+            normal.normalize();
+
             Vector3f forward(r.forward.data());
-            Vector3f right(r.right.data());
+            forward -= normal * forward.dot(normal);
+            if (forward.squaredNorm() <= 1e-8f) forward = normal.unitOrthogonal();
+            forward.normalize();
+
             Vector3f pos      = GenRandomVec3({ 0, 0, 0 }, { 10.0f, 10.0f, 10.0f }).cast<float>();
             auto     function = [=](WPParticleRef p, f64 duration) mutable {
                 float speed = Random::get(r.speedmin, r.speedmax);
+                float phase = Random::get(r.phasemin, r.phasemax);
                 if (duration > f64(10.0)) {
                     pos[0] += speed;
                     duration = f64();
                 }
                 Vector3f result;
                 do {
-                    result = algorism::CurlNoise(pos.cast<double>()).cast<float>().normalized();
+                    result =
+                        algorism::CurlNoise((pos + normal * phase).cast<double>()).cast<float>();
+                    result -= normal * result.dot(normal);
+                    if (result.squaredNorm() <= 1e-8f) result = forward;
+                    result.normalize();
                     pos += result * 0.005f / r.timescale;
                     duration -= f64(0.01);
                 } while (duration > f64(0.01));
-                // limit direction
-                {
-                    double c     = result.dot(forward) / (result.norm() * forward.norm());
-                    float  a     = static_cast<float>(std::acos(c)) / kPi;
-                    float  scale = r.scale / 2.0f;
-                    if (a > scale) {
-                        auto axis = result.cross(forward).normalized();
-                        result    = AngleAxisf((a - a * scale) * kPi, axis) * result;
-                    }
-                }
-                // offset
-                result = AngleAxisf(r.offset, right) * result;
+
+                auto cosine = std::clamp(result.dot(forward), -1.0f, 1.0f);
+                auto angle =
+                    static_cast<float>(std::atan2(normal.dot(forward.cross(result)), cosine));
+                auto scale = std::max(0.0f, r.scale * 0.5f);
+                result     = AngleAxisf(angle * scale + r.offset, normal) * forward;
                 result *= speed;
                 PM::ChangeVelocity(p, result[0], result[1], result[2]);
             };
             return Box<dyn<particle::ParticleSpawnProgram>>::make(
                 WPParticleInitProgram(attributes, rstd::move(function)));
+        } else if (name == "mapsequencearoundcontrolpoint") {
+            return Box<dyn<particle::ParticleSpawnProgram>>::make(
+                WPMapSequenceAroundControlPointProgram(
+                    attributes, MapSequenceAroundControlPoint::ReadFromJson(wpj)));
+        } else if (name == "mapsequencebetweencontrolpoints") {
+            return Box<dyn<particle::ParticleSpawnProgram>>::make(
+                WPMapSequenceBetweenControlPointsProgram(
+                    attributes, MapSequenceBetweenControlPoints::ReadFromJson(wpj)));
         }
     } while (false);
     return Box<dyn<particle::ParticleSpawnProgram>>::make(
@@ -385,7 +549,7 @@ double FadeValueChange(float life, const ValueChange& v) noexcept {
 struct VecChange {
     float                starttime { 0 };
     float                endtime { 1.0f };
-    std::array<float, 3> startvalue { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> startvalue { 1.0f, 1.0f, 1.0f };
     std::array<float, 3> endvalue { 0.0f, 0.0f, 0.0f };
 
     static auto ReadFromJson(const Json& j) {
@@ -480,7 +644,8 @@ struct Turbulence {
 struct Vortex {
     enum class FlagEnum
     {
-        infinit_axis = 0, // 1
+        infinite_axis               = 0, // 1
+        maintain_distance_to_center = 1, // 2
     };
     using EFlags = BitFlags<FlagEnum>;
 
@@ -503,6 +668,10 @@ struct Vortex {
     // the axis to rotate around.
     std::array<float, 3> axis { 0.0f, 0.0f, 1.0f };
 
+    float ringradius {};
+    float ringwidth {};
+    float ringpulldistance {};
+
     static auto ReadFromJson(const Json& j) {
         Vortex v;
         owe::GetJsonValue(j, "controlpoint", v.controlpoint, false);
@@ -520,10 +689,40 @@ struct Vortex {
 
         owe::GetJsonValue(j, "offset", v.offset, false);
         owe::GetJsonValue(j, "axis", v.axis, false);
+        owe::GetJsonValue(j, "ringradius", v.ringradius, false);
+        owe::GetJsonValue(j, "ringwidth", v.ringwidth, false);
+        owe::GetJsonValue(j, "ringpulldistance", v.ringpulldistance, false);
 
         return v;
     };
 };
+
+struct VortexFrame {
+    Vector3d center { Vector3d::Zero() };
+    Vector3d axis { Vector3d::UnitZ() };
+};
+
+auto ResolveVortexFrame(const Vortex& vortex, slice<WPParticleControlpoint> controlpoints)
+    -> VortexFrame {
+    const auto& controlpoint = controlpoints[rstd::as_cast<usize>(vortex.controlpoint)];
+    Vector3d    local_offset = Vector3f { vortex.offset.data() }.cast<double>();
+    Vector3d    axis         = Vector3f { vortex.axis.data() }.cast<double>();
+    local_offset             = controlpoint.rotation * local_offset;
+    axis                     = controlpoint.rotation * axis;
+    if (axis.squaredNorm() <= 1e-12) axis = Vector3d::UnitZ();
+    return {
+        .center = controlpoint.offset + local_offset,
+        .axis   = axis.normalized(),
+    };
+}
+
+auto VortexSpeedAtDistance(const Vortex& vortex, double distance) -> double {
+    auto distance_range = static_cast<double>(vortex.distanceouter - vortex.distanceinner);
+    if (distance_range < 0.0 || distance < vortex.distanceinner) return vortex.speedinner;
+    if (distance > vortex.distanceouter) return vortex.speedouter;
+    auto amount = (distance - vortex.distanceinner) / (distance_range + 0.1);
+    return algorism::lerp(amount, vortex.speedinner, vortex.speedouter);
+}
 
 struct ControlPointForce {
     i32 controlpoint { 0 };
@@ -549,6 +748,65 @@ struct ControlPointForce {
         return v;
     };
 };
+
+struct MaintainDistanceState {
+    float distance {};
+    bool  initialized { false };
+};
+
+class MaintainDistanceAttribute {
+public:
+    using Value = MaintainDistanceState;
+
+    MaintainDistanceAttribute(particle::ParticleAttributeDescriptor descriptor, Value default_value)
+        : m_storage(rstd::move(descriptor), rstd::move(default_value)) {}
+
+    auto Descriptor() const -> ref<particle::ParticleAttributeDescriptor> {
+        return m_storage.Descriptor();
+    }
+    auto ConcreteType() const noexcept -> rstd::any::TypeId { return m_storage.ConcreteType(); }
+    auto ValueType() const noexcept -> rstd::any::TypeId { return m_storage.ValueTypeId(); }
+    auto Len() const noexcept -> usize { return m_storage.Len(); }
+    auto Capacity() const noexcept -> usize { return m_storage.Capacity(); }
+    void Reserve(usize total_slots) { m_storage.Reserve(total_slots); }
+    void AppendDefault() { m_storage.AppendDefault(); }
+    void Reset(particle::ParticleSlot slot) { m_storage.Reset(slot); }
+    void Clear() { m_storage.Clear(); }
+    auto Values() const noexcept -> slice<Value> { return m_storage.Values(); }
+    auto ValuesMut() noexcept -> mut_ref<Value[]> { return m_storage.ValuesMut(); }
+    auto CloneEmpty() const -> MaintainDistanceAttribute {
+        return MaintainDistanceAttribute(m_storage.CloneDescriptor(), m_storage.DefaultValue());
+    }
+
+private:
+    particle::ParticleValueAttributeStorage<Value> m_storage;
+};
+
+struct MaintainDistance {
+    i32   controlpoint {};
+    float variable_strength { 5.0f };
+
+    static auto ReadFromJson(const Json& json) -> MaintainDistance {
+        MaintainDistance value;
+        owe::GetJsonValue(json, "controlpoint", value.controlpoint, false);
+        owe::GetJsonValue(json, "variablestrength", value.variable_strength, false);
+        value.controlpoint %= i32(8);
+        return value;
+    }
+};
+
+auto RegisterMaintainDistanceAttribute(WPParticleSubSystem& subsystem, usize operator_index)
+    -> particle::ParticleAttributeKey<MaintainDistanceAttribute> {
+    auto name   = std::string("maintain_distance_") + std::to_string(operator_index.to_primitive());
+    auto result = subsystem.SchemaBuilder().Register<MaintainDistanceAttribute>(
+        ref<str>(name.c_str()),
+        ref<str>("we.operator.maintain_distance"),
+        MaintainDistanceState {});
+    if (result.is_err()) rstd::panic { "failed to register maintain distance attribute" };
+    auto key = result.unwrap();
+    subsystem.RequireAttribute(key);
+    return key;
+}
 
 template<typename F>
 auto MakeUpdateProgram(WPParticleAttributes attributes, F&& function)
@@ -620,6 +878,7 @@ WPParticleParser::GenOperator(const Json&                                       
                     else
                         acc += vecG;
                     PM::Accelerate(p, speed * acc, info.time_pass);
+                    PM::Move(p, p.velocity.cast<double>() * info.time_pass.to_primitive());
                 }
             };
             return MakeUpdateProgram(attributes, rstd::move(function));
@@ -635,6 +894,8 @@ WPParticleParser::GenOperator(const Json&                                       
                     Vector3d acc =
                         algorism::DragForce(PM::GetAngular(p).cast<double>(), drag) + vecF;
                     PM::AngularAccelerate(p, acc, info.time_pass);
+                    PM::ChangeRotation(
+                        p, p.angular_velocity.cast<double>() * info.time_pass.to_primitive());
                 }
             };
             return MakeUpdateProgram(attributes, rstd::move(function));
@@ -766,27 +1027,121 @@ WPParticleParser::GenOperator(const Json&                                       
         } else if (name == "vortex") {
             Vortex v        = Vortex::ReadFromJson(wpj);
             auto   function = [=](WPParticleBatch& info) {
-                Vector3d offset  = info.controlpoints[rstd::as_cast<usize>(v.controlpoint)].offset +
-                                   (Vector3f { v.offset.data() }).cast<double>();
-                Vector3d axis    = (Vector3f { v.axis.data() }).cast<double>();
-                double   dis_mid = v.distanceouter - v.distanceinner + 0.1f;
+                auto  frame  = ResolveVortexFrame(v, info.controlpoints);
+                auto& offset = frame.center;
+                auto& axis   = frame.axis;
 
                 for (usize index {}; index < info.Len(); ++index) {
                     auto     p        = info.Particle(index);
-                    Vector3d pos      = p.position.cast<double>();
-                    Vector3d direct   = -axis.cross(pos).normalized();
-                    double   distance = (pos - offset).norm();
-                    if (dis_mid < 0 || distance < v.distanceinner) {
-                        PM::Accelerate(p, direct * v.speedinner, info.time_pass);
-                    }
-                    if (distance > v.distanceouter) {
-                        PM::Accelerate(p, direct * v.speedouter, info.time_pass);
-                    } else if (distance > v.distanceinner) {
-                        double t = (distance - v.distanceinner) / dis_mid;
+                    Vector3d relative = p.position.cast<double>() - offset;
+                    Vector3d radial   = relative - axis * relative.dot(axis);
+                    double   distance = radial.norm();
+                    if (distance <= 1e-9) continue;
+                    Vector3d direct = -axis.cross(radial).normalized();
+                    PM::Accelerate(
+                        p, direct * VortexSpeedAtDistance(v, distance) * 0.5, info.time_pass);
+                }
+            };
+            return MakeUpdateProgram(attributes, rstd::move(function));
+        } else if (name == "vortex_v2") {
+            Vortex v        = Vortex::ReadFromJson(wpj);
+            auto   function = [=](WPParticleBatch& info) {
+                auto  frame  = ResolveVortexFrame(v, info.controlpoints);
+                auto& offset = frame.center;
+                auto& axis   = frame.axis;
+
+                for (usize index {}; index < info.Len(); ++index) {
+                    auto     p               = info.Particle(index);
+                    Vector3d relative        = p.position.cast<double>() - offset;
+                    Vector3d radial          = relative - axis * relative.dot(axis);
+                    double   radial_distance = radial.norm();
+                    if (radial_distance <= 1e-9) continue;
+
+                    auto distance = v.flags[Vortex::FlagEnum::infinite_axis] ? radial_distance
+                                                                             : relative.norm();
+
+                    bool ring_shape =
+                        v.ringradius > 0.0f && v.ringwidth > 0.0f && v.ringpulldistance > 0.0f;
+                    if (ring_shape) {
+                        Vector3d ring_position =
+                            radial.normalized() * static_cast<double>(v.ringradius);
+                        Vector3d ring_delta    = ring_position - relative;
+                        auto     ring_distance = ring_delta.norm();
+                        if (ring_distance >= static_cast<double>(v.ringpulldistance)) continue;
+
+                        auto ring_width = static_cast<double>(v.ringwidth);
+                        auto pull_range =
+                            std::max(static_cast<double>(v.ringpulldistance) - ring_width, 1e-9);
+                        double ring_influence {};
+                        double pull_influence {};
+                        double ring_speed {};
+                        if (ring_distance <= ring_width) {
+                            auto amount    = ring_distance / ring_width;
+                            ring_speed     = algorism::lerp(amount, v.speedinner, v.speedouter);
+                            ring_influence = 1.0;
+                            pull_influence = amount;
+                        } else {
+                            pull_influence = (ring_distance - ring_width) / pull_range;
+                            ring_influence = std::sqrt(1.0 - pull_influence);
+                            ring_speed     = v.speedouter;
+                        }
+
+                        auto     ring_strength = ring_speed * ring_influence * 0.5;
+                        Vector3d tangent       = -axis.cross(radial).normalized();
+                        if (! v.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
+                            PM::Accelerate(p, tangent * ring_strength, info.time_pass);
+                        } else {
+                            Vector3d velocity      = p.velocity.cast<double>();
+                            auto     axis_velocity = axis * velocity.dot(axis);
+                            auto     tangent_speed = velocity.dot(tangent) +
+                                                     ring_strength * info.time_pass.to_primitive();
+                            p.velocity = (axis_velocity + tangent * tangent_speed).cast<float>();
+                        }
+                        auto pull_strength = std::abs(VortexSpeedAtDistance(v, distance)) * 0.5;
                         PM::Accelerate(p,
-                                       direct * algorism::lerp(t, v.speedinner, v.speedouter),
+                                       ring_delta.normalized() * pull_strength * pull_influence,
                                        info.time_pass);
+                        continue;
                     }
+
+                    auto strength = VortexSpeedAtDistance(v, distance) * 0.5;
+                    if (std::abs(strength) <= 1e-9) continue;
+
+                    Vector3d tangent = -axis.cross(radial).normalized();
+                    if (! v.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
+                        PM::Accelerate(p, tangent * strength, info.time_pass);
+                        continue;
+                    }
+
+                    Vector3d velocity      = p.velocity.cast<double>();
+                    auto     axis_velocity = axis * velocity.dot(axis);
+                    auto     tangent_speed =
+                        velocity.dot(tangent) + strength * info.time_pass.to_primitive();
+                    p.velocity = (axis_velocity + tangent * tangent_speed).cast<float>();
+                }
+            };
+            return MakeUpdateProgram(attributes, rstd::move(function));
+        } else if (name == "maintaindistancetocontrolpoint") {
+            auto config    = MaintainDistance::ReadFromJson(wpj);
+            auto state_key = RegisterMaintainDistanceAttribute(subsystem, operator_index);
+            auto function  = [=](WPParticleBatch& info) {
+                auto states = info.storage.ValuesMut(state_key);
+                auto center = info.controlpoints[rstd::as_cast<usize>(config.controlpoint)].offset;
+                for (usize index {}; index < info.Len(); ++index) {
+                    auto     p        = info.Particle(index);
+                    auto&    state    = states[index];
+                    Vector3d relative = p.position.cast<double>() - center;
+                    double   distance = relative.norm();
+                    if (distance <= 1e-9) continue;
+                    if (! state.initialized) {
+                        state.distance    = static_cast<float>(distance);
+                        state.initialized = true;
+                    }
+                    auto direction       = relative / distance;
+                    auto radial_velocity = p.velocity.cast<double>().dot(direction);
+                    auto target_velocity = (static_cast<double>(state.distance) - distance) *
+                                           static_cast<double>(config.variable_strength);
+                    PM::ChangeVelocity(p, direction * (target_velocity - radial_velocity));
                 }
             };
             return MakeUpdateProgram(attributes, rstd::move(function));

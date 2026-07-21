@@ -20,6 +20,13 @@ using namespace owe;
 namespace
 {
 
+auto ControlpointRotation(const Eigen::Vector3f& angles) -> Eigen::Matrix3d {
+    return (Eigen::AngleAxisd(static_cast<double>(angles.z()), Eigen::Vector3d::UnitZ()) *
+            Eigen::AngleAxisd(static_cast<double>(angles.y()), Eigen::Vector3d::UnitY()) *
+            Eigen::AngleAxisd(static_cast<double>(angles.x()), Eigen::Vector3d::UnitX()))
+        .toRotationMatrix();
+}
+
 template<typename Attribute, typename... Args>
 auto RegisterAttribute(particle::ParticleSchemaBuilder& builder, const char* name,
                        const char* owner, Args&&... args)
@@ -72,26 +79,13 @@ private:
     WPParticleSubSystem* m_subsystem;
 };
 
-class WPIntegrationProgram {
+class WPSpawnMetadataProgram {
 public:
-    explicit WPIntegrationProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
+    explicit WPSpawnMetadataProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
 
-    void Update(particle::ParticleUpdateContext& context) {
-        auto states           = context.storage.Values(context.storage.SlotStateKey());
-        auto positions        = context.storage.ValuesMut(m_attributes.position);
-        auto velocities       = context.storage.Values(m_attributes.velocity);
-        auto rotations        = context.storage.ValuesMut(m_attributes.rotation);
-        auto angular_velocity = context.storage.Values(m_attributes.angular_velocity);
-        auto delta            = context.delta.to_primitive();
-        for (usize index {}; index < states.len(); ++index) {
-            if (! states[index].active) continue;
-            positions[index] =
-                (positions[index].cast<double>() + velocities[index].cast<double>() * delta)
-                    .cast<float>();
-            rotations[index] =
-                (rotations[index].cast<double>() + angular_velocity[index].cast<double>() * delta)
-                    .cast<float>();
-        }
+    void Initialize(particle::ParticleSpawnContext& context) {
+        auto value   = MakeWPParticleRef(context.storage, m_attributes, context.slot);
+        value.random = Random::get(0.0f, 1.0f);
     }
 
 private:
@@ -101,8 +95,9 @@ private:
 class WPTrailUpdateProgram {
 public:
     WPTrailUpdateProgram(WPParticleAttributes                                    attributes,
-                         particle::ParticleAttributeKey<WPTrailHistoryAttribute> trail)
-        : m_attributes(attributes), m_trail(trail) {}
+                         particle::ParticleAttributeKey<WPTrailHistoryAttribute> trail,
+                         f64                                                     sample_interval)
+        : m_attributes(attributes), m_trail(trail), m_sample_interval(sample_interval) {}
 
     void Update(particle::ParticleUpdateContext& context) {
         auto frame     = WPParticleFrameFrom(context.frame);
@@ -110,27 +105,52 @@ public:
         auto positions = context.storage.Values(m_attributes.position);
         auto trail     = context.storage.AttributeMut(m_trail);
 
-        Eigen::Vector3f trail_sample;
-        bool            use_cursor_trail = false;
-        auto            controlpoints    = frame->subsystem->Controlpoints();
-        for (usize index {}; index < controlpoints.len(); ++index) {
-            const auto& controlpoint = controlpoints[index];
-            if (! controlpoint.link_mouse) continue;
-            trail_sample     = controlpoint.offset.cast<float>();
-            use_cursor_trail = true;
-            break;
+        auto&  instance = frame->subsystem->InstanceStateMut(frame->instance_index);
+        auto   interval = m_sample_interval.to_primitive();
+        auto   delta    = context.delta.to_primitive();
+        double remainder {};
+        usize  sample_steps {};
+        if (interval > 0.0) {
+            auto elapsed     = instance.trail_sample_accumulator.to_primitive() + delta;
+            auto total_steps = static_cast<rstd::uint64_t>(std::floor(elapsed / interval));
+            elapsed -= static_cast<double>(total_steps) * interval;
+            instance.trail_sample_accumulator = f64(elapsed);
+            remainder                         = elapsed;
+            sample_steps =
+                rstd::cmp::min(rstd::as_cast<usize>(total_steps), trail->SampleCapacity());
+        } else {
+            sample_steps = usize(1);
         }
 
         for (usize index {}; index < states.len(); ++index) {
             if (! states[index].active) continue;
             particle::ParticleSlot slot { .index = index };
-            trail->Push(slot, use_cursor_trail ? trail_sample : positions[index]);
+            auto                   state = trail->State(slot);
+            if (! state.has_previous_position) {
+                for (usize sample {}; sample < trail->SampleCapacity(); ++sample) {
+                    trail->Push(slot, positions[index]);
+                }
+                trail->SetPreviousPosition(slot, positions[index]);
+                continue;
+            }
+            for (usize sample {}; sample < sample_steps; ++sample) {
+                auto age = remainder +
+                           static_cast<double>((sample_steps - sample - usize(1)).to_primitive()) *
+                               interval;
+                auto amount = delta > 0.0 ? std::clamp((delta - age) / delta, 0.0, 1.0) : 1.0;
+                auto position =
+                    state.previous_position +
+                    (positions[index] - state.previous_position) * static_cast<float>(amount);
+                trail->Push(slot, position);
+            }
+            trail->SetPreviousPosition(slot, positions[index]);
         }
     }
 
 private:
     WPParticleAttributes                                    m_attributes;
     particle::ParticleAttributeKey<WPTrailHistoryAttribute> m_trail;
+    f64                                                     m_sample_interval {};
 };
 
 } // namespace
@@ -312,6 +332,13 @@ auto WPTrailHistoryAttribute::State(particle::ParticleSlot slot) const -> WPTrai
     return m_states[slot.index];
 }
 
+void WPTrailHistoryAttribute::SetPreviousPosition(particle::ParticleSlot slot,
+                                                  const Eigen::Vector3f& position) {
+    auto& state                 = m_states[slot.index];
+    state.previous_position     = position;
+    state.has_previous_position = true;
+}
+
 auto owe::WPParticleFrameFrom(ref<dyn<rstd::any::Any>> frame) -> ref<WPParticleFrame> {
     auto value = rstd::any::downcast_ref<WPParticleFrame>(frame);
     if (value.is_none()) rstd::panic { "unexpected particle frame context" };
@@ -338,7 +365,7 @@ WPParticleSubSystem::WPParticleSubSystem(Scene& scene, std::shared_ptr<SceneMesh
                                          f64 probability, SpawnType spawn_type,
                                          WPParticleAnimationSpec animation_spec,
                                          WPParticleFollowAnchor follow_anchor, u32 trail_length,
-                                         f64 start_time, bool world_space)
+                                         f64 trail_duration, f64 start_time, bool world_space)
     : m_scene(scene),
       m_mesh(rstd::move(mesh)),
       m_attributes(WPParticleAttributes::Register(m_schema_builder)),
@@ -351,7 +378,11 @@ WPParticleSubSystem::WPParticleSubSystem(Scene& scene, std::shared_ptr<SceneMesh
       m_max_instance_count(max_instance_count),
       m_probability(probability),
       m_spawn_type(spawn_type),
-      m_trail_length(trail_length) {
+      m_trail_length(trail_length),
+      m_trail_sample_interval(trail_length == u32()
+                                  ? f64()
+                                  : f64(trail_duration.to_primitive() /
+                                        static_cast<double>(trail_length.to_primitive()))) {
     m_attributes.Require(m_program);
     if (m_trail_length != u32()) {
         m_trail_key = Some(RegisterAttribute<WPTrailHistoryAttribute>(
@@ -359,10 +390,8 @@ WPParticleSubSystem::WPParticleSubSystem(Scene& scene, std::shared_ptr<SceneMesh
         m_program.Require(*m_trail_key);
     }
 
-    AddInitializer(Box<dyn<particle::ParticleSpawnProgram>>::make(
-        WPParticleInitProgram(m_attributes, [](WPParticleRef value, f64) {
-            value.random = Random::get(0.0f, 1.0f);
-        })));
+    AddInitializer(
+        Box<dyn<particle::ParticleSpawnProgram>>::make(WPSpawnMetadataProgram(m_attributes)));
 }
 
 WPParticleSubSystem::~WPParticleSubSystem() = default;
@@ -372,11 +401,9 @@ void WPParticleSubSystem::Finalize() {
     m_program.AddLifecycle(
         Box<dyn<particle::ParticleLifecycleProgram>>::make(WPLifecycleProgram(m_attributes)));
     m_program.AddEvent(Box<dyn<particle::ParticleEventProgram>>::make(WPChildEventProgram(*this)));
-    m_program.AddPostUpdate(
-        Box<dyn<particle::ParticleUpdateProgram>>::make(WPIntegrationProgram(m_attributes)));
     if (m_trail_key.is_some()) {
         m_program.AddPostUpdate(Box<dyn<particle::ParticleUpdateProgram>>::make(
-            WPTrailUpdateProgram(m_attributes, *m_trail_key)));
+            WPTrailUpdateProgram(m_attributes, *m_trail_key, m_trail_sample_interval)));
     }
     m_program.AddExtractor(
         Box<dyn<particle::ParticleExtractProgram>>::make(WPParticleRawGenerator(*this)));
@@ -477,10 +504,23 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
             inverse * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
         mouse_local = value.head<3>();
     }
-    for (auto& controlpoint : m_controlpoints) {
-        if (controlpoint.link_mouse) {
-            controlpoint.offset = controlpoint.base_offset + mouse_local;
+    auto runtime = m_scene.Runtime().Frame().elapsed.to_primitive();
+    for (usize index {}; index < m_controlpoints.len(); ++index) {
+        auto&           controlpoint = m_controlpoints[index];
+        Eigen::Vector3f position_override { Eigen::Vector3f::Zero() };
+        Eigen::Vector3f angles { Eigen::Vector3f::Zero() };
+        if (m_instance_override) {
+            auto source_index = index.to_primitive();
+            position_override =
+                Eigen::Vector3f { m_instance_override->controlpoint[source_index].data() };
+            angles =
+                Eigen::Vector3f { m_instance_override->controlpointangle[source_index].data() };
         }
+        controlpoint.offset = controlpoint.base_offset + position_override.cast<double>();
+        if (controlpoint.link_mouse) controlpoint.offset += mouse_local;
+        if (controlpoint.angle_curve)
+            angles = controlpoint.angle_curve->EvaluateVec3(angles, runtime);
+        controlpoint.rotation = ControlpointRotation(angles);
     }
 
     m_frame.subsystem            = this;

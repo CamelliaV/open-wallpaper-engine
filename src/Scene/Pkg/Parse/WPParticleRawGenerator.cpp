@@ -218,57 +218,167 @@ auto GenParticlePointData(particle::ParticleExtractContext& context,
     return output_index;
 }
 
-auto GenRopeParticleSegments(const WPParticleConstRef& value, const WPTrailHistoryAttribute& trails,
-                             WPGOption option, SceneVertexArray& vertices, usize output_index)
-    -> usize {
-    auto state = trails.State(value.slot);
-    if (state.len < usize(2)) return usize();
+auto GenRopeParticleData(particle::ParticleExtractContext& context,
+                         const WPParticleSubSystem& subsystem, WPGOption option,
+                         SceneVertexArray& vertices) -> usize {
+    auto           one_size          = vertices.OneSize();
+    const auto     attribute_offsets = vertices.GetAttrOffsetMap();
+    const AttrSlot position          = FindAttrSlot(attribute_offsets, WE_IN_POSITIONVEC4);
+    const AttrSlot endpoint          = FindAttrSlot(attribute_offsets, WE_IN_TEXCOORDVEC4);
+    const AttrSlot previous_point    = FindAttrSlot(attribute_offsets, WE_IN_TEXCOORDVEC4C1);
+    const AttrSlot next_point        = FindAttrSlot(
+        attribute_offsets, option.thick_format ? WE_IN_TEXCOORDVEC4C2 : WE_IN_TEXCOORDVEC3C2);
+    const AttrSlot         color_end = FindAttrSlot(attribute_offsets, WE_IN_TEXCOORDVEC4C3);
+    const AttrSlot         color     = FindAttrSlot(attribute_offsets, WE_IN_COLOR);
+    rstd::array<float, 32> data {};
+    usize                  output_count {};
 
-    auto                   one_size = vertices.OneSize();
+    auto write3 = [&](AttrSlot slot, const Eigen::Vector3f& source) noexcept {
+        if (! slot.enabled) return;
+        data[slot.offset]            = source[0];
+        data[slot.offset + usize(1)] = source[1];
+        data[slot.offset + usize(2)] = source[2];
+    };
+    auto write4 = [&](AttrSlot slot, const Eigen::Vector3f& source, float w) noexcept {
+        if (! slot.enabled) return;
+        write3(slot, source);
+        data[slot.offset + usize(3)] = w;
+    };
+    auto write_color = [&](AttrSlot slot, const WPParticleConstRef& value) noexcept {
+        if (! slot.enabled) return;
+        data[slot.offset]            = value.color[0];
+        data[slot.offset + usize(1)] = value.color[1];
+        data[slot.offset + usize(2)] = value.color[2];
+        data[slot.offset + usize(3)] = value.alpha;
+    };
+
+    for (usize instance_index {}; instance_index < context.instances.len(); ++instance_index) {
+        if (subsystem.InstanceState(instance_index).no_live_particle) continue;
+        const auto&        particle_storage = context.instances[instance_index]->Storage();
+        auto               states = particle_storage.Values(particle_storage.SlotStateKey());
+        std::vector<usize> slots;
+        slots.reserve(states.len().to_primitive());
+        for (usize slot_index {}; slot_index < states.len(); ++slot_index) {
+            if (! states[slot_index].active) continue;
+            auto value = MakeWPParticleConstRef(
+                particle_storage, subsystem.Attributes(), particle::ParticleSlot { slot_index });
+            if (value.lifetime > 0.0f) slots.push_back(slot_index);
+        }
+        std::sort(slots.begin(), slots.end(), [&](usize lhs, usize rhs) {
+            return states[lhs].spawn_sequence < states[rhs].spawn_sequence;
+        });
+        if (slots.empty()) continue;
+
+        auto particle = [&](usize index) {
+            return MakeWPParticleConstRef(particle_storage,
+                                          subsystem.Attributes(),
+                                          particle::ParticleSlot { slots[index.to_primitive()] });
+        };
+        auto render_position = [&](const WPParticleConstRef& value) {
+            return (subsystem.InstanceState(instance_index).bounded.position + value.position)
+                .eval();
+        };
+
+        float sequence_offset {};
+        if (slots.size() > 1) {
+            auto newest      = particle(usize(slots.size() - 1));
+            auto before      = particle(usize(slots.size() - 2));
+            auto newest_age  = newest.initial.lifetime - newest.lifetime;
+            auto before_age  = before.initial.lifetime - before.lifetime;
+            auto emit_period = before_age - newest_age;
+            if (emit_period > 1e-6f)
+                sequence_offset = -std::clamp(newest_age / emit_period, 0.0f, 1.0f);
+        }
+
+        auto count = usize(slots.size());
+        for (usize index {}; index < count; ++index) {
+            auto previous_index = index == usize() ? usize() : index - usize(1);
+            auto next_index     = rstd::cmp::min(index + usize(1), count - usize(1));
+            auto after_index    = rstd::cmp::min(index + usize(2), count - usize(1));
+            auto current        = particle(index);
+            auto previous       = particle(previous_index);
+            auto next           = particle(next_index);
+            auto after          = particle(after_index);
+
+            std::fill(data.begin(), data.begin() + one_size.to_primitive(), 0.0f);
+            write4(position, render_position(current), current.size * 0.5f);
+            write4(endpoint, render_position(next), static_cast<float>(count.to_primitive()));
+            write4(previous_point,
+                   render_position(previous),
+                   static_cast<float>(index.to_primitive()) + sequence_offset);
+            if (option.thick_format)
+                write4(next_point, render_position(after), next.size * 0.5f);
+            else
+                write3(next_point, render_position(after));
+            write_color(color_end, next);
+            write_color(color, current);
+            vertices.SetVertexs(output_count++,
+                                std::span<const float> { data.data(), one_size.to_primitive() });
+        }
+    }
+    return output_count;
+}
+
+auto GenRopeTrailSegments(const WPParticleConstRef& value, const Eigen::Vector3f& instance_position,
+                          const WPTrailHistoryAttribute& trails, WPGOption option,
+                          SceneVertexArray& vertices, usize output_index) -> usize {
+    auto state = trails.State(value.slot);
+    if (state.len == usize()) return usize();
+
+    auto           one_size           = vertices.OneSize();
+    const auto     attribute_offsets  = vertices.GetAttrOffsetMap();
+    const AttrSlot position           = FindAttrSlot(attribute_offsets, WE_IN_POSITIONVEC4);
+    const AttrSlot endpoint           = FindAttrSlot(attribute_offsets, WE_IN_TEXCOORDVEC4);
+    const AttrSlot start_control_slot = FindAttrSlot(attribute_offsets, WE_IN_TEXCOORDVEC4C1);
+    const AttrSlot end_control_slot   = FindAttrSlot(
+        attribute_offsets, option.thick_format ? WE_IN_TEXCOORDVEC4C2 : WE_IN_TEXCOORDVEC3C2);
+    const AttrSlot         color_end = FindAttrSlot(attribute_offsets, WE_IN_TEXCOORDVEC4C3);
+    const AttrSlot         color     = FindAttrSlot(attribute_offsets, WE_IN_COLOR);
     rstd::array<float, 32> data {};
     usize                  emitted {};
     auto                   size         = value.size * 0.5f;
     auto                   trail_length = static_cast<float>(state.len.to_primitive());
 
-    for (usize sample_index { 1 }; sample_index < state.len; ++sample_index) {
-        auto previous = trails.At(value.slot, sample_index - usize(1));
-        auto current  = trails.At(value.slot, sample_index);
-        auto start_control =
-            sample_index >= usize(2) ? trails.At(value.slot, sample_index - usize(2)) : previous;
-        auto  end_control    = sample_index + usize(1) < state.len
-                                   ? trails.At(value.slot, sample_index + usize(1))
-                                   : current;
-        auto  trail_position = static_cast<float>((sample_index - usize(1)).to_primitive());
-        usize offset {};
+    auto write3 = [&](AttrSlot slot, const Eigen::Vector3f& source) noexcept {
+        if (! slot.enabled) return;
+        data[slot.offset]            = source[0];
+        data[slot.offset + usize(1)] = source[1];
+        data[slot.offset + usize(2)] = source[2];
+    };
+    auto write4 = [&](AttrSlot slot, const Eigen::Vector3f& source, float w) noexcept {
+        if (! slot.enabled) return;
+        write3(slot, source);
+        data[slot.offset + usize(3)] = w;
+    };
+    auto write_color = [&](AttrSlot slot) noexcept {
+        if (! slot.enabled) return;
+        data[slot.offset]            = value.color[0];
+        data[slot.offset + usize(1)] = value.color[1];
+        data[slot.offset + usize(2)] = value.color[2];
+        data[slot.offset + usize(3)] = value.alpha;
+    };
 
-        data[offset++] = previous[0];
-        data[offset++] = previous[1];
-        data[offset++] = previous[2];
-        data[offset++] = size;
-        data[offset++] = current[0];
-        data[offset++] = current[1];
-        data[offset++] = current[2];
-        data[offset++] = trail_length;
-        data[offset++] = start_control[0];
-        data[offset++] = start_control[1];
-        data[offset++] = start_control[2];
-        data[offset++] = trail_position;
-        data[offset++] = end_control[0];
-        data[offset++] = end_control[1];
-        data[offset++] = end_control[2];
-        data[offset++] = option.thick_format ? size : 0.0f;
-        if (option.thick_format) {
-            data[offset++] = value.color[0];
-            data[offset++] = value.color[1];
-            data[offset++] = value.color[2];
-            data[offset++] = value.alpha;
-        }
-        data[offset++] = value.color[0];
-        data[offset++] = value.color[1];
-        data[offset++] = value.color[2];
-        data[offset++] = value.alpha;
+    auto point = [&](usize point_index) -> Eigen::Vector3f {
+        if (point_index == usize()) return (value.position + instance_position).eval();
+        return (trails.At(value.slot, state.len - point_index) + instance_position).eval();
+    };
 
-        rstd_assert(offset == one_size);
+    for (usize sample_index {}; sample_index < state.len; ++sample_index) {
+        auto previous       = point(sample_index);
+        auto current        = point(sample_index + usize(1));
+        auto start_control  = point(sample_index == usize() ? usize() : sample_index - usize(1));
+        auto end_control    = point(rstd::cmp::min(sample_index + usize(2), state.len));
+        auto trail_position = static_cast<float>(sample_index.to_primitive());
+        std::fill(data.begin(), data.begin() + one_size.to_primitive(), 0.0f);
+        write4(position, previous, size);
+        write4(endpoint, current, trail_length);
+        write4(start_control_slot, start_control, trail_position);
+        if (option.thick_format)
+            write4(end_control_slot, end_control, size);
+        else
+            write3(end_control_slot, end_control);
+        write_color(color_end);
+        write_color(color);
         vertices.SetVertexs(output_index + emitted,
                             std::span<const float> { data.data(), one_size.to_primitive() });
         ++emitted;
@@ -276,9 +386,9 @@ auto GenRopeParticleSegments(const WPParticleConstRef& value, const WPTrailHisto
     return emitted;
 }
 
-auto GenRopeParticleData(particle::ParticleExtractContext& context,
-                         const WPParticleSubSystem& subsystem, WPGOption option,
-                         SceneVertexArray& vertices) -> usize {
+auto GenRopeTrailData(particle::ParticleExtractContext& context,
+                      const WPParticleSubSystem& subsystem, WPGOption option,
+                      SceneVertexArray& vertices) -> usize {
     auto trail_key = subsystem.TrailKey();
     if (trail_key.is_none()) return usize();
 
@@ -293,7 +403,13 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
             auto value = MakeWPParticleConstRef(
                 particle_storage, subsystem.Attributes(), particle::ParticleSlot { slot_index });
             if (value.lifetime <= 0.0f) continue;
-            output_count += GenRopeParticleSegments(value, *trails, option, vertices, output_count);
+            output_count +=
+                GenRopeTrailSegments(value,
+                                     subsystem.InstanceState(instance_index).bounded.position,
+                                     *trails,
+                                     option,
+                                     vertices,
+                                     output_count);
         }
     }
     return output_count;
@@ -321,6 +437,11 @@ void WPParticleRawGenerator::Extract(particle::ParticleExtractContext& context) 
     if (vertices.GetOption(WE_PRENDER_ROPE)) {
         vertices.ResetSize();
         (void)GenRopeParticleData(context, *m_subsystem, option, vertices);
+        return;
+    }
+    if (vertices.GetOption(WE_PRENDER_ROPE_TRAIL)) {
+        vertices.ResetSize();
+        (void)GenRopeTrailData(context, *m_subsystem, option, vertices);
         return;
     }
     if (mesh.Primitive() == MeshPrimitive::POINT) {

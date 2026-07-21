@@ -190,6 +190,7 @@ private:
 struct ParticleSlotState {
     bool active { false };
     bool fresh { false };
+    u64  spawn_sequence {};
 };
 
 OWE_PARTICLE_VALUE_ATTRIBUTE(SlotStateAttribute, ParticleSlotState);
@@ -377,7 +378,8 @@ public:
 
     void Clear() {
         for (auto& attribute : m_attributes) attribute->Clear();
-        m_len = usize();
+        m_len                 = usize();
+        m_next_spawn_sequence = u64();
         BumpStructureVersion();
         CheckInvariant();
     }
@@ -389,14 +391,22 @@ public:
             ParticleSlot slot { .index = index };
             ResetSlot(slot);
             auto current   = ValuesMut(m_slot_state_key);
-            current[index] = { .active = true, .fresh = true };
+            current[index] = {
+                .active         = true,
+                .fresh          = true,
+                .spawn_sequence = m_next_spawn_sequence++,
+            };
             return Some(slot);
         }
         if (m_len >= max_slots) return None();
 
         auto slot           = AppendSlot();
         auto current        = ValuesMut(m_slot_state_key);
-        current[slot.index] = { .active = true, .fresh = true };
+        current[slot.index] = {
+            .active         = true,
+            .fresh          = true,
+            .spawn_sequence = m_next_spawn_sequence++,
+        };
         return Some(slot);
     }
 
@@ -469,6 +479,7 @@ private:
     }
 
     usize                                       m_len {};
+    u64                                         m_next_spawn_sequence {};
     u64                                         m_structure_version { 1 };
     rstd::vec::Vec<Box<dyn<ParticleAttribute>>> m_attributes;
     ParticleAttributeKey<SlotStateAttribute>    m_slot_state_key;
