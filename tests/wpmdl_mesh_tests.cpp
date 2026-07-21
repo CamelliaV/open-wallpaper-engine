@@ -72,7 +72,7 @@ TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
     EXPECT_TRUE(submesh.draw_ranges.empty());
 
     const auto& index_array = submesh.index_arrays.front();
-    ASSERT_EQ(index_array.DataCount(), 780288u);
+    ASSERT_EQ(index_array.DataCount(), rstd::usize(780288));
     EXPECT_EQ(index_array.Data()[0], 0u);
     EXPECT_EQ(index_array.Data()[1], 1u);
     EXPECT_EQ(index_array.Data()[2], 2u);

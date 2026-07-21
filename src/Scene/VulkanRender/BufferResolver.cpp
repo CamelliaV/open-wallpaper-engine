@@ -17,18 +17,19 @@ auto bytesOf(const float* data, usize size) -> rstd::slice<rstd::u8> {
     return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::u8*>(data), size);
 }
 
-auto bytesOf(const u32* data, usize size) -> rstd::slice<u8> {
+auto bytesOf(const rstd::uint32_t* data, usize size) -> rstd::slice<u8> {
     return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::u8*>(data), size);
 }
 
 u64 next_dynamic_allocation_generation() {
     static std::atomic_uint64_t next { 1 };
-    return next.fetch_add(1, std::memory_order_relaxed);
+    return u64(next.fetch_add(1, std::memory_order_relaxed));
 }
 
 u64 resolve_allocation_generation(const DrawBufferRequest& request, bool dynamic) {
-    if (! dynamic) return 0;
-    if (request.dynamic_allocation_generation != 0) return request.dynamic_allocation_generation;
+    if (! dynamic) return u64();
+    if (request.dynamic_allocation_generation != u64())
+        return request.dynamic_allocation_generation;
     return next_dynamic_allocation_generation();
 }
 
@@ -53,19 +54,20 @@ std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest& request,
                                                u64                      allocation_generation) {
     std::vector<DrawBufferKey> keys;
     if (request.mesh == nullptr) return keys;
-    const SceneMesh& mesh = *request.mesh;
-    if (request.submesh_index >= mesh.Submeshes().size()) return keys;
+    const SceneMesh&  mesh          = *request.mesh;
+    const std::size_t submesh_index = request.submesh_index.to_primitive();
+    if (submesh_index >= mesh.Submeshes().size()) return keys;
 
-    const auto& submesh = mesh.Submeshes()[request.submesh_index];
+    const auto& submesh = mesh.Submeshes()[submesh_index];
     keys.reserve(submesh.vertex_arrays.size() + (submesh.index_arrays.empty() ? 0u : 1u));
-    const u64 resolved_allocation = mesh.Dynamic() ? allocation_generation : 0;
+    const u64 resolved_allocation = mesh.Dynamic() ? allocation_generation : u64();
 
-    for (usize i = 0; i < submesh.vertex_arrays.size(); ++i) {
+    for (std::size_t i = 0; i < submesh.vertex_arrays.size(); ++i) {
         const auto& vertex = submesh.vertex_arrays[i];
         keys.push_back(DrawBufferKey { .render_item           = request.render_item,
                                        .role                  = DrawBufferRole::Vertex,
                                        .submesh_index         = request.submesh_index,
-                                       .stream_index          = static_cast<u32>(i),
+                                       .stream_index          = u32(static_cast<rstd::uint32_t>(i)),
                                        .data_generation       = vertex.DataGeneration(),
                                        .allocation_generation = resolved_allocation });
     }
@@ -75,7 +77,7 @@ std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest& request,
         keys.push_back(DrawBufferKey { .render_item           = request.render_item,
                                        .role                  = DrawBufferRole::Index,
                                        .submesh_index         = request.submesh_index,
-                                       .stream_index          = 0,
+                                       .stream_index          = u32(),
                                        .data_generation       = index.DataGeneration(),
                                        .allocation_generation = resolved_allocation });
     }
@@ -85,11 +87,12 @@ std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest& request,
 
 Option<DrawBufferRefs> RenderBufferResolver::prepareDrawBuffers(const DrawBufferRequest& request) {
     if (request.mesh == nullptr) return None();
-    SceneMesh& mesh          = *request.mesh;
-    const auto submesh_index = request.submesh_index;
-    if (mesh.Submeshes().empty() || submesh_index >= mesh.Submeshes().size()) return None();
+    SceneMesh&        mesh                 = *request.mesh;
+    const auto        submesh_index        = request.submesh_index;
+    const std::size_t native_submesh_index = submesh_index.to_primitive();
+    if (mesh.Submeshes().empty() || native_submesh_index >= mesh.Submeshes().size()) return None();
 
-    const auto& submesh = mesh.Submeshes()[submesh_index];
+    const auto& submesh = mesh.Submeshes()[native_submesh_index];
 
     DrawBufferRefs out;
     out.render_item           = request.render_item;
@@ -98,27 +101,27 @@ Option<DrawBufferRefs> RenderBufferResolver::prepareDrawBuffers(const DrawBuffer
     auto keys                 = BuildDrawBufferKeys(request, out.allocation_generation);
     out.vertex_keys.reserve(submesh.vertex_arrays.size());
 
-    for (usize i = 0; i < submesh.vertex_arrays.size(); i++) {
+    for (std::size_t i = 0; i < submesh.vertex_arrays.size(); i++) {
         const auto& vertex = submesh.vertex_arrays[i];
         out.vertex_keys.push_back(keys[i]);
-        out.draw_count += static_cast<u32>(vertex.DataSize() / vertex.OneSize());
+        out.draw_count += rstd::as_cast<u32>(vertex.DataSize() / vertex.OneSize());
 
-        if (i >= request.buffer_uses.len()) return None();
-        auto prepared = m_resources->Resolve(request.buffer_uses[i]);
+        if (i >= request.buffer_uses.len().to_primitive()) return None();
+        auto prepared = m_resources->Resolve(request.buffer_uses[usize(i)]);
         if (prepared.is_none()) return None();
-        out.vertices.push(resource::BufferUseHandle(request.buffer_uses[i]));
+        out.vertices.push(resource::BufferUseHandle(request.buffer_uses[usize(i)]));
     }
 
     if (! submesh.index_arrays.empty()) {
         const auto& index = submesh.index_arrays[0];
-        out.draw_count    = static_cast<u32>(index.DataCount());
+        out.draw_count    = rstd::as_cast<u32>(index.DataCount());
         out.index_key     = Some<DrawBufferKey>(keys.back());
 
         auto use_index = submesh.vertex_arrays.size();
-        if (use_index >= request.buffer_uses.len()) return None();
-        auto prepared = m_resources->Resolve(request.buffer_uses[use_index]);
+        if (use_index >= request.buffer_uses.len().to_primitive()) return None();
+        auto prepared = m_resources->Resolve(request.buffer_uses[usize(use_index)]);
         if (prepared.is_none()) return None();
-        out.index = Some(resource::BufferUseHandle(request.buffer_uses[use_index]));
+        out.index = Some(resource::BufferUseHandle(request.buffer_uses[usize(use_index)]));
     }
 
     return Some(rstd::move(out));
@@ -132,21 +135,23 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(
     SceneMesh& mesh          = *request.mesh;
     const auto submesh_index = request.submesh_index;
     if ((mesh.DirtyFlags() & SceneMeshDirtyData) == 0) return true;
-    if (submesh_index >= mesh.Submeshes().size()) return true;
+    const std::size_t native_submesh_index = submesh_index.to_primitive();
+    if (native_submesh_index >= mesh.Submeshes().size()) return true;
 
-    const auto& submesh           = mesh.Submeshes()[submesh_index];
+    const auto& submesh           = mesh.Submeshes()[native_submesh_index];
     auto        require_reprepare = [&mesh] {
         mesh.SetLayoutDirty();
         return false;
     };
-    if (buffers.vertices.len() != submesh.vertex_arrays.size()) return require_reprepare();
+    if (buffers.vertices.len().to_primitive() != submesh.vertex_arrays.size())
+        return require_reprepare();
     if (buffers.vertex_keys.size() != submesh.vertex_arrays.size()) return require_reprepare();
     if (buffers.index.is_some() != ! submesh.index_arrays.empty()) return require_reprepare();
 
-    for (usize i = 0; i < submesh.vertex_arrays.size(); i++) {
+    for (std::size_t i = 0; i < submesh.vertex_arrays.size(); i++) {
         const auto& vertex                     = submesh.vertex_arrays[i];
         buffers.vertex_keys[i].data_generation = vertex.DataGeneration();
-        auto updated = writer->UpdateBuffer(buffers.vertices[i],
+        auto updated = writer->UpdateBuffer(buffers.vertices[usize(i)],
                                             bytesOf(vertex.Data(), vertex.DataSizeOf()),
                                             vertex.DataGeneration());
         if (updated.is_err()) return require_reprepare();
@@ -154,7 +159,7 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(
 
     if (! submesh.index_arrays.empty()) {
         const auto& index  = submesh.index_arrays[0];
-        buffers.draw_count = static_cast<u32>(index.RenderDataCount());
+        buffers.draw_count = rstd::as_cast<u32>(index.RenderDataCount());
         if (buffers.index_key.is_some()) {
             buffers.index_key->data_generation = index.DataGeneration();
         }
@@ -162,7 +167,7 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(
             *buffers.index, bytesOf(index.Data(), index.DataSizeOf()), index.DataGeneration());
         if (updated.is_err()) return require_reprepare();
     } else if (! submesh.vertex_arrays.empty()) {
-        buffers.draw_count = static_cast<u32>(submesh.vertex_arrays[0].VertexCount());
+        buffers.draw_count = rstd::as_cast<u32>(submesh.vertex_arrays[0].VertexCount());
     }
 
     (void)mesh.ConsumeDirtyFlags(SceneMeshDirtyData);

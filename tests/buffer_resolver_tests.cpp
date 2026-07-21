@@ -13,13 +13,13 @@ owe::SceneMesh::Submesh MakeSubmesh() {
         { .name = "a_Position", .type = owe::VertexType::FLOAT3 },
     };
 
-    owe::SceneVertexArray vertices(attrs, 2);
+    owe::SceneVertexArray vertices(attrs, rstd::usize(2));
     std::array<float, 6>  positions { 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
     (void)vertices.SetVertex("a_Position", positions);
 
-    owe::SceneIndexArray    indices(3);
+    owe::SceneIndexArray    indices(rstd::usize(3));
     std::array<uint32_t, 3> tri { 0, 1, 2 };
-    indices.Assign(0, tri);
+    indices.Assign(rstd::usize(), tri);
 
     owe::SceneMesh::Submesh submesh;
     submesh.vertex_arrays.push_back(std::move(vertices));
@@ -30,12 +30,12 @@ owe::SceneMesh::Submesh MakeSubmesh() {
 } // namespace
 
 TEST(DrawBufferResourceName, UsesStableSceneDrawIdentity) {
-    owe::SceneDrawItemId draw { .index = 7, .generation = 11 };
+    owe::SceneDrawItemId draw { .index = rstd::u32(7), .generation = rstd::u32(11) };
 
-    auto vertex0 =
-        owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Vertex, 0);
-    auto vertex1 =
-        owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Vertex, 1);
+    auto vertex0 = owe::vulkan::BuildDrawBufferResourceName(
+        draw, owe::vulkan::DrawBufferRole::Vertex, rstd::u32());
+    auto vertex1 = owe::vulkan::BuildDrawBufferResourceName(
+        draw, owe::vulkan::DrawBufferRole::Vertex, rstd::u32(1));
     auto index = owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Index);
     auto uniform =
         owe::vulkan::BuildDrawBufferResourceName(draw, owe::vulkan::DrawBufferRole::Uniform);
@@ -52,48 +52,50 @@ TEST(DrawBufferKey, BuildsStaticKeysFromRenderItemAndGeometryGeneration) {
     owe::SceneMesh mesh;
     mesh.Submeshes().push_back(MakeSubmesh());
 
-    owe::RenderItemId              render_item { .index = 7, .generation = 11 };
+    owe::RenderItemId render_item { .index = rstd::u32(7), .generation = rstd::u64(11) };
     owe::vulkan::DrawBufferRequest request { .render_item   = render_item,
                                              .mesh          = &mesh,
-                                             .submesh_index = 0 };
+                                             .submesh_index = rstd::u32() };
 
-    auto keys = owe::vulkan::BuildDrawBufferKeys(request, 99);
+    auto keys = owe::vulkan::BuildDrawBufferKeys(request, rstd::u64(99));
     ASSERT_EQ(keys.size(), 2u);
 
     const auto& vertex = mesh.Submeshes()[0].vertex_arrays[0];
     EXPECT_EQ(keys[0].render_item.index, render_item.index);
     EXPECT_EQ(keys[0].render_item.generation, render_item.generation);
     EXPECT_EQ(keys[0].role, owe::vulkan::DrawBufferRole::Vertex);
-    EXPECT_EQ(keys[0].submesh_index, 0u);
-    EXPECT_EQ(keys[0].stream_index, 0u);
+    EXPECT_EQ(keys[0].submesh_index, rstd::u32());
+    EXPECT_EQ(keys[0].stream_index, rstd::u32());
     EXPECT_EQ(keys[0].data_generation, vertex.DataGeneration());
-    EXPECT_EQ(keys[0].allocation_generation, 0u);
+    EXPECT_EQ(keys[0].allocation_generation, rstd::u64());
 
     const auto& index = mesh.Submeshes()[0].index_arrays[0];
     EXPECT_EQ(keys[1].role, owe::vulkan::DrawBufferRole::Index);
     EXPECT_EQ(keys[1].data_generation, index.DataGeneration());
-    EXPECT_EQ(keys[1].allocation_generation, 0u);
+    EXPECT_EQ(keys[1].allocation_generation, rstd::u64());
 }
 
 TEST(DrawBufferKey, KeepsDynamicAllocationGenerationSeparateFromDataGeneration) {
     owe::SceneMesh mesh(true);
     mesh.Submeshes().push_back(MakeSubmesh());
 
-    owe::RenderItemId              render_item { .index = 3, .generation = 5 };
+    owe::RenderItemId render_item { .index = rstd::u32(3), .generation = rstd::u64(5) };
     owe::vulkan::DrawBufferRequest request { .render_item   = render_item,
                                              .mesh          = &mesh,
-                                             .submesh_index = 0 };
+                                             .submesh_index = rstd::u32() };
 
-    auto keys = owe::vulkan::BuildDrawBufferKeys(request, 77);
+    auto keys = owe::vulkan::BuildDrawBufferKeys(request, rstd::u64(77));
     ASSERT_EQ(keys.size(), 2u);
-    EXPECT_EQ(keys[0].allocation_generation, 77u);
-    EXPECT_EQ(keys[1].allocation_generation, 77u);
+    EXPECT_EQ(keys[0].allocation_generation, rstd::u64(77));
+    EXPECT_EQ(keys[1].allocation_generation, rstd::u64(77));
     EXPECT_EQ(keys[0].data_generation, mesh.Submeshes()[0].vertex_arrays[0].DataGeneration());
     EXPECT_EQ(keys[1].data_generation, mesh.Submeshes()[0].index_arrays[0].DataGeneration());
 }
 
 TEST(DrawBufferKey, ReturnsEmptyForInvalidRequest) {
     owe::SceneMesh mesh;
-    EXPECT_TRUE(owe::vulkan::BuildDrawBufferKeys({ .mesh = nullptr }, 1).empty());
-    EXPECT_TRUE(owe::vulkan::BuildDrawBufferKeys({ .mesh = &mesh, .submesh_index = 1 }, 1).empty());
+    EXPECT_TRUE(owe::vulkan::BuildDrawBufferKeys({ .mesh = nullptr }, rstd::u64(1)).empty());
+    EXPECT_TRUE(owe::vulkan::BuildDrawBufferKeys({ .mesh = &mesh, .submesh_index = rstd::u32(1) },
+                                                 rstd::u64(1))
+                    .empty());
 }

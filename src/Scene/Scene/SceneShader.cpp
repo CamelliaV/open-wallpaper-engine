@@ -7,9 +7,9 @@ using namespace owe;
 
 void ShaderValue::fromSpan(std::span<const value_type> values) noexcept {
     m_size    = static_cast<usize>(values.size());
-    m_dynamic = values.size() > m_value.len();
+    m_dynamic = values.size() > m_value.len().to_primitive();
     if (m_dynamic) {
-        m_dynamic_value.resize(m_size);
+        m_dynamic_value.resize(m_size.to_primitive());
         std::copy(values.begin(), values.end(), m_dynamic_value.begin());
     } else
         std::copy(values.begin(), values.end(), m_value.begin());

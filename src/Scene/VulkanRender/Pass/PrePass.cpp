@@ -148,7 +148,9 @@ void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& co
     }
     {
         auto& sc           = scene.clearColor;
-        m_desc.clear_value = VkClearValue { .color = { .float32 = { sc[0], sc[1], sc[2], 1.0f } } };
+        m_desc.clear_value = VkClearValue {
+            .color = { .float32 = { sc[usize()], sc[usize(1)], sc[usize(2)], 1.0f } }
+        };
     }
     setPrepared();
 }

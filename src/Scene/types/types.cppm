@@ -181,13 +181,13 @@ private:
 // ---------- SpriteAnimation (was SpriteAnimation.hpp) ---------------------
 
 struct SpriteFrame {
-    i32   imageId { 0 };
-    float frametime { 0 };
-    float x { 0 };
-    float y { 0 };
-    float width { 1 };
-    float height { 1 };
-    float rate { 1 }; // real h / w
+    std::int32_t imageId { 0 };
+    float        frametime { 0 };
+    float        x { 0 };
+    float        y { 0 };
+    float        width { 1 };
+    float        height { 1 };
+    float        rate { 1 }; // real h / w
 
     std::array<float, 2> xAxis { 1, 0 };
     std::array<float, 2> yAxis { 0, 1 };
@@ -198,30 +198,30 @@ public:
     const auto& GetAnimateFrame(double newtime) {
         if ((m_remainTime -= newtime) < 0.0f) {
             SwitchToNext();
-            const auto& frame = m_frames.at((usize)m_curFrame);
+            const auto& frame = m_frames.at(m_curFrame);
             m_remainTime      = frame.frametime;
         }
-        const auto& frame = m_frames.at((usize)m_curFrame);
+        const auto& frame = m_frames.at(m_curFrame);
         return frame;
     }
-    const auto& GetCurFrame() const { return m_frames.at((usize)m_curFrame); }
+    const auto& GetCurFrame() const { return m_frames.at(m_curFrame); }
     void        AppendFrame(const SpriteFrame& frame) { m_frames.push_back(frame); }
     // Read a specific frame without advancing the internal cursor. Used by
     // the script-driven setFrame() override path.
-    const SpriteFrame& GetFrame(idx i) const { return m_frames.at((usize)i); }
+    const SpriteFrame& GetFrame(usize i) const { return m_frames.at(i.to_primitive()); }
 
-    usize numFrames() const { return m_frames.size(); }
-    usize CurrentFrameIndex() const { return static_cast<usize>(m_curFrame); }
+    usize numFrames() const { return usize(m_frames.size()); }
+    usize CurrentFrameIndex() const { return usize(m_curFrame); }
 
 private:
     void SwitchToNext() {
-        if (m_curFrame >= std::ssize(m_frames) - 1)
+        if (m_curFrame + 1 >= m_frames.size())
             m_curFrame = 0;
         else
             m_curFrame++;
     }
-    idx    m_curFrame { 0 };
-    double m_remainTime { 0 };
+    std::size_t m_curFrame { 0 };
+    double      m_remainTime { 0 };
 
     std::vector<SpriteFrame> m_frames;
 };
@@ -236,8 +236,8 @@ union ImageExtra {
 using ImageDataPtr = std::unique_ptr<uint8_t, std::function<void(uint8_t*)>>;
 
 struct ImageData {
-    i32                               width { 0 };
-    i32                               height { 0 };
+    std::int32_t                      width { 0 };
+    std::int32_t                      height { 0 };
     isize                             size { 0 };
     ImageDataPtr                      data {};
     rstd::Option<rstd::io::ReadRange> video_source;
@@ -245,17 +245,17 @@ struct ImageData {
 };
 
 struct ImageHeader {
-    i32 width { 0 };
-    i32 height { 0 };
-    i32 mapWidth { 0 };
-    i32 mapHeight { 0 };
+    std::int32_t width { 0 };
+    std::int32_t height { 0 };
+    std::int32_t mapWidth { 0 };
+    std::int32_t mapHeight { 0 };
 
     bool mipmap_larger { false };
     bool mipmap_pow2 { false };
 
     ImageType     type { ImageType::UNKNOWN };
     TextureFormat format { TextureFormat::RGBA8 };
-    i32           count { 0 };
+    std::int32_t  count { 0 };
 
     bool          isSprite { false };
     TextureSample sample;
@@ -266,12 +266,12 @@ struct ImageHeader {
 
 struct Image : NoCopy, NoMove {
     struct Slot {
-        i32 width { 0 };
-        i32 height { 0 };
+        std::int32_t width { 0 };
+        std::int32_t height { 0 };
 
         std::vector<ImageData> mipmaps;
 
-        operator bool() { return width * height * std::ssize(mipmaps) > 0; }
+        operator bool() { return width != 0 && height != 0 && ! mipmaps.empty(); }
     };
     ImageHeader       header;
     std::vector<Slot> slots;

@@ -205,10 +205,10 @@ JSValue JsonToJs(JSContext* ctx, const Json& value) {
         RSTD_CASE(Bool, boolean) { return JS_NewBool(ctx, boolean); }
         RSTD_CASE(Number, number) {
             if (auto integer = number.as_i64(); integer.is_some())
-                return JS_NewInt64(ctx, *integer);
+                return JS_NewInt64(ctx, integer->to_primitive());
             if (auto integer = number.as_u64(); integer.is_some())
-                return JS_NewInt64(ctx, static_cast<std::int64_t>(*integer));
-            return JS_NewFloat64(ctx, *number.as_f64());
+                return JS_NewInt64(ctx, static_cast<std::int64_t>(integer->to_primitive()));
+            return JS_NewFloat64(ctx, number.as_f64()->to_primitive());
         }
         RSTD_CASE(String, string) {
             const auto view = rstd::cppstd::as_string_view(string.as_str());
@@ -284,14 +284,18 @@ JSValue CoerceInitialValue(JSContext* ctx, const Json& v, FieldKind kind) {
             return MakeVecValue(
                 ctx, fs.size() > 0 ? fs[0] : 0.0, fs.size() > 1 ? fs[1] : 0.0, 0.0, 2);
         }
-        if (auto values = v.as_array(); values.is_some() && (*values)->len() >= 2) {
-            auto x = (**values)[0].as_f64();
-            auto y = (**values)[1].as_f64();
-            if (x.is_some() && y.is_some()) return MakeVecValue(ctx, *x, *y, 0.0, 2);
+        if (auto values = v.as_array(); values.is_some() && (*values)->len() >= usize(2)) {
+            auto x = (**values)[usize(0)].as_f64();
+            auto y = (**values)[usize(1)].as_f64();
+            if (x.is_some() && y.is_some())
+                return MakeVecValue(ctx, x->to_primitive(), y->to_primitive(), 0.0, 2);
         }
         if (v.is_number()) {
             auto number = v.as_f64();
-            if (number.is_some()) return MakeVecValue(ctx, *number, *number, 0.0, 2);
+            if (number.is_some()) {
+                const auto scalar = number->to_primitive();
+                return MakeVecValue(ctx, scalar, scalar, 0.0, 2);
+            }
         }
         break;
     }
@@ -304,15 +308,20 @@ JSValue CoerceInitialValue(JSContext* ctx, const Json& v, FieldKind kind) {
             double z      = fs.size() > 2 ? fs[2] : (fs.size() > 1 ? 0.0 : x);
             return MakeVecValue(ctx, x, y, z, 3);
         }
-        if (auto values = v.as_array(); values.is_some() && (*values)->len() >= 3) {
-            auto x = (**values)[0].as_f64();
-            auto y = (**values)[1].as_f64();
-            auto z = (**values)[2].as_f64();
-            if (x.is_some() && y.is_some() && z.is_some()) return MakeVecValue(ctx, *x, *y, *z, 3);
+        if (auto values = v.as_array(); values.is_some() && (*values)->len() >= usize(3)) {
+            auto x = (**values)[usize(0)].as_f64();
+            auto y = (**values)[usize(1)].as_f64();
+            auto z = (**values)[usize(2)].as_f64();
+            if (x.is_some() && y.is_some() && z.is_some())
+                return MakeVecValue(
+                    ctx, x->to_primitive(), y->to_primitive(), z->to_primitive(), 3);
         }
         if (v.is_number()) {
             auto number = v.as_f64();
-            if (number.is_some()) return MakeVecValue(ctx, *number, *number, *number, 3);
+            if (number.is_some()) {
+                const auto scalar = number->to_primitive();
+                return MakeVecValue(ctx, scalar, scalar, scalar, 3);
+            }
         }
         break;
     }
@@ -1750,8 +1759,8 @@ JSValue NodeSetScale(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     return JS_UNDEFINED;
 }
 // The JS angles API is in degrees; SceneNode::m_rotation is radians.
-constexpr double kRadToDeg = 180.0 / rstd::f64_::consts::PI;
-constexpr double kDegToRad = rstd::f64_::consts::PI / 180.0;
+constexpr double kRadToDeg = 180.0 / rstd::f64::consts::PI.to_primitive();
+constexpr double kDegToRad = rstd::f64::consts::PI.to_primitive() / 180.0;
 JSValue          NodeGetAngles(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return MakeVec3(ctx, 0, 0, 0);
@@ -1903,7 +1912,7 @@ JSValue NodeGetPointSize(JSContext* ctx, JSValueConst this_val) {
         return JS_NewFloat64(ctx, it->second.point_size);
     }
     auto* mesh = n->Mesh();
-    return JS_NewFloat64(ctx, mesh == nullptr ? 1.0 : mesh->PointSize());
+    return JS_NewFloat64(ctx, mesh == nullptr ? 1.0 : mesh->PointSize().to_primitive());
 }
 JSValue NodeSetPointSize(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     auto* n = GetLayerNode(this_val);

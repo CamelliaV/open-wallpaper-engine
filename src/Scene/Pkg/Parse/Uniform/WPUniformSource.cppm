@@ -10,7 +10,7 @@ using namespace rstd::prelude;
 export namespace owe
 {
 
-enum class WPTransformUniformOutput : u32
+enum class WPTransformUniformOutput : rstd::uint32_t
 {
     ModelInverse,
     Model,
@@ -27,7 +27,7 @@ enum class WPTransformUniformOutput : u32
     ViewProjection,
 };
 
-enum class WPFrameUniformOutput : u32
+enum class WPFrameUniformOutput : rstd::uint32_t
 {
     Time,
     FrameTime,
@@ -40,14 +40,14 @@ enum class WPFrameUniformOutput : u32
     Screen,
 };
 
-enum class WPLightUniformOutput : u32
+enum class WPLightUniformOutput : rstd::uint32_t
 {
     Position,
     ColorLegacy,
     ColorRadius,
 };
 
-enum class WPColorUniformOutput : u32
+enum class WPColorUniformOutput : rstd::uint32_t
 {
     UserAlpha,
     Color4,
@@ -56,7 +56,7 @@ enum class WPColorUniformOutput : u32
     Brightness,
 };
 
-enum class WPAudioUniformOutput : u32
+enum class WPAudioUniformOutput : rstd::uint32_t
 {
     Spectrum16Left,
     Spectrum16Right,
@@ -66,7 +66,7 @@ enum class WPAudioUniformOutput : u32
     Spectrum64Right,
 };
 
-enum class WPTextureUniformOutput : u32
+enum class WPTextureUniformOutput : rstd::uint32_t
 {
     Resolution0  = 0,
     Mipmap0      = 16,
@@ -76,50 +76,55 @@ enum class WPTextureUniformOutput : u32
 
 template<typename Output>
 inline auto ToUniformOutput(Output output) -> UniformOutputId {
-    return { .value = static_cast<u32>(output) };
+    return { .value = u32(static_cast<rstd::uint32_t>(output)) };
 }
 
-inline auto WPTextureResolutionOutput(usize index) -> UniformOutputId {
-    return { .value =
-                 static_cast<u32>(WPTextureUniformOutput::Resolution0) + static_cast<u32>(index) };
+inline auto WPTextureResolutionOutput(std::size_t index) -> UniformOutputId {
+    const auto value = static_cast<rstd::uint32_t>(WPTextureUniformOutput::Resolution0) +
+                       static_cast<rstd::uint32_t>(index);
+    return { .value = u32(value) };
 }
 
-inline auto WPTextureMipmapOutput(usize index) -> UniformOutputId {
-    return { .value = static_cast<u32>(WPTextureUniformOutput::Mipmap0) + static_cast<u32>(index) };
+inline auto WPTextureMipmapOutput(std::size_t index) -> UniformOutputId {
+    const auto value = static_cast<rstd::uint32_t>(WPTextureUniformOutput::Mipmap0) +
+                       static_cast<rstd::uint32_t>(index);
+    return { .value = u32(value) };
 }
 
-inline auto WPTextureRotationOutput(usize index) -> UniformOutputId {
-    return { .value =
-                 static_cast<u32>(WPTextureUniformOutput::Rotation0) + static_cast<u32>(index) };
+inline auto WPTextureRotationOutput(std::size_t index) -> UniformOutputId {
+    const auto value = static_cast<rstd::uint32_t>(WPTextureUniformOutput::Rotation0) +
+                       static_cast<rstd::uint32_t>(index);
+    return { .value = u32(value) };
 }
 
-inline auto WPTextureTranslationOutput(usize index) -> UniformOutputId {
-    return { .value =
-                 static_cast<u32>(WPTextureUniformOutput::Translation0) + static_cast<u32>(index) };
+inline auto WPTextureTranslationOutput(std::size_t index) -> UniformOutputId {
+    const auto value = static_cast<rstd::uint32_t>(WPTextureUniformOutput::Translation0) +
+                       static_cast<rstd::uint32_t>(index);
+    return { .value = u32(value) };
 }
 
 struct WPUniformCameraParallax {
-    bool enable { false };
-    f32  amount { 0.0f };
-    f32  delay { 0.0f };
-    f32  mouse_influence { 0.0f };
+    bool  enable { false };
+    float amount { 0.0f };
+    float delay { 0.0f };
+    float mouse_influence { 0.0f };
 };
 
 struct WPUniformCameraShake {
-    bool enable { false };
-    f32  amplitude { 0.0f };
-    f32  speed { 0.0f };
-    f32  roughness { 1.0f };
+    bool  enable { false };
+    float amplitude { 0.0f };
+    float speed { 0.0f };
+    float roughness { 1.0f };
 };
 
 struct WPUniformNodeConfigDraft {
     bool                               configured { false };
-    rstd::array<f32, 2>                parallax_depth { 0.0f, 0.0f };
-    rstd::array<f32, 2>                propagated_parallax_depth { 0.0f, 0.0f };
+    rstd::array<float, 2>              parallax_depth { 0.0f, 0.0f };
+    rstd::array<float, 2>              propagated_parallax_depth { 0.0f, 0.0f };
     bool                               propagate_parallax_to_children { true };
     bool                               use_camera_eye_position { false };
     Option<rstd::sync::Arc<SceneNode>> effect_projection_node;
-    rstd::array<f32, 2>                effect_projection_size { 0.0f, 0.0f };
+    rstd::array<float, 2>              effect_projection_size { 0.0f, 0.0f };
 
     auto Clone() const -> WPUniformNodeConfigDraft;
 };
@@ -148,20 +153,20 @@ private:
 struct WPUniformNodeState {
     rstd::sync::Arc<SceneNode>               node;
     std::shared_ptr<WPUniformCameraResolver> camera_resolver;
-    rstd::array<f32, 2>                      propagated_parallax_depth { 0.0f, 0.0f };
+    rstd::array<float, 2>                    propagated_parallax_depth { 0.0f, 0.0f };
     bool                                     propagate_parallax_to_children { true };
     bool                                     use_camera_eye_position { false };
     Option<rstd::sync::Arc<SceneNode>>       effect_projection_node;
-    rstd::array<f32, 2>                      effect_projection_size { 0.0f, 0.0f };
+    rstd::array<float, 2>                    effect_projection_size { 0.0f, 0.0f };
 
     explicit WPUniformNodeState(rstd::sync::Arc<SceneNode> value): node(rstd::move(value)) {}
 };
 
 struct WPUniformFrameInputs {
-    rstd::array<f32, 2>  pointer { 0.5f, 0.5f };
-    rstd::array<f32, 2>  pointer_last { 0.5f, 0.5f };
-    rstd::array<f32, 64> audio_left {};
-    rstd::array<f32, 64> audio_right {};
+    rstd::array<float, 2>  pointer { 0.5f, 0.5f };
+    rstd::array<float, 2>  pointer_last { 0.5f, 0.5f };
+    rstd::array<float, 64> audio_left {};
+    rstd::array<float, 64> audio_right {};
 };
 
 class WPUniformSceneState {
@@ -171,7 +176,7 @@ public:
 
     auto SetNodeState(SceneNodeId, std::shared_ptr<WPUniformNodeState>)
         -> std::shared_ptr<WPUniformNodeState>;
-    bool SetEffectProjectionSize(SceneNodeId, rstd::array<f32, 2>);
+    bool SetEffectProjectionSize(SceneNodeId, rstd::array<float, 2>);
     auto ResolveParallaxState(const WPUniformNodeState&) const -> const WPUniformNodeState&;
 
     WPUniformCameraParallax&       CameraParallax() noexcept { return m_camera_parallax; }
@@ -179,12 +184,12 @@ public:
     WPUniformCameraShake&          CameraShake() noexcept { return m_camera_shake; }
     const WPUniformCameraShake&    CameraShake() const noexcept { return m_camera_shake; }
     const WPUniformFrameInputs&    Inputs() const noexcept { return m_inputs; }
-    rstd::array<f32, 2>            Ortho() const noexcept { return m_ortho; }
+    rstd::array<float, 2>          Ortho() const noexcept { return m_ortho; }
 
-    void SetOrtho(f32 width, f32 height) { m_ortho = { width, height }; }
-    void SetPointerInput(f64, f64);
-    void SetPointerDelay(f32);
-    void SetAudioSpectrum(slice<f32>, slice<f32>);
+    void SetOrtho(float width, float height) { m_ortho = { width, height }; }
+    void SetPointerInput(double, double);
+    void SetPointerDelay(float);
+    void SetAudioSpectrum(slice<float>, slice<float>);
     void Advance(const SceneFrame&);
     void ApplyUserProperty(std::string_view, const Json&);
     auto AcquireAudioResponse() const -> std::shared_ptr<void> {
@@ -193,7 +198,9 @@ public:
 
 private:
     static u64 Key(SceneNodeId node) {
-        return (static_cast<u64>(node.generation) << 32) | static_cast<u64>(node.index);
+        const auto generation = static_cast<rstd::uint64_t>(node.generation.to_primitive());
+        const auto index      = static_cast<rstd::uint64_t>(node.index.to_primitive());
+        return u64((generation << 32U) | index);
     }
 
     rstd::collections::HashMap<u64, std::shared_ptr<WPUniformNodeState>> m_nodes;
@@ -202,11 +209,11 @@ private:
     WPUniformFrameInputs                 m_inputs;
     WPUniformCameraParallax              m_camera_parallax;
     WPUniformCameraShake                 m_camera_shake;
-    rstd::array<f32, 2>                  m_ortho { 1920.0f, 1080.0f };
-    rstd::array<f32, 2>                  m_pointer_input { 0.5f, 0.5f };
+    rstd::array<float, 2>                m_ortho { 1920.0f, 1080.0f };
+    rstd::array<float, 2>                m_pointer_input { 0.5f, 0.5f };
     std::shared_ptr<AudioResponseDemand> m_audio_demand;
-    f32                                  m_pointer_delay { 0.0f };
-    f64                                  m_pointer_delayed_time { 0.0 };
+    float                                m_pointer_delay { 0.0f };
+    double                               m_pointer_delayed_time { 0.0 };
     rstd::time::Instant                  m_last_pointer_input_time { rstd::time::Instant::now() };
 };
 
@@ -215,10 +222,10 @@ public:
     explicit WPUniformRuntimeInput(std::shared_ptr<WPUniformSceneState> state)
         : m_state(rstd::move(state)) {}
 
-    void SetPointerInput(f64 x, f64 y) {
+    void SetPointerInput(double x, double y) {
         if (m_state) m_state->SetPointerInput(x, y);
     }
-    void SetAudioSpectrum(slice<f32> left, slice<f32> right) {
+    void SetAudioSpectrum(slice<float> left, slice<float> right) {
         if (m_state) m_state->SetAudioSpectrum(left, right);
     }
 

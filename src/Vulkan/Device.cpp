@@ -76,8 +76,8 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
 
     auto props = m_gpu.GetQueueFamilyProperties();
 
-    std::vector<u32> graphic_indexs, present_indexs;
-    u32              index = 0;
+    std::vector<rstd::uint32_t> graphic_indexs, present_indexs;
+    rstd::uint32_t              index = 0;
     for (auto& prop : props) {
         if (prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) graphic_indexs.push_back(index);
         index++;
@@ -100,8 +100,8 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
             m_present_queue.family_index = present_indexs.front();
         }
     }
-    for (u32 i = 0; i < props.len(); ++i) {
-        if (props[i].queueCount == 0) continue;
+    for (rstd::uint32_t i = 0; i < props.len().to_primitive(); ++i) {
+        if (props[usize(i)].queueCount == 0) continue;
         VkDeviceQueueCreateInfo info {
             .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             .queueFamilyIndex = i,
@@ -189,8 +189,8 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         device.m_device,
         *device.m_gpu,
         rstd::slice<VkDeviceQueueCreateInfo>::from_raw_parts(queue_create_infos.data(),
-                                                             queue_create_infos.size()),
-        rstd::slice<const char*>::from_raw_parts(tested_exts_c.data(), tested_exts_c.size()),
+                                                             usize(queue_create_infos.size())),
+        rstd::slice<const char*>::from_raw_parts(tested_exts_c.data(), usize(tested_exts_c.size())),
         &enabled_timeline,
         device.dld,
         &enabled));
@@ -242,10 +242,11 @@ auto Device::MemoryBudget() const -> MemoryBudgetSnapshot {
     rstd::array<VmaBudget, std::extent_v<decltype(properties.memoryHeaps)>> budgets {};
     vmaGetHeapBudgets(*m_allocator, budgets.data());
     MemoryBudgetSnapshot snapshot;
-    for (u32 index = 0; index < properties.memoryHeapCount; ++index) {
-        snapshot.usage += budgets[index].usage;
-        snapshot.budget +=
-            budgets[index].budget != 0 ? budgets[index].budget : properties.memoryHeaps[index].size;
+    for (rstd::uint32_t index = 0; index < properties.memoryHeapCount; ++index) {
+        auto budget_index = usize(index);
+        snapshot.usage += budgets[budget_index].usage;
+        snapshot.budget += budgets[budget_index].budget != 0 ? budgets[budget_index].budget
+                                                             : properties.memoryHeaps[index].size;
     }
     return snapshot;
 }

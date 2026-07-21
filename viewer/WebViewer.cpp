@@ -24,7 +24,9 @@ struct WebViewerArgs {
     i32         remote_debugging_port;
 };
 
-std::string ToStdString(const String& value) { return { value.data(), value.size() }; }
+std::string ToStdString(const String& value) {
+    return { value.data(), value.size().to_primitive() };
+}
 
 template<typename T>
 const T& Value(const Matches& matches, const ArgKey<T>& key) {
@@ -177,8 +179,8 @@ int main(int argc, char** argv) {
     // want GLFW to leave the window context-less either way.
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    int         w_width  = args.width;
-    int         w_height = args.height;
+    int         w_width  = args.width.to_primitive();
+    int         w_height = args.height.to_primitive();
     GLFWwindow* window =
         glfwCreateWindow(w_width, w_height, manifest.title.c_str(), nullptr, nullptr);
     if (! window) {
@@ -204,7 +206,7 @@ int main(int argc, char** argv) {
     weweb::BrowserHost::InitOptions opts;
     opts.resources_dir = exe_dir;
     opts.locales_dir   = exe_dir / "locales";
-    if (int port = args.remote_debugging_port; port > 0) {
+    if (int port = args.remote_debugging_port.to_primitive(); port > 0) {
         opts.enable_remote_debugging = true;
         opts.remote_debugging_port   = port;
     }

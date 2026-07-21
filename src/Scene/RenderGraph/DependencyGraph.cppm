@@ -7,9 +7,9 @@ export namespace owe::rg
 {
 
 struct NodeHandle {
-    usize index { numeric_limits<usize>::max() };
+    usize index { usize::MAX };
 
-    bool valid() const noexcept { return index != numeric_limits<usize>::max(); }
+    bool valid() const noexcept { return index != usize::MAX; }
 
     friend auto operator<=>(const NodeHandle&, const NodeHandle&) = default;
 };

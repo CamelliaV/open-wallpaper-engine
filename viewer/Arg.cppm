@@ -36,7 +36,9 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv);
 namespace viewer
 {
 
-std::string ToStdString(const String& value) { return { value.data(), value.size() }; }
+std::string ToStdString(const String& value) {
+    return { value.data(), value.size().to_primitive() };
+}
 
 template<typename T>
 const T& Value(const Matches& matches, const ArgKey<T>& key) {
@@ -55,7 +57,8 @@ auto ResolutionParser(ref<rstd::ffi::OsStr> raw) -> Result<Resolution, ValueErro
     auto text = raw.to_str();
     if (text.is_none()) return Err(ValueError::InvalidUtf8());
 
-    std::string_view value { reinterpret_cast<const char*>((*text).data()), (*text).size() };
+    std::string_view value { reinterpret_cast<const char*>((*text).data()),
+                             (*text).size().to_primitive() };
     const auto       separator = value.find('x');
     unsigned         width     = 1280;
     unsigned         height    = 720;

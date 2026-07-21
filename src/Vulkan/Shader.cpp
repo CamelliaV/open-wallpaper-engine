@@ -170,10 +170,10 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                 vkbinding.descriptorCount = 1;
                 vkbinding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 
-                for (u32 i = 0; i < block.member_count; i++) {
+                for (std::uint32_t i = 0; i < block.member_count; i++) {
                     auto&                           unif = block.members[i];
                     ShaderReflected::BlockedUniform bunif {};
-                    bunif.size                      = unif.size;
+                    bunif.size                      = usize(unif.size);
                     bunif.offset                    = unif.offset;
                     ref_block.member_map[unif.name] = bunif;
                 }
@@ -340,8 +340,8 @@ bool owe::vulkan::CompileAndLinkShaderUnits(std::span<const ShaderCompUnit> comp
             // omit them from the info log on this glslang build.
             std::string log = shader.getInfoLog();
             std::string filtered;
-            for (usize i = 0, e = log.size(); i < e;) {
-                usize nl = log.find('\n', i);
+            for (std::size_t i = 0, e = log.size(); i < e;) {
+                std::size_t nl = log.find('\n', i);
                 if (nl == std::string::npos) nl = e;
                 std::string_view line(log.data() + i, nl - i);
                 if (line.find("WARNING") == std::string_view::npos) {

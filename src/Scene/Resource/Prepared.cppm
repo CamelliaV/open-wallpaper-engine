@@ -115,7 +115,7 @@ struct PreparedResourceLeases {
 
 class PreparedResourceTable {
 public:
-    explicit PreparedResourceTable(u64 generation = 0): m_generation(generation) {}
+    explicit PreparedResourceTable(u64 generation = u64()): m_generation(generation) {}
 
     bool Insert(PreparedTexture texture) {
         return m_textures.insert(texture.use, rstd::move(texture)).is_none();
@@ -525,13 +525,13 @@ private:
                                                                         : vulkan::TexUsage::COLOR,
             .format = definition.format,
             .sample = definition.sample,
-            .mipmap_level = definition.mip_levels,
+            .mipmap_level = definition.mip_levels.to_primitive(),
             .samples      = TextureSampleCount(definition.samples),
         };
     }
 
     static auto TextureSampleCount(u32 sample_count) -> VkSampleCountFlagBits {
-        switch (sample_count) {
+        switch (sample_count.to_primitive()) {
         case 2: return VK_SAMPLE_COUNT_2_BIT;
         case 4: return VK_SAMPLE_COUNT_4_BIT;
         case 8: return VK_SAMPLE_COUNT_8_BIT;

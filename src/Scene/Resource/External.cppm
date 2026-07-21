@@ -19,7 +19,7 @@ struct PreparedExternalFrame {
 class ExternalResourceBridge {
 public:
     auto Prepare(const vulkan::DeviceCapabilities& capabilities, FrameSurfaceLease lease,
-                 u32 graphics_queue_family)
+                 rstd::uint32_t graphics_queue_family)
         -> Result<PreparedExternalFrame, resource::ResourceError> {
         if (! lease.valid()) {
             return Err(resource::ResourceError {

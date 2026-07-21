@@ -34,7 +34,7 @@ using WPTexFlags = BitFlags<WPTexFlagEnum>;
 namespace
 {
 char* Lz4Decompress(const char* src, int size, int decompressed_size) {
-    char* dst       = new char[(usize)decompressed_size];
+    char* dst       = new char[static_cast<std::size_t>(decompressed_size)];
     int   load_size = LZ4_decompress_safe(src, dst, size, decompressed_size);
     if (load_size < decompressed_size) {
         rstd_error("lz4 decompress failed");
@@ -51,7 +51,7 @@ char* Lz4Decompress(const char* src, int size, int decompressed_size) {
 // is a self-contained PNG/JPEG). Without this fallback the body bytes
 // are memcpy'd into a "raw RGBA8" slot, which decodes to garbage and
 // the wallpaper renders as a flat clear-color screen.
-ImageType DetectEmbeddedImageType(const unsigned char* data, usize size) {
+ImageType DetectEmbeddedImageType(const unsigned char* data, std::size_t size) {
     if (size >= 8 && std::memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) return ImageType::PNG;
     if (size >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff) return ImageType::JPEG;
     if (size >= 6 && (std::memcmp(data, "GIF87a", 6) == 0 || std::memcmp(data, "GIF89a", 6) == 0))
@@ -160,8 +160,9 @@ WPTexFormatVersion LoadHeader(fs::BinaryReader& file, ImageHeader& header) {
     return v;
 }
 
-void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
-    header.mipmap_pow2   = algorism::IsPowOfTwo((u32)mip_0_w) || algorism::IsPowOfTwo((u32)mip_0_h);
+void SetHeaderPow2(ImageHeader& header, std::int32_t mip_0_w, std::int32_t mip_0_h) {
+    header.mipmap_pow2   = algorism::IsPowOfTwo(u32(static_cast<std::uint32_t>(mip_0_w))) ||
+                           algorism::IsPowOfTwo(u32(static_cast<std::uint32_t>(mip_0_h)));
     header.mipmap_larger = mip_0_w * mip_0_h > header.mapWidth * header.mapHeight;
 }
 
@@ -175,7 +176,7 @@ std::optional<uint8_t> HexValue(char c) {
 std::optional<std::string> PercentDecode(std::string_view raw) {
     std::string out;
     out.reserve(raw.size());
-    for (usize i = 0; i < raw.size();) {
+    for (std::size_t i = 0; i < raw.size();) {
         if (raw[i] != '%') {
             out.push_back(raw[i++]);
             continue;
@@ -243,7 +244,7 @@ std::shared_ptr<Image> ParseExternalImage(std::string_view key, const std::strin
     auto& mipmap  = slot.mipmaps[0];
     mipmap.width  = width;
     mipmap.height = height;
-    mipmap.size   = width * height * 4;
+    mipmap.size   = isize(static_cast<std::ptrdiff_t>(width * height * 4));
     mipmap.data   = ImageDataPtr(reinterpret_cast<uint8_t*>(pixels), [](uint8_t* data) {
         stbi_image_free(data);
     });
@@ -265,23 +266,23 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
     if (source.is_err()) return nullptr;
     auto tex_source = rstd::move(source).unwrap_unchecked();
     auto file       = fs::BinaryReader(tex_source.clone());
-    auto startpos   = file.Tell();
     auto ver        = LoadHeader(file, img.header);
 
     // image
-    i32 _image_count = img.header.count;
+    std::int32_t _image_count = img.header.count;
     if (_image_count < 0) return nullptr;
-    usize image_count = (usize)_image_count;
+    std::size_t image_count = static_cast<std::size_t>(_image_count);
 
     img.slots.resize(image_count);
-    for (usize i_image = 0; i_image < image_count; i_image++) {
+    for (std::size_t i_image = 0; i_image < image_count; i_image++) {
         auto& img_slot = img.slots[i_image];
         auto& mipmaps  = img_slot.mipmaps;
 
-        usize mipmap_count = (usize)std::max<i32>(file.ReadInt32(), 0);
+        std::size_t mipmap_count =
+            static_cast<std::size_t>(std::max<std::int32_t>(file.ReadInt32(), 0));
         mipmaps.resize(mipmap_count);
         // load image
-        for (usize i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
+        for (std::size_t i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
             auto& mipmap  = mipmaps.at(i_mipmap);
             mipmap.width  = file.ReadInt32();
             mipmap.height = file.ReadInt32();
@@ -299,7 +300,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 decompressed_size = file.ReadInt32();
             }
 
-            i32 src_size = file.ReadInt32();
+            std::int32_t src_size = file.ReadInt32();
             if (src_size <= 0 || mipmap.width <= 0 || mipmap.height <= 0 || decompressed_size < 0)
                 return nullptr;
 
@@ -310,17 +311,19 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             // complete video payload.
             if (ver.body_has_image_type() && img.header.type == ImageType::UNKNOWN &&
                 ! LZ4_compressed && src_size >= 16) {
-                idx           body_off = file.Tell();
-                unsigned char sniff[16] {};
+                std::ptrdiff_t body_off = file.Tell();
+                unsigned char  sniff[16] {};
                 file.Read(sniff, sizeof(sniff));
                 ImageType maybe_video = DetectEmbeddedImageType(sniff, sizeof(sniff));
                 if (maybe_video == ImageType::VIDEO) {
                     img.header.type   = ImageType::VIDEO;
                     img.header.format = TextureFormat::RGBA8;
-                    auto video_source = tex_source.subrange(u64(body_off), u64(src_size));
+                    auto video_source =
+                        tex_source.subrange(u64(static_cast<std::uint64_t>(body_off)),
+                                            u64(static_cast<std::uint64_t>(src_size)));
                     if (video_source.is_err()) return nullptr;
                     mipmap.video_source = rstd::Some(rstd::move(video_source).unwrap_unchecked());
-                    mipmap.size         = 0;
+                    mipmap.size         = isize();
                     file.SeekSet(body_off + src_size);
                     continue;
                 }
@@ -328,8 +331,8 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             }
 
             char* result;
-            result = new char[(usize)src_size];
-            file.Read(result, (usize)src_size);
+            result = new char[static_cast<std::size_t>(src_size)];
+            file.Read(result, static_cast<std::size_t>(src_size));
 
             // is LZ4 compress
             if (LZ4_compressed) {
@@ -349,7 +352,8 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             // ship containerised PNG/JPEG with image_type=-1 still decode.
             ImageType embedded = img.header.type;
             if (ver.body_has_image_type() && embedded == ImageType::UNKNOWN) {
-                embedded = DetectEmbeddedImageType((const unsigned char*)result, (usize)src_size);
+                embedded = DetectEmbeddedImageType(reinterpret_cast<const unsigned char*>(result),
+                                                   static_cast<std::size_t>(src_size));
             }
             if (ver.body_has_image_type() && embedded != ImageType::UNKNOWN) {
                 int32_t w, h, n;
@@ -362,17 +366,18 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 }
                 img.header.type   = embedded;
                 img.header.format = TextureFormat::RGBA8;
-                mipmap.data       = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
-                    stbi_image_free((unsigned char*)data);
+                mipmap.data = ImageDataPtr(reinterpret_cast<uint8_t*>(data), [](uint8_t* data) {
+                    stbi_image_free(reinterpret_cast<unsigned char*>(data));
                 });
-                src_size          = w * h * 4;
+                src_size    = w * h * 4;
             } else {
-                mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* data) {
-                    delete[] data;
-                });
+                mipmap.data = ImageDataPtr(new uint8_t[static_cast<std::size_t>(src_size)],
+                                           [](uint8_t* data) {
+                                               delete[] data;
+                                           });
                 std::copy(result, result + src_size, mipmap.data.get());
             }
-            mipmap.size = src_size * (i32)sizeof(uint8_t);
+            mipmap.size = isize(static_cast<std::ptrdiff_t>(src_size * sizeof(uint8_t)));
             delete[] result;
         }
     }
@@ -381,7 +386,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
 
 std::vector<std::shared_ptr<Image>>
 WPTexImageParser::ParseMany(std::span<const std::string> names) {
-    constexpr usize max_workers = 4;
+    constexpr usize max_workers { 4 };
     if (names.size() < 2) return IImageParser::ParseMany(names);
 
     const auto worker_count = rstd::min(usize(names.size()), max_workers);
@@ -398,7 +403,7 @@ WPTexImageParser::ParseMany(std::span<const std::string> names) {
 
     auto                                outcomes = rstd::move(*group).join();
     std::vector<std::shared_ptr<Image>> images;
-    images.reserve(outcomes.len());
+    images.reserve(outcomes.len().to_primitive());
     for (auto& outcome : outcomes) {
         auto value = rstd::move(outcome).into_value();
         images.push_back(value.is_some() ? rstd::move(value).unwrap_unchecked() : nullptr);
@@ -426,20 +431,21 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
     auto ver = LoadHeader(file, header);
     if (header.count < 0) return header;
 
-    usize image_count = (usize)header.count;
+    std::size_t image_count = static_cast<std::size_t>(header.count);
 
     // load sprite info
     if (header.isSprite) {
         // bypass image data, store width and height
         std::vector<std::vector<float>> imageDatas(image_count);
-        for (usize i_image = 0; i_image < image_count; i_image++) {
+        for (std::size_t i_image = 0; i_image < image_count; i_image++) {
             int mipmap_count = file.ReadInt32();
             for (int32_t i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
                 int32_t width  = file.ReadInt32();
                 int32_t height = file.ReadInt32();
                 if (i_mipmap == 0) {
                     imageDatas.at(i_image) = { (float)width, (float)height };
-                    header.mipmap_pow2     = algorism::IsPowOfTwo((u32)(width * height));
+                    header.mipmap_pow2 =
+                        algorism::IsPowOfTwo(u32(static_cast<std::uint32_t>(width * height)));
                 }
                 if (ver.body_has_lz4_prelude()) {
                     int32_t LZ4_compressed    = file.ReadInt32();
@@ -468,8 +474,8 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         }
         int32_t framecount = file.ReadInt32();
         if (ver.sprite_has_atlas_size()) {
-            i32 width  = file.ReadInt32();
-            i32 height = file.ReadInt32();
+            std::int32_t width  = file.ReadInt32();
+            std::int32_t height = file.ReadInt32();
             (void)width;
             (void)height;
         }
@@ -483,8 +489,8 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             // tripped vector::operator[]'s assertion. Skip the frame's
             // remaining bytes so subsequent frames stay aligned.
             const auto bad_id = sf.imageId < 0 ||
-                                static_cast<usize>(sf.imageId) >= imageDatas.size() ||
-                                imageDatas[static_cast<usize>(sf.imageId)].size() < 2;
+                                static_cast<std::size_t>(sf.imageId) >= imageDatas.size() ||
+                                imageDatas[static_cast<std::size_t>(sf.imageId)].size() < 2;
             if (bad_id) {
                 rstd_error(
                     "WPTexImageParser: invalid sprite frame imageId={} (image_count={}) in {}",
@@ -500,8 +506,8 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                 }
                 continue;
             }
-            float spriteWidth  = imageDatas[static_cast<usize>(sf.imageId)][0];
-            float spriteHeight = imageDatas[static_cast<usize>(sf.imageId)][1];
+            float spriteWidth  = imageDatas[static_cast<std::size_t>(sf.imageId)][0];
+            float spriteHeight = imageDatas[static_cast<std::size_t>(sf.imageId)][1];
 
             sf.frametime = file.ReadFloat();
             if (ver.sprite_frame_coords_int()) {
@@ -529,10 +535,10 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             header.spriteAnim.AppendFrame(sf);
         }
     } else {
-        i32 mipmap_count = file.ReadInt32();
+        std::int32_t mipmap_count = file.ReadInt32();
         (void)mipmap_count;
-        i32 width  = file.ReadInt32();
-        i32 height = file.ReadInt32();
+        std::int32_t width  = file.ReadInt32();
+        std::int32_t height = file.ReadInt32();
         SetHeaderPow2(header, width, height);
         /* Sniff the body for a video container so the validator can
          * report "video tex" without needing a full Parse(). Mirrors
@@ -546,10 +552,10 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                 decompressed_size = file.ReadInt32();
             }
             (void)decompressed_size;
-            i32 src_size = file.ReadInt32();
+            std::int32_t src_size = file.ReadInt32();
             if (! lz4 && src_size >= 16) {
-                idx           body_off = file.Tell();
-                unsigned char sniff[16] {};
+                std::ptrdiff_t body_off = file.Tell();
+                unsigned char  sniff[16] {};
                 file.Read(sniff, sizeof(sniff));
                 if (DetectEmbeddedImageType(sniff, sizeof(sniff)) == ImageType::VIDEO) {
                     header.type   = ImageType::VIDEO;

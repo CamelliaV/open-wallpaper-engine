@@ -18,7 +18,7 @@ using Combos = Map<std::string, std::string>;
 // ui material name to gl uniform name
 using WPAliasValueDict = Map<std::string, std::string>;
 
-using WPDefaultTexs = std::vector<std::pair<i32, std::string>>;
+using WPDefaultTexs = std::vector<std::pair<std::int32_t, std::string>>;
 
 // Staged direct-route u_* uniforms (shader annotation's `material` field
 // equals the wallpaper-level project.json key). LoadMaterial fills this

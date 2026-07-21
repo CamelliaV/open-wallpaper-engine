@@ -41,14 +41,14 @@ struct ShaderPlanEntry {
 struct ReadyToken {
     u64 value { 0 };
 
-    bool        Valid() const noexcept { return value != 0; }
+    bool        Valid() const noexcept { return value != u64(); }
     friend bool operator==(const ReadyToken&, const ReadyToken&) = default;
 };
 
 struct CompletionToken {
     u64 value { 0 };
 
-    bool        Valid() const noexcept { return value != 0; }
+    bool        Valid() const noexcept { return value != u64(); }
     friend bool operator==(const CompletionToken&, const CompletionToken&) = default;
 };
 

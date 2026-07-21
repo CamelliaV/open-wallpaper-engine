@@ -32,7 +32,7 @@ bool TryParseAnnotationJson(std::string_view source, Json& result) {
     return true;
 }
 
-bool CanStartNumberToken(std::string_view source, usize pos) {
+bool CanStartNumberToken(std::string_view source, std::size_t pos) {
     while (pos > 0) {
         --pos;
         char ch = source[pos];
@@ -49,7 +49,7 @@ std::optional<std::string> NormalizeAnnotationNumbers(std::string_view source) {
     bool in_string = false;
     bool escaped   = false;
     bool changed   = false;
-    for (usize i = 0; i < source.size();) {
+    for (std::size_t i = 0; i < source.size();) {
         char ch = source[i];
         if (in_string) {
             out.push_back(ch);
@@ -142,30 +142,32 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     GetJsonValue(sv_json, "material", material_key, false);
     if (! material_key.empty()) info->alias[material_key] = std::string(name);
 
-    const bool is_tex   = name.compare(0, 9, "g_Texture") == 0;
-    const idx  texcount = std::ssize(texinfos);
+    const bool        is_tex   = name.compare(0, 9, "g_Texture") == 0;
+    const std::size_t texcount = texinfos.size();
 
     if (is_tex) {
         wpscene::WPUniformTex wput;
         wput.FromJson(sv_json);
-        i32  index { 0 };
-        auto parsed = rstd::from_str<i32>(rstd::cppstd::as_str(name.substr(9)));
+        std::int32_t index  = 0;
+        auto         parsed = rstd::from_str<i32>(rstd::cppstd::as_str(name.substr(9)));
         if (parsed.is_ok()) {
-            index = rstd::move(parsed).unwrap();
+            index = rstd::move(parsed).unwrap().to_primitive();
         } else {
             rstd_error("invalid shader texture index: {}", name);
         }
         if (! wput.default_.empty()) {
             info->defTexs.push_back({ index, wput.default_ });
         }
+        const bool        has_texture   = index >= 0 && static_cast<std::size_t>(index) < texcount;
+        const std::size_t texture_index = static_cast<std::size_t>(index);
         if (! wput.combo.empty()) {
-            const bool enabled       = index < texcount && texinfos[(usize)index].enabled;
+            const bool enabled       = has_texture && texinfos[texture_index].enabled;
             info->combos[wput.combo] = enabled ? "1" : "0";
         }
-        if (index < texcount && texinfos[(usize)index].enabled) {
-            auto& compos = texinfos[(usize)index].composEnabled;
-            usize num    = std::min(std::size(compos), std::size(wput.components));
-            for (usize i = 0; i < num; i++) {
+        if (has_texture && texinfos[texture_index].enabled) {
+            auto&       compos = texinfos[texture_index].composEnabled;
+            std::size_t num    = std::min(std::size(compos), std::size(wput.components));
+            for (std::size_t i = 0; i < num; i++) {
                 if (compos[i]) info->combos[wput.components[i].combo] = "1";
             }
         }
@@ -180,8 +182,8 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
                 GetJsonValue(**value, values);
                 sv = std::span<const float>(values);
             } else if ((*value)->is_number()) {
-                sv.setSize(1);
-                GetJsonValue(**value, sv[0]);
+                sv.setSize(usize(1));
+                GetJsonValue(**value, sv[usize()]);
             }
             info->svs[std::string(name)] = sv;
         }

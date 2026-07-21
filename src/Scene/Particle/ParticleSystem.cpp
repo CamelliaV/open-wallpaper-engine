@@ -99,15 +99,15 @@ ParticleInstance* ParticleSubSystem::QueryNewInstance() {
                 return inst.get();
             }
         }
-        if (m_instances.len() < m_maxcount_instance) {
+        if (m_instances.len() < rstd::as_cast<usize>(m_maxcount_instance)) {
             m_instances.push(Box<ParticleInstance>::make());
-            return m_instances[m_instances.len() - 1].get();
+            return m_instances[m_instances.len() - usize(1)].get();
         }
     }
     return nullptr;
 }
 
-void ParticleSubSystem::Emitt() { Tick(m_sys.scene.Runtime().Frame().delta, true); }
+void ParticleSubSystem::Emitt() { Tick(m_sys.scene.Runtime().Frame().delta.to_primitive(), true); }
 
 void ParticleSubSystem::Tick(double frame_time, bool update_mesh) {
     if (! m_started) {
@@ -120,13 +120,13 @@ void ParticleSubSystem::Tick(double frame_time, bool update_mesh) {
 void ParticleSubSystem::Warmup() {
     if (m_start_time <= 0.0) return;
 
-    constexpr double kTargetWarmupFrameTime = 1.0 / 60.0;
-    constexpr u32    kMaxWarmupFrames       = 240;
-    u32              frame_count =
-        std::max(1u, static_cast<u32>(std::ceil(m_start_time / kTargetWarmupFrameTime)));
+    constexpr double         kTargetWarmupFrameTime = 1.0 / 60.0;
+    constexpr rstd::uint32_t kMaxWarmupFrames       = 240;
+    rstd::uint32_t           frame_count =
+        std::max(1u, static_cast<rstd::uint32_t>(std::ceil(m_start_time / kTargetWarmupFrameTime)));
     frame_count       = std::min(frame_count, kMaxWarmupFrames);
     double frame_time = m_start_time / static_cast<double>(frame_count);
-    for (u32 i = 0; i < frame_count; ++i) {
+    for (rstd::uint32_t i = 0; i < frame_count; ++i) {
         Advance(frame_time, false);
     }
 }
@@ -142,8 +142,8 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
     // with Y pointing up. Pointer is [0..1] with Y down -> flip Y.
     const auto            pointer = m_sys.scene.pointerPosition;
     const Eigen::Vector3d mouse_world {
-        static_cast<double>(pointer[0]) * static_cast<double>(m_sys.scene.ortho[0]),
-        (1.0 - static_cast<double>(pointer[1])) * static_cast<double>(m_sys.scene.ortho[1]),
+        static_cast<double>(pointer[usize()]) * static_cast<double>(m_sys.scene.ortho[0]),
+        (1.0 - static_cast<double>(pointer[usize(1)])) * static_cast<double>(m_sys.scene.ortho[1]),
         0.0,
     };
     // Particle a_Position is consumed by the vertex shader in local space and
@@ -168,7 +168,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
     }
 
     rstd::array<float, 16> audio_average {};
-    for (usize i = 0; i < audio_average.len(); ++i) {
+    for (usize i {}; i < audio_average.len(); ++i) {
         audio_average[i] = m_sys.scene.audioAverage[i].load(std::memory_order_relaxed);
     }
 
@@ -178,11 +178,11 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
 
     auto spawn_inst = [this](ParticleInstance&  inst,
                              ParticleSubSystem& child,
-                             isize              idx,
+                             std::ptrdiff_t     idx,
                              Eigen::Vector3f    pos       = Eigen::Vector3f::Zero(),
                              bool               fixed_pos = false) {
-        if (! fixed_pos && idx >= 0 && static_cast<usize>(idx) < inst.Particles().size()) {
-            pos = FollowPosition(inst.Particles()[static_cast<usize>(idx)]);
+        if (! fixed_pos && idx >= 0 && static_cast<std::size_t>(idx) < inst.Particles().size()) {
+            pos = FollowPosition(inst.Particles()[static_cast<std::size_t>(idx)]);
         }
         ParticleInstance* n_inst = child.QueryNewInstance();
         if (n_inst != nullptr) {
@@ -205,8 +205,8 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
         if (bounded_data.parent != nullptr) {
             std::span particles = bounded_data.parent->Particles();
             if (bounded_data.particle_idx != -1 &&
-                static_cast<usize>(bounded_data.particle_idx) < particles.size()) {
-                auto& p          = particles[bounded_data.particle_idx];
+                static_cast<std::size_t>(bounded_data.particle_idx) < particles.size()) {
+                auto& p          = particles[static_cast<std::size_t>(bounded_data.particle_idx)];
                 bounded_data.pos = bounded_data.parent_subsystem
                                        ? bounded_data.parent_subsystem->FollowPosition(p)
                                        : ParticleModify::GetPos(p);
@@ -238,7 +238,8 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
                         m_initializers,
                         m_maxcount,
                         emitter_time,
-                        std::span<const float> { audio_average.data(), audio_average.len() },
+                        std::span<const float> { audio_average.data(),
+                                                 audio_average.len().to_primitive() },
                         std::span<const ParticleControlpoint> { m_controlpoints });
             }
         }
@@ -256,18 +257,18 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
             .time_pass            = simulation_time,
         };
 
-        bool  has_live = false;
-        isize i        = -1;
+        bool           has_live = false;
+        std::ptrdiff_t i        = -1;
         // Keep the trail buffer parallel to the particle slot count, and
         // reset the trail any time a slot transitions to a fresh particle.
-        if (m_trail_length > 0) {
+        if (m_trail_length > u32()) {
             auto& trails = inst->TrailsVec();
             if (trails.size() < info.particles.size()) {
                 trails.resize(info.particles.size());
             }
             for (auto& t : trails) {
-                if (t.positions.size() != m_trail_length)
-                    t.positions.assign(m_trail_length, Eigen::Vector3f::Zero());
+                if (t.positions.size() != m_trail_length.to_primitive())
+                    t.positions.assign(m_trail_length.to_primitive(), Eigen::Vector3f::Zero());
             }
         }
         for (auto& p : info.particles) {
@@ -280,7 +281,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
                         child->Type() == SpawnType::EVENT_SPAWN)
                         spawn_inst(*inst, *child, i);
                 }
-                if (m_trail_length > 0) inst->TrailsVec()[i].Reset();
+                if (m_trail_length > u32()) inst->TrailsVec()[static_cast<std::size_t>(i)].Reset();
             }
 
             ParticleModify::MarkOld(p);
@@ -318,7 +319,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
             ParticleModify::RotateByTime(p, info.time_pass);
         }
 
-        if (m_trail_length > 0) {
+        if (m_trail_length > u32()) {
             // A link_mouse controlpoint drives the rope as a cursor trail:
             // the per-particle position is the spawn cursor and never moves
             // (no velocity initializer, drag=0), so sampling p.position
@@ -335,7 +336,7 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
                 }
             }
             auto& trails = inst->TrailsVec();
-            for (usize si = 0; si < info.particles.size(); si++) {
+            for (std::size_t si = 0; si < info.particles.size(); ++si) {
                 auto& p = info.particles[si];
                 if (! ParticleModify::LifetimeOk(p)) continue;
                 trails[si].Push(use_cursor_trail ? trail_sample : Eigen::Vector3f { p.position });
@@ -346,7 +347,8 @@ void ParticleSubSystem::Advance(double frame_time, bool update_mesh) {
     if (update_mesh) {
         m_mesh->SetDirty();
         m_sys.gener->GenGLData(
-            std::span<const Box<ParticleInstance>> { m_instances.begin(), m_instances.len() },
+            std::span<const Box<ParticleInstance>> { m_instances.begin(),
+                                                     m_instances.len().to_primitive() },
             *m_mesh,
             m_genSpecOp);
     }

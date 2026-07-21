@@ -65,18 +65,19 @@ public:
     auto Bind(UniformOutputId output, std::string_view shader_member, UniformValueShape shape)
         -> Result<bool, UniformError> {
         bool matched = false;
-        for (usize index = 0; index < m_layout.slots.len(); ++index) {
+        for (usize index {}; index < m_layout.slots.len(); ++index) {
             const auto& slot = m_layout.slots[index];
             if (rstd::cppstd::as_string_view(slot.name.as_str()) != shader_member) continue;
-            if (slot.size % sizeof(f32) != 0) {
+            if (slot.size % usize(sizeof(float)) != usize()) {
                 return Err(UniformError {
                     .message =
                         rstd::format("uniform {} has non-float size {}", shader_member, slot.size),
                 });
             }
-            const auto elements = static_cast<u32>(slot.size / sizeof(f32));
-            if ((shape.min_elements != 0 && elements < shape.min_elements) ||
-                (shape.max_elements != 0 && elements > shape.max_elements)) {
+            const auto elements =
+                u32(static_cast<rstd::uint32_t>((slot.size / usize(sizeof(float))).to_primitive()));
+            if ((shape.min_elements != u32() && elements < shape.min_elements) ||
+                (shape.max_elements != u32() && elements > shape.max_elements)) {
                 return Err(UniformError {
                     .message = rstd::format("uniform {} shape mismatch: reflected {} floats, "
                                             "source expects {}..{}",
@@ -162,18 +163,20 @@ public:
             view.has_transform = true;
             view.rotation      = frame->rotation;
             view.translation   = frame->translation;
-            view.revision ^= frame->revision + 0x9e3779b97f4a7c15ULL + (view.revision << 6) +
-                             (view.revision >> 2);
-            if (view.revision == 0) view.revision = 1;
+            auto revision      = view.revision.to_primitive();
+            revision ^= frame->revision.to_primitive() + 0x9e3779b97f4a7c15ULL + (revision << 6U) +
+                        (revision >> 2U);
+            view.revision = u64(revision);
+            if (view.revision == u64()) view.revision = u64(1);
             available = true;
         }
         return available ? Some(view) : None<UniformTextureView>();
     }
-    auto Viewport() const -> rstd::array<f32, 2> { return m_frame->Viewport(); }
-    auto TexelSize() const -> rstd::array<f32, 2> {
+    auto Viewport() const -> rstd::array<float, 2> { return m_frame->Viewport(); }
+    auto TexelSize() const -> rstd::array<float, 2> {
         const auto viewport = m_frame->Viewport();
-        return { viewport[0] > 0.0f ? 1.0f / viewport[0] : 0.0f,
-                 viewport[1] > 0.0f ? 1.0f / viewport[1] : 0.0f };
+        return { viewport[usize(0)] > 0.0f ? 1.0f / viewport[usize(0)] : 0.0f,
+                 viewport[usize(1)] > 0.0f ? 1.0f / viewport[usize(1)] : 0.0f };
     }
 
 private:
@@ -208,7 +211,7 @@ auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock& bloc
     layout.slots.reserve(block.members.len());
 
     for (const auto& member : block.members) {
-        const auto offset = static_cast<usize>(member.offset);
+        const auto offset = rstd::as_cast<usize>(member.offset);
         if (offset > block.size || member.size > block.size - offset) {
             return Err(UniformBufferUpdateError {
                 .message = rstd::format(
@@ -224,12 +227,14 @@ auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock& bloc
     }
 
     auto order = rstd::vec::Vec<usize>::with_capacity(layout.slots.len());
-    for (usize index = 0; index < layout.slots.len(); ++index) order.push(usize(index));
+    for (usize index {}; index < layout.slots.len(); ++index) {
+        order.push(usize(index.to_primitive()));
+    }
     std::sort(order.begin(), order.end(), [&](usize lhs, usize rhs) {
         return layout.slots[lhs].offset < layout.slots[rhs].offset;
     });
-    for (usize index = 1; index < order.len(); ++index) {
-        const auto& previous = layout.slots[order[index - 1]];
+    for (usize index { 1 }; index < order.len(); ++index) {
+        const auto& previous = layout.slots[order[index - usize(1)]];
         const auto& current  = layout.slots[order[index]];
         if (current.offset < previous.offset + previous.size) {
             rstd_warn("uniform block {} overlaps {} and {}",
@@ -263,15 +268,15 @@ UniformBufferBinding::UniformBufferBinding(SceneDrawItemId           draw_item,
 bool UniformBufferBinding::WriteSlot(usize slot_index, UniformValueView value) const {
     if (slot_index >= m_layout.slots.len() || value.data == nullptr) return false;
     const auto& slot       = m_layout.slots[slot_index];
-    const usize value_size = value.size * sizeof(f32);
+    const usize value_size = value.size * usize(sizeof(float));
     auto source = slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(value.data), value_size);
-    rstd::vec::Vec<f32> resized;
-    if (slot.size != value_size && slot.size % sizeof(f32) == 0) {
-        const auto count = slot.size / sizeof(f32);
-        resized          = rstd::vec::Vec<f32>::with_capacity(count);
+    rstd::vec::Vec<float> resized;
+    if (slot.size != value_size && slot.size % usize(sizeof(float)) == usize()) {
+        const auto count = slot.size / usize(sizeof(float));
+        resized          = rstd::vec::Vec<float>::with_capacity(count);
         resized.resize(count, 0.0f);
-        for (usize index = 0; index < rstd::cmp::min(value.size, count); ++index) {
-            resized[index] = value.data[index];
+        for (usize index {}; index < rstd::cmp::min(value.size, count); ++index) {
+            resized[index] = value.data[index.to_primitive()];
         }
         source = slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(resized.data()), slot.size);
     } else if (slot.size != value_size) {
@@ -283,14 +288,14 @@ bool UniformBufferBinding::WriteSlot(usize slot_index, UniformValueView value) c
             slice<u8>::from_raw_parts(source.as_raw_ptr(), rstd::cmp::min(slot.size, source.len()));
     }
     if (slot.offset > m_data.len() || source.len() > m_data.len() - slot.offset) return false;
-    for (usize index = 0; index < source.len(); ++index) {
+    for (usize index {}; index < source.len(); ++index) {
         m_data[slot.offset + index] = source[index];
     }
     return true;
 }
 
 bool UniformBufferBinding::WriteName(std::string_view name, const UniformValue& value) const {
-    for (usize index = 0; index < m_layout.slots.len(); ++index) {
+    for (usize index {}; index < m_layout.slots.len(); ++index) {
         if (rstd::cppstd::as_string_view(m_layout.slots[index].name.as_str()) != name) continue;
         return WriteSlot(index, value.View());
     }
@@ -303,7 +308,7 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
     auto&      material = *m_material;
     const bool force    = ! m_uploaded || m_material_version != material.customShader.value_version;
     if (force) {
-        for (auto& byte : m_data) byte = 0;
+        for (auto& byte : m_data) byte = u8();
         for (const auto& [name, value] : m_defaults) WriteName(name, value);
         for (const auto& [name, value] : material.customShader.constValues) {
             WriteName(name, value);
@@ -325,8 +330,8 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
     }
     if (! changed) return Ok(empty {});
 
-    m_data             = m_base_data.clone();
-    usize source_index = 0;
+    m_data = m_base_data.clone();
+    usize source_index {};
     for (auto& bound : m_sources) {
         detail::SourceValueWriter writer_impl(*this, bound);
         auto                      writer = dyn<UniformValueSink>::from_ref(writer_impl);
@@ -341,7 +346,7 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
     }
 
     ++m_content_version;
-    if (m_content_version == 0) ++m_content_version;
+    if (m_content_version == u64()) ++m_content_version;
     auto updated = buffers->UpdateBuffer(m_buffer, m_data.as_slice(), m_content_version);
     if (updated.is_err()) {
         auto error = rstd::move(updated).unwrap_err_unchecked();
@@ -377,14 +382,14 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
 
     struct RankedSource {
         UniformSourceId source;
-        i32             priority { 0 };
+        rstd::int32_t   priority { 0 };
     };
     auto ranked = Vec<RankedSource>::make();
     auto append = [&](slice<UniformSourceAttachment> attachments) {
-        for (usize index = 0; index < attachments.len(); ++index) {
+        for (usize index {}; index < attachments.len(); ++index) {
             const auto&   attachment = attachments[index];
             Option<usize> found;
-            for (usize candidate = 0; candidate < ranked.len(); ++candidate) {
+            for (usize candidate {}; candidate < ranked.len(); ++candidate) {
                 if (ranked[candidate].source == attachment.source) {
                     found = Some(candidate);
                     break;

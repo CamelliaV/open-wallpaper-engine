@@ -17,8 +17,8 @@ static double SampleBoneCurve(const std::vector<WPPuppet::BoneFrameCurve>&  curv
     const auto& values = curves[bone_index].values;
     if (values.empty()) return 1.0;
 
-    auto sample = [&](idx frame) {
-        const auto i = std::min<usize>(static_cast<usize>(frame), values.size() - 1);
+    auto sample = [&](std::size_t frame) {
+        const auto i = std::min(frame, values.size() - 1);
         return static_cast<double>(values[i]);
     };
     const double a = sample(info.frame_a);
@@ -103,7 +103,7 @@ void WPPuppet::prepared() {
     }
     for (auto& anim : anims) {
         anim.frame_time = 1.0f / anim.fps;
-        anim.max_time   = anim.length / anim.fps;
+        anim.max_time   = static_cast<double>(anim.length) / anim.fps;
         for (auto& t : anim.bone_tracks) {
             for (auto& f : t.frames) {
                 f.quaternion = ToQuaternion(f.angle);
@@ -153,7 +153,7 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             const double blend =
                 LayerBoneBlend(*layer.anim, i, layer.interp_info, layer.anim_layer.blend);
             if (blend <= 0.0) continue;
-            replace_base_frame = std::addressof(track.frames[(usize)0]);
+            replace_base_frame = std::addressof(track.frames[0]);
             break;
         }
 
@@ -180,9 +180,9 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             auto& info  = layer.interp_info;
             auto& track = layer.anim->bone_tracks[i];
             if (! HasAuthoredTrack(track)) continue;
-            auto& frame_base = track.frames[(usize)0];
-            auto& frame_a    = track.frames[(usize)info.frame_a];
-            auto& frame_b    = track.frames[(usize)info.frame_b];
+            auto& frame_base = track.frames[0];
+            auto& frame_a    = track.frames[info.frame_a];
+            auto& frame_b    = track.frames[info.frame_b];
 
             double t     = info.t;
             double one_t = 1.0 - info.t;
@@ -222,7 +222,7 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
 }
 
 static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInfo& info,
-                                           double& cur, u32 length, double frame_time,
+                                           double& cur, std::size_t length, double frame_time,
                                            double max_time) {
     cur          = std::fmod(cur, max_time);
     double _rate = cur / frame_time;
@@ -230,13 +230,13 @@ static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInf
     // `length` is the number of intervals; the track stores `length + 1`
     // frame samples (frame[0]..frame[length], where frame[length] closes
     // the loop). frame_b = frame_a + 1 is always in-range.
-    info.frame_a = ((unsigned)_rate) % length;
+    info.frame_a = static_cast<std::size_t>(_rate) % length;
     info.frame_b = info.frame_a + 1;
-    info.t       = _rate - (double)info.frame_a;
+    info.t       = _rate - static_cast<double>(info.frame_a);
 }
 
 static constexpr void genSingleInterpolationInfo(WPPuppet::Animation::InterpolationInfo& info,
-                                                 double& cur, u32 length, double frame_time,
+                                                 double& cur, std::size_t length, double frame_time,
                                                  double max_time) {
     if (length == 0 || frame_time <= 0.0) {
         cur          = 0.0;
@@ -248,7 +248,7 @@ static constexpr void genSingleInterpolationInfo(WPPuppet::Animation::Interpolat
 
     cur          = std::clamp(cur, 0.0, max_time);
     double rate  = cur / frame_time;
-    u32    frame = static_cast<u32>(rate);
+    auto   frame = static_cast<std::size_t>(rate);
     if (frame >= length) {
         info.frame_a = length - 1;
         info.frame_b = length;
@@ -267,16 +267,19 @@ WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
     auto&             _cur_time = *cur_time;
 
     if (mode == PlayMode::Loop) {
-        genInterpolationInfo(_info, _cur_time, (u32)length, frame_time, max_time);
+        const auto frame_count = static_cast<std::size_t>(length);
+        genInterpolationInfo(_info, _cur_time, frame_count, frame_time, max_time);
     } else if (mode == PlayMode::Single) {
-        genSingleInterpolationInfo(_info, _cur_time, (u32)length, frame_time, max_time);
+        const auto frame_count = static_cast<std::size_t>(length);
+        genSingleInterpolationInfo(_info, _cur_time, frame_count, frame_time, max_time);
     } else if (mode == PlayMode::Mirror) {
         // Frames 0..length stored; mirror cycle is 0,1,..,length,length-1,..,0
         // (2*length intervals). Map any f in [0, 2*length] back into [0, length].
-        const auto _get_frame = [this](auto f) -> idx {
-            return f <= length ? f : (2 * length - f);
+        const auto frame_count = static_cast<std::size_t>(length);
+        const auto _get_frame  = [frame_count](std::size_t frame) {
+            return frame <= frame_count ? frame : (2 * frame_count - frame);
         };
-        genInterpolationInfo(_info, _cur_time, (u32)length * 2, frame_time, max_time * 2.0f);
+        genInterpolationInfo(_info, _cur_time, frame_count * 2, frame_time, max_time * 2.0);
         _info.frame_a = _get_frame(_info.frame_a);
         _info.frame_b = _get_frame(_info.frame_b);
     }

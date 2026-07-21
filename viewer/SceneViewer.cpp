@@ -43,7 +43,7 @@ public:
         for (;;) {
             const auto count = ::read(STDIN_FILENO, buffer, sizeof(buffer));
             if (count > 0) {
-                m_pending.append(buffer, static_cast<usize>(count));
+                m_pending.append(buffer, static_cast<std::size_t>(count));
                 consumeLines(wallpaper, false);
                 continue;
             }
@@ -83,8 +83,8 @@ private:
         auto parsed_result = owe::ParseJson(line);
         if (parsed_result.is_err()) {
             const auto error = parsed_result.unwrap_err();
-            std::cerr << "--stdin-json: invalid JSON at line " << error.line() << " column "
-                      << error.column() << '\n';
+            std::cerr << "--stdin-json: invalid JSON at line " << error.line().to_primitive()
+                      << " column " << error.column().to_primitive() << '\n';
             return;
         }
         auto command = parsed_result.unwrap();
@@ -200,13 +200,13 @@ int main(int argc, char** argv) {
     info.enable_valid_layer = args.enable_valid_layer;
     info.width              = w_width;
     info.height             = w_height;
-    info.msaa_samples       = args.msaa_samples;
+    info.msaa_samples       = args.msaa_samples.to_primitive();
 
     auto& sf_info = info.surface_info;
     {
         uint32_t glfwExtCount = 0;
         auto     exts         = glfwGetRequiredInstanceExtensions(&glfwExtCount);
-        for (int i = 0; i < glfwExtCount; i++) {
+        for (uint32_t i = 0; i < glfwExtCount; i++) {
             sf_info.instanceExts.emplace_back(exts[i]);
         }
 
@@ -235,7 +235,7 @@ int main(int argc, char** argv) {
     config.assets_dir      = std::move(args.assets_dir);
     config.source_pkg_path = std::move(args.scene_path);
     config.graphviz        = args.graphviz;
-    config.fps             = static_cast<uint32_t>(args.fps);
+    config.fps             = static_cast<uint32_t>(args.fps.to_primitive());
 
     std::string cache_path = std::move(args.cache_path);
     if (cache_path.empty()) cache_path = viewer::DefaultCacheDir("wescene-renderer").string();
@@ -257,7 +257,8 @@ int main(int argc, char** argv) {
         if (parsed_result.is_err()) {
             auto error = parsed_result.unwrap_err();
             std::cerr << "--user-properties: '" << up_path << "' is invalid JSON at line "
-                      << error.line() << " column " << error.column() << '\n';
+                      << error.line().to_primitive() << " column " << error.column().to_primitive()
+                      << '\n';
             return 1;
         }
         auto parsed = parsed_result.unwrap();

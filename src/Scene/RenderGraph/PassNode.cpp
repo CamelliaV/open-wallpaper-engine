@@ -8,7 +8,7 @@ namespace
 {
 auto DotEscape(rstd::ref<rstd::str> value) -> String {
     auto out = String::make();
-    for (usize index = 0; index < value.size(); ++index) {
+    for (std::size_t index = 0; index < value.size().to_primitive(); ++index) {
         switch (static_cast<char>(value.data()[index])) {
         case '\\': out.push_str("\\\\"); break;
         case '"': out.push_str("\\\""); break;

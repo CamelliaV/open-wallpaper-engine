@@ -14,10 +14,10 @@ export namespace owe::resource_registry
 using namespace rstd::prelude;
 
 struct DescriptorBindingSchema {
-    u32 binding { 0 };
-    u32 descriptor_type { 0 };
-    u32 descriptor_count { 1 };
-    u32 stage_flags { 0 };
+    rstd::uint32_t binding { 0 };
+    rstd::uint32_t descriptor_type { 0 };
+    rstd::uint32_t descriptor_count { 1 };
+    rstd::uint32_t stage_flags { 0 };
 
     friend bool operator==(const DescriptorBindingSchema&,
                            const DescriptorBindingSchema&) = default;
@@ -48,7 +48,7 @@ struct DescriptorSetSchema {
             lhs.bindings.len() != rhs.bindings.len()) {
             return false;
         }
-        for (usize index = 0; index < lhs.bindings.len(); ++index) {
+        for (usize index = usize(); index < lhs.bindings.len(); ++index) {
             if (lhs.bindings[index] != rhs.bindings[index]) return false;
         }
         return true;
@@ -60,14 +60,16 @@ struct DescriptorSetSchemaHasher {
 
     auto operator()(const DescriptorSetSchema& schema) const noexcept -> u64 {
         auto seed = state(schema.push_descriptor);
+        auto mix  = [&](u64 value) {
+            seed ^= value.wrapping_add(u64(0x9e3779b97f4a7c15ULL))
+                        .wrapping_add(seed.wrapping_shl(u64(6)))
+                        .wrapping_add(seed >> u64(2));
+        };
         for (const auto& binding : schema.bindings) {
-            seed ^= state(binding.binding) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-            seed ^= state(binding.descriptor_type) + 0x9e3779b97f4a7c15ULL + (seed << 6U) +
-                    (seed >> 2U);
-            seed ^= state(binding.descriptor_count) + 0x9e3779b97f4a7c15ULL + (seed << 6U) +
-                    (seed >> 2U);
-            seed ^=
-                state(binding.stage_flags) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+            mix(state(binding.binding));
+            mix(state(binding.descriptor_type));
+            mix(state(binding.descriptor_count));
+            mix(state(binding.stage_flags));
         }
         return seed;
     }
@@ -116,7 +118,7 @@ public:
             .flags        = normalized.push_descriptor
                                 ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR
                                 : VkDescriptorSetLayoutCreateFlags {},
-            .bindingCount = static_cast<u32>(bindings.len()),
+            .bindingCount = static_cast<rstd::uint32_t>(bindings.len().to_primitive()),
             .pBindings    = bindings.data(),
         };
         vvk::DescriptorSetLayout layout;
@@ -150,9 +152,9 @@ public:
     void Reset() {
         m_handles.clear();
         m_entries.clear();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
     auto Size() const noexcept -> usize { return m_entries.len(); }
@@ -160,7 +162,7 @@ public:
     static auto CanonicalSchema(const vulkan::DescriptorSetInfo& info)
         -> Result<DescriptorSetSchema, resource::ResourceError> {
         auto bindings =
-            rstd::vec::Vec<DescriptorBindingSchema>::with_capacity(info.bindings.size());
+            rstd::vec::Vec<DescriptorBindingSchema>::with_capacity(usize(info.bindings.size()));
         for (const auto& binding : info.bindings) {
             if (binding.pImmutableSamplers != nullptr) {
                 return Err(resource::ResourceError {
@@ -170,7 +172,7 @@ public:
             }
             bindings.push(DescriptorBindingSchema {
                 .binding          = binding.binding,
-                .descriptor_type  = static_cast<u32>(binding.descriptorType),
+                .descriptor_type  = static_cast<rstd::uint32_t>(binding.descriptorType),
                 .descriptor_count = binding.descriptorCount,
                 .stage_flags      = binding.stageFlags,
             });
@@ -178,9 +180,10 @@ public:
         std::sort(bindings.begin(), bindings.end(), [](const auto& lhs, const auto& rhs) {
             return lhs.binding < rhs.binding;
         });
-        for (usize index = 0; index < bindings.len(); ++index) {
+        for (usize index = usize(); index < bindings.len(); ++index) {
             if (bindings[index].descriptor_count == 0 || bindings[index].stage_flags == 0 ||
-                (index > 0 && bindings[index - 1].binding == bindings[index].binding)) {
+                (index > usize() &&
+                 bindings[index - usize(1)].binding == bindings[index].binding)) {
                 return Err(resource::ResourceError {
                     .kind = resource::ResourceErrorKind::MissingDefinition,
                     .message =
@@ -209,15 +212,15 @@ private:
 };
 
 struct DescriptorImageBinding {
-    u32                     binding { 0 };
+    rstd::uint32_t          binding { 0 };
     vulkan::ImageParameters image;
 };
 
 struct DescriptorBufferBinding {
-    u32          binding { 0 };
-    VkBuffer     buffer { VK_NULL_HANDLE };
-    VkDeviceSize offset { 0 };
-    VkDeviceSize size { 0 };
+    rstd::uint32_t binding { 0 };
+    VkBuffer       buffer { VK_NULL_HANDLE };
+    VkDeviceSize   offset { 0 };
+    VkDeviceSize   size { 0 };
 };
 
 enum class DescriptorBindingBackend
@@ -254,11 +257,12 @@ struct PreparedDescriptorBinding {
         if (backend == DescriptorBindingBackend::Set) {
             if (set.is_none() || ! set->valid()) return;
             auto descriptor_set = set->handle;
-            command.BindDescriptorSets(VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                       layout,
-                                       0,
-                                       slice<VkDescriptorSet>::from_raw_parts(&descriptor_set, 1),
-                                       {});
+            command.BindDescriptorSets(
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                layout,
+                0,
+                slice<VkDescriptorSet>::from_raw_parts(&descriptor_set, usize(1)),
+                {});
             return;
         }
         for (const auto& binding : images) {
@@ -303,7 +307,7 @@ public:
     auto PreparePush(rstd::slice<DescriptorImageBinding> images,
                      Option<DescriptorBufferBinding>     buffer) -> PreparedDescriptorBinding {
         auto prepared_images = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(images.len());
-        for (usize index = 0; index < images.len(); ++index) {
+        for (usize index = usize(); index < images.len(); ++index) {
             prepared_images.push(DescriptorImageBinding {
                 .binding = images[index].binding,
                 .image   = images[index].image,
@@ -339,10 +343,11 @@ public:
                 .imageView   = binding.image.view,
                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             };
-            if (! updates.WriteImage(prepared.set->clone(),
-                                     binding.binding,
-                                     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                     slice<VkDescriptorImageInfo>::from_raw_parts(&image, 1))) {
+            if (! updates.WriteImage(
+                    prepared.set->clone(),
+                    binding.binding,
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    slice<VkDescriptorImageInfo>::from_raw_parts(&image, usize(1)))) {
                 return Err(resource::ResourceError {
                     .kind    = resource::ResourceErrorKind::BackendFailure,
                     .message = rstd::format("prepare descriptor image binding failed"),
@@ -355,10 +360,11 @@ public:
                 .offset = prepared.buffer->offset,
                 .range  = prepared.buffer->size,
             };
-            if (! updates.WriteBuffer(prepared.set->clone(),
-                                      prepared.buffer->binding,
-                                      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                      slice<VkDescriptorBufferInfo>::from_raw_parts(&info, 1))) {
+            if (! updates.WriteBuffer(
+                    prepared.set->clone(),
+                    prepared.buffer->binding,
+                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    slice<VkDescriptorBufferInfo>::from_raw_parts(&info, usize(1)))) {
                 return Err(resource::ResourceError {
                     .kind    = resource::ResourceErrorKind::BackendFailure,
                     .message = rstd::format("prepare descriptor buffer binding failed"),
@@ -376,9 +382,9 @@ public:
 
     void Reset() {
         m_pool       = None();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
 private:
@@ -401,7 +407,7 @@ private:
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
                 .message = rstd::format("allocate descriptor set failed: {}",
-                                        static_cast<i32>(allocated.api_result)),
+                                        static_cast<rstd::int32_t>(allocated.api_result)),
             });
         }
         return Ok(rstd::move(allocated.lease));
@@ -409,7 +415,7 @@ private:
 
     auto CreatePool(const vulkan::Device& device)
         -> Result<rstd::sync::Arc<vvk::DescriptorArenaGeneration>, resource::ResourceError> {
-        auto sizes = rstd::vec::Vec<VkDescriptorPoolSize>::with_capacity(2);
+        auto sizes = rstd::vec::Vec<VkDescriptorPoolSize>::with_capacity(usize(2));
         sizes.push(VkDescriptorPoolSize {
             .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .descriptorCount = 8192,
@@ -424,7 +430,7 @@ private:
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
                 .message = rstd::format("create descriptor pool failed: {}",
-                                        static_cast<i32>(created.api_result)),
+                                        static_cast<rstd::int32_t>(created.api_result)),
             });
         }
         return Ok(rstd::move(*created.arena));

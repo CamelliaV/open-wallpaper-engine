@@ -71,12 +71,12 @@ void BufferUploadPool::destroy() {
     m_dirty = false;
 }
 
-Option<BufferAllocation> BufferUploadPool::Upload(std::span<const u8>        data,
-                                                  const BufferUploadRequest& request) {
+Option<BufferAllocation> BufferUploadPool::Upload(std::span<const rstd::uint8_t> data,
+                                                  const BufferUploadRequest&     request) {
     if (m_buf.is_none() || request.size == 0 || data.size() > request.size) {
         return None();
     }
-    VkDeviceSize alignment = static_cast<VkDeviceSize>(request.alignment);
+    VkDeviceSize alignment = request.alignment;
     if (request.usage == BufferUploadClass::Uniform) {
         alignment = std::max(alignment, m_device.limits().minUniformBufferOffsetAlignment);
     } else if (request.usage == BufferUploadClass::Storage) {
@@ -85,8 +85,7 @@ Option<BufferAllocation> BufferUploadPool::Upload(std::span<const u8>        dat
     StagingBufferRef ref;
     auto*            buffer = m_buf->get();
     if (! buffer->allocateSubRef(request.size, ref, alignment)) return None();
-    if (! data.empty() &&
-        ! buffer->writeToBuf(ref, { const_cast<u8*>(data.data()), data.size() })) {
+    if (! data.empty() && ! buffer->writeToBuf(ref, data)) {
         buffer->unallocateSubRef(ref);
         return None();
     }
@@ -95,7 +94,7 @@ Option<BufferAllocation> BufferUploadPool::Upload(std::span<const u8>        dat
     return Some(BufferAllocation(this, ref));
 }
 
-bool BufferUploadPool::Update(BufferAllocation& allocation, std::span<const u8> data) {
+bool BufferUploadPool::Update(BufferAllocation& allocation, std::span<const rstd::uint8_t> data) {
     if (m_buf.is_none()) {
         rstd_error("update buffer failed: upload pool is not initialized");
         return false;
@@ -115,8 +114,7 @@ bool BufferUploadPool::Update(BufferAllocation& allocation, std::span<const u8> 
         return false;
     }
     if (data.empty()) return true;
-    if (! m_buf->get()->writeToBuf(allocation.m_ref,
-                                   { const_cast<u8*>(data.data()), data.size() })) {
+    if (! m_buf->get()->writeToBuf(allocation.m_ref, data)) {
         return false;
     }
     m_dirty = true;

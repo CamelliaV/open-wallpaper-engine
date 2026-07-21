@@ -28,7 +28,7 @@ void LoadUserShaderValues(const owe::Json&                              json,
 
 void MergeUserTextures(const rstd::json::Array& src, rstd::json::Array& dst) {
     while (src.len() > dst.len()) dst.push(owe::Json::Null());
-    for (rstd::usize i = 0; i < src.len(); ++i) {
+    for (rstd::usize i = rstd::usize(); i < src.len(); ++i) {
         if (! src[i].is_null()) dst[i] = src[i].clone();
     }
 }
@@ -202,7 +202,7 @@ bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
         rstd_error("material no data");
         return false;
     }
-    const auto& jContent = (**pass_array)[0];
+    const auto& jContent = (**pass_array)[rstd::usize()];
     if (jContent.get("shader").is_none()) {
         rstd_error("material no shader");
         return false;

@@ -201,11 +201,13 @@ inline u32  ParseLinkTex(const std::string_view name) {
     auto result = rstd::from_str<u32>(rstd::cppstd::as_str(name.substr(9)));
     if (result.is_err()) {
         rstd_error("invalid linked texture id: {}", name);
-        return 0;
+        return u32();
     }
     return rstd::move(result).unwrap();
 }
-inline std::string GenLinkTex(isize id) { return std::string(SpecTex_Link) + std::to_string(id); }
+inline std::string GenLinkTex(std::ptrdiff_t id) {
+    return std::string(SpecTex_Link) + std::to_string(id);
+}
 
 inline bool IsImageLayerComposite(const std::string_view name) {
     return name.starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);

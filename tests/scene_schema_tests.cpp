@@ -365,7 +365,7 @@ void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
     std::sort(stamps.begin(), stamps.end());
 
     for (const auto& [v, stamp] : stamps) {
-        auto ver_data = (Report()).get(stamp);
+        auto ver_data = (Report()).get(rstd::cppstd::as_str(stamp));
         if (ver_data.is_none()) continue;
 
         struct Entry {
@@ -379,7 +379,7 @@ void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
             if (parsed.contains(k)) return;
             std::uint64_t present_in = 0;
             if (auto value = info.get("present_in"); value.is_some())
-                present_in = (*value)->as_u64().unwrap_or(0);
+                present_in = (*value)->as_u64().unwrap_or(rstd::u64()).to_primitive();
             miss.push_back({ k, present_in });
         });
         std::sort(miss.begin(), miss.end(), [](auto& a, auto& b) {
@@ -516,7 +516,7 @@ TEST(SceneSchema, ReportTopUnparsedNestedKeys) {
                 const std::string k { path.substr(parent.size()) };
                 if (parsed.contains(k)) return;
                 if (auto value = info.get("present_in"); value.is_some())
-                    agg[k] += (*value)->as_u64().unwrap_or(0);
+                    agg[k] += (*value)->as_u64().unwrap_or(rstd::u64()).to_primitive();
             });
         });
         std::vector<Entry> miss;

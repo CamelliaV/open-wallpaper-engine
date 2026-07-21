@@ -70,8 +70,8 @@ bool CopyPass::prepareResourceStates(
     if (m_desc.src_use.is_none() || m_desc.dst_use.is_none()) return false;
 
     auto range = resource_registry::TextureSubresourceRange {
-        .level_count = 1,
-        .layer_count = 1,
+        .level_count = u32(1),
+        .layer_count = u32(1),
     };
     auto src_before = states->Prepare(
         *m_desc.src_use, resource_registry::TextureStateKind::TransferSource, range);
@@ -98,7 +98,7 @@ void CopyPass::prepare(Scene&, const Device&, PassPrepareContext& context) {
         &m_desc.src_use,
         &m_desc.dst_use,
     };
-    for (usize i = 0; i < textures.len(); i++) {
+    for (usize i {}; i < textures.len(); i++) {
         auto& tex_name = textures[i];
         if (tex_name.empty()) continue;
 

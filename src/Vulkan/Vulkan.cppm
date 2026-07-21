@@ -38,12 +38,12 @@ namespace vulkan
 {
 
 struct ImageParameters {
-    VkImage     handle {};
-    VkImageView view {};
-    VkSampler   sampler {};
-    VkExtent3D  extent {};
-    u32         mipmap_level { 1 };
-    u64         generation { 0 };
+    VkImage        handle {};
+    VkImageView    view {};
+    VkSampler      sampler {};
+    VkExtent3D     extent {};
+    rstd::uint32_t mipmap_level { 1 };
+    u64            generation { 0 };
 
     ImageParameters()  = default;
     ~ImageParameters() = default;
@@ -73,7 +73,7 @@ struct FrameSurfaceIdentity {
     u32 image_index { 0 };
     u64 acquire_serial { 0 };
 
-    bool valid() const noexcept { return owner_generation != 0 && acquire_serial != 0; }
+    bool valid() const noexcept { return owner_generation != u64() && acquire_serial != u64(); }
     bool operator==(const FrameSurfaceIdentity&) const = default;
 };
 
@@ -90,7 +90,7 @@ struct FrameSurfaceReuseProof {
     u64                   release_point { 0 };
 
     bool valid() const noexcept {
-        return (kind == FrameSurfaceReuseKind::ConsumerReleased) == (release_point != 0);
+        return (kind == FrameSurfaceReuseKind::ConsumerReleased) == (release_point != u64());
     }
 };
 
@@ -109,10 +109,10 @@ struct FrameSurfaceLease {
     vulkan::ImageParameters       image;
     VkFormat                      format { VK_FORMAT_UNDEFINED };
     VkImageLayout                 initial_layout { VK_IMAGE_LAYOUT_UNDEFINED };
-    u32                           initial_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    rstd::uint32_t                initial_queue_family { VK_QUEUE_FAMILY_IGNORED };
     FrameSurfaceAcquireDependency acquire;
     VkImageLayout                 final_layout { VK_IMAGE_LAYOUT_UNDEFINED };
-    u32                           final_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    rstd::uint32_t                final_queue_family { VK_QUEUE_FAMILY_IGNORED };
     bool                          discard_content { true };
 
     bool valid() const noexcept {
@@ -222,10 +222,10 @@ struct ExHandle {
     i32   height { 0 };
     usize size { 0 };
 
-    u32 drm_fourcc { 0 };
-    u64 drm_modifier { 0 };
-    u64 plane0_offset { 0 };
-    u32 plane0_stride { 0 };
+    rstd::uint32_t drm_fourcc { 0 };
+    rstd::uint64_t drm_modifier { 0 };
+    VkDeviceSize   plane0_offset { 0 };
+    rstd::uint32_t plane0_stride { 0 };
 
     ExHandle() = default;
     ExHandle(int id): m_id(id) {};
@@ -382,8 +382,8 @@ using CheckGpuOp = std::function<bool(vvk::PhysicalDevice)>;
 
 constexpr std::string_view VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
 
-constexpr u32         WP_VULKAN_VERSION { VK_API_VERSION_1_1 };
-constexpr const char* WP_APPLICATION_NAME { "scene render" };
+constexpr rstd::uint32_t WP_VULKAN_VERSION { VK_API_VERSION_1_1 };
+constexpr const char*    WP_APPLICATION_NAME { "scene render" };
 
 class Device;
 class Instance {
@@ -394,13 +394,13 @@ public:
     void Destroy();
 
     static bool Create(Instance&, std::span<const Extension>, std::span<const InstanceLayer>,
-                       u32 api_version = WP_VULKAN_VERSION);
-    bool        ChoosePhysicalDevice(const CheckGpuOp& checkgpu, std::span<const u8> uuid = {});
+                       rstd::uint32_t api_version = WP_VULKAN_VERSION);
+    bool ChoosePhysicalDevice(const CheckGpuOp& checkgpu, std::span<const rstd::uint8_t> uuid = {});
 
     const vvk::Instance&         inst() const;
     const vvk::PhysicalDevice&   gpu() const;
     const vvk::SurfaceKHR&       surface() const;
-    u32                          api_version() const { return m_api_version; }
+    rstd::uint32_t               api_version() const { return m_api_version; }
     std::span<const std::string> enabled_extensions() const { return m_enabled_extensions; }
 
     bool offscreen() const;
@@ -414,7 +414,7 @@ private:
 
     vvk::DebugUtilsMessenger m_debug_utils;
     vvk::PhysicalDevice      m_gpu {};
-    u32                      m_api_version { WP_VULKAN_VERSION };
+    rstd::uint32_t           m_api_version { WP_VULKAN_VERSION };
 
     vvk::SurfaceKHR          m_surface {};
     Set<std::string>         m_extensions;
@@ -427,13 +427,13 @@ private:
 // ---------- Parameters.hpp ----------
 
 struct QueueParameters {
-    vvk::Queue handle;
-    u32        family_index;
+    vvk::Queue     handle;
+    rstd::uint32_t family_index;
 };
 
 struct VmaBufferParameters {
     vvk::VmaBuffer handle;
-    usize          req_size;
+    VkDeviceSize   req_size;
 
     VmaBufferParameters();
     ~VmaBufferParameters();
@@ -442,8 +442,8 @@ struct VmaBufferParameters {
 };
 
 struct BufferParameters {
-    VkBuffer handle;
-    usize    req_size;
+    VkBuffer     handle;
+    VkDeviceSize req_size;
     BufferParameters()  = default;
     ~BufferParameters() = default;
     BufferParameters(const VmaBufferParameters& o) noexcept
@@ -476,10 +476,10 @@ struct ExImageParameters : NoCopy {
     u64            generation { 0 };
     int            fd { 0 };
 
-    u32 drm_fourcc { 0 };
-    u64 drm_modifier { 0 };
-    u64 plane0_offset { 0 };
-    u32 plane0_stride { 0 };
+    rstd::uint32_t drm_fourcc { 0 };
+    rstd::uint64_t drm_modifier { 0 };
+    VkDeviceSize   plane0_offset { 0 };
+    rstd::uint32_t plane0_stride { 0 };
 
     ExImageParameters();
     ~ExImageParameters();
@@ -524,11 +524,11 @@ struct ImageSlots : NoCopy {
 struct ImageSlotsRef {
     std::vector<ImageParameters> slots;
 
-    idx active { 0 };
+    std::ptrdiff_t active { 0 };
 
     auto& getActive() const {
         if (active > 0 && active >= std::ssize(slots)) return slots[0];
-        return slots[(usize)active];
+        return slots[static_cast<std::size_t>(active)];
     }
     ImageSlotsRef();
     ~ImageSlotsRef();
@@ -616,8 +616,9 @@ public:
     void PumpVideoTextures(double dt_seconds);
 
     /* vkCmdCopyBufferToImage a sub-rect of `atlas` into the supplied texture. */
-    bool UploadFontAtlasRegion(ref<TextureAllocation> texture, const u8* atlas, u32 atlas_w, u32 x,
-                               u32 y, u32 w, u32 h);
+    bool UploadFontAtlasRegion(ref<TextureAllocation> texture, const rstd::uint8_t* atlas,
+                               rstd::uint32_t atlas_w, rstd::uint32_t x, rstd::uint32_t y,
+                               rstd::uint32_t w, rstd::uint32_t h);
 
 private:
     Option<VmaImageParameters> CreateTex(TextureKey);
@@ -670,16 +671,16 @@ void RecordGenerateMipmaps(vvk::CommandBuffer&, const ImageParameters&);
 // ---------- Device.hpp ----------
 
 struct DeviceCapabilities {
-    bool timeline_semaphore { false };
-    bool synchronization2 { false };
-    bool push_descriptor { false };
-    bool memory_budget { false };
-    bool external_memory_fd { false };
-    bool external_memory_dma_buf { false };
-    bool drm_format_modifier { false };
-    bool foreign_queue { false };
-    u32  graphics_queue_family { VK_QUEUE_FAMILY_IGNORED };
-    u32  present_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    bool           timeline_semaphore { false };
+    bool           synchronization2 { false };
+    bool           push_descriptor { false };
+    bool           memory_budget { false };
+    bool           external_memory_fd { false };
+    bool           external_memory_dma_buf { false };
+    bool           drm_format_modifier { false };
+    bool           foreign_queue { false };
+    rstd::uint32_t graphics_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    rstd::uint32_t present_queue_family { VK_QUEUE_FAMILY_IGNORED };
 };
 
 struct MemoryBudgetSnapshot {
@@ -725,7 +726,7 @@ public:
     const auto&                  handle() const { return m_device; }
     const auto&                  gpu() const { return m_gpu; }
     VkInstance                   instance_handle() const { return m_instance; }
-    u32                          instance_api_version() const { return m_instance_api_version; }
+    rstd::uint32_t               instance_api_version() const { return m_instance_api_version; }
     std::span<const std::string> enabled_instance_extensions() const {
         return m_enabled_instance_extensions;
     }
@@ -750,7 +751,7 @@ private:
 
     vvk::DeviceDispatch     dld;
     VkInstance              m_instance { VK_NULL_HANDLE };
-    u32                     m_instance_api_version { WP_VULKAN_VERSION };
+    rstd::uint32_t          m_instance_api_version { WP_VULKAN_VERSION };
     vvk::Device             m_device;
     vvk::PhysicalDevice     m_gpu;
     vvk::VmaAllocatorHandle m_allocator;
@@ -773,7 +774,8 @@ private:
 
 // ---------- Util.hpp ----------
 
-inline bool CreateStagingBuffer(VmaAllocator allocator, usize size, VmaBufferParameters& buffer) {
+inline bool CreateStagingBuffer(VmaAllocator allocator, VkDeviceSize size,
+                                VmaBufferParameters& buffer) {
     VkBufferCreateInfo ci {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -802,7 +804,7 @@ public:
 private:
     friend class StagingBuffer;
     VmaVirtualAllocation m_allocation {};
-    usize                m_virtual_index { 0 };
+    std::size_t          m_virtual_index { 0 };
 };
 
 class StagingBuffer : NoCopy, NoMove {
@@ -815,8 +817,10 @@ public:
 
     bool allocateSubRef(VkDeviceSize size, StagingBufferRef&, VkDeviceSize alignment = 1);
     void unallocateSubRef(const StagingBufferRef&);
-    bool writeToBuf(const StagingBufferRef&, std::span<u8>, usize offset = 0);
-    bool fillBuf(const StagingBufferRef& ref, usize offset, usize size, u8 c);
+    bool writeToBuf(const StagingBufferRef&, std::span<const rstd::uint8_t>,
+                    VkDeviceSize offset = 0);
+    bool fillBuf(const StagingBufferRef& ref, VkDeviceSize offset, VkDeviceSize size,
+                 rstd::uint8_t c);
 
     bool prepareGpuBuffer();
     bool recordUpload(vvk::CommandBuffer&);
@@ -827,7 +831,7 @@ private:
     struct VirtualBlock {
         VmaVirtualBlock handle {};
         bool            enabled { false };
-        usize           index { 0 };
+        std::size_t     index { 0 };
         VkDeviceSize    offset { 0 };
         VkDeviceSize    size { 0 };
     };
@@ -886,8 +890,8 @@ enum class BufferUploadClass
 };
 
 struct BufferUploadRequest {
-    rstd::usize       size { 0 };
-    rstd::usize       alignment { 1 };
+    VkDeviceSize      size { 0 };
+    VkDeviceSize      alignment { 1 };
     BufferUploadClass usage { BufferUploadClass::Vertex };
 };
 
@@ -899,8 +903,9 @@ public:
     bool init();
     void destroy();
 
-    Option<BufferAllocation> Upload(std::span<const u8> data, const BufferUploadRequest& request);
-    bool                     Update(BufferAllocation&, std::span<const u8> data);
+    Option<BufferAllocation> Upload(std::span<const rstd::uint8_t> data,
+                                    const BufferUploadRequest&     request);
+    bool                     Update(BufferAllocation&, std::span<const rstd::uint8_t> data);
     void                     Release(StagingBufferRef ref);
     VkBuffer                 gpuBuf() const;
     bool                     preparePendingUploads();
@@ -974,10 +979,11 @@ public:
     GraphicsPipeline&
         addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
     GraphicsPipeline& addInputBindingDescription(std::span<const VkVertexInputBindingDescription>);
-    GraphicsPipeline& setCreateInfoOptions(VkPipelineCreateFlags flags, u32 subpass);
+    GraphicsPipeline& setCreateInfoOptions(VkPipelineCreateFlags flags, rstd::uint32_t subpass);
     GraphicsPipeline& setTopology(VkPrimitiveTopology);
     GraphicsPipeline& setPrimitiveRestartEnable(bool);
-    GraphicsPipeline& setViewportScissorCount(u32 viewport_count, u32 scissor_count);
+    GraphicsPipeline& setViewportScissorCount(rstd::uint32_t viewport_count,
+                                              rstd::uint32_t scissor_count);
     GraphicsPipeline& setDynamicStates(std::span<const VkDynamicState>);
     GraphicsPipeline& setSampleCount(VkSampleCountFlagBits);
 
@@ -985,7 +991,7 @@ private:
     vvk::RenderPass m_pass;
 
     VkPipelineCreateFlags m_create_flags { 0 };
-    u32                   m_subpass { 0 };
+    rstd::uint32_t        m_subpass { 0 };
 
     VkPipelineInputAssemblyStateCreateInfo         m_input_assembly {};
     std::vector<VkVertexInputBindingDescription>   m_input_bind_descriptions;
@@ -1036,7 +1042,8 @@ struct LocalExHandle : NoCopy {
 class LocalExSwapchain final : public ::owe::ExSwapchain,
                                public ::owe::TripleSwapchain<::owe::ExHandle> {
 public:
-    LocalExSwapchain(rstd::array<LocalExHandle, 3> handles, VkExtent2D ext, u32 queue_family)
+    LocalExSwapchain(rstd::array<LocalExHandle, 3> handles, VkExtent2D ext,
+                     rstd::uint32_t queue_family)
         : m_handles(std::move(handles)), m_extent(ext), m_queue_family(queue_family) {
         int index = 0;
         for (auto& h : m_handles) {
@@ -1045,15 +1052,15 @@ public:
             handle.width         = (i32)h.image.extent.width;
             handle.height        = (i32)h.image.extent.height;
             handle.fd            = h.image.fd;
-            handle.size          = h.image.mem_reqs.size;
+            handle.size          = usize(h.image.mem_reqs.size);
             handle.drm_fourcc    = h.image.drm_fourcc;
             handle.drm_modifier  = h.image.drm_modifier;
             handle.plane0_offset = h.image.plane0_offset;
             handle.plane0_stride = h.image.plane0_stride;
         }
-        m_presented  = &m_handles[0].handle;
-        m_ready      = &m_handles[1].handle;
-        m_inprogress = &m_handles[2].handle;
+        m_presented  = &m_handles[usize()].handle;
+        m_ready      = &m_handles[usize(1)].handle;
+        m_inprogress = &m_handles[usize(2)].handle;
     }
 
     ~LocalExSwapchain() override {
@@ -1065,20 +1072,20 @@ public:
         if (m_surface_pending) {
             return { .status = ::owe::FrameSurfaceAcquireStatus::Busy };
         }
-        const u32 slot_index     = static_cast<u32>(this->getInprogress()->id());
+        const u32 slot_index     = rstd::as_cast<u32>(this->getInprogress()->id());
         const u64 acquire_serial = m_next_acquire_serial++;
-        if (acquire_serial == 0) {
+        if (acquire_serial == u64()) {
             return { .status     = ::owe::FrameSurfaceAcquireStatus::ProtocolError,
-                     .error_code = -EOVERFLOW };
+                     .error_code = i32(-EOVERFLOW) };
         }
         ::owe::FrameSurfaceLease lease {
-            .identity       = { .owner_generation = 1,
-                                .image_index      = slot_index,
-                                .acquire_serial   = acquire_serial },
-            .reuse          = { .kind = ::owe::FrameSurfaceReuseKind::QueueOrdered },
-            .image          = ToImageParameters(m_handles.at(static_cast<usize>(slot_index)).image),
-            .format         = VK_FORMAT_R8G8B8A8_UNORM,
-            .initial_layout = VK_IMAGE_LAYOUT_GENERAL,
+            .identity = { .owner_generation = u64(1),
+                          .image_index      = slot_index,
+                          .acquire_serial   = acquire_serial },
+            .reuse    = { .kind = ::owe::FrameSurfaceReuseKind::QueueOrdered },
+            .image    = ToImageParameters(m_handles.at(rstd::as_cast<usize>(slot_index)).image),
+            .format   = VK_FORMAT_R8G8B8A8_UNORM,
+            .initial_layout       = VK_IMAGE_LAYOUT_GENERAL,
             .initial_queue_family = m_queue_family,
             .acquire              = { .kind = ::owe::FrameSurfaceAcquireKind::QueueOrdered },
             .final_layout         = VK_IMAGE_LAYOUT_GENERAL,
@@ -1087,7 +1094,7 @@ public:
         };
         if (! lease.valid()) {
             return { .status     = ::owe::FrameSurfaceAcquireStatus::ProtocolError,
-                     .error_code = -EINVAL };
+                     .error_code = i32(-EINVAL) };
         }
         m_surface_pending  = true;
         m_pending_identity = lease.identity;
@@ -1174,7 +1181,7 @@ private:
     std::atomic<::owe::ExHandle*> m_ready { nullptr };
     std::atomic<::owe::ExHandle*> m_inprogress { nullptr };
     VkExtent2D                    m_extent;
-    u32                           m_queue_family { VK_QUEUE_FAMILY_IGNORED };
+    rstd::uint32_t                m_queue_family { VK_QUEUE_FAMILY_IGNORED };
     std::atomic<int>              m_last_sync_fd { -1 };
     u64                           m_next_acquire_serial { 1 };
     ::owe::FrameSurfaceIdentity   m_pending_identity;
@@ -1186,7 +1193,8 @@ inline std::shared_ptr<LocalExSwapchain> CreateLocalExSwapchain(const Device& de
                                                                 unsigned h, VkImageTiling tiling) {
     rstd::array<LocalExHandle, 3> handles;
     for (auto& handle : handles) {
-        if (auto rv = textures.CreateExTex(w, h, VK_FORMAT_R8G8B8A8_UNORM, tiling); rv.is_some())
+        if (auto rv = textures.CreateExTex(u32(w), u32(h), VK_FORMAT_R8G8B8A8_UNORM, tiling);
+            rv.is_some())
             handle.image = rstd::move(rv).unwrap();
         else
             return nullptr;
@@ -1214,14 +1222,19 @@ struct Impl<owe::vulkan::BufferUploadBackend, owe::vulkan::BufferUploadPool>
     auto UploadBuffer(slice<u8> content, const owe::vulkan::BufferUploadRequest& request)
         -> Option<owe::vulkan::BufferAllocation> {
         auto uploaded =
-            this->self().Upload(std::span<const u8>(content.as_raw_ptr(), content.len()), request);
+            this->self().Upload(std::span<const rstd::uint8_t>(
+                                    reinterpret_cast<const rstd::uint8_t*>(content.as_raw_ptr()),
+                                    content.len().to_primitive()),
+                                request);
         if (uploaded.is_none()) return None();
         return Some(rstd::move(uploaded).unwrap());
     }
 
     bool UpdateBuffer(mut_ref<owe::vulkan::BufferAllocation> allocation, slice<u8> content) {
         return this->self().Update(*allocation,
-                                   std::span<const u8>(content.as_raw_ptr(), content.len()));
+                                   std::span<const rstd::uint8_t>(
+                                       reinterpret_cast<const rstd::uint8_t*>(content.as_raw_ptr()),
+                                       content.len().to_primitive()));
     }
 };
 

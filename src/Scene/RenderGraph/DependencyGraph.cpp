@@ -8,7 +8,7 @@ using namespace owe::rg;
 namespace
 {
 bool SliceContains(rstd::slice<NodeHandle> handles, NodeHandle needle) {
-    for (usize index = 0; index < handles.len(); ++index) {
+    for (usize index {}; index < handles.len(); ++index) {
         if (handles[index] == needle) return true;
     }
     return false;
@@ -42,7 +42,7 @@ auto DependencyGraph::Contains(NodeHandle handle) const -> bool {
 auto DependencyGraph::NodeNum() const noexcept -> usize { return m_nodes.len(); }
 
 auto DependencyGraph::EdgeNum() const noexcept -> usize {
-    usize count = 0;
+    usize count {};
     auto  nodes = m_nodes.values();
     for (auto node = nodes.next(); node.is_some(); node = nodes.next()) {
         count += (**node).outgoing.len();
@@ -62,27 +62,27 @@ auto DependencyGraph::GetNodeIn(NodeHandle handle) const -> rstd::slice<NodeHand
 
 auto DependencyGraph::TopologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
     auto in_degree = rstd::vec::Vec<usize>::make();
-    in_degree.resize(NodeNum(), 0);
+    in_degree.resize(NodeNum(), usize());
 
     auto ready = rstd::vec::Vec<NodeHandle>::make();
-    for (usize index = 0; index < NodeNum(); ++index) {
+    for (usize index {}; index < NodeNum(); ++index) {
         NodeHandle handle { .index = index };
         in_degree[index] = GetNodeIn(handle).len();
-        if (in_degree[index] == 0) ready.push(NodeHandle { handle });
+        if (in_degree[index] == usize()) ready.push(NodeHandle { handle });
     }
 
     auto result = rstd::vec::Vec<NodeHandle>::with_capacity(NodeNum());
     while (! ready.is_empty()) {
         std::sort(ready.begin(), ready.end());
-        auto handle = ready.remove(0);
+        auto handle = ready.remove(usize());
         result.push(NodeHandle { handle });
 
         auto outgoing = GetNodeOut(handle);
-        for (usize index = 0; index < outgoing.len(); ++index) {
+        for (usize index {}; index < outgoing.len(); ++index) {
             auto next = outgoing[index];
-            if (in_degree[next.index] == 0) continue;
+            if (in_degree[next.index] == usize()) continue;
             --in_degree[next.index];
-            if (in_degree[next.index] == 0) ready.push(NodeHandle { next });
+            if (in_degree[next.index] == usize()) ready.push(NodeHandle { next });
         }
     }
     return result;

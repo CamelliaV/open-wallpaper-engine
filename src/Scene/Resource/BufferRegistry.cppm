@@ -71,12 +71,13 @@ public:
             });
         }
 
-        auto uploaded = backend->UploadBuffer(content,
-                                              vulkan::BufferUploadRequest {
-                                                  .size      = request.definition.size,
-                                                  .alignment = request.definition.alignment,
-                                                  .usage = UploadUsage(request.definition.usage),
-                                              });
+        auto uploaded = backend->UploadBuffer(
+            content,
+            vulkan::BufferUploadRequest {
+                .size      = static_cast<VkDeviceSize>(request.definition.size.to_primitive()),
+                .alignment = static_cast<VkDeviceSize>(request.definition.alignment.to_primitive()),
+                .usage     = UploadUsage(request.definition.usage),
+            });
         if (uploaded.is_none()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
@@ -84,7 +85,7 @@ public:
             });
         }
 
-        u64  physical_generation = existing.is_some() ? (**existing)->generation + 1 : 1;
+        u64  physical_generation = existing.is_some() ? (**existing)->generation + u64(1) : u64(1);
         auto physical            = rstd::sync::Arc<BufferPhysical>::make(
             rstd::move(*uploaded),
             physical_generation,
@@ -136,7 +137,7 @@ public:
     void EvictUnused() {
         m_resources.retain(
             [](const resource::BufferHandle&, rstd::sync::Arc<BufferPhysical>& value) {
-                return value.strong_count() > 1;
+                return value.strong_count() > usize(1);
             });
     }
 
@@ -144,9 +145,9 @@ public:
         m_resources.clear();
         m_entries.clear();
         m_names.clear();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
     auto Size() const noexcept -> usize { return m_entries.len(); }
@@ -164,7 +165,7 @@ private:
     }
 
     auto Register(resource::BufferRequest request) -> resource::BufferHandle {
-        if (request.name.is_empty() || request.definition.size == 0) return {};
+        if (request.name.is_empty() || request.definition.size == usize()) return {};
         auto existing = m_names.get(request.name);
         if (existing.is_some()) {
             auto entry = m_entries.get_mut(**existing);

@@ -16,7 +16,7 @@ FinPass::~FinPass() {}
 bool FinPass::setFrameSurface(
     owe::FrameSurfaceLease                                                lease,
     rstd::mut_ref<rstd::dyn<resource_registry::ExternalResourcePreparer>> resources,
-    const DeviceCapabilities& capabilities, u32 graphics_queue_family) {
+    const DeviceCapabilities& capabilities, rstd::uint32_t graphics_queue_family) {
     if (m_desc.external_use.is_none() || m_desc.result_use.is_none()) return false;
     auto prepared = resources->PrepareExternal(*m_desc.external_use,
                                                *m_desc.result_use,
@@ -129,15 +129,15 @@ void FinPass::record(PassRecordContext& context) {
                 .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 .srcOffsets     = {
                     VkOffset3D { 0, 0, 0 },
-                    VkOffset3D { static_cast<i32>(result.extent.width),
-                                 static_cast<i32>(result.extent.height),
+                    VkOffset3D { static_cast<rstd::int32_t>(result.extent.width),
+                                 static_cast<rstd::int32_t>(result.extent.height),
                                  1 },
                 },
                 .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                 .dstOffsets     = {
                     VkOffset3D { 0, 0, 0 },
-                    VkOffset3D { static_cast<i32>(present.extent.width),
-                                 static_cast<i32>(present.extent.height),
+                    VkOffset3D { static_cast<rstd::int32_t>(present.extent.width),
+                                 static_cast<rstd::int32_t>(present.extent.height),
                                  1 },
                 },
             };

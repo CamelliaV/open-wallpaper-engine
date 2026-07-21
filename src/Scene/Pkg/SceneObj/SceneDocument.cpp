@@ -29,8 +29,8 @@ SceneJsonVersion DetectSceneJsonVersion(const owe::Json& root) {
     auto version = root.get("version");
     if (version.is_none()) return kSceneJsonVersionDefault;
     auto value = (*version)->as_u64();
-    if (value.is_some() && *value <= std::numeric_limits<SceneJsonVersion>::max())
-        return static_cast<SceneJsonVersion>(*value);
+    if (value.is_some() && value->to_primitive() <= std::numeric_limits<SceneJsonVersion>::max())
+        return static_cast<SceneJsonVersion>(value->to_primitive());
     return kSceneJsonVersionDefault;
 }
 
@@ -223,9 +223,10 @@ std::vector<SceneObjectMetadata> parse_objects_metadata(const owe::Json& root) {
 
     auto array = (*raw_objects)->as_array();
     if (array.is_none()) return objects;
-    objects.reserve((*array)->len());
-    for (std::size_t i = 0; i < (*array)->len(); ++i) {
-        objects.push_back(parse_object_metadata((**array)[i], i));
+    const auto count = (*array)->len().to_primitive();
+    objects.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        objects.push_back(parse_object_metadata((**array)[rstd::usize(i)], i));
     }
     return objects;
 }
@@ -342,7 +343,7 @@ std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path)
 
     auto       stamp       = pkg->pkg_version_stamp();
     const auto pkg_version = ParsePkgVersionStamp(
-        std::string_view(reinterpret_cast<const char*>(stamp.data()), stamp.size()));
+        std::string_view(reinterpret_cast<const char*>(stamp.data()), stamp.size().to_primitive()));
     return ParseSceneDocumentJson(scene_file.ReadAllStr(), pkg_version);
 }
 

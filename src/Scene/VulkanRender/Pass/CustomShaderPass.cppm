@@ -45,7 +45,7 @@ public:
 
         // -----prepared
         // vulkan texs
-        std::vector<i32>                        vk_tex_binding;
+        std::vector<rstd::int32_t>              vk_tex_binding;
         resource_registry::PreparedBarrierBatch sampled_barriers;
         VkExtent2D                              output_extent {};
         VkSampleCountFlagBits                   samples { VK_SAMPLE_COUNT_1_BIT };

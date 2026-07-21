@@ -8,10 +8,10 @@ using namespace rstd::prelude;
 
 template<typename Tag>
 struct ResourceHandle {
-    u64 index { numeric_limits<u64>::max() };
-    u64 generation { 0 };
+    u64 index { u64::MAX };
+    u64 generation {};
 
-    bool Valid() const noexcept { return index != numeric_limits<u64>::max() && generation != 0; }
+    bool Valid() const noexcept { return index != u64::MAX && generation != u64(); }
 
     friend bool operator==(const ResourceHandle&, const ResourceHandle&) = default;
 };
@@ -56,7 +56,10 @@ struct ResourceHandleHasher {
 
     auto operator()(const Handle& handle) const noexcept -> u64 {
         auto seed = state(handle.index);
-        seed ^= state(handle.generation) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        seed ^= state(handle.generation)
+                    .wrapping_add(u64(0x9e3779b97f4a7c15ULL))
+                    .wrapping_add(seed.wrapping_shl(u64(6)))
+                    .wrapping_add(seed >> u64(2));
         return seed;
     }
 };

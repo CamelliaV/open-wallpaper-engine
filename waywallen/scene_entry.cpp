@@ -117,7 +117,8 @@ const char* texture_lifetime_name(owe::resource::TextureLifetimeClass lifetime) 
 
 std::string render_item_text(const rstd::Option<owe::RenderItemId>& id) {
     if (id.is_none()) return "-";
-    return std::to_string(id->index) + "/" + std::to_string(id->generation);
+    return std::to_string(id->index.to_primitive()) + "/" +
+           std::to_string(id->generation.to_primitive());
 }
 
 std::string texture_request_text(const owe::vulkan::PassTextureRequestDiagnostic& diagnostic) {
@@ -126,16 +127,16 @@ std::string texture_request_text(const owe::vulkan::PassTextureRequestDiagnostic
     std::string text    = std::string(texture_request_kind_name(request.kind)) + " name='" +
                           rstd::cppstd::to_string(request.name.as_str()) + "'";
     if (request.source) {
-        text += " source=" + std::to_string(request.source->index) + "/" +
-                std::to_string(request.source->generation);
+        text += " source=" + std::to_string(request.source->index.to_primitive()) + "/" +
+                std::to_string(request.source->generation.to_primitive());
     }
     if (request.definition) {
         const auto& definition = *request.definition;
-        text += " definition=" + std::to_string(definition.width) + "x" +
-                std::to_string(definition.height);
+        text += " definition=" + std::to_string(definition.width.to_primitive()) + "x" +
+                std::to_string(definition.height.to_primitive());
         text += " usage=" + std::string(texture_usage_name(definition.usage));
-        text += " mip=" + std::to_string(definition.mip_levels);
-        text += " samples=" + std::to_string(definition.samples);
+        text += " mip=" + std::to_string(definition.mip_levels.to_primitive());
+        text += " samples=" + std::to_string(definition.samples.to_primitive());
     }
     text += " lifetime=" + std::string(texture_lifetime_name(request.lifetime));
     return text;
@@ -146,7 +147,9 @@ void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnost
               diagnostics.size());
     for (const auto& diagnostic : diagnostics) {
         const std::string graph_node =
-            diagnostic.graph_node.is_some() ? std::to_string(diagnostic.graph_node->index) : "-";
+            diagnostic.graph_node.is_some()
+                ? std::to_string(diagnostic.graph_node->index.to_primitive())
+                : "-";
         const std::string pass_type = diagnostic.pass_type.is_some()
                                           ? pass_type_name(*diagnostic.pass_type)
                                           : (diagnostic.frame_pass ? "frame" : "unknown");
@@ -193,7 +196,7 @@ void log_prepared_pass_diagnostics(std::vector<owe::vulkan::PreparedPassDiagnost
 }
 
 std::string ToStdString(const rstd::string::String& value) {
-    return { value.data(), value.size() };
+    return rstd::cppstd::to_string(value.as_str());
 }
 
 template<typename T>

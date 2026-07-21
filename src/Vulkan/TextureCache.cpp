@@ -141,8 +141,8 @@ Option<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::Physica
                                          VkMemoryRequirements reqs, VkMemoryPropertyFlags property,
                                          void* pNext = nullptr) {
     VkPhysicalDeviceMemoryProperties pros = gpu.GetMemoryProperties().memoryProperties;
-    for (u32 i = 0; i < pros.memoryTypeCount; ++i) {
-        if ((reqs.memoryTypeBits & (1 << i)) && (pros.memoryTypes[i].propertyFlags & property)) {
+    for (rstd::uint32_t i = 0; i < pros.memoryTypeCount; ++i) {
+        if ((reqs.memoryTypeBits & (1u << i)) && (pros.memoryTypes[i].propertyFlags & property)) {
             VkMemoryAllocateInfo memory_allocate_info { .sType =
                                                             VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                                                         .pNext           = pNext,
@@ -167,7 +167,7 @@ Option<vvk::DeviceMemory> AllocateMemory(const vvk::Device& device, vvk::Physica
 // Vulkan component order X-Y-Z-W maps to the *first-byte-in-memory* ordering
 // used by DRM fourccs ('AB24' = little-endian 'AB24' bytes = A, B, 2, 4 →
 // DRM_FORMAT_ABGR8888).
-static u32 VkFormatToDrmFourcc(VkFormat fmt) {
+static rstd::uint32_t VkFormatToDrmFourcc(VkFormat fmt) {
     switch (fmt) {
     case VK_FORMAT_R8G8B8A8_UNORM: return 0x34324241u; // DRM_FORMAT_ABGR8888
     case VK_FORMAT_B8G8R8A8_UNORM: return 0x34324152u; // DRM_FORMAT_ARGB8888
@@ -175,10 +175,10 @@ static u32 VkFormatToDrmFourcc(VkFormat fmt) {
     }
 }
 
-Option<ExImageParameters> CreateExImage(u32 width, u32 height, VkFormat format,
-                                        VkImageTiling tiling, VkSamplerCreateInfo sampler_info,
-                                        VkImageUsageFlags usage, const vvk::Device& device,
-                                        const vvk::PhysicalDevice& gpu) {
+Option<ExImageParameters> CreateExImage(rstd::uint32_t width, rstd::uint32_t height,
+                                        VkFormat format, VkImageTiling tiling,
+                                        VkSamplerCreateInfo sampler_info, VkImageUsageFlags usage,
+                                        const vvk::Device& device, const vvk::PhysicalDevice& gpu) {
     ExImageParameters image;
     do {
         // Iteration 1a: switch the external handle type from OPAQUE_FD to
@@ -263,7 +263,7 @@ Option<ExImageParameters> CreateExImage(u32 width, u32 height, VkFormat format,
         };
         VkSubresourceLayout layout = device.GetImageSubresourceLayout(*image.handle, subres);
         image.plane0_offset        = layout.offset;
-        image.plane0_stride        = static_cast<u32>(layout.rowPitch);
+        image.plane0_stride        = static_cast<rstd::uint32_t>(layout.rowPitch);
         image.drm_modifier         = 0; // DRM_FORMAT_MOD_LINEAR
         image.drm_fourcc           = VkFormatToDrmFourcc(format);
 
@@ -274,7 +274,7 @@ Option<ExImageParameters> CreateExImage(u32 width, u32 height, VkFormat format,
 }
 
 inline Option<VmaImageParameters>
-CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat format,
+CreateImage(const Device& device, VkExtent3D extent, rstd::uint32_t miplevel, VkFormat format,
             VkSamplerCreateInfo sampler_info, VkImageUsageFlags usage,
             VmaMemoryUsage        mem_usage = VMA_MEMORY_USAGE_GPU_ONLY,
             VkSampleCountFlagBits samples   = VK_SAMPLE_COUNT_1_BIT) {
@@ -356,7 +356,7 @@ inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
         VkImageSubresourceRange subresourceRange {
             .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel   = 0,
-            .levelCount     = static_cast<u32>(in_bufs.size()),
+            .levelCount     = static_cast<rstd::uint32_t>(in_bufs.size()),
             .baseArrayLayer = 0,
             .layerCount     = 1,
         };
@@ -384,8 +384,8 @@ inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
                     .layerCount     = 1,
                 },
         };
-        for (usize i = 0; i < in_bufs.size(); i++) {
-            copy.imageSubresource.mipLevel = (u32)i;
+        for (std::size_t i = 0; i < in_bufs.size(); ++i) {
+            copy.imageSubresource.mipLevel = static_cast<rstd::uint32_t>(i);
             copy.imageExtent               = in_exts[i];
             cmd.CopyBufferToImage(
                 in_bufs[i].handle, image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copy);
@@ -422,9 +422,9 @@ inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
 } // namespace
 
 usize TextureKey::HashValue(const TextureKey& k) {
-    usize seed { 0 };
-    utils::hash_combine(seed, k.width);
-    utils::hash_combine(seed, k.height);
+    std::size_t seed = 0;
+    utils::hash_combine(seed, k.width.to_primitive());
+    utils::hash_combine(seed, k.height.to_primitive());
     utils::hash_combine(seed, (int)k.usage);
     utils::hash_combine(seed, (int)k.format);
     utils::hash_combine(seed, (int)k.mipmap_level);
@@ -433,7 +433,7 @@ usize TextureKey::HashValue(const TextureKey& k) {
     utils::hash_combine(seed, (int)k.sample.wrapT);
     utils::hash_combine(seed, (int)k.sample.magFilter);
     utils::hash_combine(seed, (int)k.samples);
-    return seed;
+    return usize(seed);
 }
 
 Option<ExImageParameters> TextureCache::CreateExTex(u32 width, u32 height, VkFormat format,
@@ -457,8 +457,8 @@ Option<ExImageParameters> TextureCache::CreateExTex(u32 width, u32 height, VkFor
         .unnormalizedCoordinates = false,
     };
 
-    auto opt = CreateExImage(width,
-                             height,
+    auto opt = CreateExImage(width.to_primitive(),
+                             height.to_primitive(),
                              format,
                              tiling,
                              sampler_info,
@@ -493,7 +493,7 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateTex(Image& image)
 
     auto& sam = image.header.sample;
 
-    for (usize i = 0; i < image.slots.size(); i++) {
+    for (std::size_t i = 0; i < image.slots.size(); ++i) {
         auto& image_paras   = img_slots.slots[i];
         auto& image_slot    = image.slots[i];
         auto  mipmap_levels = image_slot.mipmaps.size();
@@ -519,11 +519,13 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateTex(Image& image)
             .unnormalizedCoordinates = (false),
         };
         VkFormat   format = ToVkType(image.header.format);
-        VkExtent3D ext { (u32)image_slot.width, (u32)image_slot.height, 1 };
+        VkExtent3D ext { static_cast<rstd::uint32_t>(image_slot.width),
+                         static_cast<rstd::uint32_t>(image_slot.height),
+                         1 };
 
         if (auto opt = CreateImage(m_device,
                                    ext,
-                                   (u32)mipmap_levels,
+                                   static_cast<rstd::uint32_t>(mipmap_levels),
                                    format,
                                    sampler_info,
                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
@@ -536,18 +538,24 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateTex(Image& image)
         std::vector<VmaBufferParameters> stage_bufs;
         std::vector<VkExtent3D>          extents;
 
-        for (usize j = 0; j < image_slot.mipmaps.size(); j++) {
+        for (std::size_t j = 0; j < image_slot.mipmaps.size(); ++j) {
             auto&               image_data = image_slot.mipmaps[j];
             VmaBufferParameters buf;
-            (void)CreateStagingBuffer(m_device.vma_allocator(), (u32)image_data.size, buf);
+            (void)CreateStagingBuffer(m_device.vma_allocator(),
+                                      static_cast<VkDeviceSize>(image_data.size.to_primitive()),
+                                      buf);
             {
                 void* v_data;
                 VVK_CHECK(buf.handle.MapMemory(&v_data));
-                std::memcpy(v_data, image_data.data.get(), (u32)image_data.size);
+                std::memcpy(v_data,
+                            image_data.data.get(),
+                            static_cast<std::size_t>(image_data.size.to_primitive()));
                 buf.handle.UnMapMemory();
             }
             stage_bufs.emplace_back(std::move(buf));
-            extents.push_back(VkExtent3D { (u32)image_data.width, (u32)image_data.height, 1 });
+            extents.push_back(VkExtent3D { static_cast<rstd::uint32_t>(image_data.width),
+                                           static_cast<rstd::uint32_t>(image_data.height),
+                                           1 });
         }
 
         CopyImageData(transform<VmaBufferParameters>(stage_bufs,
@@ -566,8 +574,8 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateTex(Image& image)
 
 void TextureCache::allocateCmd() {
     const auto& pool = m_device.cmd_pool();
-    VVK_CHECK(pool.Allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY, m_tex_cmds));
-    m_tex_cmd = vvk::CommandBuffer(m_tex_cmds[0], m_device.handle().Dispatch());
+    VVK_CHECK(pool.Allocate(usize(1), VK_COMMAND_BUFFER_LEVEL_PRIMARY, m_tex_cmds));
+    m_tex_cmd = vvk::CommandBuffer(m_tex_cmds[usize()], m_device.handle().Dispatch());
 }
 
 Option<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
@@ -575,7 +583,9 @@ Option<VmaImageParameters> TextureCache::CreateTex(TextureKey tex_key) {
     do {
         VkSamplerCreateInfo sam_info = GenSamplerInfo(tex_key);
         VkFormat            format   = ToVkType(tex_key.format);
-        VkExtent3D          ext { (u32)tex_key.width, (u32)tex_key.height, 1 };
+        VkExtent3D          ext { static_cast<rstd::uint32_t>(tex_key.width.to_primitive()),
+                                  static_cast<rstd::uint32_t>(tex_key.height.to_primitive()),
+                                  1 };
         const bool          depth_usage = tex_key.usage == TexUsage::DEPTH;
         VkImageUsageFlags   usage =
             depth_usage ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
@@ -654,34 +664,38 @@ namespace
 class RangeInputStream {
 public:
     explicit RangeInputStream(rstd::io::ReadRange source)
-        : m_length(i64(source.len())), m_reader(rstd::move(source).into_reader()) {}
+        : m_length(static_cast<rstd::int64_t>(source.len().to_primitive())),
+          m_reader(rstd::move(source).into_reader()) {}
 
-    int read(u8* buf, int size) {
+    int read(rstd::uint8_t* buf, int size) {
         if (size <= 0) return 0;
-        auto result = m_reader.read(buf, usize(size));
+        auto result = m_reader.read(rstd::mut_ref<rstd::byte[]>::from_raw_parts(
+            buf, usize(static_cast<std::size_t>(size))));
         if (result.is_err()) return -1;
-        return int(rstd::move(result).unwrap_unchecked());
+        return static_cast<int>(rstd::move(result).unwrap_unchecked().to_primitive());
     }
 
-    i64 seek(i64 offset, int whence) {
+    rstd::int64_t seek(rstd::int64_t offset, int whence) {
         constexpr int AVSEEK_SIZE = 0x10000;
         if (whence == AVSEEK_SIZE) return m_length;
         rstd::io::SeekFrom from;
         switch (whence) {
         case 0:
             if (offset < 0) return -1;
-            from = rstd::io::SeekFrom::from_start(u64(offset));
+            from = rstd::io::SeekFrom::from_start(u64(static_cast<rstd::uint64_t>(offset)));
             break;
-        case 1: from = rstd::io::SeekFrom::from_current(offset); break;
-        case 2: from = rstd::io::SeekFrom::from_end(offset); break;
+        case 1: from = rstd::io::SeekFrom::from_current(i64(offset)); break;
+        case 2: from = rstd::io::SeekFrom::from_end(i64(offset)); break;
         default: return -1;
         }
         auto result = m_reader.seek(from);
-        return result.is_ok() ? i64(rstd::move(result).unwrap_unchecked()) : -1;
+        return result.is_ok() ? static_cast<rstd::int64_t>(
+                                    rstd::move(result).unwrap_unchecked().to_primitive())
+                              : -1;
     }
 
 private:
-    i64                   m_length { 0 };
+    rstd::int64_t         m_length { 0 };
     rstd::io::RangeReader m_reader;
 };
 
@@ -712,7 +726,7 @@ const char* FrameKindLabel(wavsen::video::FrameKind k) {
 }
 
 rstd::vec::Vec<const char*> ExtensionPtrs(std::span<const std::string> names) {
-    auto out = rstd::vec::Vec<const char*>::with_capacity(names.size());
+    auto out = rstd::vec::Vec<const char*>::with_capacity(usize(names.size()));
     for (const auto& name : names) out.push(name.c_str());
     return out;
 }
@@ -720,18 +734,18 @@ rstd::vec::Vec<const char*> ExtensionPtrs(std::span<const std::string> names) {
 rstd::vec::Vec<wavsen::video::QueueFamily> QueueFamiliesForFfmpeg(const Device& device) {
     auto props = device.gpu().GetQueueFamilyProperties();
     auto out   = rstd::vec::Vec<wavsen::video::QueueFamily>::with_capacity(props.len());
-    for (u32 i = 0; i < props.len(); ++i) {
+    for (rstd::uint32_t i = 0; i < props.len().to_primitive(); ++i) {
         out.push(wavsen::video::QueueFamily {
             .index      = i,
-            .flags      = props[i].queueFlags,
+            .flags      = props[usize(i)].queueFlags,
             .video_caps = 0,
         });
     }
     return out;
 }
 
-wavsen::video::Producer::ExternalDeviceInfo MakeExternalProducerInfo(const Device& device,
-                                                                     u32 width, u32 height) {
+wavsen::video::Producer::ExternalDeviceInfo
+MakeExternalProducerInfo(const Device& device, rstd::uint32_t width, rstd::uint32_t height) {
     return wavsen::video::Producer::ExternalDeviceInfo {
         .instance                    = device.instance_handle(),
         .physical_device             = *device.gpu(),
@@ -757,13 +771,13 @@ struct TextureCache::VideoRegistry {
     TextureCache::VideoDecodeOptions      options;
     Option<Box<wavsen::video::Producer>>  producer;
     Option<Box<wavsen::video::YuvToRgba>> yuv;
-    u32                                   yuv_max_width { 0 };
-    u32                                   yuv_max_height { 0 };
+    rstd::uint32_t                        yuv_max_width { 0 };
+    rstd::uint32_t                        yuv_max_height { 0 };
 
     struct Slot {
         std::string                         key;
-        u32                                 width { 0 };
-        u32                                 height { 0 };
+        rstd::uint32_t                      width { 0 };
+        rstd::uint32_t                      height { 0 };
         VmaImageParameters                  image;
         rstd::sync::Weak<TextureAllocation> texture = rstd::sync::Weak<TextureAllocation>::make();
         Option<Box<wavsen::video::VideoDecoder>> decoder;
@@ -774,7 +788,8 @@ struct TextureCache::VideoRegistry {
     };
     Vec<Box<Slot>> slots;
 
-    const wavsen::video::Producer* ensureProducer(const Device& device, u32 width, u32 height) {
+    const wavsen::video::Producer* ensureProducer(const Device& device, rstd::uint32_t width,
+                                                  rstd::uint32_t height) {
         if (producer.is_some()) return producer->get();
         auto r =
             wavsen::video::Producer::from_external(MakeExternalProducerInfo(device, width, height));
@@ -788,7 +803,8 @@ struct TextureCache::VideoRegistry {
         return producer->get();
     }
 
-    wavsen::video::YuvToRgba* ensureYuv(const Device& device, u32 width, u32 height) {
+    wavsen::video::YuvToRgba* ensureYuv(const Device& device, rstd::uint32_t width,
+                                        rstd::uint32_t height) {
         if (yuv.is_some() && width <= yuv_max_width && height <= yuv_max_height) return yuv->get();
         auto next_w = std::max(width, yuv_max_width);
         auto next_h = std::max(height, yuv_max_height);
@@ -831,11 +847,13 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(Image& i
     auto slot = Box<VideoRegistry::Slot>::make();
     slot->key = image.key;
     /* NV12 chroma is 4:2:0 → both dims even. */
-    slot->width  = static_cast<u32>(mip.width | (mip.width & 1));
-    slot->height = static_cast<u32>(mip.height | (mip.height & 1));
-    if (slot->width != static_cast<u32>(mip.width)) slot->width = static_cast<u32>(mip.width + 1);
-    if (slot->height != static_cast<u32>(mip.height)) {
-        slot->height = static_cast<u32>(mip.height + 1);
+    const auto source_width  = static_cast<rstd::uint32_t>(mip.width);
+    const auto source_height = static_cast<rstd::uint32_t>(mip.height);
+    slot->width              = source_width | (source_width & 1u);
+    slot->height             = source_height | (source_height & 1u);
+    if (slot->width != source_width) slot->width = source_width + 1u;
+    if (slot->height != source_height) {
+        slot->height = source_height + 1u;
     }
 
     /* 1) Allocate the stable RGBA8 target. */
@@ -1034,8 +1052,8 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
         if (! got_new && s.have_frame) continue; /* nothing to upload */
         if (! got_new) continue;
 
-        u32 cs_id = 0;
-        u32 cr_id = 0;
+        rstd::uint32_t cs_id = 0;
+        rstd::uint32_t cr_id = 0;
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared:
             cs_id = vkv.colorspace;
@@ -1109,8 +1127,9 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
     }
 }
 
-bool TextureCache::UploadFontAtlasRegion(ref<TextureAllocation> texture, const u8* atlas,
-                                         u32 atlas_w, u32 x, u32 y, u32 w, u32 h) {
+bool TextureCache::UploadFontAtlasRegion(ref<TextureAllocation> texture, const rstd::uint8_t* atlas,
+                                         rstd::uint32_t atlas_w, rstd::uint32_t x, rstd::uint32_t y,
+                                         rstd::uint32_t w, rstd::uint32_t h) {
     if (w == 0 || h == 0) return true;
     auto view = texture->View();
     if (view.slots.empty()) return false;
@@ -1119,16 +1138,16 @@ bool TextureCache::UploadFontAtlasRegion(ref<TextureAllocation> texture, const u
     // Tightly-packed staging buffer for the AABB. Allocating per-call keeps
     // this code path independent of the video-tex ring; atlas pumps are
     // small (a handful of glyphs per frame) so cost is negligible.
-    const u32           bytes = w * h;
+    const VkDeviceSize  bytes = static_cast<VkDeviceSize>(w) * h;
     VmaBufferParameters stage;
     if (! CreateStagingBuffer(m_device.vma_allocator(), bytes, stage)) return false;
 
     {
         void* v = nullptr;
         VVK_CHECK(stage.handle.MapMemory(&v));
-        auto* dst = static_cast<u8*>(v);
-        for (u32 row = 0; row < h; ++row) {
-            std::memcpy(dst + row * w, atlas + (y + row) * atlas_w + x, w);
+        auto* dst = static_cast<rstd::uint8_t*>(v);
+        for (rstd::uint32_t row = 0; row < h; ++row) {
+            std::memcpy(dst + row * w, atlas + (y + row) * atlas_w + x, static_cast<size_t>(w));
         }
         stage.handle.UnMapMemory();
     }
@@ -1160,8 +1179,9 @@ bool TextureCache::UploadFontAtlasRegion(ref<TextureAllocation> texture, const u
     VkBufferImageCopy region {};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.layerCount = 1;
-    region.imageOffset                 = VkOffset3D { static_cast<i32>(x), static_cast<i32>(y), 0 };
-    region.imageExtent                 = VkExtent3D { w, h, 1 };
+    region.imageOffset =
+        VkOffset3D { static_cast<rstd::int32_t>(x), static_cast<rstd::int32_t>(y), 0 };
+    region.imageExtent = VkExtent3D { w, h, 1 };
     m_tex_cmd.CopyBufferToImage(
         *stage.handle, ip.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
     VkImageMemoryBarrier to_shader {
@@ -1236,8 +1256,8 @@ void owe::vulkan::RecordGenerateMipmaps(vvk::CommandBuffer& cmd, const ImagePara
                         out_bar);
         */
 
-    i32 mipWidth  = (i32)image.extent.width;
-    i32 mipHeight = (i32)image.extent.height;
+    rstd::int32_t mipWidth  = static_cast<rstd::int32_t>(image.extent.width);
+    rstd::int32_t mipHeight = static_cast<rstd::int32_t>(image.extent.height);
 
     for (unsigned i = 1; i < image.mipmap_level; i++) {
         barrier.subresourceRange.baseMipLevel = i - 1;

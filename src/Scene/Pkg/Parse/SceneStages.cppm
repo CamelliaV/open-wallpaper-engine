@@ -35,8 +35,8 @@ struct PuppetLayerRegistry {
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
     std::shared_ptr<Scene>                   scene;
-    i32                                      ortho_w { 0 };
-    i32                                      ortho_h { 0 };
+    std::int32_t                             ortho_w { 0 };
+    std::int32_t                             ortho_h { 0 };
     fs::VFS*                                 vfs { nullptr };
     rstd::Option<rstd::ref<rstd::json::Map>> user_properties;
 
@@ -140,13 +140,13 @@ ExpandObjects(const Json&, fs::VFS&, wpscene::SceneVersion,
               const Set<std::int32_t>*                 linked_source_ids = nullptr);
 
 // Resolves the effective width/height without mutating the parsed metadata.
-std::array<i32, 2> ResolveOrthoProjectionExtent(const wpscene::SceneMetadata&,
-                                                std::span<const SceneObjectVar>);
+std::array<std::int32_t, 2> ResolveOrthoProjectionExtent(const wpscene::SceneMetadata&,
+                                                         std::span<const SceneObjectVar>);
 
 // Allocates Scene + cameras + base uniforms + the two default render
 // targets (SpecTex_Default, WE_MIP_MAPPED_FRAME_BUFFER).
 ParseContext BuildContext(fs::VFS&, std::string_view scene_id, const wpscene::SceneMetadata&,
-                          std::array<i32, 2>                       ortho_extent,
+                          std::array<std::int32_t, 2>              ortho_extent,
                           rstd::Option<rstd::ref<rstd::json::Map>> user_properties = rstd::None());
 
 // Per-object dispatch. Brackets glslang init/finalize around the visit

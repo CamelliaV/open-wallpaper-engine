@@ -31,7 +31,7 @@ public:
 
     bool setFrameSurface(owe::FrameSurfaceLease,
                          rstd::mut_ref<rstd::dyn<resource_registry::ExternalResourcePreparer>>,
-                         const DeviceCapabilities&, u32 graphics_queue_family);
+                         const DeviceCapabilities&, rstd::uint32_t graphics_queue_family);
     bool setResultRequest(rstd::Option<TextureRequest>);
     void setResultUse(rstd::Option<resource::TextureUseHandle> use) {
         m_desc.result_use = rstd::move(use);

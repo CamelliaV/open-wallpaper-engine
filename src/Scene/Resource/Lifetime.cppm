@@ -18,7 +18,7 @@ class UploadScheduler {
 public:
     auto Reserve() -> resource::ReadyToken {
         ++m_next_value;
-        if (m_next_value == 0) ++m_next_value;
+        if (m_next_value == u64()) ++m_next_value;
         return resource::ReadyToken { .value = m_next_value };
     }
 
@@ -53,7 +53,7 @@ public:
     void Reset() {
         m_in_flight.clear();
         m_pending    = None();
-        m_next_value = 0;
+        m_next_value = u64();
     }
 
     auto InFlight() const noexcept -> usize { return m_in_flight.len(); }
@@ -81,7 +81,7 @@ class SubmissionTracker {
 public:
     auto Begin(const PreparedResourceTable& resources) -> resource::CompletionToken {
         ++m_next_value;
-        if (m_next_value == 0) ++m_next_value;
+        if (m_next_value == u64()) ++m_next_value;
         resource::CompletionToken completion { .value = m_next_value };
         auto                      leases = resources.Leases();
         if (m_in_flight
@@ -110,7 +110,7 @@ public:
 
     void Reset() {
         m_in_flight.clear();
-        m_next_value = 0;
+        m_next_value = u64();
     }
 
     auto InFlight() const noexcept -> usize { return m_in_flight.len(); }

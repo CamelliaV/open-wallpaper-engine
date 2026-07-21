@@ -9,10 +9,10 @@ export namespace owe::resource
 using namespace rstd::prelude;
 
 struct TextureDefinitionId {
-    u32 index { numeric_limits<u32>::max() };
-    u64 generation { 0 };
+    u32 index { u32::MAX };
+    u64 generation {};
 
-    bool Valid() const noexcept { return index != numeric_limits<u32>::max() && generation != 0; }
+    bool Valid() const noexcept { return index != u32::MAX && generation != u64(); }
 
     friend bool operator==(const TextureDefinitionId&, const TextureDefinitionId&) = default;
 };
@@ -35,7 +35,7 @@ enum class TextureLifetimeClass
 
 using TextureContentFlags = u32;
 
-enum class TextureContent : TextureContentFlags
+enum class TextureContent : rstd::uint32_t
 {
     SourceDefined        = 1u << 0u,
     DiscardOnAcquire     = 1u << 1u,
@@ -48,7 +48,7 @@ enum class TextureContent : TextureContentFlags
 };
 
 inline constexpr TextureContentFlags TextureContentFlag(TextureContent content) {
-    return static_cast<TextureContentFlags>(content);
+    return TextureContentFlags(static_cast<rstd::uint32_t>(content));
 }
 
 enum class TextureContractSource
@@ -80,13 +80,13 @@ enum class TextureUsage
 };
 
 struct TextureDefinition {
-    i32           width { 0 };
-    i32           height { 0 };
+    i32           width {};
+    i32           height {};
     TextureUsage  usage { TextureUsage::Color };
     TextureFormat format { TextureFormat::RGBA8 };
     TextureSample sample;
-    u32           mip_levels { 1 };
-    u32           samples { 1 };
+    u32           mip_levels { u32(1) };
+    u32           samples { u32(1) };
 
     friend bool operator==(const TextureDefinition& lhs, const TextureDefinition& rhs) {
         return lhs.width == rhs.width && lhs.height == rhs.height && lhs.usage == rhs.usage &&

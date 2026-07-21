@@ -24,8 +24,9 @@ namespace
 
 void WriteMessage(ref<str> text, rstd::argparse::OutputTarget::Tag target) {
     FILE* stream = target == rstd::argparse::OutputTarget::Tag::Stdout ? stdout : stderr;
-    std::fwrite(text.data(), 1, text.size(), stream);
-    if (text.size() == 0 || text.data()[text.size() - 1] != '\n') std::fputc('\n', stream);
+    auto  size   = text.size().to_primitive();
+    std::fwrite(text.data(), 1, size, stream);
+    if (size == 0 || text.data()[size - 1] != '\n') std::fputc('\n', stream);
 }
 
 auto Build(rstd::argparse::Command&& command)
@@ -45,14 +46,14 @@ auto Finish(rstd::argparse::Parser&              parser,
     if (parsed.is_err()) {
         auto report = parser.render_error(parsed.as_ref().unwrap_err());
         WriteMessage(report.text(), report.target());
-        return Err(owe::cli::ParseExit { report.exit_code() });
+        return Err(owe::cli::ParseExit { report.exit_code().to_primitive() });
     }
 
     auto outcome = rstd::move(parsed).unwrap();
     if (outcome.is_Display()) {
         auto request = rstd::move(outcome).as_Display().request;
         WriteMessage(request.text(), request.target());
-        return Err(owe::cli::ParseExit { request.exit_code() });
+        return Err(owe::cli::ParseExit { request.exit_code().to_primitive() });
     }
     return Ok(rstd::move(outcome).as_Parsed().value);
 }
@@ -73,8 +74,8 @@ auto ParseArgs(rstd::argparse::Command&& command, int argc, char** argv)
     -> Result<rstd::argparse::Matches, ParseExit> {
     auto arguments = Vec<rstd::ffi::OsString>::with_capacity(static_cast<usize>(argc));
     for (int i = 0; i < argc; ++i) {
-        auto bytes = ref<rstd::ffi::OsStr>::from_raw_parts(reinterpret_cast<const u8*>(argv[i]),
-                                                           std::strlen(argv[i]));
+        auto bytes = ref<rstd::ffi::OsStr>::from_raw_parts(
+            reinterpret_cast<const rstd::uint8_t*>(argv[i]), usize(std::strlen(argv[i])));
         arguments.push(rstd::ffi::OsString::from(bytes));
     }
 

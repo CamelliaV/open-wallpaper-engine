@@ -227,7 +227,7 @@ void BrowserHost::Pump() {
 void BrowserHost::ApplyVolume(float volume) {
     auto object = rstd::json::Map::make();
     object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")),
-                  rstd::into<owe::Json>(volume));
+                  rstd::into<owe::Json>(rstd::f32(volume)));
     auto v = owe::Json::Object(rstd::move(object));
     ApplyUserProperty("audio", v);
 }

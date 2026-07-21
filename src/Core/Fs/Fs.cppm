@@ -18,7 +18,7 @@ using ReadRange       = rstd::io::ReadRange;
 using WriteSeekHandle = rstd::io::WriteSeekHandle;
 
 struct FileMetadata {
-    u64  len { 0 };
+    u64  len {};
     bool is_file { false };
     bool is_directory { false };
     bool readonly { false };
@@ -32,7 +32,7 @@ struct WriteOptions {
 };
 
 struct MountId {
-    u64 value { 0 };
+    u64 value {};
 
     friend bool operator==(MountId lhs, MountId rhs) noexcept { return lhs.value == rhs.value; }
 };
@@ -148,7 +148,7 @@ public:
         }
 
         auto source = rstd::io::SharedReadAt::make(rstd::move(opened));
-        return ReadRange::make(rstd::move(source), 0, info.len());
+        return ReadRange::make(rstd::move(source), u64(), info.len());
     }
 
     auto open_write(Path path, WriteOptions options) const -> rstd::io::Result<WriteSeekHandle> {
@@ -235,7 +235,7 @@ private:
 
 class VFS {
 public:
-    VFS(): m_state(State { .mounts = Vec<MountedFs>::make(), .next_id = 1 }) {}
+    VFS(): m_state(State { .mounts = Vec<MountedFs>::make(), .next_id = u64(1) }) {}
 
     VFS(const VFS&)                    = delete;
     auto operator=(const VFS&) -> VFS& = delete;
@@ -248,7 +248,7 @@ public:
         }
 
         auto state = m_state.lock().unwrap_unchecked();
-        if (state->next_id == u64(-1)) {
+        if (state->next_id == u64::MAX) {
             return rstd::Err(detail::error(rstd::io::error::ErrorKind::Other));
         }
         auto id = MountId { state->next_id++ };
@@ -261,9 +261,9 @@ public:
 
     bool unmount(MountId id) {
         auto state = m_state.lock().unwrap_unchecked();
-        for (usize i = state->mounts.len(); i > 0; --i) {
-            if (state->mounts[i - 1].id == id) {
-                state->mounts.remove(i - 1);
+        for (usize i = state->mounts.len(); i > usize(); --i) {
+            if (state->mounts[i - usize(1)].id == id) {
+                state->mounts.remove(i - usize(1));
                 return true;
             }
         }
@@ -272,7 +272,7 @@ public:
 
     bool is_mounted(rstd::ref<rstd::str> name) const {
         auto state = m_state.lock().unwrap_unchecked();
-        for (usize i = 0; i < state->mounts.len(); ++i) {
+        for (usize i {}; i < state->mounts.len(); ++i) {
             if (state->mounts[i].name == name) return true;
         }
         return false;
@@ -281,8 +281,8 @@ public:
     auto open_read(Path path) const -> rstd::io::Result<ReadRange> {
         auto normalized = rstd_try(detail::normalize_global(path));
         auto mounts     = snapshot();
-        for (usize i = mounts.len(); i > 0; --i) {
-            auto& mount = mounts[i - 1];
+        for (usize i = mounts.len(); i > usize(); --i) {
+            auto& mount = mounts[i - usize(1)];
             auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
             if (local.is_none()) continue;
             auto opened = mount.fs->open_read(*local);
@@ -310,8 +310,8 @@ public:
             auto existing_options       = options;
             existing_options.create     = false;
             existing_options.create_new = false;
-            for (usize i = mounts.len(); i > 0; --i) {
-                auto& mount = mounts[i - 1];
+            for (usize i = mounts.len(); i > usize(); --i) {
+                auto& mount = mounts[i - usize(1)];
                 auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
                 if (local.is_none()) continue;
                 auto opened = mount.fs->open_write(*local, existing_options);
@@ -324,8 +324,8 @@ public:
         if (! options.create && ! options.create_new) {
             return rstd::Err(detail::error(rstd::io::error::ErrorKind::NotFound));
         }
-        for (usize i = mounts.len(); i > 0; --i) {
-            auto& mount = mounts[i - 1];
+        for (usize i = mounts.len(); i > usize(); --i) {
+            auto& mount = mounts[i - usize(1)];
             auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
             if (local.is_none()) continue;
             auto opened = mount.fs->open_write(*local, options);
@@ -341,8 +341,8 @@ public:
     auto metadata(Path path) const -> rstd::io::Result<FileMetadata> {
         auto normalized = rstd_try(detail::normalize_global(path));
         auto mounts     = snapshot();
-        for (usize i = mounts.len(); i > 0; --i) {
-            auto& mount = mounts[i - 1];
+        for (usize i = mounts.len(); i > usize(); --i) {
+            auto& mount = mounts[i - usize(1)];
             auto  local = normalized.as_path().strip_prefix(mount.mount_point.as_path());
             if (local.is_none()) continue;
             auto result = mount.fs->metadata(*local);
@@ -375,7 +375,7 @@ private:
     auto snapshot() const -> Vec<MountedFs> {
         auto state  = m_state.lock().unwrap_unchecked();
         auto result = Vec<MountedFs>::with_capacity(state->mounts.len());
-        for (usize i = 0; i < state->mounts.len(); ++i) {
+        for (usize i {}; i < state->mounts.len(); ++i) {
             result.push(state->mounts[i].clone());
         }
         return result;

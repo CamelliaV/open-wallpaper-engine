@@ -801,23 +801,23 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
 // declaration, before `void main(`, and outside any `#if/#endif` block.
 // Returns 0 when no preceding decls are found or the source has multiple
 // entry points (post-include shaders we can't reason about).
-inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
+inline std::size_t FindIncludeInsertPos(const std::string& src, std::size_t startPos) {
     using shader_lex::PpKind;
     (void)startPos;
 
-    const usize main_pos = src.find("void main(");
+    const std::size_t main_pos = src.find("void main(");
     if (main_pos == std::string::npos) return 0;
     if (src.find("void main(", main_pos + 2) != std::string::npos) return 0;
 
-    usize                                     after_pos = std::string::npos;
-    std::vector<std::pair<usize, usize>>      if_ranges;
-    std::vector<usize>                        if_stack;
+    std::size_t                                      after_pos = std::string::npos;
+    std::vector<std::pair<std::size_t, std::size_t>> if_ranges;
+    std::vector<std::size_t>                         if_stack;
     constexpr std::array<std::string_view, 4> kKws { "attribute", "varying", "uniform", "struct" };
 
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
         if (w.LineStart() >= main_pos) break;
-        usize line_end = std::min(w.LineEnd(), main_pos);
+        std::size_t line_end = std::min(w.LineEnd(), main_pos);
 
         shader_lex::Cursor c(src);
         c.SeekTo(w.LineStart());
@@ -832,9 +832,9 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
                 if_stack.push_back(w.LineStart());
             } else if (kind == PpKind::Endif) {
                 if (! if_stack.empty()) {
-                    usize start = if_stack.back();
+                    std::size_t start = if_stack.back();
                     if_stack.pop_back();
-                    usize end = (w.LineEnd() < src.size()) ? w.LineEnd() + 1 : w.LineEnd();
+                    std::size_t end = (w.LineEnd() < src.size()) ? w.LineEnd() + 1 : w.LineEnd();
                     if_ranges.emplace_back(start, end);
                 }
             }
@@ -851,7 +851,7 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
         }
     }
 
-    usize pos = (after_pos == std::string::npos) ? 0 : std::min(after_pos, main_pos);
+    std::size_t pos = (after_pos == std::string::npos) ? 0 : std::min(after_pos, main_pos);
     for (const auto& [s, e] : if_ranges) {
         if (pos > s && pos <= e) pos = e;
     }
@@ -1038,7 +1038,7 @@ ScanAndStripSamplers(const std::string& src) {
     std::vector<SamplerDecl> decls;
     std::string              out;
     out.reserve(src.size());
-    usize cursor = 0;
+    std::size_t cursor = 0;
     ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
         if (! IsSamplerType(m.type)) return;
         out.append(src, cursor, m.start - cursor);
@@ -1080,7 +1080,7 @@ inline bool IsSamplerCombinedImage(std::string_view glsl) {
 inline std::string StripUniforms(const std::string& src) {
     std::string out;
     out.reserve(src.size());
-    usize cursor = 0;
+    std::size_t cursor = 0;
     ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
         out.append(src, cursor, m.start - cursor);
         out.append(src, m.start, m.keep_prefix);
@@ -1154,7 +1154,7 @@ inline std::pair<std::vector<IODecl>, std::string> ScanAndStripIO(const std::str
     std::vector<IODecl> decls;
     std::string         out;
     out.reserve(src.size());
-    usize cursor = 0;
+    std::size_t cursor = 0;
     ForEachDeclLine(src, { "attribute", "varying", "in", "out" }, [&](const DeclMatch& m) {
         out.append(src, cursor, m.start - cursor);
         out.append(src, m.start, m.keep_prefix);
@@ -1177,13 +1177,13 @@ struct SynthOutput {
     std::string post;
 };
 
-inline usize ArraySlots(const std::string& arr) {
+inline std::size_t ArraySlots(const std::string& arr) {
     if (arr.size() < 3 || arr.front() != '[' || arr.back() != ']') return 1;
-    usize n = 0;
-    for (usize i = 1; i + 1 < arr.size(); ++i) {
+    std::size_t n = 0;
+    for (std::size_t i = 1; i + 1 < arr.size(); ++i) {
         const char c = arr[i];
         if (c < '0' || c > '9') return 1;
-        n = n * 10 + (usize)(c - '0');
+        n = n * 10 + static_cast<std::size_t>(c - '0');
     }
     return n > 0 ? n : 1;
 }
@@ -1206,7 +1206,7 @@ inline std::string EmitStageIOLayout(std::vector<IODecl> decls, bool is_input) {
     });
     const char* qual = is_input ? "in" : "out";
     std::string out;
-    usize       loc = 0;
+    std::size_t loc = 0;
     for (const auto& d : decls) {
         out += "layout(location = " + std::to_string(loc) + ") " + qual + " " + ToGLSLType(d.type) +
                " " + d.name + d.array + ";\n";
@@ -1614,7 +1614,7 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
     Set<std::string> sampler_seen;
     std::string      sampler_block;
     if (! sampler_decls.empty()) sampler_block += "\n// === auto-generated samplers (HLSL) ===\n";
-    usize sampler_idx = 1;
+    std::size_t sampler_idx = 1;
     for (const auto& s : sampler_decls) {
         if (! sampler_seen.insert(s.name).second) continue;
         const char* tex_ty   = HLSLSamplerType(s.sampler_type);
@@ -1649,17 +1649,17 @@ inline std::string GetCachePath(std::string_view scene_id, std::string_view file
 
 inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::BinaryReader& file) {
     codes.clear();
-    i32 ver = ReadShaderCacheVersion(file);
+    std::int32_t ver = ReadShaderCacheVersion(file);
 
-    usize count = file.ReadUint32();
-    rstd_assert(count <= 16 && count >= 0);
+    std::uint32_t count = file.ReadUint32();
+    rstd_assert(count <= 16);
     if (count > 16) return false;
 
     codes.resize(count);
-    for (usize i = 0; i < count; i++) {
+    for (std::size_t i = 0; i < count; i++) {
         auto& c = codes[i];
 
-        u32 size = file.ReadUint32();
+        std::uint32_t size = file.ReadUint32();
         rstd_assert(size % 4 == 0);
         if (size % 4 != 0) return false;
 
@@ -1673,9 +1673,9 @@ inline void SaveShaderToFile(std::span<const ShaderCode> codes, fs::BinaryWriter
     char nop[256] { '\0' };
 
     WriteShaderCacheVersion(file, 1);
-    file.WriteUint32((u32)codes.size());
+    file.WriteUint32(static_cast<std::uint32_t>(codes.size()));
     for (const auto& c : codes) {
-        u32 size = (u32)c.size() * 4;
+        const auto size = static_cast<std::uint32_t>(c.size() * 4);
         file.WriteUint32(size);
         file.Write((const char*)c.data(), size);
     }
@@ -1698,7 +1698,7 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
     newsrc.reserve(src.size());
     std::string all_includes;
 
-    usize                  cursor = 0;
+    std::size_t            cursor = 0;
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
         shader_lex::Cursor c(src);
@@ -1899,7 +1899,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         }
 
         std::vector<vulkan::ShaderCompUnit> vunits(units.size());
-        for (usize i = 0; i < units.size(); i++) {
+        for (std::size_t i = 0; i < units.size(); i++) {
             auto&               unit     = units[i];
             auto&               vunit    = vunits[i];
             WPPreprocessorInfo* pre_info = i >= 1 ? &units[i - 1].preprocess_info : nullptr;
@@ -1968,9 +1968,10 @@ namespace
 
 WPShaderTexInfo ToWPShaderTexInfo(const SceneShaderTextureCompileInfo& info) {
     return WPShaderTexInfo {
-        .enabled = info.enabled,
-        .composEnabled =
-            std::array<bool, 3> { info.components[0], info.components[1], info.components[2] },
+        .enabled       = info.enabled,
+        .composEnabled = std::array<bool, 3> { info.components[usize(0)],
+                                               info.components[usize(1)],
+                                               info.components[usize(2)] },
     };
 }
 
@@ -2012,7 +2013,7 @@ void MergeVariantFallbackMetadata(WPShaderInfo& info, const SceneShaderVariantDe
 void WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
     SceneShaderVariantDesc& desc, std::span<const WPShaderUnit> units,
     std::span<const ShaderCode> codes) {
-    for (usize i = 0; i < desc.stages.size() && i < units.size(); ++i) {
+    for (std::size_t i = 0; i < desc.stages.size() && i < units.size(); ++i) {
         desc.stages[i].active_texture_slots = units[i].preprocess_info.active_tex_slots;
         desc.stages[i].uniforms             = units[i].preprocess_info.uniforms;
         if (i < codes.size()) desc.stages[i].code_hash = SceneShaderStageCodeHash(codes[i]);
@@ -2031,7 +2032,7 @@ void WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
         }
         const auto suffix = std::string_view(name).substr(texture_prefix.size());
         if (suffix.empty() || (suffix.size() > 1 && suffix.front() == '0')) continue;
-        usize slot { 0 };
+        std::size_t slot { 0 };
         const auto [end, error] =
             std::from_chars(suffix.data(), suffix.data() + suffix.size(), slot);
         if (error != std::errc() || end != suffix.data() + suffix.size()) continue;
@@ -2102,8 +2103,8 @@ void WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
             record.members.push_back(UniformMemberRecord {
                 .name   = name,
                 .offset = member.offset,
-                .size   = member.size,
-                .num    = member.num,
+                .size   = member.size.to_primitive(),
+                .num    = member.num.to_primitive(),
             });
         }
         std::sort(record.members.begin(), record.members.end(), member_less);

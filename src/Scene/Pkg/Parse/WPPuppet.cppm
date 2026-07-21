@@ -136,12 +136,12 @@ public:
     };
 
     struct Animation {
-        i32         id;
-        u32         unk_after_id { 0 };
-        double      fps;
-        i32         length;
-        PlayMode    mode;
-        std::string name;
+        rstd::int32_t  id;
+        rstd::uint32_t unk_after_id { 0 };
+        double         fps;
+        rstd::int32_t  length;
+        PlayMode       mode;
+        std::string    name;
 
         std::vector<BoneTrack> bone_tracks;
 
@@ -164,9 +164,9 @@ public:
         double max_time;
         double frame_time;
         struct InterpolationInfo {
-            idx    frame_a;
-            idx    frame_b;
-            double t;
+            std::size_t frame_a;
+            std::size_t frame_b;
+            double      t;
         };
         InterpolationInfo getInterpolationInfo(double* cur_time) const;
     };
@@ -236,19 +236,19 @@ public:
     bool hasPuppet() const { return (bool)m_puppet; };
 
     struct AnimationLayer {
-        i32    id { 0 }; // animation file id (PKGV0001+)
-        double rate { 1.0f };
-        double blend { 1.0f };
-        bool   visible { true };
-        double cur_time { 0.0f };
+        rstd::int32_t id { 0 }; // animation file id (PKGV0001+)
+        double        rate { 1.0f };
+        double        blend { 1.0f };
+        bool          visible { true };
+        double        cur_time { 0.0f };
 
         // Schema-only absorption (renderer reads only id/rate/blend/visible).
-        i32         layer_id { 0 };     // animationlayers[].id (was unread)
-        std::string name;               // animationlayers[].name (was unread)
-        bool        additive { false }; // PKGV0019+; blend operator
-        bool        blendin { false };  // PKGV0021+
-        bool        blendout { false }; // PKGV0021+
-        double      blendtime { 0.0 };  // PKGV0021+
+        rstd::int32_t layer_id { 0 };     // animationlayers[].id (was unread)
+        std::string   name;               // animationlayers[].name (was unread)
+        bool          additive { false }; // PKGV0019+; blend operator
+        bool          blendin { false };  // PKGV0021+
+        bool          blendout { false }; // PKGV0021+
+        double        blendtime { 0.0 };  // PKGV0021+
     };
 
     void prepared(std::span<AnimationLayer>);

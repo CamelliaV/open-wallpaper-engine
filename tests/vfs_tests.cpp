@@ -17,10 +17,14 @@ auto FsError(rstd::io::error::ErrorKind::Entity kind) -> rstd::io::error::Error 
 struct MemorySource {
     std::string data;
 
-    auto read_at(u8* buffer, usize len, u64 offset) const -> rstd::io::Result<usize> {
-        if (offset >= data.size()) return rstd::Ok(usize(0));
-        auto count = rstd::min(len, data.size() - usize(offset));
-        rstd::mem::memcpy(buffer, data.data() + offset, count);
+    auto read_at(mut_ref<byte[]> buffer, u64 offset) const -> rstd::io::Result<usize> {
+        auto position = rstd::try_from<usize>(offset);
+        if (position.is_err()) return rstd::Ok(usize());
+        auto position_value = rstd::move(position).unwrap_unchecked();
+        auto data_len       = usize(data.size());
+        if (position_value >= data_len) return rstd::Ok(usize());
+        auto count = rstd::min(buffer.len(), data_len - position_value);
+        rstd::mem::memcpy(buffer.as_raw_ptr(), data.data() + position_value.to_primitive(), count);
         return rstd::Ok(count);
     }
 };
@@ -29,8 +33,8 @@ struct MemorySource {
 
 template<>
 struct rstd::Impl<rstd::io::ReadAt, MemorySource> : rstd::ImplBase<MemorySource> {
-    auto read_at(u8* buffer, usize len, u64 offset) const -> rstd::io::Result<usize> {
-        return this->self().read_at(buffer, len, offset);
+    auto read_at(mut_ref<byte[]> buffer, u64 offset) const -> rstd::io::Result<usize> {
+        return this->self().read_at(buffer, offset);
     }
 };
 
@@ -53,7 +57,7 @@ public:
             return rstd::Err(FsError(rstd::io::error::ErrorKind::NotFound));
         }
         auto source = rstd::io::SharedReadAt::make(MemorySource { file->second });
-        return owe::fs::ReadRange::make(std::move(source), 0, file->second.size());
+        return owe::fs::ReadRange::make(std::move(source), u64(), u64(file->second.size()));
     }
 
     auto open_write(owe::fs::Path path, owe::fs::WriteOptions) const
@@ -72,7 +76,11 @@ public:
             return rstd::Err(FsError(rstd::io::error::ErrorKind::NotFound));
         }
         return rstd::Ok(owe::fs::FileMetadata {
-            .len = file->second.size(), .is_file = true, .is_directory = false, .readonly = true });
+            .len          = u64(file->second.size()),
+            .is_file      = true,
+            .is_directory = false,
+            .readonly     = true,
+        });
     }
 
 private:
@@ -210,7 +218,7 @@ TEST(Vfs, WriteRoutingPreservesReadonlyOverlay) {
     ASSERT_TRUE(created.is_ok());
     {
         owe::fs::BinaryWriter writer(std::move(created).unwrap_unchecked());
-        EXPECT_EQ(writer.Write("new", 3), usize(3));
+        EXPECT_EQ(writer.Write("new", 3), 3u);
     }
 
     std::ifstream file(temp.path / "new");
@@ -227,7 +235,8 @@ TEST(PkgFs, ReusesHeaderAndRejectsInvalidEntryRanges) {
     auto pkg = owe::fs::WPPkgFs::open(owe::fs::ToPath(valid_path.string()));
     ASSERT_TRUE(pkg.is_ok());
     auto stamp = pkg->pkg_version_stamp();
-    EXPECT_EQ(std::string(reinterpret_cast<const char*>(stamp.data()), stamp.len()), "PKGV0001");
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(stamp.data()), stamp.len().to_primitive()),
+              "PKGV0001");
 
     auto source = pkg->open_read(owe::fs::ToPath("/materials/foo.BIN"));
     ASSERT_TRUE(source.is_ok());

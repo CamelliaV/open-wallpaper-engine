@@ -67,7 +67,7 @@ bool peek_block_magic(fs::BinaryReader& f, std::string_view expect4) {
     return ok;
 }
 
-bool peek_uint8_at(fs::BinaryReader& f, idx off, uint8_t& out) {
+bool peek_uint8_at(fs::BinaryReader& f, rstd::ptrdiff_t off, uint8_t& out) {
     if (off < 0 || off + 1 > f.Size()) return false;
     auto save = f.Tell();
     f.SeekSet(off);
@@ -76,7 +76,7 @@ bool peek_uint8_at(fs::BinaryReader& f, idx off, uint8_t& out) {
     return true;
 }
 
-bool peek_uint32_at(fs::BinaryReader& f, idx off, uint32_t& out) {
+bool peek_uint32_at(fs::BinaryReader& f, rstd::ptrdiff_t off, uint32_t& out) {
     if (off < 0 || off + 4 > f.Size()) return false;
     auto save = f.Tell();
     f.SeekSet(off);
@@ -118,7 +118,7 @@ bool next_is_anim_bone_curves(fs::BinaryReader& f) {
 
 bool next_is_anim_record_padding(fs::BinaryReader& f, uint32_t end_offset) {
     auto off = f.Tell();
-    if (end_offset == 0 || off + 12 > static_cast<idx>(end_offset)) return false;
+    if (end_offset == 0 || off + 12 > static_cast<rstd::ptrdiff_t>(end_offset)) return false;
     uint32_t zero = 0;
     if (! peek_uint32_at(f, off, zero) || zero != 0) return false;
     uint32_t next_id = 0;
@@ -129,22 +129,23 @@ bool next_is_anim_record_padding(fs::BinaryReader& f, uint32_t end_offset) {
     return peek_uint32_at(f, off + 8, next_unk_after_id) && next_unk_after_id == 0;
 }
 
-idx mdls_v2_indexed_trailer_start(uint32_t end_offset, uint16_t bones_num) {
+rstd::ptrdiff_t mdls_v2_indexed_trailer_start(uint32_t end_offset, uint16_t bones_num) {
     auto trailer_size = 1ull + static_cast<uint64_t>(bones_num) * mdls_offset_trans_entry_size +
                         1ull + static_cast<uint64_t>(bones_num) * 4ull;
     if (end_offset < trailer_size) return -1;
-    return static_cast<idx>(end_offset - trailer_size);
+    return static_cast<rstd::ptrdiff_t>(end_offset - trailer_size);
 }
 
-bool is_mdls_v2_indexed_trailer(fs::BinaryReader& f, idx start, uint32_t end_offset,
+bool is_mdls_v2_indexed_trailer(fs::BinaryReader& f, rstd::ptrdiff_t start, uint32_t end_offset,
                                 uint16_t bones_num) {
-    if (start < 0 || start >= static_cast<idx>(end_offset)) return false;
+    if (start < 0 || start >= static_cast<rstd::ptrdiff_t>(end_offset)) return false;
     uint8_t has_offset_trans = 0;
     if (! peek_uint8_at(f, start, has_offset_trans) || has_offset_trans != 1) return false;
 
-    auto has_index_off =
-        start + 1 + static_cast<idx>(bones_num) * static_cast<idx>(mdls_offset_trans_entry_size);
-    if (has_index_off >= static_cast<idx>(end_offset)) return false;
+    auto has_index_off = start + 1 +
+                         static_cast<rstd::ptrdiff_t>(bones_num) *
+                             static_cast<rstd::ptrdiff_t>(mdls_offset_trans_entry_size);
+    if (has_index_off >= static_cast<rstd::ptrdiff_t>(end_offset)) return false;
     uint8_t has_index = 0;
     return peek_uint8_at(f, has_index_off, has_index) && has_index == 1;
 }
@@ -1100,7 +1101,7 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     }
 
     auto             attrs = MakeAttrSet(specs);
-    SceneVertexArray vertex(attrs, vert_num);
+    SceneVertexArray vertex(attrs, usize(vert_num));
 
     size_t stride_floats = 0;
     for (auto& a : attrs) stride_floats += SceneVertexArray::RealAttributeSize(a);
@@ -1112,7 +1113,7 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
             packers[k](i, one_vert.data() + offset);
             offset += SceneVertexArray::RealAttributeSize(attrs[k]);
         }
-        vertex.SetVertexs(i, std::span<const float>(one_vert));
+        vertex.SetVertexs(usize(i), std::span<const float>(one_vert));
     }
 
     std::vector<uint32_t> indices;
@@ -1160,6 +1161,6 @@ void WPMdlParser::AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl) {
 
 void WPMdlParser::AddPuppetMatInfo(wpscene::Material& mat, const WPMdl& mdl) {
     mat.combos[std::string(WE_CB_SKINNING)]  = 1;
-    mat.combos[std::string(WE_CB_BONECOUNT)] = (i32)mdl.puppet->bones.size();
+    mat.combos[std::string(WE_CB_BONECOUNT)] = static_cast<int>(mdl.puppet->bones.size());
     mat.use_puppet                           = true;
 }

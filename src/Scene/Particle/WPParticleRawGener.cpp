@@ -39,13 +39,13 @@ inline void AssignVertex(std::span<float> dst, std::span<const float> src, unsig
 inline usize GenParticleData(std::span<const Box<ParticleInstance>> instances,
                              const ParticleRawGenSpecOp& specOp, WPGOption opt,
                              SceneVertexArray& sv) noexcept {
-    rstd::array<float, 32 * 4> storage;
+    std::array<float, 32 * 4> storage;
 
     float* data = storage.data();
 
-    const auto one_size   = sv.OneSize();
+    const auto one_size   = sv.OneSize().to_primitive();
     const auto totle_size = 4 * one_size;
-    usize      i { 0 };
+    usize      i {};
     for (const auto& inst : instances) {
         if (inst->IsNoLiveParticle()) continue;
 
@@ -60,46 +60,46 @@ inline usize GenParticleData(std::span<const Box<ParticleInstance>> instances,
             auto  pos  = inst->GetBoundedData().pos + p.position;
             float size = p.size / 2.0f;
 
-            usize offset = 0;
+            std::size_t offset = 0;
 
             // pos
             AssignVertexTimes(
-                { data + offset, totle_size }, rstd::array<float, 3> { pos[0], pos[1], pos[2] }, 4);
+                { data + offset, totle_size }, std::array<float, 3> { pos[0], pos[1], pos[2] }, 4);
             offset += 4;
             // TexCoordVec4
-            float                  rz = p.rotation[2];
-            rstd::array<float, 16> t { 0.0f, 1.0f, rz, size, 1.0f, 1.0f, rz, size,
-                                       1.0f, 0.0f, rz, size, 0.0f, 0.0f, rz, size };
+            float                 rz = p.rotation[2];
+            std::array<float, 16> t { 0.0f, 1.0f, rz, size, 1.0f, 1.0f, rz, size,
+                                      1.0f, 0.0f, rz, size, 0.0f, 0.0f, rz, size };
             AssignVertex({ data + offset, totle_size }, t, 4);
             offset += 4;
 
             // color
             AssignVertexTimes({ data + offset, totle_size },
-                              rstd::array<float, 4> { p.color[0], p.color[1], p.color[2], p.alpha },
+                              std::array<float, 4> { p.color[0], p.color[1], p.color[2], p.alpha },
                               4);
             offset += 4;
 
             if (opt.thick_format) {
                 AssignVertexTimes(
                     { data + offset, totle_size },
-                    rstd::array<float, 4> { p.velocity[0], p.velocity[1], p.velocity[2], lifetime },
+                    std::array<float, 4> { p.velocity[0], p.velocity[1], p.velocity[2], lifetime },
                     4);
                 offset += 4;
             }
             // TexCoordC2
             AssignVertexTimes({ data + offset, totle_size },
-                              rstd::array<float, 2> { p.rotation[0], p.rotation[1] },
+                              std::array<float, 2> { p.rotation[0], p.rotation[1] },
                               4);
 
-            sv.SetVertexs((i++) * 4, { data, totle_size });
+            sv.SetVertexs((i++) * usize(4), { data, totle_size });
         }
     }
     return i;
 }
 
 struct AttrSlot {
-    usize offset { 0 };
-    bool  enabled { false };
+    std::size_t offset { 0 };
+    bool        enabled { false };
 };
 
 inline AttrSlot
@@ -107,20 +107,20 @@ FindAttrSlot(const owe::Map<std::string, SceneVertexArray::SceneVertexAttributeO
              std::string_view name) noexcept {
     auto it = attrs.find(std::string(name));
     if (it == attrs.end()) return {};
-    return { it->second.offset / sizeof(float), true };
+    return { it->second.offset.to_primitive() / sizeof(float), true };
 }
 
 inline usize GenParticlePointData(std::span<const Box<ParticleInstance>> instances,
                                   const ParticleRawGenSpecOp& specOp, WPGOption opt,
                                   SceneVertexArray& sv) noexcept {
-    const auto             one_size = sv.OneSize();
-    const auto             attrs    = sv.GetAttrOffsetMap();
-    const AttrSlot         position = FindAttrSlot(attrs, WE_IN_POSITION);
-    const AttrSlot         texcoord = FindAttrSlot(attrs, WE_IN_TEXCOORDVEC4);
-    const AttrSlot         color    = FindAttrSlot(attrs, WE_IN_COLOR);
-    const AttrSlot         velocity = FindAttrSlot(attrs, WE_IN_TEXCOORDVEC4C1);
-    rstd::array<float, 16> v {};
-    auto                   write3 = [&](AttrSlot slot, float x, float y, float z) noexcept {
+    const auto            one_size = sv.OneSize().to_primitive();
+    const auto            attrs    = sv.GetAttrOffsetMap();
+    const AttrSlot        position = FindAttrSlot(attrs, WE_IN_POSITION);
+    const AttrSlot        texcoord = FindAttrSlot(attrs, WE_IN_TEXCOORDVEC4);
+    const AttrSlot        color    = FindAttrSlot(attrs, WE_IN_COLOR);
+    const AttrSlot        velocity = FindAttrSlot(attrs, WE_IN_TEXCOORDVEC4C1);
+    std::array<float, 16> v {};
+    auto                  write3 = [&](AttrSlot slot, float x, float y, float z) noexcept {
         if (! slot.enabled) return;
         v[slot.offset + 0] = x;
         v[slot.offset + 1] = y;
@@ -134,7 +134,7 @@ inline usize GenParticlePointData(std::span<const Box<ParticleInstance>> instanc
         v[slot.offset + 3] = w;
     };
 
-    usize i { 0 };
+    usize i {};
     for (const auto& inst : instances) {
         if (inst->IsNoLiveParticle()) continue;
 
@@ -147,7 +147,7 @@ inline usize GenParticlePointData(std::span<const Box<ParticleInstance>> instanc
             auto  pos  = inst->GetBoundedData().pos + p.position;
             float size = p.size / 2.0f;
 
-            std::fill(v.begin(), v.begin() + (isize)one_size, 0.0f);
+            std::fill(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(one_size), 0.0f);
             write3(position, pos[0], pos[1], pos[2]);
             write4(texcoord, p.rotation[0], p.rotation[1], p.rotation[2], size);
             write4(color, p.color[0], p.color[1], p.color[2], p.alpha);
@@ -170,11 +170,11 @@ inline usize GenParticlePointData(std::span<const Box<ParticleInstance>> instanc
 inline usize GenRopeParticleSegments(const Particle& p, const ParticleTrail& trail,
                                      const ParticleRawGenSpecOp& specOp, WPGOption opt,
                                      SceneVertexArray& sv, usize base_index) {
-    const auto             one_size = sv.OneSize();
-    rstd::array<float, 32> v {};
-    usize                  emitted = 0;
+    const auto            one_size = sv.OneSize().to_primitive();
+    std::array<float, 32> v {};
+    std::size_t           emitted = 0;
 
-    if (trail.len < 2) return 0;
+    if (trail.len < 2) return usize();
 
     float size     = p.size / 2.0f;
     float lifetime = p.lifetime;
@@ -183,31 +183,31 @@ inline usize GenRopeParticleSegments(const Particle& p, const ParticleTrail& tra
     const float in_ParticleTrailLength = (float)trail.len;
 
     // trail.At(0) = oldest, At(len-1) = newest. Segments connect (j-1) -> j.
-    for (u16 j = 1; j < trail.len; j++) {
-        Vector3f pre_pos = trail.At(static_cast<u16>(j - 1));
+    for (std::size_t j = 1; j < trail.len; ++j) {
+        Vector3f pre_pos = trail.At(j - 1);
         Vector3f cur_pos = trail.At(j);
         // Catmull-Rom neighbour samples for the cubic-Bezier subdivision; the
         // GS hardcoded 0.15 factor matches Catmull-Rom tension 0.5 (theoretical
         // 1/6 ≈ 0.167). At the trail endpoints fall back to the segment ends
         // so those boundary spans render flat.
-        Vector3f scp = (j >= 2) ? trail.At(static_cast<u16>(j - 2)) : pre_pos;
-        Vector3f ecp = (j + 1 < trail.len) ? trail.At(static_cast<u16>(j + 1)) : cur_pos;
+        Vector3f scp = (j >= 2) ? trail.At(j - 2) : pre_pos;
+        Vector3f ecp = (j + 1 < trail.len) ? trail.At(j + 1) : cur_pos;
 
         const float in_ParticleTrailPosition = (float)(j - 1);
 
-        usize off = 0;
-        v[off++]  = pre_pos[0];
-        v[off++]  = pre_pos[1];
-        v[off++]  = pre_pos[2];
-        v[off++]  = size;
-        v[off++]  = cur_pos[0];
-        v[off++]  = cur_pos[1];
-        v[off++]  = cur_pos[2];
-        v[off++]  = in_ParticleTrailLength;
-        v[off++]  = scp[0];
-        v[off++]  = scp[1];
-        v[off++]  = scp[2];
-        v[off++]  = in_ParticleTrailPosition;
+        std::size_t off = 0;
+        v[off++]        = pre_pos[0];
+        v[off++]        = pre_pos[1];
+        v[off++]        = pre_pos[2];
+        v[off++]        = size;
+        v[off++]        = cur_pos[0];
+        v[off++]        = cur_pos[1];
+        v[off++]        = cur_pos[2];
+        v[off++]        = in_ParticleTrailLength;
+        v[off++]        = scp[0];
+        v[off++]        = scp[1];
+        v[off++]        = scp[2];
+        v[off++]        = in_ParticleTrailPosition;
         if (opt.thick_format) {
             v[off++] = ecp[0];
             v[off++] = ecp[1];
@@ -229,22 +229,22 @@ inline usize GenRopeParticleSegments(const Particle& p, const ParticleTrail& tra
         v[off++] = p.alpha;
 
         rstd_assert(off == one_size);
-        sv.SetVertexs(base_index + emitted, { v.data(), one_size });
-        emitted++;
+        sv.SetVertexs(base_index + usize(emitted), { v.data(), one_size });
+        ++emitted;
     }
-    return emitted;
+    return usize(emitted);
 }
 
 inline usize GenRopeParticleData(std::span<const Box<ParticleInstance>> instances,
                                  const ParticleRawGenSpecOp& specOp, WPGOption opt,
                                  SceneVertexArray& sv) {
-    usize total = 0;
+    usize total {};
     for (const auto& inst : instances) {
         if (inst->IsNoLiveParticle()) continue;
-        auto        particles = inst->Particles();
-        auto        trails    = inst->Trails();
-        const usize n         = std::min(particles.size(), trails.size());
-        for (usize si = 0; si < n; si++) {
+        auto              particles = inst->Particles();
+        auto              trails    = inst->Trails();
+        const std::size_t n         = std::min(particles.size(), trails.size());
+        for (std::size_t si = 0; si < n; ++si) {
             if (! ParticleModify::LifetimeOk(particles[si])) continue;
             total += GenRopeParticleSegments(particles[si], trails[si], specOp, opt, sv, total);
         }
@@ -253,29 +253,29 @@ inline usize GenRopeParticleData(std::span<const Box<ParticleInstance>> instance
 }
 
 inline void updateIndexArray(u32 index, usize count, SceneIndexArray& iarray) noexcept {
-    constexpr usize single_size = 6;
-    u32             cv          = index * 4;
+    constexpr std::size_t single_size = 6;
+    rstd::uint32_t        cv          = index.to_primitive() * 4U;
 
-    rstd::array<u32, single_size> single;
+    std::array<rstd::uint32_t, single_size> single;
     // 0 1 3
     // 1 2 3
     single[0] = cv;
-    single[1] = cv + 1;
-    single[2] = cv + 3;
-    single[3] = cv + 1;
-    single[4] = cv + 2;
-    single[5] = cv + 3;
+    single[1] = cv + 1U;
+    single[2] = cv + 3U;
+    single[3] = cv + 1U;
+    single[4] = cv + 2U;
+    single[5] = cv + 3U;
     // every particle
-    for (usize i = index; i < count; i++) {
-        iarray.Assign(i * single_size, single);
-        for (auto& x : single) x += 4;
+    for (usize i = rstd::as_cast<usize>(index); i < count; ++i) {
+        iarray.Assign(i * usize(single_size), single);
+        for (auto& x : single) x += 4U;
     }
 }
 } // namespace
 
 void WPParticleRawGener::GenGLData(std::span<const Box<ParticleInstance>> instances,
                                    SceneMesh& mesh, ParticleRawGenSpecOp& specOp) {
-    auto& sv = mesh.GetVertexArray(0);
+    auto& sv = mesh.GetVertexArray(usize());
 
     WPGOption opt;
     opt.thick_format = sv.GetOption(WE_CB_THICK_FORMAT);
@@ -299,10 +299,10 @@ void WPParticleRawGener::GenGLData(std::span<const Box<ParticleInstance>> instan
 
     usize particle_num = GenParticleData(instances, specOp, opt, sv);
 
-    auto& si       = mesh.GetIndexArray(0);
-    u32   indexNum = (u32)(si.DataCount() / 6);
-    if (particle_num > indexNum) {
+    auto& si       = mesh.GetIndexArray(usize());
+    u32   indexNum = rstd::as_cast<u32>(si.DataCount() / usize(6));
+    if (particle_num > rstd::as_cast<usize>(indexNum)) {
         updateIndexArray(indexNum, particle_num, si);
     }
-    si.SetRenderDataCount(particle_num * 6);
+    si.SetRenderDataCount(particle_num * usize(6));
 }

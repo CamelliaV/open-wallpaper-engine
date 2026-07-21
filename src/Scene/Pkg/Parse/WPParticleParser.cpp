@@ -17,6 +17,10 @@ namespace PM = ParticleModify;
 namespace
 {
 
+constexpr float  kPi    = rstd::f32::consts::PI.to_primitive();
+constexpr float  kTau   = rstd::f32::consts::TAU.to_primitive();
+constexpr double kTau64 = rstd::f64::consts::TAU.to_primitive();
+
 inline void Color(Particle& p, const std::array<float, 3> min, const std::array<float, 3> max) {
     double               random = Random::get(0.0, 1.0);
     std::array<float, 3> result;
@@ -144,7 +148,7 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const Json& wpj) {
             };
         } else if (name == "rotationrandom") {
             VecRandom r;
-            r.max[2] = rstd::f32_::consts::TAU;
+            r.max[2] = kTau;
             VecRandom::ReadFromJson(wpj, r);
             return [=](Particle& p, double) {
                 auto result = GenRandomVec3(r.min, r.max);
@@ -181,12 +185,11 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const Json& wpj) {
                 // limit direction
                 {
                     double c     = result.dot(forward) / (result.norm() * forward.norm());
-                    float  a     = std::acos(c) / rstd::f32_::consts::PI;
+                    float  a     = static_cast<float>(std::acos(c)) / kPi;
                     float  scale = r.scale / 2.0f;
                     if (a > scale) {
                         auto axis = result.cross(forward).normalized();
-                        result =
-                            AngleAxisf((a - a * scale) * rstd::f32_::consts::PI, axis) * result;
+                        result    = AngleAxisf((a - a * scale) * kPi, axis) * result;
                     }
                 }
                 // offset
@@ -278,7 +281,7 @@ struct FrequencyValue {
     float scalemin { 0.0f };
     float scalemax { 1.0f };
     float phasemin { 0.0f };
-    float phasemax { static_cast<float>(rstd::f32_::consts::TAU) };
+    float phasemax { kTau };
 
     struct StorageRandom {
         bool  reset { true };
@@ -316,20 +319,21 @@ struct FrequencyValue {
         if (st.reset) {
             st.frequency = Random::get(frequencymin, frequencymax);
             st.scale     = Random::get(scalemin, scalemax);
-            st.phase     = (float)Random::get((double)phasemin, phasemax + rstd::f64_::consts::TAU);
-            st.reset     = false;
+            st.phase =
+                static_cast<float>(Random::get(static_cast<double>(phasemin), phasemax + kTau64));
+            st.reset = false;
         }
     }
     inline double GetScale(uint32_t index, double time) {
         const auto& st = storage.at(index);
-        double      f  = st.frequency / (rstd::f32_::consts::TAU);
-        double      w  = rstd::f32_::consts::TAU * f;
+        double      f  = st.frequency / kTau;
+        double      w  = kTau * f;
         return algorism::lerp((std::cos(w * time + st.phase) + 1.0f) * 0.5f, scalemin, scalemax);
     }
     inline double GetMove(uint32_t index, double time, double timePass) {
         const auto& st = storage.at(index);
-        double      f  = st.frequency / (rstd::f32_::consts::TAU);
-        double      w  = rstd::f32_::consts::TAU * f;
+        double      f  = st.frequency / kTau;
+        double      w  = kTau * f;
         return -1.0f * st.scale * w * std::sin(w * time + st.phase) * timePass;
     }
 };
@@ -392,8 +396,8 @@ struct Vortex {
     static auto ReadFromJson(const Json& j) {
         Vortex v;
         owe::GetJsonValue(j, "controlpoint", v.controlpoint, false);
-        if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
-        v.controlpoint %= 8;
+        if (v.controlpoint >= i32(8)) rstd_error("wrong contropoint index {}", v.controlpoint);
+        v.controlpoint %= i32(8);
 
         owe::GetJsonValue(j, "distanceinner", v.distanceinner, false);
         owe::GetJsonValue(j, "distanceouter", v.distanceouter, false);
@@ -402,7 +406,7 @@ struct Vortex {
 
         i32 _flags { 0 };
         owe::GetJsonValue(j, "flags", _flags, false);
-        v.flags = EFlags(_flags);
+        v.flags = EFlags(static_cast<rstd::uint32_t>(_flags.to_primitive()));
 
         owe::GetJsonValue(j, "offset", v.offset, false);
         owe::GetJsonValue(j, "axis", v.axis, false);
@@ -425,8 +429,8 @@ struct ControlPointForce {
     static auto ReadFromJson(const Json& j) {
         ControlPointForce v;
         owe::GetJsonValue(j, "controlpoint", v.controlpoint, false);
-        if (v.controlpoint >= 8) rstd_error("wrong contropoint index {}", v.controlpoint);
-        v.controlpoint %= 8;
+        if (v.controlpoint >= i32(8)) rstd_error("wrong contropoint index {}", v.controlpoint);
+        v.controlpoint %= i32(8);
 
         owe::GetJsonValue(j, "scale", v.scale, false);
         owe::GetJsonValue(j, "threshold", v.threshold, false);
@@ -575,7 +579,7 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(
                     Vector3d pos = PM::GetPos(p).cast<double>();
                     pos.x() += phase + tur.timescale * info.time;
                     Vector3d result = speed * algorism::CurlNoise(pos * tur.scale * 2).normalized();
-                    for (usize i = 0; i < 3; i++) {
+                    for (std::size_t i = 0; i < 3; ++i) {
                         if (tur.mask[i] == 0) result[i] = 0;
                     }
                     PM::Accelerate(p, result, info.time_pass);
@@ -584,8 +588,10 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(
         } else if (name == "vortex") {
             Vortex v = Vortex::ReadFromJson(wpj);
             return [=](const ParticleInfo& info) {
-                Vector3d offset  = info.controlpoints[v.controlpoint].offset +
-                                   (Vector3f { v.offset.data() }).cast<double>();
+                Vector3d offset =
+                    info.controlpoints[static_cast<std::size_t>(v.controlpoint.to_primitive())]
+                        .offset +
+                    (Vector3f { v.offset.data() }).cast<double>();
                 Vector3d axis    = (Vector3f { v.axis.data() }).cast<double>();
                 double   dis_mid = v.distanceouter - v.distanceinner + 0.1f;
 
@@ -609,8 +615,10 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(
         } else if (name == "controlpointattract") {
             ControlPointForce c = ControlPointForce::ReadFromJson(wpj);
             return [=](const ParticleInfo& info) {
-                Vector3d offset = info.controlpoints[c.controlpoint].offset +
-                                  Vector3f { c.origin.data() }.cast<double>();
+                Vector3d offset =
+                    info.controlpoints[static_cast<std::size_t>(c.controlpoint.to_primitive())]
+                        .offset +
+                    Vector3f { c.origin.data() }.cast<double>();
                 for (auto& p : info.particles) {
                     Vector3d diff     = offset - PM::GetPos(p).cast<double>();
                     double   distance = diff.norm();
@@ -627,7 +635,7 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(
 
 ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe, bool sort) {
     ParticleAudioResponse audio_response {
-        .enable    = wpe.audioprocessingmode != 0,
+        .enable    = wpe.audioprocessingmode != u32(),
         .amount    = wpe.audioamount,
         .exponent  = wpe.audioexponent,
         .frequency = array_cast<float>(wpe.audiofrequency),
@@ -669,7 +677,7 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(const wpscene::Emitter& wpe
     } else
         return [](std::vector<Particle>&,
                   std::vector<ParticleInitOp>&,
-                  uint32_t,
+                  u32,
                   double,
                   std::span<const float>,
                   std::span<const ParticleControlpoint>) {

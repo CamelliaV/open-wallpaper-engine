@@ -60,9 +60,12 @@ inline void ReadVisibleProperty(const owe::Json& json, bool& visible, VisibleUse
             visible = *(*initial)->as_bool();
         } else {
             auto numeric = (*initial)->as_f64();
-            if (numeric.is_some() && *numeric >= std::numeric_limits<int>::min() &&
-                *numeric <= std::numeric_limits<int>::max())
-                visible = static_cast<int>(*numeric) != 0;
+            if (numeric.is_some()) {
+                const auto value = numeric->to_primitive();
+                if (value >= std::numeric_limits<int>::min() &&
+                    value <= std::numeric_limits<int>::max())
+                    visible = static_cast<int>(value) != 0;
+            }
         }
     }
     ReadVisibleUserBinding(json, out);
@@ -71,7 +74,7 @@ inline void ReadVisibleProperty(const owe::Json& json, bool& visible, VisibleUse
 inline void ReadUserValueBinding(const owe::Json& json, std::string_view field,
                                  UserValueBinding& out) {
     out        = {};
-    auto value = json.get(field);
+    auto value = json.get(rstd::cppstd::as_str(field));
     if (value.is_none() || ! (*value)->is_object()) return;
 
     auto user = (*value)->get("user");

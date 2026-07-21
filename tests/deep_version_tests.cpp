@@ -33,10 +33,11 @@ std::optional<std::string> FirstDifference(const Json& expected, const Json& act
         auto actual_values = actual.as_array();
         if (actual_values.is_none() || (*expected_values)->len() != (*actual_values)->len())
             return path;
-        for (rstd::usize i = 0; i < (*expected_values)->len(); ++i) {
-            if (auto difference = FirstDifference((**expected_values)[i],
-                                                  (**actual_values)[i],
-                                                  path + "[" + std::to_string(i) + "]"))
+        for (rstd::usize i; i < (*expected_values)->len(); ++i) {
+            if (auto difference =
+                    FirstDifference((**expected_values)[i],
+                                    (**actual_values)[i],
+                                    path + "[" + std::to_string(i.to_primitive()) + "]"))
                 return difference;
         }
         return path;
@@ -47,23 +48,22 @@ std::optional<std::string> FirstDifference(const Json& expected, const Json& act
         (*expected_object)->iter().for_each([&](auto entry) {
             auto [entry_key, entry_value] = entry;
             if (difference) return;
-            const auto  key            = rstd::cppstd::as_string_view(entry_key->as_str());
             const auto& expected_value = *entry_value;
-            auto        actual_value   = actual.get(key);
+            auto        actual_value   = actual.get(entry_key->as_str());
             if (actual_value.is_none()) {
-                difference = path + "." + std::string(key);
+                difference = path + "." + rstd::cppstd::to_string(entry_key->as_str());
                 return;
             }
-            difference =
-                FirstDifference(expected_value, **actual_value, path + "." + std::string(key));
+            difference = FirstDifference(expected_value,
+                                         **actual_value,
+                                         path + "." + rstd::cppstd::to_string(entry_key->as_str()));
         });
         if (difference) return difference;
         auto actual_object = actual.as_object();
         (*actual_object)->iter().for_each([&](auto entry) {
             auto [entry_key, entry_value] = entry;
-            const auto key                = rstd::cppstd::as_string_view(entry_key->as_str());
-            if (! difference && expected.get(key).is_none())
-                difference = path + "." + std::string(key);
+            if (! difference && expected.get(entry_key->as_str()).is_none())
+                difference = path + "." + rstd::cppstd::to_string(entry_key->as_str());
         });
         return difference.value_or(path);
     }

@@ -138,7 +138,7 @@ struct FramebufferResourceDesc {
 struct PipelineCacheProbe {
     PipelineCacheKey key;
     bool             hit { false };
-    uint64_t         observed_count { 0 };
+    u64              observed_count { 0 };
 };
 
 inline bool SamePipelineCacheKey(const PipelineCacheKey& lhs, const PipelineCacheKey& rhs) {
@@ -220,7 +220,7 @@ private:
     static std::size_t HashCanonicalBytes(std::span<const std::byte> bytes) {
         std::uint64_t hash { 1469598103934665603ull };
         for (auto byte : bytes) {
-            hash ^= std::to_integer<std::uint8_t>(byte);
+            hash ^= static_cast<std::uint8_t>(byte);
             hash *= 1099511628211ull;
         }
         return static_cast<std::size_t>(hash);
@@ -246,6 +246,13 @@ private:
 };
 
 struct CanonicalCacheKeyHash {
+    template<typename T>
+    u64 operator()(const T& key) const {
+        return u64(static_cast<rstd::uint64_t>(key.value));
+    }
+};
+
+struct CanonicalCacheKeyStdHash {
     template<typename T>
     std::size_t operator()(const T& key) const {
         return key.value;

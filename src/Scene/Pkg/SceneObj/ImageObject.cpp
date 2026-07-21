@@ -127,7 +127,7 @@ bool ImageEffect::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     if (auto injected_passes = json.get("passes"); injected_passes.is_some()) {
         auto array = (*injected_passes)->as_array();
         if (array.is_none()) return true;
-        if ((*array)->len() > passes.size()) {
+        if ((*array)->len().to_primitive() > passes.size()) {
             rstd_error("passes is not injective");
             return false;
         }
@@ -169,7 +169,7 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
                 if (jP.get("command").is_some()) {
                     EffectCommand cmd;
                     cmd.FromJson(jP);
-                    cmd.afterpos = passes.size();
+                    cmd.afterpos = i32(static_cast<rstd::int32_t>(passes.size()));
                     commands.push_back(cmd);
                     continue;
                 }

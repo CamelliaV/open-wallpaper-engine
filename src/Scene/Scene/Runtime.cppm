@@ -44,7 +44,7 @@ public:
         m_frame.elapsed += delta;
         ++m_frame.index;
         ++m_frame.revision;
-        if (m_frame.revision == 0) m_frame.revision = 1;
+        if (m_frame.revision == u64()) m_frame.revision = u64(1);
 
         auto frame = ref<SceneFrame>::from_raw_parts(rstd::addressof(m_frame));
         for (auto& system : m_systems) system->Update(frame);

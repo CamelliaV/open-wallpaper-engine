@@ -183,7 +183,7 @@ std::shared_ptr<owe::SceneShader> GetTextSceneShader();
 // the text RT and keep alpha at zero.
 std::shared_ptr<owe::SceneShader> GetTextCopyBackgroundSceneShader();
 
-enum class TextUniformOutput : rstd::u32
+enum class TextUniformOutput : rstd::uint32_t
 {
     ModelViewProjection,
     EffectModelViewProjection,
@@ -191,7 +191,7 @@ enum class TextUniformOutput : rstd::u32
 
 struct TextEffectProjectionState {
     rstd::sync::Arc<SceneNode> node;
-    rstd::array<rstd::f32, 2>  size { 0.0f, 0.0f };
+    rstd::array<float, 2>      size { 0.0f, 0.0f };
 };
 
 struct TextUniformState {

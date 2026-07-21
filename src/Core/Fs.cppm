@@ -16,10 +16,10 @@ export namespace owe::fs
 using BinaryReader = owe::io::BinaryReader;
 using BinaryWriter = owe::io::BinaryWriter;
 
-inline Path ToPath(std::string_view path) { return Path(rstd::ref<rstd::str>(path)); }
+inline Path ToPath(std::string_view path) { return Path(rstd::cppstd::as_str(path)); }
 
 inline std::string ToStdString(Path path) {
-    return std::string(reinterpret_cast<const char*>(path.data()), path.len());
+    return std::string(reinterpret_cast<const char*>(path.data()), path.len().to_primitive());
 }
 
 inline auto OpenBinary(VFS& vfs, std::string_view path) -> rstd::io::Result<BinaryReader> {
@@ -37,7 +37,7 @@ inline auto OpenPhysicalBinary(std::string_view path) -> rstd::io::Result<Binary
     auto opened   = rstd_try(rstd::fs::File::open(ToPath(path)));
     auto metadata = rstd_try(opened.metadata());
     auto source   = rstd::io::SharedReadAt::make(rstd::move(opened));
-    auto range    = rstd_try(rstd::io::ReadRange::make(rstd::move(source), 0, metadata.len()));
+    auto range    = rstd_try(rstd::io::ReadRange::make(rstd::move(source), u64(), metadata.len()));
     return Ok(BinaryReader(rstd::move(range)));
 }
 

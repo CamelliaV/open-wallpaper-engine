@@ -11,7 +11,7 @@ import rstd.cppstd;
 using namespace rstd::prelude;
 using namespace owe;
 
-u8 SceneVertexArray::TypeCount(VertexType t) {
+std::size_t SceneVertexArray::TypeCount(VertexType t) {
     switch (t) {
     case VertexType::FLOAT1:
     case VertexType::UINT1: return 1;
@@ -25,7 +25,8 @@ u8 SceneVertexArray::TypeCount(VertexType t) {
     return 1;
 }
 
-u8 SceneVertexArray::RealAttributeSize(const SceneVertexArray::SceneVertexAttribute& attr) {
+std::size_t
+SceneVertexArray::RealAttributeSize(const SceneVertexArray::SceneVertexAttribute& attr) {
     return attr.padding ? 4 : TypeCount(attr.type);
 }
 
@@ -33,12 +34,11 @@ SceneVertexArray::SceneVertexArray(const std::vector<SceneVertexAttribute>& attr
                                    const usize                              count)
     : m_attributes(attrs) {
     for (const auto& el : m_attributes) {
-        usize size = SceneVertexArray::RealAttributeSize(el);
-        m_oneSize += size;
+        m_oneSize += usize(SceneVertexArray::RealAttributeSize(el));
     }
     auto capacity = m_oneSize * count;
     m_data        = Vec<float>::with_capacity(capacity);
-    for (usize i = 0; i < capacity; ++i) m_data.push(0.0f);
+    for (usize i {}; i < capacity; ++i) m_data.push(0.0f);
 }
 
 SceneVertexArray::SceneVertexArray(SceneVertexArray&& other) noexcept
@@ -64,9 +64,9 @@ SceneVertexArray& SceneVertexArray::operator=(SceneVertexArray&& other) noexcept
 
 bool SceneVertexArray::AddVertex(const float* data) {
     if (m_size + m_oneSize > m_data.len()) return false;
-    usize  pos   = 0;
-    usize  mpos  = 0;
-    float* mData = m_data.begin() + m_size;
+    std::size_t pos   = 0;
+    std::size_t mpos  = 0;
+    float*      mData = m_data.begin() + m_size.to_primitive();
     for (const auto& el : m_attributes) {
         auto typeSize = SceneVertexArray::TypeCount(el.type);
         std::copy(data + pos, data + pos + typeSize, mData + mpos);
@@ -79,18 +79,19 @@ bool SceneVertexArray::AddVertex(const float* data) {
 }
 
 bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> data) noexcept {
-    u32 offset = 0;
+    std::size_t offset = 0;
     for (const auto& el : m_attributes) {
         if (el.name == name) {
-            usize typeSize = SceneVertexArray::TypeCount(el.type);
-            usize count    = data.size() / typeSize;
-            if (! TrySetSize(count * m_oneSize)) return false;
+            std::size_t typeSize = SceneVertexArray::TypeCount(el.type);
+            std::size_t count    = data.size() / typeSize;
+            if (! TrySetSize(usize(count) * m_oneSize)) return false;
 
-            for (usize i = 0; i < data.size(); i += typeSize) {
-                auto  start = data.begin() + (isize)i;
-                usize num   = i / typeSize;
-                std::copy(
-                    start, start + (isize)typeSize, m_data.begin() + offset + num * m_oneSize);
+            for (std::size_t i = 0; i < data.size(); i += typeSize) {
+                auto start = data.begin() + static_cast<std::ptrdiff_t>(i);
+                auto num   = i / typeSize;
+                std::copy(start,
+                          start + static_cast<std::ptrdiff_t>(typeSize),
+                          m_data.begin() + offset + num * m_oneSize.to_primitive());
             }
             BumpDataGeneration();
             return true;
@@ -102,8 +103,8 @@ bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> d
 
 bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noexcept {
     usize start = index * m_oneSize;
-    if (TrySetSize(start + data.size())) {
-        std::copy(data.begin(), data.end(), m_data.begin() + start);
+    if (TrySetSize(start + usize(data.size()))) {
+        std::copy(data.begin(), data.end(), m_data.begin() + start.to_primitive());
         BumpDataGeneration();
         return true;
     }
@@ -111,8 +112,8 @@ bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noex
 }
 
 void SceneVertexArray::ResetSize() noexcept {
-    if (m_size == 0) return;
-    m_size = 0;
+    if (m_size == usize()) return;
+    m_size = usize();
     BumpDataGeneration();
 }
 
@@ -128,10 +129,10 @@ bool SceneVertexArray::TrySetSize(usize new_size) noexcept {
 Map<std::string, SceneVertexArray::SceneVertexAttributeOffset>
 SceneVertexArray::GetAttrOffsetMap() const {
     Map<std::string, SceneVertexArray::SceneVertexAttributeOffset> result;
-    usize                                                          offset { 0 };
+    usize                                                          offset {};
     for (const auto& attr : m_attributes) {
         result[attr.name] = (SceneVertexAttributeOffset { .attr = attr, .offset = offset });
-        offset += SceneVertexArray::RealAttributeSize(attr) * sizeof(float);
+        offset += usize(SceneVertexArray::RealAttributeSize(attr) * sizeof(float));
     }
     return result;
 }

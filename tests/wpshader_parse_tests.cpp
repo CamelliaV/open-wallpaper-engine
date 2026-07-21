@@ -389,7 +389,7 @@ void main() {
     EXPECT_NE(result.variant.descriptor_layout_hash, 0u);
     ASSERT_EQ(result.variant.stages.size(), 2u);
     EXPECT_EQ(result.variant.stages[0].source_key, "/assets/shaders/variant-test.vert");
-    EXPECT_NE(result.variant.stages[0].code_hash, 0u);
+    EXPECT_NE(result.variant.stages[0].code_hash, rstd::usize());
     EXPECT_TRUE(result.variant.stages[1].uniforms.contains("g_Brightness"));
-    EXPECT_NE(result.variant.stages[1].code_hash, 0u);
+    EXPECT_NE(result.variant.stages[1].code_hash, rstd::usize());
 }

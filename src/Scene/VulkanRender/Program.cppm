@@ -95,7 +95,7 @@ struct RenderProgram {
         PassResourceUses                resources;
         PassInvalidationFlags           invalidation_flags { PassInvalidationNone };
 
-        bool invalidated() const { return invalidation_flags != 0; }
+        bool invalidated() const { return invalidation_flags != PassInvalidationNone; }
 
         void invalidate(PassInvalidationFlags flags) { invalidation_flags |= flags; }
 
@@ -197,9 +197,10 @@ struct RenderProgram {
         this->graph =
             rstd::Some(rstd::mut_ref<owe::rg::RenderGraph>::from_raw_parts(rstd::addressof(graph)));
         resource_plan = rstd::move(plan);
-        pass_records  = rstd::vec::Vec<PreparedPassRecord>::with_capacity(nodes.len() + 2);
+        pass_records =
+            rstd::vec::Vec<PreparedPassRecord>::with_capacity(nodes.len() + rstd::usize(2));
 
-        for (rstd::usize i = 0; i < nodes.len(); ++i) {
+        for (rstd::usize i {}; i < nodes.len(); ++i) {
             auto id    = nodes[i];
             auto state = graph.passState(id);
             rstd_assert(state.is_some());
@@ -232,14 +233,15 @@ struct RenderProgram {
         frame_passes.clear();
         frame_passes.push(rstd::mut_ref<VulkanPass>::from_raw_parts(rstd::addressof(prepass)));
         frame_passes.push(rstd::mut_ref<VulkanPass>::from_raw_parts(rstd::addressof(finpass)));
-        auto combined = rstd::vec::Vec<PreparedPassRecord>::with_capacity(pass_records.len() + 2);
+        auto combined =
+            rstd::vec::Vec<PreparedPassRecord>::with_capacity(pass_records.len() + rstd::usize(2));
         combined.push(PreparedPassRecord {
             .kind      = PreparedPassKind::Frame,
             .pass_name = String::make("frame/pre"),
             .pass =
                 ProgramPassHandle {
                     .kind        = PreparedPassKind::Frame,
-                    .frame_index = 0,
+                    .frame_index = rstd::usize(),
                 },
         });
         for (auto& record : pass_records) combined.push(rstd::move(record));
@@ -249,7 +251,7 @@ struct RenderProgram {
             .pass =
                 ProgramPassHandle {
                     .kind        = PreparedPassKind::Frame,
-                    .frame_index = 1,
+                    .frame_index = rstd::usize(1),
                 },
         });
         pass_records = rstd::move(combined);
@@ -257,7 +259,7 @@ struct RenderProgram {
 
     std::vector<PreparedPassDiagnostic> diagnostics() const {
         std::vector<PreparedPassDiagnostic> out;
-        out.reserve(pass_records.len());
+        out.reserve(pass_records.len().to_primitive());
         for (const auto& record : pass_records) {
             auto pass        = resolve(record);
             auto render_item = Option<RenderItemId> {};
@@ -266,7 +268,7 @@ struct RenderProgram {
                 if (id.is_some()) render_item = Some<RenderItemId>(*id);
             }
             auto release_textures = std::vector<std::string> {};
-            release_textures.reserve(record.release_textures.len());
+            release_textures.reserve(record.release_textures.len().to_primitive());
             for (const auto& texture : record.release_textures) {
                 release_textures.push_back(rstd::cppstd::to_string(texture.as_str()));
             }
@@ -279,14 +281,15 @@ struct RenderProgram {
                 .invalidation_flags            = record.invalidation_flags,
                 .pipeline_cache_key            = pass ? pass->pipelineCacheKey() : std::nullopt,
                 .pipeline_cache_hit            = pass && pass->pipelineCacheHit(),
-                .pipeline_cache_observed_count = pass ? pass->pipelineCacheObservedCount() : 0,
+                .pipeline_cache_observed_count = pass ? pass->pipelineCacheObservedCount() : u64(),
                 .render_pass_cache_key         = pass ? pass->renderPassCacheKey() : std::nullopt,
                 .render_pass_cache_hit         = pass && pass->renderPassCacheHit(),
-                .render_pass_cache_observed_count = pass ? pass->renderPassCacheObservedCount() : 0,
+                .render_pass_cache_observed_count =
+                    pass ? pass->renderPassCacheObservedCount() : u64(),
                 .framebuffer_cache_key = pass ? pass->framebufferCacheKey() : std::nullopt,
                 .framebuffer_cache_hit = pass && pass->framebufferCacheHit(),
                 .framebuffer_cache_observed_count =
-                    pass ? pass->framebufferCacheObservedCount() : 0,
+                    pass ? pass->framebufferCacheObservedCount() : u64(),
                 .release_textures = rstd::move(release_textures),
                 .texture_requests = pass ? pass->textureRequestDiagnostics()
                                          : std::vector<PassTextureRequestDiagnostic> {},
@@ -359,8 +362,8 @@ struct RenderProgram {
         for (auto& item : scene.renderTargets) {
             auto& rt = item.second;
             if (rt.bind.enable && rt.bind.screen) {
-                rt.width  = static_cast<owe::i32>(rt.bind.scale * extent.width);
-                rt.height = static_cast<owe::i32>(rt.bind.scale * extent.height);
+                rt.width  = static_cast<std::int32_t>(rt.bind.scale * extent.width);
+                rt.height = static_cast<std::int32_t>(rt.bind.scale * extent.height);
             }
         }
         for (auto& item : scene.renderTargets) {
@@ -371,8 +374,8 @@ struct RenderProgram {
                 rstd_error("unknonw render target bind: {}", rt.bind.name);
                 continue;
             }
-            rt.width  = static_cast<owe::i32>(rt.bind.scale * bind_rt->second.width);
-            rt.height = static_cast<owe::i32>(rt.bind.scale * bind_rt->second.height);
+            rt.width  = static_cast<std::int32_t>(rt.bind.scale * bind_rt->second.width);
+            rt.height = static_cast<std::int32_t>(rt.bind.scale * bind_rt->second.height);
         }
         for (auto& item : scene.renderTargets) {
             auto& rt = item.second;
@@ -380,10 +383,14 @@ struct RenderProgram {
                 rstd_error("wrong size for render target: {}", item.first);
             }
 
-            const auto physical_width  = static_cast<owe::i32>(std::clamp<owe::u32>(
-                static_cast<owe::u32>(std::max(rt.width, 1)), 1, max_framebuffer_extent.width));
-            const auto physical_height = static_cast<owe::i32>(std::clamp<owe::u32>(
-                static_cast<owe::u32>(std::max(rt.height, 1)), 1, max_framebuffer_extent.height));
+            const auto physical_width  = static_cast<std::int32_t>(std::clamp<std::uint32_t>(
+                static_cast<std::uint32_t>(std::max(rt.width, std::int32_t(1))),
+                std::uint32_t(1),
+                max_framebuffer_extent.width));
+            const auto physical_height = static_cast<std::int32_t>(std::clamp<std::uint32_t>(
+                static_cast<std::uint32_t>(std::max(rt.height, std::int32_t(1))),
+                std::uint32_t(1),
+                max_framebuffer_extent.height));
             const bool physical_size_changed =
                 rt.physical_width != physical_width || rt.physical_height != physical_height;
             rt.physical_width  = physical_width;
@@ -420,11 +427,11 @@ struct RenderProgram {
         auto& finpass        = **frame_finpass;
         auto  prepass_handle = ProgramPassHandle {
             .kind        = PreparedPassKind::Frame,
-            .frame_index = 0,
+            .frame_index = rstd::usize(),
         };
         auto finpass_handle = ProgramPassHandle {
             .kind        = PreparedPassKind::Frame,
-            .frame_index = 1,
+            .frame_index = rstd::usize(1),
         };
 
         const std::string key(owe::SpecTex_Default);
@@ -612,17 +619,17 @@ struct RenderProgram {
 
     u64 commitUploads(const Device& device, RenderingResources& rr,
                       vvk::CommandBuffer& upload_cmd) {
-        VVK_CHECK_ACT(return 0,
+        VVK_CHECK_ACT(return u64(),
                              upload_cmd.Begin(VkCommandBufferBeginInfo {
                                  .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                  .pNext = nullptr,
                                  .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                              }));
-        if (! rr.resources.RecordPendingUploads(upload_cmd)) return 0;
-        VVK_CHECK_ACT(return 0, upload_cmd.End());
+        if (! rr.resources.RecordPendingUploads(upload_cmd)) return u64();
+        VVK_CHECK_ACT(return u64(), upload_cmd.End());
         {
             auto                          ready        = rr.resources.ReserveUpload();
-            const u64                     signal_value = ready.value;
+            const uint64_t                signal_value = ready.value.to_primitive();
             VkTimelineSemaphoreSubmitInfo timeline_info {
                 .sType                     = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
                 .pNext                     = nullptr,
@@ -639,12 +646,12 @@ struct RenderProgram {
                 .signalSemaphoreCount = 1,
                 .pSignalSemaphores    = rr.sem_upload.address(),
             };
-            VVK_CHECK_ACT(return 0, device.graphics_queue().handle.Submit(sub_info, {}));
-            if (! rr.resources.MarkUploadSubmitted(ready)) return 0;
+            VVK_CHECK_ACT(return u64(), device.graphics_queue().handle.Submit(sub_info, {}));
+            if (! rr.resources.MarkUploadSubmitted(ready)) return u64();
             loaded = true;
-            return signal_value;
+            return u64(signal_value);
         }
-        return 0;
+        return u64();
     }
 
     void rebuildScopes() {
@@ -659,7 +666,7 @@ struct RenderProgram {
             pending_scope_passes = rstd::vec::Vec<rstd::usize>::make();
         };
 
-        for (rstd::usize index = 0; index < pass_records.len(); ++index) {
+        for (rstd::usize index {}; index < pass_records.len(); ++index) {
             auto& record = pass_records[index];
             auto  pass   = resolve(record);
             if (pass.is_none()) continue;
@@ -667,7 +674,8 @@ struct RenderProgram {
                 bool can_join = false;
                 if (! pending_scope_passes.is_empty()) {
                     auto previous =
-                        resolve(pass_records[pending_scope_passes[pending_scope_passes.len() - 1]]);
+                        resolve(pass_records[pending_scope_passes[pending_scope_passes.len() -
+                                                                  rstd::usize(1)]]);
                     can_join = previous && pass->canJoinRenderScopeAfter(*previous);
                 }
                 if (can_join) {
@@ -706,7 +714,9 @@ struct RenderProgram {
                 ref<dyn<SceneTextureAnimationView>> textures, RenderingResources& rr) {
         auto buffer_writer = rstd::dyn<resource::BufferContentWriter>::from_ref(rr.resources);
         ProgramUniformFrameContext frame_context(
-            frame, { static_cast<f32>(extent.width), static_cast<f32>(extent.height) }, textures);
+            frame,
+            { static_cast<float>(extent.width), static_cast<float>(extent.height) },
+            textures);
         auto context = dyn<UniformBufferFrameContext>::from_ref(frame_context);
         for (auto& binding : uniform_updates) {
             auto result = binding->Update(context.as_ref(), buffer_writer.as_mut_ref());
@@ -750,13 +760,14 @@ struct RenderProgram {
 
             auto& scoped_passes = scope.scoped_passes;
             if (scoped_passes.is_empty()) continue;
-            if (scoped_passes.len() == 1) {
-                auto pass = resolve(pass_records[scoped_passes[0]]);
+            if (scoped_passes.len() == rstd::usize(1)) {
+                auto pass = resolve(pass_records[scoped_passes[rstd::usize()]]);
                 if (pass && pass->prepared()) {
-                    withRecordContext(
-                        scoped_passes[0], rr, [](VulkanPass& target, PassRecordContext& context) {
-                            target.record(context);
-                        });
+                    withRecordContext(scoped_passes[rstd::usize()],
+                                      rr,
+                                      [](VulkanPass& target, PassRecordContext& context) {
+                                          target.record(context);
+                                      });
                 }
                 continue;
             }
@@ -773,19 +784,21 @@ struct RenderProgram {
                     target.prepareRenderScopeDraw(context);
                 });
             }
-            withRecordContext(
-                scoped_passes[0], rr, [](VulkanPass& target, PassRecordContext& context) {
-                    target.beginRenderScope(context);
-                });
+            withRecordContext(scoped_passes[rstd::usize()],
+                              rr,
+                              [](VulkanPass& target, PassRecordContext& context) {
+                                  target.beginRenderScope(context);
+                              });
             for (auto index : scoped_passes) {
                 withRecordContext(index, rr, [](VulkanPass& target, PassRecordContext& context) {
                     target.recordRenderScopeDraw(context);
                 });
             }
-            withRecordContext(
-                scoped_passes[0], rr, [](VulkanPass& target, PassRecordContext& context) {
-                    target.endRenderScope(context);
-                });
+            withRecordContext(scoped_passes[rstd::usize()],
+                              rr,
+                              [](VulkanPass& target, PassRecordContext& context) {
+                                  target.endRenderScope(context);
+                              });
         }
     }
 };

@@ -44,10 +44,10 @@ double PerlinNoise(double x, double y, double z) noexcept;
 
 constexpr u32 PowOfTwo(u32 x) {
     u32 pow2 { 8 };
-    while (pow2 < x) pow2 *= 2;
+    while (pow2 < x) pow2 *= u32(2);
     return pow2;
 }
-constexpr bool IsPowOfTwo(u32 x) { return (x > 1) && ((x & (x - 1)) == 0); }
+constexpr bool IsPowOfTwo(u32 x) { return (x > u32(1)) && ((x & (x - u32(1))) == u32()); }
 
 inline Eigen::Vector3d sph2cart(const Eigen::Vector3d& sph) noexcept {
     double azimuth   = sph.x();
@@ -62,7 +62,7 @@ inline Eigen::Vector3d sph2cart(const Eigen::Vector3d& sph) noexcept {
 
 template<typename TFUNC>
 Eigen::Vector3d GenSphereSurface(TFUNC&& random) noexcept {
-    double azimuth   = rstd::f64_::consts::TAU * random();
+    double azimuth   = rstd::f64::consts::TAU.to_primitive() * random();
     double elevation = std::asin(2.0 * random() - 1.0);
     return sph2cart({ azimuth, elevation, 1.0 });
 }
@@ -132,7 +132,9 @@ using ::utils::genSha1;
 // namespace; only visible to TUs that `import wescene.utils;`.
 export namespace Eigen
 {
-constexpr double Radians(double a) noexcept { return (a / 180.0f) * rstd::f64_::consts::PI; }
+constexpr double Radians(double a) noexcept {
+    return (a / 180.0f) * rstd::f64::consts::PI.to_primitive();
+}
 
 inline Matrix4d LookAt(Vector3d eye, Vector3d center, Vector3d up) noexcept {
     Vector3d camDir = center - eye;

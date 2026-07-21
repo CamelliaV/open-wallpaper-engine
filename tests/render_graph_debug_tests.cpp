@@ -35,16 +35,16 @@ TEST(DependencyGraph, StoresHandlesAndDeduplicatesEdges) {
     EXPECT_TRUE(graph.Connect(first, second));
     EXPECT_TRUE(graph.Connect(second, third));
     EXPECT_FALSE(graph.Connect(first, owe::rg::NodeHandle {}));
-    EXPECT_EQ(graph.NodeNum(), 3u);
-    EXPECT_EQ(graph.EdgeNum(), 2u);
-    EXPECT_EQ(graph.GetNodeOut(first).len(), 1u);
-    EXPECT_EQ(graph.GetNodeIn(third).len(), 1u);
+    EXPECT_EQ(graph.NodeNum(), rstd::usize(3));
+    EXPECT_EQ(graph.EdgeNum(), rstd::usize(2));
+    EXPECT_EQ(graph.GetNodeOut(first).len(), rstd::usize(1));
+    EXPECT_EQ(graph.GetNodeIn(third).len(), rstd::usize(1));
 
     auto order = graph.TopologicalOrder();
-    ASSERT_EQ(order.len(), 3u);
-    EXPECT_EQ(order[0], first);
-    EXPECT_EQ(order[1], second);
-    EXPECT_EQ(order[2], third);
+    ASSERT_EQ(order.len(), rstd::usize(3));
+    EXPECT_EQ(order[rstd::usize()], first);
+    EXPECT_EQ(order[rstd::usize(1)], second);
+    EXPECT_EQ(order[rstd::usize(2)], third);
     EXPECT_FALSE(graph.HasCycle());
 
     EXPECT_TRUE(graph.Connect(third, first));
@@ -88,7 +88,7 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
                              });
 
     auto path = std::filesystem::temp_directory_path() / "owe-render-graph-debug-test.dot";
-    graph.ToGraphviz(path.native());
+    graph.ToGraphviz(rstd::cppstd::as_str(path.native()));
 
     auto dot = ReadFile(path);
     EXPECT_NE(dot.find("ref=n"), std::string::npos);
@@ -152,8 +152,8 @@ TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
                         .kind       = owe::resource::TextureRequestKind::RenderTarget,
                         .name       = String::make("_rt_default"),
                         .definition = rstd::Some(owe::resource::TextureDefinition {
-                            .width  = 1920,
-                            .height = 1080,
+                            .width  = rstd::i32(1920),
+                            .height = rstd::i32(1080),
                         }),
                     }),
                 },
@@ -162,14 +162,15 @@ TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
         });
 
     auto plan = graph.resourcePlan();
-    ASSERT_EQ(plan.textures.len(), 2u);
-    EXPECT_TRUE(plan.textures[0].handle.Valid());
-    EXPECT_EQ(plan.textures[0].access, owe::resource::ResourceAccess::Read);
-    EXPECT_EQ(plan.textures[0].request.kind, owe::resource::TextureRequestKind::Imported);
-    EXPECT_TRUE(plan.textures[1].handle.Valid());
-    EXPECT_EQ(plan.textures[1].access, owe::resource::ResourceAccess::Write);
-    ASSERT_TRUE(plan.textures[1].request.definition.is_some());
-    EXPECT_EQ(plan.textures[1].request.definition->width, 1920);
+    ASSERT_EQ(plan.textures.len(), rstd::usize(2));
+    EXPECT_TRUE(plan.textures[rstd::usize()].handle.Valid());
+    EXPECT_EQ(plan.textures[rstd::usize()].access, owe::resource::ResourceAccess::Read);
+    EXPECT_EQ(plan.textures[rstd::usize()].request.kind,
+              owe::resource::TextureRequestKind::Imported);
+    EXPECT_TRUE(plan.textures[rstd::usize(1)].handle.Valid());
+    EXPECT_EQ(plan.textures[rstd::usize(1)].access, owe::resource::ResourceAccess::Write);
+    ASSERT_TRUE(plan.textures[rstd::usize(1)].request.definition.is_some());
+    EXPECT_EQ(plan.textures[rstd::usize(1)].request.definition->width, rstd::i32(1920));
 }
 
 TEST(RenderGraphResources, UsesGraphKeyAsTextureRequestIdentity) {
@@ -193,8 +194,8 @@ TEST(RenderGraphResources, UsesGraphKeyAsTextureRequestIdentity) {
         });
 
     auto plan = graph.resourcePlan();
-    ASSERT_EQ(plan.textures.len(), 1u);
-    EXPECT_EQ(rstd::cppstd::as_string_view(plan.textures[0].request.name.as_str()),
+    ASSERT_EQ(plan.textures.len(), rstd::usize(1));
+    EXPECT_EQ(rstd::cppstd::as_string_view(plan.textures[rstd::usize()].request.name.as_str()),
               "_rt_default_1_copy");
 }
 
@@ -210,8 +211,8 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
                 .kind       = owe::resource::TextureRequestKind::RenderTarget,
                 .name       = String::make("history"),
                 .definition = rstd::Some(owe::resource::TextureDefinition {
-                    .width  = 1920,
-                    .height = 1080,
+                    .width  = rstd::i32(1920),
+                    .height = rstd::i32(1080),
                 }),
                 .lifetime   = owe::resource::TextureLifetimeClass::FrameLocal,
             }),
@@ -234,17 +235,17 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
 
     auto plan  = graph.resourcePlan();
     auto order = graph.topologicalOrder();
-    ASSERT_EQ(order.len(), 2u);
-    EXPECT_EQ(rstd::cppstd::as_string_view(graph.passState(order[0])->name.as_str()),
+    ASSERT_EQ(order.len(), rstd::usize(2));
+    EXPECT_EQ(rstd::cppstd::as_string_view(graph.passState(order[rstd::usize()])->name.as_str()),
               "motion/accumulate");
-    EXPECT_EQ(rstd::cppstd::as_string_view(graph.passState(order[1])->name.as_str()),
+    EXPECT_EQ(rstd::cppstd::as_string_view(graph.passState(order[rstd::usize(1)])->name.as_str()),
               "motion/store");
-    ASSERT_EQ(plan.textures.len(), 2u);
+    ASSERT_EQ(plan.textures.len(), rstd::usize(2));
     for (const auto& entry : plan.textures) {
         EXPECT_EQ(entry.request.lifetime, owe::resource::TextureLifetimeClass::Retained);
         EXPECT_NE(entry.request.content & owe::resource::TextureContentFlag(
                                               owe::resource::TextureContent::PreserveAcrossFrames),
-                  0u);
+                  rstd::u32());
     }
 }
 

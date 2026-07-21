@@ -141,7 +141,7 @@ public:
 
     void EvictUnused(bool transient_only = false) {
         m_resources.retain([&](const resource::TextureHandle& handle, TexturePhysical& physical) {
-            if (physical.allocation.strong_count() > 1) return true;
+            if (physical.allocation.strong_count() > usize(1)) return true;
             if (! transient_only) return false;
             auto texture = m_textures.get(handle);
             return texture.is_none() ||
@@ -160,9 +160,9 @@ public:
         m_resources.clear();
         m_textures.clear();
         m_handles.clear();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
     auto Generation() const noexcept -> u64 { return m_generation; }
@@ -182,8 +182,11 @@ private:
         rstd::hash::RandomState state;
 
         auto operator()(const Identity& identity) const noexcept -> u64 {
-            auto seed = state(static_cast<u32>(identity.kind));
-            seed ^= state(identity.key) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+            auto seed = state(u32(static_cast<rstd::uint32_t>(identity.kind)));
+            seed ^= state(identity.key)
+                        .wrapping_add(u64(0x9e3779b97f4a7c15ULL))
+                        .wrapping_add(seed.wrapping_shl(u64(6)))
+                        .wrapping_add(seed >> u64(2));
             return seed;
         }
     };

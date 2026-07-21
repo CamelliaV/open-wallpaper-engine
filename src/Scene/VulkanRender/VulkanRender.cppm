@@ -38,8 +38,8 @@ struct RenderInitInfo {
     bool enable_valid_layer { false };
     bool offscreen { false };
 
-    std::span<const u8> uuid;
-    TexTiling           offscreen_tiling { TexTiling::OPTIMAL };
+    std::span<const rstd::uint8_t> uuid;
+    TexTiling                      offscreen_tiling { TexTiling::OPTIMAL };
     /* When true, allocate the offscreen ExSwapchain images out of
      * HOST_VISIBLE && !DEVICE_LOCAL (true GTT) so the exported dmabuf
      * fds are importable by a foreign GPU (cross-GPU PRIME). Ignored
@@ -47,14 +47,14 @@ struct RenderInitInfo {
     bool              offscreen_host_visible { false };
     VulkanSurfaceInfo surface_info;
 
-    u16         width { 1920 };
-    u16         height { 1080 };
-    std::string video_hwdec { "auto" };
-    std::string video_render_node;
+    std::uint16_t width { 1920 };
+    std::uint16_t height { 1080 };
+    std::string   video_hwdec { "auto" };
+    std::string   video_render_node;
     // MSAA samples for the screen RT only. 1 disables. Clamped down to
     // device's framebufferColorSampleCounts at init.
-    u32      msaa_samples { 1 };
-    ReDrawCB redraw_callback;
+    std::uint32_t msaa_samples { 1 };
+    ReDrawCB      redraw_callback;
 
     /* When set AND `offscreen == true`, VulkanRender invokes this factory
      * after picking the GPU and creating the VkDevice, and adopts the
@@ -67,7 +67,7 @@ struct RenderInitInfo {
         VkPhysicalDevice physical_device;
         VkDevice         device;
         VkQueue          graphics_queue;
-        u32              graphics_queue_family;
+        rstd::uint32_t   graphics_queue_family;
     };
     std::function<std::unique_ptr<ExSwapchain>(const ExSwapchainHandles&)> ex_swapchain_factory;
 };
@@ -126,7 +126,7 @@ public:
 
     int takeLastFrameSyncFd();
 
-    bool getDrmRenderNode(u32& out_major, u32& out_minor) const;
+    bool getDrmRenderNode(std::uint32_t& out_major, std::uint32_t& out_minor) const;
 
     /* Tick all registered video-tex decoders. No-op when no scene
      * texture has been recognised as a VIDEO container. Invoked from
@@ -145,10 +145,10 @@ public:
     VkPhysicalDevice vkPhysicalDevice() const;
     VkDevice         vkDevice() const;
     VkQueue          vkGraphicsQueue() const;
-    u32              vkGraphicsQueueFamily() const;
+    std::uint32_t    vkGraphicsQueueFamily() const;
 
-    void deviceUuid(u8 out[16]) const;
-    void driverUuid(u8 out[16]) const;
+    void deviceUuid(std::uint8_t out[16]) const;
+    void driverUuid(std::uint8_t out[16]) const;
 
 private:
     struct Impl;

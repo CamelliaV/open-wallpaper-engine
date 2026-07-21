@@ -14,7 +14,7 @@ export namespace owe
 
 class SceneNode;
 
-enum class SceneLightType : u8
+enum class SceneLightType : rstd::uint8_t
 {
     Point       = 0,
     Spot        = 1,

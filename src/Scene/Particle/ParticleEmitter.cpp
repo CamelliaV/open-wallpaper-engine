@@ -14,18 +14,19 @@ typedef std::function<Particle()> SpwanOp;
 namespace
 {
 
-inline std::tuple<u32, bool> FindLastParticle(std::span<const Particle> ps, u32 last) {
-    for (u32 i = last; i < ps.size(); i++) {
+inline std::tuple<std::size_t, bool> FindLastParticle(std::span<const Particle> ps,
+                                                      std::size_t               last) {
+    for (std::size_t i = last; i < ps.size(); ++i) {
         if (! ParticleModify::LifetimeOk(ps[i])) return { i, true };
     }
-    return { 0, false };
+    return { std::size_t(), false };
 }
 
 inline u32 GetEmitNum(double& timer, float speed) {
-    if (speed <= 0.0f) return 0;
+    if (speed <= 0.0f) return u32();
     double emitDur = 1.0f / speed;
-    if (emitDur > timer) return 0;
-    u32 num = timer / emitDur;
+    if (emitDur > timer) return u32();
+    u32 num(static_cast<rstd::uint32_t>(timer / emitDur));
     while (emitDur < timer) timer -= emitDur;
     if (timer < 0) timer = 0;
     return num;
@@ -35,19 +36,19 @@ inline double EmitDuration(float speed) noexcept { return speed > 0.0f ? 1.0 / s
 
 inline u32 ResolveEmitNum(double& timer, float speed, u32 instantaneous, bool one_per_frame,
                           bool empty) {
-    if (instantaneous > 0 && empty) return instantaneous;
-    if (speed <= 0.0f) return 0;
+    if (instantaneous > u32() && empty) return instantaneous;
+    if (speed <= 0.0f) return u32();
     u32 emit_num = GetEmitNum(timer, speed);
-    return one_per_frame ? 1 : emit_num;
+    return one_per_frame ? u32(1) : emit_num;
 }
 
 inline u32 Emitt(std::vector<Particle>& particles, u32 num, u32 maxcount, bool sort,
                  SpwanOp Spwan) {
-    u32  lastPartcle = 0;
-    bool has_dead    = true;
-    u32  i           = 0;
+    std::size_t lastPartcle = 0;
+    bool        has_dead    = true;
+    u32         i {};
 
-    for (i = 0; i < num; i++) {
+    for (i = u32(); i < num; ++i) {
         if (has_dead) {
             auto [r1, r2] = FindLastParticle(particles, lastPartcle);
             lastPartcle   = r1;
@@ -57,7 +58,7 @@ inline u32 Emitt(std::vector<Particle>& particles, u32 num, u32 maxcount, bool s
             particles[lastPartcle] = Spwan();
 
         } else {
-            if (maxcount == particles.size()) break;
+            if (maxcount.to_primitive() == particles.size()) break;
             particles.push_back(Spwan());
         }
     }
@@ -73,7 +74,7 @@ inline u32 Emitt(std::vector<Particle>& particles, u32 num, u32 maxcount, bool s
         });
     }
 
-    return i + 1;
+    return i + u32(1);
 }
 
 inline float AudioResponseScale(std::span<const float> audio, const ParticleAudioResponse& ar) {
@@ -84,16 +85,16 @@ inline float AudioResponseScale(std::span<const float> audio, const ParticleAudi
         idx      = std::max(0, std::min(idx, static_cast<int>(audio.size()) - 1));
         return static_cast<std::size_t>(idx);
     };
-    auto first = clamp_idx(ar.frequency[0]);
-    auto last  = clamp_idx(ar.frequency[1]);
+    auto first = clamp_idx(ar.frequency[usize()]);
+    auto last  = clamp_idx(ar.frequency[usize(1)]);
     if (last < first) std::swap(first, last);
 
     float sum = 0.0f;
     for (std::size_t i = first; i <= last; ++i) sum += std::max(0.0f, audio[i]);
     float level = sum / static_cast<float>(last - first + 1);
 
-    const float lo = std::min(ar.bounds[0], ar.bounds[1]);
-    const float hi = std::max(ar.bounds[0], ar.bounds[1]);
+    const float lo = std::min(ar.bounds[usize()], ar.bounds[usize(1)]);
+    const float hi = std::max(ar.bounds[usize()], ar.bounds[usize(1)]);
     if (hi > lo) level = (level - lo) / (hi - lo);
     level = std::clamp(level, 0.0f, 1.0f);
     level = std::pow(level, std::max(0.001f, ar.exponent));
@@ -120,19 +121,20 @@ inline void ApplySign(Eigen::Vector3d& p, int32_t x, int32_t y, int32_t z) noexc
 }
 
 inline u32 ActiveAxisCount(const Eigen::Vector3d& directions) noexcept {
-    u32 count = 0;
+    rstd::uint32_t count = 0;
     for (int i = 0; i < 3; ++i) {
         if (std::abs(directions[i]) > 1e-6) count++;
     }
-    return std::max(1u, count);
+    return u32(std::max(1u, count));
 }
 
 inline double RandomRadius(double min_distance, double max_distance, u32 dimensions) {
     min_distance = std::max(0.0, min_distance);
     max_distance = std::max(min_distance, max_distance);
-    if (dimensions <= 1) return algorism::lerp(Random::get(0.0, 1.0), min_distance, max_distance);
+    if (dimensions <= u32(1))
+        return algorism::lerp(Random::get(0.0, 1.0), min_distance, max_distance);
 
-    double dim = static_cast<double>(dimensions);
+    double dim = static_cast<double>(dimensions.to_primitive());
     double lo  = std::pow(min_distance, dim);
     double hi  = std::pow(max_distance, dim);
     return std::pow(algorism::lerp(Random::get(0.0, 1.0), lo, hi), 1.0 / dim);
@@ -159,12 +161,12 @@ inline Eigen::Vector3d RandomDirectedUnit(const Eigen::Vector3d& directions) {
 inline Eigen::Vector3d ResolveEmitterOrigin(std::span<const ParticleControlpoint> cps, i32 cp_index,
                                             const rstd::array<float, 3>& authored) {
     Eigen::Vector3d o {
-        static_cast<double>(authored[0]),
-        static_cast<double>(authored[1]),
-        static_cast<double>(authored[2]),
+        static_cast<double>(authored[usize()]),
+        static_cast<double>(authored[usize(1)]),
+        static_cast<double>(authored[usize(2)]),
     };
-    if (cp_index >= 0 && static_cast<usize>(cp_index) < cps.size()) {
-        o += cps[cp_index].offset;
+    if (cp_index >= i32() && static_cast<std::size_t>(cp_index.to_primitive()) < cps.size()) {
+        o += cps[static_cast<std::size_t>(cp_index.to_primitive())].offset;
     }
     return o;
 }
@@ -187,8 +189,10 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
         Eigen::Vector3d origin = ResolveEmitterOrigin(cps, a.controlpoint, a.orgin);
         auto            GenBox = [&]() {
             Eigen::Vector3d pos;
-            for (int32_t i = 0; i < 3; i++)
-                pos[i] = algorism::lerp(Random::get(-1.0, 1.0), a.minDistance[i], a.maxDistance[i]);
+            for (int32_t i = 0; i < 3; ++i)
+                pos[i] = algorism::lerp(Random::get(-1.0, 1.0),
+                                        a.minDistance[usize(static_cast<std::size_t>(i))],
+                                        a.maxDistance[usize(static_cast<std::size_t>(i))]);
             auto p = Particle();
             pos    = pos.cwiseProduct(Eigen::Vector3f { a.directions.data() }.cast<double>());
             ParticleModify::MoveTo(p, pos);
@@ -202,7 +206,7 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
         float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
         u32   emit_num =
             ResolveEmitNum(timer, emit_speed, a.instantaneous, a.one_per_frame, ps.empty());
-        if (emit_num == 0) return;
+        if (emit_num == u32()) return;
         Emitt(ps, emit_num, maxcount, a.sort, [&]() {
             return Spwan(GenBox, inis, EmitDuration(emit_speed));
         });
@@ -233,7 +237,10 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
             double          r    = RandomRadius(a.minDistance, a.maxDistance, dimensions);
             Eigen::Vector3d unit = RandomDirectedUnit(directions);
             Eigen::Vector3d sp   = r * unit.cwiseProduct(directions.cwiseAbs());
-            ApplySign(sp, a.sign[0], a.sign[1], a.sign[2]);
+            ApplySign(sp,
+                      a.sign[usize()].to_primitive(),
+                      a.sign[usize(1)].to_primitive(),
+                      a.sign[usize(2)].to_primitive());
 
             ParticleModify::MoveTo(p, sp);
             double speed = Random::get(a.minSpeed, a.maxSpeed);
@@ -246,7 +253,7 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
         float emit_speed = a.emitSpeed * AudioResponseScale(audio_average, a.audio_response);
         u32   emit_num =
             ResolveEmitNum(timer, emit_speed, a.instantaneous, a.one_per_frame, ps.empty());
-        if (emit_num == 0) return;
+        if (emit_num == u32()) return;
         Emitt(ps, emit_num, maxcount, a.sort, [&]() {
             return Spwan(GenSphere, inis, EmitDuration(emit_speed));
         });

@@ -21,9 +21,9 @@ namespace
 {
 
 owe::FrameSurfaceIdentity ToFrameIdentity(const BridgeSlotIdentity& identity) {
-    return { .owner_generation = identity.bind_generation,
-             .image_index      = identity.slot_index,
-             .acquire_serial   = identity.acquire_serial };
+    return { .owner_generation = rstd::u64(identity.bind_generation),
+             .image_index      = rstd::u32(identity.slot_index),
+             .acquire_serial   = rstd::u64(identity.acquire_serial) };
 }
 
 owe::FrameSurfaceCompletionStatus ToFrameCompletionStatus(BridgeSlotCompletionStatus status) {
@@ -54,14 +54,15 @@ owe::FrameSurfaceAcquireResult BridgeExSwapchain::acquireRenderTarget() {
             return { .status = owe::FrameSurfaceAcquireStatus::NotReady };
         case BridgeSlotAcquireStatus::SessionLost:
             return { .status     = owe::FrameSurfaceAcquireStatus::SessionLost,
-                     .error_code = acquired.error_code };
+                     .error_code = rstd::i32(acquired.error_code) };
         case BridgeSlotAcquireStatus::Error:
             return { .status     = owe::FrameSurfaceAcquireStatus::ProtocolError,
-                     .error_code = acquired.error_code };
+                     .error_code = rstd::i32(acquired.error_code) };
         case BridgeSlotAcquireStatus::ReadyUnused:
         case BridgeSlotAcquireStatus::ReadyReleased: break;
         }
-        return { .status = owe::FrameSurfaceAcquireStatus::ProtocolError, .error_code = -EINVAL };
+        return { .status     = owe::FrameSurfaceAcquireStatus::ProtocolError,
+                 .error_code = rstd::i32(-EINVAL) };
     }
 
     owe::vulkan::ImageParameters target;
@@ -71,14 +72,14 @@ owe::FrameSurfaceAcquireResult BridgeExSwapchain::acquireRenderTarget() {
     target.extent       = { acquired.width, acquired.height, 1 };
     target.mipmap_level = 1;
     owe::FrameSurfaceLease lease {
-        .identity             = ToFrameIdentity(acquired.identity),
-        .reuse                = { .kind          = acquired.status == BridgeSlotAcquireStatus::ReadyUnused
-                                                       ? owe::FrameSurfaceReuseKind::NeverSubmitted
-                                                       : owe::FrameSurfaceReuseKind::ConsumerReleased,
-                                  .release_point = acquired.identity.previous_release_point },
-        .image                = target,
-        .format               = m_core.format(),
-        .initial_layout       = VK_IMAGE_LAYOUT_GENERAL,
+        .identity       = ToFrameIdentity(acquired.identity),
+        .reuse          = { .kind          = acquired.status == BridgeSlotAcquireStatus::ReadyUnused
+                                                 ? owe::FrameSurfaceReuseKind::NeverSubmitted
+                                                 : owe::FrameSurfaceReuseKind::ConsumerReleased,
+                            .release_point = rstd::u64(acquired.identity.previous_release_point) },
+        .image          = target,
+        .format         = m_core.format(),
+        .initial_layout = VK_IMAGE_LAYOUT_GENERAL,
         .initial_queue_family = VK_QUEUE_FAMILY_FOREIGN_EXT,
         .acquire              = { .kind = owe::FrameSurfaceAcquireKind::ExternalProtocol },
         .final_layout         = VK_IMAGE_LAYOUT_GENERAL,
@@ -87,7 +88,8 @@ owe::FrameSurfaceAcquireResult BridgeExSwapchain::acquireRenderTarget() {
     };
     if (! lease.valid()) {
         (void)m_core.abortSlot(acquired.identity);
-        return { .status = owe::FrameSurfaceAcquireStatus::ProtocolError, .error_code = -EINVAL };
+        return { .status     = owe::FrameSurfaceAcquireStatus::ProtocolError,
+                 .error_code = rstd::i32(-EINVAL) };
     }
 
     m_pending_identity = acquired.identity;
@@ -113,7 +115,7 @@ BridgeExSwapchain::CompleteRendered(owe::FrameSurfaceIdentity identity, int prod
     auto result = m_core.submitSlot(core_identity, producer_sync_fd);
     return { .status     = ToFrameCompletionStatus(result.status),
              .identity   = identity,
-             .error_code = result.error_code };
+             .error_code = rstd::i32(result.error_code) };
 }
 
 owe::FrameSurfaceCompletionResult
@@ -130,7 +132,7 @@ BridgeExSwapchain::AbortRenderTarget(owe::FrameSurfaceIdentity identity) {
     auto result = m_core.abortSlot(core_identity);
     return { .status     = ToFrameCompletionStatus(result.status),
              .identity   = identity,
-             .error_code = result.error_code };
+             .error_code = rstd::i32(result.error_code) };
 }
 
 } // namespace ww_wescene

@@ -11,57 +11,19 @@ using namespace rstd::prelude;
 export namespace owe::io
 {
 
-enum class ByteOrder : u8
+enum class ByteOrder : rstd::uint8_t
 {
     BigEndian,
     LittleEndian,
 };
 
-template<typename T>
-constexpr auto byte_swap(T value) -> T;
-
-template<>
-constexpr auto byte_swap<u64>(u64 value) -> u64 {
-    return ((value & 0x00000000000000ffULL) << 56) | ((value & 0x000000000000ff00ULL) << 40) |
-           ((value & 0x0000000000ff0000ULL) << 24) | ((value & 0x00000000ff000000ULL) << 8) |
-           ((value & 0x000000ff00000000ULL) >> 8) | ((value & 0x0000ff0000000000ULL) >> 24) |
-           ((value & 0x00ff000000000000ULL) >> 40) | ((value & 0xff00000000000000ULL) >> 56);
-}
-
-template<>
-constexpr auto byte_swap<u32>(u32 value) -> u32 {
-    return ((value & 0x000000ffU) << 24) | ((value & 0x0000ff00U) << 8) |
-           ((value & 0x00ff0000U) >> 8) | ((value & 0xff000000U) >> 24);
-}
-
-template<>
-constexpr auto byte_swap<u16>(u16 value) -> u16 {
-    return u16(((value & 0x00ffU) << 8) | ((value & 0xff00U) >> 8));
-}
-
-template<>
-constexpr auto byte_swap<u8>(u8 value) -> u8 {
-    return value;
-}
-
-template<>
-constexpr auto byte_swap<i64>(i64 value) -> i64 {
-    return i64(byte_swap(u64(value)));
-}
-
-template<>
-constexpr auto byte_swap<i32>(i32 value) -> i32 {
-    return i32(byte_swap(u32(value)));
-}
-
-template<>
-constexpr auto byte_swap<i16>(i16 value) -> i16 {
-    return i16(byte_swap(u16(value)));
-}
-
-template<>
-constexpr auto byte_swap<i8>(i8 value) -> i8 {
-    return value;
+template<rstd::num::Integer T>
+constexpr auto byte_swap(T value) -> T {
+    if constexpr (sizeof(T) == 1) {
+        return value;
+    } else {
+        return value.swap_bytes();
+    }
 }
 
 consteval auto system_byte_order() -> ByteOrder {
@@ -91,20 +53,22 @@ public:
     void SetByteOrder(ByteOrder order) noexcept { set_byte_order(order); }
 
     auto read(void* buffer, usize size) -> rstd::io::Result<usize> {
-        auto result = m_handle->read(static_cast<u8*>(buffer), size);
-        if (result.is_ok()) m_position += *result;
+        auto bytes =
+            rstd::mut_ref<rstd::byte[]>::from_raw_parts(static_cast<rstd::byte*>(buffer), size);
+        auto result = m_handle->read(bytes);
+        if (result.is_ok()) m_position += rstd::as_cast<u64>(*result);
         return result;
     }
 
     auto read_exact(void* buffer, usize size) -> rstd::io::Result<empty> {
         auto* bytes = static_cast<u8*>(buffer);
-        while (size > 0) {
+        while (size > usize()) {
             auto count = rstd_try(read(bytes, size));
-            if (count == 0) {
+            if (count == usize()) {
                 return Err(rstd::io::error::Error::from_kind(
                     rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::UnexpectedEof }));
             }
-            bytes += count;
+            bytes += count.to_primitive();
             size -= count;
         }
         return Ok(empty {});
@@ -118,46 +82,60 @@ public:
 
     auto position() const noexcept -> u64 { return m_position; }
     auto len() const noexcept -> u64 { return m_len; }
-    auto remaining() const noexcept -> u64 { return m_position < m_len ? m_len - m_position : 0; }
-
-    usize Read(void* buffer, usize size) {
-        auto result = read(buffer, size);
-        return result.is_ok() ? rstd::move(result).unwrap_unchecked() : 0;
+    auto remaining() const noexcept -> u64 {
+        return m_position < m_len ? m_len - m_position : u64();
     }
 
-    char* Gets(char* buffer, usize size) {
+    rstd::size_t Read(void* buffer, rstd::size_t size) {
+        auto result = read(buffer, usize(size));
+        return result.is_ok() ? rstd::move(result).unwrap_unchecked().to_primitive()
+                              : rstd::size_t {};
+    }
+
+    char* Gets(char* buffer, rstd::size_t size) {
         auto read = Read(buffer, size);
         return read == 0 ? nullptr : buffer;
     }
 
-    idx Tell() const noexcept { return idx(m_position); }
-
-    bool SeekSet(idx offset) {
-        return offset >= 0 && seek(rstd::io::SeekFrom::from_start(u64(offset))).is_ok();
+    rstd::ptrdiff_t Tell() const noexcept {
+        return static_cast<rstd::ptrdiff_t>(m_position.to_primitive());
     }
 
-    bool SeekCur(idx offset) { return seek(rstd::io::SeekFrom::from_current(i64(offset))).is_ok(); }
+    bool SeekSet(rstd::ptrdiff_t offset) {
+        return offset >= 0 &&
+               seek(rstd::io::SeekFrom::from_start(u64(static_cast<rstd::uint64_t>(offset))))
+                   .is_ok();
+    }
 
-    bool SeekEnd(idx offset) { return seek(rstd::io::SeekFrom::from_end(i64(offset))).is_ok(); }
+    bool SeekCur(rstd::ptrdiff_t offset) {
+        return seek(rstd::io::SeekFrom::from_current(i64(static_cast<rstd::int64_t>(offset))))
+            .is_ok();
+    }
 
-    isize Size() const noexcept { return isize(m_len); }
-    usize Usize() const noexcept { return usize(m_len); }
-    bool  Rewind() { return SeekSet(0); }
+    bool SeekEnd(rstd::ptrdiff_t offset) {
+        return seek(rstd::io::SeekFrom::from_end(i64(static_cast<rstd::int64_t>(offset)))).is_ok();
+    }
 
-    f32 ReadFloat() {
-        f32 value { 0.0F };
+    rstd::ptrdiff_t Size() const noexcept {
+        return static_cast<rstd::ptrdiff_t>(m_len.to_primitive());
+    }
+    rstd::size_t Usize() const noexcept { return static_cast<rstd::size_t>(m_len.to_primitive()); }
+    bool         Rewind() { return SeekSet(0); }
+
+    float ReadFloat() {
+        f32 value {};
         Read(&value, sizeof(value));
-        return value;
+        return value.to_primitive();
     }
 
-    i64 ReadInt64() { return read_integer<i64>(); }
-    u64 ReadUint64() { return read_integer<u64>(); }
-    i32 ReadInt32() { return read_integer<i32>(); }
-    u32 ReadUint32() { return read_integer<u32>(); }
-    i16 ReadInt16() { return read_integer<i16>(); }
-    u16 ReadUint16() { return read_integer<u16>(); }
-    i8  ReadInt8() { return read_integer<i8>(); }
-    u8  ReadUint8() { return read_integer<u8>(); }
+    rstd::int64_t  ReadInt64() { return read_integer<i64>().to_primitive(); }
+    rstd::uint64_t ReadUint64() { return read_integer<u64>().to_primitive(); }
+    rstd::int32_t  ReadInt32() { return read_integer<i32>().to_primitive(); }
+    rstd::uint32_t ReadUint32() { return read_integer<u32>().to_primitive(); }
+    rstd::int16_t  ReadInt16() { return read_integer<i16>().to_primitive(); }
+    rstd::uint16_t ReadUint16() { return read_integer<u16>().to_primitive(); }
+    rstd::int8_t   ReadInt8() { return read_integer<i8>().to_primitive(); }
+    rstd::uint8_t  ReadUint8() { return read_integer<u8>().to_primitive(); }
 
     std::string ReadStr() {
         std::string value;
@@ -167,12 +145,12 @@ public:
     }
 
     auto read_all_string() -> rstd::io::Result<std::string> {
-        if (remaining() > u64(std::numeric_limits<usize>::max())) {
+        if (remaining() > rstd::as_cast<u64>(usize::MAX)) {
             return rstd::Err(rstd::io::error::Error::from_kind(
                 rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::InvalidData }));
         }
-        std::string value(usize(remaining()), '\0');
-        rstd_try(read_exact(value.data(), value.size()));
+        std::string value(rstd::as_cast<usize>(remaining()).to_primitive(), '\0');
+        rstd_try(read_exact(value.data(), usize(value.size())));
         return Ok(rstd::move(value));
     }
 
@@ -194,30 +172,30 @@ private:
         : BinaryReader(rstd::move(prepared.handle), prepared.len) {}
 
     static auto prepare(Vec<u8> bytes) -> Prepared {
-        auto len    = u64(bytes.len());
+        auto len    = rstd::as_cast<u64>(bytes.len());
         auto cursor = rstd::io::Cursor<Vec<u8>>(rstd::move(bytes));
         return Prepared { .handle = rstd::io::ReadSeekHandle::make(rstd::move(cursor)),
                           .len    = len };
     }
 
     static auto prepare_std(std::vector<u8>&& bytes) -> Prepared {
-        auto data = Vec<u8>::with_capacity(bytes.size());
-        for (auto value : bytes) data.push(u8(value));
+        auto data = Vec<u8>::with_capacity(usize(bytes.size()));
+        for (auto value : bytes) data.push(rstd::move(value));
         return prepare(rstd::move(data));
     }
 
     static auto read_remaining(BinaryReader& source) -> Vec<u8> {
-        auto bytes = Vec<u8>::with_capacity(usize(source.remaining()));
-        bytes.resize(usize(source.remaining()), u8(0));
-        auto count = source.Read(bytes.data(), bytes.len());
-        bytes.truncate(count);
+        auto bytes = Vec<u8>::with_capacity(rstd::as_cast<usize>(source.remaining()));
+        bytes.resize(rstd::as_cast<usize>(source.remaining()), u8());
+        auto count = source.Read(bytes.data(), bytes.len().to_primitive());
+        bytes.truncate(usize(count));
         return bytes;
     }
 
     template<typename T>
     auto read_integer() -> T {
-        T value { 0 };
-        if (Read(&value, sizeof(value)) != sizeof(value)) return T { 0 };
+        T value {};
+        if (Read(&value, sizeof(value)) != sizeof(value)) return T {};
         if (m_byte_order != owe::io::system_byte_order()) value = byte_swap(value);
         return value;
     }
@@ -229,8 +207,8 @@ private:
     }
 
     rstd::io::ReadSeekHandle m_handle;
-    u64                      m_len { 0 };
-    u64                      m_position { 0 };
+    u64                      m_len {};
+    u64                      m_position {};
     ByteOrder                m_byte_order { ByteOrder::LittleEndian };
 };
 
@@ -248,21 +226,29 @@ public:
 
     auto write(const void* buffer, usize size) -> rstd::io::Result<empty> {
         auto* bytes = static_cast<const u8*>(buffer);
-        while (size > 0) {
-            auto count = rstd_try(m_handle->write(bytes, size));
-            if (count == 0) {
+        while (size > usize()) {
+            auto source = rstd::slice<rstd::byte>::from_raw_parts(
+                reinterpret_cast<const rstd::byte*>(bytes), size);
+            auto count = rstd_try(m_handle->write(source));
+            if (count == usize()) {
                 return Err(rstd::io::error::Error::from_kind(
                     rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::WriteZero }));
             }
-            bytes += count;
+            bytes += count.to_primitive();
             size -= count;
         }
         return Ok(empty {});
     }
 
-    usize Write(const void* buffer, usize size) { return write(buffer, size).is_ok() ? size : 0; }
-    i32   WriteInt32(i32 value) { return write_integer(value) ? i32(sizeof(value)) : 0; }
-    i32   WriteUint32(u32 value) { return write_integer(value) ? i32(sizeof(value)) : 0; }
+    rstd::size_t Write(const void* buffer, rstd::size_t size) {
+        return write(buffer, usize(size)).is_ok() ? size : 0;
+    }
+    rstd::int32_t WriteInt32(rstd::int32_t value) {
+        return write_integer(i32(value)) ? static_cast<rstd::int32_t>(sizeof(value)) : 0;
+    }
+    rstd::int32_t WriteUint32(rstd::uint32_t value) {
+        return write_integer(u32(value)) ? static_cast<rstd::int32_t>(sizeof(value)) : 0;
+    }
 
     auto flush() -> rstd::io::Result<empty> { return m_handle->flush(); }
 
@@ -270,7 +256,7 @@ private:
     template<typename T>
     bool write_integer(T value) {
         if (m_byte_order != system_byte_order()) value = byte_swap(value);
-        return write(&value, sizeof(value)).is_ok();
+        return write(&value, usize(sizeof(value))).is_ok();
     }
 
     rstd::io::WriteSeekHandle m_handle;

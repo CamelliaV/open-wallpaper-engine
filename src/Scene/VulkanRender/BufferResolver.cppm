@@ -58,9 +58,9 @@ struct DrawBufferRequest {
     rstd::slice<resource::BufferUseHandle> buffer_uses;
 };
 
-String BuildDrawBufferResourceName(SceneDrawItemId, DrawBufferRole, u32 stream_index = 0);
+String BuildDrawBufferResourceName(SceneDrawItemId, DrawBufferRole, u32 stream_index = u32());
 std::vector<DrawBufferKey> BuildDrawBufferKeys(const DrawBufferRequest&,
-                                               u64 allocation_generation = 0);
+                                               u64 allocation_generation = u64());
 
 class RenderBufferResolver {
 public:

@@ -26,8 +26,8 @@ public:
         last_version = content_version;
         ++update_count;
         bytes.clear();
-        bytes.reserve(content.len());
-        for (rstd::usize index = 0; index < content.len(); ++index) {
+        bytes.reserve(content.len().to_primitive());
+        for (rstd::usize index; index < content.len(); ++index) {
             bytes.push_back(content[index]);
         }
         return rstd::Ok(rstd::empty {});
@@ -53,7 +53,8 @@ public:
 
     auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
         -> rstd::Result<rstd::empty, owe::UniformError> {
-        auto result = sink->Bind(m_output, m_name, owe::UniformValueShape::FloatRange(1, 4));
+        auto result = sink->Bind(
+            m_output, m_name, owe::UniformValueShape::FloatRange(rstd::u32(1), rstd::u32(4)));
         if (result.is_err()) return rstd::Err(std::move(result).unwrap_err_unchecked());
         return rstd::Ok(rstd::empty {});
     }
@@ -75,14 +76,15 @@ private:
     std::string                               m_name;
     std::shared_ptr<StaticSourceState>        m_state;
     std::shared_ptr<owe::AudioResponseDemand> m_demand;
-    owe::UniformOutputId                      m_output { .value = 0 };
+    owe::UniformOutputId                      m_output { .value = rstd::u32() };
 };
 
 class TextureMetadataSource {
 public:
     auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
         -> rstd::Result<rstd::empty, owe::UniformError> {
-        auto result = sink->Bind(m_output, "texture_extent", owe::UniformValueShape::Float(4));
+        auto result =
+            sink->Bind(m_output, "texture_extent", owe::UniformValueShape::Float(rstd::u32(4)));
         if (result.is_err()) return rstd::Err(rstd::move(result).unwrap_err_unchecked());
         return rstd::Ok(rstd::empty {});
     }
@@ -93,20 +95,20 @@ public:
                   rstd::mut_ref<rstd::dyn<owe::UniformValueSink>> sink) const
         -> rstd::Result<rstd::empty, owe::UniformError> {
         if (! sink->Wants(m_output)) return rstd::Ok(rstd::empty {});
-        auto texture = context->Resources()->Texture(0);
+        auto texture = context->Resources()->Texture(rstd::usize());
         if (texture.is_none() || ! texture->has_extent) return rstd::Ok(rstd::empty {});
-        auto value = owe::UniformValue(rstd::array<rstd::f32, 4> {
-            texture->source_extent[0],
-            texture->source_extent[1],
-            texture->sample_extent[0],
-            texture->sample_extent[1],
+        auto value = owe::UniformValue(rstd::array<float, 4> {
+            texture->source_extent[rstd::usize()],
+            texture->source_extent[rstd::usize(1)],
+            texture->sample_extent[rstd::usize()],
+            texture->sample_extent[rstd::usize(1)],
         });
         return sink->Write(m_output, value.View());
     }
     auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
 
 private:
-    owe::UniformOutputId m_output { .value = 0 };
+    owe::UniformOutputId m_output { .value = rstd::u32() };
 };
 
 } // namespace uniform_test
@@ -114,10 +116,10 @@ private:
 namespace
 {
 
-std::vector<std::byte> Bytes(std::initializer_list<unsigned char> values) {
-    std::vector<std::byte> bytes;
+std::vector<unsigned char> Bytes(std::initializer_list<unsigned char> values) {
+    std::vector<unsigned char> bytes;
     bytes.reserve(values.size());
-    for (auto value : values) bytes.push_back(static_cast<std::byte>(value));
+    for (auto value : values) bytes.push_back(value);
     return bytes;
 }
 
@@ -156,44 +158,45 @@ TEST(UniformBufferLayout, PreservesReflectedSlots) {
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("g_Time")),
-        .offset = 0,
-        .size   = 4,
+        .offset = rstd::u32(),
+        .size   = rstd::usize(4),
     });
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("time_alias")),
-        .offset = 16,
-        .size   = 4,
+        .offset = rstd::u32(16),
+        .size   = rstd::usize(4),
     });
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("unmapped")),
-        .offset = 32,
-        .size   = 4,
+        .offset = rstd::u32(32),
+        .size   = rstd::usize(4),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
         .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
-        .size    = 48,
+        .size    = rstd::usize(48),
         .members = rstd::move(members),
     };
     auto result = owe::vulkan::CompileUniformBufferLayout(block);
 
     ASSERT_TRUE(result.is_ok());
     auto layout = std::move(result).unwrap_unchecked();
-    ASSERT_EQ(layout.slots.len(), 3u);
-    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[0].name.as_str()), "g_Time");
-    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[1].name.as_str()), "time_alias");
-    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[2].name.as_str()), "unmapped");
+    ASSERT_EQ(layout.slots.len(), rstd::usize(3));
+    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[rstd::usize()].name.as_str()), "g_Time");
+    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[rstd::usize(1)].name.as_str()),
+              "time_alias");
+    EXPECT_EQ(rstd::cppstd::as_string_view(layout.slots[rstd::usize(2)].name.as_str()), "unmapped");
 }
 
 TEST(UniformBufferLayout, RejectsMemberOutsideBlock) {
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("outside")),
-        .offset = 8,
-        .size   = 8,
+        .offset = rstd::u32(8),
+        .size   = rstd::usize(8),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
         .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
-        .size    = 12,
+        .size    = rstd::usize(12),
         .members = rstd::move(members),
     };
 
@@ -216,27 +219,28 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
 
     auto shader = std::make_shared<owe::SceneShader>();
     auto node   = rstd::sync::Arc<owe::SceneNode>::make();
-    node->ID()  = 1;
+    node->ID()  = rstd::i32(1);
     node->AddMesh(MakeUniformMesh(std::move(shader)));
     scene.sceneGraph->AppendChild(node.clone());
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
-    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, rstd::u32());
     ASSERT_TRUE(draw_id.is_some());
 
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("scene_time")),
-        .offset = 0,
-        .size   = 16,
+        .offset = rstd::u32(),
+        .size   = rstd::usize(16),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
         .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
-        .size    = 16,
+        .size    = rstd::usize(16),
         .members = rstd::move(members),
     };
-    const auto buffer = owe::resource::BufferUseHandle { .index = 3, .generation = 1 };
+    const auto buffer =
+        owe::resource::BufferUseHandle { .index = rstd::u64(3), .generation = rstd::u64(1) };
     owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
     auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
     auto binding = owe::vulkan::MakeUniformBufferBinding(prepare.as_ref(), *draw_id, buffer, block);
@@ -252,7 +256,7 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
 
     ASSERT_TRUE(updated.is_ok());
     EXPECT_EQ(writer.last_use, buffer);
-    EXPECT_GT(writer.last_version, 0u);
+    EXPECT_GT(writer.last_version, rstd::u64());
     ASSERT_EQ(writer.bytes.size(), 16u);
     std::array<float, 4> values {};
     std::memcpy(values.data(), writer.bytes.data(), writer.bytes.size());
@@ -281,7 +285,7 @@ TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
-    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, rstd::u32());
     ASSERT_TRUE(draw_id.is_some());
     owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
     auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
@@ -290,12 +294,12 @@ TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
         auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
         members.push(owe::resource::ShaderArtifactUniformMember {
             .name   = rstd::string::String::make(rstd::cppstd::as_str(name)),
-            .offset = 0,
-            .size   = 4,
+            .offset = rstd::u32(),
+            .size   = rstd::usize(4),
         });
         return owe::resource::ShaderArtifactUniformBlock {
             .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
-            .size    = 4,
+            .size    = rstd::usize(4),
             .members = rstd::move(members),
         };
     };
@@ -304,7 +308,7 @@ TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
         auto unbound = owe::vulkan::MakeUniformBufferBinding(
             prepare.as_ref(),
             *draw_id,
-            owe::resource::BufferUseHandle { .index = 1, .generation = 1 },
+            owe::resource::BufferUseHandle { .index = rstd::u64(1), .generation = rstd::u64(1) },
             make_block("unrelated"));
         ASSERT_TRUE(unbound.is_ok());
         EXPECT_FALSE(active);
@@ -313,7 +317,7 @@ TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
         auto bound = owe::vulkan::MakeUniformBufferBinding(
             prepare.as_ref(),
             *draw_id,
-            owe::resource::BufferUseHandle { .index = 2, .generation = 1 },
+            owe::resource::BufferUseHandle { .index = rstd::u64(2), .generation = rstd::u64(1) },
             make_block("audio_signal"));
         ASSERT_TRUE(bound.is_ok());
         EXPECT_TRUE(active);
@@ -336,18 +340,18 @@ TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
-    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, rstd::u32());
     ASSERT_TRUE(draw_id.is_some());
 
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("texture_extent")),
-        .offset = 0,
-        .size   = 16,
+        .offset = rstd::u32(),
+        .size   = rstd::usize(16),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
         .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
-        .size    = 16,
+        .size    = rstd::usize(16),
         .members = rstd::move(members),
     };
     auto textures = rstd::vec::Vec<owe::vulkan::PreparedUniformTextureMetadata>::make();
@@ -355,14 +359,14 @@ TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {
         .available     = true,
         .source_extent = { 640.0f, 360.0f },
         .sample_extent = { 1024.0f, 512.0f },
-        .revision      = 4,
+        .revision      = rstd::u64(4),
     });
     owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
     auto prepare = rstd::dyn<owe::vulkan::UniformBindingPrepareContext>::from_ref(prepare_impl);
     auto binding = owe::vulkan::MakeUniformBufferBinding(
         prepare.as_ref(),
         *draw_id,
-        owe::resource::BufferUseHandle { .index = 3, .generation = 1 },
+        owe::resource::BufferUseHandle { .index = rstd::u64(3), .generation = rstd::u64(1) },
         block,
         rstd::move(textures));
     ASSERT_TRUE(binding.is_ok());
@@ -400,7 +404,7 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
         uniform_test::StaticSource("static_value", low_state)));
     auto shader        = std::make_shared<owe::SceneShader>();
     auto node          = rstd::sync::Arc<owe::SceneNode>::make();
-    node->ID()         = 1;
+    node->ID()         = rstd::i32(1);
     node->AddMesh(MakeUniformMesh(std::move(shader)));
     scene.sceneGraph->AppendChild(node.clone());
     scene.RebuildResourceIndex();
@@ -408,18 +412,18 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     ASSERT_TRUE(node_id.is_some());
     ASSERT_TRUE(attachments->AttachNode(*node_id, high_priority, 10));
     ASSERT_TRUE(attachments->AttachNode(*node_id, low_priority, -10));
-    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, 0);
+    auto draw_id = scene.ResourceIndex().drawItemFor(*node_id, rstd::u32());
     ASSERT_TRUE(draw_id.is_some());
 
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("static_value")),
-        .offset = 0,
-        .size   = 4,
+        .offset = rstd::u32(),
+        .size   = rstd::usize(4),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
         .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
-        .size    = 4,
+        .size    = rstd::usize(4),
         .members = rstd::move(members),
     };
     owe::vulkan::SceneUniformBindingPrepareContext prepare_impl(scene);
@@ -427,7 +431,7 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     auto binding = owe::vulkan::MakeUniformBufferBinding(
         prepare.as_ref(),
         *draw_id,
-        owe::resource::BufferUseHandle { .index = 3, .generation = 1 },
+        owe::resource::BufferUseHandle { .index = rstd::u64(3), .generation = rstd::u64(1) },
         block);
     ASSERT_TRUE(binding.is_ok());
 
@@ -441,12 +445,12 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     ASSERT_TRUE(update->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
     ASSERT_TRUE(update->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
 
-    EXPECT_EQ(writer.update_count, 1u);
+    EXPECT_EQ(writer.update_count, rstd::u64(1));
     low_state->value = 5.0f;
     ++low_state->version;
     ASSERT_TRUE(update->Update(frame.as_ref(), writer_trait.as_mut_ref()).is_ok());
 
-    EXPECT_EQ(writer.update_count, 2u);
+    EXPECT_EQ(writer.update_count, rstd::u64(2));
     ASSERT_EQ(writer.bytes.size(), 4u);
     float value = 0.0f;
     std::memcpy(&value, writer.bytes.data(), writer.bytes.size());
@@ -456,9 +460,9 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
 TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
     owe::resource::ShaderArtifact artifact;
     auto                          code = rstd::vec::Vec<rstd::u32>::make();
-    code.push(1);
-    code.push(2);
-    code.push(3);
+    code.push(rstd::u32(1));
+    code.push(rstd::u32(2));
+    code.push(rstd::u32(3));
     artifact.stages.push(owe::resource::ShaderArtifactStage {
         .stage       = owe::ShaderType::VERTEX,
         .entry_point = rstd::string::String::make(rstd::cppstd::as_str("main")),
@@ -467,25 +471,26 @@ TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
         .name   = rstd::string::String::make(rstd::cppstd::as_str("g_Time")),
-        .offset = 16,
-        .size   = 4,
+        .offset = rstd::u32(16),
+        .size   = rstd::usize(4),
     });
     artifact.uniform_blocks.push(owe::resource::ShaderArtifactUniformBlock {
         .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
-        .size    = 32,
+        .size    = rstd::usize(32),
         .members = rstd::move(members),
     });
     artifact.descriptor_bindings.push(owe::resource::ShaderArtifactDescriptorBinding {
-        .name             = rstd::string::String::make(rstd::cppstd::as_str("g_Texture0")),
-        .binding          = 2,
-        .descriptor_type  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptor_count = 1,
-        .stage_flags      = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .name    = rstd::string::String::make(rstd::cppstd::as_str("g_Texture0")),
+        .binding = rstd::u32(2),
+        .descriptor_type =
+            rstd::u32(static_cast<rstd::uint32_t>(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)),
+        .descriptor_count = rstd::u32(1),
+        .stage_flags      = rstd::u32(static_cast<rstd::uint32_t>(VK_SHADER_STAGE_FRAGMENT_BIT)),
     });
     artifact.vertex_inputs.push(owe::resource::ShaderArtifactVertexInput {
         .name     = rstd::string::String::make(rstd::cppstd::as_str("a_Position")),
-        .location = 3,
-        .format   = VK_FORMAT_R32G32_SFLOAT,
+        .location = rstd::u32(3),
+        .format   = rstd::u32(static_cast<rstd::uint32_t>(VK_FORMAT_R32G32_SFLOAT)),
     });
 
     auto stages     = owe::vulkan::ShaderSpvsFromArtifact(artifact);
@@ -526,16 +531,19 @@ TEST(TextureBindingRequest, CarriesNameAndTypedRequest) {
 }
 
 TEST(PreparedPassResources, ResolvesOnlyDeclaredUses) {
-    owe::resource_registry::PreparedResourceTable table(6);
-    auto allowed = owe::resource::TextureUseHandle { .index = 1, .generation = 6 };
-    auto hidden  = owe::resource::TextureUseHandle { .index = 2, .generation = 6 };
-    auto insert  = [&](owe::resource::TextureUseHandle use, std::string_view name) {
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(6));
+    auto                                          allowed =
+        owe::resource::TextureUseHandle { .index = rstd::u64(1), .generation = rstd::u64(6) };
+    auto hidden =
+        owe::resource::TextureUseHandle { .index = rstd::u64(2), .generation = rstd::u64(6) };
+    auto insert = [&](owe::resource::TextureUseHandle use, std::string_view name) {
         owe::vulkan::ImageSlots slots;
         slots.slots.resize(1);
         auto allocation = rstd::sync::Arc<owe::vulkan::TextureAllocation>::make(rstd::move(slots));
         return table.Insert(owe::resource_registry::PreparedTexture {
-            .use      = use,
-            .resource = owe::resource::TextureHandle { .index = use.index, .generation = 1 },
+            .use = use,
+            .resource =
+                owe::resource::TextureHandle { .index = use.index, .generation = rstd::u64(1) },
             .request =
                 owe::resource::TextureRequest {
                     .name = rstd::string::String::make(rstd::cppstd::as_str(name)),
@@ -592,11 +600,11 @@ TEST(TextureRequest, BuildsRenderTargetCacheKey) {
     EXPECT_EQ(request.kind, owe::vulkan::TextureRequestKind::RenderTarget);
     EXPECT_EQ(rstd::cppstd::as_string_view(request.name.as_str()), "_rt_default");
     ASSERT_TRUE(request.definition.is_some());
-    EXPECT_EQ(request.definition->width, 256);
-    EXPECT_EQ(request.definition->height, 128);
+    EXPECT_EQ(request.definition->width, rstd::i32(256));
+    EXPECT_EQ(request.definition->height, rstd::i32(128));
     EXPECT_EQ(request.definition->usage, owe::resource::TextureUsage::Color);
     EXPECT_EQ(request.definition->format, owe::TextureFormat::RGBA8);
-    EXPECT_EQ(request.definition->mip_levels, 3u);
+    EXPECT_EQ(request.definition->mip_levels, rstd::u32(3));
     EXPECT_EQ(request.lifetime, owe::resource::TextureLifetimeClass::Retained);
 
     rt.allowReuse = true;
@@ -605,7 +613,7 @@ TEST(TextureRequest, BuildsRenderTargetCacheKey) {
 
     auto no_mip = owe::vulkan::MakeRenderTargetNoMipTextureRequest("_rt_default", rt);
     ASSERT_TRUE(no_mip.definition.is_some());
-    EXPECT_EQ(no_mip.definition->mip_levels, 1u);
+    EXPECT_EQ(no_mip.definition->mip_levels, rstd::u32(1));
 }
 
 TEST(TextureRequest, DetectsRequestChanges) {
@@ -630,7 +638,7 @@ TEST(TextureRequest, DetectsRequestChanges) {
     EXPECT_TRUE(owe::vulkan::SetTextureRequestIfChanged(target, std::move(resized)));
     ASSERT_TRUE(target.is_some());
     ASSERT_TRUE(target->definition.is_some());
-    EXPECT_EQ(target->definition->width, 512);
+    EXPECT_EQ(target->definition->width, rstd::i32(512));
 }
 
 TEST(TextureRequest, BuildsMsaaAndDepthCacheKeys) {
@@ -647,7 +655,7 @@ TEST(TextureRequest, BuildsMsaaAndDepthCacheKeys) {
     EXPECT_EQ(msaa.kind, owe::vulkan::TextureRequestKind::RenderTargetMsaa);
     EXPECT_EQ(rstd::cppstd::as_string_view(msaa.name.as_str()), "_rt_default::msaa4");
     ASSERT_TRUE(msaa.definition.is_some());
-    EXPECT_EQ(msaa.definition->samples, 4u);
+    EXPECT_EQ(msaa.definition->samples, rstd::u32(4));
     EXPECT_EQ(msaa.lifetime, owe::resource::TextureLifetimeClass::Dedicated);
 
     auto depth = owe::vulkan::MakeDepthTextureRequest("_rt_default::depth", rt);
@@ -655,8 +663,8 @@ TEST(TextureRequest, BuildsMsaaAndDepthCacheKeys) {
     ASSERT_TRUE(depth.definition.is_some());
     EXPECT_EQ(depth.definition->usage, owe::resource::TextureUsage::Depth);
     EXPECT_EQ(depth.definition->format, owe::TextureFormat::D32F);
-    EXPECT_EQ(depth.definition->mip_levels, 1u);
-    EXPECT_EQ(depth.definition->samples, 4u);
+    EXPECT_EQ(depth.definition->mip_levels, rstd::u32(1));
+    EXPECT_EQ(depth.definition->samples, rstd::u32(4));
     EXPECT_EQ(depth.lifetime, owe::resource::TextureLifetimeClass::Retained);
 }
 
@@ -692,7 +700,7 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
     auto                          custom_diag = custom.textureRequestDiagnostics();
     ASSERT_EQ(custom_diag.size(), 3u);
     EXPECT_EQ(custom_diag[0].role, "sampled");
-    EXPECT_EQ(custom_diag[0].slot, 0u);
+    EXPECT_EQ(custom_diag[0].slot, rstd::u32());
     EXPECT_EQ(custom_diag[0].request->kind, owe::vulkan::TextureRequestKind::Imported);
     EXPECT_EQ(custom_diag[1].role, "output");
     EXPECT_EQ(custom_diag[1].request->kind, owe::vulkan::TextureRequestKind::RenderTarget);
@@ -790,7 +798,7 @@ TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
     subpass_request.subpass      = 1u;
     auto key_subpass             = owe::vulkan::MakePipelineCacheKey(subpass_request);
     auto blend_constants_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    blend_constants_request.blend_constants[0] = 1.0f;
+    blend_constants_request.blend_constants[rstd::usize()] = 1.0f;
     auto key_blend_constants   = owe::vulkan::MakePipelineCacheKey(blend_constants_request);
     auto dynamic_state_request = make_request(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     dynamic_state_request.dynamic_states = { VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT };
@@ -824,27 +832,27 @@ TEST(PipelineCacheDiagnostics, RecordsStableKeys) {
     owe::vulkan::PipelineCacheDiagnostics diagnostics;
     auto                                  first = diagnostics.Record(key_a);
     EXPECT_FALSE(first.hit);
-    EXPECT_EQ(first.observed_count, 1u);
+    EXPECT_EQ(first.observed_count, rstd::u64(1));
 
     auto second = diagnostics.Record(key_b);
     EXPECT_TRUE(second.hit);
-    EXPECT_EQ(second.observed_count, 2u);
+    EXPECT_EQ(second.observed_count, rstd::u64(2));
 
     auto third = diagnostics.Record(key_c);
     EXPECT_FALSE(third.hit);
-    EXPECT_EQ(third.observed_count, 1u);
+    EXPECT_EQ(third.observed_count, rstd::u64(1));
 
     auto collision_first = diagnostics.Record(colliding_a);
     EXPECT_FALSE(collision_first.hit);
-    EXPECT_EQ(collision_first.observed_count, 1u);
+    EXPECT_EQ(collision_first.observed_count, rstd::u64(1));
 
     auto collision_second = diagnostics.Record(colliding_b);
     EXPECT_FALSE(collision_second.hit);
-    EXPECT_EQ(collision_second.observed_count, 1u);
+    EXPECT_EQ(collision_second.observed_count, rstd::u64(1));
 
     std::unordered_map<owe::vulkan::PipelineCacheKey,
                        int,
-                       owe::vulkan::CanonicalCacheKeyHash,
+                       owe::vulkan::CanonicalCacheKeyStdHash,
                        owe::vulkan::PipelineCacheKeyEqual>
         cache_entries;
     cache_entries.emplace(colliding_a, 1);
@@ -903,7 +911,7 @@ TEST(RenderPassCacheKey, TracksRenderPassCompatibilityInputs) {
 
     std::unordered_map<owe::vulkan::RenderPassCacheKey,
                        int,
-                       owe::vulkan::CanonicalCacheKeyHash,
+                       owe::vulkan::CanonicalCacheKeyStdHash,
                        owe::vulkan::RenderPassCacheKeyEqual>
         cache_entries;
     cache_entries.emplace(colliding_a, 1);
@@ -975,27 +983,27 @@ TEST(FramebufferCacheDiagnostics, RecordsStableFramebufferKeys) {
     owe::vulkan::FramebufferCacheDiagnostics diagnostics;
     auto                                     first = diagnostics.Record(key_a);
     EXPECT_FALSE(first.hit);
-    EXPECT_EQ(first.observed_count, 1u);
+    EXPECT_EQ(first.observed_count, rstd::u64(1));
 
     auto second = diagnostics.Record(key_b);
     EXPECT_TRUE(second.hit);
-    EXPECT_EQ(second.observed_count, 2u);
+    EXPECT_EQ(second.observed_count, rstd::u64(2));
 
     auto third = diagnostics.Record(key_resized);
     EXPECT_FALSE(third.hit);
-    EXPECT_EQ(third.observed_count, 1u);
+    EXPECT_EQ(third.observed_count, rstd::u64(1));
 
     auto collision_first = diagnostics.Record(colliding_a);
     EXPECT_FALSE(collision_first.hit);
-    EXPECT_EQ(collision_first.observed_count, 1u);
+    EXPECT_EQ(collision_first.observed_count, rstd::u64(1));
 
     auto collision_second = diagnostics.Record(colliding_b);
     EXPECT_FALSE(collision_second.hit);
-    EXPECT_EQ(collision_second.observed_count, 1u);
+    EXPECT_EQ(collision_second.observed_count, rstd::u64(1));
 
     std::unordered_map<owe::vulkan::FramebufferCacheKey,
                        int,
-                       owe::vulkan::CanonicalCacheKeyHash,
+                       owe::vulkan::CanonicalCacheKeyStdHash,
                        owe::vulkan::FramebufferCacheKeyEqual>
         cache_entries;
     cache_entries.emplace(colliding_a, 1);
@@ -1016,9 +1024,9 @@ TEST(FramebufferAttachmentIdentity, TracksTextureGeneration) {
     image_a.view         = ImageView(0x301u);
     image_a.extent       = { 320u, 180u, 1u };
     image_a.mipmap_level = 1u;
-    image_a.generation   = 10u;
+    image_a.generation   = rstd::u64(10);
     auto image_b         = image_a;
-    image_b.generation   = 11u;
+    image_b.generation   = rstd::u64(11);
 
     auto attachment_a = owe::vulkan::MakeFramebufferAttachment(request, image_a);
     auto attachment_b = owe::vulkan::MakeFramebufferAttachment(request, image_b);

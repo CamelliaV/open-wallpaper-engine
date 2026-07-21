@@ -12,9 +12,9 @@ TEST(JsonAdapter, ParsesDumpsAndReportsMembers) {
     EXPECT_TRUE(value.get("a").is_some());
     EXPECT_TRUE(value.get("missing").is_none());
     const std::string dynamic_key = "a";
-    EXPECT_TRUE(value.get(dynamic_key).is_some());
+    EXPECT_TRUE(value.get(rstd::cppstd::as_str(dynamic_key)).is_some());
     const std::string_view mutable_key = "z";
-    EXPECT_TRUE(value.get_mut(mutable_key).is_some());
+    EXPECT_TRUE(value.get_mut(rstd::cppstd::as_str(mutable_key)).is_some());
     auto z = value.get("z");
     ASSERT_TRUE(z.is_some());
     EXPECT_TRUE((*z)->is_array());
@@ -31,7 +31,7 @@ TEST(JsonAdapter, CommentsRequireExplicitOption) {
     auto value  = parsed.unwrap();
     auto member = value.get("value");
     ASSERT_TRUE(member.is_some());
-    EXPECT_EQ((*member)->as_i64().unwrap_or(0), 1);
+    EXPECT_EQ((*member)->as_i64().unwrap_or(rstd::i64()).to_primitive(), 1);
 }
 
 TEST(JsonAdapter, ClonesSubtreesExplicitly) {
@@ -43,7 +43,7 @@ TEST(JsonAdapter, ClonesSubtreesExplicitly) {
     ASSERT_TRUE(nested.is_some());
     auto object = (*nested)->as_object_mut();
     ASSERT_TRUE(object.is_some());
-    (*object)->insert(::alloc::string::String::make("value"), rstd::into<owe::Json>(2));
+    (*object)->insert(::alloc::string::String::make("value"), rstd::into<owe::Json>(rstd::i32(2)));
     EXPECT_EQ(owe::Dump(original), R"({"nested":{"value":1}})");
     EXPECT_EQ(owe::Dump(clone), R"({"nested":{"value":2}})");
 }
@@ -72,7 +72,7 @@ TEST(UserProperty, NonTextWireValuesKeepExistingJsonCoercion) {
     auto merged = owe::MergeUserPropertyDescriptor(schema, patch);
     auto value  = merged.get("value");
     ASSERT_TRUE(value.is_some());
-    EXPECT_DOUBLE_EQ((**value).as_f64().unwrap_or(0.0), 1.5);
+    EXPECT_DOUBLE_EQ((**value).as_f64().unwrap_or(rstd::f64()).to_primitive(), 1.5);
 }
 
 TEST(UserProperty, UnknownTypeDefersWireValueCoercion) {
@@ -90,7 +90,7 @@ TEST(JsonAdapter, NativeProjectionsPreserveOptions) {
     auto value  = parsed.unwrap();
     auto number = value.get("number");
     ASSERT_TRUE(number.is_some());
-    EXPECT_DOUBLE_EQ((*number)->as_f64().unwrap_or(0.0), 1.75);
+    EXPECT_DOUBLE_EQ((*number)->as_f64().unwrap_or(rstd::f64()).to_primitive(), 1.75);
     auto boolean = value.get("bool");
     ASSERT_TRUE(boolean.is_some());
     EXPECT_TRUE((*boolean)->as_bool().unwrap_or(false));

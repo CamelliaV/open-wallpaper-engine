@@ -54,7 +54,8 @@ public:
             }
             const bool preserve_across_frames =
                 (entry.request.content &
-                 resource::TextureContentFlag(resource::TextureContent::PreserveAcrossFrames)) != 0;
+                 resource::TextureContentFlag(resource::TextureContent::PreserveAcrossFrames)) !=
+                u32();
             auto initial = entry.request.kind == resource::TextureRequestKind::Imported ||
                                    preserve_across_frames
                                ? TextureStateKind::Sampled
@@ -99,10 +100,10 @@ public:
                     .subresourceRange =
                         VkImageSubresourceRange {
                             .aspectMask     = range.aspect,
-                            .baseMipLevel   = range.base_mip_level,
-                            .levelCount     = range.level_count,
-                            .baseArrayLayer = range.base_array_layer,
-                            .layerCount     = range.layer_count,
+                            .baseMipLevel   = range.base_mip_level.to_primitive(),
+                            .levelCount     = range.level_count.to_primitive(),
+                            .baseArrayLayer = range.base_array_layer.to_primitive(),
+                            .layerCount     = range.layer_count.to_primitive(),
                         },
                 },
         };

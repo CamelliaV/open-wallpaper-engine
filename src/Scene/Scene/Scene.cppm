@@ -32,7 +32,7 @@ public:
 };
 
 struct SceneSamplerBinding {
-    usize       texture_slot { 0 };
+    std::size_t texture_slot { 0 };
     std::string shader_member;
 
     bool operator==(const SceneSamplerBinding&) const = default;
@@ -49,7 +49,7 @@ public:
     std::vector<SceneSamplerBinding> sampler_bindings;
     ShaderValues                     default_uniforms;
 
-    std::string_view SamplerMember(usize texture_slot) const {
+    std::string_view SamplerMember(std::size_t texture_slot) const {
         for (const auto& binding : sampler_bindings) {
             if (binding.texture_slot == texture_slot) return binding.shader_member;
         }
@@ -58,17 +58,19 @@ public:
 };
 
 inline usize SceneShaderStageCodeHash(const ShaderCode& code) {
-    usize seed { 0 };
+    std::size_t seed { 0 };
     utils::hash_combine(seed, code.size());
     for (auto word : code) utils::hash_combine(seed, word);
-    return seed;
+    return usize(seed);
 }
 
 inline usize SceneShaderCodeHash(std::span<const ShaderCode> codes) {
-    usize seed { 0 };
+    std::size_t seed { 0 };
     utils::hash_combine(seed, codes.size());
-    for (const auto& code : codes) utils::hash_combine(seed, SceneShaderStageCodeHash(code));
-    return seed;
+    for (const auto& code : codes) {
+        utils::hash_combine(seed, SceneShaderStageCodeHash(code).to_primitive());
+    }
+    return usize(seed);
 }
 
 inline usize SceneShaderCodeHash(const SceneShader& shader) {
@@ -90,8 +92,8 @@ struct SceneShaderVariantStage {
 };
 
 struct SceneShaderDefaultTexture {
-    i32         slot { 0 };
-    std::string texture;
+    std::int32_t slot { 0 };
+    std::string  texture;
 };
 
 struct SceneShaderVariantDesc {
@@ -108,7 +110,7 @@ struct SceneShaderVariantDesc {
 
     std::vector<SceneShaderTextureCompileInfo> texture_infos;
     std::vector<SceneShaderVariantStage>       stages;
-    usize                                      descriptor_layout_hash { 0 };
+    std::size_t                                descriptor_layout_hash { 0 };
     bool                                       geometry_shader_enabled { false };
 
     bool Valid() const { return ! shader_name.empty() && ! stages.empty(); }
@@ -137,15 +139,15 @@ struct SceneRenderTarget {
         double      scale { 1.0 };
     };
 
-    i32 width;
-    i32 height;
+    std::int32_t width;
+    std::int32_t height;
     // Keep authored layout dimensions separate from backend-limited allocation dimensions.
-    i32      physical_width { 0 };
-    i32      physical_height { 0 };
-    bool     allowReuse { false };
-    bool     withDepth { false };
-    bool     has_mipmap { false };
-    unsigned mipmap_level { 1 };
+    std::int32_t physical_width { 0 };
+    std::int32_t physical_height { 0 };
+    bool         allowReuse { false };
+    bool         withDepth { false };
+    bool         has_mipmap { false };
+    unsigned     mipmap_level { 1 };
     // 1 disables MSAA; only screen RT is opted-in by VulkanRender at init.
     unsigned      sample_count { 1 };
     TextureSample sample { TextureWrap::CLAMP_TO_EDGE,
@@ -166,8 +168,8 @@ struct SceneRenderTarget {
     // for composition targets, not transient effect outputs.
     bool preserve_on_write { false };
 
-    i32 PhysicalWidth() const { return physical_width > 0 ? physical_width : width; }
-    i32 PhysicalHeight() const { return physical_height > 0 ? physical_height : height; }
+    std::int32_t PhysicalWidth() const { return physical_width > 0 ? physical_width : width; }
+    std::int32_t PhysicalHeight() const { return physical_height > 0 ? physical_height : height; }
 };
 
 // ============================================================================
@@ -175,24 +177,24 @@ struct SceneRenderTarget {
 // ============================================================================
 
 class SceneIndexArray : NoCopy {
-    constexpr static usize Unit_Byte_Size { sizeof(u32) };
+    constexpr static usize Unit_Byte_Size { sizeof(rstd::uint32_t) };
 
 public:
     SceneIndexArray(usize indexCount);
-    SceneIndexArray(std::span<const u32> data);
+    SceneIndexArray(std::span<const rstd::uint32_t> data);
 
     SceneIndexArray(SceneIndexArray&&) noexcept;
     ~SceneIndexArray() = default;
 
-    void Assign(usize index, std::span<const u32> data) {
-        if (! IncreaseCheckSet((index + data.size()) * Unit_Byte_Size)) return;
-        std::copy(data.begin(), data.end(), m_data.begin() + index);
+    void Assign(usize index, std::span<const rstd::uint32_t> data) {
+        if (! IncreaseCheckSet((index + usize(data.size())) * Unit_Byte_Size)) return;
+        std::copy(data.begin(), data.end(), m_data.begin() + index.to_primitive());
         BumpDataGeneration();
     }
 
-    const u32* Data() const { return m_data.is_empty() ? nullptr : m_data.begin(); }
-    usize      DataCount() const { return m_size; }
-    usize      DataSizeOf() const { return m_size * Unit_Byte_Size; }
+    const rstd::uint32_t* Data() const { return m_data.is_empty() ? nullptr : m_data.begin(); }
+    usize                 DataCount() const { return m_size; }
+    usize                 DataSizeOf() const { return m_size * Unit_Byte_Size; }
 
     usize RenderDataCount() const noexcept {
         return m_render_size > m_size ? m_size : m_render_size;
@@ -210,12 +212,12 @@ private:
     bool IncreaseCheckSet(usize size);
     void BumpDataGeneration() noexcept { ++m_generation; }
 
-    Vec<u32> m_data;
-    usize    m_size { 0 };
+    Vec<rstd::uint32_t> m_data;
+    usize               m_size { 0 };
 
-    usize m_render_size { std::numeric_limits<usize>::max() };
+    usize m_render_size { usize::MAX };
 
-    u32 m_id { std::numeric_limits<u32>::max() };
+    u32 m_id { u32::MAX };
     u64 m_generation { 1 };
 };
 
@@ -256,12 +258,12 @@ public:
 
     const float* Data() const { return m_data.is_empty() ? nullptr : m_data.begin(); }
     usize        DataSize() const { return m_size; }
-    usize        DataSizeOf() const { return m_size * sizeof(float); }
+    usize        DataSizeOf() const { return m_size * usize(sizeof(float)); }
     usize        VertexCount() const { return m_size / m_oneSize; }
     usize        CapacitySize() const { return m_data.len(); }
-    usize        CapacitySizeOf() const { return m_data.len() * sizeof(float); }
+    usize        CapacitySizeOf() const { return m_data.len() * usize(sizeof(float)); }
     usize        OneSize() const { return m_oneSize; }
-    usize        OneSizeOf() const { return m_oneSize * sizeof(float); }
+    usize        OneSizeOf() const { return m_oneSize * usize(sizeof(float)); }
     u64          DataGeneration() const { return m_generation; }
 
     const auto&                                  Attributes() const { return m_attributes; }
@@ -270,8 +272,8 @@ public:
     u32  ID() const { return m_id; }
     void SetID(u32 id) { m_id = id; }
 
-    static u8 TypeCount(VertexType);
-    static u8 RealAttributeSize(const SceneVertexAttribute&);
+    static std::size_t TypeCount(VertexType);
+    static std::size_t RealAttributeSize(const SceneVertexAttribute&);
 
 private:
     bool TrySetSize(usize) noexcept;
@@ -325,9 +327,9 @@ struct SceneMaterialCustomShader {
 };
 
 struct SceneMaterialTextureMetadata {
-    bool                has_extent { false };
-    rstd::array<f32, 2> source_extent { 0.0f, 0.0f };
-    rstd::array<f32, 2> sample_extent { 0.0f, 0.0f };
+    bool                  has_extent { false };
+    rstd::array<float, 2> source_extent { 0.0f, 0.0f };
+    rstd::array<float, 2> sample_extent { 0.0f, 0.0f };
 };
 
 enum class SceneMaterialTextureDependency
@@ -366,7 +368,7 @@ inline bool CanRefreshSceneMaterialTextureBinding(std::string_view old_texture,
            IsLocalSceneMaterialTextureDependency(new_dep);
 }
 
-using SceneMaterialDirtyFlags = u32;
+using SceneMaterialDirtyFlags = rstd::uint32_t;
 
 enum class SceneMaterialDirty : SceneMaterialDirtyFlags
 {
@@ -416,7 +418,7 @@ SceneShaderVariantUniformLayout(const SceneShaderVariantDesc& desc) {
 inline bool SameSceneShaderVariantStageSet(const SceneShaderVariantDesc& lhs,
                                            const SceneShaderVariantDesc& rhs) {
     if (lhs.stages.size() != rhs.stages.size()) return false;
-    for (usize i = 0; i < lhs.stages.size(); ++i) {
+    for (std::size_t i = 0; i < lhs.stages.size(); ++i) {
         if (lhs.stages[i].stage != rhs.stages[i].stage) return false;
     }
     return true;
@@ -438,7 +440,7 @@ inline bool SameSceneShaderVariantUniformShape(const SceneShaderVariantDesc& lhs
 
 inline bool SceneShaderVariantHasCodeHashes(const SceneShaderVariantDesc& desc) {
     for (const auto& stage : desc.stages) {
-        if (stage.code_hash != 0) return true;
+        if (stage.code_hash != usize()) return true;
     }
     return false;
 }
@@ -449,7 +451,7 @@ inline bool SameSceneShaderVariantCodeHashes(const SceneShaderVariantDesc& lhs,
     const bool rhs_has_hashes = SceneShaderVariantHasCodeHashes(rhs);
     if (! lhs_has_hashes && ! rhs_has_hashes) return true;
     if (lhs.stages.size() != rhs.stages.size()) return false;
-    for (usize i = 0; i < lhs.stages.size(); ++i) {
+    for (std::size_t i = 0; i < lhs.stages.size(); ++i) {
         if (lhs.stages[i].code_hash != rhs.stages[i].code_hash) return false;
     }
     return true;
@@ -492,7 +494,7 @@ ClassifySceneShaderVariantMutation(const SceneShaderVariantDesc& current,
         flags |= SceneMaterialDirtyResources | SceneMaterialDirtyPipeline;
     }
     if (flags == SceneMaterialDirtyNone && current.stages.size() == next.stages.size()) {
-        for (usize i = 0; i < current.stages.size(); ++i) {
+        for (std::size_t i = 0; i < current.stages.size(); ++i) {
             if (current.stages[i].source_key != next.stages[i].source_key ||
                 current.stages[i].source != next.stages[i].source) {
                 flags |= SceneMaterialDirtyPipeline;
@@ -567,7 +569,7 @@ public:
     }
     void TouchShaderValues() {
         ++customShader.value_version;
-        if (customShader.value_version == 0) customShader.value_version = 1;
+        if (customShader.value_version == u64()) customShader.value_version = u64(1);
     }
     bool SetShaderValueAnimation(std::string                          uniform_name,
                                  std::shared_ptr<SceneAnimationCurve> curve);
@@ -585,7 +587,7 @@ public:
             auto previous_metadata = texture_metadata;
             textures               = variant.texture_slots;
             texture_metadata.resize(textures.size());
-            for (usize i = 0; i < textures.size(); ++i) {
+            for (std::size_t i = 0; i < textures.size(); ++i) {
                 if (i >= previous_textures.size() || previous_textures[i] != textures[i]) {
                     texture_metadata[i] = {};
                 } else if (i < previous_metadata.size()) {
@@ -593,7 +595,7 @@ public:
                 }
             }
             auto active = SceneShaderVariantActiveTextureSlots(variant);
-            for (usize i = 0; i < textures.size(); ++i) {
+            for (std::size_t i = 0; i < textures.size(); ++i) {
                 if (! active.contains(static_cast<unsigned>(i))) {
                     textures[i].clear();
                     texture_metadata[i] = {};
@@ -621,22 +623,22 @@ public:
 
 private:
     ShaderValue ShapeShaderValue(std::string_view uniform_name, const ShaderValue& value) const {
-        if (value.size() != 1) return value;
+        if (value.size() != usize(1)) return value;
 
-        usize target_size = 0;
+        usize target_size {};
         if (auto it = customShader.constValues.find(std::string(uniform_name));
             it != customShader.constValues.end()) {
             target_size = it->second.size();
         }
-        if (target_size <= 1 && customShader.shader) {
+        if (target_size <= usize(1) && customShader.shader) {
             if (auto it = customShader.shader->default_uniforms.find(std::string(uniform_name));
                 it != customShader.shader->default_uniforms.end()) {
                 target_size = it->second.size();
             }
         }
-        if (target_size <= 1 || target_size > 4) return value;
+        if (target_size <= usize(1) || target_size > usize(4)) return value;
 
-        std::vector<float> shaped(target_size, value[0]);
+        std::vector<float> shaped(target_size.to_primitive(), value[usize()]);
         return ShaderValue(std::span<const float>(shaped));
     }
 
@@ -674,7 +676,7 @@ private:
 // SceneMesh.h
 // ============================================================================
 
-using SceneMeshDirtyFlags = u32;
+using SceneMeshDirtyFlags = rstd::uint32_t;
 
 enum class SceneMeshDirty : SceneMeshDirtyFlags
 {
@@ -701,8 +703,8 @@ public:
     // issued per range in vector order — matching the file's z-order. All
     // ranges in a submesh share the submesh's material slot.
     struct DrawRange {
-        u32 first_index;
-        u32 index_count;
+        rstd::uint32_t first_index;
+        rstd::uint32_t index_count;
     };
 
     // = glTF "primitive": one vertex-stream set + one index array + one
@@ -713,7 +715,7 @@ public:
         std::vector<SceneVertexArray> vertex_arrays;
         std::vector<SceneIndexArray>  index_arrays;
         std::vector<DrawRange>        draw_ranges;
-        u32                           material_slot { 0 };
+        rstd::uint32_t                material_slot { 0 };
         // Non-empty value redirects this submesh's pass output to the
         // named RT (instead of the SceneNode's default). Used by puppet
         // clipping-mask submeshes to write into a shared `_rt_puppet_mask`
@@ -761,17 +763,21 @@ public:
     std::vector<std::shared_ptr<SceneMaterial>>&       MaterialSlots() { return m_materials; }
 
     // ---- Legacy single-slot compat (routes through submeshes[0] / materials[0]) ----
-    usize VertexCount() const { return submesh0().vertex_arrays.size(); }
-    usize IndexCount() const { return submesh0().index_arrays.size(); }
+    usize VertexCount() const { return usize(submesh0().vertex_arrays.size()); }
+    usize IndexCount() const { return usize(submesh0().index_arrays.size()); }
 
     const SceneVertexArray& GetVertexArray(usize index) const {
-        return submesh0().vertex_arrays[index];
+        return submesh0().vertex_arrays[index.to_primitive()];
     }
     const SceneIndexArray& GetIndexArray(usize index) const {
-        return submesh0().index_arrays[index];
+        return submesh0().index_arrays[index.to_primitive()];
     }
-    SceneVertexArray& GetVertexArray(usize index) { return ensureSubmesh0().vertex_arrays[index]; }
-    SceneIndexArray&  GetIndexArray(usize index) { return ensureSubmesh0().index_arrays[index]; }
+    SceneVertexArray& GetVertexArray(usize index) {
+        return ensureSubmesh0().vertex_arrays[index.to_primitive()];
+    }
+    SceneIndexArray& GetIndexArray(usize index) {
+        return ensureSubmesh0().index_arrays[index.to_primitive()];
+    }
 
     void AddIndexArray(SceneIndexArray&& array) {
         ensureSubmesh0().index_arrays.emplace_back(std::move(array));
@@ -809,7 +815,7 @@ private:
         return m_data->submeshes.empty() ? kEmpty : m_data->submeshes[0];
     }
 
-    u32               m_id { std::numeric_limits<u32>::max() };
+    u32               m_id { u32::MAX };
     MeshPrimitive     m_primitive { MeshPrimitive::TRIANGLE };
     u32               m_pointSize { 1 };
     bool              m_dynamic;
@@ -831,7 +837,7 @@ struct ScenePostProcess;
 
 class SceneCamera {
 public:
-    explicit SceneCamera(i32 width, i32 height, float near, float far)
+    explicit SceneCamera(rstd::int32_t width, rstd::int32_t height, float near, float far)
         : m_width(width),
           m_height(height),
           m_aspect(m_width / m_height),
@@ -938,14 +944,14 @@ private:
 };
 
 struct SceneAnimationKey {
-    i32   frame { 0 };
-    float value { 0.0f };
-    bool  front_enabled { false };
-    float front_x { 0.0f };
-    float front_y { 0.0f };
-    bool  back_enabled { false };
-    float back_x { 0.0f };
-    float back_y { 0.0f };
+    std::int32_t frame { 0 };
+    float        value { 0.0f };
+    bool         front_enabled { false };
+    float        front_x { 0.0f };
+    float        front_y { 0.0f };
+    bool         back_enabled { false };
+    float        back_x { 0.0f };
+    float        back_y { 0.0f };
 };
 
 struct SceneAnimationCurve {
@@ -953,7 +959,7 @@ struct SceneAnimationCurve {
     std::vector<SceneAnimationKey> c1;
     std::vector<SceneAnimationKey> c2;
     float                          fps { 30.0f };
-    i32                            length { 0 };
+    std::int32_t                   length { 0 };
     std::string                    mode;
     bool                           wraploop { false };
     bool                           relative { false };
@@ -1375,8 +1381,8 @@ public:
         m_resolved             = false;
         return true;
     }
-    usize                             EffectCount() const { return m_effects.size(); }
-    auto&                             GetEffect(usize index) { return m_effects.at(index); }
+    usize EffectCount() const { return usize(m_effects.size()); }
+    auto& GetEffect(usize index) { return m_effects.at(index.to_primitive()); }
     std::shared_ptr<SceneImageEffect> FindEffect(std::string_view name) {
         auto it = std::find_if(m_effects.begin(), m_effects.end(), [name](const auto& effect) {
             return effect && effect->name == name;
@@ -1444,8 +1450,8 @@ public:
 
 private:
     struct EffectNodeResolveState {
-        std::string        output;
-        std::vector<usize> pingpong_input_slots;
+        std::string              output;
+        std::vector<std::size_t> pingpong_input_slots;
     };
 
     struct EffectCommandResolveState {
@@ -1654,14 +1660,14 @@ inline void MoveMultiply(Particle& p, double x, double y, double z) noexcept {
 }
 
 inline void MoveApplySign(Particle& p, i32 x, i32 y, i32 z) noexcept {
-    if (x != 0) {
-        p.position[0] = std::abs(p.position[0]) * (float)x;
+    if (x != i32()) {
+        p.position[0] = std::abs(p.position[0]) * static_cast<float>(x.to_primitive());
     }
-    if (y != 0) {
-        p.position[1] = std::abs(p.position[1]) * (float)y;
+    if (y != i32()) {
+        p.position[1] = std::abs(p.position[1]) * static_cast<float>(y.to_primitive());
     }
-    if (z != 0) {
-        p.position[2] = std::abs(p.position[2]) * (float)z;
+    if (z != i32()) {
+        p.position[2] = std::abs(p.position[2]) * static_cast<float>(z.to_primitive());
     }
 }
 inline void SphereDirectOffset(Particle& p, const Eigen::Vector3d& base, double direct) noexcept {
@@ -1823,8 +1829,8 @@ class ParticleSubSystem;
 // SubSystem and is the same for every slot in one instance.
 struct ParticleTrail {
     std::vector<Eigen::Vector3f> positions;
-    u16                          head { 0 };
-    u16                          len { 0 };
+    std::size_t                  head { 0 };
+    std::size_t                  len { 0 };
 
     void Reset() noexcept {
         head = 0;
@@ -1832,15 +1838,15 @@ struct ParticleTrail {
     }
     void Push(const Eigen::Vector3f& p) noexcept {
         if (positions.empty()) return;
-        head            = static_cast<u16>((head + 1) % positions.size());
+        head            = (head + 1) % positions.size();
         positions[head] = p;
         if (len < positions.size()) len++;
     }
     // Returns oldest -> newest sample at logical index i in [0, len).
-    Eigen::Vector3f At(u16 i) const noexcept {
+    Eigen::Vector3f At(std::size_t i) const noexcept {
         // newest is at head; oldest is len-1 back from head.
-        auto cap = static_cast<u16>(positions.size());
-        auto idx = static_cast<u16>((head + cap - (len - 1 - i)) % cap);
+        auto cap = positions.size();
+        auto idx = (head + cap - (len - 1 - i)) % cap;
         return positions[idx];
     }
 };
@@ -1850,7 +1856,7 @@ public:
     struct BoundedData {
         ParticleInstance*        parent { nullptr };
         const ParticleSubSystem* parent_subsystem { nullptr };
-        isize                    particle_idx { -1 };
+        std::ptrdiff_t           particle_idx { -1 };
 
         bool            pre_lifetime_ok { true };
         Eigen::Vector3f pos { 0.0f, 0.0f, 0.0f };
@@ -1897,7 +1903,7 @@ public:
     ParticleSubSystem(ParticleSystem& p, std::shared_ptr<SceneMesh> sm, u32 maxcount, double rate,
                       u32 maxcount_instance, double probability, SpawnType type,
                       ParticleRawGenSpecOp specOp, ParticleFollowAnchor follow_anchor = {},
-                      u32 trail_length = 0, double start_time = 0.0, bool world_space = false);
+                      u32 trail_length = u32(), double start_time = 0.0, bool world_space = false);
     ~ParticleSubSystem();
 
     void Emitt();
@@ -2098,9 +2104,9 @@ private:
 };
 
 struct SceneTextureFrameView {
-    rstd::array<f32, 4> rotation { 1.0f, 0.0f, 0.0f, 1.0f };
-    rstd::array<f32, 2> translation { 0.0f, 0.0f };
-    u64                 revision { 1 };
+    rstd::array<float, 4> rotation { 1.0f, 0.0f, 0.0f, 1.0f };
+    rstd::array<float, 2> translation { 0.0f, 0.0f };
+    u64                   revision { 1 };
 };
 
 struct SceneTextureAnimationView {
@@ -2145,7 +2151,7 @@ private:
     };
 
     static u64 Key(SceneDrawItemId draw) {
-        return (static_cast<u64>(draw.generation) << 32) | static_cast<u64>(draw.index);
+        return (rstd::as_cast<u64>(draw.generation) << u64(32)) | rstd::as_cast<u64>(draw.index);
     }
 
     Map<std::string, Animation> m_animations;
@@ -2168,21 +2174,19 @@ struct RenderSceneVersion {
 };
 
 struct RenderItemId {
-    u32 index { std::numeric_limits<u32>::max() };
+    u32 index { u32::MAX };
     u64 generation { 0 };
 
-    bool Valid() const noexcept {
-        return index != std::numeric_limits<u32>::max() && generation != 0;
-    }
+    bool Valid() const noexcept { return index != u32::MAX && generation != u64(); }
 };
 
 struct RenderTextureDescId {
-    u32 index { std::numeric_limits<u32>::max() };
+    u32 index { u32::MAX };
     u64 generation { 0 };
 };
 
 struct RenderTargetDescId {
-    u32 index { std::numeric_limits<u32>::max() };
+    u32 index { u32::MAX };
     u64 generation { 0 };
 };
 
@@ -2315,15 +2319,15 @@ private:
     std::vector<RenderTextureDescRecord> m_texture_descs;
     std::vector<RenderTargetDescRecord>  m_render_target_descs;
 
-    std::unordered_map<u64, RenderItemId>                m_render_item_ids;
-    std::unordered_map<std::string, RenderTextureDescId> m_texture_desc_ids;
-    std::unordered_map<std::string, RenderTargetDescId>  m_render_target_desc_ids;
-    std::unordered_map<i32, std::vector<RenderItemId>>   m_source_layer_items;
-    std::unordered_map<u64, std::vector<RenderItemId>>   m_material_render_items;
-    std::unordered_map<u64, std::vector<RenderItemId>>   m_mesh_render_items;
-    std::vector<RenderLinkSourceRecord>                  m_link_sources;
-    std::unordered_map<i32, u32>                         m_link_source_ids;
-    Set<i32>                                             m_linked_layer_ids;
+    std::unordered_map<rstd::uint64_t, RenderItemId>              m_render_item_ids;
+    std::unordered_map<std::string, RenderTextureDescId>          m_texture_desc_ids;
+    std::unordered_map<std::string, RenderTargetDescId>           m_render_target_desc_ids;
+    std::unordered_map<rstd::int32_t, std::vector<RenderItemId>>  m_source_layer_items;
+    std::unordered_map<rstd::uint64_t, std::vector<RenderItemId>> m_material_render_items;
+    std::unordered_map<rstd::uint64_t, std::vector<RenderItemId>> m_mesh_render_items;
+    std::vector<RenderLinkSourceRecord>                           m_link_sources;
+    std::unordered_map<rstd::int32_t, u32>                        m_link_source_ids;
+    Set<i32>                                                      m_linked_layer_ids;
 };
 
 RenderSceneSnapshot ExtractRenderSceneSnapshot(Scene& scene);
@@ -2452,10 +2456,10 @@ public:
     auto Register(Box<dyn<UniformSource>> source) -> UniformSourceId {
         return m_uniforms.Register(rstd::move(source));
     }
-    bool AttachGlobal(UniformSourceId source, i32 priority = 0) {
+    bool AttachGlobal(UniformSourceId source, rstd::int32_t priority = 0) {
         return m_uniforms.AttachGlobal(source, priority);
     }
-    bool AttachNode(SceneNodeId node, UniformSourceId source, i32 priority = 0) {
+    bool AttachNode(SceneNodeId node, UniformSourceId source, rstd::int32_t priority = 0) {
         return m_uniforms.AttachNode(node, source, priority);
     }
     auto Resolve(UniformSourceId source) const -> Option<ref<dyn<UniformSource>>> {
@@ -2511,11 +2515,11 @@ public:
     rstd::array<float, 2>               pointerPosition { 0.5f, 0.5f };
     rstd::array<std::atomic<float>, 16> audioAverage {};
 
-    i32                   ortho[2] { 1920, 1080 };
+    std::int32_t          ortho[2] { 1920, 1080 };
     rstd::array<float, 3> clearColor { 1.0f, 1.0f, 1.0f };
     std::string           clearColorUserKey;
 
-    void PassFrameTime(double delta) { m_runtime.Advance(delta); }
+    void PassFrameTime(double delta) { m_runtime.Advance(f64(delta)); }
     void TickNodeFieldAnimations();
     std::vector<std::function<void(double)>> transform_updaters;
     void                                     TickTransformUpdaters();

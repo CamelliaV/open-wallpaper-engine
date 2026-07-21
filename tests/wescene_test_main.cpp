@@ -37,6 +37,9 @@ using JsonSink = rstd::Option<rstd::mut_ref<Json>>;
 namespace
 {
 
+using rstd::i32;
+using rstd::u32;
+using rstd::usize;
 using rstd::argparse::Arg;
 using rstd::argparse::ArgGroup;
 using rstd::argparse::ArgKey;
@@ -47,7 +50,9 @@ using rstd::argparse::NumArgs;
 using rstd::argparse::string_parser;
 using rstd::string::String;
 
-std::string ToStdString(const String& value) { return { value.data(), value.size() }; }
+std::string ToStdString(const String& value) {
+    return { value.data(), value.size().to_primitive() };
+}
 
 template<typename T>
 const T& ArgValue(const Matches& matches, const ArgKey<T>& key) {
@@ -197,22 +202,22 @@ struct ScanOptions {
 };
 
 struct ScanArgs {
-    ArgKey<String>        workshop_dir;
-    ArgKey<String>        assets;
-    ArgKey<bool>          full;
-    ArgKey<bool>          parse_tex;
-    ArgKey<bool>          parse_shader;
-    ArgKey<bool>          parse_mdl;
-    ArgKey<bool>          parse_mdl_full;
-    ArgKey<bool>          parse_all;
-    ArgKey<String>        name;
-    ArgKey<std::uint32_t> pkgv;
-    ArgKey<std::int32_t>  limit;
-    ArgKey<std::int32_t>  offset;
-    ArgKey<bool>          quiet;
-    ArgKey<bool>          stop_on_fail;
-    ArgKey<String>        json;
-    ArgKey<String>        json_dir;
+    ArgKey<String> workshop_dir;
+    ArgKey<String> assets;
+    ArgKey<bool>   full;
+    ArgKey<bool>   parse_tex;
+    ArgKey<bool>   parse_shader;
+    ArgKey<bool>   parse_mdl;
+    ArgKey<bool>   parse_mdl_full;
+    ArgKey<bool>   parse_all;
+    ArgKey<String> name;
+    ArgKey<u32>    pkgv;
+    ArgKey<i32>    limit;
+    ArgKey<i32>    offset;
+    ArgKey<bool>   quiet;
+    ArgKey<bool>   stop_on_fail;
+    ArgKey<String> json;
+    ArgKey<String> json_dir;
 };
 
 ScanArgs AddScanArgs(Command& command) {
@@ -254,16 +259,16 @@ ScanArgs AddScanArgs(Command& command) {
             .long_name("name")
             .append()
             .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd"));
-    auto pkgv  = command.add_arg(Arg<std::uint32_t>::value("pkgv", from_str_parser<std::uint32_t>())
+    auto pkgv  = command.add_arg(Arg<u32>::value("pkgv", from_str_parser<u32>())
                                      .long_name("pkgv")
                                      .append()
                                      .help("only pkgs with PKGV stamp == N; repeatable, OR'd"));
-    auto limit = command.add_arg(Arg<std::int32_t>::value("limit", from_str_parser<std::int32_t>())
+    auto limit = command.add_arg(Arg<i32>::value("limit", from_str_parser<i32>())
                                      .long_name("limit")
                                      .default_value("0")
                                      .help("stop after N matched pkgs (default 0 = all)"));
     auto offset =
-        command.add_arg(Arg<std::int32_t>::value("offset", from_str_parser<std::int32_t>())
+        command.add_arg(Arg<i32>::value("offset", from_str_parser<i32>())
                             .long_name("offset")
                             .default_value("0")
                             .help("skip the first N matched pkgs before --limit applies"));
@@ -298,9 +303,11 @@ ScanOptions ReadScanOptions(const Matches& matches, const ScanArgs& args) {
     opt.p_shader     = all || ArgFlag(matches, args.parse_shader);
     opt.p_mdl        = all || opt.p_mdl_full || ArgFlag(matches, args.parse_mdl);
     opt.name_filters = ArgStringValues(matches, args.name);
-    opt.pkgv_filters = ArgValues(matches, args.pkgv);
-    opt.limit        = ArgValue(matches, args.limit);
-    opt.offset       = ArgValue(matches, args.offset);
+    for (auto value : ArgValues(matches, args.pkgv)) {
+        opt.pkgv_filters.push_back(value.to_primitive());
+    }
+    opt.limit        = ArgValue(matches, args.limit).to_primitive();
+    opt.offset       = ArgValue(matches, args.offset).to_primitive();
     opt.quiet        = ArgFlag(matches, args.quiet);
     opt.stop_on_fail = ArgFlag(matches, args.stop_on_fail);
     opt.json_out     = OptionalArgString(matches, args.json);
@@ -1026,22 +1033,22 @@ struct GrepOptions {
 };
 
 struct GrepArgs {
-    ArgKey<String>       pattern;
-    ArgKey<String>       workshop_dir;
-    ArgKey<String>       name;
-    ArgKey<std::int32_t> limit;
-    ArgKey<std::int32_t> offset;
-    ArgKey<String>       path_filter;
-    ArgKey<bool>         all_text;
-    ArgKey<bool>         ignore_case;
-    ArgKey<std::int32_t> snippet;
-    ArgKey<std::int32_t> after;
-    ArgKey<std::int32_t> before;
-    ArgKey<std::int32_t> around;
-    ArgKey<bool>         json;
-    ArgKey<bool>         only_matching;
-    ArgKey<bool>         files_with_matches;
-    ArgKey<bool>         count;
+    ArgKey<String> pattern;
+    ArgKey<String> workshop_dir;
+    ArgKey<String> name;
+    ArgKey<i32>    limit;
+    ArgKey<i32>    offset;
+    ArgKey<String> path_filter;
+    ArgKey<bool>   all_text;
+    ArgKey<bool>   ignore_case;
+    ArgKey<i32>    snippet;
+    ArgKey<i32>    after;
+    ArgKey<i32>    before;
+    ArgKey<i32>    around;
+    ArgKey<bool>   json;
+    ArgKey<bool>   only_matching;
+    ArgKey<bool>   files_with_matches;
+    ArgKey<bool>   count;
 };
 
 GrepArgs AddGrepArgs(Command& command) {
@@ -1062,12 +1069,12 @@ GrepArgs AddGrepArgs(Command& command) {
             .long_name("name")
             .append()
             .help("only pkgs whose dir name contains SUBSTR (ci); repeatable, OR'd"));
-    auto limit = command.add_arg(Arg<std::int32_t>::value("limit", from_str_parser<std::int32_t>())
+    auto limit = command.add_arg(Arg<i32>::value("limit", from_str_parser<i32>())
                                      .long_name("limit")
                                      .default_value("0")
                                      .help("stop after N matched pkgs (default 0 = all)"));
     auto offset =
-        command.add_arg(Arg<std::int32_t>::value("offset", from_str_parser<std::int32_t>())
+        command.add_arg(Arg<i32>::value("offset", from_str_parser<i32>())
                             .long_name("offset")
                             .default_value("0")
                             .help("skip the first N matched pkgs before --limit applies"));
@@ -1085,31 +1092,29 @@ GrepArgs AddGrepArgs(Command& command) {
                                            .long_name("ignore-case")
                                            .help("case-insensitive match"));
     auto snippet =
-        command.add_arg(Arg<std::int32_t>::value("snippet", from_str_parser<std::int32_t>())
+        command.add_arg(Arg<i32>::value("snippet", from_str_parser<i32>())
                             .long_name("snippet")
                             .default_value("48")
                             .help("chars of context around a match in the flat default mode "
                                   "(ignored when -A/-B/-C is set)"));
     auto after = command.add_arg(
-        Arg<std::int32_t>::value("after", from_str_parser<std::int32_t>())
+        Arg<i32>::value("after", from_str_parser<i32>())
             .short_name('A')
             .long_name("after")
             .default_value("0")
             .help("print N lines after each match (grep -A); switches default mode to "
                   "line context with <path>:<lineno>: prefixes"));
-    auto before =
-        command.add_arg(Arg<std::int32_t>::value("before", from_str_parser<std::int32_t>())
-                            .short_name('B')
-                            .long_name("before")
-                            .default_value("0")
-                            .help("print N lines before each match (grep -B)"));
-    auto around =
-        command.add_arg(Arg<std::int32_t>::value("around", from_str_parser<std::int32_t>())
-                            .short_name('C')
-                            .long_name("around")
-                            .default_value("0")
-                            .help("print N lines before AND after each match (grep -C)"));
-    auto json = command.add_arg(Arg<bool>::flag("json").long_name("json").help(
+    auto before = command.add_arg(Arg<i32>::value("before", from_str_parser<i32>())
+                                      .short_name('B')
+                                      .long_name("before")
+                                      .default_value("0")
+                                      .help("print N lines before each match (grep -B)"));
+    auto around = command.add_arg(Arg<i32>::value("around", from_str_parser<i32>())
+                                      .short_name('C')
+                                      .long_name("around")
+                                      .default_value("0")
+                                      .help("print N lines before AND after each match (grep -C)"));
+    auto json   = command.add_arg(Arg<bool>::flag("json").long_name("json").help(
         "structured array of {id, path, matches[]}"));
     auto only_matching =
         command.add_arg(Arg<bool>::flag("only-matching")
@@ -1142,12 +1147,12 @@ GrepOptions ReadGrepOptions(const Matches& matches, const GrepArgs& args) {
     opt.path_filter  = ToStdString(ArgValue(matches, args.path_filter));
     opt.search_all   = ArgFlag(matches, args.all_text);
     opt.icase        = ArgFlag(matches, args.ignore_case);
-    opt.limit        = ArgValue(matches, args.limit);
-    opt.offset       = ArgValue(matches, args.offset);
-    opt.snippet      = ArgValue(matches, args.snippet);
-    const int around = ArgValue(matches, args.around);
-    opt.before       = std::max<int>(ArgValue(matches, args.before), around);
-    opt.after        = std::max<int>(ArgValue(matches, args.after), around);
+    opt.limit        = ArgValue(matches, args.limit).to_primitive();
+    opt.offset       = ArgValue(matches, args.offset).to_primitive();
+    opt.snippet      = ArgValue(matches, args.snippet).to_primitive();
+    const int around = ArgValue(matches, args.around).to_primitive();
+    opt.before       = std::max<int>(ArgValue(matches, args.before).to_primitive(), around);
+    opt.after        = std::max<int>(ArgValue(matches, args.after).to_primitive(), around);
     opt.json_out     = ArgFlag(matches, args.json);
     if (ArgFlag(matches, args.only_matching))
         opt.mode = GrepOptions::Mode::Only;
@@ -1500,15 +1505,16 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
         // Mirror SceneToRenderGraph::ToGraphPass: only nodes with mesh+material emit.
         auto* mesh = n->Mesh();
         if (mesh && mesh->Material()) {
-            std::string tag =
-                "[node id=" + std::to_string(n->ID()) + " depth=" + std::to_string(depth) + "]";
-            std::string                                 output { owe::SpecTex_Default };
+            std::string tag = "[node id=" + std::to_string(n->ID().to_primitive()) +
+                              " depth=" + std::to_string(depth) + "]";
+            std::string output { owe::SpecTex_Default };
             std::shared_ptr<owe::SceneImageEffectLayer> eff_layer;
             if (! n->Camera().empty() && scene.cameras.count(n->Camera())) {
                 auto& cam = scene.cameras.at(n->Camera());
                 if (cam->HasImgEffect()) {
                     eff_layer = cam->GetImgEffect();
-                    if (eff_layer->EffectCount() == 0 || eff_layer->HasRuntimeVisibleEffect()) {
+                    if (eff_layer->EffectCount() == usize() ||
+                        eff_layer->HasRuntimeVisibleEffect()) {
                         output = eff_layer->FirstTarget();
                     }
                 }
@@ -1524,23 +1530,24 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
 
             if (eff_layer && eff_layer->HasRuntimeVisibleEffect()) {
                 eff_layer->ResolveEffect(scene.default_effect_mesh, "effect");
+                const usize effect_count = eff_layer->EffectCount();
                 std::fprintf(
-                    out, "    image-effect chain (%zu effects):\n", eff_layer->EffectCount());
-                for (std::size_t ei = 0; ei < eff_layer->EffectCount(); ++ei) {
+                    out, "    image-effect chain (%zu effects):\n", effect_count.to_primitive());
+                for (usize ei {}; ei < effect_count; ++ei) {
                     auto&       eff = eff_layer->GetEffect(ei);
                     std::size_t ni  = 0;
                     for (auto cmd_it = eff->commands.begin(); cmd_it != eff->commands.end();
                          ++cmd_it) {
                         std::fprintf(out,
                                      "      [eff %zu cmd] copy %s -> %s (afterpos=%d)\n",
-                                     ei,
+                                     ei.to_primitive(),
                                      cmd_it->src.c_str(),
                                      cmd_it->dst.c_str(),
-                                     cmd_it->afterpos);
+                                     cmd_it->afterpos.to_primitive());
                     }
                     for (auto& enode : eff->nodes) {
-                        std::string tag2 =
-                            "[eff " + std::to_string(ei) + " node " + std::to_string(ni++) + "]";
+                        std::string tag2 = "[eff " + std::to_string(ei.to_primitive()) + " node " +
+                                           std::to_string(ni++) + "]";
                         DumpPass(out, "    " + tag2, *enode.sceneNode.as_ptr(), enode.output);
                     }
                 }

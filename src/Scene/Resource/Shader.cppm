@@ -9,10 +9,10 @@ export namespace owe::resource
 using namespace rstd::prelude;
 
 struct ShaderDefinitionId {
-    u32 index { numeric_limits<u32>::max() };
-    u64 generation { 0 };
+    u32 index { u32::MAX };
+    u64 generation {};
 
-    bool Valid() const noexcept { return index != numeric_limits<u32>::max() && generation != 0; }
+    bool Valid() const noexcept { return index != u32::MAX && generation != u64(); }
 
     friend bool operator==(const ShaderDefinitionId&, const ShaderDefinitionId&) = default;
 };
@@ -20,7 +20,7 @@ struct ShaderDefinitionId {
 struct ShaderRequest {
     String             name;
     ShaderDefinitionId source;
-    u64                content_version { 1 };
+    u64                content_version { u64(1) };
 
     auto clone() const -> ShaderRequest {
         return ShaderRequest {
@@ -37,12 +37,16 @@ struct ShaderRequestHasher {
     rstd::hash::RandomState state;
 
     auto operator()(const ShaderRequest& request) const noexcept -> u64 {
-        auto seed = state(request.name);
-        seed ^= state(request.source.index) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-        seed ^=
-            state(request.source.generation) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-        seed ^=
-            state(request.content_version) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        auto          seed = state(request.name);
+        constexpr u64 mix_constant(0x9e3779b97f4a7c15ULL);
+        auto          mix = [&](u64 value) {
+            seed ^= value.wrapping_add(mix_constant)
+                        .wrapping_add(seed.wrapping_shl(u64(6)))
+                        .wrapping_add(seed >> u64(2));
+        };
+        mix(state(request.source.index));
+        mix(state(request.source.generation));
+        mix(state(request.content_version));
         return seed;
     }
 };
@@ -65,9 +69,9 @@ struct ShaderArtifactStage {
 
 struct ShaderArtifactUniformMember {
     String name;
-    u32    offset { 0 };
-    usize  size { 0 };
-    usize  count { 1 };
+    u32    offset {};
+    usize  size {};
+    usize  count { usize(1) };
 
     auto clone() const -> ShaderArtifactUniformMember {
         return ShaderArtifactUniformMember {
@@ -81,7 +85,7 @@ struct ShaderArtifactUniformMember {
 
 struct ShaderArtifactUniformBlock {
     String                                      name;
-    usize                                       size { 0 };
+    usize                                       size {};
     rstd::vec::Vec<ShaderArtifactUniformMember> members;
 
     auto clone() const -> ShaderArtifactUniformBlock {
@@ -97,10 +101,10 @@ struct ShaderArtifactUniformBlock {
 
 struct ShaderArtifactDescriptorBinding {
     String name;
-    u32    binding { 0 };
-    u32    descriptor_type { 0 };
-    u32    descriptor_count { 1 };
-    u32    stage_flags { 0 };
+    u32    binding {};
+    u32    descriptor_type {};
+    u32    descriptor_count { u32(1) };
+    u32    stage_flags {};
 
     auto clone() const -> ShaderArtifactDescriptorBinding {
         return ShaderArtifactDescriptorBinding {
@@ -115,8 +119,8 @@ struct ShaderArtifactDescriptorBinding {
 
 struct ShaderArtifactVertexInput {
     String name;
-    u32    location { 0 };
-    u32    format { 0 };
+    u32    location {};
+    u32    format {};
 
     auto clone() const -> ShaderArtifactVertexInput {
         return ShaderArtifactVertexInput {
@@ -129,7 +133,7 @@ struct ShaderArtifactVertexInput {
 
 struct ShaderArtifact {
     ShaderDefinitionId                              source;
-    u64                                             content_version { 1 };
+    u64                                             content_version { u64(1) };
     rstd::vec::Vec<ShaderArtifactStage>             stages;
     rstd::vec::Vec<ShaderArtifactUniformBlock>      uniform_blocks;
     rstd::vec::Vec<ShaderArtifactDescriptorBinding> descriptor_bindings;

@@ -43,7 +43,7 @@ using rstd::usize;
 
 using idx = isize;
 
-inline isize Ptr2Int(void* p) noexcept { return reinterpret_cast<isize>(p); }
+inline isize Ptr2Int(void* p) noexcept { return isize(reinterpret_cast<rstd::intptr_t>(p)); }
 
 // StringHelper
 constexpr bool sstart_with(std::string_view str, std::string_view start) {
@@ -81,7 +81,9 @@ inline bool exists(const std::set<Key, std::less<>, Allocator>& m, const KeyLike
 template<typename T, typename Tarray>
 rstd::array<T, std::tuple_size<Tarray>::value> array_cast(const Tarray& array) noexcept {
     rstd::array<T, std::tuple_size<Tarray>::value> res;
-    std::copy(array.begin(), array.end(), res.begin());
+    for (std::size_t index = 0; index < array.size(); ++index) {
+        res[rstd::usize(index)] = T(array[index]);
+    }
     return res;
 }
 
@@ -102,7 +104,7 @@ public:
 
     constexpr spanone(reference value) noexcept: ptr { &value } {}
     constexpr pointer   data() const noexcept { return ptr; }
-    constexpr size_type size() const noexcept { return 1; }
+    constexpr size_type size() const noexcept { return usize(1); }
     constexpr reference operator[](usize index) const noexcept { return ptr[index]; }
     constexpr pointer   begin() const noexcept { return ptr; }
     constexpr pointer   end() const noexcept { return ptr + 1; }

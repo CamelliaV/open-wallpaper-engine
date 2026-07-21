@@ -11,7 +11,7 @@ export namespace owe
 
 using Json = rstd::json::Value;
 
-enum class JsonFileErrorKind : u8
+enum class JsonFileErrorKind : rstd::uint8_t
 {
     Io,
     Parse,
@@ -46,6 +46,10 @@ auto Dump(const Json& value, Option<usize> indent = None()) -> std::string;
 
 inline auto Dump(const Json& value, usize indent) -> std::string {
     return Dump(value, Some(indent));
+}
+
+inline auto Dump(const Json& value, rstd::size_t indent) -> std::string {
+    return Dump(value, usize(indent));
 }
 
 inline auto JsonFromStd(std::string_view value) -> Json {

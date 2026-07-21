@@ -32,7 +32,7 @@ struct JsonArrayTarget<std::array<T, N>> {
     using value_type              = T;
 };
 
-template<typename T, usize N>
+template<typename T, rstd::size_t N>
 struct JsonArrayTarget<rstd::array<T, N>> {
     static constexpr bool enabled = true;
     using value_type              = T;
@@ -69,9 +69,9 @@ template<typename T>
 auto ConvertNumber(const Json& json) -> T {
     auto number = json.as_number();
     if (number.is_none()) throw WrongJsonType {};
-    if ((*number)->is_f64()) return static_cast<T>(*(*number)->as_f64());
-    if ((*number)->is_u64()) return static_cast<T>(*(*number)->as_u64());
-    return static_cast<T>(*(*number)->as_i64());
+    if ((*number)->is_f64()) return rstd::as_cast<T>(*(*number)->as_f64());
+    if ((*number)->is_u64()) return rstd::as_cast<T>(*(*number)->as_u64());
+    return rstd::as_cast<T>(*(*number)->as_i64());
 }
 
 template<typename T>
@@ -114,13 +114,13 @@ auto ConvertArray(std::string_view value, std::array<T, N>& target) -> bool {
     return true;
 }
 
-template<typename T, usize N>
+template<typename T, rstd::size_t N>
 auto ConvertArray(std::string_view value, rstd::array<T, N>& target) -> bool {
     rstd::array<std::string_view, N> parts;
-    usize                            count = 0;
+    usize                            count {};
     while (true) {
         const auto delimiter = value.find(' ');
-        if (count == N) throw WrongArraySize {};
+        if (count == usize(N)) throw WrongArraySize {};
         if (delimiter == std::string_view::npos) {
             parts[count++] = value;
             break;
@@ -128,8 +128,8 @@ auto ConvertArray(std::string_view value, rstd::array<T, N>& target) -> bool {
         parts[count++] = value.substr(0, delimiter);
         value.remove_prefix(delimiter + 1);
     }
-    if (count != N) throw WrongArraySize {};
-    for (usize index = 0; index < N; ++index) target[index] = ParseNumber<T>(parts[index]);
+    if (count != usize(N)) throw WrongArraySize {};
+    for (usize index {}; index < usize(N); ++index) target[index] = ParseNumber<T>(parts[index]);
     return true;
 }
 
@@ -140,8 +140,8 @@ auto ReadJsonValue(const Json& json, T& value) -> bool {
         using Value = typename JsonArrayTarget<T>::value_type;
         if (input.is_number()) {
             if constexpr (requires { T::LENGTH; }) {
-                for (usize index = 0; index < value.len(); ++index) value[index] = Value {};
-                if constexpr (T::LENGTH > 0) value[0] = ConvertNumber<Value>(input);
+                for (usize index {}; index < value.len(); ++index) value[index] = Value {};
+                if constexpr (T::LENGTH > 0) value[usize()] = ConvertNumber<Value>(input);
             } else {
                 value = { ConvertNumber<Value>(input) };
             }
@@ -154,6 +154,11 @@ auto ReadJsonValue(const Json& json, T& value) -> bool {
         auto boolean = input.as_bool();
         if (boolean.is_none()) throw WrongJsonType {};
         value = *boolean;
+        return true;
+    } else if constexpr (rstd::num::Numeric<T>) {
+        auto boolean = input.as_bool();
+        value        = boolean.is_some() ? rstd::as_cast<T>(static_cast<rstd::uint8_t>(*boolean))
+                                         : ConvertNumber<T>(input);
         return true;
     } else if constexpr (std::is_arithmetic_v<T>) {
         auto boolean = input.as_bool();
@@ -180,7 +185,7 @@ auto ReadJsonValue(const Json& json, T& value, const char* name, std::source_loc
                   std::string_view(loc.function_name()),
                   std::string_view(loc.file_name()),
                   loc.line(),
-                  Dump(json, 4));
+                  Dump(json, usize(4)));
     } catch (const std::invalid_argument& error) {
         rstd_error("{} {} at {} {}:{}",
                    std::string_view(error.what()),
@@ -218,7 +223,7 @@ template<typename T>
 typename JsonTemplateTypeCheck<T>::type GetJsonValue(const Json& json, std::string_view name_view,
                                                      T& value, bool warn,
                                                      std::source_location loc) {
-    auto member = json.get(name_view);
+    auto member = json.get(rstd::cppstd::as_str(name_view));
     if (member.is_none()) {
         if (warn)
             rstd_info("read json \"{}\" not a key at {}({}:{})",
@@ -250,6 +255,8 @@ typename JsonTemplateTypeCheck<T>::type GetJsonValue(const Json& json, std::stri
 OWE_IMPL_GET_JSON(bool);
 OWE_IMPL_GET_JSON(i32);
 OWE_IMPL_GET_JSON(u32);
+OWE_IMPL_GET_JSON(rstd::int32_t);
+OWE_IMPL_GET_JSON(rstd::uint32_t);
 OWE_IMPL_GET_JSON(float);
 OWE_IMPL_GET_JSON(double);
 OWE_IMPL_GET_JSON(std::string);

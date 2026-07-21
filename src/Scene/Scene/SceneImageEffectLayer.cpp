@@ -32,7 +32,7 @@ void ChangeMeshToUnitQuad(SceneMesh& target) {
     };
     // clang-format on
 
-    SceneVertexArray vertex(MakeAttrSet({ VAttr::Position, VAttr::TexCoord }), 4);
+    SceneVertexArray vertex(MakeAttrSet({ VAttr::Position, VAttr::TexCoord }), usize(4));
     vertex.SetVertex(WE_IN_POSITION, pos);
     vertex.SetVertex(WE_IN_TEXCOORD, tex_coord);
     mesh.AddVertexArray(std::move(vertex));
@@ -84,13 +84,13 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                 &(*it), EffectNodeResolveState { .output = it->output });
             auto& state = state_it->second;
             if (inserted) {
-                for (usize i = 0; i < material.textures.size(); ++i) {
+                for (std::size_t i = 0; i < material.textures.size(); ++i) {
                     if (sstart_with(material.textures[i], OWE_EFFECT_PPONG_PREFIX_A))
                         state.pingpong_input_slots.push_back(i);
                 }
             }
             it->output = state.output;
-            for (usize slot : state.pingpong_input_slots) {
+            for (std::size_t slot : state.pingpong_input_slots) {
                 if (slot < material.textures.size()) material.textures[slot] = ppong_a;
             }
 

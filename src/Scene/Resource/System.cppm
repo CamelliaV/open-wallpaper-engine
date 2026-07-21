@@ -94,7 +94,7 @@ struct ExternalResourcePreparer {
         auto PrepareExternal(resource::ExternalUseHandle       external_use,
                              resource::TextureUseHandle        source_use,
                              const vulkan::DeviceCapabilities& capabilities,
-                             FrameSurfaceLease lease, u32 graphics_queue_family)
+                             FrameSurfaceLease lease, rstd::uint32_t graphics_queue_family)
             -> Result<empty, resource::ResourceError> {
             return rstd::trait_call<0>(this,
                                        external_use,
@@ -275,8 +275,8 @@ public:
                 .message = rstd::format("pipeline descriptor layout unavailable"),
             });
         }
-        auto layout =
-            m_registries.DescriptorLayouts().Resolve((**pipeline).physical->descriptor_layouts[0]);
+        auto layout = m_registries.DescriptorLayouts().Resolve(
+            (**pipeline).physical->descriptor_layouts[usize()]);
         if (layout.is_none()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::MissingDefinition,
@@ -336,7 +336,8 @@ public:
     auto PrepareExternal(resource::ExternalUseHandle       external_use,
                          resource::TextureUseHandle        source_use,
                          const vulkan::DeviceCapabilities& capabilities, FrameSurfaceLease lease,
-                         u32 graphics_queue_family) -> Result<empty, resource::ResourceError> {
+                         rstd::uint32_t graphics_queue_family)
+        -> Result<empty, resource::ResourceError> {
         auto source = m_prepared.Resolve(source_use);
         if (source.is_none()) {
             return Err(resource::ResourceError {
@@ -455,7 +456,7 @@ struct Impl<owe::resource_registry::ExternalResourcePreparer,
     auto PrepareExternal(owe::resource::ExternalUseHandle       external_use,
                          owe::resource::TextureUseHandle        source_use,
                          const owe::vulkan::DeviceCapabilities& capabilities,
-                         owe::FrameSurfaceLease lease, u32 graphics_queue_family)
+                         owe::FrameSurfaceLease lease, rstd::uint32_t graphics_queue_family)
         -> Result<empty, owe::resource::ResourceError> {
         return this->self().PrepareExternal(
             external_use, source_use, capabilities, rstd::move(lease), graphics_queue_family);

@@ -12,7 +12,7 @@ FpsCounter::FpsCounter(): m_fps(0), m_frameCount(0), m_startTime(rstd::time::Ins
 
 namespace
 {
-constexpr auto timeout = rstd::time::Duration::from_secs(2);
+constexpr auto timeout = rstd::time::Duration::from_secs(u64(2));
 }
 
 void FpsCounter::RegisterFrame() {
@@ -21,9 +21,9 @@ void FpsCounter::RegisterFrame() {
 
     m_frameCount++;
     if (diff > timeout) {
-        m_fps        = u32(double(m_frameCount) / diff.as_secs_f64());
-        m_frameCount = 0;
+        m_fps        = u32(double(m_frameCount.to_primitive()) / diff.as_secs_f64());
+        m_frameCount = u32();
         m_startTime  = now;
-        std::cerr << m_fps << std::endl;
+        std::cerr << m_fps.to_primitive() << std::endl;
     }
 }

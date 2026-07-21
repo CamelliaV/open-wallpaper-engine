@@ -91,8 +91,8 @@ bool Emitter::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "controlpoint", controlpoint, false);
     owe::GetJsonValue(json, "duration", duration, false);
 
-    if (controlpoint >= 8) rstd_error("wrong controlpoint {}", controlpoint);
-    controlpoint = controlpoint % 8; // limited to 0-7
+    if (controlpoint >= i32(8)) rstd_error("wrong controlpoint {}", controlpoint);
+    controlpoint = controlpoint % i32(8); // limited to 0-7
 
     uint32_t _raw_flags { 0 };
     owe::GetJsonValue(json, "flags", _raw_flags, false);

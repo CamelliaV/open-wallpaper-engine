@@ -63,8 +63,8 @@ struct LinkTextureConsumer {
 
 static rg::TextureDesc MakeTextureDescBase(std::string_view key) {
     return rg::TextureDesc {
-        .name = String::make(rstd::ref<rstd::str>(key)),
-        .key  = String::make(rstd::ref<rstd::str>(key)),
+        .name = String::make(rstd::cppstd::as_str(key)),
+        .key  = String::make(rstd::cppstd::as_str(key)),
         .kind = IsSpecTex(key) ? rg::TextureKind::Temp : rg::TextureKind::Imported,
     };
 }
@@ -222,10 +222,11 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
             .binding = stored.binding.clone(),
             .desc    = CloneTextureDesc(stored.desc),
         };
-        auto link_key = GenLinkTex(static_cast<std::ptrdiff_t>(consumer.source_layer.value));
+        auto link_key =
+            GenLinkTex(static_cast<std::ptrdiff_t>(consumer.source_layer.value.to_primitive()));
         if (input.binding.name != rstd::cppstd::as_str(link_key)) {
             auto copy_desc        = CloneTextureDesc(input.desc);
-            copy_desc.key         = String::make(rstd::ref<rstd::str>(link_key));
+            copy_desc.key         = String::make(rstd::cppstd::as_str(link_key));
             copy_desc.name        = copy_desc.key.clone();
             input.desc            = CloneTextureDesc(copy_desc);
             input.ref             = AddCopyPass(extra, input.ref, Some(rstd::move(copy_desc)));
@@ -283,7 +284,7 @@ static void LoadGraphEffects(SceneImageEffectLayer* effs, Option<WallpaperLayerI
         auto cmdEnd  = eff->commands.end();
         int  nodePos = 0;
         for (auto& n : eff->nodes) {
-            if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos) {
+            if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos.to_primitive()) {
                 AddCopyPass(extra,
                             MakeTextureDesc(extra, cmdItor->src),
                             MakeTextureDesc(extra, cmdItor->dst));
@@ -326,10 +327,11 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         }
     }
 
-    for (u32 smi = 0; smi < mesh->Submeshes().size(); smi++) {
-        const auto& submesh = mesh->Submeshes()[smi];
-        if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) continue;
-        SceneMaterial* material = slots[submesh.material_slot].get();
+    for (std::size_t smi = 0; smi < mesh->Submeshes().size(); smi++) {
+        const auto& submesh       = mesh->Submeshes()[smi];
+        const auto  material_slot = static_cast<std::size_t>(submesh.material_slot);
+        if (material_slot >= slots.size() || ! slots[material_slot]) continue;
+        SceneMaterial* material = slots[material_slot].get();
         std::string    passName = material->name;
         // Per-submesh output override (clipping-mask submeshes write into a
         // shared RT that the main puppet pass samples via g_Texture8).
@@ -337,16 +339,17 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
             submesh.output_override.empty() ? output : std::string_view(submesh.output_override);
 
         rgraph.addPass<vulkan::CustomShaderPass>(
-            passName,
+            rstd::cppstd::as_str(passName),
             rg::PassNode::Type::CustomShader,
             [material, node, smi, pass_output, source_layer, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
                 const auto& pass       = builder.workPassNode();
                 pdesc.node             = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
-                pdesc.submesh_index    = smi;
+                pdesc.submesh_index    = u32(static_cast<rstd::uint32_t>(smi));
                 pdesc.graph_pass_index = pass.pass.index;
                 if (auto node_id = scene.ResourceIndex().nodeId(*node)) {
-                    if (auto draw_item = scene.ResourceIndex().drawItemFor(*node_id, smi)) {
+                    if (auto draw_item = scene.ResourceIndex().drawItemFor(
+                            *node_id, u32(static_cast<rstd::uint32_t>(smi)))) {
                         pdesc.draw_item = *draw_item;
                         if (extra.render_scene != nullptr) {
                             if (auto render_item = extra.render_scene->renderItemFor(*draw_item)) {
@@ -356,7 +359,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     }
                 }
                 pdesc.output = std::string(pass_output);
-                for (usize i = 0; i < material->textures.size(); i++) {
+                for (std::size_t i = 0; i < material->textures.size(); i++) {
                     const auto&                url = material->textures[i];
                     Option<rg::TextureNodeRef> input;
                     if (url.empty()) {
@@ -366,8 +369,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         auto id = ParseLinkTex(url);
                         extra.link_finalizer.addConsumer(
                             pass,
-                            WallpaperLayerId { .value = static_cast<i32>(id) },
-                            static_cast<u32>(i));
+                            WallpaperLayerId { .value = rstd::as_cast<i32>(id) },
+                            u32(static_cast<rstd::uint32_t>(i)));
                         pdesc.texture_bindings.emplace_back();
                         continue;
                     } else {
@@ -408,7 +411,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 rstd_assert(output_state.is_some());
                 if (output_state.is_none()) return;
                 const auto& output_rt          = scene.renderTargets.at(pass_output_s);
-                const bool  first_output_write = output_state->version == 0;
+                const bool  first_output_write = output_state->version == usize();
                 pdesc.output_use               = Some(output_state->use);
                 pdesc.output_request           = BuildGraphTextureRequest(extra, pass_output_s);
                 pdesc.samples                  = vulkan::TextureSampleCount(output_rt.sample_count);
@@ -430,7 +433,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 pdesc.transparent_clear = first_output_write && output_rt.clear_on_first_write;
                 pdesc.clear_output =
                     (first_output_write && output_rt.bind.screen) || pdesc.transparent_clear;
-                pdesc.preserve_output = output_state->version > 0 && output_rt.preserve_on_write;
+                pdesc.preserve_output =
+                    output_state->version > usize() && output_rt.preserve_on_write;
                 const bool uses_depth =
                     output_rt.withDepth && vulkan::UsesDepthAttachment(*material);
                 pdesc.has_depth_attachment = uses_depth;
@@ -464,7 +468,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 }
                 if (IsSpecLinkTex(pass_output)) {
                     extra.link_finalizer.recordSource(
-                        WallpaperLayerId { .value = static_cast<i32>(ParseLinkTex(pass_output)) },
+                        WallpaperLayerId { .value = rstd::as_cast<i32>(ParseLinkTex(pass_output)) },
                         CaptureTextureOutput(extra, output_node));
                 }
             });
@@ -487,7 +491,7 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32
     const i32  layer_id    = link_source.is_some() ? link_source->value : nid;
     const bool linked      = link_source.is_some() && linked_ids.count(link_source->value) != 0;
     const bool visibility_hidden_self =
-        layer_id >= 0 && scene.visibility_elidable_layer_ids.count(layer_id) != 0 && ! linked;
+        layer_id >= i32() && scene.visibility_elidable_layer_ids.count(layer_id) != 0 && ! linked;
     const bool visibility_hidden = visibility_hidden_ancestor || visibility_hidden_self;
 
     bool all_children_skippable = true;
@@ -497,7 +501,7 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32
     }
     const bool self_skippable =
         ! linked &&
-        (visibility_hidden || (layer_id >= 0 && scene.elidable_layer_ids.count(layer_id) != 0));
+        (visibility_hidden || (layer_id >= i32() && scene.elidable_layer_ids.count(layer_id) != 0));
     if (self_skippable && all_children_skippable) {
         out_skip.insert(node);
         return true;
@@ -511,7 +515,7 @@ static bool ShouldSkipNoRuntimeEffect(SceneNode* node, Scene& scene) {
     if (camera_it == scene.cameras.end() || ! camera_it->second->HasImgEffect()) return false;
     const auto& effect_layer = camera_it->second->GetImgEffect();
     return effect_layer && effect_layer->SkipWhenNoRuntimeEffect() &&
-           effect_layer->EffectCount() > 0 && ! effect_layer->HasRuntimeVisibleEffect();
+           effect_layer->EffectCount() > usize() && ! effect_layer->HasRuntimeVisibleEffect();
 }
 
 static void ConfigureNestedOutput(SceneNode* node, std::string_view output,

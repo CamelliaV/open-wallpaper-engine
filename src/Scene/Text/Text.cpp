@@ -66,7 +66,7 @@ std::uint64_t HashBlob(std::span<const std::byte> blob) {
     // (we cache per-pixel-size below the blob).
     std::uint64_t h = 1469598103934665603ull;
     for (std::byte b : blob) {
-        h ^= static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(b));
+        h ^= static_cast<std::uint64_t>(static_cast<std::uint8_t>(b));
         h *= 1099511628211ull;
     }
     return h;
@@ -566,8 +566,8 @@ std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face, const std::str
     auto img = std::make_shared<owe::Image>();
     img->key = key;
 
-    img->header.width         = static_cast<owe::i32>(fm.atlas_w);
-    img->header.height        = static_cast<owe::i32>(fm.atlas_h);
+    img->header.width         = static_cast<std::int32_t>(fm.atlas_w);
+    img->header.height        = static_cast<std::int32_t>(fm.atlas_h);
     img->header.mapWidth      = img->header.width;
     img->header.mapHeight     = img->header.height;
     img->header.mipmap_larger = false;
@@ -695,7 +695,7 @@ std::shared_ptr<owe::SceneShader> CompileInlineShader(std::string_view name,
     }
 
     auto shader  = std::make_shared<owe::SceneShader>();
-    shader->id   = 0;
+    shader->id   = owe::u32();
     shader->name = std::string(name);
     shader->codes.reserve(spvs.size());
     for (auto& spv : spvs) {
@@ -731,9 +731,12 @@ std::shared_ptr<owe::SceneShader> GetTextCopyBackgroundSceneShader() {
 auto TextUniformSource::Describe(rstd::mut_ref<rstd::dyn<UniformBindingSink>> sink) const
     -> rstd::Result<rstd::empty, UniformError> {
     auto bind = [&](TextUniformOutput output, std::string_view name) {
-        return sink->Bind(UniformOutputId { .value = static_cast<rstd::u32>(output) },
-                          name,
-                          UniformValueShape::Float(16));
+        return sink->Bind(
+            UniformOutputId {
+                .value = rstd::u32(static_cast<rstd::uint32_t>(output)),
+            },
+            name,
+            UniformValueShape::Float(rstd::u32(16)));
     };
     auto model = bind(TextUniformOutput::ModelViewProjection, G_MVP);
     if (model.is_err()) return rstd::Err(rstd::move(model).unwrap_err_unchecked());
@@ -754,7 +757,9 @@ auto TextUniformSource::Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
 
     auto write = [&](TextUniformOutput      output,
                      const Eigen::Matrix4d& matrix) -> rstd::Result<rstd::empty, UniformError> {
-        const auto id = UniformOutputId { .value = static_cast<rstd::u32>(output) };
+        const auto id = UniformOutputId {
+            .value = rstd::u32(static_cast<rstd::uint32_t>(output)),
+        };
         if (! sink->Wants(id)) return rstd::Ok(rstd::empty {});
         const auto value = UniformValue(ShaderValue::fromMatrix(matrix));
         return sink->Write(id, value.View());
@@ -771,12 +776,13 @@ auto TextUniformSource::Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
     projection_node.UpdateTrans();
     Eigen::Matrix4d effect_model = projection_node.ModelTrans();
     const auto&     size         = m_state->effect_projection->size;
-    if (size[0] > 0.0f && size[1] > 0.0f) {
+    if (size[rstd::usize(0)] > 0.0f && size[rstd::usize(1)] > 0.0f) {
         effect_model =
-            effect_model * Eigen::Affine3d(Eigen::Scaling(static_cast<rstd::f64>(size[0]) * 0.5,
-                                                          static_cast<rstd::f64>(size[1]) * 0.5,
-                                                          1.0))
-                               .matrix();
+            effect_model *
+            Eigen::Affine3d(Eigen::Scaling(static_cast<double>(size[rstd::usize(0)]) * 0.5,
+                                           static_cast<double>(size[rstd::usize(1)]) * 0.5,
+                                           1.0))
+                .matrix();
     }
     const Eigen::Matrix4d effect_view = m_state->active_camera
                                             ? m_state->active_camera->GetViewProjectionMatrix()
@@ -1160,16 +1166,16 @@ void TextLayouter::SetText(std::string_view utf8) {
 
     // Push into the mesh. Vertex array's stride is interleaved with padding
     // already laid out by SceneVertexArray; SetVertex scatters by name.
-    auto& v = im.mesh->GetVertexArray(0);
+    auto& v = im.mesh->GetVertexArray(rstd::usize());
     v.SetVertex(WE_IN_POSITION, im.positions);
     v.SetVertex(WE_IN_TEXCOORD, im.texcoords);
     v.SetVertex(WE_IN_COLOR, im.colors);
 
-    auto& idx = im.mesh->GetIndexArray(0);
-    idx.Assign(0, im.indices);
+    auto& idx = im.mesh->GetIndexArray(rstd::usize());
+    idx.Assign(rstd::usize(), im.indices);
     // Render only the indices we actually populated (rest are zeroed out
     // and reference vertex 0, which is harmless but wastes draw calls).
-    idx.SetRenderDataCount(q * 6);
+    idx.SetRenderDataCount(rstd::usize(q * 6));
 
     im.mesh->SetDirty();
 }

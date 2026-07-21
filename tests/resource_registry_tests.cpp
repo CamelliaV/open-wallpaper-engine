@@ -45,7 +45,7 @@ struct BufferUploadBackend {
         -> rstd::Option<owe::vulkan::BufferAllocation> {
         ++uploads;
         last_request = request;
-        if (request.size == 0 || request.size < content.len()) return rstd::None();
+        if (request.size == 0 || request.size < content.len().to_primitive()) return rstd::None();
         return rstd::Some(owe::vulkan::BufferAllocation {});
     }
 
@@ -55,22 +55,23 @@ struct BufferUploadBackend {
     }
 };
 
-auto ShaderRequest(rstd::u64 version) -> owe::resource::ShaderRequest {
+auto ShaderRequest(rstd::uint64_t version) -> owe::resource::ShaderRequest {
     return owe::resource::ShaderRequest {
         .name = rstd::string::String::make(rstd::cppstd::as_str("sprite")),
         .source =
             owe::resource::ShaderDefinitionId {
-                .index      = 3,
-                .generation = 1,
+                .index      = rstd::u32(3),
+                .generation = rstd::u64(1),
             },
-        .content_version = version,
+        .content_version = rstd::u64(version),
     };
 }
 
-auto TextureAllocation(rstd::u64 generation) -> rstd::sync::Arc<owe::vulkan::TextureAllocation> {
+auto TextureAllocation(rstd::uint64_t generation)
+    -> rstd::sync::Arc<owe::vulkan::TextureAllocation> {
     owe::vulkan::ImageSlots slots;
     slots.slots.resize(1);
-    slots.slots[0].generation = generation;
+    slots.slots[0].generation = rstd::u64(generation);
     return rstd::sync::Arc<owe::vulkan::TextureAllocation>::make(rstd::move(slots));
 }
 
@@ -82,12 +83,12 @@ TEST(TextureRegistry, OwnsLogicalEntriesBehindGenerationalHandles) {
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
         .name       = rstd::string::String::make(rstd::cppstd::as_str("frame")),
         .definition = rstd::Some(owe::resource::TextureDefinition {
-            .width  = 256,
-            .height = 128,
+            .width  = rstd::i32(256),
+            .height = rstd::i32(128),
         }),
     });
     ASSERT_TRUE(handle.Valid());
-    EXPECT_EQ(registry.Size(), 1u);
+    EXPECT_EQ(registry.Size(), rstd::usize(1));
 
     auto found = registry.Find(owe::resource::TextureRequestKind::RenderTarget,
                                rstd::cppstd::as_str("frame"));
@@ -97,26 +98,26 @@ TEST(TextureRegistry, OwnsLogicalEntriesBehindGenerationalHandles) {
     auto entry = registry.ResolveTexture(handle);
     ASSERT_TRUE(entry.is_some());
     EXPECT_EQ(rstd::cppstd::as_string_view((**entry).request.name.as_str()), "frame");
-    EXPECT_EQ((**entry).definition_version, 1u);
+    EXPECT_EQ((**entry).definition_version, rstd::u64(1));
 
     auto resized = registry.Register(owe::resource::TextureRequest {
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
         .name       = rstd::string::String::make(rstd::cppstd::as_str("frame")),
         .definition = rstd::Some(owe::resource::TextureDefinition {
-            .width  = 512,
-            .height = 128,
+            .width  = rstd::i32(512),
+            .height = rstd::i32(128),
         }),
     });
     EXPECT_EQ(resized, handle);
     entry = registry.ResolveTexture(handle);
     ASSERT_TRUE(entry.is_some());
-    EXPECT_EQ((**entry).definition_version, 2u);
+    EXPECT_EQ((**entry).definition_version, rstd::u64(2));
 
     auto view  = rstd::dyn<owe::resource::TextureLogicalRegistryView>::from_ref(registry);
     auto state = view->ResolveTextureState(handle);
     ASSERT_TRUE(state.is_some());
-    EXPECT_EQ(state->definition_version, 2u);
-    EXPECT_EQ(state->content_version, 1u);
+    EXPECT_EQ(state->definition_version, rstd::u64(2));
+    EXPECT_EQ(state->content_version, rstd::u64(1));
 }
 
 TEST(TextureRegistry, InvalidatesOldHandlesOnReset) {
@@ -131,7 +132,7 @@ TEST(TextureRegistry, InvalidatesOldHandlesOnReset) {
 
     EXPECT_GT(registry.Generation(), generation);
     EXPECT_TRUE(registry.ResolveTexture(handle).is_none());
-    EXPECT_EQ(registry.Size(), 0u);
+    EXPECT_EQ(registry.Size(), rstd::usize());
 }
 
 TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
@@ -140,31 +141,31 @@ TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
         .name       = rstd::string::String::make(rstd::cppstd::as_str("frame")),
         .definition = rstd::Some(owe::resource::TextureDefinition {
-            .width  = 256,
-            .height = 128,
+            .width  = rstd::i32(256),
+            .height = rstd::i32(128),
         }),
     });
 
     auto allocation = TextureAllocation(7);
-    auto first =
-        registry.Publish(handle, allocation.clone(), owe::resource::ReadyToken { .value = 3 });
+    auto first      = registry.Publish(
+        handle, allocation.clone(), owe::resource::ReadyToken { .value = rstd::u64(3) });
     ASSERT_TRUE(first.is_some());
-    EXPECT_EQ(*first, 1u);
+    EXPECT_EQ(*first, rstd::u64(1));
 
-    auto same =
-        registry.Publish(handle, allocation.clone(), owe::resource::ReadyToken { .value = 4 });
+    auto same = registry.Publish(
+        handle, allocation.clone(), owe::resource::ReadyToken { .value = rstd::u64(4) });
     ASSERT_TRUE(same.is_some());
-    EXPECT_EQ(*same, 1u);
+    EXPECT_EQ(*same, rstd::u64(1));
 
-    auto replaced =
-        registry.Publish(handle, TextureAllocation(8), owe::resource::ReadyToken { .value = 5 });
+    auto replaced = registry.Publish(
+        handle, TextureAllocation(8), owe::resource::ReadyToken { .value = rstd::u64(5) });
     ASSERT_TRUE(replaced.is_some());
-    EXPECT_EQ(*replaced, 2u);
+    EXPECT_EQ(*replaced, rstd::u64(2));
 
     auto physical = registry.Resolve(handle);
     ASSERT_TRUE(physical.is_some());
-    EXPECT_EQ((**physical).generation, 2u);
-    EXPECT_EQ((**physical).ready.value, 5u);
+    EXPECT_EQ((**physical).generation, rstd::u64(2));
+    EXPECT_EQ((**physical).ready.value, rstd::u64(5));
 }
 
 TEST(ShaderRegistry, OwnsVersionedArtifactsBehindStableHandles) {
@@ -175,20 +176,20 @@ TEST(ShaderRegistry, OwnsVersionedArtifactsBehindStableHandles) {
     auto first = registry.Ensure(ShaderRequest(4), object);
     ASSERT_TRUE(first.is_ok());
     auto handle = rstd::move(first).unwrap_unchecked();
-    EXPECT_EQ(provider.loads, 1u);
+    EXPECT_EQ(provider.loads, rstd::usize(1));
 
     auto same = registry.Ensure(ShaderRequest(4), object);
     ASSERT_TRUE(same.is_ok());
     EXPECT_EQ(rstd::move(same).unwrap_unchecked(), handle);
-    EXPECT_EQ(provider.loads, 1u);
+    EXPECT_EQ(provider.loads, rstd::usize(1));
 
     auto changed = registry.Ensure(ShaderRequest(5), object);
     ASSERT_TRUE(changed.is_ok());
     EXPECT_EQ(rstd::move(changed).unwrap_unchecked(), handle);
-    EXPECT_EQ(provider.loads, 2u);
+    EXPECT_EQ(provider.loads, rstd::usize(2));
     auto entry = registry.Resolve(handle);
     ASSERT_TRUE(entry.is_some());
-    EXPECT_EQ((**entry).physical->physical_generation, 2u);
+    EXPECT_EQ((**entry).physical->physical_generation, rstd::u64(2));
 
     registry.Reset();
     EXPECT_TRUE(registry.Resolve(handle).is_none());
@@ -197,22 +198,22 @@ TEST(ShaderRegistry, OwnsVersionedArtifactsBehindStableHandles) {
 TEST(BufferRegistry, OwnsLogicalDefinitionsBehindStableHandles) {
     owe::resource_registry::BufferRegistry registry;
     auto                                   first = registry.Declare(owe::resource::BufferRequest {
-        .name            = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
-        .definition      = { .size = 128, .usage = owe::resource::BufferUsage::Vertex },
-        .content_version = 3,
+        .name       = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
+        .definition = { .size = rstd::usize(128), .usage = owe::resource::BufferUsage::Vertex },
+        .content_version = rstd::u64(3),
     });
     ASSERT_TRUE(first.Valid());
 
     auto changed = registry.Declare(owe::resource::BufferRequest {
-        .name            = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
-        .definition      = { .size = 256, .usage = owe::resource::BufferUsage::Vertex },
-        .content_version = 4,
+        .name       = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
+        .definition = { .size = rstd::usize(256), .usage = owe::resource::BufferUsage::Vertex },
+        .content_version = rstd::u64(4),
     });
     EXPECT_EQ(changed, first);
     auto entry = registry.ResolveBuffer(first);
     ASSERT_TRUE(entry.is_some());
-    EXPECT_EQ((**entry).definition_version, 2u);
-    EXPECT_EQ((**entry).content_version, 2u);
+    EXPECT_EQ((**entry).definition_version, rstd::u64(2));
+    EXPECT_EQ((**entry).content_version, rstd::u64(2));
 
     registry.Reset();
     EXPECT_TRUE(registry.ResolveBuffer(first).is_none());
@@ -227,7 +228,9 @@ TEST(BufferRegistry, UpdatesDynamicContentWithoutReplacingItsPlannedCapacity) {
     content.push(rstd::u8(2));
     auto request = owe::resource::BufferRequest {
         .name       = rstd::string::String::make(rstd::cppstd::as_str("dynamic-vertices")),
-        .definition = { .size = 128, .usage = owe::resource::BufferUsage::Vertex, .alignment = 16 },
+        .definition = { .size      = rstd::usize(128),
+                        .usage     = owe::resource::BufferUsage::Vertex,
+                        .alignment = rstd::usize(16) },
         .lifetime   = owe::resource::BufferLifetimeClass::Dynamic,
     };
 
@@ -239,12 +242,13 @@ TEST(BufferRegistry, UpdatesDynamicContentWithoutReplacingItsPlannedCapacity) {
     EXPECT_EQ(upload_backend.last_request.usage, owe::vulkan::BufferUploadClass::Vertex);
 
     content.push(rstd::u8(3));
-    auto updated = registry.Update(buffer.resource, content.as_slice(), 2, upload.as_mut_ref());
+    auto updated =
+        registry.Update(buffer.resource, content.as_slice(), rstd::u64(2), upload.as_mut_ref());
     ASSERT_TRUE(updated.is_ok());
-    EXPECT_EQ(upload_backend.updates, 1u);
+    EXPECT_EQ(upload_backend.updates, rstd::usize(1));
     auto physical = registry.Resolve(buffer.resource);
     ASSERT_TRUE(physical.is_some());
-    EXPECT_EQ((**physical).source_generation, 2u);
+    EXPECT_EQ((**physical).source_generation, rstd::u64(2));
 }
 
 TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
@@ -258,18 +262,21 @@ TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
     auto buffer = rstd::dyn<owe::resource::BufferContentProvider>::from_ref(buffer_provider);
     auto shader = rstd::dyn<owe::resource::ShaderArtifactProvider>::from_ref(shader_provider);
 
-    owe::resource::ResourcePlan plan { .generation = 12 };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(12) };
     plan.buffers.push(owe::resource::BufferPlanEntry {
-        .handle = owe::resource::BufferUseHandle { .index = 3, .generation = 12 },
+        .handle =
+            owe::resource::BufferUseHandle { .index = rstd::u64(3), .generation = rstd::u64(12) },
         .request =
             owe::resource::BufferRequest {
                 .name            = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
-                .definition      = { .size = 2, .usage = owe::resource::BufferUsage::Vertex },
-                .content_version = 4,
+                .definition      = { .size  = rstd::usize(2),
+                                     .usage = owe::resource::BufferUsage::Vertex },
+                .content_version = rstd::u64(4),
             },
     });
     plan.shaders.push(owe::resource::ShaderPlanEntry {
-        .handle  = owe::resource::ShaderUseHandle { .index = 7, .generation = 12 },
+        .handle =
+            owe::resource::ShaderUseHandle { .index = rstd::u64(7), .generation = rstd::u64(12) },
         .request = ShaderRequest(5),
     });
 
@@ -287,22 +294,24 @@ TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
 
     ASSERT_TRUE(prepared.is_ok());
     auto table = rstd::move(prepared).unwrap_unchecked();
-    EXPECT_EQ(table.Generation(), 12u);
-    EXPECT_EQ(table.BufferCount(), 1u);
-    EXPECT_EQ(table.ShaderCount(), 1u);
-    EXPECT_EQ(buffer_provider.loads, 1u);
-    EXPECT_EQ(upload_backend.uploads, 1u);
-    EXPECT_EQ(shader_provider.loads, 1u);
+    EXPECT_EQ(table.Generation(), rstd::u64(12));
+    EXPECT_EQ(table.BufferCount(), rstd::usize(1));
+    EXPECT_EQ(table.ShaderCount(), rstd::usize(1));
+    EXPECT_EQ(buffer_provider.loads, rstd::usize(1));
+    EXPECT_EQ(upload_backend.uploads, rstd::usize(1));
+    EXPECT_EQ(shader_provider.loads, rstd::usize(1));
 }
 
 TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {
-    owe::resource_registry::PreparedResourceTable table(9);
-    auto use        = owe::resource::TextureUseHandle { .index = 4, .generation = 9 };
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(9));
+    auto                                          use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(4), .generation = rstd::u64(9) };
     auto allocation = TextureAllocation(11);
 
     EXPECT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
-        .use      = use,
-        .resource = owe::resource::TextureHandle { .index = 2, .generation = 1 },
+        .use = use,
+        .resource =
+            owe::resource::TextureHandle { .index = rstd::u64(2), .generation = rstd::u64(1) },
         .request =
             owe::resource::TextureRequest {
                 .kind = owe::resource::TextureRequestKind::Imported,
@@ -310,30 +319,32 @@ TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {
             },
         .physical            = allocation.clone(),
         .image               = allocation->View(),
-        .physical_generation = 3,
-        .ready               = owe::resource::ReadyToken { .value = 8 },
+        .physical_generation = rstd::u64(3),
+        .ready               = owe::resource::ReadyToken { .value = rstd::u64(8) },
     }));
 
     auto prepared = table.Resolve(use);
     ASSERT_TRUE(prepared.is_some());
-    EXPECT_EQ(table.Generation(), 9u);
-    EXPECT_EQ(table.TextureCount(), 1u);
-    EXPECT_EQ((**prepared).image.getActive().generation, 11u);
-    EXPECT_EQ((**prepared).physical_generation, 3u);
+    EXPECT_EQ(table.Generation(), rstd::u64(9));
+    EXPECT_EQ(table.TextureCount(), rstd::usize(1));
+    EXPECT_EQ((**prepared).image.getActive().generation, rstd::u64(11));
+    EXPECT_EQ((**prepared).physical_generation, rstd::u64(3));
     auto leases = table.Leases();
-    ASSERT_EQ(leases.textures.len(), 1u);
-    EXPECT_EQ(leases.textures[0].resource.index, 2u);
-    EXPECT_EQ(leases.textures[0].physical_generation, 3u);
+    ASSERT_EQ(leases.textures.len(), rstd::usize(1));
+    EXPECT_EQ(leases.textures[rstd::usize()].resource.index, rstd::u64(2));
+    EXPECT_EQ(leases.textures[rstd::usize()].physical_generation, rstd::u64(3));
 }
 
 TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
-    owe::resource_registry::PreparedResourceTable table(4);
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(4));
 
     auto texture_physical = TextureAllocation(2);
-    auto texture_use      = owe::resource::TextureUseHandle { .index = 0, .generation = 4 };
+    auto texture_use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(), .generation = rstd::u64(4) };
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
-        .use      = texture_use,
-        .resource = owe::resource::TextureHandle { .index = 10, .generation = 2 },
+        .use = texture_use,
+        .resource =
+            owe::resource::TextureHandle { .index = rstd::u64(10), .generation = rstd::u64(2) },
         .request =
             owe::resource::TextureRequest {
                 .kind = owe::resource::TextureRequestKind::Imported,
@@ -347,48 +358,59 @@ TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
         owe::vulkan::BufferAllocation {},
         rstd::u64(3),
         rstd::u64(7),
-        owe::resource::ReadyToken { .value = 7 });
-    auto buffer_use = owe::resource::BufferUseHandle { .index = 1, .generation = 4 };
+        owe::resource::ReadyToken { .value = rstd::u64(7) });
+    auto buffer_use =
+        owe::resource::BufferUseHandle { .index = rstd::u64(1), .generation = rstd::u64(4) };
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedBufferUse {
         .use = buffer_use,
         .buffer =
             owe::resource_registry::PreparedBuffer {
-                .resource = owe::resource::BufferHandle { .index = 11, .generation = 2 },
+                .resource = owe::resource::BufferHandle { .index      = rstd::u64(11),
+                                                          .generation = rstd::u64(2) },
                 .physical = buffer_physical.clone(),
             },
     }));
 
     auto shader_physical = rstd::sync::Arc<owe::resource_registry::ShaderPhysical>::make(
         owe::resource::ShaderArtifact {}, rstd::u64(5));
-    auto shader_use = owe::resource::ShaderUseHandle { .index = 2, .generation = 4 };
+    auto shader_use =
+        owe::resource::ShaderUseHandle { .index = rstd::u64(2), .generation = rstd::u64(4) };
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedShaderUse {
         .use = shader_use,
         .shader =
             owe::resource_registry::PreparedShader {
-                .resource = owe::resource::ShaderHandle { .index = 12, .generation = 2 },
+                .resource = owe::resource::ShaderHandle { .index      = rstd::u64(12),
+                                                          .generation = rstd::u64(2) },
                 .physical = shader_physical.clone(),
             },
     }));
 
     auto pipeline = rstd::sync::Arc<owe::resource_registry::PipelineResourceEntry>::make();
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedPipeline {
-        .use      = owe::resource::PipelineUseHandle { .index = 3, .generation = 4 },
-        .resource = owe::resource::PipelineHandle { .index = 13, .generation = 2 },
+        .use =
+            owe::resource::PipelineUseHandle { .index = rstd::u64(3), .generation = rstd::u64(4) },
+        .resource =
+            owe::resource::PipelineHandle { .index = rstd::u64(13), .generation = rstd::u64(2) },
         .physical = pipeline.clone(),
     }));
     auto render_pass = rstd::sync::Arc<vvk::RenderPass>::make();
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedRenderPass {
-        .use      = owe::resource::RenderPassUseHandle { .index = 4, .generation = 4 },
-        .resource = owe::resource::RenderPassHandle { .index = 14, .generation = 2 },
+        .use = owe::resource::RenderPassUseHandle { .index      = rstd::u64(4),
+                                                    .generation = rstd::u64(4) },
+        .resource =
+            owe::resource::RenderPassHandle { .index = rstd::u64(14), .generation = rstd::u64(2) },
         .physical = render_pass.clone(),
     }));
     auto framebuffer = rstd::sync::Arc<vvk::Framebuffer>::make();
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedFramebuffer {
-        .use      = owe::resource::FramebufferUseHandle { .index = 5, .generation = 4 },
-        .resource = owe::resource::FramebufferHandle { .index = 15, .generation = 2 },
+        .use = owe::resource::FramebufferUseHandle { .index      = rstd::u64(5),
+                                                     .generation = rstd::u64(4) },
+        .resource =
+            owe::resource::FramebufferHandle { .index = rstd::u64(15), .generation = rstd::u64(2) },
         .physical = framebuffer.clone(),
     }));
-    auto external_use = owe::resource::ExternalUseHandle { .index = 6, .generation = 4 };
+    auto external_use =
+        owe::resource::ExternalUseHandle { .index = rstd::u64(6), .generation = rstd::u64(4) };
     table.Insert(owe::resource_registry::PreparedExternalUse {
         .use   = external_use,
         .frame = owe::resource_registry::PreparedExternalFrame {},
@@ -399,31 +421,31 @@ TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
     ASSERT_TRUE(table.Resolve(shader_use).is_some());
     ASSERT_TRUE(table.Resolve(external_use).is_some());
     auto leases = table.Leases();
-    EXPECT_EQ(leases.textures.len(), 1u);
-    EXPECT_EQ(leases.buffers.len(), 1u);
-    EXPECT_EQ(leases.shaders.len(), 1u);
-    EXPECT_EQ(leases.pipelines.len(), 1u);
-    EXPECT_EQ(leases.render_passes.len(), 1u);
-    EXPECT_EQ(leases.framebuffers.len(), 1u);
-    EXPECT_EQ(leases.externals.len(), 1u);
-    EXPECT_EQ(texture_physical.strong_count(), 3u);
-    EXPECT_EQ(buffer_physical.strong_count(), 3u);
-    EXPECT_EQ(shader_physical.strong_count(), 3u);
-    EXPECT_EQ(pipeline.strong_count(), 3u);
-    EXPECT_EQ(render_pass.strong_count(), 3u);
-    EXPECT_EQ(framebuffer.strong_count(), 3u);
+    EXPECT_EQ(leases.textures.len(), rstd::usize(1));
+    EXPECT_EQ(leases.buffers.len(), rstd::usize(1));
+    EXPECT_EQ(leases.shaders.len(), rstd::usize(1));
+    EXPECT_EQ(leases.pipelines.len(), rstd::usize(1));
+    EXPECT_EQ(leases.render_passes.len(), rstd::usize(1));
+    EXPECT_EQ(leases.framebuffers.len(), rstd::usize(1));
+    EXPECT_EQ(leases.externals.len(), rstd::usize(1));
+    EXPECT_EQ(texture_physical.strong_count(), rstd::usize(3));
+    EXPECT_EQ(buffer_physical.strong_count(), rstd::usize(3));
+    EXPECT_EQ(shader_physical.strong_count(), rstd::usize(3));
+    EXPECT_EQ(pipeline.strong_count(), rstd::usize(3));
+    EXPECT_EQ(render_pass.strong_count(), rstd::usize(3));
+    EXPECT_EQ(framebuffer.strong_count(), rstd::usize(3));
 
     owe::resource_registry::SubmissionTracker submissions;
     auto                                      completion = submissions.Begin(table);
     ASSERT_TRUE(completion.Valid());
     auto submitted = submissions.Complete(completion);
     ASSERT_TRUE(submitted.is_some());
-    EXPECT_EQ(submitted->textures.len(), 1u);
-    EXPECT_EQ(submitted->buffers.len(), 1u);
-    EXPECT_EQ(submitted->shaders.len(), 1u);
-    EXPECT_EQ(submitted->pipelines.len(), 1u);
-    EXPECT_EQ(submitted->render_passes.len(), 1u);
-    EXPECT_EQ(submitted->framebuffers.len(), 1u);
+    EXPECT_EQ(submitted->textures.len(), rstd::usize(1));
+    EXPECT_EQ(submitted->buffers.len(), rstd::usize(1));
+    EXPECT_EQ(submitted->shaders.len(), rstd::usize(1));
+    EXPECT_EQ(submitted->pipelines.len(), rstd::usize(1));
+    EXPECT_EQ(submitted->render_passes.len(), rstd::usize(1));
+    EXPECT_EQ(submitted->framebuffers.len(), rstd::usize(1));
 }
 
 TEST(DescriptorLayoutRegistry, CanonicalizesBindingOrder) {
@@ -480,7 +502,7 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     owe::resource_registry::DescriptorSystem descriptors;
     auto images = rstd::vec::Vec<owe::resource_registry::DescriptorImageBinding>::make();
     owe::vulkan::ImageParameters image;
-    image.generation = 17;
+    image.generation = rstd::u64(17);
     images.push(owe::resource_registry::DescriptorImageBinding {
         .binding = 2,
         .image   = image,
@@ -495,9 +517,9 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     auto handle = prepared.handle;
 
     EXPECT_TRUE(handle.Valid());
-    EXPECT_EQ(prepared.images.len(), 1u);
-    EXPECT_EQ(prepared.images[0].binding, 2u);
-    EXPECT_EQ(prepared.images[0].image.generation, 17u);
+    EXPECT_EQ(prepared.images.len(), rstd::usize(1));
+    EXPECT_EQ(prepared.images[rstd::usize()].binding, 2u);
+    EXPECT_EQ(prepared.images[rstd::usize()].image.generation, rstd::u64(17));
     ASSERT_TRUE(prepared.buffer.is_some());
     EXPECT_EQ(prepared.buffer->offset, 64u);
     EXPECT_EQ(prepared.buffer->size, 128u);
@@ -506,33 +528,34 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
     EXPECT_TRUE(table.Insert(rstd::move(prepared)));
     auto resolved = table.Resolve(handle);
     ASSERT_TRUE(resolved.is_some());
-    EXPECT_EQ(table.DescriptorCount(), 1u);
-    EXPECT_EQ((**resolved).images[0].image.generation, 17u);
+    EXPECT_EQ(table.DescriptorCount(), rstd::usize(1));
+    EXPECT_EQ((**resolved).images[rstd::usize()].image.generation, rstd::u64(17));
 
     owe::resource_registry::SubmissionTracker submissions;
     auto                                      completion = submissions.Begin(table);
     EXPECT_TRUE(completion.Valid());
-    EXPECT_EQ(submissions.InFlight(), 1u);
+    EXPECT_EQ(submissions.InFlight(), rstd::usize(1));
     auto completed = submissions.Complete(completion);
     ASSERT_TRUE(completed.is_some());
-    EXPECT_EQ(completed->program_generation, 0u);
-    EXPECT_EQ(completed->descriptors.len(), 1u);
-    EXPECT_EQ(submissions.InFlight(), 0u);
+    EXPECT_EQ(completed->program_generation, rstd::u64());
+    EXPECT_EQ(completed->descriptors.len(), rstd::usize(1));
+    EXPECT_EQ(submissions.InFlight(), rstd::usize());
 }
 
 TEST(UploadScheduler, TracksTimelineReadiness) {
     owe::resource_registry::UploadScheduler       uploads;
-    owe::resource_registry::PreparedResourceTable table(1);
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(1));
     auto physical = rstd::sync::Arc<owe::resource_registry::BufferPhysical>::make(
         owe::vulkan::BufferAllocation {},
         rstd::u64(1),
         rstd::u64(1),
-        owe::resource::ReadyToken { .value = 1 });
+        owe::resource::ReadyToken { .value = rstd::u64(1) });
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedBufferUse {
-        .use = owe::resource::BufferUseHandle { .index = 0, .generation = 1 },
+        .use = owe::resource::BufferUseHandle { .index = rstd::u64(), .generation = rstd::u64(1) },
         .buffer =
             owe::resource_registry::PreparedBuffer {
-                .resource = owe::resource::BufferHandle { .index = 0, .generation = 1 },
+                .resource = owe::resource::BufferHandle { .index      = rstd::u64(),
+                                                          .generation = rstd::u64(1) },
                 .physical = physical.clone(),
             },
     }));
@@ -541,28 +564,29 @@ TEST(UploadScheduler, TracksTimelineReadiness) {
     EXPECT_LT(first.value, second.value);
     EXPECT_TRUE(uploads.MarkSubmitted(first, table));
     EXPECT_TRUE(uploads.MarkSubmitted(second, table));
-    EXPECT_EQ(physical.strong_count(), 4u);
+    EXPECT_EQ(physical.strong_count(), rstd::usize(4));
     ASSERT_TRUE(uploads.Pending().is_some());
     EXPECT_EQ(uploads.Pending()->value, second.value);
-    EXPECT_EQ(uploads.InFlight(), 2u);
+    EXPECT_EQ(uploads.InFlight(), rstd::usize(2));
 
     uploads.CompleteThrough(first.value);
-    EXPECT_EQ(physical.strong_count(), 3u);
-    EXPECT_EQ(uploads.InFlight(), 1u);
+    EXPECT_EQ(physical.strong_count(), rstd::usize(3));
+    EXPECT_EQ(uploads.InFlight(), rstd::usize(1));
     EXPECT_EQ(uploads.Pending()->value, second.value);
     uploads.CompleteThrough(second.value);
-    EXPECT_EQ(physical.strong_count(), 2u);
-    EXPECT_EQ(uploads.InFlight(), 0u);
+    EXPECT_EQ(physical.strong_count(), rstd::usize(2));
+    EXPECT_EQ(uploads.InFlight(), rstd::usize());
     EXPECT_TRUE(uploads.Pending().is_none());
 }
 
 TEST(ResourceStateTracker, CompilesTypedUsesIntoBarrierPackets) {
-    auto use     = owe::resource::TextureUseHandle { .index = 6, .generation = 3 };
+    auto use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(6), .generation = rstd::u64(3) };
     auto request = owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::Imported,
         .name = rstd::string::String::make(rstd::cppstd::as_str("sampled")),
     };
-    owe::resource::ResourcePlan plan { .generation = 3 };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(3) };
     plan.textures.push(owe::resource::TexturePlanEntry {
         .handle  = use,
         .request = request.clone(),
@@ -570,15 +594,16 @@ TEST(ResourceStateTracker, CompilesTypedUsesIntoBarrierPackets) {
     });
 
     auto                                          allocation = TextureAllocation(1);
-    owe::resource_registry::PreparedResourceTable table(3);
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(3));
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
-        .use                 = use,
-        .resource            = owe::resource::TextureHandle { .index = 8, .generation = 1 },
+        .use = use,
+        .resource =
+            owe::resource::TextureHandle { .index = rstd::u64(8), .generation = rstd::u64(1) },
         .request             = rstd::move(request),
         .physical            = allocation.clone(),
         .image               = allocation->View(),
-        .physical_generation = 2,
-        .ready               = owe::resource::ReadyToken { .value = 4 },
+        .physical_generation = rstd::u64(2),
+        .ready               = owe::resource::ReadyToken { .value = rstd::u64(4) },
     }));
 
     owe::resource_registry::ResourceStateTracker states;
@@ -609,14 +634,17 @@ TEST(ResourceStateTracker, CompilesTypedUsesIntoBarrierPackets) {
 }
 
 TEST(ResourceStateTracker, SharesStateAcrossUsesOfOneTexture) {
-    auto first_use  = owe::resource::TextureUseHandle { .index = 1, .generation = 3 };
-    auto second_use = owe::resource::TextureUseHandle { .index = 2, .generation = 3 };
-    auto resource   = owe::resource::TextureHandle { .index = 8, .generation = 1 };
-    auto request    = owe::resource::TextureRequest {
+    auto first_use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(1), .generation = rstd::u64(3) };
+    auto second_use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(2), .generation = rstd::u64(3) };
+    auto resource =
+        owe::resource::TextureHandle { .index = rstd::u64(8), .generation = rstd::u64(1) };
+    auto request = owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::RenderTarget,
         .name = rstd::string::String::make(rstd::cppstd::as_str("frame")),
     };
-    owe::resource::ResourcePlan plan { .generation = 3 };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(3) };
     plan.textures.push(owe::resource::TexturePlanEntry {
         .handle  = first_use,
         .request = request.clone(),
@@ -629,7 +657,7 @@ TEST(ResourceStateTracker, SharesStateAcrossUsesOfOneTexture) {
     });
 
     auto                                          allocation = TextureAllocation(1);
-    owe::resource_registry::PreparedResourceTable table(3);
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(3));
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
         .use      = first_use,
         .resource = resource,
@@ -656,14 +684,15 @@ TEST(ResourceStateTracker, SharesStateAcrossUsesOfOneTexture) {
 }
 
 TEST(ResourceStateTracker, PreservesFrameBoundaryContentBeforeItsFirstRead) {
-    auto use     = owe::resource::TextureUseHandle { .index = 1, .generation = 3 };
+    auto use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(1), .generation = rstd::u64(3) };
     auto request = owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::RenderTarget,
         .name = rstd::string::String::make(rstd::cppstd::as_str("history")),
         .content =
             owe::resource::TextureContentFlag(owe::resource::TextureContent::PreserveAcrossFrames),
     };
-    owe::resource::ResourcePlan plan { .generation = 3 };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(3) };
     plan.textures.push(owe::resource::TexturePlanEntry {
         .handle  = use,
         .request = request.clone(),
@@ -671,10 +700,11 @@ TEST(ResourceStateTracker, PreservesFrameBoundaryContentBeforeItsFirstRead) {
     });
 
     auto                                          allocation = TextureAllocation(1);
-    owe::resource_registry::PreparedResourceTable table(3);
+    owe::resource_registry::PreparedResourceTable table(rstd::u64(3));
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
-        .use      = use,
-        .resource = owe::resource::TextureHandle { .index = 8, .generation = 1 },
+        .use = use,
+        .resource =
+            owe::resource::TextureHandle { .index = rstd::u64(8), .generation = rstd::u64(1) },
         .request  = rstd::move(request),
         .physical = allocation.clone(),
         .image    = allocation->View(),
@@ -714,9 +744,9 @@ TEST(ExternalResourceBridge, PreparesLayoutAndQueueOwnershipContract) {
     owe::FrameSurfaceLease lease {
         .identity =
             owe::FrameSurfaceIdentity {
-                .owner_generation = 2,
-                .image_index      = 1,
-                .acquire_serial   = 4,
+                .owner_generation = rstd::u64(2),
+                .image_index      = rstd::u32(1),
+                .acquire_serial   = rstd::u64(4),
             },
         .reuse =
             owe::FrameSurfaceReuseProof {
@@ -740,7 +770,7 @@ TEST(ExternalResourceBridge, PreparesLayoutAndQueueOwnershipContract) {
     auto prepared = bridge.Prepare(owe::vulkan::DeviceCapabilities {}, lease, 3);
     ASSERT_TRUE(prepared.is_ok());
     auto contract = rstd::move(prepared).unwrap_unchecked();
-    EXPECT_EQ(contract.before_copy.Size(), 1u);
-    EXPECT_EQ(contract.after_copy.Size(), 1u);
-    EXPECT_EQ(contract.lease.identity.acquire_serial, 4u);
+    EXPECT_EQ(contract.before_copy.Size(), rstd::usize(1));
+    EXPECT_EQ(contract.after_copy.Size(), rstd::usize(1));
+    EXPECT_EQ(contract.lease.identity.acquire_serial, rstd::u64(4));
 }

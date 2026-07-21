@@ -18,10 +18,10 @@ export namespace owe
 // File header preceding the per-mesh body. Per hexpat: 4-byte version tag +
 // u32 vertex layout flag + u32 always-one + u32 mesh_count.
 struct WPMdlHeader {
-    i32 mdlv { 13 };
-    u32 mdl_flag { 0 }; // vertex layout bitmask; mdlv<=14 meshes inherit this
-    u32 unk_a { 1 };    // always_one in hexpat
-    u32 mesh_count { 1 };
+    rstd::int32_t  mdlv { 13 };
+    rstd::uint32_t mdl_flag { 0 }; // vertex layout bitmask; mdlv<=14 meshes inherit this
+    rstd::uint32_t unk_a { 1 };    // always_one in hexpat
+    rstd::uint32_t mesh_count { 1 };
 };
 
 struct WPMdl {
@@ -30,10 +30,10 @@ struct WPMdl {
     // One element per header.mesh_count. mesh_count > 1 only seen on static
     // (non-puppet) meshes; renderer currently consumes meshes[0] only.
     struct Mesh {
-        std::string mat_json_file;
-        u32         flag_a { 0 }; // hexpat Mesh.flag_a (usually 0; 2 has trailing 1)
-        bool        has_flag_a2_one { false };
-        u32         flag { 0 }; // per-mesh vertex layout flag (mdlv>14); 0 = inherit header
+        std::string    mat_json_file;
+        rstd::uint32_t flag_a { 0 }; // hexpat Mesh.flag_a (usually 0; 2 has trailing 1)
+        bool           has_flag_a2_one { false };
+        rstd::uint32_t flag { 0 }; // per-mesh vertex layout flag (mdlv>14); 0 = inherit header
         std::array<float, 3> aabb_min {};
         std::array<float, 3> aabb_max {};
         bool                 has_aabb { false }; // mdlv>=17
@@ -71,10 +71,10 @@ struct WPMdl {
     };
     std::vector<Mesh> meshes;
 
-    i32 mdls { 1 };
-    i32 mdla { 1 };
-    i32 mdle { 0 }; // 0 = section not present
-    i32 mdmp { 0 };
+    rstd::int32_t mdls { 1 };
+    rstd::int32_t mdla { 1 };
+    rstd::int32_t mdle { 0 }; // 0 = section not present
+    rstd::int32_t mdmp { 0 };
 
     // MDMP morph sections — present when an animation drives shape blends.
     // Each section keyed by event_time matching a v4 AnimV4Event.time.

@@ -24,7 +24,10 @@ struct ShaderReflectionKeyHash {
 
     auto operator()(const ShaderReflectionKey& key) const noexcept -> rstd::u64 {
         auto seed = state(key.shader_id);
-        seed ^= state(key.code_hash) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        seed ^= state(key.code_hash)
+                    .wrapping_add(rstd::u64(0x9e3779b97f4a7c15ULL))
+                    .wrapping_add(seed.wrapping_shl(rstd::u64(6)))
+                    .wrapping_add(seed >> rstd::u64(2));
         return seed;
     }
 };

@@ -8,10 +8,10 @@ export namespace owe::resource
 using namespace rstd::prelude;
 
 struct BufferDefinitionId {
-    u32 index { numeric_limits<u32>::max() };
-    u64 generation { 0 };
+    u32 index { u32::MAX };
+    u64 generation {};
 
-    bool Valid() const noexcept { return index != numeric_limits<u32>::max() && generation != 0; }
+    bool Valid() const noexcept { return index != u32::MAX && generation != u64(); }
 
     friend bool operator==(const BufferDefinitionId&, const BufferDefinitionId&) = default;
 };

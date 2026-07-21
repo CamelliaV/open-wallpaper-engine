@@ -144,20 +144,20 @@ public:
                                Entry {
                                    .framebuffer    = shared.clone(),
                                    .handle         = handle,
-                                   .observed_count = 1,
+                                   .observed_count = u64(1),
                                });
         return Some(FramebufferResourceResult {
             .framebuffer          = rstd::move(shared),
             .handle               = handle,
             .cache_key            = key,
             .cache_hit            = false,
-            .cache_observed_count = 1,
+            .cache_observed_count = u64(1),
         });
     }
 
     void PruneExpired() {
         m_entries.retain([&](const FramebufferCacheKey&, Entry& entry) {
-            if (entry.framebuffer.strong_count() > 1) return true;
+            if (entry.framebuffer.strong_count() > usize(1)) return true;
             (void)m_handles.remove(entry.handle);
             return false;
         });
@@ -166,9 +166,9 @@ public:
     void Reset() {
         m_entries.clear();
         m_handles.clear();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
     auto Resolve(resource::FramebufferHandle handle) const
@@ -247,14 +247,14 @@ public:
                                Entry {
                                    .render_pass    = shared.clone(),
                                    .handle         = handle,
-                                   .observed_count = 1,
+                                   .observed_count = u64(1),
                                });
         return Some(RenderPassResourceResult {
             .render_pass          = rstd::move(shared),
             .handle               = handle,
             .cache_key            = key,
             .cache_hit            = false,
-            .cache_observed_count = 1,
+            .cache_observed_count = u64(1),
         });
     }
 
@@ -265,7 +265,7 @@ public:
 
     void PruneExpired() {
         m_entries.retain([&](const RenderPassCacheKey&, Entry& entry) {
-            if (entry.render_pass.strong_count() > 1) return true;
+            if (entry.render_pass.strong_count() > usize(1)) return true;
             (void)m_handles.remove(entry.handle);
             return false;
         });
@@ -274,9 +274,9 @@ public:
     void Reset() {
         m_entries.clear();
         m_handles.clear();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
     auto Resolve(resource::RenderPassHandle handle) const
@@ -436,10 +436,10 @@ public:
         auto render_pass = render_pass_cache.Ensure(device, desc.render_pass);
         if (render_pass.is_none()) return None();
 
-        auto entry = rstd::sync::Arc<PipelineResourceEntry>::make();
-        auto vk_descriptor_layouts =
-            rstd::vec::Vec<VkDescriptorSetLayout>::with_capacity(desc.descriptor_sets.size());
-        entry->descriptor_layouts.reserve(desc.descriptor_sets.size());
+        auto entry                 = rstd::sync::Arc<PipelineResourceEntry>::make();
+        auto vk_descriptor_layouts = rstd::vec::Vec<VkDescriptorSetLayout>::with_capacity(
+            usize(desc.descriptor_sets.size()));
+        entry->descriptor_layouts.reserve(usize(desc.descriptor_sets.size()));
         for (const auto& descriptor_set : desc.descriptor_sets) {
             auto layout = descriptor_layouts.Ensure(device, descriptor_set);
             if (layout.is_err()) return None();
@@ -471,7 +471,7 @@ public:
             .addInputBindingDescription(desc.vertex_bindings)
             .addInputAttributeDescription(desc.vertex_attrs)
             .setDescriptorSetLayouts(std::span<const VkDescriptorSetLayout>(
-                vk_descriptor_layouts.data(), vk_descriptor_layouts.len()));
+                vk_descriptor_layouts.data(), vk_descriptor_layouts.len().to_primitive()));
         for (auto& spv : desc.shader_stages) {
             pipeline.addStage(Box<ShaderSpv>::make(std::move(spv)));
         }
@@ -487,7 +487,7 @@ public:
                                    .render_pass          = render_pass->handle,
                                    .render_pass_physical = render_pass->render_pass.clone(),
                                    .render_pass_key      = render_pass->cache_key,
-                                   .observed_count       = 1,
+                                   .observed_count       = u64(1),
                                });
         return Some(PipelineResourceResult {
             .pipeline                         = rstd::move(entry),
@@ -497,7 +497,7 @@ public:
             .cache_key                        = key,
             .render_pass_key                  = render_pass->cache_key,
             .cache_hit                        = false,
-            .cache_observed_count             = 1,
+            .cache_observed_count             = u64(1),
             .render_pass_cache_hit            = render_pass->cache_hit,
             .render_pass_cache_observed_count = render_pass->cache_observed_count,
         });
@@ -505,7 +505,7 @@ public:
 
     void PruneExpired() {
         m_entries.retain([&](const PipelineCacheKey&, Entry& entry) {
-            if (entry.pipeline.strong_count() > 1) return true;
+            if (entry.pipeline.strong_count() > usize(1)) return true;
             (void)m_handles.remove(entry.handle);
             return false;
         });
@@ -514,9 +514,9 @@ public:
     void Reset() {
         m_entries.clear();
         m_handles.clear();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
     auto Resolve(resource::PipelineHandle handle) const

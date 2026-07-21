@@ -552,7 +552,7 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
                           << " for " << m.workshop_id << " " << m.pkg_path;
             continue;
         }
-        if (s0.mipmaps.empty() || ! s0.mipmaps[0].data || s0.mipmaps[0].size <= 0) {
+        if (s0.mipmaps.empty() || ! s0.mipmaps[0].data || s0.mipmaps[0].size <= rstd::isize()) {
             ++slot_empty;
             ++per_bucket_fail[key];
             ADD_FAILURE() << "slot 0 mip 0 missing data for " << m.workshop_id << " " << m.pkg_path;

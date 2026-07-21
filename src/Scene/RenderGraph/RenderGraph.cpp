@@ -98,7 +98,7 @@ auto RenderGraph::passState(NodeHandle handle) const -> rstd::Option<PassNodeSta
 void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
     auto output = String::make("digraph framegraph {\nnode [shape=box]\n");
 
-    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
         NodeHandle handle { .index = index };
         if (auto pass = getPassNode(handle); pass.is_some()) {
             auto declaration = NodeGraphviz(*pass);
@@ -111,7 +111,7 @@ void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
         }
     }
 
-    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
         NodeHandle from { .index = index };
         for (auto to : Sorted(m_dg.GetNodeOut(from))) {
             rstd::ref<rstd::str> access       = "order";
@@ -136,7 +136,8 @@ void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
     }
 
     output.push_back('}');
-    (void)rstd::fs::write(rstd::ref<rstd::path::Path>(path), rstd::str_::as_bytes(output.as_str()));
+    (void)rstd::fs::write(rstd::ref<rstd::path::Path>(path),
+                          rstd::slice<u8>::from_raw_parts(output.as_raw_ptr(), output.len()));
 }
 
 auto RenderGraph::textureState(TextureNodeRef ref) const -> rstd::Option<TextureNodeState> {
@@ -144,7 +145,8 @@ auto RenderGraph::textureState(TextureNodeRef ref) const -> rstd::Option<Texture
     if (node.is_none()) return rstd::None();
     return rstd::Some(TextureNodeState {
         .ref     = ref,
-        .use     = resource::TextureUseHandle { .index = ref.handle.index, .generation = 1 },
+        .use     = resource::TextureUseHandle { .index      = rstd::as_cast<u64>(ref.handle.index),
+                                                .generation = u64(1) },
         .desc    = ToTextureDesc(*node),
         .version = node->version,
     });
@@ -160,30 +162,30 @@ auto RenderGraph::readTexture(NodeHandle pass_node, TextureNodeRef texture) -> b
 
 auto RenderGraph::topologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
     auto in_degree = rstd::vec::Vec<usize>::make();
-    in_degree.resize(m_dg.NodeNum(), 0);
-    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+    in_degree.resize(m_dg.NodeNum(), usize());
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
         NodeHandle handle { .index = index };
         in_degree[index] = m_dg.GetNodeIn(handle).len();
     }
 
     auto ready = rstd::vec::Vec<NodeHandle>::with_capacity(m_dg.NodeNum());
-    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
-        if (in_degree[index] == 0) ready.push(NodeHandle { .index = index });
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
+        if (in_degree[index] == usize()) ready.push(NodeHandle { .index = index });
     }
 
     auto                 pass_nodes = rstd::vec::Vec<NodeHandle>::make();
     rstd::Option<String> active_target;
-    usize                visited = 0;
+    usize                visited {};
 
     auto choose_ready = [&]() -> usize {
         std::sort(ready.begin(), ready.end());
 
-        for (usize index = 0; index < ready.len(); ++index) {
+        for (usize index {}; index < ready.len(); ++index) {
             if (! isRenderPassNode(ready[index])) return index;
         }
 
         if (active_target) {
-            for (usize index = 0; index < ready.len(); ++index) {
+            for (usize index {}; index < ready.len(); ++index) {
                 auto target = passWriteTarget(ready[index]);
                 if (target && *target == *active_target) return index;
             }
@@ -198,13 +200,13 @@ auto RenderGraph::topologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
             if (count)
                 ++**count;
             else
-                (void)target_counts.insert(target->clone(), 1);
+                (void)target_counts.insert(target->clone(), usize(1));
         }
 
-        usize best_index = 0;
-        usize best_count = 0;
-        for (usize index = 0; index < ready.len(); ++index) {
-            usize count  = 0;
+        usize best_index {};
+        usize best_count {};
+        for (usize index {}; index < ready.len(); ++index) {
+            usize count {};
             auto  target = passWriteTarget(ready[index]);
             if (target) {
                 auto stored = target_counts.get(*target);
@@ -228,9 +230,9 @@ auto RenderGraph::topologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
         }
 
         for (auto next : Sorted(m_dg.GetNodeOut(handle))) {
-            rstd_assert(in_degree[next.index] > 0);
+            rstd_assert(in_degree[next.index] > usize());
             --in_degree[next.index];
-            if (in_degree[next.index] == 0) ready.push(NodeHandle { next });
+            if (in_degree[next.index] == usize()) ready.push(NodeHandle { next });
         }
     }
 
@@ -274,7 +276,7 @@ RenderGraphBuilder::RenderGraphBuilder(RenderGraph& graph, NodeHandle pass_node)
 void RenderGraphBuilder::markSelfWrite(TextureNodeRef ref) {
     auto state = m_rg.textureState(ref);
     rstd_assert(state.is_some());
-    if (! state || state->version > 0) return;
+    if (! state || state->version > usize()) return;
     m_rg.addPass<VirtualPass>(
         "virtual pass", PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
             builder.write(ref);
@@ -284,7 +286,7 @@ void RenderGraphBuilder::markSelfWrite(TextureNodeRef ref) {
 void RenderGraphBuilder::markVirtualWrite(TextureNodeRef ref) {
     auto state = m_rg.textureState(ref);
     rstd_assert(state.is_some());
-    if (! state || state->version > 0 || m_rg.textureHasWriter(ref)) return;
+    if (! state || state->version > usize() || m_rg.textureHasWriter(ref)) return;
     m_rg.addPass<VirtualPass>(
         "virtual pass", PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
             builder.write(ref);
@@ -354,7 +356,7 @@ auto RenderGraph::createNewTextureNode(const TextureDesc& desc) -> TextureNodeRe
         auto previous = getTexNode(**current);
         rstd_assert(previous.is_some());
         if (previous) {
-            node.version   = previous->version + 1;
+            node.version   = previous->version + usize(1);
             node.previous  = rstd::Some(previous->handle);
             previous->next = rstd::Some(handle);
         }
@@ -383,11 +385,11 @@ void RenderGraph::connectTextureWrite(TextureNodeRef ref, NodeHandle pass_node) 
     if (node->previous) {
         auto previous = *node->previous;
         auto readers  = m_dg.GetNodeOut(previous);
-        for (usize index = 0; index < readers.len(); ++index) {
+        for (usize index {}; index < readers.len(); ++index) {
             auto reader = readers[index];
             if (isPassNode(reader)) (void)m_dg.Connect(reader, pass_node);
         }
-        if (readers.len() == 0) (void)m_dg.Connect(previous, pass_node);
+        if (readers.len() == usize()) (void)m_dg.Connect(previous, pass_node);
     }
     (void)m_dg.Connect(pass_node, ref.handle);
     node->writer = rstd::Some(pass_node);
@@ -407,16 +409,16 @@ auto RenderGraphBuilder::workPassNode() const -> const PassNode& {
 auto RenderGraph::getLastReadTextures(rstd::slice<NodeHandle> nodes) const
     -> rstd::vec::Vec<rstd::vec::Vec<TextureNodeState>> {
     auto result = rstd::vec::Vec<rstd::vec::Vec<TextureNodeState>>::with_capacity(nodes.len());
-    for (usize index = 0; index < nodes.len(); ++index) {
+    for (usize index {}; index < nodes.len(); ++index) {
         result.push(rstd::vec::Vec<TextureNodeState>::make());
     }
 
     using SeenMap = rstd::collections::HashMap<NodeHandle, bool, NodeHandleHasher>;
     auto seen     = SeenMap::make();
-    for (usize offset = nodes.len(); offset > 0; --offset) {
-        auto index  = offset - 1;
+    for (usize offset = nodes.len(); offset > usize(); --offset) {
+        auto index  = offset - usize(1);
         auto inputs = m_dg.GetNodeIn(nodes[index]);
-        for (usize input_index = 0; input_index < inputs.len(); ++input_index) {
+        for (usize input_index {}; input_index < inputs.len(); ++input_index) {
             auto input = inputs[input_index];
             if (seen.contains_key(input)) continue;
             (void)seen.insert(input, true);
@@ -430,16 +432,16 @@ auto RenderGraph::getLastReadTextures(rstd::slice<NodeHandle> nodes) const
 auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
     using BoundaryMap     = rstd::collections::HashMap<String, bool>;
     auto frame_boundaries = BoundaryMap::make();
-    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
         auto node = getTexNode(NodeHandle { .index = index });
-        if (node.is_none() || node->version != 0 || node->writer.is_none() ||
+        if (node.is_none() || node->version != usize() || node->writer.is_none() ||
             ! isVirtualPassNode(*node->writer)) {
             continue;
         }
 
         bool has_real_reader = false;
         auto targets         = m_dg.GetNodeOut(node->handle);
-        for (usize target_index = 0; target_index < targets.len(); ++target_index) {
+        for (usize target_index {}; target_index < targets.len(); ++target_index) {
             if (isRenderPassNode(targets[target_index])) {
                 has_real_reader = true;
                 break;
@@ -459,14 +461,14 @@ auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
         }
     }
 
-    resource::ResourcePlan plan { .generation = 1 };
-    for (usize index = 0; index < m_dg.NodeNum(); ++index) {
+    resource::ResourcePlan plan { .generation = u64(1) };
+    for (usize index {}; index < m_dg.NodeNum(); ++index) {
         auto node = getTexNode(NodeHandle { .index = index });
         if (node.is_none() || node->request.is_none()) continue;
 
         bool read    = false;
         auto targets = m_dg.GetNodeOut(node->handle);
-        for (usize target_index = 0; target_index < targets.len(); ++target_index) {
+        for (usize target_index {}; target_index < targets.len(); ++target_index) {
             if (isPassNode(targets[target_index])) {
                 read = true;
                 break;
@@ -482,11 +484,11 @@ auto RenderGraph::resourcePlan() const -> resource::ResourcePlan {
                 resource::TextureContentFlag(resource::TextureContent::PreserveAcrossFrames);
         }
         plan.textures.push(resource::TexturePlanEntry {
-            .handle  = resource::TextureUseHandle { .index      = node->handle.index,
+            .handle  = resource::TextureUseHandle { .index = rstd::as_cast<u64>(node->handle.index),
                                                     .generation = plan.generation },
             .request = rstd::move(request),
             .access  = access,
-            .version = static_cast<u32>(node->version),
+            .version = rstd::as_cast<u32>(node->version),
         });
     }
     return plan;

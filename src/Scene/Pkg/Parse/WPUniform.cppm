@@ -111,9 +111,9 @@ struct WPUniformVar {
         owe::GetJsonValue(json, "nobindings", nobindings, false);
         if (auto values = json.get("range"); values.is_some()) {
             auto array = (*values)->as_array();
-            if (array.is_some() && (*array)->len() >= 2)
-                has_range = owe::GetJsonValue((**array)[0], range[0]) &&
-                            owe::GetJsonValue((**array)[1], range[1]);
+            if (array.is_some() && (*array)->len() >= rstd::usize(2))
+                has_range = owe::GetJsonValue((**array)[rstd::usize(0)], range[0]) &&
+                            owe::GetJsonValue((**array)[rstd::usize(1)], range[1]);
         }
         if (auto value = json.get("default"); value.is_some()) default_value = (*value)->clone();
         return true;

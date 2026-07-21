@@ -48,7 +48,7 @@ struct Options {
 }
 
 std::string ToStdString(const rstd::string::String& value) {
-    return { value.data(), value.size() };
+    return rstd::cppstd::to_string(value.as_str());
 }
 
 template<typename T>
@@ -259,8 +259,7 @@ void merge_user_property_overrides(owe::Json& properties, const rstd::json::Map&
     if (! properties.is_object()) properties = owe::Json::Object(rstd::json::Map::make());
     overrides.iter().for_each([&](auto entry) {
         auto [entry_key, entry_value] = entry;
-        auto key                      = rstd::cppstd::as_string_view(entry_key->as_str());
-        auto current                  = properties.get(key);
+        auto current                  = properties.get(entry_key->as_str());
         auto descriptor =
             current.is_some()
                 ? owe::MergeUserPropertyDescriptor(**current, *entry_value)
@@ -295,7 +294,7 @@ void drain_settings(HostState& s) {
             auto patch      = owe::MakeUserPropertyWirePatch(sd.value);
             auto descriptor = patch.clone();
             if (s.user_properties) {
-                auto current = s.user_properties->get(sd.key);
+                auto current = s.user_properties->get(rstd::cppstd::as_str(sd.key));
                 if (current.is_some())
                     descriptor = owe::MergeUserPropertyDescriptor(**current, patch);
                 auto object = s.user_properties->as_object_mut();

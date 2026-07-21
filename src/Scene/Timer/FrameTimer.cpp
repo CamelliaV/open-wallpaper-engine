@@ -20,7 +20,7 @@ FrameTimer::FrameTimer(std::function<void()> cb)
               m_callback();
           }
       }) {
-    SetRequiredFps(15);
+    SetRequiredFps(u16(15));
 }
 
 FrameTimer::~FrameTimer() {};
@@ -43,9 +43,9 @@ void FrameTimer::UpdateFrametime() {
 
 void FrameTimer::SetRequiredFps(u16 value) {
     m_req_fps             = value;
-    microseconds ideatime = microseconds(1'000'000 / m_req_fps);
+    microseconds ideatime = microseconds(1'000'000 / m_req_fps.to_primitive());
     m_ideatime            = ideatime;
-    for (usize i = 0; i < FrameTimer::FRAMETIME_QUEUE_SIZE; i++) {
+    for (std::size_t i = 0; i < FrameTimer::FRAMETIME_QUEUE_SIZE; i++) {
         AddFrametime(ideatime);
     }
     UpdateFrametime();
@@ -64,7 +64,7 @@ void FrameTimer::FrameEnd() {
     AddFrametime(duration_cast<microseconds>(now - m_clock));
     UpdateFrametime();
 
-    i32 expected = m_frame_busy_count.load();
+    rstd::int32_t expected = m_frame_busy_count.load();
     while (expected > 0) {
         if (m_frame_busy_count.compare_exchange_weak(expected, expected - 1)) {
             break;

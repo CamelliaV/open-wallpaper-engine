@@ -49,16 +49,16 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": true,
-    "commit": "49cc38a6b4c2072176cd9b20c5fe2a988b70efb6",
+    "commit": "f7bd41d4fb04d02a10d7f74e9ea703a350c91d55",
     "type": "git",
-    "url": "https://github.com/hypengw/rstd.git",
+    "url": "https://github.com/litocpp/rstd.git",
     "x-cmake": {
       "name": "rstd",
       "exclude_from_all": true
     }
   },
   {
-    "commit": "4189a1e4b290df196418c09a389159cdd5262ead",
+    "commit": "f54d6a294327c2aef1a91d27c05c0ae61561ea81",
     "dest": "build/_flatpak_deps/wavsen-src",
     "disable-shallow-clone": true,
     "type": "git",

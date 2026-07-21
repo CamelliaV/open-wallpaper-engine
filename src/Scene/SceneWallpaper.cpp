@@ -261,9 +261,12 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const Json& prop) {
     }
     if (v.is_number()) {
         auto number = v.as_f64();
-        r.ok        = number.is_some() && *number >= std::numeric_limits<float>::lowest() &&
-                      *number <= std::numeric_limits<float>::max();
-        if (r.ok) r.value = ShaderValue(static_cast<float>(*number));
+        if (number.is_some()) {
+            const double value = number->to_primitive();
+            r.ok               = value >= std::numeric_limits<float>::lowest() &&
+                                 value <= std::numeric_limits<float>::max();
+            if (r.ok) r.value = ShaderValue(static_cast<float>(value));
+        }
         return r;
     }
     if (v.is_string()) {
@@ -290,14 +293,14 @@ void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const Json& 
     if (scene.clearColorUserKey.empty()) return;
     if (CanonicalUserPropertyKey(scene.clearColorUserKey) != key) return;
     auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < 3) return;
+    if (! coerced.ok || coerced.value.size() < usize(3)) return;
     auto clamp01 = [](float n) {
         return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
     };
     scene.clearColor = {
-        clamp01(coerced.value[0]),
-        clamp01(coerced.value[1]),
-        clamp01(coerced.value[2]),
+        clamp01(coerced.value[usize()]),
+        clamp01(coerced.value[usize(1)]),
+        clamp01(coerced.value[usize(2)]),
     };
 }
 
@@ -425,9 +428,12 @@ ResolveRuntimeShaderComboValue(const Json& prop, const Scene::ShaderComboUserBin
     if (value.is_boolean()) return *value.as_bool() ? "1" : "0";
     if (value.is_number()) {
         auto number = value.as_f64();
-        if (number.is_some() && *number >= std::numeric_limits<int>::min() &&
-            *number <= std::numeric_limits<int>::max())
-            return std::to_string(static_cast<int>(*number));
+        if (number.is_some()) {
+            const double native_number = number->to_primitive();
+            if (native_number >= std::numeric_limits<int>::min() &&
+                native_number <= std::numeric_limits<int>::max())
+                return std::to_string(static_cast<int>(native_number));
+        }
         return std::nullopt;
     }
     if (! value.is_string()) return std::nullopt;
@@ -567,9 +573,11 @@ void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key, const J
     if (it == scene.image_color_user_index.end()) return;
 
     auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < 3) return;
+    if (! coerced.ok || coerced.value.size() < usize(3)) return;
 
-    Eigen::Vector3f color { coerced.value[0], coerced.value[1], coerced.value[2] };
+    Eigen::Vector3f color { coerced.value[usize()],
+                            coerced.value[usize(1)],
+                            coerced.value[usize(2)] };
     for (const auto& binding : it->second) {
         if (binding.node) binding.node->SetColor(color);
 
@@ -594,9 +602,9 @@ void ApplyUserPropertyToImageAlpha(Scene& scene, const std::string& key, const J
     if (it == scene.image_alpha_user_index.end()) return;
 
     auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < 1) return;
+    if (! coerced.ok || coerced.value.size() < usize(1)) return;
 
-    const float alpha = std::clamp(coerced.value[0], 0.0f, 1.0f);
+    const float alpha = std::clamp(coerced.value[usize()], 0.0f, 1.0f);
     for (const auto& binding : it->second) {
         if (binding.node) binding.node->SetUserAlpha(alpha);
 
@@ -627,11 +635,13 @@ void ApplyUserPropertyToParticles(Scene& scene, const std::string& key, const Js
     if (! coerced.ok) return;
 
     auto write_scalar = [&](float& dst) {
-        if (coerced.value.size() >= 1) dst = coerced.value[0];
+        if (coerced.value.size() >= usize(1)) dst = coerced.value[usize()];
     };
     auto write_vec3 = [&](std::array<float, 3>& dst, float scale) {
-        if (coerced.value.size() < 3) return;
-        dst = { coerced.value[0] * scale, coerced.value[1] * scale, coerced.value[2] * scale };
+        if (coerced.value.size() < usize(3)) return;
+        dst = { coerced.value[usize()] * scale,
+                coerced.value[usize(1)] * scale,
+                coerced.value[usize(2)] * scale };
     };
 
     for (auto& b : it->second) {
@@ -682,8 +692,8 @@ void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key, const 
     if (it == scene.sound_volume_user_index.end()) return;
 
     auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < 1) return;
-    const float volume = std::clamp(coerced.value[0], 0.0f, 1.0f);
+    if (! coerced.ok || coerced.value.size() < usize(1)) return;
+    const float volume = std::clamp(coerced.value[usize()], 0.0f, 1.0f);
     for (auto& control : it->second) {
         if (control) control->SetVolume(volume);
     }
@@ -1007,12 +1017,13 @@ void SceneRenderController::on(RenderDraw&&) {
         // The runtime is a no-op when no ScriptScene is installed.
         {
             owe::script::FrameInputs fi;
-            fi.frametime = static_cast<float>(m_scene->Runtime().Frame().delta * m_speed);
-            fi.runtime   = static_cast<float>(m_scene->Runtime().Frame().elapsed);
-            fi.canvas_w  = static_cast<float>(m_scene->ortho[0]);
-            fi.canvas_h  = static_cast<float>(m_scene->ortho[1]);
-            fi.screen_w  = fi.canvas_w;
-            fi.screen_h  = fi.canvas_h;
+            fi.frametime =
+                static_cast<float>(m_scene->Runtime().Frame().delta.to_primitive() * m_speed);
+            fi.runtime  = static_cast<float>(m_scene->Runtime().Frame().elapsed.to_primitive());
+            fi.canvas_w = static_cast<float>(m_scene->ortho[0]);
+            fi.canvas_h = static_cast<float>(m_scene->ortho[1]);
+            fi.screen_w = fi.canvas_w;
+            fi.screen_h = fi.canvas_h;
             {
                 auto pos    = m_mouse_pos.load();
                 fi.cursor_x = pos[0];
@@ -1035,9 +1046,10 @@ void SceneRenderController::on(RenderDraw&&) {
             }
             if (m_uniform_input) {
                 m_uniform_input->SetAudioSpectrum(
-                    rstd::slice<float>::from_raw_parts(fi.audio_left.data(), fi.audio_left.size()),
+                    rstd::slice<float>::from_raw_parts(fi.audio_left.data(),
+                                                       usize(fi.audio_left.size())),
                     rstd::slice<float>::from_raw_parts(fi.audio_right.data(),
-                                                       fi.audio_right.size()));
+                                                       usize(fi.audio_right.size())));
             }
             m_scene->TickNodeFieldAnimations();
             owe::script::TickSceneScripts(*m_scene, fi);
@@ -1394,7 +1406,9 @@ void SceneRuntimeController::on(MainConfigure&& m) {
 
 void SceneRuntimeController::on(MainSetFps&& m) {
     m_config.fps = m.fps;
-    if (m.fps >= 5) m_render_controller->frame_timer.SetRequiredFps(static_cast<uint8_t>(m.fps));
+    if (m.fps >= 5) {
+        m_render_controller->frame_timer.SetRequiredFps(u16(static_cast<rstd::uint16_t>(m.fps)));
+    }
 }
 
 void SceneRuntimeController::on(MainSetVolume&& m) {
@@ -1518,9 +1532,9 @@ void SceneRuntimeController::loadScene() {
     auto                  wfs         = fs::WPPkgFs::open(fs::ToPath(pkgPath));
     bool                  pkg_mounted = false;
     if (wfs.is_ok()) {
-        auto stamp = wfs->pkg_version_stamp();
-        pkg_v      = wpscene::ParsePkgVersionStamp(
-            std::string_view(reinterpret_cast<const char*>(stamp.data()), stamp.size()));
+        auto stamp  = wfs->pkg_version_stamp();
+        pkg_v       = wpscene::ParsePkgVersionStamp(std::string_view(
+            reinterpret_cast<const char*>(stamp.data()), stamp.size().to_primitive()));
         pkg_mounted = vfs.mount("/assets", wfs->mount_handle()).is_ok();
     }
     if (! pkg_mounted) {
@@ -1583,7 +1597,7 @@ void SceneRuntimeController::loadScene() {
         // host) need the value to feed `set_config.clear_*`.
         if (m_clear_color_cb) {
             const auto& c = scene->clearColor;
-            m_clear_color_cb(c[0], c[1], c[2]);
+            m_clear_color_cb(c[usize()], c[usize(1)], c[usize(2)]);
         }
     }
 
@@ -1619,7 +1633,7 @@ bool SceneRuntimeController::init() {
         frameTimer.SetCallback([rtx]() mutable {
             (void)rtx.send(RenderMsg { RenderDraw {} });
         });
-        frameTimer.SetRequiredFps(15);
+        frameTimer.SetRequiredFps(u16(15));
         frameTimer.Run();
     }
 

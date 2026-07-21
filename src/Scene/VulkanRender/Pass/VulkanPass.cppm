@@ -19,23 +19,22 @@ namespace vulkan
 
 using PassInvalidationFlags = u32;
 
-enum class PassInvalidation : PassInvalidationFlags
+enum class PassInvalidation : rstd::uint32_t
 {
     Resources   = 1u << 0u,
     Pipeline    = 1u << 1u,
     Framebuffer = 1u << 2u,
 };
 
-inline constexpr PassInvalidationFlags PassInvalidationNone { 0u };
-inline constexpr PassInvalidationFlags PassInvalidationAll {
-    static_cast<PassInvalidationFlags>(PassInvalidation::Resources) |
-        static_cast<PassInvalidationFlags>(PassInvalidation::Pipeline) |
-        static_cast<PassInvalidationFlags>(PassInvalidation::Framebuffer),
-};
-
 inline constexpr PassInvalidationFlags ToPassInvalidationFlags(PassInvalidation invalidation) {
-    return static_cast<PassInvalidationFlags>(invalidation);
+    return PassInvalidationFlags(static_cast<rstd::uint32_t>(invalidation));
 }
+
+inline constexpr PassInvalidationFlags PassInvalidationNone {};
+inline constexpr PassInvalidationFlags PassInvalidationAll =
+    ToPassInvalidationFlags(PassInvalidation::Resources) |
+    ToPassInvalidationFlags(PassInvalidation::Pipeline) |
+    ToPassInvalidationFlags(PassInvalidation::Framebuffer);
 
 struct MaterialTextureBindingRefresh {
     PassInvalidationFlags invalidation_flags { PassInvalidationNone };
@@ -111,7 +110,7 @@ public:
 private:
     template<typename Handle>
     static bool Contains(const rstd::vec::Vec<Handle>& handles, Handle value) {
-        for (rstd::usize index = 0; index < handles.len(); ++index) {
+        for (rstd::usize index {}; index < handles.len(); ++index) {
             if (handles[index] == value) return true;
         }
         return false;
@@ -151,7 +150,7 @@ public:
             .generation = m_plan.generation,
         };
         auto bytes = rstd::vec::Vec<rstd::u8>::with_capacity(content.len());
-        for (rstd::usize index = 0; index < content.len(); ++index) {
+        for (rstd::usize index {}; index < content.len(); ++index) {
             bytes.push(rstd::u8(content[index]));
         }
         auto name = request.name.clone();
@@ -269,16 +268,16 @@ public:
     prepareResourceStates(rstd::mut_ref<rstd::dyn<resource_registry::TextureStatePreparer>>) {
         return true;
     }
-    virtual Option<RenderItemId>               renderItemId() const { return None(); }
-    virtual std::optional<PipelineCacheKey>    pipelineCacheKey() const { return std::nullopt; }
-    virtual bool                               pipelineCacheHit() const { return false; }
-    virtual u64                                pipelineCacheObservedCount() const { return 0; }
-    virtual std::optional<RenderPassCacheKey>  renderPassCacheKey() const { return std::nullopt; }
-    virtual bool                               renderPassCacheHit() const { return false; }
-    virtual u64                                renderPassCacheObservedCount() const { return 0; }
+    virtual Option<RenderItemId>              renderItemId() const { return None(); }
+    virtual std::optional<PipelineCacheKey>   pipelineCacheKey() const { return std::nullopt; }
+    virtual bool                              pipelineCacheHit() const { return false; }
+    virtual u64                               pipelineCacheObservedCount() const { return u64(); }
+    virtual std::optional<RenderPassCacheKey> renderPassCacheKey() const { return std::nullopt; }
+    virtual bool                              renderPassCacheHit() const { return false; }
+    virtual u64                               renderPassCacheObservedCount() const { return u64(); }
     virtual std::optional<FramebufferCacheKey> framebufferCacheKey() const { return std::nullopt; }
     virtual bool                               framebufferCacheHit() const { return false; }
-    virtual u64                                framebufferCacheObservedCount() const { return 0; }
+    virtual u64 framebufferCacheObservedCount() const { return u64(); }
     virtual std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const {
         return {};
     }

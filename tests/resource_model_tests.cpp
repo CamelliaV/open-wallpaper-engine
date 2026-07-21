@@ -13,11 +13,11 @@ auto TextureRequest(std::string_view name, rstd::u32 width) -> owe::resource::Te
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
         .name       = rstd::string::String::make(rstd::cppstd::as_str(name)),
         .definition = rstd::Some(owe::resource::TextureDefinition {
-            .width      = static_cast<rstd::i32>(width),
-            .height     = 128,
+            .width      = rstd::as_cast<rstd::i32>(width),
+            .height     = rstd::i32(128),
             .usage      = owe::resource::TextureUsage::Color,
             .format     = owe::TextureFormat::RGBA8,
-            .mip_levels = 2,
+            .mip_levels = rstd::u32(2),
         }),
         .lifetime   = owe::resource::TextureLifetimeClass::Retained,
     };
@@ -64,7 +64,7 @@ struct Impl<owe::resource::ResourcePlanVisitor, resource_model_test::CountingVis
 } // namespace rstd
 
 TEST(ResourceModel, ClonesMoveOnlyTextureRequestsExplicitly) {
-    auto request = TextureRequest("frame", 256);
+    auto request = TextureRequest("frame", rstd::u32(256));
     auto cloned  = request.clone();
 
     EXPECT_TRUE(owe::resource::SameTextureRequest(request, cloned));
@@ -74,52 +74,60 @@ TEST(ResourceModel, ClonesMoveOnlyTextureRequestsExplicitly) {
 }
 
 TEST(ResourceModel, ReplacesRequestsOnlyWhenTheirDefinitionChanges) {
-    auto                                        current = TextureRequest("frame", 256);
+    auto                                        current = TextureRequest("frame", rstd::u32(256));
     rstd::Option<owe::resource::TextureRequest> slot    = rstd::Some(current.clone());
 
     EXPECT_FALSE(owe::resource::SetTextureRequestIfChanged(slot, current.clone()));
-    EXPECT_TRUE(owe::resource::SetTextureRequestIfChanged(slot, TextureRequest("frame", 512)));
+    EXPECT_TRUE(
+        owe::resource::SetTextureRequestIfChanged(slot, TextureRequest("frame", rstd::u32(512))));
     ASSERT_TRUE(slot.is_some());
     ASSERT_TRUE(slot->definition.is_some());
-    EXPECT_EQ(slot->definition->width, 512);
+    EXPECT_EQ(slot->definition->width, rstd::i32(512));
 }
 
 TEST(ResourcePlan, OwnsBackendNeutralRequestsByTypedUseHandle) {
-    owe::resource::ResourcePlan plan { .generation = 7 };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(7) };
     plan.textures.push(owe::resource::TexturePlanEntry {
-        .handle  = owe::resource::TextureUseHandle { .index = 2, .generation = 1 },
-        .request = TextureRequest("frame", 256),
+        .handle =
+            owe::resource::TextureUseHandle { .index = rstd::u64(2), .generation = rstd::u64(1) },
+        .request = TextureRequest("frame", rstd::u32(256)),
         .access  = owe::resource::ResourceAccess::Write,
-        .version = 3,
+        .version = rstd::u32(3),
     });
 
-    ASSERT_EQ(plan.textures.len(), 1u);
-    EXPECT_TRUE(plan.textures[0].handle.Valid());
-    EXPECT_EQ(plan.textures[0].version, 3u);
-    EXPECT_EQ(plan.textures[0].access, owe::resource::ResourceAccess::Write);
-    EXPECT_EQ(rstd::cppstd::as_string_view(plan.textures[0].request.name.as_str()), "frame");
+    ASSERT_EQ(plan.textures.len(), rstd::usize(1));
+    EXPECT_TRUE(plan.textures[rstd::usize()].handle.Valid());
+    EXPECT_EQ(plan.textures[rstd::usize()].version, rstd::u32(3));
+    EXPECT_EQ(plan.textures[rstd::usize()].access, owe::resource::ResourceAccess::Write);
+    EXPECT_EQ(rstd::cppstd::as_string_view(plan.textures[rstd::usize()].request.name.as_str()),
+              "frame");
 }
 
 TEST(ResourcePlan, VisitsTypedRequestsThroughPublicTrait) {
-    owe::resource::ResourcePlan plan { .generation = 11 };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(11) };
     plan.textures.push(owe::resource::TexturePlanEntry {
-        .handle  = owe::resource::TextureUseHandle { .index = 1, .generation = 11 },
-        .request = TextureRequest("frame", 64),
+        .handle =
+            owe::resource::TextureUseHandle { .index = rstd::u64(1), .generation = rstd::u64(11) },
+        .request = TextureRequest("frame", rstd::u32(64)),
     });
     plan.buffers.push(owe::resource::BufferPlanEntry {
-        .handle = owe::resource::BufferUseHandle { .index = 2, .generation = 11 },
+        .handle =
+            owe::resource::BufferUseHandle { .index = rstd::u64(2), .generation = rstd::u64(11) },
         .request =
             owe::resource::BufferRequest {
                 .name       = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
-                .definition = { .size = 128, .usage = owe::resource::BufferUsage::Vertex },
+                .definition = { .size  = rstd::usize(128),
+                                .usage = owe::resource::BufferUsage::Vertex },
             },
     });
     plan.shaders.push(owe::resource::ShaderPlanEntry {
-        .handle = owe::resource::ShaderUseHandle { .index = 3, .generation = 11 },
+        .handle =
+            owe::resource::ShaderUseHandle { .index = rstd::u64(3), .generation = rstd::u64(11) },
         .request =
             owe::resource::ShaderRequest {
                 .name   = rstd::string::String::make(rstd::cppstd::as_str("sprite")),
-                .source = owe::resource::ShaderDefinitionId { .index = 4, .generation = 2 },
+                .source = owe::resource::ShaderDefinitionId { .index      = rstd::u32(4),
+                                                              .generation = rstd::u64(2) },
             },
     });
 
@@ -128,25 +136,26 @@ TEST(ResourcePlan, VisitsTypedRequestsThroughPublicTrait) {
     auto result  = owe::resource::VisitResourcePlan(plan, visitor);
 
     ASSERT_TRUE(result.is_ok());
-    EXPECT_EQ(counter.textures, 1u);
-    EXPECT_EQ(counter.buffers, 1u);
-    EXPECT_EQ(counter.shaders, 1u);
+    EXPECT_EQ(counter.textures, rstd::usize(1));
+    EXPECT_EQ(counter.buffers, rstd::usize(1));
+    EXPECT_EQ(counter.shaders, rstd::usize(1));
 }
 
 TEST(ShaderArtifact, ClonesOwnedStageCode) {
     owe::resource::ShaderArtifact artifact {
-        .source = owe::resource::ShaderDefinitionId { .index = 1, .generation = 3 },
+        .source =
+            owe::resource::ShaderDefinitionId { .index = rstd::u32(1), .generation = rstd::u64(3) },
     };
     owe::resource::ShaderArtifactStage stage {
         .stage       = owe::ShaderType::VERTEX,
         .entry_point = rstd::string::String::make(rstd::cppstd::as_str("main")),
     };
-    stage.code.push(7);
+    stage.code.push(rstd::u32(7));
     artifact.stages.push(rstd::move(stage));
 
-    auto cloned              = artifact.clone();
-    cloned.stages[0].code[0] = 9;
+    auto cloned                                      = artifact.clone();
+    cloned.stages[rstd::usize()].code[rstd::usize()] = rstd::u32(9);
 
-    EXPECT_EQ(artifact.stages[0].code[0], 7u);
-    EXPECT_EQ(cloned.stages[0].code[0], 9u);
+    EXPECT_EQ(artifact.stages[rstd::usize()].code[rstd::usize()], rstd::u32(7));
+    EXPECT_EQ(cloned.stages[rstd::usize()].code[rstd::usize()], rstd::u32(9));
 }

@@ -30,7 +30,7 @@ bool querySwapChainSupport(const vvk::PhysicalDevice& gpu, VkSurfaceKHR surface,
 }
 
 VkSurfaceFormatKHR chooseSwapSurfaceFormat(rstd::slice<VkSurfaceFormatKHR> availableFormats) {
-    for (rstd::usize i = 0; i < availableFormats.len(); ++i) {
+    for (rstd::usize i {}; i < availableFormats.len(); ++i) {
         const auto& availableFormat = availableFormats[i];
         if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM ||
             availableFormat.format == VK_FORMAT_R8G8B8A8_UNORM) {
@@ -38,7 +38,7 @@ VkSurfaceFormatKHR chooseSwapSurfaceFormat(rstd::slice<VkSurfaceFormatKHR> avail
                 return availableFormat;
         }
     }
-    auto& format = availableFormats[0];
+    auto& format = availableFormats[rstd::usize()];
     rstd_info("swapchain format: {}, color space: {}",
               vvk::ToString(format.format),
               vvk::ToString(format.colorSpace));
@@ -102,7 +102,7 @@ bool Swapchain::Create(Device& device, VkSurfaceKHR surface, VkExtent2D extent, 
 
     auto& surfaceCapabilities = swap_details.capabilities;
 
-    u32 image_count = surfaceCapabilities.minImageCount + 1;
+    rstd::uint32_t image_count = surfaceCapabilities.minImageCount + 1;
     if (surfaceCapabilities.maxImageCount > 0 && image_count > surfaceCapabilities.maxImageCount)
         image_count = surfaceCapabilities.maxImageCount;
     surfaceCapabilities.currentExtent = swap.m_extent;

@@ -8,10 +8,10 @@ export namespace owe
 
 template<typename Tag>
 struct SceneResourceId {
-    u32 index { rstd::u32_::MAX };
+    u32 index { u32::MAX };
     u32 generation { 0 };
 
-    bool Valid() const noexcept { return index != rstd::u32_::MAX && generation != 0; }
+    bool Valid() const noexcept { return index != u32::MAX && generation != u32(); }
 
     friend bool operator==(const SceneResourceId&, const SceneResourceId&) = default;
 };

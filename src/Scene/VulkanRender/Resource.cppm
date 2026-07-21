@@ -58,8 +58,8 @@ inline void WriteTextureSampleIdentity(PipelineKeyWriter& writer, const TextureS
 }
 
 inline void WriteTextureKeyIdentity(PipelineKeyWriter& writer, const TextureKey& key) {
-    writer.writeU32(static_cast<u32>(key.width));
-    writer.writeU32(static_cast<u32>(key.height));
+    writer.writeU32(static_cast<std::uint32_t>(key.width.to_primitive()));
+    writer.writeU32(static_cast<std::uint32_t>(key.height.to_primitive()));
     WritePipelineScalar(writer, key.usage);
     WritePipelineScalar(writer, key.format);
     WriteTextureSampleIdentity(writer, key.sample);
@@ -69,19 +69,19 @@ inline void WriteTextureKeyIdentity(PipelineKeyWriter& writer, const TextureKey&
 
 inline void WriteTextureDefinitionIdIdentity(PipelineKeyWriter&         writer,
                                              const TextureDefinitionId& id) {
-    writer.writeU64(static_cast<u64>(id.index));
-    writer.writeU64(static_cast<u64>(id.generation));
+    writer.writeU64(id.index.to_primitive());
+    writer.writeU64(id.generation.to_primitive());
 }
 
 inline void WriteTextureDefinitionIdentity(PipelineKeyWriter&       writer,
                                            const TextureDefinition& definition) {
-    writer.writeU32(static_cast<u32>(definition.width));
-    writer.writeU32(static_cast<u32>(definition.height));
+    writer.writeU32(static_cast<std::uint32_t>(definition.width.to_primitive()));
+    writer.writeU32(static_cast<std::uint32_t>(definition.height.to_primitive()));
     WritePipelineScalar(writer, definition.usage);
     WritePipelineScalar(writer, definition.format);
     WriteTextureSampleIdentity(writer, definition.sample);
-    writer.writeU32(definition.mip_levels);
-    writer.writeU32(definition.samples);
+    writer.writeU32(definition.mip_levels.to_primitive());
+    writer.writeU32(definition.samples.to_primitive());
 }
 
 inline void WriteTextureRequestIdentity(PipelineKeyWriter& writer, const TextureRequest& request) {
@@ -94,17 +94,17 @@ inline void WriteTextureRequestIdentity(PipelineKeyWriter& writer, const Texture
     writer.writeBool(request.definition.is_some());
     if (request.definition.is_some()) WriteTextureDefinitionIdentity(writer, *request.definition);
     WritePipelineScalar(writer, request.lifetime);
-    writer.writeU32(request.content);
+    writer.writeU32(request.content.to_primitive());
 }
 
 inline void WriteImageParametersIdentity(PipelineKeyWriter& writer, const ImageParameters& image) {
-    writer.writeU64(static_cast<u64>(reinterpret_cast<usize>(image.handle)));
-    writer.writeU64(static_cast<u64>(reinterpret_cast<usize>(image.view)));
+    writer.writeU64(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(image.handle)));
+    writer.writeU64(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(image.view)));
     writer.writeU32(image.extent.width);
     writer.writeU32(image.extent.height);
     writer.writeU32(image.extent.depth);
     writer.writeU32(image.mipmap_level);
-    writer.writeU64(image.generation);
+    writer.writeU64(image.generation.to_primitive());
 }
 
 inline FramebufferAttachmentIdentity
@@ -157,19 +157,19 @@ inline unsigned TextureSampleCountValue(VkSampleCountFlagBits sample_count) {
 
 inline TextureDefinition RenderTargetTextureDefinition(owe::SceneRenderTarget rt) {
     return TextureDefinition {
-        .width      = rt.PhysicalWidth(),
-        .height     = rt.PhysicalHeight(),
+        .width      = i32(rt.PhysicalWidth()),
+        .height     = i32(rt.PhysicalHeight()),
         .usage      = TextureUsage::Color,
         .format     = owe::TextureFormat::RGBA8,
         .sample     = rt.sample,
-        .mip_levels = rt.mipmap_level,
+        .mip_levels = u32(rt.mipmap_level),
     };
 }
 
 inline TextureDefinition RenderTargetTextureDefinitionNoMip(owe::SceneRenderTarget rt) {
     return TextureDefinition {
-        .width  = rt.PhysicalWidth(),
-        .height = rt.PhysicalHeight(),
+        .width  = i32(rt.PhysicalWidth()),
+        .height = i32(rt.PhysicalHeight()),
         .usage  = TextureUsage::Color,
         .format = owe::TextureFormat::RGBA8,
         .sample = rt.sample,
@@ -179,19 +179,19 @@ inline TextureDefinition RenderTargetTextureDefinitionNoMip(owe::SceneRenderTarg
 inline TextureDefinition MsaaTextureDefinition(owe::SceneRenderTarget rt,
                                                VkSampleCountFlagBits  samples) {
     auto definition    = RenderTargetTextureDefinition(rt);
-    definition.samples = TextureSampleCountValue(samples);
+    definition.samples = u32(TextureSampleCountValue(samples));
     return definition;
 }
 
 inline TextureDefinition DepthTextureDefinition(owe::SceneRenderTarget rt) {
     return TextureDefinition {
-        .width      = rt.PhysicalWidth(),
-        .height     = rt.PhysicalHeight(),
+        .width      = i32(rt.PhysicalWidth()),
+        .height     = i32(rt.PhysicalHeight()),
         .usage      = TextureUsage::Depth,
         .format     = owe::TextureFormat::D32F,
         .sample     = rt.sample,
-        .mip_levels = 1,
-        .samples    = rt.sample_count,
+        .mip_levels = u32(1),
+        .samples    = u32(rt.sample_count),
     };
 }
 

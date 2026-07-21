@@ -27,10 +27,10 @@ std::optional<std::string> ReadSizedString(BinaryReader& file, usize max_len) {
     auto signed_len = file.ReadInt32();
     if (signed_len < 0) return std::nullopt;
 
-    auto len = usize(signed_len);
+    auto len = usize(static_cast<rstd::size_t>(signed_len));
     if (len > max_len) return std::nullopt;
-    std::string result(len, '\0');
-    if (file.Read(result.data(), len) != len) return std::nullopt;
+    std::string result(len.to_primitive(), '\0');
+    if (file.Read(result.data(), len.to_primitive()) != len.to_primitive()) return std::nullopt;
     return result;
 }
 
@@ -53,9 +53,9 @@ auto LookupKey(Path path) -> rstd::io::Result<String> {
         if (value.is_none()) {
             return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidFilename));
         }
-        if (output.len() > 1) output.push_back('/');
+        if (output.len() > usize(1)) output.push_back('/');
         for (auto byte : *value) {
-            auto lowered = byte >= 'A' && byte <= 'Z' ? u8(byte - 'A' + 'a') : byte;
+            auto lowered = byte >= 'A' && byte <= 'Z' ? rstd::uint8_t(byte - 'A' + 'a') : byte;
             output.push_back(lowered);
         }
     }
@@ -72,12 +72,12 @@ auto WPPkgFs::open(Path pkg_path) -> rstd::io::Result<PkgMount> {
     if (metadata.is_err()) return rstd::Err(rstd::move(metadata).unwrap_err_unchecked());
     auto source = rstd::io::SharedReadAt::make(rstd::move(opened));
     auto range =
-        ReadRange::make(rstd::move(source), 0, rstd::move(metadata).unwrap_unchecked().len());
+        ReadRange::make(rstd::move(source), u64(), rstd::move(metadata).unwrap_unchecked().len());
     if (range.is_err()) return rstd::Err(rstd::move(range).unwrap_err_unchecked());
     auto pkg_source = rstd::move(range).unwrap_unchecked();
     auto pkg        = BinaryReader(pkg_source.clone());
 
-    auto version = ReadSizedString(pkg, 64);
+    auto version = ReadSizedString(pkg, usize(64));
     if (! version || ! IsPkgVersionStamp(*version)) {
         return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
     }
@@ -95,8 +95,8 @@ auto WPPkgFs::open(Path pkg_path) -> rstd::io::Result<PkgMount> {
         return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
     }
     files.reserve(usize(entry_count));
-    for (i32 i = 0; i < entry_count; ++i) {
-        auto path = ReadSizedString(pkg, 4096);
+    for (rstd::int32_t i = 0; i < entry_count; ++i) {
+        auto path = ReadSizedString(pkg, usize(4096));
         if (! path) return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
         auto key = LookupKey(ToPath(*path));
         if (key.is_err()) return rstd::Err(rstd::move(key).unwrap_err_unchecked());
@@ -107,14 +107,14 @@ auto WPPkgFs::open(Path pkg_path) -> rstd::io::Result<PkgMount> {
             return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
         }
         files.push(PendingFile { .path   = rstd::move(key).unwrap_unchecked(),
-                                 .offset = u64(offset),
-                                 .length = u64(length) });
+                                 .offset = u64(static_cast<rstd::uint64_t>(offset)),
+                                 .length = u64(static_cast<rstd::uint64_t>(length)) });
     }
 
     auto header_size = pkg.position();
     auto entries     = HashMap<String, PkgFile>::with_capacity(files.len());
     for (auto& file : files) {
-        if (file.offset > u64(-1) - header_size) {
+        if (file.offset > u64::MAX - header_size) {
             return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidData));
         }
         auto absolute = header_size + file.offset;
@@ -125,9 +125,10 @@ auto WPPkgFs::open(Path pkg_path) -> rstd::io::Result<PkgMount> {
                        PkgFile { .offset = absolute, .length = file.length });
     }
 
-    auto version_string = String::make(rstd::ref<rstd::str>(*version));
-    auto mount_version  = version_string.clone();
-    auto mount          = MountHandle::make(
+    auto version_string =
+        String::make(rstd::ref<rstd::str>(version->data(), usize(version->size())));
+    auto mount_version = version_string.clone();
+    auto mount         = MountHandle::make(
         WPPkgFs(rstd::move(pkg_source), rstd::move(version_string), rstd::move(entries)));
     return rstd::Ok(PkgMount(rstd::move(mount), rstd::move(mount_version)));
 }

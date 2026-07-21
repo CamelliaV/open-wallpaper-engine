@@ -37,7 +37,7 @@ struct UniformBufferFrameContext {
         using Trait = UniformBufferFrameContext;
 
         auto Frame() const -> ref<SceneFrame> { return rstd::trait_call<0>(this); }
-        auto Viewport() const -> rstd::array<f32, 2> { return rstd::trait_call<1>(this); }
+        auto Viewport() const -> rstd::array<float, 2> { return rstd::trait_call<1>(this); }
         auto TextureFrame(SceneDrawItemId draw, usize texture_index) const
             -> Option<SceneTextureFrameView> {
             return rstd::trait_call<2>(this, draw, texture_index);
@@ -50,20 +50,20 @@ struct UniformBufferFrameContext {
 
 class ProgramUniformFrameContext {
 public:
-    ProgramUniformFrameContext(const SceneFrame& frame, rstd::array<f32, 2> viewport,
+    ProgramUniformFrameContext(const SceneFrame& frame, rstd::array<float, 2> viewport,
                                ref<dyn<SceneTextureAnimationView>> textures)
         : m_frame(ref<SceneFrame>::from_raw_parts(rstd::addressof(frame))),
           m_viewport(viewport),
           m_textures(textures) {}
 
     auto Frame() const -> ref<SceneFrame> { return m_frame; }
-    auto Viewport() const -> rstd::array<f32, 2> { return m_viewport; }
+    auto Viewport() const -> rstd::array<float, 2> { return m_viewport; }
     auto TextureFrame(SceneDrawItemId draw, usize texture_index) const
         -> Option<SceneTextureFrameView>;
 
 private:
     ref<SceneFrame>                             m_frame;
-    rstd::array<f32, 2>                         m_viewport;
+    rstd::array<float, 2>                       m_viewport;
     mutable ref<dyn<SceneTextureAnimationView>> m_textures;
 };
 
@@ -93,7 +93,7 @@ struct BoundUniformOutput {
 
 struct BoundUniformSource {
     ref<dyn<UniformSource>> source;
-    i32                     priority { 0 };
+    rstd::int32_t           priority { 0 };
     Vec<BoundUniformOutput> outputs;
     std::shared_ptr<void>   lease;
     u64                     version { 0 };
@@ -101,12 +101,12 @@ struct BoundUniformSource {
 };
 
 struct PreparedUniformTextureMetadata {
-    bool                available { false };
-    rstd::array<f32, 2> source_extent { 0.0f, 0.0f };
-    rstd::array<f32, 2> sample_extent { 0.0f, 0.0f };
-    bool                has_mipmap { false };
-    f32                 mipmap_level { 0.0f };
-    u64                 revision { 1 };
+    bool                  available { false };
+    rstd::array<float, 2> source_extent { 0.0f, 0.0f };
+    rstd::array<float, 2> sample_extent { 0.0f, 0.0f };
+    bool                  has_mipmap { false };
+    float                 mipmap_level { 0.0f };
+    u64                   revision { 1 };
 };
 
 struct UniformPrepareDraw {

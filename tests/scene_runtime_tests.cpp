@@ -43,10 +43,8 @@ public:
     auto Texture(rstd::usize) const -> rstd::Option<owe::UniformTextureView> {
         return rstd::None();
     }
-    auto Viewport() const -> rstd::array<rstd::f32, 2> { return { 1920.0f, 1080.0f }; }
-    auto TexelSize() const -> rstd::array<rstd::f32, 2> {
-        return { 1.0f / 1920.0f, 1.0f / 1080.0f };
-    }
+    auto Viewport() const -> rstd::array<float, 2> { return { 1920.0f, 1080.0f }; }
+    auto TexelSize() const -> rstd::array<float, 2> { return { 1.0f / 1920.0f, 1.0f / 1080.0f }; }
 };
 
 class UpdateContext {
@@ -145,7 +143,7 @@ TEST(TextUniformSource, OwnsTextProjectionOutputs) {
     auto                         value = scene_test::Capture(
         scene.Runtime().Frame(), source, owe::text::TextUniformOutput::ModelViewProjection);
 
-    EXPECT_EQ(value.size(), 16u);
+    EXPECT_EQ(value.size().to_primitive(), 16u);
 }
 
 TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
@@ -157,11 +155,11 @@ TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
     owe::WPColorUniformSource source(node.clone());
     const auto                color =
         scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
-    ASSERT_EQ(color.size(), 4u);
-    EXPECT_FLOAT_EQ(color[0], 0.25f);
-    EXPECT_FLOAT_EQ(color[1], 0.5f);
-    EXPECT_FLOAT_EQ(color[2], 0.75f);
-    EXPECT_FLOAT_EQ(color[3], 0.125f);
+    ASSERT_EQ(color.size().to_primitive(), 4u);
+    EXPECT_FLOAT_EQ(color[rstd::usize()], 0.25f);
+    EXPECT_FLOAT_EQ(color[rstd::usize(1)], 0.5f);
+    EXPECT_FLOAT_EQ(color[rstd::usize(2)], 0.75f);
+    EXPECT_FLOAT_EQ(color[rstd::usize(3)], 0.125f);
 }
 
 TEST(WPUniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
@@ -173,20 +171,20 @@ TEST(WPUniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
     node->SetVisible(true);
     auto visible =
         scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
-    ASSERT_EQ(visible.size(), 4u);
-    EXPECT_FLOAT_EQ(visible[3], 0.35f);
+    ASSERT_EQ(visible.size().to_primitive(), 4u);
+    EXPECT_FLOAT_EQ(visible[rstd::usize(3)], 0.35f);
 
     node->SetVisible(false);
     auto hidden =
         scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
-    ASSERT_EQ(hidden.size(), 4u);
-    EXPECT_FLOAT_EQ(hidden[3], 0.0f);
+    ASSERT_EQ(hidden.size().to_primitive(), 4u);
+    EXPECT_FLOAT_EQ(hidden[rstd::usize(3)], 0.0f);
 
     node->SetVisible(true);
     auto restored =
         scene_test::Capture(scene.Runtime().Frame(), source, owe::WPColorUniformOutput::Color4);
-    ASSERT_EQ(restored.size(), 4u);
-    EXPECT_FLOAT_EQ(restored[3], 0.35f);
+    ASSERT_EQ(restored.size().to_primitive(), 4u);
+    EXPECT_FLOAT_EQ(restored[rstd::usize(3)], 0.35f);
 }
 
 TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
@@ -242,9 +240,9 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     effect_state->camera_resolver = camera_resolver;
     effect_state->propagated_parallax_depth      = { 0.0f, 0.0f };
     effect_state->propagate_parallax_to_children = true;
-    (void)state->SetNodeState({ .index = 1, .generation = 1 }, parent_state);
-    (void)state->SetNodeState({ .index = 2, .generation = 1 }, child_state);
-    (void)state->SetNodeState({ .index = 3, .generation = 1 }, effect_state);
+    (void)state->SetNodeState({ .index = rstd::u32(1), .generation = rstd::u32(1) }, parent_state);
+    (void)state->SetNodeState({ .index = rstd::u32(2), .generation = rstd::u32(1) }, child_state);
+    (void)state->SetNodeState({ .index = rstd::u32(3), .generation = rstd::u32(1) }, effect_state);
     owe::WPTransformUniformSource source(state, effect_state);
 
     auto capture_mvp = [&]() {
@@ -264,15 +262,15 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
 
     auto mvp             = capture_mvp();
     auto expected_parent = expected_translation({ 1982.0f, 1053.0f }, { -1.56f, -0.79f });
-    ASSERT_GT(mvp.size(), 13u);
-    EXPECT_NEAR(mvp[12], expected_parent.x(), 1e-5f);
-    EXPECT_NEAR(mvp[13], expected_parent.y(), 1e-5f);
+    ASSERT_GT(mvp.size().to_primitive(), 13u);
+    EXPECT_NEAR(mvp[rstd::usize(12)], expected_parent.x(), 1e-5f);
+    EXPECT_NEAR(mvp[rstd::usize(13)], expected_parent.y(), 1e-5f);
 
     parent_state->propagate_parallax_to_children = false;
     mvp                                          = capture_mvp();
     auto expected_child = expected_translation({ 1906.0f, 1050.0f }, { -1.12f, -1.36f });
-    EXPECT_NEAR(mvp[12], expected_child.x(), 1e-5f);
-    EXPECT_NEAR(mvp[13], expected_child.y(), 1e-5f);
+    EXPECT_NEAR(mvp[rstd::usize(12)], expected_child.x(), 1e-5f);
+    EXPECT_NEAR(mvp[rstd::usize(13)], expected_child.y(), 1e-5f);
 
     auto layer_camera = std::make_shared<owe::SceneCamera>(3840, 2160, -1.0, 1.0);
     layer_camera->AttatchNode(effect.as_ptr());
@@ -287,6 +285,6 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     effect->SetCamera("layer");
     parent_state->propagate_parallax_to_children = true;
     mvp                                          = capture_mvp();
-    EXPECT_NEAR(mvp[12], 0.0f, 1e-5f);
-    EXPECT_NEAR(mvp[13], 0.0f, 1e-5f);
+    EXPECT_NEAR(mvp[rstd::usize(12)], 0.0f, 1e-5f);
+    EXPECT_NEAR(mvp[rstd::usize(13)], 0.0f, 1e-5f);
 }

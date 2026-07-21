@@ -66,9 +66,10 @@ PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
 
             bool has_depth_attachment = false;
             if (m_desc.node.is_some() && (*m_desc.node)->Mesh() != nullptr) {
-                auto& mesh = *(*m_desc.node)->Mesh();
-                if (m_desc.submesh_index < mesh.Submeshes().size()) {
-                    const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
+                auto&             mesh          = *(*m_desc.node)->Mesh();
+                const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
+                if (submesh_index < mesh.Submeshes().size()) {
+                    const auto& submesh = mesh.Submeshes()[submesh_index];
                     const auto& slots   = mesh.MaterialSlots();
                     if (submesh.material_slot < slots.size() && slots[submesh.material_slot]) {
                         has_depth_attachment =
@@ -103,9 +104,10 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
     m_desc.framebuffer_use = rstd::None();
     if (m_desc.node.is_none() || (*m_desc.node)->Mesh() == nullptr) return;
 
-    auto& mesh = *(*m_desc.node)->Mesh();
-    if (m_desc.submesh_index >= mesh.Submeshes().size()) return;
-    const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
+    auto&             mesh          = *(*m_desc.node)->Mesh();
+    const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
+    if (submesh_index >= mesh.Submeshes().size()) return;
+    const auto& submesh = mesh.Submeshes()[submesh_index];
     const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
     auto& material = *slots[submesh.material_slot];
@@ -121,8 +123,8 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
 
     auto artifact = context.ShaderArtifact(artifact_request);
     if (artifact.is_some() && ! (**artifact).uniform_blocks.is_empty()) {
-        auto size = (**artifact).uniform_blocks[0].size;
-        if (size != 0) {
+        auto size = (**artifact).uniform_blocks[usize()].size;
+        if (size != usize()) {
             auto name = m_desc.draw_item.Valid()
                             ? BuildDrawBufferResourceName(m_desc.draw_item, DrawBufferRole::Uniform)
                             : rstd::format("pass:{}:{}:uniform",
@@ -134,19 +136,20 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
                     resource::BufferDefinition {
                         .size      = size,
                         .usage     = resource::BufferUsage::Uniform,
-                        .alignment = 4,
+                        .alignment = usize(4),
                     },
                 .lifetime = resource::BufferLifetimeClass::Dynamic,
             }));
         }
     }
 
-    for (usize index = 0; index < submesh.vertex_arrays.size(); ++index) {
+    for (std::size_t index = 0; index < submesh.vertex_arrays.size(); ++index) {
         const auto& vertex = submesh.vertex_arrays[index];
         auto        name =
             m_desc.draw_item.Valid()
-                ? BuildDrawBufferResourceName(
-                      m_desc.draw_item, DrawBufferRole::Vertex, static_cast<u32>(index))
+                ? BuildDrawBufferResourceName(m_desc.draw_item,
+                                              DrawBufferRole::Vertex,
+                                              u32(static_cast<rstd::uint32_t>(index)))
                 : rstd::format(
                       "pass:{}:{}:vertex:{}", m_desc.graph_pass_index, m_desc.submesh_index, index);
         auto use = context.AddBuffer(
@@ -156,7 +159,7 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
                     resource::BufferDefinition {
                         .size      = vertex.CapacitySizeOf(),
                         .usage     = resource::BufferUsage::Vertex,
-                        .alignment = 4,
+                        .alignment = usize(4),
                     },
                 .lifetime        = mesh.Dynamic() ? resource::BufferLifetimeClass::Dynamic
                                                   : resource::BufferLifetimeClass::Retained,
@@ -180,7 +183,7 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
                 resource::BufferDefinition {
                     .size      = index.CapacitySizeof(),
                     .usage     = resource::BufferUsage::Index,
-                    .alignment = 4,
+                    .alignment = usize(4),
                 },
             .lifetime        = mesh.Dynamic() ? resource::BufferLifetimeClass::Dynamic
                                               : resource::BufferLifetimeClass::Retained,
@@ -269,12 +272,12 @@ u64 CustomShaderPass::framebufferCacheObservedCount() const {
 std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagnostics() const {
     std::vector<PassTextureRequestDiagnostic> out;
     out.reserve(m_desc.texture_bindings.size() + 3);
-    for (usize i = 0; i < m_desc.texture_bindings.size(); ++i) {
+    for (std::size_t i = 0; i < m_desc.texture_bindings.size(); ++i) {
         const auto& binding = m_desc.texture_bindings[i];
         if (binding.name.is_empty() && binding.request.is_none()) continue;
         out.push_back(PassTextureRequestDiagnostic {
             .role    = "sampled",
-            .slot    = static_cast<u32>(i),
+            .slot    = u32(static_cast<rstd::uint32_t>(i)),
             .name    = rstd::cppstd::to_string(binding.name.as_str()),
             .request = binding.request.is_some() ? rstd::Some(binding.request->clone())
                                                  : rstd::None<TextureRequest>(),
@@ -310,9 +313,10 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
     MaterialTextureBindingRefresh result;
     if (m_desc.node.is_none() || (*m_desc.node)->Mesh() == nullptr) return result;
 
-    auto& mesh = *(*m_desc.node)->Mesh();
-    if (m_desc.submesh_index >= mesh.Submeshes().size()) return result;
-    const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
+    auto&             mesh          = *(*m_desc.node)->Mesh();
+    const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
+    if (submesh_index >= mesh.Submeshes().size()) return result;
+    const auto& submesh = mesh.Submeshes()[submesh_index];
     const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return result;
 
@@ -322,7 +326,7 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
         return result;
     }
 
-    for (usize i = 0; i < textures.size(); ++i) {
+    for (std::size_t i = 0; i < textures.size(); ++i) {
         const auto& next     = textures[i];
         const auto& old      = m_desc.texture_bindings[i];
         auto        old_name = rstd::cppstd::as_string_view(old.name.as_str());
@@ -332,7 +336,7 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
         }
     }
 
-    for (usize i = 0; i < textures.size(); ++i) {
+    for (std::size_t i = 0; i < textures.size(); ++i) {
         const auto& next     = textures[i];
         auto&       old      = m_desc.texture_bindings[i];
         auto        next_dep = ClassifySceneMaterialTexture(next);
@@ -385,8 +389,8 @@ auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareCo
         });
     }
     auto textures =
-        Vec<PreparedUniformTextureMetadata>::with_capacity(m_desc.texture_bindings.size());
-    for (usize index = 0; index < m_desc.texture_bindings.size(); ++index) {
+        Vec<PreparedUniformTextureMetadata>::with_capacity(usize(m_desc.texture_bindings.size()));
+    for (std::size_t index = 0; index < m_desc.texture_bindings.size(); ++index) {
         PreparedUniformTextureMetadata metadata;
         const auto&                    binding = m_desc.texture_bindings[index];
         if (binding.use.is_some()) {
@@ -399,13 +403,13 @@ auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareCo
             }
             const auto image       = (**prepared).image.getActive();
             metadata.available     = true;
-            metadata.source_extent = { static_cast<f32>(image.extent.width),
-                                       static_cast<f32>(image.extent.height) };
+            metadata.source_extent = { static_cast<float>(image.extent.width),
+                                       static_cast<float>(image.extent.height) };
             metadata.sample_extent = metadata.source_extent;
             metadata.has_mipmap    = (**prepared).request.kind == TextureRequestKind::RenderTarget;
-            metadata.mipmap_level  = static_cast<f32>(image.mipmap_level);
+            metadata.mipmap_level  = static_cast<float>(image.mipmap_level);
             metadata.revision      = (**prepared).physical_generation ^ image.generation;
-            if (metadata.revision == 0) metadata.revision = 1;
+            if (metadata.revision == u64()) metadata.revision = u64(1);
         }
         if (index < draw->material->texture_metadata.size()) {
             const auto& authored = draw->material->texture_metadata[index];
@@ -417,8 +421,11 @@ auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareCo
         }
         textures.push(rstd::move(metadata));
     }
-    auto binding = MakeUniformBufferBinding(
-        prepare, draw_item, *m_desc.ubo_use, artifact.uniform_blocks[0], rstd::move(textures));
+    auto binding = MakeUniformBufferBinding(prepare,
+                                            draw_item,
+                                            *m_desc.ubo_use,
+                                            artifact.uniform_blocks[usize()],
+                                            rstd::move(textures));
     if (binding.is_err()) return Err(rstd::move(binding).unwrap_err_unchecked());
     return Ok(Some(rstd::move(binding).unwrap_unchecked()));
 }
@@ -450,7 +457,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     ImageParameters            vk_output;
     ImageParameters            vk_output_msaa;
     ImageParameters            vk_depth;
-    for (usize i = 0; i < m_desc.texture_bindings.size(); i++) {
+    for (std::size_t i = 0; i < m_desc.texture_bindings.size(); i++) {
         auto& binding = m_desc.texture_bindings[i];
         if (binding.empty()) continue;
 
@@ -498,9 +505,10 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     }
 
     if (m_desc.node.is_none() || (*m_desc.node)->Mesh() == nullptr) return;
-    SceneMesh& mesh = *(*m_desc.node)->Mesh();
-    if (mesh.Submeshes().empty() || m_desc.submesh_index >= mesh.Submeshes().size()) return;
-    const auto& submesh = mesh.Submeshes()[m_desc.submesh_index];
+    SceneMesh&        mesh          = *(*m_desc.node)->Mesh();
+    const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
+    if (mesh.Submeshes().empty() || submesh_index >= mesh.Submeshes().size()) return;
+    const auto& submesh = mesh.Submeshes()[submesh_index];
     const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
     SceneMaterial& material_ref         = *slots[submesh.material_slot];
@@ -569,13 +577,13 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         m_desc.vk_tex_binding.clear();
         m_desc.vk_tex_binding.reserve(vk_textures.size());
 
-        for (usize i = 0; i < vk_textures.size(); i++) {
-            i32        binding { -1 };
-            const auto member = shader.SamplerMember(i);
+        for (std::size_t i = 0; i < vk_textures.size(); i++) {
+            rstd::int32_t binding { -1 };
+            const auto    member = shader.SamplerMember(i);
             if (! member.empty()) {
                 auto reflected = ref->binding_map.find(std::string(member));
                 if (reflected != ref->binding_map.end()) {
-                    binding = static_cast<i32>(reflected->second.binding);
+                    binding = static_cast<rstd::int32_t>(reflected->second.binding);
                 }
             }
             m_desc.vk_tex_binding.push_back(binding);
@@ -600,7 +608,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
 
             VkVertexInputBindingDescription bind_desc {
                 .binding   = i,
-                .stride    = static_cast<u32>(vertex.OneSizeOf()),
+                .stride    = static_cast<rstd::uint32_t>(vertex.OneSizeOf().to_primitive()),
                 .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
             };
             bind_descriptions.push_back(bind_desc);
@@ -608,13 +616,13 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             for (auto& item : ref->input_location_map) {
                 auto& name   = item.first;
                 auto& input  = item.second;
-                usize offset = exists(attrs_map, name) ? attrs_map[name].offset : 0;
+                usize offset = exists(attrs_map, name) ? attrs_map[name].offset : usize();
 
                 VkVertexInputAttributeDescription attr_desc {
                     .location = input.location,
                     .binding  = i,
                     .format   = input.format,
-                    .offset   = (u32)offset,
+                    .offset   = static_cast<rstd::uint32_t>(offset.to_primitive()),
                 };
                 attr_descriptions.push_back(attr_desc);
             }
@@ -680,9 +688,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         m_desc.pipeline_cache_key.reset();
         m_desc.render_pass_cache_key.reset();
         m_desc.pipeline_cache_hit               = false;
-        m_desc.pipeline_cache_observed_count    = 0;
+        m_desc.pipeline_cache_observed_count    = u64();
         m_desc.render_pass_cache_hit            = false;
-        m_desc.render_pass_cache_observed_count = 0;
+        m_desc.render_pass_cache_observed_count = u64();
         if (m_desc.pipeline_use.is_none() || m_desc.render_pass_use.is_none()) return;
         auto prepared = context.graphics->PreparePipeline(
             *m_desc.pipeline_use, *m_desc.render_pass_use, device, std::move(pipeline_request));
@@ -719,7 +727,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
 
         m_desc.framebuffer_cache_key.reset();
         m_desc.framebuffer_cache_hit            = false;
-        m_desc.framebuffer_cache_observed_count = 0;
+        m_desc.framebuffer_cache_observed_count = u64();
         if (m_desc.framebuffer_use.is_none() || m_desc.render_pass_use.is_none()) return;
         auto prepared = context.graphics->PrepareFramebuffer(*m_desc.framebuffer_use,
                                                              *m_desc.render_pass_use,
@@ -739,13 +747,13 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
 
     {
         auto images = rstd::vec::Vec<resource_registry::DescriptorImageBinding>::with_capacity(
-            vk_textures.size());
-        for (usize index = 0; index < vk_textures.size(); ++index) {
+            usize(vk_textures.size()));
+        for (std::size_t index = 0; index < vk_textures.size(); ++index) {
             auto  binding = m_desc.vk_tex_binding[index];
             auto& slots   = vk_textures[index];
             if (binding < 0 || slots.slots.empty()) continue;
             images.push(resource_registry::DescriptorImageBinding {
-                .binding = static_cast<u32>(binding),
+                .binding = static_cast<rstd::uint32_t>(binding),
                 .image   = slots.getActive(),
             });
         }
@@ -780,9 +788,10 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
                 VkClearValue { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 0.0f } } };
             m_desc.clear_value_src = rstd::None();
         } else {
-            auto& sc = scene.clearColor;
-            m_desc.clear_value =
-                VkClearValue { .color = { .float32 = { sc[0], sc[1], sc[2], 1.0f } } };
+            auto& sc           = scene.clearColor;
+            m_desc.clear_value = VkClearValue {
+                .color = { .float32 = { sc[usize()], sc[usize(1)], sc[usize(2)], 1.0f } }
+            };
             // Track the live scene.clearColor: per-frame re-sync in
             // execute() picks up live edits (e.g. `schemecolor` user
             // property changes) without a render-graph rebuild.
@@ -818,9 +827,9 @@ bool CustomShaderPass::canJoinRenderScopeAfter(const VulkanPass& previous) const
 bool CustomShaderPass::update(PassUpdateContext& context) {
     if (m_desc.clear_value_src) {
         const auto& sc                      = **m_desc.clear_value_src;
-        m_desc.clear_value.color.float32[0] = sc[0];
-        m_desc.clear_value.color.float32[1] = sc[1];
-        m_desc.clear_value.color.float32[2] = sc[2];
+        m_desc.clear_value.color.float32[0] = sc[usize()];
+        m_desc.clear_value.color.float32[1] = sc[usize(1)];
+        m_desc.clear_value.color.float32[2] = sc[usize(2)];
         m_desc.clear_value.color.float32[3] = 1.0f;
     }
 
@@ -854,15 +863,16 @@ void CustomShaderPass::beginRenderScope(PassRecordContext& context) {
     auto render_pass = context.resources->Resolve(*m_desc.render_pass_use);
     auto framebuffer = context.resources->Resolve(*m_desc.framebuffer_use);
     if (render_pass.is_none() || framebuffer.is_none()) return;
-    auto&      cmd         = *context.command;
-    auto&      outext      = m_desc.output_extent;
-    const bool has_msaa    = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
-    const u32  clear_count = (has_msaa ? 2u : 1u) + (m_desc.has_depth_attachment ? 1u : 0u);
+    auto&                cmd      = *context.command;
+    auto&                outext   = m_desc.output_extent;
+    const bool           has_msaa = m_desc.samples != VK_SAMPLE_COUNT_1_BIT;
+    const rstd::uint32_t clear_count =
+        (has_msaa ? 2u : 1u) + (m_desc.has_depth_attachment ? 1u : 0u);
     rstd::array<VkClearValue, 3> clears {};
-    clears[0] = m_desc.clear_value;
+    clears[usize()] = m_desc.clear_value;
     if (m_desc.has_depth_attachment) {
-        const u32 depth_index            = has_msaa ? 2u : 1u;
-        clears[depth_index].depthStencil = { 1.0f, 0 };
+        const rstd::uint32_t depth_index        = has_msaa ? 2u : 1u;
+        clears[usize(depth_index)].depthStencil = { 1.0f, 0 };
     }
     VkRenderPassBeginInfo pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
@@ -907,13 +917,13 @@ void CustomShaderPass::recordRenderScopeDraw(PassRecordContext& context) {
     cmd.SetScissor(0, scissor);
 
     auto& draw_buffers = m_desc.draw_buffers;
-    for (usize i = 0; i < draw_buffers.vertices.len(); i++) {
+    for (usize i {}; i < draw_buffers.vertices.len(); i++) {
         auto prepared = context.resources->Resolve(draw_buffers.vertices[i]);
         if (prepared.is_none()) return;
         auto&        mref = (**prepared).buffer.physical->buffer;
         VkBuffer     vb   = mref.buffer();
         VkDeviceSize off  = mref.offset();
-        cmd.BindVertexBuffers((u32)i, 1, &vb, &off);
+        cmd.BindVertexBuffers(static_cast<rstd::uint32_t>(i.to_primitive()), 1, &vb, &off);
     }
     if (draw_buffers.index.is_some()) {
         auto prepared = context.resources->Resolve(*draw_buffers.index);
@@ -928,11 +938,11 @@ void CustomShaderPass::recordRenderScopeDraw(PassRecordContext& context) {
     if (has_index) {
         const auto& submeshes = (*m_desc.node)->Mesh()->Submeshes();
         static const std::vector<SceneMesh::DrawRange> kEmpty;
-        const auto& ranges = (m_desc.submesh_index < submeshes.size())
-                                 ? submeshes[m_desc.submesh_index].draw_ranges
-                                 : kEmpty;
+        const std::size_t submesh_index = m_desc.submesh_index.to_primitive();
+        const auto&       ranges =
+            (submesh_index < submeshes.size()) ? submeshes[submesh_index].draw_ranges : kEmpty;
         if (ranges.empty()) {
-            cmd.DrawIndexed(draw_buffers.draw_count, 1, 0, 0, 0);
+            cmd.DrawIndexed(draw_buffers.draw_count.to_primitive(), 1, 0, 0, 0);
         } else {
             // Per-part drawing — preserves the file's z-order so later parts
             // overdraw earlier ones (eyelid over pupil during blink).
@@ -941,7 +951,7 @@ void CustomShaderPass::recordRenderScopeDraw(PassRecordContext& context) {
             }
         }
     } else {
-        cmd.Draw(draw_buffers.draw_count, 1, 0, 0);
+        cmd.Draw(draw_buffers.draw_count.to_primitive(), 1, 0, 0);
     }
 }
 
@@ -962,16 +972,17 @@ void CustomShaderPass::destory(const Device&) {
     m_desc.render_pass_cache_key.reset();
     m_desc.framebuffer_cache_key.reset();
     m_desc.pipeline_cache_hit               = false;
-    m_desc.pipeline_cache_observed_count    = 0;
+    m_desc.pipeline_cache_observed_count    = u64();
     m_desc.render_pass_cache_hit            = false;
-    m_desc.render_pass_cache_observed_count = 0;
+    m_desc.render_pass_cache_observed_count = u64();
     m_desc.framebuffer_cache_hit            = false;
-    m_desc.framebuffer_cache_observed_count = 0;
+    m_desc.framebuffer_cache_observed_count = u64();
     m_desc.draw_buffers                     = {};
 }
 
 bool CustomShaderPass::setTextureBinding(u32 index, TextureBindingRequest binding) {
-    if (index >= m_desc.texture_bindings.size()) return false;
-    m_desc.texture_bindings[index] = std::move(binding);
+    const std::size_t native_index = index.to_primitive();
+    if (native_index >= m_desc.texture_bindings.size()) return false;
+    m_desc.texture_bindings[native_index] = std::move(binding);
     return true;
 }

@@ -172,16 +172,17 @@ private:
         const auto   total   = static_cast<std::size_t>(frameReads * m_desc.channels);
         if (total == 0) return;
 
-        for (usize bin = 0; bin < m_audioAverage->len(); ++bin) {
-            const auto begin = bin * total / m_audioAverage->len();
-            const auto end   = (bin + 1) * total / m_audioAverage->len();
+        const std::size_t bin_count = m_audioAverage->len().to_primitive();
+        for (std::size_t bin = 0; bin < bin_count; ++bin) {
+            const auto begin = bin * total / bin_count;
+            const auto end   = (bin + 1) * total / bin_count;
             if (end <= begin) continue;
 
             float sum = 0.0f;
             for (std::size_t i = begin; i < end; ++i) sum += std::abs(samples[i]);
             float level = std::clamp(sum / static_cast<float>(end - begin), 0.0f, 1.0f);
 
-            auto&       slot = (*m_audioAverage)[bin];
+            auto&       slot = (*m_audioAverage)[usize(bin)];
             const float old  = slot.load(std::memory_order_relaxed);
             slot.store(std::max(old * 0.75f, level), std::memory_order_relaxed);
         }

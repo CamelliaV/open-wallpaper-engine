@@ -87,6 +87,10 @@ const std::vector<int>& AllMdlaVersions() {
 
 std::string IntName(int v) { return "V" + std::to_string(v); }
 
+auto JsonI64Or(const owe::Json& value, rstd::int64_t default_value) -> rstd::int64_t {
+    return value.as_i64().unwrap_or(rstd::i64(default_value)).to_primitive();
+}
+
 } // namespace
 
 // ============================================================================
@@ -111,7 +115,7 @@ TEST_P(ScenePkgVersionTest, AllWorkshopsParseAndExposeSaneScene) {
         EXPECT_EQ(rstd::cppstd::to_string(*(*pkg_version)->as_str()), version);
         auto file_count = (*pkg)->get("file_count");
         ASSERT_TRUE(file_count.is_some());
-        EXPECT_GT((*file_count)->as_i64().unwrap_or(0), 0);
+        EXPECT_GT(JsonI64Or(**file_count, 0), 0);
         auto has_scene_json = (*pkg)->get("has_scene_json");
         ASSERT_TRUE(has_scene_json.is_some());
         EXPECT_TRUE((*has_scene_json)->as_bool().unwrap_or(false));
@@ -134,8 +138,8 @@ TEST_P(ScenePkgVersionTest, AllWorkshopsParseAndExposeSaneScene) {
             auto height = (*ortho)->get("height");
             ASSERT_TRUE(width.is_some());
             ASSERT_TRUE(height.is_some());
-            EXPECT_GT((*width)->as_i64().unwrap_or(0), 0);
-            EXPECT_GT((*height)->as_i64().unwrap_or(0), 0);
+            EXPECT_GT(JsonI64Or(**width, 0), 0);
+            EXPECT_GT(JsonI64Or(**height, 0), 0);
         }
     }
 }
@@ -171,11 +175,11 @@ static void CheckTexInvariants(const Corpus::TexRef& ref) {
     ASSERT_TRUE(ok.is_some() && width.is_some() && height.is_some() && map_width.is_some() &&
                 map_height.is_some() && count.is_some());
     EXPECT_TRUE((*ok)->as_bool().unwrap_or(false));
-    EXPECT_GT((*width)->as_i64().unwrap_or(0), 0);
-    EXPECT_GT((*height)->as_i64().unwrap_or(0), 0);
-    EXPECT_GT((*map_width)->as_i64().unwrap_or(0), 0);
-    EXPECT_GT((*map_height)->as_i64().unwrap_or(0), 0);
-    EXPECT_GT((*count)->as_i64().unwrap_or(0), 0);
+    EXPECT_GT(JsonI64Or(**width, 0), 0);
+    EXPECT_GT(JsonI64Or(**height, 0), 0);
+    EXPECT_GT(JsonI64Or(**map_width, 0), 0);
+    EXPECT_GT(JsonI64Or(**map_height, 0), 0);
+    EXPECT_GT(JsonI64Or(**count, 0), 0);
 }
 
 TEST_P(TextureTexvTest, AllInstancesParse) {
@@ -184,7 +188,7 @@ TEST_P(TextureTexvTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("texv");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -194,7 +198,7 @@ TEST_P(TextureTexiTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("texi");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -204,7 +208,7 @@ TEST_P(TextureTexbTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("texb");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -214,7 +218,7 @@ TEST_P(TextureFormatTest, AllInstancesParse) {
     for (const auto& r : slice) {
         auto value = r.tex->get("format");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
     }
 }
@@ -260,13 +264,13 @@ static void CheckMdlInvariants(const Corpus::MdlRef& ref) {
     auto mdla = m.get("mdla");
     auto ok   = m.get("ok");
     ASSERT_TRUE(mdlv.is_some() && mdls.is_some() && mdla.is_some() && ok.is_some());
-    EXPECT_GE((*mdlv)->as_i64().unwrap_or(-1), 0);
-    EXPECT_GE((*mdls)->as_i64().unwrap_or(-1), 0);
-    EXPECT_GE((*mdla)->as_i64().unwrap_or(-1), 0);
+    EXPECT_GE(JsonI64Or(**mdlv, -1), 0);
+    EXPECT_GE(JsonI64Or(**mdls, -1), 0);
+    EXPECT_GE(JsonI64Or(**mdla, -1), 0);
     if ((*ok)->as_bool().unwrap_or(false)) {
         auto bones = m.get("bones");
         ASSERT_TRUE(bones.is_some());
-        EXPECT_GT((*bones)->as_i64().unwrap_or(0), 0);
+        EXPECT_GT(JsonI64Or(**bones, 0), 0);
     }
 }
 
@@ -276,7 +280,7 @@ TEST_P(MdlMdlvTest, AllInstancesExposeStamps) {
     for (const auto& r : slice) {
         auto value = r.mdl->get("mdlv");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckMdlInvariants(r);
     }
 }
@@ -286,7 +290,7 @@ TEST_P(MdlMdlsTest, AllInstancesExposeStamps) {
     for (const auto& r : slice) {
         auto value = r.mdl->get("mdls");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckMdlInvariants(r);
     }
 }
@@ -296,7 +300,7 @@ TEST_P(MdlMdlaTest, AllInstancesExposeStamps) {
     for (const auto& r : slice) {
         auto value = r.mdl->get("mdla");
         ASSERT_TRUE(value.is_some());
-        EXPECT_EQ((*value)->as_i64().unwrap_or(-1), GetParam());
+        EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckMdlInvariants(r);
     }
 }

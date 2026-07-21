@@ -87,9 +87,9 @@ public:
     void Reset() {
         m_entries.clear();
         m_requests.clear();
-        m_next_index = 0;
+        m_next_index = u64();
         ++m_generation;
-        if (m_generation == 0) ++m_generation;
+        if (m_generation == u64()) ++m_generation;
     }
 
     auto Generation() const noexcept -> u64 { return m_generation; }

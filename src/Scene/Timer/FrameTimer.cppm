@@ -10,7 +10,7 @@ export namespace owe
 {
 
 class FrameTimer : NoCopy, NoMove {
-    constexpr static usize FRAMETIME_QUEUE_SIZE { 5 };
+    constexpr static std::size_t FRAMETIME_QUEUE_SIZE { 5 };
 
 public:
     FrameTimer(std::function<void()> callback = {});
@@ -41,7 +41,7 @@ private:
     u16                                    m_req_fps;
     std::atomic<std::chrono::microseconds> m_frametime;
     std::atomic<std::chrono::microseconds> m_ideatime;
-    std::atomic<i32>                       m_frame_busy_count;
+    std::atomic<rstd::int32_t>             m_frame_busy_count;
 
     ThreadTimer m_timer;
 

@@ -30,7 +30,7 @@ bool ParseAnimKeyframe(const owe::Json& json, AnimKeyframe& out) {
 bool ParseAnimAxis(const owe::Json& json, std::vector<AnimKeyframe>& out) {
     if (! json.is_array()) return false;
     auto array = json.as_array();
-    out.reserve((*array)->len());
+    out.reserve((*array)->len().to_primitive());
     for (const auto& jK : **array) {
         AnimKeyframe k;
         if (ParseAnimKeyframe(jK, k)) out.push_back(std::move(k));

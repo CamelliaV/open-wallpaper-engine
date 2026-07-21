@@ -26,7 +26,7 @@ StagingBuffer::~StagingBuffer() {}
 namespace
 {
 Option<VmaBufferParameters> CreateGpuBuffer(VmaAllocator allocator, VkBufferUsageFlags usage,
-                                            usize size) {
+                                            VkDeviceSize size) {
     do {
         VmaBufferParameters buffer;
         VkBufferCreateInfo  ci {
@@ -85,7 +85,7 @@ StagingBuffer::VirtualBlock* StagingBuffer::newVirtualBlock(VkDeviceSize nsize) 
         m_virtual_blocks.push_back({});
         it         = m_virtual_blocks.end() - 1;
         it->size   = nsize > m_size_step ? nsize : m_size_step;
-        it->index  = static_cast<usize>(std::distance(m_virtual_blocks.begin(), it));
+        it->index  = static_cast<std::size_t>(std::distance(m_virtual_blocks.begin(), it));
         it->offset = offset;
     }
     auto& block = *it;
@@ -107,9 +107,8 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
     if (m_stage_raw == nullptr) {
         VVK_CHECK_BOOL_RE(mapStageBuf());
     }
-    auto newsize = m_stage_buf.req_size + nsize;
-    auto tmp     = Vec<u8>::with_capacity(usize(newsize));
-    tmp.resize(usize(newsize), u8(0));
+    auto                       newsize = m_stage_buf.req_size + nsize;
+    std::vector<rstd::uint8_t> tmp(static_cast<std::size_t>(newsize));
     std::memcpy(tmp.data(), m_stage_raw, m_stage_buf.req_size);
 
     m_stage_raw = nullptr;
@@ -118,7 +117,7 @@ bool StagingBuffer::increaseBuf(VkDeviceSize nsize) {
 
     if (! CreateStagingBuffer(m_device.vma_allocator(), newsize, m_stage_buf)) return false;
     VVK_CHECK_BOOL_RE(mapStageBuf());
-    std::memcpy(m_stage_raw, tmp.data(), usize(newsize));
+    std::memcpy(m_stage_raw, tmp.data(), static_cast<std::size_t>(newsize));
 
     m_gpu_buf.handle = nullptr;
     rstd_info("increase buffer size: {}", nsize);
@@ -211,23 +210,26 @@ void StagingBuffer::unallocateSubRef(const StagingBufferRef& ref) {
 
 VkResult StagingBuffer::mapStageBuf() { return m_stage_buf.handle.MapMemory(&m_stage_raw); }
 
-bool StagingBuffer::writeToBuf(const StagingBufferRef& ref, std::span<u8> data, usize offset) {
+bool StagingBuffer::writeToBuf(const StagingBufferRef& ref, std::span<const rstd::uint8_t> data,
+                               VkDeviceSize offset) {
     CHECK_REF(ref, return false);
 
     if (m_stage_raw == nullptr) mapStageBuf();
-    VkDeviceSize size = std::min(ref.size - offset, data.size());
-    u8*          raw  = static_cast<u8*>(m_stage_raw);
-    std::copy(data.begin(), data.begin() + size, raw + ref.offset + offset);
+    VkDeviceSize size = std::min(ref.size - offset, static_cast<VkDeviceSize>(data.size()));
+    auto*        raw  = static_cast<rstd::uint8_t*>(m_stage_raw);
+    std::copy(
+        data.begin(), data.begin() + static_cast<std::ptrdiff_t>(size), raw + ref.offset + offset);
     return true;
 }
 
-bool StagingBuffer::fillBuf(const StagingBufferRef& ref, usize offset, usize size, u8 c) {
+bool StagingBuffer::fillBuf(const StagingBufferRef& ref, VkDeviceSize offset, VkDeviceSize size,
+                            rstd::uint8_t c) {
     CHECK_REF(ref, return false);
 
     if (m_stage_raw == nullptr) mapStageBuf();
     VkDeviceSize size_     = std::min(ref.size - offset, size);
-    u8*          raw       = static_cast<u8*>(m_stage_raw);
-    u8*          raw_begin = raw + ref.offset + offset;
+    auto*        raw       = static_cast<rstd::uint8_t*>(m_stage_raw);
+    auto*        raw_begin = raw + ref.offset + offset;
     std::fill(raw_begin, raw_begin + size_, c);
     return true;
 }

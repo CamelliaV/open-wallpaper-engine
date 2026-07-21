@@ -89,7 +89,7 @@ void GraphicsPipeline::toDefault() {
         .pNext           = nullptr,
         .logicOpEnable   = false,
         .logicOp         = VK_LOGIC_OP_COPY,
-        .attachmentCount = static_cast<u32>(m_color_attachments.size()),
+        .attachmentCount = static_cast<rstd::uint32_t>(m_color_attachments.size()),
         .pAttachments    = m_color_attachments.data(),
     };
     m_dynamic_states = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
@@ -112,7 +112,7 @@ const ShaderSpv* GraphicsPipeline::getShaderSpv(VkShaderStageFlagBits stage) con
 GraphicsPipeline&
 GraphicsPipeline::setColorBlendStates(std::span<const VkPipelineColorBlendAttachmentState> stats) {
     m_color_attachments     = { stats.begin(), stats.end() };
-    m_color.attachmentCount = (u32)m_color_attachments.size();
+    m_color.attachmentCount = static_cast<rstd::uint32_t>(m_color_attachments.size());
     m_color.pAttachments    = m_color_attachments.data();
     return *this;
 }
@@ -130,7 +130,8 @@ GraphicsPipeline& GraphicsPipeline::setLogicOp(bool enable, VkLogicOp op) {
     return *this;
 }
 
-GraphicsPipeline& GraphicsPipeline::setCreateInfoOptions(VkPipelineCreateFlags flags, u32 subpass) {
+GraphicsPipeline& GraphicsPipeline::setCreateInfoOptions(VkPipelineCreateFlags flags,
+                                                         rstd::uint32_t        subpass) {
     m_create_flags = flags;
     m_subpass      = subpass;
     return *this;
@@ -173,7 +174,8 @@ GraphicsPipeline& GraphicsPipeline::setPrimitiveRestartEnable(bool enable) {
     return *this;
 }
 
-GraphicsPipeline& GraphicsPipeline::setViewportScissorCount(u32 viewport_count, u32 scissor_count) {
+GraphicsPipeline& GraphicsPipeline::setViewportScissorCount(rstd::uint32_t viewport_count,
+                                                            rstd::uint32_t scissor_count) {
     m_view.viewportCount = viewport_count;
     m_view.scissorCount  = scissor_count;
     return *this;
@@ -194,14 +196,14 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
     VkPipelineDynamicStateCreateInfo dynamic_info {
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
         .pNext             = nullptr,
-        .dynamicStateCount = static_cast<u32>(m_dynamic_states.size()),
+        .dynamicStateCount = static_cast<rstd::uint32_t>(m_dynamic_states.size()),
         .pDynamicStates    = m_dynamic_states.data()
     };
     {
         VkPipelineLayoutCreateInfo ci {
             .sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .pNext          = nullptr,
-            .setLayoutCount = static_cast<u32>(m_descriptor_set_layouts.size()),
+            .setLayoutCount = static_cast<rstd::uint32_t>(m_descriptor_set_layouts.size()),
             .pSetLayouts    = m_descriptor_set_layouts.data(),
         };
         VVK_CHECK(device.handle().CreatePipelineLayout(ci, pipeline.layout));
@@ -226,19 +228,21 @@ bool GraphicsPipeline::create(const Device& device, VkRenderPass pass,
     }
 
     VkPipelineVertexInputStateCreateInfo input {
-        .sType                         = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .pNext                         = nullptr,
-        .vertexBindingDescriptionCount = static_cast<u32>(m_input_bind_descriptions.size()),
-        .pVertexBindingDescriptions    = m_input_bind_descriptions.data(),
-        .vertexAttributeDescriptionCount = static_cast<u32>(m_input_attr_descriptions.size()),
-        .pVertexAttributeDescriptions    = m_input_attr_descriptions.data()
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .vertexBindingDescriptionCount =
+            static_cast<rstd::uint32_t>(m_input_bind_descriptions.size()),
+        .pVertexBindingDescriptions = m_input_bind_descriptions.data(),
+        .vertexAttributeDescriptionCount =
+            static_cast<rstd::uint32_t>(m_input_attr_descriptions.size()),
+        .pVertexAttributeDescriptions = m_input_attr_descriptions.data()
     };
 
     VkGraphicsPipelineCreateInfo create {
         .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext               = nullptr,
         .flags               = m_create_flags,
-        .stageCount          = static_cast<u32>(shaderStages.size()),
+        .stageCount          = static_cast<rstd::uint32_t>(shaderStages.size()),
         .pStages             = shaderStages.data(),
         .pVertexInputState   = &input,
         .pInputAssemblyState = &m_input_assembly,
