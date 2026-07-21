@@ -31,11 +31,7 @@ add_library(owe-base STATIC
   Scene/SceneIndexArray.cpp
   Scene/SceneNode.cpp
   Scene/SceneVertexArray.cpp
-  Scene/SceneShader.cpp
-  Particle/ParticleModify.cpp
-  Particle/ParticleSystem.cpp
-  Particle/ParticleEmitter.cpp
-  Particle/WPParticleRawGener.cpp)
+  Scene/SceneShader.cpp)
 target_sources(owe-base
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          SpecNames.cppm
@@ -46,6 +42,8 @@ target_sources(owe-base
          Timer/Timer.cppm
          Timer/ThreadTimer.cppm
          Timer/FrameTimer.cppm
+         Particle/Particle.cppm
+         Particle/ParticleProgram.cppm
          Scene/Id.cppm
          Scene/Runtime.cppm
          Scene/SceneVisibility.cppm
@@ -88,6 +86,9 @@ add_library(owe-parse STATIC
   Pkg/SceneObj/LightObject.cpp
   Pkg/SceneObj/Material.cpp
   Pkg/Parse/WPMdlParser.cpp
+  Pkg/Parse/WPParticleEmitter.cpp
+  Pkg/Parse/WPParticleRawGenerator.cpp
+  Pkg/Parse/WPParticleRuntime.cpp
   Pkg/SceneObj/ParticleObject.cpp
   Pkg/Parse/WPParticleParser.cpp
   Pkg/Parse/WPPuppet.cpp
@@ -104,6 +105,7 @@ target_sources(owe-parse
          Pkg/Parse/mod.cppm
          Pkg/Parse/Compat.cppm
          Pkg/Parse/PuppetCompat.cppm
+         Pkg/Parse/WPParticleRuntime.cppm
          Pkg/SceneObj/mod.cppm
          Pkg/SceneObj/AnimationLayer.cppm
          Pkg/SceneObj/FieldBinding.cppm

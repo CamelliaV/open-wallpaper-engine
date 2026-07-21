@@ -1052,51 +1052,50 @@ ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render)
     return desc;
 }
 
-ParticleAnimationMode ToAnimMode(const std::string& str) {
+WPParticleAnimationMode ToAnimMode(const std::string& str) {
     if (str == "randomframe")
-        return ParticleAnimationMode::RANDOMONE;
+        return WPParticleAnimationMode::RANDOMONE;
     else if (str == "sequence")
-        return ParticleAnimationMode::SEQUENCE;
+        return WPParticleAnimationMode::SEQUENCE;
     else {
-        return ParticleAnimationMode::SEQUENCE;
+        return WPParticleAnimationMode::SEQUENCE;
     }
 }
 
-void LoadControlPoint(ParticleSubSystem& pSys, const wpscene::Particle& wp) {
-    std::span<ParticleControlpoint> pcs = pSys.Controlpoints();
-    std::size_t                     s   = std::min(pcs.size(), wp.controlpoints.size());
-    for (std::size_t i = 0; i < s; i++) {
-        pcs[i].base_offset =
-            Eigen::Vector3d { array_cast<double>(wp.controlpoints[i].offset).data() };
-        pcs[i].offset = pcs[i].base_offset;
-        pcs[i].link_mouse =
-            wp.controlpoints[i].flags[wpscene::ParticleControlpoint::FlagEnum::link_mouse];
-        pcs[i].worldspace =
-            wp.controlpoints[i].flags[wpscene::ParticleControlpoint::FlagEnum::worldspace];
+void LoadControlPoint(WPParticleSubSystem& system, const wpscene::Particle& particle) {
+    auto points = system.ControlpointsMut();
+    auto count  = rstd::cmp::min(points.len(), usize(particle.controlpoints.size()));
+    for (usize index {}; index < count; ++index) {
+        auto source_index         = index.to_primitive();
+        points[index].base_offset = Eigen::Vector3d {
+            array_cast<double>(particle.controlpoints[source_index].offset).data()
+        };
+        points[index].offset     = points[index].base_offset;
+        points[index].link_mouse = particle.controlpoints[source_index]
+                                       .flags[wpscene::ParticleControlpoint::FlagEnum::link_mouse];
+        points[index].worldspace = particle.controlpoints[source_index]
+                                       .flags[wpscene::ParticleControlpoint::FlagEnum::worldspace];
     }
 }
-void LoadInitializer(ParticleSubSystem& pSys, const wpscene::Particle& wp,
+void LoadInitializer(WPParticleSubSystem& system, const wpscene::Particle& particle,
                      std::shared_ptr<wpscene::ParticleInstanceoverride> over_state) {
-    for (const auto& ini : wp.initializers) {
-        pSys.AddInitializer(WPParticleParser::genParticleInitOp(ini));
+    for (const auto& initializer : particle.initializers) {
+        system.AddInitializer(WPParticleParser::GenInitializer(initializer, system.Attributes()));
     }
-    if (over_state->enabled) pSys.AddInitializer(WPParticleParser::genOverrideInitOp(over_state));
+    if (over_state->enabled) {
+        system.AddInitializer(WPParticleParser::GenOverride(over_state, system.Attributes()));
+    }
 }
-void LoadOperator(ParticleSubSystem& pSys, const wpscene::Particle& wp,
+void LoadOperator(WPParticleSubSystem& system, const wpscene::Particle& particle,
                   std::shared_ptr<wpscene::ParticleInstanceoverride> over_state) {
-    for (const auto& op : wp.operators) {
-        pSys.AddOperator(WPParticleParser::genParticleOperatorOp(op, over_state));
+    usize index {};
+    for (const auto& operation : particle.operators) {
+        system.AddOperator(WPParticleParser::GenOperator(operation, over_state, system, index++));
     }
 }
-void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp, float count,
-                 bool render_rope, i32 cp_start_index = i32()) {
-    // Sort was used by the rope generator to keep adjacent-particle pairs
-    // packed at the front of m_particles[]. With per-particle trail history
-    // each slot is independent, so sort is unnecessary and would shuffle the
-    // slot<->trail mapping mid-frame.
-    (void)render_rope;
-    bool sort = false;
-    for (const auto& em : wp.emitters) {
+void LoadEmitter(WPParticleSubSystem& system, const wpscene::Particle& particle, float count,
+                 i32 cp_start_index = i32()) {
+    for (const auto& em : particle.emitters) {
         auto newEm = em;
         newEm.rate *= count;
         // controlpointstartindex on the parent's child entry biases the
@@ -1104,12 +1103,12 @@ void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp, float cou
         // authored as `controlpoint: 0` always samples cps[0] even when WE
         // wired it through `cps[cp_start_index]`.
         if (newEm.controlpoint >= i32()) newEm.controlpoint += cp_start_index;
-        pSys.AddEmitter(WPParticleParser::genParticleEmittOp(newEm, sort));
+        system.AddEmitter(WPParticleParser::GenEmitter(newEm, system.Attributes()));
     }
 }
 
-ParticleSubSystem::SpawnType ParseSpawnType(std::string_view str) {
-    using ST = ParticleSubSystem::SpawnType;
+WPParticleSubSystem::SpawnType ParseSpawnType(std::string_view str) {
+    using ST = WPParticleSubSystem::SpawnType;
     ST type { ST::STATIC };
     if (str == "eventfollow") {
         type = ST::EVENT_FOLLOW;
@@ -2081,7 +2080,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     context.vfs                        = &vfs;
     auto& scene                        = *context.scene;
     scene.imageParser                  = std::make_unique<WPTexImageParser>(&vfs);
-    scene.paritileSys->gener           = std::make_unique<WPParticleRawGener>();
+    context.particle_runtime           = Some(WPParticleRuntime {});
     GenCardMesh(scene.default_effect_mesh, { 2.0f, 2.0f });
 
     scene.clearColor = array_cast<float>(sc.general.clearcolor);
@@ -2960,7 +2959,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 struct ParticleChildPtr {
     wpscene::ParticleChild* child { nullptr };
     SceneNode*              node_parent { nullptr };
-    ParticleSubSystem*      particle_parent { nullptr };
+    WPParticleSubSystem*    particle_parent { nullptr };
 
     i32 max_instancecount { 1 };
 
@@ -3125,7 +3124,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     }
 
     auto animationmode = ToAnimMode(particle_obj.animationmode);
-    if (animationmode == ParticleAnimationMode::SEQUENCE &&
+    if (animationmode == WPParticleAnimationMode::SEQUENCE &&
         ! particle_obj.flags[wpscene::Particle::FlagEnum::spritenoframeblending]) {
         shaderInfo.combos["SPRITESHEETBLEND"] = "1";
     }
@@ -3165,7 +3164,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         if (seg > 256) seg = 256;
         trail_length = static_cast<std::uint32_t>(seg);
     }
-    ParticleFollowAnchor follow_anchor;
+    WPParticleFollowAnchor follow_anchor;
     if (hastrail && ! render_rope) {
         follow_anchor.trail_renderer = true;
         follow_anchor.length         = wppartRenderer.length;
@@ -3186,43 +3185,32 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         }
     }
 
-    auto particleSub = Box<ParticleSubSystem>::make(
-        *context.scene->paritileSys,
+    auto particleSub = Box<WPParticleSubSystem>::make(
+        *context.scene,
         spMesh,
         u32(maxcount),
-        override.rate,
+        f64(override.rate),
         u32(static_cast<std::uint32_t>(child_data.maxcount.to_primitive())),
-        child_data.probability,
+        f64(child_data.probability),
         ParseSpawnType(child_data.type),
-        [=](const Particle& p, const ParticleRawGenSpec& spec) {
-            auto& lifetime = *(spec.lifetime);
-            if (lifetime <= 0.0f) {
-                lifetime = 0.0f;
-                return;
-            }
-            switch (animationmode) {
-            case ParticleAnimationMode::RANDOMONE:
-                lifetime = std::clamp(p.random, 0.0f, std::nextafter(1.0f, 0.0f));
-                break;
-            case ParticleAnimationMode::SEQUENCE:
-                lifetime = (1.0f - (p.lifetime / p.init.lifetime)) * sequencemultiplier;
-                break;
-            }
+        WPParticleAnimationSpec {
+            .mode                = animationmode,
+            .sequence_multiplier = sequencemultiplier,
         },
         follow_anchor,
         u32(trail_length),
-        static_cast<double>(particle_obj.starttime),
+        f64(static_cast<double>(particle_obj.starttime)),
         particle_obj.flags[wpscene::Particle::FlagEnum::wordspace]);
 
     particleSub->SetOwnerNode(spNode.as_ptr());
     LoadEmitter(*particleSub,
                 particle_obj,
                 override.count,
-                render_rope,
                 is_child ? child_data.controlpointstartindex : i32());
     LoadInitializer(*particleSub, particle_obj, override_state);
     LoadOperator(*particleSub, particle_obj, override_state);
     LoadControlPoint(*particleSub, particle_obj);
+    particleSub->Finalize();
 
     // Register every {user:"<key>", value:...} binding on instanceoverride
     // so RenderSetUserProperty can mutate the shared state at runtime.
@@ -3251,7 +3239,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     if (is_child)
         child_ptr.particle_parent->AddChild(std::move(particleSub));
     else
-        context.scene->paritileSys->subsystems.push(rstd::move(particleSub));
+        context.particle_runtime->Add(rstd::move(particleSub));
 
     if (! is_child) AssignNodeFieldAnimations(*spNode.as_ptr(), wppartobj.field_bindings);
     WireFieldScripts(context, spNode, wppartobj.field_bindings);
@@ -4857,6 +4845,10 @@ std::shared_ptr<Scene> FinalizeScene(ParseContext& context) {
         context.script_scene->runtime().SetScene(context.scene.get());
         context.script_scene->runtime().SetSceneRoot(context.scene->sceneGraph.as_ptr());
         owe::script::InstallScriptScene(*context.scene, std::move(context.script_scene));
+    }
+    if (context.particle_runtime.is_some()) {
+        context.scene->Runtime().RegisterSystem(context.particle_runtime.take().unwrap(),
+                                                SceneRuntimeSchedule::BeforeRender);
     }
     FinalizeUniformSources(context);
     return context.scene;

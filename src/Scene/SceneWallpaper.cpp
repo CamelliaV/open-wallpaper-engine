@@ -37,6 +37,7 @@ struct RenderInit {
 struct RenderSetScene {
     std::shared_ptr<Scene>                 scene;
     std::shared_ptr<WPUniformRuntimeInput> uniform_input;
+    Option<u64>                            random_seed;
 };
 struct RenderSetFillMode {
     FillMode mode;
@@ -1060,7 +1061,7 @@ void SceneRenderController::on(RenderDraw&&) {
                 rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
             }
         }
-        m_scene->paritileSys->Emitt();
+        m_scene->Runtime().BeforeRender();
         refreshPreparedMeshDirtyEvents();
         refreshPreparedMaterialDirtyEvents();
 
@@ -1160,6 +1161,10 @@ void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
 }
 
 void SceneRenderController::on(RenderSetScene&& m) {
+    if (m.random_seed.is_some()) {
+        using Seed = decltype(Random::max());
+        Random::seed(static_cast<Seed>(m.random_seed->to_primitive()));
+    }
     if (m_scene && m_scene->audioResponseDemand) {
         m_scene->audioResponseDemand->SetCallback({});
     }
@@ -1495,6 +1500,11 @@ void SceneRuntimeController::on(MainFirstFrame&&) {
 void SceneRuntimeController::loadScene() {
     if (m_config.source_pkg_path.empty() || m_config.assets_dir.empty()) return;
 
+    if (m_config.random_seed.is_some()) {
+        using Seed = decltype(Random::max());
+        Random::seed(static_cast<Seed>(m_config.random_seed->to_primitive()));
+    }
+
     rstd_info("loading scene: {}", m_config.source_pkg_path);
 
     if (! m_sound_manager->is_inited()) {
@@ -1602,7 +1612,8 @@ void SceneRuntimeController::loadScene() {
     }
 
     auto rtx = m_render_controller->sender();
-    (void)rtx.send(RenderMsg { RenderSetScene { scene, m_scene_parser.RuntimeInput() } });
+    (void)rtx.send(RenderMsg {
+        RenderSetScene { scene, m_scene_parser.RuntimeInput(), m_config.random_seed } });
     // First-frame default push: now that the render thread owns the scene,
     // replay every collected user property (project.json defaults + any
     // mutations the host already pushed during scene load) so the shader

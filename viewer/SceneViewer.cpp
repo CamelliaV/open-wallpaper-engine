@@ -8,6 +8,7 @@
 import rstd.cppstd;
 import rstd.log;
 import wavsen.audio;
+import wescene.core;
 import wescene.json;
 import wescene.scene_wallpaper;
 import wescene.utils;
@@ -180,7 +181,6 @@ int main(int argc, char** argv) {
 
     auto args                = viewer::ParseSceneViewerArgs(argc, argv);
     auto [w_width, w_height] = args.resolution;
-
     viewer::InitGlfwPlatformHint(/*force_x11=*/false);
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -236,6 +236,9 @@ int main(int argc, char** argv) {
     config.source_pkg_path = std::move(args.scene_path);
     config.graphviz        = args.graphviz;
     config.fps             = static_cast<uint32_t>(args.fps.to_primitive());
+    if (args.random_seed.is_some()) {
+        config.random_seed = Some(*args.random_seed);
+    }
 
     std::string cache_path = std::move(args.cache_path);
     if (cache_path.empty()) cache_path = viewer::DefaultCacheDir("wescene-renderer").string();

@@ -21,6 +21,7 @@ struct SceneViewerArgs {
     std::string cache_path;
     std::string user_properties_path;
     std::string mouse_position;
+    Option<u64> random_seed;
     Resolution  resolution;
     i32         fps;
     u32         msaa_samples;
@@ -51,6 +52,14 @@ bool Flag(const Matches& matches, const ArgKey<bool>& key) {
     auto value = matches.get_one(key);
     if (value.is_err()) rstd::unreachable();
     return value->is_some() && ***value;
+}
+
+template<typename T>
+auto OptionalValue(const Matches& matches, const ArgKey<T>& key) -> Option<T> {
+    auto value = matches.get_one(key);
+    if (value.is_err()) rstd::unreachable();
+    if (value->is_none()) return None();
+    return Some(T(***value));
 }
 
 auto ResolutionParser(ref<rstd::ffi::OsStr> raw) -> Result<Resolution, ValueError> {
@@ -130,7 +139,10 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
                             .long_name("mouse-position")
                             .help("Set initial normalized mouse position, e.g. 0,1")
                             .default_value(""));
-    auto resolution = command.add_arg(
+    auto random_seed = command.add_arg(Arg<u64>::value("random-seed", from_str_parser<u64>())
+                                           .long_name("random-seed")
+                                           .help("Set the scene random seed"));
+    auto resolution  = command.add_arg(
         Arg<Resolution>::value("resolution", parse_with<Resolution>(ResolutionParser))
             .short_name('R')
             .long_name("resolution")
@@ -147,6 +159,7 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
         .cache_path           = ToStdString(Value(matches, cache_path)),
         .user_properties_path = ToStdString(Value(matches, user_properties)),
         .mouse_position       = ToStdString(Value(matches, mouse_position)),
+        .random_seed          = OptionalValue(matches, random_seed),
         .resolution           = Value(matches, resolution),
         .fps                  = Value(matches, fps),
         .msaa_samples         = Value(matches, msaa),

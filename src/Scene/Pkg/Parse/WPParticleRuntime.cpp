@@ -1,0 +1,637 @@
+module;
+
+#include <rstd/macro.hpp>
+
+module wescene.pkg.parse;
+
+import eigen;
+import rstd;
+import rstd.cppstd;
+import rstd.log;
+import wescene.core;
+import wescene.particle;
+import wescene.particle.program;
+import wescene.scene;
+import wescene.utils;
+
+using namespace rstd::prelude;
+using namespace owe;
+
+namespace
+{
+
+template<typename Attribute, typename... Args>
+auto RegisterAttribute(particle::ParticleSchemaBuilder& builder, const char* name,
+                       const char* owner, Args&&... args)
+    -> particle::ParticleAttributeKey<Attribute> {
+    auto result =
+        builder.Register<Attribute>(ref<str>(name), ref<str>(owner), rstd::forward<Args>(args)...);
+    if (result.is_err()) rstd::panic { "failed to register particle attribute" };
+    return result.unwrap();
+}
+
+class WPLifecycleProgram {
+public:
+    explicit WPLifecycleProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
+
+    void Update(particle::ParticleLifecycleContext& context) {
+        auto frame    = WPParticleFrameFrom(context.frame);
+        auto states   = context.storage.Values(context.storage.SlotStateKey());
+        bool has_live = false;
+        for (usize index {}; index < states.len(); ++index) {
+            if (! states[index].active) continue;
+
+            auto value = MakeWPParticleRef(
+                context.storage, m_attributes, particle::ParticleSlot { .index = index });
+            value.alpha = value.initial.alpha;
+            value.size  = value.initial.size;
+            value.color = value.initial.color;
+            value.lifetime += -context.delta.to_primitive();
+            if (value.lifetime <= 0.0f) {
+                context.Kill(value.slot);
+            } else {
+                has_live = true;
+            }
+        }
+        frame->subsystem->InstanceStateMut(frame->instance_index).no_live_particle = ! has_live;
+    }
+
+private:
+    WPParticleAttributes m_attributes;
+};
+
+class WPChildEventProgram {
+public:
+    explicit WPChildEventProgram(WPParticleSubSystem& subsystem): m_subsystem(&subsystem) {}
+
+    void Process(particle::ParticleEventContext& context) {
+        m_subsystem->ProcessChildEvents(context);
+    }
+
+private:
+    WPParticleSubSystem* m_subsystem;
+};
+
+class WPIntegrationProgram {
+public:
+    explicit WPIntegrationProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto states           = context.storage.Values(context.storage.SlotStateKey());
+        auto positions        = context.storage.ValuesMut(m_attributes.position);
+        auto velocities       = context.storage.Values(m_attributes.velocity);
+        auto rotations        = context.storage.ValuesMut(m_attributes.rotation);
+        auto angular_velocity = context.storage.Values(m_attributes.angular_velocity);
+        auto delta            = context.delta.to_primitive();
+        for (usize index {}; index < states.len(); ++index) {
+            if (! states[index].active) continue;
+            positions[index] =
+                (positions[index].cast<double>() + velocities[index].cast<double>() * delta)
+                    .cast<float>();
+            rotations[index] =
+                (rotations[index].cast<double>() + angular_velocity[index].cast<double>() * delta)
+                    .cast<float>();
+        }
+    }
+
+private:
+    WPParticleAttributes m_attributes;
+};
+
+class WPTrailUpdateProgram {
+public:
+    WPTrailUpdateProgram(WPParticleAttributes                                    attributes,
+                         particle::ParticleAttributeKey<WPTrailHistoryAttribute> trail)
+        : m_attributes(attributes), m_trail(trail) {}
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto frame     = WPParticleFrameFrom(context.frame);
+        auto states    = context.storage.Values(context.storage.SlotStateKey());
+        auto positions = context.storage.Values(m_attributes.position);
+        auto trail     = context.storage.AttributeMut(m_trail);
+
+        Eigen::Vector3f trail_sample;
+        bool            use_cursor_trail = false;
+        auto            controlpoints    = frame->subsystem->Controlpoints();
+        for (usize index {}; index < controlpoints.len(); ++index) {
+            const auto& controlpoint = controlpoints[index];
+            if (! controlpoint.link_mouse) continue;
+            trail_sample     = controlpoint.offset.cast<float>();
+            use_cursor_trail = true;
+            break;
+        }
+
+        for (usize index {}; index < states.len(); ++index) {
+            if (! states[index].active) continue;
+            particle::ParticleSlot slot { .index = index };
+            trail->Push(slot, use_cursor_trail ? trail_sample : positions[index]);
+        }
+    }
+
+private:
+    WPParticleAttributes                                    m_attributes;
+    particle::ParticleAttributeKey<WPTrailHistoryAttribute> m_trail;
+};
+
+} // namespace
+
+auto WPParticleAttributes::Register(particle::ParticleSchemaBuilder& builder)
+    -> WPParticleAttributes {
+    const Eigen::Vector3f zero = Eigen::Vector3f::Zero();
+    const Eigen::Vector3f one  = Eigen::Vector3f::Ones();
+    return {
+        .position = RegisterAttribute<particle::PositionAttribute>(builder, "position", "we", zero),
+        .velocity = RegisterAttribute<particle::VelocityAttribute>(builder, "velocity", "we", zero),
+        .acceleration =
+            RegisterAttribute<particle::AccelerationAttribute>(builder, "acceleration", "we", zero),
+        .rotation = RegisterAttribute<particle::RotationAttribute>(builder, "rotation", "we", zero),
+        .angular_velocity = RegisterAttribute<particle::AngularVelocityAttribute>(
+            builder, "angular_velocity", "we", zero),
+        .angular_acceleration = RegisterAttribute<particle::AngularAccelerationAttribute>(
+            builder, "angular_acceleration", "we", zero),
+        .color    = RegisterAttribute<particle::ColorAttribute>(builder, "color", "we", one),
+        .alpha    = RegisterAttribute<particle::AlphaAttribute>(builder, "alpha", "we", 1.0f),
+        .size     = RegisterAttribute<particle::SizeAttribute>(builder, "size", "we", 20.0f),
+        .lifetime = RegisterAttribute<particle::LifetimeAttribute>(builder, "lifetime", "we", 1.0f),
+        .random   = RegisterAttribute<particle::RandomAttribute>(builder, "random", "we", 0.0f),
+        .initial_color =
+            RegisterAttribute<particle::InitialColorAttribute>(builder, "initial_color", "we", one),
+        .initial_alpha = RegisterAttribute<particle::InitialAlphaAttribute>(
+            builder, "initial_alpha", "we", 1.0f),
+        .initial_size =
+            RegisterAttribute<particle::InitialSizeAttribute>(builder, "initial_size", "we", 20.0f),
+        .initial_lifetime = RegisterAttribute<particle::InitialLifetimeAttribute>(
+            builder, "initial_lifetime", "we", 1.0f),
+    };
+}
+
+void WPParticleAttributes::Require(particle::ParticleProgram& program) const {
+    program.Require(position);
+    program.Require(velocity);
+    program.Require(acceleration);
+    program.Require(rotation);
+    program.Require(angular_velocity);
+    program.Require(angular_acceleration);
+    program.Require(color);
+    program.Require(alpha);
+    program.Require(size);
+    program.Require(lifetime);
+    program.Require(random);
+    program.Require(initial_color);
+    program.Require(initial_alpha);
+    program.Require(initial_size);
+    program.Require(initial_lifetime);
+}
+
+auto owe::MakeWPParticleRef(particle::ParticleStorage&  storage,
+                            const WPParticleAttributes& attributes, particle::ParticleSlot slot)
+    -> WPParticleRef {
+    return {
+        .slot                 = slot,
+        .state                = storage.ValuesMut(storage.SlotStateKey())[slot.index],
+        .position             = storage.ValuesMut(attributes.position)[slot.index],
+        .color                = storage.ValuesMut(attributes.color)[slot.index],
+        .alpha                = storage.ValuesMut(attributes.alpha)[slot.index],
+        .size                 = storage.ValuesMut(attributes.size)[slot.index],
+        .lifetime             = storage.ValuesMut(attributes.lifetime)[slot.index],
+        .rotation             = storage.ValuesMut(attributes.rotation)[slot.index],
+        .velocity             = storage.ValuesMut(attributes.velocity)[slot.index],
+        .acceleration         = storage.ValuesMut(attributes.acceleration)[slot.index],
+        .angular_velocity     = storage.ValuesMut(attributes.angular_velocity)[slot.index],
+        .angular_acceleration = storage.ValuesMut(attributes.angular_acceleration)[slot.index],
+        .random               = storage.ValuesMut(attributes.random)[slot.index],
+        .initial = {
+            .color    = storage.ValuesMut(attributes.initial_color)[slot.index],
+            .alpha    = storage.ValuesMut(attributes.initial_alpha)[slot.index],
+            .size     = storage.ValuesMut(attributes.initial_size)[slot.index],
+            .lifetime = storage.ValuesMut(attributes.initial_lifetime)[slot.index],
+        },
+    };
+}
+
+auto owe::MakeWPParticleConstRef(const particle::ParticleStorage& storage,
+                                 const WPParticleAttributes&      attributes,
+                                 particle::ParticleSlot           slot) -> WPParticleConstRef {
+    return {
+        .slot                 = slot,
+        .state                = storage.Values(storage.SlotStateKey())[slot.index],
+        .position             = storage.Values(attributes.position)[slot.index],
+        .color                = storage.Values(attributes.color)[slot.index],
+        .alpha                = storage.Values(attributes.alpha)[slot.index],
+        .size                 = storage.Values(attributes.size)[slot.index],
+        .lifetime             = storage.Values(attributes.lifetime)[slot.index],
+        .rotation             = storage.Values(attributes.rotation)[slot.index],
+        .velocity             = storage.Values(attributes.velocity)[slot.index],
+        .acceleration         = storage.Values(attributes.acceleration)[slot.index],
+        .angular_velocity     = storage.Values(attributes.angular_velocity)[slot.index],
+        .angular_acceleration = storage.Values(attributes.angular_acceleration)[slot.index],
+        .random               = storage.Values(attributes.random)[slot.index],
+        .initial = {
+            .color    = storage.Values(attributes.initial_color)[slot.index],
+            .alpha    = storage.Values(attributes.initial_alpha)[slot.index],
+            .size     = storage.Values(attributes.initial_size)[slot.index],
+            .lifetime = storage.Values(attributes.initial_lifetime)[slot.index],
+        },
+    };
+}
+
+WPTrailHistoryAttribute::WPTrailHistoryAttribute(particle::ParticleAttributeDescriptor descriptor,
+                                                 usize sample_capacity)
+    : m_descriptor(rstd::move(descriptor)), m_sample_capacity(sample_capacity) {}
+
+auto WPTrailHistoryAttribute::Descriptor() const -> ref<particle::ParticleAttributeDescriptor> {
+    return ref<particle::ParticleAttributeDescriptor>::from_raw_parts(
+        rstd::addressof(m_descriptor));
+}
+
+auto WPTrailHistoryAttribute::ConcreteType() const noexcept -> rstd::any::TypeId {
+    return m_descriptor.concrete_type;
+}
+
+auto WPTrailHistoryAttribute::ValueType() const noexcept -> rstd::any::TypeId {
+    return m_descriptor.value_type;
+}
+
+auto WPTrailHistoryAttribute::Len() const noexcept -> usize { return m_states.len(); }
+auto WPTrailHistoryAttribute::Capacity() const noexcept -> usize { return m_states.capacity(); }
+
+void WPTrailHistoryAttribute::Reserve(usize total_slots) {
+    if (total_slots <= m_states.capacity()) return;
+    if (m_sample_capacity != usize() && total_slots > usize::MAX / m_sample_capacity) {
+        rstd::panic { "particle trail capacity overflow" };
+    }
+    m_states.reserve(total_slots - m_states.len());
+    auto total_samples = total_slots * m_sample_capacity;
+    if (total_samples > m_positions.capacity()) {
+        m_positions.reserve(total_samples - m_positions.len());
+    }
+}
+
+void WPTrailHistoryAttribute::AppendDefault() {
+    m_states.emplace_back();
+    for (usize index {}; index < m_sample_capacity; ++index) {
+        m_positions.emplace_back(Eigen::Vector3f::Zero());
+    }
+}
+
+void WPTrailHistoryAttribute::Reset(particle::ParticleSlot slot) {
+    m_states[slot.index] = {};
+    auto begin           = slot.index * m_sample_capacity;
+    for (usize index {}; index < m_sample_capacity; ++index) {
+        m_positions[begin + index] = Eigen::Vector3f::Zero();
+    }
+}
+
+void WPTrailHistoryAttribute::Clear() {
+    m_states.clear();
+    m_positions.clear();
+}
+
+auto WPTrailHistoryAttribute::CloneEmpty() const -> WPTrailHistoryAttribute {
+    return WPTrailHistoryAttribute(m_descriptor.Clone(), m_sample_capacity);
+}
+
+void WPTrailHistoryAttribute::Push(particle::ParticleSlot slot, const Eigen::Vector3f& position) {
+    if (m_sample_capacity == usize()) return;
+    auto& state = m_states[slot.index];
+    state.head  = (state.head + usize(1)) % m_sample_capacity;
+    m_positions[slot.index * m_sample_capacity + state.head] = position;
+    if (state.len < m_sample_capacity) ++state.len;
+}
+
+auto WPTrailHistoryAttribute::At(particle::ParticleSlot slot, usize logical_index) const
+    -> Eigen::Vector3f {
+    const auto state = m_states[slot.index];
+    if (logical_index >= state.len) rstd::panic { "particle trail index out of bounds" };
+    auto index = (state.head + m_sample_capacity - (state.len - usize(1) - logical_index)) %
+                 m_sample_capacity;
+    return m_positions[slot.index * m_sample_capacity + index];
+}
+
+auto WPTrailHistoryAttribute::State(particle::ParticleSlot slot) const -> WPTrailSlotState {
+    return m_states[slot.index];
+}
+
+auto owe::WPParticleFrameFrom(ref<dyn<rstd::any::Any>> frame) -> ref<WPParticleFrame> {
+    auto value = rstd::any::downcast_ref<WPParticleFrame>(frame);
+    if (value.is_none()) rstd::panic { "unexpected particle frame context" };
+    return *value;
+}
+
+void WPParticleUpdateProgram::Update(particle::ParticleUpdateContext& context) {
+    auto            frame = WPParticleFrameFrom(context.frame);
+    WPParticleBatch batch {
+        .storage              = context.storage,
+        .attributes           = m_attributes,
+        .controlpoints        = frame->subsystem->Controlpoints(),
+        .world_from_local_dir = frame->world_from_local_dir,
+        .local_from_world_dir = frame->local_from_world_dir,
+        .world_space          = frame->world_space,
+        .time                 = frame->time,
+        .time_pass            = context.delta,
+    };
+    m_function->operator()(batch);
+}
+
+WPParticleSubSystem::WPParticleSubSystem(Scene& scene, std::shared_ptr<SceneMesh> mesh,
+                                         u32 max_count, f64 rate, u32 max_instance_count,
+                                         f64 probability, SpawnType spawn_type,
+                                         WPParticleAnimationSpec animation_spec,
+                                         WPParticleFollowAnchor follow_anchor, u32 trail_length,
+                                         f64 start_time, bool world_space)
+    : m_scene(scene),
+      m_mesh(rstd::move(mesh)),
+      m_attributes(WPParticleAttributes::Register(m_schema_builder)),
+      m_animation_spec(animation_spec),
+      m_follow_anchor(follow_anchor),
+      m_max_count(max_count),
+      m_rate(rate),
+      m_start_time(start_time),
+      m_world_space(world_space),
+      m_max_instance_count(max_instance_count),
+      m_probability(probability),
+      m_spawn_type(spawn_type),
+      m_trail_length(trail_length) {
+    m_attributes.Require(m_program);
+    if (m_trail_length != u32()) {
+        m_trail_key = Some(RegisterAttribute<WPTrailHistoryAttribute>(
+            m_schema_builder, "trail_history", "we.rope", rstd::as_cast<usize>(m_trail_length)));
+        m_program.Require(*m_trail_key);
+    }
+
+    AddInitializer(Box<dyn<particle::ParticleSpawnProgram>>::make(
+        WPParticleInitProgram(m_attributes, [](WPParticleRef value, f64) {
+            value.random = Random::get(0.0f, 1.0f);
+        })));
+}
+
+WPParticleSubSystem::~WPParticleSubSystem() = default;
+
+void WPParticleSubSystem::Finalize() {
+    if (m_system.is_some()) return;
+    m_program.AddLifecycle(
+        Box<dyn<particle::ParticleLifecycleProgram>>::make(WPLifecycleProgram(m_attributes)));
+    m_program.AddEvent(Box<dyn<particle::ParticleEventProgram>>::make(WPChildEventProgram(*this)));
+    m_program.AddPostUpdate(
+        Box<dyn<particle::ParticleUpdateProgram>>::make(WPIntegrationProgram(m_attributes)));
+    if (m_trail_key.is_some()) {
+        m_program.AddPostUpdate(Box<dyn<particle::ParticleUpdateProgram>>::make(
+            WPTrailUpdateProgram(m_attributes, *m_trail_key)));
+    }
+    m_program.AddExtractor(
+        Box<dyn<particle::ParticleExtractProgram>>::make(WPParticleRawGenerator(*this)));
+
+    auto definition = particle::ParticleDefinition::Prepare(rstd::move(m_schema_builder).Build(),
+                                                            rstd::move(m_program),
+                                                            rstd::as_cast<usize>(m_max_count));
+    if (definition.is_err()) {
+        auto error = rstd::move(definition).unwrap_err();
+        rstd_error("particle definition prepare failed: {}", error.message.as_str());
+        rstd::panic { "particle definition prepare failed" };
+    }
+    m_system = Some(Box<particle::ParticleSystem>::make(rstd::move(definition).unwrap()));
+}
+
+void WPParticleSubSystem::AddEmitter(Box<dyn<particle::ParticleEmitterProgram>> emitter) {
+    m_program.AddEmitter(rstd::move(emitter));
+}
+
+void WPParticleSubSystem::AddInitializer(Box<dyn<particle::ParticleSpawnProgram>> initializer) {
+    m_program.AddSpawn(rstd::move(initializer));
+}
+
+void WPParticleSubSystem::AddOperator(Box<dyn<particle::ParticleUpdateProgram>> update) {
+    m_program.AddUpdate(rstd::move(update));
+}
+
+void WPParticleSubSystem::AddChild(Box<WPParticleSubSystem> child) {
+    m_children.push(rstd::move(child));
+}
+
+auto WPParticleSubSystem::System() noexcept -> particle::ParticleSystem& {
+    if (m_system.is_none()) rstd::panic { "particle subsystem not finalized" };
+    return *m_system->get();
+}
+
+auto WPParticleSubSystem::QueryNewInstance() -> Option<WPParticleInstanceRef> {
+    if (Random::get(0.0, 1.0) > m_probability.to_primitive()) return None();
+
+    auto& system = System();
+    for (usize index {}; index < system.InstanceCount(); ++index) {
+        auto& state = m_instance_states[index];
+        if (! state.death || ! state.no_live_particle) continue;
+        system.Instance(index).Reset();
+        state.Reset();
+        return Some(WPParticleInstanceRef {
+            .instance = rstd::addressof(system.Instance(index)),
+            .state    = rstd::addressof(state),
+            .index    = index,
+        });
+    }
+
+    if (system.InstanceCount() >= rstd::as_cast<usize>(m_max_instance_count)) return None();
+    auto  index    = system.InstanceCount();
+    auto& instance = system.CreateInstance();
+    m_instance_states.emplace_back();
+    return Some(WPParticleInstanceRef {
+        .instance = rstd::addressof(instance),
+        .state    = rstd::addressof(m_instance_states[index]),
+        .index    = index,
+    });
+}
+
+auto WPParticleSubSystem::FollowPosition(const particle::ParticleStorage& storage,
+                                         particle::ParticleSlot slot) const -> Eigen::Vector3f {
+    auto value = MakeWPParticleConstRef(storage, m_attributes, slot);
+    auto pos   = value.position;
+    if (! m_follow_anchor.trail_renderer) return pos;
+
+    float speed = value.velocity.norm();
+    if (speed <= 1e-6f) return pos;
+    float trail_length =
+        std::max(0.0f, std::min(speed * m_follow_anchor.length, m_follow_anchor.max_length));
+    if (trail_length <= 0.0f) return pos;
+    float visual_half_length =
+        (value.size * 0.5f) * m_follow_anchor.texture_ratio * trail_length * 0.5f;
+    return pos + value.velocity.normalized() * visual_half_length;
+}
+
+void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
+    const auto            pointer = m_scene.pointerPosition;
+    const Eigen::Vector3d mouse_world {
+        static_cast<double>(pointer[usize()]) * static_cast<double>(m_scene.ortho[0]),
+        (1.0 - static_cast<double>(pointer[usize(1)])) * static_cast<double>(m_scene.ortho[1]),
+        0.0,
+    };
+    Eigen::Vector3d mouse_local          = mouse_world;
+    Eigen::Matrix3d world_from_local_dir = Eigen::Matrix3d::Identity();
+    Eigen::Matrix3d local_from_world_dir = Eigen::Matrix3d::Identity();
+    if (m_owner_node != nullptr) {
+        m_owner_node->UpdateTrans();
+        world_from_local_dir = m_owner_node->ModelTrans().block<3, 3>(0, 0);
+        if (std::abs(world_from_local_dir.determinant()) > 1e-9) {
+            local_from_world_dir = world_from_local_dir.inverse();
+        }
+        Eigen::Matrix4d inverse = m_owner_node->ModelTrans().inverse();
+        Eigen::Vector4d value =
+            inverse * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
+        mouse_local = value.head<3>();
+    }
+    for (auto& controlpoint : m_controlpoints) {
+        if (controlpoint.link_mouse) {
+            controlpoint.offset = controlpoint.base_offset + mouse_local;
+        }
+    }
+
+    m_frame.subsystem            = this;
+    m_frame.world_from_local_dir = world_from_local_dir;
+    m_frame.local_from_world_dir = local_from_world_dir;
+    m_frame.world_space          = m_world_space;
+    m_frame.time                 = m_time;
+    m_frame.delta                = frame_time;
+    m_frame.emitter_delta        = frame_time * m_rate;
+    for (usize index {}; index < m_frame.audio_average.len(); ++index) {
+        m_frame.audio_average[index] = m_scene.audioAverage[index].load(std::memory_order_relaxed);
+    }
+}
+
+void WPParticleSubSystem::UpdateBoundedState(WPParticleInstanceRef current) {
+    auto& bounded = current.state->bounded;
+    if (bounded.parent == nullptr || bounded.parent_subsystem == nullptr) return;
+
+    bool type_has_death =
+        m_spawn_type == SpawnType::EVENT_SPAWN || m_spawn_type == SpawnType::EVENT_FOLLOW;
+
+    auto& parent_storage = bounded.parent->Storage();
+    if (bounded.particle_index >= isize() &&
+        rstd::as_cast<usize>(bounded.particle_index) < parent_storage.Len()) {
+        particle::ParticleSlot slot { .index = rstd::as_cast<usize>(bounded.particle_index) };
+        bounded.position = bounded.parent_subsystem->FollowPosition(parent_storage, slot);
+        if (m_spawn_type == SpawnType::EVENT_DEATH) bounded.particle_index = isize(-1);
+
+        if (! current.state->death && type_has_death) {
+            auto value = MakeWPParticleConstRef(
+                parent_storage, bounded.parent_subsystem->Attributes(), slot);
+            bool lifetime_ok             = value.lifetime > 0.0f;
+            current.state->death         = ! lifetime_ok && bounded.previous_lifetime_ok;
+            bounded.previous_lifetime_ok = lifetime_ok;
+        }
+    }
+
+    if (! current.state->death && type_has_death) {
+        current.state->death =
+            bounded.parent_subsystem->InstanceState(bounded.parent_instance_index).death;
+    }
+}
+
+void WPParticleSubSystem::Advance(f64 frame_time, bool update_mesh) {
+    m_time += frame_time;
+    UpdateFrameInput(frame_time);
+    if (m_spawn_type == SpawnType::STATIC && System().InstanceCount() == usize()) {
+        (void)System().CreateInstance();
+        m_instance_states.emplace_back();
+    }
+
+    auto frame_ref = rstd::dyn<rstd::any::Any>::from_ref(m_frame).as_ref();
+    for (usize index {}; index < System().InstanceCount(); ++index) {
+        WPParticleInstanceRef current {
+            .instance = rstd::addressof(System().Instance(index)),
+            .state    = rstd::addressof(m_instance_states[index]),
+            .index    = index,
+        };
+        UpdateBoundedState(current);
+        if (current.state->death && m_spawn_type == SpawnType::EVENT_FOLLOW) {
+            current.instance->Storage().Clear();
+        }
+
+        m_frame.instance_index = index;
+        System().Advance(*current.instance, frame_ref, frame_time, m_time);
+        if (m_spawn_type == SpawnType::EVENT_DEATH) current.state->death = true;
+    }
+
+    if (update_mesh) {
+        m_frame.instance_index = usize();
+        System().Extract(frame_ref);
+        m_mesh->SetDirty();
+    }
+    for (auto& child : m_children) {
+        child->Tick(frame_time, update_mesh);
+    }
+}
+
+void WPParticleSubSystem::Warmup() {
+    if (m_start_time <= f64()) return;
+    constexpr double kFrameTime  = 1.0 / 60.0;
+    constexpr auto   kMaxFrames  = u32(240);
+    auto             frame_count = u32(static_cast<rstd::uint32_t>(
+        std::max(1.0, std::ceil(m_start_time.to_primitive() / kFrameTime))));
+    frame_count                  = rstd::cmp::min(frame_count, kMaxFrames);
+    auto frame_time =
+        f64(m_start_time.to_primitive() / static_cast<double>(frame_count.to_primitive()));
+    for (u32 index {}; index < frame_count; ++index) {
+        Advance(frame_time, false);
+    }
+}
+
+void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
+    if (! m_started) {
+        m_started = true;
+        Warmup();
+    }
+    Advance(frame_time, update_mesh);
+}
+
+void WPParticleSubSystem::SpawnChild(WPParticleInstanceRef parent, WPParticleSubSystem& child,
+                                     particle::ParticleSlot slot, Eigen::Vector3f position,
+                                     bool fixed) {
+    if (! fixed) position = FollowPosition(parent.instance->Storage(), slot);
+    auto instance = child.QueryNewInstance();
+    if (instance.is_none()) return;
+    instance->state->bounded = {
+        .parent                = parent.instance,
+        .parent_subsystem      = this,
+        .parent_instance_index = parent.index,
+        .particle_index =
+            fixed ? isize(-1) : isize(static_cast<rstd::intptr_t>(slot.index.to_primitive())),
+        .previous_lifetime_ok = true,
+        .position             = position,
+    };
+}
+
+void WPParticleSubSystem::ProcessChildEvents(particle::ParticleEventContext& context) {
+    auto                  frame = WPParticleFrameFrom(context.frame);
+    WPParticleInstanceRef parent {
+        .instance = rstd::addressof(System().Instance(frame->instance_index)),
+        .state    = rstd::addressof(m_instance_states[frame->instance_index]),
+        .index    = frame->instance_index,
+    };
+    for (const auto& transition : context.events->transitions) {
+        if (transition.spawned) {
+            for (auto& child : m_children) {
+                if (child->Type() != SpawnType::EVENT_FOLLOW &&
+                    child->Type() != SpawnType::EVENT_SPAWN) {
+                    continue;
+                }
+                SpawnChild(parent, *child, transition.slot);
+            }
+        }
+        if (transition.died) {
+            for (auto& child : m_children) {
+                if (child->Type() != SpawnType::EVENT_DEATH) continue;
+                SpawnChild(parent,
+                           *child,
+                           transition.slot,
+                           FollowPosition(parent.instance->Storage(), transition.slot),
+                           true);
+            }
+        }
+    }
+}
+
+void WPParticleRuntime::Update(ref<SceneFrame> frame) { Tick(frame->delta); }
+
+void WPParticleRuntime::Tick(f64 delta) {
+    for (auto& subsystem : m_subsystems) {
+        subsystem->Tick(delta);
+    }
+}

@@ -951,7 +951,6 @@ bool SceneCameraPath::Tick(double runtime) {
 Scene::Scene()
     : sceneGraph(rstd::sync::Arc<SceneNode>::make()),
       vfs(nullptr, &delete_vfs),
-      paritileSys(Box<ParticleSystem>::make(*this)),
       m_resource_generation(next_scene_resource_generation()) {
     m_runtime.RegisterSystem(SceneTextureAnimationRuntime { m_texture_animations });
 }

@@ -28,15 +28,29 @@ struct SceneRuntimeSystem {
     using Funcs = TraitFuncs<&T::Update>;
 };
 
+enum class SceneRuntimeSchedule
+{
+    FrameAdvance,
+    BeforeRender,
+};
+
 class SceneRuntime {
 public:
     const SceneFrame& Frame() const noexcept { return m_frame; }
 
-    void Register(Box<dyn<SceneRuntimeSystem>> system) { m_systems.push(rstd::move(system)); }
+    void Register(Box<dyn<SceneRuntimeSystem>> system,
+                  SceneRuntimeSchedule         schedule = SceneRuntimeSchedule::FrameAdvance) {
+        if (schedule == SceneRuntimeSchedule::BeforeRender) {
+            m_before_render.push(rstd::move(system));
+        } else {
+            m_frame_advance.push(rstd::move(system));
+        }
+    }
 
     template<typename T>
-    void RegisterSystem(T system) {
-        Register(Box<dyn<SceneRuntimeSystem>>::make(rstd::move(system)));
+    void RegisterSystem(T                    system,
+                        SceneRuntimeSchedule schedule = SceneRuntimeSchedule::FrameAdvance) {
+        Register(Box<dyn<SceneRuntimeSystem>>::make(rstd::move(system)), schedule);
     }
 
     void Advance(f64 delta) {
@@ -46,13 +60,20 @@ public:
         ++m_frame.revision;
         if (m_frame.revision == u64()) m_frame.revision = u64(1);
 
-        auto frame = ref<SceneFrame>::from_raw_parts(rstd::addressof(m_frame));
-        for (auto& system : m_systems) system->Update(frame);
+        UpdateSystems(m_frame_advance);
     }
 
+    void BeforeRender() { UpdateSystems(m_before_render); }
+
 private:
+    void UpdateSystems(rstd::vec::Vec<Box<dyn<SceneRuntimeSystem>>>& systems) {
+        auto frame = ref<SceneFrame>::from_raw_parts(rstd::addressof(m_frame));
+        for (auto& system : systems) system->Update(frame);
+    }
+
     SceneFrame                                   m_frame;
-    rstd::vec::Vec<Box<dyn<SceneRuntimeSystem>>> m_systems;
+    rstd::vec::Vec<Box<dyn<SceneRuntimeSystem>>> m_frame_advance;
+    rstd::vec::Vec<Box<dyn<SceneRuntimeSystem>>> m_before_render;
 };
 
 } // namespace owe

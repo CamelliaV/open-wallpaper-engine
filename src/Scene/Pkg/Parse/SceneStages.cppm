@@ -17,6 +17,7 @@ import wescene.pkg.scene_obj;
 
 import wescene.pkg.puppet;
 import :wp_uniform_source;
+import :wp_particle_runtime;
 
 export namespace owe
 {
@@ -35,6 +36,7 @@ struct PuppetLayerRegistry {
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
     std::shared_ptr<Scene>                   scene;
+    Option<WPParticleRuntime>                particle_runtime;
     std::int32_t                             ortho_w { 0 };
     std::int32_t                             ortho_h { 0 };
     fs::VFS*                                 vfs { nullptr };

@@ -112,6 +112,10 @@ add_executable(scene_resource_index_tests scene_resource_index_tests.cpp)
 target_link_libraries(scene_resource_index_tests PRIVATE owe-base GTest::gtest_main)
 set_target_properties(scene_resource_index_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
+add_executable(particle_system_tests particle_system_tests.cpp)
+target_link_libraries(particle_system_tests PRIVATE owe-base GTest::gtest_main)
+set_target_properties(particle_system_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 add_executable(buffer_resolver_tests buffer_resolver_tests.cpp)
 target_link_libraries(buffer_resolver_tests PRIVATE owe-render GTest::gtest_main)
 set_target_properties(buffer_resolver_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
@@ -224,6 +228,11 @@ gtest_discover_tests(
 )
 gtest_discover_tests(
     scene_resource_index_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    particle_system_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )

@@ -2,6 +2,7 @@ module;
 #include <vulkan/vulkan.h>
 
 export module wescene.scene_wallpaper;
+import rstd;
 import wescene.core;
 import wescene.json;
 import rstd.cppstd;
@@ -11,6 +12,8 @@ export import wescene.vulkan_render;
 export import wescene.vulkan;
 export import wescene.types;
 export import wescene.pkg.parse;
+
+using namespace rstd::prelude;
 
 export namespace owe
 {
@@ -52,6 +55,7 @@ struct SceneWallpaperConfig {
     FillMode                                fill_mode { FillMode::ASPECTCROP };
     float                                   speed { 1.0f };
     bool                                    graphviz { false };
+    Option<u64>                             random_seed;
 };
 
 class SceneRuntimeController;
