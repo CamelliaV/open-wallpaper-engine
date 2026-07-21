@@ -283,9 +283,11 @@ void WPUniformSceneState::ApplyUserProperty(std::string_view field, const Json& 
 auto WPTransformUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = WPTransformUniformOutput;
-    const rstd::array<BindingEntry<Output>, 13> entries {
+    auto model   = Bind(sink, Output::Model, G_M, UniformValueShape::FloatRange(u32(12), u32(16)));
+    if (model.is_err()) return model;
+
+    const rstd::array<BindingEntry<Output>, 12> entries {
         BindingEntry<Output> { Output::ModelInverse, G_MI, u32(16) },
-        BindingEntry<Output> { Output::Model, G_M, u32(16) },
         BindingEntry<Output> { Output::AlternateModel, G_AM, u32(16) },
         BindingEntry<Output> { Output::ModelViewProjection, G_MVP, u32(16) },
         BindingEntry<Output> { Output::ModelViewProjectionInverse, G_MVPI, u32(16) },

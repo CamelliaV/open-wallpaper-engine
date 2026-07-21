@@ -47,6 +47,21 @@ public:
     auto TexelSize() const -> rstd::array<float, 2> { return { 1.0f / 1920.0f, 1.0f / 1080.0f }; }
 };
 
+class ShapeSink {
+public:
+    auto Bind(owe::UniformOutputId, std::string_view name, owe::UniformValueShape shape)
+        -> rstd::Result<bool, owe::UniformError> {
+        if (name == "g_ModelMatrix") {
+            model_shape = shape;
+            found_model = true;
+        }
+        return rstd::Ok(true);
+    }
+
+    owe::UniformValueShape model_shape;
+    bool                   found_model { false };
+};
+
 class UpdateContext {
 public:
     UpdateContext(const owe::SceneFrame& frame, const EmptyResources& resources)
@@ -76,6 +91,22 @@ auto Capture(const owe::SceneFrame& frame, const Source& source, Output output)
 }
 
 } // namespace scene_test
+
+TEST(WPTransformUniformSource, AcceptsMat3AndMat4ModelMatrices) {
+    auto state      = std::make_shared<owe::WPUniformSceneState>();
+    auto scene_node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto node       = std::make_shared<owe::WPUniformNodeState>(rstd::move(scene_node));
+    owe::WPTransformUniformSource source(state, node);
+    scene_test::ShapeSink         sink_impl;
+    auto                          sink = rstd::dyn<owe::UniformBindingSink>::from_ref(sink_impl);
+
+    auto result = source.Describe(sink.as_mut_ref());
+
+    ASSERT_TRUE(result.is_ok());
+    ASSERT_TRUE(sink_impl.found_model);
+    EXPECT_EQ(sink_impl.model_shape.min_elements, rstd::u32(12));
+    EXPECT_EQ(sink_impl.model_shape.max_elements, rstd::u32(16));
+}
 
 TEST(AudioResponseDemand, AggregatesLeasesAndHonorsRuntimeGate) {
     owe::AudioResponseDemand demand;

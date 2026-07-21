@@ -1005,7 +1005,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 
 std::optional<wpscene::Material> WPMdlParser::ParseMaterial(std::string_view ref, fs::VFS& vfs) {
     const auto path   = ResolveMdlMaterialPath(ref);
-    auto       parsed = owe::ReadJsonFile(vfs, path);
+    auto       parsed = owe::ReadJsonFile(vfs, path, { .allow_comments = true });
     if (parsed.is_err()) {
         auto error = rstd::move(parsed).unwrap_err_unchecked();
         rstd_error("load mdl material '{}' failed: {}", path, error.message.as_str());
