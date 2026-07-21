@@ -782,10 +782,10 @@ rstd::json::Map NormalizeUserProperties(const rstd::json::Map& input) {
 
 } // namespace
 
-using MainSender     = rstd::sync::mpsc::Sender<MainMsg>;
-using MainReceiver   = rstd::sync::mpsc::Receiver<MainMsg>;
-using RenderSender   = rstd::sync::mpsc::Sender<RenderMsg>;
-using RenderReceiver = rstd::sync::mpsc::Receiver<RenderMsg>;
+using MainSender     = rstd::sync::mpmc::Sender<MainMsg>;
+using MainReceiver   = rstd::sync::mpmc::Receiver<MainMsg>;
+using RenderSender   = rstd::sync::mpmc::Sender<RenderMsg>;
+using RenderReceiver = rstd::sync::mpmc::Receiver<RenderMsg>;
 
 class SceneRenderController;
 
@@ -864,7 +864,7 @@ class SceneRenderController {
 public:
     explicit SceneRenderController(SceneRuntimeController& main)
         : m_main(main), m_render(Box<vulkan::VulkanRender>::make()) {
-        auto [tx, rx] = rstd::sync::mpsc::channel<RenderMsg>();
+        auto [tx, rx] = rstd::sync::mpmc::channel<RenderMsg>();
         m_tx.emplace(std::move(tx));
         m_rx.emplace(std::move(rx));
     }
@@ -1945,7 +1945,7 @@ bool SceneRuntimeController::init() {
 
 SceneRuntimeController::SceneRuntimeController()
     : m_sound_manager(std::make_unique<wavsen::audio::SoundManager>()) {
-    auto [tx, rx] = rstd::sync::mpsc::channel<MainMsg>();
+    auto [tx, rx] = rstd::sync::mpmc::channel<MainMsg>();
     m_main_tx.emplace(std::move(tx));
     m_main_rx.emplace(std::move(rx));
     m_render_controller = std::make_unique<SceneRenderController>(*this);
