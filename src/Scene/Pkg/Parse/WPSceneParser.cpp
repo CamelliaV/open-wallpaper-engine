@@ -3099,15 +3099,23 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     std::uint32_t maxcount = particle_obj.maxcount;
     maxcount               = std::min(maxcount, 20000u);
 
+    std::shared_ptr<WPParticleTrailUniformState> trail_uniform_state;
     if (hastrail) {
-        double in_SegmentUVTimeOffset                      = 0.0;
-        double in_SegmentMaxCount                          = maxcount - 1.0;
-        shaderInfo.baseConstSvs[std::string(G_RENDERVAR0)] = std::array {
+        double                in_SegmentUVTimeOffset = 0.0;
+        double                in_SegmentMaxCount     = maxcount - 1.0;
+        rstd::array<float, 4> render_var {
             (float)wppartRenderer.length,
             (float)wppartRenderer.maxlength,
             (float)in_SegmentUVTimeOffset,
             (float)in_SegmentMaxCount,
         };
+        shaderInfo.baseConstSvs[std::string(G_RENDERVAR0)] = render_var;
+        if (render_rope_trail) {
+            trail_uniform_state =
+                std::make_shared<WPParticleTrailUniformState>(WPParticleTrailUniformState {
+                    .render_var = render_var,
+                });
+        }
         shaderInfo.combos[std::string(WE_CB_TRAILRENDERER)] = "1";
         if (! render_rope_trail) shaderInfo.combos[std::string(WE_CB_THICK_FORMAT)] = "1";
     }
@@ -3182,7 +3190,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         u32(trail_length),
         f64(render_rope_trail ? static_cast<double>(wppartRenderer.length) : 0.0),
         f64(static_cast<double>(particle_obj.starttime)),
-        particle_obj.flags[wpscene::Particle::FlagEnum::wordspace]);
+        particle_obj.flags[wpscene::Particle::FlagEnum::wordspace],
+        trail_uniform_state);
 
     {
         auto mesh_capacity = particleSub->MaxParticleCapacity();
@@ -3228,6 +3237,13 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         context.scene.get(), mesh.Material(), particle_obj.material, shaderInfo);
     spNode->AddMesh(spMesh);
     SetWPUniformConfig(context, spNode, rstd::move(svData));
+    if (trail_uniform_state) {
+        context.particle_trail_uniform_configs.push_back(
+            ParseContext::ParticleTrailUniformConfigDraft {
+                .node          = spNode.clone(),
+                .uniform_state = rstd::move(trail_uniform_state),
+            });
+    }
 
     for (auto& child : particle_obj.children) {
         ParseParticleObj(context,
@@ -4736,6 +4752,14 @@ void FinalizeUniformSources(ParseContext& context) {
         (void)writer->AttachNode(*node_id, transform, 0);
         (void)writer->AttachNode(*node_id, color, 0);
         (void)writer->AttachNode(*node_id, texture, 0);
+    }
+
+    for (auto& draft : context.particle_trail_uniform_configs) {
+        auto node_id = scene.ResourceIndex().nodeId(*draft.node);
+        if (node_id.is_none()) continue;
+        const auto source = registrar->Register(Box<dyn<UniformSource>>::make(
+            WPParticleTrailUniformSource { rstd::move(draft.uniform_state) }));
+        (void)writer->AttachNode(*node_id, source, 10);
     }
 
     std::unordered_map<WPPuppetLayer*, UniformSourceId> puppet_sources;

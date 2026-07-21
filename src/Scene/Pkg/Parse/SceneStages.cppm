@@ -68,6 +68,11 @@ struct ParseContext {
         std::shared_ptr<text::TextEffectProjectionState> effect_projection;
     };
     std::vector<TextUniformConfigDraft> text_uniform_configs;
+    struct ParticleTrailUniformConfigDraft {
+        rstd::sync::Arc<SceneNode>                   node;
+        std::shared_ptr<WPParticleTrailUniformState> uniform_state;
+    };
+    std::vector<ParticleTrailUniformConfigDraft> particle_trail_uniform_configs;
 
     // ID → (parent_id, node) for every parseable object. Filled by each
     // ParseXObj. FinalizeScene re-parents nodes with non-zero parent_id

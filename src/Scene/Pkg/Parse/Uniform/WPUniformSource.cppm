@@ -4,6 +4,7 @@ import rstd.cppstd;
 import wescene.json;
 import wescene.pkg.puppet;
 import wescene.scene;
+import :wp_particle_runtime;
 
 using namespace rstd::prelude;
 
@@ -72,6 +73,11 @@ enum class WPTextureUniformOutput : rstd::uint32_t
     Mipmap0      = 16,
     Rotation0    = 32,
     Translation0 = 48,
+};
+
+enum class WPParticleTrailUniformOutput : rstd::uint32_t
+{
+    RenderVar0,
 };
 
 template<typename Output>
@@ -328,6 +334,21 @@ public:
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
     auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+};
+
+class WPParticleTrailUniformSource {
+public:
+    explicit WPParticleTrailUniformSource(std::shared_ptr<WPParticleTrailUniformState> state)
+        : m_state(rstd::move(state)) {}
+
+    auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
+    auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
+    auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
+        -> Result<empty, UniformError>;
+    auto AcquireBindingLease() const -> std::shared_ptr<void> { return m_state; }
+
+private:
+    std::shared_ptr<WPParticleTrailUniformState> m_state;
 };
 
 class WPPuppetUniformSource {

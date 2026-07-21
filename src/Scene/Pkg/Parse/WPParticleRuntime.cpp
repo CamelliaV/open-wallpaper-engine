@@ -105,31 +105,17 @@ public:
         auto positions = context.storage.Values(m_attributes.position);
         auto trail     = context.storage.AttributeMut(m_trail);
 
-        auto&  instance = frame->subsystem->InstanceStateMut(frame->instance_index);
-        auto   interval = m_sample_interval.to_primitive();
-        auto   delta    = context.delta.to_primitive();
-        double remainder {};
-        usize  sample_steps {};
-        if (interval > 0.0) {
-            auto elapsed     = instance.trail_sample_accumulator.to_primitive() + delta;
-            auto total_steps = static_cast<rstd::uint64_t>(std::floor(elapsed / interval));
-            elapsed -= static_cast<double>(total_steps) * interval;
-            instance.trail_sample_accumulator = f64(elapsed);
-            remainder                         = elapsed;
-            sample_steps =
-                rstd::cmp::min(rstd::as_cast<usize>(total_steps), trail->SampleCapacity());
-        } else {
-            sample_steps = usize(1);
-        }
+        auto interval     = m_sample_interval.to_primitive();
+        auto delta        = context.delta.to_primitive();
+        auto remainder    = frame->trail_sample_remainder.to_primitive();
+        auto sample_steps = rstd::cmp::min(frame->trail_sample_steps, trail->SampleCapacity());
 
         for (usize index {}; index < states.len(); ++index) {
             if (! states[index].active) continue;
             particle::ParticleSlot slot { .index = index };
             auto                   state = trail->State(slot);
             if (! state.has_previous_position) {
-                for (usize sample {}; sample < trail->SampleCapacity(); ++sample) {
-                    trail->Push(slot, positions[index]);
-                }
+                trail->Initialize(slot, positions[index]);
                 trail->SetPreviousPosition(slot, positions[index]);
                 continue;
             }
@@ -313,10 +299,24 @@ auto WPTrailHistoryAttribute::CloneEmpty() const -> WPTrailHistoryAttribute {
 
 void WPTrailHistoryAttribute::Push(particle::ParticleSlot slot, const Eigen::Vector3f& position) {
     if (m_sample_capacity == usize()) return;
-    auto& state = m_states[slot.index];
-    state.head  = (state.head + usize(1)) % m_sample_capacity;
+    auto& state        = m_states[slot.index];
+    state.head         = (state.head + usize(1)) % m_sample_capacity;
+    state.sample_count = rstd::cmp::min(state.sample_count + usize(1), m_sample_capacity);
     m_positions[slot.index * m_sample_capacity + state.head] = position;
     if (state.len < m_sample_capacity) ++state.len;
+}
+
+void WPTrailHistoryAttribute::Initialize(particle::ParticleSlot slot,
+                                         const Eigen::Vector3f& position) {
+    if (m_sample_capacity == usize()) return;
+    auto& state        = m_states[slot.index];
+    state              = {};
+    state.len          = m_sample_capacity;
+    state.sample_count = usize(1);
+    const auto begin   = slot.index * m_sample_capacity;
+    for (usize index {}; index < m_sample_capacity; ++index) {
+        m_positions[begin + index] = position;
+    }
 }
 
 auto WPTrailHistoryAttribute::At(particle::ParticleSlot slot, usize logical_index) const
@@ -360,12 +360,11 @@ void WPParticleUpdateProgram::Update(particle::ParticleUpdateContext& context) {
     m_function->operator()(batch);
 }
 
-WPParticleSubSystem::WPParticleSubSystem(Scene& scene, std::shared_ptr<SceneMesh> mesh,
-                                         u32 max_count, f64 rate, u32 max_instance_count,
-                                         f64 probability, SpawnType spawn_type,
-                                         WPParticleAnimationSpec animation_spec,
-                                         WPParticleFollowAnchor follow_anchor, u32 trail_length,
-                                         f64 trail_duration, f64 start_time, bool world_space)
+WPParticleSubSystem::WPParticleSubSystem(
+    Scene& scene, std::shared_ptr<SceneMesh> mesh, u32 max_count, f64 rate, u32 max_instance_count,
+    f64 probability, SpawnType spawn_type, WPParticleAnimationSpec animation_spec,
+    WPParticleFollowAnchor follow_anchor, u32 trail_length, f64 trail_duration, f64 start_time,
+    bool world_space, std::shared_ptr<WPParticleTrailUniformState> trail_uniform_state)
     : m_scene(scene),
       m_mesh(rstd::move(mesh)),
       m_attributes(WPParticleAttributes::Register(m_schema_builder)),
@@ -382,7 +381,8 @@ WPParticleSubSystem::WPParticleSubSystem(Scene& scene, std::shared_ptr<SceneMesh
       m_trail_sample_interval(trail_length == u32()
                                   ? f64()
                                   : f64(trail_duration.to_primitive() /
-                                        static_cast<double>(trail_length.to_primitive()))) {
+                                        static_cast<double>(trail_length.to_primitive()))),
+      m_trail_uniform_state(rstd::move(trail_uniform_state)) {
     m_attributes.Require(m_program);
     if (m_trail_length != u32()) {
         m_trail_key = Some(RegisterAttribute<WPTrailHistoryAttribute>(
@@ -523,13 +523,36 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
         controlpoint.rotation = ControlpointRotation(angles);
     }
 
-    m_frame.subsystem            = this;
-    m_frame.world_from_local_dir = world_from_local_dir;
-    m_frame.local_from_world_dir = local_from_world_dir;
-    m_frame.world_space          = m_world_space;
-    m_frame.time                 = m_time;
-    m_frame.delta                = frame_time;
-    m_frame.emitter_delta        = frame_time * m_rate;
+    m_frame.subsystem              = this;
+    m_frame.world_from_local_dir   = world_from_local_dir;
+    m_frame.local_from_world_dir   = local_from_world_dir;
+    m_frame.world_space            = m_world_space;
+    m_frame.time                   = m_time;
+    m_frame.delta                  = frame_time;
+    m_frame.emitter_delta          = frame_time * m_rate;
+    m_frame.trail_sample_steps     = usize();
+    m_frame.trail_sample_remainder = f64();
+    if (m_trail_key.is_some()) {
+        const auto interval = m_trail_sample_interval.to_primitive();
+        if (interval > 0.0) {
+            auto elapsed = m_trail_sample_accumulator.to_primitive() + frame_time.to_primitive();
+            const auto total_steps =
+                u64(static_cast<rstd::uint64_t>(std::floor(elapsed / interval)));
+            elapsed -= static_cast<double>(total_steps.to_primitive()) * interval;
+            m_trail_sample_accumulator     = f64(elapsed);
+            m_frame.trail_sample_steps     = rstd::as_cast<usize>(total_steps);
+            m_frame.trail_sample_remainder = f64(elapsed);
+            if (m_trail_uniform_state) {
+                m_trail_uniform_state->render_var[usize(2)] =
+                    static_cast<float>(std::clamp(elapsed / interval, 0.0, 1.0));
+            }
+        } else {
+            m_frame.trail_sample_steps = usize(1);
+            if (m_trail_uniform_state) {
+                m_trail_uniform_state->render_var[usize(2)] = 1.0f;
+            }
+        }
+    }
     for (usize index {}; index < m_frame.audio_average.len(); ++index) {
         m_frame.audio_average[index] = m_scene.audioAverage[index].load(std::memory_order_relaxed);
     }

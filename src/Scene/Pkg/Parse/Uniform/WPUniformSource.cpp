@@ -706,6 +706,27 @@ auto WPTextureUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     return writer.Finish();
 }
 
+auto WPParticleTrailUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
+    -> Result<empty, UniformError> {
+    return Bind(sink,
+                WPParticleTrailUniformOutput::RenderVar0,
+                G_RENDERVAR0,
+                UniformValueShape::Float(u32(4)));
+}
+
+auto WPParticleTrailUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
+    return context->Frame()->revision;
+}
+
+auto WPParticleTrailUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
+                                            mut_ref<dyn<UniformValueSink>> sink) const
+    -> Result<empty, UniformError> {
+    if (! m_state) return Ok(empty {});
+    WPUniformWriter writer(sink);
+    writer.Write(WPParticleTrailUniformOutput::RenderVar0, m_state->render_var);
+    return writer.Finish();
+}
+
 auto WPPuppetUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     return Bind(sink,

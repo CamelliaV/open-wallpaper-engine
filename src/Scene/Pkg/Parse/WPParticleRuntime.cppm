@@ -49,6 +49,10 @@ struct WPParticleFollowAnchor {
     float texture_ratio { 1.0f };
 };
 
+struct WPParticleTrailUniformState {
+    rstd::array<float, 4> render_var {};
+};
+
 struct WPParticleAttributes {
     particle::ParticleAttributeKey<particle::PositionAttribute>            position;
     particle::ParticleAttributeKey<particle::VelocityAttribute>            velocity;
@@ -199,6 +203,7 @@ struct WPOscillationAttributes {
 struct WPTrailSlotState {
     usize           head {};
     usize           len {};
+    usize           sample_count {};
     Eigen::Vector3f previous_position { Eigen::Vector3f::Zero() };
     bool            has_previous_position { false };
 };
@@ -221,6 +226,7 @@ struct WPTrailHistoryAttribute {
     auto CloneEmpty() const -> WPTrailHistoryAttribute;
 
     void Push(particle::ParticleSlot slot, const Eigen::Vector3f& position);
+    void Initialize(particle::ParticleSlot slot, const Eigen::Vector3f& position);
     auto At(particle::ParticleSlot slot, usize logical_index) const -> Eigen::Vector3f;
     auto State(particle::ParticleSlot slot) const -> WPTrailSlotState;
     void SetPreviousPosition(particle::ParticleSlot slot, const Eigen::Vector3f& position);
@@ -242,6 +248,8 @@ struct WPParticleFrame {
     f64                        time {};
     f64                        delta {};
     f64                        emitter_delta {};
+    usize                      trail_sample_steps {};
+    f64                        trail_sample_remainder {};
     bool                       world_space { false };
 };
 
@@ -372,13 +380,11 @@ struct WPParticleInstanceState {
 
     bool death { false };
     bool no_live_particle { false };
-    f64  trail_sample_accumulator {};
 
     void Reset() {
-        bounded                  = {};
-        death                    = false;
-        no_live_particle         = false;
-        trail_sample_accumulator = f64();
+        bounded          = {};
+        death            = false;
+        no_live_particle = false;
     }
 };
 
@@ -412,7 +418,8 @@ public:
     WPParticleSubSystem(Scene&, std::shared_ptr<SceneMesh>, u32 max_count, f64 rate,
                         u32 max_instance_count, f64 probability, SpawnType, WPParticleAnimationSpec,
                         WPParticleFollowAnchor = {}, u32 trail_length = {}, f64 trail_duration = {},
-                        f64 start_time = {}, bool world_space = false);
+                        f64 start_time = {}, bool world_space = false,
+                        std::shared_ptr<WPParticleTrailUniformState> trail_uniform_state = {});
     ~WPParticleSubSystem();
 
     void Finalize();
@@ -499,9 +506,11 @@ private:
     bool                                                            m_started { false };
     u32                                                             m_max_instance_count { 1 };
     f64                                                             m_probability { 1.0 };
-    SpawnType m_spawn_type { SpawnType::STATIC };
-    u32       m_trail_length {};
-    f64       m_trail_sample_interval {};
+    SpawnType                                    m_spawn_type { SpawnType::STATIC };
+    u32                                          m_trail_length {};
+    f64                                          m_trail_sample_interval {};
+    f64                                          m_trail_sample_accumulator {};
+    std::shared_ptr<WPParticleTrailUniformState> m_trail_uniform_state;
 };
 
 class WPParticleRuntime {

@@ -337,7 +337,7 @@ auto GenRopeTrailSegments(const WPParticleConstRef& value, const Eigen::Vector3f
     rstd::array<float, 32> data {};
     usize                  emitted {};
     auto                   size         = value.size * 0.5f;
-    auto                   trail_length = static_cast<float>(state.len.to_primitive());
+    auto                   trail_length = static_cast<float>(state.sample_count.to_primitive());
 
     auto write3 = [&](AttrSlot slot, const Eigen::Vector3f& source) noexcept {
         if (! slot.enabled) return;
