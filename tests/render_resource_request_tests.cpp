@@ -206,7 +206,8 @@ TEST(UniformBufferLayout, RejectsMemberOutsideBlock) {
 TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
     owe::Scene scene;
     auto       camera_node = rstd::sync::Arc<owe::SceneNode>::make();
-    auto       camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
+    auto       camera      = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
     scene.cameras["default"] = camera;
     scene.activeCamera       = camera.get();
@@ -389,7 +390,8 @@ TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {
 TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     owe::Scene scene;
     auto       camera_node = rstd::sync::Arc<owe::SceneNode>::make();
-    auto       camera      = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
+    auto       camera      = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
     scene.cameras["default"] = camera;
     scene.activeCamera       = camera.get();

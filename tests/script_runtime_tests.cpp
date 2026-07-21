@@ -964,7 +964,8 @@ TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
     scene.sceneGraph = root.clone();
 
     layer->SetCamera("audio-effect-camera");
-    auto camera       = std::make_shared<owe::SceneCamera>(256, 256, -1.0f, 1.0f);
+    auto camera =
+        std::make_shared<owe::SceneCamera>(owe::SceneCamera::MakeOrthographic(256, 256, -1.0, 1.0));
     auto effect_layer = std::make_shared<owe::SceneImageEffectLayer>(
         layer.as_ptr(), 256.0f, 256.0f, "_rt_effect_pingpong_a_test", "_rt_effect_pingpong_b_test");
     auto effect             = std::make_shared<owe::SceneImageEffect>();

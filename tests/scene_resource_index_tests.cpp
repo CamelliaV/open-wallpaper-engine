@@ -41,7 +41,8 @@ TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
     scene.sceneGraph->ID()             = rstd::i32(1);
     scene.textures["tex/main"]         = owe::SceneTexture { .url = "tex/main" };
     scene.renderTargets["_rt_default"] = owe::SceneRenderTarget { .width = 1920, .height = 1080 };
-    scene.cameras["default"] = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0f, 1.0f);
+    scene.cameras["default"]           = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
 
     auto child      = rstd::sync::Arc<owe::SceneNode>::make();
     child->ID()     = rstd::i32(2);
@@ -118,8 +119,9 @@ TEST(SceneResourceIndex, RebuildPicksUpNewRenderTargets) {
 
 TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
     owe::Scene scene;
-    auto       camera = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0f, 1.0f);
-    auto       layer  = std::make_shared<owe::SceneImageEffectLayer>(
+    auto       camera = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto layer = std::make_shared<owe::SceneImageEffectLayer>(
         scene.sceneGraph.as_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
 
     auto prefill = rstd::sync::Arc<owe::SceneNode>::make();
@@ -151,8 +153,9 @@ TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
 
 TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterCameraBindingChanges) {
     owe::Scene scene;
-    auto       camera = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0f, 1.0f);
-    auto       layer  = std::make_shared<owe::SceneImageEffectLayer>(
+    auto       camera = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto layer = std::make_shared<owe::SceneImageEffectLayer>(
         scene.sceneGraph.as_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
 
     auto effect_node = rstd::sync::Arc<owe::SceneNode>::make();

@@ -1947,15 +1947,16 @@ void ParseCamera(ParseContext& context, const wpscene::SceneMetadata& sc) {
     auto& scene   = *context.scene;
     auto& general = sc.general;
     // effect camera
-    scene.cameras["effect"]    = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
+    scene.cameras["effect"] =
+        std::make_shared<SceneCamera>(SceneCamera::MakeOrthographic(2, 2, -1.0, 1.0));
     context.effect_camera_node = rstd::Some(rstd::sync::Arc<SceneNode>::make()); // at 0,0,0
     scene.cameras.at("effect")->AttatchNode((*context.effect_camera_node).as_ptr());
     scene.sceneGraph->AppendChild((*context.effect_camera_node).clone());
 
     // global camera
-    scene.cameras["global"] = std::make_shared<SceneCamera>(
-        (context.ortho_w / general.zoom), (context.ortho_h / general.zoom), -5000.0f, 5000.0f);
-    scene.activeCamera = scene.cameras.at("global").get();
+    scene.cameras["global"] = std::make_shared<SceneCamera>(SceneCamera::MakeOrthographic(
+        context.ortho_w / general.zoom, context.ortho_h / general.zoom, -5000.0, 5000.0));
+    scene.activeCamera      = scene.cameras.at("global").get();
     Vector3f cori { (float)context.ortho_w / 2.0f, (float)context.ortho_h / 2.0f, 0 },
         cscale { 1.0f, 1.0f, 1.0f }, cangle(Vector3f::Zero());
 
@@ -1963,11 +1964,11 @@ void ParseCamera(ParseContext& context, const wpscene::SceneMetadata& sc) {
     scene.activeCamera->AttatchNode((*context.global_camera_node).as_ptr());
     scene.sceneGraph->AppendChild((*context.global_camera_node).clone());
 
-    scene.cameras["global_perspective"] =
-        std::make_shared<SceneCamera>((float)context.ortho_w / (float)context.ortho_h,
-                                      general.nearz,
-                                      general.farz,
-                                      algorism::CalculatePersperctiveFov(1000.0f, context.ortho_h));
+    scene.cameras["global_perspective"] = std::make_shared<SceneCamera>(
+        SceneCamera::MakePerspective(static_cast<double>(context.ortho_w) / context.ortho_h,
+                                     general.nearz,
+                                     general.farz,
+                                     algorism::CalculatePersperctiveFov(1000.0f, context.ortho_h)));
 
     Vector3f cperori = cori;
     cperori[2]       = 1000.0f;
@@ -2567,12 +2568,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         std::string nodeAddr = getAddr(spImgNode.as_ptr());
         // set camera to attatch effect
         if (isPassthrough) {
-            scene.cameras[nodeAddr] =
-                std::make_shared<SceneCamera>((int32_t)scene.activeCamera->Width(),
-                                              (int32_t)scene.activeCamera->Height(),
-                                              -1.0f,
-                                              1.0f);
-            auto attached = scene.activeCamera->GetAttachedNode();
+            scene.cameras[nodeAddr] = std::make_shared<SceneCamera>(SceneCamera::MakeOrthographic(
+                scene.activeCamera->Width(), scene.activeCamera->Height(), -1.0, 1.0));
+            auto attached           = scene.activeCamera->GetAttachedNode();
             if (attached.is_some()) scene.cameras.at(nodeAddr)->AttatchNode(attached.unwrap());
             if (scene.linkedCameras.count("global") == 0) scene.linkedCameras["global"] = {};
             scene.linkedCameras.at("global").push_back(nodeAddr);
@@ -2580,9 +2578,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             // applly scale to crop
             const auto effect_extent =
                 NonZeroRenderTargetExtent(effect_target_size[0], effect_target_size[1]);
-            std::int32_t w          = effect_extent[0];
-            std::int32_t h          = effect_extent[1];
-            scene.cameras[nodeAddr] = std::make_shared<SceneCamera>(w, h, -1.0f, 1.0f);
+            std::int32_t w = effect_extent[0];
+            std::int32_t h = effect_extent[1];
+            scene.cameras[nodeAddr] =
+                std::make_shared<SceneCamera>(SceneCamera::MakeOrthographic(w, h, -1.0, 1.0));
             // Attach the per-layer effect camera to spImgNode itself so the
             // camera follows the layer through any parent-container world
             // translation. Otherwise the layer's quad ends up off-center in
@@ -2594,8 +2593,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             const std::string group_camera = nodeAddr + "_group";
             const auto        group_extent =
                 NonZeroRenderTargetExtent(effect_target_size[0], effect_target_size[1]);
-            scene.cameras[group_camera] =
-                std::make_shared<SceneCamera>(group_extent[0], group_extent[1], -1.0f, 1.0f);
+            scene.cameras[group_camera] = std::make_shared<SceneCamera>(
+                SceneCamera::MakeOrthographic(group_extent[0], group_extent[1], -1.0, 1.0));
             scene.cameras.at(group_camera)->AttatchNode(spImgNode.as_ptr());
             scene.RegisterRenderGroup(WallpaperLayerId { .value = static_cast<i32>(wpimgobj.id) },
                                       group_camera);
@@ -3822,8 +3821,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         // Per-layer ortho camera. effect_camera_node sits at origin so the
         // view matrix is identity; ortho extents = bbox so glyph pixel
         // coords (centered around 0) map directly to [-1, +1] NDC.
-        scene.cameras[addr] =
-            std::make_shared<SceneCamera>(initial_layer_w, initial_layer_h, -1.0f, 1.0f);
+        scene.cameras[addr] = std::make_shared<SceneCamera>(
+            SceneCamera::MakeOrthographic(initial_layer_w, initial_layer_h, -1.0, 1.0));
         scene.cameras.at(addr)->AttatchNode(sp_node.as_ptr());
 
         scene.renderTargets[ppong_a] = {

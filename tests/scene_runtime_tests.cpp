@@ -135,15 +135,28 @@ TEST(SceneUserTextBinding, AppliesEmptyString) {
 TEST(TextUniformSource, OwnsTextProjectionOutputs) {
     owe::Scene scene;
     auto       node   = rstd::sync::Arc<owe::SceneNode>::make();
-    auto       camera = std::make_shared<owe::SceneCamera>(1920, 1080, -1.0, 1.0);
-    auto       state  = std::make_shared<owe::text::TextUniformState>(node.clone());
-    state->camera     = camera;
+    auto       camera = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto state    = std::make_shared<owe::text::TextUniformState>(node.clone());
+    state->camera = camera;
 
     owe::text::TextUniformSource source(state);
     auto                         value = scene_test::Capture(
         scene.Runtime().Frame(), source, owe::text::TextUniformOutput::ModelViewProjection);
 
     EXPECT_EQ(value.size().to_primitive(), 16u);
+}
+
+TEST(SceneCameraProjection, UsesExplicitProjectionFactories) {
+    auto orthographic = owe::SceneCamera::MakeOrthographic(1920.5, 1080.25, -1.0, 1.0);
+    EXPECT_FALSE(orthographic.IsPerspective());
+    EXPECT_DOUBLE_EQ(orthographic.Width(), 1920.5);
+    EXPECT_DOUBLE_EQ(orthographic.Height(), 1080.25);
+
+    auto perspective = owe::SceneCamera::MakePerspective(16.0 / 9.0, 0.01, 1000.0, 45.0);
+    EXPECT_TRUE(perspective.IsPerspective());
+    EXPECT_DOUBLE_EQ(perspective.Aspect(), 16.0 / 9.0);
+    EXPECT_DOUBLE_EQ(perspective.Fov(), 45.0);
 }
 
 TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
@@ -196,7 +209,8 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
         rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 1920.0f, 1080.0f, 0.0f },
                                               Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
                                               Eigen::Vector3f::Zero());
-    auto camera = std::make_shared<owe::SceneCamera>(3840, 2160, -1.0, 1.0);
+    auto camera = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
     scene.cameras["default"] = camera;
     scene.activeCamera       = camera.get();
@@ -272,7 +286,8 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     EXPECT_NEAR(mvp[rstd::usize(12)], expected_child.x(), 1e-5f);
     EXPECT_NEAR(mvp[rstd::usize(13)], expected_child.y(), 1e-5f);
 
-    auto layer_camera = std::make_shared<owe::SceneCamera>(3840, 2160, -1.0, 1.0);
+    auto layer_camera = std::make_shared<owe::SceneCamera>(
+        owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
     layer_camera->AttatchNode(effect.as_ptr());
     layer_camera->AttatchImgEffect(
         std::make_shared<owe::SceneImageEffectLayer>(child.as_ptr(),

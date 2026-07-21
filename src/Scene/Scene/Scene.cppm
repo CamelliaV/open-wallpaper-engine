@@ -837,16 +837,14 @@ struct ScenePostProcess;
 
 class SceneCamera {
 public:
-    explicit SceneCamera(rstd::int32_t width, rstd::int32_t height, float near, float far)
-        : m_width(width),
-          m_height(height),
-          m_aspect(m_width / m_height),
-          m_nearClip(near),
-          m_farClip(far),
-          m_perspective(false) {}
+    static auto MakeOrthographic(double width, double height, double near, double far)
+        -> SceneCamera {
+        return SceneCamera(OrthographicTag {}, width, height, near, far);
+    }
 
-    explicit SceneCamera(float aspect, float near, float far, float fov)
-        : m_aspect(aspect), m_nearClip(near), m_farClip(far), m_fov(fov), m_perspective(true) {}
+    static auto MakePerspective(double aspect, double near, double far, double fov) -> SceneCamera {
+        return SceneCamera(PerspectiveTag {}, aspect, near, far, fov);
+    }
 
     SceneCamera(const SceneCamera& cam) { Clone(cam); }
 
@@ -921,6 +919,19 @@ public:
     }
 
 private:
+    struct OrthographicTag {};
+    struct PerspectiveTag {};
+
+    explicit SceneCamera(OrthographicTag, double width, double height, double near, double far)
+        : m_width(width),
+          m_height(height),
+          m_aspect(m_width / m_height),
+          m_nearClip(near),
+          m_farClip(far),
+          m_perspective(false) {}
+
+    explicit SceneCamera(PerspectiveTag, double aspect, double near, double far, double fov)
+        : m_aspect(aspect), m_nearClip(near), m_farClip(far), m_fov(fov), m_perspective(true) {}
     void CalculateViewProjectionMatrix();
 
     double m_width { 1.0f };
