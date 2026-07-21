@@ -1,4 +1,15 @@
 # ---------------------------------------------------------------------------
+# owe-load-bench
+# ---------------------------------------------------------------------------
+add_library(owe-load-bench STATIC)
+target_sources(owe-load-bench
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES LoadBench.cppm)
+target_link_libraries(owe-load-bench PUBLIC rstd::bench)
+target_compile_features(owe-load-bench PUBLIC cxx_std_20)
+set_property(TARGET owe-load-bench PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET owe-load-bench PROPERTY CXX_SCAN_FOR_MODULES ON)
+
+# ---------------------------------------------------------------------------
 # owe-types — minimal types module (enums, BitFlags, Image, SpriteAnim)
 # Independent of owe-base so consumers (e.g. owe-vulkan)
 # can pick it up without dragging the rest of base in.
@@ -130,7 +141,7 @@ target_sources(owe-parse
          Pkg/Parse/WPUniform.cppm
          Text/Text.cppm)
 target_link_libraries(owe-parse
-  PUBLIC owe-base owe-shader-compile owe-script
+  PUBLIC owe-base owe-load-bench owe-shader-compile owe-script
   PRIVATE ${LZ4_LIBRARIES} Freetype::Freetype PkgConfig::FONTCONFIG)
 target_include_directories(owe-parse
   PUBLIC  .. . Utils/include
@@ -196,7 +207,7 @@ target_sources(owe-vulkan-renderer
          VulkanRender/Pass/FinPass.cppm
          VulkanRender/Pass/PrePass.cppm)
 target_link_libraries(owe-vulkan-renderer
-  PUBLIC owe-rdg owe-resource-registry owe-vulkan owe-parse owe-script wavsen::audio)
+  PUBLIC owe-rdg owe-resource-registry owe-vulkan owe-parse owe-script owe-load-bench wavsen::audio)
 target_include_directories(owe-vulkan-renderer
   PUBLIC  .. . Swapchain Utils/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)
@@ -218,7 +229,7 @@ add_library(owe-scene-wallpaper STATIC SceneWallpaper.cpp)
 target_sources(owe-scene-wallpaper
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES SceneWallpaper.cppm)
 target_link_libraries(owe-scene-wallpaper
-  PUBLIC owe-render owe-resource-registry owe-parse owe-script wavsen::audio)
+  PUBLIC owe-render owe-resource-registry owe-parse owe-script owe-load-bench wavsen::audio)
 target_include_directories(owe-scene-wallpaper
   PUBLIC  .. . Swapchain Utils/include ../Vulkan/include
   PRIVATE VulkanRender Utils Utils/include/Utils Scene ../Vulkan)

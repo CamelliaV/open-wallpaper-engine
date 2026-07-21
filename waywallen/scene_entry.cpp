@@ -43,6 +43,8 @@ struct Options {
     bool        property_enable_audio { true };
     std::string render_node;
     std::string video_hwdec;
+
+    rstd::string::String load_bench_output;
     // 1 disables MSAA. Clamped against device caps in VulkanRender::init.
     uint32_t                                     msaa_samples { 1 };
     rstd::json::Map                              initial_user_properties;
@@ -238,6 +240,12 @@ Options parse_args(int argc, char** argv) {
                             .long_name("hwdec")
                             .help("Video texture decoder mode: auto, vulkan, vaapi, or none")
                             .default_value(""));
+    auto load_bench_output =
+        command.add_arg(Arg<rstd::string::String>::value("load-bench-output", string_parser())
+                            .long_name("load-bench-output")
+                            .help("Write scene load probe report to FILE")
+                            .value_name("FILE")
+                            .default_value(""));
     command.add_arg(Arg<rstd::string::String>::value("remaining", string_parser())
                         .num_args(NumArgs::any())
                         .allow_hyphen_values());
@@ -253,6 +261,8 @@ Options parse_args(int argc, char** argv) {
     options.workshop_id    = ToStdString(ArgValue(matches, workshop_id));
     options.render_node    = ToStdString(ArgValue(matches, render_node));
     options.video_hwdec    = ToStdString(ArgValue(matches, hwdec));
+
+    options.load_bench_output = ArgValue(matches, load_bench_output).clone();
     return options;
 }
 
@@ -732,6 +742,8 @@ int run(int argc, char** argv) {
 
     Options opts = parse_args(argc, argv);
 
+    auto load_bench = owe::CreateSceneLoadBench(opts.load_bench_output.as_str());
+
     ::prctl(PR_SET_PDEATHSIG, SIGTERM);
 
     HostState host;
@@ -762,7 +774,24 @@ int run(int argc, char** argv) {
                 resolution = static_cast<int32_t>(WW_RESOLUTION_1080P);
             uint32_t custom_extent = parse_u32(kv_get(init.settings, "custom_extent"), 1080u);
             if (! opts.initial_scene.empty()) {
-                auto scene_doc = owe::wpscene::LoadSceneDocumentFromSource(opts.initial_scene);
+                auto scene_doc = [&] {
+                    if (load_bench.is_none())
+                        return owe::wpscene::LoadSceneDocumentFromSource(opts.initial_scene);
+
+                    auto& context  = **load_bench;
+                    auto  recorder = context.session().recorder();
+                    auto  loaded   = [&] {
+                        auto span = recorder.span(context.ids().preload_scene_document);
+                        return owe::wpscene::LoadSceneDocumentFromSource(opts.initial_scene);
+                    }();
+                    auto batch = recorder.drain();
+                    if (batch.is_ok()) {
+                        context.add_preload_batch(rstd::move(batch).unwrap_unchecked());
+                    } else {
+                        rstd_warn("waywallen-wescene-renderer: preload probe drain failed");
+                    }
+                    return loaded;
+                }();
                 if (scene_doc) {
                     opts.initial_scene_document =
                         std::make_shared<owe::wpscene::SceneDocument>(std::move(*scene_doc));
@@ -919,6 +948,7 @@ int run(int argc, char** argv) {
     wp_config.source_pkg_path = opts.initial_scene;
     wp_config.assets_dir      = opts.initial_assets;
     wp_config.scene_document  = opts.initial_scene_document;
+    wp_config.load_bench      = load_bench.clone();
     wp_config.user_properties = std::move(opts.initial_user_properties);
     wp_config.fps             = opts.initial_fps;
     wp_config.volume          = effective_volume(host);

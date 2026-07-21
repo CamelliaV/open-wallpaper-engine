@@ -10,6 +10,7 @@ module;
 module wescene.pkg.parse;
 import eigen;
 import wescene.spec_names;
+import wescene.load_bench;
 import wescene.core;
 import wescene.types;
 import rstd;
@@ -4581,41 +4582,56 @@ void ResolveCreateLayerAssetRequests(ParseContext& context) {
 }
 
 void ProcessObjects(ParseContext& context, std::span<SceneObjectVar> scene_objs,
-                    wavsen::audio::SoundManager* sm, ProcessOpts opts) {
+                    wavsen::audio::SoundManager* sm, ProcessOpts opts,
+                    SceneLoadBenchRecorderView load_bench) {
     WPShaderParser::InitGlslang();
     IndexSystemMediaImageFallbacks(context, scene_objs);
 
     for (SceneObjectVar& obj : scene_objs) {
-        std::visit(visitor::overload {
-                       [&context, opts](wpscene::ImageObject& obj) {
-                           if (opts.kinds & ProcessOpts::Image) ParseImageObj(context, obj);
-                       },
-                       [&context, opts](wpscene::ParticleObject& obj) {
-                           if (opts.kinds & ProcessOpts::Particle) ParseParticleObj(context, obj);
-                       },
-                       [&context, opts, sm](wpscene::SoundObject& obj) {
-                           if ((opts.kinds & ProcessOpts::Sound) && sm)
-                               ParseSoundObj(context, obj, *sm);
-                       },
-                       [&context, opts](wpscene::LightObject& obj) {
-                           if (opts.kinds & ProcessOpts::Light) ParseLightObj(context, obj);
-                       },
-                       // Stage A text-layer support: ParseTextObj loads the
-                       // font, lays glyphs into a CPU-side atlas, and logs
-                       // the resolved layout. Scene-graph emission is still
-                       // pending Stage B (custom shader + atlas texture
-                       // through the existing imageParser path).
-                       [&context, opts](wpscene::TextObject& obj) {
-                           if (opts.kinds & ProcessOpts::Text) ParseTextObj(context, obj);
-                       },
-                       [&context, opts](wpscene::ModelObject& obj) {
-                           if (opts.kinds & ProcessOpts::Model) ParseModelObj(context, obj);
-                       },
-                       [&context](wpscene::CameraObject& obj) {
-                           ParseCameraObj(context, obj);
-                       },
-                   },
-                   obj);
+        std::visit(
+            visitor::overload {
+                [&context, opts, load_bench](wpscene::ImageObject& obj) {
+                    if (! (opts.kinds & ProcessOpts::Image)) return;
+                    auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_image);
+                    ParseImageObj(context, obj);
+                },
+                [&context, opts, load_bench](wpscene::ParticleObject& obj) {
+                    if (! (opts.kinds & ProcessOpts::Particle)) return;
+                    auto span =
+                        SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_particle);
+                    ParseParticleObj(context, obj);
+                },
+                [&context, opts, sm, load_bench](wpscene::SoundObject& obj) {
+                    if (! (opts.kinds & ProcessOpts::Sound) || ! sm) return;
+                    auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_sound);
+                    ParseSoundObj(context, obj, *sm);
+                },
+                [&context, opts, load_bench](wpscene::LightObject& obj) {
+                    if (! (opts.kinds & ProcessOpts::Light)) return;
+                    auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_light);
+                    ParseLightObj(context, obj);
+                },
+                // Stage A text-layer support: ParseTextObj loads the
+                // font, lays glyphs into a CPU-side atlas, and logs
+                // the resolved layout. Scene-graph emission is still
+                // pending Stage B (custom shader + atlas texture
+                // through the existing imageParser path).
+                [&context, opts, load_bench](wpscene::TextObject& obj) {
+                    if (! (opts.kinds & ProcessOpts::Text)) return;
+                    auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_text);
+                    ParseTextObj(context, obj);
+                },
+                [&context, opts, load_bench](wpscene::ModelObject& obj) {
+                    if (! (opts.kinds & ProcessOpts::Model)) return;
+                    auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_model);
+                    ParseModelObj(context, obj);
+                },
+                [&context, load_bench](wpscene::CameraObject& obj) {
+                    auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_camera);
+                    ParseCameraObj(context, obj);
+                },
+            },
+            obj);
     }
 
     ResolveCreateLayerAssetRequests(context);
@@ -5035,25 +5051,46 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
                                             fs::VFS& vfs, wavsen::audio::SoundManager& sm,
                                             wpscene::SceneVersion pkg_version) {
+    return Parse(scene_id, buf, vfs, sm, pkg_version, {});
+}
+
+std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
+                                            fs::VFS& vfs, wavsen::audio::SoundManager& sm,
+                                            wpscene::SceneVersion pkg_version,
+                                            SceneParseOptions     options) {
     m_runtime_input.reset();
+    auto scene_document_span =
+        SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::load_scene_document);
     auto doc = wpscene::ParseSceneDocumentJson(buf, pkg_version);
+    scene_document_span.finish();
     if (! doc) return nullptr;
-    return Parse(scene_id, *doc, vfs, sm);
+    return Parse(scene_id, *doc, vfs, sm, options);
 }
 
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_id,
                                             const wpscene::SceneDocument& doc, fs::VFS& vfs,
                                             wavsen::audio::SoundManager& sm) {
-    const auto& json = doc.root_json;
-    const auto& sc   = doc.metadata;
+    return Parse(scene_id, doc, vfs, sm, {});
+}
+
+std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_id,
+                                            const wpscene::SceneDocument& doc, fs::VFS& vfs,
+                                            wavsen::audio::SoundManager& sm,
+                                            SceneParseOptions            options) {
+    auto        total_span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_total);
+    const auto& json       = doc.root_json;
+    const auto& sc         = doc.metadata;
     rstd_info("scene: pkg_version={} scene_json_version={}",
               static_cast<unsigned>(sc.pkg_version),
               static_cast<unsigned>(sc.scene_json_version));
 
     m_runtime_input.reset();
     auto linked_source_ids = CollectLinkedSourceIdsFromJson(json);
-    auto scene_objs =
-        ExpandObjects(json, vfs, sc.pkg_version, m_user_properties, &linked_source_ids);
+    auto scene_objs        = [&] {
+        auto span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_expand_objects);
+        return ExpandObjects(json, vfs, sc.pkg_version, m_user_properties, &linked_source_ids);
+    }();
+    auto       context_span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_context);
     const auto ortho_extent = ResolveOrthoProjectionExtent(sc, scene_objs);
     auto       context      = BuildContext(vfs, scene_id, sc, ortho_extent, m_user_properties);
     m_runtime_input         = std::make_shared<WPUniformRuntimeInput>(context.uniform_state);
@@ -5137,11 +5174,19 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view              scene_
             };
         }
     }
+    (void)context_span.finish();
 
-    ProcessObjects(context, scene_objs, &sm);
-
-    if (sc.general.bloom) {
-        BuildBloomPostProcess(context, vfs, sc.general);
+    {
+        auto span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_objects);
+        ProcessObjects(context, scene_objs, &sm, {}, options.load_bench);
     }
+
+    {
+        auto span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_post_process);
+        if (sc.general.bloom) {
+            BuildBloomPostProcess(context, vfs, sc.general);
+        }
+    }
+    auto finalize_span = SceneLoadSpan(options.load_bench, &SceneLoadProbeIds::parse_finalize);
     return FinalizeScene(context);
 }

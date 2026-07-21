@@ -11,10 +11,12 @@ import wescene.spec_names;
 import eigen;
 import owe.user_property;
 import rstd;
+import rstd.bench;
 import rstd.log;
 import rstd.cppstd;
 import wavsen.audio;
 import wescene.fs;
+import wescene.load_bench;
 import wescene.timer;
 import wescene.pkg.parse;
 import wescene.pkg_fs;
@@ -33,10 +35,12 @@ namespace owe
 
 struct RenderInit {
     std::shared_ptr<RenderInitInfo> info;
+    Option<SceneLoadBenchHandle>    load_bench;
 };
 struct RenderSetScene {
     std::shared_ptr<Scene>                 scene;
     std::shared_ptr<WPUniformRuntimeInput> uniform_input;
+    Option<SceneLoadBenchHandle>           load_bench;
     Option<u64>                            random_seed;
 };
 struct RenderSetFillMode {
@@ -99,7 +103,17 @@ struct MainStop {
 struct MainPauseAudio {
     uint64_t generation { 0 };
 };
-struct MainFirstFrame {};
+struct MainLoadBenchBatch {
+    Option<SceneLoadBenchHandle>   context;
+    rstd::bench::probe::ProbeBatch batch;
+};
+struct MainLoadBenchFinish {
+    Option<SceneLoadBenchHandle> context;
+};
+struct MainFirstFrame {
+    Option<SceneLoadBenchHandle>           context;
+    Option<rstd::bench::probe::ProbeBatch> batch;
+};
 struct MainShutdown {};
 struct MainConfigure {
     SceneWallpaperConfig config;
@@ -149,13 +163,21 @@ struct MainMsg {
                  MainSetMuted, MainSetAudioClientIdentity, MainSetFillMode, MainSetSpeed,
                  MainSetUserProperty, MainSetFirstFrameCallback,
                  MainSetUserPropertyDiagnosticCallback, MainUserPropertyDiagnostics,
-                 MainPreparedPassDiagnostics, MainStop, MainPauseAudio, MainFirstFrame,
-                 MainShutdown>
+                 MainPreparedPassDiagnostics, MainStop, MainPauseAudio, MainLoadBenchBatch,
+                 MainLoadBenchFinish, MainFirstFrame, MainShutdown>
         v;
 };
 
 namespace
 {
+
+auto BenchContext(Option<SceneLoadBenchHandle>& handle) -> SceneLoadBenchContext& {
+    return **handle;
+}
+
+auto BenchContext(const Option<SceneLoadBenchHandle>& handle) -> const SceneLoadBenchContext& {
+    return **handle;
+}
 
 Json MakeUserPropertyDescriptor(Json value) {
     if (value.get("value").is_some()) return value;
@@ -795,6 +817,8 @@ public:
     void on(MainPreparedPassDiagnostics&&);
     void on(MainStop&&);
     void on(MainPauseAudio&&);
+    void on(MainLoadBenchBatch&&);
+    void on(MainLoadBenchFinish&&);
     void on(MainFirstFrame&&);
 
     bool isGenGraphviz() const { return m_config.graphviz; }
@@ -806,6 +830,11 @@ private:
     void       startMainLoop();
     void       stopMainLoop();
     void       loadScene();
+    void       ensureLoadBench(const Option<SceneLoadBenchHandle>&);
+    void       ingestLoadBenchBatch(const Option<SceneLoadBenchHandle>&,
+                                    const rstd::bench::probe::ProbeBatch&);
+    void       finishLoadBench();
+    auto       loadBenchView() -> SceneLoadBenchRecorderView;
 
     bool m_inited { false };
 
@@ -818,6 +847,12 @@ private:
     UserPropertyDiagnosticCallback               m_user_property_diagnostic_cb;
     ClearColorCallback                           m_clear_color_cb;
     uint64_t                                     m_audio_pause_generation { 0 };
+
+    Option<SceneLoadBenchHandle>               m_load_bench;
+    Option<rstd::bench::probe::ProbeCollector> m_load_bench_collector;
+    Option<rstd::bench::probe::ProbeRecorder>  m_load_bench_recorder;
+    Option<rstd::bench::probe::SpanGuard>      m_load_total_span;
+    u64                                        m_latest_load_bench_run_id { 0 };
 
     std::optional<MainSender>              m_main_tx;
     std::optional<MainReceiver>            m_main_rx;
@@ -897,7 +932,8 @@ public:
     FpsCounter fps_counter;
 
 private:
-    void rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention, bool evict_meshes);
+    void rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention, bool evict_meshes,
+                            SceneLoadBenchRecorderView load_bench = {});
     void consumeDirtyEventsCoveredByGraphRebuild();
     void refreshPreparedRenderTargetDirtyEvents();
     void refreshPreparedMeshDirtyEvents();
@@ -930,6 +966,9 @@ private:
     std::optional<RenderReceiver> m_rx;
     std::thread                   m_thread;
     std::optional<MainSender>     m_main_tx;
+
+    Option<SceneLoadBenchHandle>              m_load_bench;
+    Option<rstd::bench::probe::ProbeRecorder> m_load_bench_recorder;
 
     // Strong ref kept here, weak copy captured by the swapchain callback.
     std::shared_ptr<RenderSender> m_swapchain_tx;
@@ -1081,13 +1120,38 @@ void SceneRenderController::on(RenderDraw&&) {
          * drawFrame so newly-rasterised glyphs are visible the same frame. */
         m_render->pumpFontAtlases(*m_scene);
 
+        const bool first_draw = ! m_scene->first_frame_ok;
+        auto       load_bench = SceneLoadBenchRecorderView {
+            .recorder = m_load_bench_recorder ? &*m_load_bench_recorder : nullptr,
+            .ids      = m_load_bench ? &BenchContext(m_load_bench).ids() : nullptr,
+        };
+        auto first_draw_span =
+            first_draw ? SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_first_draw)
+                       : rstd::bench::probe::SpanGuard {};
         m_render->drawFrame(*m_scene);
+        (void)first_draw_span.finish();
 
         m_scene->PassFrameTime(frame_timer.TargetFrameTime() * m_speed);
 
-        if (! m_scene->first_frame_ok) {
+        if (first_draw) {
             m_scene->first_frame_ok = true;
-            if (m_main_tx) (void)m_main_tx->send(MainMsg { MainFirstFrame {} });
+            Option<rstd::bench::probe::ProbeBatch> batch;
+            if (m_load_bench_recorder) {
+                auto drained = m_load_bench_recorder->drain();
+                if (drained.is_ok()) {
+                    batch = Some(rstd::move(drained).unwrap_unchecked());
+                } else {
+                    rstd_warn("render probe drain failed");
+                }
+            }
+            if (m_main_tx) {
+                (void)m_main_tx->send(MainMsg { MainFirstFrame {
+                    .context = m_load_bench.clone(),
+                    .batch   = rstd::move(batch),
+                } });
+            }
+            m_load_bench_recorder = None();
+            m_load_bench          = None();
         }
     }
     frame_timer.FrameEnd();
@@ -1101,16 +1165,23 @@ void SceneRenderController::on(RenderSetFillMode&& m) {
 }
 
 void SceneRenderController::rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention,
-                                               bool                                 evict_meshes) {
+                                               bool                                 evict_meshes,
+                                               SceneLoadBenchRecorderView           load_bench) {
     if (! m_scene || ! renderInited()) return;
     if (m_rg.is_some()) m_render->clearLastRenderGraph(retention);
     if (evict_meshes) m_render->evictUnusedMeshes();
     m_render->configureRenderTargets(*m_scene);
-    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
-    m_rg           = Some(sceneToRenderGraph(*m_scene, m_render_scene));
+    {
+        auto snapshot_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_snapshot);
+        m_render_scene     = ExtractRenderSceneSnapshot(*m_scene);
+    }
+    {
+        auto graph_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_graph_build);
+        m_rg            = Some(sceneToRenderGraph(*m_scene, m_render_scene));
+    }
 
     if (m_main.isGenGraphviz()) (*m_rg)->ToGraphviz("graph.dot");
-    m_render->compileRenderGraph(*m_scene, **m_rg, m_render_scene);
+    m_render->compileRenderGraph(*m_scene, **m_rg, m_render_scene, load_bench);
     m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     consumeDirtyEventsCoveredByGraphRebuild();
     (void)m_scene->ConsumeRenderGraphDirty();
@@ -1178,6 +1249,18 @@ void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
 }
 
 void SceneRenderController::on(RenderSetScene&& m) {
+    m_load_bench          = rstd::move(m.load_bench);
+    m_load_bench_recorder = None();
+    if (m_load_bench) {
+        rstd::bench::probe::RecorderConfig config;
+        config.sample_capacity = usize(32768);
+        m_load_bench_recorder  = Some(BenchContext(m_load_bench).session().recorder(config));
+    }
+    auto load_bench = SceneLoadBenchRecorderView {
+        .recorder = m_load_bench_recorder ? &*m_load_bench_recorder : nullptr,
+        .ids      = m_load_bench ? &BenchContext(m_load_bench).ids() : nullptr,
+    };
+    auto load_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_load);
     if (m.random_seed.is_some()) {
         using Seed = decltype(Random::max());
         Random::seed(static_cast<Seed>(m.random_seed->to_primitive()));
@@ -1194,7 +1277,8 @@ void SceneRenderController::on(RenderSetScene&& m) {
         m_scene->audioResponseDemand->SetEnabled(m_audio_response_enabled);
         m_scene->audioResponseDemand->SetCallback(m_audio_response_demand_callback);
     }
-    rebuildRenderGraph(vulkan::RenderGraphResourceRetention::ReleaseSceneTextures, true);
+    rebuildRenderGraph(
+        vulkan::RenderGraphResourceRetention::ReleaseSceneTextures, true, load_bench);
 }
 
 void SceneRenderController::on(RenderSetSpeed&& m) { m_speed = m.speed; }
@@ -1300,7 +1384,36 @@ void SceneRenderController::on(RenderSetAudioSpectrum&& m) {
 }
 
 void SceneRenderController::on(RenderInit&& m) {
-    m_render->init(std::move(*m.info));
+    auto                                      context = rstd::move(m.load_bench);
+    Option<rstd::bench::probe::ProbeRecorder> recorder;
+    if (context) recorder = Some(BenchContext(context).session().recorder());
+    auto load_bench = SceneLoadBenchRecorderView {
+        .recorder = recorder ? &*recorder : nullptr,
+        .ids      = context ? &BenchContext(context).ids() : nullptr,
+    };
+    bool initialized = false;
+    {
+        auto init_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::vulkan_init);
+        initialized    = m_render->init(rstd::move(*m.info), load_bench);
+    }
+    if (recorder && m_main_tx) {
+        auto batch = recorder->drain();
+        if (batch.is_ok()) {
+            (void)m_main_tx->send(MainMsg { MainLoadBenchBatch {
+                .context = context.clone(),
+                .batch   = rstd::move(batch).unwrap_unchecked(),
+            } });
+        } else {
+            rstd_warn("vulkan init probe drain failed");
+        }
+    }
+
+    if (! initialized) {
+        if (context && m_main_tx) {
+            (void)m_main_tx->send(MainMsg { MainLoadBenchFinish { .context = context.clone() } });
+        }
+        return;
+    }
 
     // Subscribe to ExSwapchain ready/extent/format changes. The
     // callback runs on the render thread (sync for Local, from
@@ -1361,6 +1474,87 @@ void SceneRuntimeController::post(MainMsg msg) {
 
 void SceneRuntimeController::post(RenderMsg msg) { m_render_controller->post(std::move(msg)); }
 
+auto SceneRuntimeController::loadBenchView() -> SceneLoadBenchRecorderView {
+    return {
+        .recorder = m_load_bench_recorder ? &*m_load_bench_recorder : nullptr,
+        .ids      = m_load_bench ? &BenchContext(m_load_bench).ids() : nullptr,
+    };
+}
+
+void SceneRuntimeController::ensureLoadBench(const Option<SceneLoadBenchHandle>& context) {
+    if (! context) {
+        finishLoadBench();
+        return;
+    }
+    if (m_load_bench && BenchContext(m_load_bench).run_id() == BenchContext(context).run_id())
+        return;
+    if (BenchContext(context).run_id() <= m_latest_load_bench_run_id) return;
+
+    finishLoadBench();
+    m_latest_load_bench_run_id = BenchContext(context).run_id();
+    m_load_bench               = context.clone();
+    m_load_bench_collector =
+        Some(rstd::bench::probe::ProbeCollector::new_(BenchContext(context).schema_owner()));
+    auto batches = BenchContext(m_load_bench).take_preload_batches();
+    for (usize index; index < batches.len(); ++index) {
+        auto ingested = m_load_bench_collector->ingest(batches[index]);
+        if (ingested.is_err()) rstd_warn("preload probe batch schema mismatch");
+    }
+}
+
+void SceneRuntimeController::ingestLoadBenchBatch(const Option<SceneLoadBenchHandle>&   context,
+                                                  const rstd::bench::probe::ProbeBatch& batch) {
+    if (! context) return;
+    if (! m_load_bench) ensureLoadBench(context);
+    if (! m_load_bench || ! context ||
+        BenchContext(m_load_bench).run_id() != BenchContext(context).run_id() ||
+        ! m_load_bench_collector)
+        return;
+    auto ingested = m_load_bench_collector->ingest(batch);
+    if (ingested.is_err()) rstd_warn("scene load probe batch schema mismatch");
+}
+
+void SceneRuntimeController::finishLoadBench() {
+    if (! m_load_bench) return;
+
+    if (m_load_total_span) {
+        (void)m_load_total_span->finish();
+        m_load_total_span = None();
+    }
+    if (m_load_bench_recorder) {
+        auto batch = m_load_bench_recorder->drain();
+        if (batch.is_ok() && m_load_bench_collector) {
+            auto ingested = m_load_bench_collector->ingest(*batch);
+            if (ingested.is_err()) rstd_warn("main probe batch schema mismatch");
+        } else if (batch.is_err()) {
+            rstd_warn("main probe drain failed");
+        }
+        m_load_bench_recorder = None();
+    }
+
+    if (m_load_bench_collector) {
+        auto report = rstd::move(*m_load_bench_collector).finish();
+        auto file   = rstd::fs::File::create(BenchContext(m_load_bench).output_path());
+        if (file.is_err()) {
+            auto error = rstd::move(file).unwrap_err_unchecked();
+            rstd_warn("cannot create scene load probe report {}: {}",
+                      BenchContext(m_load_bench).output_path(),
+                      error);
+        } else {
+            auto output  = rstd::move(file).unwrap_unchecked();
+            auto written = rstd::bench::probe::write_text(output, report);
+            if (written.is_err()) {
+                auto error = rstd::move(written).unwrap_err_unchecked();
+                rstd_warn("cannot write scene load probe report {}: {}",
+                          BenchContext(m_load_bench).output_path(),
+                          error);
+            }
+        }
+        m_load_bench_collector = None();
+    }
+    m_load_bench = None();
+}
+
 void SceneRuntimeController::startMainLoop() {
     if (m_main_thread.joinable()) return;
     if (! m_main_rx) rstd::panic { "main mailbox cannot be restarted" };
@@ -1379,6 +1573,7 @@ void SceneRuntimeController::startMainLoop() {
                 [this, &shutdown](auto&& value) {
                     using Message = std::remove_cvref_t<decltype(value)>;
                     if constexpr (std::is_same_v<Message, MainShutdown>) {
+                        finishLoadBench();
                         shutdown = true;
                     } else {
                         on(std::move(value));
@@ -1415,7 +1610,8 @@ void SceneRuntimeController::on(MainLoadScene&&) {
 }
 
 void SceneRuntimeController::on(MainConfigure&& m) {
-    m_config          = std::move(m.config);
+    m_config = rstd::move(m.config);
+    ensureLoadBench(m_config.load_bench);
     m_user_properties = NormalizeUserProperties(m_config.user_properties);
     on(MainSetFps { m_config.fps });
     on(MainSetVolume { m_config.volume });
@@ -1524,12 +1720,41 @@ void SceneRuntimeController::on(MainPauseAudio&& m) {
     if (m.generation == m_audio_pause_generation) m_sound_manager->pause();
 }
 
-void SceneRuntimeController::on(MainFirstFrame&&) {
+void SceneRuntimeController::on(MainLoadBenchBatch&& m) {
+    ingestLoadBenchBatch(m.context, m.batch);
+}
+
+void SceneRuntimeController::on(MainLoadBenchFinish&& m) {
+    if (m_load_bench && m.context &&
+        BenchContext(m_load_bench).run_id() == BenchContext(m.context).run_id()) {
+        finishLoadBench();
+    }
+}
+
+void SceneRuntimeController::on(MainFirstFrame&& m) {
+    if (m.batch) ingestLoadBenchBatch(m.context, *m.batch);
+    if (m_load_bench && m.context &&
+        BenchContext(m_load_bench).run_id() == BenchContext(m.context).run_id()) {
+        finishLoadBench();
+    }
     if (m_first_frame_callback) m_first_frame_callback();
 }
 
 void SceneRuntimeController::loadScene() {
-    if (m_config.source_pkg_path.empty() || m_config.assets_dir.empty()) return;
+    ensureLoadBench(m_config.load_bench);
+    if (m_config.source_pkg_path.empty() || m_config.assets_dir.empty()) {
+        finishLoadBench();
+        return;
+    }
+    if (m_load_bench && ! m_load_bench_recorder) {
+        rstd::bench::probe::RecorderConfig config;
+        config.sample_capacity = usize(32768);
+        m_load_bench_recorder  = Some(BenchContext(m_load_bench).session().recorder(config));
+        m_load_total_span = Some(SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_total));
+    }
+    auto abort_load = [this] {
+        finishLoadBench();
+    };
 
     if (m_config.random_seed.is_some()) {
         using Seed = decltype(Random::max());
@@ -1538,11 +1763,14 @@ void SceneRuntimeController::loadScene() {
 
     rstd_info("loading scene: {}", m_config.source_pkg_path);
 
-    if (! m_sound_manager->is_inited()) {
-        m_sound_manager->init();
-        m_sound_manager->play();
-    } else {
-        m_sound_manager->unmount_all();
+    {
+        auto span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_audio);
+        if (! m_sound_manager->is_inited()) {
+            m_sound_manager->init();
+            m_sound_manager->play();
+        } else {
+            m_sound_manager->unmount_all();
+        }
     }
 
     std::shared_ptr<Scene> scene { nullptr };
@@ -1550,12 +1778,16 @@ void SceneRuntimeController::loadScene() {
     // mount assets dir
     std::unique_ptr<fs::VFS> pVfs = std::make_unique<fs::VFS>();
     auto&                    vfs  = *pVfs;
-    if (! vfs.is_mounted("assets")) {
-        auto assets = fs::make_physical_fs(fs::ToPath(m_config.assets_dir));
-        if (assets.is_err() ||
-            vfs.mount("/assets", rstd::move(assets).unwrap_unchecked(), "assets").is_err()) {
-            rstd_error("Mount assets dir failed");
-            return;
+    {
+        auto span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_vfs_assets);
+        if (! vfs.is_mounted("assets")) {
+            auto assets = fs::make_physical_fs(fs::ToPath(m_config.assets_dir));
+            if (assets.is_err() ||
+                vfs.mount("/assets", rstd::move(assets).unwrap_unchecked(), "assets").is_err()) {
+                rstd_error("Mount assets dir failed");
+                abort_load();
+                return;
+            }
         }
     }
     std::filesystem::path pkgPath_fs { m_config.source_pkg_path };
@@ -1564,31 +1796,39 @@ void SceneRuntimeController::loadScene() {
     std::string pkgEntry = pkgPath_fs.filename().replace_extension("json").native();
     std::string pkgDir   = pkgPath_fs.parent_path().native();
     std::string scene_id = pkgPath_fs.parent_path().filename().native();
-    MergeProjectUserProperties(pkgPath_fs.parent_path(), m_user_properties);
+    {
+        auto span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_project_properties);
+        MergeProjectUserProperties(pkgPath_fs.parent_path(), m_user_properties);
+    }
 
     // load pkgfile. Read pkg version stamp before move-mounting so we can
     // pass it to the scene parser; on fallback (loose dir) we have no
     // version info and use kSceneVersionUnknown.
-    wpscene::SceneVersion pkg_v       = wpscene::kSceneVersionUnknown;
-    auto                  wfs         = fs::WPPkgFs::open(fs::ToPath(pkgPath));
-    bool                  pkg_mounted = false;
-    if (wfs.is_ok()) {
-        auto stamp  = wfs->pkg_version_stamp();
-        pkg_v       = wpscene::ParsePkgVersionStamp(std::string_view(
-            reinterpret_cast<const char*>(stamp.data()), stamp.size().to_primitive()));
-        pkg_mounted = vfs.mount("/assets", wfs->mount_handle()).is_ok();
-    }
-    if (! pkg_mounted) {
-        rstd_info("load pkg file {} failed, fallback to use dir", pkgPath);
-        pkg_v = wpscene::kSceneVersionUnknown;
-        // load pkg dir
-        auto loose = fs::make_physical_fs(fs::ToPath(pkgDir));
-        if (loose.is_err() || vfs.mount("/assets", rstd::move(loose).unwrap_unchecked()).is_err()) {
-            rstd_error("can't load pkg directory: {}", pkgDir);
-            return;
+    wpscene::SceneVersion pkg_v = wpscene::kSceneVersionUnknown;
+    {
+        auto span        = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_package);
+        auto wfs         = fs::WPPkgFs::open(fs::ToPath(pkgPath));
+        bool pkg_mounted = false;
+        if (wfs.is_ok()) {
+            auto stamp  = wfs->pkg_version_stamp();
+            pkg_v       = wpscene::ParsePkgVersionStamp(std::string_view(
+                reinterpret_cast<const char*>(stamp.data()), stamp.size().to_primitive()));
+            pkg_mounted = vfs.mount("/assets", wfs->mount_handle()).is_ok();
+        }
+        if (! pkg_mounted) {
+            rstd_info("load pkg file {} failed, fallback to use dir", pkgPath);
+            pkg_v      = wpscene::kSceneVersionUnknown;
+            auto loose = fs::make_physical_fs(fs::ToPath(pkgDir));
+            if (loose.is_err() ||
+                vfs.mount("/assets", rstd::move(loose).unwrap_unchecked()).is_err()) {
+                rstd_error("can't load pkg directory: {}", pkgDir);
+                abort_load();
+                return;
+            }
         }
     }
     if (! m_config.cache_dir.empty()) {
+        auto span  = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_vfs_cache);
         auto cache = fs::make_physical_fs(fs::ToPath(m_config.cache_dir), true);
         if (cache.is_err() ||
             vfs.mount("/cache", rstd::move(cache).unwrap_unchecked(), "cache").is_err()) {
@@ -1602,11 +1842,13 @@ void SceneRuntimeController::loadScene() {
         const std::string base { "/assets/" };
         auto              scene_doc = m_config.scene_document;
         if (! scene_doc) {
+            auto span   = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_scene_document);
             auto loaded = wpscene::LoadSceneDocumentFromVfs(vfs, base + pkgEntry, pkg_v);
             if (loaded) scene_doc = std::make_shared<wpscene::SceneDocument>(std::move(*loaded));
         }
         if (! scene_doc) {
             rstd_error("Not supported scene type");
+            abort_load();
             return;
         }
         // Hand the (already-merged project.json defaults + any host-supplied
@@ -1614,8 +1856,18 @@ void SceneRuntimeController::loadScene() {
         // pruning sees the user's saved values, not the scene.json defaults.
         m_scene_parser.SetUserProperties(rstd::Some(
             rstd::ref<rstd::json::Map>::from_raw_parts(rstd::addressof(m_user_properties))));
-        scene = m_scene_parser.Parse(scene_id, *scene_doc, vfs, *m_sound_manager);
+        scene = m_scene_parser.Parse(scene_id,
+                                     *scene_doc,
+                                     vfs,
+                                     *m_sound_manager,
+                                     SceneParseOptions { .load_bench = loadBenchView() });
         m_scene_parser.SetUserProperties(rstd::None());
+        if (! scene) {
+            rstd_error("scene parse failed");
+            abort_load();
+            return;
+        }
+        auto runtime_span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_runtime_setup);
         m_user_properties.iter().for_each([&](auto entry) {
             auto [entry_key, entry_value] = entry;
             auto        key               = rstd::cppstd::to_string(entry_key->as_str());
@@ -1643,8 +1895,16 @@ void SceneRuntimeController::loadScene() {
     }
 
     auto rtx = m_render_controller->sender();
-    (void)rtx.send(RenderMsg {
-        RenderSetScene { scene, m_scene_parser.RuntimeInput(), m_config.random_seed } });
+    if (rtx.send(RenderMsg { RenderSetScene {
+                     .scene         = scene,
+                     .uniform_input = m_scene_parser.RuntimeInput(),
+                     .load_bench    = m_config.load_bench.clone(),
+                     .random_seed   = m_config.random_seed,
+                 } })
+            .is_err()) {
+        abort_load();
+        return;
+    }
     // First-frame default push: now that the render thread owns the scene,
     // replay every collected user property (project.json defaults + any
     // mutations the host already pushed during scene load) so the shader
@@ -1656,7 +1916,7 @@ void SceneRuntimeController::loadScene() {
         (void)rtx.send(RenderMsg { RenderSetUserProperty { rstd::move(key), prop.clone() } });
     });
     // draw first frame
-    (void)rtx.send(RenderMsg { RenderDraw {} });
+    if (rtx.send(RenderMsg { RenderDraw {} }).is_err()) abort_load();
 }
 
 bool SceneRuntimeController::init() {
@@ -1711,7 +1971,7 @@ bool SceneWallpaper::init() { return m_runtime->init(); }
 void SceneWallpaper::initVulkan(RenderInitInfo info) {
     m_offscreen = info.offscreen;
     auto sp     = std::make_shared<RenderInitInfo>(std::move(info));
-    m_runtime->post(RenderMsg { RenderInit { std::move(sp) } });
+    m_runtime->post(RenderMsg { RenderInit { rstd::move(sp), m_load_bench.clone() } });
 }
 
 void SceneWallpaper::play() { m_runtime->post(MainMsg { MainStop { false } }); }
@@ -1737,7 +1997,8 @@ void SceneWallpaper::mouseEnter(bool in_window) {
 }
 
 void SceneWallpaper::configure(SceneWallpaperConfig config) {
-    m_runtime->post(MainMsg { MainConfigure { std::move(config) } });
+    m_load_bench = config.load_bench.clone();
+    m_runtime->post(MainMsg { MainConfigure { rstd::move(config) } });
 }
 
 void SceneWallpaper::setFps(uint32_t fps) { m_runtime->post(MainMsg { MainSetFps { fps } }); }

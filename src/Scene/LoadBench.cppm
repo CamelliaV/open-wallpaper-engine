@@ -1,0 +1,184 @@
+module;
+export module wescene.load_bench;
+
+import rstd;
+import rstd.bench;
+
+using namespace rstd::prelude;
+
+export namespace owe
+{
+
+struct SceneLoadProbeIds {
+    rstd::bench::probe::ProbeId preload_scene_document;
+    rstd::bench::probe::ProbeId vulkan_init;
+    rstd::bench::probe::ProbeId vulkan_instance;
+    rstd::bench::probe::ProbeId vulkan_device;
+    rstd::bench::probe::ProbeId vulkan_swapchain;
+    rstd::bench::probe::ProbeId vulkan_resources;
+    rstd::bench::probe::ProbeId load_total;
+    rstd::bench::probe::ProbeId load_audio;
+    rstd::bench::probe::ProbeId load_vfs_assets;
+    rstd::bench::probe::ProbeId load_project_properties;
+    rstd::bench::probe::ProbeId load_package;
+    rstd::bench::probe::ProbeId load_vfs_cache;
+    rstd::bench::probe::ProbeId load_scene_document;
+    rstd::bench::probe::ProbeId parse_total;
+    rstd::bench::probe::ProbeId parse_expand_objects;
+    rstd::bench::probe::ProbeId parse_context;
+    rstd::bench::probe::ProbeId parse_objects;
+    rstd::bench::probe::ProbeId parse_object_image;
+    rstd::bench::probe::ProbeId parse_object_particle;
+    rstd::bench::probe::ProbeId parse_object_sound;
+    rstd::bench::probe::ProbeId parse_object_light;
+    rstd::bench::probe::ProbeId parse_object_text;
+    rstd::bench::probe::ProbeId parse_object_model;
+    rstd::bench::probe::ProbeId parse_object_camera;
+    rstd::bench::probe::ProbeId parse_post_process;
+    rstd::bench::probe::ProbeId parse_finalize;
+    rstd::bench::probe::ProbeId load_runtime_setup;
+    rstd::bench::probe::ProbeId render_load;
+    rstd::bench::probe::ProbeId render_snapshot;
+    rstd::bench::probe::ProbeId render_graph_build;
+    rstd::bench::probe::ProbeId render_graph_compile;
+    rstd::bench::probe::ProbeId render_program_build;
+    rstd::bench::probe::ProbeId render_requests;
+    rstd::bench::probe::ProbeId render_resources_prepare;
+    rstd::bench::probe::ProbeId render_scopes;
+    rstd::bench::probe::ProbeId render_upload_submit;
+    rstd::bench::probe::ProbeId render_first_draw;
+};
+
+struct SceneLoadBenchRecorderView {
+    rstd::bench::probe::ProbeRecorder* recorder { nullptr };
+    const SceneLoadProbeIds*           ids { nullptr };
+
+    explicit operator bool() const noexcept { return recorder != nullptr && ids != nullptr; }
+};
+
+auto SceneLoadSpan(SceneLoadBenchRecorderView  view,
+                   rstd::bench::probe::ProbeId SceneLoadProbeIds::* probe) noexcept
+    -> rstd::bench::probe::SpanGuard {
+    return view ? view.recorder->span(view.ids->*probe) : rstd::bench::probe::SpanGuard {};
+}
+
+class SceneLoadBenchContext;
+using SceneLoadBenchHandle = rstd::sync::Arc<SceneLoadBenchContext>;
+
+class SceneLoadBenchContext {
+public:
+    SceneLoadBenchContext(const SceneLoadBenchContext&)                    = delete;
+    auto operator=(const SceneLoadBenchContext&) -> SceneLoadBenchContext& = delete;
+
+    auto run_id() const noexcept -> u64 { return m_run_id; }
+    auto ids() const noexcept -> const SceneLoadProbeIds& { return m_ids; }
+    auto session() const noexcept -> const rstd::bench::probe::ProbeSession& { return m_session; }
+    auto schema_owner() const noexcept -> rstd::sync::Arc<rstd::bench::probe::ProbeSchema> {
+        return m_schema.clone();
+    }
+    auto output_path() const noexcept -> ref<rstd::path::Path> { return m_output_path.as_path(); }
+
+    void add_preload_batch(rstd::bench::probe::ProbeBatch batch) {
+        m_preload_batches.push(rstd::move(batch));
+    }
+
+    auto take_preload_batches() -> rstd::vec::Vec<rstd::bench::probe::ProbeBatch> {
+        auto batches      = rstd::move(m_preload_batches);
+        m_preload_batches = rstd::vec::Vec<rstd::bench::probe::ProbeBatch>::make();
+        return batches;
+    }
+
+private:
+    struct FactoryToken {};
+    friend auto CreateSceneLoadBench(ref<str>) -> Option<SceneLoadBenchHandle>;
+
+public:
+    SceneLoadBenchContext(FactoryToken, rstd::path::PathBuf output_path, SceneLoadProbeIds ids,
+                          rstd::sync::Arc<rstd::bench::probe::ProbeSchema> schema, u64 run_id)
+        : m_output_path(rstd::move(output_path)),
+          m_ids(ids),
+          m_schema(schema.clone()),
+          m_session(rstd::bench::probe::ProbeSession::new_(rstd::move(schema))),
+          m_run_id(run_id),
+          m_preload_batches(rstd::vec::Vec<rstd::bench::probe::ProbeBatch>::make()) {}
+
+    rstd::path::PathBuf                              m_output_path;
+    SceneLoadProbeIds                                m_ids;
+    rstd::sync::Arc<rstd::bench::probe::ProbeSchema> m_schema;
+    rstd::bench::probe::ProbeSession                 m_session;
+    u64                                              m_run_id;
+    rstd::vec::Vec<rstd::bench::probe::ProbeBatch>   m_preload_batches;
+};
+
+auto CreateSceneLoadBench(ref<str> output_path) -> Option<SceneLoadBenchHandle>;
+
+} // namespace owe
+
+namespace
+{
+
+auto RegisterProbe(rstd::bench::probe::ProbeRegistry& registry, const char* label)
+    -> rstd::bench::probe::ProbeId {
+    auto registered = registry.register_probe(ref<str>(label));
+    if (registered.is_err()) rstd::panic { "scene load probe catalog exhausted" };
+    return rstd::move(registered).unwrap_unchecked();
+}
+
+} // namespace
+
+namespace owe
+{
+
+auto CreateSceneLoadBench(ref<str> output_path) -> Option<SceneLoadBenchHandle> {
+    if (output_path.is_empty()) return None();
+
+    auto              registry = rstd::bench::probe::ProbeRegistry::new_();
+    SceneLoadProbeIds ids {
+        .preload_scene_document   = RegisterProbe(registry, "preload.scene_document"),
+        .vulkan_init              = RegisterProbe(registry, "vulkan.init"),
+        .vulkan_instance          = RegisterProbe(registry, "vulkan.instance"),
+        .vulkan_device            = RegisterProbe(registry, "vulkan.device"),
+        .vulkan_swapchain         = RegisterProbe(registry, "vulkan.swapchain"),
+        .vulkan_resources         = RegisterProbe(registry, "vulkan.resources"),
+        .load_total               = RegisterProbe(registry, "load.total"),
+        .load_audio               = RegisterProbe(registry, "load.audio"),
+        .load_vfs_assets          = RegisterProbe(registry, "load.vfs.assets"),
+        .load_project_properties  = RegisterProbe(registry, "load.project_properties"),
+        .load_package             = RegisterProbe(registry, "load.package"),
+        .load_vfs_cache           = RegisterProbe(registry, "load.vfs.cache"),
+        .load_scene_document      = RegisterProbe(registry, "load.scene_document"),
+        .parse_total              = RegisterProbe(registry, "parse.total"),
+        .parse_expand_objects     = RegisterProbe(registry, "parse.expand_objects"),
+        .parse_context            = RegisterProbe(registry, "parse.context"),
+        .parse_objects            = RegisterProbe(registry, "parse.objects"),
+        .parse_object_image       = RegisterProbe(registry, "parse.object.image"),
+        .parse_object_particle    = RegisterProbe(registry, "parse.object.particle"),
+        .parse_object_sound       = RegisterProbe(registry, "parse.object.sound"),
+        .parse_object_light       = RegisterProbe(registry, "parse.object.light"),
+        .parse_object_text        = RegisterProbe(registry, "parse.object.text"),
+        .parse_object_model       = RegisterProbe(registry, "parse.object.model"),
+        .parse_object_camera      = RegisterProbe(registry, "parse.object.camera"),
+        .parse_post_process       = RegisterProbe(registry, "parse.post_process"),
+        .parse_finalize           = RegisterProbe(registry, "parse.finalize"),
+        .load_runtime_setup       = RegisterProbe(registry, "load.runtime_setup"),
+        .render_load              = RegisterProbe(registry, "render.load"),
+        .render_snapshot          = RegisterProbe(registry, "render.snapshot"),
+        .render_graph_build       = RegisterProbe(registry, "render.graph.build"),
+        .render_graph_compile     = RegisterProbe(registry, "render.graph.compile"),
+        .render_program_build     = RegisterProbe(registry, "render.program.build"),
+        .render_requests          = RegisterProbe(registry, "render.requests"),
+        .render_resources_prepare = RegisterProbe(registry, "render.resources.prepare"),
+        .render_scopes            = RegisterProbe(registry, "render.scopes"),
+        .render_upload_submit     = RegisterProbe(registry, "render.upload.submit"),
+        .render_first_draw        = RegisterProbe(registry, "render.first_draw"),
+    };
+    auto schema = rstd::move(registry).freeze();
+    auto path   = rstd::path::PathBuf::from(output_path);
+
+    static rstd::sync::atomic::Atomic<u64> next_run_id { u64(1) };
+    auto run_id = next_run_id.fetch_add(u64(1), rstd::sync::atomic::Ordering::Relaxed);
+    return Some(SceneLoadBenchHandle::make(
+        SceneLoadBenchContext::FactoryToken {}, rstd::move(path), ids, rstd::move(schema), run_id));
+}
+
+} // namespace owe

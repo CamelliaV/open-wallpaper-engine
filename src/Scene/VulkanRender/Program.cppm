@@ -8,6 +8,7 @@ import wescene.types;
 import rstd;
 import rstd.log;
 import rstd.cppstd;
+import wescene.load_bench;
 import wescene.resource_registry;
 import wescene.vulkan;
 import wescene.scene;
@@ -500,8 +501,10 @@ struct RenderProgram {
 
     bool prepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
                  const owe::RenderSceneSnapshot& render_scene,
-                 resource::ResourcePlanSections  sections = resource::ResourcePlanAll) {
-        loaded = false;
+                 resource::ResourcePlanSections  sections   = resource::ResourcePlanAll,
+                 SceneLoadBenchRecorderView      load_bench = {}) {
+        auto prepare_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_resources_prepare);
+        loaded            = false;
         if (rr.shader_reflection_cache.is_none()) {
             rstd_error("shader artifact compiler unavailable");
             return false;

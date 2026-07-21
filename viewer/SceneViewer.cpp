@@ -235,6 +235,7 @@ int main(int argc, char** argv) {
     config.assets_dir      = std::move(args.assets_dir);
     config.source_pkg_path = std::move(args.scene_path);
     config.graphviz        = args.graphviz;
+    config.load_bench      = owe::CreateSceneLoadBench(args.load_bench_output.as_str());
     config.fps             = static_cast<uint32_t>(args.fps.to_primitive());
     if (args.random_seed.is_some()) {
         config.random_seed = Some(*args.random_seed);

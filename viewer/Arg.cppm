@@ -21,6 +21,7 @@ struct SceneViewerArgs {
     std::string cache_path;
     std::string user_properties_path;
     std::string mouse_position;
+    String      load_bench_output;
     Option<u64> random_seed;
     Resolution  resolution;
     i32         fps;
@@ -142,7 +143,13 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
     auto random_seed = command.add_arg(Arg<u64>::value("random-seed", from_str_parser<u64>())
                                            .long_name("random-seed")
                                            .help("Set the scene random seed"));
-    auto resolution  = command.add_arg(
+    auto load_bench_output =
+        command.add_arg(Arg<String>::value("load-bench-output", string_parser())
+                            .long_name("load-bench-output")
+                            .help("Write scene load probe report to FILE")
+                            .value_name("FILE")
+                            .default_value(""));
+    auto resolution = command.add_arg(
         Arg<Resolution>::value("resolution", parse_with<Resolution>(ResolutionParser))
             .short_name('R')
             .long_name("resolution")
@@ -159,6 +166,7 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
         .cache_path           = ToStdString(Value(matches, cache_path)),
         .user_properties_path = ToStdString(Value(matches, user_properties)),
         .mouse_position       = ToStdString(Value(matches, mouse_position)),
+        .load_bench_output    = Value(matches, load_bench_output).clone(),
         .random_seed          = OptionalValue(matches, random_seed),
         .resolution           = Value(matches, resolution),
         .fps                  = Value(matches, fps),

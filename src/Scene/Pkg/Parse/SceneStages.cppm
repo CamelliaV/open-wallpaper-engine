@@ -8,6 +8,7 @@ import rstd.cppstd;
 import wavsen.audio;
 import wescene.core;
 import wescene.json;
+import wescene.load_bench;
 import wescene.fs;
 import wescene.scene;
 import wescene.script;
@@ -155,7 +156,7 @@ ParseContext BuildContext(fs::VFS&, std::string_view scene_id, const wpscene::Sc
 // loop. opts.kinds masks which kinds run; default is all-kinds. Sound
 // dispatch additionally requires sm non-null.
 void ProcessObjects(ParseContext&, std::span<SceneObjectVar>, wavsen::audio::SoundManager* sm,
-                    ProcessOpts opts = {});
+                    ProcessOpts opts = {}, SceneLoadBenchRecorderView load_bench = {});
 
 // Installs the lazily-built ScriptScene onto the Scene (if any) and
 // returns the now-frozen Scene.
