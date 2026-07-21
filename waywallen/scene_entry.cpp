@@ -14,6 +14,7 @@ module;
 
 module waywallen.scene_entry;
 
+import rstd;
 import rstd.argparse;
 import rstd.cppstd;
 import rstd.log;
@@ -28,6 +29,8 @@ import waywallen.bridge_session;
 
 namespace
 {
+
+using namespace rstd::prelude;
 
 struct Options {
     std::string ipc_path;
@@ -391,6 +394,13 @@ bool resolve_render_node_to_uuid(const std::string&                 path,
 // Host state shared between reader thread and main thread.
 // ---------------------------------------------------------------------------
 
+using BridgeSubscriptions = std::shared_ptr<ww_wescene::BridgeSubscriptionController>;
+
+struct ClearColorPublishState {
+    bool                          ready { false };
+    Option<rstd::array<float, 3>> pending;
+};
+
 struct HostState {
     int                                      sock { -1 };
     std::weak_ptr<ww_wescene::BridgeSession> session;
@@ -403,64 +413,61 @@ struct HostState {
 
     // Render-target extent. Pointer events arrive in pixel coords from
     // the consumer display;
-    uint32_t width { 0 };
-    uint32_t height { 0 };
+    u32 width {};
+    u32 height {};
 
-    std::atomic<bool> shutdown { false };
-    std::atomic<bool> paused { false };
-    std::atomic<bool> muted { false };
-    std::atomic<bool> settings_enable_audio { true };
-    std::atomic<bool> property_enable_audio { true };
-    std::atomic<bool> audio_response_demand { false };
-    uint64_t          last_audio_generation { 0 };
-    uint64_t          last_audio_sequence { 0 };
-    float             base_volume { 1.0f };
+    rstd::sync::atomic::Atomic<bool> shutdown { false };
+    rstd::sync::atomic::Atomic<bool> paused { false };
+    rstd::sync::atomic::Atomic<bool> muted { false };
+    rstd::sync::atomic::Atomic<bool> settings_enable_audio { true };
+    rstd::sync::atomic::Atomic<bool> property_enable_audio { true };
+    rstd::sync::atomic::Atomic<bool> audio_response_demand { false };
+    u64                              last_audio_generation {};
+    u64                              last_audio_sequence {};
+    f32                              base_volume { 1.0f };
 
-    std::mutex                                                subscription_mu;
-    std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
+    rstd::sync::Mutex<BridgeSubscriptions> subscriptions { BridgeSubscriptions {} };
 
     // Daemon enforces "Ready before any ReportState" during the spawn
     // handshake; the scene-load path can fire `setOnClearColor` (and
     // thus a ReportState send) earlier than `ww_bridge_pool_advertise_caps`
     // (which is what actually triggers Ready). Stash any clear-colour
     // emitted before Ready, and flush after advertise_caps succeeds.
-    std::mutex                          clear_mu;
-    bool                                clear_ready_published { false };
-    std::optional<std::array<float, 3>> clear_pending;
+    rstd::sync::Mutex<ClearColorPublishState> clear_color { ClearColorPublishState {} };
 };
 
-void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_release); }
+void signal_shutdown(HostState& s) {
+    s.shutdown.store(true, rstd::sync::atomic::Ordering::Release);
+}
 
 void set_audio_response_demand(HostState& s, bool active) {
-    s.audio_response_demand.store(active, std::memory_order_release);
+    s.audio_response_demand.store(active, rstd::sync::atomic::Ordering::Release);
     if (! active && s.wp) {
         const std::array<float, 64> silence {};
         s.wp->setAudioSpectrum(silence, silence);
     }
-    std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
-    {
-        std::scoped_lock lock(s.subscription_mu);
-        subscriptions = s.subscriptions;
-    }
+    auto subscriptions = *s.subscriptions.lock().unwrap();
     if (subscriptions && ! subscriptions->set("audio", active)) {
         rstd_warn("waywallen-wescene-renderer: failed to update audio subscription");
     }
 }
 
-float effective_volume(const HostState& s) { return std::clamp(s.base_volume, 0.0f, 1.0f); }
+float effective_volume(const HostState& s) {
+    return s.base_volume.clamp(f32(), f32(1.0f)).to_primitive();
+}
 
 bool effective_audio_enabled(const HostState& s) {
-    return s.settings_enable_audio.load(std::memory_order_acquire) &&
-           s.property_enable_audio.load(std::memory_order_acquire);
+    return s.settings_enable_audio.load(rstd::sync::atomic::Ordering::Acquire) &&
+           s.property_enable_audio.load(rstd::sync::atomic::Ordering::Acquire);
 }
 
 void apply_volume_scale(HostState& s, float scale, uint32_t fade_ms) {
-    if (s.wp) s.wp->setVolumeScale(std::clamp(scale, 0.0f, 1.0f), fade_ms);
+    if (s.wp) s.wp->setVolumeScale(f32(scale).clamp(f32(), f32(1.0f)).to_primitive(), fade_ms);
 }
 
 float runtime_volume_scale(const HostState& s) {
-    return (effective_audio_enabled(s) && ! s.paused.load(std::memory_order_acquire) &&
-            ! s.muted.load(std::memory_order_acquire))
+    return (effective_audio_enabled(s) && ! s.paused.load(rstd::sync::atomic::Ordering::Acquire) &&
+            ! s.muted.load(rstd::sync::atomic::Ordering::Acquire))
                ? 1.0f
                : 0.0f;
 }
@@ -470,14 +477,14 @@ void apply_runtime_volume_scale(HostState& s, uint32_t fade_ms) {
 }
 
 void set_base_volume(HostState& s, float volume) {
-    s.base_volume = volume;
+    s.base_volume = f32(volume);
     if (s.wp) s.wp->setVolume(effective_volume(s));
 }
 
 void set_runtime_pause(HostState& s, bool paused, uint32_t fade_ms) {
-    const bool was_paused = s.paused.exchange(paused, std::memory_order_acq_rel);
-    const bool was_audible =
-        effective_audio_enabled(s) && ! was_paused && ! s.muted.load(std::memory_order_acquire);
+    const bool was_paused  = s.paused.exchange(paused, rstd::sync::atomic::Ordering::AcqRel);
+    const bool was_audible = effective_audio_enabled(s) && ! was_paused &&
+                             ! s.muted.load(rstd::sync::atomic::Ordering::Acquire);
     if (! s.wp) return;
 
     if (paused) {
@@ -491,7 +498,7 @@ void set_runtime_pause(HostState& s, bool paused, uint32_t fade_ms) {
 }
 
 void set_runtime_mute(HostState& s, bool muted, uint32_t fade_ms) {
-    s.muted.store(muted, std::memory_order_release);
+    s.muted.store(muted, rstd::sync::atomic::Ordering::Release);
     apply_runtime_volume_scale(s, fade_ms);
 }
 
@@ -500,7 +507,7 @@ void apply_audio_enabled(HostState& s, bool was_enabled) {
     const bool enabled = effective_audio_enabled(s);
     if (enabled == was_enabled) return;
     s.wp->setMuted(! enabled);
-    if (enabled && ! s.paused.load(std::memory_order_acquire)) s.wp->play();
+    if (enabled && ! s.paused.load(rstd::sync::atomic::Ordering::Acquire)) s.wp->play();
     apply_runtime_volume_scale(s, 0);
 }
 
@@ -513,7 +520,7 @@ void set_settings_enable_audio(HostState& s, const char* value) {
         return;
     }
     const bool was_enabled = effective_audio_enabled(s);
-    s.settings_enable_audio.store(enabled, std::memory_order_release);
+    s.settings_enable_audio.store(enabled, rstd::sync::atomic::Ordering::Release);
     apply_audio_enabled(s, was_enabled);
 }
 
@@ -526,7 +533,7 @@ void set_property_enable_audio(HostState& s, const char* value) {
         return;
     }
     const bool was_enabled = effective_audio_enabled(s);
-    s.property_enable_audio.store(enabled, std::memory_order_release);
+    s.property_enable_audio.store(enabled, rstd::sync::atomic::Ordering::Release);
     apply_audio_enabled(s, was_enabled);
 }
 
@@ -586,10 +593,10 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     case WW_EVT_IN_UNMUTE: set_runtime_mute(s, false, msg.u.unmute.fade_ms); break;
     case WW_EVT_IN_POINTER_MOTION: {
         ww_bridge_pointer_motion_t pm {};
-        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.wp && s.width > 0 &&
-            s.height > 0) {
-            s.wp->mouseInput(static_cast<double>(pm.x) / s.width,
-                             static_cast<double>(pm.y) / s.height);
+        if (ww_bridge_pointer_motion_from_control(&msg, &pm) == 0 && s.wp && s.width > u32() &&
+            s.height > u32()) {
+            s.wp->mouseInput(static_cast<double>(pm.x) / s.width.to_primitive(),
+                             static_cast<double>(pm.y) / s.height.to_primitive());
             // The bridge has no explicit enter/leave; treat every motion
             // event as proof the cursor is inside.
             s.wp->mouseEnter(true);
@@ -632,11 +639,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED: {
         ww_bridge_event_subscriptions_applied_t applied {};
         if (ww_bridge_event_subscriptions_applied_from_control(&msg, &applied) == 0) {
-            std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
-            {
-                std::scoped_lock lock(s.subscription_mu);
-                subscriptions = s.subscriptions;
-            }
+            auto subscriptions = *s.subscriptions.lock().unwrap();
             if (subscriptions) subscriptions->applied(applied);
         }
         ww_bridge_event_subscriptions_applied_free(&applied);
@@ -645,15 +648,11 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
     case WW_EVT_IN_AUDIO_SPECTRUM: {
         ww_bridge_audio_spectrum_t audio {};
         if (ww_bridge_audio_spectrum_from_control(&msg, &audio) != 0) break;
-        if (! s.audio_response_demand.load(std::memory_order_acquire)) break;
-        std::shared_ptr<ww_wescene::BridgeSubscriptionController> subscriptions;
-        {
-            std::scoped_lock lock(s.subscription_mu);
-            subscriptions = s.subscriptions;
-        }
-        const bool fresh =
-            audio.generation > s.last_audio_generation ||
-            (audio.generation == s.last_audio_generation && audio.sequence > s.last_audio_sequence);
+        if (! s.audio_response_demand.load(rstd::sync::atomic::Ordering::Acquire)) break;
+        auto       subscriptions = *s.subscriptions.lock().unwrap();
+        const bool fresh         = u64(audio.generation) > s.last_audio_generation ||
+                                   (u64(audio.generation) == s.last_audio_generation &&
+                                    u64(audio.sequence) > s.last_audio_sequence);
         if (fresh && subscriptions && subscriptions->acceptsAudio(audio.subscription_revision) &&
             s.wp) {
             std::array<float, 64> left {};
@@ -661,8 +660,8 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
             std::copy_n(audio.left, left.size(), left.begin());
             std::copy_n(audio.right, right.size(), right.begin());
             s.wp->setAudioSpectrum(left, right);
-            s.last_audio_generation = audio.generation;
-            s.last_audio_sequence   = audio.sequence;
+            s.last_audio_generation = u64(audio.generation);
+            s.last_audio_sequence   = u64(audio.sequence);
         }
         break;
     }
@@ -684,7 +683,7 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
         // the pending directive at the head of its next acquireRenderTarget,
         // so this thread does no Vk / bridge slot work.
         if (s.swapchain) s.swapchain->queueDirective(d);
-        if (s.wp && s.paused.load(std::memory_order_acquire)) s.wp->requestFrame();
+        if (s.wp && s.paused.load(rstd::sync::atomic::Ordering::Acquire)) s.wp->requestFrame();
         break;
     }
     default:
@@ -694,11 +693,11 @@ void apply_control(HostState& s, ww_bridge_control_t& msg) {
 }
 
 void reader_loop(HostState& s) {
-    while (! s.shutdown.load(std::memory_order_acquire)) {
+    while (! s.shutdown.load(rstd::sync::atomic::Ordering::Acquire)) {
         ww_bridge_control_t msg {};
         int                 rc = ww_bridge_recv_control(s.sock, &msg);
         if (rc != 0) {
-            if (! s.shutdown.load(std::memory_order_acquire)) {
+            if (! s.shutdown.load(rstd::sync::atomic::Ordering::Acquire)) {
                 rstd_error("waywallen-wescene-renderer: recv_control failed: {}", rc);
             }
             signal_shutdown(s);
@@ -794,7 +793,7 @@ int run(int argc, char** argv) {
                 }();
                 if (scene_doc) {
                     opts.initial_scene_document =
-                        std::make_shared<owe::wpscene::SceneDocument>(std::move(*scene_doc));
+                        std::make_shared<owe::wpscene::SceneDocument>(rstd::move(*scene_doc));
                 }
             }
             if (opts.initial_scene_document &&
@@ -899,11 +898,13 @@ int run(int argc, char** argv) {
     });
 
     host.wp          = &wp;
-    host.width       = opts.width;
-    host.height      = opts.height;
-    host.base_volume = opts.initial_volume;
-    host.settings_enable_audio.store(opts.settings_enable_audio, std::memory_order_release);
-    host.property_enable_audio.store(opts.property_enable_audio, std::memory_order_release);
+    host.width       = u32(opts.width);
+    host.height      = u32(opts.height);
+    host.base_volume = f32(opts.initial_volume);
+    host.settings_enable_audio.store(opts.settings_enable_audio,
+                                     rstd::sync::atomic::Ordering::Release);
+    host.property_enable_audio.store(opts.property_enable_audio,
+                                     rstd::sync::atomic::Ordering::Release);
 
     wp.setAudioResponseDemandCallback([&host](bool active) {
         set_audio_response_demand(host, active);
@@ -914,11 +915,11 @@ int run(int argc, char** argv) {
     // DMA-BUF is opaque; alpha only governs daemon-side letterbox bars.
     wp.setOnClearColor([&host](float r, float g, float b) {
         if (host.sock < 0) return;
-        std::scoped_lock _(host.clear_mu);
-        if (! host.clear_ready_published) {
+        auto clear = host.clear_color.lock().unwrap();
+        if (! clear->ready) {
             // Daemon will reject ReportState received before Ready; stash
             // the latest value and replay after advertise_caps fires.
-            host.clear_pending = std::array<float, 3> { r, g, b };
+            clear->pending = Some(rstd::array<float, 3> { r, g, b });
             return;
         }
         auto session = host.session.lock();
@@ -949,13 +950,13 @@ int run(int argc, char** argv) {
     wp_config.assets_dir      = opts.initial_assets;
     wp_config.scene_document  = opts.initial_scene_document;
     wp_config.load_bench      = load_bench.clone();
-    wp_config.user_properties = std::move(opts.initial_user_properties);
+    wp_config.user_properties = rstd::move(opts.initial_user_properties);
     wp_config.fps             = opts.initial_fps;
     wp_config.volume          = effective_volume(host);
     // Mute first so loadScene's SoundManager::init() short-circuits when
     // audio is disabled; the audio device + system output never open.
     wp_config.muted = ! effective_audio_enabled(host);
-    wp.configure(std::move(wp_config));
+    wp.configure(rstd::move(wp_config));
 
     // The factory runs inside VulkanRender::init after the GPU is picked
     // and the VkDevice is created; that's when ww_bridge_pool_create can
@@ -1043,11 +1044,11 @@ int run(int argc, char** argv) {
         info.surface_info.createSurfaceOp = [](VkInstance, VkSurfaceKHR*) -> VkResult {
             return VK_SUCCESS;
         };
-        info.ex_swapchain_factory = std::move(factory);
+        info.ex_swapchain_factory = rstd::move(factory);
         if (have_uuid) {
             info.uuid = std::span<const std::uint8_t>(chosen_uuid.data(), chosen_uuid.size());
         }
-        wp.initVulkan(std::move(info));
+        wp.initVulkan(rstd::move(info));
     }
 
     if (! wp.waitVulkanInited(/*timeout_ms*/ 10000))
@@ -1056,7 +1057,7 @@ int run(int argc, char** argv) {
         die("ex_swapchain_factory did not produce a bridge session / swapchain");
 
     host.swapchain->setOnFirstNegotiated([&] {
-        if (host.paused.load(std::memory_order_acquire)) {
+        if (host.paused.load(rstd::sync::atomic::Ordering::Acquire)) {
             rstd_info("waywallen-wescene-renderer: negotiated while paused");
         } else {
             wp.play();
@@ -1075,52 +1076,47 @@ int run(int argc, char** argv) {
     rstd_info("waywallen-wescene-renderer: ready, advertise sent to daemon");
 
     auto subscriptions = std::make_shared<ww_wescene::BridgeSubscriptionController>(session);
-    {
-        std::scoped_lock lock(host.subscription_mu);
-        host.subscriptions = subscriptions;
-    }
+    *host.subscriptions.lock().unwrap() = subscriptions;
     std::vector<std::string> event_kinds { "pointer", "mpris" };
-    if (host.audio_response_demand.load(std::memory_order_acquire)) {
+    if (host.audio_response_demand.load(rstd::sync::atomic::Ordering::Acquire)) {
         event_kinds.emplace_back("audio");
     }
-    if (! subscriptions->replace(std::move(event_kinds))) {
+    if (! subscriptions->replace(rstd::move(event_kinds))) {
         die("failed to register renderer event subscriptions");
     }
 
     // Flip the clear-colour gate now that Ready has been emitted. Replay
     // any value the scene-load callback stashed during init.
     {
-        std::scoped_lock _(host.clear_mu);
-        host.clear_ready_published = true;
-        if (host.clear_pending) {
-            auto c = *host.clear_pending;
-            if (int rc = session->sendClearColor(c[0], c[1], c[2], 1.0f); rc != 0) {
+        auto clear   = host.clear_color.lock().unwrap();
+        clear->ready = true;
+        if (clear->pending) {
+            auto c = *clear->pending;
+            if (int rc = session->sendClearColor(c[usize()], c[usize(1)], c[usize(2)], 1.0f);
+                rc != 0) {
                 rstd_warn("waywallen-wescene-renderer: pending report_state(clear_color) "
                           "flush failed ({})",
                           rc);
             }
-            host.clear_pending.reset();
+            clear->pending = None();
         }
     }
 
-    std::thread reader([&]() {
+    auto reader = rstd::thread::spawn([&]() {
         reader_loop(host);
     });
+    if (reader.is_err()) die("failed to spawn bridge reader thread");
+    auto reader_handle = rstd::move(reader).unwrap_unchecked();
 
     // Idle until shutdown; the reader thread dispatches live controls.
-    while (! host.shutdown.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    while (! host.shutdown.load(rstd::sync::atomic::Ordering::Acquire)) {
+        rstd::thread::sleep(rstd::time::Duration::from_millis(u64(100)));
     }
 
-    if (reader.joinable()) {
-        ::shutdown(host.sock, SHUT_RD);
-        reader.join();
-    }
+    ::shutdown(host.sock, SHUT_RD);
+    rstd::move(reader_handle).join().unwrap();
     (void)subscriptions->replace({});
-    {
-        std::scoped_lock lock(host.subscription_mu);
-        host.subscriptions.reset();
-    }
+    host.subscriptions.lock().unwrap()->reset();
     session.reset();
     ww_bridge_close(host.sock);
 
