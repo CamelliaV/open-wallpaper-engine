@@ -899,6 +899,7 @@ public:
 private:
     void rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention, bool evict_meshes);
     void consumeDirtyEventsCoveredByGraphRebuild();
+    void refreshPreparedRenderTargetDirtyEvents();
     void refreshPreparedMeshDirtyEvents();
     void refreshPreparedMaterialDirtyEvents();
 
@@ -1067,6 +1068,7 @@ void SceneRenderController::on(RenderDraw&&) {
             }
         }
         m_scene->Runtime().BeforeRender();
+        refreshPreparedRenderTargetDirtyEvents();
         refreshPreparedMeshDirtyEvents();
         refreshPreparedMaterialDirtyEvents();
 
@@ -1118,6 +1120,16 @@ void SceneRenderController::consumeDirtyEventsCoveredByGraphRebuild() {
     if (! m_scene) return;
     (void)m_scene->ConsumePreparedMaterialDirtyEvents();
     (void)m_scene->ConsumePreparedMeshDirtyEvents();
+    (void)m_scene->ConsumePreparedRenderTargetDirtyEvents();
+}
+
+void SceneRenderController::refreshPreparedRenderTargetDirtyEvents() {
+    if (! m_scene || ! renderInited() || m_rg.is_none()) return;
+    auto events = m_scene->ConsumePreparedRenderTargetDirtyEvents();
+    if (events.empty()) return;
+
+    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
+    m_render->refreshPreparedTextures(*m_scene, m_render_scene);
 }
 
 void SceneRenderController::refreshPreparedMeshDirtyEvents() {

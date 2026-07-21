@@ -1761,6 +1761,14 @@ struct SceneMaterialDirtyEvent {
     SceneMaterialDirtyFlags flags { SceneMaterialDirtyNone };
 };
 
+struct SceneRenderTargetDirtyEvent {
+    std::string  name;
+    std::int32_t old_width { 0 };
+    std::int32_t old_height { 0 };
+    std::int32_t width { 0 };
+    std::int32_t height { 0 };
+};
+
 struct SceneMaterialTextureSlotMutation {
     bool                    changed { false };
     Option<SceneMaterialId> material;
@@ -2090,10 +2098,12 @@ public:
         if (it == m_render_group_cameras.end()) return None();
         return Some(std::string_view(it->second));
     }
-    bool                                 SetNodeVisible(SceneNode& node, bool visible);
-    std::vector<SceneMeshDirtyEvent>     ConsumePreparedMeshDirtyEvents();
-    std::vector<SceneMaterialDirtyEvent> ConsumePreparedMaterialDirtyEvents();
-    void                                 ClearUserPropertyDiagnostics(std::string_view key);
+    bool SetNodeVisible(SceneNode& node, bool visible);
+    bool ResizeRenderTarget(std::string_view name, std::int32_t width, std::int32_t height);
+    std::vector<SceneMeshDirtyEvent>         ConsumePreparedMeshDirtyEvents();
+    std::vector<SceneMaterialDirtyEvent>     ConsumePreparedMaterialDirtyEvents();
+    std::vector<SceneRenderTargetDirtyEvent> ConsumePreparedRenderTargetDirtyEvents();
+    void                                     ClearUserPropertyDiagnostics(std::string_view key);
     void AddUserPropertyDiagnostic(SceneUserPropertyDiagnostic diagnostic);
     std::span<const SceneUserPropertyDiagnostic> UserPropertyDiagnostics() const {
         return { m_user_property_diagnostics.data(), m_user_property_diagnostics.size() };
@@ -2121,6 +2131,7 @@ private:
     Map<i32, SceneNode*>                     m_layer_link_sources;
     Map<const SceneNode*, WallpaperLayerId>  m_node_link_sources;
     std::vector<SceneUserPropertyDiagnostic> m_user_property_diagnostics;
+    std::unordered_map<std::string, SceneRenderTargetDirtyEvent> m_render_target_dirty_events;
 };
 
 } // namespace owe

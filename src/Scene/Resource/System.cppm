@@ -120,31 +120,53 @@ public:
 
     bool Ready() const noexcept { return m_registries.Ready(); }
 
-    auto PreparePlan(const resource::ResourcePlan& plan, ResourceContentProviders providers)
+    auto PreparePlan(const resource::ResourcePlan& plan, ResourceContentProviders providers,
+                     resource::ResourcePlanSections sections = resource::ResourcePlanAll)
         -> Result<empty, resource::ResourceError> {
-        auto image_backend = dyn<vulkan::ImagePrepareBackend>::from_ref(m_registries.Textures());
-        auto buffer_backend =
-            dyn<vulkan::BufferUploadBackend>::from_ref(m_registries.BufferUploads());
+        auto image_backend  = dyn<vulkan::ImagePrepareBackend>::from_ref(m_registries.Textures());
+        auto buffer_backend = dyn<vulkan::BufferBackend>::from_ref(m_registries.BufferManager());
         ResourcePrepareService service(m_registries.TextureEntries(),
                                        Some(image_backend.as_mut_ref()),
                                        m_registries.Buffers(),
                                        buffer_backend.as_mut_ref(),
                                        m_registries.Shaders());
-        auto                   prepared = service.Prepare(plan, rstd::move(providers));
+        auto                   prepared = service.Prepare(plan, rstd::move(providers), sections);
         if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
         auto next = rstd::move(prepared).unwrap_unchecked();
-        if (! m_registries.States().Compile(plan, next)) {
+        if (resource::ResourcePlanIncludes(sections, resource::ResourcePlanTextures) &&
+            ! m_registries.States().Compile(plan, next)) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
                 .message = rstd::format("compile resource state plan failed"),
             });
         }
+        next.CarryForward(rstd::move(m_prepared), sections);
         m_prepared = rstd::move(next);
         return Ok(empty {});
     }
 
     auto Prepared() const -> const PreparedResourceTable& { return m_prepared; }
     auto States() -> ResourceStateTracker& { return m_registries.States(); }
+
+    void RemovePreparedGraphics(slice<resource::PipelineUseHandle>       pipelines,
+                                slice<resource::RenderPassUseHandle>     render_passes,
+                                slice<resource::FramebufferUseHandle>    framebuffers,
+                                slice<resource::DescriptorBindingHandle> descriptors,
+                                slice<resource::ExternalUseHandle>       externals) {
+        for (usize index {}; index < pipelines.len(); ++index) m_prepared.Remove(pipelines[index]);
+        for (usize index {}; index < render_passes.len(); ++index) {
+            m_prepared.Remove(render_passes[index]);
+        }
+        for (usize index {}; index < framebuffers.len(); ++index) {
+            m_prepared.Remove(framebuffers[index]);
+        }
+        for (usize index {}; index < descriptors.len(); ++index) {
+            m_prepared.Remove(descriptors[index]);
+        }
+        for (usize index {}; index < externals.len(); ++index) {
+            m_prepared.Remove(externals[index]);
+        }
+    }
 
     auto PreparePipeline(resource::PipelineUseHandle   pipeline_use,
                          resource::RenderPassUseHandle render_pass_use,
@@ -297,10 +319,11 @@ public:
         return Ok(handle);
     }
 
-    bool PreparePendingUploads() { return m_registries.BufferUploads().preparePendingUploads(); }
+    bool HasPendingUploads() const { return m_registries.BufferManager().HasPendingUploads(); }
 
-    bool RecordPendingUploads(vvk::CommandBuffer& command) {
-        return m_registries.BufferUploads().recordPendingUploads(command);
+    bool RecordPendingUploads(vvk::CommandBuffer&            command,
+                              vulkan::RecordedBufferUploads& recorded) {
+        return m_registries.BufferManager().RecordPendingUploads(command, recorded);
     }
 
     auto UpdateBuffer(resource::BufferUseHandle use, slice<u8> content, u64 content_version)
@@ -312,22 +335,32 @@ public:
                 .message = rstd::format("prepared buffer use {} is unavailable", use.index),
             });
         }
-        auto backend = dyn<vulkan::BufferUploadBackend>::from_ref(m_registries.BufferUploads());
+        auto backend = dyn<vulkan::BufferBackend>::from_ref(m_registries.BufferManager());
         return m_registries.Buffers().Update(
             (**prepared).buffer.resource, content, content_version, backend.as_mut_ref());
     }
 
     auto ReserveUpload() -> resource::ReadyToken { return m_registries.Uploads().Reserve(); }
-    bool MarkUploadSubmitted(resource::ReadyToken token) {
-        return m_registries.Uploads().MarkSubmitted(token, m_prepared);
+    bool MarkUploadSubmitted(resource::ReadyToken token, vulkan::RecordedBufferUploads recorded) {
+        auto lease = m_registries.BufferManager().CommitRecordedUploads(rstd::move(recorded));
+        if (lease.is_none()) return false;
+        m_registries.Buffers().MarkUploadsSubmitted(lease->Tickets(), Some(token));
+        return m_registries.Uploads().MarkSubmitted(token, rstd::move(*lease));
     }
     auto PendingUpload() -> Option<resource::ReadyToken> {
         return m_registries.Uploads().Pending();
     }
     void CompleteUploadsThrough(u64 value) { m_registries.Uploads().CompleteThrough(value); }
 
-    auto BeginSubmission() -> resource::CompletionToken {
-        return m_registries.Submissions().Begin(m_prepared);
+    auto BeginSubmission(vulkan::RecordedBufferUploads recorded = {}) -> resource::CompletionToken {
+        Option<vulkan::BufferUploadBatchLease> upload_lease = None();
+        if (recorded.Valid()) {
+            auto lease = m_registries.BufferManager().CommitRecordedUploads(rstd::move(recorded));
+            if (lease.is_none()) return {};
+            m_registries.Buffers().MarkUploadsSubmitted(lease->Tickets(), None());
+            upload_lease = Some(rstd::move(*lease));
+        }
+        return m_registries.Submissions().Begin(m_prepared, rstd::move(upload_lease));
     }
     auto CompleteSubmission(resource::CompletionToken token) -> Option<SubmissionLease> {
         return m_registries.Submissions().Complete(token);
@@ -363,6 +396,7 @@ public:
         if (! m_registries.Memory().ShouldEvictTransient()) return;
         m_registries.TextureEntries().EvictUnused();
         m_registries.Buffers().EvictUnused();
+        m_registries.BufferManager().Trim();
     }
 
     void PumpVideoTextures(double seconds) { m_registries.Textures().PumpVideoTextures(seconds); }
@@ -390,6 +424,7 @@ public:
         m_registries.TextureEntries().Reset();
         m_registries.Textures().Clear();
     }
+    void ClearPreparedGraphics() { m_prepared.ClearPreparedState(); }
     void ClearTransientTextures() { m_registries.TextureEntries().ClearGraphResources(); }
     void EvictUnusedBuffers() { m_registries.Buffers().EvictUnused(); }
 

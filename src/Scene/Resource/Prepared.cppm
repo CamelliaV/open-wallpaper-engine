@@ -285,6 +285,38 @@ public:
         };
     }
 
+    void CarryForward(PreparedResourceTable&&        previous,
+                      resource::ResourcePlanSections prepared_sections) {
+        if (! resource::ResourcePlanIncludes(prepared_sections, resource::ResourcePlanTextures)) {
+            m_textures = rstd::move(previous.m_textures);
+        }
+        if (! resource::ResourcePlanIncludes(prepared_sections, resource::ResourcePlanBuffers)) {
+            m_buffers = rstd::move(previous.m_buffers);
+        }
+        if (! resource::ResourcePlanIncludes(prepared_sections, resource::ResourcePlanShaders)) {
+            m_shaders = rstd::move(previous.m_shaders);
+        }
+        m_pipelines     = rstd::move(previous.m_pipelines);
+        m_render_passes = rstd::move(previous.m_render_passes);
+        m_framebuffers  = rstd::move(previous.m_framebuffers);
+        m_descriptors   = rstd::move(previous.m_descriptors);
+        m_externals     = rstd::move(previous.m_externals);
+    }
+
+    void ClearPreparedState() {
+        m_pipelines.clear();
+        m_render_passes.clear();
+        m_framebuffers.clear();
+        m_descriptors.clear();
+        m_externals.clear();
+    }
+
+    void Remove(resource::PipelineUseHandle use) { (void)m_pipelines.remove(use); }
+    void Remove(resource::RenderPassUseHandle use) { (void)m_render_passes.remove(use); }
+    void Remove(resource::FramebufferUseHandle use) { (void)m_framebuffers.remove(use); }
+    void Remove(resource::DescriptorBindingHandle use) { (void)m_descriptors.remove(use); }
+    void Remove(resource::ExternalUseHandle use) { (void)m_externals.remove(use); }
+
 private:
     using TextureMap = rstd::collections::HashMap<resource::TextureUseHandle, PreparedTexture>;
     using DescriptorMap =
@@ -339,20 +371,21 @@ public:
     ResourcePrepareService(resource::TextureRegistry&                        textures,
                            Option<mut_ref<dyn<vulkan::ImagePrepareBackend>>> textures_backend,
                            BufferRegistry&                                   buffers,
-                           mut_ref<dyn<vulkan::BufferUploadBackend>>         buffer_uploads,
+                           mut_ref<dyn<vulkan::BufferBackend>>               buffer_backend,
                            ShaderRegistry&                                   shaders)
         : m_textures(textures),
           m_textures_backend(textures_backend),
           m_buffers(buffers),
-          m_buffer_uploads(buffer_uploads),
+          m_buffer_backend(buffer_backend),
           m_shaders(shaders) {}
 
-    auto Prepare(const resource::ResourcePlan& plan, ResourceContentProviders providers = {})
+    auto Prepare(const resource::ResourcePlan& plan, ResourceContentProviders providers = {},
+                 resource::ResourcePlanSections sections = resource::ResourcePlanAll)
         -> Result<PreparedResourceTable, resource::ResourceError> {
         PreparedResourceTable      table(plan.generation);
         ResourcePlanPrepareVisitor visitor(*this, table, rstd::move(providers));
         auto object  = rstd::dyn<resource::ResourcePlanVisitor>::from_ref(visitor);
-        auto visited = resource::VisitResourcePlan(plan, object);
+        auto visited = resource::VisitResourcePlan(plan, object, sections);
         if (visited.is_err()) return Err(rstd::move(visited).unwrap_err_unchecked());
         return Ok(rstd::move(table));
     }
@@ -370,7 +403,7 @@ public:
         auto loaded = (*content)->LoadBuffer(entry.request);
         if (loaded.is_err()) return Err(rstd::move(loaded).unwrap_err_unchecked());
         auto bytes    = rstd::move(loaded).unwrap_unchecked();
-        auto prepared = m_buffers.Ensure(entry.request.clone(), bytes.as_slice(), m_buffer_uploads);
+        auto prepared = m_buffers.Ensure(entry.request.clone(), bytes.as_slice(), m_buffer_backend);
         if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
         if (! table.Insert(PreparedBufferUse {
                 .use    = entry.handle,
@@ -533,7 +566,7 @@ private:
     resource::TextureRegistry&                        m_textures;
     Option<mut_ref<dyn<vulkan::ImagePrepareBackend>>> m_textures_backend;
     BufferRegistry&                                   m_buffers;
-    mut_ref<dyn<vulkan::BufferUploadBackend>>         m_buffer_uploads;
+    mut_ref<dyn<vulkan::BufferBackend>>               m_buffer_backend;
     ShaderRegistry&                                   m_shaders;
 };
 

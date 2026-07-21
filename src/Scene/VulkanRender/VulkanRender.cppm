@@ -104,6 +104,7 @@ public:
     void compileRenderGraph(Scene&, rg::RenderGraph&, const RenderSceneSnapshot&);
     void refreshPreparedResources(Scene&);
     void refreshPreparedResources(Scene&, const RenderSceneSnapshot&);
+    void refreshPreparedTextures(Scene&, const RenderSceneSnapshot&);
     void invalidatePreparedRenderItems(std::span<const RenderItemId>, PassInvalidationFlags);
     void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&,
                                     std::span<const RenderItemId>, PassInvalidationFlags);

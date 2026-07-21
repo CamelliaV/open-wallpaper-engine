@@ -480,25 +480,53 @@ struct RenderProgram {
             auto pass = resolve(record);
             if (pass.is_none()) continue;
             auto flags = pass->finalizeResourceRequests(scene);
-            if (flags == PassInvalidationNone) continue;
-            record.invalidate(flags);
-            loaded = false;
+            if (flags != PassInvalidationNone) {
+                record.invalidate(flags);
+                loaded = false;
+            }
+            for (const auto& diagnostic : pass->textureRequestDiagnostics()) {
+                if (diagnostic.request.is_none()) continue;
+                auto request_name = rstd::cppstd::as_string_view(diagnostic.request->name.as_str());
+                for (auto& entry : resource_plan.textures) {
+                    if (entry.request.kind != diagnostic.request->kind ||
+                        rstd::cppstd::as_string_view(entry.request.name.as_str()) != request_name) {
+                        continue;
+                    }
+                    entry.request = diagnostic.request->clone();
+                }
+            }
         }
     }
 
     bool prepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
-                 const owe::RenderSceneSnapshot& render_scene) {
+                 const owe::RenderSceneSnapshot& render_scene,
+                 resource::ResourcePlanSections  sections = resource::ResourcePlanAll) {
         loaded = false;
-        resource_plan.buffers.clear();
-        resource_plan.shaders.clear();
         if (rr.shader_reflection_cache.is_none()) {
             rstd_error("shader artifact compiler unavailable");
             return false;
         }
         ResourceDeclarationContext declarations(resource_plan, **rr.shader_reflection_cache);
-        for (auto& record : pass_records) {
-            auto pass = resolve(record);
-            if (pass) pass->declareResources(declarations);
+        const bool                 prepare_buffers =
+            resource::ResourcePlanIncludes(sections, resource::ResourcePlanBuffers);
+        const bool prepare_shaders =
+            resource::ResourcePlanIncludes(sections, resource::ResourcePlanShaders);
+        if (prepare_buffers != prepare_shaders) {
+            rstd_error("render resource declaration requires buffers and shaders together");
+            return false;
+        }
+        if (prepare_buffers) {
+            resource_plan.buffers.clear();
+            resource_plan.shaders.clear();
+            for (auto& record : pass_records) {
+                auto pass = resolve(record);
+                if (pass) {
+                    pass->declareResources(declarations);
+                    if (pass->prepared() && pass->resourceUses() != record.resources) {
+                        record.invalidateAll();
+                    }
+                }
+            }
         }
 
         SnapshotImportedTextureProvider imported_textures(render_scene, scene.imageParser.get());
@@ -509,24 +537,17 @@ struct RenderProgram {
         DeclaredShaderArtifactProvider declared_shaders(declarations);
         auto                           shader_artifacts =
             rstd::dyn<owe::resource::ShaderArtifactProvider>::from_ref(declared_shaders);
-        for (auto& record : pass_records) {
-            auto pass = resolve(record);
-            if (pass && pass->prepared()) record.resetPrepared(*pass, device);
-        }
         auto prepared =
             rr.resources.PreparePlan(resource_plan,
                                      owe::resource_registry::ResourceContentProviders {
                                          .texture = rstd::Some(content),
                                          .buffer  = rstd::Some(buffer_content.as_mut_ref()),
                                          .shader  = rstd::Some(shader_artifacts.as_mut_ref()),
-                                     });
+                                     },
+                                     sections);
         if (prepared.is_err()) {
             auto error = rstd::move(prepared).unwrap_err_unchecked();
             rstd_error("prepare resource plan failed: {}", error.message);
-            return false;
-        }
-        if (! rr.resources.PreparePendingUploads()) {
-            rstd_error("prepare buffer upload backing failed");
             return false;
         }
         rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
@@ -576,6 +597,13 @@ struct RenderProgram {
         for (auto& record : pass_records) {
             auto pass = resolve(record);
             if (pass) {
+                if (record.invalidated()) {
+                    rr.resources.RemovePreparedGraphics(record.resources.pipelines.as_slice(),
+                                                        record.resources.render_passes.as_slice(),
+                                                        record.resources.framebuffers.as_slice(),
+                                                        record.resources.descriptors.as_slice(),
+                                                        record.resources.externals.as_slice());
+                }
                 record.prepareIfNeeded(*pass, scene, device, prepare_context);
                 if (! pass->prepared()) {
                     rstd_error("prepare pass failed for {}", record.pass_name);
@@ -619,13 +647,18 @@ struct RenderProgram {
 
     u64 commitUploads(const Device& device, RenderingResources& rr,
                       vvk::CommandBuffer& upload_cmd) {
+        if (! rr.resources.HasPendingUploads()) {
+            loaded = true;
+            return u64();
+        }
         VVK_CHECK_ACT(return u64(),
                              upload_cmd.Begin(VkCommandBufferBeginInfo {
                                  .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                  .pNext = nullptr,
                                  .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                              }));
-        if (! rr.resources.RecordPendingUploads(upload_cmd)) return u64();
+        RecordedBufferUploads recorded;
+        if (! rr.resources.RecordPendingUploads(upload_cmd, recorded)) return u64();
         VVK_CHECK_ACT(return u64(), upload_cmd.End());
         {
             auto                          ready        = rr.resources.ReserveUpload();
@@ -647,7 +680,7 @@ struct RenderProgram {
                 .pSignalSemaphores    = rr.sem_upload.address(),
             };
             VVK_CHECK_ACT(return u64(), device.graphics_queue().handle.Submit(sub_info, {}));
-            if (! rr.resources.MarkUploadSubmitted(ready)) return u64();
+            if (! rr.resources.MarkUploadSubmitted(ready, rstd::move(recorded))) return u64();
             loaded = true;
             return u64(signal_value);
         }
@@ -739,10 +772,10 @@ struct RenderProgram {
         return true;
     }
 
-    void record(RenderingResources& rr) {
-        if (! rr.resources.RecordPendingUploads(rr.command)) {
+    bool record(RenderingResources& rr, RecordedBufferUploads& recorded_uploads) {
+        if (! rr.resources.RecordPendingUploads(rr.command, recorded_uploads)) {
             rstd_error("record dynamic buffer uploads failed");
-            return;
+            return false;
         }
 
         for (auto& scope : scopes) {
@@ -800,6 +833,7 @@ struct RenderProgram {
                                   target.endRenderScope(context);
                               });
         }
+        return true;
     }
 };
 

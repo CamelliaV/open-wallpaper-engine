@@ -23,15 +23,20 @@ struct BufferEntry {
 struct BufferPhysical {
     vulkan::BufferAllocation buffer;
     u64                      generation { 1 };
+    u64                      definition_generation { 1 };
     u64                      source_generation { 0 };
+    u64                      submitted_generation { 0 };
     resource::ReadyToken     ready;
 
-    BufferPhysical(vulkan::BufferAllocation value, u64 physical_generation, u64 source,
-                   resource::ReadyToken ready_token)
+    BufferPhysical(vulkan::BufferAllocation value, u64 physical_generation, u64 definition_version)
         : buffer(rstd::move(value)),
           generation(physical_generation),
-          source_generation(source),
-          ready(ready_token) {}
+          definition_generation(definition_version) {}
+};
+
+struct PendingBufferUpload {
+    rstd::sync::Arc<BufferPhysical> physical;
+    u64                             content_version { 0 };
 };
 
 struct PreparedBuffer {
@@ -53,7 +58,7 @@ public:
     }
 
     auto Ensure(resource::BufferRequest request, slice<u8> content,
-                mut_ref<dyn<vulkan::BufferUploadBackend>> backend)
+                mut_ref<dyn<vulkan::BufferBackend>> backend)
         -> Result<PreparedBuffer, resource::ResourceError> {
         auto handle = Register(request.clone());
         if (! handle.Valid()) {
@@ -63,34 +68,43 @@ public:
             });
         }
 
+        auto entry = m_entries.get(handle);
+        if (entry.is_none()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::MissingDefinition,
+                .message = rstd::format("buffer definition is unavailable"),
+            });
+        }
+
         auto existing = m_resources.get(handle);
-        if (existing.is_some() && (**existing)->source_generation == request.content_version) {
+        if (existing.is_some() &&
+            (**existing)->definition_generation == (**entry).definition_version) {
+            auto queued =
+                QueueWrite((**existing).clone(), content, request.content_version, backend);
+            if (queued.is_err()) return Err(rstd::move(queued).unwrap_err_unchecked());
             return Ok(PreparedBuffer {
                 .resource = handle,
                 .physical = (**existing).clone(),
             });
         }
 
-        auto uploaded = backend->UploadBuffer(
-            content,
-            vulkan::BufferUploadRequest {
-                .size      = static_cast<VkDeviceSize>(request.definition.size.to_primitive()),
-                .alignment = static_cast<VkDeviceSize>(request.definition.alignment.to_primitive()),
-                .usage     = UploadUsage(request.definition.usage),
-            });
-        if (uploaded.is_none()) {
+        auto allocated = backend->AllocateBuffer(vulkan::BufferAllocationRequest {
+            .size      = static_cast<VkDeviceSize>(request.definition.size.to_primitive()),
+            .alignment = static_cast<VkDeviceSize>(request.definition.alignment.to_primitive()),
+            .usage     = AllocationUsage(request.definition.usage),
+        });
+        if (allocated.is_none()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
-                .message = rstd::format("upload buffer {} failed", request.name.as_str()),
+                .message = rstd::format("allocate buffer {} failed", request.name.as_str()),
             });
         }
 
         u64  physical_generation = existing.is_some() ? (**existing)->generation + u64(1) : u64(1);
         auto physical            = rstd::sync::Arc<BufferPhysical>::make(
-            rstd::move(*uploaded),
-            physical_generation,
-            request.content_version,
-            resource::ReadyToken { .value = request.content_version });
+            rstd::move(*allocated), physical_generation, (**entry).definition_version);
+        auto queued = QueueWrite(physical.clone(), content, request.content_version, backend);
+        if (queued.is_err()) return Err(rstd::move(queued).unwrap_err_unchecked());
         (void)m_resources.insert(handle, physical.clone());
         return Ok(PreparedBuffer {
             .resource = handle,
@@ -109,7 +123,7 @@ public:
     }
 
     auto Update(resource::BufferHandle handle, slice<u8> content, u64 content_version,
-                mut_ref<dyn<vulkan::BufferUploadBackend>> backend)
+                mut_ref<dyn<vulkan::BufferBackend>> backend)
         -> Result<empty, resource::ResourceError> {
         auto entry    = m_entries.get_mut(handle);
         auto physical = m_resources.get_mut(handle);
@@ -120,18 +134,21 @@ public:
                 .message = rstd::format("dynamic buffer is unavailable"),
             });
         }
-        auto allocation = mut_ref<vulkan::BufferAllocation>::from_raw_parts(
-            rstd::addressof((**physical)->buffer));
-        if (! backend->UpdateBuffer(allocation, content)) {
-            return Err(resource::ResourceError {
-                .kind    = resource::ResourceErrorKind::BackendFailure,
-                .message = rstd::format("update buffer {} failed", (**entry).request.name.as_str()),
-            });
-        }
+        auto queued = QueueWrite((**physical).clone(), content, content_version, backend);
+        if (queued.is_err()) return queued;
         if ((**entry).request.content_version != content_version) ++(**entry).content_version;
         (**entry).request.content_version = content_version;
-        (**physical)->source_generation   = content_version;
         return Ok(empty {});
+    }
+
+    void MarkUploadsSubmitted(std::span<const vulkan::BufferUploadTicket> tickets,
+                              Option<resource::ReadyToken>                ready) {
+        for (const auto& ticket : tickets) {
+            auto pending = m_pending_uploads.remove(ticket.value);
+            if (pending.is_none()) continue;
+            pending->physical->submitted_generation = pending->content_version;
+            if (ready.is_some()) pending->physical->ready = *ready;
+        }
     }
 
     void EvictUnused() {
@@ -143,6 +160,7 @@ public:
 
     void Reset() {
         m_resources.clear();
+        m_pending_uploads.clear();
         m_entries.clear();
         m_names.clear();
         m_next_index = u64();
@@ -153,7 +171,33 @@ public:
     auto Size() const noexcept -> usize { return m_entries.len(); }
 
 private:
-    static auto UploadUsage(resource::BufferUsage usage) -> vulkan::BufferUploadClass {
+    auto QueueWrite(rstd::sync::Arc<BufferPhysical> physical, slice<u8> content,
+                    u64 content_version, mut_ref<dyn<vulkan::BufferBackend>> backend)
+        -> Result<empty, resource::ResourceError> {
+        if (physical->source_generation == content_version) return Ok(empty {});
+        auto allocation =
+            mut_ref<vulkan::BufferAllocation>::from_raw_parts(rstd::addressof(physical->buffer));
+        auto ticket = backend->QueueBufferWrite(allocation, content);
+        if (ticket.is_none()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("queue buffer write failed"),
+            });
+        }
+        physical->source_generation = content_version;
+        if (ticket->Valid()) {
+            (void)m_pending_uploads.insert(ticket->value,
+                                           PendingBufferUpload {
+                                               .physical        = physical.clone(),
+                                               .content_version = content_version,
+                                           });
+        } else {
+            physical->submitted_generation = content_version;
+        }
+        return Ok(empty {});
+    }
+
+    static auto AllocationUsage(resource::BufferUsage usage) -> vulkan::BufferUploadClass {
         switch (usage) {
         case resource::BufferUsage::Vertex: return vulkan::BufferUploadClass::Vertex;
         case resource::BufferUsage::Index: return vulkan::BufferUploadClass::Index;
@@ -202,6 +246,7 @@ private:
     HandleMap<BufferEntry>                                     m_entries;
     HandleMap<rstd::sync::Arc<BufferPhysical>>                 m_resources;
     rstd::collections::HashMap<String, resource::BufferHandle> m_names;
+    rstd::collections::HashMap<u64, PendingBufferUpload>       m_pending_uploads;
 };
 
 } // namespace owe::resource_registry

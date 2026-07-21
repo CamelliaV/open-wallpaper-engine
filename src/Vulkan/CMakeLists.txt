@@ -24,10 +24,9 @@ add_library(owe-vulkan STATIC
   Swapchain.cpp
   Instance.cpp
   Device.cpp
-  StagingBuffer.cpp
+  BufferManager.cpp
   GraphicsPipeline.cpp
-  TextureCache.cpp
-  MeshCache.cpp)
+  TextureCache.cpp)
 target_sources(owe-vulkan
   PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
          Vulkan.cppm)

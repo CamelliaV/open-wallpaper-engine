@@ -1332,6 +1332,39 @@ bool Scene::ApplyUserCameraPathVisibilityBindings(std::string_view key, const Js
     return changed;
 }
 
+bool Scene::ResizeRenderTarget(std::string_view name, std::int32_t width, std::int32_t height) {
+    auto it = renderTargets.find(std::string(name));
+    if (it == renderTargets.end()) return false;
+    auto& target = it->second;
+    if (target.width == width && target.height == height) return false;
+
+    auto event = m_render_target_dirty_events.find(it->first);
+    if (event == m_render_target_dirty_events.end()) {
+        m_render_target_dirty_events.emplace(it->first,
+                                             SceneRenderTargetDirtyEvent {
+                                                 .name       = it->first,
+                                                 .old_width  = target.width,
+                                                 .old_height = target.height,
+                                                 .width      = width,
+                                                 .height     = height,
+                                             });
+    } else {
+        event->second.width  = width;
+        event->second.height = height;
+    }
+    target.width  = width;
+    target.height = height;
+    return true;
+}
+
+std::vector<SceneRenderTargetDirtyEvent> Scene::ConsumePreparedRenderTargetDirtyEvents() {
+    std::vector<SceneRenderTargetDirtyEvent> events;
+    events.reserve(m_render_target_dirty_events.size());
+    for (auto& [_, event] : m_render_target_dirty_events) events.push_back(std::move(event));
+    m_render_target_dirty_events.clear();
+    return events;
+}
+
 std::vector<SceneMeshDirtyEvent> Scene::ConsumePreparedMeshDirtyEvents() {
     if (m_resource_index.Empty()) RebuildResourceIndex();
 

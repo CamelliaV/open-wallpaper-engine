@@ -114,6 +114,9 @@ struct VulkanRender::Impl {
     void compileRenderGraph(Scene&, rg::RenderGraph&, const RenderSceneSnapshot&);
     void refreshPreparedResources(Scene&);
     void refreshPreparedResources(Scene&, const RenderSceneSnapshot&);
+    void refreshPreparedResources(Scene&, const RenderSceneSnapshot&,
+                                  resource::ResourcePlanSections);
+    void refreshPreparedTextures(Scene&, const RenderSceneSnapshot&);
     void invalidatePreparedRenderItems(std::span<const owe::RenderItemId>, PassInvalidationFlags);
     void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&,
                                     std::span<const owe::RenderItemId>, PassInvalidationFlags);
@@ -306,6 +309,9 @@ void VulkanRender::refreshPreparedResources(Scene& scene) {
 }
 void VulkanRender::refreshPreparedResources(Scene& scene, const RenderSceneSnapshot& render_scene) {
     pImpl->refreshPreparedResources(scene, render_scene);
+}
+void VulkanRender::refreshPreparedTextures(Scene& scene, const RenderSceneSnapshot& render_scene) {
+    pImpl->refreshPreparedTextures(scene, render_scene);
 }
 void VulkanRender::invalidatePreparedRenderItems(std::span<const owe::RenderItemId> render_items,
                                                  PassInvalidationFlags              flags) {
@@ -697,7 +703,11 @@ void VulkanRender::Impl::drawFrameSwapchain(Scene& scene) {
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_program.record(rr);
+    RecordedBufferUploads recorded_uploads;
+    if (! m_program.record(rr, recorded_uploads)) {
+        (void)rr.command.End();
+        return;
+    }
     (void)rr.command.End();
 
     auto& sem_present_done = m_sem_swap_finish_per_image[image_index];
@@ -741,7 +751,7 @@ void VulkanRender::Impl::drawFrameSwapchain(Scene& scene) {
     };
 
     VVK_CHECK_VOID_RE(m_device->present_queue().handle.Submit(sub_info, *rr.fence_frame));
-    auto submission_completion = rr.resources.BeginSubmission();
+    auto submission_completion = rr.resources.BeginSubmission(rstd::move(recorded_uploads));
     if (! submission_completion.Valid()) {
         rstd_error("track frame submission failed");
     }
@@ -813,7 +823,11 @@ void VulkanRender::Impl::drawFrameOffscreen(Scene& scene) {
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_program.record(rr);
+    RecordedBufferUploads recorded_uploads;
+    if (! m_program.record(rr, recorded_uploads)) {
+        (void)rr.command.End();
+        return;
+    }
 
     (void)rr.command.End();
 
@@ -849,7 +863,7 @@ void VulkanRender::Impl::drawFrameOffscreen(Scene& scene) {
         .pSignalSemaphores    = rr.sem_export.address(),
     };
     VVK_CHECK_VOID_RE(m_device->graphics_queue().handle.Submit(sub_info, *rr.fence_frame));
-    auto submission_completion = rr.resources.BeginSubmission();
+    auto submission_completion = rr.resources.BeginSubmission(rstd::move(recorded_uploads));
     if (! submission_completion.Valid()) {
         rstd_error("track offscreen submission failed");
     }
@@ -984,6 +998,7 @@ void VulkanRender::Impl::clearLastRenderGraph(RenderGraphResourceRetention reten
     m_program.destroyPasses(*m_device);
     ReleaseCompletedRetiredResources(*m_device, m_rendering_resources);
     m_program.clear();
+    m_rendering_resources.resources.ClearPreparedGraphics();
     if (retention == RenderGraphResourceRetention::ReleaseSceneTextures) {
         m_rendering_resources.resources.ClearTextures();
         m_shader_reflection_cache.Clear();
@@ -1033,12 +1048,24 @@ void VulkanRender::Impl::refreshPreparedResources(Scene& scene) {
 
 void VulkanRender::Impl::refreshPreparedResources(Scene&                     scene,
                                                   const RenderSceneSnapshot& render_scene) {
+    refreshPreparedResources(scene, render_scene, resource::ResourcePlanAll);
+}
+
+void VulkanRender::Impl::refreshPreparedTextures(Scene&                     scene,
+                                                 const RenderSceneSnapshot& render_scene) {
+    refreshPreparedResources(scene, render_scene, resource::ResourcePlanTextures);
+}
+
+void VulkanRender::Impl::refreshPreparedResources(Scene&                         scene,
+                                                  const RenderSceneSnapshot&     render_scene,
+                                                  resource::ResourcePlanSections sections) {
     if (! m_inited || m_program.pass_records.is_empty()) return;
 
     configureRenderTargets(scene);
     m_program.finalizeFramePassRequests(scene);
     m_program.finalizeResourceRequests(scene);
-    if (! m_program.prepare(scene, *m_device, m_rendering_resources, render_scene)) return;
+    if (! m_program.prepare(scene, *m_device, m_rendering_resources, render_scene, sections))
+        return;
     m_program.rebuildScopes();
 
     commitPreparedUploads();

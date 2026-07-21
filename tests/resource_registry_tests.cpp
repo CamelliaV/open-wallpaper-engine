@@ -35,23 +35,25 @@ struct BufferContentProvider {
     }
 };
 
-struct BufferUploadBackend {
-    rstd::usize                      uploads { 0 };
-    rstd::usize                      updates { 0 };
-    owe::vulkan::BufferUploadRequest last_request;
+struct BufferBackend {
+    rstd::usize                          allocations { 0 };
+    rstd::usize                          writes { 0 };
+    rstd::u64                            next_ticket { 0 };
+    owe::vulkan::BufferAllocationRequest last_request;
 
-    auto UploadBuffer(rstd::slice<rstd::u8>                   content,
-                      const owe::vulkan::BufferUploadRequest& request)
+    auto AllocateBuffer(const owe::vulkan::BufferAllocationRequest& request)
         -> rstd::Option<owe::vulkan::BufferAllocation> {
-        ++uploads;
+        ++allocations;
         last_request = request;
-        if (request.size == 0 || request.size < content.len().to_primitive()) return rstd::None();
+        if (request.size == 0) return rstd::None();
         return rstd::Some(owe::vulkan::BufferAllocation {});
     }
 
-    bool UpdateBuffer(rstd::mut_ref<owe::vulkan::BufferAllocation>, rstd::slice<rstd::u8>) {
-        ++updates;
-        return true;
+    auto QueueBufferWrite(rstd::mut_ref<owe::vulkan::BufferAllocation>, rstd::slice<rstd::u8>,
+                          VkDeviceSize) -> rstd::Option<owe::vulkan::BufferUploadTicket> {
+        ++writes;
+        ++next_ticket;
+        return rstd::Some(owe::vulkan::BufferUploadTicket { .value = next_ticket });
     }
 };
 
@@ -228,8 +230,8 @@ TEST(BufferRegistry, OwnsLogicalDefinitionsBehindStableHandles) {
 
 TEST(BufferRegistry, UpdatesDynamicContentWithoutReplacingItsPlannedCapacity) {
     owe::resource_registry::BufferRegistry registry;
-    BufferUploadBackend                    upload_backend;
-    auto upload  = rstd::dyn<owe::vulkan::BufferUploadBackend>::from_ref(upload_backend);
+    BufferBackend                          upload_backend;
+    auto upload  = rstd::dyn<owe::vulkan::BufferBackend>::from_ref(upload_backend);
     auto content = rstd::vec::Vec<rstd::u8>::make();
     content.push(rstd::u8(1));
     content.push(rstd::u8(2));
@@ -252,20 +254,57 @@ TEST(BufferRegistry, UpdatesDynamicContentWithoutReplacingItsPlannedCapacity) {
     auto updated =
         registry.Update(buffer.resource, content.as_slice(), rstd::u64(2), upload.as_mut_ref());
     ASSERT_TRUE(updated.is_ok());
-    EXPECT_EQ(upload_backend.updates, rstd::usize(1));
+    EXPECT_EQ(upload_backend.allocations, rstd::usize(1));
+    EXPECT_EQ(upload_backend.writes, rstd::usize(2));
     auto physical = registry.Resolve(buffer.resource);
     ASSERT_TRUE(physical.is_some());
     EXPECT_EQ((**physical).source_generation, rstd::u64(2));
+}
+
+TEST(BufferRegistry, ReusesPhysicalAllocationAcrossPreparedContentVersions) {
+    owe::resource_registry::BufferRegistry registry;
+    BufferBackend                          backend;
+    auto buffer_backend = rstd::dyn<owe::vulkan::BufferBackend>::from_ref(backend);
+    auto content        = rstd::vec::Vec<rstd::u8>::make();
+    content.push(rstd::u8(1));
+    auto request = owe::resource::BufferRequest {
+        .name            = rstd::string::String::make(rstd::cppstd::as_str("retained-vertices")),
+        .definition      = { .size = rstd::usize(64), .usage = owe::resource::BufferUsage::Vertex },
+        .content_version = rstd::u64(1),
+    };
+
+    auto first = registry.Ensure(request.clone(), content.as_slice(), buffer_backend.as_mut_ref());
+    ASSERT_TRUE(first.is_ok());
+    auto first_physical = rstd::move(first).unwrap_unchecked().physical;
+
+    request.content_version = rstd::u64(2);
+    content[rstd::usize()]  = rstd::u8(2);
+    auto second = registry.Ensure(request.clone(), content.as_slice(), buffer_backend.as_mut_ref());
+    ASSERT_TRUE(second.is_ok());
+    auto second_physical = rstd::move(second).unwrap_unchecked().physical;
+    EXPECT_EQ(first_physical.as_ptr().as_raw_ptr(), second_physical.as_ptr().as_raw_ptr());
+    EXPECT_EQ(backend.allocations, rstd::usize(1));
+    EXPECT_EQ(backend.writes, rstd::usize(2));
+
+    request.definition.size = rstd::usize(128);
+    request.content_version = rstd::u64(3);
+    auto replaced =
+        registry.Ensure(rstd::move(request), content.as_slice(), buffer_backend.as_mut_ref());
+    ASSERT_TRUE(replaced.is_ok());
+    auto replacement = rstd::move(replaced).unwrap_unchecked().physical;
+    EXPECT_NE(first_physical.as_ptr().as_raw_ptr(), replacement.as_ptr().as_raw_ptr());
+    EXPECT_EQ(replacement->generation, rstd::u64(2));
+    EXPECT_EQ(backend.allocations, rstd::usize(2));
 }
 
 TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
     owe::resource::TextureRegistry         textures;
     owe::resource_registry::BufferRegistry buffers;
     owe::resource_registry::ShaderRegistry shaders;
-    BufferUploadBackend                    upload_backend;
+    BufferBackend                          upload_backend;
     BufferContentProvider                  buffer_provider;
     ShaderArtifactProvider                 shader_provider;
-    auto upload = rstd::dyn<owe::vulkan::BufferUploadBackend>::from_ref(upload_backend);
+    auto upload = rstd::dyn<owe::vulkan::BufferBackend>::from_ref(upload_backend);
     auto buffer = rstd::dyn<owe::resource::BufferContentProvider>::from_ref(buffer_provider);
     auto shader = rstd::dyn<owe::resource::ShaderArtifactProvider>::from_ref(shader_provider);
 
@@ -305,7 +344,21 @@ TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
     EXPECT_EQ(table.BufferCount(), rstd::usize(1));
     EXPECT_EQ(table.ShaderCount(), rstd::usize(1));
     EXPECT_EQ(buffer_provider.loads, rstd::usize(1));
-    EXPECT_EQ(upload_backend.uploads, rstd::usize(1));
+    EXPECT_EQ(upload_backend.allocations, rstd::usize(1));
+    EXPECT_EQ(shader_provider.loads, rstd::usize(1));
+
+    auto texture_only = service.Prepare(plan,
+                                        owe::resource_registry::ResourceContentProviders {
+                                            .buffer = rstd::Some(buffer.as_mut_ref()),
+                                            .shader = rstd::Some(shader.as_mut_ref()),
+                                        },
+                                        owe::resource::ResourcePlanTextures);
+    ASSERT_TRUE(texture_only.is_ok());
+    auto texture_table = rstd::move(texture_only).unwrap_unchecked();
+    EXPECT_EQ(texture_table.BufferCount(), rstd::usize());
+    EXPECT_EQ(texture_table.ShaderCount(), rstd::usize());
+    EXPECT_EQ(buffer_provider.loads, rstd::usize(1));
+    EXPECT_EQ(upload_backend.allocations, rstd::usize(1));
     EXPECT_EQ(shader_provider.loads, rstd::usize(1));
 }
 
@@ -362,10 +415,7 @@ TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
     }));
 
     auto buffer_physical = rstd::sync::Arc<owe::resource_registry::BufferPhysical>::make(
-        owe::vulkan::BufferAllocation {},
-        rstd::u64(3),
-        rstd::u64(7),
-        owe::resource::ReadyToken { .value = rstd::u64(7) });
+        owe::vulkan::BufferAllocation {}, rstd::u64(3), rstd::u64(7));
     auto buffer_use =
         owe::resource::BufferUseHandle { .index = rstd::u64(1), .generation = rstd::u64(4) };
     ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedBufferUse {
@@ -550,38 +600,20 @@ TEST(DescriptorSystem, PreparesOwnedPushBindingPacket) {
 }
 
 TEST(UploadScheduler, TracksTimelineReadiness) {
-    owe::resource_registry::UploadScheduler       uploads;
-    owe::resource_registry::PreparedResourceTable table(rstd::u64(1));
-    auto physical = rstd::sync::Arc<owe::resource_registry::BufferPhysical>::make(
-        owe::vulkan::BufferAllocation {},
-        rstd::u64(1),
-        rstd::u64(1),
-        owe::resource::ReadyToken { .value = rstd::u64(1) });
-    ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedBufferUse {
-        .use = owe::resource::BufferUseHandle { .index = rstd::u64(), .generation = rstd::u64(1) },
-        .buffer =
-            owe::resource_registry::PreparedBuffer {
-                .resource = owe::resource::BufferHandle { .index      = rstd::u64(),
-                                                          .generation = rstd::u64(1) },
-                .physical = physical.clone(),
-            },
-    }));
-    auto first  = uploads.Reserve();
-    auto second = uploads.Reserve();
+    owe::resource_registry::UploadScheduler uploads;
+    auto                                    first  = uploads.Reserve();
+    auto                                    second = uploads.Reserve();
     EXPECT_LT(first.value, second.value);
-    EXPECT_TRUE(uploads.MarkSubmitted(first, table));
-    EXPECT_TRUE(uploads.MarkSubmitted(second, table));
-    EXPECT_EQ(physical.strong_count(), rstd::usize(4));
+    EXPECT_TRUE(uploads.MarkSubmitted(first, owe::vulkan::BufferUploadBatchLease {}));
+    EXPECT_TRUE(uploads.MarkSubmitted(second, owe::vulkan::BufferUploadBatchLease {}));
     ASSERT_TRUE(uploads.Pending().is_some());
     EXPECT_EQ(uploads.Pending()->value, second.value);
     EXPECT_EQ(uploads.InFlight(), rstd::usize(2));
 
     uploads.CompleteThrough(first.value);
-    EXPECT_EQ(physical.strong_count(), rstd::usize(3));
     EXPECT_EQ(uploads.InFlight(), rstd::usize(1));
     EXPECT_EQ(uploads.Pending()->value, second.value);
     uploads.CompleteThrough(second.value);
-    EXPECT_EQ(physical.strong_count(), rstd::usize(2));
     EXPECT_EQ(uploads.InFlight(), rstd::usize());
     EXPECT_TRUE(uploads.Pending().is_none());
 }

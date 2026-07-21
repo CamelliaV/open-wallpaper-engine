@@ -707,8 +707,6 @@ struct MemoryBudgetSource {
 
 struct PipelineParameters;
 
-class BufferUploadPool;
-
 class Device : NoCopy, NoMove {
 public:
     Device();
@@ -790,76 +788,11 @@ inline bool CreateStagingBuffer(VmaAllocator allocator, VkDeviceSize size,
     return true;
 }
 
-// ---------- StagingBuffer.hpp ----------
-
-class StagingBuffer;
-
-class StagingBufferRef {
-public:
-    VkDeviceSize size { 0 };
-    VkDeviceSize offset { 0 };
-
-    operator bool() const { return m_allocation != VK_NULL_HANDLE; }
-
-private:
-    friend class StagingBuffer;
-    VmaVirtualAllocation m_allocation {};
-    std::size_t          m_virtual_index { 0 };
-};
-
-class StagingBuffer : NoCopy, NoMove {
-public:
-    StagingBuffer(const Device&, VkDeviceSize size, VkBufferUsageFlags);
-    ~StagingBuffer();
-
-    bool allocate();
-    void destroy();
-
-    bool allocateSubRef(VkDeviceSize size, StagingBufferRef&, VkDeviceSize alignment = 1);
-    void unallocateSubRef(const StagingBufferRef&);
-    bool writeToBuf(const StagingBufferRef&, std::span<const rstd::uint8_t>,
-                    VkDeviceSize offset = 0);
-    bool fillBuf(const StagingBufferRef& ref, VkDeviceSize offset, VkDeviceSize size,
-                 rstd::uint8_t c);
-
-    bool prepareGpuBuffer();
-    bool recordUpload(vvk::CommandBuffer&);
-
-    VkBuffer gpuBuf() const;
-
-private:
-    struct VirtualBlock {
-        VmaVirtualBlock handle {};
-        bool            enabled { false };
-        std::size_t     index { 0 };
-        VkDeviceSize    offset { 0 };
-        VkDeviceSize    size { 0 };
-    };
-
-    VkResult      mapStageBuf();
-    VirtualBlock* newVirtualBlock(VkDeviceSize);
-    bool          increaseBuf(VkDeviceSize);
-
-    const Device& m_device;
-    VkDeviceSize  m_size_step;
-
-    VkBufferUsageFlags m_usage;
-
-    void*                     m_stage_raw { nullptr };
-    std::vector<VirtualBlock> m_virtual_blocks {};
-
-    VmaBufferParameters m_stage_buf;
-    VmaBufferParameters m_gpu_buf;
-};
-
-// ---------- BufferUploadPool.hpp ----------
-
-class BufferUploadPool;
+// ---------- BufferManager.hpp ----------
 
 class BufferAllocation {
 public:
     BufferAllocation() = default;
-    BufferAllocation(BufferUploadPool* owner, StagingBufferRef ref);
     ~BufferAllocation();
 
     BufferAllocation(const BufferAllocation&)            = delete;
@@ -868,16 +801,20 @@ public:
     BufferAllocation(BufferAllocation&& o) noexcept;
     BufferAllocation& operator=(BufferAllocation&& o) noexcept;
 
-    explicit operator bool() const noexcept { return m_owner != nullptr && m_ref.size > 0; }
+    explicit operator bool() const noexcept;
 
     VkBuffer     buffer() const noexcept;
-    VkDeviceSize offset() const noexcept { return m_ref.offset; }
-    VkDeviceSize size() const noexcept { return m_ref.size; }
+    VkDeviceSize offset() const noexcept;
+    VkDeviceSize size() const noexcept;
 
 private:
-    friend class BufferUploadPool;
-    BufferUploadPool* m_owner { nullptr };
-    StagingBufferRef  m_ref;
+    struct State;
+    friend class BufferManager;
+    friend class BufferUploadBatchLease;
+
+    explicit BufferAllocation(std::shared_ptr<State> state);
+
+    std::shared_ptr<State> m_state;
 };
 
 enum class BufferUploadClass
@@ -889,55 +826,107 @@ enum class BufferUploadClass
     Transfer,
 };
 
-struct BufferUploadRequest {
+struct BufferAllocationRequest {
     VkDeviceSize      size { 0 };
     VkDeviceSize      alignment { 1 };
     BufferUploadClass usage { BufferUploadClass::Vertex };
 };
 
-class BufferUploadPool : NoCopy, NoMove {
+struct BufferUploadTicket {
+    u64 value { 0 };
+
+    bool        Valid() const noexcept { return value != u64(); }
+    friend bool operator==(const BufferUploadTicket&, const BufferUploadTicket&) = default;
+};
+
+class BufferManager;
+
+class RecordedBufferUploads : NoCopy {
 public:
-    explicit BufferUploadPool(const Device&);
-    ~BufferUploadPool();
+    RecordedBufferUploads() = default;
+    ~RecordedBufferUploads();
+
+    RecordedBufferUploads(RecordedBufferUploads&&) noexcept;
+    RecordedBufferUploads& operator=(RecordedBufferUploads&&) noexcept;
+
+    bool Valid() const noexcept;
+
+private:
+    struct State;
+    friend class BufferManager;
+    friend class BufferUploadBatchLease;
+
+    RecordedBufferUploads(BufferManager* owner, std::shared_ptr<State> state);
+    void Reset();
+
+    BufferManager*         m_owner { nullptr };
+    std::shared_ptr<State> m_state;
+};
+
+class BufferUploadBatchLease : NoCopy {
+public:
+    BufferUploadBatchLease() = default;
+    ~BufferUploadBatchLease();
+
+    BufferUploadBatchLease(BufferUploadBatchLease&&) noexcept;
+    BufferUploadBatchLease& operator=(BufferUploadBatchLease&&) noexcept;
+
+    bool                                Valid() const noexcept;
+    std::span<const BufferUploadTicket> Tickets() const noexcept;
+
+private:
+    friend class BufferManager;
+    explicit BufferUploadBatchLease(std::shared_ptr<RecordedBufferUploads::State> state);
+
+    std::shared_ptr<RecordedBufferUploads::State> m_state;
+};
+
+class BufferManager : NoCopy, NoMove {
+public:
+    explicit BufferManager(const Device&);
+    ~BufferManager();
 
     bool init();
     void destroy();
 
-    Option<BufferAllocation> Upload(std::span<const rstd::uint8_t> data,
-                                    const BufferUploadRequest&     request);
-    bool                     Update(BufferAllocation&, std::span<const rstd::uint8_t> data);
-    void                     Release(StagingBufferRef ref);
-    VkBuffer                 gpuBuf() const;
-    bool                     preparePendingUploads();
-    bool                     recordPendingUploads(vvk::CommandBuffer& cmd);
+    Option<BufferAllocation>   Allocate(const BufferAllocationRequest& request);
+    Option<BufferUploadTicket> QueueWrite(BufferAllocation&              allocation,
+                                          std::span<const rstd::uint8_t> data,
+                                          VkDeviceSize                   destination_offset = 0);
+
+    bool HasPendingUploads() const noexcept;
+    bool RecordPendingUploads(vvk::CommandBuffer& cmd, RecordedBufferUploads& recorded);
+    Option<BufferUploadBatchLease> CommitRecordedUploads(RecordedBufferUploads&& recorded);
+    void CancelRecordedUploads(const std::shared_ptr<RecordedBufferUploads::State>& state);
+    void Trim();
 
 private:
-    const Device&              m_device;
-    Option<Box<StagingBuffer>> m_buf;
-    bool                       m_dirty { false };
+    struct Impl;
+    Box<Impl> m_impl;
 };
 
-struct BufferUploadBackend {
-    using Trait                  = BufferUploadBackend;
+struct BufferBackend {
+    using Trait                  = BufferBackend;
     static constexpr bool direct = false;
 
     template<typename Self, typename = void>
     struct Api {
-        using Trait = BufferUploadBackend;
+        using Trait = BufferBackend;
 
-        auto UploadBuffer(rstd::slice<rstd::u8> content, const BufferUploadRequest& request)
+        auto AllocateBuffer(const BufferAllocationRequest& request)
             -> rstd::Option<BufferAllocation> {
-            return rstd::trait_call<0>(this, content, request);
+            return rstd::trait_call<0>(this, request);
         }
 
-        bool UpdateBuffer(rstd::mut_ref<BufferAllocation> allocation,
-                          rstd::slice<rstd::u8>           content) {
-            return rstd::trait_call<1>(this, allocation, content);
+        auto QueueBufferWrite(rstd::mut_ref<BufferAllocation> allocation,
+                              rstd::slice<rstd::u8> content, VkDeviceSize destination_offset = 0)
+            -> rstd::Option<BufferUploadTicket> {
+            return rstd::trait_call<1>(this, allocation, content, destination_offset);
         }
     };
 
     template<typename T>
-    using Funcs = rstd::TraitFuncs<&T::UploadBuffer, &T::UpdateBuffer>;
+    using Funcs = rstd::TraitFuncs<&T::AllocateBuffer, &T::QueueBufferWrite>;
 };
 
 // ---------- GraphicsPipeline.hpp ----------
@@ -1217,24 +1206,22 @@ struct Impl<owe::vulkan::MemoryBudgetSource, owe::vulkan::Device> : ImplBase<owe
 };
 
 template<>
-struct Impl<owe::vulkan::BufferUploadBackend, owe::vulkan::BufferUploadPool>
-    : ImplBase<owe::vulkan::BufferUploadPool> {
-    auto UploadBuffer(slice<u8> content, const owe::vulkan::BufferUploadRequest& request)
+struct Impl<owe::vulkan::BufferBackend, owe::vulkan::BufferManager>
+    : ImplBase<owe::vulkan::BufferManager> {
+    auto AllocateBuffer(const owe::vulkan::BufferAllocationRequest& request)
         -> Option<owe::vulkan::BufferAllocation> {
-        auto uploaded =
-            this->self().Upload(std::span<const rstd::uint8_t>(
-                                    reinterpret_cast<const rstd::uint8_t*>(content.as_raw_ptr()),
-                                    content.len().to_primitive()),
-                                request);
-        if (uploaded.is_none()) return None();
-        return Some(rstd::move(uploaded).unwrap());
+        return this->self().Allocate(request);
     }
 
-    bool UpdateBuffer(mut_ref<owe::vulkan::BufferAllocation> allocation, slice<u8> content) {
-        return this->self().Update(*allocation,
-                                   std::span<const rstd::uint8_t>(
-                                       reinterpret_cast<const rstd::uint8_t*>(content.as_raw_ptr()),
-                                       content.len().to_primitive()));
+    auto QueueBufferWrite(mut_ref<owe::vulkan::BufferAllocation> allocation, slice<u8> content,
+                          VkDeviceSize destination_offset)
+        -> Option<owe::vulkan::BufferUploadTicket> {
+        return this->self().QueueWrite(
+            *allocation,
+            std::span<const rstd::uint8_t>(
+                reinterpret_cast<const rstd::uint8_t*>(content.as_raw_ptr()),
+                content.len().to_primitive()),
+            destination_offset);
     }
 };
 

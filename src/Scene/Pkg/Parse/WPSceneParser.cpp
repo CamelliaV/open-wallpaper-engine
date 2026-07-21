@@ -554,17 +554,6 @@ std::array<std::int32_t, 2> TextEffectFboExtent(const text::TextGeometry& geomet
     };
 }
 
-bool ResizeRenderTarget(Scene& scene, const std::string& name, std::int32_t width,
-                        std::int32_t height) {
-    auto it = scene.renderTargets.find(name);
-    if (it == scene.renderTargets.end()) return false;
-    auto& rt = it->second;
-    if (rt.width == width && rt.height == height) return false;
-    rt.width  = width;
-    rt.height = height;
-    return true;
-}
-
 struct TextRuntimeFbo {
     std::string   name;
     std::uint32_t scale { 1 };
@@ -594,10 +583,10 @@ struct TextRuntimeTargets {
 
         bool changed          = false;
         auto [next_w, next_h] = TextLayerExtent(geometry);
-        changed |= ResizeRenderTarget(*scene, ppong_a, next_w, next_h);
+        changed |= scene->ResizeRenderTarget(ppong_a, next_w, next_h);
         if (has_effect) {
-            changed |= ResizeRenderTarget(*scene, ppong_b, next_w, next_h);
-            changed |= ResizeRenderTarget(*scene, effect_final, next_w, next_h);
+            changed |= scene->ResizeRenderTarget(ppong_b, next_w, next_h);
+            changed |= scene->ResizeRenderTarget(effect_final, next_w, next_h);
         }
 
         if (auto it = scene->cameras.find(camera_key); it != scene->cameras.end() && it->second) {
@@ -613,7 +602,7 @@ struct TextRuntimeTargets {
 
         for (const auto& fbo : fbos) {
             auto [w, h] = TextEffectFboExtent(geometry, fbo.scale, fbo.fit);
-            changed |= ResizeRenderTarget(*scene, fbo.name, w, h);
+            changed |= scene->ResizeRenderTarget(fbo.name, w, h);
         }
 
         const rstd::array<float, 2> effect_size {
@@ -4121,15 +4110,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                             anchor_state,
                             apply_text_anchor,
                             runtime_targets,
-                            sp_mesh,
                             geometry_policy,
                             text_padding = style.padding](text::TextLayoutMetrics metrics) {
-        auto* compose_ptr         = compose_hold.get();
-        metrics.padding           = text_padding;
-        const auto geometry       = text::ResolveTextGeometry(geometry_policy, metrics);
-        const bool target_changed = runtime_targets->Apply(geometry);
-        anchor_state->width       = geometry.draw_width;
-        anchor_state->height      = geometry.draw_height;
+        auto* compose_ptr   = compose_hold.get();
+        metrics.padding     = text_padding;
+        const auto geometry = text::ResolveTextGeometry(geometry_policy, metrics);
+        (void)runtime_targets->Apply(geometry);
+        anchor_state->width  = geometry.draw_width;
+        anchor_state->height = geometry.draw_height;
         compose_ptr->SetSize({ geometry.draw_width, geometry.draw_height });
         apply_text_anchor();
         const float                 hx = geometry.draw_width * 0.5f;
@@ -4157,10 +4145,6 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         v.SetVertex(WE_IN_POSITION, pos);
         v.SetVertex(WE_IN_TEXCOORD, uv);
         mesh->SetDirty();
-        if (target_changed) {
-            mesh->SetLayoutDirty();
-            if (sp_mesh) sp_mesh->SetLayoutDirty();
-        }
     };
     rebuild_compose(initial_metrics);
 
@@ -4240,6 +4224,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // compose quad to the new text dims. Runs on the render thread, which
     // is also the JS thread — no synchronization needed.
     auto set_text = [layouter, rebuild_compose, current_text](std::string_view s) {
+        if (s == *current_text) return;
         *current_text = std::string(s);
         if (auto* active_face = layouter->Face()) active_face->Populate(text::DecodeUtf8(s));
         layouter->SetText(s);

@@ -760,6 +760,25 @@ TEST(SceneRenderTargets, EnsureLinkRenderTargetCreatesOwnedDescriptor) {
     EXPECT_EQ(scene.renderTargets.at(fallback_key).height, 1080);
 }
 
+TEST(SceneRenderTargets, CoalescesRuntimeExtentChanges) {
+    owe::Scene scene;
+    scene.renderTargets["_rt_clock"] = owe::SceneRenderTarget { .width = 64, .height = 32 };
+
+    EXPECT_TRUE(scene.ResizeRenderTarget("_rt_clock", 96, 48));
+    EXPECT_TRUE(scene.ResizeRenderTarget("_rt_clock", 128, 64));
+    EXPECT_FALSE(scene.ResizeRenderTarget("_rt_clock", 128, 64));
+
+    auto events = scene.ConsumePreparedRenderTargetDirtyEvents();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].name, "_rt_clock");
+    EXPECT_EQ(events[0].old_width, 64);
+    EXPECT_EQ(events[0].old_height, 32);
+    EXPECT_EQ(events[0].width, 128);
+    EXPECT_EQ(events[0].height, 64);
+    EXPECT_TRUE(scene.ConsumePreparedRenderTargetDirtyEvents().empty());
+    EXPECT_TRUE(scene.ConsumePreparedMeshDirtyEvents().empty());
+}
+
 TEST(SceneMaterialTextureDependency, ClassifiesPreparedRefreshCompatibility) {
     EXPECT_EQ(owe::ClassifySceneMaterialTexture(""), owe::SceneMaterialTextureDependency::Empty);
     EXPECT_EQ(owe::ClassifySceneMaterialTexture("tex/main"),

@@ -57,6 +57,8 @@ struct PassResourceUses {
     rstd::vec::Vec<resource::FramebufferUseHandle>    framebuffers;
     rstd::vec::Vec<resource::DescriptorBindingHandle> descriptors;
     rstd::vec::Vec<resource::ExternalUseHandle>       externals;
+
+    friend bool operator==(const PassResourceUses&, const PassResourceUses&) = default;
 };
 
 class PreparedPassResources {

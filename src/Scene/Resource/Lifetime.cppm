@@ -1,6 +1,7 @@
 export module wescene.resource_registry:lifetime;
 import rstd;
 import wescene.resource;
+import wescene.vulkan;
 
 import :prepared;
 
@@ -10,8 +11,8 @@ export namespace owe::resource_registry
 using namespace rstd::prelude;
 
 struct UploadLease {
-    resource::ReadyToken                ready;
-    rstd::vec::Vec<PreparedBufferLease> buffers;
+    resource::ReadyToken           ready;
+    vulkan::BufferUploadBatchLease buffers;
 };
 
 class UploadScheduler {
@@ -22,14 +23,13 @@ public:
         return resource::ReadyToken { .value = m_next_value };
     }
 
-    bool MarkSubmitted(resource::ReadyToken ready, const PreparedResourceTable& resources) {
+    bool MarkSubmitted(resource::ReadyToken ready, vulkan::BufferUploadBatchLease buffers) {
         if (! ready.Valid() || ready.value > m_next_value) return false;
-        auto leases = resources.Leases();
         if (m_in_flight
                 .insert(ready.value,
                         UploadLease {
                             .ready   = ready,
-                            .buffers = rstd::move(leases.buffers),
+                            .buffers = rstd::move(buffers),
                         })
                 .is_some()) {
             return false;
@@ -75,11 +75,14 @@ struct SubmissionLease {
     rstd::vec::Vec<PreparedFramebufferLease> framebuffers;
     rstd::vec::Vec<PreparedDescriptorLease>  descriptors;
     rstd::vec::Vec<PreparedExternalLease>    externals;
+    Option<vulkan::BufferUploadBatchLease>   buffer_uploads;
 };
 
 class SubmissionTracker {
 public:
-    auto Begin(const PreparedResourceTable& resources) -> resource::CompletionToken {
+    auto Begin(const PreparedResourceTable&           resources,
+               Option<vulkan::BufferUploadBatchLease> buffer_uploads = None())
+        -> resource::CompletionToken {
         ++m_next_value;
         if (m_next_value == u64()) ++m_next_value;
         resource::CompletionToken completion { .value = m_next_value };
@@ -97,6 +100,7 @@ public:
                             .framebuffers       = rstd::move(leases.framebuffers),
                             .descriptors        = rstd::move(leases.descriptors),
                             .externals          = rstd::move(leases.externals),
+                            .buffer_uploads     = rstd::move(buffer_uploads),
                         })
                 .is_some()) {
             return {};

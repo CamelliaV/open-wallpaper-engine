@@ -59,6 +59,33 @@ struct ResourcePlan {
     rstd::vec::Vec<ShaderPlanEntry>  shaders;
 };
 
+using ResourcePlanSections = rstd::uint32_t;
+
+enum class ResourcePlanSection : ResourcePlanSections
+{
+    Textures = 1u << 0u,
+    Buffers  = 1u << 1u,
+    Shaders  = 1u << 2u,
+};
+
+inline constexpr ResourcePlanSections ResourcePlanTextures {
+    static_cast<ResourcePlanSections>(ResourcePlanSection::Textures),
+};
+inline constexpr ResourcePlanSections ResourcePlanBuffers {
+    static_cast<ResourcePlanSections>(ResourcePlanSection::Buffers),
+};
+inline constexpr ResourcePlanSections ResourcePlanShaders {
+    static_cast<ResourcePlanSections>(ResourcePlanSection::Shaders),
+};
+inline constexpr ResourcePlanSections ResourcePlanAll {
+    ResourcePlanTextures | ResourcePlanBuffers | ResourcePlanShaders,
+};
+
+inline constexpr bool ResourcePlanIncludes(ResourcePlanSections sections,
+                                           ResourcePlanSections section) {
+    return (sections & section) == section;
+}
+
 struct ResourcePlanVisitor {
     using Trait                  = ResourcePlanVisitor;
     static constexpr bool direct = false;
@@ -84,19 +111,26 @@ struct ResourcePlanVisitor {
     using Funcs = TraitFuncs<&T::VisitTexture, &T::VisitBuffer, &T::VisitShader>;
 };
 
-inline auto VisitResourcePlan(const ResourcePlan& plan, mut_ref<dyn<ResourcePlanVisitor>> visitor)
+inline auto VisitResourcePlan(const ResourcePlan& plan, mut_ref<dyn<ResourcePlanVisitor>> visitor,
+                              ResourcePlanSections sections = ResourcePlanAll)
     -> Result<empty, ResourceError> {
-    for (const auto& entry : plan.textures) {
-        auto result = visitor->VisitTexture(entry);
-        if (result.is_err()) return result;
+    if (ResourcePlanIncludes(sections, ResourcePlanTextures)) {
+        for (const auto& entry : plan.textures) {
+            auto result = visitor->VisitTexture(entry);
+            if (result.is_err()) return result;
+        }
     }
-    for (const auto& entry : plan.buffers) {
-        auto result = visitor->VisitBuffer(entry);
-        if (result.is_err()) return result;
+    if (ResourcePlanIncludes(sections, ResourcePlanBuffers)) {
+        for (const auto& entry : plan.buffers) {
+            auto result = visitor->VisitBuffer(entry);
+            if (result.is_err()) return result;
+        }
     }
-    for (const auto& entry : plan.shaders) {
-        auto result = visitor->VisitShader(entry);
-        if (result.is_err()) return result;
+    if (ResourcePlanIncludes(sections, ResourcePlanShaders)) {
+        for (const auto& entry : plan.shaders) {
+            auto result = visitor->VisitShader(entry);
+            if (result.is_err()) return result;
+        }
     }
     return Ok(empty {});
 }
