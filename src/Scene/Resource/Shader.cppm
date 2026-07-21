@@ -33,23 +33,27 @@ struct ShaderRequest {
     friend bool operator==(const ShaderRequest&, const ShaderRequest&) = default;
 };
 
-struct ShaderRequestHasher {
-    rstd::hash::RandomState state;
+} // namespace owe::resource
 
-    auto operator()(const ShaderRequest& request) const noexcept -> u64 {
-        auto          seed = state(request.name);
-        constexpr u64 mix_constant(0x9e3779b97f4a7c15ULL);
-        auto          mix = [&](u64 value) {
-            seed ^= value.wrapping_add(mix_constant)
-                        .wrapping_add(seed.wrapping_shl(u64(6)))
-                        .wrapping_add(seed >> u64(2));
-        };
-        mix(state(request.source.index));
-        mix(state(request.source.generation));
-        mix(state(request.content_version));
-        return seed;
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::resource::ShaderRequest> : ImplBase<owe::resource::ShaderRequest> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().name, state);
+        hash::hash_into(this->self().source.index, state);
+        hash::hash_into(this->self().source.generation, state);
+        hash::hash_into(this->self().content_version, state);
     }
 };
+
+} // namespace rstd
+
+export namespace owe::resource
+{
 
 struct ShaderArtifactStage {
     ShaderType          stage { ShaderType::VERTEX };

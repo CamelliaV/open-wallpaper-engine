@@ -55,25 +55,33 @@ struct DescriptorSetSchema {
     }
 };
 
-struct DescriptorSetSchemaHasher {
-    rstd::hash::RandomState state;
+} // namespace owe::resource_registry
 
-    auto operator()(const DescriptorSetSchema& schema) const noexcept -> u64 {
-        auto seed = state(schema.push_descriptor);
-        auto mix  = [&](u64 value) {
-            seed ^= value.wrapping_add(u64(0x9e3779b97f4a7c15ULL))
-                        .wrapping_add(seed.wrapping_shl(u64(6)))
-                        .wrapping_add(seed >> u64(2));
-        };
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::resource_registry::DescriptorSetSchema>
+    : ImplBase<owe::resource_registry::DescriptorSetSchema> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        const auto& schema = this->self();
+        hash::hash_into(schema.push_descriptor, state);
+        hash::hash_into(schema.bindings.len(), state);
         for (const auto& binding : schema.bindings) {
-            mix(state(binding.binding));
-            mix(state(binding.descriptor_type));
-            mix(state(binding.descriptor_count));
-            mix(state(binding.stage_flags));
+            hash::hash_into(binding.binding, state);
+            hash::hash_into(binding.descriptor_type, state);
+            hash::hash_into(binding.descriptor_count, state);
+            hash::hash_into(binding.stage_flags, state);
         }
-        return seed;
     }
 };
+
+} // namespace rstd
+
+export namespace owe::resource_registry
+{
 
 struct DescriptorLayoutEntry {
     resource::DescriptorLayoutHandle handle;
@@ -198,12 +206,10 @@ public:
     }
 
 private:
-    using EntryMap = rstd::collections::HashMap<
-        resource::DescriptorLayoutHandle, DescriptorLayoutEntry,
-        resource::ResourceHandleHasher<resource::DescriptorLayoutHandle>>;
+    using EntryMap =
+        rstd::collections::HashMap<resource::DescriptorLayoutHandle, DescriptorLayoutEntry>;
     using IdentityMap =
-        rstd::collections::HashMap<DescriptorSetSchema, resource::DescriptorLayoutHandle,
-                                   DescriptorSetSchemaHasher>;
+        rstd::collections::HashMap<DescriptorSetSchema, resource::DescriptorLayoutHandle>;
 
     u64         m_generation { 1 };
     u64         m_next_index { 0 };

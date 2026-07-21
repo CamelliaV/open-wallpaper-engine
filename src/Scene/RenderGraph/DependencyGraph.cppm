@@ -14,11 +14,24 @@ struct NodeHandle {
     friend auto operator<=>(const NodeHandle&, const NodeHandle&) = default;
 };
 
-struct NodeHandleHasher {
-    rstd::hash::RandomState state;
+} // namespace owe::rg
 
-    auto operator()(NodeHandle handle) const noexcept -> rstd::u64 { return state(handle.index); }
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::rg::NodeHandle> : ImplBase<owe::rg::NodeHandle> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().index, state);
+    }
 };
+
+} // namespace rstd
+
+export namespace owe::rg
+{
 
 struct Node {
     using Trait                  = Node;
@@ -55,7 +68,7 @@ struct DependencyGraph {
     auto TopologicalOrder() const -> rstd::vec::Vec<NodeHandle>;
 
 private:
-    using LinkMap = rstd::collections::HashMap<NodeHandle, NodeLinks, NodeHandleHasher>;
+    using LinkMap = rstd::collections::HashMap<NodeHandle, NodeLinks>;
 
     usize   m_next_index { 0 };
     LinkMap m_nodes;

@@ -413,7 +413,7 @@ auto RenderGraph::getLastReadTextures(rstd::slice<NodeHandle> nodes) const
         result.push(rstd::vec::Vec<TextureNodeState>::make());
     }
 
-    using SeenMap = rstd::collections::HashMap<NodeHandle, bool, NodeHandleHasher>;
+    using SeenMap = rstd::collections::HashMap<NodeHandle, bool>;
     auto seen     = SeenMap::make();
     for (usize offset = nodes.len(); offset > usize(); --offset) {
         auto index  = offset - usize(1);

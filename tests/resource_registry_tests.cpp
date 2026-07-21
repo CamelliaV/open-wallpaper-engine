@@ -168,7 +168,7 @@ TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
     EXPECT_EQ((**physical).ready.value, rstd::u64(5));
 }
 
-TEST(ShaderRegistry, OwnsVersionedArtifactsBehindStableHandles) {
+TEST(ShaderRegistry, OwnsArtifactsByRequestIdentity) {
     owe::resource_registry::ShaderRegistry registry;
     ShaderArtifactProvider                 provider;
     auto object = rstd::dyn<owe::resource::ShaderArtifactProvider>::from_ref(provider);
@@ -185,14 +185,21 @@ TEST(ShaderRegistry, OwnsVersionedArtifactsBehindStableHandles) {
 
     auto changed = registry.Ensure(ShaderRequest(5), object);
     ASSERT_TRUE(changed.is_ok());
-    EXPECT_EQ(rstd::move(changed).unwrap_unchecked(), handle);
+    auto changed_handle = rstd::move(changed).unwrap_unchecked();
+    EXPECT_NE(changed_handle, handle);
     EXPECT_EQ(provider.loads, rstd::usize(2));
-    auto entry = registry.Resolve(handle);
-    ASSERT_TRUE(entry.is_some());
-    EXPECT_EQ((**entry).physical->physical_generation, rstd::u64(2));
+    EXPECT_EQ(registry.Size(), rstd::usize(2));
+
+    auto first_entry = registry.Resolve(handle);
+    ASSERT_TRUE(first_entry.is_some());
+    EXPECT_EQ((**first_entry).physical->artifact.content_version, rstd::u64(4));
+    auto changed_entry = registry.Resolve(changed_handle);
+    ASSERT_TRUE(changed_entry.is_some());
+    EXPECT_EQ((**changed_entry).physical->artifact.content_version, rstd::u64(5));
 
     registry.Reset();
     EXPECT_TRUE(registry.Resolve(handle).is_none());
+    EXPECT_TRUE(registry.Resolve(changed_handle).is_none());
 }
 
 TEST(BufferRegistry, OwnsLogicalDefinitionsBehindStableHandles) {

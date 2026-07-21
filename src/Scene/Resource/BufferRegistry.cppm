@@ -195,9 +195,7 @@ private:
     }
 
     template<typename Value>
-    using HandleMap =
-        rstd::collections::HashMap<resource::BufferHandle, Value,
-                                   resource::ResourceHandleHasher<resource::BufferHandle>>;
+    using HandleMap = rstd::collections::HashMap<resource::BufferHandle, Value>;
 
     u64                                                        m_generation { 1 };
     u64                                                        m_next_index { 0 };

@@ -113,9 +113,9 @@ public:
 private:
     friend struct RenderGraphBuilder;
 
-    using PassNodeMap = rstd::collections::HashMap<NodeHandle, PassNode, NodeHandleHasher>;
-    using TexNodeMap  = rstd::collections::HashMap<NodeHandle, TexNode, NodeHandleHasher>;
-    using PassMap = rstd::collections::HashMap<PassHandle, std::unique_ptr<Pass>, PassHandleHasher>;
+    using PassNodeMap   = rstd::collections::HashMap<NodeHandle, PassNode>;
+    using TexNodeMap    = rstd::collections::HashMap<NodeHandle, TexNode>;
+    using PassMap       = rstd::collections::HashMap<PassHandle, std::unique_ptr<Pass>>;
     using TextureKeyMap = rstd::collections::HashMap<String, NodeHandle>;
 
     auto getPassNode(NodeHandle) -> rstd::Option<PassNode&>;

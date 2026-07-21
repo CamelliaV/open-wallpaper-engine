@@ -50,18 +50,20 @@ using ExternalUseHandle       = ResourceHandle<ExternalUseHandleTag>;
 using DescriptorLayoutHandle  = ResourceHandle<DescriptorLayoutHandleTag>;
 using DescriptorBindingHandle = ResourceHandle<DescriptorBindingHandleTag>;
 
-template<typename Handle>
-struct ResourceHandleHasher {
-    rstd::hash::RandomState state;
+} // namespace owe::resource
 
-    auto operator()(const Handle& handle) const noexcept -> u64 {
-        auto seed = state(handle.index);
-        seed ^= state(handle.generation)
-                    .wrapping_add(u64(0x9e3779b97f4a7c15ULL))
-                    .wrapping_add(seed.wrapping_shl(u64(6)))
-                    .wrapping_add(seed >> u64(2));
-        return seed;
+export namespace rstd
+{
+
+template<typename Tag>
+struct Impl<hash::Hash, owe::resource::ResourceHandle<Tag>>
+    : ImplBase<owe::resource::ResourceHandle<Tag>> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().index, state);
+        hash::hash_into(this->self().generation, state);
     }
 };
 
-} // namespace owe::resource
+} // namespace rstd

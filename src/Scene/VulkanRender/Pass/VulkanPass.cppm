@@ -243,9 +243,7 @@ private:
     rstd::u64                                                    m_next_framebuffer { 0 };
     rstd::u64                                                    m_next_external { 0 };
     rstd::collections::HashMap<String, rstd::vec::Vec<rstd::u8>> m_buffers;
-    rstd::collections::HashMap<resource::ShaderRequest, resource::ShaderArtifact,
-                               resource::ShaderRequestHasher>
-        m_shaders;
+    rstd::collections::HashMap<resource::ShaderRequest, resource::ShaderArtifact> m_shaders;
 };
 
 class VulkanPass : public rg::Pass {

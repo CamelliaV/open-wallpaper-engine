@@ -245,13 +245,6 @@ private:
     std::vector<std::byte> m_bytes;
 };
 
-struct CanonicalCacheKeyHash {
-    template<typename T>
-    u64 operator()(const T& key) const {
-        return u64(static_cast<rstd::uint64_t>(key.value));
-    }
-};
-
 struct CanonicalCacheKeyStdHash {
     template<typename T>
     std::size_t operator()(const T& key) const {
@@ -658,3 +651,37 @@ inline FramebufferCacheKey MakeFramebufferCacheKey(const FramebufferResourceRequ
 }
 
 } // namespace owe::vulkan
+
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::vulkan::PipelineCacheKey> : ImplBase<owe::vulkan::PipelineCacheKey> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().value, state);
+    }
+};
+
+template<>
+struct Impl<hash::Hash, owe::vulkan::RenderPassCacheKey>
+    : ImplBase<owe::vulkan::RenderPassCacheKey> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().value, state);
+    }
+};
+
+template<>
+struct Impl<hash::Hash, owe::vulkan::FramebufferCacheKey>
+    : ImplBase<owe::vulkan::FramebufferCacheKey> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().value, state);
+    }
+};
+
+} // namespace rstd

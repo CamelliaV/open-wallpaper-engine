@@ -61,7 +61,8 @@ public:
     void Reset() { m_seen.clear(); }
 
 private:
-    rstd::collections::HashMap<PipelineCacheKey, u64, CanonicalCacheKeyHash, PipelineCacheKeyEqual>
+    rstd::collections::HashMap<PipelineCacheKey, u64, rstd::hash::RandomState,
+                               PipelineCacheKeyEqual>
         m_seen;
 };
 
@@ -92,7 +93,7 @@ public:
     void Reset() { m_seen.clear(); }
 
 private:
-    rstd::collections::HashMap<FramebufferCacheKey, u64, CanonicalCacheKeyHash,
+    rstd::collections::HashMap<FramebufferCacheKey, u64, rstd::hash::RandomState,
                                FramebufferCacheKeyEqual>
         m_seen;
 };
@@ -194,10 +195,9 @@ private:
     }
 
     using HandleMap =
-        rstd::collections::HashMap<resource::FramebufferHandle, rstd::sync::Weak<vvk::Framebuffer>,
-                                   resource::ResourceHandleHasher<resource::FramebufferHandle>>;
+        rstd::collections::HashMap<resource::FramebufferHandle, rstd::sync::Weak<vvk::Framebuffer>>;
 
-    rstd::collections::HashMap<FramebufferCacheKey, Entry, CanonicalCacheKeyHash,
+    rstd::collections::HashMap<FramebufferCacheKey, Entry, rstd::hash::RandomState,
                                FramebufferCacheKeyEqual>
               m_entries;
     u64       m_generation { 1 };
@@ -302,8 +302,7 @@ private:
     }
 
     using HandleMap =
-        rstd::collections::HashMap<resource::RenderPassHandle, rstd::sync::Weak<vvk::RenderPass>,
-                                   resource::ResourceHandleHasher<resource::RenderPassHandle>>;
+        rstd::collections::HashMap<resource::RenderPassHandle, rstd::sync::Weak<vvk::RenderPass>>;
 
     static auto CreateRenderPass(const Device& device, const RenderPassResourceDesc& desc)
         -> Option<vvk::RenderPass> {
@@ -400,7 +399,7 @@ private:
         return Some(rstd::move(pass));
     }
 
-    rstd::collections::HashMap<RenderPassCacheKey, Entry, CanonicalCacheKeyHash,
+    rstd::collections::HashMap<RenderPassCacheKey, Entry, rstd::hash::RandomState,
                                RenderPassCacheKeyEqual>
               m_entries;
     u64       m_generation { 1 };
@@ -544,12 +543,10 @@ private:
         return { .index = m_next_index++, .generation = m_generation };
     }
 
-    using HandleMap =
-        rstd::collections::HashMap<resource::PipelineHandle,
-                                   rstd::sync::Weak<PipelineResourceEntry>,
-                                   resource::ResourceHandleHasher<resource::PipelineHandle>>;
+    using HandleMap = rstd::collections::HashMap<resource::PipelineHandle,
+                                                 rstd::sync::Weak<PipelineResourceEntry>>;
 
-    rstd::collections::HashMap<PipelineCacheKey, Entry, CanonicalCacheKeyHash,
+    rstd::collections::HashMap<PipelineCacheKey, Entry, rstd::hash::RandomState,
                                PipelineCacheKeyEqual>
               m_entries;
     u64       m_generation { 1 };

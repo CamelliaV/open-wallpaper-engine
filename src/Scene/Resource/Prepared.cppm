@@ -286,30 +286,18 @@ public:
     }
 
 private:
-    using TextureMap =
-        rstd::collections::HashMap<resource::TextureUseHandle, PreparedTexture,
-                                   resource::ResourceHandleHasher<resource::TextureUseHandle>>;
-    using DescriptorMap = rstd::collections::HashMap<
-        resource::DescriptorBindingHandle, PreparedDescriptorBinding,
-        resource::ResourceHandleHasher<resource::DescriptorBindingHandle>>;
-    using BufferMap =
-        rstd::collections::HashMap<resource::BufferUseHandle, PreparedBufferUse,
-                                   resource::ResourceHandleHasher<resource::BufferUseHandle>>;
-    using ShaderMap =
-        rstd::collections::HashMap<resource::ShaderUseHandle, PreparedShaderUse,
-                                   resource::ResourceHandleHasher<resource::ShaderUseHandle>>;
-    using PipelineMap =
-        rstd::collections::HashMap<resource::PipelineUseHandle, PreparedPipeline,
-                                   resource::ResourceHandleHasher<resource::PipelineUseHandle>>;
+    using TextureMap = rstd::collections::HashMap<resource::TextureUseHandle, PreparedTexture>;
+    using DescriptorMap =
+        rstd::collections::HashMap<resource::DescriptorBindingHandle, PreparedDescriptorBinding>;
+    using BufferMap   = rstd::collections::HashMap<resource::BufferUseHandle, PreparedBufferUse>;
+    using ShaderMap   = rstd::collections::HashMap<resource::ShaderUseHandle, PreparedShaderUse>;
+    using PipelineMap = rstd::collections::HashMap<resource::PipelineUseHandle, PreparedPipeline>;
     using RenderPassMap =
-        rstd::collections::HashMap<resource::RenderPassUseHandle, PreparedRenderPass,
-                                   resource::ResourceHandleHasher<resource::RenderPassUseHandle>>;
+        rstd::collections::HashMap<resource::RenderPassUseHandle, PreparedRenderPass>;
     using FramebufferMap =
-        rstd::collections::HashMap<resource::FramebufferUseHandle, PreparedFramebuffer,
-                                   resource::ResourceHandleHasher<resource::FramebufferUseHandle>>;
+        rstd::collections::HashMap<resource::FramebufferUseHandle, PreparedFramebuffer>;
     using ExternalMap =
-        rstd::collections::HashMap<resource::ExternalUseHandle, PreparedExternalUse,
-                                   resource::ResourceHandleHasher<resource::ExternalUseHandle>>;
+        rstd::collections::HashMap<resource::ExternalUseHandle, PreparedExternalUse>;
 
     u64            m_generation { 0 };
     TextureMap     m_textures;

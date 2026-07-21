@@ -24,6 +24,36 @@ struct TexturePhysical {
     ReadyToken                                 ready;
 };
 
+struct TextureRegistryIdentity {
+    TextureRequestKind   kind { TextureRequestKind::Imported };
+    rstd::string::String key;
+
+    friend bool operator==(const TextureRegistryIdentity& lhs, const TextureRegistryIdentity& rhs) {
+        return lhs.kind == rhs.kind && lhs.key == rhs.key.as_str();
+    }
+};
+
+} // namespace owe::resource
+
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::resource::TextureRegistryIdentity>
+    : ImplBase<owe::resource::TextureRegistryIdentity> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(u32(static_cast<uint32_t>(this->self().kind)), state);
+        hash::hash_into(this->self().key, state);
+    }
+};
+
+} // namespace rstd
+
+export namespace owe::resource
+{
+
 class TextureRegistry {
 public:
     TextureRegistry()                                  = default;
@@ -33,7 +63,7 @@ public:
     auto Register(TextureRequest request) -> resource::TextureHandle {
         if (request.name.is_empty()) return {};
 
-        Identity identity {
+        TextureRegistryIdentity identity {
             .kind = request.kind,
             .key  = request.name.clone(),
         };
@@ -128,7 +158,7 @@ public:
     }
 
     auto Find(TextureRequestKind kind, ref<str> key) const -> Option<resource::TextureHandle> {
-        auto handle = m_handles.get(Identity {
+        auto handle = m_handles.get(TextureRegistryIdentity {
             .kind = kind,
             .key  = rstd::string::String::make(key),
         });
@@ -169,38 +199,14 @@ public:
     auto Size() const noexcept -> usize { return m_textures.len(); }
 
 private:
-    struct Identity {
-        TextureRequestKind   kind { TextureRequestKind::Imported };
-        rstd::string::String key;
-
-        friend bool operator==(const Identity& lhs, const Identity& rhs) {
-            return lhs.kind == rhs.kind && lhs.key == rhs.key.as_str();
-        }
-    };
-
-    struct IdentityHasher {
-        rstd::hash::RandomState state;
-
-        auto operator()(const Identity& identity) const noexcept -> u64 {
-            auto seed = state(u32(static_cast<rstd::uint32_t>(identity.kind)));
-            seed ^= state(identity.key)
-                        .wrapping_add(u64(0x9e3779b97f4a7c15ULL))
-                        .wrapping_add(seed.wrapping_shl(u64(6)))
-                        .wrapping_add(seed >> u64(2));
-            return seed;
-        }
-    };
-
     template<typename Value>
-    using HandleMap =
-        rstd::collections::HashMap<resource::TextureHandle, Value,
-                                   resource::ResourceHandleHasher<resource::TextureHandle>>;
+    using HandleMap = rstd::collections::HashMap<resource::TextureHandle, Value>;
 
-    u64                        m_generation { 1 };
-    u64                        m_next_index { 0 };
-    HandleMap<Texture>         m_textures;
-    HandleMap<TexturePhysical> m_resources;
-    rstd::collections::HashMap<Identity, resource::TextureHandle, IdentityHasher> m_handles;
+    u64                                                                          m_generation { 1 };
+    u64                                                                          m_next_index { 0 };
+    HandleMap<Texture>                                                           m_textures;
+    HandleMap<TexturePhysical>                                                   m_resources;
+    rstd::collections::HashMap<TextureRegistryIdentity, resource::TextureHandle> m_handles;
 };
 
 } // namespace owe::resource

@@ -14,12 +14,6 @@ struct PassHandle {
     friend auto operator<=>(const PassHandle&, const PassHandle&) = default;
 };
 
-struct PassHandleHasher {
-    rstd::hash::RandomState state;
-
-    auto operator()(PassHandle handle) const noexcept -> rstd::u64 { return state(handle.index); }
-};
-
 struct Pass {
     Pass()          = default;
     virtual ~Pass() = default;
@@ -36,3 +30,17 @@ struct VirtualPass : Pass {
 };
 
 } // namespace owe::rg
+
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::rg::PassHandle> : ImplBase<owe::rg::PassHandle> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().index, state);
+    }
+};
+
+} // namespace rstd

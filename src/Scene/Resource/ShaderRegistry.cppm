@@ -100,16 +100,12 @@ private:
         return { .index = m_next_index++, .generation = m_generation };
     }
 
-    using EntryMap =
-        rstd::collections::HashMap<resource::ShaderHandle, ShaderEntry,
-                                   resource::ResourceHandleHasher<resource::ShaderHandle>>;
+    using EntryMap = rstd::collections::HashMap<resource::ShaderHandle, ShaderEntry>;
 
-    u64      m_generation { 1 };
-    u64      m_next_index { 0 };
-    EntryMap m_entries;
-    rstd::collections::HashMap<resource::ShaderRequest, resource::ShaderHandle,
-                               resource::ShaderRequestHasher>
-        m_requests;
+    u64                                                                         m_generation { 1 };
+    u64                                                                         m_next_index { 0 };
+    EntryMap                                                                    m_entries;
+    rstd::collections::HashMap<resource::ShaderRequest, resource::ShaderHandle> m_requests;
 };
 
 } // namespace owe::resource_registry

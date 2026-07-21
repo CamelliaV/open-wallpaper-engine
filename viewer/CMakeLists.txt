@@ -42,7 +42,7 @@ if(BUILD_WEWEB)
             viewer-common
             owe-web-api
             rstd.cppstd
-            wavsen::ffi::vulkan
+            vvk::ffi::vulkan
             PkgConfig::GLFW
             PkgConfig::WEWEB_EGL
             PkgConfig::WEWEB_GLES3

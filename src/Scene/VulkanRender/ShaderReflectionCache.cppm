@@ -19,18 +19,26 @@ struct ShaderReflectionKey {
     bool operator==(const ShaderReflectionKey&) const = default;
 };
 
-struct ShaderReflectionKeyHash {
-    rstd::hash::RandomState state;
+} // namespace owe::vulkan
 
-    auto operator()(const ShaderReflectionKey& key) const noexcept -> rstd::u64 {
-        auto seed = state(key.shader_id);
-        seed ^= state(key.code_hash)
-                    .wrapping_add(rstd::u64(0x9e3779b97f4a7c15ULL))
-                    .wrapping_add(seed.wrapping_shl(rstd::u64(6)))
-                    .wrapping_add(seed >> rstd::u64(2));
-        return seed;
+export namespace rstd
+{
+
+template<>
+struct Impl<hash::Hash, owe::vulkan::ShaderReflectionKey>
+    : ImplBase<owe::vulkan::ShaderReflectionKey> {
+    template<typename H>
+        requires Impled<H, hash::Hasher>
+    void hash(H& state) const noexcept {
+        hash::hash_into(this->self().shader_id, state);
+        hash::hash_into(this->self().code_hash, state);
     }
 };
+
+} // namespace rstd
+
+export namespace owe::vulkan
+{
 
 struct CachedShaderStage {
     std::string               entry_point;
@@ -49,8 +57,7 @@ public:
     void Clear();
 
 private:
-    rstd::collections::HashMap<ShaderReflectionKey, CachedShaderReflection, ShaderReflectionKeyHash>
-        m_entries;
+    rstd::collections::HashMap<ShaderReflectionKey, CachedShaderReflection> m_entries;
 };
 
 auto MakeSceneShaderRequest(const SceneShader&) -> resource::ShaderRequest;

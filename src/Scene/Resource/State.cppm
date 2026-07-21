@@ -184,12 +184,9 @@ private:
         }
     }
 
-    using TextureMap =
-        rstd::collections::HashMap<resource::TextureHandle, TrackedTexture,
-                                   resource::ResourceHandleHasher<resource::TextureHandle>>;
+    using TextureMap = rstd::collections::HashMap<resource::TextureHandle, TrackedTexture>;
     using TextureUseMap =
-        rstd::collections::HashMap<resource::TextureUseHandle, resource::TextureHandle,
-                                   resource::ResourceHandleHasher<resource::TextureUseHandle>>;
+        rstd::collections::HashMap<resource::TextureUseHandle, resource::TextureHandle>;
 
     TextureMap    m_textures;
     TextureUseMap m_uses;

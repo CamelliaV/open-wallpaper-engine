@@ -13,13 +13,13 @@ import rstd.log;
 import rstd.cppstd;
 import wescene.types;
 
-// Vulkan FFI: wavsen::ffi::vulkan exposes the full Vk symbol surface as
+// Vulkan FFI: vvk::ffi::vulkan exposes the full Vk symbol surface as
 // a comprehensive FFI module. Re-exported so downstream consumers
 // (wescene.vulkan_render etc.) that `import wescene.vulkan;` still see
 // every Vk type / enumerator / PFN_* without needing their own
 // `import vulkan;`.
 export import vulkan;
-export import wavsen.vvk;
+export import vvk;
 
 // Re-export the host-only shader compile API. Lets existing consumers
 // (VulkanRender/* etc.) keep their `import wescene.vulkan;` without

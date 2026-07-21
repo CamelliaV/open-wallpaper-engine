@@ -34,7 +34,7 @@ target_include_directories(waywallen-bridge-producer PUBLIC .)
 target_link_libraries(waywallen-bridge-producer
     PUBLIC
         waywallen::bridge
-        wavsen::ffi::vulkan
+        vvk::ffi::vulkan
         rstd.cppstd
 )
 target_compile_features(waywallen-bridge-producer PUBLIC cxx_std_20)
@@ -96,7 +96,7 @@ if(BUILD_WEWEB)
     target_link_libraries(waywallen-web-producer-device
         PUBLIC
             owe-web-api
-            wavsen::ffi::vulkan
+            vvk::ffi::vulkan
             rstd.cppstd
     )
     target_compile_features(waywallen-web-producer-device PUBLIC cxx_std_20)
@@ -129,7 +129,7 @@ if(BUILD_WEWEB)
             waywallen::bridge
             waywallen-bridge-producer
             waywallen-web-producer-device
-            wavsen::ffi::vulkan
+            vvk::ffi::vulkan
             rstd::rstd
             rstd.cppstd
     )
