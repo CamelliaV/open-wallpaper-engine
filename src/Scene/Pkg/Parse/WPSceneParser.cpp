@@ -2963,8 +2963,6 @@ struct ParticleChildPtr {
     SceneNode*              node_parent { nullptr };
     WPParticleSubSystem*    particle_parent { nullptr };
 
-    i32 max_instancecount { 1 };
-
     // Effective world scale at node_parent. Particle child origins are
     // pre-divided by this so the shader's MVP scale recovers the authored
     // parent-relative world-pixel offset.
@@ -3028,8 +3026,6 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                                                         Vector3f(child_ptr.child->angles.data()),
                                                         child_ptr.child->name));
         child_data = ChildData(*child_ptr.child);
-
-        child_ptr.max_instancecount *= child_data.maxcount;
 
     } else {
         p_particle_obj = &wppartobj.particleObj;
@@ -3166,26 +3162,18 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         follow_anchor.max_length     = wppartRenderer.maxlength;
         follow_anchor.texture_ratio  = ParticleTextureRatio(material);
     }
-    {
-        std::uint32_t mesh_maxcount =
-            maxcount * static_cast<std::uint32_t>(child_ptr.max_instancecount.to_primitive());
-        if (rope_shader) {
-            std::uint32_t rope_vertices =
-                render_rope_trail ? mesh_maxcount * trail_length : mesh_maxcount;
-            SetRopeParticleMesh(mesh, particle_obj, rope_vertices, thick_format, render_rope_trail);
-        } else {
-            SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format, use_geometry_shader);
-        }
-    }
 
+    auto spawn_type         = ParseSpawnType(child_data.type);
+    auto max_instance_count = u32(
+        static_cast<std::uint32_t>(std::max(child_data.maxcount.to_primitive(), std::int32_t(0))));
     auto particleSub = Box<WPParticleSubSystem>::make(
         *context.scene,
         spMesh,
         u32(maxcount),
         f64(override.rate),
-        u32(static_cast<std::uint32_t>(child_data.maxcount.to_primitive())),
+        max_instance_count,
         f64(child_data.probability),
-        ParseSpawnType(child_data.type),
+        spawn_type,
         WPParticleAnimationSpec {
             .mode                = animationmode,
             .sequence_multiplier = sequencemultiplier,
@@ -3195,6 +3183,29 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         f64(render_rope_trail ? static_cast<double>(wppartRenderer.length) : 0.0),
         f64(static_cast<double>(particle_obj.starttime)),
         particle_obj.flags[wpscene::Particle::FlagEnum::wordspace]);
+
+    {
+        auto mesh_capacity = particleSub->MaxParticleCapacity();
+        if (mesh_capacity.is_none()) {
+            rstd_error("particle mesh capacity overflow for '{}'", spNode->Name());
+            return;
+        }
+        auto mesh_maxcount = mesh_capacity->to_primitive();
+        if (rope_shader) {
+            std::uint32_t rope_vertices = mesh_maxcount;
+            if (render_rope_trail) {
+                auto capacity = mesh_capacity->checked_mul(u32(trail_length));
+                if (capacity.is_none()) {
+                    rstd_error("particle rope capacity overflow for '{}'", spNode->Name());
+                    return;
+                }
+                rope_vertices = capacity->to_primitive();
+            }
+            SetRopeParticleMesh(mesh, particle_obj, rope_vertices, thick_format, render_rope_trail);
+        } else {
+            SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format, use_geometry_shader);
+        }
+    }
 
     particleSub->SetOwnerNode(spNode.as_ptr());
     LoadEmitter(*particleSub,
@@ -3222,11 +3233,10 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         ParseParticleObj(context,
                          wppartobj,
                          {
-                             .child             = &child,
-                             .node_parent       = spNode.as_ptr(),
-                             .particle_parent   = particleSub.get(),
-                             .max_instancecount = child_ptr.max_instancecount,
-                             .world_scale       = node_world_scale,
+                             .child           = &child,
+                             .node_parent     = spNode.as_ptr(),
+                             .particle_parent = particleSub.get(),
+                             .world_scale     = node_world_scale,
                          });
     }
 

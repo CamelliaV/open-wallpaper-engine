@@ -398,6 +398,17 @@ public:
         EVENT_DEATH,
     };
 
+    static auto EffectiveInstanceCapacity(u32 max_instance_count, SpawnType spawn_type) noexcept
+        -> u32 {
+        // Static subsystems own one persistent instance; the limit only bounds event pools.
+        return spawn_type == SpawnType::STATIC ? u32(1) : max_instance_count;
+    }
+
+    static auto MaxParticleCapacity(u32 max_count, u32 max_instance_count,
+                                    SpawnType spawn_type) noexcept -> Option<u32> {
+        return max_count.checked_mul(EffectiveInstanceCapacity(max_instance_count, spawn_type));
+    }
+
     WPParticleSubSystem(Scene&, std::shared_ptr<SceneMesh>, u32 max_count, f64 rate,
                         u32 max_instance_count, f64 probability, SpawnType, WPParticleAnimationSpec,
                         WPParticleFollowAnchor = {}, u32 trail_length = {}, f64 trail_duration = {},
@@ -436,6 +447,9 @@ public:
 
     auto Type() const noexcept -> SpawnType { return m_spawn_type; }
     auto MaxInstanceCount() const noexcept -> u32 { return m_max_instance_count; }
+    auto MaxParticleCapacity() const noexcept -> Option<u32> {
+        return m_max_count.checked_mul(m_max_instance_count);
+    }
     auto FollowPosition(const particle::ParticleStorage&, particle::ParticleSlot) const
         -> Eigen::Vector3f;
     auto InstanceState(usize index) const -> const WPParticleInstanceState& {

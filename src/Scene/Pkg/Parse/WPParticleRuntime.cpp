@@ -375,7 +375,7 @@ WPParticleSubSystem::WPParticleSubSystem(Scene& scene, std::shared_ptr<SceneMesh
       m_rate(rate),
       m_start_time(start_time),
       m_world_space(world_space),
-      m_max_instance_count(max_instance_count),
+      m_max_instance_count(EffectiveInstanceCapacity(max_instance_count, spawn_type)),
       m_probability(probability),
       m_spawn_type(spawn_type),
       m_trail_length(trail_length),

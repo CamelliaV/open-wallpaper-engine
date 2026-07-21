@@ -5,6 +5,7 @@ import rstd.cppstd;
 import eigen;
 import wescene.particle;
 import wescene.particle.program;
+import wescene.pkg.parse;
 
 using namespace rstd::prelude;
 
@@ -242,4 +243,21 @@ TEST(ParticleProgram, RunsPreparedProgramsInContractOrder) {
     particle::ParticleSlotReader value(instance.Storage(), particle::ParticleSlot {});
     EXPECT_FLOAT_EQ(value.Read(temperature), 42.0f);
     EXPECT_FALSE(value.Read(instance.Storage().SlotStateKey()).fresh);
+}
+
+TEST(WPParticleSubSystem, DerivesMeshCapacityFromItsOwnInstancePool) {
+    using SubSystem = owe::WPParticleSubSystem;
+    using SpawnType = SubSystem::SpawnType;
+
+    auto static_capacity = SubSystem::MaxParticleCapacity(u32(500), u32(20), SpawnType::STATIC);
+    ASSERT_TRUE(static_capacity.is_some());
+    EXPECT_EQ(*static_capacity, u32(500));
+
+    auto event_capacity =
+        SubSystem::MaxParticleCapacity(u32(100), u32(20), SpawnType::EVENT_FOLLOW);
+    ASSERT_TRUE(event_capacity.is_some());
+    EXPECT_EQ(*event_capacity, u32(2000));
+
+    EXPECT_TRUE(
+        SubSystem::MaxParticleCapacity(u32::MAX, u32(2), SpawnType::EVENT_FOLLOW).is_none());
 }
