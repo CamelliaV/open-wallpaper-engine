@@ -529,7 +529,7 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
     m_frame.world_space            = m_world_space;
     m_frame.time                   = m_time;
     m_frame.delta                  = frame_time;
-    m_frame.emitter_delta          = frame_time * m_rate;
+    m_frame.emitter_delta          = frame_time;
     m_frame.trail_sample_steps     = usize();
     m_frame.trail_sample_remainder = f64();
     if (m_trail_key.is_some()) {
@@ -587,7 +587,7 @@ void WPParticleSubSystem::UpdateBoundedState(WPParticleInstanceRef current) {
     }
 }
 
-void WPParticleSubSystem::Advance(f64 frame_time, bool update_mesh) {
+void WPParticleSubSystem::Advance(f64 frame_time, f64 child_frame_time, bool update_mesh) {
     m_time += frame_time;
     UpdateFrameInput(frame_time);
     if (m_spawn_type == SpawnType::STATIC && System().InstanceCount() == usize()) {
@@ -618,7 +618,7 @@ void WPParticleSubSystem::Advance(f64 frame_time, bool update_mesh) {
         m_mesh->SetDirty();
     }
     for (auto& child : m_children) {
-        child->Tick(frame_time, update_mesh);
+        child->Tick(child_frame_time, update_mesh);
     }
 }
 
@@ -632,7 +632,7 @@ void WPParticleSubSystem::Warmup() {
     auto frame_time =
         f64(m_start_time.to_primitive() / static_cast<double>(frame_count.to_primitive()));
     for (u32 index {}; index < frame_count; ++index) {
-        Advance(frame_time, false);
+        Advance(frame_time, frame_time, false);
     }
 }
 
@@ -641,7 +641,8 @@ void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
         m_started = true;
         Warmup();
     }
-    Advance(frame_time, update_mesh);
+    auto rate = m_instance_override ? m_instance_override->rate : m_rate.to_primitive();
+    Advance(frame_time * f64(std::max(rate, 0.0)), frame_time, update_mesh);
 }
 
 void WPParticleSubSystem::SpawnChild(WPParticleInstanceRef parent, WPParticleSubSystem& child,

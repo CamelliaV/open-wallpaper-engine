@@ -477,7 +477,7 @@ public:
 
 private:
     void Warmup();
-    void Advance(f64 frame_time, bool update_mesh);
+    void Advance(f64 frame_time, f64 child_frame_time, bool update_mesh);
     void UpdateFrameInput(f64 frame_time);
     void UpdateBoundedState(WPParticleInstanceRef);
     void SpawnChild(WPParticleInstanceRef, WPParticleSubSystem&, particle::ParticleSlot,
