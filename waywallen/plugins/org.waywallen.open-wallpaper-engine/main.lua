@@ -20,7 +20,7 @@ end
 function M.info()
     return {
         name = "wallpaper_engine",
-        display_name = "Steam Workshop",
+        display_name = "Workshop",
         status = {
             { id = "steam_account", label = "Status", group = "Steam account", order = 20 },
         },

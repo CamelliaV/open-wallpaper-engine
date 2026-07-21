@@ -96,6 +96,7 @@ end
 
 local main = assert(loadfile(plugin_root .. "/main.lua", "t", _ENV))()
 local info = main.info()
+equal(info.display_name, "Workshop", "display name")
 equal(info.capabilities.discover.subscription, true, "subscription capability")
 equal(info.capabilities.discover.download, nil, "download capability must be absent")
 equal(info.capabilities.discover.resolve, nil, "resolve capability must be absent")
