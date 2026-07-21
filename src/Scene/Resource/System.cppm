@@ -76,11 +76,17 @@ struct GraphicsResourcePreparer {
             -> Result<resource::DescriptorBindingHandle, resource::ResourceError> {
             return rstd::trait_call<3>(this, device, pipeline_use, images, rstd::move(buffer));
         }
+
+        auto UpdateDescriptorImages(resource::DescriptorBindingHandle handle,
+                                    slice<DescriptorImageBinding>     images)
+            -> Result<empty, resource::ResourceError> {
+            return rstd::trait_call<4>(this, handle, images);
+        }
     };
 
     template<typename T>
     using Funcs = TraitFuncs<&T::PreparePipeline, &T::PrepareFramebuffer, &T::PrepareRenderPass,
-                             &T::PrepareDescriptor>;
+                             &T::PrepareDescriptor, &T::UpdateDescriptorImages>;
 };
 
 struct ExternalResourcePreparer {
@@ -319,6 +325,20 @@ public:
         return Ok(handle);
     }
 
+    auto UpdateDescriptorImages(resource::DescriptorBindingHandle handle,
+                                slice<DescriptorImageBinding>     images)
+        -> Result<empty, resource::ResourceError> {
+        auto prepared = m_prepared.ResolveMut(handle);
+        if (prepared.is_none()) {
+            return Err(resource::ResourceError {
+                .kind = resource::ResourceErrorKind::MissingDefinition,
+                .message =
+                    rstd::format("prepared descriptor binding {} is unavailable", handle.index),
+            });
+        }
+        return (**prepared).UpdateImages(images);
+    }
+
     bool HasPendingUploads() const { return m_registries.BufferManager().HasPendingUploads(); }
 
     bool RecordPendingUploads(vvk::CommandBuffer&            command,
@@ -481,6 +501,12 @@ struct Impl<owe::resource_registry::GraphicsResourcePreparer,
                            Option<owe::resource_registry::DescriptorBufferBinding> buffer)
         -> Result<owe::resource::DescriptorBindingHandle, owe::resource::ResourceError> {
         return this->self().PrepareDescriptor(device, pipeline_use, images, rstd::move(buffer));
+    }
+
+    auto UpdateDescriptorImages(owe::resource::DescriptorBindingHandle                handle,
+                                slice<owe::resource_registry::DescriptorImageBinding> images)
+        -> Result<empty, owe::resource::ResourceError> {
+        return this->self().UpdateDescriptorImages(handle, images);
     }
 };
 

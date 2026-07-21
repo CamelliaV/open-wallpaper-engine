@@ -754,10 +754,16 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     {
         auto images = rstd::vec::Vec<resource_registry::DescriptorImageBinding>::with_capacity(
             usize(vk_textures.size()));
+        m_desc.descriptor_image_slots.assign(vk_textures.size(), 0);
         for (std::size_t index = 0; index < vk_textures.size(); ++index) {
             auto  binding = m_desc.vk_tex_binding[index];
             auto& slots   = vk_textures[index];
             if (binding < 0 || slots.slots.empty()) continue;
+            auto frame = scene.TextureFrame(m_desc.draw_item, usize(index));
+            if (frame.is_some() && frame->image_slot < usize(slots.slots.size())) {
+                slots.active = static_cast<std::ptrdiff_t>(frame->image_slot.to_primitive());
+                m_desc.descriptor_image_slots[index] = slots.active;
+            }
             images.push(resource_registry::DescriptorImageBinding {
                 .binding = static_cast<rstd::uint32_t>(binding),
                 .image   = slots.getActive(),
@@ -850,6 +856,45 @@ bool CustomShaderPass::update(PassUpdateContext& context) {
         if (! RenderBufferResolver::updateDynamicDrawBuffers(
                 request, m_desc.draw_buffers, context.buffers)) {
             return false;
+        }
+    }
+
+    if (m_desc.descriptor_binding.is_some()) {
+        auto images = rstd::vec::Vec<resource_registry::DescriptorImageBinding>::with_capacity(
+            usize(m_desc.texture_bindings.size()));
+        bool changed = m_desc.descriptor_image_slots.size() != m_desc.texture_bindings.size();
+        if (changed) m_desc.descriptor_image_slots.assign(m_desc.texture_bindings.size(), 0);
+
+        for (std::size_t index = 0; index < m_desc.texture_bindings.size(); ++index) {
+            const auto& binding = m_desc.texture_bindings[index];
+            if (binding.empty() || binding.use.is_none()) continue;
+            auto prepared = context.resources->Resolve(*binding.use);
+            if (prepared.is_none() || (**prepared).image.slots.empty()) return false;
+
+            auto slot  = std::ptrdiff_t {};
+            auto frame = context.textures->TextureFrame(m_desc.draw_item, usize(index));
+            if (frame.is_some() && frame->image_slot < usize((**prepared).image.slots.size())) {
+                slot = static_cast<std::ptrdiff_t>(frame->image_slot.to_primitive());
+            }
+            changed |= m_desc.descriptor_image_slots[index] != slot;
+            m_desc.descriptor_image_slots[index] = slot;
+
+            const auto vk_binding = m_desc.vk_tex_binding[index];
+            if (vk_binding < 0) continue;
+            images.push(resource_registry::DescriptorImageBinding {
+                .binding = static_cast<rstd::uint32_t>(vk_binding),
+                .image   = (**prepared).image.slots[static_cast<std::size_t>(slot)],
+            });
+        }
+
+        if (changed) {
+            auto updated = context.graphics->UpdateDescriptorImages(*m_desc.descriptor_binding,
+                                                                    images.as_slice());
+            if (updated.is_err()) {
+                auto error = rstd::move(updated).unwrap_err_unchecked();
+                rstd_error("update descriptor images failed: {}", error.message.as_str());
+                return false;
+            }
         }
     }
 

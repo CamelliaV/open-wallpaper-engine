@@ -762,12 +762,18 @@ struct RenderProgram {
                 return false;
             }
         }
-        PassUpdateContext update_context {
-            .buffers = buffer_writer.as_mut_ref(),
-        };
+        auto graphics = dyn<resource_registry::GraphicsResourcePreparer>::from_ref(rr.resources);
         for (auto& record : pass_records) {
             auto pass = resolve(record);
-            if (pass && pass->prepared() && ! pass->update(update_context)) {
+            if (! pass || ! pass->prepared()) continue;
+            PreparedPassResources resources(rr.resources.Prepared(), record.resources);
+            PassUpdateContext     update_context {
+                .buffers   = buffer_writer.as_mut_ref(),
+                .resources = ref<PreparedPassResources>::from_raw_parts(rstd::addressof(resources)),
+                .graphics  = graphics.as_mut_ref(),
+                .textures  = textures,
+            };
+            if (! pass->update(update_context)) {
                 rstd_error("update pass resources failed: {}", record.pass_name);
                 return false;
             }

@@ -324,8 +324,8 @@ TEST(SceneTextureAnimation, AdvancesOncePerRuntimeFrame) {
     scene.sceneGraph->AppendChild(second_node.clone());
 
     owe::SceneTexture texture { .url = "tex/sprite", .isSprite = true };
-    texture.spriteAnim.AppendFrame(owe::SpriteFrame { .frametime = 0.1f, .x = 0.0f });
-    texture.spriteAnim.AppendFrame(owe::SpriteFrame { .frametime = 0.1f, .x = 0.5f });
+    texture.spriteAnim.AppendFrame(owe::SpriteFrame { .imageId = 0, .frametime = 0.1f, .x = 0.0f });
+    texture.spriteAnim.AppendFrame(owe::SpriteFrame { .imageId = 1, .frametime = 0.1f, .x = 0.5f });
     scene.textures[texture.url] = rstd::move(texture);
     scene.RebuildResourceIndex();
 
@@ -341,6 +341,7 @@ TEST(SceneTextureAnimation, AdvancesOncePerRuntimeFrame) {
     auto initial = scene.TextureFrame(*draw_id, rstd::usize());
     ASSERT_TRUE(initial.is_some());
     EXPECT_FLOAT_EQ(initial->translation[rstd::usize()], 0.0f);
+    EXPECT_EQ(initial->image_slot, rstd::usize());
 
     scene.Runtime().Advance(rstd::f64(0.01));
     auto first_query  = scene.TextureFrame(*draw_id, rstd::usize());
@@ -350,6 +351,7 @@ TEST(SceneTextureAnimation, AdvancesOncePerRuntimeFrame) {
     ASSERT_TRUE(second_query.is_some());
     ASSERT_TRUE(shared_query.is_some());
     EXPECT_FLOAT_EQ(first_query->translation[rstd::usize()], 0.5f);
+    EXPECT_EQ(first_query->image_slot, rstd::usize(1));
     EXPECT_EQ(first_query->translation, second_query->translation);
     EXPECT_EQ(first_query->translation, shared_query->translation);
     EXPECT_EQ(first_query->revision, shared_query->revision);

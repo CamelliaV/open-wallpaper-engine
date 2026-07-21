@@ -259,6 +259,69 @@ struct PreparedDescriptorBinding {
         };
     }
 
+    auto UpdateImages(slice<DescriptorImageBinding> next)
+        -> Result<empty, resource::ResourceError> {
+        if (images.len() != next.len()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::MissingDefinition,
+                .message = rstd::format("descriptor image binding count changed"),
+            });
+        }
+
+        bool changed = false;
+        for (usize index {}; index < next.len(); ++index) {
+            const auto& current = images[index];
+            changed |= current.binding != next[index].binding ||
+                       current.image.view != next[index].image.view ||
+                       current.image.sampler != next[index].image.sampler;
+        }
+        if (! changed) return Ok(empty {});
+
+        auto updated = rstd::vec::Vec<DescriptorImageBinding>::with_capacity(next.len());
+        for (usize index {}; index < next.len(); ++index) {
+            updated.push(DescriptorImageBinding {
+                .binding = next[index].binding,
+                .image   = next[index].image,
+            });
+        }
+
+        if (backend == DescriptorBindingBackend::Set) {
+            if (set.is_none() || ! set->valid()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::MissingDefinition,
+                    .message = rstd::format("descriptor set is unavailable"),
+                });
+            }
+            vvk::DescriptorUpdateBatch updates;
+            for (const auto& binding : updated) {
+                VkDescriptorImageInfo image {
+                    .sampler     = binding.image.sampler,
+                    .imageView   = binding.image.view,
+                    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                };
+                if (! updates.WriteImage(
+                        set->clone(),
+                        binding.binding,
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        slice<VkDescriptorImageInfo>::from_raw_parts(&image, usize(1)))) {
+                    return Err(resource::ResourceError {
+                        .kind    = resource::ResourceErrorKind::BackendFailure,
+                        .message = rstd::format("update descriptor image binding failed"),
+                    });
+                }
+            }
+            if (! updates.Commit().committed()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = rstd::format("update descriptor set failed"),
+                });
+            }
+        }
+
+        images = rstd::move(updated);
+        return Ok(empty {});
+    }
+
     void Record(vvk::CommandBuffer& command, VkPipelineLayout layout) const {
         if (backend == DescriptorBindingBackend::Set) {
             if (set.is_none() || ! set->valid()) return;

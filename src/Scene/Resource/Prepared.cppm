@@ -174,6 +174,11 @@ public:
         return m_descriptors.get(handle);
     }
 
+    auto ResolveMut(resource::DescriptorBindingHandle handle)
+        -> Option<mut_ref<PreparedDescriptorBinding>> {
+        return m_descriptors.get_mut(handle);
+    }
+
     void Insert(PreparedExternalUse external) {
         (void)m_externals.insert(external.use, rstd::move(external));
     }

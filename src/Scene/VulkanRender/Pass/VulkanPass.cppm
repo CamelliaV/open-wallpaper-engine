@@ -128,7 +128,10 @@ struct PassRecordContext {
 };
 
 struct PassUpdateContext {
-    rstd::mut_ref<rstd::dyn<resource::BufferContentWriter>> buffers;
+    rstd::mut_ref<rstd::dyn<resource::BufferContentWriter>>               buffers;
+    rstd::ref<PreparedPassResources>                                      resources;
+    rstd::mut_ref<rstd::dyn<resource_registry::GraphicsResourcePreparer>> graphics;
+    rstd::ref<rstd::dyn<SceneTextureAnimationView>>                       textures;
 };
 
 struct PassPrepareContext {

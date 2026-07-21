@@ -1101,6 +1101,7 @@ auto SceneTextureAnimationRegistry::Frame(SceneDrawItemId draw, usize texture_in
     return Some(SceneTextureFrameView {
         .rotation    = { frame->xAxis[0], frame->xAxis[1], frame->yAxis[0], frame->yAxis[1] },
         .translation = { frame->x, frame->y },
+        .image_slot  = usize(static_cast<std::size_t>(frame->imageId)),
         .revision    = animation->second.revision,
     });
 }

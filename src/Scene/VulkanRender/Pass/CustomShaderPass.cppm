@@ -47,6 +47,7 @@ public:
         // -----prepared
         // vulkan texs
         std::vector<rstd::int32_t>              vk_tex_binding;
+        std::vector<std::ptrdiff_t>             descriptor_image_slots;
         resource_registry::PreparedBarrierBatch sampled_barriers;
         VkExtent2D                              output_extent {};
         VkSampleCountFlagBits                   samples { VK_SAMPLE_COUNT_1_BIT };

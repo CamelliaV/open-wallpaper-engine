@@ -1636,6 +1636,7 @@ private:
 struct SceneTextureFrameView {
     rstd::array<float, 4> rotation { 1.0f, 0.0f, 0.0f, 1.0f };
     rstd::array<float, 2> translation { 0.0f, 0.0f };
+    usize                 image_slot { 0 };
     u64                   revision { 1 };
 };
 
