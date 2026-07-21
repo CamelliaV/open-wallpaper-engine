@@ -117,6 +117,9 @@ struct MainSetVolumeScale {
 struct MainSetMuted {
     bool muted { false };
 };
+struct MainSetAudioClientIdentity {
+    SceneAudioClientIdentity identity;
+};
 struct MainSetFillMode {
     FillMode mode { FillMode::ASPECTCROP };
 };
@@ -143,10 +146,11 @@ struct MainPreparedPassDiagnostics {
 
 struct MainMsg {
     std::variant<MainLoadScene, MainConfigure, MainSetFps, MainSetVolume, MainSetVolumeScale,
-                 MainSetMuted, MainSetFillMode, MainSetSpeed, MainSetUserProperty,
-                 MainSetFirstFrameCallback, MainSetUserPropertyDiagnosticCallback,
-                 MainUserPropertyDiagnostics, MainPreparedPassDiagnostics, MainStop, MainPauseAudio,
-                 MainFirstFrame, MainShutdown>
+                 MainSetMuted, MainSetAudioClientIdentity, MainSetFillMode, MainSetSpeed,
+                 MainSetUserProperty, MainSetFirstFrameCallback,
+                 MainSetUserPropertyDiagnosticCallback, MainUserPropertyDiagnostics,
+                 MainPreparedPassDiagnostics, MainStop, MainPauseAudio, MainFirstFrame,
+                 MainShutdown>
         v;
 };
 
@@ -781,6 +785,7 @@ public:
     void on(MainSetVolume&&);
     void on(MainSetVolumeScale&&);
     void on(MainSetMuted&&);
+    void on(MainSetAudioClientIdentity&&);
     void on(MainSetFillMode&&);
     void on(MainSetSpeed&&);
     void on(MainSetUserProperty&&);
@@ -1430,6 +1435,20 @@ void SceneRuntimeController::on(MainSetMuted&& m) {
     m_sound_manager->set_muted(m.muted);
 }
 
+void SceneRuntimeController::on(MainSetAudioClientIdentity&& m) {
+    auto identity = wavsen::audio::AudioClientIdentity {
+        .application_name = std::move(m.identity.application_name),
+        .application_id   = std::move(m.identity.application_id),
+        .stream_prefix    = std::move(m.identity.stream_prefix),
+        .component        = std::move(m.identity.component),
+        .media_name       = std::move(m.identity.media_name),
+        .media_role       = std::move(m.identity.media_role),
+    };
+    if (! m_sound_manager->set_identity(std::move(identity))) {
+        rstd_warn("audio identity cannot change after device initialization");
+    }
+}
+
 void SceneRuntimeController::on(MainSetFillMode&& m) {
     m_config.fill_mode = m.mode;
     m_render_controller->post(RenderMsg { RenderSetFillMode { m.mode } });
@@ -1731,6 +1750,10 @@ void SceneWallpaper::setSpeed(float speed) { m_runtime->post(MainMsg { MainSetSp
 
 void SceneWallpaper::setMediaStatus(MediaStatus status) {
     m_runtime->post(RenderMsg { RenderSetMediaStatus { std::move(status) } });
+}
+
+void SceneWallpaper::setAudioClientIdentity(SceneAudioClientIdentity identity) {
+    m_runtime->post(MainMsg { MainSetAudioClientIdentity { std::move(identity) } });
 }
 
 void SceneWallpaper::setAudioResponseDemandCallback(AudioResponseDemandCallback callback) {

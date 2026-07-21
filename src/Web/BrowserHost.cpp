@@ -225,6 +225,10 @@ void BrowserHost::Pump() {
 }
 
 void BrowserHost::ApplyVolume(float volume) {
+    if (impl_->client) {
+        auto browser = impl_->client->GetBrowser();
+        if (browser && browser->GetHost()) browser->GetHost()->SetAudioMuted(volume <= 0.0f);
+    }
     auto object = rstd::json::Map::make();
     object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")),
                   rstd::into<owe::Json>(rstd::f32(volume)));

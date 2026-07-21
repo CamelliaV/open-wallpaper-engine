@@ -860,6 +860,14 @@ int run(int argc, char** argv) {
 
     owe::SceneWallpaper wp;
     if (! wp.init()) die("SceneWallpaper::init failed");
+    wp.setAudioClientIdentity({
+        .application_name = WAYWALLEN_AUDIO_APPLICATION_NAME,
+        .application_id   = WAYWALLEN_AUDIO_APPLICATION_ID,
+        .stream_prefix    = WAYWALLEN_AUDIO_STREAM_PREFIX,
+        .component        = "wescene",
+        .media_name       = "Waywallen Scene Renderer",
+        .media_role       = "music",
+    });
 
     host.wp          = &wp;
     host.width       = opts.width;
