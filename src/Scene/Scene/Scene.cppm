@@ -888,7 +888,7 @@ public:
     bool  HasImgEffect() const { return (bool)m_imgEffect; }
     auto& GetImgEffect() { return m_imgEffect; }
 
-    Eigen::Vector3d GetPosition() const;
+    Eigen::Vector3d GetPosition(SceneRenderViewKind view = SceneRenderViewKind::Primary) const;
     Eigen::Vector3d GetDirection() const;
 
     // Lazy: recomputes from m_node->ModelTrans() on every call. Cheap when
@@ -896,7 +896,8 @@ public:
     // m_dirty), correctness-keeping when scripts / parent-chain attachment
     // shift the node between frames.
     Eigen::Matrix4d GetViewMatrix();
-    Eigen::Matrix4d GetViewProjectionMatrix();
+    Eigen::Matrix4d
+    GetViewProjectionMatrix(SceneRenderViewKind view = SceneRenderViewKind::Primary);
 
     rstd::Option<SceneNode*> GetAttachedNode() const {
         if (m_node == nullptr) return rstd::None();
@@ -932,7 +933,8 @@ private:
 
     explicit SceneCamera(PerspectiveTag, double aspect, double near, double far, double fov)
         : m_aspect(aspect), m_nearClip(near), m_farClip(far), m_fov(fov), m_perspective(true) {}
-    void CalculateViewProjectionMatrix();
+    void            CalculateViewProjectionMatrix();
+    Eigen::Matrix4d CalculateReflectionViewProjectionMatrix();
 
     double m_width { 1.0f };
     double m_height { 1.0f };
@@ -1104,6 +1106,8 @@ public:
     void        SetCamera(const std::string& name) { m_cameraName = name; }
     bool        Perspective() const { return m_perspective; }
     void        SetPerspective(bool value) { m_perspective = value; }
+    bool        Reflected() const { return m_reflected; }
+    void        SetReflected(bool value) { m_reflected = value; }
     void        AddMesh(std::shared_ptr<SceneMesh> mesh) { m_mesh = mesh; }
     void        AppendChild(rstd::sync::Arc<SceneNode> sub) {
         sub->m_parent = this;
@@ -1338,6 +1342,7 @@ private:
 
     std::string m_cameraName;
     bool        m_perspective { false };
+    bool        m_reflected { false };
 
     // Raw back-link. Safe because tree topology is frozen post-parse (see
     // class header) and the dtor clears children's m_parent before any
@@ -2446,6 +2451,8 @@ public:
 
     Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, std::string_view name);
     bool SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible);
+    void EnablePlanarReflection();
+    bool PlanarReflectionEnabled() const { return m_planar_reflection_enabled; }
     bool ConsumeRenderGraphDirty() {
         bool dirty           = m_render_graph_dirty;
         m_render_graph_dirty = false;
@@ -2597,6 +2604,7 @@ private:
     u32                                      m_resource_generation { 0 };
     SceneResourceIndex                       m_resource_index;
     bool                                     m_render_graph_dirty { false };
+    bool                                     m_planar_reflection_enabled { false };
     Map<i32, std::string>                    m_render_group_cameras;
     Map<i32, SceneNode*>                     m_layer_link_sources;
     Map<const SceneNode*, WallpaperLayerId>  m_node_link_sources;

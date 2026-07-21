@@ -125,11 +125,16 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
     if (artifact.is_some() && ! (**artifact).uniform_blocks.is_empty()) {
         auto size = (**artifact).uniform_blocks[usize()].size;
         if (size != usize()) {
-            auto name = m_desc.draw_item.Valid()
-                            ? BuildDrawBufferResourceName(m_desc.draw_item, DrawBufferRole::Uniform)
-                            : rstd::format("pass:{}:{}:uniform",
-                                           m_desc.graph_pass_index,
-                                           m_desc.submesh_index);
+            auto name =
+                m_desc.draw_item.Valid()
+                    ? (m_desc.render_view == SceneRenderViewKind::Primary
+                           ? BuildDrawBufferResourceName(m_desc.draw_item, DrawBufferRole::Uniform)
+                           : rstd::format("draw:{}:{}:uniform:{}",
+                                          m_desc.draw_item.generation,
+                                          m_desc.draw_item.index,
+                                          static_cast<rstd::uint32_t>(m_desc.render_view)))
+                    : rstd::format(
+                          "pass:{}:{}:uniform", m_desc.graph_pass_index, m_desc.submesh_index);
             m_desc.ubo_use = rstd::Some(context.AddBuffer(resource::BufferRequest {
                 .name = rstd::move(name),
                 .definition =
@@ -425,7 +430,8 @@ auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareCo
                                             draw_item,
                                             *m_desc.ubo_use,
                                             artifact.uniform_blocks[usize()],
-                                            rstd::move(textures));
+                                            rstd::move(textures),
+                                            m_desc.render_view);
     if (binding.is_err()) return Err(rstd::move(binding).unwrap_err_unchecked());
     return Ok(Some(rstd::move(binding).unwrap_unchecked()));
 }

@@ -319,8 +319,9 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
 
     using Output = WPTransformUniformOutput;
     WPUniformWriter writer(sink);
-    auto&           node   = *m_node->node;
-    auto&           camera = *camera_ref;
+    auto&           node        = *m_node->node;
+    auto&           camera      = *camera_ref;
+    const auto      render_view = context->RenderView();
     node.UpdateTrans();
 
     const auto frame            = context->Frame();
@@ -334,7 +335,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     const bool req_effect_model = writer.Wants(Output::EffectModel) || req_emvp || req_emvpi ||
                                   writer.Wants(Output::LayerModel);
 
-    Matrix4d    view_projection   = camera.GetViewProjectionMatrix();
+    Matrix4d    view_projection   = camera.GetViewProjectionMatrix(render_view);
     const auto& shake             = m_state->CameraShake();
     const auto  active_camera_ref = m_node->camera_resolver->Active();
     const bool  active_camera     = active_camera_ref && camera_ref == active_camera_ref;
@@ -352,7 +353,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
 
     writer.Write(Output::ViewProjection, ShaderValue::fromMatrix(view_projection));
     if (m_node->use_camera_eye_position) {
-        const auto position = camera.GetPosition().cast<float>();
+        const auto position = camera.GetPosition(render_view).cast<float>();
         writer.Write(Output::EyePosition,
                      rstd::array<float, 3> { position.x(), position.y(), position.z() });
     }
@@ -375,7 +376,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
             const Vector2f pointer_offset =
                 Scaling(1.0f, -1.0f) * (Vector2f { 0.5f, 0.5f } - pointer);
             const Vector2f mouse = pointer_offset.cwiseProduct(ortho) * parallax.mouse_influence;
-            const auto     camera_position = camera.GetPosition().cast<float>();
+            const auto     camera_position = camera.GetPosition(render_view).cast<float>();
             const Vector2f shift =
                 (node_position.head<2>() - camera_position.head<2>() + mouse).cwiseProduct(depth) *
                 parallax.amount;
@@ -415,10 +416,10 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
             writer.Write(Output::LayerModel, ShaderValue::fromMatrix(layer_model));
             writer.Write(Output::EffectModel, ShaderValue::fromMatrix(effect_model));
             if (req_emvp || req_emvpi) {
-                const Matrix4d effect_view = active_camera_ref
-                                                 ? active_camera_ref->GetViewProjectionMatrix()
-                                                 : view_projection;
-                const Matrix4d effect_mvp  = effect_view * effect_model;
+                const Matrix4d effect_view =
+                    active_camera_ref ? active_camera_ref->GetViewProjectionMatrix(render_view)
+                                      : view_projection;
+                const Matrix4d effect_mvp = effect_view * effect_model;
                 if (req_emvp)
                     writer.Write(Output::EffectModelViewProjection,
                                  ShaderValue::fromMatrix(effect_mvp));

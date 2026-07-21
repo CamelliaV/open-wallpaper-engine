@@ -165,7 +165,7 @@ class UniformBufferBinding {
 public:
     UniformBufferBinding(SceneDrawItemId, resource::BufferUseHandle, UniformBufferLayout,
                          Vec<BoundUniformSource>, ShaderValues, ref<SceneMaterial>,
-                         Vec<PreparedUniformTextureMetadata>);
+                         Vec<PreparedUniformTextureMetadata>, SceneRenderViewKind);
 
     auto Update(ref<dyn<UniformBufferFrameContext>>,
                 mut_ref<dyn<resource::BufferContentWriter>>) const
@@ -184,6 +184,7 @@ private:
     ShaderValues                        m_defaults;
     ref<SceneMaterial>                  m_material;
     Vec<PreparedUniformTextureMetadata> m_textures;
+    SceneRenderViewKind                 m_render_view { SceneRenderViewKind::Primary };
     mutable u64                         m_content_version { 0 };
     mutable u64                         m_material_version { 0 };
     mutable bool                        m_uploaded { false };
@@ -192,7 +193,8 @@ private:
 auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>>, SceneDrawItemId,
                               resource::BufferUseHandle,
                               const resource::ShaderArtifactUniformBlock&,
-                              Vec<PreparedUniformTextureMetadata> textures = {})
+                              Vec<PreparedUniformTextureMetadata> textures = {},
+                              SceneRenderViewKind render_view = SceneRenderViewKind::Primary)
     -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError>;
 
 } // namespace owe::vulkan

@@ -162,6 +162,7 @@ struct ModelObject {
     std::string model;
     std::string attachment;
     bool        perspective { false };
+    bool        reflected { true };
 
     std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
     VisibleUserBinding                         visible_user;
@@ -189,6 +190,7 @@ struct ModelObject {
         owe::GetJsonValue(json, "model", model, false);
         owe::GetJsonValue(json, "attachment", attachment, false);
         owe::GetJsonValue(json, "perspective", perspective, false);
+        owe::GetJsonValue(json, "reflected", reflected, false);
         ReadPuppetAnimationLayers(json, puppet_layers);
         AbsorbAllFieldBindings(json, field_bindings);
         return true;

@@ -70,6 +70,9 @@ public:
 
     auto Frame() const -> rstd::ref<owe::SceneFrame> { return m_frame; }
     auto Resources() const -> rstd::ref<rstd::dyn<owe::UniformResourceView>> { return m_resources; }
+    auto RenderView() const -> owe::SceneRenderViewKind {
+        return owe::SceneRenderViewKind::Primary;
+    }
 
 private:
     rstd::ref<owe::SceneFrame>                     m_frame;

@@ -116,6 +116,12 @@ struct UniformError {
     String message;
 };
 
+enum class SceneRenderViewKind
+{
+    Primary,
+    Reflection,
+};
+
 struct UniformBindingSink {
     using Trait                  = UniformBindingSink;
     static constexpr bool direct = false;
@@ -195,10 +201,11 @@ struct UniformUpdateContext {
         auto Resources() const -> ref<dyn<UniformResourceView>> {
             return rstd::trait_call<1>(this);
         }
+        auto RenderView() const -> SceneRenderViewKind { return rstd::trait_call<2>(this); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Frame, &T::Resources>;
+    using Funcs = TraitFuncs<&T::Frame, &T::Resources, &T::RenderView>;
 };
 
 struct UniformSource {

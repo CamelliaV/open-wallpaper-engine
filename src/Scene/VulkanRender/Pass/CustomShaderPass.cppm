@@ -24,6 +24,7 @@ public:
         rstd::Option<rstd::mut_ref<SceneNode>> node;
         SceneDrawItemId                        draw_item;
         RenderItemId                           render_item;
+        SceneRenderViewKind                    render_view { SceneRenderViewKind::Primary };
         rstd::usize                            graph_pass_index { 0 };
         // Which submesh of node->Mesh() this pass renders. SceneToRenderGraph
         // emits one pass per (node, submesh).

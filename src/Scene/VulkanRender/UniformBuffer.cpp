@@ -187,15 +187,20 @@ private:
 
 class UpdateContext {
 public:
-    UpdateContext(ref<SceneFrame> frame, const ResourceSnapshot& resources)
-        : m_frame(frame), m_resources(dyn<UniformResourceView>::from_ref(resources)) {}
+    UpdateContext(ref<SceneFrame> frame, const ResourceSnapshot& resources,
+                  SceneRenderViewKind render_view)
+        : m_frame(frame),
+          m_resources(dyn<UniformResourceView>::from_ref(resources)),
+          m_render_view(render_view) {}
 
     auto Frame() const -> ref<SceneFrame> { return m_frame; }
     auto Resources() const -> ref<dyn<UniformResourceView>> { return m_resources; }
+    auto RenderView() const -> SceneRenderViewKind { return m_render_view; }
 
 private:
     ref<SceneFrame>               m_frame;
     ref<dyn<UniformResourceView>> m_resources;
+    SceneRenderViewKind           m_render_view;
 };
 
 } // namespace detail
@@ -246,12 +251,10 @@ auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock& bloc
     return Ok(rstd::move(layout));
 }
 
-UniformBufferBinding::UniformBufferBinding(SceneDrawItemId           draw_item,
-                                           resource::BufferUseHandle buffer,
-                                           UniformBufferLayout       layout,
-                                           Vec<BoundUniformSource> sources, ShaderValues defaults,
-                                           ref<SceneMaterial>                  material,
-                                           Vec<PreparedUniformTextureMetadata> textures)
+UniformBufferBinding::UniformBufferBinding(
+    SceneDrawItemId draw_item, resource::BufferUseHandle buffer, UniformBufferLayout layout,
+    Vec<BoundUniformSource> sources, ShaderValues defaults, ref<SceneMaterial> material,
+    Vec<PreparedUniformTextureMetadata> textures, SceneRenderViewKind render_view)
     : m_draw_item(draw_item),
       m_buffer(buffer),
       m_layout(rstd::move(layout)),
@@ -260,7 +263,8 @@ UniformBufferBinding::UniformBufferBinding(SceneDrawItemId           draw_item,
       m_base_data(rstd::vec::Vec<u8>::with_capacity(m_layout.size)),
       m_defaults(rstd::move(defaults)),
       m_material(material),
-      m_textures(rstd::move(textures)) {
+      m_textures(rstd::move(textures)),
+      m_render_view(render_view) {
     m_data.resize(m_layout.size, u8(0));
     m_base_data.resize(m_layout.size, u8(0));
 }
@@ -318,7 +322,7 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
 
     detail::ResourceSnapshot resources(frame_context, m_draw_item, m_textures.as_slice());
 
-    detail::UpdateContext context_impl(frame_context->Frame(), resources);
+    detail::UpdateContext context_impl(frame_context->Frame(), resources, m_render_view);
     auto                  context = dyn<UniformUpdateContext>::from_ref(context_impl);
 
     auto versions = Vec<u64>::with_capacity(m_sources.len());
@@ -360,7 +364,8 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
 auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
                               SceneDrawItemId draw_item, resource::BufferUseHandle buffer,
                               const resource::ShaderArtifactUniformBlock& block,
-                              Vec<PreparedUniformTextureMetadata>         textures)
+                              Vec<PreparedUniformTextureMetadata>         textures,
+                              SceneRenderViewKind                         render_view)
     -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError> {
     auto draw = prepare->ResolveDraw(draw_item);
     if (draw.is_none()) {
@@ -457,7 +462,8 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
                                  rstd::move(sources),
                                  shader.default_uniforms,
                                  draw->material,
-                                 rstd::move(textures));
+                                 rstd::move(textures),
+                                 render_view);
     return Ok(Box<dyn<UniformBufferUpdate>>::make(rstd::move(binding)));
 }
 

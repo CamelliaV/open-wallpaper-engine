@@ -196,6 +196,7 @@ const std::set<std::string>& kParsedObjectKeys() {
         // model-only (ModelObject)
         "model",
         "attachment",
+        "reflected",
         // camera-only (CameraObject)
         "camera",
         "fov",

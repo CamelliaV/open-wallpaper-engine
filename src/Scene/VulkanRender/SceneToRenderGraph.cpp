@@ -268,9 +268,10 @@ static void StoreMipFramebufferHistory(ExtraInfo& extra) {
     AddCopyPass(extra, MakeTextureDesc(extra, SpecTex_Default), rstd::move(history_desc));
 }
 
-static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output,
-                                          Option<WallpaperLayerId> source_layer, ExtraInfo& extra,
-                                          bool defer_effect = false);
+static SceneImageEffectLayer*
+ToGraphPass(SceneNode* node, std::string_view output, Option<WallpaperLayerId> source_layer,
+            ExtraInfo& extra, bool defer_effect = false,
+            SceneRenderViewKind render_view = SceneRenderViewKind::Primary);
 
 static void LoadGraphEffects(SceneImageEffectLayer* effs, Option<WallpaperLayerId> source_layer,
                              ExtraInfo& extra) {
@@ -299,7 +300,7 @@ static void LoadGraphEffects(SceneImageEffectLayer* effs, Option<WallpaperLayerI
 
 static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output,
                                           Option<WallpaperLayerId> source_layer, ExtraInfo& extra,
-                                          bool defer_effect) {
+                                          bool defer_effect, SceneRenderViewKind render_view) {
     auto& rgraph = *extra.rgraph;
     auto& scene  = *extra.scene;
 
@@ -341,12 +342,13 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         rgraph.addPass<vulkan::CustomShaderPass>(
             rstd::cppstd::as_str(passName),
             rg::PassNode::Type::CustomShader,
-            [material, node, smi, pass_output, source_layer, &scene, &extra](
+            [material, node, smi, pass_output, source_layer, render_view, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
                 const auto& pass       = builder.workPassNode();
                 pdesc.node             = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
                 pdesc.submesh_index    = u32(static_cast<rstd::uint32_t>(smi));
                 pdesc.graph_pass_index = pass.pass.index;
+                pdesc.render_view      = render_view;
                 if (auto node_id = scene.ResourceIndex().nodeId(*node)) {
                     if (auto draw_item = scene.ResourceIndex().drawItemFor(
                             *node_id, u32(static_cast<rstd::uint32_t>(smi)))) {
@@ -609,6 +611,34 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
     }
 }
 
+static bool SamplesPlanarReflection(SceneNode& node) {
+    auto* mesh = node.Mesh();
+    if (mesh == nullptr) return false;
+    for (const auto& material : mesh->MaterialSlots()) {
+        if (! material) continue;
+        for (const auto& texture : material->textures) {
+            if (sstart_with(texture, WE_REFLECTION_PREFIX)) return true;
+        }
+    }
+    return false;
+}
+
+static void EmitPlanarReflectionNode(SceneNode* node, ExtraInfo& extra,
+                                     const Set<const SceneNode*>& emit_skip_subtrees) {
+    if (node == nullptr || emit_skip_subtrees.count(node) != 0) return;
+    if (node->Reflected() && ! SamplesPlanarReflection(*node)) {
+        ToGraphPass(node,
+                    WE_REFLECTION_PREFIX,
+                    None<WallpaperLayerId>(),
+                    extra,
+                    true,
+                    SceneRenderViewKind::Reflection);
+    }
+    for (auto& child : node->GetChildren()) {
+        EmitPlanarReflectionNode(child.as_ptr(), extra, emit_skip_subtrees);
+    }
+}
+
 Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
                                              const RenderSceneSnapshot& render_scene) {
     auto      rgraph = Box<rg::RenderGraph>::make();
@@ -625,6 +655,10 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
     // the skip set lets the emit walk short-circuit without mutating the tree.
     Set<const SceneNode*> emit_skip_subtrees;
     CollectEmitSkipSubtrees(scene.sceneGraph.as_ptr(), scene, linked_ids, emit_skip_subtrees);
+
+    if (scene.PlanarReflectionEnabled()) {
+        EmitPlanarReflectionNode(scene.sceneGraph.as_ptr(), extra, emit_skip_subtrees);
+    }
 
     EmitSceneNode(
         scene.sceneGraph.as_ptr(), SpecTex_Default, {}, extra, emit_skip_subtrees, linked_ids);

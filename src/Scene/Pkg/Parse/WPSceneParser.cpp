@@ -1162,7 +1162,7 @@ CullMode ParseCullMode(std::string_view str) {
 }
 
 void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const WPShaderInfo& sinfo,
-                      const Scene& scene) {
+                      Scene& scene) {
     if (IsSpecTex(name)) {
         if (name == WE_FULL_FRAME_BUFFER) {
             name = SpecTex_Default;
@@ -1182,7 +1182,8 @@ void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const W
             name.clear();
         } else if (sstart_with(name, OWE_BLOOM_MIP_PREFIX)) {
         } else if (sstart_with(name, WE_REFLECTION_PREFIX)) {
-            name.clear();
+            name = std::string(WE_REFLECTION_PREFIX);
+            scene.EnablePlanarReflection();
         } else if (sstart_with(name, OWE_EFFECT_PPONG_PREFIX)) {
         } else if (sstart_with(name, WE_HALF_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
@@ -1429,13 +1430,8 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::Material& wpmat, Scene* pScene,
     }
 
     for (std::size_t i = 0; i < textures.size(); i++) {
-        std::string name                   = textures.at(i);
-        bool        unsupported_reflection = sstart_with(name, WE_REFLECTION_PREFIX);
+        std::string name = textures.at(i);
         ParseSpecTexName(name, wpmat, *pWPShaderInfo, *pScene);
-        if (unsupported_reflection && name.empty()) {
-            pWPShaderInfo->combos["reflection"]                  = "0";
-            pWPShaderInfo->combos[std::string(WE_CB_REFLECTION)] = "0";
-        }
         material.textures.push_back(name);
         material.texture_metadata.emplace_back();
         material.defines.push_back("g_Texture" + std::to_string(i));
@@ -3350,6 +3346,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
                                                   Vector3f(model_obj.angles.data()),
                                                   model_obj.name);
     node->ID() = i32(model_obj.id);
+    node->SetReflected(model_obj.reflected);
     if (! model_obj.visible) {
         node->SetVisible(false);
         context.scene->MarkLayerVisibilityElidable(

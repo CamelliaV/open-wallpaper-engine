@@ -1454,6 +1454,27 @@ void Scene::CaptureCameraPathViewports() {
     }
 }
 
+void Scene::EnablePlanarReflection() {
+    m_planar_reflection_enabled = true;
+    const std::string key(WE_REFLECTION_PREFIX);
+    if (renderTargets.count(key) != 0) return;
+
+    std::int32_t width  = ortho[0];
+    std::int32_t height = ortho[1];
+    if (auto primary = renderTargets.find(std::string(SpecTex_Default));
+        primary != renderTargets.end()) {
+        width  = primary->second.width;
+        height = primary->second.height;
+    }
+    renderTargets[key] = {
+        .width             = width,
+        .height            = height,
+        .withDepth         = true,
+        .bind              = { .enable = true, .screen = true },
+        .preserve_on_write = true,
+    };
+}
+
 std::string Scene::EnsureLinkRenderTarget(WallpaperLayerId source_layer,
                                           const SceneNode& source_node) {
     auto link_key = GenLinkTex(static_cast<std::ptrdiff_t>(source_layer.value.to_primitive()));
