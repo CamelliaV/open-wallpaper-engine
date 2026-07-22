@@ -43,14 +43,13 @@ public:
     explicit WPLifecycleProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
 
     void Update(particle::ParticleLifecycleContext& context) {
-        auto frame    = WPParticleFrameFrom(context.frame);
-        auto states   = context.storage.Values(context.storage.SlotStateKey());
-        bool has_live = false;
-        for (usize index {}; index < states.len(); ++index) {
-            if (! states[index].active) continue;
+        auto frame     = WPParticleFrameFrom(context.frame);
+        auto particles = WPParticleBatch(context.storage, context.columns, m_attributes);
+        bool has_live  = false;
+        for (usize index {}; index < particles.Len(); ++index) {
+            auto value = particles.Particle(index);
+            if (! value.state.active) continue;
 
-            auto value = MakeWPParticleRef(
-                context.storage, m_attributes, particle::ParticleSlot { .index = index });
             value.alpha = value.initial.alpha;
             value.size  = value.initial.size;
             value.color = value.initial.color;
@@ -61,6 +60,7 @@ public:
                 has_live = true;
             }
         }
+        particles.ValidateStorage();
         frame->subsystem->InstanceStateMut(frame->instance_index).no_live_particle = ! has_live;
     }
 
@@ -346,19 +346,48 @@ auto owe::WPParticleFrameFrom(ref<dyn<rstd::any::Any>> frame) -> ref<WPParticleF
     return *value;
 }
 
+WPParticleBatch::WPParticleBatch(particle::ParticleStorage&     storage,
+                                 particle::ParticleColumnCache& columns,
+                                 const WPParticleAttributes&    attributes)
+    : m_storage(rstd::addressof(storage)),
+      m_columns(rstd::addressof(columns)),
+      m_column_version(storage.ColumnVersion()),
+      m_len(storage.Len()),
+      m_state(columns.ValuesMut(storage, storage.SlotStateKey()).as_raw_ptr()),
+      m_position(columns.ValuesMut(storage, attributes.position).as_raw_ptr()),
+      m_color(columns.ValuesMut(storage, attributes.color).as_raw_ptr()),
+      m_alpha(columns.ValuesMut(storage, attributes.alpha).as_raw_ptr()),
+      m_size(columns.ValuesMut(storage, attributes.size).as_raw_ptr()),
+      m_lifetime(columns.ValuesMut(storage, attributes.lifetime).as_raw_ptr()),
+      m_rotation(columns.ValuesMut(storage, attributes.rotation).as_raw_ptr()),
+      m_velocity(columns.ValuesMut(storage, attributes.velocity).as_raw_ptr()),
+      m_acceleration(columns.ValuesMut(storage, attributes.acceleration).as_raw_ptr()),
+      m_angular_velocity(columns.ValuesMut(storage, attributes.angular_velocity).as_raw_ptr()),
+      m_angular_acceleration(
+          columns.ValuesMut(storage, attributes.angular_acceleration).as_raw_ptr()),
+      m_random(columns.ValuesMut(storage, attributes.random).as_raw_ptr()),
+      m_initial_color(columns.ValuesMut(storage, attributes.initial_color).as_raw_ptr()),
+      m_initial_alpha(columns.ValuesMut(storage, attributes.initial_alpha).as_raw_ptr()),
+      m_initial_size(columns.ValuesMut(storage, attributes.initial_size).as_raw_ptr()),
+      m_initial_lifetime(columns.ValuesMut(storage, attributes.initial_lifetime).as_raw_ptr()) {}
+
+void WPParticleBatch::ValidateStorage() const {
+    if (m_storage->ColumnVersion() != m_column_version) {
+        rstd::panic { "particle batch used after column layout mutation" };
+    }
+}
+
 void WPParticleUpdateProgram::Update(particle::ParticleUpdateContext& context) {
     auto            frame = WPParticleFrameFrom(context.frame);
-    WPParticleBatch batch {
-        .storage              = context.storage,
-        .attributes           = m_attributes,
-        .controlpoints        = frame->subsystem->Controlpoints(),
-        .world_from_local_dir = frame->world_from_local_dir,
-        .local_from_world_dir = frame->local_from_world_dir,
-        .world_space          = frame->world_space,
-        .time                 = frame->time,
-        .time_pass            = context.delta,
-    };
+    WPParticleBatch batch(context.storage, context.columns, m_attributes);
+    batch.controlpoints        = frame->subsystem->Controlpoints();
+    batch.world_from_local_dir = frame->world_from_local_dir;
+    batch.local_from_world_dir = frame->local_from_world_dir;
+    batch.world_space          = frame->world_space;
+    batch.time                 = frame->time;
+    batch.time_pass            = context.delta;
     m_function->operator()(batch);
+    batch.ValidateStorage();
 }
 
 WPParticleSubSystem::WPParticleSubSystem(

@@ -953,7 +953,7 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
             FrequencyValue fv = FrequencyValue::ReadFromJson(wpj, name);
             auto state_keys   = RegisterOscillationAttributes(subsystem, operator_index, "alpha");
             auto function     = [fv, state_keys](WPParticleBatch& info) mutable {
-                auto states = state_keys.ValuesMut(info.storage);
+                auto states = state_keys.ValuesMut(info);
                 for (usize index {}; index < info.Len(); ++index) {
                     auto p     = info.Particle(index);
                     auto state = states.At(index);
@@ -966,7 +966,7 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
             FrequencyValue fv = FrequencyValue::ReadFromJson(wpj, name);
             auto state_keys   = RegisterOscillationAttributes(subsystem, operator_index, "size");
             auto function     = [fv, state_keys](WPParticleBatch& info) mutable {
-                auto states = state_keys.ValuesMut(info.storage);
+                auto states = state_keys.ValuesMut(info);
                 for (usize index {}; index < info.Len(); ++index) {
                     auto p     = info.Particle(index);
                     auto state = states.At(index);
@@ -986,9 +986,9 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
             };
             auto function = [fxp, state_keys](WPParticleBatch& info) mutable {
                 std::array<WPOscillationValues, 3> states {
-                    state_keys[0].ValuesMut(info.storage),
-                    state_keys[1].ValuesMut(info.storage),
-                    state_keys[2].ValuesMut(info.storage),
+                    state_keys[0].ValuesMut(info),
+                    state_keys[1].ValuesMut(info),
+                    state_keys[2].ValuesMut(info),
                 };
                 for (usize index {}; index < info.Len(); ++index) {
                     auto     p = info.Particle(index);
@@ -1125,7 +1125,7 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
             auto config    = MaintainDistance::ReadFromJson(wpj);
             auto state_key = RegisterMaintainDistanceAttribute(subsystem, operator_index);
             auto function  = [=](WPParticleBatch& info) {
-                auto states = info.storage.ValuesMut(state_key);
+                auto states = info.ValuesMut(state_key);
                 auto center = info.controlpoints[rstd::as_cast<usize>(config.controlpoint)].offset;
                 for (usize index {}; index < info.Len(); ++index) {
                     auto     p        = info.Particle(index);

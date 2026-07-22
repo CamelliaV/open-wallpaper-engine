@@ -152,6 +152,7 @@ struct ParticleSpawnContext {
 
 struct ParticleLifecycleContext {
     ParticleStorage&         storage;
+    ParticleColumnCache&     columns;
     ParticleSlotEvents&      events;
     ref<dyn<rstd::any::Any>> frame;
     f64                      delta {};
@@ -177,6 +178,7 @@ struct ParticleEventContext {
 
 struct ParticleUpdateContext {
     ParticleStorage&         storage;
+    ParticleColumnCache&     columns;
     ref<dyn<rstd::any::Any>> frame;
     f64                      delta {};
     f64                      elapsed {};
@@ -256,6 +258,7 @@ public:
 
     ParticleStorage&       Storage() noexcept { return m_storage; }
     const ParticleStorage& Storage() const noexcept { return m_storage; }
+    ParticleColumnCache&   Columns() noexcept { return m_columns; }
     ParticleSlotEvents&    Events() noexcept { return m_events; }
     bool                   Active() const noexcept { return m_active; }
     void                   SetActive(bool active) noexcept { m_active = active; }
@@ -267,9 +270,10 @@ public:
     }
 
 private:
-    ParticleStorage    m_storage;
-    ParticleSlotEvents m_events;
-    bool               m_active { true };
+    ParticleStorage     m_storage;
+    ParticleColumnCache m_columns;
+    ParticleSlotEvents  m_events;
+    bool                m_active { true };
 };
 
 struct ParticleExtractContext {
@@ -353,6 +357,7 @@ public:
         if (! instance.Active()) return;
 
         auto& storage = instance.Storage();
+        auto& columns = instance.Columns();
         auto& events  = instance.Events();
         events.Clear();
 
@@ -367,6 +372,7 @@ public:
 
         ParticleLifecycleContext lifecycle_context {
             .storage = storage,
+            .columns = columns,
             .events  = events,
             .frame   = frame,
             .delta   = delta,
@@ -390,6 +396,7 @@ public:
 
         ParticleUpdateContext update_context {
             .storage = storage,
+            .columns = columns,
             .frame   = frame,
             .delta   = delta,
             .elapsed = elapsed,

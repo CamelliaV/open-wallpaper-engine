@@ -191,7 +191,8 @@ struct WPOscillationAttributes {
     particle::ParticleAttributeKey<WPOscillationScaleAttribute>     scale;
     particle::ParticleAttributeKey<WPOscillationPhaseAttribute>     phase;
 
-    auto ValuesMut(particle::ParticleStorage& storage) const -> WPOscillationValues {
+    template<typename Storage>
+    auto ValuesMut(Storage& storage) const -> WPOscillationValues {
         return {
             .reset     = storage.ValuesMut(reset),
             .frequency = storage.ValuesMut(frequency),
@@ -257,8 +258,6 @@ struct WPParticleFrame {
 auto WPParticleFrameFrom(ref<dyn<rstd::any::Any>>) -> ref<WPParticleFrame>;
 
 struct WPParticleBatch {
-    particle::ParticleStorage&    storage;
-    const WPParticleAttributes&   attributes;
     slice<WPParticleControlpoint> controlpoints;
     Eigen::Matrix3d               world_from_local_dir { Eigen::Matrix3d::Identity() };
     Eigen::Matrix3d               local_from_world_dir { Eigen::Matrix3d::Identity() };
@@ -266,10 +265,65 @@ struct WPParticleBatch {
     f64                           time {};
     f64                           time_pass {};
 
-    auto Len() const noexcept -> usize { return storage.Len(); }
+    WPParticleBatch(particle::ParticleStorage&, particle::ParticleColumnCache&,
+                    const WPParticleAttributes&);
+
+    auto Len() const noexcept -> usize { return m_len; }
     auto Particle(usize index) -> WPParticleRef {
-        return MakeWPParticleRef(storage, attributes, particle::ParticleSlot { .index = index });
+        const auto raw_index = index.to_primitive();
+        return {
+            .slot                 = particle::ParticleSlot { .index = index },
+            .state                = m_state[raw_index],
+            .position             = m_position[raw_index],
+            .color                = m_color[raw_index],
+            .alpha                = m_alpha[raw_index],
+            .size                 = m_size[raw_index],
+            .lifetime             = m_lifetime[raw_index],
+            .rotation             = m_rotation[raw_index],
+            .velocity             = m_velocity[raw_index],
+            .acceleration         = m_acceleration[raw_index],
+            .angular_velocity     = m_angular_velocity[raw_index],
+            .angular_acceleration = m_angular_acceleration[raw_index],
+            .random               = m_random[raw_index],
+            .initial = {
+                .color    = m_initial_color[raw_index],
+                .alpha    = m_initial_alpha[raw_index],
+                .size     = m_initial_size[raw_index],
+                .lifetime = m_initial_lifetime[raw_index],
+            },
+        };
     }
+
+    template<typename Attribute>
+    auto ValuesMut(particle::ParticleAttributeKey<Attribute> key)
+        -> mut_ref<typename Attribute::Value[]> {
+        ValidateStorage();
+        return m_columns->ValuesMut(*m_storage, key);
+    }
+
+    void ValidateStorage() const;
+
+private:
+    particle::ParticleStorage*     m_storage { nullptr };
+    particle::ParticleColumnCache* m_columns { nullptr };
+    u64                            m_column_version {};
+    usize                          m_len {};
+    particle::ParticleSlotState*   m_state { nullptr };
+    Eigen::Vector3f*               m_position { nullptr };
+    Eigen::Vector3f*               m_color { nullptr };
+    float*                         m_alpha { nullptr };
+    float*                         m_size { nullptr };
+    float*                         m_lifetime { nullptr };
+    Eigen::Vector3f*               m_rotation { nullptr };
+    Eigen::Vector3f*               m_velocity { nullptr };
+    Eigen::Vector3f*               m_acceleration { nullptr };
+    Eigen::Vector3f*               m_angular_velocity { nullptr };
+    Eigen::Vector3f*               m_angular_acceleration { nullptr };
+    float*                         m_random { nullptr };
+    Eigen::Vector3f*               m_initial_color { nullptr };
+    float*                         m_initial_alpha { nullptr };
+    float*                         m_initial_size { nullptr };
+    float*                         m_initial_lifetime { nullptr };
 };
 
 class WPParticleInitProgram {

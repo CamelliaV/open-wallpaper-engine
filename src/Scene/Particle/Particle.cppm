@@ -350,6 +350,7 @@ public:
 
     auto Len() const noexcept -> usize { return m_len; }
     auto StructureVersion() const noexcept -> u64 { return m_structure_version; }
+    auto ColumnVersion() const noexcept -> u64 { return m_column_version; }
     auto SlotStateKey() const noexcept -> ParticleAttributeKey<SlotStateAttribute> {
         return m_slot_state_key;
     }
@@ -357,6 +358,7 @@ public:
     void Reserve(usize total_slots) {
         for (auto& attribute : m_attributes) attribute->Reserve(total_slots);
         BumpStructureVersion();
+        BumpColumnVersion();
         CheckInvariant();
     }
 
@@ -365,6 +367,7 @@ public:
         for (auto& attribute : m_attributes) attribute->AppendDefault();
         ParticleSlot slot { .index = m_len++ };
         BumpStructureVersion();
+        BumpColumnVersion();
         CheckInvariant();
         return slot;
     }
@@ -381,6 +384,7 @@ public:
         m_len                 = usize();
         m_next_spawn_sequence = u64();
         BumpStructureVersion();
+        BumpColumnVersion();
         CheckInvariant();
     }
 
@@ -448,6 +452,7 @@ public:
 
 private:
     friend class ParticleSchema;
+    friend class ParticleColumnCache;
 
     ParticleStorage(rstd::vec::Vec<Box<dyn<ParticleAttribute>>> attributes,
                     ParticleAttributeKey<SlotStateAttribute>    slot_state_key)
@@ -467,6 +472,8 @@ private:
         }
     }
 
+    auto AttributeCount() const noexcept -> usize { return m_attributes.len(); }
+
     void CheckInvariant() const {
         for (const auto& attribute : m_attributes) {
             if (attribute->Len() != m_len) rstd::panic { "particle attribute length mismatch" };
@@ -478,11 +485,80 @@ private:
         if (m_structure_version == u64()) m_structure_version = u64(1);
     }
 
+    void BumpColumnVersion() noexcept {
+        ++m_column_version;
+        if (m_column_version == u64()) m_column_version = u64(1);
+    }
+
     usize                                       m_len {};
     u64                                         m_next_spawn_sequence {};
     u64                                         m_structure_version { 1 };
+    u64                                         m_column_version { 1 };
     rstd::vec::Vec<Box<dyn<ParticleAttribute>>> m_attributes;
     ParticleAttributeKey<SlotStateAttribute>    m_slot_state_key;
+};
+
+class ParticleColumnCache {
+public:
+    template<typename Attribute>
+    auto ValuesMut(ParticleStorage& storage, ParticleAttributeKey<Attribute> key)
+        -> mut_ref<typename Attribute::Value[]> {
+        Refresh(storage);
+        if (! key.Valid() || key.schema_slot >= m_columns.len()) {
+            rstd::panic { "invalid particle attribute key" };
+        }
+
+        auto& entry         = m_columns[key.schema_slot];
+        auto  concrete_type = rstd::any::TypeId::of<Attribute>();
+        if (entry.concrete_type.is_some() &&
+            (entry.id != key.id || *entry.concrete_type != concrete_type)) {
+            rstd::panic { "particle attribute key does not match storage" };
+        }
+        if (! entry.resolved) {
+            auto values         = storage.ValuesMut(key);
+            entry.id            = key.id;
+            entry.concrete_type = Some(concrete_type);
+            entry.values        = values.as_raw_ptr();
+            entry.len           = values.len();
+            entry.resolved      = true;
+        }
+        return mut_ref<typename Attribute::Value[]>::from_raw_parts(
+            static_cast<typename Attribute::Value*>(entry.values), entry.len);
+    }
+
+private:
+    struct Entry {
+        ParticleAttributeId       id;
+        Option<rstd::any::TypeId> concrete_type;
+        void*                     values { nullptr };
+        usize                     len {};
+        bool                      resolved { false };
+    };
+
+    void Refresh(ParticleStorage& storage) {
+        auto storage_ptr = rstd::addressof(storage);
+        auto version     = storage.ColumnVersion();
+        if (m_storage == storage_ptr && m_version == version) return;
+
+        if (m_storage != storage_ptr || m_columns.len() != storage.AttributeCount()) {
+            m_columns.clear();
+            for (usize index {}; index < storage.AttributeCount(); ++index) {
+                m_columns.emplace_back();
+            }
+        } else {
+            for (auto& entry : m_columns) {
+                entry.values   = nullptr;
+                entry.len      = usize();
+                entry.resolved = false;
+            }
+        }
+        m_storage = storage_ptr;
+        m_version = version;
+    }
+
+    ParticleStorage*      m_storage { nullptr };
+    u64                   m_version {};
+    rstd::vec::Vec<Entry> m_columns;
 };
 
 class ParticleReadQuery {

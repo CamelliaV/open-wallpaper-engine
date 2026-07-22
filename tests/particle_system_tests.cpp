@@ -26,6 +26,8 @@ auto Register(particle::ParticleSchemaBuilder& builder, const char* name, const 
 struct TemperatureAttribute {
     using Value = float;
 
+    static inline usize values_mut_calls {};
+
     TemperatureAttribute(particle::ParticleAttributeDescriptor descriptor, Value default_value)
         : storage(rstd::move(descriptor), default_value) {}
 
@@ -41,7 +43,10 @@ struct TemperatureAttribute {
     void Reset(particle::ParticleSlot slot) { storage.Reset(slot); }
     void Clear() { storage.Clear(); }
     auto Values() const noexcept -> slice<Value> { return storage.Values(); }
-    auto ValuesMut() noexcept -> mut_ref<Value[]> { return storage.ValuesMut(); }
+    auto ValuesMut() noexcept -> mut_ref<Value[]> {
+        ++values_mut_calls;
+        return storage.ValuesMut();
+    }
     auto CloneEmpty() const -> TemperatureAttribute {
         return TemperatureAttribute(storage.CloneDescriptor(), storage.DefaultValue());
     }
@@ -154,6 +159,11 @@ TEST(ParticleSchema, RejectsDuplicateNamesAndMismatchedTypedKeys) {
         .schema_slot = position.schema_slot,
     };
     EXPECT_DEATH((void)storage.Values(wrong), "particle attribute key does not match storage");
+
+    particle::ParticleColumnCache columns;
+    (void)columns.ValuesMut(storage, position);
+    EXPECT_DEATH((void)columns.ValuesMut(storage, wrong),
+                 "particle attribute key does not match storage");
 }
 
 TEST(ParticleSchema, RejectsMissingProgramRequirementsDuringPrepare) {
@@ -182,6 +192,45 @@ TEST(ParticleQuery, RejectsUseAfterStructuralMutation) {
 
     (void)storage.AppendSlot();
     EXPECT_DEATH((void)query.Read(temperature), "particle query used after structural mutation");
+}
+
+TEST(ParticleColumnCache, ReusesResolvedColumnsUntilLayoutChanges) {
+    particle::ParticleSchemaBuilder builder;
+    auto temperature = Register<TemperatureAttribute>(builder, "temperature", "test", 1.0f);
+    auto schema      = rstd::move(builder).Build();
+    auto storage     = schema.CreateStorage();
+    auto slot        = storage.AppendSlot();
+
+    TemperatureAttribute::values_mut_calls = usize();
+    particle::ParticleColumnCache columns;
+    columns.ValuesMut(storage, temperature)[slot.index] = 2.0f;
+    EXPECT_FLOAT_EQ(columns.ValuesMut(storage, temperature)[slot.index], 2.0f);
+    EXPECT_EQ(TemperatureAttribute::values_mut_calls, usize(1));
+
+    storage.ResetSlot(slot);
+    EXPECT_FLOAT_EQ(columns.ValuesMut(storage, temperature)[slot.index], 1.0f);
+    EXPECT_EQ(TemperatureAttribute::values_mut_calls, usize(1));
+
+    (void)storage.AppendSlot();
+    (void)columns.ValuesMut(storage, temperature);
+    EXPECT_EQ(TemperatureAttribute::values_mut_calls, usize(2));
+}
+
+TEST(WPParticleBatch, UsesResolvedColumnsUntilStorageLayoutChanges) {
+    particle::ParticleSchemaBuilder builder;
+    auto                            attributes = owe::WPParticleAttributes::Register(builder);
+    auto                            schema     = rstd::move(builder).Build();
+    auto                            storage    = schema.CreateStorage();
+    auto                            slot       = storage.AppendSlot();
+
+    particle::ParticleColumnCache columns;
+    owe::WPParticleBatch          particles(storage, columns, attributes);
+    particles.Particle(slot.index).position = Eigen::Vector3f { 1.0f, 2.0f, 3.0f };
+    EXPECT_EQ(storage.Values(attributes.position)[slot.index],
+              (Eigen::Vector3f { 1.0f, 2.0f, 3.0f }));
+
+    (void)storage.AppendSlot();
+    EXPECT_DEATH(particles.ValidateStorage(), "particle batch used after column layout mutation");
 }
 
 TEST(ParticleSlotEvents, CombinesTransitionsInStableSlotOrder) {
