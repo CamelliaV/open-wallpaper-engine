@@ -22,11 +22,15 @@ TEST(SceneLoadBench, RegistersStableCatalog) {
     auto& bench = **context;
 
     auto schema = bench.schema_owner();
-    EXPECT_EQ(schema->len().to_primitive(), 37u);
+    EXPECT_EQ(schema->len().to_primitive(), 43u);
     EXPECT_EQ(ProbeLabel(bench, bench.ids().preload_scene_document),
               rstd::ref<rstd::str>("preload.scene_document"));
     EXPECT_EQ(ProbeLabel(bench, bench.ids().parse_object_particle),
               rstd::ref<rstd::str>("parse.object.particle"));
+    EXPECT_EQ(ProbeLabel(bench, bench.ids().render_user_property_graph_rebuild),
+              rstd::ref<rstd::str>("render.user_property.graph_rebuild"));
+    EXPECT_EQ(ProbeLabel(bench, bench.ids().render_first_frame_prepare),
+              rstd::ref<rstd::str>("render.first_frame.prepare"));
     EXPECT_EQ(ProbeLabel(bench, bench.ids().render_first_draw),
               rstd::ref<rstd::str>("render.first_draw"));
 }

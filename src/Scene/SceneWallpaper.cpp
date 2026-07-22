@@ -837,6 +837,7 @@ public:
     FpsCounter fps_counter;
 
 private:
+    auto loadBenchView() -> SceneLoadBenchRecorderView;
     void rebuildRenderGraph(vulkan::RenderGraphResourceRetention retention, bool evict_meshes,
                             SceneLoadBenchRecorderView load_bench = {});
     void consumeDirtyEventsCoveredByGraphRebuild();
@@ -887,6 +888,13 @@ auto SceneRenderController::sender() const -> RenderSender {
 
 void SceneRenderController::post(RenderMsg msg) {
     if (m_tx) (void)m_tx->send(rstd::move(msg));
+}
+
+auto SceneRenderController::loadBenchView() -> SceneLoadBenchRecorderView {
+    return {
+        .recorder = m_load_bench_recorder ? &*m_load_bench_recorder : nullptr,
+        .ids      = m_load_bench ? &BenchContext(m_load_bench).ids() : nullptr,
+    };
 }
 
 void SceneRenderController::start() {
@@ -966,6 +974,14 @@ void SceneRenderController::on(RenderMsg::Stop_payload&& m) {
 void SceneRenderController::onDraw() {
     frame_timer.FrameBegin();
     if (m_rg.is_some()) {
+        const bool first_draw = ! m_scene->first_frame_ok;
+        auto       load_bench = loadBenchView();
+        auto       first_frame_span =
+            first_draw ? SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_first_frame)
+                       : rstd::bench::probe::SpanGuard {};
+        auto first_frame_prepare_span =
+            first_draw ? SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_first_frame_prepare)
+                       : rstd::bench::probe::SpanGuard {};
         {
             auto pos                 = m_mouse_pos.load();
             m_scene->pointerPosition = rstd::array<float, 2> { pos[usize()], pos[usize(1)] };
@@ -1017,7 +1033,8 @@ void SceneRenderController::onDraw() {
             m_scene->TickMaterialShaderAnimations();
             m_scene->TickTransformUpdaters();
             if (m_scene->ConsumeRenderGraphDirty()) {
-                rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+                rebuildRenderGraph(
+                    vulkan::RenderGraphResourceRetention::KeepSceneTextures, false, load_bench);
             }
         }
         m_scene->Runtime().BeforeRender();
@@ -1034,16 +1051,13 @@ void SceneRenderController::onDraw() {
          * drawFrame so newly-rasterised glyphs are visible the same frame. */
         m_render->pumpFontAtlases(*m_scene);
 
-        const bool first_draw = ! m_scene->first_frame_ok;
-        auto       load_bench = SceneLoadBenchRecorderView {
-            .recorder = m_load_bench_recorder ? &*m_load_bench_recorder : nullptr,
-            .ids      = m_load_bench ? &BenchContext(m_load_bench).ids() : nullptr,
-        };
+        (void)first_frame_prepare_span.finish();
         auto first_draw_span =
             first_draw ? SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_first_draw)
                        : rstd::bench::probe::SpanGuard {};
         m_render->drawFrame(*m_scene);
         (void)first_draw_span.finish();
+        (void)first_frame_span.finish();
 
         m_scene->PassFrameTime(frame_timer.TargetFrameTime() * m_speed.to_primitive());
 
@@ -1167,11 +1181,8 @@ void SceneRenderController::on(RenderMsg::SetScene_payload&& m) {
         config.sample_capacity = usize(32768);
         m_load_bench_recorder  = Some(BenchContext(m_load_bench).session().recorder(config));
     }
-    auto load_bench = SceneLoadBenchRecorderView {
-        .recorder = m_load_bench_recorder ? &*m_load_bench_recorder : nullptr,
-        .ids      = m_load_bench ? &BenchContext(m_load_bench).ids() : nullptr,
-    };
-    auto load_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_load);
+    auto load_bench = loadBenchView();
+    auto load_span  = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_load);
     if (m.random_seed.is_some()) {
         using Seed = decltype(Random::max());
         Random::seed(static_cast<Seed>(m.random_seed->to_primitive()));
@@ -1196,27 +1207,39 @@ void SceneRenderController::on(RenderMsg::SetSpeed_payload&& m) { m_speed = m.sp
 
 void SceneRenderController::on(RenderMsg::SetUserProperty_payload&& m) {
     if (! m_scene) return;
-    std::string key                      = CanonicalUserPropertyKey(m.key);
-    const bool  has_shader_combo_binding = m_scene->shader_combo_user_index.contains(key);
-    owe::script::SetSceneUserProperty(*m_scene, key, m.property);
-    ApplyUserPropertyToClear(*m_scene, key, m.property);
-    ApplyUserPropertyToShaderUniforms(*m_scene, key, m.property);
-    auto texture_materials = ApplyUserPropertyToMaterialTextures(*m_scene, key, m.property);
-    bool shader_combo_requires_graph = ApplyUserPropertyToShaderCombos(*m_scene, key, m.property);
-    ApplyUserPropertyToImageColor(*m_scene, key, m.property);
-    ApplyUserPropertyToImageAlpha(*m_scene, key, m.property);
-    m_scene->ApplyUserTextBindings(key, m.property);
-    ApplyUserPropertyToParticles(*m_scene, key, m.property);
-    ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
-    m_scene->ApplyUserPropertyBindings(key, m.property);
-    ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
-    bool requires_graph_rebuild = ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
-    requires_graph_rebuild =
-        m_scene->ApplyUserImageEffectVisibilityBindings(key, m.property) || requires_graph_rebuild;
-    requires_graph_rebuild = requires_graph_rebuild || shader_combo_requires_graph;
+    auto load_bench    = loadBenchView();
+    auto property_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property);
+
+    std::string                  key = CanonicalUserPropertyKey(m.key);
+    bool                         has_shader_combo_binding {};
+    bool                         requires_graph_rebuild {};
+    std::vector<SceneMaterialId> texture_materials;
+    {
+        auto apply_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_apply);
+        has_shader_combo_binding = m_scene->shader_combo_user_index.contains(key);
+        owe::script::SetSceneUserProperty(*m_scene, key, m.property);
+        ApplyUserPropertyToClear(*m_scene, key, m.property);
+        ApplyUserPropertyToShaderUniforms(*m_scene, key, m.property);
+        texture_materials = ApplyUserPropertyToMaterialTextures(*m_scene, key, m.property);
+        bool shader_combo_requires_graph =
+            ApplyUserPropertyToShaderCombos(*m_scene, key, m.property);
+        ApplyUserPropertyToImageColor(*m_scene, key, m.property);
+        ApplyUserPropertyToImageAlpha(*m_scene, key, m.property);
+        m_scene->ApplyUserTextBindings(key, m.property);
+        ApplyUserPropertyToParticles(*m_scene, key, m.property);
+        ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
+        m_scene->ApplyUserPropertyBindings(key, m.property);
+        ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
+        requires_graph_rebuild = ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
+        requires_graph_rebuild = m_scene->ApplyUserImageEffectVisibilityBindings(key, m.property) ||
+                                 requires_graph_rebuild;
+        requires_graph_rebuild = requires_graph_rebuild || shader_combo_requires_graph;
+    }
 
     if (! texture_materials.empty() && renderInited() && m_rg.is_some() &&
         ! requires_graph_rebuild) {
+        auto refresh_span =
+            SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_refresh);
         m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
         if (! m_render->refreshPreparedMaterialTextures(
                 *m_scene, m_render_scene, texture_materials)) {
@@ -1228,10 +1251,17 @@ void SceneRenderController::on(RenderMsg::SetUserProperty_payload&& m) {
         (void)m_main_tx->send(MainMsg::UserPropertyDiagnostics(rstd::move(diagnostics)));
     }
     if (requires_graph_rebuild) {
-        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+        auto rebuild_span =
+            SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_graph_rebuild);
+        rebuildRenderGraph(
+            vulkan::RenderGraphResourceRetention::KeepSceneTextures, false, load_bench);
         return;
     }
-    if (renderInited() && m_rg.is_some()) refreshPreparedMaterialDirtyEvents();
+    if (renderInited() && m_rg.is_some()) {
+        auto refresh_span =
+            SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_refresh);
+        refreshPreparedMaterialDirtyEvents();
+    }
 }
 
 void SceneRenderController::on(RenderMsg::SetMediaStatus_payload&& m) {
