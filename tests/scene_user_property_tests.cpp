@@ -5,6 +5,22 @@ import rstd.json;
 import wescene.scene;
 import wescene.scene_user_property;
 
+using namespace rstd::prelude;
+using rstd::sync::Arc;
+
+namespace
+{
+
+struct FakeParticleOverrideControl {
+    float* observed;
+
+    void Apply(slice<float> values) {
+        if (! values.is_empty()) *observed = values[usize()];
+    }
+};
+
+} // namespace
+
 TEST(SceneUserProperty, CanonicalizesHostSchemeColor) {
     EXPECT_EQ(owe::CanonicalSceneUserPropertyKey("waywallen.scheme_color"), "schemecolor");
     EXPECT_EQ(owe::CanonicalSceneUserPropertyKey("custom"), "custom");
@@ -13,8 +29,8 @@ TEST(SceneUserProperty, CanonicalizesHostSchemeColor) {
 TEST(SceneUserProperty, BatchUsesSinglePropertySemantics) {
     owe::Scene single;
     owe::Scene batch;
-    single.clearColorUserKey = "schemecolor";
-    batch.clearColorUserKey  = "schemecolor";
+    single.SetClearColorUserKey(String::make("schemecolor"));
+    batch.SetClearColorUserKey(String::make("schemecolor"));
 
     auto property = rstd::json::from_str(R"({"type":"color","value":"0.2 0.4 0.6"})").unwrap();
     auto properties =
@@ -29,12 +45,109 @@ TEST(SceneUserProperty, BatchUsesSinglePropertySemantics) {
 
     EXPECT_FALSE(single_mutation.graph_changed);
     EXPECT_FALSE(batch_mutation.graph_changed);
-    EXPECT_TRUE(single_mutation.texture_materials.empty());
-    EXPECT_TRUE(batch_mutation.texture_materials.empty());
-    for (rstd::usize index; index < rstd::usize(3); ++index) {
-        EXPECT_FLOAT_EQ(single.clearColor[index], batch.clearColor[index]);
+    EXPECT_TRUE(single_mutation.texture_materials.is_empty());
+    EXPECT_TRUE(batch_mutation.texture_materials.is_empty());
+    auto single_color = single.ClearColor();
+    auto batch_color  = batch.ClearColor();
+    for (usize index {}; index < usize(3); ++index) {
+        EXPECT_FLOAT_EQ(single_color[index], batch_color[index]);
     }
-    EXPECT_FLOAT_EQ(batch.clearColor[rstd::usize()], 0.2f);
-    EXPECT_FLOAT_EQ(batch.clearColor[rstd::usize(1)], 0.4f);
-    EXPECT_FLOAT_EQ(batch.clearColor[rstd::usize(2)], 0.6f);
+    EXPECT_FLOAT_EQ(batch_color[usize()], 0.2f);
+    EXPECT_FLOAT_EQ(batch_color[usize(1)], 0.4f);
+    EXPECT_FLOAT_EQ(batch_color[usize(2)], 0.6f);
+}
+
+TEST(SceneUserProperty, AppliesRegisteredShaderUniformBinding) {
+    owe::Scene         scene;
+    owe::SceneMaterial material;
+    scene.RegisterShaderUserBinding(
+        String::make("brightness"), material, String::make("u_Brightness"));
+
+    auto property = rstd::json::from_str(R"({"type":"slider","value":0.5})").unwrap();
+    owe::SceneUserPropertyApplier::Apply(scene, "brightness", property);
+
+    auto bindings = scene.ShaderUserBindings("brightness");
+    ASSERT_EQ(bindings.len(), usize(1));
+    EXPECT_EQ(bindings[usize()].material, &material);
+    EXPECT_EQ(bindings[usize()].uniform, "u_Brightness");
+    EXPECT_TRUE(material.customShader.constValues.contains("u_Brightness"));
+}
+
+TEST(SceneUserProperty, ReportsRegisteredShaderComboWithoutVfs) {
+    owe::Scene                         scene;
+    owe::SceneMaterial                 material;
+    owe::Scene::ShaderComboUserBinding binding {
+        .material = &material,
+        .combo    = String::make("QUALITY"),
+        .fallback = String::make("0"),
+    };
+    (void)binding.options.insert(String::make("high"), String::make("2"));
+    scene.RegisterShaderComboUserBinding(String::make("quality"), rstd::move(binding));
+
+    auto property = rstd::json::from_str(R"({"type":"combo","value":"high"})").unwrap();
+    auto mutation = owe::SceneUserPropertyApplier::Apply(scene, "quality", property);
+
+    EXPECT_TRUE(mutation.diagnostics_changed);
+    auto bindings = scene.ShaderComboUserBindings("quality");
+    ASSERT_EQ(bindings.len(), usize(1));
+    EXPECT_EQ(bindings[usize()].combo, "QUALITY");
+    EXPECT_EQ(**bindings[usize()].options.get(ref<str>("high")), "2");
+    auto diagnostics = owe::CollectSceneUserPropertyDiagnostics(scene, "quality");
+    ASSERT_EQ(diagnostics.len(), usize(1));
+    EXPECT_EQ(diagnostics[usize()].code, owe::SceneUserPropertyDiagnosticCode::SceneVfsUnavailable);
+}
+
+TEST(SceneUserProperty, AppliesRegisteredMaterialTextureBinding) {
+    owe::Scene         scene;
+    owe::SceneMaterial material;
+    scene.RegisterTexture(String::make("tex/new"), owe::SceneTexture { .url = "tex/new" });
+    material.textures.push_back("tex/old");
+    scene.RegisterMaterialTextureUserBinding(String::make("cover"),
+                                             owe::Scene::MaterialTextureUserBinding {
+                                                 .material = &material,
+                                                 .slot     = rstd::u32(),
+                                                 .fallback = String::make("tex/fallback"),
+                                             });
+
+    auto property = rstd::json::from_str(R"({"type":"texture","value":"tex/new"})").unwrap();
+    (void)owe::SceneUserPropertyApplier::ApplyTexture(scene, "cover", property);
+
+    auto bindings = scene.MaterialTextureUserBindings("cover");
+    ASSERT_EQ(bindings.len(), usize(1));
+    EXPECT_EQ(bindings[usize()].fallback, "tex/fallback");
+    EXPECT_EQ(material.textures[0], "tex/new");
+}
+
+TEST(SceneUserProperty, AppliesRegisteredImageColorBinding) {
+    owe::Scene                          scene;
+    owe::SceneNode                      node;
+    owe::SceneMaterial                  material;
+    rstd::array<owe::SceneMaterial*, 1> materials { &material };
+    scene.RegisterImageColorUserBinding(String::make("tint"), node, materials.as_slice());
+
+    auto property = rstd::json::from_str(R"({"type":"color","value":"0.2 0.4 0.6"})").unwrap();
+    (void)owe::SceneUserPropertyApplier::Apply(scene, "tint", property);
+
+    auto bindings = scene.ImageColorUserBindings("tint");
+    ASSERT_EQ(bindings.len(), usize(1));
+    ASSERT_EQ(bindings[usize()].materials.len(), usize(1));
+    EXPECT_EQ(bindings[usize()].materials[usize()], &material);
+    EXPECT_FLOAT_EQ(node.Color().x(), 0.2f);
+    EXPECT_FLOAT_EQ(node.Color().y(), 0.4f);
+    EXPECT_FLOAT_EQ(node.Color().z(), 0.6f);
+}
+
+TEST(SceneUserProperty, AppliesRegisteredParticleOverrideBinding) {
+    owe::Scene scene;
+    float      observed = 0.0f;
+    scene.RegisterParticleOverrideBinding(
+        String::make("rate"),
+        Arc<dyn<owe::SceneParticleOverrideControl>>::make(
+            FakeParticleOverrideControl { .observed = &observed }));
+
+    auto property = rstd::json::from_str(R"({"type":"slider","value":2.5})").unwrap();
+    (void)owe::SceneUserPropertyApplier::Apply(scene, "rate", property);
+
+    EXPECT_FLOAT_EQ(observed, 2.5f);
+    EXPECT_EQ(scene.ParticleOverrideBindings("rate").len(), usize(1));
 }

@@ -3,12 +3,15 @@ module;
 export module wescene.pkg.parse:wp_shader_parser;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.cppstd;
 import wescene.shader_compile;
 import wescene.scene;
 import wescene.fs;
 
 export import :wp_uniform;
+
+using namespace rstd::prelude;
 
 export namespace owe
 
@@ -22,13 +25,12 @@ using WPDefaultTexs = std::vector<std::pair<std::int32_t, std::string>>;
 
 // Staged direct-route u_* uniforms (shader annotation's `material` field
 // equals the wallpaper-level project.json key). LoadMaterial fills this
-// during compile; the caller registers it into `Scene::shader_user_var_index`
-// AFTER `AddMaterial` so the stored pointer references the shared_ptr-owned
-// SceneMaterial, not the stack-local one being moved.
+// during compile; the caller registers it through Scene after AddMaterial
+// establishes the material's stable owner.
 struct UserVarRecord {
-    std::string material;      // project.json key (== shader annotation's material)
-    std::string name;          // GLSL identifier (e.g. "u_Brightness")
-    Json        default_value; // raw default from annotation; may be null
+    String material;      // project.json key (== shader annotation's material)
+    String name;          // GLSL identifier (e.g. "u_Brightness")
+    Json   default_value; // raw default from annotation; may be null
 };
 
 struct WPShaderInfo {
@@ -42,14 +44,14 @@ struct WPShaderInfo {
     // Full annotation metadata. Renderer reads `combos / svs / defTexs /
     // alias` on the hot path; the editor / material UI and the user-property
     // bridge for `u_*` uniforms read the vectors below.
-    std::vector<wpscene::WPCombo>      combo_defs;
-    std::vector<wpscene::WPUniformTex> texture_uniforms;
-    std::vector<wpscene::WPUniformVar> scalar_uniforms;
+    Vec<wpscene::WPCombo>      combo_defs;
+    Vec<wpscene::WPUniformTex> texture_uniforms;
+    Vec<wpscene::WPUniformVar> scalar_uniforms;
 
     // Filled by LoadMaterial for the direct-binding u_* route. The
     // scene-instance-level user-binding route (effect-key → wallpaper-key)
     // is registered separately from `Material::constantshadervalues_user`.
-    std::vector<UserVarRecord> user_var_staging;
+    Vec<UserVarRecord> user_var_staging;
 };
 
 struct WPPreprocessorInfo {

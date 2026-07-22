@@ -1,8 +1,9 @@
 export module wescene.pkg.parse:wp_uniform;
-import rstd.cppstd;
-import wescene.fs;
-
+import rstd;
 import wescene.json;
+
+using namespace rstd::prelude;
+using rstd::collections::HashMap;
 
 export namespace owe
 
@@ -15,149 +16,67 @@ namespace wpscene
 // stored anyway so future editor / material UI consumers can read them back.
 struct WPUniformTex {
     struct Component {
-        std::string label;
-        std::string combo;
+        String label;
+        String combo;
     };
-    std::string                          material; // unique key for material override
-    std::string                          label;    // editor display name
-    std::string                          default_; // default texture path or `_rt_*`
-    std::string                          mode;     // opacitymask / rgbmask / flowmask
-    std::string                          combo;    // bound? `#define <IDENT> 1` else 0
-    std::array<float, 4>                 paintdefaultcolor { 0, 0, 0, 1.0f };
-    std::vector<Component>               components;
-    bool                                 requireany { false };
-    std::unordered_map<std::string, int> require;
+    String               material; // unique key for material override
+    String               label;    // editor display name
+    String               default_; // default texture path or `_rt_*`
+    String               mode;     // opacitymask / rgbmask / flowmask
+    String               combo;    // bound? `#define <IDENT> 1` else 0
+    array<float, 4>      paintdefaultcolor { 0.0f, 0.0f, 0.0f, 1.0f };
+    Vec<Component>       components;
+    bool                 requireany { false };
+    HashMap<String, i32> require;
 
     // Corpus-observed extras (parsed, not yet consumed).
-    bool        hidden { false };
-    bool        nonremovable { false };
-    std::string group;
-    bool        linked { false };
-    std::string format; // "normalmap" etc.
-    bool        formatcombo { false };
-    bool        direction { false };
-    std::string conversion; // "startdelta" etc.
-    int         order { 0 };
+    bool   hidden { false };
+    bool   nonremovable { false };
+    String group;
+    bool   linked { false };
+    String format; // "normalmap" etc.
+    bool   formatcombo { false };
+    bool   direction { false };
+    String conversion; // "startdelta" etc.
+    i32    order {};
 
-    bool FromJson(const Json& json) {
-        owe::GetJsonValue(json, "material", material, false);
-        owe::GetJsonValue(json, "label", label, false);
-        owe::GetJsonValue(json, "default", default_, false);
-        owe::GetJsonValue(json, "mode", mode, false);
-        owe::GetJsonValue(json, "combo", combo, false);
-        if (auto values = json.get("components"); values.is_some()) {
-            auto array = (*values)->as_array();
-            if (array.is_some())
-                for (const auto& el : **array) {
-                    Component c;
-                    owe::GetJsonValue(el, "label", c.label);
-                    owe::GetJsonValue(el, "combo", c.combo, false);
-                    components.push_back(std::move(c));
-                }
-        }
-        owe::GetJsonValue(json, "requireany", requireany, false);
-        if (auto values = json.get("require"); values.is_some()) {
-            auto object = (*values)->as_object();
-            if (object.is_some())
-                (*object)->iter().for_each([&](auto entry) {
-                    auto [entry_key, entry_value] = entry;
-                    int value { false };
-                    owe::GetJsonValue(*entry_value, value);
-                    require[rstd::cppstd::to_string(entry_key->as_str())] = value;
-                });
-        }
-
-        owe::GetJsonValue(json, "hidden", hidden, false);
-        owe::GetJsonValue(json, "nonremovable", nonremovable, false);
-        owe::GetJsonValue(json, "group", group, false);
-        owe::GetJsonValue(json, "linked", linked, false);
-        owe::GetJsonValue(json, "format", format, false);
-        owe::GetJsonValue(json, "formatcombo", formatcombo, false);
-        owe::GetJsonValue(json, "direction", direction, false);
-        owe::GetJsonValue(json, "conversion", conversion, false);
-        owe::GetJsonValue(json, "order", order, false);
-        return true;
-    }
+    bool FromJson(const Json&);
 };
 
 // Scalar / vec / color / UV uniform metadata. Covers `g_*` user-controlled
 // scalars (e.g. `g_Brightness`) and `u_*` user-variable convention.
 struct WPUniformVar {
-    std::string          name;     // GLSL identifier (e.g. "g_Brightness")
-    std::string          material; // UI key for editor / project bindings
-    std::string          label;
-    std::string          group;
-    std::string          type; // "color" | "" (UV picker uses position:true)
-    bool                 position { false };
-    bool                 linked { false };
-    bool                 nobindings { false };
-    bool                 is_user { false }; // true iff name starts with "u_"
-    std::array<float, 2> range { 0.0f, 1.0f };
-    bool                 has_range { false };
+    String          name;     // GLSL identifier (e.g. "g_Brightness")
+    String          material; // UI key for editor / project bindings
+    String          label;
+    String          group;
+    String          type; // "color" | "" (UV picker uses position:true)
+    bool            position { false };
+    bool            linked { false };
+    bool            nobindings { false };
+    bool            is_user { false }; // true iff name starts with "u_"
+    array<float, 2> range { 0.0f, 1.0f };
+    bool            has_range { false };
 
     // Default value as raw JSON. Host coerces to float / vec2 / vec3 / vec4
     // depending on uniform type at upload time.
     Json default_value;
 
-    bool FromJson(const Json& json, std::string uniform_name) {
-        name    = std::move(uniform_name);
-        is_user = name.size() >= 2 && name[0] == 'u' && name[1] == '_';
-        owe::GetJsonValue(json, "material", material, false);
-        owe::GetJsonValue(json, "label", label, false);
-        owe::GetJsonValue(json, "group", group, false);
-        owe::GetJsonValue(json, "type", type, false);
-        owe::GetJsonValue(json, "position", position, false);
-        owe::GetJsonValue(json, "linked", linked, false);
-        owe::GetJsonValue(json, "nobindings", nobindings, false);
-        if (auto values = json.get("range"); values.is_some()) {
-            auto array = (*values)->as_array();
-            if (array.is_some() && (*array)->len() >= rstd::usize(2))
-                has_range = owe::GetJsonValue((**array)[rstd::usize(0)], range[0]) &&
-                            owe::GetJsonValue((**array)[rstd::usize(1)], range[1]);
-        }
-        if (auto value = json.get("default"); value.is_some()) default_value = (*value)->clone();
-        return true;
-    }
+    bool FromJson(const Json&, String uniform_name);
 };
 
 // [COMBO] preprocessor switch declaration. `combo` is the IDENT that gets
 // `#define`'d in the GLSL prologue, with value `default_` (or whichever
 // option the user picked in the editor).
 struct WPCombo {
-    std::string                          material; // editor display name
-    std::string                          combo;    // IDENT injected as #define
-    std::string                          type;     // "options" | "" (checkbox)
-    int                                  default_ { 0 };
-    std::unordered_map<std::string, int> options; // label → value (combo box mode)
-    std::unordered_map<std::string, int> require; // gating combos
+    String               material; // editor display name
+    String               combo;    // IDENT injected as #define
+    String               type;     // "options" | "" (checkbox)
+    i32                  default_ {};
+    HashMap<String, i32> options; // label → value (combo box mode)
+    HashMap<String, i32> require; // gating combos
 
-    bool FromJson(const Json& json) {
-        owe::GetJsonValue(json, "material", material, false);
-        owe::GetJsonValue(json, "combo", combo, false);
-        owe::GetJsonValue(json, "type", type, false);
-        owe::GetJsonValue(json, "default", default_, false);
-        if (auto values = json.get("options"); values.is_some()) {
-            auto object = (*values)->as_object();
-            if (object.is_some())
-                (*object)->iter().for_each([&](auto entry) {
-                    auto [entry_key, entry_value] = entry;
-                    int value { 0 };
-                    owe::GetJsonValue(*entry_value, value);
-                    options[rstd::cppstd::to_string(entry_key->as_str())] = value;
-                });
-        }
-        if (auto values = json.get("require"); values.is_some()) {
-            auto object = (*values)->as_object();
-            if (object.is_some())
-                (*object)->iter().for_each([&](auto entry) {
-                    auto [entry_key, entry_value] = entry;
-                    int value { 0 };
-                    owe::GetJsonValue(*entry_value, value);
-                    require[rstd::cppstd::to_string(entry_key->as_str())] = value;
-                });
-        }
-        return true;
-    }
+    bool FromJson(const Json&);
 };
 
 } // namespace wpscene

@@ -28,6 +28,8 @@ import wescene.vulkan_render;
 
 using namespace owe;
 using namespace rstd::prelude;
+using rstd::sync::Arc;
+using rstd::sync::atomic::Atomic;
 
 namespace owe
 {
@@ -35,9 +37,8 @@ namespace owe
 class RenderMsg final {
     RSTD_ENUM(RenderMsg,
               (Init, (Box<RenderInitInfo> info; Option<SceneLoadBenchHandle> load_bench;)),
-              (SetScene,
-               (std::shared_ptr<Scene> scene; std::shared_ptr<WPUniformRuntimeInput> uniform_input;
-                Option<SceneLoadBenchHandle> load_bench; Option<u64> random_seed;)),
+              (SetScene, (Box<Scene> scene; Arc<WPUniformRuntimeInput> uniform_input;
+                          Option<SceneLoadBenchHandle> load_bench; Option<u64> random_seed;)),
               (SetFillMode, (FillMode mode;)), (SetSpeed, (f32 speed;)),
               (SetUserProperty, (std::string key; Json property;)),
               (SetMediaStatus, (MediaStatus status;)),
@@ -58,7 +59,7 @@ class MainMsg final {
               (SetUserProperty, (std::string key; Json value;)),
               (SetFirstFrameCallback, (FirstFrameCallback cb;)),
               (SetUserPropertyDiagnosticCallback, (UserPropertyDiagnosticCallback cb;)),
-              (UserPropertyDiagnostics, (std::vector<SceneUserPropertyDiagnostic> diagnostics;)),
+              (UserPropertyDiagnostics, (Vec<SceneUserPropertyDiagnostic> diagnostics;)),
               (PreparedPassDiagnostics, (RenderPassDiagnosticCallback                cb;
                                          std::vector<vulkan::PreparedPassDiagnostic> diagnostics;)),
               (Stop, (bool stop; u32 fade_ms { 0 }; bool scale_audio { false };)),
@@ -82,6 +83,20 @@ auto BenchContext(const Option<SceneLoadBenchHandle>& handle) -> const SceneLoad
     return **handle;
 }
 
+auto CloneAudioResponseDemandCallback(const Option<AudioResponseDemandCallback>& callback)
+    -> Option<AudioResponseDemandCallback> {
+    if (callback.is_none()) return None();
+    return Some(callback->clone());
+}
+
+auto CloneUserPropertyDiagnostics(slice<SceneUserPropertyDiagnostic> diagnostics)
+    -> Vec<SceneUserPropertyDiagnostic> {
+    auto cloned = Vec<SceneUserPropertyDiagnostic>::with_capacity(diagnostics.len());
+    for (usize index {}; index < diagnostics.len(); ++index)
+        cloned.push(diagnostics[index].Clone());
+    return cloned;
+}
+
 Json MakeUserPropertyDescriptor(Json value) {
     if (value.get("value").is_some()) return value;
     auto object = rstd::json::Map::make();
@@ -103,11 +118,11 @@ bool SameSceneMaterialId(SceneMaterialId lhs, SceneMaterialId rhs) {
     return lhs.index == rhs.index && lhs.generation == rhs.generation;
 }
 
-void PushUniqueMaterialId(std::vector<SceneMaterialId>& materials, SceneMaterialId id) {
-    auto it = std::find_if(materials.begin(), materials.end(), [id](auto existing) {
-        return SameSceneMaterialId(existing, id);
-    });
-    if (it == materials.end()) materials.push_back(id);
+void PushUniqueMaterialId(Vec<SceneMaterialId>& materials, SceneMaterialId id) {
+    for (usize index {}; index < materials.len(); ++index) {
+        if (SameSceneMaterialId(materials[index], id)) return;
+    }
+    materials.push(rstd::move(id));
 }
 
 vulkan::PassInvalidationFlags MaterialDirtyToPassInvalidationFlags(SceneMaterialDirtyFlags flags) {
@@ -248,7 +263,6 @@ private:
     SceneWallpaperConfig m_config;
     rstd::json::Map      m_user_properties;
 
-    WPSceneParser                    m_scene_parser;
     Box<wavsen::audio::SoundManager> m_sound_manager;
     FirstFrameCallback               m_first_frame_callback;
     UserPropertyDiagnosticCallback   m_user_property_diagnostic_cb;
@@ -310,7 +324,7 @@ public:
     bool renderInited() const { return m_render->inited(); }
 
     void setMousePos(double x, double y) {
-        m_mouse_pos.store(rstd::array<float, 2> { static_cast<float>(x), static_cast<float>(y) });
+        m_mouse_pos.store(array<float, 2> { static_cast<float>(x), static_cast<float>(y) });
     }
 
     // Edge-events for the cursor button stream. Each call from the input
@@ -351,27 +365,29 @@ private:
 
     SceneRuntimeController& m_main;
 
-    Box<vulkan::VulkanRender>              m_render;
-    std::shared_ptr<Scene>                 m_scene { nullptr };
-    std::shared_ptr<WPUniformRuntimeInput> m_uniform_input;
-    RenderSceneSnapshot                    m_render_scene;
-    Option<Box<rg::RenderGraph>>           m_rg;
-    f32                                    m_speed { 1.0f };
-    FillMode                               m_fillmode { FillMode::ASPECTCROP };
-    bool                                   m_stopped { false };
-    AudioResponseDemandCallback            m_audio_response_demand_callback;
-    bool                                   m_audio_response_enabled { true };
-    std::array<float, 64>                  m_audio_left {};
-    std::array<float, 64>                  m_audio_right {};
-    rstd::time::Instant                    m_audio_received {};
-    bool                                   m_audio_primed { false };
+    Box<vulkan::VulkanRender>           m_render;
+    Option<Box<Scene>>                  m_scene_owner;
+    Scene*                              m_scene { nullptr };
+    Option<Arc<WPUniformRuntimeInput>>  m_uniform_input_owner;
+    WPUniformRuntimeInput*              m_uniform_input { nullptr };
+    RenderSceneSnapshot                 m_render_scene;
+    Option<Box<rg::RenderGraph>>        m_rg;
+    f32                                 m_speed { 1.0f };
+    FillMode                            m_fillmode { FillMode::ASPECTCROP };
+    bool                                m_stopped { false };
+    Option<AudioResponseDemandCallback> m_audio_response_demand_callback;
+    bool                                m_audio_response_enabled { true };
+    std::array<float, 64>               m_audio_left {};
+    std::array<float, 64>               m_audio_right {};
+    rstd::time::Instant                 m_audio_received {};
+    bool                                m_audio_primed { false };
+    bool                                m_first_frame_ok { false };
 
-    rstd::sync::atomic::Atomic<rstd::array<float, 2>> m_mouse_pos { rstd::array<float, 2> {
-        0.5f, 0.5f } };
-    rstd::sync::atomic::Atomic<u32>                   m_buttons_down {};
-    rstd::sync::atomic::Atomic<u32>                   m_buttons_pressed {};
-    rstd::sync::atomic::Atomic<u32>                   m_buttons_released {};
-    rstd::sync::atomic::Atomic<bool>                  m_cursor_in_window { false };
+    Atomic<array<float, 2>> m_mouse_pos { array<float, 2> { 0.5f, 0.5f } };
+    Atomic<u32>             m_buttons_down {};
+    Atomic<u32>             m_buttons_pressed {};
+    Atomic<u32>             m_buttons_released {};
+    Atomic<bool>            m_cursor_in_window { false };
 
     Option<RenderSender>                   m_tx;
     Option<RenderReceiver>                 m_rx;
@@ -478,7 +494,7 @@ void SceneRenderController::on(RenderMsg::Stop_payload&& m) {
 void SceneRenderController::onDraw() {
     frame_timer.FrameBegin();
     if (m_rg.is_some()) {
-        const bool first_draw = ! m_scene->first_frame_ok;
+        const bool first_draw = ! m_first_frame_ok;
         auto       load_bench = loadBenchView();
         auto       first_frame_span =
             first_draw ? SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_first_frame)
@@ -487,8 +503,8 @@ void SceneRenderController::onDraw() {
             first_draw ? SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_first_frame_prepare)
                        : rstd::bench::probe::SpanGuard {};
         {
-            auto pos                 = m_mouse_pos.load();
-            m_scene->pointerPosition = rstd::array<float, 2> { pos[usize()], pos[usize(1)] };
+            auto pos = m_mouse_pos.load();
+            m_scene->SetPointerPosition(array<float, 2> { pos[usize()], pos[usize(1)] });
             if (m_uniform_input) m_uniform_input->SetPointerInput(pos[usize()], pos[usize(1)]);
         }
         // Drive any per-Scene scenescripts before particle emission.
@@ -501,8 +517,9 @@ void SceneRenderController::onDraw() {
             fi.frametime = static_cast<float>(m_scene->Runtime().Frame().delta.to_primitive() *
                                               m_speed.to_primitive());
             fi.runtime   = static_cast<float>(m_scene->Runtime().Frame().elapsed.to_primitive());
-            fi.canvas_w  = static_cast<float>(m_scene->ortho[0]);
-            fi.canvas_h  = static_cast<float>(m_scene->ortho[1]);
+            auto ortho   = m_scene->Ortho();
+            fi.canvas_w  = static_cast<float>(ortho[usize()].to_primitive());
+            fi.canvas_h  = static_cast<float>(ortho[usize(1)].to_primitive());
             fi.screen_w  = fi.canvas_w;
             fi.screen_h  = fi.canvas_h;
             {
@@ -526,10 +543,9 @@ void SceneRenderController::onDraw() {
             }
             if (m_uniform_input) {
                 m_uniform_input->SetAudioSpectrum(
-                    rstd::slice<float>::from_raw_parts(fi.audio_left.data(),
-                                                       usize(fi.audio_left.size())),
-                    rstd::slice<float>::from_raw_parts(fi.audio_right.data(),
-                                                       usize(fi.audio_right.size())));
+                    slice<float>::from_raw_parts(fi.audio_left.data(), usize(fi.audio_left.size())),
+                    slice<float>::from_raw_parts(fi.audio_right.data(),
+                                                 usize(fi.audio_right.size())));
             }
             m_scene->TickNodeFieldAnimations();
             owe::script::TickSceneScripts(*m_scene, fi);
@@ -566,7 +582,7 @@ void SceneRenderController::onDraw() {
         m_scene->PassFrameTime(frame_timer.TargetFrameTime() * m_speed.to_primitive());
 
         if (first_draw) {
-            m_scene->first_frame_ok = true;
+            m_first_frame_ok = true;
             Option<rstd::bench::probe::ProbeBatch> batch;
             if (m_load_bench_recorder) {
                 auto drained = m_load_bench_recorder->drain();
@@ -626,7 +642,7 @@ void SceneRenderController::consumeDirtyEventsCoveredByGraphRebuild() {
 void SceneRenderController::refreshPreparedRenderTargetDirtyEvents() {
     if (! m_scene || ! renderInited() || m_rg.is_none()) return;
     auto events = m_scene->ConsumePreparedRenderTargetDirtyEvents();
-    if (events.empty()) return;
+    if (events.is_empty()) return;
 
     m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
     m_render->refreshPreparedTextures(*m_scene, m_render_scene);
@@ -635,10 +651,10 @@ void SceneRenderController::refreshPreparedRenderTargetDirtyEvents() {
 void SceneRenderController::refreshPreparedMeshDirtyEvents() {
     if (! m_scene || ! renderInited() || m_rg.is_none()) return;
     auto events = m_scene->ConsumePreparedMeshDirtyEvents();
-    if (events.empty()) return;
+    if (events.is_empty()) return;
 
-    bool requires_graph_rebuild = std::any_of(events.begin(), events.end(), [](const auto& event) {
-        return (event.flags & SceneMeshDirtyLayout) != 0;
+    bool requires_graph_rebuild = events.iter().any([](auto event) {
+        return (event->flags & SceneMeshDirtyLayout) != 0;
     });
     if (requires_graph_rebuild) {
         rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
@@ -659,10 +675,10 @@ void SceneRenderController::refreshPreparedMeshDirtyEvents() {
 void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
     if (! m_scene || ! renderInited() || m_rg.is_none()) return;
     auto events = m_scene->ConsumePreparedMaterialDirtyEvents();
-    if (events.empty()) return;
+    if (events.is_empty()) return;
 
-    bool requires_graph_rebuild = std::any_of(events.begin(), events.end(), [](const auto& event) {
-        return (event.flags & SceneMaterialDirtyGraph) != 0;
+    bool requires_graph_rebuild = events.iter().any([](auto event) {
+        return (event->flags & SceneMaterialDirtyGraph) != 0;
     });
     if (requires_graph_rebuild) {
         rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
@@ -691,17 +707,23 @@ void SceneRenderController::on(RenderMsg::SetScene_payload&& m) {
         using Seed = decltype(Random::max());
         Random::seed(static_cast<Seed>(m.random_seed->to_primitive()));
     }
-    if (m_scene && m_scene->audioResponseDemand) {
-        m_scene->audioResponseDemand->SetCallback({});
+    if (m_scene) {
+        m_scene->AudioDemandMut()->SetCallback(None<AudioResponseDemandCallback>());
     }
-    m_scene         = rstd::move(m.scene);
-    m_uniform_input = rstd::move(m.uniform_input);
-    m_audio_primed  = false;
+    m_scene               = nullptr;
+    m_uniform_input       = nullptr;
+    m_scene_owner         = Some(rstd::move(m.scene));
+    m_uniform_input_owner = Some(rstd::move(m.uniform_input));
+    m_scene               = m_scene_owner->get();
+    m_uniform_input       = m_uniform_input_owner->as_ptr().as_raw_ptr();
+    m_audio_primed        = false;
+    m_first_frame_ok      = false;
     m_audio_left.fill(0.0f);
     m_audio_right.fill(0.0f);
-    if (m_scene && m_scene->audioResponseDemand) {
-        m_scene->audioResponseDemand->SetEnabled(m_audio_response_enabled);
-        m_scene->audioResponseDemand->SetCallback(m_audio_response_demand_callback);
+    if (m_scene) {
+        m_scene->AudioDemandMut()->SetEnabled(m_audio_response_enabled);
+        m_scene->AudioDemandMut()->SetCallback(
+            CloneAudioResponseDemandCallback(m_audio_response_demand_callback));
     }
     rebuildRenderGraph(
         vulkan::RenderGraphResourceRetention::ReleaseSceneTextures, true, load_bench);
@@ -720,13 +742,13 @@ void SceneRenderController::on(RenderMsg::SetUserProperty_payload&& m) {
         mutation        = SceneUserPropertyApplier::Apply(*m_scene, m.key, m.property);
     }
 
-    if (! mutation.texture_materials.empty() && renderInited() && m_rg.is_some() &&
+    if (! mutation.texture_materials.is_empty() && renderInited() && m_rg.is_some() &&
         ! mutation.graph_changed) {
         auto refresh_span =
             SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_refresh);
         m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
         if (! m_render->refreshPreparedMaterialTextures(
-                *m_scene, m_render_scene, mutation.texture_materials)) {
+                *m_scene, m_render_scene, mutation.texture_materials.as_slice())) {
             mutation.graph_changed = true;
         }
     }
@@ -753,7 +775,7 @@ void SceneRenderController::on(RenderMsg::SetMediaStatus_payload&& m) {
 
     owe::script::SetSceneMediaStatus(*m_scene, ToScriptMediaStatus(m.status));
 
-    std::vector<SceneMaterialId> texture_materials;
+    Vec<SceneMaterialId> texture_materials;
     for (auto material : SceneUserPropertyApplier::ApplyTexture(
              *m_scene, "$mediaThumbnail", RuntimeTextureProperty(m.status.art_url))) {
         PushUniqueMaterialId(texture_materials, material);
@@ -766,10 +788,10 @@ void SceneRenderController::on(RenderMsg::SetMediaStatus_payload&& m) {
     }
 
     bool requires_graph_rebuild = false;
-    if (! texture_materials.empty() && renderInited() && m_rg.is_some()) {
+    if (! texture_materials.is_empty() && renderInited() && m_rg.is_some()) {
         m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
         if (! m_render->refreshPreparedMaterialTextures(
-                *m_scene, m_render_scene, texture_materials)) {
+                *m_scene, m_render_scene, texture_materials.as_slice())) {
             requires_graph_rebuild = true;
         }
     }
@@ -781,17 +803,16 @@ void SceneRenderController::on(RenderMsg::SetMediaStatus_payload&& m) {
 }
 
 void SceneRenderController::on(RenderMsg::SetAudioResponseDemandCallback_payload&& m) {
-    m_audio_response_demand_callback = rstd::move(m.callback);
-    if (m_scene && m_scene->audioResponseDemand) {
-        m_scene->audioResponseDemand->SetCallback(m_audio_response_demand_callback);
+    m_audio_response_demand_callback = Some(rstd::move(m.callback));
+    if (m_scene) {
+        m_scene->AudioDemandMut()->SetCallback(
+            CloneAudioResponseDemandCallback(m_audio_response_demand_callback));
     }
 }
 
 void SceneRenderController::on(RenderMsg::SetAudioResponseEnabled_payload&& m) {
     m_audio_response_enabled = m.enabled;
-    if (m_scene && m_scene->audioResponseDemand) {
-        m_scene->audioResponseDemand->SetEnabled(m.enabled);
-    }
+    if (m_scene) m_scene->AudioDemandMut()->SetEnabled(m.enabled);
 }
 
 void SceneRenderController::on(RenderMsg::SetAudioSpectrum_payload&& m) {
@@ -1210,11 +1231,11 @@ void SceneRuntimeController::loadScene() {
         }
     }
 
-    std::shared_ptr<Scene> scene { nullptr };
+    Option<ParsedScene> parsed_scene;
 
     // mount assets dir
-    std::unique_ptr<fs::VFS> pVfs = std::make_unique<fs::VFS>();
-    auto&                    vfs  = *pVfs;
+    Box<fs::VFS> pVfs = Box<fs::VFS>::make();
+    auto&        vfs  = *pVfs;
     {
         auto span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_vfs_assets);
         if (! vfs.is_mounted("assets")) {
@@ -1288,24 +1309,26 @@ void SceneRuntimeController::loadScene() {
             abort_load();
             return;
         }
-        // Hand the (already-merged project.json defaults + any host-supplied
-        // overrides) user-property map to the parser so visible-binding
-        // pruning sees the user's saved values, not the scene.json defaults.
-        m_scene_parser.SetUserProperties(rstd::Some(
-            rstd::ref<rstd::json::Map>::from_raw_parts(rstd::addressof(m_user_properties))));
-        scene = m_scene_parser.Parse(scene_id,
-                                     *scene_doc,
-                                     vfs,
-                                     *m_sound_manager,
-                                     SceneParseOptions { .load_bench = loadBenchView() });
-        m_scene_parser.SetUserProperties(rstd::None());
-        if (! scene) {
-            rstd_error("scene parse failed");
+        WPSceneParser parser;
+        auto          parsed = parser.Parse(
+            rstd::cppstd::as_str(scene_id),
+            rstd::ref<wpscene::SceneDocument>::from_raw_parts(scene_doc.get()),
+            rstd::mut_ref<fs::VFS>::from_raw_parts(&vfs),
+            rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(m_sound_manager.get()),
+            SceneParseOptions {
+                .load_bench      = loadBenchView(),
+                .user_properties = Some(
+                    rstd::ref<rstd::json::Map>::from_raw_parts(rstd::addressof(m_user_properties))),
+            });
+        if (parsed.is_err()) {
+            rstd_error("scene parse failed: {}", parsed.unwrap_err().message.as_str());
             abort_load();
             return;
         }
-        auto runtime_span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_runtime_setup);
-        scene->vfs.reset(pVfs.release());
+        parsed_scene       = Some(rstd::move(parsed).unwrap());
+        auto& scene        = parsed_scene->scene;
+        auto  runtime_span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_runtime_setup);
+        scene->InstallExtension(rstd::move(pVfs));
         SceneUserPropertyMutation initial_mutation;
         {
             auto property_span =
@@ -1313,11 +1336,10 @@ void SceneRuntimeController::loadScene() {
             initial_mutation = SceneUserPropertyApplier::ApplyAll(*scene, m_user_properties);
         }
         if (initial_mutation.diagnostics_changed && m_user_property_diagnostic_cb) {
-            auto diagnostics = scene->UserPropertyDiagnostics();
             m_user_property_diagnostic_cb(
-                std::vector<SceneUserPropertyDiagnostic>(diagnostics.begin(), diagnostics.end()));
+                CloneUserPropertyDiagnostics(scene->UserPropertyDiagnostics()));
         }
-        if (! m_config.cache_dir.empty() && scene) {
+        if (! m_config.cache_dir.empty()) {
             std::filesystem::path ls_dir =
                 std::filesystem::path(m_config.cache_dir) / "script_localstorage";
             std::error_code ec;
@@ -1330,14 +1352,15 @@ void SceneRuntimeController::loadScene() {
         // off to the render thread; downstream callers (the daemon
         // host) need the value to feed `set_config.clear_*`.
         if (m_clear_color_cb) {
-            const auto& c = scene->clearColor;
+            auto c = scene->ClearColor();
             m_clear_color_cb(c[usize()], c[usize(1)], c[usize(2)]);
         }
     }
 
-    auto rtx = m_render_controller->sender();
-    if (rtx.send(RenderMsg::SetScene(scene,
-                                     m_scene_parser.RuntimeInput(),
+    auto parsed = rstd::move(parsed_scene).unwrap();
+    auto rtx    = m_render_controller->sender();
+    if (rtx.send(RenderMsg::SetScene(rstd::move(parsed.scene),
+                                     rstd::move(parsed.runtime_input),
                                      m_config.load_bench.clone(),
                                      m_config.random_seed))
             .is_err()) {

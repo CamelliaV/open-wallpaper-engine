@@ -110,14 +110,15 @@ void HandleComboLine(WPShaderInfo* info, std::string_view line) {
     if (j.get("combo").is_none()) return;
     wpscene::WPCombo combo;
     combo.FromJson(j);
-    if (combo.combo.empty()) return;
-    info->combos[combo.combo] = std::to_string(combo.default_);
-    info->combo_defs.push_back(std::move(combo));
+    if (combo.combo.is_empty()) return;
+    info->combos[rstd::cppstd::to_string(combo.combo.as_str())] =
+        std::to_string(combo.default_.to_primitive());
+    info->combo_defs.push(rstd::move(combo));
 }
 
 void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texinfos,
                        std::string_view line) {
-    Cursor c(line);
+    Cursor c(rstd::cppstd::as_str(line));
     c.SkipHSpace();
     if (! c.MatchKeyword("uniform")) return;
     c.SkipHSpace();
@@ -134,9 +135,9 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     while (! c.Eof() && c.Peek() != '{') c.Advance();
     if (c.Eof()) return;
     Json sv_json;
-    if (! ParseAnnotationJson(line.substr(c.Pos()), sv_json)) return;
+    if (! ParseAnnotationJson(line.substr(c.Pos().to_primitive()), sv_json)) return;
 
-    auto name = tn->name;
+    auto name = rstd::cppstd::as_string_view(tn->name);
 
     std::string material_key;
     GetJsonValue(sv_json, "material", material_key, false);
@@ -155,26 +156,29 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
         } else {
             rstd_error("invalid shader texture index: {}", name);
         }
-        if (! wput.default_.empty()) {
-            info->defTexs.push_back({ index, wput.default_ });
+        if (! wput.default_.is_empty()) {
+            info->defTexs.push_back({ index, rstd::cppstd::to_string(wput.default_.as_str()) });
         }
         const bool        has_texture   = index >= 0 && static_cast<std::size_t>(index) < texcount;
         const std::size_t texture_index = static_cast<std::size_t>(index);
-        if (! wput.combo.empty()) {
-            const bool enabled       = has_texture && texinfos[texture_index].enabled;
-            info->combos[wput.combo] = enabled ? "1" : "0";
+        if (! wput.combo.is_empty()) {
+            const bool enabled = has_texture && texinfos[texture_index].enabled;
+            info->combos[rstd::cppstd::to_string(wput.combo.as_str())] = enabled ? "1" : "0";
         }
         if (has_texture && texinfos[texture_index].enabled) {
             auto&       compos = texinfos[texture_index].composEnabled;
-            std::size_t num    = std::min(std::size(compos), std::size(wput.components));
+            std::size_t num    = std::min(std::size(compos), wput.components.len().to_primitive());
             for (std::size_t i = 0; i < num; i++) {
-                if (compos[i]) info->combos[wput.components[i].combo] = "1";
+                if (compos[i]) {
+                    auto& combo = wput.components[usize(i)].combo;
+                    info->combos[rstd::cppstd::to_string(combo.as_str())] = "1";
+                }
             }
         }
-        info->texture_uniforms.push_back(std::move(wput));
+        info->texture_uniforms.push(rstd::move(wput));
     } else {
         wpscene::WPUniformVar var;
-        var.FromJson(sv_json, std::string(name));
+        var.FromJson(sv_json, String::make(tn->name));
         if (auto value = sv_json.get("default"); value.is_some()) {
             ShaderValue sv;
             if ((*value)->is_string()) {
@@ -192,7 +196,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
             GetJsonValue(sv_json, "combo", cname);
             if (! cname.empty()) info->combos[cname] = "1";
         }
-        info->scalar_uniforms.push_back(std::move(var));
+        info->scalar_uniforms.push(rstd::move(var));
     }
 }
 
@@ -201,9 +205,9 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
 void ParseWPShader(const std::string& src, WPShaderInfo* info,
                    const std::vector<WPShaderTexInfo>& texinfos_vec) {
     std::span<const WPShaderTexInfo> texinfos(texinfos_vec.data(), texinfos_vec.size());
-    LineWalker                       w(src);
+    LineWalker                       w(rstd::cppstd::as_str(src));
     for (; ! w.Done(); w.Step()) {
-        auto line = w.Line();
+        auto line = rstd::cppstd::as_string_view(w.Line());
         if (line.empty()) continue;
         // Helpers / forward decls above `void main()` are the annotated
         // region; the function body never carries new annotations.
@@ -215,7 +219,7 @@ void ParseWPShader(const std::string& src, WPShaderInfo* info,
         }
         // Cheap pre-check: only attempt the full keyword match if the trimmed
         // line could plausibly start with `uniform`.
-        Cursor probe(line);
+        Cursor probe(rstd::cppstd::as_str(line));
         probe.SkipHSpace();
         if (probe.Eof() || probe.Peek() != 'u') continue;
         HandleUniformLine(info, texinfos, line);

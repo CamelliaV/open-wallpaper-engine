@@ -1,9 +1,12 @@
 module;
 
 export module wescene.pkg.scene_obj:animation_layer;
+import rstd;
 import rstd.cppstd;
 import wescene.json;
 export import wescene.pkg.puppet;
+
+using namespace rstd::prelude;
 
 export namespace owe::wpscene
 {
@@ -21,7 +24,9 @@ inline void ReadPuppetAnimationLayers(const owe::Json&                          
         owe::GetJsonValue(jLayer, "rate", layer.rate);
         owe::GetJsonValue(jLayer, "visible", layer.visible, false);
         owe::GetJsonValue(jLayer, "id", layer.layer_id, false);
-        owe::GetJsonValue(jLayer, "name", layer.name, false);
+        std::string name;
+        owe::GetJsonValue(jLayer, "name", name, false);
+        layer.name = String::make(rstd::cppstd::as_str(name));
         owe::GetJsonValue(jLayer, "additive", layer.additive, false);
         owe::GetJsonValue(jLayer, "blendin", layer.blendin, false);
         owe::GetJsonValue(jLayer, "blendout", layer.blendout, false);

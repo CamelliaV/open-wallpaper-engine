@@ -9,16 +9,17 @@ import rstd.cppstd;
 
 using namespace owe;
 using namespace Eigen;
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
-static double SampleBoneCurve(const std::vector<WPPuppet::BoneFrameCurve>&  curves,
-                              unsigned                                      bone_index,
+static double SampleBoneCurve(const Vec<WPPuppet::BoneFrameCurve>& curves, usize bone_index,
                               const WPPuppet::Animation::InterpolationInfo& info) {
-    if (bone_index >= curves.size()) return 1.0;
+    if (bone_index >= curves.len()) return 1.0;
     const auto& values = curves[bone_index].values;
-    if (values.empty()) return 1.0;
+    if (values.is_empty()) return 1.0;
 
-    auto sample = [&](std::size_t frame) {
-        const auto i = std::min(frame, values.size() - 1);
+    auto sample = [&](usize frame) {
+        const auto i = frame < values.len() ? frame : values.len() - usize(1);
         return static_cast<double>(values[i]);
     };
     const double a = sample(info.frame_a);
@@ -26,7 +27,7 @@ static double SampleBoneCurve(const std::vector<WPPuppet::BoneFrameCurve>&  curv
     return a * (1.0 - info.t) + b * info.t;
 }
 
-static double LayerBoneBlend(const WPPuppet::Animation& anim, unsigned bone_index,
+static double LayerBoneBlend(const WPPuppet::Animation& anim, usize bone_index,
                              const WPPuppet::Animation::InterpolationInfo& info,
                              double                                        layer_blend) {
     double blend = layer_blend * SampleBoneCurve(anim.blend_curves, bone_index, info);
@@ -57,9 +58,10 @@ struct BindLinear {
 };
 
 static Quaterniond ToQuaternion(Vector3f euler) {
-    const std::array<Vector3d, 3> axis { Vector3d::UnitX(), Vector3d::UnitY(), Vector3d::UnitZ() };
-    return AngleAxis<double>(euler.z(), axis[2]) * AngleAxis<double>(euler.y(), axis[1]) *
-           AngleAxis<double>(euler.x(), axis[0]);
+    const array<Vector3d, 3> axis { Vector3d::UnitX(), Vector3d::UnitY(), Vector3d::UnitZ() };
+    return AngleAxis<double>(euler.z(), axis[usize(2)]) *
+           AngleAxis<double>(euler.y(), axis[usize(1)]) *
+           AngleAxis<double>(euler.x(), axis[usize(0)]);
 };
 
 static BindLinear DecomposeBindLinear(const Matrix3f& linear) {
@@ -85,9 +87,9 @@ static BindLinear DecomposeBindLinear(const Matrix3f& linear) {
 }
 
 void WPPuppet::prepared() {
-    for (unsigned i = 0; i < bones.size(); i++) {
+    for (usize i {}; i < bones.len(); ++i) {
         auto& b = bones[i];
-        rstd_assert(b.bind_parent < i || b.noBindParent());
+        rstd_assert(b.bind_parent < i.to_primitive() || b.noBindParent());
         // vco bracket only applies to world-anchored puppets (MDLV21): each bone
         // is its own sprite root, and anim pivots around vertex_centroid_offset.
         // Chain LBS (MDLV22+) keeps strict parent.world_bind * local_bind.
@@ -97,7 +99,7 @@ void WPPuppet::prepared() {
                 b.world_bind.pretranslate(b.vertex_centroid_offset);
             }
         } else {
-            b.world_bind = bones[b.bind_parent].world_bind * b.local_bind;
+            b.world_bind = bones[usize(b.bind_parent)].world_bind * b.local_bind;
         }
         b.inv_bind = b.world_bind.inverse();
     }
@@ -111,11 +113,14 @@ void WPPuppet::prepared() {
         }
     }
 
-    m_final_affines.resize(bones.size());
+    m_final_affines.clear();
+    m_final_affines.reserve(bones.len());
+    for (usize i {}; i < bones.len(); ++i) {
+        m_final_affines.emplace_back(Affine3f::Identity());
+    }
 }
 
-std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
-                                                    double         time) noexcept {
+slice<Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer, double time) noexcept {
     puppet_layer.updateInterpolation(time);
 
     // TRS skinning is required: WE puppets animate scale (e.g. blink uses
@@ -128,18 +133,18 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
     // MDLA blend curves decide which dense bone-track slots are active for each
     // animation layer; inactive bones keep bind pose instead of being diluted by
     // unrelated replacement layers.
-    for (unsigned i = 0; i < m_final_affines.size(); i++) {
+    for (usize i {}; i < m_final_affines.len(); ++i) {
         const auto& bone   = bones[i];
         auto&       affine = m_final_affines[i];
 
-        rstd_assert(bone.anim_parent < i || bone.noAnimParent());
+        rstd_assert(bone.anim_parent < i.to_primitive() || bone.noAnimParent());
         Affine3f parent = Affine3f::Identity();
         if (! bone.noAnimParent()) {
-            parent = m_final_affines[bone.anim_parent];
+            parent = m_final_affines[usize(bone.anim_parent)];
             if (world_anchored_bones) {
                 // MDLV21 child bind poses are already puppet-local; inherit
                 // only the parent's animated delta to avoid double transforms.
-                parent = parent * bones[bone.anim_parent].inv_bind.matrix();
+                parent = parent * bones[usize(bone.anim_parent)].inv_bind.matrix();
             }
         }
 
@@ -147,13 +152,13 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         for (const auto& layer : puppet_layer.m_layers) {
             if (layer.anim == nullptr || ! layer.anim_layer.visible || layer.anim_layer.additive)
                 continue;
-            if (i >= layer.anim->bone_tracks.size()) continue;
+            if (i >= layer.anim->bone_tracks.len()) continue;
             const auto& track = layer.anim->bone_tracks[i];
             if (! HasAuthoredTrack(track)) continue;
             const double blend =
                 LayerBoneBlend(*layer.anim, i, layer.interp_info, layer.anim_layer.blend);
             if (blend <= 0.0) continue;
-            replace_base_frame = std::addressof(track.frames[0]);
+            replace_base_frame = std::addressof(track.frames[usize()]);
             break;
         }
 
@@ -175,12 +180,12 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         for (auto& layer : puppet_layer.m_layers) {
             auto& alayer = layer.anim_layer;
             if (layer.anim == nullptr || ! alayer.visible) continue;
-            if (i >= layer.anim->bone_tracks.size()) continue;
+            if (i >= layer.anim->bone_tracks.len()) continue;
 
             auto& info  = layer.interp_info;
             auto& track = layer.anim->bone_tracks[i];
             if (! HasAuthoredTrack(track)) continue;
-            auto& frame_base = track.frames[0];
+            auto& frame_base = track.frames[usize()];
             auto& frame_a    = track.frames[info.frame_a];
             auto& frame_b    = track.frames[info.frame_b];
 
@@ -215,14 +220,14 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         affine = parent * affine;
     }
 
-    for (unsigned i = 0; i < m_final_affines.size(); i++) {
+    for (usize i {}; i < m_final_affines.len(); ++i) {
         m_final_affines[i] *= bones[i].inv_bind.matrix();
     }
-    return m_final_affines;
+    return m_final_affines.as_slice();
 }
 
 static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInfo& info,
-                                           double& cur, std::size_t length, double frame_time,
+                                           double& cur, usize length, double frame_time,
                                            double max_time) {
     cur          = std::fmod(cur, max_time);
     double _rate = cur / frame_time;
@@ -230,35 +235,35 @@ static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInf
     // `length` is the number of intervals; the track stores `length + 1`
     // frame samples (frame[0]..frame[length], where frame[length] closes
     // the loop). frame_b = frame_a + 1 is always in-range.
-    info.frame_a = static_cast<std::size_t>(_rate) % length;
-    info.frame_b = info.frame_a + 1;
-    info.t       = _rate - static_cast<double>(info.frame_a);
+    info.frame_a = usize(static_cast<size_t>(_rate)) % length;
+    info.frame_b = info.frame_a + usize(1);
+    info.t       = _rate - static_cast<double>(info.frame_a.to_primitive());
 }
 
 static constexpr void genSingleInterpolationInfo(WPPuppet::Animation::InterpolationInfo& info,
-                                                 double& cur, std::size_t length, double frame_time,
+                                                 double& cur, usize length, double frame_time,
                                                  double max_time) {
-    if (length == 0 || frame_time <= 0.0) {
+    if (length == usize() || frame_time <= 0.0) {
         cur          = 0.0;
-        info.frame_a = 0;
-        info.frame_b = 0;
+        info.frame_a = usize();
+        info.frame_b = usize();
         info.t       = 0.0;
         return;
     }
 
     cur          = std::clamp(cur, 0.0, max_time);
     double rate  = cur / frame_time;
-    auto   frame = static_cast<std::size_t>(rate);
+    auto   frame = usize(static_cast<size_t>(rate));
     if (frame >= length) {
-        info.frame_a = length - 1;
+        info.frame_a = length - usize(1);
         info.frame_b = length;
         info.t       = 1.0;
         return;
     }
 
     info.frame_a = frame;
-    info.frame_b = frame + 1;
-    info.t       = rate - static_cast<double>(frame);
+    info.frame_b = frame + usize(1);
+    info.t       = rate - static_cast<double>(frame.to_primitive());
 }
 
 WPPuppet::Animation::InterpolationInfo
@@ -267,19 +272,19 @@ WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
     auto&             _cur_time = *cur_time;
 
     if (mode == PlayMode::Loop) {
-        const auto frame_count = static_cast<std::size_t>(length);
+        const auto frame_count = usize(static_cast<size_t>(length));
         genInterpolationInfo(_info, _cur_time, frame_count, frame_time, max_time);
     } else if (mode == PlayMode::Single) {
-        const auto frame_count = static_cast<std::size_t>(length);
+        const auto frame_count = usize(static_cast<size_t>(length));
         genSingleInterpolationInfo(_info, _cur_time, frame_count, frame_time, max_time);
     } else if (mode == PlayMode::Mirror) {
         // Frames 0..length stored; mirror cycle is 0,1,..,length,length-1,..,0
         // (2*length intervals). Map any f in [0, 2*length] back into [0, length].
-        const auto frame_count = static_cast<std::size_t>(length);
-        const auto _get_frame  = [frame_count](std::size_t frame) {
-            return frame <= frame_count ? frame : (2 * frame_count - frame);
+        const auto frame_count = usize(static_cast<size_t>(length));
+        const auto _get_frame  = [frame_count](usize frame) {
+            return frame <= frame_count ? frame : (frame_count * usize(2) - frame);
         };
-        genInterpolationInfo(_info, _cur_time, frame_count * 2, frame_time, max_time * 2.0);
+        genInterpolationInfo(_info, _cur_time, frame_count * usize(2), frame_time, max_time * 2.0);
         _info.frame_a = _get_frame(_info.frame_a);
         _info.frame_b = _get_frame(_info.frame_b);
     }
@@ -287,18 +292,38 @@ WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
     return _info;
 }
 
-void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
-    m_layers.resize(alayers.size());
+auto WPPuppetLayer::AnimationLayer::Clone() const -> AnimationLayer {
+    return AnimationLayer {
+        .id        = id,
+        .rate      = rate,
+        .blend     = blend,
+        .visible   = visible,
+        .cur_time  = cur_time,
+        .layer_id  = layer_id,
+        .name      = name.clone(),
+        .additive  = additive,
+        .blendin   = blendin,
+        .blendout  = blendout,
+        .blendtime = blendtime,
+    };
+}
+
+void WPPuppetLayer::prepared(slice<AnimationLayer> alayers) {
+    m_layers.clear();
+    m_layers.reserve(alayers.len());
+    for (usize i {}; i < alayers.len(); ++i) m_layers.emplace_back();
 
     const auto&           anims         = m_puppet->anims;
     const AnimationLayer* additive_base = nullptr;
     bool                  has_replace   = false;
     auto                  exists        = [&](const auto& layer) {
-        return std::any_of(anims.begin(), anims.end(), [&](const auto& a) {
-            return a.id == layer.id;
-        });
+        for (const auto& anim : anims) {
+            if (anim.id == layer.id) return true;
+        }
+        return false;
     };
-    for (const auto& layer : alayers) {
+    for (usize i {}; i < alayers.len(); ++i) {
+        const auto& layer = alayers[i];
         if (! layer.visible || ! exists(layer)) continue;
         if (layer.additive) {
             if (! has_replace && additive_base == nullptr && layer.blend > 0.0) {
@@ -310,50 +335,53 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
         additive_base = nullptr;
     }
 
-    std::transform(alayers.rbegin(),
-                   alayers.rend(),
-                   m_layers.rbegin(),
-                   [additive_base, this](const auto& layer) {
-                       const auto& anims     = m_puppet->anims;
-                       auto        out_layer = layer;
+    for (usize i = alayers.len(); i != usize();) {
+        --i;
+        const auto&                layer     = alayers[i];
+        auto                       out_layer = layer.Clone();
+        const WPPuppet::Animation* matched   = nullptr;
+        for (const auto& anim : anims) {
+            if (layer.id == anim.id) {
+                matched = rstd::addressof(anim);
+                break;
+            }
+        }
+        const bool ok = matched != nullptr && layer.visible;
 
-                       auto it = std::find_if(anims.begin(), anims.end(), [&layer](auto& a) {
-                           return layer.id == a.id;
-                       });
-                       bool ok = it != anims.end() && layer.visible;
+        if (ok && rstd::addressof(layer) == additive_base) {
+            // Additive-only stacks still need one absolute frame[0]
+            // pose; otherwise authored puppet pieces stay scattered.
+            out_layer.additive = false;
+        }
 
-                       if (ok && std::addressof(layer) == additive_base) {
-                           // Additive-only stacks still need one absolute frame[0]
-                           // pose; otherwise authored puppet pieces stay scattered.
-                           out_layer.additive = false;
-                       }
-
-                       return Layer {
-                           .anim_layer = out_layer,
-                           .anim       = ok ? std::addressof(*it) : nullptr,
-                       };
-                   });
+        m_layers[i] = Layer {
+            .anim_layer = rstd::move(out_layer),
+            .anim       = ok ? matched : nullptr,
+        };
+    }
 }
 
-std::span<const Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
+slice<Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
     return m_puppet->genFrame(*this, time);
 }
 
-uint32_t WPPuppetLayer::boneIndex(std::string_view name) const noexcept {
-    if (! m_puppet) return 0;
-    for (uint32_t i = 0; i < m_puppet->bones.size(); ++i) {
-        if (m_puppet->bones[i].name == name) return i + 1;
+uint32_t WPPuppetLayer::boneIndex(ref<str> name) const noexcept {
+    for (usize i {}; i < m_puppet->bones.len(); ++i) {
+        if (m_puppet->bones[i].name == name) {
+            return static_cast<uint32_t>(i.to_primitive()) + 1;
+        }
     }
     return 0;
 }
 
-std::optional<Eigen::Affine3f> WPPuppetLayer::boneTransform(uint32_t index, double time) noexcept {
-    if (! m_puppet || index == 0) return std::nullopt;
-    const uint32_t zero_based = index - 1;
-    if (zero_based >= m_puppet->bones.size()) return std::nullopt;
+Option<Eigen::Affine3f> WPPuppetLayer::boneTransform(uint32_t index, double time) noexcept {
+    if (index == 0) return None();
+    const usize zero_based(index - 1);
+    if (zero_based >= m_puppet->bones.len()) return None();
     auto frame = genFrame(time);
-    if (zero_based >= frame.size()) return std::nullopt;
-    return frame[zero_based] * m_puppet->bones[zero_based].world_bind;
+    if (zero_based >= frame.len()) return None();
+    Eigen::Affine3f transform = frame[zero_based] * m_puppet->bones[zero_based].world_bind;
+    return Some(rstd::move(transform));
 }
 
 void WPPuppetLayer::updateInterpolation(double elapsed) noexcept {
@@ -368,6 +396,5 @@ void WPPuppetLayer::updateInterpolation(double elapsed) noexcept {
     }
 }
 
-WPPuppetLayer::WPPuppetLayer(std::shared_ptr<WPPuppet> pup): m_puppet(pup) {}
-WPPuppetLayer::WPPuppetLayer()  = default;
+WPPuppetLayer::WPPuppetLayer(Arc<WPPuppet> pup): m_puppet(rstd::move(pup)) {}
 WPPuppetLayer::~WPPuppetLayer() = default;

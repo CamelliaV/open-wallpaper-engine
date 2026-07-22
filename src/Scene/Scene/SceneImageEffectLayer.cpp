@@ -149,14 +149,16 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             } else {
                 mesh.ChangeMeshDataFrom(*m_final_mesh.as_ptr());
             }
-            for (const auto& [name, value] : last_output->final_quad_shader_values) {
-                material.SetShaderValue(name, value.base);
-                if (value.curve && ! value.curve->Empty()) {
-                    material.customShader.valueAnimations[name] = value;
+            last_output->final_quad_shader_values.iter().for_each([&](auto entry) {
+                auto [name, value] = entry;
+                material.SetShaderValue(rstd::cppstd::to_string(name->as_str()), value->base);
+                if (value->curve.is_some() && ! (**value->curve).Empty()) {
+                    (void)material.customShader.valueAnimations.insert(name->clone(),
+                                                                       value->Clone());
                 } else {
-                    material.customShader.valueAnimations.erase(name);
+                    (void)material.customShader.valueAnimations.remove(name->as_str());
                 }
-            }
+            });
         }
         last_output->sceneNode->SetAlphaSource(m_worldNode);
     }

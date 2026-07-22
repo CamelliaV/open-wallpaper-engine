@@ -9,12 +9,26 @@ import wescene.spec_names;
 
 using namespace Eigen;
 using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 namespace owe
 {
 
 namespace
 {
+
+template<typename T>
+struct ArcUniformBindingLease {
+    Arc<T> state;
+
+    void KeepAlive() const {}
+};
+
+template<typename T>
+auto MakeArcUniformBindingLease(const Arc<T>& state) -> Option<Box<dyn<UniformBindingLease>>> {
+    return Some(
+        Box<dyn<UniformBindingLease>>::make(ArcUniformBindingLease<T> { .state = state.clone() }));
+}
 
 template<std::size_t N>
 void AverageResample64(slice<float> bins, rstd::array<float, N>& out) {
@@ -188,32 +202,28 @@ auto WPUniformNodeConfigDraft::Clone() const -> WPUniformNodeConfigDraft {
     return result;
 }
 
-void WPUniformCameraResolver::Add(std::string name, std::shared_ptr<SceneCamera> camera) {
-    m_cameras.push(Entry { .name = rstd::move(name), .camera = rstd::move(camera) });
+void WPUniformCameraResolver::Add(String name, Arc<SceneCamera> camera) {
+    (void)m_cameras.insert(rstd::move(name), rstd::move(camera));
 }
 
-auto WPUniformCameraResolver::Resolve(const SceneNode& node) const -> std::shared_ptr<SceneCamera> {
-    std::string_view name = node.Camera();
-    if (name.empty()) {
-        if (! node.Perspective()) return m_active_camera;
-        name = "global_perspective";
+auto WPUniformCameraResolver::Resolve(const SceneNode& node) const -> Option<mut_ref<SceneCamera>> {
+    auto name = rstd::cppstd::as_str(node.Camera());
+    if (name.is_empty()) {
+        if (! node.Perspective()) return Some(m_active_camera.deref_mut());
+        name = ref<str>("global_perspective");
     }
-    for (const auto& entry : m_cameras) {
-        if (entry.name == name) return entry.camera;
-    }
-    return nullptr;
+    auto camera = m_cameras.get(name);
+    return camera.is_some() ? Some((**camera).deref_mut()) : None();
 }
 
-auto WPUniformSceneState::SetNodeState(SceneNodeId id, std::shared_ptr<WPUniformNodeState> state)
-    -> std::shared_ptr<WPUniformNodeState> {
-    (void)m_nodes_by_address.insert(state->node.as_ptr().as_raw_ptr(), state);
-    (void)m_nodes.insert(Key(id), state);
-    return state;
+void WPUniformSceneState::SetNodeState(SceneNodeId id, Arc<WPUniformNodeState> state) {
+    (void)m_nodes_by_address.insert(state->node.as_ptr().as_raw_ptr(), state.clone());
+    (void)m_nodes.insert(Key(id), rstd::move(state));
 }
 
 bool WPUniformSceneState::SetEffectProjectionSize(SceneNodeId id, rstd::array<float, 2> size) {
     auto found = m_nodes.get_mut(Key(id));
-    if (found.is_none() || ! **found) return false;
+    if (found.is_none()) return false;
     (**found)->effect_projection_size = size;
     return true;
 }
@@ -223,7 +233,7 @@ auto WPUniformSceneState::ResolveParallaxState(const WPUniformNodeState& state) 
     auto* resolved = rstd::addressof(state);
     for (auto* parent = state.node->Parent(); parent != nullptr; parent = parent->Parent()) {
         auto found = m_nodes_by_address.get(parent);
-        if (found.is_none() || ! **found) continue;
+        if (found.is_none()) continue;
         auto& candidate = ***found;
         if (! candidate.propagate_parallax_to_children) break;
         resolved = rstd::addressof(candidate);
@@ -312,15 +322,13 @@ auto WPTransformUniformSource::Version(ref<dyn<UniformUpdateContext>> context) c
 auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
                                         mut_ref<dyn<UniformValueSink>> sink) const
     -> Result<empty, UniformError> {
-    if (! m_state || ! m_node || ! m_node->camera_resolver) return Ok(empty {});
-
     auto camera_ref = m_node->camera_resolver->Resolve(*m_node->node);
-    if (! camera_ref) return Ok(empty {});
+    if (camera_ref.is_none()) return Ok(empty {});
 
     using Output = WPTransformUniformOutput;
     WPUniformWriter writer(sink);
     auto&           node        = *m_node->node;
-    auto&           camera      = *camera_ref;
+    auto&           camera      = **camera_ref;
     const auto      render_view = context->RenderView();
     node.UpdateTrans();
 
@@ -337,8 +345,8 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
 
     Matrix4d    view_projection   = camera.GetViewProjectionMatrix(render_view);
     const auto& shake             = m_state->CameraShake();
-    const auto  active_camera_ref = m_node->camera_resolver->Active();
-    const bool  active_camera     = active_camera_ref && camera_ref == active_camera_ref;
+    auto        active_camera_ref = m_node->camera_resolver->Active();
+    const bool  active_camera     = (*camera_ref).as_raw_ptr() == active_camera_ref.as_raw_ptr();
     if (shake.enable && active_camera && ! camera.IsPerspective() && shake.amplitude > 0.0f &&
         shake.speed > 0.0f) {
         const auto  ortho       = m_state->Ortho();
@@ -417,8 +425,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
             writer.Write(Output::EffectModel, ShaderValue::fromMatrix(effect_model));
             if (req_emvp || req_emvpi) {
                 const Matrix4d effect_view =
-                    active_camera_ref ? active_camera_ref->GetViewProjectionMatrix(render_view)
-                                      : view_projection;
+                    active_camera_ref->GetViewProjectionMatrix(render_view);
                 const Matrix4d effect_mvp = effect_view * effect_model;
                 if (req_emvp)
                     writer.Write(Output::EffectModelViewProjection,
@@ -458,7 +465,6 @@ auto WPFrameUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const
 auto WPFrameUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
                                     mut_ref<dyn<UniformValueSink>> sink) const
     -> Result<empty, UniformError> {
-    if (! m_state) return Ok(empty {});
     using Output = WPFrameUniformOutput;
     WPUniformWriter writer(sink);
     const auto      frame     = context->Frame();
@@ -509,14 +515,18 @@ auto WPAudioUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const
     return context->Frame()->revision;
 }
 
-auto WPAudioUniformSource::AcquireBindingLease() const -> std::shared_ptr<void> {
-    return m_state ? m_state->AcquireAudioResponse() : std::shared_ptr<void> {};
+auto WPAudioUniformSource::AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> {
+    return Some(m_state->AcquireAudioResponse());
+}
+
+auto WPParticleTrailUniformSource::AcquireBindingLease() const
+    -> Option<Box<dyn<UniformBindingLease>>> {
+    return MakeArcUniformBindingLease(m_state);
 }
 
 auto WPAudioUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
                                     mut_ref<dyn<UniformValueSink>> sink) const
     -> Result<empty, UniformError> {
-    if (! m_state) return Ok(empty {});
     using Output = WPAudioUniformOutput;
     WPUniformWriter        writer(sink);
     const auto&            inputs = m_state->Inputs();
@@ -721,7 +731,6 @@ auto WPParticleTrailUniformSource::Version(ref<dyn<UniformUpdateContext>> contex
 auto WPParticleTrailUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
                                             mut_ref<dyn<UniformValueSink>> sink) const
     -> Result<empty, UniformError> {
-    if (! m_state) return Ok(empty {});
     WPUniformWriter writer(sink);
     writer.Write(WPParticleTrailUniformOutput::RenderVar0, m_state->render_var);
     return writer.Finish();
@@ -743,10 +752,10 @@ auto WPPuppetUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
                                      mut_ref<dyn<UniformValueSink>> sink) const
     -> Result<empty, UniformError> {
     const auto output = UniformOutputId { .value = u32() };
-    if (! m_layer || ! m_layer->hasPuppet() || ! sink->Wants(output)) return Ok(empty {});
+    if (! sink->Wants(output)) return Ok(empty {});
     auto matrices = m_layer->genFrame(context->Frame()->elapsed.to_primitive());
-    if (matrices.empty()) return Ok(empty {});
-    auto value = UniformValue(matrices[0].data(), usize(matrices.size() * 16));
+    if (matrices.is_empty()) return Ok(empty {});
+    auto value = UniformValue(matrices[usize()].data(), matrices.len() * usize(16));
     return sink->Write(output, value.View());
 }
 

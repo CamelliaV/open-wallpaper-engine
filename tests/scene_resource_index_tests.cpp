@@ -7,6 +7,10 @@ import wescene.types;
 import wescene.json;
 import wescene.scene;
 
+using namespace rstd::prelude;
+using rstd::cppstd::as_str;
+using rstd::sync::Arc;
+
 namespace
 {
 
@@ -23,42 +27,84 @@ std::shared_ptr<owe::SceneMesh> MakeSingleSubmesh(std::string name) {
     return mesh;
 }
 
-class FakeImageParser : public owe::IImageParser {
+class FakeImageParser {
 public:
-    std::shared_ptr<owe::Image> Parse(const std::string&) override { return {}; }
-    owe::ImageHeader            ParseHeader(const std::string&) override {
+    auto Parse(ref<str>) const -> Result<Arc<owe::Image>, owe::ImageParseError> {
+        return Err(owe::ImageParseError {
+            .kind    = owe::ImageParseErrorKind::MissingContent,
+            .message = String::make("missing fake image"),
+        });
+    }
+    auto ParseHeader(ref<str>) const -> Result<owe::ImageHeader, owe::ImageParseError> {
         owe::ImageHeader header;
         header.width  = 64;
         header.height = 32;
-        return header;
+        return Ok(rstd::move(header));
     }
+};
+
+struct FakeSceneExtension {
+    int value { 0 };
 };
 
 } // namespace
 
+TEST(SceneExtensions, StoresAndReplacesTypedOwners) {
+    owe::Scene scene;
+    scene.InstallExtension(Box<FakeSceneExtension>::make(FakeSceneExtension { .value = 7 }));
+
+    auto extension = scene.Extension<FakeSceneExtension>();
+    ASSERT_TRUE(extension.is_some());
+    EXPECT_EQ((**extension).value, 7);
+
+    auto mutable_extension = scene.ExtensionMut<FakeSceneExtension>();
+    ASSERT_TRUE(mutable_extension.is_some());
+    (**mutable_extension).value = 11;
+    EXPECT_EQ((**scene.Extension<FakeSceneExtension>()).value, 11);
+
+    scene.InstallExtension(Box<FakeSceneExtension>::make(FakeSceneExtension { .value = 13 }));
+    EXPECT_EQ((**scene.Extension<FakeSceneExtension>()).value, 13);
+}
+
+TEST(SceneLights, OwnsRegisteredLightsBehindBorrowedViews) {
+    owe::Scene scene;
+    auto       light =
+        scene.RegisterLight(Box<owe::SceneLight>::make(owe::SceneLight::Desc { .radius = 4.0f }));
+    light->setRuntimeVisible(false);
+
+    auto lights = scene.Lights();
+    ASSERT_EQ(lights.len(), usize(1));
+    EXPECT_FLOAT_EQ(lights[usize()]->radius(), 4.0f);
+    EXPECT_FALSE(lights[usize()]->runtimeVisible());
+}
+
 TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
     owe::Scene scene;
-    scene.sceneGraph->ID()             = rstd::i32(1);
-    scene.textures["tex/main"]         = owe::SceneTexture { .url = "tex/main" };
-    scene.renderTargets["_rt_default"] = owe::SceneRenderTarget { .width = 1920, .height = 1080 };
-    scene.cameras["default"]           = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    scene.RootMut()->ID() = rstd::i32(1);
+    EXPECT_EQ(scene.Root()->ID(), rstd::i32(1));
+    scene.RegisterTexture(String::make("tex/main"), owe::SceneTexture { .url = "tex/main" });
+    scene.RegisterRenderTarget(String::make("_rt_default"),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+    auto default_camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    scene.RegisterCamera(String::make("default"), default_camera.clone());
 
     auto child      = rstd::sync::Arc<owe::SceneNode>::make();
     child->ID()     = rstd::i32(2);
     auto child_mesh = MakeSingleSubmesh("child-material");
     child->AddMesh(child_mesh);
-    scene.sceneGraph->AppendChild(child.clone());
+    scene.RootMut()->AppendChild(child.clone());
 
     auto post_node  = rstd::sync::Arc<owe::SceneNode>::make();
     post_node->ID() = rstd::i32(3);
     auto post_mesh  = MakeSingleSubmesh("post-material");
     post_node->AddMesh(post_mesh);
 
-    auto post = std::make_shared<owe::ScenePostProcess>();
-    post->steps.push_back(
-        owe::ScenePostProcessPass { .node = post_node.clone(), .output = "_rt_post" });
-    scene.post_processes.push_back(std::move(post));
+    auto post = rstd::boxed::Box<owe::ScenePostProcess>::make();
+    post->steps.push(owe::ScenePostProcessStep::Pass(
+        owe::ScenePostProcessPass { .node = post_node.clone(), .output = "_rt_post" }));
+    (void)scene.RegisterPostProcess(rstd::move(post));
+    ASSERT_EQ(scene.PostProcesses().len(), usize(1));
 
     scene.RebuildResourceIndex();
     const auto& index = scene.ResourceIndex();
@@ -94,7 +140,7 @@ TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
 
     auto camera_id = index.cameraId("default");
     ASSERT_TRUE(camera_id.is_some());
-    EXPECT_EQ(index.camera(*camera_id), scene.cameras["default"].get());
+    EXPECT_EQ(index.camera(*camera_id), default_camera.as_ptr());
 
     owe::Scene other_scene;
     other_scene.RebuildResourceIndex();
@@ -107,7 +153,8 @@ TEST(SceneResourceIndex, RebuildPicksUpNewRenderTargets) {
     scene.RebuildResourceIndex();
     EXPECT_TRUE(scene.ResourceIndex().renderTargetId("_rt_link_7").is_none());
 
-    scene.renderTargets["_rt_link_7"] = owe::SceneRenderTarget { .width = 64, .height = 32 };
+    scene.RegisterRenderTarget(String::make("_rt_link_7"),
+                               owe::SceneRenderTarget { .width = 64, .height = 32 });
     scene.RebuildResourceIndex();
 
     auto id = scene.ResourceIndex().renderTargetId("_rt_link_7");
@@ -119,10 +166,10 @@ TEST(SceneResourceIndex, RebuildPicksUpNewRenderTargets) {
 
 TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
     owe::Scene scene;
-    auto       camera = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto       camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     auto layer = std::make_shared<owe::SceneImageEffectLayer>(
-        scene.sceneGraph.as_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
+        scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
 
     auto prefill = rstd::sync::Arc<owe::SceneNode>::make();
     prefill->AddMesh(MakeSingleSubmesh("prefill"));
@@ -141,7 +188,7 @@ TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
     layer->SetFinalResolveEffect(final_effect);
 
     camera->AttatchImgEffect(layer);
-    scene.cameras["effect"] = std::move(camera);
+    scene.RegisterCamera(String::make("effect"), rstd::move(camera));
     scene.RebuildResourceIndex();
 
     for (auto node : { prefill.as_ptr(), effect_node.as_ptr(), final_node.as_ptr() }) {
@@ -153,10 +200,10 @@ TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
 
 TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterCameraBindingChanges) {
     owe::Scene scene;
-    auto       camera = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto       camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     auto layer = std::make_shared<owe::SceneImageEffectLayer>(
-        scene.sceneGraph.as_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
+        scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
 
     auto effect_node = rstd::sync::Arc<owe::SceneNode>::make();
     effect_node->AddMesh(MakeSingleSubmesh("effect"));
@@ -164,15 +211,15 @@ TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterCameraBindingChanges
     effect->nodes.push_back(owe::SceneImageEffectNode { .sceneNode = effect_node.clone() });
     layer->AddEffect(effect);
     camera->AttatchImgEffect(layer);
-    scene.cameras["effect"] = std::move(camera);
+    scene.RegisterCamera(String::make("effect"), rstd::move(camera));
 
     auto source_node = rstd::sync::Arc<owe::SceneNode>::make();
     source_node->AddMesh(MakeSingleSubmesh("source"));
-    scene.sceneGraph->AppendChild(source_node.clone());
+    scene.RootMut()->AppendChild(source_node.clone());
 
     auto sibling_node = rstd::sync::Arc<owe::SceneNode>::make();
     sibling_node->AddMesh(MakeSingleSubmesh("sibling"));
-    scene.sceneGraph->AppendChild(sibling_node.clone());
+    scene.RootMut()->AppendChild(sibling_node.clone());
 
     scene.RebuildResourceIndex();
     auto sibling_id = scene.ResourceIndex().nodeId(*sibling_node.as_ptr());
@@ -209,13 +256,13 @@ TEST(SceneResourceIndex, RebuildAppendsNewDrawsWithoutRenumberingExistingDraws) 
 
     auto existing_node = rstd::sync::Arc<owe::SceneNode>::make();
     existing_node->AddMesh(MakeSingleSubmesh("existing"));
-    scene.sceneGraph->AppendChild(existing_node.clone());
+    scene.RootMut()->AppendChild(existing_node.clone());
 
     auto pending_node = rstd::sync::Arc<owe::SceneNode>::make();
     auto pending_mesh = MakeSingleSubmesh("pending");
     pending_mesh->Submeshes().clear();
     pending_node->AddMesh(pending_mesh);
-    scene.sceneGraph->AppendChild(pending_node.clone());
+    scene.RootMut()->AppendChild(pending_node.clone());
 
     scene.RebuildResourceIndex();
     auto existing_node_id = scene.ResourceIndex().nodeId(*existing_node.as_ptr());
@@ -257,11 +304,11 @@ TEST(SceneResourceIndex, RebuildInvalidatesRemovedNodesWithoutRenumberingRemaini
 
     auto removed_node = rstd::sync::Arc<owe::SceneNode>::make();
     removed_node->AddMesh(MakeSingleSubmesh("removed"));
-    scene.sceneGraph->AppendChild(removed_node.clone());
+    scene.RootMut()->AppendChild(removed_node.clone());
 
     auto remaining_node = rstd::sync::Arc<owe::SceneNode>::make();
     remaining_node->AddMesh(MakeSingleSubmesh("remaining"));
-    scene.sceneGraph->AppendChild(remaining_node.clone());
+    scene.RootMut()->AppendChild(remaining_node.clone());
 
     scene.RebuildResourceIndex();
     auto removed_node_id   = scene.ResourceIndex().nodeId(*removed_node.as_ptr());
@@ -283,8 +330,8 @@ TEST(SceneResourceIndex, RebuildInvalidatesRemovedNodesWithoutRenumberingRemaini
     ASSERT_TRUE(remaining_mesh_id.is_some());
     ASSERT_TRUE(remaining_material_id.is_some());
 
-    scene.sceneGraph->GetChildren().clear();
-    scene.sceneGraph->AppendChild(remaining_node.clone());
+    scene.RootMut()->GetChildren().clear();
+    scene.RootMut()->AppendChild(remaining_node.clone());
     scene.RebuildResourceIndex();
 
     EXPECT_TRUE(scene.ResourceIndex().nodeId(*removed_node.as_ptr()).is_none());
@@ -316,17 +363,17 @@ TEST(SceneTextureAnimation, AdvancesOncePerRuntimeFrame) {
     auto       mesh = MakeSingleSubmesh("sprite-a");
     mesh->MaterialSlots()[0]->textures.push_back("tex/sprite");
     node->AddMesh(mesh);
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
     auto second_node = rstd::sync::Arc<owe::SceneNode>::make();
     auto second_mesh = MakeSingleSubmesh("sprite-b");
     second_mesh->MaterialSlots()[0]->textures.push_back("tex/sprite");
     second_node->AddMesh(second_mesh);
-    scene.sceneGraph->AppendChild(second_node.clone());
+    scene.RootMut()->AppendChild(second_node.clone());
 
     owe::SceneTexture texture { .url = "tex/sprite", .isSprite = true };
     texture.spriteAnim.AppendFrame(owe::SpriteFrame { .imageId = 0, .frametime = 0.1f, .x = 0.0f });
     texture.spriteAnim.AppendFrame(owe::SpriteFrame { .imageId = 1, .frametime = 0.1f, .x = 0.5f });
-    scene.textures[texture.url] = rstd::move(texture);
+    scene.RegisterTexture(String::make("tex/sprite"), rstd::move(texture));
     scene.RebuildResourceIndex();
 
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
@@ -356,10 +403,25 @@ TEST(SceneTextureAnimation, AdvancesOncePerRuntimeFrame) {
     EXPECT_EQ(first_query->translation, shared_query->translation);
     EXPECT_EQ(first_query->revision, shared_query->revision);
 
+    scene.RebuildResourceIndex();
+    auto rebuilt_node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
+    ASSERT_TRUE(rebuilt_node_id.is_some());
+    auto rebuilt_draw_id = scene.ResourceIndex().drawItemFor(*rebuilt_node_id, rstd::u32());
+    ASSERT_TRUE(rebuilt_draw_id.is_some());
+    auto rebuilt_second_node_id = scene.ResourceIndex().nodeId(*second_node.as_ptr());
+    ASSERT_TRUE(rebuilt_second_node_id.is_some());
+    auto rebuilt_second_draw_id =
+        scene.ResourceIndex().drawItemFor(*rebuilt_second_node_id, rstd::u32());
+    ASSERT_TRUE(rebuilt_second_draw_id.is_some());
+    auto rebuilt = scene.TextureFrame(*rebuilt_draw_id, rstd::usize());
+    ASSERT_TRUE(rebuilt.is_some());
+    EXPECT_FLOAT_EQ(rebuilt->translation[rstd::usize()], 0.5f);
+    EXPECT_EQ(rebuilt->revision, first_query->revision);
+
     node->TexAnim().playing = false;
     scene.Runtime().Advance(rstd::f64(0.11));
-    auto paused  = scene.TextureFrame(*draw_id, rstd::usize());
-    auto playing = scene.TextureFrame(*second_draw_id, rstd::usize());
+    auto paused  = scene.TextureFrame(*rebuilt_draw_id, rstd::usize());
+    auto playing = scene.TextureFrame(*rebuilt_second_draw_id, rstd::usize());
     ASSERT_TRUE(paused.is_some());
     ASSERT_TRUE(playing.is_some());
     EXPECT_FLOAT_EQ(paused->translation[rstd::usize()], 0.5f);
@@ -370,56 +432,86 @@ TEST(SceneTextures, EnsureTextureDescriptorRegistersImportedTexture) {
     owe::Scene scene;
     EXPECT_FALSE(scene.EnsureTextureDescriptor("tex/runtime"));
 
-    scene.imageParser = std::make_unique<FakeImageParser>();
+    scene.SetImageParser(Box<dyn<owe::IImageParser>>::make(FakeImageParser {}));
     EXPECT_TRUE(scene.EnsureTextureDescriptor("tex/runtime"));
-    ASSERT_TRUE(scene.textures.contains("tex/runtime"));
-    EXPECT_EQ(scene.textures.at("tex/runtime").url, "tex/runtime");
+    auto texture = scene.Texture(ref<str>("tex/runtime"));
+    ASSERT_TRUE(texture.is_some());
+    EXPECT_EQ((**texture).url, "tex/runtime");
     EXPECT_TRUE(scene.EnsureTextureDescriptor("_rt_default"));
-    EXPECT_FALSE(scene.textures.contains("_rt_default"));
+    EXPECT_TRUE(scene.Texture(ref<str>("_rt_default")).is_none());
+}
+
+TEST(SceneTextures, RegisteredReplacementKeepsOneName) {
+    owe::Scene scene;
+    scene.RegisterTexture(String::make("slot"), owe::SceneTexture { .url = "first" });
+    scene.RegisterTexture(String::make("slot"), owe::SceneTexture { .url = "second" });
+
+    auto texture = scene.Texture(ref<str>("slot"));
+    ASSERT_TRUE(texture.is_some());
+    EXPECT_EQ((**texture).url, "second");
+    EXPECT_EQ(scene.TextureNames().len(), usize(1));
+}
+
+TEST(SceneTextures, RuntimeImageOverridesParserContent) {
+    owe::Scene scene;
+    scene.SetImageParser(Box<dyn<owe::IImageParser>>::make(FakeImageParser {}));
+    auto image           = Arc<owe::Image>::make();
+    image->header.width  = 128;
+    image->header.height = 64;
+    scene.RegisterRuntimeImage(String::make("runtime/atlas"), image.clone());
+
+    auto parsed = scene.ParseImage("runtime/atlas");
+    ASSERT_TRUE(parsed.is_ok());
+    EXPECT_TRUE(Arc<owe::Image>::ptr_eq(*parsed, image));
+
+    auto header = scene.ParseImageHeader("runtime/atlas");
+    ASSERT_TRUE(header.is_ok());
+    EXPECT_EQ(header->width, 128);
+    EXPECT_EQ(header->height, 64);
 }
 
 TEST(SceneUserPropertyDiagnostics, StoresAndClearsByKey) {
     owe::Scene scene;
     scene.AddUserPropertyDiagnostic(owe::SceneUserPropertyDiagnostic {
-        .key      = "combo_a",
+        .key      = String::make("combo_a"),
         .code     = owe::SceneUserPropertyDiagnosticCode::UnsupportedShaderComboValue,
-        .material = "mat_a",
-        .combo    = "USE_A",
-        .message  = "bad value",
+        .material = String::make("mat_a"),
+        .combo    = String::make("USE_A"),
+        .message  = String::make("bad value"),
     });
     scene.AddUserPropertyDiagnostic(owe::SceneUserPropertyDiagnostic {
-        .key      = "combo_b",
+        .key      = String::make("combo_b"),
         .code     = owe::SceneUserPropertyDiagnosticCode::ShaderComboCompileFailed,
-        .material = "mat_b",
-        .combo    = "USE_B",
-        .message  = "compile failed",
+        .material = String::make("mat_b"),
+        .combo    = String::make("USE_B"),
+        .message  = String::make("compile failed"),
     });
 
     auto diagnostics = scene.UserPropertyDiagnostics();
-    ASSERT_EQ(diagnostics.size(), 2u);
-    EXPECT_EQ(diagnostics[0].key, "combo_a");
-    EXPECT_EQ(diagnostics[0].code,
+    ASSERT_EQ(diagnostics.len(), usize(2));
+    EXPECT_EQ(diagnostics[usize()].key, "combo_a");
+    EXPECT_EQ(diagnostics[usize()].code,
               owe::SceneUserPropertyDiagnosticCode::UnsupportedShaderComboValue);
 
-    scene.ClearUserPropertyDiagnostics("combo_a");
+    scene.ClearUserPropertyDiagnostics(ref<str>("combo_a"));
     diagnostics = scene.UserPropertyDiagnostics();
-    ASSERT_EQ(diagnostics.size(), 1u);
-    EXPECT_EQ(diagnostics[0].key, "combo_b");
+    ASSERT_EQ(diagnostics.len(), usize(1));
+    EXPECT_EQ(diagnostics[usize()].key, "combo_b");
 
-    scene.ClearUserPropertyDiagnostics({});
-    EXPECT_TRUE(scene.UserPropertyDiagnostics().empty());
+    scene.ClearUserPropertyDiagnostics(ref<str>(""));
+    EXPECT_TRUE(scene.UserPropertyDiagnostics().is_empty());
 }
 
 TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughSceneOwner) {
     owe::Scene scene;
-    scene.sceneGraph->ID() = rstd::i32(1);
-    scene.imageParser      = std::make_unique<FakeImageParser>();
+    scene.RootMut()->ID() = rstd::i32(1);
+    scene.SetImageParser(Box<dyn<owe::IImageParser>>::make(FakeImageParser {}));
 
     auto node  = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID() = rstd::i32(2);
     auto mesh  = MakeSingleSubmesh("material");
     node->AddMesh(mesh);
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
 
     auto* material = mesh->MaterialSlots()[0].get();
     ASSERT_NE(material, nullptr);
@@ -445,7 +537,7 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
     auto mutation = scene.SetMaterialTextureSlot(*material, rstd::u32(), "tex/runtime");
     EXPECT_TRUE(mutation.changed);
     ASSERT_TRUE(mutation.material.is_some());
-    ASSERT_TRUE(scene.textures.contains("tex/runtime"));
+    ASSERT_TRUE(scene.Texture(ref<str>("tex/runtime")).is_some());
     EXPECT_EQ(material->textures[0], "tex/runtime");
 
     auto unchanged = scene.SetMaterialTextureSlot(*material, rstd::u32(), "tex/runtime");
@@ -454,7 +546,7 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
 
     auto spec = scene.SetMaterialTextureSlot(*material, rstd::u32(1), "_rt_default");
     EXPECT_TRUE(spec.changed);
-    EXPECT_FALSE(scene.textures.contains("_rt_default"));
+    EXPECT_TRUE(scene.Texture(ref<str>("_rt_default")).is_none());
     ASSERT_GE(material->textures.size(), 2u);
     EXPECT_EQ(material->textures[1], "_rt_default");
 }
@@ -505,7 +597,7 @@ TEST(SceneMaterialShaderVariant, CarriesCompileDescriptorThroughMaterialMove) {
     EXPECT_EQ(stored.stages[0].source_key, "/assets/shaders/genericimage.vert");
 }
 
-TEST(SceneMaterial, PreservesTextureMetadataAcrossCopyAndMove) {
+TEST(SceneMaterial, PreservesOwnedStateAcrossCopyAndMove) {
     owe::SceneMaterial material;
     material.textures = { "masks/padded" };
     material.texture_metadata.push_back(owe::SceneMaterialTextureMetadata {
@@ -513,6 +605,13 @@ TEST(SceneMaterial, PreservesTextureMetadataAcrossCopyAndMove) {
         .source_extent = { 1024.0f, 1024.0f },
         .sample_extent = { 960.0f, 540.0f },
     });
+    auto curve = Arc<owe::SceneAnimationCurve>::make();
+    curve->c0.push({ .frame = 0, .value = 0.25f });
+    (void)material.customShader.valueAnimations.insert(String::make("u_Alpha"),
+                                                       owe::SceneShaderValueAnimation {
+                                                           .base  = owe::ShaderValue(1.0f),
+                                                           .curve = Some(curve.clone()),
+                                                       });
 
     owe::SceneMaterial copied = material;
     ASSERT_EQ(copied.texture_metadata.size(), 1u);
@@ -520,6 +619,14 @@ TEST(SceneMaterial, PreservesTextureMetadataAcrossCopyAndMove) {
     EXPECT_EQ(copied.texture_metadata[0].source_extent,
               (rstd::array<float, 2> { 1024.0f, 1024.0f }));
     EXPECT_EQ(copied.texture_metadata[0].sample_extent, (rstd::array<float, 2> { 960.0f, 540.0f }));
+    auto original_animation = material.customShader.valueAnimations.get(ref<str>("u_Alpha"));
+    auto copied_animation   = copied.customShader.valueAnimations.get(ref<str>("u_Alpha"));
+    ASSERT_TRUE(original_animation.is_some());
+    ASSERT_TRUE(copied_animation.is_some());
+    ASSERT_TRUE((**original_animation).curve.is_some());
+    ASSERT_TRUE((**copied_animation).curve.is_some());
+    EXPECT_EQ((*(**original_animation).curve).as_ptr().as_raw_ptr(),
+              (*(**copied_animation).curve).as_ptr().as_raw_ptr());
 
     auto mesh = std::make_shared<owe::SceneMesh>();
     mesh->AddMaterial(std::move(material));
@@ -527,6 +634,10 @@ TEST(SceneMaterial, PreservesTextureMetadataAcrossCopyAndMove) {
     ASSERT_NE(moved, nullptr);
     ASSERT_EQ(moved->texture_metadata.size(), 1u);
     EXPECT_EQ(moved->texture_metadata[0].sample_extent, (rstd::array<float, 2> { 960.0f, 540.0f }));
+    auto moved_animation = moved->customShader.valueAnimations.get(ref<str>("u_Alpha"));
+    ASSERT_TRUE(moved_animation.is_some());
+    ASSERT_TRUE((**moved_animation).curve.is_some());
+    EXPECT_EQ((*(**moved_animation).curve).as_ptr().as_raw_ptr(), curve.as_ptr().as_raw_ptr());
 }
 
 TEST(SceneShader, ResolvesLoaderDefinedSamplerMember) {
@@ -540,13 +651,13 @@ TEST(SceneShader, ResolvesLoaderDefinedSamplerMember) {
 
 TEST(SceneMaterialShaderVariant, AppliesCompiledVariantThroughSceneOwner) {
     owe::Scene scene;
-    scene.sceneGraph->ID() = rstd::i32(1);
+    scene.RootMut()->ID() = rstd::i32(1);
 
     auto node  = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID() = rstd::i32(2);
     auto mesh  = MakeSingleSubmesh("variant");
     node->AddMesh(mesh);
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
 
     auto* material = mesh->MaterialSlots()[0].get();
     ASSERT_NE(material, nullptr);
@@ -582,21 +693,21 @@ TEST(SceneMaterialShaderVariant, AppliesCompiledVariantThroughSceneOwner) {
     EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyGraph);
 
     auto events = scene.ConsumePreparedMaterialDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].material.index, mutation.material->index);
-    EXPECT_EQ(events[0].flags, owe::SceneMaterialDirtyGraph);
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].material.index, mutation.material->index);
+    EXPECT_EQ(events[usize()].flags, owe::SceneMaterialDirtyGraph);
     EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyNone);
 }
 
 TEST(SceneMaterialShaderVariant, ClassifiesVariantImpactAndAppliesActiveTextureSlots) {
     owe::Scene scene;
-    scene.sceneGraph->ID() = rstd::i32(1);
+    scene.RootMut()->ID() = rstd::i32(1);
 
     auto node  = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID() = rstd::i32(2);
     auto mesh  = MakeSingleSubmesh("variant");
     node->AddMesh(mesh);
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
 
     auto* material = mesh->MaterialSlots()[0].get();
     ASSERT_NE(material, nullptr);
@@ -634,8 +745,8 @@ TEST(SceneMaterialShaderVariant, ClassifiesVariantImpactAndAppliesActiveTextureS
     EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyPipeline);
 
     auto hash_events = scene.ConsumePreparedMaterialDirtyEvents();
-    ASSERT_EQ(hash_events.size(), 1u);
-    EXPECT_EQ(hash_events[0].flags, owe::SceneMaterialDirtyPipeline);
+    ASSERT_EQ(hash_events.len(), usize(1));
+    EXPECT_EQ(hash_events[usize()].flags, owe::SceneMaterialDirtyPipeline);
 
     auto layout_only                   = hash_only;
     layout_only.descriptor_layout_hash = 2000u;
@@ -653,8 +764,8 @@ TEST(SceneMaterialShaderVariant, ClassifiesVariantImpactAndAppliesActiveTextureS
               owe::SceneMaterialDirtyResources | owe::SceneMaterialDirtyPipeline);
 
     auto layout_events = scene.ConsumePreparedMaterialDirtyEvents();
-    ASSERT_EQ(layout_events.size(), 1u);
-    EXPECT_EQ(layout_events[0].flags,
+    ASSERT_EQ(layout_events.len(), usize(1));
+    EXPECT_EQ(layout_events[usize()].flags,
               owe::SceneMaterialDirtyResources | owe::SceneMaterialDirtyPipeline);
 
     auto same_slots                     = layout_only;
@@ -677,8 +788,9 @@ TEST(SceneMaterialShaderVariant, ClassifiesVariantImpactAndAppliesActiveTextureS
     EXPECT_TRUE(material->textures[1].empty());
 
     auto events = scene.ConsumePreparedMaterialDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].flags, owe::SceneMaterialDirtyResources | owe::SceneMaterialDirtyPipeline);
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].flags,
+              owe::SceneMaterialDirtyResources | owe::SceneMaterialDirtyPipeline);
 
     auto graph_slots                           = same_slots;
     graph_slots.resolved_combos["USE_B"]       = "1";
@@ -704,22 +816,22 @@ TEST(SceneVisibility, VisibleRuntimeChangeClearsOnlyVisibilityElideReason) {
     auto       node = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID()      = rstd::i32(7);
     node->SetVisible(false);
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
 
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
-    ASSERT_EQ(scene.elidable_layer_ids.count(rstd::i32(7)), 1u);
+    ASSERT_TRUE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
 
     EXPECT_TRUE(scene.SetNodeVisible(*node.as_ptr(), true));
     EXPECT_TRUE(node->Visible());
-    EXPECT_EQ(scene.visibility_elidable_layer_ids.count(rstd::i32(7)), 0u);
-    EXPECT_EQ(scene.elidable_layer_ids.count(rstd::i32(7)), 0u);
+    EXPECT_FALSE(scene.IsLayerVisibilityElidable(owe::WallpaperLayerId { .value = i32(7) }));
+    EXPECT_FALSE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
 
     scene.MarkLayerStaticElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
     EXPECT_FALSE(scene.SetNodeVisible(*node.as_ptr(), true));
-    EXPECT_EQ(scene.visibility_elidable_layer_ids.count(rstd::i32(7)), 0u);
-    EXPECT_EQ(scene.static_elidable_layer_ids.count(rstd::i32(7)), 1u);
-    EXPECT_EQ(scene.elidable_layer_ids.count(rstd::i32(7)), 1u);
+    EXPECT_FALSE(scene.IsLayerVisibilityElidable(owe::WallpaperLayerId { .value = i32(7) }));
+    EXPECT_TRUE(scene.IsLayerStaticElidable(owe::WallpaperLayerId { .value = i32(7) }));
+    EXPECT_TRUE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
 }
 
 TEST(SceneVisibility, UserBindingVisibilityChangesRequireGraphRebuild) {
@@ -727,58 +839,78 @@ TEST(SceneVisibility, UserBindingVisibilityChangesRequireGraphRebuild) {
     auto       node = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID()      = rstd::i32(7);
     node->SetVisible(false);
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
 
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
-    node->SetVisibleUserBinding(owe::SceneUserVisibilityBinding { .key = "variant" });
-    EXPECT_EQ(scene.visibility_elidable_layer_ids.count(rstd::i32(7)), 1u);
-    EXPECT_EQ(scene.elidable_layer_ids.count(rstd::i32(7)), 1u);
+    node->SetVisibleUserBinding(owe::SceneUserVisibilityBinding {
+        .key = rstd::string::String::make("variant"),
+    });
+    EXPECT_TRUE(scene.IsLayerVisibilityElidable(owe::WallpaperLayerId { .value = i32(7) }));
+    EXPECT_TRUE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
     EXPECT_TRUE(scene.ApplyUserNodeVisibilityBindings("variant", rstd::into<owe::Json>(true)));
     EXPECT_TRUE(node->Visible());
-    EXPECT_EQ(scene.elidable_layer_ids.count(rstd::i32(7)), 0u);
+    EXPECT_FALSE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
     EXPECT_FALSE(scene.ApplyUserNodeVisibilityBindings("variant", rstd::into<owe::Json>(true)));
     EXPECT_TRUE(scene.ApplyUserNodeVisibilityBindings("variant", rstd::into<owe::Json>(false)));
     EXPECT_FALSE(node->Visible());
-    EXPECT_EQ(scene.elidable_layer_ids.count(rstd::i32(7)), 1u);
+    EXPECT_TRUE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
 }
 
 TEST(SceneRenderTargets, EnsureLinkRenderTargetCreatesOwnedDescriptor) {
     owe::Scene scene;
-    scene.ortho[0] = 1920;
-    scene.ortho[1] = 1080;
+    scene.SetOrtho({ i32(1920), i32(1080) });
 
     owe::SceneNode sized;
     sized.SetSize({ 64.0f, 32.0f });
     auto key = scene.EnsureLinkRenderTarget(owe::WallpaperLayerId { .value = rstd::i32(7) }, sized);
     EXPECT_EQ(key, "_rt_link_7");
-    ASSERT_TRUE(scene.renderTargets.contains(key));
-    EXPECT_EQ(scene.renderTargets.at(key).width, 64);
-    EXPECT_EQ(scene.renderTargets.at(key).height, 32);
+    auto target = scene.RenderTarget(as_str(key));
+    ASSERT_TRUE(target.is_some());
+    EXPECT_EQ((**target).width, 64);
+    EXPECT_EQ((**target).height, 32);
 
     owe::SceneNode fallback;
     auto           fallback_key =
         scene.EnsureLinkRenderTarget(owe::WallpaperLayerId { .value = rstd::i32(8) }, fallback);
-    EXPECT_EQ(scene.renderTargets.at(fallback_key).width, 1920);
-    EXPECT_EQ(scene.renderTargets.at(fallback_key).height, 1080);
+    auto fallback_target = scene.RenderTarget(as_str(fallback_key));
+    ASSERT_TRUE(fallback_target.is_some());
+    EXPECT_EQ((**fallback_target).width, 1920);
+    EXPECT_EQ((**fallback_target).height, 1080);
+}
+
+TEST(SceneRenderTargets, ReplacesDescriptorBehindStableName) {
+    owe::Scene scene;
+    scene.RegisterRenderTarget(String::make("_rt_clock"),
+                               owe::SceneRenderTarget { .width = 64, .height = 32 });
+    scene.RegisterRenderTarget(String::make("_rt_clock"),
+                               owe::SceneRenderTarget { .width = 128, .height = 64 });
+
+    auto target = scene.RenderTarget(ref<str>("_rt_clock"));
+    ASSERT_TRUE(target.is_some());
+    EXPECT_EQ((**target).width, 128);
+    EXPECT_EQ((**target).height, 64);
+    ASSERT_EQ(scene.RenderTargetNames().len(), usize(1));
+    EXPECT_EQ(scene.RenderTargetNames()[usize()], "_rt_clock");
 }
 
 TEST(SceneRenderTargets, CoalescesRuntimeExtentChanges) {
     owe::Scene scene;
-    scene.renderTargets["_rt_clock"] = owe::SceneRenderTarget { .width = 64, .height = 32 };
+    scene.RegisterRenderTarget(String::make("_rt_clock"),
+                               owe::SceneRenderTarget { .width = 64, .height = 32 });
 
-    EXPECT_TRUE(scene.ResizeRenderTarget("_rt_clock", 96, 48));
-    EXPECT_TRUE(scene.ResizeRenderTarget("_rt_clock", 128, 64));
-    EXPECT_FALSE(scene.ResizeRenderTarget("_rt_clock", 128, 64));
+    EXPECT_TRUE(scene.ResizeRenderTarget(ref<str>("_rt_clock"), i32(96), i32(48)));
+    EXPECT_TRUE(scene.ResizeRenderTarget(ref<str>("_rt_clock"), i32(128), i32(64)));
+    EXPECT_FALSE(scene.ResizeRenderTarget(ref<str>("_rt_clock"), i32(128), i32(64)));
 
     auto events = scene.ConsumePreparedRenderTargetDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].name, "_rt_clock");
-    EXPECT_EQ(events[0].old_width, 64);
-    EXPECT_EQ(events[0].old_height, 32);
-    EXPECT_EQ(events[0].width, 128);
-    EXPECT_EQ(events[0].height, 64);
-    EXPECT_TRUE(scene.ConsumePreparedRenderTargetDirtyEvents().empty());
-    EXPECT_TRUE(scene.ConsumePreparedMeshDirtyEvents().empty());
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].name, "_rt_clock");
+    EXPECT_EQ(events[usize()].old_width, i32(64));
+    EXPECT_EQ(events[usize()].old_height, i32(32));
+    EXPECT_EQ(events[usize()].width, i32(128));
+    EXPECT_EQ(events[usize()].height, i32(64));
+    EXPECT_TRUE(scene.ConsumePreparedRenderTargetDirtyEvents().is_empty());
+    EXPECT_TRUE(scene.ConsumePreparedMeshDirtyEvents().is_empty());
 }
 
 TEST(SceneMaterialTextureDependency, ClassifiesPreparedRefreshCompatibility) {
@@ -807,10 +939,12 @@ TEST(SceneMaterialTextureDependency, ClassifiesPreparedRefreshCompatibility) {
 
 TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
     owe::Scene scene;
-    scene.sceneGraph->ID()             = rstd::i32(1);
-    scene.textures["tex/main"]         = owe::SceneTexture { .url = "tex/main" };
-    scene.renderTargets["_rt_default"] = owe::SceneRenderTarget { .width = 1920, .height = 1080 };
-    scene.renderTargets["_rt_mask"]    = owe::SceneRenderTarget { .width = 256, .height = 256 };
+    scene.RootMut()->ID() = rstd::i32(1);
+    scene.RegisterTexture(String::make("tex/main"), owe::SceneTexture { .url = "tex/main" });
+    scene.RegisterRenderTarget(String::make("_rt_default"),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+    scene.RegisterRenderTarget(String::make("_rt_mask"),
+                               owe::SceneRenderTarget { .width = 256, .height = 256 });
 
     auto child                           = rstd::sync::Arc<owe::SceneNode>::make();
     child->ID()                          = rstd::i32(42);
@@ -818,13 +952,13 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
     mesh->Submeshes()[0].output_override = "_rt_mask";
     mesh->MaterialSlots()[0]->textures.push_back("_rt_link_7");
     child->AddMesh(mesh);
-    scene.sceneGraph->AppendChild(child.clone());
+    scene.RootMut()->AppendChild(child.clone());
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
     EXPECT_GT(snapshot.Version().value, rstd::u64());
-    ASSERT_EQ(snapshot.RenderItems().size(), 1u);
-    ASSERT_EQ(snapshot.TextureDescs().size(), 1u);
-    ASSERT_EQ(snapshot.RenderTargetDescs().size(), 2u);
+    ASSERT_EQ(snapshot.RenderItems().len(), rstd::usize(1));
+    ASSERT_EQ(snapshot.TextureDescs().len(), rstd::usize(1));
+    ASSERT_EQ(snapshot.RenderTargetDescs().len(), rstd::usize(2));
 
     auto node_id = scene.ResourceIndex().nodeId(*child.as_ptr());
     ASSERT_TRUE(node_id.is_some());
@@ -854,23 +988,23 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
     EXPECT_EQ(tex_desc->desc.url, "tex/main");
 
     auto layer_items = snapshot.renderItemsFor(owe::WallpaperLayerId { .value = rstd::i32(42) });
-    ASSERT_EQ(layer_items.size(), 1u);
-    EXPECT_EQ(layer_items[0].index, render_item_id->index);
-    EXPECT_EQ(layer_items[0].generation, render_item_id->generation);
+    ASSERT_EQ(layer_items.len(), rstd::usize(1));
+    EXPECT_EQ(layer_items[rstd::usize()].index, render_item_id->index);
+    EXPECT_EQ(layer_items[rstd::usize()].generation, render_item_id->generation);
 
     auto material_items = snapshot.renderItemsFor(render_item->scene_material);
-    ASSERT_EQ(material_items.size(), 1u);
-    EXPECT_EQ(material_items[0].index, render_item_id->index);
-    EXPECT_EQ(material_items[0].generation, render_item_id->generation);
+    ASSERT_EQ(material_items.len(), rstd::usize(1));
+    EXPECT_EQ(material_items[rstd::usize()].index, render_item_id->index);
+    EXPECT_EQ(material_items[rstd::usize()].generation, render_item_id->generation);
 
     auto mesh_items = snapshot.renderItemsFor(render_item->scene_mesh);
-    ASSERT_EQ(mesh_items.size(), 1u);
-    EXPECT_EQ(mesh_items[0].index, render_item_id->index);
-    EXPECT_EQ(mesh_items[0].generation, render_item_id->generation);
+    ASSERT_EQ(mesh_items.len(), rstd::usize(1));
+    EXPECT_EQ(mesh_items[rstd::usize()].index, render_item_id->index);
+    EXPECT_EQ(mesh_items[rstd::usize()].generation, render_item_id->generation);
 
     EXPECT_TRUE(snapshot.HasLinkConsumer(owe::WallpaperLayerId { .value = rstd::i32(7) }));
     EXPECT_FALSE(snapshot.HasLinkConsumer(owe::WallpaperLayerId { .value = rstd::i32(42) }));
-    EXPECT_EQ(snapshot.LinkedLayerIds().count(rstd::i32(7)), 1u);
+    EXPECT_TRUE(snapshot.LinkedLayerIds().contains(rstd::i32(7)));
 
     auto rebuilt = owe::ExtractRenderSceneSnapshot(scene);
     EXPECT_GT(rebuilt.Version().value, snapshot.Version().value);
@@ -879,30 +1013,31 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
 
 TEST(RenderSceneSnapshot, PlansLinkRenderTargetForElidableLinkedSource) {
     owe::Scene scene;
-    scene.ortho[0]                     = 1920;
-    scene.ortho[1]                     = 1080;
-    scene.renderTargets["_rt_default"] = owe::SceneRenderTarget { .width = 1920, .height = 1080 };
-    scene.sceneGraph->ID()             = rstd::i32(1);
-    scene.elidable_layer_ids.insert(rstd::i32(7));
+    scene.SetOrtho({ i32(1920), i32(1080) });
+    scene.RegisterRenderTarget(String::make("_rt_default"),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+    scene.RootMut()->ID() = rstd::i32(1);
+    scene.MarkLayerStaticElidable(owe::WallpaperLayerId { .value = i32(7) });
 
     auto source  = rstd::sync::Arc<owe::SceneNode>::make();
     source->ID() = rstd::i32(7);
     source->SetSize({ 64.0f, 32.0f });
     source->AddMesh(MakeSingleSubmesh("source-material"));
-    scene.sceneGraph->AppendChild(source.clone());
+    scene.RootMut()->AppendChild(source.clone());
 
     auto consumer      = rstd::sync::Arc<owe::SceneNode>::make();
     consumer->ID()     = rstd::i32(42);
     auto consumer_mesh = MakeSingleSubmesh("consumer-material");
     consumer_mesh->MaterialSlots()[0]->textures.push_back("_rt_link_7");
     consumer->AddMesh(consumer_mesh);
-    scene.sceneGraph->AppendChild(consumer.clone());
+    scene.RootMut()->AppendChild(consumer.clone());
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
 
-    ASSERT_TRUE(scene.renderTargets.contains("_rt_link_7"));
-    EXPECT_EQ(scene.renderTargets.at("_rt_link_7").width, 64);
-    EXPECT_EQ(scene.renderTargets.at("_rt_link_7").height, 32);
+    auto link_target = scene.RenderTarget(ref<str>("_rt_link_7"));
+    ASSERT_TRUE(link_target.is_some());
+    EXPECT_EQ((**link_target).width, 64);
+    EXPECT_EQ((**link_target).height, 32);
 
     auto* link_source = snapshot.linkSource(owe::WallpaperLayerId { .value = rstd::i32(7) });
     ASSERT_NE(link_source, nullptr);
@@ -917,22 +1052,22 @@ TEST(RenderSceneSnapshot, PlansLinkRenderTargetForElidableLinkedSource) {
 
 TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
     owe::Scene scene;
-    scene.ortho[0]                     = 1920;
-    scene.ortho[1]                     = 1080;
-    scene.renderTargets["_rt_default"] = owe::SceneRenderTarget { .width = 1920, .height = 1080 };
-    scene.sceneGraph->ID()             = rstd::i32(1);
+    scene.SetOrtho({ i32(1920), i32(1080) });
+    scene.RegisterRenderTarget(String::make("_rt_default"),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+    scene.RootMut()->ID() = rstd::i32(1);
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
 
     auto producer = rstd::sync::Arc<owe::SceneNode>::make();
     producer->SetSize({ 64.0f, 32.0f });
     producer->AddMesh(MakeSingleSubmesh("producer-material"));
-    scene.sceneGraph->AppendChild(producer.clone());
+    scene.RootMut()->AppendChild(producer.clone());
 
     auto public_node  = rstd::sync::Arc<owe::SceneNode>::make();
     public_node->ID() = rstd::i32(7);
     public_node->SetSize({ 320.0f, 180.0f });
     public_node->AddMesh(MakeSingleSubmesh("public-material"));
-    scene.sceneGraph->AppendChild(public_node.clone());
+    scene.RootMut()->AppendChild(public_node.clone());
     scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(7) },
                                   *producer.as_ptr());
 
@@ -941,7 +1076,7 @@ TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
     auto consumer_mesh = MakeSingleSubmesh("consumer-material");
     consumer_mesh->MaterialSlots()[0]->textures.push_back("_rt_link_7");
     consumer->AddMesh(consumer_mesh);
-    scene.sceneGraph->AppendChild(consumer.clone());
+    scene.RootMut()->AppendChild(consumer.clone());
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
 
@@ -950,10 +1085,57 @@ TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
     ASSERT_TRUE(scene.ResolveLayerLinkSource(*producer.as_ptr()).is_some());
     EXPECT_EQ(scene.ResolveLayerLinkSource(*producer.as_ptr())->value, rstd::i32(7));
     EXPECT_TRUE(scene.ResolveLayerLinkSource(*public_node.as_ptr()).is_none());
-    ASSERT_TRUE(scene.renderTargets.contains("_rt_link_7"));
-    EXPECT_EQ(scene.renderTargets.at("_rt_link_7").width, 64);
-    EXPECT_EQ(scene.renderTargets.at("_rt_link_7").height, 32);
+    auto link_target = scene.RenderTarget(ref<str>("_rt_link_7"));
+    ASSERT_TRUE(link_target.is_some());
+    EXPECT_EQ((**link_target).width, 64);
+    EXPECT_EQ((**link_target).height, 32);
     EXPECT_NE(snapshot.linkSource(owe::WallpaperLayerId { .value = rstd::i32(7) }), nullptr);
+}
+
+TEST(SceneRenderGroups, ReplacesCameraByLayerId) {
+    owe::Scene scene;
+    auto       layer = owe::WallpaperLayerId { .value = i32(7) };
+
+    scene.RegisterRenderGroup(layer, String::make("first"));
+    scene.RegisterRenderGroup(layer, String::make("second"));
+
+    auto camera = scene.RenderGroupCamera(layer);
+    ASSERT_TRUE(camera.is_some());
+    EXPECT_EQ(*camera, "second");
+}
+
+TEST(SceneLinkedCameras, UpdatesRegisteredTargets) {
+    owe::Scene scene;
+    scene.RegisterCamera(
+        String::make("source"),
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(100.0, 50.0, -1.0, 1.0)));
+    scene.RegisterCamera(
+        String::make("linked"),
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0)));
+    scene.RegisterLinkedCamera(String::make("source"), String::make("linked"));
+
+    scene.UpdateLinkedCamera(ref<str>("source"));
+
+    auto linked = scene.Camera(ref<str>("linked"));
+    ASSERT_TRUE(linked.is_some());
+    EXPECT_DOUBLE_EQ((**linked).Width(), 100.0);
+    EXPECT_DOUBLE_EQ((**linked).Height(), 50.0);
+}
+
+TEST(SceneCameras, ActiveCameraTracksRegisteredReplacement) {
+    owe::Scene scene;
+    scene.RegisterCamera(
+        String::make("main"),
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(100.0, 50.0, -1.0, 1.0)));
+    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("main")));
+    scene.RegisterCamera(
+        String::make("main"),
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(200.0, 80.0, -1.0, 1.0)));
+
+    auto active = scene.ActiveCamera();
+    ASSERT_TRUE(active.is_some());
+    EXPECT_DOUBLE_EQ((**active).Width(), 200.0);
+    EXPECT_EQ(scene.CameraNames().len(), usize(1));
 }
 
 TEST(SceneGeometryDataGeneration, IncrementsWhenGeometryDataChanges) {
@@ -1020,14 +1202,12 @@ TEST(SceneNodeFieldAnimation, AlphaAnimationTicksThroughScene) {
     owe::SceneAnimationCurve curve;
     curve.fps    = 30.0f;
     curve.length = 180;
-    curve.mode   = "single";
-    curve.c0     = {
-        { .frame = 0, .value = 0.0f },
-        { .frame = 60, .value = 0.5f },
-        { .frame = 100, .value = 0.0f },
-    };
+    curve.mode   = String::make("single");
+    curve.c0.push({ .frame = 0, .value = 0.0f });
+    curve.c0.push({ .frame = 60, .value = 0.5f });
+    curve.c0.push({ .frame = 100, .value = 0.0f });
     node->SetAlphaAnimation(std::move(curve));
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
 
     scene.TickNodeFieldAnimations();
     EXPECT_TRUE(node->IsAlphaOverridden());
@@ -1044,13 +1224,13 @@ TEST(SceneNodeFieldAnimation, AlphaAnimationTicksThroughScene) {
 
 TEST(SceneMeshDirtyEvents, RoutesDataAndLayoutDirtyByOwner) {
     owe::Scene scene;
-    scene.sceneGraph->ID() = rstd::i32(1);
+    scene.RootMut()->ID() = rstd::i32(1);
 
     auto static_node  = rstd::sync::Arc<owe::SceneNode>::make();
     static_node->ID() = rstd::i32(2);
     auto static_mesh  = MakeSingleSubmesh("static");
     static_node->AddMesh(static_mesh);
-    scene.sceneGraph->AppendChild(static_node.clone());
+    scene.RootMut()->AppendChild(static_node.clone());
 
     auto dynamic_node  = rstd::sync::Arc<owe::SceneNode>::make();
     dynamic_node->ID() = rstd::i32(3);
@@ -1058,7 +1238,7 @@ TEST(SceneMeshDirtyEvents, RoutesDataAndLayoutDirtyByOwner) {
     dynamic_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
     dynamic_mesh->AddMaterial(owe::SceneMaterial {});
     dynamic_node->AddMesh(dynamic_mesh);
-    scene.sceneGraph->AppendChild(dynamic_node.clone());
+    scene.RootMut()->AppendChild(dynamic_node.clone());
 
     scene.RebuildResourceIndex();
     auto static_id = scene.ResourceIndex().meshId(*static_mesh);
@@ -1067,28 +1247,28 @@ TEST(SceneMeshDirtyEvents, RoutesDataAndLayoutDirtyByOwner) {
     static_mesh->SetDirty();
     dynamic_mesh->SetDirty();
     auto events = scene.ConsumePreparedMeshDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].mesh.index, static_id->index);
-    EXPECT_EQ(events[0].flags, owe::SceneMeshDirtyData);
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].mesh.index, static_id->index);
+    EXPECT_EQ(events[usize()].flags, owe::SceneMeshDirtyData);
     EXPECT_EQ(static_mesh->DirtyFlags(), owe::SceneMeshDirtyNone);
     EXPECT_EQ(dynamic_mesh->DirtyFlags(), owe::SceneMeshDirtyData);
 
     dynamic_mesh->SetLayoutDirty();
     events = scene.ConsumePreparedMeshDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].flags, owe::SceneMeshDirtyLayout);
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].flags, owe::SceneMeshDirtyLayout);
     EXPECT_EQ(dynamic_mesh->DirtyFlags(), owe::SceneMeshDirtyNone);
 }
 
 TEST(SceneMaterialDirtyEvents, RoutesMaterialDirtyByOwner) {
     owe::Scene scene;
-    scene.sceneGraph->ID() = rstd::i32(1);
+    scene.RootMut()->ID() = rstd::i32(1);
 
     auto node  = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID() = rstd::i32(2);
     auto mesh  = MakeSingleSubmesh("material");
     node->AddMesh(mesh);
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
 
     scene.RebuildResourceIndex();
     auto* material = mesh->MaterialSlots()[0].get();
@@ -1099,22 +1279,23 @@ TEST(SceneMaterialDirtyEvents, RoutesMaterialDirtyByOwner) {
     EXPECT_TRUE(material->SetBlendMode(owe::BlendMode::Normal));
     EXPECT_FALSE(material->SetBlendMode(owe::BlendMode::Normal));
     auto events = scene.ConsumePreparedMaterialDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].material.index, material_id->index);
-    EXPECT_EQ(events[0].flags, owe::SceneMaterialDirtyPipeline);
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].material.index, material_id->index);
+    EXPECT_EQ(events[usize()].flags, owe::SceneMaterialDirtyPipeline);
     EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyNone);
 
     material->SetResourceDirty();
     material->SetCullMode(owe::CullMode::Back);
     events = scene.ConsumePreparedMaterialDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].flags, owe::SceneMaterialDirtyResources | owe::SceneMaterialDirtyPipeline);
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].flags,
+              owe::SceneMaterialDirtyResources | owe::SceneMaterialDirtyPipeline);
     EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyNone);
 
     material->SetResourceDirty();
     material->SetGraphDirty();
     events = scene.ConsumePreparedMaterialDirtyEvents();
-    ASSERT_EQ(events.size(), 1u);
-    EXPECT_EQ(events[0].flags, owe::SceneMaterialDirtyGraph);
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].flags, owe::SceneMaterialDirtyGraph);
     EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyNone);
 }

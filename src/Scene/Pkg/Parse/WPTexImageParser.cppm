@@ -1,9 +1,13 @@
 module;
 export module wescene.pkg.parse:wp_tex_image_parser;
-import wescene.types;
+import rstd;
 import rstd.cppstd;
+import wescene.types;
 import wescene.scene;
 import wescene.fs;
+
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 export namespace owe
 
@@ -87,14 +91,16 @@ struct WPTexFormatVersion {
     constexpr bool valid() const noexcept { return texv != 0 && texi != 0 && texb != 0; }
 };
 
-class WPTexImageParser : public IImageParser {
+auto ParseImages(ref<dyn<IImageParser>> parser, slice<String> names, usize max_workers = usize(4))
+    -> Vec<Result<Arc<Image>, ImageParseError>>;
+
+class WPTexImageParser {
 public:
     WPTexImageParser(fs::VFS* vfs): m_vfs(vfs) {}
-    virtual ~WPTexImageParser() = default;
 
-    std::shared_ptr<Image>              Parse(const std::string&) override;
-    std::vector<std::shared_ptr<Image>> ParseMany(std::span<const std::string> names) override;
-    ImageHeader                         ParseHeader(const std::string&) override;
+    auto Parse(ref<str> name) const -> Result<Arc<Image>, ImageParseError>;
+    auto ParseMany(slice<String> names) const -> Vec<Result<Arc<Image>, ImageParseError>>;
+    auto ParseHeader(ref<str> name) const -> Result<ImageHeader, ImageParseError>;
 
 private:
     fs::VFS* m_vfs;

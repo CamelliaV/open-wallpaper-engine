@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
 
-import rstd.cppstd;
+import rstd;
 import wescene.pkg.parse;
 
+using namespace rstd::prelude;
 using namespace owe::shader_lex;
 
 TEST(ShaderLex, CharClass) {
@@ -27,7 +28,7 @@ TEST(ShaderLex, CharClass) {
 TEST(ShaderLex, SkipHSpaceDoesNotCrossNewline) {
     Cursor c("  \t  \n   abc");
     c.SkipHSpace();
-    EXPECT_EQ(c.Pos(), 5u);
+    EXPECT_EQ(c.Pos().to_primitive(), 5u);
     EXPECT_EQ(c.Peek(), '\n');
 }
 
@@ -46,12 +47,12 @@ TEST(ShaderLex, ReadIdent) {
     }
     {
         Cursor c("9bad");
-        EXPECT_FALSE(c.ReadIdent().has_value());
-        EXPECT_EQ(c.Pos(), 0u);
+        EXPECT_TRUE(c.ReadIdent().is_none());
+        EXPECT_EQ(c.Pos().to_primitive(), 0u);
     }
     {
         Cursor c("");
-        EXPECT_FALSE(c.ReadIdent().has_value());
+        EXPECT_TRUE(c.ReadIdent().is_none());
     }
 }
 
@@ -59,12 +60,12 @@ TEST(ShaderLex, MatchKeywordRespectsIdentBoundary) {
     {
         Cursor c("uniform vec4");
         EXPECT_TRUE(c.MatchKeyword("uniform"));
-        EXPECT_EQ(c.Pos(), 7u);
+        EXPECT_EQ(c.Pos().to_primitive(), 7u);
     }
     {
         Cursor c("uniformly");
         EXPECT_FALSE(c.MatchKeyword("uniform"));
-        EXPECT_EQ(c.Pos(), 0u);
+        EXPECT_EQ(c.Pos().to_primitive(), 0u);
     }
     {
         Cursor c("uniform_x");
@@ -82,7 +83,7 @@ TEST(ShaderLex, ReadArraySuffix) {
         auto   a = c.ReadArraySuffix();
         ASSERT_TRUE(a);
         EXPECT_EQ(*a, "[42]");
-        EXPECT_EQ(c.Pos(), 4u);
+        EXPECT_EQ(c.Pos().to_primitive(), 4u);
     }
     {
         Cursor c("[]");
@@ -99,8 +100,8 @@ TEST(ShaderLex, ReadArraySuffix) {
     }
     {
         Cursor c("nope");
-        EXPECT_FALSE(c.ReadArraySuffix().has_value());
-        EXPECT_EQ(c.Pos(), 0u);
+        EXPECT_TRUE(c.ReadArraySuffix().is_none());
+        EXPECT_EQ(c.Pos().to_primitive(), 0u);
     }
 }
 
@@ -108,7 +109,7 @@ TEST(ShaderLex, SkipAllTriviaEatsBlockComment) {
     {
         Cursor c("/* abc */xy");
         c.SkipAllTrivia();
-        EXPECT_EQ(c.Pos(), 9u);
+        EXPECT_EQ(c.Pos().to_primitive(), 9u);
         EXPECT_EQ(c.Peek(), 'x');
     }
     {
@@ -141,17 +142,17 @@ TEST(ShaderLex, MatchHashDirective) {
     {
         Cursor c("//#include \"x\"");
         EXPECT_FALSE(c.MatchHashDirective("include"));
-        EXPECT_EQ(c.Pos(), 0u);
+        EXPECT_EQ(c.Pos().to_primitive(), 0u);
     }
 }
 
 TEST(ShaderLex, LineWalkerBasic) {
-    std::string_view src = "line1\nline2\nline3";
-    LineWalker       w(src);
+    ref<str>   src = "line1\nline2\nline3";
+    LineWalker w(src);
     ASSERT_FALSE(w.Done());
     EXPECT_EQ(w.Line(), "line1");
-    EXPECT_EQ(w.LineStart(), 0u);
-    EXPECT_EQ(w.LineEnd(), 5u);
+    EXPECT_EQ(w.LineStart().to_primitive(), 0u);
+    EXPECT_EQ(w.LineEnd().to_primitive(), 5u);
     w.Step();
     EXPECT_EQ(w.Line(), "line2");
     w.Step();
@@ -174,19 +175,19 @@ TEST(ShaderLex, LineWalkerEmptyLines) {
 TEST(ShaderLex, LineWalkerMasksBlockCommentLines) {
     // The `uniform` inside a multi-line block comment must not be visible to
     // LineWalker::Line() so annotation collectors skip it.
-    std::string_view src = "alpha\n"
-                           "/* hidden\n"
-                           " uniform vec4 g_X;\n"
-                           "*/\n"
-                           "after";
-    LineWalker       w(src);
+    ref<str>   src = "alpha\n"
+                     "/* hidden\n"
+                     " uniform vec4 g_X;\n"
+                     "*/\n"
+                     "after";
+    LineWalker w(src);
     EXPECT_EQ(w.Line(), "alpha");
     w.Step();
     // Line that opens block — still visible (content before `/*`).
-    EXPECT_EQ(w.Line().find("uniform"), std::string_view::npos);
+    EXPECT_TRUE(rstd::str_::find(w.Line(), "uniform").is_none());
     w.Step();
     // Inside the block comment — masked.
-    EXPECT_TRUE(w.Line().empty());
+    EXPECT_TRUE(rstd::str_::is_empty(w.Line()));
     w.Step();
     // `*/` ends the block; content after is visible (just `*/` itself).
     w.Step();
@@ -280,7 +281,7 @@ TEST(ShaderLex, LexerUnterminatedStringTerminatesAtEol) {
 }
 
 TEST(ShaderLex, ClassifyPreproc) {
-    auto cls = [](std::string_view s) {
+    auto cls = [](ref<str> s) {
         return ClassifyPreproc(Cursor(s));
     };
     EXPECT_EQ(cls("#if X"), PpKind::If);

@@ -23,34 +23,33 @@ static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 #define SHADER_SUFFIX "spvs"
 
 using namespace owe;
+using namespace rstd::prelude;
 
 namespace
 {
-
 // Decl scanners over GLSL declaration lines. Each WE shader decl is
 // line-scoped; the Cursor primitives in :shader_lex do all char-level work.
 
 struct DeclMatch {
-    std::size_t      start;       // offset of leading newline (or 0 at file start)
-    std::size_t      end;         // one past trailing `;`
-    std::size_t      keep_prefix; // number of bytes from start to preserve when stripping
-    std::string_view storage;     // attribute/varying/in/out/uniform
-    std::string_view type;
-    std::string_view name;
-    std::string_view array; // "[N]" or empty
+    std::size_t start;       // offset of leading newline (or 0 at file start)
+    std::size_t end;         // one past trailing `;`
+    std::size_t keep_prefix; // number of bytes from start to preserve when stripping
+    ref<str>    storage;     // attribute/varying/in/out/uniform
+    ref<str>    type;
+    ref<str>    name;
+    ref<str>    array; // "[N]" or empty
 };
 
 // Try to match `[ws]<storage_kw> <type> <name>[opt-array][ws];` on the line
 // starting at `line_start`. Anchored — leading non-whitespace fails it.
-inline std::optional<DeclMatch>
-TryParseDeclLine(std::string_view src, std::size_t line_start,
-                 std::initializer_list<std::string_view> storage_kws) {
-    std::size_t line_end = src.find('\n', line_start);
-    if (line_end == std::string_view::npos) line_end = src.size();
-    shader_lex::Cursor c(src.substr(line_start, line_end - line_start));
+inline std::optional<DeclMatch> TryParseDeclLine(ref<str> src, usize line_start,
+                                                 std::initializer_list<ref<str>> storage_kws) {
+    shader_lex::Cursor source(src, line_start);
+    auto               line_end = source.LineEnd();
+    shader_lex::Cursor c(*rstd::str_::get(src, line_start, line_end));
     c.SkipHSpace();
 
-    std::string_view kw;
+    ref<str> kw;
     for (auto k : storage_kws) {
         auto s = c.Save();
         if (c.MatchKeyword(k)) {
@@ -59,7 +58,7 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
         }
         c.Restore(s);
     }
-    if (kw.empty()) return std::nullopt;
+    if (rstd::str_::is_empty(kw)) return std::nullopt;
     c.SkipHSpace();
     auto tn = shader_lex::ReadTypeName(c);
     if (! tn) return std::nullopt;
@@ -69,13 +68,13 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
     if (! c.MatchChar(';')) return std::nullopt;
 
     DeclMatch m;
-    m.start       = line_start;
-    m.end         = line_start + c.Pos();
+    m.start       = line_start.to_primitive();
+    m.end         = (line_start + c.Pos()).to_primitive();
     m.keep_prefix = 0;
     m.storage     = kw;
     m.type        = tn->type;
     m.name        = tn->name;
-    m.array       = array.value_or(std::string_view {});
+    m.array       = array.unwrap_or(ref<str> {});
     return m;
 }
 
@@ -83,17 +82,16 @@ TryParseDeclLine(std::string_view src, std::size_t line_start,
 // is 1 when a leading newline exists (so callers stripping decl lines keep
 // the newline as a paragraph anchor).
 template<typename Fn>
-inline void ForEachDeclLine(std::string_view                        src,
-                            std::initializer_list<std::string_view> storage_kws, Fn&& fn) {
+inline void ForEachDeclLine(ref<str> src, std::initializer_list<ref<str>> storage_kws, Fn&& fn) {
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
         if (auto m = TryParseDeclLine(src, w.LineStart(), storage_kws)) {
             DeclMatch out = *m;
-            if (w.LineStart() > 0) {
-                out.start       = w.LineStart() - 1;
+            if (w.LineStart() > rstd::usize()) {
+                out.start       = (w.LineStart() - rstd::usize(1)).to_primitive();
                 out.keep_prefix = 1;
             } else {
-                out.start       = w.LineStart();
+                out.start       = w.LineStart().to_primitive();
                 out.keep_prefix = 0;
             }
             fn(out);
@@ -101,7 +99,7 @@ inline void ForEachDeclLine(std::string_view                        src,
     }
 }
 
-inline bool IsSamplerType(std::string_view t) {
+inline bool IsSamplerType(ref<str> t) {
     return t == "sampler2D" || t == "sampler3D" || t == "samplerCube" ||
            t == "sampler2DComparison" || t == "sampler2DShadow";
 }
@@ -416,39 +414,36 @@ inline shader_lex::Token NextShaderToken(shader_lex::Lexer& lx) {
     return lx.NextSkip(IsShaderTrivia);
 }
 
-inline bool TokenIs(shader_lex::Token token, std::string_view text) {
+inline bool TokenIs(shader_lex::Token token, ref<str> text) {
     return token.kind == shader_lex::TokenKind::Ident && token.text == text;
 }
 
 inline bool PunctIs(shader_lex::Token token, char c) {
-    return token.kind == shader_lex::TokenKind::Punct && token.text.size() == 1 &&
-           token.text[0] == c;
-}
-
-inline bool Contains(std::span<const std::string> values, std::string_view value) {
-    return std::ranges::any_of(values, [&](const std::string& v) {
-        return v == value;
-    });
+    return token.kind == shader_lex::TokenKind::Punct && token.text.size() == rstd::usize(1) &&
+           static_cast<char>(token.text[rstd::usize()].to_primitive()) == c;
 }
 
 // Legacy WE shaders sometimes address audio float arrays as std140 vec4 groups.
-inline bool IsAudioSpectrumName(std::string_view name) {
-    return name == G_AUDIO_SPEC_16_L || name == G_AUDIO_SPEC_16_R || name == G_AUDIO_SPEC_32_L ||
-           name == G_AUDIO_SPEC_32_R || name == G_AUDIO_SPEC_64_L || name == G_AUDIO_SPEC_64_R;
+inline bool IsAudioSpectrumName(rstd::ref<rstd::str> name) {
+    return name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_L) ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_R) ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_L) ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_R) ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_L) ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_R);
 }
 
 struct ShaderBracketExpr {
-    std::size_t      close_end;
-    std::string_view expr;
+    usize    close_end;
+    ref<str> expr;
 };
 
-inline std::optional<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx,
-                                                        std::string_view   src) {
+inline std::optional<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx, ref<str> src) {
     auto open = NextShaderToken(lx);
     if (! PunctIs(open, '[')) return std::nullopt;
 
     int         depth      = 1;
-    std::size_t expr_start = open.offset + open.text.size();
+    std::size_t expr_start = (open.offset + open.text.size()).to_primitive();
     for (;;) {
         auto t = lx.Next();
         if (t.kind == shader_lex::TokenKind::Eof) return std::nullopt;
@@ -463,57 +458,59 @@ inline std::optional<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx,
         if (depth == 0) {
             return ShaderBracketExpr {
                 .close_end = t.offset + t.text.size(),
-                .expr      = src.substr(expr_start, t.offset - expr_start),
+                .expr      = *rstd::str_::get(src, usize(expr_start), t.offset),
             };
         }
     }
 }
 
-inline std::vector<shader_lex::Token> ExprTokens(std::string_view expr) {
-    std::vector<shader_lex::Token> tokens;
-    shader_lex::Lexer              lx(expr);
+inline Vec<shader_lex::Token> ExprTokens(ref<str> expr) {
+    Vec<shader_lex::Token> tokens;
+    shader_lex::Lexer      lx(expr);
     for (;;) {
         auto t = NextShaderToken(lx);
         if (t.kind == shader_lex::TokenKind::Eof) break;
-        tokens.push_back(t);
+        tokens.push(rstd::move(t));
     }
     return tokens;
 }
 
-inline std::optional<std::string> TryFlattenPackedAudioIndex(std::string_view group,
-                                                             std::string_view component) {
+inline Option<String> TryFlattenPackedAudioIndex(ref<str> group, ref<str> component) {
     auto g = ExprTokens(group);
     auto c = ExprTokens(component);
-    if (g.size() == 3 && c.size() == 3 && g[0].kind == shader_lex::TokenKind::Ident &&
-        c[0].kind == shader_lex::TokenKind::Ident && g[0].text == c[0].text && PunctIs(g[1], '/') &&
-        PunctIs(c[1], '%') && g[2].kind == shader_lex::TokenKind::Int &&
-        c[2].kind == shader_lex::TokenKind::Int && g[2].text == "4" && c[2].text == "4") {
-        std::string out = "(int)(";
-        out.append(g[0].text);
-        out.append(")");
-        return out;
+    if (g.len() == usize(3) && c.len() == usize(3) &&
+        g[usize()].kind == shader_lex::TokenKind::Ident &&
+        c[usize()].kind == shader_lex::TokenKind::Ident && g[usize()].text == c[usize()].text &&
+        PunctIs(g[usize(1)], '/') && PunctIs(c[usize(1)], '%') &&
+        g[usize(2)].kind == shader_lex::TokenKind::Int &&
+        c[usize(2)].kind == shader_lex::TokenKind::Int && g[usize(2)].text == "4" &&
+        c[usize(2)].text == "4") {
+        auto out = String::make("(int)(");
+        out.push_str(g[usize()].text);
+        out.push_back(')');
+        return Some(rstd::move(out));
     }
-    return std::nullopt;
+    return None();
 }
 
-inline std::string FlattenAudioSpectrumAccess(std::string_view group, std::string_view component) {
-    if (auto exact = TryFlattenPackedAudioIndex(group, component)) return *exact;
+inline String FlattenAudioSpectrumAccess(ref<str> group, ref<str> component) {
+    if (auto exact = TryFlattenPackedAudioIndex(group, component)) return rstd::move(*exact);
 
-    std::string out;
-    out.reserve(group.size() + component.size() + 32);
-    out.append("((int)(");
-    out.append(group);
-    out.append(") * 4 + (int)(");
-    out.append(component);
-    out.append("))");
+    auto out = String::make();
+    out.reserve(group.size() + component.size() + usize(32));
+    out.push_str("((int)(");
+    out.push_str(group);
+    out.push_str(") * 4 + (int)(");
+    out.push_str(component);
+    out.push_str("))");
     return out;
 }
 
-inline std::string NormalizePackedAudioSpectrumAccess(std::string_view src) {
+inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
     shader_lex::Lexer lx(src);
-    std::string       out;
-    std::size_t       copied  = 0;
-    bool              changed = false;
+    auto              out = String::make();
+    usize             copied {};
+    bool              changed { false };
 
     for (;;) {
         auto name = lx.Next();
@@ -528,21 +525,22 @@ inline std::string NormalizePackedAudioSpectrumAccess(std::string_view src) {
             continue;
         }
 
-        out.append(src, copied, name.offset - copied);
-        out.append(name.text);
+        out.push_str(*rstd::str_::get(src, copied, name.offset));
+        out.push_str(name.text);
         out.push_back('[');
-        out.append(FlattenAudioSpectrumAccess(group->expr, component->expr));
+        auto flattened = FlattenAudioSpectrumAccess(group->expr, component->expr);
+        out.push_str(flattened.as_str());
         out.push_back(']');
         copied  = component->close_end;
         changed = true;
     }
 
-    if (! changed) return std::string { src };
-    out.append(src, copied, std::string::npos);
+    if (! changed) return String::make(src);
+    out.push_str(*rstd::str_::get_from(src, copied));
     return out;
 }
 
-inline bool IsLocalMatrixConstructor(std::string_view name) {
+inline bool IsLocalMatrixConstructor(rstd::ref<rstd::str> name) {
     return name == "mat2" || name == "mat3" || name == "mat4" || name == "mat2x2" ||
            name == "mat2x3" || name == "mat2x4" || name == "mat3x2" || name == "mat3x3" ||
            name == "mat3x4" || name == "mat4x2" || name == "mat4x3" || name == "mat4x4" ||
@@ -551,11 +549,11 @@ inline bool IsLocalMatrixConstructor(std::string_view name) {
            name == "float4x4";
 }
 
-inline std::string NormalizeLocalMatrixMul(std::string_view src) {
+inline String NormalizeLocalMatrixMul(ref<str> src) {
     shader_lex::Lexer lx(src);
-    std::string       out;
-    std::size_t       copied  = 0;
-    bool              changed = false;
+    auto              out = String::make();
+    usize             copied {};
+    bool              changed { false };
 
     for (;;) {
         auto name = lx.Next();
@@ -582,13 +580,13 @@ inline std::string NormalizeLocalMatrixMul(std::string_view src) {
             if (PunctIs(t, ')') || PunctIs(t, ']') || PunctIs(t, '}')) {
                 --depth;
                 if (depth == 0) {
-                    close_start = t.offset;
+                    close_start = t.offset.to_primitive();
                     break;
                 }
                 continue;
             }
             if (depth == 1 && PunctIs(t, ',') && ! comma_end) {
-                comma_end = t.offset + t.text.size();
+                comma_end = (t.offset + t.text.size()).to_primitive();
             }
         }
 
@@ -598,28 +596,27 @@ inline std::string NormalizeLocalMatrixMul(std::string_view src) {
         }
 
         shader_lex::Lexer probe(src);
-        probe.SeekTo(*comma_end);
+        probe.SeekTo(rstd::usize(*comma_end));
         auto second = NextShaderToken(probe);
         if (second.kind != shader_lex::TokenKind::Ident ||
             ! IsLocalMatrixConstructor(second.text)) {
             continue;
         }
 
-        out.append(src, copied, second.offset - copied);
-        out.append("transpose(");
-        out.append(src, second.offset, *close_start - second.offset);
+        out.push_str(*rstd::str_::get(src, copied, second.offset));
+        out.push_str("transpose(");
+        out.push_str(*rstd::str_::get(src, second.offset, usize(*close_start)));
         out.push_back(')');
-        copied  = *close_start;
+        copied  = usize(*close_start);
         changed = true;
     }
 
-    if (! changed) return std::string { src };
-    out.append(src, copied, std::string::npos);
+    if (! changed) return String::make(src);
+    out.push_str(*rstd::str_::get_from(src, copied));
     return out;
 }
 
-inline bool LineDefinesMacro(std::string_view src, std::size_t line_start,
-                             std::string_view macro_name) {
+inline bool LineDefinesMacro(ref<str> src, usize line_start, ref<str> macro_name) {
     shader_lex::Cursor c(src);
     c.SeekTo(line_start);
     if (! c.MatchHashDirective("define")) return false;
@@ -628,29 +625,36 @@ inline bool LineDefinesMacro(std::string_view src, std::size_t line_start,
     return ident && *ident == macro_name;
 }
 
-inline std::string UndefBeforeUserMacroDefines(std::string_view src, std::string_view macro_name) {
-    bool        changed = false;
-    std::string out;
-    out.reserve(src.size() + 64);
+inline String UndefBeforeUserMacroDefines(ref<str> src, ref<str> macro_name) {
+    bool changed = false;
+    auto out     = String::make();
+    out.reserve(src.size() + usize(64));
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
         if (LineDefinesMacro(src, w.LineStart(), macro_name)) {
-            out += "#ifdef ";
-            out += macro_name;
-            out += "\n#undef ";
-            out += macro_name;
-            out += "\n#endif\n";
+            out.push_str("#ifdef ");
+            out.push_str(macro_name);
+            out.push_str("\n#undef ");
+            out.push_str(macro_name);
+            out.push_str("\n#endif\n");
             changed = true;
         }
-        out.append(src, w.LineStart(), w.LineEnd() - w.LineStart());
+        out.push_str(*rstd::str_::get(src, w.LineStart(), w.LineEnd()));
         if (w.LineEnd() < src.size()) out.push_back('\n');
     }
-    return changed ? out : std::string { src };
+    return changed ? rstd::move(out) : String::make(src);
 }
 
-inline std::vector<std::string> CollectBuildTangentSpaceVars(std::string_view src) {
-    std::vector<std::string> vars;
-    shader_lex::Lexer        lx(src);
+inline bool Contains(slice<String> values, ref<str> value) {
+    for (usize index {}; index < values.len(); ++index) {
+        if (values[index].as_str() == value) return true;
+    }
+    return false;
+}
+
+inline Vec<String> CollectBuildTangentSpaceVars(ref<str> src) {
+    Vec<String>       vars;
+    shader_lex::Lexer lx(src);
     for (;;) {
         auto t = NextShaderToken(lx);
         if (t.kind == shader_lex::TokenKind::Eof) break;
@@ -661,16 +665,17 @@ inline std::vector<std::string> CollectBuildTangentSpaceVars(std::string_view sr
         if (! PunctIs(NextShaderToken(lx), '=')) continue;
         if (! TokenIs(NextShaderToken(lx), "BuildTangentSpace")) continue;
         if (! PunctIs(NextShaderToken(lx), '(')) continue;
-        if (! Contains(vars, name.text)) vars.emplace_back(name.text);
+        if (! Contains(vars.as_slice(), name.text)) vars.push(String::make(name.text));
     }
     return vars;
 }
 
 inline void NormalizeExpandedShaderSource(std::string& src) {
-    auto tangent_space_vars = CollectBuildTangentSpaceVars(src);
-    if (tangent_space_vars.empty()) return;
+    auto source             = rstd::cppstd::as_str(src);
+    auto tangent_space_vars = CollectBuildTangentSpaceVars(source);
+    if (tangent_space_vars.is_empty()) return;
 
-    shader_lex::Lexer lx(src);
+    shader_lex::Lexer lx(source);
     std::string       out;
     std::size_t       copied = 0;
     for (;;) {
@@ -683,16 +688,16 @@ inline void NormalizeExpandedShaderSource(std::string& src) {
         auto arg   = NextShaderToken(lx);
         auto comma = NextShaderToken(lx);
         if (! PunctIs(open, '(') || arg.kind != shader_lex::TokenKind::Ident ||
-            ! Contains(tangent_space_vars, arg.text) || ! PunctIs(comma, ',')) {
+            ! Contains(tangent_space_vars.as_slice(), arg.text) || ! PunctIs(comma, ',')) {
             lx.Restore(save);
             continue;
         }
 
-        out.append(src, copied, t.offset - copied);
+        out.append(src, copied, t.offset.to_primitive() - copied);
         out.append("mul(transpose(");
-        out.append(arg.text);
+        out.append(rstd::cppstd::as_string_view(arg.text));
         out.append("),");
-        copied = comma.offset + comma.text.size();
+        copied = (comma.offset + comma.text.size()).to_primitive();
     }
     out.append(src, copied, std::string::npos);
     src = std::move(out);
@@ -735,9 +740,10 @@ mat3 _ww_perspective_mat(mat3 m) {
     return out;
 }
 
-inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
+inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
+    auto        input_view = rstd::cppstd::as_string_view(input);
     std::string output;
-    output.reserve(input.size());
+    output.reserve(input.size().to_primitive());
     std::size_t            pos = 0;
     shader_lex::LineWalker w(input);
     for (; ! w.Done(); w.Step()) {
@@ -749,14 +755,15 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
         // and append the recursively-expanded body. Bytes after the directive
         // on the same line (rare in practice) are skipped — matching the
         // original behavior.
-        output.append(input, pos, w.LineStart() - pos);
-        std::string line = input.substr(w.LineStart(), w.LineEnd() - w.LineStart());
+        output.append(input_view, pos, w.LineStart().to_primitive() - pos);
+        auto        line_view = *rstd::str_::get(input, w.LineStart(), w.LineEnd());
+        std::string line(line_view.begin(), line_view.end());
         auto        in_p = line.find_first_of('\"');
         auto        in_e = line.find_last_of('\"');
         if (in_p == std::string::npos || in_e == std::string::npos || in_e <= in_p) {
             // Malformed include — preserve verbatim.
             output.append(line);
-            pos = w.LineEnd();
+            pos = w.LineEnd().to_primitive();
             continue;
         }
         std::string includeName = line.substr(in_p + 1, in_e - in_p - 1);
@@ -771,7 +778,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
         output.append("\n//-----include ");
         output.append(includeName);
         output.append("\n");
-        output.append(LoadGlslInclude(vfs, includeSrc));
+        output.append(LoadGlslInclude(vfs, rstd::cppstd::as_str(includeSrc)));
         // WE shaders routinely pass a vector opacity (opacity * mask) to the
         // scalar ApplyBlending, relying on fxc's implicit vector->scalar
         // truncation. glslang's HLSL frontend won't truncate at the call, so
@@ -787,9 +794,9 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
                           "return ApplyBlending(bm, A, B, o.x); }\n");
         }
         output.append("\n//-----include end\n");
-        pos = w.LineEnd();
+        pos = w.LineEnd().to_primitive();
     }
-    output.append(input, pos, std::string::npos);
+    output.append(input_view, pos, std::string::npos);
     return output;
 }
 
@@ -804,6 +811,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
 inline std::size_t FindIncludeInsertPos(const std::string& src, std::size_t startPos) {
     using shader_lex::PpKind;
     (void)startPos;
+    auto source = rstd::cppstd::as_str(src);
 
     const std::size_t main_pos = src.find("void main(");
     if (main_pos == std::string::npos) return 0;
@@ -812,39 +820,44 @@ inline std::size_t FindIncludeInsertPos(const std::string& src, std::size_t star
     std::size_t                                      after_pos = std::string::npos;
     std::vector<std::pair<std::size_t, std::size_t>> if_ranges;
     std::vector<std::size_t>                         if_stack;
-    constexpr std::array<std::string_view, 4> kKws { "attribute", "varying", "uniform", "struct" };
+    const array<ref<str>, 4> kKws { "attribute", "varying", "uniform", "struct" };
 
-    shader_lex::LineWalker w(src);
+    shader_lex::LineWalker w(source);
     for (; ! w.Done(); w.Step()) {
-        if (w.LineStart() >= main_pos) break;
-        std::size_t line_end = std::min(w.LineEnd(), main_pos);
+        if (w.LineStart().to_primitive() >= main_pos) break;
+        std::size_t line_end = std::min(w.LineEnd().to_primitive(), main_pos);
 
-        shader_lex::Cursor c(src);
+        shader_lex::Cursor c(source);
         c.SeekTo(w.LineStart());
         c.SkipHSpace();
-        if (c.Eof() || c.Pos() >= line_end) continue;
+        if (c.Eof() || c.Pos().to_primitive() >= line_end) continue;
 
         if (c.Peek() == '#') {
-            shader_lex::Cursor cc(src);
+            shader_lex::Cursor cc(source);
             cc.SeekTo(w.LineStart());
             auto kind = shader_lex::ClassifyPreproc(cc);
             if (kind == PpKind::If || kind == PpKind::Ifdef || kind == PpKind::Ifndef) {
-                if_stack.push_back(w.LineStart());
+                if_stack.push_back(w.LineStart().to_primitive());
             } else if (kind == PpKind::Endif) {
                 if (! if_stack.empty()) {
                     std::size_t start = if_stack.back();
                     if_stack.pop_back();
-                    std::size_t end = (w.LineEnd() < src.size()) ? w.LineEnd() + 1 : w.LineEnd();
+                    std::size_t end = w.LineEnd().to_primitive() < src.size()
+                                          ? w.LineEnd().to_primitive() + 1
+                                          : w.LineEnd().to_primitive();
                     if_ranges.emplace_back(start, end);
                 }
             }
         } else {
-            for (auto kw : kKws) {
-                shader_lex::Cursor probe(src);
+            for (usize keyword_index {}; keyword_index < kKws.len(); ++keyword_index) {
+                shader_lex::Cursor probe(source);
                 probe.SeekTo(c.Pos());
-                if (probe.MatchKeyword(kw) && probe.Pos() < line_end &&
-                    shader_lex::IsHSpace(src[probe.Pos()])) {
-                    after_pos = (w.LineEnd() < src.size()) ? w.LineEnd() + 1 : w.LineEnd();
+                if (probe.MatchKeyword(kKws[keyword_index]) &&
+                    probe.Pos().to_primitive() < line_end &&
+                    shader_lex::IsHSpace(src[probe.Pos().to_primitive()])) {
+                    after_pos = w.LineEnd().to_primitive() < src.size()
+                                    ? w.LineEnd().to_primitive() + 1
+                                    : w.LineEnd().to_primitive();
                     break;
                 }
             }
@@ -866,12 +879,13 @@ inline std::size_t FindIncludeInsertPos(const std::string& src, std::size_t star
 // `#endif` would pop an empty stack, comment the line instead.
 inline std::string BalanceConditionals(std::string src) {
     using shader_lex::PpKind;
-    int         depth = 0;
+    auto        source = rstd::cppstd::as_str(src);
+    int         depth  = 0;
     std::string out;
     out.reserve(src.size() + 32);
-    shader_lex::LineWalker w(src);
+    shader_lex::LineWalker w(source);
     for (; ! w.Done(); w.Step()) {
-        shader_lex::Cursor c(src);
+        shader_lex::Cursor c(source);
         c.SeekTo(w.LineStart());
         auto kind        = shader_lex::ClassifyPreproc(c);
         bool stray_endif = false;
@@ -888,8 +902,8 @@ inline std::string BalanceConditionals(std::string src) {
         default: break;
         }
         if (stray_endif) out.append("// (ww stray-endif) ");
-        out.append(src, w.LineStart(), w.LineEnd() - w.LineStart());
-        if (w.LineEnd() < src.size()) out.push_back('\n');
+        out.append(src, w.LineStart().to_primitive(), (w.LineEnd() - w.LineStart()).to_primitive());
+        if (w.LineEnd().to_primitive() < src.size()) out.push_back('\n');
     }
     return out;
 }
@@ -903,17 +917,20 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     {
         std::string out;
         out.reserve(with_prologue.size());
-        shader_lex::LineWalker w(with_prologue);
+        auto                   source = rstd::cppstd::as_str(with_prologue);
+        shader_lex::LineWalker w(source);
         for (; ! w.Done(); w.Step()) {
-            shader_lex::Cursor c(with_prologue);
+            shader_lex::Cursor c(source);
             c.SeekTo(w.LineStart());
             auto saved = c.Save();
             if (c.MatchHashDirective("require")) {
                 out.append("//");
             }
             c.Restore(saved);
-            out.append(with_prologue, w.LineStart(), w.LineEnd() - w.LineStart());
-            if (w.LineEnd() < with_prologue.size()) out.push_back('\n');
+            out.append(with_prologue,
+                       w.LineStart().to_primitive(),
+                       (w.LineEnd() - w.LineStart()).to_primitive());
+            if (w.LineEnd().to_primitive() < with_prologue.size()) out.push_back('\n');
         }
         with_prologue = std::move(out);
     }
@@ -935,9 +952,10 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         // a developer would see if they bypassed the preprocess step.
         src = std::move(with_prologue);
     }
+    auto source = rstd::cppstd::as_str(src);
 
     // GS source uses `in`/`out` storage classes; VS/FS use `attribute`/`varying`.
-    ForEachDeclLine(src, { "attribute", "varying", "in", "out" }, [&](const DeclMatch& m) {
+    ForEachDeclLine(source, { "attribute", "varying", "in", "out" }, [&](const DeclMatch& m) {
         // attribute-in-vertex and varying-in-fragment both behave as inputs;
         // varying-in-vertex behaves as output. GS: `in` is input (from VS),
         // `out` is output (to FS).
@@ -945,7 +963,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
                                (m.storage == "varying" && type == ShaderType::FRAGMENT) ||
                                (m.storage == "in" && type == ShaderType::GEOMETRY);
         std::string line(src.substr(m.start, m.end - m.start));
-        std::string name(m.name);
+        auto        name = rstd::cppstd::to_string(m.name);
         if (is_input)
             process_info.input[name] = std::move(line);
         else
@@ -955,19 +973,21 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     // Non-sampler uniform decls feed Finalprocessor's shared cbuffer.
     // Sampler-typed uniforms are emitted as Texture/SamplerState pairs and
     // captured in active_tex_slots instead.
-    ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
+    ForEachDeclLine(source, { "uniform" }, [&](const DeclMatch& m) {
         if (IsSamplerType(m.type)) {
             // Track active sampler slot if it's a `g_TextureN`.
-            constexpr std::string_view kTex { "g_Texture" };
-            if (m.name.size() > kTex.size() && m.name.substr(0, kTex.size()) == kTex) {
-                std::string_view num  = m.name.substr(kTex.size());
-                unsigned         slot = 0;
-                auto [ptr, ec]        = std::from_chars(num.data(), num.data() + num.size(), slot);
+            const ref<str> kTex { "g_Texture" };
+            if (m.name.size() > kTex.size() && rstd::str_::starts_with(m.name, kTex)) {
+                auto     num   = *rstd::str_::get_from(m.name, kTex.size());
+                unsigned slot  = 0;
+                auto*    begin = reinterpret_cast<const char*>(num.data());
+                auto [ptr, ec] = std::from_chars(begin, begin + num.size().to_primitive(), slot);
                 if (ec == std::errc()) process_info.active_tex_slots.insert(slot);
             }
             return;
         }
-        process_info.uniforms[std::string(m.name)] = std::string(m.type) + std::string(m.array);
+        process_info.uniforms[rstd::cppstd::to_string(m.name)] =
+            rstd::cppstd::to_string(m.type) + rstd::cppstd::to_string(m.array);
     });
     return src;
 }
@@ -1039,12 +1059,12 @@ ScanAndStripSamplers(const std::string& src) {
     std::string              out;
     out.reserve(src.size());
     std::size_t cursor = 0;
-    ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
+    ForEachDeclLine(rstd::cppstd::as_str(src), { "uniform" }, [&](const DeclMatch& m) {
         if (! IsSamplerType(m.type)) return;
         out.append(src, cursor, m.start - cursor);
         out.append(src, m.start, m.keep_prefix);
         cursor = m.end;
-        decls.push_back({ std::string(m.type), std::string(m.name) });
+        decls.push_back({ rstd::cppstd::to_string(m.type), rstd::cppstd::to_string(m.name) });
     });
     out.append(src, cursor, std::string::npos);
     return { std::move(decls), std::move(out) };
@@ -1081,7 +1101,7 @@ inline std::string StripUniforms(const std::string& src) {
     std::string out;
     out.reserve(src.size());
     std::size_t cursor = 0;
-    ForEachDeclLine(src, { "uniform" }, [&](const DeclMatch& m) {
+    ForEachDeclLine(rstd::cppstd::as_str(src), { "uniform" }, [&](const DeclMatch& m) {
         out.append(src, cursor, m.start - cursor);
         out.append(src, m.start, m.keep_prefix);
         cursor = m.end;
@@ -1094,12 +1114,13 @@ inline std::optional<IODecl> ParseIODecl(const std::string& line) {
     // Skip leading newline / CR that the capture loops preserved as an anchor.
     std::size_t start = 0;
     while (start < line.size() && shader_lex::IsVSpace(line[start])) ++start;
-    auto m = TryParseDeclLine(line, start, { "attribute", "varying", "in", "out" });
+    auto m = TryParseDeclLine(
+        rstd::cppstd::as_str(line), usize(start), { "attribute", "varying", "in", "out" });
     if (! m) return std::nullopt;
-    return IODecl { StorageCharFor(std::string(m->storage)),
-                    std::string(m->type),
-                    std::string(m->name),
-                    std::string(m->array) };
+    return IODecl { StorageCharFor(rstd::cppstd::to_string(m->storage)),
+                    rstd::cppstd::to_string(m->type),
+                    rstd::cppstd::to_string(m->name),
+                    rstd::cppstd::to_string(m->array) };
 }
 
 // (base, components) for a scalar / vector type. Recognizes HLSL (floatN /
@@ -1155,15 +1176,17 @@ inline std::pair<std::vector<IODecl>, std::string> ScanAndStripIO(const std::str
     std::string         out;
     out.reserve(src.size());
     std::size_t cursor = 0;
-    ForEachDeclLine(src, { "attribute", "varying", "in", "out" }, [&](const DeclMatch& m) {
-        out.append(src, cursor, m.start - cursor);
-        out.append(src, m.start, m.keep_prefix);
-        cursor = m.end;
-        decls.push_back({ StorageCharFor(std::string(m.storage)),
-                          std::string(m.type),
-                          std::string(m.name),
-                          std::string(m.array) });
-    });
+    ForEachDeclLine(rstd::cppstd::as_str(src),
+                    { "attribute", "varying", "in", "out" },
+                    [&](const DeclMatch& m) {
+                        out.append(src, cursor, m.start - cursor);
+                        out.append(src, m.start, m.keep_prefix);
+                        cursor = m.end;
+                        decls.push_back({ StorageCharFor(rstd::cppstd::to_string(m.storage)),
+                                          rstd::cppstd::to_string(m.type),
+                                          rstd::cppstd::to_string(m.name),
+                                          rstd::cppstd::to_string(m.array) });
+                    });
     out.append(src, cursor, std::string::npos);
     return { std::move(decls), std::move(out) };
 }
@@ -1699,21 +1722,25 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
     std::string all_includes;
 
     std::size_t            cursor = 0;
-    shader_lex::LineWalker w(src);
+    auto                   source = rstd::cppstd::as_str(src);
+    shader_lex::LineWalker w(source);
     for (; ! w.Done(); w.Step()) {
-        shader_lex::Cursor c(src);
+        shader_lex::Cursor c(source);
         c.SeekTo(w.LineStart());
         if (! c.MatchHashDirective("include")) continue;
 
         // Copy bytes up to this line, then splice in the recursively-expanded
         // include body. The newline after the directive stays as part of the
         // splice (we step the outer cursor to LineEnd).
-        newsrc.append(src, cursor, w.LineStart() - cursor);
-        std::string line     = src.substr(w.LineStart(), w.LineEnd() - w.LineStart());
-        std::string expanded = LoadGlslInclude(vfs, line + "\n");
+        newsrc.append(src, cursor, w.LineStart().to_primitive() - cursor);
+        std::string line =
+            src.substr(w.LineStart().to_primitive(), (w.LineEnd() - w.LineStart()).to_primitive());
+        auto include_line = String::make(rstd::cppstd::as_str(line));
+        include_line.push_back('\n');
+        std::string expanded = LoadGlslInclude(vfs, include_line.as_str());
         newsrc.append(expanded);
         all_includes.append(expanded);
-        cursor = w.LineEnd();
+        cursor = w.LineEnd().to_primitive();
     }
     newsrc.append(src, cursor, std::string::npos);
     if (pWPShaderInfo != nullptr && pWPShaderInfo->normalize_tangent_space) {
@@ -1728,8 +1755,10 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
-    const std::string user_src = NormalizeLocalMatrixMul(
-        NormalizePackedAudioSpectrumAccess(UndefBeforeUserMacroDefines(src, "M_PI_2")));
+    auto undefined        = UndefBeforeUserMacroDefines(rstd::cppstd::as_str(src), "M_PI_2");
+    auto normalized_audio = NormalizePackedAudioSpectrumAccess(undefined.as_str());
+    auto normalized_local = NormalizeLocalMatrixMul(normalized_audio.as_str());
+    auto user_src         = rstd::cppstd::to_string(normalized_local.as_str());
 
     // All stages route through glslang's HLSL frontend.
     std::string pre;

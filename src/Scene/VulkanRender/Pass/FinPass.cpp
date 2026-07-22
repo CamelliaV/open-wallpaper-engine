@@ -9,6 +9,7 @@ import wescene.scene;
 
 using namespace owe::vulkan;
 using namespace rstd::prelude;
+using rstd::cppstd::as_str;
 
 FinPass::FinPass(Desc&& desc): m_desc(std::move(desc)) {}
 FinPass::~FinPass() {}
@@ -73,7 +74,7 @@ bool FinPass::prepareResourceStates(
 
 void FinPass::prepare(Scene& scene, const Device&, PassPrepareContext& context) {
     auto tex_name = std::string(m_desc.result);
-    if (scene.renderTargets.count(tex_name) == 0) {
+    if (scene.RenderTarget(as_str(tex_name)).is_none()) {
         rstd_error("FinPass: scene render target \"{}\" not found", tex_name);
         return;
     }

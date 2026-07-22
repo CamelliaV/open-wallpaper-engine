@@ -16,6 +16,7 @@ import wescene.utils;
 
 using namespace rstd::prelude;
 using namespace owe;
+using rstd::sync::Arc;
 
 namespace
 {
@@ -364,7 +365,7 @@ WPParticleSubSystem::WPParticleSubSystem(
     Scene& scene, std::shared_ptr<SceneMesh> mesh, u32 max_count, f64 rate, u32 max_instance_count,
     f64 probability, SpawnType spawn_type, WPParticleAnimationSpec animation_spec,
     WPParticleFollowAnchor follow_anchor, u32 trail_length, f64 trail_duration, f64 start_time,
-    bool world_space, std::shared_ptr<WPParticleTrailUniformState> trail_uniform_state)
+    bool world_space, Option<Arc<WPParticleTrailUniformState>> trail_uniform_state)
     : m_scene(scene),
       m_mesh(rstd::move(mesh)),
       m_attributes(WPParticleAttributes::Register(m_schema_builder)),
@@ -484,10 +485,12 @@ auto WPParticleSubSystem::FollowPosition(const particle::ParticleStorage& storag
 }
 
 void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
-    const auto            pointer = m_scene.pointerPosition;
+    const auto            pointer = m_scene.PointerPosition();
+    const auto            ortho   = m_scene.Ortho();
     const Eigen::Vector3d mouse_world {
-        static_cast<double>(pointer[usize()]) * static_cast<double>(m_scene.ortho[0]),
-        (1.0 - static_cast<double>(pointer[usize(1)])) * static_cast<double>(m_scene.ortho[1]),
+        static_cast<double>(pointer[usize()]) * static_cast<double>(ortho[usize()].to_primitive()),
+        (1.0 - static_cast<double>(pointer[usize(1)])) *
+            static_cast<double>(ortho[usize(1)].to_primitive()),
         0.0,
     };
     Eigen::Vector3d mouse_local          = mouse_world;
@@ -509,12 +512,12 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
         auto&           controlpoint = m_controlpoints[index];
         Eigen::Vector3f position_override { Eigen::Vector3f::Zero() };
         Eigen::Vector3f angles { Eigen::Vector3f::Zero() };
-        if (m_instance_override) {
+        if (m_instance_override.is_some()) {
             auto source_index = index.to_primitive();
             position_override =
-                Eigen::Vector3f { m_instance_override->controlpoint[source_index].data() };
+                Eigen::Vector3f { (*m_instance_override)->controlpoint[source_index].data() };
             angles =
-                Eigen::Vector3f { m_instance_override->controlpointangle[source_index].data() };
+                Eigen::Vector3f { (*m_instance_override)->controlpointangle[source_index].data() };
         }
         controlpoint.offset = controlpoint.base_offset + position_override.cast<double>();
         if (controlpoint.link_mouse) controlpoint.offset += mouse_local;
@@ -542,19 +545,19 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
             m_trail_sample_accumulator     = f64(elapsed);
             m_frame.trail_sample_steps     = rstd::as_cast<usize>(total_steps);
             m_frame.trail_sample_remainder = f64(elapsed);
-            if (m_trail_uniform_state) {
-                m_trail_uniform_state->render_var[usize(2)] =
+            if (m_trail_uniform_state.is_some()) {
+                (*m_trail_uniform_state)->render_var[usize(2)] =
                     static_cast<float>(std::clamp(elapsed / interval, 0.0, 1.0));
             }
         } else {
             m_frame.trail_sample_steps = usize(1);
-            if (m_trail_uniform_state) {
-                m_trail_uniform_state->render_var[usize(2)] = 1.0f;
+            if (m_trail_uniform_state.is_some()) {
+                (*m_trail_uniform_state)->render_var[usize(2)] = 1.0f;
             }
         }
     }
     for (usize index {}; index < m_frame.audio_average.len(); ++index) {
-        m_frame.audio_average[index] = m_scene.audioAverage[index].load(std::memory_order_relaxed);
+        m_frame.audio_average[index] = m_scene.AudioAverage(index).to_primitive();
     }
 }
 
@@ -641,7 +644,8 @@ void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
         m_started = true;
         Warmup();
     }
-    auto rate = m_instance_override ? m_instance_override->rate : m_rate.to_primitive();
+    auto rate =
+        m_instance_override.is_some() ? (*m_instance_override)->rate : m_rate.to_primitive();
     Advance(frame_time * f64(std::max(rate, 0.0)), frame_time, update_mesh);
 }
 

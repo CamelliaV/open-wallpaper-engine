@@ -7,6 +7,9 @@ import rstd;
 
 using namespace rstd::prelude;
 using namespace owe;
+using rstd::sync::Arc;
+using rstd::sync::atomic::Atomic;
+using rstd::sync::atomic::Ordering;
 
 enum class PlaybackMode
 {
@@ -29,32 +32,32 @@ namespace
 {
 
 struct WPSoundState {
-    std::atomic<bool>     playing { false };
-    std::atomic<float>    volume { 1.0f };
-    std::atomic<uint32_t> play_seq { 0 };
-    std::atomic<uint32_t> stop_seq { 0 };
+    Atomic<bool> playing { false };
+    Atomic<f32>  volume { f32(1.0f) };
+    Atomic<u32>  play_seq {};
+    Atomic<u32>  stop_seq {};
 };
 
-class WPSoundControl final : public SceneSoundControl {
+class WPSoundControl final {
 public:
-    explicit WPSoundControl(std::shared_ptr<WPSoundState> state): m_state(std::move(state)) {}
+    explicit WPSoundControl(Arc<WPSoundState> state): m_state(rstd::move(state)) {}
 
-    void Play() override {
-        m_state->playing.store(true, std::memory_order_release);
-        m_state->play_seq.fetch_add(1, std::memory_order_acq_rel);
+    void Play() {
+        m_state->playing.store(true, Ordering::Release);
+        m_state->play_seq.fetch_add(u32(1), Ordering::AcqRel);
     }
-    void Stop() override {
-        m_state->playing.store(false, std::memory_order_release);
-        m_state->stop_seq.fetch_add(1, std::memory_order_acq_rel);
+    void Stop() {
+        m_state->playing.store(false, Ordering::Release);
+        m_state->stop_seq.fetch_add(u32(1), Ordering::AcqRel);
     }
-    void Pause() override { m_state->playing.store(false, std::memory_order_release); }
-    bool IsPlaying() const override { return m_state->playing.load(std::memory_order_acquire); }
-    void SetVolume(float volume) override {
-        m_state->volume.store(std::clamp(volume, 0.0f, 1.0f), std::memory_order_release);
+    void Pause() { m_state->playing.store(false, Ordering::Release); }
+    bool IsPlaying() const { return m_state->playing.load(Ordering::Acquire); }
+    void SetVolume(float volume) {
+        m_state->volume.store(f32(volume).clamp(f32(), f32(1.0f)), Ordering::Release);
     }
 
 private:
-    std::shared_ptr<WPSoundState> m_state;
+    Arc<WPSoundState> m_state;
 };
 
 } // namespace
@@ -68,19 +71,18 @@ public:
         PlaybackMode mode { PlaybackMode::Loop };
     };
     WPSoundStream(const std::vector<std::string>& paths, fs::VFS& vfs, Config c,
-                  std::shared_ptr<WPSoundState>        state,
-                  rstd::array<std::atomic<float>, 16>* audio_average)
+                  Arc<WPSoundState> state, Option<Arc<SceneAudioAverage>> audio_average)
         : vfs(vfs),
           m_config(c),
-          m_state(std::move(state)),
+          m_state(rstd::move(state)),
           m_soundPaths(paths),
-          m_audioAverage(audio_average) {};
+          m_audio_average(rstd::move(audio_average)) {};
     virtual ~WPSoundStream() = default;
 
     uint64_t next_pcm(void* pData, uint32_t frameCount) override {
         SyncControl();
         if (m_dead) return 0;
-        if (! m_state->playing.load(std::memory_order_acquire)) return 0;
+        if (! m_state->playing.load(Ordering::Acquire)) return 0;
 
         if (! m_curActive) {
             Switch();
@@ -90,7 +92,7 @@ public:
         if (frameReads == 0 && ! m_dead) {
             m_curActive.reset();
             if (m_config.mode == PlaybackMode::Single) {
-                m_state->playing.store(false, std::memory_order_release);
+                m_state->playing.store(false, Ordering::Release);
                 return 0;
             }
             Switch();
@@ -100,7 +102,7 @@ public:
         {
             float*     pData_float = static_cast<float*>(pData);
             const auto num         = frameReads * m_desc.channels;
-            const auto volume      = m_state->volume.load(std::memory_order_acquire);
+            const auto volume      = m_state->volume.load(Ordering::Acquire).to_primitive();
             for (unsigned i = 0; i < num; i++, pData_float++) {
                 (*pData_float) *= volume;
             }
@@ -133,7 +135,7 @@ public:
             }
         }
         m_dead = true;
-        m_state->playing.store(false, std::memory_order_release);
+        m_state->playing.store(false, Ordering::Release);
         rstd::log::warn("WPSoundStream: all {} sound path(s) failed to open; disabling stream", n);
     }
     uint32_t SelectStartIndex(uint32_t n) {
@@ -151,13 +153,13 @@ public:
 
 private:
     void SyncControl() {
-        const uint32_t stop_seq = m_state->stop_seq.load(std::memory_order_acquire);
+        const uint32_t stop_seq = m_state->stop_seq.load(Ordering::Acquire).to_primitive();
         if (stop_seq != m_seenStopSeq) {
             m_seenStopSeq = stop_seq;
             m_curActive.reset();
             m_dead = false;
         }
-        const uint32_t play_seq = m_state->play_seq.load(std::memory_order_acquire);
+        const uint32_t play_seq = m_state->play_seq.load(Ordering::Acquire).to_primitive();
         if (play_seq != m_seenPlaySeq) {
             m_seenPlaySeq = play_seq;
             m_curActive.reset();
@@ -166,13 +168,13 @@ private:
     }
 
     void UpdateAudioAverage(const void* pData, uint64_t frameReads) {
-        if (! m_audioAverage || frameReads == 0 || m_desc.channels == 0) return;
+        if (m_audio_average.is_none() || frameReads == 0 || m_desc.channels == 0) return;
 
         const float* samples = static_cast<const float*>(pData);
         const auto   total   = static_cast<std::size_t>(frameReads * m_desc.channels);
         if (total == 0) return;
 
-        const std::size_t bin_count = m_audioAverage->len().to_primitive();
+        const std::size_t bin_count = (*m_audio_average)->Len().to_primitive();
         for (std::size_t bin = 0; bin < bin_count; ++bin) {
             const auto begin = bin * total / bin_count;
             const auto end   = (bin + 1) * total / bin_count;
@@ -182,41 +184,41 @@ private:
             for (std::size_t i = begin; i < end; ++i) sum += std::abs(samples[i]);
             float level = std::clamp(sum / static_cast<float>(end - begin), 0.0f, 1.0f);
 
-            auto&       slot = (*m_audioAverage)[usize(bin)];
-            const float old  = slot.load(std::memory_order_relaxed);
-            slot.store(std::max(old * 0.75f, level), std::memory_order_relaxed);
+            auto        index = usize(bin);
+            const float old   = (*m_audio_average)->Load(index).to_primitive();
+            (*m_audio_average)->Store(index, f32(std::max(old * 0.75f, level)));
         }
     }
 
-    fs::VFS&                      vfs;
-    Config                        m_config;
-    Desc                          m_desc;
-    std::shared_ptr<WPSoundState> m_state;
-    uint32_t                      m_curIndex { 0 };
-    uint32_t                      m_seenPlaySeq { 0 };
-    uint32_t                      m_seenStopSeq { 0 };
-    bool                          m_dead { false };
+    fs::VFS&          vfs;
+    Config            m_config;
+    Desc              m_desc;
+    Arc<WPSoundState> m_state;
+    uint32_t          m_curIndex { 0 };
+    uint32_t          m_seenPlaySeq { 0 };
+    uint32_t          m_seenStopSeq { 0 };
+    bool              m_dead { false };
 
     const std::vector<std::string>              m_soundPaths;
     std::unique_ptr<wavsen::audio::SoundStream> m_curActive;
-    rstd::array<std::atomic<float>, 16>*        m_audioAverage { nullptr };
+    Option<Arc<SceneAudioAverage>>              m_audio_average;
 };
 
-std::shared_ptr<SceneSoundControl> WPSoundParser::Parse(const wpscene::SoundObject&  obj,
-                                                        fs::VFS&                     vfs,
-                                                        wavsen::audio::SoundManager& sm,
-                                                        Scene*                       scene) {
+Arc<dyn<SceneSoundControl>> WPSoundParser::Parse(const wpscene::SoundObject& obj, fs::VFS& vfs,
+                                                 wavsen::audio::SoundManager& sm, Scene* scene) {
     WPSoundStream::Config config { .maxtime = obj.maxtime,
                                    .mintime = obj.mintime,
                                    .volume  = std::clamp(obj.volume, 0.0f, 1.0f),
                                    .mode    = ToPlaybackMode(obj.playbackmode) };
 
-    auto* audio_average = scene ? &scene->audioAverage : nullptr;
-    auto  state         = std::make_shared<WPSoundState>();
-    state->playing.store(! obj.startsilent, std::memory_order_release);
-    state->volume.store(config.volume, std::memory_order_release);
-    auto control = std::make_shared<WPSoundControl>(state);
-    auto ss      = std::make_unique<WPSoundStream>(obj.sound, vfs, config, state, audio_average);
+    Option<Arc<SceneAudioAverage>> audio_average = None();
+    if (scene != nullptr) audio_average = Some(scene->AudioAverageHandle());
+    auto state = Arc<WPSoundState>::make();
+    state->playing.store(! obj.startsilent, Ordering::Release);
+    state->volume.store(f32(config.volume), Ordering::Release);
+    auto control = Arc<dyn<SceneSoundControl>>::make(WPSoundControl(state.clone()));
+    auto ss = std::make_unique<WPSoundStream>(
+        obj.sound, vfs, config, rstd::move(state), rstd::move(audio_average));
     sm.mount(std::move(ss));
     return control;
 }

@@ -1,7 +1,9 @@
 module;
 
 export module wescene.pkg.parse:shader_lex;
-import rstd.cppstd;
+import rstd;
+
+using namespace rstd::prelude;
 
 export namespace owe::shader_lex
 {
@@ -14,78 +16,79 @@ inline bool IsIdStart(char c) {
 inline bool IsIdCont(char c) { return IsIdStart(c) || (c >= '0' && c <= '9'); }
 inline bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
-inline bool IsPrecisionQualifier(std::string_view ident) noexcept {
+inline bool IsPrecisionQualifier(ref<str> ident) noexcept {
     return ident == "lowp" || ident == "mediump" || ident == "highp";
 }
 
 struct TypeName {
-    std::string_view type;
-    std::string_view name;
+    ref<str> type;
+    ref<str> name;
 };
 
-// Hand-rolled scanner over a string_view. Pos always points at the next byte
+// Hand-rolled scanner over a string slice. Pos always points at the next byte
 // to consume; Skip*/Match*/Read* primitives advance on success and stay put
 // on failure so the caller can probe alternatives without explicit Save.
 class Cursor {
 public:
-    explicit Cursor(std::string_view src) noexcept: m_src(src), m_pos(0) {}
-    Cursor(std::string_view src, std::size_t pos) noexcept: m_src(src), m_pos(pos) {}
+    explicit Cursor(ref<str> src) noexcept: m_src(src) {}
+    Cursor(ref<str> src, usize pos) noexcept: m_src(src), m_pos(pos) {}
 
-    std::size_t      Pos() const noexcept { return m_pos; }
-    std::string_view Source() const noexcept { return m_src; }
-    bool             Eof() const noexcept { return m_pos >= m_src.size(); }
-    char             Peek(std::size_t off = 0) const noexcept {
-        return (m_pos + off < m_src.size()) ? m_src[m_pos + off] : '\0';
+    usize    Pos() const noexcept { return m_pos; }
+    ref<str> Source() const noexcept { return m_src; }
+    bool     Eof() const noexcept { return m_pos >= m_src.size(); }
+    char     Peek(usize off = {}) const noexcept {
+        return (m_pos + off < m_src.size()) ? ByteAt(m_pos + off) : '\0';
     }
-    void SeekTo(std::size_t pos) noexcept { m_pos = pos > m_src.size() ? m_src.size() : pos; }
-    void Advance(std::size_t n = 1) noexcept { SeekTo(m_pos + n); }
+    void SeekTo(usize pos) noexcept { m_pos = pos > m_src.size() ? m_src.size() : pos; }
+    void Advance(usize n = usize(1)) noexcept { SeekTo(m_pos + n); }
 
-    bool        AtLineStart() const noexcept { return m_pos == 0 || m_src[m_pos - 1] == '\n'; }
-    std::size_t LineStart() const noexcept {
-        if (m_pos == 0) return 0;
-        auto nl = m_src.rfind('\n', m_pos - 1);
-        return nl == std::string_view::npos ? 0 : nl + 1;
+    bool AtLineStart() const noexcept {
+        return m_pos == usize() || ByteAt(m_pos - usize(1)) == '\n';
     }
-    std::size_t LineEnd() const noexcept {
-        auto nl = m_src.find('\n', m_pos);
-        return nl == std::string_view::npos ? m_src.size() : nl;
+    usize LineStart() const noexcept {
+        auto pos = m_pos;
+        while (pos > usize() && ByteAt(pos - usize(1)) != '\n') --pos;
+        return pos;
     }
-    std::string_view CurrentLine() const noexcept {
-        std::size_t s = LineStart();
-        std::size_t e = LineEnd();
-        return m_src.substr(s, e - s);
+    usize LineEnd() const noexcept {
+        auto pos = m_pos;
+        while (pos < m_src.size() && ByteAt(pos) != '\n') ++pos;
+        return pos;
+    }
+    ref<str> CurrentLine() const noexcept {
+        return *rstd::str_::get(m_src, LineStart(), LineEnd());
     }
     void SkipLine() noexcept {
-        std::size_t e = LineEnd();
-        SeekTo(e < m_src.size() ? e + 1 : e);
+        usize e = LineEnd();
+        SeekTo(e < m_src.size() ? e + usize(1) : e);
     }
 
     void SkipHSpace() noexcept {
-        while (m_pos < m_src.size() && IsHSpace(m_src[m_pos])) ++m_pos;
+        while (m_pos < m_src.size() && IsHSpace(ByteAt(m_pos))) ++m_pos;
     }
     void SkipToEol() noexcept {
-        while (m_pos < m_src.size() && m_src[m_pos] != '\n') ++m_pos;
+        while (m_pos < m_src.size() && ByteAt(m_pos) != '\n') ++m_pos;
     }
     void SkipAllTrivia() noexcept {
         while (m_pos < m_src.size()) {
-            char c = m_src[m_pos];
+            char c = ByteAt(m_pos);
             if (IsHSpace(c) || IsVSpace(c)) {
                 ++m_pos;
                 continue;
             }
-            if (c == '/' && m_pos + 1 < m_src.size()) {
-                if (m_src[m_pos + 1] == '/') {
+            if (c == '/' && m_pos + usize(1) < m_src.size()) {
+                if (ByteAt(m_pos + usize(1)) == '/') {
                     SkipToEol();
                     continue;
                 }
-                if (m_src[m_pos + 1] == '*') {
-                    m_pos += 2;
-                    while (m_pos + 1 < m_src.size() &&
-                           ! (m_src[m_pos] == '*' && m_src[m_pos + 1] == '/')) {
+                if (ByteAt(m_pos + usize(1)) == '*') {
+                    m_pos += usize(2);
+                    while (m_pos + usize(1) < m_src.size() &&
+                           ! (ByteAt(m_pos) == '*' && ByteAt(m_pos + usize(1)) == '/')) {
                         ++m_pos;
                     }
-                    if (m_pos + 1 < m_src.size())
-                        m_pos += 2;
+                    if (m_pos + usize(1) < m_src.size())
+                        m_pos += usize(2);
                     else
                         m_pos = m_src.size();
                     continue;
@@ -95,57 +98,57 @@ public:
         }
     }
 
-    std::optional<std::string_view> ReadIdent() noexcept {
-        if (m_pos >= m_src.size() || ! IsIdStart(m_src[m_pos])) return std::nullopt;
-        std::size_t s = m_pos++;
-        while (m_pos < m_src.size() && IsIdCont(m_src[m_pos])) ++m_pos;
-        return m_src.substr(s, m_pos - s);
+    Option<ref<str>> ReadIdent() noexcept {
+        if (m_pos >= m_src.size() || ! IsIdStart(ByteAt(m_pos))) return None();
+        usize s = m_pos++;
+        while (m_pos < m_src.size() && IsIdCont(ByteAt(m_pos))) ++m_pos;
+        return rstd::str_::get(m_src, s, m_pos);
     }
-    std::optional<std::string_view> ReadInt() noexcept {
-        if (m_pos >= m_src.size() || ! IsDigit(m_src[m_pos])) return std::nullopt;
-        std::size_t s = m_pos++;
-        while (m_pos < m_src.size() && IsDigit(m_src[m_pos])) ++m_pos;
-        return m_src.substr(s, m_pos - s);
+    Option<ref<str>> ReadInt() noexcept {
+        if (m_pos >= m_src.size() || ! IsDigit(ByteAt(m_pos))) return None();
+        usize s = m_pos++;
+        while (m_pos < m_src.size() && IsDigit(ByteAt(m_pos))) ++m_pos;
+        return rstd::str_::get(m_src, s, m_pos);
     }
     // Match `[...]`. Returns the bracketed text including brackets. Content
     // between [] isn't validated as integer — the caller decides.
-    std::optional<std::string_view> ReadArraySuffix() noexcept {
-        if (m_pos >= m_src.size() || m_src[m_pos] != '[') return std::nullopt;
-        std::size_t s = m_pos;
-        std::size_t p = m_pos + 1;
-        while (p < m_src.size() && m_src[p] != ']' && m_src[p] != '\n') ++p;
-        if (p >= m_src.size() || m_src[p] != ']') return std::nullopt;
+    Option<ref<str>> ReadArraySuffix() noexcept {
+        if (m_pos >= m_src.size() || ByteAt(m_pos) != '[') return None();
+        usize s = m_pos;
+        usize p = m_pos + usize(1);
+        while (p < m_src.size() && ByteAt(p) != ']' && ByteAt(p) != '\n') ++p;
+        if (p >= m_src.size() || ByteAt(p) != ']') return None();
         ++p;
         m_pos = p;
-        return m_src.substr(s, p - s);
+        return rstd::str_::get(m_src, s, p);
     }
 
     bool MatchChar(char c) noexcept {
-        if (m_pos < m_src.size() && m_src[m_pos] == c) {
+        if (m_pos < m_src.size() && ByteAt(m_pos) == c) {
             ++m_pos;
             return true;
         }
         return false;
     }
-    bool MatchPunct(std::string_view s) noexcept {
+    bool MatchPunct(ref<str> s) noexcept {
         if (m_pos + s.size() > m_src.size()) return false;
-        if (m_src.substr(m_pos, s.size()) != s) return false;
+        if (*rstd::str_::get(m_src, m_pos, m_pos + s.size()) != s) return false;
         m_pos += s.size();
         return true;
     }
-    // ident-边界感知 keyword 匹配。"uniform" 不会匹配 "uniformly".
-    bool MatchKeyword(std::string_view kw) noexcept {
+    // Match a keyword at an identifier boundary, so "uniform" does not match "uniformly".
+    bool MatchKeyword(ref<str> kw) noexcept {
         if (m_pos + kw.size() > m_src.size()) return false;
-        if (m_src.substr(m_pos, kw.size()) != kw) return false;
-        if (m_pos + kw.size() < m_src.size() && IsIdCont(m_src[m_pos + kw.size()])) return false;
+        if (*rstd::str_::get(m_src, m_pos, m_pos + kw.size()) != kw) return false;
+        if (m_pos + kw.size() < m_src.size() && IsIdCont(ByteAt(m_pos + kw.size()))) return false;
         m_pos += kw.size();
         return true;
     }
-    // `#` (允许前置 H-space) + name + ident 边界. 成功后光标在 name 之后。
-    bool MatchHashDirective(std::string_view name) noexcept {
-        std::size_t save = m_pos;
+    // Match `#`, optional horizontal space and a directive name at an identifier boundary.
+    bool MatchHashDirective(ref<str> name) noexcept {
+        usize save = m_pos;
         SkipHSpace();
-        if (m_pos >= m_src.size() || m_src[m_pos] != '#') {
+        if (m_pos >= m_src.size() || ByteAt(m_pos) != '#') {
             m_pos = save;
             return false;
         }
@@ -159,28 +162,30 @@ public:
     }
 
     struct Saved {
-        std::size_t pos;
+        usize pos;
     };
     Saved Save() const noexcept { return { m_pos }; }
     void  Restore(Saved s) noexcept { m_pos = s.pos; }
 
 private:
-    std::string_view m_src;
-    std::size_t      m_pos;
+    char ByteAt(usize pos) const noexcept { return static_cast<char>(m_src[pos].to_primitive()); }
+
+    ref<str> m_src;
+    usize    m_pos {};
 };
 
-inline std::optional<TypeName> ReadTypeName(Cursor& c) noexcept {
+inline Option<TypeName> ReadTypeName(Cursor& c) noexcept {
     auto type = c.ReadIdent();
-    if (! type) return std::nullopt;
+    if (! type) return None();
     c.SkipHSpace();
     if (IsPrecisionQualifier(*type)) {
         type = c.ReadIdent();
-        if (! type) return std::nullopt;
+        if (! type) return None();
         c.SkipHSpace();
     }
     auto name = c.ReadIdent();
-    if (! name) return std::nullopt;
-    return TypeName { *type, *name };
+    if (! name) return None();
+    return Some(TypeName { *type, *name });
 }
 
 // Walks one source line at a time. Tracks block-comment state so that a
@@ -189,31 +194,26 @@ inline std::optional<TypeName> ReadTypeName(Cursor& c) noexcept {
 // so `uniform vec4 X;` inside a block comment never gets emitted.
 class LineWalker {
 public:
-    explicit LineWalker(std::string_view src) noexcept
-        : m_src(src), m_pos(0), m_line_start(0), m_line_end(0), m_in_block(false) {
-        Recompute();
-    }
-    bool             Done() const noexcept { return m_pos > m_src.size(); }
-    std::size_t      LineStart() const noexcept { return m_line_start; }
-    std::size_t      LineEnd() const noexcept { return m_line_end; }
-    std::string_view Line() const noexcept {
+    explicit LineWalker(ref<str> src) noexcept: m_src(src) { Recompute(); }
+    bool     Done() const noexcept { return m_pos > m_src.size(); }
+    usize    LineStart() const noexcept { return m_line_start; }
+    usize    LineEnd() const noexcept { return m_line_end; }
+    ref<str> Line() const noexcept {
         // When the entire line is masked by an enclosing block comment, hide
         // it from callers so token scans never see the masked text.
-        if (m_line_masked) return std::string_view {};
-        return m_src.substr(m_line_start, m_line_end - m_line_start);
+        if (m_line_masked) return {};
+        return *rstd::str_::get(m_src, m_line_start, m_line_end);
     }
     // Raw line text including any masked content. Stripper passes use this
     // so the original bytes (including block-comment text) survive into the
     // output unchanged.
-    std::string_view RawLine() const noexcept {
-        return m_src.substr(m_line_start, m_line_end - m_line_start);
-    }
-    Cursor LineCursor() const noexcept {
+    ref<str> RawLine() const noexcept { return *rstd::str_::get(m_src, m_line_start, m_line_end); }
+    Cursor   LineCursor() const noexcept {
         // The returned Cursor scans only the visible part of the line.
         return Cursor { Line() };
     }
     void Step() noexcept {
-        m_pos = (m_line_end < m_src.size()) ? m_line_end + 1 : m_src.size() + 1;
+        m_pos = (m_line_end < m_src.size()) ? m_line_end + usize(1) : m_src.size() + usize(1);
         Recompute();
     }
 
@@ -225,18 +225,18 @@ private:
             return;
         }
         m_line_start = m_pos;
-        auto nl      = m_src.find('\n', m_pos);
-        m_line_end   = (nl == std::string_view::npos) ? m_src.size() : nl;
+        m_line_end   = m_pos;
+        while (m_line_end < m_src.size() && ByteAt(m_line_end) != '\n') ++m_line_end;
 
         // Walk the line characterwise to update block-comment state.
-        m_line_masked               = m_in_block;
-        std::size_t p               = m_line_start;
-        bool        starts_in_block = m_in_block;
+        m_line_masked         = m_in_block;
+        usize p               = m_line_start;
+        bool  starts_in_block = m_in_block;
         while (p < m_line_end) {
             if (m_in_block) {
-                if (p + 1 < m_line_end && m_src[p] == '*' && m_src[p + 1] == '/') {
+                if (p + usize(1) < m_line_end && ByteAt(p) == '*' && ByteAt(p + usize(1)) == '/') {
                     m_in_block = false;
-                    p += 2;
+                    p += usize(2);
                     // If a `*/` closes mid-line, content after it is visible —
                     // unmask the line.
                     if (starts_in_block) m_line_masked = false;
@@ -244,14 +244,14 @@ private:
                     ++p;
                 }
             } else {
-                if (p + 1 < m_line_end && m_src[p] == '/' && m_src[p + 1] == '/') {
+                if (p + usize(1) < m_line_end && ByteAt(p) == '/' && ByteAt(p + usize(1)) == '/') {
                     // Line comment terminates the line for block-state purposes.
                     p = m_line_end;
                     break;
                 }
-                if (p + 1 < m_line_end && m_src[p] == '/' && m_src[p + 1] == '*') {
+                if (p + usize(1) < m_line_end && ByteAt(p) == '/' && ByteAt(p + usize(1)) == '*') {
                     m_in_block = true;
-                    p += 2;
+                    p += usize(2);
                 } else {
                     ++p;
                 }
@@ -262,19 +262,21 @@ private:
         // lines that started inside a block comment are masked.
     }
 
-    std::string_view m_src;
-    std::size_t      m_pos;
-    std::size_t      m_line_start;
-    std::size_t      m_line_end;
-    bool             m_in_block;
-    bool             m_line_masked { false };
+    char ByteAt(usize pos) const noexcept { return static_cast<char>(m_src[pos].to_primitive()); }
+
+    ref<str> m_src;
+    usize    m_pos {};
+    usize    m_line_start {};
+    usize    m_line_end {};
+    bool     m_in_block { false };
+    bool     m_line_masked { false };
 };
 
 // Token stream layered over Cursor. Tokens preserve the underlying bytes
 // (text + offset) so callers can splice / re-emit the source unchanged. The
 // lexer is line-aware: Newline / HSpace / LineComment / BlockComment are
 // each their own kind so directive parsing stays straightforward.
-enum class TokenKind : std::uint8_t
+enum class TokenKind : rstd::uint8_t
 {
     Eof,
     Newline,      // single '\n'
@@ -290,23 +292,23 @@ enum class TokenKind : std::uint8_t
 };
 
 struct Token {
-    TokenKind        kind;
-    std::string_view text;
-    std::size_t      offset;
+    TokenKind kind;
+    ref<str>  text;
+    usize     offset;
 };
 
 class Lexer {
 public:
-    explicit Lexer(std::string_view src) noexcept: m_src(src), m_pos(0) {}
+    explicit Lexer(ref<str> src) noexcept: m_src(src) {}
 
-    std::string_view Source() const noexcept { return m_src; }
-    std::size_t      Pos() const noexcept { return m_pos; }
-    void             SeekTo(std::size_t p) noexcept { m_pos = p > m_src.size() ? m_src.size() : p; }
-    bool             Eof() const noexcept { return m_pos >= m_src.size(); }
+    ref<str> Source() const noexcept { return m_src; }
+    usize    Pos() const noexcept { return m_pos; }
+    void     SeekTo(usize p) noexcept { m_pos = p > m_src.size() ? m_src.size() : p; }
+    bool     Eof() const noexcept { return m_pos >= m_src.size(); }
 
     Token Peek() const noexcept {
-        std::size_t save                = m_pos;
-        Token       t                   = const_cast<Lexer*>(this)->ScanOne();
+        usize save                      = m_pos;
+        Token t                         = const_cast<Lexer*>(this)->ScanOne();
         const_cast<Lexer*>(this)->m_pos = save;
         return t;
     }
@@ -324,7 +326,7 @@ public:
     }
 
     struct Saved {
-        std::size_t pos;
+        usize pos;
     };
     Saved Save() const noexcept { return { m_pos }; }
     void  Restore(Saved s) noexcept { m_pos = s.pos; }
@@ -332,62 +334,65 @@ public:
 private:
     Token ScanOne() noexcept {
         if (m_pos >= m_src.size()) return { TokenKind::Eof, {}, m_src.size() };
-        std::size_t start = m_pos;
-        char        c0    = m_src[m_pos];
+        usize start = m_pos;
+        char  c0    = ByteAt(m_pos);
 
         if (c0 == '\n') {
             ++m_pos;
-            return { TokenKind::Newline, m_src.substr(start, 1), start };
+            return { TokenKind::Newline, *rstd::str_::get(m_src, start, m_pos), start };
         }
         if (IsHSpace(c0)) {
-            while (m_pos < m_src.size() && IsHSpace(m_src[m_pos])) ++m_pos;
-            return { TokenKind::HSpace, m_src.substr(start, m_pos - start), start };
+            while (m_pos < m_src.size() && IsHSpace(ByteAt(m_pos))) ++m_pos;
+            return { TokenKind::HSpace, *rstd::str_::get(m_src, start, m_pos), start };
         }
-        if (c0 == '/' && m_pos + 1 < m_src.size() && m_src[m_pos + 1] == '/') {
-            m_pos += 2;
-            while (m_pos < m_src.size() && m_src[m_pos] != '\n') ++m_pos;
-            return { TokenKind::LineComment, m_src.substr(start, m_pos - start), start };
+        if (c0 == '/' && m_pos + usize(1) < m_src.size() && ByteAt(m_pos + usize(1)) == '/') {
+            m_pos += usize(2);
+            while (m_pos < m_src.size() && ByteAt(m_pos) != '\n') ++m_pos;
+            return { TokenKind::LineComment, *rstd::str_::get(m_src, start, m_pos), start };
         }
-        if (c0 == '/' && m_pos + 1 < m_src.size() && m_src[m_pos + 1] == '*') {
-            m_pos += 2;
-            while (m_pos + 1 < m_src.size() && ! (m_src[m_pos] == '*' && m_src[m_pos + 1] == '/'))
+        if (c0 == '/' && m_pos + usize(1) < m_src.size() && ByteAt(m_pos + usize(1)) == '*') {
+            m_pos += usize(2);
+            while (m_pos + usize(1) < m_src.size() &&
+                   ! (ByteAt(m_pos) == '*' && ByteAt(m_pos + usize(1)) == '/'))
                 ++m_pos;
-            if (m_pos + 1 < m_src.size())
-                m_pos += 2;
+            if (m_pos + usize(1) < m_src.size())
+                m_pos += usize(2);
             else
                 m_pos = m_src.size();
-            return { TokenKind::BlockComment, m_src.substr(start, m_pos - start), start };
+            return { TokenKind::BlockComment, *rstd::str_::get(m_src, start, m_pos), start };
         }
         if (IsIdStart(c0)) {
             ++m_pos;
-            while (m_pos < m_src.size() && IsIdCont(m_src[m_pos])) ++m_pos;
-            return { TokenKind::Ident, m_src.substr(start, m_pos - start), start };
+            while (m_pos < m_src.size() && IsIdCont(ByteAt(m_pos))) ++m_pos;
+            return { TokenKind::Ident, *rstd::str_::get(m_src, start, m_pos), start };
         }
         if (IsDigit(c0)) {
             ++m_pos;
-            while (m_pos < m_src.size() && IsDigit(m_src[m_pos])) ++m_pos;
-            return { TokenKind::Int, m_src.substr(start, m_pos - start), start };
+            while (m_pos < m_src.size() && IsDigit(ByteAt(m_pos))) ++m_pos;
+            return { TokenKind::Int, *rstd::str_::get(m_src, start, m_pos), start };
         }
         if (c0 == '"') {
             ++m_pos;
-            while (m_pos < m_src.size() && m_src[m_pos] != '"' && m_src[m_pos] != '\n') ++m_pos;
-            if (m_pos < m_src.size() && m_src[m_pos] == '"') ++m_pos;
-            return { TokenKind::String, m_src.substr(start, m_pos - start), start };
+            while (m_pos < m_src.size() && ByteAt(m_pos) != '"' && ByteAt(m_pos) != '\n') ++m_pos;
+            if (m_pos < m_src.size() && ByteAt(m_pos) == '"') ++m_pos;
+            return { TokenKind::String, *rstd::str_::get(m_src, start, m_pos), start };
         }
         if (c0 == '#') {
             ++m_pos;
-            return { TokenKind::Hash, m_src.substr(start, 1), start };
+            return { TokenKind::Hash, *rstd::str_::get(m_src, start, m_pos), start };
         }
         if ((unsigned char)c0 >= 0x20 && (unsigned char)c0 < 0x7f) {
             ++m_pos;
-            return { TokenKind::Punct, m_src.substr(start, 1), start };
+            return { TokenKind::Punct, *rstd::str_::get(m_src, start, m_pos), start };
         }
         ++m_pos;
-        return { TokenKind::Unknown, m_src.substr(start, 1), start };
+        return { TokenKind::Unknown, *rstd::str_::get(m_src, start, m_pos), start };
     }
 
-    std::string_view m_src;
-    std::size_t      m_pos;
+    char ByteAt(usize pos) const noexcept { return static_cast<char>(m_src[pos].to_primitive()); }
+
+    ref<str> m_src;
+    usize    m_pos {};
 };
 
 enum class PpKind
@@ -410,7 +415,7 @@ enum class PpKind
 };
 
 inline PpKind ClassifyPreproc(Cursor c) noexcept {
-    Lexer lx(c.Source().substr(c.Pos()));
+    Lexer lx(*rstd::str_::get_from(c.Source(), c.Pos()));
     // First non-HSpace token must be Hash.
     Token t = lx.NextSkip([](TokenKind k) {
         return k == TokenKind::HSpace;

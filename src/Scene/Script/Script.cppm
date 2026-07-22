@@ -10,6 +10,9 @@ import wescene.scene;
 export namespace owe::script
 {
 
+using namespace rstd::prelude;
+using rstd::sync::Arc;
+
 // --- shared value variant ----------------------------------------------------
 
 // Result of a script's update() call, after coercion. The variant is a
@@ -156,7 +159,7 @@ public:
     // Push one frame's worth of host state into the runtime. The next
     // FieldScript::Update call will see these values via `engine.*`.
     void SetFrameInputs(const FrameInputs& fi);
-    void SetAudioResponseDemand(std::shared_ptr<AudioResponseDemand> demand);
+    void SetAudioResponseDemand(Option<Arc<AudioResponseDemand>> demand);
 
     // Patch one Wallpaper Engine user property into engine.userProperties.
     // `property` should be the descriptor object shape used by project.json
@@ -250,11 +253,10 @@ std::function<void(const ScriptValue&)> MakeNodeTransformApply(rstd::sync::Arc<o
 std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::SceneNode> node);
 
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
-// populated by the parser, attached to the Scene as an opaque pointer
-// (Scene::script_scene). Ticked once per frame by `TickSceneScripts`.
+// populated by the parser, then installed as a Scene extension.
 class ScriptScene : NoCopy, NoMove {
 public:
-    explicit ScriptScene(std::shared_ptr<AudioResponseDemand> demand = {});
+    explicit ScriptScene(Option<Arc<AudioResponseDemand>> demand = rstd::None());
     ~ScriptScene();
 
     JsRuntime& runtime() noexcept;
@@ -270,9 +272,8 @@ public:
     std::unique_ptr<Impl> m_impl;
 };
 
-// Attach a ScriptScene to a Scene via the opaque-pointer slot. Takes
-// ownership; replaces any previous attachment.
-void InstallScriptScene(owe::Scene& scene, std::unique_ptr<ScriptScene> ss);
+// Attach a ScriptScene to a Scene. Takes ownership and replaces any previous attachment.
+void InstallScriptScene(owe::Scene& scene, Box<ScriptScene> script_scene);
 
 // Convenience tick: looks up the ScriptScene attached to `scene` and
 // drives one frame. No-op when no ScriptScene is installed (image-only

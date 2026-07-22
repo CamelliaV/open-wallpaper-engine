@@ -108,14 +108,14 @@ public:
     void refreshPreparedResources(Scene&);
     void refreshPreparedResources(Scene&, const RenderSceneSnapshot&);
     void refreshPreparedTextures(Scene&, const RenderSceneSnapshot&);
-    void invalidatePreparedRenderItems(std::span<const RenderItemId>, PassInvalidationFlags);
+    void invalidatePreparedRenderItems(slice<RenderItemId>, PassInvalidationFlags);
     void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&,
-                                    std::span<const RenderItemId>, PassInvalidationFlags);
+                                    slice<RenderItemId>, PassInvalidationFlags);
     void refreshPreparedMaterial(Scene&, const RenderSceneSnapshot&, SceneMaterialId,
                                  PassInvalidationFlags);
     bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&, SceneMaterialId);
     bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&,
-                                         std::span<const SceneMaterialId>);
+                                         slice<SceneMaterialId>);
     void refreshPreparedMesh(Scene&, const RenderSceneSnapshot&, SceneMeshId,
                              PassInvalidationFlags);
     std::vector<PreparedPassDiagnostic> preparedPassDiagnostics() const;
@@ -137,7 +137,7 @@ public:
      * SceneWallpaper's per-frame RenderDraw handler. */
     void pumpVideoTextures(double dt_seconds);
 
-    /* For every FontFace in scene.font_cache with non-empty DirtyRects,
+    /* For every FontFace in the Scene font-cache extension with non-empty DirtyRects,
      * coalesce to one AABB and vkCmdCopyBufferToImage into the face's
      * atlas VkImage. Skips faces whose VkImage hasn't been created yet
      * (CreateTex runs lazily on first material bind — those pixels reach

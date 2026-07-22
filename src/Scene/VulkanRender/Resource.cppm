@@ -14,6 +14,8 @@ import wescene.vulkan;
 import wescene.scene;
 
 using namespace rstd::prelude;
+using rstd::collections::HashMap;
+using rstd::sync::Arc;
 
 export namespace owe::vulkan
 {
@@ -250,8 +252,8 @@ inline TextureRequest MakeDepthTextureRequest(std::string_view name, const Scene
     };
 }
 
-inline Option<std::string> ResolveImportedTextureName(const RenderSceneSnapshot& render_scene,
-                                                      const TextureRequest&      request) {
+inline Option<String> ResolveImportedTextureName(const RenderSceneSnapshot& render_scene,
+                                                 const TextureRequest&      request) {
     if (request.kind != TextureRequestKind::Imported) return None();
     auto catalog  = rstd::dyn<resource::TextureCatalog>::from_ref(render_scene);
     auto resolved = rstd::None<TextureRequest>();
@@ -262,55 +264,48 @@ inline Option<std::string> ResolveImportedTextureName(const RenderSceneSnapshot&
         resolved = catalog->FindTexture(request.name.as_str());
     }
     if (resolved.is_none()) return None();
-    return Some(rstd::cppstd::to_string(resolved->name.as_str()));
+    return Some(resolved->name.clone());
 }
 
 class SnapshotImportedTextureProvider {
 public:
-    SnapshotImportedTextureProvider(const RenderSceneSnapshot& render_scene,
-                                    IImageParser*              image_parser)
-        : m_catalog(rstd::dyn<resource::TextureCatalog>::from_ref(render_scene)),
-          m_image_parser(
-              image_parser == nullptr
-                  ? rstd::None<rstd::mut_ref<IImageParser>>()
-                  : rstd::Some(rstd::mut_ref<IImageParser>::from_raw_parts(image_parser))) {}
+    SnapshotImportedTextureProvider(const RenderSceneSnapshot& render_scene, ref<Scene> scene)
+        : m_catalog(rstd::dyn<resource::TextureCatalog>::from_ref(render_scene)), m_scene(scene) {}
 
     auto LoadTexture(const TextureRequest& request)
         -> rstd::Result<rstd::mut_ref<Image>, resource::ResourceError> {
-        auto name  = ResolveName(request);
-        auto found = m_loaded_content.find(name);
-        if (found != m_loaded_content.end()) {
-            return rstd::Ok(rstd::mut_ref<Image>::from_raw_parts(rstd::addressof(*found->second)));
-        }
-        if (m_image_parser.is_none()) {
+        auto name   = ResolveName(request);
+        auto loaded = m_loaded_content.get(name.as_str());
+        if (loaded.is_some()) return Ok((*loaded)->deref_mut());
+
+        auto parsed = m_scene->ParseImage(name.as_str());
+        if (parsed.is_err()) {
+            auto error = rstd::move(parsed).unwrap_err_unchecked();
             return rstd::Err(resource::ResourceError {
-                .kind    = resource::ResourceErrorKind::MissingContent,
-                .message = rstd::format("texture parser unavailable for {}", request.name),
+                .kind    = error.kind == ImageParseErrorKind::MissingContent
+                               ? resource::ResourceErrorKind::MissingContent
+                               : resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::move(error.message),
             });
         }
-        auto image = (*m_image_parser)->Parse(name);
-        if (! image) {
-            return rstd::Err(resource::ResourceError {
-                .kind    = resource::ResourceErrorKind::MissingContent,
-                .message = rstd::format("parse texture {} failed", request.name),
-            });
-        }
-        auto stored = m_loaded_content.emplace(rstd::move(name), rstd::move(image)).first;
-        return rstd::Ok(rstd::mut_ref<Image>::from_raw_parts(rstd::addressof(*stored->second)));
+        auto image   = rstd::move(parsed).unwrap_unchecked();
+        auto content = image.deref_mut();
+        (void)m_loaded_content.insert(rstd::move(name), rstd::move(image));
+        return Ok(content);
     }
 
 private:
-    std::string ResolveName(const TextureRequest& request) const {
+    String ResolveName(const TextureRequest& request) const {
         auto resolved = rstd::None<TextureRequest>();
         if (request.source.is_some()) resolved = m_catalog->ResolveTexture(*request.source);
         if (resolved.is_none()) resolved = m_catalog->FindTexture(request.name.as_str());
-        if (resolved.is_some()) return rstd::cppstd::to_string(resolved->name.as_str());
-        return rstd::cppstd::to_string(request.name.as_str());
+        if (resolved.is_some()) return resolved->name.clone();
+        return request.name.clone();
     }
 
-    mutable rstd::ref<rstd::dyn<resource::TextureCatalog>>  m_catalog;
-    rstd::Option<rstd::mut_ref<IImageParser>>               m_image_parser;
-    std::unordered_map<std::string, std::shared_ptr<Image>> m_loaded_content;
+    mutable ref<dyn<resource::TextureCatalog>> m_catalog;
+    ref<Scene>                                 m_scene;
+    HashMap<String, Arc<Image>>                m_loaded_content;
 };
 
 struct RenderingResources {
@@ -338,7 +333,7 @@ struct Impl<owe::resource::TextureCatalog, owe::RenderSceneSnapshot>
         auto record = this->self().textureDesc(
             owe::RenderTextureDescId { .index = id.index, .generation = id.generation });
         if (record == nullptr) return None();
-        auto name = record->desc.url.empty() ? std::string_view(record->key)
+        auto name = record->desc.url.empty() ? rstd::cppstd::as_string_view(record->key.as_str())
                                              : std::string_view(record->desc.url);
         return Some(owe::vulkan::MakeImportedTextureRequest(
             name,
@@ -346,7 +341,7 @@ struct Impl<owe::resource::TextureCatalog, owe::RenderSceneSnapshot>
     }
 
     auto FindTexture(ref<str> name) const -> Option<owe::resource::TextureRequest> {
-        auto id = this->self().textureDescId(rstd::cppstd::as_string_view(name));
+        auto id = this->self().textureDescId(name);
         if (id.is_none()) return None();
         return ResolveTexture(owe::resource::TextureDefinitionId { .index      = id->index,
                                                                    .generation = id->generation });

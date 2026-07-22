@@ -16,6 +16,8 @@ import wescene.scene;
 import wescene.pkg_asset_version;
 
 using namespace owe;
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 enum class WPTexFlagEnum : uint32_t
 {
@@ -225,15 +227,19 @@ ImageHeader MakeExternalImageHeader(int width, int height) {
     return header;
 }
 
-std::shared_ptr<Image> ParseExternalImage(std::string_view key, const std::string& path) {
+auto ParseExternalImage(std::string_view key, const std::string& path)
+    -> Result<Arc<Image>, ImageParseError> {
     int   width = 0, height = 0, channels = 0;
     auto* pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
     if (! pixels || width <= 0 || height <= 0) {
         if (pixels) stbi_image_free(pixels);
-        return nullptr;
+        return Err(ImageParseError {
+            .kind    = ImageParseErrorKind::DecodeFailed,
+            .message = rstd::format("decode external image {} failed", key),
+        });
     }
 
-    auto img_ptr    = std::make_shared<Image>();
+    auto img_ptr    = Arc<Image>::make();
     img_ptr->key    = std::string(key);
     img_ptr->header = MakeExternalImageHeader(width, height);
     img_ptr->slots.resize(1);
@@ -248,29 +254,40 @@ std::shared_ptr<Image> ParseExternalImage(std::string_view key, const std::strin
     mipmap.data   = ImageDataPtr(reinterpret_cast<uint8_t*>(pixels), [](uint8_t* data) {
         stbi_image_free(data);
     });
-    return img_ptr;
+    return Ok(rstd::move(img_ptr));
 }
 
 } // namespace
 
-std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
-    if (auto path = ResolveExternalImagePath(name)) {
-        return ParseExternalImage(name, *path);
+auto WPTexImageParser::Parse(ref<str> name) const -> Result<Arc<Image>, ImageParseError> {
+    const auto name_view = rstd::cppstd::as_string_view(name);
+    if (auto path = ResolveExternalImagePath(name_view)) {
+        return ParseExternalImage(name_view, *path);
     }
 
-    std::string            path    = "/assets/materials/" + name + ".tex";
-    std::shared_ptr<Image> img_ptr = std::make_shared<Image>();
-    auto&                  img     = *img_ptr;
-    img.key                        = name;
-    auto source                    = m_vfs->open_read(fs::ToPath(path));
-    if (source.is_err()) return nullptr;
+    std::string path    = "/assets/materials/" + std::string(name_view) + ".tex";
+    auto        img_ptr = Arc<Image>::make();
+    auto&       img     = *img_ptr;
+    img.key             = name_view;
+    auto source         = m_vfs->open_read(fs::ToPath(path));
+    if (source.is_err()) {
+        return Err(ImageParseError {
+            .kind    = ImageParseErrorKind::MissingContent,
+            .message = rstd::format("open texture {} failed", name),
+        });
+    }
     auto tex_source = rstd::move(source).unwrap_unchecked();
     auto file       = fs::BinaryReader(tex_source.clone());
     auto ver        = LoadHeader(file, img.header);
 
     // image
     std::int32_t _image_count = img.header.count;
-    if (_image_count < 0) return nullptr;
+    if (_image_count < 0) {
+        return Err(ImageParseError {
+            .kind    = ImageParseErrorKind::InvalidData,
+            .message = rstd::format("texture {} has a negative image count", name),
+        });
+    }
     std::size_t image_count = static_cast<std::size_t>(_image_count);
 
     img.slots.resize(image_count);
@@ -301,8 +318,12 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             }
 
             std::int32_t src_size = file.ReadInt32();
-            if (src_size <= 0 || mipmap.width <= 0 || mipmap.height <= 0 || decompressed_size < 0)
-                return nullptr;
+            if (src_size <= 0 || mipmap.width <= 0 || mipmap.height <= 0 || decompressed_size < 0) {
+                return Err(ImageParseError {
+                    .kind    = ImageParseErrorKind::InvalidData,
+                    .message = rstd::format("texture {} has an invalid mipmap", name),
+                });
+            }
 
             // Peek the first 16 bytes of the body so we can route MP4 /
             // WebM containers into the video-tex path without ever
@@ -321,7 +342,12 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                     auto video_source =
                         tex_source.subrange(u64(static_cast<std::uint64_t>(body_off)),
                                             u64(static_cast<std::uint64_t>(src_size)));
-                    if (video_source.is_err()) return nullptr;
+                    if (video_source.is_err()) {
+                        return Err(ImageParseError {
+                            .kind    = ImageParseErrorKind::InvalidData,
+                            .message = rstd::format("texture {} has an invalid video range", name),
+                        });
+                    }
                     mipmap.video_source = rstd::Some(rstd::move(video_source).unwrap_unchecked());
                     mipmap.size         = isize();
                     file.SeekSet(body_off + src_size);
@@ -344,7 +370,10 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 } else {
                     rstd_error("lz4 decompress failed");
                     delete[] result;
-                    return nullptr;
+                    return Err(ImageParseError {
+                        .kind    = ImageParseErrorKind::DecodeFailed,
+                        .message = rstd::format("decompress texture {} failed", name),
+                    });
                 }
             }
             // is image container — declared image_type takes precedence; if
@@ -362,7 +391,10 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 if (data == nullptr) {
                     rstd_error("stbi failed to decode embedded image (type={})", (int)embedded);
                     delete[] result;
-                    return nullptr;
+                    return Err(ImageParseError {
+                        .kind    = ImageParseErrorKind::DecodeFailed,
+                        .message = rstd::format("decode embedded image {} failed", name),
+                    });
                 }
                 img.header.type   = embedded;
                 img.header.format = TextureFormat::RGBA8;
@@ -381,55 +413,88 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             delete[] result;
         }
     }
-    return img_ptr;
+    return Ok(rstd::move(img_ptr));
 }
 
-std::vector<std::shared_ptr<Image>>
-WPTexImageParser::ParseMany(std::span<const std::string> names) {
-    constexpr usize max_workers { 4 };
-    if (names.size() < 2) return IImageParser::ParseMany(names);
+auto owe::ParseImages(ref<dyn<IImageParser>> parser, slice<String> names, usize max_workers)
+    -> Vec<Result<Arc<Image>, ImageParseError>> {
+    auto parse_sequential = [parser, names]() mutable {
+        auto images = Vec<Result<Arc<Image>, ImageParseError>>::with_capacity(names.len());
+        for (usize index {}; index < names.len(); ++index)
+            images.push(parser->Parse(names[index].as_str()));
+        return images;
+    };
 
-    const auto worker_count = rstd::min(usize(names.size()), max_workers);
-    auto       group =
-        rstd::thread::BlockingTaskGroup<std::shared_ptr<Image>>::make(worker_count, worker_count);
-    if (group.is_err()) return IImageParser::ParseMany(names);
+    if (names.len() < usize(2) || max_workers < usize(2)) return parse_sequential();
 
-    for (const auto& name : names) {
-        auto submitted = group->submit([this, name]() {
-            return Parse(name);
+    const auto worker_count = rstd::min(names.len(), max_workers);
+    auto       group = rstd::thread::BlockingTaskGroup<Result<Arc<Image>, ImageParseError>>::make(
+        worker_count, worker_count);
+    if (group.is_err()) return parse_sequential();
+
+    for (usize index {}; index < names.len(); ++index) {
+        auto name      = names[index].clone();
+        auto submitted = group->submit([parser, name = rstd::move(name)]() mutable {
+            return parser->Parse(name.as_str());
         });
-        if (submitted.is_err()) return IImageParser::ParseMany(names);
+        if (submitted.is_err()) return parse_sequential();
     }
 
-    auto                                outcomes = rstd::move(*group).join();
-    std::vector<std::shared_ptr<Image>> images;
-    images.reserve(outcomes.len().to_primitive());
+    auto outcomes = rstd::move(*group).join();
+    auto images   = Vec<Result<Arc<Image>, ImageParseError>>::with_capacity(outcomes.len());
     for (auto& outcome : outcomes) {
         auto value = rstd::move(outcome).into_value();
-        images.push_back(value.is_some() ? rstd::move(value).unwrap_unchecked() : nullptr);
+        if (value.is_some()) {
+            images.push(rstd::move(value).unwrap_unchecked());
+        } else {
+            images.push(Err(ImageParseError {
+                .kind    = ImageParseErrorKind::DecodeFailed,
+                .message = String::make("texture parse task failed"),
+            }));
+        }
     }
     return images;
 }
 
-ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
+auto WPTexImageParser::ParseMany(slice<String> names) const
+    -> Vec<Result<Arc<Image>, ImageParseError>> {
+    auto parser = dyn<IImageParser>::from_ref(*this);
+    return ParseImages(parser, names);
+}
+
+auto WPTexImageParser::ParseHeader(ref<str> name) const -> Result<ImageHeader, ImageParseError> {
+    const auto  name_view = rstd::cppstd::as_string_view(name);
     ImageHeader header;
-    if (auto path = ResolveExternalImagePath(name)) {
+    if (auto path = ResolveExternalImagePath(name_view)) {
         int width = 0, height = 0, channels = 0;
         if (stbi_info(path->c_str(), &width, &height, &channels) && width > 0 && height > 0)
-            return MakeExternalImageHeader(width, height);
-        return header;
+            return Ok(MakeExternalImageHeader(width, height));
+        return Err(ImageParseError {
+            .kind    = ImageParseErrorKind::DecodeFailed,
+            .message = rstd::format("read external image header {} failed", name),
+        });
     }
     // WE "_alias_*" textures are runtime aliases the engine resolves
     // internally (light cookies, etc.). We don't model that, so just
     // return an empty header without spamming a vfs miss.
-    if (name.find("_alias_") != std::string::npos) return header;
-    std::string path   = "/assets/materials/" + name + ".tex";
+    if (name_view.find("_alias_") != std::string_view::npos) return Ok(rstd::move(header));
+    std::string path   = "/assets/materials/" + std::string(name_view) + ".tex";
     auto        source = m_vfs->open_read(fs::ToPath(path));
-    if (source.is_err()) return header;
+    if (source.is_err()) {
+        return Err(ImageParseError {
+            .kind    = ImageParseErrorKind::MissingContent,
+            .message = rstd::format("open texture header {} failed", name),
+        });
+    }
     auto file = fs::BinaryReader(rstd::move(source).unwrap_unchecked());
 
     auto ver = LoadHeader(file, header);
-    if (header.count < 0) return header;
+    if (header.count < 0) {
+        return Err(ImageParseError {
+            .kind    = ImageParseErrorKind::InvalidData,
+            .message = rstd::format("texture {} has a negative image count", name),
+        });
+    }
 
     std::size_t image_count = static_cast<std::size_t>(header.count);
 
@@ -470,7 +535,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         // info is best-effort anyway in our renderer pipeline.
         if (ver.texs < 1 || ver.texs > 3) {
             rstd_error("WPTexImageParser: unsupported texs version {} for {}", ver.texs, name);
-            return header;
+            return Ok(rstd::move(header));
         }
         int32_t framecount = file.ReadInt32();
         if (ver.sprite_has_atlas_size()) {
@@ -565,5 +630,5 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             }
         }
     }
-    return header;
+    return Ok(rstd::move(header));
 }

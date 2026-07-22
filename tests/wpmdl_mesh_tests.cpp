@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 
+import eigen;
 import rstd.cppstd;
 import wescene.fs;
 import wescene.pkg_fs;
 import wescene.pkg.parse;
 import wescene.scene;
 import wescene.spec_names;
+
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 namespace
 {
@@ -24,8 +28,8 @@ std::uint32_t CountUvSeamTriangles(const owe::WPMdl::Mesh& mesh) {
         float min_u = std::numeric_limits<float>::max();
         float max_u = std::numeric_limits<float>::lowest();
         for (std::uint32_t idx : tri) {
-            min_u = std::min(min_u, mesh.texcoords[idx][0]);
-            max_u = std::max(max_u, mesh.texcoords[idx][0]);
+            min_u = std::min(min_u, mesh.texcoords[usize(idx)][usize(0)]);
+            max_u = std::max(max_u, mesh.texcoords[usize(idx)][usize(0)]);
         }
         if (max_u - min_u > 0.5f) ++seam_triangles;
     }
@@ -33,6 +37,24 @@ std::uint32_t CountUvSeamTriangles(const owe::WPMdl::Mesh& mesh) {
 }
 
 } // namespace
+
+TEST(WPPuppet, ArcOwnedLayerExposesBorrowedTransforms) {
+    auto                puppet = Arc<owe::WPPuppet>::make();
+    owe::WPPuppet::Bone bone;
+    bone.name = String::make("root");
+    puppet->bones.push(rstd::move(bone));
+    puppet->prepared();
+
+    owe::WPPuppetLayer layer(puppet.clone());
+    layer.prepared(slice<owe::WPPuppetLayer::AnimationLayer> {});
+
+    EXPECT_EQ(layer.boneIndex("root"), 1u);
+    EXPECT_EQ(layer.boneIndex("missing"), 0u);
+    EXPECT_TRUE(layer.boneTransform(0u, 0.0).is_none());
+    auto transform = layer.boneTransform(1u, 0.0);
+    ASSERT_TRUE(transform.is_some());
+    EXPECT_TRUE(transform->matrix().isApprox(Eigen::Matrix4f::Identity()));
+}
 
 TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
     const std::filesystem::path pkg_path =
@@ -52,17 +74,18 @@ TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
 
     owe::WPMdl mdl;
     ASSERT_TRUE(owe::WPMdlParser::Parse("models/球体01/球体01.mdl", vfs, mdl));
-    ASSERT_FALSE(mdl.meshes.empty());
+    ASSERT_FALSE(mdl.meshes.is_empty());
 
-    const auto& mesh = mdl.meshes.front();
+    const auto& mesh = mdl.meshes[usize()];
     ASSERT_EQ(mdl.header.mdlv, 23);
-    ASSERT_EQ(mesh.positions.size(), 520192u);
-    ASSERT_EQ(mesh.texcoords.size(), mesh.positions.size());
-    ASSERT_EQ(mesh.indices.size(), 260096u);
-    ASSERT_LT(MaxMeshIndex(mesh), mesh.positions.size());
-    EXPECT_EQ(mesh.indices[0], (std::array<std::uint32_t, 3> { 0u, 1u, 2u }));
-    EXPECT_EQ(mesh.indices[1], (std::array<std::uint32_t, 3> { 0u, 2u, 3u }));
-    EXPECT_EQ(mesh.indices.back(), (std::array<std::uint32_t, 3> { 520188u, 520190u, 520191u }));
+    ASSERT_EQ(mesh.positions.len(), usize(520192));
+    ASSERT_EQ(mesh.texcoords.len(), mesh.positions.len());
+    ASSERT_EQ(mesh.indices.len(), usize(260096));
+    ASSERT_LT(MaxMeshIndex(mesh), mesh.positions.len().to_primitive());
+    EXPECT_EQ(mesh.indices[usize(0)], (array<std::uint32_t, 3> { 0u, 1u, 2u }));
+    EXPECT_EQ(mesh.indices[usize(1)], (array<std::uint32_t, 3> { 0u, 2u, 3u }));
+    EXPECT_EQ(mesh.indices[mesh.indices.len() - usize(1)],
+              (array<std::uint32_t, 3> { 520188u, 520190u, 520191u }));
     EXPECT_EQ(CountUvSeamTriangles(mesh), 0u);
 
     owe::SceneMesh::Submesh submesh;

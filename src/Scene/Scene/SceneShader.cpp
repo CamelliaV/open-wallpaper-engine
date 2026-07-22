@@ -1,16 +1,21 @@
 module;
 
 module wescene.scene;
-import rstd.cppstd;
+import rstd;
 
 using namespace owe;
+using namespace rstd::prelude;
 
-void ShaderValue::fromSpan(std::span<const value_type> values) noexcept {
-    m_size    = static_cast<usize>(values.size());
-    m_dynamic = values.size() > m_value.len().to_primitive();
+void ShaderValue::fromSlice(slice<value_type> values) noexcept {
+    m_size    = values.len();
+    m_dynamic = values.len() > m_value.len();
     if (m_dynamic) {
-        m_dynamic_value.resize(m_size.to_primitive());
-        std::copy(values.begin(), values.end(), m_dynamic_value.begin());
-    } else
-        std::copy(values.begin(), values.end(), m_value.begin());
+        m_dynamic_value.clear();
+        m_dynamic_value.reserve(values.len());
+        for (usize index {}; index < values.len(); ++index) {
+            m_dynamic_value.push_back(values[index]);
+        }
+    } else {
+        for (usize index {}; index < values.len(); ++index) m_value[index] = values[index];
+    }
 }

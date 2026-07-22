@@ -928,7 +928,7 @@ int run(int argc, char** argv) {
             rstd_warn("waywallen-wescene-renderer: report_state(clear_color) failed ({})", rc);
         }
     });
-    wp.setOnUserPropertyDiagnostics([](std::vector<owe::SceneUserPropertyDiagnostic> diagnostics) {
+    wp.setOnUserPropertyDiagnostics([](Vec<owe::SceneUserPropertyDiagnostic> diagnostics) {
         for (const auto& diagnostic : diagnostics) {
             rstd_warn("waywallen-wescene-renderer: user property '{}' diagnostic {} "
                       "material='{}' combo='{}': {}",

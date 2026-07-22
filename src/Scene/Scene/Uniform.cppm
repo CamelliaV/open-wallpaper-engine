@@ -7,6 +7,7 @@ import rstd.cppstd;
 import wescene.core;
 
 using namespace rstd::prelude;
+using rstd::collections::HashMap;
 
 export namespace owe
 {
@@ -25,49 +26,72 @@ public:
     ShaderValue()  = default;
     ~ShaderValue() = default;
 
-    ShaderValue(const ShaderValue&)            = default;
-    ShaderValue& operator=(const ShaderValue&) = default;
+    ShaderValue(const ShaderValue& other) noexcept
+        : m_dynamic(other.m_dynamic),
+          m_value(other.m_value),
+          m_dynamic_value(CloneDynamic(other.m_dynamic_value)),
+          m_size(other.m_size) {}
+    ShaderValue& operator=(const ShaderValue& other) noexcept {
+        if (this == &other) return *this;
+        m_dynamic       = other.m_dynamic;
+        m_value         = other.m_value;
+        m_dynamic_value = CloneDynamic(other.m_dynamic_value);
+        m_size          = other.m_size;
+        return *this;
+    }
 
-    ShaderValue(const value_type& value) noexcept { fromSpan(spanone { value }); }
+    ShaderValue(const value_type& value) noexcept {
+        fromSlice(slice<value_type>::from_raw_parts(rstd::addressof(value), usize(1)));
+    }
     template<typename Range>
     ShaderValue(const Range& range) noexcept {
-        fromSpan(range);
+        const auto len = [&]() -> usize {
+            if constexpr (requires { range.len(); })
+                return range.len();
+            else
+                return usize(range.size());
+        }();
+        fromSlice(slice<value_type>::from_raw_parts(range.data(), len));
     }
     ShaderValue(const value_type* ptr, usize num) noexcept {
-        fromSpan({ ptr, num.to_primitive() });
+        fromSlice(slice<value_type>::from_raw_parts(ptr, num));
     }
 
     static ShaderValue fromMatrix(const Eigen::Ref<const Eigen::MatrixXf>& mat) {
-        return ShaderValue(std::span { mat.data(), static_cast<std::size_t>(mat.size()) });
+        return ShaderValue(mat.data(), usize(mat.size()));
     }
     static ShaderValue fromMatrix(const Eigen::Ref<const Eigen::MatrixXd>& mat) {
         const Eigen::Ref<const Eigen::MatrixXf>& matf = mat.cast<float>();
         return fromMatrix(matf);
     }
 
-    const auto& operator[](usize index) const { return value()[index.to_primitive()]; }
-    auto&       operator[](usize index) {
-        return m_dynamic ? m_dynamic_value[index.to_primitive()] : m_value[index];
-    }
+    const auto& operator[](usize index) const { return value()[index]; }
+    auto& operator[](usize index) { return m_dynamic ? m_dynamic_value[index] : m_value[index]; }
 
-    auto  data() const noexcept { return value().data(); }
+    auto  data() const noexcept { return value().as_raw_ptr(); }
     usize size() const noexcept { return m_size; }
     auto  View() const noexcept -> UniformValueView { return { data(), size() }; }
 
-    void setSize(usize size) noexcept { m_size = rstd::cmp::min(size, usize(value().size())); }
+    void setSize(usize size) noexcept { m_size = rstd::cmp::min(size, value().len()); }
 
 private:
-    void fromSpan(std::span<const value_type> values) noexcept;
-
-    std::span<const value_type> value() const noexcept {
-        if (m_dynamic) return m_dynamic_value;
-        return m_value;
+    static auto CloneDynamic(const Vec<value_type>& source) noexcept -> Vec<value_type> {
+        auto result = Vec<value_type>::with_capacity(source.len());
+        for (const auto value : source) result.push_back(value);
+        return result;
     }
 
-    bool                    m_dynamic { false };
-    ShaderValueInter        m_value;
-    std::vector<value_type> m_dynamic_value;
-    usize                   m_size {};
+    void fromSlice(slice<value_type> values) noexcept;
+
+    slice<value_type> value() const noexcept {
+        if (m_dynamic) return m_dynamic_value.as_slice();
+        return m_value.as_slice();
+    }
+
+    bool             m_dynamic { false };
+    ShaderValueInter m_value;
+    Vec<value_type>  m_dynamic_value;
+    usize            m_size {};
 };
 
 using UniformValue   = ShaderValue;
@@ -208,6 +232,21 @@ struct UniformUpdateContext {
     using Funcs = TraitFuncs<&T::Frame, &T::Resources, &T::RenderView>;
 };
 
+struct UniformBindingLease {
+    using Trait                  = UniformBindingLease;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = UniformBindingLease;
+
+        void KeepAlive() const { rstd::trait_call<0>(this); }
+    };
+
+    template<typename T>
+    using Funcs = TraitFuncs<&T::KeepAlive>;
+};
+
 struct UniformSource {
     using Trait                  = UniformSource;
     static constexpr bool direct = false;
@@ -226,7 +265,7 @@ struct UniformSource {
                       mut_ref<dyn<UniformValueSink>> sink) const -> Result<empty, UniformError> {
             return rstd::trait_call<2>(this, context, sink);
         }
-        auto AcquireBindingLease() const -> std::shared_ptr<void> {
+        auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> {
             return rstd::trait_call<3>(this);
         }
     };
@@ -384,10 +423,10 @@ private:
         return true;
     }
 
-    Vec<Box<dyn<UniformSource>>>                                  m_sources;
-    Vec<UniformSourceAttachment>                                  m_global_sources;
-    rstd::collections::HashMap<u64, Vec<UniformSourceAttachment>> m_node_sources;
-    u32                                                           m_generation { 1 };
+    Vec<Box<dyn<UniformSource>>>               m_sources;
+    Vec<UniformSourceAttachment>               m_global_sources;
+    HashMap<u64, Vec<UniformSourceAttachment>> m_node_sources;
+    u32                                        m_generation { 1 };
 };
 
 } // namespace owe

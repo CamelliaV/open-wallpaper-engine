@@ -15,6 +15,7 @@ import wescene.types;
 using owe::ParseWPShader;
 using owe::WPShaderInfo;
 using owe::WPShaderTexInfo;
+using namespace rstd::prelude;
 
 namespace
 {
@@ -124,9 +125,21 @@ TEST(WPShaderParser, ComboMaterialKeyIsRecorded) {
 void main(){}
 )";
     auto              info = Parse(src);
-    ASSERT_EQ(info.combo_defs.size(), 1u);
-    EXPECT_EQ(info.combo_defs[0].material, "toggle");
-    EXPECT_EQ(info.combo_defs[0].combo, "USE_FEATURE");
+    ASSERT_EQ(info.combo_defs.len(), usize(1));
+    EXPECT_EQ(info.combo_defs[usize()].material, "toggle");
+    EXPECT_EQ(info.combo_defs[usize()].combo, "USE_FEATURE");
+}
+
+TEST(WPShaderParser, ComboOptionsUseOwnedAnnotationKeys) {
+    const std::string src  = R"(
+// [COMBO] {"material":"quality","combo":"QUALITY","type":"options","options":{"Low":0,"High":2}}
+void main(){}
+)";
+    auto              info = Parse(src);
+    ASSERT_EQ(info.combo_defs.len(), usize(1));
+    auto high = info.combo_defs[usize()].options.get(ref<str>("High"));
+    ASSERT_TRUE(high.is_some());
+    EXPECT_EQ(**high, i32(2));
 }
 
 TEST(WPShaderParser, ScalarDefaultPushedToSvs) {

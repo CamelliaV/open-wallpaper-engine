@@ -298,12 +298,16 @@ auto ReadJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions 
 }
 
 auto Dump(const Json& value, Option<usize> indent) -> std::string {
+    return rstd::cppstd::to_string(DumpString(value, indent));
+}
+
+auto DumpString(const Json& value, Option<usize> indent) -> String {
     auto options = rstd::json::FormatOptions {};
     if (indent) {
         options.pretty = true;
         options.indent = *indent;
     }
-    return rstd::cppstd::to_string(rstd::json::to_string(value, options));
+    return rstd::json::to_string(value, options);
 }
 
 } // namespace owe

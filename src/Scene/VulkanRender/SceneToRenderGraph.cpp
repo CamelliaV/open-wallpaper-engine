@@ -15,6 +15,8 @@ import wescene.rgraph;
 
 using namespace owe;
 using namespace rstd::prelude;
+using rstd::collections::BTreeSet;
+using rstd::cppstd::as_str;
 
 namespace
 {
@@ -77,9 +79,9 @@ struct GraphTextureOutput {
 
 class GraphLinkFinalizer {
 public:
-    void setLinkedLayerIds(const Set<i32>* linked_ids) { m_linked_ids = linked_ids; }
+    void setLinkedLayerIds(const BTreeSet<i32>* linked_ids) { m_linked_ids = linked_ids; }
     void recordSource(WallpaperLayerId source_layer, GraphTextureOutput output) {
-        if (m_linked_ids == nullptr || m_linked_ids->count(source_layer.value) != 0) {
+        if (m_linked_ids == nullptr || m_linked_ids->contains(source_layer.value)) {
             m_source_outputs[source_layer.value] = std::move(output);
         }
     }
@@ -94,7 +96,7 @@ public:
     void apply(ExtraInfo& extra);
 
 private:
-    const Set<i32>*                  m_linked_ids { nullptr };
+    const BTreeSet<i32>*             m_linked_ids { nullptr };
     Map<i32, GraphTextureOutput>     m_source_outputs;
     std::vector<LinkTextureConsumer> m_consumers;
 };
@@ -113,12 +115,13 @@ static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       
     if (key.empty()) return None();
     if (! IsSpecTex(key)) {
         Option<RenderTextureDescId> texture;
-        if (extra.render_scene != nullptr) texture = extra.render_scene->textureDescId(key);
+        if (extra.render_scene != nullptr)
+            texture = extra.render_scene->textureDescId(rstd::cppstd::as_str(key));
         return Some(vulkan::MakeImportedTextureRequest(key, texture));
     }
 
     if (extra.render_scene != nullptr) {
-        if (auto desc_id = extra.render_scene->renderTargetDescId(key)) {
+        if (auto desc_id = extra.render_scene->renderTargetDescId(rstd::cppstd::as_str(key))) {
             if (auto* desc = extra.render_scene->renderTargetDesc(*desc_id)) {
                 return Some(vulkan::MakeRenderTargetTextureRequest(key, desc->desc));
             }
@@ -126,9 +129,9 @@ static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       
     }
 
     if (extra.scene != nullptr) {
-        auto it = extra.scene->renderTargets.find(std::string(key));
-        if (it != extra.scene->renderTargets.end()) {
-            return Some(vulkan::MakeRenderTargetTextureRequest(key, it->second));
+        auto target = extra.scene->RenderTarget(as_str(key));
+        if (target.is_some()) {
+            return Some(vulkan::MakeRenderTargetTextureRequest(key, **target));
         }
     }
 
@@ -277,7 +280,7 @@ static void LoadGraphEffects(SceneImageEffectLayer* effs, Option<WallpaperLayerI
                              ExtraInfo& extra) {
     auto& scene = *extra.scene;
 
-    effs->ResolveEffect(scene.default_effect_mesh, "effect");
+    effs->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
 
     for (auto* eff : effs->ResolvedEffects()) {
         if (eff == nullptr) continue;
@@ -311,9 +314,9 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
 
     SceneImageEffectLayer* imgeff = nullptr;
     if (! node->Camera().empty()) {
-        auto& cam = scene.cameras.at(node->Camera());
-        if (cam->HasImgEffect()) {
-            auto* effect = cam->GetImgEffect().get();
+        auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()));
+        if (camera.is_some() && (**camera).HasImgEffect()) {
+            auto* effect = (**camera).GetImgEffect().get();
             if (effect->RequiresIntermediateTarget()) {
                 imgeff = effect;
                 output = imgeff->FirstTarget();
@@ -412,15 +415,18 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 auto output_state = builder.textureState(output_node);
                 rstd_assert(output_state.is_some());
                 if (output_state.is_none()) return;
-                const auto& output_rt          = scene.renderTargets.at(pass_output_s);
+                auto output_rt = scene.RenderTarget(as_str(pass_output_s));
+                rstd_assert(output_rt.is_some());
+                if (output_rt.is_none()) return;
+                const auto& output_target      = **output_rt;
                 const bool  first_output_write = output_state->version == usize();
                 pdesc.output_use               = Some(output_state->use);
                 pdesc.output_request           = BuildGraphTextureRequest(extra, pass_output_s);
-                pdesc.samples                  = vulkan::TextureSampleCount(output_rt.sample_count);
+                pdesc.samples = vulkan::TextureSampleCount(output_target.sample_count);
                 if (pdesc.samples != VK_SAMPLE_COUNT_1_BIT) {
-                    auto twin_name = vulkan::MsaaTwinName(pass_output_s, pdesc.samples);
-                    pdesc.output_msaa_request =
-                        Some(vulkan::MakeMsaaTextureRequest(twin_name, output_rt, pdesc.samples));
+                    auto twin_name            = vulkan::MsaaTwinName(pass_output_s, pdesc.samples);
+                    pdesc.output_msaa_request = Some(
+                        vulkan::MakeMsaaTextureRequest(twin_name, output_target, pdesc.samples));
                     auto msaa_node = builder.createTexture(
                         rg::TextureDesc {
                             .name    = String::make(rstd::cppstd::as_str(twin_name)),
@@ -432,18 +438,18 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     auto msaa_state = builder.textureState(msaa_node);
                     if (msaa_state) pdesc.output_msaa_use = Some(msaa_state->use);
                 }
-                pdesc.transparent_clear = first_output_write && output_rt.clear_on_first_write;
+                pdesc.transparent_clear = first_output_write && output_target.clear_on_first_write;
                 pdesc.clear_output =
-                    (first_output_write && output_rt.bind.screen) || pdesc.transparent_clear;
+                    (first_output_write && output_target.bind.screen) || pdesc.transparent_clear;
                 pdesc.preserve_output =
-                    output_state->version > usize() && output_rt.preserve_on_write;
+                    output_state->version > usize() && output_target.preserve_on_write;
                 const bool uses_depth =
-                    output_rt.withDepth && vulkan::UsesDepthAttachment(*material);
+                    output_target.withDepth && vulkan::UsesDepthAttachment(*material);
                 pdesc.has_depth_attachment = uses_depth;
                 if (uses_depth) {
                     auto depth_name = pass_output_s + "::depth";
                     pdesc.depth_request =
-                        Some(vulkan::MakeDepthTextureRequest(depth_name, output_rt));
+                        Some(vulkan::MakeDepthTextureRequest(depth_name, output_target));
                     auto depth_node = builder.createTexture(
                         rg::TextureDesc {
                             .name    = String::make(rstd::cppstd::as_str(depth_name)),
@@ -456,11 +462,11 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     if (depth_state) pdesc.depth_use = Some(depth_state->use);
                 }
                 pdesc.clear_depth =
-                    uses_depth && (pdesc.clear_output || output_rt.force_clear ||
+                    uses_depth && (pdesc.clear_output || output_target.force_clear ||
                                    extra.depth_initialized_outputs.count(pass_output_s) == 0);
                 if (uses_depth) {
                     extra.depth_initialized_outputs.insert(pass_output_s);
-                } else if (pdesc.clear_output || output_rt.force_clear) {
+                } else if (pdesc.clear_output || output_target.force_clear) {
                     extra.depth_initialized_outputs.erase(pass_output_s);
                 }
                 builder.write(output_node);
@@ -485,15 +491,16 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
 // elided without losing a link source. Visibility-hidden ancestors also hide
 // anonymous/generated descendants such as particle children, so the skip set
 // is keyed by node pointer instead of WE layer id.
-static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32>& linked_ids,
+static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const BTreeSet<i32>& linked_ids,
                                     Set<const SceneNode*>& out_skip,
                                     bool                   visibility_hidden_ancestor = false) {
     const i32  nid         = node->ID();
     const auto link_source = scene.ResolveLayerLinkSource(*node);
     const i32  layer_id    = link_source.is_some() ? link_source->value : nid;
-    const bool linked      = link_source.is_some() && linked_ids.count(link_source->value) != 0;
+    const bool linked      = link_source.is_some() && linked_ids.contains(link_source->value);
     const bool visibility_hidden_self =
-        layer_id >= i32() && scene.visibility_elidable_layer_ids.count(layer_id) != 0 && ! linked;
+        layer_id >= i32() &&
+        scene.IsLayerVisibilityElidable(WallpaperLayerId { .value = layer_id }) && ! linked;
     const bool visibility_hidden = visibility_hidden_ancestor || visibility_hidden_self;
 
     bool all_children_skippable = true;
@@ -503,7 +510,8 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32
     }
     const bool self_skippable =
         ! linked &&
-        (visibility_hidden || (layer_id >= i32() && scene.elidable_layer_ids.count(layer_id) != 0));
+        (visibility_hidden ||
+         (layer_id >= i32() && scene.IsLayerElidable(WallpaperLayerId { .value = layer_id })));
     if (self_skippable && all_children_skippable) {
         out_skip.insert(node);
         return true;
@@ -513,9 +521,9 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const Set<i32
 
 static bool ShouldSkipNoRuntimeEffect(SceneNode* node, Scene& scene) {
     if (node == nullptr || node->Camera().empty()) return false;
-    auto camera_it = scene.cameras.find(node->Camera());
-    if (camera_it == scene.cameras.end() || ! camera_it->second->HasImgEffect()) return false;
-    const auto& effect_layer = camera_it->second->GetImgEffect();
+    auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()));
+    if (camera.is_none() || ! (**camera).HasImgEffect()) return false;
+    const auto& effect_layer = (**camera).GetImgEffect();
     return effect_layer && effect_layer->SkipWhenNoRuntimeEffect() &&
            effect_layer->EffectCount() > usize() && ! effect_layer->HasRuntimeVisibleEffect();
 }
@@ -527,9 +535,9 @@ static void ConfigureNestedOutput(SceneNode* node, std::string_view output,
     }
     if (node->Camera().empty()) return;
 
-    auto camera_it = scene.cameras.find(node->Camera());
-    if (camera_it == scene.cameras.end() || ! camera_it->second->HasImgEffect()) return;
-    auto& effect_layer = camera_it->second->GetImgEffect();
+    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()));
+    if (camera.is_none() || ! (**camera).HasImgEffect()) return;
+    auto& effect_layer = (**camera).GetImgEffect();
     if (! effect_layer) return;
     if (output != SpecTex_Default && effect_layer->FinalTarget() == SpecTex_Default) {
         effect_layer->SetFinalTarget(std::string(output));
@@ -542,16 +550,16 @@ static void ConfigureNestedOutput(SceneNode* node, std::string_view output,
 static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
                           std::string_view inherited_camera, ExtraInfo& extra,
                           const Set<const SceneNode*>& emit_skip_subtrees,
-                          const Set<i32>&              linked_ids) {
+                          const BTreeSet<i32>&         linked_ids) {
     if (node == nullptr || emit_skip_subtrees.count(node) != 0) return;
 
     auto&            scene       = *extra.scene;
     const i32        nid         = node->ID();
     const auto       link_source = scene.ResolveLayerLinkSource(*node);
     const i32        layer_id    = link_source.is_some() ? link_source->value : nid;
-    const bool       elidable    = scene.elidable_layer_ids.count(layer_id) != 0;
-    const bool       linked = link_source.is_some() && linked_ids.count(link_source->value) != 0;
-    bool             emit   = true;
+    const bool       elidable    = scene.IsLayerElidable(WallpaperLayerId { .value = layer_id });
+    const bool       linked      = link_source.is_some() && linked_ids.contains(link_source->value);
+    bool             emit        = true;
     std::string      link_output;
     std::string_view node_output = inherited_output;
 
@@ -565,13 +573,13 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
                 rstd_error("link render target for layer {} not found in snapshot", layer_id);
                 emit = false;
             } else {
-                link_output = source_record->render_target_key;
+                link_output = rstd::cppstd::to_string(source_record->render_target_key);
                 node_output = link_output;
                 if (! node->Camera().empty()) {
-                    auto camera_it = scene.cameras.find(node->Camera());
-                    if (camera_it != scene.cameras.end() && camera_it->second->HasImgEffect()) {
-                        camera_it->second->GetImgEffect()->SetFinalTarget(link_output);
-                        camera_it->second->GetImgEffect()->SetFinalLocal(true);
+                    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()));
+                    if (camera.is_some() && (**camera).HasImgEffect()) {
+                        (**camera).GetImgEffect()->SetFinalTarget(link_output);
+                        (**camera).GetImgEffect()->SetFinalLocal(true);
                     }
                 }
             }
@@ -588,8 +596,12 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
         const std::string_view child_output =
             effect_layer == nullptr ? node_output : std::string_view(effect_layer->FirstTarget());
         for (auto& child : node->GetChildren()) {
-            EmitSceneNode(
-                child.as_ptr(), child_output, *group_camera, extra, emit_skip_subtrees, linked_ids);
+            EmitSceneNode(child.as_ptr(),
+                          child_output,
+                          rstd::cppstd::as_string_view(*group_camera),
+                          extra,
+                          emit_skip_subtrees,
+                          linked_ids);
         }
         if (effect_layer != nullptr && effect_layer->HasRenderEffects()) {
             LoadGraphEffects(effect_layer, link_source, extra);
@@ -654,28 +666,31 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
     // Most corpora have ~25x more elidable layers than link-referenced ones;
     // the skip set lets the emit walk short-circuit without mutating the tree.
     Set<const SceneNode*> emit_skip_subtrees;
-    CollectEmitSkipSubtrees(scene.sceneGraph.as_ptr(), scene, linked_ids, emit_skip_subtrees);
+    CollectEmitSkipSubtrees(scene.RootMut().as_raw_ptr(), scene, linked_ids, emit_skip_subtrees);
 
     if (scene.PlanarReflectionEnabled()) {
-        EmitPlanarReflectionNode(scene.sceneGraph.as_ptr(), extra, emit_skip_subtrees);
+        EmitPlanarReflectionNode(scene.RootMut().as_raw_ptr(), extra, emit_skip_subtrees);
     }
 
     EmitSceneNode(
-        scene.sceneGraph.as_ptr(), SpecTex_Default, {}, extra, emit_skip_subtrees, linked_ids);
+        scene.RootMut().as_raw_ptr(), SpecTex_Default, {}, extra, emit_skip_subtrees, linked_ids);
 
     // Emit global post-process passes after the main scene-graph traversal.
     // Each step is either a CustomShaderPass (built on the synthetic node's
     // mesh+material) or a CopyPass (RT-to-RT blit).
-    for (auto& pp : scene.post_processes) {
+    auto post_processes = scene.PostProcesses();
+    for (usize index {}; index < post_processes.len(); ++index) {
+        const auto& pp = post_processes[index];
         for (auto& step : pp->steps) {
-            if (auto* sp = std::get_if<ScenePostProcessPass>(&step)) {
+            if (step.is_Pass()) {
+                auto&            sp = step.as_Pass().value;
                 std::string_view target =
-                    sp->output.empty() ? SpecTex_Default : std::string_view(sp->output);
+                    sp.output.empty() ? SpecTex_Default : std::string_view(sp.output);
                 ToGraphPass(
-                    sp->node.as_ptr(), target, scene.ResolveLayerLinkSource(*sp->node), extra);
-            } else if (auto* cp = std::get_if<ScenePostProcessCopy>(&step)) {
-                AddCopyPass(
-                    extra, MakeTextureDesc(extra, cp->src), MakeTextureDesc(extra, cp->dst));
+                    sp.node.as_ptr(), target, scene.ResolveLayerLinkSource(*sp.node), extra);
+            } else {
+                auto& cp = step.as_Copy().value;
+                AddCopyPass(extra, MakeTextureDesc(extra, cp.src), MakeTextureDesc(extra, cp.dst));
             }
         }
     }

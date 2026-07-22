@@ -92,12 +92,12 @@ struct BoundUniformOutput {
 };
 
 struct BoundUniformSource {
-    ref<dyn<UniformSource>> source;
-    rstd::int32_t           priority { 0 };
-    Vec<BoundUniformOutput> outputs;
-    std::shared_ptr<void>   lease;
-    u64                     version { 0 };
-    bool                    evaluated { false };
+    ref<dyn<UniformSource>>               source;
+    rstd::int32_t                         priority { 0 };
+    Vec<BoundUniformOutput>               outputs;
+    Option<Box<dyn<UniformBindingLease>>> lease;
+    u64                                   version { 0 };
+    bool                                  evaluated { false };
 };
 
 struct PreparedUniformTextureMetadata {

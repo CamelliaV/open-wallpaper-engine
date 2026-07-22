@@ -37,9 +37,7 @@ using JsonSink = rstd::Option<rstd::mut_ref<Json>>;
 namespace
 {
 
-using rstd::i32;
-using rstd::u32;
-using rstd::usize;
+using namespace rstd::prelude;
 using rstd::argparse::Arg;
 using rstd::argparse::ArgGroup;
 using rstd::argparse::ArgKey;
@@ -48,7 +46,8 @@ using rstd::argparse::from_str_parser;
 using rstd::argparse::Matches;
 using rstd::argparse::NumArgs;
 using rstd::argparse::string_parser;
-using rstd::string::String;
+using rstd::cppstd::as_str;
+using rstd::cppstd::to_string;
 
 std::string ToStdString(const String& value) {
     return { value.data(), value.size().to_primitive() };
@@ -358,7 +357,7 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
         return false;
     }
     auto scene_objs = owe::ExpandObjects(j, vfs, pkg_v);
-    (void)owe::ResolveOrthoProjectionExtent(sc, scene_objs);
+    (void)owe::ResolveOrthoProjectionExtent(sc, scene_objs.as_slice());
     (void)scene_objs;
     return true;
 }
@@ -374,12 +373,20 @@ bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
         err = "scene.json not in pkg";
         return false;
     }
-    const std::string           text = stream->ReadAllStr();
+    const std::string text     = stream->ReadAllStr();
+    auto              document = owe::wpscene::ParseSceneDocumentJson(text, pkg_v);
+    if (! document) {
+        err = "ParseSceneDocumentJson returned null";
+        return false;
+    }
     wavsen::audio::SoundManager sm;
     owe::WPSceneParser          parser;
-    auto                        scene = parser.Parse(pkg_id, text, vfs, sm, pkg_v);
-    if (! scene) {
-        err = "WPSceneParser::Parse returned null";
+    auto parsed = parser.Parse(rstd::cppstd::as_str(pkg_id),
+                               rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(&*document),
+                               rstd::mut_ref<owe::fs::VFS>::from_raw_parts(&vfs),
+                               rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(&sm));
+    if (parsed.is_err()) {
+        err = "WPSceneParser::Parse returned an error";
         return false;
     }
     return true;
@@ -401,10 +408,16 @@ void ValidateTextures(const std::vector<owe::testing::PkgEntry>& entries, owe::f
         bool        video = false;
         std::string err;
         try {
-            owe::ImageHeader h = parser.ParseHeader(name);
-            ok                 = (h.width > 0 && h.height > 0);
-            video              = (h.type == owe::ImageType::VIDEO);
-            if (! ok) err = "header looks invalid (zero dim)";
+            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+            if (parsed.is_err()) {
+                auto error = rstd::move(parsed).unwrap_err_unchecked();
+                err        = rstd::cppstd::to_string(error.message.as_str());
+            } else {
+                auto h = rstd::move(parsed).unwrap_unchecked();
+                ok     = (h.width > 0 && h.height > 0);
+                video  = (h.type == owe::ImageType::VIDEO);
+                if (! ok) err = "header looks invalid (zero dim)";
+            }
         } catch (const std::exception& ex) {
             err = ex.what();
         } catch (...) {
@@ -518,7 +531,7 @@ void ValidateMdls(const std::vector<owe::testing::PkgEntry>& entries, owe::fs::V
         std::string err;
         try {
             owe::WPMdl mdl;
-            ok = owe::WPMdlParser::Parse(name, vfs, mdl);
+            ok = owe::WPMdlParser::Parse(rstd::cppstd::as_str(name), vfs, mdl);
             if (! ok) err = "WPMdlParser::Parse returned false";
         } catch (const std::exception& ex) {
             err = ex.what();
@@ -561,7 +574,7 @@ void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries, owe:
         bool             ok = false;
         std::string      err;
         try {
-            ok = owe::WPMdlParser::ParseHeader(name, vfs, h);
+            ok = owe::WPMdlParser::ParseHeader(rstd::cppstd::as_str(name), vfs, h);
             if (! ok) err = "ParseHeader returned false";
         } catch (const std::exception& ex) {
             err = ex.what();
@@ -1477,13 +1490,18 @@ void DumpPass(FILE* out, const std::string& tag, const owe::SceneNode& node,
 }
 
 void DumpRenderTargets(FILE* out, const owe::Scene& scene) {
-    std::fprintf(out, "Render targets (%zu):\n", scene.renderTargets.size());
+    auto target_names = scene.RenderTargetNames();
+    std::fprintf(out, "Render targets (%zu):\n", target_names.len().to_primitive());
     std::vector<std::string> names;
-    names.reserve(scene.renderTargets.size());
-    for (const auto& [k, _] : scene.renderTargets) names.push_back(k);
+    names.reserve(target_names.len().to_primitive());
+    for (usize index {}; index < target_names.len(); ++index) {
+        names.push_back(to_string(target_names[index]));
+    }
     std::sort(names.begin(), names.end());
     for (const auto& n : names) {
-        const auto& rt = scene.renderTargets.at(n);
+        auto target = scene.RenderTarget(as_str(n));
+        if (target.is_none()) continue;
+        const auto& rt = **target;
         std::fprintf(out,
                      "  %-48s %dx%d  bind=%s%s%s scale=%.3f%s%s\n",
                      n.c_str(),
@@ -1509,10 +1527,10 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
                               " depth=" + std::to_string(depth) + "]";
             std::string output { owe::SpecTex_Default };
             std::shared_ptr<owe::SceneImageEffectLayer> eff_layer;
-            if (! n->Camera().empty() && scene.cameras.count(n->Camera())) {
-                auto& cam = scene.cameras.at(n->Camera());
-                if (cam->HasImgEffect()) {
-                    eff_layer = cam->GetImgEffect();
+            if (! n->Camera().empty()) {
+                auto camera = scene.Camera(rstd::cppstd::as_str(n->Camera()));
+                if (camera.is_some() && (**camera).HasImgEffect()) {
+                    eff_layer = (**camera).GetImgEffect();
                     if (eff_layer->EffectCount() == usize() ||
                         eff_layer->HasRuntimeVisibleEffect()) {
                         output = eff_layer->FirstTarget();
@@ -1529,7 +1547,7 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
             DumpPass(out, tag, *n, output);
 
             if (eff_layer && eff_layer->HasRuntimeVisibleEffect()) {
-                eff_layer->ResolveEffect(scene.default_effect_mesh, "effect");
+                eff_layer->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
                 const usize effect_count = eff_layer->EffectCount();
                 std::fprintf(
                     out, "    image-effect chain (%zu effects):\n", effect_count.to_primitive());
@@ -1555,38 +1573,44 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
         }
         for (auto& child : n->GetChildren()) walk(child.as_ptr(), depth + 1);
     };
-    walk(scene.sceneGraph.as_ptr(), 0);
+    walk(scene.RootMut().as_raw_ptr(), 0);
 }
 
 void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
+    auto post_processes = scene.PostProcesses();
     std::fprintf(out,
-                 "\nPost-processes (scene.post_processes, %zu chain%s):\n",
-                 scene.post_processes.size(),
-                 scene.post_processes.size() == 1 ? "" : "s");
-    if (scene.post_processes.empty()) {
+                 "\nPost-processes (%zu chain%s):\n",
+                 post_processes.len().to_primitive(),
+                 post_processes.len() == usize(1) ? "" : "s");
+    if (post_processes.is_empty()) {
         std::fprintf(out, "  (none)\n");
         return;
     }
-    for (std::size_t ci = 0; ci < scene.post_processes.size(); ++ci) {
-        const auto& pp = *scene.post_processes[ci];
-        std::fprintf(
-            out, "  chain[%zu] name=\"%s\" steps=%zu\n", ci, pp.name.c_str(), pp.steps.size());
-        for (std::size_t si = 0; si < pp.steps.size(); ++si) {
+    for (usize ci {}; ci < post_processes.len(); ++ci) {
+        const auto& pp = *post_processes[ci];
+        std::fprintf(out,
+                     "  chain[%zu] name=\"%s\" steps=%zu\n",
+                     ci.to_primitive(),
+                     pp.name.c_str(),
+                     pp.steps.len().to_primitive());
+        for (usize si {}; si < pp.steps.len(); ++si) {
             const auto& step = pp.steps[si];
-            if (auto* sp = std::get_if<owe::ScenePostProcessPass>(&step)) {
-                std::string tag =
-                    "  [pp " + std::to_string(ci) + ":" + std::to_string(si) + " draw]";
+            if (step.is_Pass()) {
+                const auto& sp  = step.as_Pass().value;
+                std::string tag = "  [pp " + std::to_string(ci.to_primitive()) + ":" +
+                                  std::to_string(si.to_primitive()) + " draw]";
                 DumpPass(out,
                          tag,
-                         *sp->node.as_ptr(),
-                         sp->output.empty() ? std::string(owe::SpecTex_Default) : sp->output);
-            } else if (auto* cp = std::get_if<owe::ScenePostProcessCopy>(&step)) {
+                         *sp.node.as_ptr(),
+                         sp.output.empty() ? std::string(owe::SpecTex_Default) : sp.output);
+            } else {
+                const auto& cp = step.as_Copy().value;
                 std::fprintf(out,
                              "    [pp %zu:%zu copy] %s -> %s\n",
-                             ci,
-                             si,
-                             cp->src.c_str(),
-                             cp->dst.c_str());
+                             ci.to_primitive(),
+                             si.to_primitive(),
+                             cp.src.c_str(),
+                             cp.dst.c_str());
             }
         }
     }
@@ -1635,15 +1659,24 @@ int CmdRendergraph(const Matches& matches, const RendergraphArgs& args) {
             stderr, "wescene-test rendergraph: ReadPkgHeader failed on %s\n", pkg_path.c_str());
         return 1;
     }
-    auto pkg_v = owe::wpscene::ParsePkgVersionStamp(version_stamp);
+    auto pkg_v    = owe::wpscene::ParsePkgVersionStamp(version_stamp);
+    auto document = owe::wpscene::ParseSceneDocumentJson(text, pkg_v);
+    if (! document) {
+        std::fprintf(stderr, "wescene-test rendergraph: ParseSceneDocumentJson failed\n");
+        return 1;
+    }
 
     wavsen::audio::SoundManager sm;
     owe::WPSceneParser          parser;
-    auto                        scene = parser.Parse(pkg_path, text, vfs, sm, pkg_v);
-    if (! scene) {
-        std::fprintf(stderr, "wescene-test rendergraph: WPSceneParser::Parse returned null\n");
+    auto parsed = parser.Parse(rstd::cppstd::as_str(pkg_path),
+                               rstd::ref<owe::wpscene::SceneDocument>::from_raw_parts(&*document),
+                               rstd::mut_ref<owe::fs::VFS>::from_raw_parts(&vfs),
+                               rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(&sm));
+    if (parsed.is_err()) {
+        std::fprintf(stderr, "wescene-test rendergraph: WPSceneParser::Parse returned an error\n");
         return 1;
     }
+    auto scene = rstd::move(parsed).unwrap().scene;
 
     FILE* out       = stdout;
     bool  close_out = false;
@@ -1661,7 +1694,9 @@ int CmdRendergraph(const Matches& matches, const RendergraphArgs& args) {
     std::fprintf(out, "wescene-test rendergraph\n");
     std::fprintf(out, "  pkg     : %s\n", pkg_path.c_str());
     std::fprintf(out, "  version : %s\n", version_stamp.c_str());
-    std::fprintf(out, "  ortho   : %dx%d\n", scene->ortho[0], scene->ortho[1]);
+    auto ortho = scene->Ortho();
+    std::fprintf(
+        out, "  ortho   : %dx%d\n", ortho[usize()].to_primitive(), ortho[usize(1)].to_primitive());
     std::fprintf(out, "\n");
 
     DumpRenderTargets(out, *scene);

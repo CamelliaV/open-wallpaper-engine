@@ -43,6 +43,7 @@ auto ParseJson(std::string_view source, rstd::json::ParseOptions options = {})
 auto ReadJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions options = {})
     -> rstd::Result<Json, JsonFileError>;
 auto Dump(const Json& value, Option<usize> indent = None()) -> std::string;
+auto DumpString(const Json& value, Option<usize> indent = None()) -> String;
 
 inline auto Dump(const Json& value, usize indent) -> std::string {
     return Dump(value, Some(indent));

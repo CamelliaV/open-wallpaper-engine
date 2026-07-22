@@ -15,14 +15,14 @@ export import wescene.types;
 export import wescene.pkg.parse;
 
 using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 export namespace owe
 {
 
-using FirstFrameCallback          = std::function<void()>;
-using AudioResponseDemandCallback = std::function<void(bool)>;
-using UserPropertyDiagnosticCallback =
-    std::function<void(std::vector<SceneUserPropertyDiagnostic>)>;
+using FirstFrameCallback             = std::function<void()>;
+using AudioResponseDemandCallback    = Arc<dyn<rstd::Fn<void(bool)>>>;
+using UserPropertyDiagnosticCallback = std::function<void(Vec<SceneUserPropertyDiagnostic>)>;
 using RenderPassDiagnosticCallback =
     std::function<void(std::vector<vulkan::PreparedPassDiagnostic>)>;
 
@@ -102,6 +102,10 @@ public:
     void setMediaStatus(MediaStatus);
     void setAudioClientIdentity(SceneAudioClientIdentity);
     void setAudioResponseDemandCallback(AudioResponseDemandCallback);
+    template<typename Callback>
+    void setAudioResponseDemandCallback(Callback callback) {
+        setAudioResponseDemandCallback(AudioResponseDemandCallback::make(rstd::move(callback)));
+    }
     void setAudioResponseEnabled(bool);
     void setAudioSpectrum(const std::array<float, 64>& left, const std::array<float, 64>& right);
     void setUserPropertyRaw(std::string_view, std::string);

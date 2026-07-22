@@ -23,6 +23,7 @@ import :shader_reflection_cache;
 import :uniform_buffer;
 
 using namespace rstd::prelude;
+using rstd::cppstd::as_str;
 
 export namespace owe::vulkan
 {
@@ -314,26 +315,28 @@ struct RenderProgram {
         }
     }
 
-    void invalidateRenderItems(std::span<const owe::RenderItemId> render_items,
-                               PassInvalidationFlags              flags) {
-        if (flags == PassInvalidationNone || render_items.empty()) return;
+    void invalidateRenderItems(slice<owe::RenderItemId> render_items, PassInvalidationFlags flags) {
+        if (flags == PassInvalidationNone || render_items.is_empty()) return;
         for (auto& record : pass_records) {
             auto pass = resolve(record);
             if (pass.is_none()) continue;
             auto pass_render_item = pass->renderItemId();
             if (pass_render_item.is_none()) continue;
-            auto matched = std::any_of(render_items.begin(), render_items.end(), [&](auto id) {
-                return SameProgramRenderItemId(*pass_render_item, id);
-            });
+            bool matched = false;
+            for (usize index {}; index < render_items.len(); ++index) {
+                if (! SameProgramRenderItemId(*pass_render_item, render_items[index])) continue;
+                matched = true;
+                break;
+            }
             if (! matched) continue;
             record.invalidate(flags);
             loaded = false;
         }
     }
 
-    bool refreshMaterialTextureBindings(const owe::RenderSceneSnapshot&    render_scene,
-                                        std::span<const owe::RenderItemId> render_items) {
-        if (render_items.empty()) return false;
+    bool refreshMaterialTextureBindings(const owe::RenderSceneSnapshot& render_scene,
+                                        slice<owe::RenderItemId>        render_items) {
+        if (render_items.is_empty()) return false;
 
         bool requires_graph_rebuild = false;
         for (auto& record : pass_records) {
@@ -341,9 +344,12 @@ struct RenderProgram {
             if (pass.is_none()) continue;
             auto pass_render_item = pass->renderItemId();
             if (pass_render_item.is_none()) continue;
-            auto matched = std::any_of(render_items.begin(), render_items.end(), [&](auto id) {
-                return SameProgramRenderItemId(*pass_render_item, id);
-            });
+            bool matched = false;
+            for (usize index {}; index < render_items.len(); ++index) {
+                if (! SameProgramRenderItemId(*pass_render_item, render_items[index])) continue;
+                matched = true;
+                break;
+            }
             if (! matched) continue;
 
             auto refresh = pass->refreshMaterialTextureBindings(render_scene);
@@ -360,28 +366,35 @@ struct RenderProgram {
     void finalizeRenderTargetSizes(owe::Scene& scene, VkExtent2D extent,
                                    VkExtent2D            max_framebuffer_extent,
                                    VkSampleCountFlagBits msaa_samples) {
-        for (auto& item : scene.renderTargets) {
-            auto& rt = item.second;
+        auto names = scene.RenderTargetNames();
+        for (usize index {}; index < names.len(); ++index) {
+            auto target = scene.RenderTargetMut(names[index].as_str());
+            if (target.is_none()) continue;
+            auto& rt = **target;
             if (rt.bind.enable && rt.bind.screen) {
                 rt.width  = static_cast<std::int32_t>(rt.bind.scale * extent.width);
                 rt.height = static_cast<std::int32_t>(rt.bind.scale * extent.height);
             }
         }
-        for (auto& item : scene.renderTargets) {
-            auto& rt = item.second;
+        for (usize index {}; index < names.len(); ++index) {
+            auto target = scene.RenderTargetMut(names[index].as_str());
+            if (target.is_none()) continue;
+            auto& rt = **target;
             if (rt.bind.screen || ! rt.bind.enable) continue;
-            auto bind_rt = scene.renderTargets.find(rt.bind.name);
-            if (rt.bind.name.empty() || bind_rt == scene.renderTargets.end()) {
+            auto bind_rt = scene.RenderTarget(as_str(rt.bind.name));
+            if (rt.bind.name.empty() || bind_rt.is_none()) {
                 rstd_error("unknonw render target bind: {}", rt.bind.name);
                 continue;
             }
-            rt.width  = static_cast<std::int32_t>(rt.bind.scale * bind_rt->second.width);
-            rt.height = static_cast<std::int32_t>(rt.bind.scale * bind_rt->second.height);
+            rt.width  = static_cast<std::int32_t>(rt.bind.scale * (**bind_rt).width);
+            rt.height = static_cast<std::int32_t>(rt.bind.scale * (**bind_rt).height);
         }
-        for (auto& item : scene.renderTargets) {
-            auto& rt = item.second;
-            if (! item.first.empty() && (rt.width <= 0 || rt.height <= 0)) {
-                rstd_error("wrong size for render target: {}", item.first);
+        for (usize index {}; index < names.len(); ++index) {
+            auto target = scene.RenderTargetMut(names[index].as_str());
+            if (target.is_none()) continue;
+            auto& rt = **target;
+            if (! names[index].is_empty() && (rt.width <= 0 || rt.height <= 0)) {
+                rstd_error("wrong size for render target: {}", names[index].as_str());
             }
 
             const auto physical_width  = static_cast<std::int32_t>(std::clamp<std::uint32_t>(
@@ -399,7 +412,7 @@ struct RenderProgram {
             if (physical_size_changed &&
                 (rt.physical_width != rt.width || rt.physical_height != rt.height)) {
                 rstd_warn("clamp render target {} from {}x{} to {}x{}",
-                          item.first,
+                          names[index].as_str(),
                           rt.width,
                           rt.height,
                           rt.physical_width,
@@ -414,9 +427,9 @@ struct RenderProgram {
             }
         }
         if (msaa_samples != VK_SAMPLE_COUNT_1_BIT) {
-            auto it = scene.renderTargets.find(std::string(owe::SpecTex_Default));
-            if (it != scene.renderTargets.end()) {
-                it->second.sample_count = static_cast<unsigned>(msaa_samples);
+            auto target = scene.RenderTargetMut(as_str(owe::SpecTex_Default));
+            if (target.is_some()) {
+                (**target).sample_count = static_cast<unsigned>(msaa_samples);
             }
         }
     }
@@ -436,8 +449,8 @@ struct RenderProgram {
         };
 
         const std::string key(owe::SpecTex_Default);
-        auto              it = scene.renderTargets.find(key);
-        if (it == scene.renderTargets.end()) {
+        auto              target = scene.RenderTarget(as_str(key));
+        if (target.is_none()) {
             if (prepass.setResultRequest(rstd::None())) {
                 invalidatePass(prepass_handle,
                                ToPassInvalidationFlags(PassInvalidation::Resources) |
@@ -450,7 +463,7 @@ struct RenderProgram {
             return;
         }
 
-        auto&                        rt = it->second;
+        const auto&                  rt = **target;
         rstd::Option<TextureRequest> msaa_request;
         auto                         samples = TextureSampleCount(rt.sample_count);
         if (samples != VK_SAMPLE_COUNT_1_BIT) {
@@ -532,8 +545,9 @@ struct RenderProgram {
             }
         }
 
-        SnapshotImportedTextureProvider imported_textures(render_scene, scene.imageParser.get());
-        auto                            content =
+        SnapshotImportedTextureProvider imported_textures(
+            render_scene, ref<Scene>::from_raw_parts(rstd::addressof(scene)));
+        auto content =
             rstd::dyn<owe::resource::TextureContentProvider>::from_ref(imported_textures);
         auto buffer_content =
             rstd::dyn<owe::resource::BufferContentProvider>::from_ref(declarations);
@@ -556,9 +570,9 @@ struct RenderProgram {
         rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
         rstd::Option<owe::resource::TextureUseHandle> frame_msaa_use   = rstd::None();
         std::string                                   frame_msaa_name;
-        auto frame_target = scene.renderTargets.find(std::string(owe::SpecTex_Default));
-        if (frame_target != scene.renderTargets.end()) {
-            auto samples = TextureSampleCount(frame_target->second.sample_count);
+        auto frame_target = scene.RenderTarget(as_str(owe::SpecTex_Default));
+        if (frame_target.is_some()) {
+            auto samples = TextureSampleCount((**frame_target).sample_count);
             if (samples != VK_SAMPLE_COUNT_1_BIT) {
                 frame_msaa_name = MsaaTwinName(owe::SpecTex_Default, samples);
             }

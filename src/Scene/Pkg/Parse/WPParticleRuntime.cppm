@@ -15,6 +15,7 @@ import wescene.scene;
 export import wescene.pkg.scene_obj;
 
 using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 export namespace owe
 {
@@ -419,7 +420,7 @@ public:
                         u32 max_instance_count, f64 probability, SpawnType, WPParticleAnimationSpec,
                         WPParticleFollowAnchor = {}, u32 trail_length = {}, f64 trail_duration = {},
                         f64 start_time = {}, bool world_space = false,
-                        std::shared_ptr<WPParticleTrailUniformState> trail_uniform_state = {});
+                        Option<Arc<WPParticleTrailUniformState>> trail_uniform_state = None());
     ~WPParticleSubSystem();
 
     void Finalize();
@@ -444,8 +445,8 @@ public:
     auto ControlpointsMut() noexcept -> mut_ref<WPParticleControlpoint[]> {
         return m_controlpoints.as_mut_slice();
     }
-    void SetInstanceOverride(std::shared_ptr<const wpscene::ParticleInstanceoverride> value) {
-        m_instance_override = rstd::move(value);
+    void SetInstanceOverride(Arc<wpscene::ParticleInstanceoverride> value) {
+        m_instance_override = Some(rstd::move(value));
     }
     void SetControlpointAngleCurve(usize index, SceneAnimationCurve curve) {
         m_controlpoints[index].angle_curve = Some(rstd::move(curve));
@@ -494,7 +495,7 @@ private:
     rstd::vec::Vec<WPParticleInstanceState>                         m_instance_states;
     rstd::vec::Vec<Box<WPParticleSubSystem>>                        m_children;
     rstd::array<WPParticleControlpoint, 8>                          m_controlpoints;
-    std::shared_ptr<const wpscene::ParticleInstanceoverride>        m_instance_override;
+    Option<Arc<wpscene::ParticleInstanceoverride>>                  m_instance_override;
     WPParticleFrame                                                 m_frame;
     WPParticleAnimationSpec                                         m_animation_spec;
     WPParticleFollowAnchor                                          m_follow_anchor;
@@ -506,11 +507,11 @@ private:
     bool                                                            m_started { false };
     u32                                                             m_max_instance_count { 1 };
     f64                                                             m_probability { 1.0 };
-    SpawnType                                    m_spawn_type { SpawnType::STATIC };
-    u32                                          m_trail_length {};
-    f64                                          m_trail_sample_interval {};
-    f64                                          m_trail_sample_accumulator {};
-    std::shared_ptr<WPParticleTrailUniformState> m_trail_uniform_state;
+    SpawnType                                m_spawn_type { SpawnType::STATIC };
+    u32                                      m_trail_length {};
+    f64                                      m_trail_sample_interval {};
+    f64                                      m_trail_sample_accumulator {};
+    Option<Arc<WPParticleTrailUniformState>> m_trail_uniform_state;
 };
 
 class WPParticleRuntime {

@@ -15,6 +15,7 @@ module;
 
 export module wescene.testing.corpus;
 
+import rstd;
 import rstd.cppstd;
 import wescene.json;
 import wescene.pkg.parse;
@@ -23,6 +24,8 @@ import wescene.fs;
 import wescene.types;
 import wescene.testing.pkg_header;
 import wescene.testing.json_builder;
+
+using namespace rstd::prelude;
 
 export namespace owe::testing
 {
@@ -132,6 +135,12 @@ Json SnapshotValue(const T& value) {
 
 inline Json SnapshotValue(const Json& value) { return value.clone(); }
 
+inline Json SnapshotValue(ref<str> value) {
+    return owe::IntoJson(rstd::cppstd::as_string_view(value));
+}
+
+inline Json SnapshotValue(const String& value) { return SnapshotValue(value.as_str()); }
+
 template<typename T>
 Json SnapshotValue(const std::vector<T>& values) {
     auto out = owe::MakeArray();
@@ -141,6 +150,20 @@ Json SnapshotValue(const std::vector<T>& values) {
 
 template<typename T, std::size_t N>
 Json SnapshotValue(const std::array<T, N>& values) {
+    auto out = owe::MakeArray();
+    for (const auto& value : values) owe::AppendJson(out, SnapshotValue(value));
+    return out;
+}
+
+template<typename T>
+Json SnapshotValue(const Vec<T>& values) {
+    auto out = owe::MakeArray();
+    for (const auto& value : values) owe::AppendJson(out, SnapshotValue(value));
+    return out;
+}
+
+template<typename T, rstd::size_t N>
+Json SnapshotValue(const array<T, N>& values) {
     auto out = owe::MakeArray();
     for (const auto& value : values) owe::AppendJson(out, SnapshotValue(value));
     return out;
@@ -218,7 +241,9 @@ TexMeta ReadTexMeta(owe::fs::VFS& vfs, const std::string& pkg_path) {
     owe::WPTexImageParser parser(&vfs);
     owe::ImageHeader      h;
     try {
-        h = parser.ParseHeader(name);
+        auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+        if (parsed.is_err()) return meta;
+        h = rstd::move(parsed).unwrap_unchecked();
     } catch (const std::exception&) {
         return meta;
     }
@@ -763,7 +788,7 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
             WPMdlHeader h;
             bool        ok = false;
             try {
-                ok = owe::WPMdlParser::ParseHeader(rel, vfs, h);
+                ok = owe::WPMdlParser::ParseHeader(rstd::cppstd::as_str(rel), vfs, h);
             } catch (const std::exception&) {
                 ok = false;
             }
@@ -790,7 +815,7 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         WPMdl mdl;
         bool  ok = false;
         try {
-            ok = owe::WPMdlParser::Parse(rel, vfs, mdl);
+            ok = owe::WPMdlParser::Parse(rstd::cppstd::as_str(rel), vfs, mdl);
         } catch (const std::exception&) {
             ok = false;
         }
@@ -803,12 +828,14 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         SetSnapshot(jm, "mesh_count", static_cast<int64_t>(mdl.header.mesh_count));
         SetSnapshot(jm, "mdls", mdl.mdls);
         SetSnapshot(jm, "mdla", mdl.mdla);
-        const WPMdl::Mesh* m0 = mdl.meshes.empty() ? nullptr : &mdl.meshes.front();
-        SetSnapshot(jm, "mat_json_file", m0 ? m0->mat_json_file : std::string());
-        SetSnapshot(jm, "vertex_count", m0 ? static_cast<int>(m0->positions.size()) : 0);
-        SetSnapshot(jm, "index_count", m0 ? static_cast<int>(m0->indices.size()) : 0);
-        SetSnapshot(jm, "vert_extra_count", m0 ? static_cast<int>(m0->part_uv2.size()) : 0);
-        SetSnapshot(jm, "part_count", m0 ? static_cast<int>(m0->parts.size()) : 0);
+        const WPMdl::Mesh* m0 = mdl.meshes.is_empty() ? nullptr : &mdl.meshes[usize()];
+        SetSnapshot(jm, "mat_json_file", m0 ? m0->mat_json_file.as_str() : ref<str>());
+        SetSnapshot(
+            jm, "vertex_count", m0 ? static_cast<int>(m0->positions.len().to_primitive()) : 0);
+        SetSnapshot(jm, "index_count", m0 ? static_cast<int>(m0->indices.len().to_primitive()) : 0);
+        SetSnapshot(
+            jm, "vert_extra_count", m0 ? static_cast<int>(m0->part_uv2.len().to_primitive()) : 0);
+        SetSnapshot(jm, "part_count", m0 ? static_cast<int>(m0->parts.len().to_primitive()) : 0);
         auto parts_arr = owe::MakeArray();
         if (m0) {
             for (const auto& pt : m0->parts) {
@@ -820,16 +847,24 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
             }
         }
         owe::SetJson(jm, "parts", std::move(parts_arr));
-        SetSnapshot(jm, "bones", ok && mdl.puppet ? static_cast<int>(mdl.puppet->bones.size()) : 0);
-        SetSnapshot(jm, "anims", ok && mdl.puppet ? static_cast<int>(mdl.puppet->anims.size()) : 0);
-        if (ok && mdl.puppet) {
+        SetSnapshot(jm,
+                    "bones",
+                    ok && mdl.puppet.is_some()
+                        ? static_cast<int>((*mdl.puppet)->bones.len().to_primitive())
+                        : 0);
+        SetSnapshot(jm,
+                    "anims",
+                    ok && mdl.puppet.is_some()
+                        ? static_cast<int>((*mdl.puppet)->anims.len().to_primitive())
+                        : 0);
+        if (ok && mdl.puppet.is_some()) {
             auto bones = owe::MakeArray();
-            for (const auto& b : mdl.puppet->bones) {
+            for (const auto& b : (*mdl.puppet)->bones) {
                 auto jb = owe::MakeObject();
                 SetSnapshot(jb, "name", b.name);
                 SetSnapshot(jb, "bind_parent", static_cast<int64_t>(b.bind_parent));
                 SetSnapshot(jb, "anim_parent", static_cast<int64_t>(b.anim_parent));
-                SetSnapshot(jb, "has_sim_json", ! b.simulation_json.empty());
+                SetSnapshot(jb, "has_sim_json", ! b.simulation_json.is_empty());
                 SetSnapshot(jb, "has_file_skin_pivot", b.has_file_skin_pivot);
                 SetSnapshot(jb,
                             "centroid_offset",
@@ -844,9 +879,11 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                 owe::AppendJson(bones, std::move(jb));
             }
             owe::SetJson(jm, "bone_tree", std::move(bones));
-            SetSnapshot(jm, "attachment_count", static_cast<int>(mdl.puppet->attachments.size()));
+            SetSnapshot(jm,
+                        "attachment_count",
+                        static_cast<int>((*mdl.puppet)->attachments.len().to_primitive()));
             auto atts = owe::MakeArray();
-            for (const auto& a : mdl.puppet->attachments) {
+            for (const auto& a : (*mdl.puppet)->attachments) {
                 auto attachment = owe::MakeObject();
                 SetSnapshot(attachment, "name", a.name);
                 owe::AppendJson(atts, std::move(attachment));
@@ -854,29 +891,35 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
             owe::SetJson(jm, "attachments", std::move(atts));
 
             auto anims = owe::MakeArray();
-            for (const auto& a : mdl.puppet->anims) {
+            for (const auto& a : (*mdl.puppet)->anims) {
                 auto ja = owe::MakeObject();
                 SetSnapshot(ja, "id", a.id);
                 SetSnapshot(ja, "fps", a.fps);
                 SetSnapshot(ja, "length", a.length);
                 SetSnapshot(ja, "name", a.name);
                 SetSnapshot(ja, "mode", static_cast<int>(a.mode));
-                SetSnapshot(ja, "bone_track_count", static_cast<int>(a.bone_tracks.size()));
-                SetSnapshot(ja, "has_trans", a.trans.has_value());
-                SetSnapshot(ja, "blend_curves_count", static_cast<int>(a.blend_curves.size()));
-                SetSnapshot(ja, "v4_events_count", static_cast<int>(a.v4_events.size()));
+                SetSnapshot(
+                    ja, "bone_track_count", static_cast<int>(a.bone_tracks.len().to_primitive()));
+                SetSnapshot(ja, "has_trans", a.trans.is_some());
+                SetSnapshot(ja,
+                            "blend_curves_count",
+                            static_cast<int>(a.blend_curves.len().to_primitive()));
+                SetSnapshot(
+                    ja, "v4_events_count", static_cast<int>(a.v4_events.len().to_primitive()));
                 SetSnapshot(ja, "has_aabb", a.has_aabb);
-                SetSnapshot(ja, "scalar_curves_count", static_cast<int>(a.scalar_curves.size()));
-                SetSnapshot(ja, "events_count", static_cast<int>(a.events.size()));
+                SetSnapshot(ja,
+                            "scalar_curves_count",
+                            static_cast<int>(a.scalar_curves.len().to_primitive()));
+                SetSnapshot(ja, "events_count", static_cast<int>(a.events.len().to_primitive()));
                 int total_frames = 0;
                 for (const auto& bt : a.bone_tracks)
-                    total_frames += static_cast<int>(bt.frames.size());
+                    total_frames += static_cast<int>(bt.frames.len().to_primitive());
                 SetSnapshot(ja, "total_bone_frames", total_frames);
                 auto moved = owe::MakeArray();
-                for (size_t ti = 0; ti < a.bone_tracks.size(); ++ti) {
+                for (usize ti {}; ti < a.bone_tracks.len(); ++ti) {
                     const auto& tk = a.bone_tracks[ti];
-                    if (tk.frames.empty()) continue;
-                    const auto& f0      = tk.frames[0];
+                    if (tk.frames.is_empty()) continue;
+                    const auto& f0      = tk.frames[usize()];
                     bool        any_pos = false, any_sc = false, any_an = false;
                     for (const auto& fr : tk.frames) {
                         if ((fr.position - f0.position).norm() > 0.5f) any_pos = true;
@@ -885,7 +928,7 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
                     }
                     if (any_pos || any_sc || any_an) {
                         auto item = owe::MakeObject();
-                        SetSnapshot(item, "i", static_cast<int>(ti));
+                        SetSnapshot(item, "i", static_cast<int>(ti.to_primitive()));
                         SetSnapshot(item, "p", any_pos);
                         SetSnapshot(item, "s", any_sc);
                         SetSnapshot(item, "a", any_an);

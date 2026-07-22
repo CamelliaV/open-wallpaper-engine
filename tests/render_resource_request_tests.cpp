@@ -9,6 +9,9 @@ import wescene.types;
 import wescene.vulkan;
 import wescene.vulkan_render;
 
+using namespace rstd::prelude;
+using rstd::sync::Arc;
+
 namespace uniform_test
 {
 
@@ -46,9 +49,9 @@ public:
                        std::make_shared<StaticSourceState>(StaticSourceState { .value = value })) {}
     StaticSource(std::string name, std::shared_ptr<StaticSourceState> state)
         : m_name(std::move(name)), m_state(std::move(state)) {}
-    StaticSource(std::string name, float value, std::shared_ptr<owe::AudioResponseDemand> demand)
+    StaticSource(std::string name, float value, rstd::sync::Arc<owe::AudioResponseDemand> demand)
         : StaticSource(std::move(name), value) {
-        m_demand = std::move(demand);
+        m_demand = rstd::Some(rstd::move(demand));
     }
 
     auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
@@ -68,15 +71,17 @@ public:
         auto value = owe::UniformValue(m_state->value);
         return sink->Write(m_output, value.View());
     }
-    auto AcquireBindingLease() const -> std::shared_ptr<void> {
-        return m_demand ? m_demand->Acquire() : std::shared_ptr<void> {};
+    auto AcquireBindingLease() const
+        -> rstd::Option<rstd::boxed::Box<rstd::dyn<owe::UniformBindingLease>>> {
+        if (m_demand.is_none()) return rstd::None();
+        return rstd::Some((*m_demand)->Acquire());
     }
 
 private:
-    std::string                               m_name;
-    std::shared_ptr<StaticSourceState>        m_state;
-    std::shared_ptr<owe::AudioResponseDemand> m_demand;
-    owe::UniformOutputId                      m_output { .value = rstd::u32() };
+    std::string                                             m_name;
+    std::shared_ptr<StaticSourceState>                      m_state;
+    rstd::Option<rstd::sync::Arc<owe::AudioResponseDemand>> m_demand;
+    owe::UniformOutputId                                    m_output { .value = rstd::u32() };
 };
 
 class TextureMetadataSource {
@@ -105,7 +110,10 @@ public:
         });
         return sink->Write(m_output, value.View());
     }
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const
+        -> rstd::Option<rstd::boxed::Box<rstd::dyn<owe::UniformBindingLease>>> {
+        return rstd::None();
+    }
 
 private:
     owe::UniformOutputId m_output { .value = rstd::u32() };
@@ -205,12 +213,12 @@ TEST(UniformBufferLayout, RejectsMemberOutsideBlock) {
 
 TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
     owe::Scene scene;
-    auto       camera_node = rstd::sync::Arc<owe::SceneNode>::make();
-    auto       camera      = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto       camera_node = Arc<owe::SceneNode>::make();
+    auto       camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
-    scene.cameras["default"] = camera;
-    scene.activeCamera       = camera.get();
+    scene.RegisterCamera(String::make("default"), camera.clone());
+    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("default")));
 
     auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
     auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
@@ -222,7 +230,7 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
     auto node   = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID()  = rstd::i32(1);
     node->AddMesh(MakeUniformMesh(std::move(shader)));
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
@@ -269,7 +277,7 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
 
 TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
     owe::Scene scene;
-    auto       demand = std::make_shared<owe::AudioResponseDemand>();
+    auto       demand = rstd::sync::Arc<owe::AudioResponseDemand>::make();
     bool       active = false;
     demand->SetCallback([&active](bool next) {
         active = next;
@@ -277,12 +285,12 @@ TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
     auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
     auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
     auto source      = registrar->Register(rstd::boxed::Box<rstd::dyn<owe::UniformSource>>::make(
-        uniform_test::StaticSource("audio_signal", 0.0f, demand)));
+        uniform_test::StaticSource("audio_signal", 0.0f, demand.clone())));
     ASSERT_TRUE(attachments->AttachGlobal(source));
 
     auto node = rstd::sync::Arc<owe::SceneNode>::make();
     node->AddMesh(MakeUniformMesh(std::make_shared<owe::SceneShader>()));
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
@@ -337,7 +345,7 @@ TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {
     auto shader = std::make_shared<owe::SceneShader>();
     auto node   = rstd::sync::Arc<owe::SceneNode>::make();
     node->AddMesh(MakeUniformMesh(std::move(shader)));
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
@@ -389,12 +397,12 @@ TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {
 
 TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     owe::Scene scene;
-    auto       camera_node = rstd::sync::Arc<owe::SceneNode>::make();
-    auto       camera      = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto       camera_node = Arc<owe::SceneNode>::make();
+    auto       camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
-    scene.cameras["default"] = camera;
-    scene.activeCamera       = camera.get();
+    scene.RegisterCamera(String::make("default"), camera.clone());
+    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("default")));
 
     auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
     auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
@@ -408,7 +416,7 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     auto node          = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID()         = rstd::i32(1);
     node->AddMesh(MakeUniformMesh(std::move(shader)));
-    scene.sceneGraph->AppendChild(node.clone());
+    scene.RootMut()->AppendChild(node.clone());
     scene.RebuildResourceIndex();
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
     ASSERT_TRUE(node_id.is_some());
@@ -567,7 +575,8 @@ TEST(PreparedPassResources, ResolvesOnlyDeclaredUses) {
 
 TEST(TextureRequest, ResolvesImportedTextureNameFromSnapshotCatalog) {
     owe::Scene scene;
-    scene.textures["texture-slot"] = owe::SceneTexture { .url = "textures/main.png" };
+    scene.RegisterTexture(String::make("texture-slot"),
+                          owe::SceneTexture { .url = "textures/main.png" });
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
     auto desc_id  = snapshot.textureDescId("texture-slot");
@@ -578,12 +587,12 @@ TEST(TextureRequest, ResolvesImportedTextureNameFromSnapshotCatalog) {
 
     auto resolved = owe::vulkan::ResolveImportedTextureName(snapshot, request);
     ASSERT_TRUE(resolved.is_some());
-    EXPECT_EQ(*resolved, "textures/main.png");
+    EXPECT_EQ(rstd::cppstd::as_string_view(resolved->as_str()), "textures/main.png");
 
     auto lookup_request = owe::vulkan::MakeImportedTextureRequest("texture-slot");
     resolved            = owe::vulkan::ResolveImportedTextureName(snapshot, lookup_request);
     ASSERT_TRUE(resolved.is_some());
-    EXPECT_EQ(*resolved, "textures/main.png");
+    EXPECT_EQ(rstd::cppstd::as_string_view(resolved->as_str()), "textures/main.png");
 
     auto missing_request = owe::vulkan::MakeImportedTextureRequest("missing");
     EXPECT_TRUE(owe::vulkan::ResolveImportedTextureName(snapshot, missing_request).is_none());

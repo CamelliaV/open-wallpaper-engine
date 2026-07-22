@@ -3,7 +3,10 @@ module;
 export module wescene.pkg.puppet;
 import eigen;
 import wescene.core;
-import rstd.cppstd;
+import rstd;
+
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 export namespace owe
 
@@ -31,7 +34,7 @@ public:
     // silhouette (bones are already world-anchored) but keeps the file's parent
     // chain for animation, so eye/lash bones still inherit their parent's blink.
     struct Bone {
-        std::string name;
+        String name;
         // hexpat MDLS Bone.sim_type: 0=static, 1=physics target, 3=IK chain.
         int32_t         sim_type { 0 };
         Eigen::Affine3f local_bind { Eigen::Affine3f::Identity() };
@@ -43,7 +46,7 @@ public:
 
         // Per-bone WE bone_simulation JSON (spring/damping/gravity for
         // hair/cloth). Captured raw; evaluation hook is TBD.
-        std::string simulation_json;
+        String simulation_json;
 
         // prepared
         Eigen::Affine3f world_bind { Eigen::Affine3f::Identity() };
@@ -84,7 +87,7 @@ public:
     // images at named bone offsets (e.g. bangs under a head bone).
     struct Attachment {
         uint16_t        bone_index { 0 }; // hexpat MDAT Attachment.unk
-        std::string     name;
+        String          name;
         Eigen::Affine3f local_xform { Eigen::Affine3f::Identity() };
     };
     struct BoneFrame {
@@ -100,39 +103,39 @@ public:
     // are deliberately not declared yet — drop them in as sibling vectors
     // on Animation when V22+ shows up, not as variants over this one.
     struct BoneTrack {
-        uint32_t               bone_index { 0 };
-        int32_t                unk { 0 }; // hexpat BoneTrack.unk
-        std::vector<BoneFrame> frames;
+        uint32_t       bone_index { 0 };
+        int32_t        unk { 0 }; // hexpat BoneTrack.unk
+        Vec<BoneFrame> frames;
     };
 
     // mdla>=3 per-anim translation/root-motion payload. trans_flag==1 uses
     // extra_track + main_track; trans_flag==0 can store main_track followed by
     // zero-delimited same-sized tail tracks.
     struct AnimTrans {
-        std::vector<float>              extra_track;
-        std::vector<float>              main_track;
-        std::vector<std::vector<float>> tail_tracks;
+        Vec<float>      extra_track;
+        Vec<float>      main_track;
+        Vec<Vec<float>> tail_tracks;
     };
 
     // Per-bone, per-frame curve (anim.length + 1 samples). Reused by both the
     // mdla>=3 blend_curves block (0..1 weights) and mdla==6 scalar_curves
     // (typically constant per curve).
     struct BoneFrameCurve {
-        std::vector<float> values;
+        Vec<float> values;
     };
 
     // mdla>=4 timed curve event. `values` is a per-frame ease/blend curve.
     struct AnimV4Event {
-        float              time;
-        uint32_t           flags;
-        std::vector<float> values;
+        float      time;
+        uint32_t   flags;
+        Vec<float> values;
     };
 
     // Trailing event list — present on every animation regardless of mdla
     // version. `event_json` is the WE editor's keyframe payload.
     struct AnimEvent {
-        uint32_t    time_value;
-        std::string event_json;
+        uint32_t time_value;
+        String   event_json;
     };
 
     struct Animation {
@@ -141,32 +144,32 @@ public:
         double         fps;
         rstd::int32_t  length;
         PlayMode       mode;
-        std::string    name;
+        String         name;
 
-        std::vector<BoneTrack> bone_tracks;
+        Vec<BoneTrack> bone_tracks;
 
         // mdla>=3 trans block (presence gated by trans_flag).
-        std::optional<AnimTrans> trans;
+        Option<AnimTrans> trans;
         // mdla>=3 per-bone blend curves (size == bone_tracks.size() when present).
-        std::vector<BoneFrameCurve> blend_curves;
+        Vec<BoneFrameCurve> blend_curves;
         // mdla>=4 timed events.
-        std::vector<AnimV4Event> v4_events;
+        Vec<AnimV4Event> v4_events;
         // mdla>=5 anim AABB.
-        std::array<float, 3> aabb_min {};
-        std::array<float, 3> aabb_max {};
-        bool                 has_aabb { false };
+        array<float, 3> aabb_min {};
+        array<float, 3> aabb_max {};
+        bool            has_aabb { false };
         // mdla==6 per-bone scalar curves (same shape as blend_curves).
-        std::vector<BoneFrameCurve> scalar_curves;
+        Vec<BoneFrameCurve> scalar_curves;
         // Trailing event list (all mdla versions).
-        std::vector<AnimEvent> events;
+        Vec<AnimEvent> events;
 
         // prepared
         double max_time;
         double frame_time;
         struct InterpolationInfo {
-            std::size_t frame_a;
-            std::size_t frame_b;
-            double      t;
+            usize  frame_a;
+            usize  frame_b;
+            double t;
         };
         InterpolationInfo getInterpolationInfo(double* cur_time) const;
     };
@@ -174,13 +177,13 @@ public:
     // MDLS v3 IK chain configuration. Schema derived from a single corpus
     // sample (hexpat MDLSBlock extras_flag==2 path); fields kept raw.
     struct BoneDir {
-        uint32_t             bone_id;
-        std::array<float, 3> dir;
+        uint32_t        bone_id;
+        array<float, 3> dir;
     };
     struct ChainBoneDir {
-        uint16_t             chain_id;
-        uint32_t             bone_id;
-        std::array<float, 3> dir;
+        uint16_t        chain_id;
+        uint32_t        bone_id;
+        array<float, 3> dir;
     };
     struct BoneCond {
         uint16_t cnt;
@@ -189,27 +192,27 @@ public:
         uint32_t val;
     };
     struct IkConfig {
-        Eigen::Matrix4f                      chain_a_target { Eigen::Matrix4f::Identity() };
-        uint8_t                              ik_version { 0 };
-        std::array<uint32_t, 2>              ik_header {};
-        Eigen::Matrix4f                      chain_b_target { Eigen::Matrix4f::Identity() };
-        std::array<uint8_t, 7>               ik_flags {};
-        std::array<Eigen::Vector3f, 6>       pole_targets {};
-        std::vector<BoneDir>                 rest_rotations;
-        std::vector<ChainBoneDir>            ik_targets;
-        std::optional<BoneDir>               ik_target_root;
-        BoneCond                             ik_constraint {};
-        std::array<std::vector<uint32_t>, 2> ik_bone_lists;
-        uint32_t                             ik_chain_count { 0 };
-        std::array<float, 2>                 ik_chain_length {};
-        std::vector<uint32_t>                ik_chain_bones;
+        Eigen::Matrix4f           chain_a_target { Eigen::Matrix4f::Identity() };
+        uint8_t                   ik_version { 0 };
+        array<uint32_t, 2>        ik_header {};
+        Eigen::Matrix4f           chain_b_target { Eigen::Matrix4f::Identity() };
+        array<uint8_t, 7>         ik_flags {};
+        array<Eigen::Vector3f, 6> pole_targets {};
+        Vec<BoneDir>              rest_rotations;
+        Vec<ChainBoneDir>         ik_targets;
+        Option<BoneDir>           ik_target_root;
+        BoneCond                  ik_constraint {};
+        array<Vec<uint32_t>, 2>   ik_bone_lists;
+        uint32_t                  ik_chain_count { 0 };
+        array<float, 2>           ik_chain_length {};
+        Vec<uint32_t>             ik_chain_bones;
     };
 
 public:
-    std::vector<Bone>       bones;
-    std::vector<Animation>  anims;
-    std::vector<Attachment> attachments;
-    std::optional<IkConfig> ik_config;
+    Vec<Bone>        bones;
+    Vec<Animation>   anims;
+    Vec<Attachment>  attachments;
+    Option<IkConfig> ik_config;
 
     // MDLV21 puppets store bones as world-anchored (each `local_bind.t` is
     // a puppet-local position, not parent-relative) and sprite vertices live
@@ -218,22 +221,19 @@ public:
     // uses standard chain LBS. Set at parse time from `header.mdlv`.
     bool world_anchored_bones { false };
 
-    std::span<const Eigen::Affine3f> genFrame(WPPuppetLayer&, double time) noexcept;
-    void                             prepared();
+    slice<Eigen::Affine3f> genFrame(WPPuppetLayer&, double time) noexcept;
+    void                   prepared();
 
 private:
-    std::vector<Eigen::Affine3f> m_final_affines;
+    Vec<Eigen::Affine3f> m_final_affines;
 };
 
 class WPPuppetLayer {
     friend class WPPuppet;
 
 public:
-    WPPuppetLayer();
-    WPPuppetLayer(std::shared_ptr<WPPuppet>);
+    explicit WPPuppetLayer(Arc<WPPuppet>);
     ~WPPuppetLayer();
-
-    bool hasPuppet() const { return (bool)m_puppet; };
 
     struct AnimationLayer {
         rstd::int32_t id { 0 }; // animation file id (PKGV0001+)
@@ -244,18 +244,20 @@ public:
 
         // Schema-only absorption (renderer reads only id/rate/blend/visible).
         rstd::int32_t layer_id { 0 };     // animationlayers[].id (was unread)
-        std::string   name;               // animationlayers[].name (was unread)
+        String        name;               // animationlayers[].name (was unread)
         bool          additive { false }; // PKGV0019+; blend operator
         bool          blendin { false };  // PKGV0021+
         bool          blendout { false }; // PKGV0021+
         double        blendtime { 0.0 };  // PKGV0021+
+
+        auto Clone() const -> AnimationLayer;
     };
 
-    void prepared(std::span<AnimationLayer>);
+    void prepared(slice<AnimationLayer>);
 
-    std::span<const Eigen::Affine3f> genFrame(double time) noexcept;
-    uint32_t                         boneIndex(std::string_view name) const noexcept;
-    std::optional<Eigen::Affine3f>   boneTransform(uint32_t index, double time) noexcept;
+    slice<Eigen::Affine3f>  genFrame(double time) noexcept;
+    uint32_t                boneIndex(ref<str> name) const noexcept;
+    Option<Eigen::Affine3f> boneTransform(uint32_t index, double time) noexcept;
 
     void updateInterpolation(double time) noexcept;
 
@@ -273,8 +275,8 @@ private:
     // advancing animation N× per frame.
     double m_last_elapsed { -1.0 };
 
-    std::vector<Layer>        m_layers;
-    std::shared_ptr<WPPuppet> m_puppet;
+    Vec<Layer>    m_layers;
+    Arc<WPPuppet> m_puppet;
 };
 
 } // namespace owe

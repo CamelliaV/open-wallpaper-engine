@@ -7,6 +7,8 @@ import wescene.scene;
 import :wp_particle_runtime;
 
 using namespace rstd::prelude;
+using rstd::collections::HashMap;
+using rstd::sync::Arc;
 
 export namespace owe
 {
@@ -124,65 +126,60 @@ struct WPUniformCameraShake {
 };
 
 struct WPUniformNodeConfigDraft {
-    bool                               configured { false };
-    rstd::array<float, 2>              parallax_depth { 0.0f, 0.0f };
-    rstd::array<float, 2>              propagated_parallax_depth { 0.0f, 0.0f };
-    bool                               propagate_parallax_to_children { true };
-    bool                               use_camera_eye_position { false };
-    Option<rstd::sync::Arc<SceneNode>> effect_projection_node;
-    rstd::array<float, 2>              effect_projection_size { 0.0f, 0.0f };
+    bool                   configured { false };
+    array<float, 2>        parallax_depth { 0.0f, 0.0f };
+    array<float, 2>        propagated_parallax_depth { 0.0f, 0.0f };
+    bool                   propagate_parallax_to_children { true };
+    bool                   use_camera_eye_position { false };
+    Option<Arc<SceneNode>> effect_projection_node;
+    array<float, 2>        effect_projection_size { 0.0f, 0.0f };
 
     auto Clone() const -> WPUniformNodeConfigDraft;
 };
 
 class WPUniformCameraResolver {
 public:
-    explicit WPUniformCameraResolver(std::shared_ptr<SceneCamera> active_camera)
+    explicit WPUniformCameraResolver(Arc<SceneCamera> active_camera)
         : m_active_camera(rstd::move(active_camera)) {}
 
-    void Add(std::string name, std::shared_ptr<SceneCamera> camera);
+    void Add(String name, Arc<SceneCamera> camera);
     void Reserve(usize count) { m_cameras.reserve(count); }
 
-    auto Resolve(const SceneNode& node) const -> std::shared_ptr<SceneCamera>;
-    auto Active() const -> std::shared_ptr<SceneCamera> { return m_active_camera; }
+    auto Resolve(const SceneNode& node) const -> Option<mut_ref<SceneCamera>>;
+    auto Active() const -> mut_ref<SceneCamera> { return m_active_camera.deref_mut(); }
 
 private:
-    struct Entry {
-        std::string                  name;
-        std::shared_ptr<SceneCamera> camera;
-    };
-
-    Vec<Entry>                   m_cameras;
-    std::shared_ptr<SceneCamera> m_active_camera;
+    HashMap<String, Arc<SceneCamera>> m_cameras;
+    Arc<SceneCamera>                  m_active_camera;
 };
 
 struct WPUniformNodeState {
-    rstd::sync::Arc<SceneNode>               node;
-    std::shared_ptr<WPUniformCameraResolver> camera_resolver;
-    rstd::array<float, 2>                    propagated_parallax_depth { 0.0f, 0.0f };
-    bool                                     propagate_parallax_to_children { true };
-    bool                                     use_camera_eye_position { false };
-    Option<rstd::sync::Arc<SceneNode>>       effect_projection_node;
-    rstd::array<float, 2>                    effect_projection_size { 0.0f, 0.0f };
+    Arc<SceneNode>               node;
+    Arc<WPUniformCameraResolver> camera_resolver;
+    array<float, 2>              propagated_parallax_depth { 0.0f, 0.0f };
+    bool                         propagate_parallax_to_children { true };
+    bool                         use_camera_eye_position { false };
+    Option<Arc<SceneNode>>       effect_projection_node;
+    array<float, 2>              effect_projection_size { 0.0f, 0.0f };
 
-    explicit WPUniformNodeState(rstd::sync::Arc<SceneNode> value): node(rstd::move(value)) {}
+    WPUniformNodeState(Arc<SceneNode> value, Arc<WPUniformCameraResolver> resolver)
+        : node(rstd::move(value)), camera_resolver(rstd::move(resolver)) {}
 };
 
 struct WPUniformFrameInputs {
-    rstd::array<float, 2>  pointer { 0.5f, 0.5f };
-    rstd::array<float, 2>  pointer_last { 0.5f, 0.5f };
-    rstd::array<float, 64> audio_left {};
-    rstd::array<float, 64> audio_right {};
+    array<float, 2>  pointer { 0.5f, 0.5f };
+    array<float, 2>  pointer_last { 0.5f, 0.5f };
+    array<float, 64> audio_left {};
+    array<float, 64> audio_right {};
 };
 
 class WPUniformSceneState {
 public:
-    explicit WPUniformSceneState(std::shared_ptr<AudioResponseDemand> demand = {})
-        : m_audio_demand(std::move(demand)) {}
+    explicit WPUniformSceneState(Arc<AudioResponseDemand> demand)
+        : m_audio_demand(rstd::move(demand)) {}
 
-    auto SetNodeState(SceneNodeId, std::shared_ptr<WPUniformNodeState>)
-        -> std::shared_ptr<WPUniformNodeState>;
-    bool SetEffectProjectionSize(SceneNodeId, rstd::array<float, 2>);
+    void SetNodeState(SceneNodeId, Arc<WPUniformNodeState>);
+    bool SetEffectProjectionSize(SceneNodeId, array<float, 2>);
     auto ResolveParallaxState(const WPUniformNodeState&) const -> const WPUniformNodeState&;
 
     WPUniformCameraParallax&       CameraParallax() noexcept { return m_camera_parallax; }
@@ -190,7 +187,7 @@ public:
     WPUniformCameraShake&          CameraShake() noexcept { return m_camera_shake; }
     const WPUniformCameraShake&    CameraShake() const noexcept { return m_camera_shake; }
     const WPUniformFrameInputs&    Inputs() const noexcept { return m_inputs; }
-    rstd::array<float, 2>          Ortho() const noexcept { return m_ortho; }
+    array<float, 2>                Ortho() const noexcept { return m_ortho; }
 
     void SetOrtho(float width, float height) { m_ortho = { width, height }; }
     void SetPointerInput(double, double);
@@ -198,8 +195,8 @@ public:
     void SetAudioSpectrum(slice<float>, slice<float>);
     void Advance(const SceneFrame&);
     void ApplyUserProperty(std::string_view, const Json&);
-    auto AcquireAudioResponse() const -> std::shared_ptr<void> {
-        return m_audio_demand ? m_audio_demand->Acquire() : std::shared_ptr<void> {};
+    auto AcquireAudioResponse() const -> Box<dyn<UniformBindingLease>> {
+        return m_audio_demand->Acquire();
     }
 
 private:
@@ -209,108 +206,98 @@ private:
         return u64((generation << 32U) | index);
     }
 
-    rstd::collections::HashMap<u64, std::shared_ptr<WPUniformNodeState>> m_nodes;
-    rstd::collections::HashMap<const SceneNode*, std::shared_ptr<WPUniformNodeState>>
-                                         m_nodes_by_address;
-    WPUniformFrameInputs                 m_inputs;
-    WPUniformCameraParallax              m_camera_parallax;
-    WPUniformCameraShake                 m_camera_shake;
-    rstd::array<float, 2>                m_ortho { 1920.0f, 1080.0f };
-    rstd::array<float, 2>                m_pointer_input { 0.5f, 0.5f };
-    std::shared_ptr<AudioResponseDemand> m_audio_demand;
-    float                                m_pointer_delay { 0.0f };
-    double                               m_pointer_delayed_time { 0.0 };
-    rstd::time::Instant                  m_last_pointer_input_time { rstd::time::Instant::now() };
+    HashMap<u64, Arc<WPUniformNodeState>>              m_nodes;
+    HashMap<const SceneNode*, Arc<WPUniformNodeState>> m_nodes_by_address;
+    WPUniformFrameInputs                               m_inputs;
+    WPUniformCameraParallax                            m_camera_parallax;
+    WPUniformCameraShake                               m_camera_shake;
+    array<float, 2>                                    m_ortho { 1920.0f, 1080.0f };
+    array<float, 2>                                    m_pointer_input { 0.5f, 0.5f };
+    Arc<AudioResponseDemand>                           m_audio_demand;
+    float                                              m_pointer_delay { 0.0f };
+    double                                             m_pointer_delayed_time { 0.0 };
+    rstd::time::Instant m_last_pointer_input_time { rstd::time::Instant::now() };
 };
 
 class WPUniformRuntimeInput {
 public:
-    explicit WPUniformRuntimeInput(std::shared_ptr<WPUniformSceneState> state)
-        : m_state(rstd::move(state)) {}
+    explicit WPUniformRuntimeInput(Arc<WPUniformSceneState> state): m_state(rstd::move(state)) {}
 
-    void SetPointerInput(double x, double y) {
-        if (m_state) m_state->SetPointerInput(x, y);
-    }
+    void SetPointerInput(double x, double y) { m_state->SetPointerInput(x, y); }
     void SetAudioSpectrum(slice<float> left, slice<float> right) {
-        if (m_state) m_state->SetAudioSpectrum(left, right);
+        m_state->SetAudioSpectrum(left, right);
     }
 
 private:
-    std::shared_ptr<WPUniformSceneState> m_state;
+    Arc<WPUniformSceneState> m_state;
 };
 
 class WPUniformRuntimeSystem {
 public:
-    explicit WPUniformRuntimeSystem(std::shared_ptr<WPUniformSceneState> state)
-        : m_state(rstd::move(state)) {}
+    explicit WPUniformRuntimeSystem(Arc<WPUniformSceneState> state): m_state(rstd::move(state)) {}
 
-    void Update(ref<SceneFrame> frame) {
-        if (m_state) m_state->Advance(*frame);
-    }
+    void Update(ref<SceneFrame> frame) { m_state->Advance(*frame); }
 
 private:
-    std::shared_ptr<WPUniformSceneState> m_state;
+    Arc<WPUniformSceneState> m_state;
 };
 
 class WPTransformUniformSource {
 public:
-    WPTransformUniformSource(std::shared_ptr<WPUniformSceneState> state,
-                             std::shared_ptr<WPUniformNodeState>  node)
+    WPTransformUniformSource(Arc<WPUniformSceneState> state, Arc<WPUniformNodeState> node)
         : m_state(rstd::move(state)), m_node(rstd::move(node)) {}
 
     auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> { return None(); }
 
 private:
-    std::shared_ptr<WPUniformSceneState> m_state;
-    std::shared_ptr<WPUniformNodeState>  m_node;
+    Arc<WPUniformSceneState> m_state;
+    Arc<WPUniformNodeState>  m_node;
 };
 
 class WPFrameUniformSource {
 public:
-    explicit WPFrameUniformSource(std::shared_ptr<WPUniformSceneState> state)
-        : m_state(rstd::move(state)) {}
+    explicit WPFrameUniformSource(Arc<WPUniformSceneState> state): m_state(rstd::move(state)) {}
 
     auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> { return None(); }
 
 private:
-    std::shared_ptr<WPUniformSceneState> m_state;
+    Arc<WPUniformSceneState> m_state;
 };
 
 class WPAudioUniformSource {
 public:
-    explicit WPAudioUniformSource(std::shared_ptr<WPUniformSceneState> state)
-        : m_state(rstd::move(state)) {}
+    explicit WPAudioUniformSource(Arc<WPUniformSceneState> state): m_state(rstd::move(state)) {}
 
     auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void>;
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>>;
 
 private:
-    std::shared_ptr<WPUniformSceneState> m_state;
+    Arc<WPUniformSceneState> m_state;
 };
 
 class WPColorUniformSource {
 public:
-    explicit WPColorUniformSource(rstd::sync::Arc<SceneNode> node): m_node(rstd::move(node)) {}
+    explicit WPColorUniformSource(Arc<SceneNode> node): m_node(rstd::move(node)) {}
 
     auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> { return None(); }
 
 private:
-    rstd::sync::Arc<SceneNode> m_node;
+    Arc<SceneNode> m_node;
 };
 
 class WPLightUniformSource {
@@ -321,7 +308,7 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> { return None(); }
 
 private:
     Vec<ref<SceneLight>> m_lights;
@@ -333,37 +320,36 @@ public:
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> { return None(); }
 };
 
 class WPParticleTrailUniformSource {
 public:
-    explicit WPParticleTrailUniformSource(std::shared_ptr<WPParticleTrailUniformState> state)
+    explicit WPParticleTrailUniformSource(Arc<WPParticleTrailUniformState> state)
         : m_state(rstd::move(state)) {}
 
     auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return m_state; }
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>>;
 
 private:
-    std::shared_ptr<WPParticleTrailUniformState> m_state;
+    Arc<WPParticleTrailUniformState> m_state;
 };
 
 class WPPuppetUniformSource {
 public:
-    explicit WPPuppetUniformSource(std::shared_ptr<WPPuppetLayer> layer)
-        : m_layer(rstd::move(layer)) {}
+    explicit WPPuppetUniformSource(Arc<WPPuppetLayer> layer): m_layer(rstd::move(layer)) {}
 
     auto Describe(mut_ref<dyn<UniformBindingSink>>) const -> Result<empty, UniformError>;
     auto Version(ref<dyn<UniformUpdateContext>>) const -> u64;
     auto Evaluate(ref<dyn<UniformUpdateContext>>, mut_ref<dyn<UniformValueSink>>) const
         -> Result<empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const -> Option<Box<dyn<UniformBindingLease>>> { return None(); }
 
 private:
-    std::shared_ptr<WPPuppetLayer> m_layer;
+    Arc<WPPuppetLayer> m_layer;
 };
 
 } // namespace owe

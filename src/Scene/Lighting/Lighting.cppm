@@ -2,9 +2,10 @@ module;
 
 export module wescene.scene:lighting;
 import eigen;
-import wescene.core;
-import rstd.cppstd;
+import rstd;
 import :visibility;
+
+using namespace rstd::prelude;
 
 // SceneNode lives in the primary interface unit of wescene.scene. SceneLight
 // only needs a raw observation pointer here; ownership is carried by the
@@ -55,13 +56,13 @@ public:
 
     void setNode(SceneNode* node) { m_node = node; }
 
-    const std::string& visibleUserKey() const { return m_visible_user_binding.key; }
-    void               setVisibleUserKey(std::string k) {
-        m_visible_user_binding = SceneUserVisibilityBinding { .key = std::move(k) };
+    ref<str> visibleUserKey() const { return m_visible_user_binding.key.as_str(); }
+    void     setVisibleUserKey(String key) {
+        m_visible_user_binding = SceneUserVisibilityBinding { .key = rstd::move(key) };
     }
     const SceneUserVisibilityBinding& visibleUserBinding() const { return m_visible_user_binding; }
     void                              setVisibleUserBinding(SceneUserVisibilityBinding binding) {
-        m_visible_user_binding = std::move(binding);
+        m_visible_user_binding = rstd::move(binding);
     }
     bool runtimeVisible() const { return m_runtime_visible; }
     void setRuntimeVisible(bool v) { m_runtime_visible = v; }

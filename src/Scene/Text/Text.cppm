@@ -1,9 +1,13 @@
 module;
 
 export module wescene.text;
+import rstd;
 import wescene.types;
 import rstd.cppstd;
 import wescene.scene;
+
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 export namespace owe::text
 {
@@ -158,9 +162,7 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-// Lazy accessor for the scene-owned FontCache. The cache lives behind the
-// opaque `Scene::font_cache` pointer so wescene.scene doesn't have to depend
-// on this module.
+// Lazy accessor for the scene-owned FontCache extension.
 FontCache& EnsureSceneFontCache(owe::Scene& scene);
 FontCache* SceneFontCache(owe::Scene& scene) noexcept;
 
@@ -168,7 +170,7 @@ FontCache* SceneFontCache(owe::Scene& scene) noexcept;
 // single slot, single mipmap, LINEAR/CLAMP_TO_EDGE sampler). The returned
 // Image owns its pixel buffer; the FontFace can subsequently mutate or be
 // destroyed without affecting the snapshot.
-std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face, const std::string& key);
+auto BuildAtlasImage(const FontFace& face, ref<str> key) -> Option<Arc<owe::Image>>;
 
 // Lazily compiles the embedded text HLSL shader (one-time, process-wide
 // cached) and returns a ready-to-bind SceneShader. The shader expects:
@@ -190,17 +192,17 @@ enum class TextUniformOutput : rstd::uint32_t
 };
 
 struct TextEffectProjectionState {
-    rstd::sync::Arc<SceneNode> node;
-    rstd::array<float, 2>      size { 0.0f, 0.0f };
+    Arc<SceneNode>        node;
+    rstd::array<float, 2> size { 0.0f, 0.0f };
 };
 
 struct TextUniformState {
-    rstd::sync::Arc<SceneNode>                 node;
-    std::shared_ptr<SceneCamera>               camera;
-    std::shared_ptr<SceneCamera>               active_camera;
+    Arc<SceneNode>                             node;
+    Option<Arc<SceneCamera>>                   camera;
+    Option<Arc<SceneCamera>>                   active_camera;
     std::shared_ptr<TextEffectProjectionState> effect_projection;
 
-    explicit TextUniformState(rstd::sync::Arc<SceneNode> value): node(rstd::move(value)) {}
+    explicit TextUniformState(Arc<SceneNode> value): node(rstd::move(value)) {}
 };
 
 class TextUniformSource {
@@ -214,7 +216,10 @@ public:
     auto Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
                   rstd::mut_ref<rstd::dyn<UniformValueSink>>) const
         -> rstd::Result<rstd::empty, UniformError>;
-    auto AcquireBindingLease() const -> std::shared_ptr<void> { return {}; }
+    auto AcquireBindingLease() const
+        -> rstd::Option<rstd::boxed::Box<rstd::dyn<UniformBindingLease>>> {
+        return rstd::None();
+    }
 
 private:
     std::shared_ptr<TextUniformState> m_state;

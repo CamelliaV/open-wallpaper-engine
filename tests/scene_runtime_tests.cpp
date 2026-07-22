@@ -8,6 +8,10 @@ import wescene.pkg.parse;
 import wescene.scene;
 import wescene.text;
 
+using namespace rstd::prelude;
+using rstd::cppstd::to_string;
+using rstd::sync::Arc;
+
 namespace scene_test
 {
 
@@ -96,10 +100,13 @@ auto Capture(const owe::SceneFrame& frame, const Source& source, Output output)
 } // namespace scene_test
 
 TEST(WPTransformUniformSource, AcceptsMat3AndMat4ModelMatrices) {
-    auto state      = std::make_shared<owe::WPUniformSceneState>();
-    auto scene_node = rstd::sync::Arc<owe::SceneNode>::make();
-    auto node       = std::make_shared<owe::WPUniformNodeState>(rstd::move(scene_node));
-    owe::WPTransformUniformSource source(state, node);
+    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+    auto camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0));
+    auto resolver   = Arc<owe::WPUniformCameraResolver>::make(rstd::move(camera));
+    auto scene_node = Arc<owe::SceneNode>::make();
+    auto node = Arc<owe::WPUniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
+    owe::WPTransformUniformSource source(rstd::move(state), rstd::move(node));
     scene_test::ShapeSink         sink_impl;
     auto                          sink = rstd::dyn<owe::UniformBindingSink>::from_ref(sink_impl);
 
@@ -119,33 +126,44 @@ TEST(AudioResponseDemand, AggregatesLeasesAndHonorsRuntimeGate) {
     });
     ASSERT_EQ(changes, (std::vector<bool> { false }));
 
-    auto first  = demand.Acquire();
-    auto second = demand.Acquire();
+    auto first  = rstd::Some(demand.Acquire());
+    auto second = rstd::Some(demand.Acquire());
     EXPECT_TRUE(demand.Active());
     EXPECT_EQ(changes, (std::vector<bool> { false, true }));
-    first.reset();
+    first = rstd::None();
     EXPECT_TRUE(demand.Active());
-    second.reset();
+    second = rstd::None();
     EXPECT_FALSE(demand.Active());
     EXPECT_EQ(changes, (std::vector<bool> { false, true, false }));
 
-    auto gated = demand.Acquire();
+    auto gated = rstd::Some(demand.Acquire());
     demand.SetEnabled(false);
     demand.SetEnabled(true);
-    gated.reset();
+    gated = rstd::None();
     EXPECT_EQ(changes, (std::vector<bool> { false, true, false, true, false, true, false }));
+}
+
+TEST(SceneAudioAverage, SharesAtomicStateWithStreamOwner) {
+    owe::Scene scene;
+    auto       stream_owner = scene.AudioAverageHandle();
+
+    stream_owner->Store(usize(3), f32(0.75f));
+
+    EXPECT_FLOAT_EQ(scene.AudioAverage(usize(3)).to_primitive(), 0.75f);
 }
 
 TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {
     owe::Scene  scene;
     std::string first;
     std::string second;
-    scene.RegisterUserTextBinding("title", [&](std::string_view value) {
-        first = value;
-    });
-    scene.RegisterUserTextBinding("title", [&](std::string_view value) {
-        second = value;
-    });
+    scene.RegisterUserTextBinding(String::make("title"),
+                                  Box<dyn<FnMut<void(ref<str>)>>>::make([&](ref<str> value) {
+                                      first = to_string(value);
+                                  }));
+    scene.RegisterUserTextBinding(String::make("title"),
+                                  Box<dyn<FnMut<void(ref<str>)>>>::make([&](ref<str> value) {
+                                      second = to_string(value);
+                                  }));
 
     auto property = owe::ParseJson(R"({"type":"textinput","value":"updated"})").unwrap();
     EXPECT_TRUE(scene.ApplyUserTextBindings("title", property));
@@ -157,22 +175,50 @@ TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {
 TEST(SceneUserTextBinding, AppliesEmptyString) {
     owe::Scene  scene;
     std::string value = "default";
-    scene.RegisterUserTextBinding("title", [&](std::string_view next) {
-        value = next;
-    });
+    scene.RegisterUserTextBinding(String::make("title"),
+                                  Box<dyn<FnMut<void(ref<str>)>>>::make([&](ref<str> next) {
+                                      value = to_string(next);
+                                  }));
 
     auto property = owe::ParseJson(R"({"type":"textinput","value":""})").unwrap();
     EXPECT_TRUE(scene.ApplyUserTextBindings("title", property));
     EXPECT_TRUE(value.empty());
 }
 
+TEST(SceneUserPropertyBinding, AppliesJsonPayloadToOwnedCallback) {
+    owe::Scene scene;
+    bool       called = false;
+    scene.RegisterUserPropertyBinding(
+        String::make("camera"),
+        Box<dyn<FnMut<void(const owe::Json&)>>>::make([&](const owe::Json& property) {
+            called = property.is_object();
+        }));
+
+    auto property = owe::ParseJson(R"({"value":true})").unwrap();
+    EXPECT_TRUE(scene.ApplyUserPropertyBindings("camera", property));
+    EXPECT_TRUE(called);
+    EXPECT_FALSE(scene.ApplyUserPropertyBindings("other", property));
+}
+
+TEST(SceneTransformUpdater, ReceivesRuntimeElapsedTime) {
+    owe::Scene scene;
+    f64        observed;
+    scene.RegisterTransformUpdater(Box<dyn<FnMut<void(f64)>>>::make([&](f64 elapsed) {
+        observed = elapsed;
+    }));
+
+    scene.PassFrameTime(0.25);
+    scene.TickTransformUpdaters();
+    EXPECT_DOUBLE_EQ(observed.to_primitive(), 0.25);
+}
+
 TEST(TextUniformSource, OwnsTextProjectionOutputs) {
     owe::Scene scene;
-    auto       node   = rstd::sync::Arc<owe::SceneNode>::make();
-    auto       camera = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
+    auto       node = Arc<owe::SceneNode>::make();
+    auto       camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     auto state    = std::make_shared<owe::text::TextUniformState>(node.clone());
-    state->camera = camera;
+    state->camera = Some(camera.clone());
 
     owe::text::TextUniformSource source(state);
     auto                         value = scene_test::Capture(
@@ -193,9 +239,25 @@ TEST(SceneCameraProjection, UsesExplicitProjectionFactories) {
     EXPECT_DOUBLE_EQ(perspective.Fov(), 45.0);
 }
 
+TEST(SceneCameraPath, UserBindingMutatesRegisteredArc) {
+    owe::Scene scene;
+    auto       path                = Arc<owe::SceneCameraPath>::make();
+    path->visible_user_binding.key = String::make("camera-path");
+    scene.RegisterCameraPath(path.clone());
+    scene.RegisterCameraPathUserBinding(String::make("camera-path"), path.clone());
+
+    auto disabled = owe::ParseJson(R"({"value":false})").unwrap();
+    EXPECT_TRUE(scene.ApplyUserCameraPathVisibilityBindings("camera-path", disabled));
+    EXPECT_FALSE(path->enabled);
+
+    auto enabled = owe::ParseJson(R"({"value":true})").unwrap();
+    EXPECT_TRUE(scene.ApplyUserCameraPathVisibilityBindings("camera-path", enabled));
+    EXPECT_TRUE(path->enabled);
+}
+
 TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
     owe::Scene scene;
-    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       node = Arc<owe::SceneNode>::make();
     node->SetBaseColor({ 0.25f, 0.5f, 0.75f }, 0.8f);
     node->SetUserAlpha(0.125f);
 
@@ -211,7 +273,7 @@ TEST(WPUniformSourceRuntimeAlpha, Color4UsesBaseColorAndRuntimeAlpha) {
 
 TEST(WPUniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
     owe::Scene scene;
-    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       node = Arc<owe::SceneNode>::make();
     node->SetBaseColor({ 0.0f, 0.0f, 0.0f }, 0.35f);
     owe::WPColorUniformSource source(node.clone());
 
@@ -236,26 +298,24 @@ TEST(WPUniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
 
 TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     owe::Scene scene;
-    scene.ortho[0] = 3840;
-    scene.ortho[1] = 2160;
+    scene.SetOrtho({ i32(3840), i32(2160) });
 
-    auto camera_node =
-        rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 1920.0f, 1080.0f, 0.0f },
-                                              Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                                              Eigen::Vector3f::Zero());
-    auto camera = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
+    auto camera_node = Arc<owe::SceneNode>::make(Eigen::Vector3f { 1920.0f, 1080.0f, 0.0f },
+                                                 Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
+                                                 Eigen::Vector3f::Zero());
+    auto camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
-    scene.cameras["default"] = camera;
-    scene.activeCamera       = camera.get();
+    scene.RegisterCamera(String::make("default"), camera.clone());
+    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("default")));
 
-    auto parent = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 1982.0f, 1053.0f, 0.0f },
-                                                        Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                                                        Eigen::Vector3f::Zero());
-    auto child  = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { -76.0f, -3.0f, 0.0f },
-                                                        Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                                                        Eigen::Vector3f::Zero());
-    auto effect = rstd::sync::Arc<owe::SceneNode>::make();
+    auto parent = Arc<owe::SceneNode>::make(Eigen::Vector3f { 1982.0f, 1053.0f, 0.0f },
+                                            Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
+                                            Eigen::Vector3f::Zero());
+    auto child  = Arc<owe::SceneNode>::make(Eigen::Vector3f { -76.0f, -3.0f, 0.0f },
+                                            Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
+                                            Eigen::Vector3f::Zero());
+    auto effect = Arc<owe::SceneNode>::make();
     auto mesh   = std::make_shared<owe::SceneMesh>();
     mesh->AddMaterial(owe::SceneMaterial {});
     owe::SceneMesh::Submesh submesh;
@@ -263,35 +323,34 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     mesh->Submeshes().push_back(std::move(submesh));
     child->AddMesh(mesh);
     parent->AppendChild(child.clone());
-    scene.sceneGraph->AppendChild(parent.clone());
+    scene.RootMut()->AppendChild(parent.clone());
     scene.RebuildResourceIndex();
     effect->SetParentAnchor(child.as_ptr());
 
-    auto state              = std::make_shared<owe::WPUniformSceneState>();
+    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     state->CameraParallax() = { true, 0.03f, 0.0f, 0.36f };
     state->SetOrtho(3840.0f, 2160.0f);
     state->SetPointerInput(0.0, 1.0);
     state->Advance(owe::SceneFrame {});
 
-    auto camera_resolver = std::make_shared<owe::WPUniformCameraResolver>(camera);
-    camera_resolver->Add("default", camera);
+    auto camera_resolver = Arc<owe::WPUniformCameraResolver>::make(camera.clone());
+    camera_resolver->Add(String::make("default"), camera.clone());
 
-    auto parent_state             = std::make_shared<owe::WPUniformNodeState>(parent.clone());
-    parent_state->camera_resolver = camera_resolver;
+    auto parent_state = Arc<owe::WPUniformNodeState>::make(parent.clone(), camera_resolver.clone());
     parent_state->propagated_parallax_depth      = { -1.56f, -0.79f };
     parent_state->propagate_parallax_to_children = true;
-    auto child_state             = std::make_shared<owe::WPUniformNodeState>(child.clone());
-    child_state->camera_resolver = camera_resolver;
+    auto child_state = Arc<owe::WPUniformNodeState>::make(child.clone(), camera_resolver.clone());
     child_state->propagated_parallax_depth      = { -1.12f, -1.36f };
     child_state->propagate_parallax_to_children = true;
-    auto effect_state             = std::make_shared<owe::WPUniformNodeState>(effect.clone());
-    effect_state->camera_resolver = camera_resolver;
+    auto effect_state = Arc<owe::WPUniformNodeState>::make(effect.clone(), camera_resolver.clone());
     effect_state->propagated_parallax_depth      = { 0.0f, 0.0f };
     effect_state->propagate_parallax_to_children = true;
-    (void)state->SetNodeState({ .index = rstd::u32(1), .generation = rstd::u32(1) }, parent_state);
-    (void)state->SetNodeState({ .index = rstd::u32(2), .generation = rstd::u32(1) }, child_state);
-    (void)state->SetNodeState({ .index = rstd::u32(3), .generation = rstd::u32(1) }, effect_state);
-    owe::WPTransformUniformSource source(state, effect_state);
+    state->SetNodeState({ .index = rstd::u32(1), .generation = rstd::u32(1) },
+                        parent_state.clone());
+    state->SetNodeState({ .index = rstd::u32(2), .generation = rstd::u32(1) }, child_state.clone());
+    state->SetNodeState({ .index = rstd::u32(3), .generation = rstd::u32(1) },
+                        effect_state.clone());
+    owe::WPTransformUniformSource source(state.clone(), effect_state.clone());
 
     auto capture_mvp = [&]() {
         return scene_test::Capture(
@@ -320,8 +379,8 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     EXPECT_NEAR(mvp[rstd::usize(12)], expected_child.x(), 1e-5f);
     EXPECT_NEAR(mvp[rstd::usize(13)], expected_child.y(), 1e-5f);
 
-    auto layer_camera = std::make_shared<owe::SceneCamera>(
-        owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
+    auto layer_camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
     layer_camera->AttatchNode(effect.as_ptr());
     layer_camera->AttatchImgEffect(
         std::make_shared<owe::SceneImageEffectLayer>(child.as_ptr(),
@@ -329,8 +388,8 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
                                                      2160.0f,
                                                      "_rt_effect_pingpong_a_test",
                                                      "_rt_effect_pingpong_b_test"));
-    scene.cameras["layer"] = layer_camera;
-    camera_resolver->Add("layer", layer_camera);
+    scene.RegisterCamera(String::make("layer"), layer_camera.clone());
+    camera_resolver->Add(String::make("layer"), layer_camera.clone());
     effect->SetCamera("layer");
     parent_state->propagate_parallax_to_children = true;
     mvp                                          = capture_mvp();

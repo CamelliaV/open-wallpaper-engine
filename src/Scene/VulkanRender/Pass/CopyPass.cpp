@@ -13,18 +13,19 @@ import wescene.scene;
 
 using namespace owe::vulkan;
 using namespace rstd::prelude;
+using rstd::cppstd::as_str;
 
 CopyPass::CopyPass(Desc&& desc): m_desc(std::move(desc)) {}
 
 CopyPass::~CopyPass() {};
 
 PassInvalidationFlags CopyPass::finalizeResourceRequests(Scene& scene) {
-    PassInvalidationFlags flags = PassInvalidationNone;
-    auto refresh                = [&scene](std::string_view name) -> rstd::Option<TextureRequest> {
-        if (name.empty() || ! IsSpecTex(name)) return rstd::None();
-        auto it = scene.renderTargets.find(std::string(name));
-        if (it == scene.renderTargets.end()) return rstd::None();
-        return rstd::Some(MakeRenderTargetTextureRequest(name, it->second));
+    PassInvalidationFlags flags   = PassInvalidationNone;
+    auto                  refresh = [&scene](std::string_view name) -> Option<TextureRequest> {
+        if (name.empty() || ! IsSpecTex(name)) return None();
+        auto target = scene.RenderTarget(as_str(name));
+        if (target.is_none()) return None();
+        return Some(MakeRenderTargetTextureRequest(name, **target));
     };
 
     if (auto request = refresh(m_desc.src);

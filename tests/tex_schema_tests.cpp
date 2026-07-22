@@ -2,11 +2,15 @@
 
 #include <gtest/gtest.h>
 
+import rstd;
 import rstd.cppstd;
 import wescene.pkg.parse;
 import wescene.pkg_fs;
 import wescene.fs;
 import wescene.types;
+
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 namespace
 {
@@ -431,7 +435,9 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
         owe::WPTexImageParser parser(&vfs);
         owe::ImageHeader      h;
         try {
-            h = parser.ParseHeader(name);
+            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+            if (parsed.is_err()) continue;
+            h = rstd::move(parsed).unwrap_unchecked();
         } catch (...) {
             continue;
         }
@@ -520,7 +526,9 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         owe::WPTexImageParser parser(&vfs);
         owe::ImageHeader      h;
         try {
-            h = parser.ParseHeader(name);
+            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+            if (parsed.is_err()) continue;
+            h = rstd::move(parsed).unwrap_unchecked();
         } catch (...) {
             continue;
         }
@@ -529,19 +537,27 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         ++bucket_counts[key];
 
         ++parse_attempted;
-        std::shared_ptr<owe::Image> img;
+        Option<Arc<owe::Image>> image;
         try {
-            img = parser.Parse(name);
+            auto parsed_image = parser.Parse(rstd::cppstd::as_str(name));
+            if (parsed_image.is_ok()) image = Some(rstd::move(parsed_image).unwrap_unchecked());
         } catch (...) {
-            img.reset();
         }
-
-        if (! img || img->slots.empty()) {
+        if (image.is_none()) {
             ++parse_failed;
             ++per_bucket_fail[key];
-            ADD_FAILURE() << "Parse returned null/empty for " << m.workshop_id << " " << m.pkg_path
+            ADD_FAILURE() << "Parse failed for " << m.workshop_id << " " << m.pkg_path
                           << " (texb=" << m.texb << " image_type=" << static_cast<int>(h.type)
                           << ")";
+            continue;
+        }
+        auto img = image.take().unwrap_unchecked();
+        if (img->slots.empty()) {
+            ++parse_failed;
+            ++per_bucket_fail[key];
+            ADD_FAILURE() << "Parse returned an empty image for " << m.workshop_id << " "
+                          << m.pkg_path << " (texb=" << m.texb
+                          << " image_type=" << static_cast<int>(h.type) << ")";
             continue;
         }
         const auto& s0 = img->slots[0];
@@ -610,7 +626,9 @@ TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
         owe::WPTexImageParser parser(&vfs);
         owe::ImageHeader      h;
         try {
-            h = parser.ParseHeader(name);
+            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+            if (parsed.is_err()) continue;
+            h = rstd::move(parsed).unwrap_unchecked();
         } catch (...) {
             continue;
         }

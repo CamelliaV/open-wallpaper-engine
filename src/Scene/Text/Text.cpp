@@ -16,6 +16,9 @@ import rstd.cppstd;
 import wescene.scene;
 import wescene.shader_compile;
 
+using namespace rstd::prelude;
+using rstd::sync::Arc;
+
 namespace owe::text
 {
 
@@ -430,15 +433,14 @@ std::vector<FontFace*> FontCache::Faces() const {
 }
 
 FontCache& EnsureSceneFontCache(owe::Scene& scene) {
-    if (! scene.font_cache) {
-        scene.font_cache = { new FontCache(), [](void* p) noexcept {
-                                delete static_cast<FontCache*>(p);
-                            } };
-    }
-    return *static_cast<FontCache*>(scene.font_cache.get());
+    auto cache = scene.ExtensionMut<FontCache>();
+    if (cache.is_some()) return **cache;
+    scene.InstallExtension(Box<FontCache>::make());
+    return **scene.ExtensionMut<FontCache>();
 }
 FontCache* SceneFontCache(owe::Scene& scene) noexcept {
-    return static_cast<FontCache*>(scene.font_cache.get());
+    auto cache = scene.ExtensionMut<FontCache>();
+    return cache.is_some() ? (*cache).as_raw_ptr() : nullptr;
 }
 
 // WE references system fonts as `systemfont_<lowercased-windows-name>`,
@@ -558,13 +560,13 @@ FontCache::ResolvedBlob FontCache::ResolveSystemFont(std::string_view name, bool
 
 // -- Atlas snapshot -------------------------------------------------------
 
-std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face, const std::string& key) {
+auto BuildAtlasImage(const FontFace& face, ref<str> key) -> Option<Arc<owe::Image>> {
     auto fm  = face.Metrics();
     auto pix = face.AtlasPixels();
-    if (fm.atlas_w == 0 || fm.atlas_h == 0 || pix.empty()) return nullptr;
+    if (fm.atlas_w == 0 || fm.atlas_h == 0 || pix.empty()) return None();
 
-    auto img = std::make_shared<owe::Image>();
-    img->key = key;
+    auto img = Arc<owe::Image>::make();
+    img->key = rstd::cppstd::to_string(key);
 
     img->header.width         = static_cast<std::int32_t>(fm.atlas_w);
     img->header.height        = static_cast<std::int32_t>(fm.atlas_h);
@@ -598,7 +600,7 @@ std::shared_ptr<owe::Image> BuildAtlasImage(const FontFace& face, const std::str
     mip.data = owe::ImageDataPtr(const_cast<std::uint8_t*>(pix.data()), [](std::uint8_t*) noexcept {
     });
 
-    return img;
+    return Some(rstd::move(img));
 }
 
 // -- Text shader ----------------------------------------------------------
@@ -753,7 +755,7 @@ auto TextUniformSource::Version(rstd::ref<rstd::dyn<UniformUpdateContext>> conte
 auto TextUniformSource::Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
                                  rstd::mut_ref<rstd::dyn<UniformValueSink>> sink) const
     -> rstd::Result<rstd::empty, UniformError> {
-    if (! m_state || ! m_state->camera) return rstd::Ok(rstd::empty {});
+    if (! m_state || m_state->camera.is_none()) return rstd::Ok(rstd::empty {});
 
     auto write = [&](TextUniformOutput      output,
                      const Eigen::Matrix4d& matrix) -> rstd::Result<rstd::empty, UniformError> {
@@ -767,7 +769,7 @@ auto TextUniformSource::Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
 
     m_state->node->UpdateTrans();
     const Eigen::Matrix4d model =
-        m_state->camera->GetViewProjectionMatrix() * m_state->node->ModelTrans();
+        (**m_state->camera).GetViewProjectionMatrix() * m_state->node->ModelTrans();
     auto result = write(TextUniformOutput::ModelViewProjection, model);
     if (result.is_err()) return result;
 
@@ -784,9 +786,9 @@ auto TextUniformSource::Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
                                            1.0))
                 .matrix();
     }
-    const Eigen::Matrix4d effect_view = m_state->active_camera
-                                            ? m_state->active_camera->GetViewProjectionMatrix()
-                                            : m_state->camera->GetViewProjectionMatrix();
+    const Eigen::Matrix4d effect_view = m_state->active_camera.is_some()
+                                            ? (**m_state->active_camera).GetViewProjectionMatrix()
+                                            : (**m_state->camera).GetViewProjectionMatrix();
     return write(TextUniformOutput::EffectModelViewProjection, effect_view * effect_model);
 }
 

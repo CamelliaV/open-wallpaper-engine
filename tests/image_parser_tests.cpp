@@ -1,48 +1,57 @@
 #include <gtest/gtest.h>
 
+import rstd;
 import rstd.cppstd;
 import wescene.pkg.parse;
+import wescene.scene;
 import wescene.types;
+
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 namespace
 {
 
-class TrackingImageParser : public owe::WPTexImageParser {
+class TrackingImageParser {
 public:
-    TrackingImageParser(): WPTexImageParser(nullptr) {}
-
-    std::shared_ptr<owe::Image> Parse(const std::string& name) override {
+    auto Parse(ref<str> name) const -> Result<Arc<owe::Image>, owe::ImageParseError> {
         auto current  = m_active.fetch_add(1) + 1;
         auto observed = m_peak.load();
         while (current > observed && ! m_peak.compare_exchange_weak(observed, current)) {
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        auto image = std::make_shared<owe::Image>();
-        image->key = name;
+        auto image = Arc<owe::Image>::make();
+        image->key = rstd::cppstd::to_string(name);
         m_active.fetch_sub(1);
-        return image;
+        return Ok(rstd::move(image));
     }
 
-    owe::ImageHeader ParseHeader(const std::string&) override { return {}; }
+    auto ParseHeader(ref<str>) const -> Result<owe::ImageHeader, owe::ImageParseError> {
+        return Ok(owe::ImageHeader {});
+    }
 
     int peak() const { return m_peak.load(); }
 
 private:
-    std::atomic<int> m_active { 0 };
-    std::atomic<int> m_peak { 0 };
+    mutable std::atomic<int> m_active { 0 };
+    mutable std::atomic<int> m_peak { 0 };
 };
 
 TEST(ImageParser, BatchPreservesOrderAndBoundsConcurrency) {
-    TrackingImageParser      parser;
-    std::vector<std::string> names { "0", "1", "2", "3", "4", "5", "6", "7" };
+    TrackingImageParser parser;
+    Vec<String>         names;
+    for (const char* name : { "0", "1", "2", "3", "4", "5", "6", "7" })
+        names.push(String::make(name));
 
-    auto images = parser.ParseMany(names);
+    auto image_parser = dyn<owe::IImageParser>::from_ref(parser);
+    auto images       = owe::ParseImages(image_parser.as_ref(), names.as_slice());
 
-    ASSERT_EQ(images.size(), names.size());
-    for (std::size_t index = 0; index < names.size(); ++index) {
-        ASSERT_NE(images[index], nullptr);
-        EXPECT_EQ(images[index]->key, names[index]);
+    ASSERT_EQ(images.len(), names.len());
+    for (usize index {}; index < names.len(); ++index) {
+        ASSERT_TRUE(images[index].is_ok());
+        auto image = rstd::move(images[index]).unwrap_unchecked();
+        EXPECT_EQ(image->key, rstd::cppstd::to_string(names[index].as_str()));
     }
     EXPECT_GT(parser.peak(), 1);
     EXPECT_LE(parser.peak(), 4);

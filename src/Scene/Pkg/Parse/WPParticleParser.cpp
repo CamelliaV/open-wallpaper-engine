@@ -14,6 +14,7 @@ import wescene.particle.program;
 
 using namespace owe;
 using namespace Eigen;
+using rstd::sync::Arc;
 
 namespace WPParticleModify
 {
@@ -490,9 +491,9 @@ WPParticleParser::GenInitializer(const Json& wpj, WPParticleAttributes attribute
 }
 
 Box<dyn<particle::ParticleSpawnProgram>>
-WPParticleParser::GenOverride(std::shared_ptr<const wpscene::ParticleInstanceoverride> over,
-                              WPParticleAttributes                                     attributes) {
-    auto function = [over = std::move(over)](WPParticleRef p, f64) {
+WPParticleParser::GenOverride(Arc<wpscene::ParticleInstanceoverride> over,
+                              WPParticleAttributes                   attributes) {
+    auto function = [over = rstd::move(over)](WPParticleRef p, f64) {
         PM::MutiplyInitLifeTime(p, over->lifetime);
         PM::MutiplyInitAlpha(p, UiScalarToLinear(over->alpha));
         PM::MutiplyInitSize(p, over->size);
@@ -850,8 +851,7 @@ auto RegisterOscillationAttributes(WPParticleSubSystem& subsystem, usize operato
 }
 
 Box<dyn<particle::ParticleUpdateProgram>>
-WPParticleParser::GenOperator(const Json&                                              wpj,
-                              std::shared_ptr<const wpscene::ParticleInstanceoverride> over_state,
+WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceoverride> over_state,
                               WPParticleSubSystem& subsystem, usize operator_index) {
     auto attributes = subsystem.Attributes();
     do {
@@ -864,8 +864,8 @@ WPParticleParser::GenOperator(const Json&                                       
             std::array<float, 3> gravity { 0, 0, 0 };
             owe::GetJsonValue(wpj, "drag", drag, false);
             owe::GetJsonValue(wpj, "gravity", gravity, false);
-            Vector3d vecG     = Vector3f(gravity.data()).cast<double>();
-            auto     function = [drag, vecG, over_state](WPParticleBatch& info) {
+            Vector3d vecG = Vector3f(gravity.data()).cast<double>();
+            auto function = [drag, vecG, over_state = over_state.clone()](WPParticleBatch& info) {
                 auto speed = over_state->speed;
                 for (usize index {}; index < info.Len(); ++index) {
                     auto     p = info.Particle(index);
@@ -901,7 +901,7 @@ WPParticleParser::GenOperator(const Json&                                       
             return MakeUpdateProgram(attributes, rstd::move(function));
         } else if (name == "sizechange") {
             auto vc       = ValueChange::ReadFromJson(wpj);
-            auto function = [vc, over_state](WPParticleBatch& info) {
+            auto function = [vc, over_state = over_state.clone()](WPParticleBatch& info) {
                 auto size_over = over_state->size;
                 for (usize index {}; index < info.Len(); ++index) {
                     auto p = info.Particle(index);

@@ -13,18 +13,19 @@ import wescene.scene;
 
 using namespace owe::vulkan;
 using namespace rstd::prelude;
+using rstd::cppstd::as_str;
 
 CustomShaderPass::CustomShaderPass(Desc&& desc): m_desc(std::move(desc)) {}
 CustomShaderPass::~CustomShaderPass() {}
 
 namespace
 {
-rstd::Option<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::string_view name) {
-    if (name.empty()) return rstd::None();
-    if (! owe::IsSpecTex(name)) return rstd::Some(MakeImportedTextureRequest(name));
-    auto it = scene.renderTargets.find(std::string(name));
-    if (it == scene.renderTargets.end()) return rstd::None();
-    return rstd::Some(MakeRenderTargetTextureRequest(name, it->second));
+Option<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::string_view name) {
+    if (name.empty()) return None();
+    if (! owe::IsSpecTex(name)) return Some(MakeImportedTextureRequest(name));
+    auto target = scene.RenderTarget(as_str(name));
+    if (target.is_none()) return None();
+    return Some(MakeRenderTargetTextureRequest(name, **target));
 }
 
 } // namespace
@@ -40,9 +41,10 @@ PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
     }
 
     if (! m_desc.output.empty() && IsSpecTex(m_desc.output)) {
-        if (auto it = scene.renderTargets.find(m_desc.output); it != scene.renderTargets.end()) {
-            auto& rt             = it->second;
-            auto  output_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
+        auto target = scene.RenderTarget(as_str(m_desc.output));
+        if (target.is_some()) {
+            const auto& rt             = **target;
+            auto        output_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
             if (SetTextureRequestIfChanged(m_desc.output_request, std::move(output_request))) {
                 flags |= ToPassInvalidationFlags(PassInvalidation::Resources) |
                          ToPassInvalidationFlags(PassInvalidation::Framebuffer);
@@ -351,9 +353,9 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
 
         TextureBindingRequest binding;
         if (! next.empty()) {
-            binding.name = rstd::string::String::make(rstd::cppstd::as_str(next));
-            binding.request =
-                rstd::Some(MakeImportedTextureRequest(next, render_scene.textureDescId(next)));
+            binding.name    = rstd::string::String::make(rstd::cppstd::as_str(next));
+            binding.request = rstd::Some(MakeImportedTextureRequest(
+                next, render_scene.textureDescId(rstd::cppstd::as_str(next))));
         }
 
         if (! SameTextureBindingRequest(old, binding)) {
@@ -485,8 +487,10 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     {
         auto& tex_name = m_desc.output;
         rstd_assert(IsSpecTex(tex_name));
-        rstd_assert(scene.renderTargets.count(tex_name) > 0);
-        auto& rt        = scene.renderTargets.at(tex_name);
+        auto target = scene.RenderTarget(as_str(tex_name));
+        rstd_assert(target.is_some());
+        if (target.is_none()) return;
+        const auto& rt  = **target;
         out_force_clear = rt.force_clear;
         if (m_desc.output_use.is_none()) return;
         auto prepared = context.resources->Resolve(*m_desc.output_use);
@@ -517,10 +521,11 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     const auto& submesh = mesh.Submeshes()[submesh_index];
     const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
-    SceneMaterial& material_ref         = *slots[submesh.material_slot];
-    auto&          output_rt            = scene.renderTargets.at(m_desc.output);
-    const bool     has_depth_attachment = output_rt.withDepth && UsesDepthAttachment(material_ref);
-    m_desc.has_depth_attachment         = has_depth_attachment;
+    SceneMaterial& material_ref = *slots[submesh.material_slot];
+    auto           output_rt    = scene.RenderTarget(as_str(m_desc.output));
+    if (output_rt.is_none()) return;
+    const bool has_depth_attachment = (**output_rt).withDepth && UsesDepthAttachment(material_ref);
+    m_desc.has_depth_attachment     = has_depth_attachment;
     VkAttachmentLoadOp depthLoadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
     if (has_depth_attachment) {
         depthLoadOp = m_desc.clear_depth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -800,15 +805,11 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
                 VkClearValue { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 0.0f } } };
             m_desc.clear_value_src = rstd::None();
         } else {
-            auto& sc           = scene.clearColor;
+            auto sc            = scene.ClearColor();
             m_desc.clear_value = VkClearValue {
                 .color = { .float32 = { sc[usize()], sc[usize(1)], sc[usize(2)], 1.0f } }
             };
-            // Track the live scene.clearColor: per-frame re-sync in
-            // execute() picks up live edits (e.g. `schemecolor` user
-            // property changes) without a render-graph rebuild.
-            m_desc.clear_value_src = rstd::Some(rstd::ref<rstd::array<float, 3>>::from_raw_parts(
-                rstd::addressof(scene.clearColor)));
+            m_desc.clear_value_src = Some(scene.ClearColor());
         }
     }
     setPrepared();
@@ -838,7 +839,7 @@ bool CustomShaderPass::canJoinRenderScopeAfter(const VulkanPass& previous) const
 
 bool CustomShaderPass::update(PassUpdateContext& context) {
     if (m_desc.clear_value_src) {
-        const auto& sc                      = **m_desc.clear_value_src;
+        const auto& sc                      = *m_desc.clear_value_src;
         m_desc.clear_value.color.float32[0] = sc[usize()];
         m_desc.clear_value.color.float32[1] = sc[usize(1)];
         m_desc.clear_value.color.float32[2] = sc[usize(2)];

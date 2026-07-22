@@ -9,6 +9,8 @@ import wescene.script;
 import wescene.testing.json_builder;
 
 using namespace owe::script;
+using namespace rstd::prelude;
+using rstd::sync::Arc;
 
 namespace
 {
@@ -187,14 +189,14 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
 }
 
 TEST(ScriptAudio, RegisterAudioBuffersHoldsOneRuntimeDemandLease) {
-    auto              demand = std::make_shared<owe::AudioResponseDemand>();
+    auto              demand = rstd::sync::Arc<owe::AudioResponseDemand>::make();
     std::vector<bool> changes;
     demand->SetCallback([&changes](bool active) {
         changes.push_back(active);
     });
     {
         JsRuntime rt;
-        rt.SetAudioResponseDemand(demand);
+        rt.SetAudioResponseDemand(rstd::Some(demand.clone()));
         auto* fs = MakeProbe(rt,
                              "test/audio_demand",
                              R"JS(
@@ -957,15 +959,16 @@ TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
 
 TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
     owe::Scene scene;
-    auto       root  = rstd::sync::Arc<owe::SceneNode>::make();
+    auto       root  = Box<owe::SceneNode>::make();
     auto       layer = rstd::sync::Arc<owe::SceneNode>::make(
         Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "audio-layer");
     root->AppendChild(layer.clone());
-    scene.sceneGraph = root.clone();
+    auto root_pointer = root.get();
+    scene.SetRoot(rstd::move(root));
 
     layer->SetCamera("audio-effect-camera");
     auto camera =
-        std::make_shared<owe::SceneCamera>(owe::SceneCamera::MakeOrthographic(256, 256, -1.0, 1.0));
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(256, 256, -1.0, 1.0));
     auto effect_layer = std::make_shared<owe::SceneImageEffectLayer>(
         layer.as_ptr(), 256.0f, 256.0f, "_rt_effect_pingpong_a_test", "_rt_effect_pingpong_b_test");
     auto effect             = std::make_shared<owe::SceneImageEffect>();
@@ -973,13 +976,13 @@ TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
     effect->runtime_visible = true;
     effect_layer->AddEffect(effect);
     camera->AttatchImgEffect(effect_layer);
-    scene.cameras["audio-effect-camera"] = camera;
+    scene.RegisterCamera(String::make("audio-effect-camera"), rstd::move(camera));
 
     JsRuntime   rt;
     FrameInputs fi {};
     rt.SetFrameInputs(fi);
     rt.SetScene(&scene);
-    rt.SetSceneRoot(root.as_ptr());
+    rt.SetSceneRoot(root_pointer);
     auto* fs = rt.MakeFieldScript(
         R"JS(
             export function update() {
@@ -992,7 +995,7 @@ TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
         FieldKind::Scalar,
         owe::MakeObject(),
         owe::IntoJson(0),
-        root.as_ptr());
+        root_pointer);
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();

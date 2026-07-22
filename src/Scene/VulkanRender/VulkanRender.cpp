@@ -37,20 +37,21 @@ bool SameRenderItemId(owe::RenderItemId lhs, owe::RenderItemId rhs) {
     return lhs.index == rhs.index && lhs.generation == rhs.generation;
 }
 
-void PushUniqueRenderItem(std::vector<owe::RenderItemId>& items, owe::RenderItemId id) {
-    auto it = std::find_if(items.begin(), items.end(), [id](auto existing) {
-        return SameRenderItemId(existing, id);
-    });
-    if (it == items.end()) items.push_back(id);
+void PushUniqueRenderItem(Vec<owe::RenderItemId>& items, owe::RenderItemId id) {
+    for (usize index {}; index < items.len(); ++index) {
+        if (SameRenderItemId(items[index], id)) return;
+    }
+    items.push(rstd::move(id));
 }
 
-std::vector<owe::RenderItemId>
-RenderItemsForMaterials(const owe::RenderSceneSnapshot&       render_scene,
-                        std::span<const owe::SceneMaterialId> materials) {
-    std::vector<owe::RenderItemId> render_items;
-    for (auto material : materials) {
-        for (auto item : render_scene.renderItemsFor(material)) {
-            PushUniqueRenderItem(render_items, item);
+Vec<owe::RenderItemId> RenderItemsForMaterials(const owe::RenderSceneSnapshot& render_scene,
+                                               slice<owe::SceneMaterialId>     materials) {
+    Vec<owe::RenderItemId> render_items;
+    for (usize material_index {}; material_index < materials.len(); ++material_index) {
+        auto material       = materials[material_index];
+        auto material_items = render_scene.renderItemsFor(material);
+        for (usize index {}; index < material_items.len(); ++index) {
+            PushUniqueRenderItem(render_items, material_items[index]);
         }
     }
     return render_items;
@@ -120,14 +121,14 @@ struct VulkanRender::Impl {
     void refreshPreparedResources(Scene&, const RenderSceneSnapshot&,
                                   resource::ResourcePlanSections);
     void refreshPreparedTextures(Scene&, const RenderSceneSnapshot&);
-    void invalidatePreparedRenderItems(std::span<const owe::RenderItemId>, PassInvalidationFlags);
+    void invalidatePreparedRenderItems(slice<owe::RenderItemId>, PassInvalidationFlags);
     void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&,
-                                    std::span<const owe::RenderItemId>, PassInvalidationFlags);
+                                    slice<owe::RenderItemId>, PassInvalidationFlags);
     void refreshPreparedMaterial(Scene&, const RenderSceneSnapshot&, owe::SceneMaterialId,
                                  PassInvalidationFlags);
     bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&, owe::SceneMaterialId);
     bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&,
-                                         std::span<const owe::SceneMaterialId>);
+                                         slice<owe::SceneMaterialId>);
     void refreshPreparedMesh(Scene&, const RenderSceneSnapshot&, owe::SceneMeshId,
                              PassInvalidationFlags);
     std::vector<PreparedPassDiagnostic> preparedPassDiagnostics() const;
@@ -323,13 +324,13 @@ void VulkanRender::refreshPreparedResources(Scene& scene, const RenderSceneSnaps
 void VulkanRender::refreshPreparedTextures(Scene& scene, const RenderSceneSnapshot& render_scene) {
     pImpl->refreshPreparedTextures(scene, render_scene);
 }
-void VulkanRender::invalidatePreparedRenderItems(std::span<const owe::RenderItemId> render_items,
-                                                 PassInvalidationFlags              flags) {
+void VulkanRender::invalidatePreparedRenderItems(slice<owe::RenderItemId> render_items,
+                                                 PassInvalidationFlags    flags) {
     pImpl->invalidatePreparedRenderItems(render_items, flags);
 }
 void VulkanRender::refreshPreparedRenderItems(Scene& scene, const RenderSceneSnapshot& render_scene,
-                                              std::span<const owe::RenderItemId> render_items,
-                                              PassInvalidationFlags              flags) {
+                                              slice<owe::RenderItemId> render_items,
+                                              PassInvalidationFlags    flags) {
     pImpl->refreshPreparedRenderItems(scene, render_scene, render_items, flags);
 }
 void VulkanRender::refreshPreparedMaterial(Scene& scene, const RenderSceneSnapshot& render_scene,
@@ -342,9 +343,9 @@ bool VulkanRender::refreshPreparedMaterialTextures(Scene&                     sc
                                                    owe::SceneMaterialId       material) {
     return pImpl->refreshPreparedMaterialTextures(scene, render_scene, material);
 }
-bool VulkanRender::refreshPreparedMaterialTextures(
-    Scene& scene, const RenderSceneSnapshot& render_scene,
-    std::span<const owe::SceneMaterialId> materials) {
+bool VulkanRender::refreshPreparedMaterialTextures(Scene&                      scene,
+                                                   const RenderSceneSnapshot&  render_scene,
+                                                   slice<owe::SceneMaterialId> materials) {
     return pImpl->refreshPreparedMaterialTextures(scene, render_scene, materials);
 }
 void VulkanRender::refreshPreparedMesh(Scene& scene, const RenderSceneSnapshot& render_scene,
@@ -963,10 +964,14 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode f
     auto height = m_device->out_extent().height;
 
     if (width == 0) return;
-    double sw = scene.ortho[0], sh = scene.ortho[1];
+    auto   ortho = scene.Ortho();
+    double sw = ortho[usize()].to_primitive(), sh = ortho[usize(1)].to_primitive();
     double fboAspect = width / (double)height, sAspect = sw / sh;
-    auto&  gCam    = *scene.cameras.at("global");
-    auto&  gPerCam = *scene.cameras.at("global_perspective");
+    auto   global      = scene.CameraMut(ref<str>("global"));
+    auto   perspective = scene.CameraMut(ref<str>("global_perspective"));
+    if (global.is_none() || perspective.is_none()) return;
+    auto& gCam    = **global;
+    auto& gPerCam = **perspective;
     // assum cam
     switch (fillmode) {
     case FillMode::STRETCH:
@@ -1110,14 +1115,14 @@ void VulkanRender::Impl::refreshPreparedResources(Scene&                        
 }
 
 void VulkanRender::Impl::invalidatePreparedRenderItems(
-    std::span<const owe::RenderItemId> render_items, PassInvalidationFlags flags) {
+    slice<owe::RenderItemId> render_items, PassInvalidationFlags flags) {
     if (! m_inited) return;
     m_program.invalidateRenderItems(render_items, flags);
 }
 
 void VulkanRender::Impl::refreshPreparedRenderItems(Scene&                             scene,
                                                     const RenderSceneSnapshot&         render_scene,
-                                                    std::span<const owe::RenderItemId> render_items,
+                                                    slice<owe::RenderItemId>           render_items,
                                                     PassInvalidationFlags              flags) {
     invalidatePreparedRenderItems(render_items, flags);
     refreshPreparedResources(scene, render_scene);
@@ -1134,16 +1139,16 @@ bool VulkanRender::Impl::refreshPreparedMaterialTextures(Scene&                 
                                                          const RenderSceneSnapshot& render_scene,
                                                          owe::SceneMaterialId       material) {
     rstd::array<owe::SceneMaterialId, 1> materials { material };
-    return refreshPreparedMaterialTextures(scene, render_scene, std::span(materials));
+    return refreshPreparedMaterialTextures(scene, render_scene, materials.as_slice());
 }
 
-bool VulkanRender::Impl::refreshPreparedMaterialTextures(
-    Scene& scene, const RenderSceneSnapshot& render_scene,
-    std::span<const owe::SceneMaterialId> materials) {
+bool VulkanRender::Impl::refreshPreparedMaterialTextures(Scene&                      scene,
+                                                         const RenderSceneSnapshot&  render_scene,
+                                                         slice<owe::SceneMaterialId> materials) {
     if (! m_inited || m_program.pass_records.is_empty()) return true;
     auto render_items = RenderItemsForMaterials(render_scene, materials);
     bool requires_graph_rebuild =
-        m_program.refreshMaterialTextureBindings(render_scene, render_items);
+        m_program.refreshMaterialTextureBindings(render_scene, render_items.as_slice());
     if (requires_graph_rebuild) return false;
     refreshPreparedResources(scene, render_scene);
     return true;

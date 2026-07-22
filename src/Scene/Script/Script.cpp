@@ -364,15 +364,15 @@ struct DeferredCb {
 };
 
 struct EngineHostState {
-    FrameInputs                          inputs;
-    MediaStatus                          media;
-    bool                                 media_initialized { false };
-    owe::Scene*                          scene { nullptr };
-    JSValue                              audio_buffer { JS_UNDEFINED };
-    uint32_t                             audio_buffer_resolution { 64 };
-    bool                                 audio_buffer_built { false };
-    std::shared_ptr<AudioResponseDemand> audio_response_demand;
-    std::shared_ptr<void>                audio_response_lease;
+    FrameInputs                           inputs;
+    MediaStatus                           media;
+    bool                                  media_initialized { false };
+    owe::Scene*                           scene { nullptr };
+    JSValue                               audio_buffer { JS_UNDEFINED };
+    uint32_t                              audio_buffer_resolution { 64 };
+    bool                                  audio_buffer_built { false };
+    Option<Arc<AudioResponseDemand>>      audio_response_demand;
+    Option<Box<dyn<UniformBindingLease>>> audio_response_lease;
     // Cached `globalThis.Vec3` ctor, populated lazily on first node access.
     // Used by the SceneNode wrapper to hand back Vec3 instances so scripts
     // can call `.add` / `.subtract` on `thisLayer.origin`.
@@ -586,8 +586,9 @@ JSValue EngineRegisterAudioBuffers(JSContext* ctx, JSValueConst /*this_val*/, in
                                    JSValueConst* argv) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     if (! host->audio_buffer_built) {
-        if (host->audio_response_demand && ! host->audio_response_lease)
-            host->audio_response_lease = host->audio_response_demand->Acquire();
+        if (host->audio_response_demand.is_some() && host->audio_response_lease.is_none()) {
+            host->audio_response_lease = Some((*host->audio_response_demand)->Acquire());
+        }
         int32_t requested = 64;
         if (argc > 0) (void)JS_ToInt32(ctx, &requested, argv[0]);
         host->audio_buffer_resolution = NormalizeAudioResolution(requested);
@@ -2516,11 +2517,12 @@ void JsRuntime::SetFrameInputs(const FrameInputs& fi) {
     if (m_impl->host.audio_buffer_built) RefreshAudioBuffer(m_impl->ctx);
 }
 
-void JsRuntime::SetAudioResponseDemand(std::shared_ptr<AudioResponseDemand> demand) {
-    m_impl->host.audio_response_lease.reset();
-    m_impl->host.audio_response_demand = std::move(demand);
-    if (m_impl->host.audio_buffer_built && m_impl->host.audio_response_demand)
-        m_impl->host.audio_response_lease = m_impl->host.audio_response_demand->Acquire();
+void JsRuntime::SetAudioResponseDemand(Option<Arc<AudioResponseDemand>> demand) {
+    m_impl->host.audio_response_lease  = None();
+    m_impl->host.audio_response_demand = rstd::move(demand);
+    if (m_impl->host.audio_buffer_built && m_impl->host.audio_response_demand.is_some()) {
+        m_impl->host.audio_response_lease = Some((*m_impl->host.audio_response_demand)->Acquire());
+    }
 }
 
 void JsRuntime::SetUserProperty(std::string_view key, const Json& property) {
@@ -2926,9 +2928,9 @@ struct ScriptScene::Impl {
     std::vector<Actuator> actuators;
 };
 
-ScriptScene::ScriptScene(std::shared_ptr<AudioResponseDemand> demand)
+ScriptScene::ScriptScene(Option<Arc<AudioResponseDemand>> demand)
     : m_impl(std::make_unique<Impl>()) {
-    m_impl->rt.SetAudioResponseDemand(std::move(demand));
+    m_impl->rt.SetAudioResponseDemand(rstd::move(demand));
 }
 ScriptScene::~ScriptScene() = default;
 
@@ -3033,38 +3035,31 @@ void ScriptScene::Tick(const FrameInputs& fi) {
     }
 }
 
-void InstallScriptScene(owe::Scene& scene, std::unique_ptr<ScriptScene> ss) {
-    // Move into Scene's opaque-pointer slot. The deleter knows the
-    // concrete type because it's instantiated in this TU.
-    void* raw          = ss.release();
-    scene.script_scene = decltype(scene.script_scene)(raw, [](void* p) noexcept {
-        delete static_cast<ScriptScene*>(p);
-    });
+void InstallScriptScene(owe::Scene& scene, Box<ScriptScene> script_scene) {
+    scene.InstallExtension(rstd::move(script_scene));
 }
 
 void TickSceneScripts(owe::Scene& scene, const FrameInputs& fi) {
-    auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
-    if (! ss) return;
-    ss->Tick(fi);
+    auto script_scene = scene.ExtensionMut<ScriptScene>();
+    if (script_scene.is_none()) return;
+    (**script_scene).Tick(fi);
 }
 
 void SetSceneUserProperty(owe::Scene& scene, std::string_view key, const Json& property) {
-    if (auto* ss = static_cast<ScriptScene*>(scene.script_scene.get()); ss != nullptr) {
-        ss->runtime().SetUserProperty(key, property);
-    }
+    auto script_scene = scene.ExtensionMut<ScriptScene>();
+    if (script_scene.is_some()) (**script_scene).runtime().SetUserProperty(key, property);
     scene.ApplyUserLightVisibilityBindings(key, property);
 }
 
 void SetSceneMediaStatus(owe::Scene& scene, const MediaStatus& status) {
-    if (auto* ss = static_cast<ScriptScene*>(scene.script_scene.get()); ss != nullptr) {
-        ss->runtime().SetMediaStatus(status);
-    }
+    auto script_scene = scene.ExtensionMut<ScriptScene>();
+    if (script_scene.is_some()) (**script_scene).runtime().SetMediaStatus(status);
 }
 
 void SetScenePersistence(owe::Scene& scene, std::string path) {
-    auto* ss = static_cast<ScriptScene*>(scene.script_scene.get());
-    if (! ss) return;
-    ss->runtime().SetPersistence(std::move(path));
+    auto script_scene = scene.ExtensionMut<ScriptScene>();
+    if (script_scene.is_none()) return;
+    (**script_scene).runtime().SetPersistence(std::move(path));
 }
 
 } // namespace owe::script

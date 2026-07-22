@@ -10,6 +10,8 @@ import wescene.vulkan;
 import wescene.scene;
 
 using namespace owe::vulkan;
+using namespace rstd::prelude;
+using rstd::cppstd::as_str;
 
 PrePass::PrePass(Desc&& desc): m_desc(std::move(desc)) {}
 PrePass::~PrePass() {}
@@ -85,7 +87,7 @@ std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() c
 void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& context) {
     {
         auto tex_name = std::string(m_desc.result);
-        if (scene.renderTargets.count(tex_name) == 0) {
+        if (scene.RenderTarget(as_str(tex_name)).is_none()) {
             rstd_error("frame result render target {} not found", tex_name);
             return;
         }
@@ -99,9 +101,10 @@ void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& co
         }
     }
     {
-        auto  tex_name = std::string(m_desc.result);
-        auto& rt       = scene.renderTargets.at(tex_name);
-        m_desc.samples = TextureSampleCount(rt.sample_count);
+        auto tex_name = std::string(m_desc.result);
+        auto target   = scene.RenderTarget(as_str(tex_name));
+        if (target.is_none()) return;
+        m_desc.samples = TextureSampleCount((**target).sample_count);
         if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {
             if (m_desc.result_msaa_use.is_none()) {
                 rstd_error("frame MSAA texture use {} not found", tex_name);
@@ -147,7 +150,7 @@ void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& co
         }
     }
     {
-        auto& sc           = scene.clearColor;
+        auto sc            = scene.ClearColor();
         m_desc.clear_value = VkClearValue {
             .color = { .float32 = { sc[usize()], sc[usize(1)], sc[usize(2)], 1.0f } }
         };
