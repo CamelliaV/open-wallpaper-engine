@@ -4,31 +4,143 @@ local M = {}
 
 local SUBSCRIBE = "https://api.steampowered.com/IPublishedFileService/Subscribe/v1/"
 local UNSUBSCRIBE = "https://api.steampowered.com/IPublishedFileService/Unsubscribe/v1/"
+local DETAILS = "https://steamcommunity.com/sharedfiles/filedetails/?id="
+local DETAILS_HEADERS = {
+    Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    ["Accept-Language"] = "zh",
+    DNT = "1",
+    Priority = "u=0, i",
+    ["Sec-Fetch-Dest"] = "document",
+    ["Sec-Fetch-Mode"] = "navigate",
+    ["Sec-Fetch-Site"] = "none",
+    ["Sec-Fetch-User"] = "?1",
+    ["Upgrade-Insecure-Requests"] = "1",
+}
+local STATUS_TTL_MS = 60000
+local UNKNOWN_TTL_MS = 15000
+local MUTATION_GRACE_MS = 30000
+
+local cache = {}
+local cache_generation = -1
+
+local function sync_cache()
+    local current = session.generation()
+    if current ~= cache_generation then
+        cache = {}
+        cache_generation = current
+    end
+end
+
+function M.clear()
+    cache = {}
+    cache_generation = session.generation()
+end
+
+local function parse_page_state(ctx, html)
+    local signed_in = false
+    local state
+    local elements = ctx.html.query(
+        html,
+        "#account_pulldown, #SubscribeItemOptionSubscribed.selected, "
+            .. "#SubscribeItemOptionAdd.selected"
+    )
+    for _, element in ipairs(elements) do
+        local attrs = element.attrs or {}
+        local id = attrs.id
+        if id == "account_pulldown" then
+            signed_in = true
+        elseif id == "SubscribeItemOptionSubscribed" then
+            if state then return "unknown" end
+            state = "subscribed"
+        elseif id == "SubscribeItemOptionAdd" then
+            if state then return "unknown" end
+            state = "unsubscribed"
+        end
+    end
+    if not signed_in then return nil, "signed_out" end
+    if not state then
+        ctx.log("wallpaper_engine: Steam detail page has no selected subscription option")
+    end
+    return state or "unknown"
+end
+
+local function request_page(ctx, id, retry_login)
+    local http = session.ensure_http(ctx)
+    local response = http:get(DETAILS .. ctx.url.encode_component(tostring(id)))
+        :headers(DETAILS_HEADERS)
+        :timeout(20)
+        :send()
+    if response:status() == 401 or response:status() == 403 then
+        if retry_login then
+            session.renew_web_session(ctx)
+            return request_page(ctx, id, false)
+        end
+        error("Steam Community session expired; sign in again")
+    end
+    if not response:ok() then
+        error("Steam subscription status failed with HTTP " .. tostring(response:status()))
+    end
+    local result, reason = parse_page_state(ctx, response:text() or "")
+    if reason == "signed_out" then
+        if retry_login then
+            session.renew_web_session(ctx)
+            return request_page(ctx, id, false)
+        end
+        error("Steam Community session expired; sign in again")
+    end
+    return result
+end
 
 function M.status(ctx, ids)
-    session.ensure_access_token(ctx)
+    sync_cache()
+    if #ids == 0 then return {} end
+    session.ensure_http(ctx)
+    local now = ctx.time.now()
     local result = {}
     for _, id in ipairs(ids) do
-        result[tostring(id)] = "unknown"
+        local key = tostring(id)
+        local cached = cache[key]
+        if cached and cached.expires_at > now then
+            result[key] = cached.state
+        else
+            local ok, value = pcall(request_page, ctx, key, true)
+            if not ok then
+                local message = tostring(value)
+                if message:find("session expired; sign in again", 1, true) then error(value) end
+                ctx.log("wallpaper_engine: Steam subscription status failed: " .. message)
+                value = "unknown"
+            end
+            result[key] = value
+            cache[key] = {
+                state = value,
+                expires_at = now + (value == "unknown" and UNKNOWN_TTL_MS or STATUS_TTL_MS),
+            }
+        end
     end
     return result
 end
 
 local function set_subscription(ctx, id, subscribed)
-    local access_token = session.ensure_access_token(ctx)
-    local rsp = ctx.http
-        :post(subscribed and SUBSCRIBE or UNSUBSCRIBE)
-        :form({
-            access_token = access_token,
-            publishedfileid = tostring(id),
-            list_type = "1",
-            notify_client = "1",
-        })
-        :timeout(20)
-        :send()
-    if not rsp:ok() then
-        error("Steam subscription request failed with HTTP " .. tostring(rsp:status()))
+    sync_cache()
+    local response = session.authorized(ctx, function(access_token, http)
+        return http
+            :post(subscribed and SUBSCRIBE or UNSUBSCRIBE)
+            :form({
+                access_token = access_token,
+                publishedfileid = tostring(id),
+                list_type = "1",
+                notify_client = "1",
+            })
+            :timeout(20)
+            :send()
+    end)
+    if not response:ok() then
+        error("Steam subscription request failed with HTTP " .. tostring(response:status()))
     end
+    cache[tostring(id)] = {
+        state = subscribed and "subscribed" or "unsubscribed",
+        expires_at = ctx.time.now() + MUTATION_GRACE_MS,
+    }
     return { accepted = true }
 end
 

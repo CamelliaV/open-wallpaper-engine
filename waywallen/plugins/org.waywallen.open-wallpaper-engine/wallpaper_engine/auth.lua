@@ -4,21 +4,24 @@ local M = {}
 
 local BEGIN = "https://api.steampowered.com/IAuthenticationService/BeginAuthSessionViaQR/v1/"
 local POLL = "https://api.steampowered.com/IAuthenticationService/PollAuthSessionStatus/v1/"
+local COMMUNITY_HEADERS = {
+    Accept = "application/json, text/plain, */*",
+    Origin = "https://steamcommunity.com",
+    Referer = "https://steamcommunity.com",
+}
 
 function M.begin(ctx)
-    local device_details = ctx.json.encode({
-        device_friendly_name = "waywallen",
-        platform_type = 1,
-        os_type = 0,
+    local input_json = ctx.json.encode({
+        device_details = {
+            device_friendly_name = "waywallen",
+            platform_type = 2,
+        },
     })
     local rsp = ctx.http
         :post(BEGIN)
+        :headers(COMMUNITY_HEADERS)
         :form({
-            device_friendly_name = "waywallen",
-            platform_type = "1",
-            website_id = "Client",
-            device_details = device_details,
-            format = "json",
+            input_json = input_json,
         })
         :timeout(20)
         :send()
@@ -46,6 +49,7 @@ end
 function M.poll(ctx, key)
     local rsp = ctx.http
         :post(POLL)
+        :headers(COMMUNITY_HEADERS)
         :form({
             client_id = key.client_id,
             request_id = key.request_id,
@@ -61,7 +65,7 @@ function M.poll(ctx, key)
     end
     local response = ((rsp:json() or {}).response or {})
     if type(response.refresh_token) == "string" and response.refresh_token ~= "" then
-        session.set_auth(response.account_name, response.access_token, response.refresh_token)
+        session.set_auth(ctx, response.account_name, response.access_token, response.refresh_token)
         return {
             state = "succeeded",
             display_value = response.account_name or "Steam",

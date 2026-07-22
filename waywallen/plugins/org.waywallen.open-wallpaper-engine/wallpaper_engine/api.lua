@@ -89,7 +89,6 @@ function M.search(ctx, params)
     end
 
     local query = {
-        access_token = session.ensure_access_token(ctx),
         appid = M.APPID,
         query_type = tostring(sort.query_type),
         page = tostring(params.page or 1),
@@ -113,7 +112,10 @@ function M.search(ctx, params)
         ei = ei + 1
     end
 
-    local rsp = ctx.http:get(QUERYFILES):query(query):timeout(20):send()
+    local rsp = session.authorized(ctx, function(access_token, http)
+        query.access_token = access_token
+        return http:get(QUERYFILES):query(query):timeout(20):send()
+    end)
     if not rsp:ok() then
         error("steam workshop http " .. tostring(rsp:status()))
     end

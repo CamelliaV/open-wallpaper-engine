@@ -60,9 +60,6 @@ function M.info()
                 search = true,
                 details = true,
                 subscription = true,
-                remote_hint =
-                    "Steam downloads subscribed items. Refresh your configured Steam source " ..
-                    "library when you want waywallen to discover newly downloaded wallpapers.",
                 sorts = {
                     { key = "trend_day", label = "Trending today" },
                     { key = "trend_week", label = "Trending this week" },
@@ -119,7 +116,8 @@ function M.actions.invoke(ctx, action_id)
     if action_id ~= "steam_sign_out" then
         error("unsupported Steam action")
     end
-    session.sign_out()
+    session.sign_out(ctx)
+    subscription.clear()
 end
 
 M.qrlogin = {}

@@ -1,4 +1,7 @@
+local STEAMID = "76561198000000000"
+
 return {
+    steamid = STEAMID,
     qr_begin = {
         response = {
             client_id = "123456789",
@@ -7,16 +10,8 @@ return {
             interval = 1.5,
         },
     },
-    qr_pending = {
-        response = {
-            had_remote_interaction = false,
-        },
-    },
-    qr_confirmation = {
-        response = {
-            had_remote_interaction = true,
-        },
-    },
+    qr_pending = { response = { had_remote_interaction = false } },
+    qr_confirmation = { response = { had_remote_interaction = true } },
     qr_rotation = {
         response = {
             new_client_id = "987654321",
@@ -27,16 +22,58 @@ return {
     qr_success = {
         response = {
             account_name = "fixture-account",
-            access_token = "header.valid.signature",
+            access_token = "header.qr_access.signature",
             refresh_token = "header.refresh.signature",
         },
     },
-    token_refresh = {
-        response = {
-            access_token = "header.valid.signature",
-            refresh_token = "header.refresh2.signature",
+    web_finalize = {
+        steamID = STEAMID,
+        transfer_info = {
+            {
+                url = "https://steamcommunity.com/login/settoken",
+                params = { nonce = "community-transfer" },
+            },
+            {
+                url = "https://store.steampowered.com/login/settoken",
+                params = { nonce = "store-transfer" },
+            },
+            {
+                url = "https://help.steampowered.com/login/settoken",
+                params = { nonce = "help-transfer" },
+            },
+            {
+                url = "https://checkout.steampowered.com/login/settoken",
+                params = { nonce = "checkout-transfer" },
+            },
+            {
+                url = "https://steam.tv/login/settoken",
+                params = { nonce = "tv-transfer" },
+            },
         },
     },
+    community_cookie = "steamLoginSecure=" .. STEAMID
+        .. "%7C%7Cheader.community.signature; Domain=steamcommunity.com; Path=/; Secure",
+    store_cookie = "steamLoginSecure=" .. STEAMID
+        .. "%7C%7Cheader.store.signature; Domain=store.steampowered.com; Path=/; Secure",
+    help_cookie = "steamLoginSecure=" .. STEAMID
+        .. "%7C%7Cheader.store.signature; Domain=help.steampowered.com; Path=/; Secure",
+    checkout_cookie = "steamLoginSecure=" .. STEAMID
+        .. "%7C%7Cheader.store.signature; Domain=checkout.steampowered.com; Path=/; Secure",
+    tv_cookie = "steamLoginSecure=" .. STEAMID
+        .. "%7C%7Cheader.store.signature; Domain=steam.tv; Path=/; Secure",
+    subscribed_page = '<div id="account_pulldown">fixture-account</div>'
+        .. '<div id="SubscribeItemOptionSubscribed" '
+        .. 'class="subscribeOption subscribed selected">Subscribed</div>',
+    unsubscribed_page = '<div id="account_pulldown">fixture-account</div>'
+        .. '<div id="SubscribeItemOptionAdd" '
+        .. 'class="subscribeOption add selected">Subscribe</div>',
+    unknown_page = '<div id="account_pulldown">fixture-account</div>',
+    conflict_page = '<div id="account_pulldown">fixture-account</div>'
+        .. '<div id="SubscribeItemOptionSubscribed" '
+        .. 'class="subscribeOption subscribed selected">Subscribed</div>'
+        .. '<div id="SubscribeItemOptionAdd" '
+        .. 'class="subscribeOption add selected">Subscribe</div>',
+    signed_out_page = '<a href="https://steamcommunity.com/login">Sign In</a>',
     query_files = {
         response = {
             total = 1,
