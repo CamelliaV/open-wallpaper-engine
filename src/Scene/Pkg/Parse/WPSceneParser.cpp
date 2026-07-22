@@ -1863,16 +1863,33 @@ bool IsSystemMediaTextureBinding(const Json& binding) {
     return UserTexturePropertyKey(binding).has_value() && binding.is_object();
 }
 
+std::string ResolveMaterialTextureFallback(Scene& scene, const wpscene::Material& fallback_material,
+                                           const WPShaderInfo& shader_info, usize slot) {
+    std::string fallback;
+    if (slot.to_primitive() < fallback_material.textures.size()) {
+        fallback = fallback_material.textures[slot.to_primitive()];
+    }
+    if (fallback.empty()) {
+        for (const auto& [index, texture] : shader_info.defTexs) {
+            if (usize(static_cast<std::size_t>(index)) == slot) {
+                fallback = texture;
+                break;
+            }
+        }
+    }
+    ParseSpecTexName(fallback, fallback_material, shader_info, scene);
+    return fallback;
+}
+
 void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
-                                      const wpscene::Material& fallback_material) {
+                                      const wpscene::Material& fallback_material,
+                                      const WPShaderInfo&      shader_info) {
     if (! pScene || ! stable_mat) return;
     for (usize i {}; i < fallback_material.usertextures.len(); ++i) {
         auto key = UserTexturePropertyKey(fallback_material.usertextures[i]);
         if (! key.has_value()) continue;
-        std::string fallback;
-        if (i.to_primitive() < fallback_material.textures.size()) {
-            fallback = fallback_material.textures[i.to_primitive()];
-        }
+        std::string fallback =
+            ResolveMaterialTextureFallback(*pScene, fallback_material, shader_info, i);
         if (IsSystemMediaTextureBinding(fallback_material.usertextures[i]) &&
             i.to_primitive() < stable_mat->textures.size()) {
             fallback = stable_mat->textures[i.to_primitive()];
@@ -2601,7 +2618,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     track_image_property_material(mesh.MaterialSlots().back().get());
     RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(), image_wpmat, shaderInfo);
     RegisterMaterialUserTextureIndex(
-        context.scene.get(), mesh.Material(), image_user_texture_fallback);
+        context.scene.get(), mesh.Material(), image_user_texture_fallback, shaderInfo);
 
     // Puppet clipping masks: each MaskBlock becomes a pair of submeshes.
     // 1) Pre-pass: clippingmaskimage4 over `part_ids_b` (mask shape mesh)
@@ -2960,8 +2977,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 RegisterShaderUserVarIndex(
                     context.scene.get(), spMesh->Material(), wpmat, wpEffShaderInfo);
                 if (user_texture_fallback.has_value()) {
-                    RegisterMaterialUserTextureIndex(
-                        context.scene.get(), spMesh->Material(), *user_texture_fallback);
+                    RegisterMaterialUserTextureIndex(context.scene.get(),
+                                                     spMesh->Material(),
+                                                     *user_texture_fallback,
+                                                     wpEffShaderInfo);
                 }
                 auto add_puppet_mask_materials = [&]() -> bool {
                     if (! (puppet && wpmat.use_puppet && puppet_has_masks)) return true;
@@ -4174,7 +4193,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     RegisterShaderUserVarIndex(&scene, mesh->Material(), wpmat, shader_info);
                     if (user_texture_fallback.has_value()) {
                         RegisterMaterialUserTextureIndex(
-                            &scene, mesh->Material(), *user_texture_fallback);
+                            &scene, mesh->Material(), *user_texture_fallback, shader_info);
                     }
                     effect_node->AddMesh(mesh);
                     SetWPUniformConfig(context, effect_node, rstd::move(sv));
