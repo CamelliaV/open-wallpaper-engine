@@ -444,20 +444,29 @@ bool CustomShaderPass::prepareResourceStates(
     for (const auto& binding : m_desc.texture_bindings) {
         if (binding.use.is_none()) continue;
         auto barrier = states->Prepare(*binding.use, resource_registry::TextureStateKind::Sampled);
-        if (barrier.is_none()) return false;
+        if (barrier.is_none()) {
+            rstd_error("prepare sampled texture state failed for {}", binding.name);
+            return false;
+        }
         m_desc.sampled_barriers.Add(rstd::move(barrier).unwrap_unchecked());
     }
     if (m_desc.output_use.is_some() &&
         ! states->Set(*m_desc.output_use, resource_registry::TextureStateKind::Sampled)) {
+        rstd_error("prepare output texture state failed for {}", m_desc.output);
         return false;
     }
     if (m_desc.output_msaa_use.is_some() &&
         ! states->Set(*m_desc.output_msaa_use,
                       resource_registry::TextureStateKind::ColorAttachment)) {
+        rstd_error("prepare MSAA output texture state failed for {}", m_desc.output);
         return false;
     }
-    return m_desc.depth_use.is_none() ||
-           states->Set(*m_desc.depth_use, resource_registry::TextureStateKind::DepthAttachment);
+    if (m_desc.depth_use.is_some() &&
+        ! states->Set(*m_desc.depth_use, resource_registry::TextureStateKind::DepthAttachment)) {
+        rstd_error("prepare depth texture state failed for {}", m_desc.output);
+        return false;
+    }
+    return true;
 }
 
 void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareContext& context) {
