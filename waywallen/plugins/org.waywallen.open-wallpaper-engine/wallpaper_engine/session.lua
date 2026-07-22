@@ -1,6 +1,6 @@
 local M = {}
 
-local FORMAT_VERSION = "steam-session-v4"
+local FORMAT_VERSION = "steam-session-v5"
 local LEGACY_LINE_FORMAT_VERSION = "steam-session-v2"
 local PLATFORM_WEB_BROWSER = "web_browser"
 local PLATFORM_LEGACY = "legacy"
@@ -23,8 +23,10 @@ local state = {
     access_token = "",
     refresh_token = "",
     community_access_token = "",
+    avatar_url = "",
 }
 local generation = 0
+local credentials_rejected = false
 local last_check = { state = "signed_out", display_value = "Not signed in" }
 
 local function remember(check)
@@ -43,6 +45,9 @@ local function clear()
     state.platform = ""
     state.access_token = ""
     state.refresh_token = ""
+    state.community_access_token = ""
+    state.avatar_url = ""
+    credentials_rejected = false
     generation = generation + 1
     last_check = { state = "signed_out", display_value = "Not signed in" }
 end
@@ -111,6 +116,7 @@ local function mark_legacy(account_name, steamid)
     state.access_token = ""
     state.refresh_token = ""
     state.community_access_token = ""
+    state.avatar_url = ""
     last_check = {
         state = "expired",
         display_value = state.account_name ~= "" and state.account_name or "Steam",
@@ -122,7 +128,7 @@ function M.load(blob)
     clear()
     if type(blob) ~= "string" or blob == "" then return end
 
-    local fields = read_fields(blob, FORMAT_VERSION, 6)
+    local fields = read_fields(blob, FORMAT_VERSION, 7)
     if fields then
         state.account_name = fields[1]
         state.steamid = fields[2]
@@ -130,6 +136,23 @@ function M.load(blob)
         state.access_token = fields[4]
         state.refresh_token = fields[5]
         state.community_access_token = fields[6]
+        state.avatar_url = fields[7]
+        if state.platform == PLATFORM_LEGACY then
+            mark_legacy(state.account_name, state.steamid)
+        elseif state.platform ~= PLATFORM_WEB_BROWSER then
+            clear()
+        end
+        return
+    end
+
+    local v4_fields = read_fields(blob, "steam-session-v4", 6)
+    if v4_fields then
+        state.account_name = v4_fields[1]
+        state.steamid = v4_fields[2]
+        state.platform = v4_fields[3]
+        state.access_token = v4_fields[4]
+        state.refresh_token = v4_fields[5]
+        state.community_access_token = v4_fields[6]
         if state.platform == PLATFORM_LEGACY then
             mark_legacy(state.account_name, state.steamid)
         elseif state.platform ~= PLATFORM_WEB_BROWSER then
@@ -159,6 +182,7 @@ function M.save()
         state.access_token,
         state.refresh_token,
         state.community_access_token,
+        state.avatar_url,
     }
     local chunks = { FORMAT_VERSION, "\n" }
     for _, value in ipairs(fields) do
@@ -239,11 +263,12 @@ function M.set_auth(ctx, account_name, access_token, refresh_token)
     state.platform = PLATFORM_WEB_BROWSER
     state.access_token = access_token
     state.refresh_token = refresh_token
+    state.avatar_url = ""
+    credentials_rejected = false
     generation = generation + 1
     last_check = {
         state = "signed_in",
-        display_value = state.account_name ~= "" and ("Signed in as " .. state.account_name)
-            or "Signed in",
+        display_value = state.account_name ~= "" and state.account_name or "Steam",
     }
 end
 
@@ -307,8 +332,8 @@ local function community_token(ctx, client)
     return token
 end
 
-local function restore_web_session(ctx)
-    local payload = token_valid(ctx, state.community_access_token, state.steamid)
+local function restore_web_session(ctx, token)
+    local payload = token_valid(ctx, token, state.steamid)
     if not payload or not audience_contains(payload, "web:community") then return nil end
 
     local candidate = ctx.http
@@ -316,7 +341,7 @@ local function restore_web_session(ctx)
     candidate:set_cookie(
         COMMUNITY_ROOT,
         "steamLoginSecure="
-            .. ctx.url.encode_component(state.steamid .. "||" .. state.community_access_token)
+            .. ctx.url.encode_component(state.steamid .. "||" .. token)
             .. "; Path=/; Secure; HttpOnly; SameSite=None; Domain=steamcommunity.com"
     )
     candidate:set_cookie(
@@ -324,6 +349,7 @@ local function restore_web_session(ctx)
         "sessionid=" .. sessionid
             .. "; Path=/; Secure; SameSite=None; Domain=steamcommunity.com"
     )
+    state.community_access_token = token
     return candidate
 end
 
@@ -375,17 +401,43 @@ local function build_web_session(ctx)
     state.community_access_token = token
 end
 
+function M.refresh_credentials(ctx)
+    validate_saved_session(ctx)
+    drop_web_session(ctx)
+    local ok, error_value = pcall(build_web_session, ctx)
+    if not ok then
+        if tostring(error_value):find("expired; sign in again", 1, true) then
+            M.reject_credentials(ctx)
+        end
+        error(error_value, 0)
+    end
+    credentials_rejected = false
+    generation = generation + 1
+    return ctx.http
+end
+
+function M.complete_login(ctx, account_name, access_token, refresh_token)
+    M.set_auth(ctx, account_name, access_token, refresh_token)
+    local ok, error_value = pcall(M.refresh_credentials, ctx)
+    if ok then return ctx.http end
+    drop_web_session(ctx)
+    clear()
+    error(error_value, 0)
+end
+
 function M.ensure_http(ctx)
     validate_saved_session(ctx)
+    if credentials_rejected then
+        error("Steam Community session expired; sign in again")
+    end
     local valid_cookie, token = pcall(community_token, ctx, ctx.http)
     if valid_cookie then
         state.community_access_token = token
         return ctx.http
     end
-    if restore_web_session(ctx) then return ctx.http end
-    drop_web_session(ctx)
-    build_web_session(ctx)
-    return ctx.http
+    if restore_web_session(ctx, state.community_access_token) then return ctx.http end
+    if restore_web_session(ctx, state.access_token) then return ctx.http end
+    return M.refresh_credentials(ctx)
 end
 
 function M.ensure_access_token(ctx)
@@ -398,14 +450,51 @@ function M.authorized(ctx, callback)
     local response = callback(state.community_access_token, http)
     local status = response:status()
     if status ~= 401 and status ~= 403 then return response end
-    drop_web_session(ctx)
-    http = M.ensure_http(ctx)
-    return callback(state.community_access_token, http)
+    http = M.refresh_credentials(ctx)
+    response = callback(state.community_access_token, http)
+    status = response:status()
+    if status == 401 or status == 403 then M.reject_credentials(ctx) end
+    return response
 end
 
-function M.renew_web_session(ctx)
+function M.reject_credentials(ctx)
     drop_web_session(ctx)
-    return M.ensure_http(ctx)
+    credentials_rejected = true
+    generation = generation + 1
+    last_check = {
+        state = "expired",
+        display_value = state.account_name ~= "" and state.account_name or "Steam",
+        error = "Steam session expired; sign in again",
+    }
+end
+
+function M.capture_profile(ctx, html)
+    local element = ctx.html.query_one(
+        html or "",
+        "a.user_avatar img, .playerAvatarAutoSizeInner img"
+    )
+    local src = element and element.attrs and element.attrs.src or ""
+    if type(src) == "string" and src:match("^https://") then
+        state.avatar_url = src
+    end
+    return state.avatar_url
+end
+
+function M.refresh_profile(ctx)
+    local ok, result = pcall(function()
+        local response = M.authorized(ctx, function(_, http)
+            return http:get(COMMUNITY_ROOT .. "profiles/" .. state.steamid .. "/")
+                :timeout(20)
+                :send()
+        end)
+        if not response:ok() then return "" end
+        return M.capture_profile(ctx, response:text() or "")
+    end)
+    if not ok then
+        ctx.log("wallpaper_engine: Steam profile image unavailable")
+        return ""
+    end
+    return result
 end
 
 function M.sign_out(ctx)
@@ -436,6 +525,13 @@ function M.check(ctx)
     if not M.signed_in() then
         return remember({ state = "signed_out", display_value = "Not signed in" })
     end
+    if credentials_rejected then
+        return remember({
+            state = "expired",
+            display_value = state.account_name ~= "" and state.account_name or "Steam",
+            error = "Steam session expired; sign in again",
+        })
+    end
     local ok, error_value = pcall(validate_saved_session, ctx)
     if not ok then
         local message = tostring(error_value)
@@ -448,9 +544,12 @@ function M.check(ctx)
                 or "Steam session check failed",
         })
     end
-    local display = state.account_name ~= "" and ("Signed in as " .. state.account_name)
-        or "Signed in"
-    return remember({ state = "signed_in", display_value = display })
+    local display = state.account_name ~= "" and state.account_name or "Steam"
+    return remember({
+        state = "signed_in",
+        display_value = display,
+        avatar_url = state.avatar_url,
+    })
 end
 
 function M.current_check()

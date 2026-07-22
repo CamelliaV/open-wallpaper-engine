@@ -72,20 +72,24 @@ local function request_page(ctx, id, retry_login)
         :send()
     if response:status() == 401 or response:status() == 403 then
         if retry_login then
-            session.renew_web_session(ctx)
+            session.refresh_credentials(ctx)
             return request_page(ctx, id, false)
         end
+        session.reject_credentials(ctx)
         error("Steam Community session expired; sign in again")
     end
     if not response:ok() then
         error("Steam subscription status failed with HTTP " .. tostring(response:status()))
     end
-    local result, reason = parse_page_state(ctx, response:text() or "")
+    local html = response:text() or ""
+    session.capture_profile(ctx, html)
+    local result, reason = parse_page_state(ctx, html)
     if reason == "signed_out" then
         if retry_login then
-            session.renew_web_session(ctx)
+            session.refresh_credentials(ctx)
             return request_page(ctx, id, false)
         end
+        session.reject_credentials(ctx)
         error("Steam Community session expired; sign in again")
     end
     return result

@@ -41,8 +41,8 @@ function M.begin(ctx)
         challenge = response.challenge_url,
         poll_after_ms = math.floor((tonumber(response.interval) or 5) * 1000),
         expires_in_ms = 180000,
-        title = "Sign in to Steam",
-        instruction = "Scan this code with the Steam mobile app, then approve the sign-in.",
+        title = "Log in to Steam",
+        instruction = "Scan and approve this login in the Steam mobile app.",
     }
 end
 
@@ -65,7 +65,13 @@ function M.poll(ctx, key)
     end
     local response = ((rsp:json() or {}).response or {})
     if type(response.refresh_token) == "string" and response.refresh_token ~= "" then
-        session.set_auth(ctx, response.account_name, response.access_token, response.refresh_token)
+        session.complete_login(
+            ctx,
+            response.account_name,
+            response.access_token,
+            response.refresh_token
+        )
+        session.refresh_profile(ctx)
         return {
             state = "succeeded",
             display_value = response.account_name or "Steam",

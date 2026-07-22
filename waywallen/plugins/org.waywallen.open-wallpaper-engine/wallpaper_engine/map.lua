@@ -67,6 +67,8 @@ function M.details(item)
         description = desc,
         size = tostring(item.file_size or ""),
         tags = tag_names(item),
+        web_url = "https://steamcommunity.com/sharedfiles/filedetails/?id=" ..
+            tostring(item.publishedfileid or ""),
     }
 end
 

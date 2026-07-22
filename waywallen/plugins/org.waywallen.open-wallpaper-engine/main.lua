@@ -28,9 +28,14 @@ function M.info()
             {
                 id = "steam_sign_in",
                 kind = "qr_login",
-                label = "Sign in to Steam",
+                label = "Log in to Steam",
+                browse_button_label = "Log in to Steam",
+                browse_description =
+                    "Waywallen only manages Workshop subscriptions and does not download " ..
+                    "wallpapers. Keep the Steam desktop client running to download subscribed items.",
                 group = "Steam account",
                 order = 21,
+                required_for_browsing = true,
             },
             {
                 id = "steam_sign_out",

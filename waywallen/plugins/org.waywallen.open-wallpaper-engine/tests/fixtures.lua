@@ -53,6 +53,8 @@ return {
     },
     community_cookie = "steamLoginSecure=" .. STEAMID
         .. "%7C%7Cheader.community.signature; Domain=steamcommunity.com; Path=/; Secure",
+    short_community_cookie = "steamLoginSecure=" .. STEAMID
+        .. "%7C%7Cheader.short_community.signature; Domain=steamcommunity.com; Path=/; Secure",
     store_cookie = "steamLoginSecure=" .. STEAMID
         .. "%7C%7Cheader.store.signature; Domain=store.steampowered.com; Path=/; Secure",
     help_cookie = "steamLoginSecure=" .. STEAMID
@@ -61,6 +63,7 @@ return {
         .. "%7C%7Cheader.store.signature; Domain=checkout.steampowered.com; Path=/; Secure",
     tv_cookie = "steamLoginSecure=" .. STEAMID
         .. "%7C%7Cheader.store.signature; Domain=steam.tv; Path=/; Secure",
+    profile_page = '<a class="user_avatar"><img src="https://avatars.steamstatic.com/avatar.jpg"></a>',
     subscribed_page = '<div id="account_pulldown">fixture-account</div>'
         .. '<div id="SubscribeItemOptionSubscribed" '
         .. 'class="subscribeOption subscribed selected">Subscribed</div>',

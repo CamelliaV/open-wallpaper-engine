@@ -28,6 +28,7 @@ local function fake_context()
     local requests = {}
     local encoded_values = {}
     local now = 1000
+    local unix_now = 2
     local sleep_calls = 0
     local html_query_calls = 0
     local decoded = {
@@ -43,6 +44,16 @@ local function fake_context()
         },
         community = {
             exp = 4102444800,
+            sub = fixtures.steamid,
+            aud = { "web:community" },
+        },
+        short_community = {
+            exp = 120,
+            sub = fixtures.steamid,
+            aud = { "web:community" },
+        },
+        short_access = {
+            exp = 120,
             sub = fixtures.steamid,
             aud = { "web:community" },
         },
@@ -154,7 +165,7 @@ local function fake_context()
         log = function() end,
     }
     ctx.time = {
-        unix = function() return 2 end,
+        unix = function() return unix_now end,
         now = function() return now end,
         sleep = function(milliseconds)
             sleep_calls = sleep_calls + 1
@@ -193,6 +204,10 @@ local function fake_context()
         end,
     }
     local function query_one(html, selector)
+            if selector:find("a.user_avatar img", 1, true) then
+                local src = html:match('<a[^>]-class="[^"]*user_avatar[^"]*"[^>]*>%s*<img[^>]-src="([^"]+)"')
+                if src then return { attrs = { src = src } } end
+            end
             local id = selector:match("#([%w_%-]+)")
             if not id or not html:find('id="' .. id .. '"', 1, true) then return nil end
             local class = html:match('id="' .. id .. '"[^>]-class="([^"]*)"') or ""
@@ -248,15 +263,16 @@ local function fake_context()
     function ctx.sleep_count() return sleep_calls end
     function ctx.html_query_count() return html_query_calls end
     function ctx.advance(milliseconds) now = now + milliseconds end
+    function ctx.set_unix(value) unix_now = value end
     return ctx
 end
 
-local function queue_web_session(ctx, finalize)
+local function queue_web_session(ctx, finalize, community_cookie)
     ctx.queue(finalize or fixtures.web_finalize)
     ctx.queue_response({
         text = "transfer-ok",
         url = "https://steamcommunity.com/login/settoken",
-        cookies = { fixtures.community_cookie },
+        cookies = { community_cookie or fixtures.community_cookie },
     })
     ctx.queue_response({
         text = "transfer-ok",
@@ -287,6 +303,15 @@ equal(info.capabilities.discover.subscription, true, "subscription capability")
 equal(info.capabilities.discover.download, nil, "download capability must be absent")
 equal(info.capabilities.discover.resolve, nil, "resolve capability must be absent")
 equal(info.capabilities.discover.remote_hint, nil, "remote hint must be absent")
+equal(info.actions[1].label, "Log in to Steam", "Steam login label")
+equal(info.actions[1].browse_button_label, "Log in to Steam", "Steam browse login button label")
+equal(info.actions[1].description, nil, "Steam manage action description")
+equal(
+    info.actions[1].browse_description,
+    "Waywallen only manages Workshop subscriptions and does not download wallpapers. " ..
+        "Keep the Steam desktop client running to download subscribed items.",
+    "Steam browse login description"
+)
 equal(main.discover.download, nil, "download callback must be absent")
 equal(main.discover.resolve, nil, "resolve callback must be absent")
 truthy(type(main.subscription.status) == "function", "subscription.status missing")
@@ -296,12 +321,28 @@ local session = import("wallpaper_engine.session")
 local auth = import("wallpaper_engine.auth")
 local subscription = import("wallpaper_engine.subscription")
 
+local function login(ctx)
+    queue_web_session(ctx)
+    session.complete_login(
+        ctx,
+        "fixture-account",
+        "header.qr_access.signature",
+        "header.refresh.signature"
+    )
+end
+
 session.sign_out()
 local auth_ctx = fake_context()
 auth_ctx.queue(fixtures.qr_begin)
 local begin = auth.begin(auth_ctx)
 equal(begin.challenge, "https://s.team/q/example", "QR challenge")
 equal(begin.poll_after_ms, 1500, "QR interval")
+equal(begin.title, "Log in to Steam", "QR title")
+equal(
+    begin.instruction,
+    "Scan and approve this login in the Steam mobile app.",
+    "QR instruction"
+)
 local request = auth_ctx.last_request()
 equal(request.method, "POST", "QR begin method")
 equal(request.form_data.input_json, "fixture-json", "QR input_json envelope")
@@ -321,8 +362,17 @@ local rotated = auth.poll(auth_ctx, begin.key)
 equal(rotated.state, "challenge_changed", "rotation QR state")
 equal(rotated.challenge, "https://s.team/q/rotated", "rotated challenge")
 auth_ctx.queue(fixtures.qr_success)
+queue_web_session(auth_ctx)
+auth_ctx.queue(nil, 200, fixtures.profile_page)
 equal(auth.poll(auth_ctx, begin.key).state, "succeeded", "successful QR state")
 equal(session.account_name(), "fixture-account", "QR account")
+local qr_check = session.check(auth_ctx)
+equal(qr_check.display_value, "fixture-account", "QR profile name")
+equal(
+    qr_check.avatar_url,
+    "https://avatars.steamstatic.com/avatar.jpg",
+    "QR profile avatar"
+)
 local qr_state = session.save()
 truthy(qr_state:find("header.qr_access.signature", 1, true), "QR access token not saved")
 truthy(qr_state:find("header.refresh.signature", 1, true), "QR refresh token not saved")
@@ -346,7 +396,7 @@ local serialized = session.save()
 session.sign_out()
 session.load(serialized)
 equal(session.account_name(), "line one\nline two", "opaque state round trip")
-truthy(session.signed_in(), "v4 session did not restore")
+truthy(session.signed_in(), "v5 session did not restore")
 
 session.load(table.concat({
     "steam-session-v2",
@@ -370,10 +420,21 @@ equal(session.account_name(), "escaped\nname", "legacy JSON migration")
 equal(session.check(auth_ctx).state, "expired", "migrated lifecycle")
 
 local web_ctx = fake_context()
-session.set_auth(web_ctx, "fixture-account", "header.qr_access.signature", "header.refresh.signature")
+session.set_auth(
+    web_ctx,
+    "fixture-account",
+    "header.qr_access.signature",
+    "header.refresh.signature"
+)
 equal(session.check(web_ctx).state, "signed_in", "local Web lifecycle")
 equal(web_ctx.request_count(), 0, "lifecycle check must not create a Web session")
 queue_web_session(web_ctx)
+session.complete_login(
+    web_ctx,
+    "fixture-account",
+    "header.qr_access.signature",
+    "header.refresh.signature"
+)
 equal(session.ensure_access_token(web_ctx), "header.community.signature", "Community token")
 equal(web_ctx.request_count(), 6, "all Web transfers")
 request = web_ctx.request_at(1)
@@ -402,6 +463,25 @@ equal(
     fixtures.steamid .. "%7C%7Cheader.community.signature",
     "restored Community cookie"
 )
+
+local refresh_ctx = fake_context()
+queue_web_session(refresh_ctx, nil, fixtures.short_community_cookie)
+session.complete_login(
+    refresh_ctx,
+    "fixture-account",
+    "header.short_access.signature",
+    "header.refresh.signature"
+)
+equal(session.ensure_access_token(refresh_ctx), "header.short_community.signature",
+    "initial short-lived Community token")
+refresh_ctx.set_unix(61)
+queue_web_session(refresh_ctx)
+equal(session.ensure_access_token(refresh_ctx), "header.community.signature",
+    "expired Community credentials refresh")
+equal(refresh_ctx.request_count(), 12, "credential refresh finalization count")
+equal(session.ensure_access_token(refresh_ctx), "header.community.signature",
+    "refreshed Community token reuse")
+equal(refresh_ctx.request_count(), 12, "valid credentials must not repeat finalization")
 
 local retry_ctx = fake_context()
 session.set_auth(retry_ctx, "fixture-account", "header.qr_access.signature", "header.refresh.signature")
@@ -432,7 +512,8 @@ retry_ctx.queue_response({
     url = "https://steam.tv/login/settoken",
     cookies = { fixtures.tv_cookie },
 })
-equal(session.ensure_access_token(retry_ctx), "header.community.signature", "transient transfer retry")
+equal(session.refresh_credentials(retry_ctx), retry_ctx.http, "transient transfer retry")
+equal(session.ensure_access_token(retry_ctx), "header.community.signature", "refreshed token")
 equal(retry_ctx.request_count(), 7, "transfer retry request count")
 equal(retry_ctx.sleep_count(), 1, "transfer retry delay")
 
@@ -445,7 +526,7 @@ session.set_auth(
 )
 exhausted_ctx.queue(fixtures.web_finalize)
 for _ = 1, 5 do exhausted_ctx.queue({}, 503) end
-local exhausted_ok = pcall(session.ensure_access_token, exhausted_ctx)
+local exhausted_ok = pcall(session.refresh_credentials, exhausted_ctx)
 equal(exhausted_ok, false, "exhausted transfer retries")
 equal(exhausted_ctx.request_count(), 6, "transfer retry limit")
 equal(exhausted_ctx.sleep_count(), 4, "transfer retry delay limit")
@@ -453,9 +534,12 @@ equal(exhausted_ctx.sleep_count(), 4, "transfer retry delay limit")
 local expired_ctx = fake_context()
 session.set_auth(expired_ctx, "fixture-account", "header.qr_access.signature", "header.refresh.signature")
 expired_ctx.queue({}, 403)
-local expired_ok, expired_error = pcall(session.ensure_access_token, expired_ctx)
+local expired_ok, expired_error = pcall(session.refresh_credentials, expired_ctx)
 equal(expired_ok, false, "finalization auth failure")
 truthy(tostring(expired_error):find("expired; sign in again", 1, true), "auth failure message")
+local expired_request_count = expired_ctx.request_count()
+equal(pcall(session.ensure_access_token, expired_ctx), false, "rejected credentials stay expired")
+equal(expired_ctx.request_count(), expired_request_count, "rejected credentials must not retry login")
 local transient_ctx = fake_context()
 session.set_auth(
     transient_ctx,
@@ -464,17 +548,11 @@ session.set_auth(
     "header.refresh.signature"
 )
 transient_ctx.queue({}, 503)
-local transient_ok = pcall(session.ensure_access_token, transient_ctx)
+local transient_ok = pcall(session.refresh_credentials, transient_ctx)
 equal(transient_ok, false, "finalization HTTP failure")
 
 local discover_ctx = fake_context()
-session.set_auth(
-    discover_ctx,
-    "fixture-account",
-    "header.qr_access.signature",
-    "header.refresh.signature"
-)
-queue_web_session(discover_ctx)
+login(discover_ctx)
 discover_ctx.queue(fixtures.query_files)
 local search = main.discover.search(discover_ctx, {
     query = "fixture",
@@ -492,18 +570,17 @@ equal(request.query_data.appid, "431960", "QueryFiles appid")
 local request_count = discover_ctx.request_count()
 local details = main.discover.details(discover_ctx, "3765064055")
 equal(details.size, "4096", "cached details size")
+equal(
+    details.web_url,
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=3765064055",
+    "cached details web URL"
+)
 equal(discover_ctx.request_count(), request_count, "search metadata must be reused")
 discover_ctx.queue(fixtures.file_details)
 equal(main.discover.details(discover_ctx, "fallback").size, "8192", "fallback details")
 
 local subscription_ctx = fake_context()
-session.set_auth(
-    subscription_ctx,
-    "fixture-account",
-    "header.qr_access.signature",
-    "header.refresh.signature"
-)
-queue_web_session(subscription_ctx)
+login(subscription_ctx)
 subscription_ctx.queue(nil, 200, fixtures.subscribed_page)
 local states = subscription.status(subscription_ctx, { "3765064055" })
 equal(states["3765064055"], "subscribed", "subscribed page state")
@@ -526,8 +603,7 @@ equal(states["missing-markers"], "unknown", "missing page markers")
 equal(states["conflicting-markers"], "unknown", "conflicting page markers")
 
 local partial_ctx = fake_context()
-session.set_auth(partial_ctx, "fixture-account", "header.qr_access.signature", "header.refresh.signature")
-queue_web_session(partial_ctx)
+login(partial_ctx)
 partial_ctx.queue(nil, 200, fixtures.subscribed_page)
 partial_ctx.queue({}, 503)
 states = subscription.status(partial_ctx, { "subscribed", "failed" })
@@ -535,21 +611,27 @@ equal(states.subscribed, "subscribed", "batch successful item")
 equal(states.failed, "unknown", "batch failed item")
 
 local login_retry_ctx = fake_context()
-session.set_auth(
-    login_retry_ctx,
-    "fixture-account",
-    "header.qr_access.signature",
-    "header.refresh.signature"
-)
-queue_web_session(login_retry_ctx)
+login(login_retry_ctx)
 login_retry_ctx.queue(nil, 200, fixtures.signed_out_page)
 queue_web_session(login_retry_ctx)
 login_retry_ctx.queue(nil, 200, fixtures.subscribed_page)
 equal(subscription.status(login_retry_ctx, { "retry" }).retry, "subscribed", "login page retry")
 
+local rejected_ctx = fake_context()
+login(rejected_ctx)
+rejected_ctx.queue(nil, 200, fixtures.signed_out_page)
+queue_web_session(rejected_ctx)
+rejected_ctx.queue(nil, 200, fixtures.signed_out_page)
+local rejected_ok = pcall(subscription.status, rejected_ctx, { "rejected" })
+equal(rejected_ok, false, "rejected refreshed login")
+local rejected_request_count = rejected_ctx.request_count()
+equal(pcall(subscription.status, rejected_ctx, { "rejected" }), false,
+    "rejected login remains expired")
+equal(rejected_ctx.request_count(), rejected_request_count,
+    "rejected login must not repeat finalization")
+
 local mutation_ctx = fake_context()
-session.set_auth(mutation_ctx, "fixture-account", "header.qr_access.signature", "header.refresh.signature")
-queue_web_session(mutation_ctx)
+login(mutation_ctx)
 mutation_ctx.queue(fixtures.mutation_accepted)
 equal(subscription.subscribe(mutation_ctx, "3765064055").accepted, true, "subscribe accepted")
 request = mutation_ctx.last_request()
@@ -565,13 +647,7 @@ equal(subscription.status(mutation_ctx, { "3765064055" })["3765064055"], "unsubs
     "server state corrects mutation expectation")
 
 local retry_mutation_ctx = fake_context()
-session.set_auth(
-    retry_mutation_ctx,
-    "fixture-account",
-    "header.qr_access.signature",
-    "header.refresh.signature"
-)
-queue_web_session(retry_mutation_ctx)
+login(retry_mutation_ctx)
 retry_mutation_ctx.queue({}, 403)
 queue_web_session(retry_mutation_ctx)
 retry_mutation_ctx.queue(fixtures.mutation_accepted)
@@ -580,13 +656,7 @@ equal(subscription.unsubscribe(retry_mutation_ctx, "retry-item").accepted, true,
 equal(retry_mutation_ctx.request_count(), 14, "mutation auth retry request count")
 
 local failed_mutation_ctx = fake_context()
-session.set_auth(
-    failed_mutation_ctx,
-    "fixture-account",
-    "header.qr_access.signature",
-    "header.refresh.signature"
-)
-queue_web_session(failed_mutation_ctx)
+login(failed_mutation_ctx)
 failed_mutation_ctx.queue({}, 500)
 local mutation_ok, mutation_error = pcall(
     subscription.subscribe,
