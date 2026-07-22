@@ -79,6 +79,23 @@ struct WPShaderUnit {
     WPPreprocessorInfo preprocess_info;
 };
 
+class WPShaderParserCache {
+    struct SourceEntry {
+        std::string source;
+        std::string includes;
+    };
+
+    struct CompileEntry {
+        std::vector<WPShaderUnit> units;
+        std::vector<ShaderCode>   codes;
+    };
+
+    Map<std::string, SourceEntry>  source_entries;
+    Map<std::string, CompileEntry> compile_entries;
+
+    friend class WPShaderParser;
+};
+
 // Output of CompileMaterialShader. On ok=true, spvs holds one SPIR-V
 // blob per stage (currently always vertex+fragment in that order).
 // On ok=false, error carries a short diagnostic.
@@ -109,7 +126,8 @@ void ParseWPShader(const std::string& src, WPShaderInfo* info,
 class WPShaderParser {
 public:
     static std::string PreShaderSrc(fs::VFS&, const std::string& src, WPShaderInfo* pWPShaderInfo,
-                                    const std::vector<WPShaderTexInfo>& texs);
+                                    const std::vector<WPShaderTexInfo>& texs,
+                                    WPShaderParserCache* = nullptr);
 
     static std::string PreShaderHeader(const std::string& src, const Combos& combos, ShaderType);
 
@@ -118,7 +136,7 @@ public:
 
     static bool CompileToSpv(std::string_view         scene_id, std::span<WPShaderUnit>,
                              std::vector<ShaderCode>& spvs, fs::VFS&, WPShaderInfo*,
-                             std::span<const WPShaderTexInfo>);
+                             std::span<const WPShaderTexInfo>, WPShaderParserCache* = nullptr);
 
     static void UpdateSceneShaderVariantDescFromCompiledUnits(SceneShaderVariantDesc&,
                                                               std::span<const WPShaderUnit>,

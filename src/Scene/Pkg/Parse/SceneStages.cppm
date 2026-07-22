@@ -18,6 +18,7 @@ import wescene.types;
 import wescene.pkg.scene_obj;
 
 import wescene.pkg.puppet;
+import :wp_shader_parser;
 import :wp_uniform_source;
 import :wp_particle_runtime;
 
@@ -51,6 +52,7 @@ struct ParseContext {
     std::int32_t                 ortho_h { 0 };
     fs::VFS*                     vfs { nullptr };
     Option<ref<rstd::json::Map>> user_properties;
+    WPShaderParserCache          shader_cache;
 
     ShaderValueMap         global_base_uniforms;
     Option<Arc<SceneNode>> effect_camera_node;
