@@ -150,27 +150,14 @@ public:
 
     auto AddBuffer(resource::BufferRequest request, rstd::slice<rstd::u8> content)
         -> resource::BufferUseHandle {
-        auto handle = resource::BufferUseHandle {
-            .index      = m_next_buffer++,
-            .generation = m_plan.generation,
-        };
-        auto bytes = rstd::vec::Vec<rstd::u8>::with_capacity(content.len());
-        for (rstd::usize index {}; index < content.len(); ++index) {
-            bytes.push(rstd::u8(content[index]));
-        }
-        auto name = request.name.clone();
-        (void)m_buffers.insert(rstd::move(name), rstd::move(bytes));
-        m_plan.buffers.push(resource::BufferPlanEntry {
-            .handle  = handle,
-            .request = rstd::move(request),
-        });
-        return handle;
+        auto bytes = rstd::vec::Vec<rstd::u8>::from(content);
+        return AddBuffer(rstd::move(request), rstd::move(bytes));
     }
 
     auto AddBuffer(resource::BufferRequest request) -> resource::BufferUseHandle {
         auto bytes = rstd::vec::Vec<rstd::u8>::with_capacity(request.definition.size);
         bytes.resize(request.definition.size, rstd::u8(0));
-        return AddBuffer(rstd::move(request), bytes.as_slice());
+        return AddBuffer(rstd::move(request), rstd::move(bytes));
     }
 
     auto AddShader(resource::ShaderRequest request, const SceneShader& shader)
@@ -220,7 +207,7 @@ public:
     }
 
     auto LoadBuffer(const resource::BufferRequest& request)
-        -> rstd::Result<rstd::vec::Vec<rstd::u8>, resource::ResourceError> {
+        -> rstd::Result<rstd::slice<rstd::u8>, resource::ResourceError> {
         auto content = m_buffers.get(request.name);
         if (content.is_none()) {
             return rstd::Err(resource::ResourceError {
@@ -228,9 +215,7 @@ public:
                 .message = rstd::format("buffer content {} unavailable", request.name),
             });
         }
-        auto bytes = rstd::vec::Vec<rstd::u8>::with_capacity((**content).len());
-        for (auto value : **content) bytes.push(rstd::u8(value));
-        return rstd::Ok(rstd::move(bytes));
+        return rstd::Ok((**content).as_slice());
     }
 
     auto ShaderArtifact(const resource::ShaderRequest& request) const
@@ -239,6 +224,20 @@ public:
     }
 
 private:
+    auto AddBuffer(resource::BufferRequest request, rstd::vec::Vec<rstd::u8> content)
+        -> resource::BufferUseHandle {
+        auto handle = resource::BufferUseHandle {
+            .index      = m_next_buffer++,
+            .generation = m_plan.generation,
+        };
+        auto name = request.name.clone();
+        (void)m_buffers.insert(rstd::move(name), rstd::move(content));
+        m_plan.buffers.push(resource::BufferPlanEntry {
+            .handle  = handle,
+            .request = rstd::move(request),
+        });
+        return handle;
+    }
     resource::ResourcePlan&                                      m_plan;
     rstd::mut_ref<ShaderReflectionCache>                         m_shader_cache;
     rstd::u64                                                    m_next_buffer { 0 };

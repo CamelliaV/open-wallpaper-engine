@@ -407,8 +407,8 @@ public:
         }
         auto loaded = (*content)->LoadBuffer(entry.request);
         if (loaded.is_err()) return Err(rstd::move(loaded).unwrap_err_unchecked());
-        auto bytes    = rstd::move(loaded).unwrap_unchecked();
-        auto prepared = m_buffers.Ensure(entry.request.clone(), bytes.as_slice(), m_buffer_backend);
+        auto prepared =
+            m_buffers.Ensure(entry.request.clone(), loaded.unwrap_unchecked(), m_buffer_backend);
         if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
         if (! table.Insert(PreparedBufferUse {
                 .use    = entry.handle,
