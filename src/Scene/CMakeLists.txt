@@ -225,9 +225,11 @@ target_link_libraries(owe-render INTERFACE owe-rdg owe-vulkan-renderer)
 # ---------------------------------------------------------------------------
 # owe-scene-wallpaper
 # ---------------------------------------------------------------------------
-add_library(owe-scene-wallpaper STATIC SceneWallpaper.cpp)
+add_library(owe-scene-wallpaper STATIC SceneWallpaper.cpp SceneUserProperty.cpp)
 target_sources(owe-scene-wallpaper
-  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES SceneWallpaper.cppm)
+  PUBLIC FILE_SET cxx_modules TYPE CXX_MODULES FILES
+         SceneWallpaper.cppm
+         SceneUserProperty.cppm)
 target_link_libraries(owe-scene-wallpaper
   PUBLIC owe-render owe-resource-registry owe-parse owe-script owe-load-bench wavsen::audio)
 target_include_directories(owe-scene-wallpaper

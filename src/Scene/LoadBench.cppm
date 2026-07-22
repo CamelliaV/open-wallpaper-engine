@@ -37,6 +37,7 @@ struct SceneLoadProbeIds {
     rstd::bench::probe::ProbeId parse_post_process;
     rstd::bench::probe::ProbeId parse_finalize;
     rstd::bench::probe::ProbeId load_runtime_setup;
+    rstd::bench::probe::ProbeId load_initial_properties;
     rstd::bench::probe::ProbeId render_load;
     rstd::bench::probe::ProbeId render_snapshot;
     rstd::bench::probe::ProbeId render_graph_build;
@@ -167,6 +168,7 @@ auto CreateSceneLoadBench(ref<str> output_path) -> Option<SceneLoadBenchHandle> 
         .parse_post_process           = RegisterProbe(registry, "parse.post_process"),
         .parse_finalize               = RegisterProbe(registry, "parse.finalize"),
         .load_runtime_setup           = RegisterProbe(registry, "load.runtime_setup"),
+        .load_initial_properties      = RegisterProbe(registry, "load.initial_properties"),
         .render_load                  = RegisterProbe(registry, "render.load"),
         .render_snapshot              = RegisterProbe(registry, "render.snapshot"),
         .render_graph_build           = RegisterProbe(registry, "render.graph.build"),

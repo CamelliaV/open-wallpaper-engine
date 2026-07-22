@@ -75,6 +75,10 @@ add_executable(load_bench_tests load_bench_tests.cpp)
 target_link_libraries(load_bench_tests PRIVATE owe-load-bench GTest::gtest_main)
 set_target_properties(load_bench_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
+add_executable(scene_user_property_tests scene_user_property_tests.cpp)
+target_link_libraries(scene_user_property_tests PRIVATE owe-scene-wallpaper GTest::gtest_main)
+set_target_properties(scene_user_property_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
+
 # Consolidated CLI: walks pkgs, runs scene parse; --validate-{tex,shader,mdl}
 # add per-asset checks; --name / --pkgv / --limit filter the pkg set.
 # `valid` subcommand regenerates fixture JSONs via DumpWorkshop.
@@ -202,6 +206,11 @@ gtest_discover_tests(
 )
 gtest_discover_tests(
     load_bench_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 30
+)
+gtest_discover_tests(
+    scene_user_property_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 30
 )

@@ -22,6 +22,7 @@ import wescene.pkg.parse;
 import wescene.pkg_fs;
 import wescene.rgraph;
 import wescene.resource;
+import wescene.scene_user_property;
 import wescene.script;
 import wescene.vulkan_render;
 
@@ -98,184 +99,6 @@ Json InitialUserProperty(Json value) {
     return MakeUserPropertyDescriptor(rstd::move(value));
 }
 
-bool IsShaderGraphUserProperty(const Json& prop) {
-    auto type = prop.get("type");
-    if (type.is_none()) return false;
-    auto string = (*type)->as_str();
-    return string.is_some() && rstd::cppstd::as_string_view(*string) == "combo";
-}
-
-constexpr std::string_view kSchemeColorKey          = "schemecolor";
-constexpr std::string_view kWaywallenSchemeColorKey = "waywallen.scheme_color";
-
-std::string CanonicalUserPropertyKey(std::string_view key) {
-    if (key == kWaywallenSchemeColorKey) return std::string(kSchemeColorKey);
-    return std::string(key);
-}
-
-// Parse a "r g b" / "r g b a" / "x y z w ..." space-separated float string into
-// a small float vector. Trailing / leading whitespace is tolerated. Returns
-// false when no numbers parse — caller treats as coercion failure.
-bool ParseFloatList(std::string_view s, std::vector<float>& out) {
-    out.clear();
-    std::size_t i = 0;
-    while (i < s.size()) {
-        while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
-        if (i >= s.size()) break;
-        std::size_t start = i;
-        while (i < s.size() && s[i] != ' ' && s[i] != '\t') ++i;
-        std::string tok(s.substr(start, i - start));
-        try {
-            out.push_back(std::stof(tok));
-        } catch (...) {
-            return false;
-        }
-    }
-    return ! out.empty();
-}
-
-// Coerce a project.json property entry into a ShaderValue. Returns ok=false
-// (with skip_reason) for combo / texture / unsupported types — the handler
-// logs and skips those.
-struct UserPropertyCoerceResult {
-    bool        ok { false };
-    ShaderValue value;
-    const char* skip_reason { nullptr };
-};
-
-UserPropertyCoerceResult CoerceUserPropertyValue(const Json& prop) {
-    UserPropertyCoerceResult r;
-
-    // Pull the explicit type if present; project.json properties always have
-    // one, but inline {"value": ...} descriptors don't.
-    std::string type;
-    if (auto member = prop.get("type"); member.is_some()) {
-        auto string = (*member)->as_str();
-        if (string.is_some()) type = rstd::cppstd::to_string(*string);
-    }
-
-    // Combo / texture / file paths can't write a uniform.
-    if (type == "combo") {
-        r.skip_reason = "shader graph mutation is not a uniform update";
-        return r;
-    }
-    if (type == "texture" || type == "replacetexture" || type == "file" || type == "textinput") {
-        r.skip_reason = "non-uniform property type";
-        return r;
-    }
-
-    // Find the raw value.
-    auto        value = prop.get("value");
-    const Json& v     = value.is_some() ? **value : prop;
-
-    if (type == "color") {
-        std::vector<float> nums;
-        auto               value = v.as_str();
-        if (value.is_some() && ParseFloatList(rstd::cppstd::as_string_view(*value), nums) &&
-            nums.size() >= 3) {
-            r.ok    = true;
-            r.value = ShaderValue(std::span<const float>(nums));
-            return r;
-        }
-        r.skip_reason = "color value not a 'r g b[ a]' float string";
-        return r;
-    }
-
-    // Fallback inference when type is missing.
-    if (v.is_boolean()) {
-        r.ok    = true;
-        float f = *v.as_bool() ? 1.0f : 0.0f;
-        r.value = ShaderValue(f);
-        return r;
-    }
-    if (v.is_number()) {
-        auto number = v.as_f64();
-        if (number.is_some()) {
-            const double value = number->to_primitive();
-            r.ok               = value >= std::numeric_limits<float>::lowest() &&
-                                 value <= std::numeric_limits<float>::max();
-            if (r.ok) r.value = ShaderValue(static_cast<float>(value));
-        }
-        return r;
-    }
-    if (v.is_string()) {
-        std::vector<float> nums;
-        auto               value = rstd::cppstd::as_string_view(*v.as_str());
-        if (ParseFloatList(value, nums)) {
-            if (nums.size() == 1) {
-                r.ok    = true;
-                r.value = ShaderValue(nums[0]);
-                return r;
-            }
-            r.ok    = true;
-            r.value = ShaderValue(std::span<const float>(nums));
-            return r;
-        }
-        r.skip_reason = "string value isn't parseable as float list";
-        return r;
-    }
-    r.skip_reason = "unsupported JSON value shape";
-    return r;
-}
-
-void ApplyUserPropertyToClear(Scene& scene, const std::string& key, const Json& prop) {
-    if (scene.clearColorUserKey.empty()) return;
-    if (CanonicalUserPropertyKey(scene.clearColorUserKey) != key) return;
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < usize(3)) return;
-    auto clamp01 = [](float n) {
-        return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
-    };
-    scene.clearColor = {
-        clamp01(coerced.value[usize()]),
-        clamp01(coerced.value[usize(1)]),
-        clamp01(coerced.value[usize(2)]),
-    };
-}
-
-// Push a user-property value to every material whose shader declared a
-// `u_*` uniform with this material-key.
-void ApplyUserPropertyToShaderUniforms(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.shader_user_var_index.find(key);
-    if (it == scene.shader_user_var_index.end()) return;
-
-    if (IsShaderGraphUserProperty(prop)) {
-        rstd_warn("user property '{}' skipped: shader graph mutation is not a uniform update", key);
-        return;
-    }
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok) {
-        rstd_warn("user property '{}' skipped: {}",
-                  key,
-                  coerced.skip_reason ? coerced.skip_reason : "unknown");
-        return;
-    }
-    for (auto& [material, uniform_name] : it->second) {
-        if (! material) continue;
-        scene.SetMaterialShaderValue(*material, uniform_name, coerced.value);
-    }
-}
-
-Option<std::string> ResolveRuntimeSceneTextureProperty(const Json& prop) {
-    if (prop.is_string()) {
-        return Some(rstd::cppstd::to_string(*prop.as_str()));
-    }
-    if (! prop.is_object()) return None();
-
-    std::string type;
-    if (auto member = prop.get("type"); member.is_some()) {
-        auto string = (*member)->as_str();
-        if (string.is_some()) type = rstd::cppstd::to_string(*string);
-    }
-    if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
-        return None();
-    auto value = prop.get("value");
-    if (value.is_none()) return None();
-    auto string = (*value)->as_str();
-    return string.is_some() ? Some(rstd::cppstd::to_string(*string)) : None();
-}
-
 bool SameSceneMaterialId(SceneMaterialId lhs, SceneMaterialId rhs) {
     return lhs.index == rhs.index && lhs.generation == rhs.generation;
 }
@@ -299,27 +122,6 @@ vulkan::PassInvalidationFlags MaterialDirtyToPassInvalidationFlags(SceneMaterial
     return out;
 }
 
-std::vector<SceneMaterialId>
-ApplyUserPropertyToMaterialTextures(Scene& scene, const std::string& key, const Json& prop) {
-    std::vector<SceneMaterialId> changed_materials;
-    auto                         it = scene.material_texture_user_index.find(key);
-    if (it == scene.material_texture_user_index.end()) return changed_materials;
-
-    auto texture_value = ResolveRuntimeSceneTextureProperty(prop);
-    if (texture_value.is_none()) return changed_materials;
-
-    for (const auto& binding : it->second) {
-        if (binding.material == nullptr) continue;
-        std::string next     = texture_value->empty() ? binding.fallback : *texture_value;
-        auto        mutation = scene.SetMaterialTextureSlot(*binding.material, binding.slot, next);
-        if (mutation.changed && mutation.material.is_some()) {
-            PushUniqueMaterialId(changed_materials, *mutation.material);
-        }
-    }
-
-    return changed_materials;
-}
-
 Json RuntimeTextureProperty(std::string value) {
     auto object = rstd::json::Map::make();
     object.insert(::alloc::string::String::make(rstd::cppstd::as_str("type")),
@@ -336,304 +138,6 @@ owe::script::MediaStatus ToScriptMediaStatus(const MediaStatus& status) {
                                       .album_artist     = status.album_artist,
                                       .art_url          = status.art_url,
                                       .previous_art_url = status.previous_art_url };
-}
-
-std::vector<SceneUserPropertyDiagnostic> CollectUserPropertyDiagnostics(const Scene&     scene,
-                                                                        std::string_view key) {
-    std::vector<SceneUserPropertyDiagnostic> out;
-    for (const auto& diagnostic : scene.UserPropertyDiagnostics()) {
-        if (diagnostic.key == key) out.push_back(diagnostic);
-    }
-    return out;
-}
-
-Option<std::string> ResolveRuntimeShaderComboValue(const Json&                          prop,
-                                                   const Scene::ShaderComboUserBinding& binding) {
-    auto        member = prop.get("value");
-    const auto& value  = member.is_some() ? **member : prop;
-
-    if (value.is_null()) return Some(std::string(binding.fallback));
-    if (value.is_boolean()) return Some(std::string(*value.as_bool() ? "1" : "0"));
-    if (value.is_number()) {
-        auto number = value.as_f64();
-        if (number.is_some()) {
-            const double native_number = number->to_primitive();
-            if (native_number >= std::numeric_limits<int>::min() &&
-                native_number <= std::numeric_limits<int>::max())
-                return Some(std::to_string(static_cast<int>(native_number)));
-        }
-        return None();
-    }
-    if (! value.is_string()) return None();
-
-    auto text = rstd::cppstd::to_string(*value.as_str());
-    if (text.empty()) return Some(std::string(binding.fallback));
-    if (auto it = binding.options.find(text); it != binding.options.end())
-        return Some(std::string(it->second));
-    if (text == "true") return Some(std::string("1"));
-    if (text == "false") return Some(std::string("0"));
-
-    try {
-        std::size_t parsed = 0;
-        int         number = std::stoi(text, &parsed);
-        if (parsed == text.size()) return Some(std::to_string(number));
-    } catch (...) {
-    }
-    return None();
-}
-
-void RecordShaderComboDiagnostic(Scene& scene, std::string key,
-                                 SceneUserPropertyDiagnosticCode code, std::string material,
-                                 std::string combo, std::string message) {
-    scene.AddUserPropertyDiagnostic(SceneUserPropertyDiagnostic {
-        .key      = rstd::move(key),
-        .code     = code,
-        .material = rstd::move(material),
-        .combo    = rstd::move(combo),
-        .message  = rstd::move(message),
-    });
-}
-
-bool ApplyUserPropertyToShaderCombos(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.shader_combo_user_index.find(key);
-    if (it == scene.shader_combo_user_index.end()) return false;
-
-    scene.ClearUserPropertyDiagnostics(key);
-
-    auto* vfs = static_cast<fs::VFS*>(scene.vfs.get());
-    if (! vfs) {
-        rstd_warn("user property '{}' skipped: scene VFS is not available", key);
-        RecordShaderComboDiagnostic(scene,
-                                    key,
-                                    SceneUserPropertyDiagnosticCode::SceneVfsUnavailable,
-                                    {},
-                                    {},
-                                    "scene VFS is not available");
-        return false;
-    }
-
-    bool requires_graph_rebuild = false;
-    for (const auto& binding : it->second) {
-        if (! binding.material) continue;
-        auto next = ResolveRuntimeShaderComboValue(prop, binding);
-        if (next.is_none()) {
-            rstd_warn(
-                "user property '{}' skipped: combo '{}' value is unsupported", key, binding.combo);
-            RecordShaderComboDiagnostic(
-                scene,
-                key,
-                SceneUserPropertyDiagnosticCode::UnsupportedShaderComboValue,
-                binding.material ? binding.material->name : std::string {},
-                binding.combo,
-                "shader combo value is unsupported");
-            continue;
-        }
-        auto& material = *binding.material;
-        if (! material.customShader.variant.has_value()) {
-            rstd_warn("user property '{}' skipped: material '{}' has no shader variant descriptor",
-                      key,
-                      material.name);
-            RecordShaderComboDiagnostic(
-                scene,
-                key,
-                SceneUserPropertyDiagnosticCode::MissingShaderVariantDescriptor,
-                material.name,
-                binding.combo,
-                "material has no shader variant descriptor");
-            continue;
-        }
-        const auto& current_variant = *material.customShader.variant;
-        if (auto current = current_variant.resolved_combos.find(binding.combo);
-            current != current_variant.resolved_combos.end() && current->second == *next) {
-            continue;
-        }
-
-        auto compiled = WPShaderParser::CompileSceneShaderVariant(
-            current_variant, *vfs, { { binding.combo, *next } });
-        if (! compiled.ok || ! compiled.shader) {
-            rstd_warn("user property '{}' skipped: shader combo '{}' compile failed: {}",
-                      key,
-                      binding.combo,
-                      compiled.error);
-            RecordShaderComboDiagnostic(scene,
-                                        key,
-                                        SceneUserPropertyDiagnosticCode::ShaderComboCompileFailed,
-                                        material.name,
-                                        binding.combo,
-                                        compiled.error);
-            continue;
-        }
-        auto mutation = scene.SetMaterialShaderVariant(material,
-                                                       SceneShaderVariantMutation {
-                                                           .shader  = rstd::move(compiled.shader),
-                                                           .variant = rstd::move(compiled.variant),
-                                                       });
-        if (mutation.changed && (material.DirtyFlags() & SceneMaterialDirtyGraph) != 0) {
-            requires_graph_rebuild = true;
-        }
-    }
-    return requires_graph_rebuild;
-}
-
-float CurrentImagePropertyAlpha(SceneNode* node) {
-    if (! node) return 1.0f;
-    return node->IsAlphaOverridden() ? node->EffectiveAlpha() : node->BaseAlpha();
-}
-
-Eigen::Vector3f CurrentImagePropertyColor(SceneNode* node) {
-    if (! node) return { 1.0f, 1.0f, 1.0f };
-    return node->IsColorOverridden() ? node->Color() : node->BaseColor();
-}
-
-bool MaterialHasShaderUniform(const SceneMaterial& material, std::string_view uniform_name) {
-    const std::string name(uniform_name);
-    if (material.customShader.constValues.contains(name)) return true;
-    if (material.customShader.shader &&
-        material.customShader.shader->default_uniforms.contains(name))
-        return true;
-    if (material.customShader.variant &&
-        material.customShader.variant->default_uniforms.contains(name))
-        return true;
-    return false;
-}
-
-void ApplyUserPropertyToImageColor(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.image_color_user_index.find(key);
-    if (it == scene.image_color_user_index.end()) return;
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < usize(3)) return;
-
-    Eigen::Vector3f color { coerced.value[usize()],
-                            coerced.value[usize(1)],
-                            coerced.value[usize(2)] };
-    for (const auto& binding : it->second) {
-        if (binding.node) binding.node->SetColor(color);
-
-        std::array<float, 3> color3 { color.x(), color.y(), color.z() };
-        for (auto* material : binding.materials) {
-            if (! material) continue;
-            const bool           has_user_alpha = MaterialHasShaderUniform(*material, G_USERALPHA);
-            const float          alpha          = has_user_alpha && binding.node
-                                                      ? binding.node->BaseAlpha()
-                                                      : CurrentImagePropertyAlpha(binding.node);
-            std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
-            if (MaterialHasShaderUniform(*material, G_COLOR4))
-                scene.SetMaterialShaderValue(*material, G_COLOR4, color4);
-            if (MaterialHasShaderUniform(*material, G_COLOR))
-                scene.SetMaterialShaderValue(*material, G_COLOR, color3);
-        }
-    }
-}
-
-void ApplyUserPropertyToImageAlpha(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.image_alpha_user_index.find(key);
-    if (it == scene.image_alpha_user_index.end()) return;
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < usize(1)) return;
-
-    const float alpha = std::clamp(coerced.value[usize()], 0.0f, 1.0f);
-    for (const auto& binding : it->second) {
-        if (binding.node) binding.node->SetUserAlpha(alpha);
-
-        Eigen::Vector3f      color = CurrentImagePropertyColor(binding.node);
-        std::array<float, 4> color4 { color.x(), color.y(), color.z(), alpha };
-        for (auto* material : binding.materials) {
-            if (! material) continue;
-            const bool has_user_alpha = MaterialHasShaderUniform(*material, G_USERALPHA);
-            if (has_user_alpha) scene.SetMaterialShaderValue(*material, G_USERALPHA, alpha);
-            if (MaterialHasShaderUniform(*material, G_ALPHA))
-                scene.SetMaterialShaderValue(*material, G_ALPHA, alpha);
-            if (! has_user_alpha && MaterialHasShaderUniform(*material, G_COLOR4))
-                scene.SetMaterialShaderValue(*material, G_COLOR4, color4);
-        }
-    }
-}
-
-// Push a user-property value into every particle subsystem whose
-// instanceoverride was authored as `{user:"<key>", value:...}` for one of
-// its fields. The override sits behind a shared_ptr; mutating it through the
-// scene-wide binding index is observed by every initializer / operator
-// closure on next emission.
-void ApplyUserPropertyToParticles(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.particle_user_var_index.find(key);
-    if (it == scene.particle_user_var_index.end()) return;
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok) return;
-
-    auto write_scalar = [&](float& dst) {
-        if (coerced.value.size() >= usize(1)) dst = coerced.value[usize()];
-    };
-    auto write_vec3 = [&](std::array<float, 3>& dst, float scale) {
-        if (coerced.value.size() < usize(3)) return;
-        dst = { coerced.value[usize()] * scale,
-                coerced.value[usize(1)] * scale,
-                coerced.value[usize(2)] * scale };
-    };
-
-    for (auto& b : it->second) {
-        if (! b.state) continue;
-        auto*              st = static_cast<owe::wpscene::ParticleInstanceoverride*>(b.state.get());
-        const std::string& f  = b.field;
-        if (f == "alpha")
-            write_scalar(st->alpha);
-        else if (f == "size")
-            write_scalar(st->size);
-        else if (f == "lifetime")
-            write_scalar(st->lifetime);
-        else if (f == "rate")
-            write_scalar(st->rate);
-        else if (f == "speed")
-            write_scalar(st->speed);
-        else if (f == "count")
-            write_scalar(st->count);
-        else if (f == "brightness")
-            write_scalar(st->brightness);
-        else if (f == "color") {
-            // `color` is 0..255 in the JSON; the init op divides by 255.
-            write_vec3(st->color, 255.0f);
-            st->overColor = true;
-        } else if (f == "colorn") {
-            write_vec3(st->colorn, 1.0f);
-            st->overColorn = true;
-        } else if (f.starts_with("controlpoint") && ! f.starts_with("controlpointangle")) {
-            int idx = -1;
-            try {
-                idx = std::stoi(f.substr(std::string_view("controlpoint").size()));
-            } catch (...) {
-            }
-            if (idx >= 0 && idx < 8) write_vec3(st->controlpoint[idx], 1.0f);
-        } else if (f.starts_with("controlpointangle")) {
-            int idx = -1;
-            try {
-                idx = std::stoi(f.substr(std::string_view("controlpointangle").size()));
-            } catch (...) {
-            }
-            if (idx >= 0 && idx < 8) write_vec3(st->controlpointangle[idx], 1.0f);
-        }
-    }
-}
-
-void ApplyUserPropertyToSoundVolume(Scene& scene, const std::string& key, const Json& prop) {
-    auto it = scene.sound_volume_user_index.find(key);
-    if (it == scene.sound_volume_user_index.end()) return;
-
-    auto coerced = CoerceUserPropertyValue(prop);
-    if (! coerced.ok || coerced.value.size() < usize(1)) return;
-    const float volume = std::clamp(coerced.value[usize()], 0.0f, 1.0f);
-    for (auto& control : it->second) {
-        if (control) control->SetVolume(volume);
-    }
-}
-
-void ApplyUserPropertyToCameraPath(Scene& scene, const std::string& key, const Json& prop) {
-    scene.ApplyUserCameraPathVisibilityBindings(key, prop);
-}
-
-bool ApplyUserPropertyToNodeVisibility(Scene& scene, const std::string& key, const Json& prop) {
-    return scene.ApplyUserNodeVisibilityBindings(key, prop);
 }
 
 void MergeProjectUserProperties(const std::filesystem::path& project_dir, rstd::json::Map& out) {
@@ -659,7 +163,7 @@ void MergeProjectUserProperties(const std::filesystem::path& project_dir, rstd::
         auto [entry_key, entry_value] = entry;
         const auto  raw_key           = rstd::cppstd::as_string_view(entry_key->as_str());
         const auto& value             = *entry_value;
-        std::string key               = CanonicalUserPropertyKey(raw_key);
+        std::string key               = CanonicalSceneUserPropertyKey(raw_key);
         auto        current           = out.get(rstd::cppstd::as_str(key));
         auto        descriptor = current.is_some() ? MergeUserPropertyDescriptor(value, **current)
                                                    : MakeUserPropertyDescriptor(value.clone());
@@ -674,7 +178,7 @@ rstd::json::Map NormalizeUserProperties(const rstd::json::Map& input) {
         auto [entry_key, entry_value] = entry;
         const auto  key               = rstd::cppstd::as_string_view(entry_key->as_str());
         const auto& value             = *entry_value;
-        std::string canonical         = CanonicalUserPropertyKey(key);
+        std::string canonical         = CanonicalSceneUserPropertyKey(key);
         if (key == canonical || out.get(rstd::cppstd::as_str(canonical)).is_none()) {
             out.insert(::alloc::string::String::make(rstd::cppstd::as_str(canonical)),
                        InitialUserProperty(value.clone()));
@@ -1210,47 +714,27 @@ void SceneRenderController::on(RenderMsg::SetUserProperty_payload&& m) {
     auto load_bench    = loadBenchView();
     auto property_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property);
 
-    std::string                  key = CanonicalUserPropertyKey(m.key);
-    bool                         has_shader_combo_binding {};
-    bool                         requires_graph_rebuild {};
-    std::vector<SceneMaterialId> texture_materials;
+    SceneUserPropertyMutation mutation;
     {
         auto apply_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_apply);
-        has_shader_combo_binding = m_scene->shader_combo_user_index.contains(key);
-        owe::script::SetSceneUserProperty(*m_scene, key, m.property);
-        ApplyUserPropertyToClear(*m_scene, key, m.property);
-        ApplyUserPropertyToShaderUniforms(*m_scene, key, m.property);
-        texture_materials = ApplyUserPropertyToMaterialTextures(*m_scene, key, m.property);
-        bool shader_combo_requires_graph =
-            ApplyUserPropertyToShaderCombos(*m_scene, key, m.property);
-        ApplyUserPropertyToImageColor(*m_scene, key, m.property);
-        ApplyUserPropertyToImageAlpha(*m_scene, key, m.property);
-        m_scene->ApplyUserTextBindings(key, m.property);
-        ApplyUserPropertyToParticles(*m_scene, key, m.property);
-        ApplyUserPropertyToSoundVolume(*m_scene, key, m.property);
-        m_scene->ApplyUserPropertyBindings(key, m.property);
-        ApplyUserPropertyToCameraPath(*m_scene, key, m.property);
-        requires_graph_rebuild = ApplyUserPropertyToNodeVisibility(*m_scene, key, m.property);
-        requires_graph_rebuild = m_scene->ApplyUserImageEffectVisibilityBindings(key, m.property) ||
-                                 requires_graph_rebuild;
-        requires_graph_rebuild = requires_graph_rebuild || shader_combo_requires_graph;
+        mutation        = SceneUserPropertyApplier::Apply(*m_scene, m.key, m.property);
     }
 
-    if (! texture_materials.empty() && renderInited() && m_rg.is_some() &&
-        ! requires_graph_rebuild) {
+    if (! mutation.texture_materials.empty() && renderInited() && m_rg.is_some() &&
+        ! mutation.graph_changed) {
         auto refresh_span =
             SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_refresh);
         m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
         if (! m_render->refreshPreparedMaterialTextures(
-                *m_scene, m_render_scene, texture_materials)) {
-            requires_graph_rebuild = true;
+                *m_scene, m_render_scene, mutation.texture_materials)) {
+            mutation.graph_changed = true;
         }
     }
-    if (has_shader_combo_binding && m_main_tx) {
-        auto diagnostics = CollectUserPropertyDiagnostics(*m_scene, key);
+    if (mutation.diagnostics_changed && m_main_tx) {
+        auto diagnostics = CollectSceneUserPropertyDiagnostics(*m_scene, m.key);
         (void)m_main_tx->send(MainMsg::UserPropertyDiagnostics(rstd::move(diagnostics)));
     }
-    if (requires_graph_rebuild) {
+    if (mutation.graph_changed) {
         auto rebuild_span =
             SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_graph_rebuild);
         rebuildRenderGraph(
@@ -1270,14 +754,14 @@ void SceneRenderController::on(RenderMsg::SetMediaStatus_payload&& m) {
     owe::script::SetSceneMediaStatus(*m_scene, ToScriptMediaStatus(m.status));
 
     std::vector<SceneMaterialId> texture_materials;
-    for (auto material : ApplyUserPropertyToMaterialTextures(
+    for (auto material : SceneUserPropertyApplier::ApplyTexture(
              *m_scene, "$mediaThumbnail", RuntimeTextureProperty(m.status.art_url))) {
         PushUniqueMaterialId(texture_materials, material);
     }
-    for (auto material :
-         ApplyUserPropertyToMaterialTextures(*m_scene,
-                                             "$mediaPreviousThumbnail",
-                                             RuntimeTextureProperty(m.status.previous_art_url))) {
+    for (auto material : SceneUserPropertyApplier::ApplyTexture(
+             *m_scene,
+             "$mediaPreviousThumbnail",
+             RuntimeTextureProperty(m.status.previous_art_url))) {
         PushUniqueMaterialId(texture_materials, material);
     }
 
@@ -1621,7 +1105,7 @@ void SceneRuntimeController::on(MainMsg::SetSpeed_payload&& m) {
 }
 
 void SceneRuntimeController::on(MainMsg::SetUserProperty_payload&& m) {
-    const std::string property = CanonicalUserPropertyKey(m.key);
+    const std::string property = CanonicalSceneUserPropertyKey(m.key);
     auto              current  = m_user_properties.get(rstd::cppstd::as_str(property));
     Json              prop = current.is_some() ? MergeUserPropertyDescriptor(**current, m.value)
                                                : MakeUserPropertyDescriptor(rstd::move(m.value));
@@ -1821,13 +1305,18 @@ void SceneRuntimeController::loadScene() {
             return;
         }
         auto runtime_span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_runtime_setup);
-        m_user_properties.iter().for_each([&](auto entry) {
-            auto [entry_key, entry_value] = entry;
-            auto        key               = rstd::cppstd::to_string(entry_key->as_str());
-            const auto& prop              = *entry_value;
-            ApplyUserPropertyToClear(*scene, key, prop);
-            owe::script::SetSceneUserProperty(*scene, key, prop);
-        });
+        scene->vfs.reset(pVfs.release());
+        SceneUserPropertyMutation initial_mutation;
+        {
+            auto property_span =
+                SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_initial_properties);
+            initial_mutation = SceneUserPropertyApplier::ApplyAll(*scene, m_user_properties);
+        }
+        if (initial_mutation.diagnostics_changed && m_user_property_diagnostic_cb) {
+            auto diagnostics = scene->UserPropertyDiagnostics();
+            m_user_property_diagnostic_cb(
+                std::vector<SceneUserPropertyDiagnostic>(diagnostics.begin(), diagnostics.end()));
+        }
         if (! m_config.cache_dir.empty() && scene) {
             std::filesystem::path ls_dir =
                 std::filesystem::path(m_config.cache_dir) / "script_localstorage";
@@ -1836,7 +1325,6 @@ void SceneRuntimeController::loadScene() {
             std::string ls_file = (ls_dir / (scene_id + ".json")).native();
             owe::script::SetScenePersistence(*scene, rstd::move(ls_file));
         }
-        scene->vfs.reset(pVfs.release());
 
         // Surface the parsed clear color before the scene is shipped
         // off to the render thread; downstream callers (the daemon
@@ -1856,17 +1344,6 @@ void SceneRuntimeController::loadScene() {
         abort_load();
         return;
     }
-    // First-frame default push: now that the render thread owns the scene,
-    // replay every collected user property (project.json defaults + any
-    // mutations the host already pushed during scene load) so the shader
-    // cbuffer matches what the host UI displays.
-    m_user_properties.iter().for_each([&](auto entry) {
-        auto [entry_key, entry_value] = entry;
-        auto        key               = rstd::cppstd::to_string(entry_key->as_str());
-        const auto& prop              = *entry_value;
-        (void)rtx.send(RenderMsg::SetUserProperty(rstd::move(key), prop.clone()));
-    });
-    // draw first frame
     if (rtx.send(RenderMsg::Draw()).is_err()) abort_load();
 }
 
