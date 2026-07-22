@@ -79,21 +79,14 @@ struct WPShaderUnit {
     WPPreprocessorInfo preprocess_info;
 };
 
-class WPShaderParserCache {
-    struct SourceEntry {
-        std::string source;
-        std::string includes;
-    };
+class WPShaderCacheDirectory {
+public:
+    explicit WPShaderCacheDirectory(rstd::path::PathBuf path): m_path(rstd::move(path)) {}
 
-    struct CompileEntry {
-        std::vector<WPShaderUnit> units;
-        std::vector<ShaderCode>   codes;
-    };
+    auto path() const noexcept -> ref<rstd::path::Path> { return m_path.as_path(); }
 
-    Map<std::string, SourceEntry>  source_entries;
-    Map<std::string, CompileEntry> compile_entries;
-
-    friend class WPShaderParser;
+private:
+    rstd::path::PathBuf m_path;
 };
 
 // Output of CompileMaterialShader. On ok=true, spvs holds one SPIR-V
@@ -126,8 +119,7 @@ void ParseWPShader(const std::string& src, WPShaderInfo* info,
 class WPShaderParser {
 public:
     static std::string PreShaderSrc(fs::VFS&, const std::string& src, WPShaderInfo* pWPShaderInfo,
-                                    const std::vector<WPShaderTexInfo>& texs,
-                                    WPShaderParserCache* = nullptr);
+                                    const std::vector<WPShaderTexInfo>& texs);
 
     static std::string PreShaderHeader(const std::string& src, const Combos& combos, ShaderType);
 
@@ -135,8 +127,9 @@ public:
     static void FinalGlslang();
 
     static bool CompileToSpv(std::string_view         scene_id, std::span<WPShaderUnit>,
-                             std::vector<ShaderCode>& spvs, fs::VFS&, WPShaderInfo*,
-                             std::span<const WPShaderTexInfo>, WPShaderParserCache* = nullptr);
+                             std::vector<ShaderCode>& spvs, WPShaderInfo*,
+                             std::span<const WPShaderTexInfo>,
+                             Option<ref<rstd::path::Path>> cache_dir = None());
 
     static void UpdateSceneShaderVariantDescFromCompiledUnits(SceneShaderVariantDesc&,
                                                               std::span<const WPShaderUnit>,
@@ -156,13 +149,14 @@ public:
     // (color-blend mode, sprite-sheet flags, puppet bone count beyond
     // default, etc.) are NOT injected. Materials that hard-require them
     // will fail compile here; supply the right values via combos_override.
-    static CompileMaterialShaderResult CompileMaterialShader(const Json&      material_json,
-                                                             fs::VFS&         vfs,
-                                                             std::string_view scene_id = "test",
-                                                             const Combos&    combos_override = {});
+    static CompileMaterialShaderResult
+    CompileMaterialShader(const Json& material_json, fs::VFS& vfs,
+                          std::string_view scene_id = "test", const Combos& combos_override = {},
+                          Option<ref<rstd::path::Path>> cache_dir = None());
 
     static CompileSceneShaderVariantResult
     CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs::VFS& vfs,
-                              const Combos& combos_override = {});
+                              const Combos&                 combos_override = {},
+                              Option<ref<rstd::path::Path>> cache_dir       = None());
 };
 } // namespace owe

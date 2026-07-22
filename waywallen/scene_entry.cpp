@@ -83,6 +83,22 @@ bool env_flag_enabled(const char* name) {
            std::strcmp(value, "OFF") != 0;
 }
 
+std::string shader_cache_dir() {
+    auto                configured = rstd::env::var("XDG_CACHE_HOME");
+    rstd::path::PathBuf path;
+    if (configured.is_some() && ! configured->is_empty()) {
+        path = rstd::path::PathBuf::from(rstd::move(configured).unwrap_unchecked());
+    } else {
+        auto home = rstd::env::var("HOME");
+        if (home.is_none() || home->is_empty()) return {};
+        path = rstd::path::PathBuf::from(rstd::move(home).unwrap_unchecked());
+        path.push(ref<rstd::path::Path>(".cache"));
+    }
+    path.push(ref<rstd::path::Path>("wescene-renderer"));
+    auto text = path.as_path().to_str();
+    return text.is_some() ? rstd::cppstd::to_string(*text) : std::string {};
+}
+
 const char* pass_type_name(owe::rg::PassNode::Type type) {
     switch (type) {
     case owe::rg::PassNode::Type::CustomShader: return "custom-shader";
@@ -948,6 +964,7 @@ int run(int argc, char** argv) {
     owe::SceneWallpaperConfig wp_config;
     wp_config.source_pkg_path = opts.initial_scene;
     wp_config.assets_dir      = opts.initial_assets;
+    wp_config.cache_dir       = shader_cache_dir();
     wp_config.scene_document  = opts.initial_scene_document;
     wp_config.load_bench      = load_bench.clone();
     wp_config.user_properties = rstd::move(opts.initial_user_properties);

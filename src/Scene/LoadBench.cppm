@@ -21,7 +21,6 @@ struct SceneLoadProbeIds {
     rstd::bench::probe::ProbeId load_vfs_assets;
     rstd::bench::probe::ProbeId load_project_properties;
     rstd::bench::probe::ProbeId load_package;
-    rstd::bench::probe::ProbeId load_vfs_cache;
     rstd::bench::probe::ProbeId load_scene_document;
     rstd::bench::probe::ProbeId parse_total;
     rstd::bench::probe::ProbeId parse_expand_objects;
@@ -152,7 +151,6 @@ auto CreateSceneLoadBench(ref<str> output_path) -> Option<SceneLoadBenchHandle> 
         .load_vfs_assets              = RegisterProbe(registry, "load.vfs.assets"),
         .load_project_properties      = RegisterProbe(registry, "load.project_properties"),
         .load_package                 = RegisterProbe(registry, "load.package"),
-        .load_vfs_cache               = RegisterProbe(registry, "load.vfs.cache"),
         .load_scene_document          = RegisterProbe(registry, "load.scene_document"),
         .parse_total                  = RegisterProbe(registry, "parse.total"),
         .parse_expand_objects         = RegisterProbe(registry, "parse.expand_objects"),

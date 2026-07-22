@@ -31,6 +31,7 @@ struct SceneParseError {
 struct SceneParseOptions {
     SceneLoadBenchRecorderView   load_bench;
     Option<ref<rstd::json::Map>> user_properties;
+    Option<rstd::path::PathBuf>  shader_cache_dir;
 };
 
 struct ParsedScene {

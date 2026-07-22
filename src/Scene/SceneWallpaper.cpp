@@ -1285,17 +1285,6 @@ void SceneRuntimeController::loadScene() {
             }
         }
     }
-    if (! m_config.cache_dir.empty()) {
-        auto span  = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_vfs_cache);
-        auto cache = fs::make_physical_fs(fs::ToPath(m_config.cache_dir), true);
-        if (cache.is_err() ||
-            vfs.mount("/cache", rstd::move(cache).unwrap_unchecked(), "cache").is_err()) {
-            rstd_error("can't load cache folder: {}", m_config.cache_dir);
-        } else {
-            rstd_info("cache folder: {}", m_config.cache_dir);
-        }
-    }
-
     {
         const std::string base { "/assets/" };
         auto              scene_doc = m_config.scene_document;
@@ -1309,6 +1298,12 @@ void SceneRuntimeController::loadScene() {
             abort_load();
             return;
         }
+        Option<rstd::path::PathBuf> shader_cache_dir;
+        if (! m_config.cache_dir.empty()) {
+            shader_cache_dir =
+                Some(rstd::path::PathBuf::from(rstd::cppstd::as_str(m_config.cache_dir)));
+            rstd_info("shader cache folder: {}", m_config.cache_dir);
+        }
         WPSceneParser parser;
         auto          parsed = parser.Parse(
             rstd::cppstd::as_str(scene_id),
@@ -1319,6 +1314,7 @@ void SceneRuntimeController::loadScene() {
                 .load_bench      = loadBenchView(),
                 .user_properties = Some(
                     rstd::ref<rstd::json::Map>::from_raw_parts(rstd::addressof(m_user_properties))),
+                .shader_cache_dir = rstd::move(shader_cache_dir),
             });
         if (parsed.is_err()) {
             rstd_error("scene parse failed: {}", parsed.unwrap_err().message.as_str());

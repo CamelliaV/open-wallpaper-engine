@@ -46,13 +46,18 @@ struct PuppetLayerRegistry {
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
-    Box<Scene>                   scene { Box<Scene>::make() };
-    Option<WPParticleRuntime>    particle_runtime;
-    std::int32_t                 ortho_w { 0 };
-    std::int32_t                 ortho_h { 0 };
-    fs::VFS*                     vfs { nullptr };
-    Option<ref<rstd::json::Map>> user_properties;
-    WPShaderParserCache          shader_cache;
+    Box<Scene>                     scene { Box<Scene>::make() };
+    Option<WPParticleRuntime>      particle_runtime;
+    std::int32_t                   ortho_w { 0 };
+    std::int32_t                   ortho_h { 0 };
+    fs::VFS*                       vfs { nullptr };
+    Option<ref<rstd::json::Map>>   user_properties;
+    Option<WPShaderCacheDirectory> shader_cache_directory;
+
+    auto ShaderCachePath() const noexcept -> Option<ref<rstd::path::Path>> {
+        if (shader_cache_directory.is_none()) return None();
+        return Some(shader_cache_directory->path());
+    }
 
     ShaderValueMap         global_base_uniforms;
     Option<Arc<SceneNode>> effect_camera_node;
@@ -163,7 +168,8 @@ array<std::int32_t, 2> ResolveOrthoProjectionExtent(const wpscene::SceneMetadata
 // targets (SpecTex_Default, WE_MIP_MAPPED_FRAME_BUFFER).
 ParseContext BuildContext(fs::VFS&, ref<str> scene_id, const wpscene::SceneMetadata&,
                           array<std::int32_t, 2>       ortho_extent,
-                          Option<ref<rstd::json::Map>> user_properties = None());
+                          Option<ref<rstd::json::Map>> user_properties  = None(),
+                          Option<rstd::path::PathBuf>  shader_cache_dir = None());
 
 // Per-object dispatch. Brackets glslang init/finalize around the visit
 // loop. opts.kinds masks which kinds run; default is all-kinds. Sound

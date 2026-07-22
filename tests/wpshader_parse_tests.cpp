@@ -310,6 +310,59 @@ void main() {
     EXPECT_FALSE(result.shader->codes[1].empty());
 }
 
+TEST(WPShaderParser, CompileSceneShaderVariantUsesPhysicalFileCache) {
+    const auto root =
+        std::filesystem::temp_directory_path() /
+        ("owe-shader-cache-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+    std::filesystem::remove_all(root);
+
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "physical-cache-test";
+    desc.shader_name = "physical-cache-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/physical-cache-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+void main() {
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/physical-cache-test.frag",
+        .source     = R"(
+void main() {
+    gl_FragColor = vec4(1.0);
+}
+)",
+    });
+
+    const auto   cache_text = root.string();
+    const auto   cache_path = rstd::path::PathBuf::from(rstd::cppstd::as_str(cache_text));
+    owe::fs::VFS vfs;
+    const auto   first =
+        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    ASSERT_TRUE(first.ok) << first.error;
+    ASSERT_TRUE(first.shader);
+
+    const auto shader_cache = root / desc.scene_id / "spvs01";
+    ASSERT_TRUE(std::filesystem::is_directory(shader_cache));
+    const auto files = std::filesystem::directory_iterator(shader_cache);
+    ASSERT_NE(files, std::filesystem::directory_iterator {});
+    EXPECT_EQ(files->path().extension(), ".spvs");
+    EXPECT_GT(files->file_size(), 0u);
+
+    const auto second =
+        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    ASSERT_TRUE(second.ok) << second.error;
+    ASSERT_TRUE(second.shader);
+    EXPECT_EQ(second.shader->codes, first.shader->codes);
+
+    std::filesystem::remove_all(root);
+}
+
 TEST(WPShaderParser, CompileSceneShaderVariantExportsSamplerBindings) {
     owe::SceneShaderVariantDesc desc;
     desc.scene_id    = "sampler-binding-test";
