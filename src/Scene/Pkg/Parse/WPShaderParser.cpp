@@ -30,6 +30,7 @@ static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 
 using namespace owe;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace
 {
@@ -106,8 +107,8 @@ inline void ForEachDeclLine(ref<str> src, std::initializer_list<ref<str>> storag
 }
 
 inline bool IsSamplerType(ref<str> t) {
-    return t == "sampler2D" || t == "sampler3D" || t == "samplerCube" ||
-           t == "sampler2DComparison" || t == "sampler2DShadow";
+    return t == "sampler2D"_str || t == "sampler3D"_str || t == "samplerCube"_str ||
+           t == "sampler2DComparison"_str || t == "sampler2DShadow"_str;
 }
 
 // Replace every occurrence of `needle` in `body` with `repl`. The placeholder
@@ -431,12 +432,12 @@ inline bool PunctIs(shader_lex::Token token, char c) {
 
 // Legacy WE shaders sometimes address audio float arrays as std140 vec4 groups.
 inline bool IsAudioSpectrumName(rstd::ref<rstd::str> name) {
-    return name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_L) ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_R) ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_L) ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_R) ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_L) ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_R);
+    return name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_L).unwrap() ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_R).unwrap() ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_L).unwrap() ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_R).unwrap() ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_L).unwrap() ||
+           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_R).unwrap();
 }
 
 struct ShaderBracketExpr {
@@ -489,11 +490,11 @@ inline Option<String> TryFlattenPackedAudioIndex(ref<str> group, ref<str> compon
         c[usize()].kind == shader_lex::TokenKind::Ident && g[usize()].text == c[usize()].text &&
         PunctIs(g[usize(1)], '/') && PunctIs(c[usize(1)], '%') &&
         g[usize(2)].kind == shader_lex::TokenKind::Int &&
-        c[usize(2)].kind == shader_lex::TokenKind::Int && g[usize(2)].text == "4" &&
-        c[usize(2)].text == "4") {
-        auto out = String::make("(int)(");
+        c[usize(2)].kind == shader_lex::TokenKind::Int && g[usize(2)].text == "4"_str &&
+        c[usize(2)].text == "4"_str) {
+        auto out = String::make("(int)("_str);
         out.push_str(g[usize()].text);
-        out.push_back(')');
+        out.push_ascii(u8(')'));
         return Some(rstd::move(out));
     }
     return None();
@@ -504,11 +505,11 @@ inline String FlattenAudioSpectrumAccess(ref<str> group, ref<str> component) {
 
     auto out = String::make();
     out.reserve(group.size() + component.size() + usize(32));
-    out.push_str("((int)(");
+    out.push_str("((int)("_str);
     out.push_str(group);
-    out.push_str(") * 4 + (int)(");
+    out.push_str(") * 4 + (int)("_str);
     out.push_str(component);
-    out.push_str("))");
+    out.push_str("))"_str);
     return out;
 }
 
@@ -533,10 +534,10 @@ inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
 
         out.push_str(*rstd::str_::get(src, copied, name.offset));
         out.push_str(name.text);
-        out.push_back('[');
+        out.push_ascii(u8('['));
         auto flattened = FlattenAudioSpectrumAccess(group->expr, component->expr);
         out.push_str(flattened.as_str());
-        out.push_back(']');
+        out.push_ascii(u8(']'));
         copied  = component->close_end;
         changed = true;
     }
@@ -547,12 +548,13 @@ inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
 }
 
 inline bool IsLocalMatrixConstructor(rstd::ref<rstd::str> name) {
-    return name == "mat2" || name == "mat3" || name == "mat4" || name == "mat2x2" ||
-           name == "mat2x3" || name == "mat2x4" || name == "mat3x2" || name == "mat3x3" ||
-           name == "mat3x4" || name == "mat4x2" || name == "mat4x3" || name == "mat4x4" ||
-           name == "float2x2" || name == "float2x3" || name == "float2x4" || name == "float3x2" ||
-           name == "float3x3" || name == "float3x4" || name == "float4x2" || name == "float4x3" ||
-           name == "float4x4";
+    return name == "mat2"_str || name == "mat3"_str || name == "mat4"_str || name == "mat2x2"_str ||
+           name == "mat2x3"_str || name == "mat2x4"_str || name == "mat3x2"_str ||
+           name == "mat3x3"_str || name == "mat3x4"_str || name == "mat4x2"_str ||
+           name == "mat4x3"_str || name == "mat4x4"_str || name == "float2x2"_str ||
+           name == "float2x3"_str || name == "float2x4"_str || name == "float3x2"_str ||
+           name == "float3x3"_str || name == "float3x4"_str || name == "float4x2"_str ||
+           name == "float4x3"_str || name == "float4x4"_str;
 }
 
 inline String NormalizeLocalMatrixMul(ref<str> src) {
@@ -564,7 +566,7 @@ inline String NormalizeLocalMatrixMul(ref<str> src) {
     for (;;) {
         auto name = lx.Next();
         if (name.kind == shader_lex::TokenKind::Eof) break;
-        if (! TokenIs(name, "mul")) continue;
+        if (! TokenIs(name, "mul"_str)) continue;
 
         auto save = lx.Save();
         auto open = NextShaderToken(lx);
@@ -610,9 +612,9 @@ inline String NormalizeLocalMatrixMul(ref<str> src) {
         }
 
         out.push_str(*rstd::str_::get(src, copied, second.offset));
-        out.push_str("transpose(");
+        out.push_str("transpose("_str);
         out.push_str(*rstd::str_::get(src, second.offset, usize(*close_start)));
-        out.push_back(')');
+        out.push_ascii(u8(')'));
         copied  = usize(*close_start);
         changed = true;
     }
@@ -625,7 +627,7 @@ inline String NormalizeLocalMatrixMul(ref<str> src) {
 inline bool LineDefinesMacro(ref<str> src, usize line_start, ref<str> macro_name) {
     shader_lex::Cursor c(src);
     c.SeekTo(line_start);
-    if (! c.MatchHashDirective("define")) return false;
+    if (! c.MatchHashDirective("define"_str)) return false;
     c.SkipHSpace();
     auto ident = c.ReadIdent();
     return ident && *ident == macro_name;
@@ -638,15 +640,15 @@ inline String UndefBeforeUserMacroDefines(ref<str> src, ref<str> macro_name) {
     shader_lex::LineWalker w(src);
     for (; ! w.Done(); w.Step()) {
         if (LineDefinesMacro(src, w.LineStart(), macro_name)) {
-            out.push_str("#ifdef ");
+            out.push_str("#ifdef "_str);
             out.push_str(macro_name);
-            out.push_str("\n#undef ");
+            out.push_str("\n#undef "_str);
             out.push_str(macro_name);
-            out.push_str("\n#endif\n");
+            out.push_str("\n#endif\n"_str);
             changed = true;
         }
         out.push_str(*rstd::str_::get(src, w.LineStart(), w.LineEnd()));
-        if (w.LineEnd() < src.size()) out.push_back('\n');
+        if (w.LineEnd() < src.size()) out.push_ascii(u8('\n'));
     }
     return changed ? rstd::move(out) : String::make(src);
 }
@@ -664,12 +666,12 @@ inline Vec<String> CollectBuildTangentSpaceVars(ref<str> src) {
     for (;;) {
         auto t = NextShaderToken(lx);
         if (t.kind == shader_lex::TokenKind::Eof) break;
-        if (! TokenIs(t, "mat3")) continue;
+        if (! TokenIs(t, "mat3"_str)) continue;
 
         auto name = NextShaderToken(lx);
         if (name.kind != shader_lex::TokenKind::Ident) continue;
         if (! PunctIs(NextShaderToken(lx), '=')) continue;
-        if (! TokenIs(NextShaderToken(lx), "BuildTangentSpace")) continue;
+        if (! TokenIs(NextShaderToken(lx), "BuildTangentSpace"_str)) continue;
         if (! PunctIs(NextShaderToken(lx), '(')) continue;
         if (! Contains(vars.as_slice(), name.text)) vars.push(String::make(name.text));
     }
@@ -677,7 +679,7 @@ inline Vec<String> CollectBuildTangentSpaceVars(ref<str> src) {
 }
 
 inline void NormalizeExpandedShaderSource(std::string& src) {
-    auto source             = rstd::cppstd::as_str(src);
+    auto source             = rstd::cppstd::as_str(src).unwrap();
     auto tangent_space_vars = CollectBuildTangentSpaceVars(source);
     if (tangent_space_vars.is_empty()) return;
 
@@ -687,7 +689,7 @@ inline void NormalizeExpandedShaderSource(std::string& src) {
     for (;;) {
         auto t = lx.Next();
         if (t.kind == shader_lex::TokenKind::Eof) break;
-        if (! TokenIs(t, "mul")) continue;
+        if (! TokenIs(t, "mul"_str)) continue;
 
         auto save  = lx.Save();
         auto open  = NextShaderToken(lx);
@@ -755,7 +757,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
     for (; ! w.Done(); w.Step()) {
         shader_lex::Cursor c(input);
         c.SeekTo(w.LineStart());
-        if (! c.MatchHashDirective("include")) continue;
+        if (! c.MatchHashDirective("include"_str)) continue;
 
         // Emit everything up to the directive line, then resolve the include
         // and append the recursively-expanded body. Bytes after the directive
@@ -763,9 +765,9 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
         // original behavior.
         output.append(input_view, pos, w.LineStart().to_primitive() - pos);
         auto        line_view = *rstd::str_::get(input, w.LineStart(), w.LineEnd());
-        std::string line(line_view.begin(), line_view.end());
-        auto        in_p = line.find_first_of('\"');
-        auto        in_e = line.find_last_of('\"');
+        std::string line      = rstd::cppstd::to_string(line_view);
+        auto        in_p      = line.find_first_of('\"');
+        auto        in_e      = line.find_last_of('\"');
         if (in_p == std::string::npos || in_e == std::string::npos || in_e <= in_p) {
             // Malformed include — preserve verbatim.
             output.append(line);
@@ -784,7 +786,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
         output.append("\n//-----include ");
         output.append(includeName);
         output.append("\n");
-        output.append(LoadGlslInclude(vfs, rstd::cppstd::as_str(includeSrc)));
+        output.append(LoadGlslInclude(vfs, rstd::cppstd::as_str(includeSrc).unwrap()));
         // WE shaders routinely pass a vector opacity (opacity * mask) to the
         // scalar ApplyBlending, relying on fxc's implicit vector->scalar
         // truncation. glslang's HLSL frontend won't truncate at the call, so
@@ -817,7 +819,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
 inline std::size_t FindIncludeInsertPos(const std::string& src, std::size_t startPos) {
     using shader_lex::PpKind;
     (void)startPos;
-    auto source = rstd::cppstd::as_str(src);
+    auto source = rstd::cppstd::as_str(src).unwrap();
 
     const std::size_t main_pos = src.find("void main(");
     if (main_pos == std::string::npos) return 0;
@@ -826,7 +828,7 @@ inline std::size_t FindIncludeInsertPos(const std::string& src, std::size_t star
     std::size_t                                      after_pos = std::string::npos;
     std::vector<std::pair<std::size_t, std::size_t>> if_ranges;
     std::vector<std::size_t>                         if_stack;
-    const array<ref<str>, 4> kKws { "attribute", "varying", "uniform", "struct" };
+    const array<ref<str>, 4> kKws { "attribute"_str, "varying"_str, "uniform"_str, "struct"_str };
 
     shader_lex::LineWalker w(source);
     for (; ! w.Done(); w.Step()) {
@@ -885,7 +887,7 @@ inline std::size_t FindIncludeInsertPos(const std::string& src, std::size_t star
 // `#endif` would pop an empty stack, comment the line instead.
 inline std::string BalanceConditionals(std::string src) {
     using shader_lex::PpKind;
-    auto        source = rstd::cppstd::as_str(src);
+    auto        source = rstd::cppstd::as_str(src).unwrap();
     int         depth  = 0;
     std::string out;
     out.reserve(src.size() + 32);
@@ -923,13 +925,13 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     {
         std::string out;
         out.reserve(with_prologue.size());
-        auto                   source = rstd::cppstd::as_str(with_prologue);
+        auto                   source = rstd::cppstd::as_str(with_prologue).unwrap();
         shader_lex::LineWalker w(source);
         for (; ! w.Done(); w.Step()) {
             shader_lex::Cursor c(source);
             c.SeekTo(w.LineStart());
             auto saved = c.Save();
-            if (c.MatchHashDirective("require")) {
+            if (c.MatchHashDirective("require"_str)) {
                 out.append("//");
             }
             c.Restore(saved);
@@ -958,31 +960,32 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         // a developer would see if they bypassed the preprocess step.
         src = std::move(with_prologue);
     }
-    auto source = rstd::cppstd::as_str(src);
+    auto source = rstd::cppstd::as_str(src).unwrap();
 
     // GS source uses `in`/`out` storage classes; VS/FS use `attribute`/`varying`.
-    ForEachDeclLine(source, { "attribute", "varying", "in", "out" }, [&](const DeclMatch& m) {
-        // attribute-in-vertex and varying-in-fragment both behave as inputs;
-        // varying-in-vertex behaves as output. GS: `in` is input (from VS),
-        // `out` is output (to FS).
-        bool        is_input = (m.storage == "attribute") ||
-                               (m.storage == "varying" && type == ShaderType::FRAGMENT) ||
-                               (m.storage == "in" && type == ShaderType::GEOMETRY);
-        std::string line(src.substr(m.start, m.end - m.start));
-        auto        name = rstd::cppstd::to_string(m.name);
-        if (is_input)
-            process_info.input[name] = std::move(line);
-        else
-            process_info.output[name] = std::move(line);
-    });
+    ForEachDeclLine(
+        source, { "attribute"_str, "varying"_str, "in"_str, "out"_str }, [&](const DeclMatch& m) {
+            // attribute-in-vertex and varying-in-fragment both behave as inputs;
+            // varying-in-vertex behaves as output. GS: `in` is input (from VS),
+            // `out` is output (to FS).
+            bool        is_input = (m.storage == "attribute"_str) ||
+                                   (m.storage == "varying"_str && type == ShaderType::FRAGMENT) ||
+                                   (m.storage == "in"_str && type == ShaderType::GEOMETRY);
+            std::string line(src.substr(m.start, m.end - m.start));
+            auto        name = rstd::cppstd::to_string(m.name);
+            if (is_input)
+                process_info.input[name] = std::move(line);
+            else
+                process_info.output[name] = std::move(line);
+        });
 
     // Non-sampler uniform decls feed Finalprocessor's shared cbuffer.
     // Sampler-typed uniforms are emitted as Texture/SamplerState pairs and
     // captured in active_tex_slots instead.
-    ForEachDeclLine(source, { "uniform" }, [&](const DeclMatch& m) {
+    ForEachDeclLine(source, { "uniform"_str }, [&](const DeclMatch& m) {
         if (IsSamplerType(m.type)) {
             // Track active sampler slot if it's a `g_TextureN`.
-            const ref<str> kTex { "g_Texture" };
+            const ref<str> kTex { "g_Texture"_str };
             if (m.name.size() > kTex.size() && rstd::str_::starts_with(m.name, kTex)) {
                 auto     num   = *rstd::str_::get_from(m.name, kTex.size());
                 unsigned slot  = 0;
@@ -1065,7 +1068,7 @@ ScanAndStripSamplers(const std::string& src) {
     std::string              out;
     out.reserve(src.size());
     std::size_t cursor = 0;
-    ForEachDeclLine(rstd::cppstd::as_str(src), { "uniform" }, [&](const DeclMatch& m) {
+    ForEachDeclLine(rstd::cppstd::as_str(src).unwrap(), { "uniform"_str }, [&](const DeclMatch& m) {
         if (! IsSamplerType(m.type)) return;
         out.append(src, cursor, m.start - cursor);
         out.append(src, m.start, m.keep_prefix);
@@ -1107,7 +1110,7 @@ inline std::string StripUniforms(const std::string& src) {
     std::string out;
     out.reserve(src.size());
     std::size_t cursor = 0;
-    ForEachDeclLine(rstd::cppstd::as_str(src), { "uniform" }, [&](const DeclMatch& m) {
+    ForEachDeclLine(rstd::cppstd::as_str(src).unwrap(), { "uniform"_str }, [&](const DeclMatch& m) {
         out.append(src, cursor, m.start - cursor);
         out.append(src, m.start, m.keep_prefix);
         cursor = m.end;
@@ -1120,8 +1123,9 @@ inline std::optional<IODecl> ParseIODecl(const std::string& line) {
     // Skip leading newline / CR that the capture loops preserved as an anchor.
     std::size_t start = 0;
     while (start < line.size() && shader_lex::IsVSpace(line[start])) ++start;
-    auto m = TryParseDeclLine(
-        rstd::cppstd::as_str(line), usize(start), { "attribute", "varying", "in", "out" });
+    auto m = TryParseDeclLine(rstd::cppstd::as_str(line).unwrap(),
+                              usize(start),
+                              { "attribute"_str, "varying"_str, "in"_str, "out"_str });
     if (! m) return std::nullopt;
     return IODecl { StorageCharFor(rstd::cppstd::to_string(m->storage)),
                     rstd::cppstd::to_string(m->type),
@@ -1182,8 +1186,8 @@ inline std::pair<std::vector<IODecl>, std::string> ScanAndStripIO(const std::str
     std::string         out;
     out.reserve(src.size());
     std::size_t cursor = 0;
-    ForEachDeclLine(rstd::cppstd::as_str(src),
-                    { "attribute", "varying", "in", "out" },
+    ForEachDeclLine(rstd::cppstd::as_str(src).unwrap(),
+                    { "attribute"_str, "varying"_str, "in"_str, "out"_str },
                     [&](const DeclMatch& m) {
                         out.append(src, cursor, m.start - cursor);
                         out.append(src, m.start, m.keep_prefix);
@@ -1825,10 +1829,10 @@ std::optional<ShaderCacheIdentity> MakeShaderCacheIdentity(std::span<const WPSha
 inline rstd::path::PathBuf GetCachePath(ref<rstd::path::Path> cache_dir, std::string_view scene_id,
                                         std::string_view filename) {
     auto path = rstd::path::PathBuf::from(cache_dir);
-    path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(scene_id)));
-    path.push(ref<rstd::path::Path>(SHADER_DIR));
+    path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(scene_id).unwrap()));
+    path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(SHADER_DIR).unwrap()));
     const std::string cache_filename = std::string(filename) + "." SHADER_SUFFIX;
-    path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(cache_filename)));
+    path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(cache_filename).unwrap()));
     return path;
 }
 
@@ -2106,7 +2110,7 @@ bool PublishShaderCacheArtifact(ref<rstd::path::Path> path, std::string_view cac
             "." + std::to_string(temporary_sequence.fetch_add(1, std::memory_order_relaxed)) +
             ".tmp";
         auto temporary_path = rstd::path::PathBuf::from(*parent);
-        temporary_path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(temporary_name)));
+        temporary_path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(temporary_name).unwrap()));
 
         auto opened = rstd::fs::File::create_new(temporary_path.as_path());
         if (opened.is_err()) {
@@ -2121,9 +2125,9 @@ bool PublishShaderCacheArtifact(ref<rstd::path::Path> path, std::string_view cac
         bool write_ok = false;
         {
             auto file = rstd::move(opened).unwrap_unchecked();
-            auto data = rstd::slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(bytes.data()),
+            auto data = rstd::slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(bytes.data()),
                                                         rstd::usize(bytes.size()));
-            auto written = rstd::io::write_all(file, rstd::as_bytes(data));
+            auto written = rstd::io::write_all(file, data);
             if (written.is_err()) {
                 rstd_warn("cannot write shader cache temporary file '{}': {}",
                           temporary_path.as_path(),
@@ -2175,12 +2179,12 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
     std::string all_includes;
 
     std::size_t            cursor = 0;
-    auto                   source = rstd::cppstd::as_str(src);
+    auto                   source = rstd::cppstd::as_str(src).unwrap();
     shader_lex::LineWalker w(source);
     for (; ! w.Done(); w.Step()) {
         shader_lex::Cursor c(source);
         c.SeekTo(w.LineStart());
-        if (! c.MatchHashDirective("include")) continue;
+        if (! c.MatchHashDirective("include"_str)) continue;
 
         // Copy bytes up to this line, then splice in the recursively-expanded
         // include body. The newline after the directive stays as part of the
@@ -2188,8 +2192,8 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
         newsrc.append(src, cursor, w.LineStart().to_primitive() - cursor);
         std::string line =
             src.substr(w.LineStart().to_primitive(), (w.LineEnd() - w.LineStart()).to_primitive());
-        auto include_line = String::make(rstd::cppstd::as_str(line));
-        include_line.push_back('\n');
+        auto include_line = String::make(rstd::cppstd::as_str(line).unwrap());
+        include_line.push_ascii(u8('\n'));
         std::string expanded = LoadGlslInclude(vfs, include_line.as_str());
         newsrc.append(expanded);
         all_includes.append(expanded);
@@ -2208,7 +2212,7 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
-    auto undefined        = UndefBeforeUserMacroDefines(rstd::cppstd::as_str(src), "M_PI_2");
+    auto undefined = UndefBeforeUserMacroDefines(rstd::cppstd::as_str(src).unwrap(), "M_PI_2"_str);
     auto normalized_audio = NormalizePackedAudioSpectrumAccess(undefined.as_str());
     auto normalized_local = NormalizeLocalMatrixMul(normalized_audio.as_str());
     auto user_src         = rstd::cppstd::to_string(normalized_local.as_str());
@@ -2295,43 +2299,36 @@ Json BuildShaderRecord(std::string_view scene_id, std::span<const WPShaderUnit> 
     };
 
     auto rec = rstd::json::Map::make();
-    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("scene_id")),
-               JsonFromStd(scene_id));
+    rec.insert(::alloc::string::String::make("scene_id"_str), JsonFromStd(scene_id));
 
     auto js_stages = rstd::json::Array::make();
     for (const auto& u : units) {
         auto stage = rstd::json::Map::make();
-        stage.insert(::alloc::string::String::make(rstd::cppstd::as_str("stage")),
-                     JsonFromStd(stage_name(u.stage)));
-        stage.insert(::alloc::string::String::make(rstd::cppstd::as_str("src")),
-                     JsonFromStd(u.src));
+        stage.insert(::alloc::string::String::make("stage"_str), JsonFromStd(stage_name(u.stage)));
+        stage.insert(::alloc::string::String::make("src"_str), JsonFromStd(u.src));
         js_stages.push(Json::Object(rstd::move(stage)));
     }
-    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("stages")),
-               Json::Array(rstd::move(js_stages)));
+    rec.insert(::alloc::string::String::make("stages"_str), Json::Array(rstd::move(js_stages)));
 
     auto js_combos = rstd::json::Map::make();
     if (shader_info) {
         for (const auto& [k, v] : shader_info->combos)
-            js_combos.insert(::alloc::string::String::make(rstd::cppstd::as_str(k)),
+            js_combos.insert(::alloc::string::String::make(rstd::cppstd::as_str(k).unwrap()),
                              JsonFromStd(v));
     }
-    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("combos")),
-               Json::Object(rstd::move(js_combos)));
+    rec.insert(::alloc::string::String::make("combos"_str), Json::Object(rstd::move(js_combos)));
 
     auto js_texs = rstd::json::Array::make();
     for (const auto& t : texs) {
         auto compos = rstd::json::Array::make();
         for (bool enabled : t.composEnabled) compos.push(rstd::into<Json>(enabled));
         auto tex = rstd::json::Map::make();
-        tex.insert(::alloc::string::String::make(rstd::cppstd::as_str("enabled")),
+        tex.insert(::alloc::string::String::make("enabled"_str),
                    rstd::into<Json>(bool { t.enabled }));
-        tex.insert(::alloc::string::String::make(rstd::cppstd::as_str("compos")),
-                   Json::Array(rstd::move(compos)));
+        tex.insert(::alloc::string::String::make("compos"_str), Json::Array(rstd::move(compos)));
         js_texs.push(Json::Object(rstd::move(tex)));
     }
-    rec.insert(::alloc::string::String::make(rstd::cppstd::as_str("tex_infos")),
-               Json::Array(rstd::move(js_texs)));
+    rec.insert(::alloc::string::String::make("tex_infos"_str), Json::Array(rstd::move(js_texs)));
 
     return Json::Object(rstd::move(rec));
 }

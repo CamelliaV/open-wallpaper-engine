@@ -19,6 +19,7 @@ export import :runtime;
 export import :uniform;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::any::Any;
 using rstd::collections::BTreeMap;
 using rstd::collections::BTreeSet;
@@ -192,14 +193,16 @@ class SceneIndexArray : NoCopy {
 
 public:
     SceneIndexArray(usize indexCount);
-    SceneIndexArray(std::span<const rstd::uint32_t> data);
+    SceneIndexArray(slice<rstd::uint32_t> data);
 
     SceneIndexArray(SceneIndexArray&&) noexcept;
     ~SceneIndexArray() = default;
 
-    void Assign(usize index, std::span<const rstd::uint32_t> data) {
-        if (! IncreaseCheckSet((index + usize(data.size())) * Unit_Byte_Size)) return;
-        std::copy(data.begin(), data.end(), m_data.begin() + index.to_primitive());
+    void Assign(usize index, slice<rstd::uint32_t> data) {
+        if (! IncreaseCheckSet((index + data.len()) * Unit_Byte_Size)) return;
+        for (usize source_index {}; source_index < data.len(); ++source_index) {
+            m_data[index + source_index] = data[source_index];
+        }
         BumpDataGeneration();
     }
 
@@ -255,8 +258,8 @@ public:
     SceneVertexArray& operator=(SceneVertexArray&&) noexcept;
 
     bool AddVertex(const float*);
-    bool SetVertex(std::string_view name, std::span<const float> data) noexcept;
-    bool SetVertexs(usize index, std::span<const float> data) noexcept;
+    bool SetVertex(std::string_view name, slice<float> data) noexcept;
+    bool SetVertexs(usize index, slice<float> data) noexcept;
 
     // Drops the active size to zero without releasing capacity. Subsequent
     // SetVertexs calls regrow it. Used by per-frame dynamic geners (rope
@@ -582,7 +585,8 @@ public:
         if (uniform_name.empty()) return false;
         auto shaped                            = ShapeShaderValue(uniform_name, value);
         customShader.constValues[uniform_name] = shaped;
-        auto animation = customShader.valueAnimations.get_mut(rstd::cppstd::as_str(uniform_name));
+        auto animation =
+            customShader.valueAnimations.get_mut(rstd::cppstd::as_str(uniform_name).unwrap());
         if (animation.is_some()) (**animation).base = shaped;
         TouchShaderValues();
         return true;
@@ -2245,7 +2249,7 @@ private:
     SceneUniformRegistry          m_uniforms;
     SceneTextureAnimationRegistry m_texture_animations;
     SceneRuntime                  m_runtime;
-    String                        m_scene_id { String::make("unknown_id") };
+    String                        m_scene_id { String::make("unknown_id"_str) };
     SceneMesh                     m_default_effect_mesh;
     array<i32, 2>                 m_ortho { i32(1920), i32(1080) };
     array<float, 2>               m_pointer_position { 0.5f, 0.5f };

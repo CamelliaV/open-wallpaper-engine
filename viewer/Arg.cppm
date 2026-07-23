@@ -6,6 +6,7 @@ import wescene.cli;
 
 using namespace rstd::prelude;
 using namespace rstd::argparse;
+using namespace rstd::literals;
 
 export namespace viewer
 {
@@ -38,9 +39,7 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv);
 namespace viewer
 {
 
-std::string ToStdString(const String& value) {
-    return { value.data(), value.size().to_primitive() };
-}
+std::string ToStdString(const String& value) { return rstd::cppstd::to_string(value.as_str()); }
 
 template<typename T>
 const T& Value(const Matches& matches, const ArgKey<T>& key) {
@@ -90,71 +89,73 @@ auto ResolutionParser(ref<rstd::ffi::OsStr> raw) -> Result<Resolution, ValueErro
 }
 
 SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
-    auto command     = Command::make("scene-viewer");
-    auto assets      = command.add_arg(Arg<String>::value("assets", string_parser())
-                                           .value_name("ASSETS")
-                                           .help("assets folder")
+    auto command     = Command::make("scene-viewer"_str);
+    auto assets      = command.add_arg(Arg<String>::value("assets"_str, string_parser())
+                                           .value_name("ASSETS"_str)
+                                           .help("assets folder"_str)
                                            .required());
-    auto scene       = command.add_arg(Arg<String>::value("scene", string_parser())
-                                           .value_name("SCENE")
-                                           .help("scene file")
+    auto scene       = command.add_arg(Arg<String>::value("scene"_str, string_parser())
+                                           .value_name("SCENE"_str)
+                                           .help("scene file"_str)
                                            .required());
-    auto fps         = command.add_arg(Arg<i32>::value("fps", from_str_parser<i32>())
-                                           .short_name('f')
-                                           .long_name("fps")
-                                           .help("fps")
-                                           .default_value("15"));
-    auto valid_layer = command.add_arg(Arg<bool>::flag("valid-layer")
-                                           .short_name('V')
-                                           .long_name("valid-layer")
-                                           .help("enable vulkan valid layer"));
+    auto fps         = command.add_arg(Arg<i32>::value("fps"_str, from_str_parser<i32>())
+                                           .short_name(u8('f'))
+                                           .long_name("fps"_str)
+                                           .help("fps"_str)
+                                           .default_value("15"_str));
+    auto valid_layer = command.add_arg(Arg<bool>::flag("valid-layer"_str)
+                                           .short_name(u8('V'))
+                                           .long_name("valid-layer"_str)
+                                           .help("enable vulkan valid layer"_str));
     auto graphviz =
-        command.add_arg(Arg<bool>::flag("graphviz")
-                            .short_name('G')
-                            .long_name("graphviz")
-                            .help("generate graphviz of render graph, output to 'graph.dot'"));
+        command.add_arg(Arg<bool>::flag("graphviz"_str)
+                            .short_name(u8('G'))
+                            .long_name("graphviz"_str)
+                            .help("generate graphviz of render graph, output to 'graph.dot'"_str));
     auto stdin_json =
-        command.add_arg(Arg<bool>::flag("stdin-json")
-                            .long_name("stdin-json")
+        command.add_arg(Arg<bool>::flag("stdin-json"_str)
+                            .long_name("stdin-json"_str)
                             .help("read JSONL commands from stdin, for example: "
                                   "{\"command\":\"set_user_property\",\"key\":\"name\","
-                                  "\"value\":1}"));
-    auto cache_path = command.add_arg(Arg<String>::value("cache-path", string_parser())
-                                          .short_name('C')
-                                          .long_name("cache-path")
-                                          .help("shader cache directory")
-                                          .default_value(""));
-    auto msaa = command.add_arg(Arg<u32>::value("msaa", from_str_parser<u32>())
-                                    .short_name('M')
-                                    .long_name("msaa")
-                                    .help("MSAA samples for screen RT (1/2/4/8/16; default 1=off)")
-                                    .default_value("1"));
+                                  "\"value\":1}"_str));
+    auto cache_path = command.add_arg(Arg<String>::value("cache-path"_str, string_parser())
+                                          .short_name(u8('C'))
+                                          .long_name("cache-path"_str)
+                                          .help("shader cache directory"_str)
+                                          .default_value(""_str));
+    auto msaa =
+        command.add_arg(Arg<u32>::value("msaa"_str, from_str_parser<u32>())
+                            .short_name(u8('M'))
+                            .long_name("msaa"_str)
+                            .help("MSAA samples for screen RT (1/2/4/8/16; default 1=off)"_str)
+                            .default_value("1"_str));
     auto user_properties = command.add_arg(
-        Arg<String>::value("user-properties", string_parser())
-            .short_name('P')
-            .long_name("user-properties")
-            .help("Path to a JSON file mapping project.json property keys to user-edited values")
-            .default_value(""));
+        Arg<String>::value("user-properties"_str, string_parser())
+            .short_name(u8('P'))
+            .long_name("user-properties"_str)
+            .help(
+                "Path to a JSON file mapping project.json property keys to user-edited values"_str)
+            .default_value(""_str));
     auto mouse_position =
-        command.add_arg(Arg<String>::value("mouse-position", string_parser())
-                            .long_name("mouse-position")
-                            .help("Set initial normalized mouse position, e.g. 0,1")
-                            .default_value(""));
-    auto random_seed = command.add_arg(Arg<u64>::value("random-seed", from_str_parser<u64>())
-                                           .long_name("random-seed")
-                                           .help("Set the scene random seed"));
+        command.add_arg(Arg<String>::value("mouse-position"_str, string_parser())
+                            .long_name("mouse-position"_str)
+                            .help("Set initial normalized mouse position, e.g. 0,1"_str)
+                            .default_value(""_str));
+    auto random_seed = command.add_arg(Arg<u64>::value("random-seed"_str, from_str_parser<u64>())
+                                           .long_name("random-seed"_str)
+                                           .help("Set the scene random seed"_str));
     auto load_bench_output =
-        command.add_arg(Arg<String>::value("load-bench-output", string_parser())
-                            .long_name("load-bench-output")
-                            .help("Write scene load probe report to FILE")
-                            .value_name("FILE")
-                            .default_value(""));
+        command.add_arg(Arg<String>::value("load-bench-output"_str, string_parser())
+                            .long_name("load-bench-output"_str)
+                            .help("Write scene load probe report to FILE"_str)
+                            .value_name("FILE"_str)
+                            .default_value(""_str));
     auto resolution = command.add_arg(
-        Arg<Resolution>::value("resolution", parse_with<Resolution>(ResolutionParser))
-            .short_name('R')
-            .long_name("resolution")
-            .help("Set the resolution, eg. 1920x1080")
-            .default_value("1280x720"));
+        Arg<Resolution>::value("resolution"_str, parse_with<Resolution>(ResolutionParser))
+            .short_name(u8('R'))
+            .long_name("resolution"_str)
+            .help("Set the resolution, eg. 1920x1080"_str)
+            .default_value("1280x720"_str));
 
     auto parsed = owe::cli::ParseArgs(rstd::move(command), argc, argv);
     if (parsed.is_err()) std::exit(parsed.unwrap_err().code);

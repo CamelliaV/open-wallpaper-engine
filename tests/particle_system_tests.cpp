@@ -8,6 +8,7 @@ import wescene.particle.program;
 import wescene.pkg.parse;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace
 {
@@ -15,10 +16,9 @@ namespace
 namespace particle = owe::particle;
 
 template<typename Attribute, typename... Args>
-auto Register(particle::ParticleSchemaBuilder& builder, const char* name, const char* owner,
+auto Register(particle::ParticleSchemaBuilder& builder, ref<str> name, ref<str> owner,
               Args&&... args) -> particle::ParticleAttributeKey<Attribute> {
-    auto result =
-        builder.Register<Attribute>(ref<str>(name), ref<str>(owner), rstd::forward<Args>(args)...);
+    auto result = builder.Register<Attribute>(name, owner, rstd::forward<Args>(args)...);
     if (result.is_err()) rstd::panic { "particle test attribute registration failed" };
     return result.unwrap();
 }
@@ -111,11 +111,12 @@ struct EmptyFrame {};
 
 TEST(ParticleStorage, OwnsIndependentAttributesAndReusesStableSlots) {
     particle::ParticleSchemaBuilder builder;
-    auto                            position =
-        Register<particle::PositionAttribute>(builder, "position", "test", Eigen::Vector3f::Zero());
-    auto temperature = Register<TemperatureAttribute>(builder, "temperature", "test", 18.0f);
-    auto schema      = rstd::move(builder).Build();
-    auto storage     = schema.CreateStorage();
+    auto                            position = Register<particle::PositionAttribute>(
+        builder, "position"_str, "test"_str, Eigen::Vector3f::Zero());
+    auto temperature =
+        Register<TemperatureAttribute>(builder, "temperature"_str, "test"_str, 18.0f);
+    auto schema  = rstd::move(builder).Build();
+    auto storage = schema.CreateStorage();
 
     auto first  = storage.AcquireSlot(usize(4));
     auto second = storage.AcquireSlot(usize(4));
@@ -146,9 +147,9 @@ TEST(ParticleStorage, OwnsIndependentAttributesAndReusesStableSlots) {
 TEST(ParticleSchema, RejectsDuplicateNamesAndMismatchedTypedKeys) {
     particle::ParticleSchemaBuilder duplicate_builder;
     auto                            position = Register<particle::PositionAttribute>(
-        duplicate_builder, "value", "test", Eigen::Vector3f::Zero());
+        duplicate_builder, "value"_str, "test"_str, Eigen::Vector3f::Zero());
     auto duplicate = duplicate_builder.Register<particle::ColorAttribute>(
-        ref<str>("value"), ref<str>("test"), Eigen::Vector3f::Ones());
+        "value"_str, "test"_str, Eigen::Vector3f::Ones());
     EXPECT_TRUE(duplicate.is_err());
 
     auto schema  = rstd::move(duplicate_builder).Build();
@@ -168,8 +169,8 @@ TEST(ParticleSchema, RejectsDuplicateNamesAndMismatchedTypedKeys) {
 
 TEST(ParticleSchema, RejectsMissingProgramRequirementsDuringPrepare) {
     particle::ParticleSchemaBuilder builder;
-    auto                            position =
-        Register<particle::PositionAttribute>(builder, "position", "test", Eigen::Vector3f::Zero());
+    auto                            position = Register<particle::PositionAttribute>(
+        builder, "position"_str, "test"_str, Eigen::Vector3f::Zero());
     particle::ParticleProgram program;
     program.Require(particle::ParticleAttributeKey<particle::ColorAttribute> {
         .id          = position.id,
@@ -183,7 +184,7 @@ TEST(ParticleSchema, RejectsMissingProgramRequirementsDuringPrepare) {
 
 TEST(ParticleQuery, RejectsUseAfterStructuralMutation) {
     particle::ParticleSchemaBuilder builder;
-    auto temperature = Register<TemperatureAttribute>(builder, "temperature", "test", 1.0f);
+    auto temperature = Register<TemperatureAttribute>(builder, "temperature"_str, "test"_str, 1.0f);
     auto schema      = rstd::move(builder).Build();
     auto storage     = schema.CreateStorage();
     (void)storage.AppendSlot();
@@ -196,7 +197,7 @@ TEST(ParticleQuery, RejectsUseAfterStructuralMutation) {
 
 TEST(ParticleColumnCache, ReusesResolvedColumnsUntilLayoutChanges) {
     particle::ParticleSchemaBuilder builder;
-    auto temperature = Register<TemperatureAttribute>(builder, "temperature", "test", 1.0f);
+    auto temperature = Register<TemperatureAttribute>(builder, "temperature"_str, "test"_str, 1.0f);
     auto schema      = rstd::move(builder).Build();
     auto storage     = schema.CreateStorage();
     auto slot        = storage.AppendSlot();
@@ -253,7 +254,7 @@ TEST(ParticleSlotEvents, CombinesTransitionsInStableSlotOrder) {
 
 TEST(ParticleProgram, RunsPreparedProgramsInContractOrder) {
     particle::ParticleSchemaBuilder builder;
-    auto temperature = Register<TemperatureAttribute>(builder, "temperature", "test", 0.0f);
+    auto temperature = Register<TemperatureAttribute>(builder, "temperature"_str, "test"_str, 0.0f);
     rstd::vec::Vec<i32> trace;
     usize               spawned {};
 

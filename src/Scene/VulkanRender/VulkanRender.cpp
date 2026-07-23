@@ -24,6 +24,7 @@ import wescene.rgraph;
 
 using namespace owe::vulkan;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 constexpr std::uint64_t        vk_wait_time { 10u * 1000u * 1000000u };
 constexpr std::uint32_t        vk_upload_command_num { 3 };
@@ -380,8 +381,10 @@ bool VulkanRender::Impl::init(RenderInitInfo info, SceneLoadBenchRecorderView lo
         rstd_info("set swapchain image size: {}x{}", extent.width, extent.height);
     }
 
-    std::vector<Extension> inst_exts { base_inst_exts.begin(), base_inst_exts.end() };
-    std::vector<Extension> device_exts { base_device_exts.begin(), base_device_exts.end() };
+    std::vector<Extension> inst_exts;
+    std::vector<Extension> device_exts;
+    for (const auto& extension : base_inst_exts) inst_exts.push_back(extension);
+    for (const auto& extension : base_device_exts) device_exts.push_back(extension);
     if (info.video_hwdec != "none") {
         AppendVideoDeviceExtensions(device_exts);
     }
@@ -974,8 +977,8 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode f
     auto   ortho = scene.Ortho();
     double sw = ortho[usize()].to_primitive(), sh = ortho[usize(1)].to_primitive();
     double fboAspect = width / (double)height, sAspect = sw / sh;
-    auto   global      = scene.CameraMut(ref<str>("global"));
-    auto   perspective = scene.CameraMut(ref<str>("global_perspective"));
+    auto   global      = scene.CameraMut("global"_str);
+    auto   perspective = scene.CameraMut("global_perspective"_str);
     if (global.is_none() || perspective.is_none()) return;
     auto& gCam    = **global;
     auto& gPerCam = **perspective;
@@ -1018,7 +1021,7 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode f
     }
     gCam.Update();
     gPerCam.Update();
-    scene.UpdateLinkedCamera("global");
+    scene.UpdateLinkedCamera("global"_str);
     scene.CaptureCameraPathViewports();
 }
 

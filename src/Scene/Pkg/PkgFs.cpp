@@ -15,6 +15,7 @@ using ::alloc::string::String;
 using namespace owe;
 using namespace owe::fs;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace
 {
@@ -40,7 +41,7 @@ bool IsPkgVersionStamp(std::string_view stamp) {
 }
 
 auto LookupKey(Path path) -> rstd::io::Result<String> {
-    auto output     = String::make("/");
+    auto output     = String::make("/"_str);
     auto components = path.components();
     while (true) {
         auto component = components.next();
@@ -53,10 +54,12 @@ auto LookupKey(Path path) -> rstd::io::Result<String> {
         if (value.is_none()) {
             return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidFilename));
         }
-        if (output.len() > usize(1)) output.push_back('/');
-        for (auto byte : *value) {
-            auto lowered = byte >= 'A' && byte <= 'Z' ? rstd::uint8_t(byte - 'A' + 'a') : byte;
-            output.push_back(lowered);
+        if (output.len() > usize(1)) output.push_ascii(u8('/'));
+        for (auto value_byte : *value) {
+            auto lowered = value_byte >= u8('A') && value_byte <= u8('Z')
+                               ? value_byte - u8('A') + u8('a')
+                               : value_byte;
+            output.push_ascii(lowered);
         }
     }
     return rstd::Ok(rstd::move(output));
@@ -125,10 +128,9 @@ auto WPPkgFs::open(Path pkg_path) -> rstd::io::Result<PkgMount> {
                        PkgFile { .offset = absolute, .length = file.length });
     }
 
-    auto version_string =
-        String::make(rstd::ref<rstd::str>(version->data(), usize(version->size())));
-    auto mount_version = version_string.clone();
-    auto mount         = MountHandle::make(
+    auto version_string = String::make(rstd::cppstd::as_str(*version).unwrap());
+    auto mount_version  = version_string.clone();
+    auto mount          = MountHandle::make(
         WPPkgFs(rstd::move(pkg_source), rstd::move(version_string), rstd::move(entries)));
     return rstd::Ok(PkgMount(rstd::move(mount), rstd::move(mount_version)));
 }

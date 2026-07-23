@@ -21,6 +21,7 @@ import rstd.cppstd;
 import wescene.json;
 import wescene.testing.corpus;
 
+using namespace rstd::literals;
 using owe::testing::Corpus;
 
 namespace
@@ -108,34 +109,34 @@ TEST_P(ScenePkgVersionTest, AllWorkshopsParseAndExposeSaneScene) {
         const auto& w = *ref.workshop;
         SCOPED_TRACE("workshop " + w.id);
 
-        auto pkg = w.snapshot.get("pkg");
+        auto pkg = w.snapshot.get("pkg"_str);
         ASSERT_TRUE(pkg.is_some());
-        auto pkg_version = (*pkg)->get("version");
+        auto pkg_version = (*pkg)->get("version"_str);
         ASSERT_TRUE(pkg_version.is_some());
         EXPECT_EQ(rstd::cppstd::to_string(*(*pkg_version)->as_str()), version);
-        auto file_count = (*pkg)->get("file_count");
+        auto file_count = (*pkg)->get("file_count"_str);
         ASSERT_TRUE(file_count.is_some());
         EXPECT_GT(JsonI64Or(**file_count, 0), 0);
-        auto has_scene_json = (*pkg)->get("has_scene_json");
+        auto has_scene_json = (*pkg)->get("has_scene_json"_str);
         ASSERT_TRUE(has_scene_json.is_some());
         EXPECT_TRUE((*has_scene_json)->as_bool().unwrap_or(false));
 
-        auto scene = w.snapshot.get("scene");
+        auto scene = w.snapshot.get("scene"_str);
         ASSERT_TRUE(scene.is_some());
-        auto parsed = (*scene)->get("parsed");
+        auto parsed = (*scene)->get("parsed"_str);
         ASSERT_TRUE(parsed.is_some());
-        auto error = (*scene)->get("error");
+        auto error = (*scene)->get("error"_str);
         EXPECT_TRUE((*parsed)->as_bool().unwrap_or(false))
             << "scene.json failed: "
             << (error.is_some() && (*error)->as_str().is_some()
                     ? rstd::cppstd::to_string(*(*error)->as_str())
                     : "");
-        auto is_ortho = (*scene)->get("is_ortho");
+        auto is_ortho = (*scene)->get("is_ortho"_str);
         if (is_ortho.is_some() && (*is_ortho)->as_bool().unwrap_or(false)) {
-            auto ortho = (*scene)->get("ortho");
+            auto ortho = (*scene)->get("ortho"_str);
             ASSERT_TRUE(ortho.is_some());
-            auto width  = (*ortho)->get("width");
-            auto height = (*ortho)->get("height");
+            auto width  = (*ortho)->get("width"_str);
+            auto height = (*ortho)->get("height"_str);
             ASSERT_TRUE(width.is_some());
             ASSERT_TRUE(height.is_some());
             EXPECT_GT(JsonI64Or(**width, 0), 0);
@@ -161,17 +162,17 @@ class TextureFormatTest : public ::testing::TestWithParam<int> {};
 static void CheckTexInvariants(const Corpus::TexRef& ref) {
     const auto& w    = *ref.workshop;
     const auto& t    = *ref.tex;
-    auto        path = t.get("path");
+    auto        path = t.get("path"_str);
     SCOPED_TRACE("workshop " + w.id + " tex " +
                  (path.is_some() && (*path)->as_str().is_some()
                       ? rstd::cppstd::to_string(*(*path)->as_str())
                       : ""));
-    auto ok         = t.get("ok");
-    auto width      = t.get("width");
-    auto height     = t.get("height");
-    auto map_width  = t.get("map_width");
-    auto map_height = t.get("map_height");
-    auto count      = t.get("count");
+    auto ok         = t.get("ok"_str);
+    auto width      = t.get("width"_str);
+    auto height     = t.get("height"_str);
+    auto map_width  = t.get("map_width"_str);
+    auto map_height = t.get("map_height"_str);
+    auto count      = t.get("count"_str);
     ASSERT_TRUE(ok.is_some() && width.is_some() && height.is_some() && map_width.is_some() &&
                 map_height.is_some() && count.is_some());
     EXPECT_TRUE((*ok)->as_bool().unwrap_or(false));
@@ -186,7 +187,7 @@ TEST_P(TextureTexvTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_texv(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        auto value = r.tex->get("texv");
+        auto value = r.tex->get("texv"_str);
         ASSERT_TRUE(value.is_some());
         EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
@@ -196,7 +197,7 @@ TEST_P(TextureTexiTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_texi(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        auto value = r.tex->get("texi");
+        auto value = r.tex->get("texi"_str);
         ASSERT_TRUE(value.is_some());
         EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
@@ -206,7 +207,7 @@ TEST_P(TextureTexbTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_texb(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        auto value = r.tex->get("texb");
+        auto value = r.tex->get("texb"_str);
         ASSERT_TRUE(value.is_some());
         EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
@@ -216,7 +217,7 @@ TEST_P(TextureFormatTest, AllInstancesParse) {
     auto slice = Corpus::instance().textures_with_format(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        auto value = r.tex->get("format");
+        auto value = r.tex->get("format"_str);
         ASSERT_TRUE(value.is_some());
         EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckTexInvariants(r);
@@ -251,7 +252,7 @@ class MdlMdlaTest : public ::testing::TestWithParam<int> {};
 static void CheckMdlInvariants(const Corpus::MdlRef& ref) {
     const auto& w    = *ref.workshop;
     const auto& m    = *ref.mdl;
-    auto        path = m.get("path");
+    auto        path = m.get("path"_str);
     SCOPED_TRACE("workshop " + w.id + " mdl " +
                  (path.is_some() && (*path)->as_str().is_some()
                       ? rstd::cppstd::to_string(*(*path)->as_str())
@@ -259,16 +260,16 @@ static void CheckMdlInvariants(const Corpus::MdlRef& ref) {
     // Failed parses are tolerated (some .mdl files are non-puppet 3D
     // models that WPMdlParser intentionally rejects), but the version
     // stamps must still be readable.
-    auto mdlv = m.get("mdlv");
-    auto mdls = m.get("mdls");
-    auto mdla = m.get("mdla");
-    auto ok   = m.get("ok");
+    auto mdlv = m.get("mdlv"_str);
+    auto mdls = m.get("mdls"_str);
+    auto mdla = m.get("mdla"_str);
+    auto ok   = m.get("ok"_str);
     ASSERT_TRUE(mdlv.is_some() && mdls.is_some() && mdla.is_some() && ok.is_some());
     EXPECT_GE(JsonI64Or(**mdlv, -1), 0);
     EXPECT_GE(JsonI64Or(**mdls, -1), 0);
     EXPECT_GE(JsonI64Or(**mdla, -1), 0);
     if ((*ok)->as_bool().unwrap_or(false)) {
-        auto bones = m.get("bones");
+        auto bones = m.get("bones"_str);
         ASSERT_TRUE(bones.is_some());
         EXPECT_GT(JsonI64Or(**bones, 0), 0);
     }
@@ -278,7 +279,7 @@ TEST_P(MdlMdlvTest, AllInstancesExposeStamps) {
     auto slice = Corpus::instance().mdls_with_mdlv(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        auto value = r.mdl->get("mdlv");
+        auto value = r.mdl->get("mdlv"_str);
         ASSERT_TRUE(value.is_some());
         EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckMdlInvariants(r);
@@ -288,7 +289,7 @@ TEST_P(MdlMdlsTest, AllInstancesExposeStamps) {
     auto slice = Corpus::instance().mdls_with_mdls(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        auto value = r.mdl->get("mdls");
+        auto value = r.mdl->get("mdls"_str);
         ASSERT_TRUE(value.is_some());
         EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckMdlInvariants(r);
@@ -298,7 +299,7 @@ TEST_P(MdlMdlaTest, AllInstancesExposeStamps) {
     auto slice = Corpus::instance().mdls_with_mdla(GetParam());
     ASSERT_FALSE(slice.empty());
     for (const auto& r : slice) {
-        auto value = r.mdl->get("mdla");
+        auto value = r.mdl->get("mdla"_str);
         ASSERT_TRUE(value.is_some());
         EXPECT_EQ(JsonI64Or(**value, -1), GetParam());
         CheckMdlInvariants(r);

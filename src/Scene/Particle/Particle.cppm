@@ -4,6 +4,7 @@ import eigen;
 import rstd;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 export namespace owe::particle
 {
@@ -254,14 +255,14 @@ public:
         -> Result<bool, ParticleSchemaError> {
         if (! requirement.id.Valid() || requirement.schema_slot >= m_factories.len()) {
             return Err(ParticleSchemaError {
-                .message = String::make("required particle attribute is missing"),
+                .message = String::make("required particle attribute is missing"_str),
             });
         }
         auto descriptor = m_factories[requirement.schema_slot]->Descriptor();
         if (descriptor->id != requirement.id ||
             descriptor->concrete_type != requirement.concrete_type) {
             return Err(ParticleSchemaError {
-                .message = String::make("required particle attribute does not match schema"),
+                .message = String::make("required particle attribute does not match schema"_str),
             });
         }
         return Ok(true);
@@ -295,7 +296,7 @@ public:
         for (const auto& factory : m_factories) {
             if (factory->Descriptor()->debug_name == name) {
                 return Err(ParticleSchemaError {
-                    .message = String::make("duplicate particle attribute name"),
+                    .message = String::make("duplicate particle attribute name"_str),
                 });
             }
         }
@@ -672,8 +673,8 @@ private:
 };
 
 inline ParticleSchemaBuilder::ParticleSchemaBuilder() {
-    auto key = Register<SlotStateAttribute>(
-        ref<str>("slot_state"), ref<str>("framework"), ParticleSlotState {});
+    auto key =
+        Register<SlotStateAttribute>("slot_state"_str, "framework"_str, ParticleSlotState {});
     if (key.is_err()) rstd::panic { "failed to register particle slot state" };
     m_slot_state_key = key.unwrap();
 }

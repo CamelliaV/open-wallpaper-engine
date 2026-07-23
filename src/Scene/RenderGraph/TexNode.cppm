@@ -4,6 +4,7 @@ import wescene.resource;
 import :dependency_graph;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 export namespace owe::rg
 {
@@ -18,7 +19,7 @@ struct TexNode {
     NodeHandle                             handle;
     TexType                                type { TexType::Imported };
     String                                 key;
-    String                                 name { String::make("unknown tex") };
+    String                                 name { String::make("unknown tex"_str) };
     rstd::Option<resource::TextureRequest> request;
     usize                                  version { 0 };
     rstd::Option<NodeHandle>               previous;

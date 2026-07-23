@@ -8,6 +8,7 @@ import rstd.log;
 import rstd.cppstd;
 
 using namespace owe::wpscene;
+using namespace rstd::literals;
 
 namespace
 {
@@ -114,38 +115,39 @@ bool ParticleInstanceoverride::FromJosn(const owe::Json& json) {
     // {"user":"<key>","value":...} indirection -> record the key for the
     // live user-property pipeline. The value still parses normally via
     // GetJsonValue (which already looks through the `value` wrapper).
-    auto bind = [&](const char* field) {
+    auto bind = [&](ref<str> field) {
         auto sub = json.get(field);
         if (sub.is_none() || ! (*sub)->is_object()) return;
-        auto user = (*sub)->get("user");
+        auto user = (*sub)->get("user"_str);
         if (user.is_none()) return;
         auto string = (*user)->as_str();
-        if (string.is_some()) bindings[field] = rstd::cppstd::to_string(*string);
+        if (string.is_some())
+            bindings[rstd::cppstd::to_string(field)] = rstd::cppstd::to_string(*string);
     };
 
     owe::GetJsonValue(json, "alpha", alpha, false);
-    bind("alpha");
+    bind("alpha"_str);
     owe::GetJsonValue(json, "size", size, false);
-    bind("size");
+    bind("size"_str);
     owe::GetJsonValue(json, "lifetime", lifetime, false);
-    bind("lifetime");
+    bind("lifetime"_str);
     owe::GetJsonValue(json, "rate", rate, false);
-    bind("rate");
+    bind("rate"_str);
     owe::GetJsonValue(json, "speed", speed, false);
-    bind("speed");
+    bind("speed"_str);
     owe::GetJsonValue(json, "count", count, false);
-    bind("count");
+    bind("count"_str);
     owe::GetJsonValue(json, "brightness", brightness, false);
-    bind("brightness");
+    bind("brightness"_str);
     owe::GetJsonValue(json, "id", id, false);
-    if (auto value = json.get("color"); value.is_some()) {
+    if (auto value = json.get("color"_str); value.is_some()) {
         owe::GetJsonValue(json, "color", color);
         overColor = true;
-        bind("color");
-    } else if (auto value = json.get("colorn"); value.is_some()) {
+        bind("color"_str);
+    } else if (auto value = json.get("colorn"_str); value.is_some()) {
         owe::GetJsonValue(json, "colorn", colorn);
         overColorn = true;
-        bind("colorn");
+        bind("colorn"_str);
     }
     {
         const char* cp_keys[]  = { "controlpoint0", "controlpoint1", "controlpoint2",
@@ -156,9 +158,9 @@ bool ParticleInstanceoverride::FromJosn(const owe::Json& json) {
                                    "controlpointangle6", "controlpointangle7" };
         for (int i = 0; i < 8; ++i) {
             owe::GetJsonValue(json, cp_keys[i], controlpoint[i], false);
-            bind(cp_keys[i]);
+            bind(rstd::cppstd::as_str(cp_keys[i]).unwrap());
             owe::GetJsonValue(json, cpa_keys[i], controlpointangle[i], false);
-            bind(cpa_keys[i]);
+            bind(rstd::cppstd::as_str(cpa_keys[i]).unwrap());
         }
     }
     auto field_binding_state = std::make_shared<FieldBindings>();
@@ -168,7 +170,7 @@ bool ParticleInstanceoverride::FromJosn(const owe::Json& json) {
 };
 
 bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
-    auto emitter_values = json.get("emitter");
+    auto emitter_values = json.get("emitter"_str);
     if (emitter_values.is_none()) {
         rstd_error("particle no emitter");
         return false;
@@ -183,7 +185,7 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
         emi.FromJson(el);
         emitters.push_back(std::move(emi));
     }
-    if (auto values = json.get("renderer"); values.is_some()) {
+    if (auto values = json.get("renderer"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& el : **array) {
@@ -199,17 +201,17 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
         pr.name = "sprite";
         renderers.push_back(pr);
     }
-    if (auto values = json.get("initializer"); values.is_some()) {
+    if (auto values = json.get("initializer"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some())
             for (const auto& el : **array) initializers.push(el.clone());
     }
-    if (auto values = json.get("operator"); values.is_some()) {
+    if (auto values = json.get("operator"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some())
             for (const auto& el : **array) operators.push(el.clone());
     }
-    if (auto values = json.get("controlpoint"); values.is_some()) {
+    if (auto values = json.get("controlpoint"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& el : **array) {
@@ -220,7 +222,7 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
         }
     }
 
-    if (auto values = json.get("children"); values.is_some()) {
+    if (auto values = json.get("children"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& el : **array) {
@@ -229,7 +231,7 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
             }
         }
     }
-    if (json.get("material").is_some()) {
+    if (json.get("material"_str).is_some()) {
         std::string matPath;
         owe::GetJsonValue(json, "material", matPath);
         auto jMat = LoadJsonFile(vfs, "/assets/" + matPath);
@@ -268,7 +270,7 @@ bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion 
     owe::GetJsonValue(json, "scale", scale);
     owe::GetJsonValue(json, "parallaxDepth", parallaxDepth, false);
 
-    if (auto value = json.get("instanceoverride"); value.is_some() && ! (*value)->is_null()) {
+    if (auto value = json.get("instanceoverride"_str); value.is_some() && ! (*value)->is_null()) {
         instanceoverride.FromJosn(**value);
     }
 
@@ -279,8 +281,8 @@ bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion 
     owe::GetJsonValue(json, "attachment", attachment, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);
     owe::GetJsonValue(json, "controlpoint", controlpoint, false);
-    if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
-    if (auto value = json.get("particlesrc"); value.is_some()) particlesrc = (*value)->clone();
+    if (auto value = json.get("instance"_str); value.is_some()) instance = (*value)->clone();
+    if (auto value = json.get("particlesrc"_str); value.is_some()) particlesrc = (*value)->clone();
 
     AbsorbAllFieldBindings(json, field_bindings);
 

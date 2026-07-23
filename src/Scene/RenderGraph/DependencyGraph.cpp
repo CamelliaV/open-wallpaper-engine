@@ -73,7 +73,7 @@ auto DependencyGraph::TopologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
 
     auto result = rstd::vec::Vec<NodeHandle>::with_capacity(NodeNum());
     while (! ready.is_empty()) {
-        std::sort(ready.begin(), ready.end());
+        rstd::slice_::sort_unstable(ready.as_mut_slice().as_mut_ref());
         auto handle = ready.remove(usize());
         result.push(NodeHandle { handle });
 

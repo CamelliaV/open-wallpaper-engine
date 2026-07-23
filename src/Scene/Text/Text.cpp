@@ -1169,12 +1169,20 @@ void TextLayouter::SetText(std::string_view utf8) {
     // Push into the mesh. Vertex array's stride is interleaved with padding
     // already laid out by SceneVertexArray; SetVertex scatters by name.
     auto& v = im.mesh->GetVertexArray(rstd::usize());
-    v.SetVertex(WE_IN_POSITION, im.positions);
-    v.SetVertex(WE_IN_TEXCOORD, im.texcoords);
-    v.SetVertex(WE_IN_COLOR, im.colors);
+    v.SetVertex(
+        WE_IN_POSITION,
+        rstd::slice<float>::from_raw_parts(im.positions.data(), rstd::usize(im.positions.size())));
+    v.SetVertex(
+        WE_IN_TEXCOORD,
+        rstd::slice<float>::from_raw_parts(im.texcoords.data(), rstd::usize(im.texcoords.size())));
+    v.SetVertex(
+        WE_IN_COLOR,
+        rstd::slice<float>::from_raw_parts(im.colors.data(), rstd::usize(im.colors.size())));
 
     auto& idx = im.mesh->GetIndexArray(rstd::usize());
-    idx.Assign(rstd::usize(), im.indices);
+    idx.Assign(rstd::usize(),
+               rstd::slice<rstd::uint32_t>::from_raw_parts(im.indices.data(),
+                                                           rstd::usize(im.indices.size())));
     // Render only the indices we actually populated (rest are zeroed out
     // and reference vertex 0, which is harmless but wastes draw calls).
     idx.SetRenderDataCount(rstd::usize(q * 6));

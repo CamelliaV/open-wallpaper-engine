@@ -32,7 +32,8 @@ bool SetJson(Json& object, std::string_view key, Json value) {
     if (object.is_null()) object = MakeObject();
     auto values = object.as_object_mut();
     if (values.is_none()) return false;
-    (*values)->insert(::alloc::string::String::make(rstd::cppstd::as_str(key)), rstd::move(value));
+    (*values)->insert(::alloc::string::String::make(rstd::cppstd::as_str(key).unwrap()),
+                      rstd::move(value));
     return true;
 }
 

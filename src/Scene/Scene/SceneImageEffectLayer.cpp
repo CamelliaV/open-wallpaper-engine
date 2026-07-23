@@ -33,8 +33,8 @@ void ChangeMeshToUnitQuad(SceneMesh& target) {
     // clang-format on
 
     SceneVertexArray vertex(MakeAttrSet({ VAttr::Position, VAttr::TexCoord }), usize(4));
-    vertex.SetVertex(WE_IN_POSITION, pos);
-    vertex.SetVertex(WE_IN_TEXCOORD, tex_coord);
+    vertex.SetVertex(WE_IN_POSITION, pos.as_slice());
+    vertex.SetVertex(WE_IN_TEXCOORD, tex_coord.as_slice());
     mesh.AddVertexArray(std::move(vertex));
     target.ChangeMeshDataFrom(mesh);
 }

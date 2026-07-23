@@ -8,13 +8,14 @@ import rstd.cppstd;
 import wescene.json;
 
 using namespace owe::wpscene;
+using namespace rstd::literals;
 
 namespace
 {
 
 void LoadUserShaderValues(const owe::Json&                              json,
                           std::unordered_map<std::string, std::string>& out) {
-    auto values = json.get("usershadervalues");
+    auto values = json.get("usershadervalues"_str);
     if (values.is_none()) return;
     auto object = (*values)->as_object();
     if (object.is_none()) return;
@@ -42,11 +43,11 @@ void LoadConstantShaderValue(std::string name, const owe::Json& json,
     constant_values[name] = std::move(value);
     if (! json.is_object()) return;
 
-    if (auto user = json.get("user"); user.is_some()) {
+    if (auto user = json.get("user"_str); user.is_some()) {
         auto string = (*user)->as_str();
         if (string.is_some()) user_values[name] = rstd::cppstd::to_string(*string);
     }
-    if (auto animation = json.get("animation"); animation.is_some()) {
+    if (auto animation = json.get("animation"_str); animation.is_some()) {
         AnimCurve curve;
         if (ParseAnimCurve(**animation, curve)) {
             animations[name] = std::move(curve);
@@ -137,7 +138,7 @@ void Material::MergePass(const MaterialPass& p) {
 
 bool MaterialPass::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "id", id, false);
-    if (auto values = json.get("textures"); values.is_some()) {
+    if (auto values = json.get("textures"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& jT : **array) {
@@ -147,12 +148,12 @@ bool MaterialPass::FromJson(const owe::Json& json) {
             }
         }
     }
-    if (auto values = json.get("usertextures"); values.is_some()) {
+    if (auto values = json.get("usertextures"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some())
             for (const auto& jU : **array) usertextures.push(jU.clone());
     }
-    if (auto values = json.get("constantshadervalues"); values.is_some()) {
+    if (auto values = json.get("constantshadervalues"_str); values.is_some()) {
         auto object = (*values)->as_object();
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {
@@ -165,7 +166,7 @@ bool MaterialPass::FromJson(const owe::Json& json) {
             });
     }
     LoadUserShaderValues(json, user_shader_values);
-    if (auto values = json.get("combos"); values.is_some()) {
+    if (auto values = json.get("combos"_str); values.is_some()) {
         auto object = (*values)->as_object();
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {
@@ -176,7 +177,7 @@ bool MaterialPass::FromJson(const owe::Json& json) {
             });
     }
     owe::GetJsonValue(json, "target", target, false);
-    if (auto values = json.get("bind"); values.is_some()) {
+    if (auto values = json.get("bind"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& jB : **array) {
@@ -192,7 +193,7 @@ bool MaterialPass::FromJson(const owe::Json& json) {
 bool Material::FromJson(const owe::Json& json) { return FromJson(json, kSceneVersionUnknown); }
 
 bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
-    auto passes = json.get("passes");
+    auto passes = json.get("passes"_str);
     if (passes.is_none()) {
         rstd_error("material no data");
         return false;
@@ -203,7 +204,7 @@ bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
         return false;
     }
     const auto& jContent = (**pass_array)[rstd::usize()];
-    if (jContent.get("shader").is_none()) {
+    if (jContent.get("shader"_str).is_none()) {
         rstd_error("material no shader");
         return false;
     }
@@ -212,7 +213,7 @@ bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
     owe::GetJsonValue(jContent, "depthtest", depthtest);
     owe::GetJsonValue(jContent, "depthwrite", depthwrite);
     owe::GetJsonValue(jContent, "shader", shader);
-    if (auto values = jContent.get("textures"); values.is_some()) {
+    if (auto values = jContent.get("textures"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& jT : **array) {
@@ -222,12 +223,12 @@ bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
             }
         }
     }
-    if (auto values = jContent.get("usertextures"); values.is_some()) {
+    if (auto values = jContent.get("usertextures"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some())
             for (const auto& jU : **array) usertextures.push(jU.clone());
     }
-    if (auto values = jContent.get("constantshadervalues"); values.is_some()) {
+    if (auto values = jContent.get("constantshadervalues"_str); values.is_some()) {
         auto object = (*values)->as_object();
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {
@@ -240,7 +241,7 @@ bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
             });
     }
     LoadUserShaderValues(jContent, user_shader_values);
-    if (auto values = jContent.get("combos"); values.is_some()) {
+    if (auto values = jContent.get("combos"_str); values.is_some()) {
         auto object = (*values)->as_object();
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {

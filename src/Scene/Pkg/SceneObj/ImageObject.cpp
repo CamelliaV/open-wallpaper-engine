@@ -8,6 +8,7 @@ import rstd.cppstd;
 import wescene.json;
 
 using namespace owe::wpscene;
+using namespace rstd::literals;
 
 namespace
 {
@@ -67,7 +68,7 @@ bool EffectCommand::FromJson(const owe::Json& json) {
 bool ObjectInstance::FromJson(const owe::Json& json) {
     present = true;
     owe::GetJsonValue(json, "id", id, false);
-    if (auto values = json.get("combos"); values.is_some()) {
+    if (auto values = json.get("combos"_str); values.is_some()) {
         auto object = (*values)->as_object();
         if (object.is_some())
             (*object)->iter().for_each([&](auto entry) {
@@ -77,7 +78,7 @@ bool ObjectInstance::FromJson(const owe::Json& json) {
                     combos.emplace(rstd::cppstd::to_string(entry_key->as_str()), value);
             });
     }
-    if (auto values = json.get("textures"); values.is_some()) {
+    if (auto values = json.get("textures"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& value : **array) {
@@ -86,7 +87,7 @@ bool ObjectInstance::FromJson(const owe::Json& json) {
             }
         }
     }
-    if (auto values = json.get("usertextures"); values.is_some()) {
+    if (auto values = json.get("usertextures"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& value : **array) usertextures.push(value.clone());
@@ -124,7 +125,7 @@ bool ImageEffect::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     if (! jEffect) return false;
     if (! FromFileJson(*jEffect, vfs)) return false;
 
-    if (auto injected_passes = json.get("passes"); injected_passes.is_some()) {
+    if (auto injected_passes = json.get("passes"_str); injected_passes.is_some()) {
         auto array = (*injected_passes)->as_array();
         if (array.is_none()) return true;
         if ((*array)->len().to_primitive() > passes.size()) {
@@ -147,7 +148,7 @@ bool ImageEffect::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
 bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
     owe::GetJsonValue(json, "version", version, false);
     owe::GetJsonValue(json, "name", name);
-    if (auto values = json.get("fbos"); values.is_some()) {
+    if (auto values = json.get("fbos"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& jF : **array) {
@@ -157,7 +158,7 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
             }
         }
     }
-    if (auto effect_passes = json.get("passes"); effect_passes.is_some()) {
+    if (auto effect_passes = json.get("passes"_str); effect_passes.is_some()) {
         auto array = (*effect_passes)->as_array();
         if (array.is_none()) {
             rstd_error("passes in effect file is not an array");
@@ -165,8 +166,8 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
         }
         bool compose { false };
         for (const auto& jP : **array) {
-            if (jP.get("material").is_none()) {
-                if (jP.get("command").is_some()) {
+            if (jP.get("material"_str).is_none()) {
+                if (jP.get("command"_str).is_some()) {
                     EffectCommand cmd;
                     cmd.FromJson(jP);
                     cmd.afterpos = i32(static_cast<rstd::int32_t>(passes.size()));
@@ -186,7 +187,7 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
             MaterialPass pass;
             pass.FromJson(jP);
             passes.push_back(std::move(pass));
-            if (jP.get("compose").is_some()) owe::GetJsonValue(jP, "compose", compose);
+            if (jP.get("compose"_str).is_some()) owe::GetJsonValue(jP, "compose", compose);
         }
         if (compose) {
             if (passes.size() != 2) {
@@ -222,7 +223,7 @@ std::optional<ImageAssetInfo> owe::wpscene::LoadImageAssetInfo(fs::VFS&         
     ImageAssetInfo info;
     owe::GetJsonValue(*j_image, "solidlayer", info.solid_layer, false);
     int32_t w = 0, h = 0;
-    if (j_image->get("width").is_some() && j_image->get("height").is_some()) {
+    if (j_image->get("width"_str).is_some() && j_image->get("height"_str).is_some()) {
         owe::GetJsonValue(*j_image, "width", w, false);
         owe::GetJsonValue(*j_image, "height", h, false);
         if (w > 0 && h > 0) {
@@ -261,12 +262,12 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
             // WE gives composite containers the regular layer depth when the field is omitted.
             parallaxDepth = { 1.0f, 1.0f };
         }
-        if (jImage->get("width").is_some()) {
+        if (jImage->get("width"_str).is_some()) {
             int32_t w = 0, h = 0;
             owe::GetJsonValue(*jImage, "width", w);
             owe::GetJsonValue(*jImage, "height", h);
             size = { (float)w, (float)h };
-        } else if (json.get("size").is_some()) {
+        } else if (json.get("size"_str).is_some()) {
             owe::GetJsonValue(json, "size", size);
         } else {
             size = { origin.at(0) * 2, origin.at(1) * 2 };
@@ -289,7 +290,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
         owe::GetJsonValue(json, "copybackground", copy_background_value, false) &&
         ! copy_background_value;
 
-    if (jImage->get("material").is_some()) {
+    if (jImage->get("material"_str).is_some()) {
         std::string matPath;
         owe::GetJsonValue(*jImage, "material", matPath);
         auto jMat = LoadJsonFile(vfs, "/assets/" + matPath);
@@ -302,7 +303,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
         rstd_info("image object no material");
         return false;
     }
-    if (auto values = json.get("effects"); values.is_some()) {
+    if (auto values = json.get("effects"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
             for (const auto& jE : **array) {
@@ -313,7 +314,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
         }
     }
     ReadPuppetAnimationLayers(json, puppet_layers);
-    if (auto config_json = json.get("config"); config_json.is_some()) {
+    if (auto config_json = json.get("config"_str); config_json.is_some()) {
         owe::GetJsonValue(**config_json, "passthrough", config.passthrough, false);
     }
 
@@ -333,7 +334,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     owe::GetJsonValue(json, "backgroundcolor", backgroundcolor, false);
     owe::GetJsonValue(json, "backgroundbrightness", backgroundbrightness, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);
-    if (auto instance_json = json.get("instance");
+    if (auto instance_json = json.get("instance"_str);
         instance_json.is_some() && (*instance_json)->is_object()) {
         instance.FromJson(**instance_json);
     }

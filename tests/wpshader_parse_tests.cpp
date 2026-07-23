@@ -19,6 +19,7 @@ import wescene.types;
 using owe::ParseWPShader;
 using owe::WPShaderInfo;
 using owe::WPShaderTexInfo;
+using namespace rstd::literals;
 using namespace rstd::prelude;
 
 namespace
@@ -130,8 +131,8 @@ void main(){}
 )";
     auto              info = Parse(src);
     ASSERT_EQ(info.combo_defs.len(), usize(1));
-    EXPECT_EQ(info.combo_defs[usize()].material, "toggle");
-    EXPECT_EQ(info.combo_defs[usize()].combo, "USE_FEATURE");
+    EXPECT_EQ(info.combo_defs[usize()].material, "toggle"_str);
+    EXPECT_EQ(info.combo_defs[usize()].combo, "USE_FEATURE"_str);
 }
 
 TEST(WPShaderParser, ComboOptionsUseOwnedAnnotationKeys) {
@@ -141,7 +142,7 @@ void main(){}
 )";
     auto              info = Parse(src);
     ASSERT_EQ(info.combo_defs.len(), usize(1));
-    auto high = info.combo_defs[usize()].options.get(ref<str>("High"));
+    auto high = info.combo_defs[usize()].options.get("High"_str);
     ASSERT_TRUE(high.is_some());
     EXPECT_EQ(**high, i32(2));
 }
@@ -254,7 +255,7 @@ mat3 squareToQuad(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
     owe::fs::VFS vfs;
     auto         physical = owe::fs::make_physical_fs(owe::fs::ToPath(root.string()));
     ASSERT_TRUE(physical.is_ok());
-    ASSERT_TRUE(vfs.mount("/assets", std::move(physical).unwrap_unchecked()).is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, std::move(physical).unwrap_unchecked()).is_ok());
 
     const std::string out = owe::WPShaderParser::PreShaderSrc(
         vfs, "#include \"common_perspective.h\"\nvoid main(){}\n", nullptr, {});
@@ -348,7 +349,7 @@ void main() {
     });
 
     const auto   cache_text = root.string();
-    const auto   cache_path = rstd::path::PathBuf::from(rstd::cppstd::as_str(cache_text));
+    const auto   cache_path = rstd::path::PathBuf::from(rstd::cppstd::as_str(cache_text).unwrap());
     owe::fs::VFS vfs;
     const auto   first =
         owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));

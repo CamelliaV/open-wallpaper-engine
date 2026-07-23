@@ -557,8 +557,9 @@ public:
 
     int read(rstd::uint8_t* buf, int size) {
         if (size <= 0) return 0;
-        auto result = m_reader.read(rstd::mut_ref<rstd::byte[]>::from_raw_parts(
-            buf, usize(static_cast<std::size_t>(size))));
+        auto bytes = rstd::mut_ref<rstd::byte[]>::from_raw_parts(
+            reinterpret_cast<rstd::byte*>(buf), usize(static_cast<std::size_t>(size)));
+        auto result = m_reader.read(rstd::as_u8_slice_mut(bytes));
         if (result.is_err()) return -1;
         return static_cast<int>(rstd::move(result).unwrap_unchecked().to_primitive());
     }
@@ -842,7 +843,7 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Im
     const auto              requested_hwdec = ParseHwdec(registry->options.hwdec);
     wavsen::video::OpenOpts opts {
         requested_hwdec,
-        String::make(registry->options.render_node.c_str()),
+        String::make(rstd::cppstd::as_str(registry->options.render_node).unwrap()),
     };
     const wavsen::video::Producer* producer = nullptr;
     if (requested_hwdec != wavsen::video::HwAccel::None) {

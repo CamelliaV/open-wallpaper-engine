@@ -8,6 +8,7 @@ import rstd.json;
 import rstd.log;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace owe
 {
@@ -47,7 +48,7 @@ struct WrongArraySize : std::exception {
 };
 
 auto InitialJsonValue(const Json& json) -> const Json& {
-    if (auto value = json.get("value"); value.is_some()) return **value;
+    if (auto value = json.get("value"_str); value.is_some()) return **value;
     return json;
 }
 
@@ -223,7 +224,7 @@ template<typename T>
 typename JsonTemplateTypeCheck<T>::type GetJsonValue(const Json& json, std::string_view name_view,
                                                      T& value, bool warn,
                                                      std::source_location loc) {
-    auto member = json.get(rstd::cppstd::as_str(name_view));
+    auto member = json.get(rstd::cppstd::as_str(name_view).unwrap());
     if (member.is_none()) {
         if (warn)
             rstd_info("read json \"{}\" not a key at {}({}:{})",
@@ -281,7 +282,7 @@ OWE_IMPL_GET_JSON(RstdFloatArray3);
 
 auto ParseJson(std::string_view source, rstd::json::ParseOptions options)
     -> rstd::json::ParseResult {
-    return rstd::json::from_str(rstd::cppstd::as_str(source), options);
+    return rstd::json::from_str(rstd::cppstd::as_str(source).unwrap(), options);
 }
 
 auto ReadJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions options)

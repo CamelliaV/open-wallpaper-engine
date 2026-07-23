@@ -3,6 +3,8 @@ module;
 module wescene.pkg.scene_obj;
 import rstd.cppstd;
 
+using namespace rstd::literals;
+
 namespace owe::wpscene
 {
 
@@ -21,9 +23,10 @@ bool ParseAnimKeyframe(const owe::Json& json, AnimKeyframe& out) {
     owe::GetJsonValue(json, "value", out.value, false);
     owe::GetJsonValue(json, "lockangle", out.lockangle, false);
     owe::GetJsonValue(json, "locklength", out.locklength, false);
-    if (auto front = json.get("front"); front.is_some())
+    if (auto front = json.get("front"_str); front.is_some())
         ParseAnimKeyframeTangent(**front, out.front);
-    if (auto back = json.get("back"); back.is_some()) ParseAnimKeyframeTangent(**back, out.back);
+    if (auto back = json.get("back"_str); back.is_some())
+        ParseAnimKeyframeTangent(**back, out.back);
     return true;
 }
 
@@ -46,19 +49,20 @@ bool ParseAnimOptions(const owe::Json& json, AnimOptions& out) {
     owe::GetJsonValue(json, "name", out.name, false);
     owe::GetJsonValue(json, "startpaused", out.startpaused, false);
     owe::GetJsonValue(json, "wraploop", out.wraploop, false);
-    if (auto value = json.get("smoothing"); value.is_some()) out.smoothing = (*value)->clone();
-    if (auto value = json.get("children"); value.is_some()) out.children = (*value)->clone();
-    if (auto value = json.get("events"); value.is_some()) out.events = (*value)->clone();
-    if (auto value = json.get("parent"); value.is_some()) out.parent = (*value)->clone();
+    if (auto value = json.get("smoothing"_str); value.is_some()) out.smoothing = (*value)->clone();
+    if (auto value = json.get("children"_str); value.is_some()) out.children = (*value)->clone();
+    if (auto value = json.get("events"_str); value.is_some()) out.events = (*value)->clone();
+    if (auto value = json.get("parent"_str); value.is_some()) out.parent = (*value)->clone();
     return true;
 }
 
 bool ParseAnimCurve(const owe::Json& json, AnimCurve& out) {
     if (! json.is_object()) return false;
-    if (auto value = json.get("c0"); value.is_some()) ParseAnimAxis(**value, out.c0);
-    if (auto value = json.get("c1"); value.is_some()) ParseAnimAxis(**value, out.c1);
-    if (auto value = json.get("c2"); value.is_some()) ParseAnimAxis(**value, out.c2);
-    if (auto value = json.get("options"); value.is_some()) ParseAnimOptions(**value, out.options);
+    if (auto value = json.get("c0"_str); value.is_some()) ParseAnimAxis(**value, out.c0);
+    if (auto value = json.get("c1"_str); value.is_some()) ParseAnimAxis(**value, out.c1);
+    if (auto value = json.get("c2"_str); value.is_some()) ParseAnimAxis(**value, out.c2);
+    if (auto value = json.get("options"_str); value.is_some())
+        ParseAnimOptions(**value, out.options);
     owe::GetJsonValue(json, "relative", out.relative, false);
     return true;
 }
@@ -91,27 +95,28 @@ std::size_t AbsorbAllFieldBindings(const owe::Json& obj_json, FieldBindings& out
         const auto  field             = rstd::cppstd::as_string_view(entry_key->as_str());
         const auto& field_value       = *entry_value;
         if (! field_value.is_object()) return;
-        if (auto animation = field_value.get("animation"); animation.is_some()) {
+        if (auto animation = field_value.get("animation"_str); animation.is_some()) {
             AnimCurve curve;
             if (ParseAnimCurve(**animation, curve)) {
                 out.animations[std::string(field)] = std::move(curve);
                 ++n;
             }
         }
-        if (auto properties = field_value.get("scriptproperties"); properties.is_some()) {
-            out.scriptproperties.insert(::alloc::string::String::make(rstd::cppstd::as_str(field)),
-                                        (*properties)->clone());
+        if (auto properties = field_value.get("scriptproperties"_str); properties.is_some()) {
+            out.scriptproperties.insert(
+                ::alloc::string::String::make(rstd::cppstd::as_str(field).unwrap()),
+                (*properties)->clone());
             ++n;
         }
-        auto script = field_value.get("script");
+        auto script = field_value.get("script"_str);
         if (script.is_some() && (*script)->is_string()) {
             ScriptBinding sb;
             sb.source = rstd::cppstd::to_string(*(*script)->as_str());
-            if (auto properties = field_value.get("scriptproperties"); properties.is_some())
+            if (auto properties = field_value.get("scriptproperties"_str); properties.is_some())
                 sb.properties = (*properties)->clone();
-            if (auto value = field_value.get("value"); value.is_some())
+            if (auto value = field_value.get("value"_str); value.is_some())
                 sb.initial_value = (*value)->clone();
-            if (auto user = field_value.get("user"); user.is_some()) {
+            if (auto user = field_value.get("user"_str); user.is_some()) {
                 auto string = (*user)->as_str();
                 if (string.is_some()) sb.user = rstd::cppstd::to_string(*string);
             }

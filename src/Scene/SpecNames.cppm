@@ -200,7 +200,7 @@ inline constexpr std::string_view G_AUDIO_SPEC_64_R { "g_AudioSpectrum64Right" }
 inline bool IsSpecTex(const std::string_view name) { return name.starts_with(WE_SPEC_PREFIX); }
 inline bool IsSpecLinkTex(const std::string_view name) { return name.starts_with(SpecTex_Link); }
 inline u32  ParseLinkTex(const std::string_view name) {
-    auto result = rstd::from_str<u32>(rstd::cppstd::as_str(name.substr(9)));
+    auto result = rstd::from_str<u32>(rstd::cppstd::as_str(name.substr(9)).unwrap());
     if (result.is_err()) {
         rstd_error("invalid linked texture id: {}", name);
         return u32();

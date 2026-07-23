@@ -7,6 +7,7 @@ import rstd;
 import cppstd;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using namespace owe::rg;
 namespace resource = owe::resource;
 
@@ -43,7 +44,7 @@ auto NodeGraphviz(const T& node) -> String {
 auto Sorted(rstd::slice<NodeHandle> handles) -> rstd::vec::Vec<NodeHandle> {
     auto sorted = rstd::vec::Vec<NodeHandle>::with_capacity(handles.len());
     sorted.extend_from_slice(handles);
-    std::sort(sorted.begin(), sorted.end());
+    rstd::slice_::sort_unstable(sorted.as_mut_slice().as_mut_ref());
     return sorted;
 }
 } // namespace
@@ -96,37 +97,37 @@ auto RenderGraph::passState(NodeHandle handle) const -> rstd::Option<PassNodeSta
 }
 
 void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
-    auto output = String::make("digraph framegraph {\nnode [shape=box]\n");
+    auto output = String::make("digraph framegraph {\nnode [shape=box]\n"_str);
 
     for (usize index {}; index < m_dg.NodeNum(); ++index) {
         NodeHandle handle { .index = index };
         if (auto pass = getPassNode(handle); pass.is_some()) {
             auto declaration = NodeGraphviz(*pass);
             output.push_str(declaration.as_str());
-            output.push_back('\n');
+            output.push_ascii(u8('\n'));
         } else if (auto texture = getTexNode(handle); texture.is_some()) {
             auto declaration = NodeGraphviz(*texture);
             output.push_str(declaration.as_str());
-            output.push_back('\n');
+            output.push_ascii(u8('\n'));
         }
     }
 
     for (usize index {}; index < m_dg.NodeNum(); ++index) {
         NodeHandle from { .index = index };
         for (auto to : Sorted(m_dg.GetNodeOut(from))) {
-            rstd::ref<rstd::str> access       = "order";
+            rstd::ref<rstd::str> access       = "order"_str;
             auto                 texture_from = getTexNode(from);
             auto                 pass_to      = getPassNode(to);
             if (texture_from && pass_to) {
                 if (texture_from->next) {
                     auto next = getTexNode(*texture_from->next);
-                    if (next && next->writer && *next->writer == to) access = "read/version";
+                    if (next && next->writer && *next->writer == to) access = "read/version"_str;
                 }
-                if (access == "order") access = "read";
+                if (access == "order"_str) access = "read"_str;
             } else if (auto pass_from = getPassNode(from); pass_from) {
                 auto texture_to = getTexNode(to);
                 if (texture_to && texture_to->writer && *texture_to->writer == from) {
-                    access = "write";
+                    access = "write"_str;
                 }
             }
             auto edge =
@@ -135,7 +136,7 @@ void RenderGraph::ToGraphviz(rstd::ref<rstd::str> path) const {
         }
     }
 
-    output.push_back('}');
+    output.push_ascii(u8('}'));
     (void)rstd::fs::write(rstd::ref<rstd::path::Path>(path),
                           rstd::slice<u8>::from_raw_parts(output.as_raw_ptr(), output.len()));
 }
@@ -178,7 +179,7 @@ auto RenderGraph::topologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
     usize                visited {};
 
     auto choose_ready = [&]() -> usize {
-        std::sort(ready.begin(), ready.end());
+        rstd::slice_::sort_unstable(ready.as_mut_slice().as_mut_ref());
 
         for (usize index {}; index < ready.len(); ++index) {
             if (! isRenderPassNode(ready[index])) return index;
@@ -278,7 +279,7 @@ void RenderGraphBuilder::markSelfWrite(TextureNodeRef ref) {
     rstd_assert(state.is_some());
     if (! state || state->version > usize()) return;
     m_rg.addPass<VirtualPass>(
-        "virtual pass", PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
+        "virtual pass"_str, PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
             builder.write(ref);
         });
 }
@@ -288,7 +289,7 @@ void RenderGraphBuilder::markVirtualWrite(TextureNodeRef ref) {
     rstd_assert(state.is_some());
     if (! state || state->version > usize() || m_rg.textureHasWriter(ref)) return;
     m_rg.addPass<VirtualPass>(
-        "virtual pass", PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
+        "virtual pass"_str, PassNode::Type::Virtual, [ref](RenderGraphBuilder& builder, auto&) {
             builder.write(ref);
         });
 }

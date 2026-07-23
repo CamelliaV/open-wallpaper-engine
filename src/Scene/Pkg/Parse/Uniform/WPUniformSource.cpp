@@ -9,6 +9,7 @@ import wescene.spec_names;
 
 using namespace Eigen;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace owe
@@ -207,10 +208,10 @@ void WPUniformCameraResolver::Add(String name, Arc<SceneCamera> camera) {
 }
 
 auto WPUniformCameraResolver::Resolve(const SceneNode& node) const -> Option<mut_ref<SceneCamera>> {
-    auto name = rstd::cppstd::as_str(node.Camera());
+    auto name = rstd::cppstd::as_str(node.Camera()).unwrap();
     if (name.is_empty()) {
         if (! node.Perspective()) return Some(m_active_camera.deref_mut());
-        name = ref<str>("global_perspective");
+        name = "global_perspective"_str;
     }
     auto camera = m_cameras.get(name);
     return camera.is_some() ? Some((**camera).deref_mut()) : None();

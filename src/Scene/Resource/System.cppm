@@ -482,7 +482,7 @@ public:
                                std::uint32_t atlas_width, std::uint32_t x, std::uint32_t y,
                                std::uint32_t width, std::uint32_t height) {
         auto handle = m_registries.TextureEntries().Find(resource::TextureRequestKind::Imported,
-                                                         rstd::cppstd::as_str(key));
+                                                         rstd::cppstd::as_str(key).unwrap());
         if (handle.is_none()) return false;
         auto physical = m_registries.TextureEntries().ResolveCurrent(*handle);
         if (physical.is_none()) return false;

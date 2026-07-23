@@ -8,6 +8,7 @@ import wescene.json;
 import wescene.scene;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::cppstd::as_str;
 using rstd::sync::Arc;
 
@@ -32,7 +33,7 @@ public:
     auto Parse(ref<str>) const -> Result<Arc<owe::Image>, owe::ImageParseError> {
         return Err(owe::ImageParseError {
             .kind    = owe::ImageParseErrorKind::MissingContent,
-            .message = String::make("missing fake image"),
+            .message = String::make("missing fake image"_str),
         });
     }
     auto ParseMany(slice<String> names) const
@@ -91,12 +92,12 @@ TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
     owe::Scene scene;
     scene.RootMut()->ID() = rstd::i32(1);
     EXPECT_EQ(scene.Root()->ID(), rstd::i32(1));
-    scene.RegisterTexture(String::make("tex/main"), owe::SceneTexture { .url = "tex/main" });
-    scene.RegisterRenderTarget(String::make("_rt_default"),
+    scene.RegisterTexture(String::make("tex/main"_str), owe::SceneTexture { .url = "tex/main" });
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
                                owe::SceneRenderTarget { .width = 1920, .height = 1080 });
     auto default_camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
-    scene.RegisterCamera(String::make("default"), default_camera.clone());
+    scene.RegisterCamera(String::make("default"_str), default_camera.clone());
 
     auto child      = rstd::sync::Arc<owe::SceneNode>::make();
     child->ID()     = rstd::i32(2);
@@ -138,16 +139,16 @@ TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
     ASSERT_TRUE(post_draw_id.is_some());
     EXPECT_EQ(index.resolve(*post_draw_id)->material, post_mesh->MaterialSlots()[0].get());
 
-    auto texture_id = index.textureId("tex/main");
+    auto texture_id = index.textureId("tex/main"_str);
     ASSERT_TRUE(texture_id.is_some());
     EXPECT_EQ(index.texture(*texture_id)->url, "tex/main");
 
-    auto rt_id = index.renderTargetId("_rt_default");
+    auto rt_id = index.renderTargetId("_rt_default"_str);
     ASSERT_TRUE(rt_id.is_some());
     EXPECT_EQ(index.renderTarget(*rt_id)->width, 1920);
     EXPECT_EQ(index.mutableRenderTarget(*rt_id)->height, 1080);
 
-    auto camera_id = index.cameraId("default");
+    auto camera_id = index.cameraId("default"_str);
     ASSERT_TRUE(camera_id.is_some());
     EXPECT_EQ(index.camera(*camera_id), default_camera.as_ptr());
 
@@ -160,13 +161,13 @@ TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
 TEST(SceneResourceIndex, RebuildPicksUpNewRenderTargets) {
     owe::Scene scene;
     scene.RebuildResourceIndex();
-    EXPECT_TRUE(scene.ResourceIndex().renderTargetId("_rt_link_7").is_none());
+    EXPECT_TRUE(scene.ResourceIndex().renderTargetId("_rt_link_7"_str).is_none());
 
-    scene.RegisterRenderTarget(String::make("_rt_link_7"),
+    scene.RegisterRenderTarget(String::make("_rt_link_7"_str),
                                owe::SceneRenderTarget { .width = 64, .height = 32 });
     scene.RebuildResourceIndex();
 
-    auto id = scene.ResourceIndex().renderTargetId("_rt_link_7");
+    auto id = scene.ResourceIndex().renderTargetId("_rt_link_7"_str);
     ASSERT_TRUE(id.is_some());
     ASSERT_NE(scene.ResourceIndex().mutableRenderTarget(*id), nullptr);
     EXPECT_EQ(scene.ResourceIndex().mutableRenderTarget(*id)->width, 64);
@@ -197,7 +198,7 @@ TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
     layer->SetFinalResolveEffect(final_effect);
 
     camera->AttatchImgEffect(layer);
-    scene.RegisterCamera(String::make("effect"), rstd::move(camera));
+    scene.RegisterCamera(String::make("effect"_str), rstd::move(camera));
     scene.RebuildResourceIndex();
 
     for (auto node : { prefill.as_ptr(), effect_node.as_ptr(), final_node.as_ptr() }) {
@@ -220,7 +221,7 @@ TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterCameraBindingChanges
     effect->nodes.push_back(owe::SceneImageEffectNode { .sceneNode = effect_node.clone() });
     layer->AddEffect(effect);
     camera->AttatchImgEffect(layer);
-    scene.RegisterCamera(String::make("effect"), rstd::move(camera));
+    scene.RegisterCamera(String::make("effect"_str), rstd::move(camera));
 
     auto source_node = rstd::sync::Arc<owe::SceneNode>::make();
     source_node->AddMesh(MakeSingleSubmesh("source"));
@@ -382,7 +383,7 @@ TEST(SceneTextureAnimation, AdvancesOncePerRuntimeFrame) {
     owe::SceneTexture texture { .url = "tex/sprite", .isSprite = true };
     texture.spriteAnim.AppendFrame(owe::SpriteFrame { .imageId = 0, .frametime = 0.1f, .x = 0.0f });
     texture.spriteAnim.AppendFrame(owe::SpriteFrame { .imageId = 1, .frametime = 0.1f, .x = 0.5f });
-    scene.RegisterTexture(String::make("tex/sprite"), rstd::move(texture));
+    scene.RegisterTexture(String::make("tex/sprite"_str), rstd::move(texture));
     scene.RebuildResourceIndex();
 
     auto node_id = scene.ResourceIndex().nodeId(*node.as_ptr());
@@ -443,19 +444,19 @@ TEST(SceneTextures, EnsureTextureDescriptorRegistersImportedTexture) {
 
     scene.SetImageParser(Box<dyn<owe::IImageParser>>::make(FakeImageParser {}));
     EXPECT_TRUE(scene.EnsureTextureDescriptor("tex/runtime"));
-    auto texture = scene.Texture(ref<str>("tex/runtime"));
+    auto texture = scene.Texture("tex/runtime"_str);
     ASSERT_TRUE(texture.is_some());
     EXPECT_EQ((**texture).url, "tex/runtime");
     EXPECT_TRUE(scene.EnsureTextureDescriptor("_rt_default"));
-    EXPECT_TRUE(scene.Texture(ref<str>("_rt_default")).is_none());
+    EXPECT_TRUE(scene.Texture("_rt_default"_str).is_none());
 }
 
 TEST(SceneTextures, RegisteredReplacementKeepsOneName) {
     owe::Scene scene;
-    scene.RegisterTexture(String::make("slot"), owe::SceneTexture { .url = "first" });
-    scene.RegisterTexture(String::make("slot"), owe::SceneTexture { .url = "second" });
+    scene.RegisterTexture(String::make("slot"_str), owe::SceneTexture { .url = "first" });
+    scene.RegisterTexture(String::make("slot"_str), owe::SceneTexture { .url = "second" });
 
-    auto texture = scene.Texture(ref<str>("slot"));
+    auto texture = scene.Texture("slot"_str);
     ASSERT_TRUE(texture.is_some());
     EXPECT_EQ((**texture).url, "second");
     EXPECT_EQ(scene.TextureNames().len(), usize(1));
@@ -467,13 +468,13 @@ TEST(SceneTextures, RuntimeImageOverridesParserContent) {
     auto image           = Arc<owe::Image>::make();
     image->header.width  = 128;
     image->header.height = 64;
-    scene.RegisterRuntimeImage(String::make("runtime/atlas"), image.clone());
+    scene.RegisterRuntimeImage(String::make("runtime/atlas"_str), image.clone());
 
-    auto parsed = scene.ParseImage("runtime/atlas");
+    auto parsed = scene.ParseImage("runtime/atlas"_str);
     ASSERT_TRUE(parsed.is_ok());
     EXPECT_TRUE(Arc<owe::Image>::ptr_eq(*parsed, image));
 
-    auto header = scene.ParseImageHeader("runtime/atlas");
+    auto header = scene.ParseImageHeader("runtime/atlas"_str);
     ASSERT_TRUE(header.is_ok());
     EXPECT_EQ(header->width, 128);
     EXPECT_EQ(header->height, 64);
@@ -482,32 +483,32 @@ TEST(SceneTextures, RuntimeImageOverridesParserContent) {
 TEST(SceneUserPropertyDiagnostics, StoresAndClearsByKey) {
     owe::Scene scene;
     scene.AddUserPropertyDiagnostic(owe::SceneUserPropertyDiagnostic {
-        .key      = String::make("combo_a"),
+        .key      = String::make("combo_a"_str),
         .code     = owe::SceneUserPropertyDiagnosticCode::UnsupportedShaderComboValue,
-        .material = String::make("mat_a"),
-        .combo    = String::make("USE_A"),
-        .message  = String::make("bad value"),
+        .material = String::make("mat_a"_str),
+        .combo    = String::make("USE_A"_str),
+        .message  = String::make("bad value"_str),
     });
     scene.AddUserPropertyDiagnostic(owe::SceneUserPropertyDiagnostic {
-        .key      = String::make("combo_b"),
+        .key      = String::make("combo_b"_str),
         .code     = owe::SceneUserPropertyDiagnosticCode::ShaderComboCompileFailed,
-        .material = String::make("mat_b"),
-        .combo    = String::make("USE_B"),
-        .message  = String::make("compile failed"),
+        .material = String::make("mat_b"_str),
+        .combo    = String::make("USE_B"_str),
+        .message  = String::make("compile failed"_str),
     });
 
     auto diagnostics = scene.UserPropertyDiagnostics();
     ASSERT_EQ(diagnostics.len(), usize(2));
-    EXPECT_EQ(diagnostics[usize()].key, "combo_a");
+    EXPECT_EQ(diagnostics[usize()].key, "combo_a"_str);
     EXPECT_EQ(diagnostics[usize()].code,
               owe::SceneUserPropertyDiagnosticCode::UnsupportedShaderComboValue);
 
-    scene.ClearUserPropertyDiagnostics(ref<str>("combo_a"));
+    scene.ClearUserPropertyDiagnostics("combo_a"_str);
     diagnostics = scene.UserPropertyDiagnostics();
     ASSERT_EQ(diagnostics.len(), usize(1));
-    EXPECT_EQ(diagnostics[usize()].key, "combo_b");
+    EXPECT_EQ(diagnostics[usize()].key, "combo_b"_str);
 
-    scene.ClearUserPropertyDiagnostics(ref<str>(""));
+    scene.ClearUserPropertyDiagnostics(""_str);
     EXPECT_TRUE(scene.UserPropertyDiagnostics().is_empty());
 }
 
@@ -546,7 +547,7 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
     auto mutation = scene.SetMaterialTextureSlot(*material, rstd::u32(), "tex/runtime");
     EXPECT_TRUE(mutation.changed);
     ASSERT_TRUE(mutation.material.is_some());
-    ASSERT_TRUE(scene.Texture(ref<str>("tex/runtime")).is_some());
+    ASSERT_TRUE(scene.Texture("tex/runtime"_str).is_some());
     EXPECT_EQ(material->textures[0], "tex/runtime");
 
     auto unchanged = scene.SetMaterialTextureSlot(*material, rstd::u32(), "tex/runtime");
@@ -555,7 +556,7 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
 
     auto spec = scene.SetMaterialTextureSlot(*material, rstd::u32(1), "_rt_default");
     EXPECT_TRUE(spec.changed);
-    EXPECT_TRUE(scene.Texture(ref<str>("_rt_default")).is_none());
+    EXPECT_TRUE(scene.Texture("_rt_default"_str).is_none());
     ASSERT_GE(material->textures.size(), 2u);
     EXPECT_EQ(material->textures[1], "_rt_default");
 }
@@ -616,7 +617,7 @@ TEST(SceneMaterial, PreservesOwnedStateAcrossCopyAndMove) {
     });
     auto curve = Arc<owe::SceneAnimationCurve>::make();
     curve->c0.push({ .frame = 0, .value = 0.25f });
-    (void)material.customShader.valueAnimations.insert(String::make("u_Alpha"),
+    (void)material.customShader.valueAnimations.insert(String::make("u_Alpha"_str),
                                                        owe::SceneShaderValueAnimation {
                                                            .base  = owe::ShaderValue(1.0f),
                                                            .curve = Some(curve.clone()),
@@ -628,8 +629,8 @@ TEST(SceneMaterial, PreservesOwnedStateAcrossCopyAndMove) {
     EXPECT_EQ(copied.texture_metadata[0].source_extent,
               (rstd::array<float, 2> { 1024.0f, 1024.0f }));
     EXPECT_EQ(copied.texture_metadata[0].sample_extent, (rstd::array<float, 2> { 960.0f, 540.0f }));
-    auto original_animation = material.customShader.valueAnimations.get(ref<str>("u_Alpha"));
-    auto copied_animation   = copied.customShader.valueAnimations.get(ref<str>("u_Alpha"));
+    auto original_animation = material.customShader.valueAnimations.get("u_Alpha"_str);
+    auto copied_animation   = copied.customShader.valueAnimations.get("u_Alpha"_str);
     ASSERT_TRUE(original_animation.is_some());
     ASSERT_TRUE(copied_animation.is_some());
     ASSERT_TRUE((**original_animation).curve.is_some());
@@ -643,7 +644,7 @@ TEST(SceneMaterial, PreservesOwnedStateAcrossCopyAndMove) {
     ASSERT_NE(moved, nullptr);
     ASSERT_EQ(moved->texture_metadata.size(), 1u);
     EXPECT_EQ(moved->texture_metadata[0].sample_extent, (rstd::array<float, 2> { 960.0f, 540.0f }));
-    auto moved_animation = moved->customShader.valueAnimations.get(ref<str>("u_Alpha"));
+    auto moved_animation = moved->customShader.valueAnimations.get("u_Alpha"_str);
     ASSERT_TRUE(moved_animation.is_some());
     ASSERT_TRUE((**moved_animation).curve.is_some());
     EXPECT_EQ((*(**moved_animation).curve).as_ptr().as_raw_ptr(), curve.as_ptr().as_raw_ptr());
@@ -852,7 +853,7 @@ TEST(SceneVisibility, UserBindingVisibilityChangesRequireGraphRebuild) {
 
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
     node->SetVisibleUserBinding(owe::SceneUserVisibilityBinding {
-        .key = rstd::string::String::make("variant"),
+        .key = rstd::string::String::make("variant"_str),
     });
     EXPECT_TRUE(scene.IsLayerVisibilityElidable(owe::WallpaperLayerId { .value = i32(7) }));
     EXPECT_TRUE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
@@ -873,7 +874,7 @@ TEST(SceneRenderTargets, EnsureLinkRenderTargetCreatesOwnedDescriptor) {
     sized.SetSize({ 64.0f, 32.0f });
     auto key = scene.EnsureLinkRenderTarget(owe::WallpaperLayerId { .value = rstd::i32(7) }, sized);
     EXPECT_EQ(key, "_rt_link_7");
-    auto target = scene.RenderTarget(as_str(key));
+    auto target = scene.RenderTarget(as_str(key).unwrap());
     ASSERT_TRUE(target.is_some());
     EXPECT_EQ((**target).width, 64);
     EXPECT_EQ((**target).height, 32);
@@ -881,7 +882,7 @@ TEST(SceneRenderTargets, EnsureLinkRenderTargetCreatesOwnedDescriptor) {
     owe::SceneNode fallback;
     auto           fallback_key =
         scene.EnsureLinkRenderTarget(owe::WallpaperLayerId { .value = rstd::i32(8) }, fallback);
-    auto fallback_target = scene.RenderTarget(as_str(fallback_key));
+    auto fallback_target = scene.RenderTarget(as_str(fallback_key).unwrap());
     ASSERT_TRUE(fallback_target.is_some());
     EXPECT_EQ((**fallback_target).width, 1920);
     EXPECT_EQ((**fallback_target).height, 1080);
@@ -889,31 +890,31 @@ TEST(SceneRenderTargets, EnsureLinkRenderTargetCreatesOwnedDescriptor) {
 
 TEST(SceneRenderTargets, ReplacesDescriptorBehindStableName) {
     owe::Scene scene;
-    scene.RegisterRenderTarget(String::make("_rt_clock"),
+    scene.RegisterRenderTarget(String::make("_rt_clock"_str),
                                owe::SceneRenderTarget { .width = 64, .height = 32 });
-    scene.RegisterRenderTarget(String::make("_rt_clock"),
+    scene.RegisterRenderTarget(String::make("_rt_clock"_str),
                                owe::SceneRenderTarget { .width = 128, .height = 64 });
 
-    auto target = scene.RenderTarget(ref<str>("_rt_clock"));
+    auto target = scene.RenderTarget("_rt_clock"_str);
     ASSERT_TRUE(target.is_some());
     EXPECT_EQ((**target).width, 128);
     EXPECT_EQ((**target).height, 64);
     ASSERT_EQ(scene.RenderTargetNames().len(), usize(1));
-    EXPECT_EQ(scene.RenderTargetNames()[usize()], "_rt_clock");
+    EXPECT_EQ(scene.RenderTargetNames()[usize()], "_rt_clock"_str);
 }
 
 TEST(SceneRenderTargets, CoalescesRuntimeExtentChanges) {
     owe::Scene scene;
-    scene.RegisterRenderTarget(String::make("_rt_clock"),
+    scene.RegisterRenderTarget(String::make("_rt_clock"_str),
                                owe::SceneRenderTarget { .width = 64, .height = 32 });
 
-    EXPECT_TRUE(scene.ResizeRenderTarget(ref<str>("_rt_clock"), i32(96), i32(48)));
-    EXPECT_TRUE(scene.ResizeRenderTarget(ref<str>("_rt_clock"), i32(128), i32(64)));
-    EXPECT_FALSE(scene.ResizeRenderTarget(ref<str>("_rt_clock"), i32(128), i32(64)));
+    EXPECT_TRUE(scene.ResizeRenderTarget("_rt_clock"_str, i32(96), i32(48)));
+    EXPECT_TRUE(scene.ResizeRenderTarget("_rt_clock"_str, i32(128), i32(64)));
+    EXPECT_FALSE(scene.ResizeRenderTarget("_rt_clock"_str, i32(128), i32(64)));
 
     auto events = scene.ConsumePreparedRenderTargetDirtyEvents();
     ASSERT_EQ(events.len(), usize(1));
-    EXPECT_EQ(events[usize()].name, "_rt_clock");
+    EXPECT_EQ(events[usize()].name, "_rt_clock"_str);
     EXPECT_EQ(events[usize()].old_width, i32(64));
     EXPECT_EQ(events[usize()].old_height, i32(32));
     EXPECT_EQ(events[usize()].width, i32(128));
@@ -949,10 +950,10 @@ TEST(SceneMaterialTextureDependency, ClassifiesPreparedRefreshCompatibility) {
 TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
     owe::Scene scene;
     scene.RootMut()->ID() = rstd::i32(1);
-    scene.RegisterTexture(String::make("tex/main"), owe::SceneTexture { .url = "tex/main" });
-    scene.RegisterRenderTarget(String::make("_rt_default"),
+    scene.RegisterTexture(String::make("tex/main"_str), owe::SceneTexture { .url = "tex/main" });
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
                                owe::SceneRenderTarget { .width = 1920, .height = 1080 });
-    scene.RegisterRenderTarget(String::make("_rt_mask"),
+    scene.RegisterRenderTarget(String::make("_rt_mask"_str),
                                owe::SceneRenderTarget { .width = 256, .height = 256 });
 
     auto child                           = rstd::sync::Arc<owe::SceneNode>::make();
@@ -985,15 +986,15 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
 
     const auto* mask_desc = snapshot.renderTargetDesc(*render_item->output_override);
     ASSERT_NE(mask_desc, nullptr);
-    EXPECT_EQ(mask_desc->key, "_rt_mask");
+    EXPECT_EQ(mask_desc->key, "_rt_mask"_str);
     EXPECT_EQ(mask_desc->desc.width, 256);
     EXPECT_EQ(mask_desc->desc.height, 256);
 
-    auto tex_desc_id = snapshot.textureDescId("tex/main");
+    auto tex_desc_id = snapshot.textureDescId("tex/main"_str);
     ASSERT_TRUE(tex_desc_id.is_some());
     const auto* tex_desc = snapshot.textureDesc(*tex_desc_id);
     ASSERT_NE(tex_desc, nullptr);
-    EXPECT_EQ(tex_desc->key, "tex/main");
+    EXPECT_EQ(tex_desc->key, "tex/main"_str);
     EXPECT_EQ(tex_desc->desc.url, "tex/main");
 
     auto layer_items = snapshot.renderItemsFor(owe::WallpaperLayerId { .value = rstd::i32(42) });
@@ -1023,7 +1024,7 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
 TEST(RenderSceneSnapshot, PlansLinkRenderTargetForElidableLinkedSource) {
     owe::Scene scene;
     scene.SetOrtho({ i32(1920), i32(1080) });
-    scene.RegisterRenderTarget(String::make("_rt_default"),
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
                                owe::SceneRenderTarget { .width = 1920, .height = 1080 });
     scene.RootMut()->ID() = rstd::i32(1);
     scene.MarkLayerStaticElidable(owe::WallpaperLayerId { .value = i32(7) });
@@ -1043,18 +1044,18 @@ TEST(RenderSceneSnapshot, PlansLinkRenderTargetForElidableLinkedSource) {
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
 
-    auto link_target = scene.RenderTarget(ref<str>("_rt_link_7"));
+    auto link_target = scene.RenderTarget("_rt_link_7"_str);
     ASSERT_TRUE(link_target.is_some());
     EXPECT_EQ((**link_target).width, 64);
     EXPECT_EQ((**link_target).height, 32);
 
     auto* link_source = snapshot.linkSource(owe::WallpaperLayerId { .value = rstd::i32(7) });
     ASSERT_NE(link_source, nullptr);
-    EXPECT_EQ(link_source->render_target_key, "_rt_link_7");
+    EXPECT_EQ(link_source->render_target_key, "_rt_link_7"_str);
 
     const auto* link_desc = snapshot.renderTargetDesc(link_source->render_target);
     ASSERT_NE(link_desc, nullptr);
-    EXPECT_EQ(link_desc->key, "_rt_link_7");
+    EXPECT_EQ(link_desc->key, "_rt_link_7"_str);
     EXPECT_EQ(link_desc->desc.width, 64);
     EXPECT_EQ(link_desc->desc.height, 32);
 }
@@ -1062,7 +1063,7 @@ TEST(RenderSceneSnapshot, PlansLinkRenderTargetForElidableLinkedSource) {
 TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
     owe::Scene scene;
     scene.SetOrtho({ i32(1920), i32(1080) });
-    scene.RegisterRenderTarget(String::make("_rt_default"),
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
                                owe::SceneRenderTarget { .width = 1920, .height = 1080 });
     scene.RootMut()->ID() = rstd::i32(1);
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
@@ -1094,7 +1095,7 @@ TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
     ASSERT_TRUE(scene.ResolveLayerLinkSource(*producer.as_ptr()).is_some());
     EXPECT_EQ(scene.ResolveLayerLinkSource(*producer.as_ptr())->value, rstd::i32(7));
     EXPECT_TRUE(scene.ResolveLayerLinkSource(*public_node.as_ptr()).is_none());
-    auto link_target = scene.RenderTarget(ref<str>("_rt_link_7"));
+    auto link_target = scene.RenderTarget("_rt_link_7"_str);
     ASSERT_TRUE(link_target.is_some());
     EXPECT_EQ((**link_target).width, 64);
     EXPECT_EQ((**link_target).height, 32);
@@ -1105,27 +1106,27 @@ TEST(SceneRenderGroups, ReplacesCameraByLayerId) {
     owe::Scene scene;
     auto       layer = owe::WallpaperLayerId { .value = i32(7) };
 
-    scene.RegisterRenderGroup(layer, String::make("first"));
-    scene.RegisterRenderGroup(layer, String::make("second"));
+    scene.RegisterRenderGroup(layer, String::make("first"_str));
+    scene.RegisterRenderGroup(layer, String::make("second"_str));
 
     auto camera = scene.RenderGroupCamera(layer);
     ASSERT_TRUE(camera.is_some());
-    EXPECT_EQ(*camera, "second");
+    EXPECT_EQ(*camera, "second"_str);
 }
 
 TEST(SceneLinkedCameras, UpdatesRegisteredTargets) {
     owe::Scene scene;
     scene.RegisterCamera(
-        String::make("source"),
+        String::make("source"_str),
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(100.0, 50.0, -1.0, 1.0)));
     scene.RegisterCamera(
-        String::make("linked"),
+        String::make("linked"_str),
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0)));
-    scene.RegisterLinkedCamera(String::make("source"), String::make("linked"));
+    scene.RegisterLinkedCamera(String::make("source"_str), String::make("linked"_str));
 
-    scene.UpdateLinkedCamera(ref<str>("source"));
+    scene.UpdateLinkedCamera("source"_str);
 
-    auto linked = scene.Camera(ref<str>("linked"));
+    auto linked = scene.Camera("linked"_str);
     ASSERT_TRUE(linked.is_some());
     EXPECT_DOUBLE_EQ((**linked).Width(), 100.0);
     EXPECT_DOUBLE_EQ((**linked).Height(), 50.0);
@@ -1134,11 +1135,11 @@ TEST(SceneLinkedCameras, UpdatesRegisteredTargets) {
 TEST(SceneCameras, ActiveCameraTracksRegisteredReplacement) {
     owe::Scene scene;
     scene.RegisterCamera(
-        String::make("main"),
+        String::make("main"_str),
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(100.0, 50.0, -1.0, 1.0)));
-    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("main")));
+    ASSERT_TRUE(scene.SetActiveCamera("main"_str));
     scene.RegisterCamera(
-        String::make("main"),
+        String::make("main"_str),
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(200.0, 80.0, -1.0, 1.0)));
 
     auto active = scene.ActiveCamera();
@@ -1155,7 +1156,9 @@ TEST(SceneGeometryDataGeneration, IncrementsWhenGeometryDataChanges) {
     auto                  vertex_generation = vertices.DataGeneration();
 
     std::array<float, 6> positions { 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
-    ASSERT_TRUE(vertices.SetVertex("a_Position", positions));
+    ASSERT_TRUE(vertices.SetVertex(
+        "a_Position",
+        rstd::slice<float>::from_raw_parts(positions.data(), rstd::usize(positions.size()))));
     EXPECT_GT(vertices.DataGeneration(), vertex_generation);
 
     vertex_generation = vertices.DataGeneration();
@@ -1165,7 +1168,9 @@ TEST(SceneGeometryDataGeneration, IncrementsWhenGeometryDataChanges) {
     owe::SceneIndexArray    indices(rstd::usize(6));
     auto                    index_generation = indices.DataGeneration();
     std::array<uint32_t, 3> tri { 0, 1, 2 };
-    indices.Assign(rstd::usize(), tri);
+    indices.Assign(
+        rstd::usize(),
+        rstd::slice<rstd::uint32_t>::from_raw_parts(tri.data(), rstd::usize(tri.size())));
     EXPECT_GT(indices.DataGeneration(), index_generation);
 }
 
@@ -1211,7 +1216,7 @@ TEST(SceneNodeFieldAnimation, AlphaAnimationTicksThroughScene) {
     owe::SceneAnimationCurve curve;
     curve.fps    = 30.0f;
     curve.length = 180;
-    curve.mode   = String::make("single");
+    curve.mode   = String::make("single"_str);
     curve.c0.push({ .frame = 0, .value = 0.0f });
     curve.c0.push({ .frame = 60, .value = 0.5f });
     curve.c0.push({ .frame = 100, .value = 0.0f });

@@ -63,7 +63,7 @@ SceneShaderArtifactProvider::SceneShaderArtifactProvider(ShaderReflectionCache& 
 
 auto MakeSceneShaderRequest(const SceneShader& shader) -> resource::ShaderRequest {
     return resource::ShaderRequest {
-        .name = rstd::string::String::make(rstd::cppstd::as_str(shader.name)),
+        .name = rstd::string::String::make(rstd::cppstd::as_str(shader.name).unwrap()),
         .source =
             resource::ShaderDefinitionId {
                 .index      = shader.id,
@@ -103,9 +103,10 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
         auto code = rstd::vec::Vec<rstd::u32>::with_capacity(usize(stage.spirv.size()));
         for (auto word : stage.spirv) code.push(rstd::u32(word));
         artifact.stages.push(resource::ShaderArtifactStage {
-            .stage       = stage.stage,
-            .entry_point = rstd::string::String::make(rstd::cppstd::as_str(stage.entry_point)),
-            .code        = rstd::move(code),
+            .stage = stage.stage,
+            .entry_point =
+                rstd::string::String::make(rstd::cppstd::as_str(stage.entry_point).unwrap()),
+            .code = rstd::move(code),
         });
     }
     artifact.uniform_blocks.reserve(usize((**reflection).reflected.blocks.size()));
@@ -114,14 +115,14 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
             usize(block.member_map.size()));
         for (const auto& [name, member] : block.member_map) {
             members.push(resource::ShaderArtifactUniformMember {
-                .name   = rstd::string::String::make(rstd::cppstd::as_str(name)),
+                .name   = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
                 .offset = u32(member.offset),
                 .size   = member.size,
                 .count  = member.num,
             });
         }
         artifact.uniform_blocks.push(resource::ShaderArtifactUniformBlock {
-            .name    = rstd::string::String::make(rstd::cppstd::as_str(block.name)),
+            .name    = rstd::string::String::make(rstd::cppstd::as_str(block.name).unwrap()),
             .size    = usize(block.size),
             .members = rstd::move(members),
         });
@@ -129,7 +130,7 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
     artifact.descriptor_bindings.reserve(usize((**reflection).reflected.binding_map.size()));
     for (const auto& [name, binding] : (**reflection).reflected.binding_map) {
         artifact.descriptor_bindings.push(resource::ShaderArtifactDescriptorBinding {
-            .name             = rstd::string::String::make(rstd::cppstd::as_str(name)),
+            .name             = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
             .binding          = u32(binding.binding),
             .descriptor_type  = u32(static_cast<rstd::uint32_t>(binding.descriptorType)),
             .descriptor_count = u32(binding.descriptorCount),
@@ -139,7 +140,7 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
     artifact.vertex_inputs.reserve(usize((**reflection).reflected.input_location_map.size()));
     for (const auto& [name, input] : (**reflection).reflected.input_location_map) {
         artifact.vertex_inputs.push(resource::ShaderArtifactVertexInput {
-            .name     = rstd::string::String::make(rstd::cppstd::as_str(name)),
+            .name     = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
             .location = u32(input.location),
             .format   = u32(static_cast<rstd::uint32_t>(input.format)),
         });

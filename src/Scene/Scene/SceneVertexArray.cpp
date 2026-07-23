@@ -78,20 +78,20 @@ bool SceneVertexArray::AddVertex(const float* data) {
     return true;
 }
 
-bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> data) noexcept {
+bool SceneVertexArray::SetVertex(std::string_view name, slice<float> data) noexcept {
     std::size_t offset = 0;
     for (const auto& el : m_attributes) {
         if (el.name == name) {
             std::size_t typeSize = SceneVertexArray::TypeCount(el.type);
-            std::size_t count    = data.size() / typeSize;
+            std::size_t count    = data.len().to_primitive() / typeSize;
             if (! TrySetSize(usize(count) * m_oneSize)) return false;
 
-            for (std::size_t i = 0; i < data.size(); i += typeSize) {
-                auto start = data.begin() + static_cast<std::ptrdiff_t>(i);
-                auto num   = i / typeSize;
-                std::copy(start,
-                          start + static_cast<std::ptrdiff_t>(typeSize),
-                          m_data.begin() + offset + num * m_oneSize.to_primitive());
+            for (std::size_t i = 0; i < data.len().to_primitive(); i += typeSize) {
+                auto num = i / typeSize;
+                for (std::size_t component = 0; component < typeSize; ++component) {
+                    m_data[usize(offset + num * m_oneSize.to_primitive() + component)] =
+                        data[usize(i + component)];
+                }
             }
             BumpDataGeneration();
             return true;
@@ -101,10 +101,12 @@ bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> d
     return false;
 }
 
-bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noexcept {
+bool SceneVertexArray::SetVertexs(usize index, slice<float> data) noexcept {
     usize start = index * m_oneSize;
-    if (TrySetSize(start + usize(data.size()))) {
-        std::copy(data.begin(), data.end(), m_data.begin() + start.to_primitive());
+    if (TrySetSize(start + data.len())) {
+        for (usize source_index {}; source_index < data.len(); ++source_index) {
+            m_data[start + source_index] = data[source_index];
+        }
         BumpDataGeneration();
         return true;
     }

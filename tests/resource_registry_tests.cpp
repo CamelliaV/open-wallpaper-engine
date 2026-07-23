@@ -10,6 +10,8 @@ import wescene.resource_registry;
 import wescene.types;
 import wescene.vulkan;
 
+using namespace rstd::literals;
+
 namespace
 {
 
@@ -77,7 +79,7 @@ struct TextureContentProvider {
         ++resolves;
         auto name = rstd::cppstd::as_string_view(request.name.as_str());
         if (name.starts_with("alias-")) {
-            return rstd::Ok(rstd::string::String::make(rstd::cppstd::as_str("shared")));
+            return rstd::Ok(rstd::string::String::make("shared"_str));
         }
         return rstd::Ok(request.name.clone());
     }
@@ -121,7 +123,7 @@ struct ImageBackend {
 
 auto ShaderRequest(rstd::uint64_t version) -> owe::resource::ShaderRequest {
     return owe::resource::ShaderRequest {
-        .name = rstd::string::String::make(rstd::cppstd::as_str("sprite")),
+        .name = rstd::string::String::make("sprite"_str),
         .source =
             owe::resource::ShaderDefinitionId {
                 .index      = rstd::u32(3),
@@ -145,7 +147,7 @@ TEST(TextureRegistry, OwnsLogicalEntriesBehindGenerationalHandles) {
     owe::resource::TextureRegistry registry;
     auto                           handle = registry.Register(owe::resource::TextureRequest {
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str("frame")),
+        .name       = rstd::string::String::make("frame"_str),
         .definition = rstd::Some(owe::resource::TextureDefinition {
             .width  = rstd::i32(256),
             .height = rstd::i32(128),
@@ -154,8 +156,7 @@ TEST(TextureRegistry, OwnsLogicalEntriesBehindGenerationalHandles) {
     ASSERT_TRUE(handle.Valid());
     EXPECT_EQ(registry.Size(), rstd::usize(1));
 
-    auto found = registry.Find(owe::resource::TextureRequestKind::RenderTarget,
-                               rstd::cppstd::as_str("frame"));
+    auto found = registry.Find(owe::resource::TextureRequestKind::RenderTarget, "frame"_str);
     ASSERT_TRUE(found.is_some());
     EXPECT_EQ(*found, handle);
 
@@ -166,7 +167,7 @@ TEST(TextureRegistry, OwnsLogicalEntriesBehindGenerationalHandles) {
 
     auto resized = registry.Register(owe::resource::TextureRequest {
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str("frame")),
+        .name       = rstd::string::String::make("frame"_str),
         .definition = rstd::Some(owe::resource::TextureDefinition {
             .width  = rstd::i32(512),
             .height = rstd::i32(128),
@@ -188,7 +189,7 @@ TEST(TextureRegistry, InvalidatesOldHandlesOnReset) {
     owe::resource::TextureRegistry registry;
     auto                           handle     = registry.Register(owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::Imported,
-        .name = rstd::string::String::make(rstd::cppstd::as_str("asset")),
+        .name = rstd::string::String::make("asset"_str),
     });
     auto                           generation = registry.Generation();
 
@@ -203,7 +204,7 @@ TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
     owe::resource::TextureRegistry registry;
     auto                           handle = registry.Register(owe::resource::TextureRequest {
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str("frame")),
+        .name       = rstd::string::String::make("frame"_str),
         .definition = rstd::Some(owe::resource::TextureDefinition {
             .width  = rstd::i32(256),
             .height = rstd::i32(128),
@@ -236,7 +237,7 @@ TEST(TextureRegistry, PublishesUploadedPhysicalOnlyAfterSubmission) {
     owe::resource::TextureRegistry registry;
     auto                           handle = registry.Register(owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::Imported,
-        .name = rstd::string::String::make(rstd::cppstd::as_str("asset")),
+        .name = rstd::string::String::make("asset"_str),
     });
     owe::vulkan::ImageUploadTicket ticket { .value = rstd::u64(7) };
 
@@ -291,14 +292,14 @@ TEST(ShaderRegistry, OwnsArtifactsByRequestIdentity) {
 TEST(BufferRegistry, OwnsLogicalDefinitionsBehindStableHandles) {
     owe::resource_registry::BufferRegistry registry;
     auto                                   first = registry.Declare(owe::resource::BufferRequest {
-        .name       = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
+        .name       = rstd::string::String::make("vertices"_str),
         .definition = { .size = rstd::usize(128), .usage = owe::resource::BufferUsage::Vertex },
         .content_version = rstd::u64(3),
     });
     ASSERT_TRUE(first.Valid());
 
     auto changed = registry.Declare(owe::resource::BufferRequest {
-        .name       = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
+        .name       = rstd::string::String::make("vertices"_str),
         .definition = { .size = rstd::usize(256), .usage = owe::resource::BufferUsage::Vertex },
         .content_version = rstd::u64(4),
     });
@@ -320,7 +321,7 @@ TEST(BufferRegistry, UpdatesDynamicContentWithoutReplacingItsPlannedCapacity) {
     content.push(rstd::u8(1));
     content.push(rstd::u8(2));
     auto request = owe::resource::BufferRequest {
-        .name       = rstd::string::String::make(rstd::cppstd::as_str("dynamic-vertices")),
+        .name       = rstd::string::String::make("dynamic-vertices"_str),
         .definition = { .size      = rstd::usize(128),
                         .usage     = owe::resource::BufferUsage::Vertex,
                         .alignment = rstd::usize(16) },
@@ -352,7 +353,7 @@ TEST(BufferRegistry, ReusesPhysicalAllocationAcrossPreparedContentVersions) {
     auto content        = rstd::vec::Vec<rstd::u8>::make();
     content.push(rstd::u8(1));
     auto request = owe::resource::BufferRequest {
-        .name            = rstd::string::String::make(rstd::cppstd::as_str("retained-vertices")),
+        .name            = rstd::string::String::make("retained-vertices"_str),
         .definition      = { .size = rstd::usize(64), .usage = owe::resource::BufferUsage::Vertex },
         .content_version = rstd::u64(1),
     };
@@ -398,7 +399,7 @@ TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
             owe::resource::BufferUseHandle { .index = rstd::u64(3), .generation = rstd::u64(12) },
         .request =
             owe::resource::BufferRequest {
-                .name            = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
+                .name            = rstd::string::String::make("vertices"_str),
                 .definition      = { .size  = rstd::usize(2),
                                      .usage = owe::resource::BufferUsage::Vertex },
                 .content_version = rstd::u64(4),
@@ -467,7 +468,7 @@ TEST(ResourcePrepareService, BatchesDeduplicatesAndCachesImportedTextures) {
             .request =
                 owe::resource::TextureRequest {
                     .kind = owe::resource::TextureRequestKind::Imported,
-                    .name = rstd::string::String::make(rstd::cppstd::as_str(name)),
+                    .name = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
                 },
         });
     }
@@ -512,7 +513,7 @@ TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {
         .request =
             owe::resource::TextureRequest {
                 .kind = owe::resource::TextureRequestKind::Imported,
-                .name = rstd::string::String::make(rstd::cppstd::as_str("prepared")),
+                .name = rstd::string::String::make("prepared"_str),
             },
         .physical            = allocation.clone(),
         .image               = allocation->View(),
@@ -545,7 +546,7 @@ TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {
         .request =
             owe::resource::TextureRequest {
                 .kind = owe::resource::TextureRequestKind::Imported,
-                .name = rstd::string::String::make(rstd::cppstd::as_str("leased")),
+                .name = rstd::string::String::make("leased"_str),
             },
         .physical = texture_physical.clone(),
         .image    = texture_physical->View(),
@@ -760,7 +761,7 @@ TEST(ResourceStateTracker, CompilesTypedUsesIntoBarrierPackets) {
         owe::resource::TextureUseHandle { .index = rstd::u64(6), .generation = rstd::u64(3) };
     auto request = owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::Imported,
-        .name = rstd::string::String::make(rstd::cppstd::as_str("sampled")),
+        .name = rstd::string::String::make("sampled"_str),
     };
     owe::resource::ResourcePlan plan { .generation = rstd::u64(3) };
     plan.textures.push(owe::resource::TexturePlanEntry {
@@ -818,7 +819,7 @@ TEST(ResourceStateTracker, SharesStateAcrossUsesOfOneTexture) {
         owe::resource::TextureHandle { .index = rstd::u64(8), .generation = rstd::u64(1) };
     auto request = owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::RenderTarget,
-        .name = rstd::string::String::make(rstd::cppstd::as_str("frame")),
+        .name = rstd::string::String::make("frame"_str),
     };
     owe::resource::ResourcePlan plan { .generation = rstd::u64(3) };
     plan.textures.push(owe::resource::TexturePlanEntry {
@@ -864,7 +865,7 @@ TEST(ResourceStateTracker, PreservesFrameBoundaryContentBeforeItsFirstRead) {
         owe::resource::TextureUseHandle { .index = rstd::u64(1), .generation = rstd::u64(3) };
     auto request = owe::resource::TextureRequest {
         .kind = owe::resource::TextureRequestKind::RenderTarget,
-        .name = rstd::string::String::make(rstd::cppstd::as_str("history")),
+        .name = rstd::string::String::make("history"_str),
         .content =
             owe::resource::TextureContentFlag(owe::resource::TextureContent::PreserveAcrossFrames),
     };

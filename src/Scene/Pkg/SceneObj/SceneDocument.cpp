@@ -9,6 +9,7 @@ import wescene.json;
 import wescene.pkg_fs;
 
 using namespace owe::wpscene;
+using namespace rstd::literals;
 
 namespace owe::wpscene
 {
@@ -26,7 +27,7 @@ SceneVersion ParsePkgVersionStamp(std::string_view stamp) {
 }
 
 SceneJsonVersion DetectSceneJsonVersion(const owe::Json& root) {
-    auto version = root.get("version");
+    auto version = root.get("version"_str);
     if (version.is_none()) return kSceneJsonVersionDefault;
     auto value = (*version)->as_u64();
     if (value.is_some() && value->to_primitive() <= std::numeric_limits<SceneJsonVersion>::max())
@@ -38,7 +39,7 @@ SceneJsonVersion DetectSceneJsonVersion(const owe::Json& root) {
 
 bool Orthogonalprojection::FromJson(const owe::Json& json) {
     if (json.is_null()) return false;
-    if (json.get("auto").is_some()) {
+    if (json.get("auto"_str).is_some()) {
         owe::GetJsonValue(json, "auto", auto_);
     } else {
         owe::GetJsonValue(json, "width", width);
@@ -51,7 +52,7 @@ bool SceneCamera::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "center", center);
     owe::GetJsonValue(json, "eye", eye);
     owe::GetJsonValue(json, "up", up);
-    if (auto raw_paths = json.get("paths"); raw_paths.is_some()) {
+    if (auto raw_paths = json.get("paths"_str); raw_paths.is_some()) {
         auto array = (*raw_paths)->as_array();
         if (array.is_none()) return true;
         for (const auto& path : **array) {
@@ -90,7 +91,7 @@ void capture_user_bindings(SceneGeneral& g, const owe::Json& json) {
         auto [entry_key, entry_value] = entry;
         const auto& field             = *entry_value;
         if (! field.is_object()) return;
-        auto user = field.get("user");
+        auto user = field.get("user"_str);
         if (user.is_none() || ! (*user)->is_string()) return;
         g.user_bindings[rstd::cppstd::to_string(entry_key->as_str())] =
             rstd::cppstd::to_string(*(*user)->as_str());
@@ -120,7 +121,7 @@ void parse_baseline(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "camerashakespeed", g.camerashakespeed, false);
     owe::GetJsonValue(json, "camerashakeroughness", g.camerashakeroughness, false);
     g.isOrtho = false;
-    if (auto ortho = json.get("orthogonalprojection"); ortho.is_some()) {
+    if (auto ortho = json.get("orthogonalprojection"_str); ortho.is_some()) {
         if ((*ortho)->is_null())
             g.isOrtho = false;
         else {
@@ -173,7 +174,7 @@ void parse_v23_plus(SceneGeneral& g, const owe::Json& json) {
 }
 
 void parse_lightconfig(SceneGeneral& g, const owe::Json& json) {
-    if (auto lightconfig = json.get("lightconfig");
+    if (auto lightconfig = json.get("lightconfig"_str);
         lightconfig.is_some() && (*lightconfig)->is_object()) {
         g.lightconfig.FromJson(**lightconfig);
     }
@@ -181,19 +182,19 @@ void parse_lightconfig(SceneGeneral& g, const owe::Json& json) {
 
 SceneObjectKind object_kind(const owe::Json& obj) {
     if (! obj.is_object()) return SceneObjectKind::Unknown;
-    if (auto value = obj.get("image"); value.is_some() && ! (*value)->is_null())
+    if (auto value = obj.get("image"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Image;
-    if (auto value = obj.get("particle"); value.is_some() && ! (*value)->is_null())
+    if (auto value = obj.get("particle"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Particle;
-    if (auto value = obj.get("sound"); value.is_some() && ! (*value)->is_null())
+    if (auto value = obj.get("sound"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Sound;
-    if (auto value = obj.get("light"); value.is_some() && ! (*value)->is_null())
+    if (auto value = obj.get("light"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Light;
-    if (auto value = obj.get("text"); value.is_some() && ! (*value)->is_null())
+    if (auto value = obj.get("text"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Text;
-    if (auto value = obj.get("model"); value.is_some() && ! (*value)->is_null())
+    if (auto value = obj.get("model"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Model;
-    if (auto value = obj.get("camera"); value.is_some() && ! (*value)->is_null())
+    if (auto value = obj.get("camera"_str); value.is_some() && ! (*value)->is_null())
         return SceneObjectKind::Camera;
     return SceneObjectKind::Container;
 }
@@ -218,7 +219,7 @@ SceneObjectMetadata parse_object_metadata(const owe::Json& obj, std::size_t raw_
 
 std::vector<SceneObjectMetadata> parse_objects_metadata(const owe::Json& root) {
     std::vector<SceneObjectMetadata> objects;
-    auto                             raw_objects = root.get("objects");
+    auto                             raw_objects = root.get("objects"_str);
     if (raw_objects.is_none()) return objects;
 
     auto array = (*raw_objects)->as_array();
@@ -291,14 +292,14 @@ bool SceneMetadata::FromJson(const owe::Json& json) { return FromJson(json, kSce
 bool SceneMetadata::FromJson(const owe::Json& json, SceneVersion v) {
     pkg_version        = v;
     scene_json_version = DetectSceneJsonVersion(json);
-    if (auto camera_json = json.get("camera"); camera_json.is_some()) {
+    if (auto camera_json = json.get("camera"_str); camera_json.is_some()) {
         // camera schema is identical across PKGV0001..PKGV0023; no version gate needed.
         camera.FromJson(**camera_json);
     } else {
         rstd_error("scene no camera");
         return false;
     }
-    if (auto general_json = json.get("general"); general_json.is_some()) {
+    if (auto general_json = json.get("general"_str); general_json.is_some()) {
         general.FromJson(**general_json, v);
     } else {
         rstd_error("scene no genera data");
@@ -337,7 +338,7 @@ std::optional<SceneDocument> LoadSceneDocumentFromPkg(std::string_view pkg_path)
     auto pkg = fs::WPPkgFs::open(fs::ToPath(pkg_path));
     if (pkg.is_err()) return std::nullopt;
 
-    auto scene_source = pkg->open_read("/scene.json");
+    auto scene_source = pkg->open_read("/scene.json"_str);
     if (scene_source.is_err()) return std::nullopt;
     auto scene_file = fs::BinaryReader(rstd::move(scene_source).unwrap_unchecked());
 

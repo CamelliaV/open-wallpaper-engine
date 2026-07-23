@@ -14,6 +14,7 @@ import wescene.script;
 import wescene.spec_names;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::cppstd::as_str;
 using rstd::cppstd::as_string_view;
 using rstd::cppstd::to_string;
@@ -54,7 +55,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const Json& property) {
     UserPropertyCoerceResult result;
 
     std::string type;
-    if (auto member = property.get("type"); member.is_some()) {
+    if (auto member = property.get("type"_str); member.is_some()) {
         auto string = (*member)->as_str();
         if (string.is_some()) type = rstd::cppstd::to_string(*string);
     }
@@ -68,7 +69,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const Json& property) {
         return result;
     }
 
-    auto        value = property.get("value");
+    auto        value = property.get("value"_str);
     const Json& raw   = value.is_some() ? **value : property;
     if (type == "color") {
         std::vector<float> values;
@@ -115,7 +116,7 @@ UserPropertyCoerceResult CoerceUserPropertyValue(const Json& property) {
 }
 
 bool IsShaderGraphUserProperty(const Json& property) {
-    auto type = property.get("type");
+    auto type = property.get("type"_str);
     if (type.is_none()) return false;
     auto string = (*type)->as_str();
     return string.is_some() && rstd::cppstd::as_string_view(*string) == "combo";
@@ -136,7 +137,7 @@ void ApplyClear(Scene& scene, const std::string& key, const Json& property) {
 }
 
 void ApplyShaderUniforms(Scene& scene, const std::string& key, const Json& property) {
-    auto bindings = scene.ShaderUserBindings(as_str(key));
+    auto bindings = scene.ShaderUserBindings(as_str(key).unwrap());
     if (bindings.is_empty()) return;
     if (IsShaderGraphUserProperty(property)) {
         rstd_warn("user property '{}' skipped: shader graph mutation is not a uniform update", key);
@@ -164,13 +165,13 @@ Option<String> ResolveTextureProperty(const Json& property) {
     if (! property.is_object()) return None();
 
     std::string type;
-    if (auto member = property.get("type"); member.is_some()) {
+    if (auto member = property.get("type"_str); member.is_some()) {
         auto string = (*member)->as_str();
         if (string.is_some()) type = rstd::cppstd::to_string(*string);
     }
     if (! type.empty() && type != "scenetexture" && type != "texture" && type != "replacetexture")
         return None();
-    auto value = property.get("value");
+    auto value = property.get("value"_str);
     if (value.is_none()) return None();
     auto string = (*value)->as_str();
     return string.is_some() ? Some(String::make(*string)) : None();
@@ -190,7 +191,7 @@ void PushUniqueMaterial(Vec<SceneMaterialId>& materials, SceneMaterialId id) {
 Vec<SceneMaterialId> ApplyTextureProperty(Scene& scene, const std::string& key,
                                           const Json& property) {
     Vec<SceneMaterialId> changed;
-    auto                 bindings = scene.MaterialTextureUserBindings(as_str(key));
+    auto                 bindings = scene.MaterialTextureUserBindings(as_str(key).unwrap());
     if (bindings.is_empty()) return changed;
 
     auto texture = ResolveTextureProperty(property);
@@ -210,17 +211,18 @@ Vec<SceneMaterialId> ApplyTextureProperty(Scene& scene, const std::string& key,
 
 Option<String> ResolveShaderComboValue(const Json&                          property,
                                        const Scene::ShaderComboUserBinding& binding) {
-    auto        member = property.get("value");
+    auto        member = property.get("value"_str);
     const auto& value  = member.is_some() ? **member : property;
     if (value.is_null()) return Some(binding.fallback.clone());
-    if (value.is_boolean()) return Some(String::make(*value.as_bool() ? "1" : "0"));
+    if (value.is_boolean()) return Some(String::make(*value.as_bool() ? "1"_str : "0"_str));
     if (value.is_number()) {
         auto number = value.as_f64();
         if (number.is_some()) {
             const double native = number->to_primitive();
             if (native >= std::numeric_limits<int>::min() &&
                 native <= std::numeric_limits<int>::max())
-                return Some(String::make(as_str(std::to_string(static_cast<int>(native)))));
+                return Some(
+                    String::make(as_str(std::to_string(static_cast<int>(native))).unwrap()));
         }
         return None();
     }
@@ -230,13 +232,14 @@ Option<String> ResolveShaderComboValue(const Json&                          prop
     if (text.is_empty()) return Some(binding.fallback.clone());
     auto option = binding.options.get(text.as_str());
     if (option.is_some()) return Some((*option)->clone());
-    if (text == "true") return Some(String::make("1"));
-    if (text == "false") return Some(String::make("0"));
+    if (text == "true"_str) return Some(String::make("1"_str));
+    if (text == "false"_str) return Some(String::make("0"_str));
     try {
         auto        native = to_string(text.as_str());
         std::size_t parsed = 0;
         int         number = std::stoi(native, &parsed);
-        if (parsed == native.size()) return Some(String::make(as_str(std::to_string(number))));
+        if (parsed == native.size())
+            return Some(String::make(as_str(std::to_string(number)).unwrap()));
     } catch (...) {
     }
     return None();
@@ -246,18 +249,18 @@ void RecordShaderComboDiagnostic(Scene& scene, std::string key,
                                  SceneUserPropertyDiagnosticCode code, std::string material,
                                  std::string combo, std::string message) {
     scene.AddUserPropertyDiagnostic(SceneUserPropertyDiagnostic {
-        .key      = String::make(rstd::cppstd::as_str(key)),
+        .key      = String::make(rstd::cppstd::as_str(key).unwrap()),
         .code     = code,
-        .material = String::make(rstd::cppstd::as_str(material)),
-        .combo    = String::make(rstd::cppstd::as_str(combo)),
-        .message  = String::make(rstd::cppstd::as_str(message)),
+        .material = String::make(rstd::cppstd::as_str(material).unwrap()),
+        .combo    = String::make(rstd::cppstd::as_str(combo).unwrap()),
+        .message  = String::make(rstd::cppstd::as_str(message).unwrap()),
     });
 }
 
 bool ApplyShaderCombos(Scene& scene, const std::string& key, const Json& property) {
-    auto bindings = scene.ShaderComboUserBindings(as_str(key));
+    auto bindings = scene.ShaderComboUserBindings(as_str(key).unwrap());
     if (bindings.is_empty()) return false;
-    scene.ClearUserPropertyDiagnostics(as_str(key));
+    scene.ClearUserPropertyDiagnostics(as_str(key).unwrap());
 
     Option<ref<rstd::path::Path>> shader_cache_dir;
     if (auto cache = scene.Extension<WPShaderCacheDirectory>(); cache.is_some()) {
@@ -360,7 +363,7 @@ bool MaterialHasUniform(const SceneMaterial& material, std::string_view uniform_
 }
 
 void ApplyImageColor(Scene& scene, const std::string& key, const Json& property) {
-    auto bindings = scene.ImageColorUserBindings(as_str(key));
+    auto bindings = scene.ImageColorUserBindings(as_str(key).unwrap());
     if (bindings.is_empty()) return;
     auto coerced = CoerceUserPropertyValue(property);
     if (! coerced.ok || coerced.value.size() < usize(3)) return;
@@ -388,7 +391,7 @@ void ApplyImageColor(Scene& scene, const std::string& key, const Json& property)
 }
 
 void ApplyImageAlpha(Scene& scene, const std::string& key, const Json& property) {
-    auto bindings = scene.ImageAlphaUserBindings(as_str(key));
+    auto bindings = scene.ImageAlphaUserBindings(as_str(key).unwrap());
     if (bindings.is_empty()) return;
     auto coerced = CoerceUserPropertyValue(property);
     if (! coerced.ok || coerced.value.size() < usize(1)) return;
@@ -413,7 +416,7 @@ void ApplyImageAlpha(Scene& scene, const std::string& key, const Json& property)
 }
 
 void ApplyParticles(Scene& scene, const std::string& key, const Json& property) {
-    auto controls = scene.ParticleOverrideBindings(as_str(key));
+    auto controls = scene.ParticleOverrideBindings(as_str(key).unwrap());
     if (controls.is_empty()) return;
     auto coerced = CoerceUserPropertyValue(property);
     if (! coerced.ok) return;
@@ -422,7 +425,7 @@ void ApplyParticles(Scene& scene, const std::string& key, const Json& property) 
 }
 
 void ApplySoundVolume(Scene& scene, const std::string& key, const Json& property) {
-    auto controls = scene.SoundVolumeBindings(rstd::cppstd::as_str(key));
+    auto controls = scene.SoundVolumeBindings(rstd::cppstd::as_str(key).unwrap());
     if (controls.is_empty()) return;
     auto coerced = CoerceUserPropertyValue(property);
     if (! coerced.ok || coerced.value.size() < usize(1)) return;
@@ -440,7 +443,7 @@ SceneUserPropertyMutation SceneUserPropertyApplier::Apply(Scene& scene, std::str
                                                           const Json& property) {
     SceneUserPropertyMutation mutation;
     std::string               key = CanonicalSceneUserPropertyKey(raw_key);
-    mutation.diagnostics_changed  = ! scene.ShaderComboUserBindings(as_str(key)).is_empty();
+    mutation.diagnostics_changed = ! scene.ShaderComboUserBindings(as_str(key).unwrap()).is_empty();
 
     script::SetSceneUserProperty(scene, key, property);
     ApplyClear(scene, key, property);
@@ -449,10 +452,10 @@ SceneUserPropertyMutation SceneUserPropertyApplier::Apply(Scene& scene, std::str
     mutation.graph_changed     = ApplyShaderCombos(scene, key, property);
     ApplyImageColor(scene, key, property);
     ApplyImageAlpha(scene, key, property);
-    scene.ApplyUserTextBindings(as_str(key), property);
+    scene.ApplyUserTextBindings(as_str(key).unwrap(), property);
     ApplyParticles(scene, key, property);
     ApplySoundVolume(scene, key, property);
-    scene.ApplyUserPropertyBindings(as_str(key), property);
+    scene.ApplyUserPropertyBindings(as_str(key).unwrap(), property);
     scene.ApplyUserCameraPathVisibilityBindings(key, property);
     mutation.graph_changed =
         scene.ApplyUserNodeVisibilityBindings(key, property) || mutation.graph_changed;
@@ -488,7 +491,7 @@ Vec<SceneUserPropertyDiagnostic> CollectSceneUserPropertyDiagnostics(const Scene
     auto                             diagnostics = scene.UserPropertyDiagnostics();
     for (usize index {}; index < diagnostics.len(); ++index) {
         const auto& diagnostic = diagnostics[index];
-        if (diagnostic.key == rstd::cppstd::as_str(key)) out.push(diagnostic.Clone());
+        if (diagnostic.key == rstd::cppstd::as_str(key).unwrap()) out.push(diagnostic.Clone());
     }
     return out;
 }

@@ -7,6 +7,7 @@ import wescene.scene;
 import wescene.types;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace
@@ -50,7 +51,7 @@ public:
         if (rstd::cppstd::as_string_view(name) == "bad") {
             return Err(owe::ImageParseError {
                 .kind    = owe::ImageParseErrorKind::DecodeFailed,
-                .message = String::make("bad image"),
+                .message = String::make("bad image"_str),
             });
         }
         auto image = Arc<owe::Image>::make();
@@ -73,7 +74,7 @@ TEST(ImageParser, BatchPreservesOrderAndBoundsConcurrency) {
     TrackingImageParser parser;
     Vec<String>         names;
     for (const char* name : { "0", "1", "2", "3", "4", "5", "6", "7" })
-        names.push(String::make(name));
+        names.push(String::make(rstd::cppstd::as_str(name).unwrap()));
 
     auto image_parser = dyn<owe::IImageParser>::from_ref(parser);
     auto images       = owe::ParseImages(image_parser.as_ref(), names.as_slice());
@@ -93,11 +94,11 @@ TEST(ImageParser, SceneBatchPreservesRuntimeParserAndErrorPositions) {
     scene.SetImageParser(Box<dyn<owe::IImageParser>>::make(MixedImageParser {}));
     auto runtime = Arc<owe::Image>::make();
     runtime->key = "runtime-value";
-    scene.RegisterRuntimeImage(String::make("runtime"), runtime.clone());
+    scene.RegisterRuntimeImage(String::make("runtime"_str), runtime.clone());
 
     Vec<String> names;
     for (const char* name : { "first", "runtime", "bad", "last" }) {
-        names.push(String::make(name));
+        names.push(String::make(rstd::cppstd::as_str(name).unwrap()));
     }
     auto images = scene.ParseImages(names.as_slice());
 

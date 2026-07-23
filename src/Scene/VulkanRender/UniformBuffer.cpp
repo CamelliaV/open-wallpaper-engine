@@ -10,6 +10,7 @@ import wescene.resource;
 import wescene.scene;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace owe::vulkan
 {
@@ -129,7 +130,9 @@ public:
             wrote = m_binding.WriteSlot(binding.slot_index, value) || wrote;
         }
         if (! wrote) {
-            return Err(UniformError { .message = String::make("uniform output is not bound") });
+            return Err(UniformError {
+                .message = String::make("uniform output is not bound"_str),
+            });
         }
         return Ok(empty {});
     }
@@ -235,7 +238,7 @@ auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock& bloc
     for (usize index {}; index < layout.slots.len(); ++index) {
         order.push(usize(index.to_primitive()));
     }
-    std::sort(order.begin(), order.end(), [&](usize lhs, usize rhs) {
+    rstd::slice_::sort_unstable_by(order.as_mut_slice().as_mut_ref(), [&](usize lhs, usize rhs) {
         return layout.slots[lhs].offset < layout.slots[rhs].offset;
     });
     for (usize index { 1 }; index < order.len(); ++index) {
@@ -273,7 +276,7 @@ bool UniformBufferBinding::WriteSlot(usize slot_index, UniformValueView value) c
     if (slot_index >= m_layout.slots.len() || value.data == nullptr) return false;
     const auto& slot       = m_layout.slots[slot_index];
     const usize value_size = value.size * usize(sizeof(float));
-    auto source = slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(value.data), value_size);
+    auto source = slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(value.data), value_size);
     rstd::vec::Vec<float> resized;
     if (slot.size != value_size && slot.size % usize(sizeof(float)) == usize()) {
         const auto count = slot.size / usize(sizeof(float));
@@ -282,7 +285,8 @@ bool UniformBufferBinding::WriteSlot(usize slot_index, UniformValueView value) c
         for (usize index {}; index < rstd::cmp::min(value.size, count); ++index) {
             resized[index] = value.data[index.to_primitive()];
         }
-        source = slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(resized.data()), slot.size);
+        source =
+            slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(resized.data()), slot.size);
     } else if (slot.size != value_size) {
         rstd_warn("uniform {} size mismatch: reflected {} bytes, value {} bytes",
                   slot.name.as_str(),
@@ -312,7 +316,7 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
     auto&      material = *m_material;
     const bool force    = ! m_uploaded || m_material_version != material.customShader.value_version;
     if (force) {
-        for (auto& byte : m_data) byte = u8();
+        for (usize index {}; index < m_data.len(); ++index) m_data[index] = u8();
         for (const auto& [name, value] : m_defaults) WriteName(name, value);
         for (const auto& [name, value] : material.customShader.constValues) {
             WriteName(name, value);
@@ -370,12 +374,12 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
     auto draw = prepare->ResolveDraw(draw_item);
     if (draw.is_none()) {
         return Err(UniformBufferUpdateError {
-            .message = String::make("uniform binding scene data is unavailable"),
+            .message = String::make("uniform binding scene data is unavailable"_str),
         });
     }
     if (! draw->material->customShader.shader) {
         return Err(UniformBufferUpdateError {
-            .message = String::make("uniform binding shader metadata is unavailable"),
+            .message = String::make("uniform binding shader metadata is unavailable"_str),
         });
     }
 
@@ -409,12 +413,14 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
     };
     append(prepare->GlobalSources());
     append(prepare->NodeSources(draw->node_id));
-    std::sort(ranked.begin(), ranked.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.priority != rhs.priority) return lhs.priority < rhs.priority;
-        if (lhs.source.generation != rhs.source.generation)
-            return lhs.source.generation < rhs.source.generation;
-        return lhs.source.index < rhs.source.index;
-    });
+    rstd::slice_::sort_unstable_by(ranked.as_mut_slice().as_mut_ref(),
+                                   [](const auto& lhs, const auto& rhs) {
+                                       if (lhs.priority != rhs.priority)
+                                           return lhs.priority < rhs.priority;
+                                       if (lhs.source.generation != rhs.source.generation)
+                                           return lhs.source.generation < rhs.source.generation;
+                                       return lhs.source.index < rhs.source.index;
+                                   });
 
     auto sources = Vec<BoundUniformSource>::with_capacity(ranked.len());
     rstd::collections::HashMap<usize, usize> slot_sources;
@@ -423,7 +429,7 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
         auto source = prepare->ResolveSource(candidate.source);
         if (source.is_none()) {
             return Err(UniformBufferUpdateError {
-                .message = String::make("scene uniform source is unavailable"),
+                .message = String::make("scene uniform source is unavailable"_str),
             });
         }
         BoundUniformSource bound {

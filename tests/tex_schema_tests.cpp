@@ -10,6 +10,7 @@ import wescene.fs;
 import wescene.types;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace
@@ -281,7 +282,7 @@ const CorpusScan& AllScans() {
             auto wfs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg.string()));
             if (wfs.is_err()) continue;
             auto vfs = std::make_shared<owe::fs::VFS>();
-            if (vfs->mount("/assets", wfs->mount_handle()).is_err()) continue;
+            if (vfs->mount("/assets"_str, wfs->mount_handle()).is_err()) continue;
 
             for (auto& te : ReadTexEntries(pkg)) {
                 auto m        = read_tex_meta(te.blob);
@@ -435,7 +436,7 @@ TEST(TexSchema, ProductionParseHeaderAgreesWithMip0Reader) {
         owe::WPTexImageParser parser(&vfs);
         owe::ImageHeader      h;
         try {
-            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name).unwrap());
             if (parsed.is_err()) continue;
             h = rstd::move(parsed).unwrap_unchecked();
         } catch (...) {
@@ -526,7 +527,7 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         owe::WPTexImageParser parser(&vfs);
         owe::ImageHeader      h;
         try {
-            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name).unwrap());
             if (parsed.is_err()) continue;
             h = rstd::move(parsed).unwrap_unchecked();
         } catch (...) {
@@ -539,7 +540,7 @@ TEST(TexSchema, ProductionParseDecodesEveryBucket) {
         ++parse_attempted;
         Option<Arc<owe::Image>> image;
         try {
-            auto parsed_image = parser.Parse(rstd::cppstd::as_str(name));
+            auto parsed_image = parser.Parse(rstd::cppstd::as_str(name).unwrap());
             if (parsed_image.is_ok()) image = Some(rstd::move(parsed_image).unwrap_unchecked());
         } catch (...) {
         }
@@ -626,7 +627,7 @@ TEST(TexSchema, FormatCodeMapsToExpectedTextureFormat) {
         owe::WPTexImageParser parser(&vfs);
         owe::ImageHeader      h;
         try {
-            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name));
+            auto parsed = parser.ParseHeader(rstd::cppstd::as_str(name).unwrap());
             if (parsed.is_err()) continue;
             h = rstd::move(parsed).unwrap_unchecked();
         } catch (...) {

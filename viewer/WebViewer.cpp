@@ -15,6 +15,7 @@ namespace
 
 using namespace rstd::prelude;
 using namespace rstd::argparse;
+using namespace rstd::literals;
 
 struct WebViewerArgs {
     std::string workshop;
@@ -24,9 +25,7 @@ struct WebViewerArgs {
     i32         remote_debugging_port;
 };
 
-std::string ToStdString(const String& value) {
-    return { value.data(), value.size().to_primitive() };
-}
+std::string ToStdString(const String& value) { return rstd::cppstd::to_string(value.as_str()); }
 
 template<typename T>
 const T& Value(const Matches& matches, const ArgKey<T>& key) {
@@ -36,29 +35,29 @@ const T& Value(const Matches& matches, const ArgKey<T>& key) {
 }
 
 auto ParseWebViewerArgs(int argc, char** argv) -> Result<WebViewerArgs, owe::cli::ParseExit> {
-    auto command  = Command::make("webviewer");
+    auto command  = Command::make("webviewer"_str);
     auto workshop = command.add_arg(
-        Arg<String>::value("workshop", string_parser())
-            .value_name("WORKSHOP")
-            .help("path to a workshop/<id>/ directory containing project.json + index.html")
+        Arg<String>::value("workshop"_str, string_parser())
+            .value_name("WORKSHOP"_str)
+            .help("path to a workshop/<id>/ directory containing project.json + index.html"_str)
             .required());
-    auto width  = command.add_arg(Arg<i32>::value("width", from_str_parser<i32>())
-                                      .long_name("width")
-                                      .help("initial window width in pixels")
-                                      .default_value("1280"));
-    auto height = command.add_arg(Arg<i32>::value("height", from_str_parser<i32>())
-                                      .long_name("height")
-                                      .help("initial window height in pixels")
-                                      .default_value("720"));
+    auto width  = command.add_arg(Arg<i32>::value("width"_str, from_str_parser<i32>())
+                                      .long_name("width"_str)
+                                      .help("initial window width in pixels"_str)
+                                      .default_value("1280"_str));
+    auto height = command.add_arg(Arg<i32>::value("height"_str, from_str_parser<i32>())
+                                      .long_name("height"_str)
+                                      .help("initial window height in pixels"_str)
+                                      .default_value("720"_str));
     auto remote_debugging_port =
-        command.add_arg(Arg<i32>::value("remote-debugging-port", from_str_parser<i32>())
-                            .long_name("remote-debugging-port")
-                            .help("if non-zero, expose chrome devtools on this localhost port")
-                            .default_value("0"));
-    auto presenter = command.add_arg(Arg<String>::value("presenter", string_parser())
-                                         .long_name("presenter")
-                                         .help("present backend: egl (default) or vulkan")
-                                         .default_value("egl"));
+        command.add_arg(Arg<i32>::value("remote-debugging-port"_str, from_str_parser<i32>())
+                            .long_name("remote-debugging-port"_str)
+                            .help("if non-zero, expose chrome devtools on this localhost port"_str)
+                            .default_value("0"_str));
+    auto presenter = command.add_arg(Arg<String>::value("presenter"_str, string_parser())
+                                         .long_name("presenter"_str)
+                                         .help("present backend: egl (default) or vulkan"_str)
+                                         .default_value("egl"_str));
 
     auto parsed = owe::cli::ParseArgs(rstd::move(command), argc, argv);
     if (parsed.is_err()) return Err(parsed.unwrap_err());

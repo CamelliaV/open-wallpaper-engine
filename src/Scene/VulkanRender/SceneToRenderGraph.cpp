@@ -14,6 +14,7 @@ import wescene.scene;
 import wescene.rgraph;
 
 using namespace owe;
+using namespace rstd::literals;
 using namespace rstd::prelude;
 using rstd::collections::BTreeSet;
 using rstd::cppstd::as_str;
@@ -65,8 +66,8 @@ struct LinkTextureConsumer {
 
 static rg::TextureDesc MakeTextureDescBase(std::string_view key) {
     return rg::TextureDesc {
-        .name = String::make(rstd::cppstd::as_str(key)),
-        .key  = String::make(rstd::cppstd::as_str(key)),
+        .name = String::make(rstd::cppstd::as_str(key).unwrap()),
+        .key  = String::make(rstd::cppstd::as_str(key).unwrap()),
         .kind = IsSpecTex(key) ? rg::TextureKind::Temp : rg::TextureKind::Imported,
     };
 }
@@ -116,12 +117,13 @@ static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       
     if (! IsSpecTex(key)) {
         Option<RenderTextureDescId> texture;
         if (extra.render_scene != nullptr)
-            texture = extra.render_scene->textureDescId(rstd::cppstd::as_str(key));
+            texture = extra.render_scene->textureDescId(rstd::cppstd::as_str(key).unwrap());
         return Some(vulkan::MakeImportedTextureRequest(key, texture));
     }
 
     if (extra.render_scene != nullptr) {
-        if (auto desc_id = extra.render_scene->renderTargetDescId(rstd::cppstd::as_str(key))) {
+        if (auto desc_id =
+                extra.render_scene->renderTargetDescId(rstd::cppstd::as_str(key).unwrap())) {
             if (auto* desc = extra.render_scene->renderTargetDesc(*desc_id)) {
                 return Some(vulkan::MakeRenderTargetTextureRequest(key, desc->desc));
             }
@@ -129,7 +131,7 @@ static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       
     }
 
     if (extra.scene != nullptr) {
-        auto target = extra.scene->RenderTarget(as_str(key));
+        auto target = extra.scene->RenderTarget(as_str(key).unwrap());
         if (target.is_some()) {
             return Some(vulkan::MakeRenderTargetTextureRequest(key, **target));
         }
@@ -158,7 +160,7 @@ static GraphTextureOutput CaptureTextureOutput(ExtraInfo& extra, rg::TextureNode
         .ref = ref,
         .binding =
             vulkan::TextureBindingRequest {
-                .name    = String::make(rstd::cppstd::as_str(key)),
+                .name    = String::make(rstd::cppstd::as_str(key).unwrap()),
                 .use     = Some(state->use),
                 .request = BuildGraphTextureRequest(extra, key),
             },
@@ -168,7 +170,7 @@ static GraphTextureOutput CaptureTextureOutput(ExtraInfo& extra, rg::TextureNode
 
 static void AddCopyPass(ExtraInfo& extra, rg::TextureDesc in, rg::TextureDesc out) {
     extra.rgraph->addPass<vulkan::CopyPass>(
-        "copy",
+        "copy"_str,
         rg::PassNode::Type::Copy,
         [in = std::move(in), out = std::move(out), &extra](rg::RenderGraphBuilder& builder,
                                                            vulkan::CopyPass::Desc& desc) {
@@ -183,7 +185,7 @@ static rg::TextureNodeRef AddCopyPass(ExtraInfo& extra, rg::TextureNodeRef in,
                                       Option<rg::TextureDesc> out_desc = None()) {
     rg::TextureNodeRef copy {};
     extra.rgraph->addPass<vulkan::CopyPass>(
-        "copy",
+        "copy"_str,
         rg::PassNode::Type::Copy,
         [&copy, in, out_desc = std::move(out_desc), &extra](rg::RenderGraphBuilder& builder,
                                                             vulkan::CopyPass::Desc& pdesc) {
@@ -227,13 +229,13 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
         };
         auto link_key =
             GenLinkTex(static_cast<std::ptrdiff_t>(consumer.source_layer.value.to_primitive()));
-        if (input.binding.name != rstd::cppstd::as_str(link_key)) {
+        if (input.binding.name != rstd::cppstd::as_str(link_key).unwrap()) {
             auto copy_desc        = CloneTextureDesc(input.desc);
-            copy_desc.key         = String::make(rstd::cppstd::as_str(link_key));
+            copy_desc.key         = String::make(rstd::cppstd::as_str(link_key).unwrap());
             copy_desc.name        = copy_desc.key.clone();
             input.desc            = CloneTextureDesc(copy_desc);
             input.ref             = AddCopyPass(extra, input.ref, Some(rstd::move(copy_desc)));
-            input.binding.name    = String::make(rstd::cppstd::as_str(link_key));
+            input.binding.name    = String::make(rstd::cppstd::as_str(link_key).unwrap());
             input.binding.request = BuildGraphTextureRequest(extra, link_key);
             auto copied_state     = extra.rgraph->textureState(input.ref);
             if (copied_state.is_some()) input.binding.use = Some(copied_state->use);
@@ -314,7 +316,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
 
     SceneImageEffectLayer* imgeff = nullptr;
     if (! node->Camera().empty()) {
-        auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()));
+        auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
         if (camera.is_some() && (**camera).HasImgEffect()) {
             auto* effect = (**camera).GetImgEffect().get();
             if (effect->RequiresIntermediateTarget()) {
@@ -343,7 +345,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
             submesh.output_override.empty() ? output : std::string_view(submesh.output_override);
 
         rgraph.addPass<vulkan::CustomShaderPass>(
-            rstd::cppstd::as_str(passName),
+            rstd::cppstd::as_str(passName).unwrap(),
             rg::PassNode::Type::CustomShader,
             [material, node, smi, pass_output, source_layer, render_view, &scene, &extra](
                 rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
@@ -403,7 +405,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     }
                     auto sampled_key = StdString(sampled_state->desc.key);
                     pdesc.texture_bindings.emplace_back(vulkan::TextureBindingRequest {
-                        .name    = String::make(rstd::cppstd::as_str(sampled_key)),
+                        .name    = String::make(rstd::cppstd::as_str(sampled_key).unwrap()),
                         .use     = Some(sampled_state->use),
                         .request = BuildGraphTextureRequest(extra, sampled_key),
                     });
@@ -415,7 +417,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 auto output_state = builder.textureState(output_node);
                 rstd_assert(output_state.is_some());
                 if (output_state.is_none()) return;
-                auto output_rt = scene.RenderTarget(as_str(pass_output_s));
+                auto output_rt = scene.RenderTarget(as_str(pass_output_s).unwrap());
                 rstd_assert(output_rt.is_some());
                 if (output_rt.is_none()) return;
                 const auto& output_target      = **output_rt;
@@ -429,8 +431,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         vulkan::MakeMsaaTextureRequest(twin_name, output_target, pdesc.samples));
                     auto msaa_node = builder.createTexture(
                         rg::TextureDesc {
-                            .name    = String::make(rstd::cppstd::as_str(twin_name)),
-                            .key     = String::make(rstd::cppstd::as_str(twin_name)),
+                            .name    = String::make(rstd::cppstd::as_str(twin_name).unwrap()),
+                            .key     = String::make(rstd::cppstd::as_str(twin_name).unwrap()),
                             .kind    = rg::TextureKind::Temp,
                             .request = Some(pdesc.output_msaa_request->clone()),
                         },
@@ -452,8 +454,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         Some(vulkan::MakeDepthTextureRequest(depth_name, output_target));
                     auto depth_node = builder.createTexture(
                         rg::TextureDesc {
-                            .name    = String::make(rstd::cppstd::as_str(depth_name)),
-                            .key     = String::make(rstd::cppstd::as_str(depth_name)),
+                            .name    = String::make(rstd::cppstd::as_str(depth_name).unwrap()),
+                            .key     = String::make(rstd::cppstd::as_str(depth_name).unwrap()),
                             .kind    = rg::TextureKind::Temp,
                             .request = Some(pdesc.depth_request->clone()),
                         },
@@ -521,7 +523,7 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const BTreeSe
 
 static bool ShouldSkipNoRuntimeEffect(SceneNode* node, Scene& scene) {
     if (node == nullptr || node->Camera().empty()) return false;
-    auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()));
+    auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
     if (camera.is_none() || ! (**camera).HasImgEffect()) return false;
     const auto& effect_layer = (**camera).GetImgEffect();
     return effect_layer && effect_layer->SkipWhenNoRuntimeEffect() &&
@@ -535,7 +537,7 @@ static void ConfigureNestedOutput(SceneNode* node, std::string_view output,
     }
     if (node->Camera().empty()) return;
 
-    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()));
+    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
     if (camera.is_none() || ! (**camera).HasImgEffect()) return;
     auto& effect_layer = (**camera).GetImgEffect();
     if (! effect_layer) return;
@@ -576,7 +578,7 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
                 link_output = rstd::cppstd::to_string(source_record->render_target_key);
                 node_output = link_output;
                 if (! node->Camera().empty()) {
-                    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()));
+                    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
                     if (camera.is_some() && (**camera).HasImgEffect()) {
                         (**camera).GetImgEffect()->SetFinalTarget(link_output);
                         (**camera).GetImgEffect()->SetFinalLocal(true);

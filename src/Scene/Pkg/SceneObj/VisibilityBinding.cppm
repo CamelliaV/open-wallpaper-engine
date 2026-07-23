@@ -2,6 +2,8 @@ export module wescene.pkg.scene_obj:visibility_binding;
 import rstd.cppstd;
 import wescene.json;
 
+using namespace rstd::literals;
+
 export namespace owe::wpscene
 {
 
@@ -23,10 +25,10 @@ struct UserValueBinding {
 
 inline void ReadVisibleUserBinding(const owe::Json& json, VisibleUserBinding& out) {
     out          = {};
-    auto visible = json.get("visible");
+    auto visible = json.get("visible"_str);
     if (visible.is_none() || ! (*visible)->is_object()) return;
 
-    auto user = (*visible)->get("user");
+    auto user = (*visible)->get("user"_str);
     if (user.is_none()) return;
     if ((*user)->is_string()) {
         out.name = rstd::cppstd::to_string(*(*user)->as_str());
@@ -34,11 +36,11 @@ inline void ReadVisibleUserBinding(const owe::Json& json, VisibleUserBinding& ou
     }
 
     if (! (*user)->is_object()) return;
-    if (auto name = (*user)->get("name"); name.is_some()) {
+    if (auto name = (*user)->get("name"_str); name.is_some()) {
         auto string = (*name)->as_str();
         if (string.is_some()) out.name = rstd::cppstd::to_string(*string);
     }
-    if (auto condition = (*user)->get("condition"); condition.is_some()) {
+    if (auto condition = (*user)->get("condition"_str); condition.is_some()) {
         out.condition     = (*condition)->clone();
         out.has_condition = true;
     }
@@ -46,7 +48,7 @@ inline void ReadVisibleUserBinding(const owe::Json& json, VisibleUserBinding& ou
 
 inline void ReadVisibleProperty(const owe::Json& json, bool& visible, VisibleUserBinding& out) {
     out        = {};
-    auto value = json.get("visible");
+    auto value = json.get("visible"_str);
     if (value.is_none()) return;
 
     if ((*value)->is_boolean()) {
@@ -55,7 +57,7 @@ inline void ReadVisibleProperty(const owe::Json& json, bool& visible, VisibleUse
     }
     if (! (*value)->is_object()) return;
 
-    if (auto initial = (*value)->get("value"); initial.is_some()) {
+    if (auto initial = (*value)->get("value"_str); initial.is_some()) {
         if ((*initial)->is_boolean()) {
             visible = *(*initial)->as_bool();
         } else {
@@ -74,10 +76,10 @@ inline void ReadVisibleProperty(const owe::Json& json, bool& visible, VisibleUse
 inline void ReadUserValueBinding(const owe::Json& json, std::string_view field,
                                  UserValueBinding& out) {
     out        = {};
-    auto value = json.get(rstd::cppstd::as_str(field));
+    auto value = json.get(rstd::cppstd::as_str(field).unwrap());
     if (value.is_none() || ! (*value)->is_object()) return;
 
-    auto user = (*value)->get("user");
+    auto user = (*value)->get("user"_str);
     if (user.is_none()) return;
 
     if ((*user)->is_string()) {
@@ -86,11 +88,11 @@ inline void ReadUserValueBinding(const owe::Json& json, std::string_view field,
     }
 
     if (! (*user)->is_object()) return;
-    if (auto name = (*user)->get("name"); name.is_some()) {
+    if (auto name = (*user)->get("name"_str); name.is_some()) {
         auto string = (*name)->as_str();
         if (string.is_some()) out.name = rstd::cppstd::to_string(*string);
     }
-    if (auto condition = (*user)->get("condition"); condition.is_some()) {
+    if (auto condition = (*user)->get("condition"_str); condition.is_some()) {
         out.condition     = (*condition)->clone();
         out.has_condition = true;
     }

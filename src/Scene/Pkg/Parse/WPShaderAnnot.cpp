@@ -9,6 +9,7 @@ import rstd.log;
 import :shader_lex;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 // WE shader annotation collector. Walks the source line by line and pulls
 // `// [COMBO]` / `uniform NAME; // {json}` annotations into WPShaderInfo.
@@ -26,7 +27,7 @@ using shader_lex::Cursor;
 using shader_lex::LineWalker;
 
 bool TryParseAnnotationJson(std::string_view source, Json& result) {
-    auto parsed = rstd::json::from_str(rstd::cppstd::as_str(source));
+    auto parsed = rstd::json::from_str(rstd::cppstd::as_str(source).unwrap());
     if (parsed.is_err()) return false;
     result = parsed.unwrap();
     return true;
@@ -107,7 +108,7 @@ void HandleComboLine(WPShaderInfo* info, std::string_view line) {
     if (brace == std::string_view::npos) return;
     Json j;
     if (! ParseAnnotationJson(line.substr(brace), j)) return;
-    if (j.get("combo").is_none()) return;
+    if (j.get("combo"_str).is_none()) return;
     wpscene::WPCombo combo;
     combo.FromJson(j);
     if (combo.combo.is_empty()) return;
@@ -118,9 +119,9 @@ void HandleComboLine(WPShaderInfo* info, std::string_view line) {
 
 void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texinfos,
                        std::string_view line) {
-    Cursor c(rstd::cppstd::as_str(line));
+    Cursor c(rstd::cppstd::as_str(line).unwrap());
     c.SkipHSpace();
-    if (! c.MatchKeyword("uniform")) return;
+    if (! c.MatchKeyword("uniform"_str)) return;
     c.SkipHSpace();
     auto tn = shader_lex::ReadTypeName(c);
     if (! tn) return;
@@ -131,7 +132,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
 
     // Find the trailing `// {json}` blob.
     while (! c.Eof() && c.Peek() != '/') c.Advance();
-    if (! c.MatchPunct("//")) return;
+    if (! c.MatchPunct("//"_str)) return;
     while (! c.Eof() && c.Peek() != '{') c.Advance();
     if (c.Eof()) return;
     Json sv_json;
@@ -150,7 +151,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
         wpscene::WPUniformTex wput;
         wput.FromJson(sv_json);
         std::int32_t index  = 0;
-        auto         parsed = rstd::from_str<i32>(rstd::cppstd::as_str(name.substr(9)));
+        auto         parsed = rstd::from_str<i32>(rstd::cppstd::as_str(name.substr(9)).unwrap());
         if (parsed.is_ok()) {
             index = rstd::move(parsed).unwrap().to_primitive();
         } else {
@@ -179,7 +180,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
     } else {
         wpscene::WPUniformVar var;
         var.FromJson(sv_json, String::make(tn->name));
-        if (auto value = sv_json.get("default"); value.is_some()) {
+        if (auto value = sv_json.get("default"_str); value.is_some()) {
             ShaderValue sv;
             if ((*value)->is_string()) {
                 std::vector<float> values;
@@ -191,7 +192,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
             }
             info->svs[std::string(name)] = sv;
         }
-        if (auto combo = sv_json.get("combo"); combo.is_some()) {
+        if (auto combo = sv_json.get("combo"_str); combo.is_some()) {
             std::string cname;
             GetJsonValue(sv_json, "combo", cname);
             if (! cname.empty()) info->combos[cname] = "1";
@@ -205,7 +206,7 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
 void ParseWPShader(const std::string& src, WPShaderInfo* info,
                    const std::vector<WPShaderTexInfo>& texinfos_vec) {
     std::span<const WPShaderTexInfo> texinfos(texinfos_vec.data(), texinfos_vec.size());
-    LineWalker                       w(rstd::cppstd::as_str(src));
+    LineWalker                       w(rstd::cppstd::as_str(src).unwrap());
     for (; ! w.Done(); w.Step()) {
         auto line = rstd::cppstd::as_string_view(w.Line());
         if (line.empty()) continue;
@@ -219,7 +220,7 @@ void ParseWPShader(const std::string& src, WPShaderInfo* info,
         }
         // Cheap pre-check: only attempt the full keyword match if the trimmed
         // line could plausibly start with `uniform`.
-        Cursor probe(rstd::cppstd::as_str(line));
+        Cursor probe(rstd::cppstd::as_str(line).unwrap());
         probe.SkipHSpace();
         if (probe.Eof() || probe.Peek() != 'u') continue;
         HandleUniformLine(info, texinfos, line);

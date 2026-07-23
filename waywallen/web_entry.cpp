@@ -29,6 +29,7 @@ namespace
 {
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 struct Options {
     std::string           ipc_path;
@@ -64,28 +65,28 @@ const T& ArgValue(const rstd::argparse::Matches& matches, const rstd::argparse::
 Options parse_args(int argc, char** argv) {
     using namespace rstd::argparse;
 
-    auto command = Command::make("waywallen-weweb-renderer");
-    auto ipc     = command.add_arg(Arg<rstd::string::String>::value("ipc", string_parser())
-                                       .long_name("ipc")
-                                       .help("Unix-domain socket path for daemon IPC")
+    auto command = Command::make("waywallen-weweb-renderer"_str);
+    auto ipc     = command.add_arg(Arg<rstd::string::String>::value("ipc"_str, string_parser())
+                                       .long_name("ipc"_str)
+                                       .help("Unix-domain socket path for daemon IPC"_str)
                                        .required());
     auto path =
-        command.add_arg(Arg<rstd::string::String>::value("path", string_parser())
-                            .long_name("path")
-                            .help("Workshop directory (containing project.json + index.html)")
-                            .default_value(""));
-    auto workshop_id =
-        command.add_arg(Arg<rstd::string::String>::value("workshop_id", string_parser())
-                            .long_name("workshop_id")
-                            .help("Optional Steam workshop id (informational; used for cache dir)")
-                            .default_value(""));
+        command.add_arg(Arg<rstd::string::String>::value("path"_str, string_parser())
+                            .long_name("path"_str)
+                            .help("Workshop directory (containing project.json + index.html)"_str)
+                            .default_value(""_str));
+    auto workshop_id = command.add_arg(
+        Arg<rstd::string::String>::value("workshop_id"_str, string_parser())
+            .long_name("workshop_id"_str)
+            .help("Optional Steam workshop id (informational; used for cache dir)"_str)
+            .default_value(""_str));
     auto render_node =
-        command.add_arg(Arg<rstd::string::String>::value("render-node", string_parser())
-                            .long_name("render-node")
+        command.add_arg(Arg<rstd::string::String>::value("render-node"_str, string_parser())
+                            .long_name("render-node"_str)
                             .help("DRM render-node path to pin Vulkan/CEF GPU selection to "
-                                  "(empty => let the renderer pick the default)")
-                            .default_value(""));
-    command.add_arg(Arg<rstd::string::String>::value("remaining", string_parser())
+                                  "(empty => let the renderer pick the default)"_str)
+                            .default_value(""_str));
+    command.add_arg(Arg<rstd::string::String>::value("remaining"_str, string_parser())
                         .num_args(NumArgs::any())
                         .allow_hyphen_values());
 
@@ -298,14 +299,15 @@ void apply_setting(HostState& s, HostMsg::Setting_payload&& setting) {
         auto patch      = owe::MakeUserPropertyWirePatch(setting.value);
         auto descriptor = patch.clone();
         if (s.user_properties) {
-            auto current = s.user_properties->get(rstd::cppstd::as_str(setting.key));
+            auto current = s.user_properties->get(rstd::cppstd::as_str(setting.key).unwrap());
             if (current.is_some()) {
                 descriptor = owe::MergeUserPropertyDescriptor(**current, patch);
             }
             auto object = s.user_properties->as_object_mut();
             if (object.is_some()) {
-                (*object)->insert(::alloc::string::String::make(rstd::cppstd::as_str(setting.key)),
-                                  descriptor.clone());
+                (*object)->insert(
+                    ::alloc::string::String::make(rstd::cppstd::as_str(setting.key).unwrap()),
+                    descriptor.clone());
             }
         }
         s.host->ApplyUserProperty(setting.key, descriptor);

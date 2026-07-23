@@ -12,6 +12,7 @@ import rstd.cppstd;
 import wescene.scene;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace owe::script
 {
@@ -239,7 +240,7 @@ JSValue JsonToJs(JSContext* ctx, const Json& value) {
 }
 
 JSValue UserPropertyValueToJs(JSContext* ctx, const Json& property) {
-    if (auto value = property.get("value"); value.is_some()) return JsonToJs(ctx, **value);
+    if (auto value = property.get("value"_str); value.is_some()) return JsonToJs(ctx, **value);
     return JsonToJs(ctx, property);
 }
 
@@ -734,7 +735,8 @@ void FlushLocalStorage(EngineHostState* host) {
     if (host->ls_path.empty()) return;
     auto object = rstd::json::Map::make();
     for (const auto& [k, v] : host->ls_data)
-        object.insert(::alloc::string::String::make(rstd::cppstd::as_str(k)), JsonFromStd(v));
+        object.insert(::alloc::string::String::make(rstd::cppstd::as_str(k).unwrap()),
+                      JsonFromStd(v));
     auto out = Json::Object(rstd::move(object));
     // ofstream defaults to ios_base::out | trunc, which is what we want.
     std::ofstream f(host->ls_path);

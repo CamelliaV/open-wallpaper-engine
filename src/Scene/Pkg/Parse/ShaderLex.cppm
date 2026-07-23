@@ -4,6 +4,7 @@ export module wescene.pkg.parse:shader_lex;
 import rstd;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 export namespace owe::shader_lex
 {
@@ -17,7 +18,7 @@ inline bool IsIdCont(char c) { return IsIdStart(c) || (c >= '0' && c <= '9'); }
 inline bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
 inline bool IsPrecisionQualifier(ref<str> ident) noexcept {
-    return ident == "lowp" || ident == "mediump" || ident == "highp";
+    return ident == "lowp"_str || ident == "mediump"_str || ident == "highp"_str;
 }
 
 struct TypeName {
@@ -427,19 +428,19 @@ inline PpKind ClassifyPreproc(Cursor c) noexcept {
     });
     if (t.kind != TokenKind::Ident) return PpKind::Other;
     auto id = t.text;
-    if (id == "if") return PpKind::If;
-    if (id == "ifdef") return PpKind::Ifdef;
-    if (id == "ifndef") return PpKind::Ifndef;
-    if (id == "elif") return PpKind::Elif;
-    if (id == "else") return PpKind::Else;
-    if (id == "endif") return PpKind::Endif;
-    if (id == "define") return PpKind::Define;
-    if (id == "undef") return PpKind::Undef;
-    if (id == "include") return PpKind::Include;
-    if (id == "require") return PpKind::Require;
-    if (id == "pragma") return PpKind::Pragma;
-    if (id == "extension") return PpKind::Extension;
-    if (id == "version") return PpKind::Version;
+    if (id == "if"_str) return PpKind::If;
+    if (id == "ifdef"_str) return PpKind::Ifdef;
+    if (id == "ifndef"_str) return PpKind::Ifndef;
+    if (id == "elif"_str) return PpKind::Elif;
+    if (id == "else"_str) return PpKind::Else;
+    if (id == "endif"_str) return PpKind::Endif;
+    if (id == "define"_str) return PpKind::Define;
+    if (id == "undef"_str) return PpKind::Undef;
+    if (id == "include"_str) return PpKind::Include;
+    if (id == "require"_str) return PpKind::Require;
+    if (id == "pragma"_str) return PpKind::Pragma;
+    if (id == "extension"_str) return PpKind::Extension;
+    if (id == "version"_str) return PpKind::Version;
     return PpKind::Other;
 }
 

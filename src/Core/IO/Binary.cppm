@@ -53,15 +53,14 @@ public:
     void SetByteOrder(ByteOrder order) noexcept { set_byte_order(order); }
 
     auto read(void* buffer, usize size) -> rstd::io::Result<usize> {
-        auto bytes =
-            rstd::mut_ref<rstd::byte[]>::from_raw_parts(static_cast<rstd::byte*>(buffer), size);
+        auto bytes  = rstd::mut_ref<u8[]>::from_raw_parts(static_cast<byte*>(buffer), size);
         auto result = m_handle->read(bytes);
         if (result.is_ok()) m_position += rstd::as_cast<u64>(*result);
         return result;
     }
 
     auto read_exact(void* buffer, usize size) -> rstd::io::Result<empty> {
-        auto* bytes = static_cast<u8*>(buffer);
+        auto* bytes = static_cast<byte*>(buffer);
         while (size > usize()) {
             auto count = rstd_try(read(bytes, size));
             if (count == usize()) {
@@ -225,11 +224,10 @@ public:
     void SetByteOrder(ByteOrder order) noexcept { set_byte_order(order); }
 
     auto write(const void* buffer, usize size) -> rstd::io::Result<empty> {
-        auto* bytes = static_cast<const u8*>(buffer);
+        auto* bytes = static_cast<const byte*>(buffer);
         while (size > usize()) {
-            auto source = rstd::slice<rstd::byte>::from_raw_parts(
-                reinterpret_cast<const rstd::byte*>(bytes), size);
-            auto count = rstd_try(m_handle->write(source));
+            auto source = rstd::slice<u8>::from_raw_parts(bytes, size);
+            auto count  = rstd_try(m_handle->write(source));
             if (count == usize()) {
                 return Err(rstd::io::error::Error::from_kind(
                     rstd::io::error::ErrorKind { rstd::io::error::ErrorKind::WriteZero }));

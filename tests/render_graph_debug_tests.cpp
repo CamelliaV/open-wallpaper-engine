@@ -7,6 +7,7 @@ import wescene.rgraph;
 import wescene.vulkan_render;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace
 {
@@ -54,33 +55,33 @@ TEST(DependencyGraph, StoresHandlesAndDeduplicatesEdges) {
 TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
     owe::rg::RenderGraph graph;
 
-    graph.addPass<DebugPass>("draw/main",
+    graph.addPass<DebugPass>("draw/main"_str,
                              owe::rg::PassNode::Type::CustomShader,
                              [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
                                  auto input = builder.createTexture(owe::rg::TextureDesc {
-                                     .name = String::make("albedo"),
-                                     .key  = String::make("tex/albedo"),
+                                     .name = String::make("albedo"_str),
+                                     .key  = String::make("tex/albedo"_str),
                                      .kind = owe::rg::TextureKind::Imported,
                                  });
                                  builder.read(input);
 
                                  auto output = builder.createTexture(
                                      owe::rg::TextureDesc {
-                                         .name = String::make("default"),
-                                         .key  = String::make("_rt_default"),
+                                         .name = String::make("default"_str),
+                                         .key  = String::make("_rt_default"_str),
                                          .kind = owe::rg::TextureKind::Temp,
                                      },
                                      true);
                                  builder.write(output);
                              });
 
-    graph.addPass<DebugPass>("draw/overlay",
+    graph.addPass<DebugPass>("draw/overlay"_str,
                              owe::rg::PassNode::Type::CustomShader,
                              [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
                                  auto output = builder.createTexture(
                                      owe::rg::TextureDesc {
-                                         .name = String::make("default"),
-                                         .key  = String::make("_rt_default"),
+                                         .name = String::make("default"_str),
+                                         .key  = String::make("_rt_default"_str),
                                          .kind = owe::rg::TextureKind::Temp,
                                      },
                                      true);
@@ -88,7 +89,7 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
                              });
 
     auto path = std::filesystem::temp_directory_path() / "owe-render-graph-debug-test.dot";
-    graph.ToGraphviz(rstd::cppstd::as_str(path.native()));
+    graph.ToGraphviz(rstd::cppstd::as_str(path.native()).unwrap());
 
     auto dot = ReadFile(path);
     EXPECT_NE(dot.find("ref=n"), std::string::npos);
@@ -109,7 +110,7 @@ TEST(RenderGraphDebug, GraphvizIncludesResourceRefsAndAccessLabels) {
 TEST(RenderGraphDebug, PassStateExposesPublicDebugRecord) {
     owe::rg::RenderGraph graph;
 
-    auto pass = graph.addPass<DebugPass>("draw/main",
+    auto pass = graph.addPass<DebugPass>("draw/main"_str,
                                          owe::rg::PassNode::Type::CustomShader,
                                          [](owe::rg::RenderGraphBuilder&, DebugPass::Desc&) {
                                          });
@@ -129,28 +130,28 @@ TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
     owe::rg::RenderGraph graph;
 
     graph.addPass<DebugPass>(
-        "draw/main",
+        "draw/main"_str,
         owe::rg::PassNode::Type::CustomShader,
         [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
             auto input = builder.createTexture(owe::rg::TextureDesc {
-                .name    = String::make("albedo"),
-                .key     = String::make("tex/albedo"),
+                .name    = String::make("albedo"_str),
+                .key     = String::make("tex/albedo"_str),
                 .kind    = owe::rg::TextureKind::Imported,
                 .request = rstd::Some(owe::resource::TextureRequest {
                     .kind = owe::resource::TextureRequestKind::Imported,
-                    .name = String::make("tex/albedo"),
+                    .name = String::make("tex/albedo"_str),
                 }),
             });
             builder.read(input);
 
             auto output = builder.createTexture(
                 owe::rg::TextureDesc {
-                    .name    = String::make("default"),
-                    .key     = String::make("_rt_default"),
+                    .name    = String::make("default"_str),
+                    .key     = String::make("_rt_default"_str),
                     .kind    = owe::rg::TextureKind::Temp,
                     .request = rstd::Some(owe::resource::TextureRequest {
                         .kind       = owe::resource::TextureRequestKind::RenderTarget,
-                        .name       = String::make("_rt_default"),
+                        .name       = String::make("_rt_default"_str),
                         .definition = rstd::Some(owe::resource::TextureDefinition {
                             .width  = rstd::i32(1920),
                             .height = rstd::i32(1080),
@@ -176,17 +177,17 @@ TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
 TEST(RenderGraphResources, UsesGraphKeyAsTextureRequestIdentity) {
     owe::rg::RenderGraph graph;
     graph.addPass<DebugPass>(
-        "copy/snapshot",
+        "copy/snapshot"_str,
         owe::rg::PassNode::Type::Copy,
         [](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
             auto snapshot = builder.createTexture(
                 owe::rg::TextureDesc {
-                    .name    = String::make("_rt_default_1_copy"),
-                    .key     = String::make("_rt_default_1_copy"),
+                    .name    = String::make("_rt_default_1_copy"_str),
+                    .key     = String::make("_rt_default_1_copy"_str),
                     .kind    = owe::rg::TextureKind::Temp,
                     .request = rstd::Some(owe::resource::TextureRequest {
                         .kind = owe::resource::TextureRequestKind::RenderTarget,
-                        .name = String::make("_rt_default"),
+                        .name = String::make("_rt_default"_str),
                     }),
                 },
                 true);
@@ -204,12 +205,12 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
     auto                 history      = owe::rg::TextureNodeRef {};
     auto                 history_desc = [] {
         return owe::rg::TextureDesc {
-            .name    = String::make("history"),
-            .key     = String::make("history"),
+            .name    = String::make("history"_str),
+            .key     = String::make("history"_str),
             .kind    = owe::rg::TextureKind::Temp,
             .request = rstd::Some(owe::resource::TextureRequest {
                 .kind       = owe::resource::TextureRequestKind::RenderTarget,
-                .name       = String::make("history"),
+                .name       = String::make("history"_str),
                 .definition = rstd::Some(owe::resource::TextureDefinition {
                     .width  = rstd::i32(1920),
                     .height = rstd::i32(1080),
@@ -219,14 +220,14 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
         };
     };
 
-    graph.addPass<DebugPass>("motion/accumulate",
+    graph.addPass<DebugPass>("motion/accumulate"_str,
                              owe::rg::PassNode::Type::CustomShader,
                              [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
                                  history = builder.createTexture(history_desc());
                                  builder.markVirtualWrite(history);
                                  builder.read(history);
                              });
-    graph.addPass<DebugPass>("motion/store",
+    graph.addPass<DebugPass>("motion/store"_str,
                              owe::rg::PassNode::Type::Copy,
                              [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
                                  auto next = builder.createTexture(history_desc(), true);

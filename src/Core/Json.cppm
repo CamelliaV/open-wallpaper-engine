@@ -54,7 +54,7 @@ inline auto Dump(const Json& value, rstd::size_t indent) -> std::string {
 }
 
 inline auto JsonFromStd(std::string_view value) -> Json {
-    return rstd::into<Json>(::alloc::string::String::make(rstd::cppstd::as_str(value)));
+    return rstd::into<Json>(::alloc::string::String::make(rstd::cppstd::as_str(value).unwrap()));
 }
 
 } // namespace owe

@@ -28,6 +28,7 @@ import wescene.vulkan_render;
 
 using namespace owe;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 using rstd::sync::atomic::Atomic;
 
@@ -98,9 +99,9 @@ auto CloneUserPropertyDiagnostics(slice<SceneUserPropertyDiagnostic> diagnostics
 }
 
 Json MakeUserPropertyDescriptor(Json value) {
-    if (value.get("value").is_some()) return value;
+    if (value.get("value"_str).is_some()) return value;
     auto object = rstd::json::Map::make();
-    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")), rstd::move(value));
+    object.insert(::alloc::string::String::make("value"_str), rstd::move(value));
     return Json::Object(rstd::move(object));
 }
 
@@ -139,9 +140,8 @@ vulkan::PassInvalidationFlags MaterialDirtyToPassInvalidationFlags(SceneMaterial
 
 Json RuntimeTextureProperty(std::string value) {
     auto object = rstd::json::Map::make();
-    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("type")),
-                  JsonFromStd("scenetexture"));
-    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")), JsonFromStd(value));
+    object.insert(::alloc::string::String::make("type"_str), JsonFromStd("scenetexture"));
+    object.insert(::alloc::string::String::make("value"_str), JsonFromStd(value));
     return Json::Object(rstd::move(object));
 }
 
@@ -167,9 +167,9 @@ void MergeProjectUserProperties(const std::filesystem::path& project_dir, rstd::
         return;
     }
     auto root    = parsed.unwrap();
-    auto general = root.get("general");
+    auto general = root.get("general"_str);
     if (general.is_none()) return;
-    auto properties = (*general)->get("properties");
+    auto properties = (*general)->get("properties"_str);
     if (properties.is_none()) return;
     auto object = (*properties)->as_object();
     if (object.is_none()) return;
@@ -179,10 +179,10 @@ void MergeProjectUserProperties(const std::filesystem::path& project_dir, rstd::
         const auto  raw_key           = rstd::cppstd::as_string_view(entry_key->as_str());
         const auto& value             = *entry_value;
         std::string key               = CanonicalSceneUserPropertyKey(raw_key);
-        auto        current           = out.get(rstd::cppstd::as_str(key));
+        auto        current           = out.get(rstd::cppstd::as_str(key).unwrap());
         auto        descriptor = current.is_some() ? MergeUserPropertyDescriptor(value, **current)
                                                    : MakeUserPropertyDescriptor(value.clone());
-        out.insert(::alloc::string::String::make(rstd::cppstd::as_str(key)),
+        out.insert(::alloc::string::String::make(rstd::cppstd::as_str(key).unwrap()),
                    rstd::move(descriptor));
     });
 }
@@ -194,8 +194,8 @@ rstd::json::Map NormalizeUserProperties(const rstd::json::Map& input) {
         const auto  key               = rstd::cppstd::as_string_view(entry_key->as_str());
         const auto& value             = *entry_value;
         std::string canonical         = CanonicalSceneUserPropertyKey(key);
-        if (key == canonical || out.get(rstd::cppstd::as_str(canonical)).is_none()) {
-            out.insert(::alloc::string::String::make(rstd::cppstd::as_str(canonical)),
+        if (key == canonical || out.get(rstd::cppstd::as_str(canonical).unwrap()).is_none()) {
+            out.insert(::alloc::string::String::make(rstd::cppstd::as_str(canonical).unwrap()),
                        InitialUserProperty(value.clone()));
         }
     });
@@ -625,7 +625,7 @@ void SceneRenderController::rebuildRenderGraph(vulkan::RenderGraphResourceRetent
         m_rg            = Some(sceneToRenderGraph(*m_scene, m_render_scene));
     }
 
-    if (m_main.isGenGraphviz()) (*m_rg)->ToGraphviz("graph.dot");
+    if (m_main.isGenGraphviz()) (*m_rg)->ToGraphviz("graph.dot"_str);
     m_render->compileRenderGraph(*m_scene, **m_rg, m_render_scene, load_bench);
     m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
     consumeDirtyEventsCoveredByGraphRebuild();
@@ -1127,12 +1127,12 @@ void SceneRuntimeController::on(MainMsg::SetSpeed_payload&& m) {
 
 void SceneRuntimeController::on(MainMsg::SetUserProperty_payload&& m) {
     const std::string property = CanonicalSceneUserPropertyKey(m.key);
-    auto              current  = m_user_properties.get(rstd::cppstd::as_str(property));
+    auto              current  = m_user_properties.get(rstd::cppstd::as_str(property).unwrap());
     Json              prop = current.is_some() ? MergeUserPropertyDescriptor(**current, m.value)
                                                : MakeUserPropertyDescriptor(rstd::move(m.value));
-    m_config.user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property)),
-                                    prop.clone());
-    m_user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property)),
+    m_config.user_properties.insert(
+        ::alloc::string::String::make(rstd::cppstd::as_str(property).unwrap()), prop.clone());
+    m_user_properties.insert(::alloc::string::String::make(rstd::cppstd::as_str(property).unwrap()),
                              prop.clone());
     m_render_controller->post(RenderMsg::SetUserProperty(property, rstd::move(prop)));
 }
@@ -1238,10 +1238,11 @@ void SceneRuntimeController::loadScene() {
     auto&        vfs  = *pVfs;
     {
         auto span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_vfs_assets);
-        if (! vfs.is_mounted("assets")) {
+        if (! vfs.is_mounted("assets"_str)) {
             auto assets = fs::make_physical_fs(fs::ToPath(m_config.assets_dir));
             if (assets.is_err() ||
-                vfs.mount("/assets", rstd::move(assets).unwrap_unchecked(), "assets").is_err()) {
+                vfs.mount("/assets"_str, rstd::move(assets).unwrap_unchecked(), "assets"_str)
+                    .is_err()) {
                 rstd_error("Mount assets dir failed");
                 abort_load();
                 return;
@@ -1271,14 +1272,14 @@ void SceneRuntimeController::loadScene() {
             auto stamp  = wfs->pkg_version_stamp();
             pkg_v       = wpscene::ParsePkgVersionStamp(std::string_view(
                 reinterpret_cast<const char*>(stamp.data()), stamp.size().to_primitive()));
-            pkg_mounted = vfs.mount("/assets", wfs->mount_handle()).is_ok();
+            pkg_mounted = vfs.mount("/assets"_str, wfs->mount_handle()).is_ok();
         }
         if (! pkg_mounted) {
             rstd_info("load pkg file {} failed, fallback to use dir", pkgPath);
             pkg_v      = wpscene::kSceneVersionUnknown;
             auto loose = fs::make_physical_fs(fs::ToPath(pkgDir));
             if (loose.is_err() ||
-                vfs.mount("/assets", rstd::move(loose).unwrap_unchecked()).is_err()) {
+                vfs.mount("/assets"_str, rstd::move(loose).unwrap_unchecked()).is_err()) {
                 rstd_error("can't load pkg directory: {}", pkgDir);
                 abort_load();
                 return;
@@ -1301,12 +1302,12 @@ void SceneRuntimeController::loadScene() {
         Option<rstd::path::PathBuf> shader_cache_dir;
         if (! m_config.cache_dir.empty()) {
             shader_cache_dir =
-                Some(rstd::path::PathBuf::from(rstd::cppstd::as_str(m_config.cache_dir)));
+                Some(rstd::path::PathBuf::from(rstd::cppstd::as_str(m_config.cache_dir).unwrap()));
             rstd_info("shader cache folder: {}", m_config.cache_dir);
         }
         WPSceneParser parser;
         auto          parsed = parser.Parse(
-            rstd::cppstd::as_str(scene_id),
+            rstd::cppstd::as_str(scene_id).unwrap(),
             rstd::ref<wpscene::SceneDocument>::from_raw_parts(scene_doc.get()),
             rstd::mut_ref<fs::VFS>::from_raw_parts(&vfs),
             rstd::mut_ref<wavsen::audio::SoundManager>::from_raw_parts(m_sound_manager.get()),

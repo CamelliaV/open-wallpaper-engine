@@ -23,6 +23,7 @@ import :shader_reflection_cache;
 import :uniform_buffer;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::cppstd::as_str;
 
 export namespace owe::vulkan
@@ -239,7 +240,7 @@ struct RenderProgram {
             rstd::vec::Vec<PreparedPassRecord>::with_capacity(pass_records.len() + rstd::usize(2));
         combined.push(PreparedPassRecord {
             .kind      = PreparedPassKind::Frame,
-            .pass_name = String::make("frame/pre"),
+            .pass_name = String::make("frame/pre"_str),
             .pass =
                 ProgramPassHandle {
                     .kind        = PreparedPassKind::Frame,
@@ -249,7 +250,7 @@ struct RenderProgram {
         for (auto& record : pass_records) combined.push(rstd::move(record));
         combined.push(PreparedPassRecord {
             .kind      = PreparedPassKind::Frame,
-            .pass_name = String::make("frame/fin"),
+            .pass_name = String::make("frame/fin"_str),
             .pass =
                 ProgramPassHandle {
                     .kind        = PreparedPassKind::Frame,
@@ -381,7 +382,7 @@ struct RenderProgram {
             if (target.is_none()) continue;
             auto& rt = **target;
             if (rt.bind.screen || ! rt.bind.enable) continue;
-            auto bind_rt = scene.RenderTarget(as_str(rt.bind.name));
+            auto bind_rt = scene.RenderTarget(as_str(rt.bind.name).unwrap());
             if (rt.bind.name.empty() || bind_rt.is_none()) {
                 rstd_error("unknonw render target bind: {}", rt.bind.name);
                 continue;
@@ -427,7 +428,7 @@ struct RenderProgram {
             }
         }
         if (msaa_samples != VK_SAMPLE_COUNT_1_BIT) {
-            auto target = scene.RenderTargetMut(as_str(owe::SpecTex_Default));
+            auto target = scene.RenderTargetMut(as_str(owe::SpecTex_Default).unwrap());
             if (target.is_some()) {
                 (**target).sample_count = static_cast<unsigned>(msaa_samples);
             }
@@ -449,7 +450,7 @@ struct RenderProgram {
         };
 
         const std::string key(owe::SpecTex_Default);
-        auto              target = scene.RenderTarget(as_str(key));
+        auto              target = scene.RenderTarget(as_str(key).unwrap());
         if (target.is_none()) {
             if (prepass.setResultRequest(rstd::None())) {
                 invalidatePass(prepass_handle,
@@ -574,7 +575,7 @@ struct RenderProgram {
         rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
         rstd::Option<owe::resource::TextureUseHandle> frame_msaa_use   = rstd::None();
         std::string                                   frame_msaa_name;
-        auto frame_target = scene.RenderTarget(as_str(owe::SpecTex_Default));
+        auto frame_target = scene.RenderTarget(as_str(owe::SpecTex_Default).unwrap());
         if (frame_target.is_some()) {
             auto samples = TextureSampleCount((**frame_target).sample_count);
             if (samples != VK_SAMPLE_COUNT_1_BIT) {

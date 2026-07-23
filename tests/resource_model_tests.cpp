@@ -5,13 +5,15 @@ import rstd.cppstd;
 import wescene.resource;
 import wescene.types;
 
+using namespace rstd::literals;
+
 namespace
 {
 
 auto TextureRequest(std::string_view name, rstd::u32 width) -> owe::resource::TextureRequest {
     return owe::resource::TextureRequest {
         .kind       = owe::resource::TextureRequestKind::RenderTarget,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str(name)),
+        .name       = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .definition = rstd::Some(owe::resource::TextureDefinition {
             .width      = rstd::as_cast<rstd::i32>(width),
             .height     = rstd::i32(128),
@@ -68,7 +70,7 @@ TEST(ResourceModel, ClonesMoveOnlyTextureRequestsExplicitly) {
     auto cloned  = request.clone();
 
     EXPECT_TRUE(owe::resource::SameTextureRequest(request, cloned));
-    cloned.name.push_str(rstd::cppstd::as_str("-copy"));
+    cloned.name.push_str("-copy"_str);
     EXPECT_FALSE(owe::resource::SameTextureRequest(request, cloned));
     EXPECT_EQ(rstd::cppstd::as_string_view(request.name.as_str()), "frame");
 }
@@ -115,7 +117,7 @@ TEST(ResourcePlan, VisitsTypedRequestsThroughPublicTrait) {
             owe::resource::BufferUseHandle { .index = rstd::u64(2), .generation = rstd::u64(11) },
         .request =
             owe::resource::BufferRequest {
-                .name       = rstd::string::String::make(rstd::cppstd::as_str("vertices")),
+                .name       = rstd::string::String::make("vertices"_str),
                 .definition = { .size  = rstd::usize(128),
                                 .usage = owe::resource::BufferUsage::Vertex },
             },
@@ -125,7 +127,7 @@ TEST(ResourcePlan, VisitsTypedRequestsThroughPublicTrait) {
             owe::resource::ShaderUseHandle { .index = rstd::u64(3), .generation = rstd::u64(11) },
         .request =
             owe::resource::ShaderRequest {
-                .name   = rstd::string::String::make(rstd::cppstd::as_str("sprite")),
+                .name   = rstd::string::String::make("sprite"_str),
                 .source = owe::resource::ShaderDefinitionId { .index      = rstd::u32(4),
                                                               .generation = rstd::u64(2) },
             },
@@ -148,7 +150,7 @@ TEST(ShaderArtifact, ClonesOwnedStageCode) {
     };
     owe::resource::ShaderArtifactStage stage {
         .stage       = owe::ShaderType::VERTEX,
-        .entry_point = rstd::string::String::make(rstd::cppstd::as_str("main")),
+        .entry_point = rstd::string::String::make("main"_str),
     };
     stage.code.push(rstd::u32(7));
     artifact.stages.push(rstd::move(stage));

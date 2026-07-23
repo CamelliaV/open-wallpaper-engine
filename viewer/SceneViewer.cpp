@@ -16,6 +16,7 @@ import viewer.common;
 
 using namespace std;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 atomic<bool> renderCall(false);
 
@@ -94,9 +95,9 @@ private:
             return;
         }
 
-        auto command_name = command.get("command");
-        auto key          = command.get("key");
-        auto value        = command.get("value");
+        auto command_name = command.get("command"_str);
+        auto key          = command.get("key"_str);
+        auto value        = command.get("value"_str);
         if (command_name.is_none() || ! (**command_name).is_string() ||
             rstd::cppstd::as_string_view(*(**command_name).as_str()) != "set_user_property") {
             std::cerr << "--stdin-json: unsupported command\n";

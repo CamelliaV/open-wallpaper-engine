@@ -14,6 +14,7 @@ import wescene.particle.program;
 
 using namespace owe;
 using namespace Eigen;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace WPParticleModify
@@ -356,7 +357,7 @@ Box<dyn<particle::ParticleSpawnProgram>>
 WPParticleParser::GenInitializer(const Json& wpj, WPParticleAttributes attributes) {
     using namespace std::placeholders;
     do {
-        if (wpj.get("name").is_none()) break;
+        if (wpj.get("name"_str).is_none()) break;
         std::string name;
         owe::GetJsonValue(wpj, "name", name);
 
@@ -800,8 +801,8 @@ auto RegisterMaintainDistanceAttribute(WPParticleSubSystem& subsystem, usize ope
     -> particle::ParticleAttributeKey<MaintainDistanceAttribute> {
     auto name   = std::string("maintain_distance_") + std::to_string(operator_index.to_primitive());
     auto result = subsystem.SchemaBuilder().Register<MaintainDistanceAttribute>(
-        ref<str>(name.c_str()),
-        ref<str>("we.operator.maintain_distance"),
+        rstd::cppstd::as_str(name).unwrap(),
+        "we.operator.maintain_distance"_str,
         MaintainDistanceState {});
     if (result.is_err()) rstd::panic { "failed to register maintain distance attribute" };
     auto key = result.unwrap();
@@ -820,8 +821,8 @@ template<typename Attribute, typename Value>
 auto RegisterOscillationAttribute(particle::ParticleSchemaBuilder& builder, const std::string& name,
                                   Value default_value)
     -> particle::ParticleAttributeKey<Attribute> {
-    auto result = builder.Register<Attribute>(ref<str>(name.c_str()),
-                                              ref<str>("we.operator.oscillation"),
+    auto result = builder.Register<Attribute>(rstd::cppstd::as_str(name).unwrap(),
+                                              "we.operator.oscillation"_str,
                                               particle::ParticleAttributeResetPolicy::Custom,
                                               default_value);
     if (result.is_err()) rstd::panic { "failed to register oscillation attribute" };
@@ -855,7 +856,7 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
                               WPParticleSubSystem& subsystem, usize operator_index) {
     auto attributes = subsystem.Attributes();
     do {
-        if (wpj.get("name").is_none()) break;
+        if (wpj.get("name"_str).is_none()) break;
         std::string name;
         owe::GetJsonValue(wpj, "name", name);
         if (name == "movement") {

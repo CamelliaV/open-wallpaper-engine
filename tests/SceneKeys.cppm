@@ -18,6 +18,8 @@ import wescene.fs;
 import wescene.testing.pkg_header;
 import wescene.testing.json_builder;
 
+using namespace rstd::literals;
+
 export namespace owe::testing
 {
 
@@ -153,7 +155,7 @@ bool ScanOneWorkshop(const fs::path& workshop_dir, std::map<std::string, Version
         return false;
     }
     owe::fs::VFS vfs;
-    if (vfs.mount("/assets", wfs->mount_handle()).is_err()) return false;
+    if (vfs.mount("/assets"_str, wfs->mount_handle()).is_err()) return false;
 
     auto stream = owe::fs::OpenBinary(vfs, "/assets/scene.json");
     if (stream.is_err()) {

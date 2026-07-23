@@ -10,6 +10,7 @@ import wescene.vulkan;
 import wescene.vulkan_render;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace uniform_test
@@ -124,10 +125,10 @@ private:
 namespace
 {
 
-std::vector<unsigned char> Bytes(std::initializer_list<unsigned char> values) {
-    std::vector<unsigned char> bytes;
+std::vector<std::byte> Bytes(std::initializer_list<unsigned char> values) {
+    std::vector<std::byte> bytes;
     bytes.reserve(values.size());
-    for (auto value : values) bytes.push_back(value);
+    for (auto value : values) bytes.push_back(static_cast<std::byte>(value));
     return bytes;
 }
 
@@ -165,22 +166,22 @@ std::shared_ptr<owe::SceneMesh> MakeUniformMesh(std::shared_ptr<owe::SceneShader
 TEST(UniformBufferLayout, PreservesReflectedSlots) {
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("g_Time")),
+        .name   = rstd::string::String::make("g_Time"_str),
         .offset = rstd::u32(),
         .size   = rstd::usize(4),
     });
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("time_alias")),
+        .name   = rstd::string::String::make("time_alias"_str),
         .offset = rstd::u32(16),
         .size   = rstd::usize(4),
     });
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("unmapped")),
+        .name   = rstd::string::String::make("unmapped"_str),
         .offset = rstd::u32(32),
         .size   = rstd::usize(4),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .name    = rstd::string::String::make("Globals"_str),
         .size    = rstd::usize(48),
         .members = rstd::move(members),
     };
@@ -198,12 +199,12 @@ TEST(UniformBufferLayout, PreservesReflectedSlots) {
 TEST(UniformBufferLayout, RejectsMemberOutsideBlock) {
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("outside")),
+        .name   = rstd::string::String::make("outside"_str),
         .offset = rstd::u32(8),
         .size   = rstd::usize(8),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .name    = rstd::string::String::make("Globals"_str),
         .size    = rstd::usize(12),
         .members = rstd::move(members),
     };
@@ -217,8 +218,8 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
     auto       camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
-    scene.RegisterCamera(String::make("default"), camera.clone());
-    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("default")));
+    scene.RegisterCamera(String::make("default"_str), camera.clone());
+    ASSERT_TRUE(scene.SetActiveCamera("default"_str));
 
     auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
     auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
@@ -239,12 +240,12 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
 
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("scene_time")),
+        .name   = rstd::string::String::make("scene_time"_str),
         .offset = rstd::u32(),
         .size   = rstd::usize(16),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .name    = rstd::string::String::make("Globals"_str),
         .size    = rstd::usize(16),
         .members = rstd::move(members),
     };
@@ -302,12 +303,12 @@ TEST(UniformBufferBinding, HoldsDemandOnlyForAReflectedLiveOutput) {
     auto make_block = [](std::string_view name) {
         auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
         members.push(owe::resource::ShaderArtifactUniformMember {
-            .name   = rstd::string::String::make(rstd::cppstd::as_str(name)),
+            .name   = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
             .offset = rstd::u32(),
             .size   = rstd::usize(4),
         });
         return owe::resource::ShaderArtifactUniformBlock {
-            .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+            .name    = rstd::string::String::make("Globals"_str),
             .size    = rstd::usize(4),
             .members = rstd::move(members),
         };
@@ -354,12 +355,12 @@ TEST(UniformBufferBinding, ProvidesPreparedTextureMetadataToGenericSource) {
 
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("texture_extent")),
+        .name   = rstd::string::String::make("texture_extent"_str),
         .offset = rstd::u32(),
         .size   = rstd::usize(16),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .name    = rstd::string::String::make("Globals"_str),
         .size    = rstd::usize(16),
         .members = rstd::move(members),
     };
@@ -401,8 +402,8 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
     auto       camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
-    scene.RegisterCamera(String::make("default"), camera.clone());
-    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("default")));
+    scene.RegisterCamera(String::make("default"_str), camera.clone());
+    ASSERT_TRUE(scene.SetActiveCamera("default"_str));
 
     auto registrar   = rstd::dyn<owe::UniformSourceRegistrar>::from_ref(scene);
     auto attachments = rstd::dyn<owe::UniformAttachmentWriter>::from_ref(scene);
@@ -427,12 +428,12 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
 
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("static_value")),
+        .name   = rstd::string::String::make("static_value"_str),
         .offset = rstd::u32(),
         .size   = rstd::usize(4),
     });
     auto block = owe::resource::ShaderArtifactUniformBlock {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .name    = rstd::string::String::make("Globals"_str),
         .size    = rstd::usize(4),
         .members = rstd::move(members),
     };
@@ -475,22 +476,22 @@ TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
     code.push(rstd::u32(3));
     artifact.stages.push(owe::resource::ShaderArtifactStage {
         .stage       = owe::ShaderType::VERTEX,
-        .entry_point = rstd::string::String::make(rstd::cppstd::as_str("main")),
+        .entry_point = rstd::string::String::make("main"_str),
         .code        = rstd::move(code),
     });
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {
-        .name   = rstd::string::String::make(rstd::cppstd::as_str("g_Time")),
+        .name   = rstd::string::String::make("g_Time"_str),
         .offset = rstd::u32(16),
         .size   = rstd::usize(4),
     });
     artifact.uniform_blocks.push(owe::resource::ShaderArtifactUniformBlock {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("Globals")),
+        .name    = rstd::string::String::make("Globals"_str),
         .size    = rstd::usize(32),
         .members = rstd::move(members),
     });
     artifact.descriptor_bindings.push(owe::resource::ShaderArtifactDescriptorBinding {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("g_Texture0")),
+        .name    = rstd::string::String::make("g_Texture0"_str),
         .binding = rstd::u32(2),
         .descriptor_type =
             rstd::u32(static_cast<rstd::uint32_t>(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)),
@@ -498,7 +499,7 @@ TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
         .stage_flags      = rstd::u32(static_cast<rstd::uint32_t>(VK_SHADER_STAGE_FRAGMENT_BIT)),
     });
     artifact.vertex_inputs.push(owe::resource::ShaderArtifactVertexInput {
-        .name     = rstd::string::String::make(rstd::cppstd::as_str("a_Position")),
+        .name     = rstd::string::String::make("a_Position"_str),
         .location = rstd::u32(3),
         .format   = rstd::u32(static_cast<rstd::uint32_t>(VK_FORMAT_R32G32_SFLOAT)),
     });
@@ -527,7 +528,7 @@ TEST(TextureRequest, BuildsImportedRequestWithoutCacheKey) {
 TEST(TextureBindingRequest, CarriesNameAndTypedRequest) {
     auto request = owe::vulkan::MakeImportedTextureRequest("texture-slot");
     owe::vulkan::TextureBindingRequest binding {
-        .name    = rstd::string::String::make(rstd::cppstd::as_str("texture-slot")),
+        .name    = rstd::string::String::make("texture-slot"_str),
         .request = rstd::Some(std::move(request)),
     };
 
@@ -556,7 +557,7 @@ TEST(PreparedPassResources, ResolvesOnlyDeclaredUses) {
                 owe::resource::TextureHandle { .index = use.index, .generation = rstd::u64(1) },
             .request =
                 owe::resource::TextureRequest {
-                    .name = rstd::string::String::make(rstd::cppstd::as_str(name)),
+                    .name = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
                 },
             .physical = allocation.clone(),
             .image    = allocation->View(),
@@ -575,11 +576,11 @@ TEST(PreparedPassResources, ResolvesOnlyDeclaredUses) {
 
 TEST(TextureRequest, ResolvesImportedTextureNameFromSnapshotCatalog) {
     owe::Scene scene;
-    scene.RegisterTexture(String::make("texture-slot"),
+    scene.RegisterTexture(String::make("texture-slot"_str),
                           owe::SceneTexture { .url = "textures/main.png" });
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
-    auto desc_id  = snapshot.textureDescId("texture-slot");
+    auto desc_id  = snapshot.textureDescId("texture-slot"_str);
     ASSERT_TRUE(desc_id.is_some());
 
     auto request = owe::vulkan::MakeImportedTextureRequest("texture-slot", desc_id);
@@ -699,7 +700,7 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
             [](owe::vulkan::TextureRequest request) {
                 std::vector<owe::vulkan::TextureBindingRequest> bindings;
                 bindings.push_back(owe::vulkan::TextureBindingRequest {
-                    .name = rstd::string::String::make(rstd::cppstd::as_str("textures/main.png")),
+                    .name    = rstd::string::String::make("textures/main.png"_str),
                     .request = rstd::Some(std::move(request)),
                 });
                 return bindings;

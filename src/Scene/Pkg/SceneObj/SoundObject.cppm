@@ -8,6 +8,8 @@ export import :field_binding;
 import :visibility_binding;
 import :scene_document;
 
+using namespace rstd::literals;
+
 export namespace owe
 
 {
@@ -53,9 +55,9 @@ struct SoundObject {
 
     bool FromJson(const owe::Json& json, fs::VFS&, SceneVersion /*v*/) {
         owe::GetJsonValue(json, "volume", volume);
-        if (auto volume_json = json.get("volume");
+        if (auto volume_json = json.get("volume"_str);
             volume_json.is_some() && (*volume_json)->is_object()) {
-            if (auto user = (*volume_json)->get("user"); user.is_some()) {
+            if (auto user = (*volume_json)->get("user"_str); user.is_some()) {
                 auto string = (*user)->as_str();
                 if (string.is_some()) volume_user_key = rstd::cppstd::to_string(*string);
             }
@@ -75,14 +77,14 @@ struct SoundObject {
         owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
         owe::GetJsonValue(json, "parent", parent, false);
         owe::GetJsonValue(json, "dependencies", dependencies, false);
-        if (auto value = json.get("instance"); value.is_some()) instance = (*value)->clone();
+        if (auto value = json.get("instance"_str); value.is_some()) instance = (*value)->clone();
 
         owe::GetJsonValue(json, "startsilent", startsilent, false);
         owe::GetJsonValue(json, "blockalign", blockalign, false);
         owe::GetJsonValue(json, "spatialization", spatialization, false);
         owe::GetJsonValue(json, "queuemode", queuemode, false);
 
-        auto sound_json = json.get("sound");
+        auto sound_json = json.get("sound"_str);
         if (sound_json.is_none()) return false;
         auto sound_array = (*sound_json)->as_array();
         if (sound_array.is_none()) return false;

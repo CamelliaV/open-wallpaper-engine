@@ -11,8 +11,8 @@ SceneIndexArray::SceneIndexArray(usize index_count)
     : m_data(Vec<rstd::uint32_t>::with_capacity(index_count)) {
     for (usize i {}; i < index_count; ++i) m_data.push(0);
 }
-SceneIndexArray::SceneIndexArray(std::span<const rstd::uint32_t> data)
-    : m_data(Vec<rstd::uint32_t>::with_capacity(usize(data.size()))), m_size(data.size()) {
+SceneIndexArray::SceneIndexArray(slice<rstd::uint32_t> data)
+    : m_data(Vec<rstd::uint32_t>::with_capacity(data.len())), m_size(data.len()) {
     for (rstd::uint32_t value : data) m_data.push(rstd::move(value));
 }
 

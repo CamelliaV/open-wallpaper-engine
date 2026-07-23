@@ -153,9 +153,8 @@ auto GenParticleData(particle::ParticleExtractContext& context,
                                                  total_size.to_primitive() },
                               rstd::array<float, 2> { value.rotation[0], value.rotation[1] },
                               usize(4));
-            vertices.SetVertexs(
-                output_index++ * usize(4),
-                std::span<const float> { storage.data(), total_size.to_primitive() });
+            vertices.SetVertexs(output_index++ * usize(4),
+                                rstd::slice<float>::from_raw_parts(storage.data(), total_size));
         }
     }
     return output_index;
@@ -200,7 +199,7 @@ auto GenParticlePointData(particle::ParticleExtractContext& context,
             auto render_position =
                 subsystem.InstanceState(instance_index).bounded.position + value.position;
             auto lifetime = AnimationLifetime(value, subsystem.AnimationSpec());
-            std::fill(data.begin(), data.begin() + one_size.to_primitive(), 0.0f);
+            for (usize index {}; index < one_size; ++index) data[index] = 0.0f;
             write3(position, render_position[0], render_position[1], render_position[2]);
             write4(texcoord,
                    value.rotation[0],
@@ -212,7 +211,7 @@ auto GenParticlePointData(particle::ParticleExtractContext& context,
                 write4(velocity, value.velocity[0], value.velocity[1], value.velocity[2], lifetime);
             }
             vertices.SetVertexs(output_index++,
-                                std::span<const float> { data.data(), one_size.to_primitive() });
+                                rstd::slice<float>::from_raw_parts(data.data(), one_size));
         }
     }
     return output_index;
@@ -300,7 +299,7 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
             auto next           = particle(next_index);
             auto after          = particle(after_index);
 
-            std::fill(data.begin(), data.begin() + one_size.to_primitive(), 0.0f);
+            for (usize index {}; index < one_size; ++index) data[index] = 0.0f;
             write4(position, render_position(current), current.size * 0.5f);
             write4(endpoint, render_position(next), static_cast<float>(count.to_primitive()));
             write4(previous_point,
@@ -313,7 +312,7 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
             write_color(color_end, next);
             write_color(color, current);
             vertices.SetVertexs(output_count++,
-                                std::span<const float> { data.data(), one_size.to_primitive() });
+                                rstd::slice<float>::from_raw_parts(data.data(), one_size));
         }
     }
     return output_count;
@@ -369,7 +368,7 @@ auto GenRopeTrailSegments(const WPParticleConstRef& value, const Eigen::Vector3f
         auto start_control  = point(sample_index == usize() ? usize() : sample_index - usize(1));
         auto end_control    = point(rstd::cmp::min(sample_index + usize(2), state.len));
         auto trail_position = static_cast<float>(sample_index.to_primitive());
-        std::fill(data.begin(), data.begin() + one_size.to_primitive(), 0.0f);
+        for (usize index {}; index < one_size; ++index) data[index] = 0.0f;
         write4(position, previous, size);
         write4(endpoint, current, trail_length);
         write4(start_control_slot, start_control, trail_position);
@@ -380,7 +379,7 @@ auto GenRopeTrailSegments(const WPParticleConstRef& value, const Eigen::Vector3f
         write_color(color_end);
         write_color(color);
         vertices.SetVertexs(output_index + emitted,
-                            std::span<const float> { data.data(), one_size.to_primitive() });
+                            rstd::slice<float>::from_raw_parts(data.data(), one_size));
         ++emitted;
     }
     return emitted;
@@ -422,7 +421,7 @@ void UpdateIndexArray(u32 first, usize count, SceneIndexArray& indices) noexcept
         current, current + 1U, current + 3U, current + 1U, current + 2U, current + 3U,
     };
     for (usize index = rstd::as_cast<usize>(first); index < count; ++index) {
-        indices.Assign(index * single_size, values);
+        indices.Assign(index * single_size, values.as_slice());
         for (auto& value : values) value += 4U;
     }
 }

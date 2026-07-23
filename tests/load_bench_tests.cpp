@@ -3,6 +3,8 @@
 import rstd.bench;
 import wescene.load_bench;
 
+using namespace rstd::literals;
+
 namespace
 {
 
@@ -13,33 +15,30 @@ auto ProbeLabel(const owe::SceneLoadBenchContext& context, rstd::bench::probe::P
 }
 
 TEST(SceneLoadBench, EmptyOutputDisablesCollection) {
-    EXPECT_TRUE(owe::CreateSceneLoadBench("").is_none());
+    EXPECT_TRUE(owe::CreateSceneLoadBench(""_str).is_none());
 }
 
 TEST(SceneLoadBench, RegistersStableCatalog) {
-    auto context = owe::CreateSceneLoadBench("/tmp/owe-load-bench-test.txt");
+    auto context = owe::CreateSceneLoadBench("/tmp/owe-load-bench-test.txt"_str);
     ASSERT_TRUE(context.is_some());
     auto& bench = **context;
 
     auto schema = bench.schema_owner();
-    EXPECT_EQ(schema->len().to_primitive(), 44u);
-    EXPECT_EQ(ProbeLabel(bench, bench.ids().preload_scene_document),
-              rstd::ref<rstd::str>("preload.scene_document"));
-    EXPECT_EQ(ProbeLabel(bench, bench.ids().parse_object_particle),
-              rstd::ref<rstd::str>("parse.object.particle"));
+    EXPECT_EQ(schema->len().to_primitive(), 47u);
+    EXPECT_EQ(ProbeLabel(bench, bench.ids().preload_scene_document), "preload.scene_document"_str);
+    EXPECT_EQ(ProbeLabel(bench, bench.ids().parse_object_particle), "parse.object.particle"_str);
     EXPECT_EQ(ProbeLabel(bench, bench.ids().load_initial_properties),
-              rstd::ref<rstd::str>("load.initial_properties"));
+              "load.initial_properties"_str);
     EXPECT_EQ(ProbeLabel(bench, bench.ids().render_user_property_graph_rebuild),
-              rstd::ref<rstd::str>("render.user_property.graph_rebuild"));
+              "render.user_property.graph_rebuild"_str);
     EXPECT_EQ(ProbeLabel(bench, bench.ids().render_first_frame_prepare),
-              rstd::ref<rstd::str>("render.first_frame.prepare"));
-    EXPECT_EQ(ProbeLabel(bench, bench.ids().render_first_draw),
-              rstd::ref<rstd::str>("render.first_draw"));
+              "render.first_frame.prepare"_str);
+    EXPECT_EQ(ProbeLabel(bench, bench.ids().render_first_draw), "render.first_draw"_str);
 }
 
 TEST(SceneLoadBench, AssignsIncreasingRunIds) {
-    auto first  = owe::CreateSceneLoadBench("/tmp/owe-load-bench-first.txt");
-    auto second = owe::CreateSceneLoadBench("/tmp/owe-load-bench-second.txt");
+    auto first  = owe::CreateSceneLoadBench("/tmp/owe-load-bench-first.txt"_str);
+    auto second = owe::CreateSceneLoadBench("/tmp/owe-load-bench-second.txt"_str);
 
     ASSERT_TRUE(first.is_some());
     ASSERT_TRUE(second.is_some());
@@ -47,7 +46,7 @@ TEST(SceneLoadBench, AssignsIncreasingRunIds) {
 }
 
 TEST(SceneLoadBench, MovesPreloadBatchOnce) {
-    auto context = owe::CreateSceneLoadBench("/tmp/owe-load-bench-test.txt");
+    auto context = owe::CreateSceneLoadBench("/tmp/owe-load-bench-test.txt"_str);
     ASSERT_TRUE(context.is_some());
     auto& bench = **context;
 

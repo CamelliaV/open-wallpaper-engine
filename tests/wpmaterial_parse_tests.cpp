@@ -4,6 +4,8 @@ import rstd.cppstd;
 import wescene.json;
 import wescene.pkg.parse;
 
+using namespace rstd::literals;
+
 TEST(MaterialParser, ParsesLegacyUserShaderValues) {
     auto j = rstd::json::from_str(R"({
         "passes": [
@@ -17,7 +19,7 @@ TEST(MaterialParser, ParsesLegacyUserShaderValues) {
                 }
             }
         ]
-    })")
+    })"_str)
                  .unwrap();
 
     owe::wpscene::Material material;

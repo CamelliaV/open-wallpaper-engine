@@ -14,11 +14,11 @@ namespace
 {
 
 auto bytesOf(const float* data, usize size) -> rstd::slice<rstd::u8> {
-    return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::u8*>(data), size);
+    return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::byte*>(data), size);
 }
 
 auto bytesOf(const rstd::uint32_t* data, usize size) -> rstd::slice<u8> {
-    return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::u8*>(data), size);
+    return rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::byte*>(data), size);
 }
 
 u64 next_dynamic_allocation_generation() {

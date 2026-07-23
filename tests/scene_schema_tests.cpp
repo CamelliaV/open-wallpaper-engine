@@ -34,6 +34,8 @@ import rstd.cppstd;
 import wescene.json;
 import wescene.testing.scene_keys;
 
+using namespace rstd::literals;
+
 namespace
 {
 
@@ -340,7 +342,7 @@ void ForEachVersion(F&& function) {
 
 template<typename F>
 void ForEachKey(const owe::Json& version, F&& function) {
-    auto keys = version.get("keys");
+    auto keys = version.get("keys"_str);
     if (keys.is_none()) return;
     auto object = (*keys)->as_object();
     if (object.is_none()) return;
@@ -366,7 +368,7 @@ void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
     std::sort(stamps.begin(), stamps.end());
 
     for (const auto& [v, stamp] : stamps) {
-        auto ver_data = (Report()).get(rstd::cppstd::as_str(stamp));
+        auto ver_data = (Report()).get(rstd::cppstd::as_str(stamp).unwrap());
         if (ver_data.is_none()) continue;
 
         struct Entry {
@@ -379,7 +381,7 @@ void PrintUnparsedReport(std::string_view prefix, std::string_view scope_label,
             const std::string k { path.substr(prefix.size()) };
             if (parsed.contains(k)) return;
             std::uint64_t present_in = 0;
-            if (auto value = info.get("present_in"); value.is_some())
+            if (auto value = info.get("present_in"_str); value.is_some())
                 present_in = (*value)->as_u64().unwrap_or(rstd::u64()).to_primitive();
             miss.push_back({ k, present_in });
         });
@@ -516,7 +518,7 @@ TEST(SceneSchema, ReportTopUnparsedNestedKeys) {
                 if (! IsDirectChildOf(parent, path)) return;
                 const std::string k { path.substr(parent.size()) };
                 if (parsed.contains(k)) return;
-                if (auto value = info.get("present_in"); value.is_some())
+                if (auto value = info.get("present_in"_str); value.is_some())
                     agg[k] += (*value)->as_u64().unwrap_or(rstd::u64()).to_primitive();
             });
         });

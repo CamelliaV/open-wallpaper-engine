@@ -4,6 +4,7 @@ import rstd;
 import rstd.cppstd;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::collections::BTreeSet;
 using rstd::collections::HashMap;
 using rstd::collections::HashSet;
@@ -158,7 +159,7 @@ float animation_frame(const SceneAnimationCurve& curve, double runtime) {
     if (end <= 0) return frame;
 
     const float ef   = static_cast<float>(end);
-    bool        loop = curve.wraploop || curve.mode == "loop" || curve.mode == "repeat";
+    bool        loop = curve.wraploop || curve.mode == "loop"_str || curve.mode == "repeat"_str;
     if (loop) {
         frame = std::fmod(frame, ef);
         if (frame < 0.0f) frame += ef;
@@ -168,7 +169,7 @@ float animation_frame(const SceneAnimationCurve& curve, double runtime) {
     // fell through to clamp(), pinning the value to the last keyframe forever
     // after one forward pass — e.g. a blink's eye-closed pose (value=1 at the
     // last key) would stick on, leaving the eye permanently transparent.
-    if (curve.mode == "mirror") {
+    if (curve.mode == "mirror"_str) {
         float period = 2.0f * ef;
         float m      = std::fmod(frame, period);
         if (m < 0.0f) m += period;
@@ -305,7 +306,7 @@ void collect_linked_ids_from_node(SceneNode* node, Scene& scene, BTreeSet<i32>& 
     if (node == nullptr) return;
     if (node->HasMaterial()) collect_linked_ids_from_material(*node->Mesh()->Material(), out);
     if (! node->Camera().empty()) {
-        auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()));
+        auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
         if (camera.is_some() && (**camera).HasImgEffect()) {
             auto& effect_layer = (**camera).GetImgEffect();
             for (usize i {}; i < effect_layer->EffectCount(); ++i) {
@@ -341,7 +342,7 @@ SceneNode* find_layer_node(SceneNode* node, Scene& scene, i32 id) {
     if (node->ID() == id) return node;
 
     if (! node->Camera().empty()) {
-        auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()));
+        auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
         if (camera.is_some() && (**camera).HasImgEffect()) {
             auto& effect_layer = (**camera).GetImgEffect();
             for (usize i {}; i < effect_layer->EffectCount(); ++i) {
@@ -383,7 +384,7 @@ void ensure_snapshot_link_render_targets(Scene& scene, const BTreeSet<i32>& link
         if (! scene.IsLayerElidable(WallpaperLayerId { .value = id })) continue;
         auto layer = WallpaperLayerId { .value = id };
         auto key   = GenLinkTex(static_cast<std::ptrdiff_t>(id.to_primitive()));
-        if (scene.RenderTarget(as_str(key)).is_some()) continue;
+        if (scene.RenderTarget(as_str(key).unwrap()).is_some()) continue;
         auto* source = scene.RegisteredLayerLinkSource(layer);
         if (source == nullptr) source = find_layer_node(scene, layer);
         if (source != nullptr) scene.EnsureLinkRenderTarget(layer, *source);
@@ -518,7 +519,7 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
         register_node(*node);
 
         if (! node->Camera().empty()) {
-            auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()));
+            auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
             if (camera.is_some() && (**camera).HasImgEffect()) {
                 auto& eff_layer = (**camera).GetImgEffect();
                 for (usize ei {}; ei < eff_layer->EffectCount(); ++ei) {
@@ -816,8 +817,8 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
         Option<RenderTargetDescId> output_override;
         if (auto view = index.resolve(item.id)) {
             if (view->submesh != nullptr && ! view->submesh->output_override.empty()) {
-                output_override =
-                    renderTargetDescId(rstd::cppstd::as_str(view->submesh->output_override));
+                output_override = renderTargetDescId(
+                    rstd::cppstd::as_str(view->submesh->output_override).unwrap());
             }
         }
 
@@ -842,14 +843,14 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
     for (auto next = linked_ids.next(); next.is_some(); next = linked_ids.next()) {
         auto id      = **next;
         auto key     = GenLinkTex(static_cast<std::ptrdiff_t>(id.to_primitive()));
-        auto desc_id = renderTargetDescId(rstd::cppstd::as_str(key));
+        auto desc_id = renderTargetDescId(rstd::cppstd::as_str(key).unwrap());
         if (! desc_id) continue;
 
         auto record_index = rstd::as_cast<u32>(m_link_sources.len());
         (void)m_link_source_ids.insert(id.to_primitive(), record_index);
         m_link_sources.push(RenderLinkSourceRecord {
             .source_layer      = WallpaperLayerId { .value = id },
-            .render_target_key = String::make(rstd::cppstd::as_str(key)),
+            .render_target_key = String::make(rstd::cppstd::as_str(key).unwrap()),
             .render_target     = *desc_id,
         });
     }
@@ -1273,13 +1274,13 @@ void SceneTextureAnimationRegistry::Rebuild(const Scene& scene) {
         Entry entry { .node = draw->node };
         for (std::size_t index = 0; index < draw->material->textures.size(); ++index) {
             const auto& texture_key = draw->material->textures[index];
-            auto        texture     = scene.Texture(rstd::cppstd::as_str(texture_key));
+            auto        texture     = scene.Texture(rstd::cppstd::as_str(texture_key).unwrap());
             if (texture.is_none() || ! (**texture).isSprite ||
                 (**texture).spriteAnim.numFrames() == usize()) {
                 continue;
             }
 
-            auto texture_name = String::make(rstd::cppstd::as_str(texture_key));
+            auto texture_name = String::make(rstd::cppstd::as_str(texture_key).unwrap());
             auto animation    = m_animations.get_mut(texture_name.as_str());
             if (animation.is_none()) {
                 auto previous_animation = previous.remove(texture_name.as_str());
@@ -1381,9 +1382,9 @@ void Scene::RebuildResourceIndex() {
 
 bool Scene::EnsureTextureDescriptor(std::string_view key) {
     if (key.empty() || IsSpecTex(key)) return true;
-    auto name = rstd::cppstd::as_str(key);
+    auto name = rstd::cppstd::as_str(key).unwrap();
     if (m_textures.contains_key(name)) return true;
-    auto header = ParseImageHeader(rstd::cppstd::as_str(key));
+    auto header = ParseImageHeader(rstd::cppstd::as_str(key).unwrap());
     if (header.is_err()) return false;
 
     SceneTexture texture;
@@ -1583,7 +1584,7 @@ bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const Json& pr
         auto* node = nodes[index];
         if (node == nullptr) continue;
         if (auto visible = ResolveSceneUserVisibilityBinding(
-                node->VisibleUserBinding(), rstd::cppstd::as_str(key), property)) {
+                node->VisibleUserBinding(), rstd::cppstd::as_str(key).unwrap(), property)) {
             requires_graph_rebuild |= SetNodeVisible(*node, *visible);
         }
     }
@@ -1593,7 +1594,7 @@ bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const Json& pr
 Option<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node,
                                                        std::string_view name) {
     if (node.Camera().empty()) return None();
-    auto camera = CameraMut(rstd::cppstd::as_str(node.Camera()));
+    auto camera = CameraMut(rstd::cppstd::as_str(node.Camera()).unwrap());
     if (camera.is_none() || ! (**camera).HasImgEffect()) return None();
 
     auto& effect_layer = (**camera).GetImgEffect();
@@ -1619,14 +1620,14 @@ bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view key, const J
     for (usize node_index {}; node_index < nodes.len(); ++node_index) {
         auto* node = nodes[node_index];
         if (node == nullptr || node->Camera().empty()) continue;
-        auto camera = CameraMut(rstd::cppstd::as_str(node->Camera()));
+        auto camera = CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
         if (camera.is_none() || ! (**camera).HasImgEffect()) continue;
         auto& effect_layer = (**camera).GetImgEffect();
         for (usize i {}; i < effect_layer->EffectCount(); ++i) {
             auto& effect = effect_layer->GetEffect(i);
             if (! effect || ! visited.insert(effect.get()).second) continue;
             auto visible = ResolveSceneUserVisibilityBinding(
-                effect->visible_user_binding, rstd::cppstd::as_str(key), property);
+                effect->visible_user_binding, rstd::cppstd::as_str(key).unwrap(), property);
             if (! visible) continue;
             if (SetImageEffectRuntimeVisible({ .layer = effect_layer.get(), .effect = effect },
                                              *visible)) {
@@ -1641,7 +1642,7 @@ bool Scene::ApplyUserLightVisibilityBindings(std::string_view key, const Json& p
     bool changed = false;
     for (auto& light : m_lights) {
         auto visible = ResolveSceneUserVisibilityBinding(
-            light->visibleUserBinding(), rstd::cppstd::as_str(key), property);
+            light->visibleUserBinding(), rstd::cppstd::as_str(key).unwrap(), property);
         if (! visible) continue;
         changed |= light->runtimeVisible() != *visible;
         light->setRuntimeVisible(*visible);
@@ -1666,13 +1667,13 @@ auto Scene::PostProcesses() const -> slice<Box<ScenePostProcess>> {
 }
 
 bool Scene::ApplyUserCameraPathVisibilityBindings(std::string_view key, const Json& property) {
-    auto paths = m_camera_path_user_index.get(rstd::cppstd::as_str(key));
+    auto paths = m_camera_path_user_index.get(rstd::cppstd::as_str(key).unwrap());
     if (paths.is_none()) return false;
 
     bool changed = false;
     for (const auto& path : **paths) {
         auto enabled = ResolveSceneUserVisibilityBinding(
-            path->visible_user_binding, rstd::cppstd::as_str(key), property);
+            path->visible_user_binding, rstd::cppstd::as_str(key).unwrap(), property);
         if (! enabled) continue;
         changed |= path->enabled != *enabled;
         path->SetEnabled(*enabled);
@@ -1891,16 +1892,16 @@ void Scene::CaptureCameraPathViewports() {
 void Scene::EnablePlanarReflection() {
     m_planar_reflection_enabled = true;
     const std::string key(WE_REFLECTION_PREFIX);
-    if (RenderTarget(as_str(key)).is_some()) return;
+    if (RenderTarget(as_str(key).unwrap()).is_some()) return;
 
     std::int32_t width   = m_ortho[usize()].to_primitive();
     std::int32_t height  = m_ortho[usize(1)].to_primitive();
-    auto         primary = RenderTarget(as_str(SpecTex_Default));
+    auto         primary = RenderTarget(as_str(SpecTex_Default).unwrap());
     if (primary.is_some()) {
         width  = (**primary).width;
         height = (**primary).height;
     }
-    RegisterRenderTarget(String::make(as_str(key)),
+    RegisterRenderTarget(String::make(as_str(key).unwrap()),
                          SceneRenderTarget {
                              .width             = width,
                              .height            = height,
@@ -1913,9 +1914,9 @@ void Scene::EnablePlanarReflection() {
 std::string Scene::EnsureLinkRenderTarget(WallpaperLayerId source_layer,
                                           const SceneNode& source_node) {
     auto link_key = GenLinkTex(static_cast<std::ptrdiff_t>(source_layer.value.to_primitive()));
-    if (RenderTarget(as_str(link_key)).is_none()) {
+    if (RenderTarget(as_str(link_key).unwrap()).is_none()) {
         auto sz = source_node.Size();
-        RegisterRenderTarget(String::make(as_str(link_key)),
+        RegisterRenderTarget(String::make(as_str(link_key).unwrap()),
                              SceneRenderTarget {
                                  .width      = sz.x() > 0 ? static_cast<std::int32_t>(sz.x())
                                                           : m_ortho[usize()].to_primitive(),

@@ -12,24 +12,25 @@ import wescene.pkg_asset_version;
 
 using namespace owe;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace
 {
 
 WPPuppet::PlayMode ToPlayMode(ref<str> m) {
-    if (m == "loop" || m.is_empty()) return WPPuppet::PlayMode::Loop;
-    if (m == "mirror") return WPPuppet::PlayMode::Mirror;
-    if (m == "single") return WPPuppet::PlayMode::Single;
+    if (m == "loop"_str || m.is_empty()) return WPPuppet::PlayMode::Loop;
+    if (m == "mirror"_str) return WPPuppet::PlayMode::Mirror;
+    if (m == "single"_str) return WPPuppet::PlayMode::Single;
 
     rstd_error("unknown puppet animation play mode \"{}\"", m);
-    rstd_assert(m == "loop");
+    rstd_assert(m == "loop"_str);
     return WPPuppet::PlayMode::Loop;
 }
 
 String ReadOwnedString(fs::BinaryReader& reader) {
     auto value = reader.ReadStr();
-    return String::make(rstd::cppstd::as_str(value));
+    return String::make(rstd::cppstd::as_str(value).unwrap());
 }
 
 template<typename T>
@@ -569,7 +570,7 @@ bool ParseAnimation(fs::BinaryReader& f, WPPuppet::Animation& anim, int mdla_ver
     if (anim.name.is_empty()) anim.name = ReadOwnedString(f);
 
     auto play_mode = f.ReadStr();
-    anim.mode      = ToPlayMode(rstd::cppstd::as_str(play_mode));
+    anim.mode      = ToPlayMode(rstd::cppstd::as_str(play_mode).unwrap());
     anim.fps       = f.ReadFloat();
     anim.length    = f.ReadInt32();
     f.ReadInt32(); // anim_zero
@@ -1135,7 +1136,8 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
             packers[k](i, one_vert.data() + offset);
             offset += SceneVertexArray::RealAttributeSize(attrs[k]);
         }
-        vertex.SetVertexs(usize(i), std::span<const float>(one_vert));
+        vertex.SetVertexs(
+            usize(i), rstd::slice<float>::from_raw_parts(one_vert.data(), usize(one_vert.size())));
     }
 
     std::vector<uint32_t> indices;
@@ -1145,7 +1147,8 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     }
 
     submesh.vertex_arrays.emplace_back(std::move(vertex));
-    submesh.index_arrays.emplace_back(SceneIndexArray(std::span<const uint32_t>(indices)));
+    submesh.index_arrays.emplace_back(
+        SceneIndexArray(slice<uint32_t>::from_raw_parts(indices.data(), usize(indices.size()))));
 
     // V21 parts[] enumerates index sub-ranges in artist-chosen z-order. We
     // issue one DrawIndexed per range so each "part" is drawn as a separate

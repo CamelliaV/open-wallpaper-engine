@@ -5,17 +5,19 @@ import owe.user_property;
 import wescene.json;
 import wescene.testing.json_builder;
 
+using namespace rstd::literals;
+
 TEST(JsonAdapter, ParsesDumpsAndReportsMembers) {
     auto parsed = owe::ParseJson(R"({"z":[true,null],"a":1.0})");
     ASSERT_TRUE(parsed.is_ok());
     auto value = parsed.unwrap();
-    EXPECT_TRUE(value.get("a").is_some());
-    EXPECT_TRUE(value.get("missing").is_none());
+    EXPECT_TRUE(value.get("a"_str).is_some());
+    EXPECT_TRUE(value.get("missing"_str).is_none());
     const std::string dynamic_key = "a";
-    EXPECT_TRUE(value.get(rstd::cppstd::as_str(dynamic_key)).is_some());
+    EXPECT_TRUE(value.get(rstd::cppstd::as_str(dynamic_key).unwrap()).is_some());
     const std::string_view mutable_key = "z";
-    EXPECT_TRUE(value.get_mut(rstd::cppstd::as_str(mutable_key)).is_some());
-    auto z = value.get("z");
+    EXPECT_TRUE(value.get_mut(rstd::cppstd::as_str(mutable_key).unwrap()).is_some());
+    auto z = value.get("z"_str);
     ASSERT_TRUE(z.is_some());
     EXPECT_TRUE((*z)->is_array());
     EXPECT_EQ(owe::Dump(value), R"({"a":1.0,"z":[true,null]})");
@@ -29,7 +31,7 @@ TEST(JsonAdapter, CommentsRequireExplicitOption) {
         owe::ParseJson("{/* comment */ \"value\": 1 // line\n}", { .allow_comments = true });
     ASSERT_TRUE(parsed.is_ok());
     auto value  = parsed.unwrap();
-    auto member = value.get("value");
+    auto member = value.get("value"_str);
     ASSERT_TRUE(member.is_some());
     EXPECT_EQ((*member)->as_i64().unwrap_or(rstd::i64()).to_primitive(), 1);
 }
@@ -39,11 +41,12 @@ TEST(JsonAdapter, ClonesSubtreesExplicitly) {
     ASSERT_TRUE(parsed.is_ok());
     auto original = parsed.unwrap();
     auto clone    = original.clone();
-    auto nested   = clone.get_mut("nested");
+    auto nested   = clone.get_mut("nested"_str);
     ASSERT_TRUE(nested.is_some());
     auto object = (*nested)->as_object_mut();
     ASSERT_TRUE(object.is_some());
-    (*object)->insert(::alloc::string::String::make("value"), rstd::into<owe::Json>(rstd::i32(2)));
+    (*object)->insert(::alloc::string::String::make("value"_str),
+                      rstd::into<owe::Json>(rstd::i32(2)));
     EXPECT_EQ(owe::Dump(original), R"({"nested":{"value":1}})");
     EXPECT_EQ(owe::Dump(clone), R"({"nested":{"value":2}})");
 }
@@ -57,12 +60,12 @@ TEST(UserProperty, TextInputWireValuesStayStrings) {
          { std::string("12"), std::string("true"), std::string("提醒喝水"), std::string() }) {
         auto patch  = owe::MakeUserPropertyWirePatch(raw);
         auto merged = owe::MergeUserPropertyDescriptor(schema, patch);
-        auto value  = merged.get("value");
+        auto value  = merged.get("value"_str);
         ASSERT_TRUE(value.is_some());
         ASSERT_TRUE((**value).is_string());
         EXPECT_EQ(rstd::cppstd::as_string_view(*(**value).as_str()), raw);
-        EXPECT_TRUE(merged.get("text").is_some());
-        EXPECT_TRUE(merged.get("order").is_some());
+        EXPECT_TRUE(merged.get("text"_str).is_some());
+        EXPECT_TRUE(merged.get("order"_str).is_some());
     }
 }
 
@@ -70,7 +73,7 @@ TEST(UserProperty, NonTextWireValuesKeepExistingJsonCoercion) {
     auto schema = owe::ParseJson(R"({"type":"slider","value":0})").unwrap();
     auto patch  = owe::MakeUserPropertyWirePatch("1.5");
     auto merged = owe::MergeUserPropertyDescriptor(schema, patch);
-    auto value  = merged.get("value");
+    auto value  = merged.get("value"_str);
     ASSERT_TRUE(value.is_some());
     EXPECT_DOUBLE_EQ((**value).as_f64().unwrap_or(rstd::f64()).to_primitive(), 1.5);
 }
@@ -78,7 +81,7 @@ TEST(UserProperty, NonTextWireValuesKeepExistingJsonCoercion) {
 TEST(UserProperty, UnknownTypeDefersWireValueCoercion) {
     auto patch  = owe::MakeUserPropertyWirePatch("12");
     auto merged = owe::MergeUserPropertyDescriptor(owe::JsonFromStd(""), patch);
-    auto value  = merged.get("value");
+    auto value  = merged.get("value"_str);
     ASSERT_TRUE(value.is_some());
     ASSERT_TRUE((**value).is_string());
     EXPECT_EQ(rstd::cppstd::as_string_view(*(**value).as_str()), "12");
@@ -88,17 +91,17 @@ TEST(JsonAdapter, NativeProjectionsPreserveOptions) {
     auto parsed = owe::ParseJson(R"({"number":1.75,"bool":true,"text":"value"})");
     ASSERT_TRUE(parsed.is_ok());
     auto value  = parsed.unwrap();
-    auto number = value.get("number");
+    auto number = value.get("number"_str);
     ASSERT_TRUE(number.is_some());
     EXPECT_DOUBLE_EQ((*number)->as_f64().unwrap_or(rstd::f64()).to_primitive(), 1.75);
-    auto boolean = value.get("bool");
+    auto boolean = value.get("bool"_str);
     ASSERT_TRUE(boolean.is_some());
     EXPECT_TRUE((*boolean)->as_bool().unwrap_or(false));
     EXPECT_TRUE((*boolean)->as_i64().is_none());
-    auto text = value.get("text");
+    auto text = value.get("text"_str);
     ASSERT_TRUE(text.is_some());
     EXPECT_EQ(rstd::cppstd::as_string_view(*(*text)->as_str()), "value");
-    EXPECT_TRUE(value.get("missing").is_none());
+    EXPECT_TRUE(value.get("missing"_str).is_none());
 }
 
 TEST(JsonAdapter, BuildsObjectsArraysAndIteratesWithoutKeyCopies) {

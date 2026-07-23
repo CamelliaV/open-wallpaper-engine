@@ -378,7 +378,7 @@ struct Extension {
 
 using InstanceLayer = Extension;
 
-using CheckGpuOp = std::function<bool(vvk::PhysicalDevice)>;
+using CheckGpuOp = std::function<bool(const vvk::PhysicalDevice&)>;
 
 constexpr std::string_view VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
 

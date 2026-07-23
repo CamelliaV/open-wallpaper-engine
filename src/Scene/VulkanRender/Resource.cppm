@@ -206,7 +206,7 @@ inline TextureRequest MakeImportedTextureRequest(std::string_view            nam
                       : rstd::None<TextureDefinitionId>();
     return TextureRequest {
         .kind   = TextureRequestKind::Imported,
-        .name   = rstd::string::String::make(rstd::cppstd::as_str(name)),
+        .name   = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .source = rstd::move(source),
     };
 }
@@ -215,7 +215,7 @@ inline TextureRequest MakeRenderTargetTextureRequest(std::string_view         na
                                                      const SceneRenderTarget& rt) {
     return TextureRequest {
         .kind       = TextureRequestKind::RenderTarget,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str(name)),
+        .name       = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .definition = rstd::Some(RenderTargetTextureDefinition(rt)),
         .lifetime =
             rt.allowReuse ? TextureLifetimeClass::FrameLocal : TextureLifetimeClass::Retained,
@@ -226,7 +226,7 @@ inline TextureRequest MakeRenderTargetNoMipTextureRequest(std::string_view      
                                                           const SceneRenderTarget& rt) {
     return TextureRequest {
         .kind       = TextureRequestKind::RenderTarget,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str(name)),
+        .name       = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .definition = rstd::Some(RenderTargetTextureDefinitionNoMip(rt)),
         .lifetime =
             rt.allowReuse ? TextureLifetimeClass::FrameLocal : TextureLifetimeClass::Retained,
@@ -237,7 +237,7 @@ inline TextureRequest MakeMsaaTextureRequest(std::string_view name, const SceneR
                                              VkSampleCountFlagBits samples) {
     return TextureRequest {
         .kind       = TextureRequestKind::RenderTargetMsaa,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str(name)),
+        .name       = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .definition = rstd::Some(MsaaTextureDefinition(rt, samples)),
         .lifetime   = TextureLifetimeClass::Dedicated,
     };
@@ -246,7 +246,7 @@ inline TextureRequest MakeMsaaTextureRequest(std::string_view name, const SceneR
 inline TextureRequest MakeDepthTextureRequest(std::string_view name, const SceneRenderTarget& rt) {
     return TextureRequest {
         .kind       = TextureRequestKind::DepthAttachment,
-        .name       = rstd::string::String::make(rstd::cppstd::as_str(name)),
+        .name       = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .definition = rstd::Some(DepthTextureDefinition(rt)),
         .lifetime =
             rt.allowReuse ? TextureLifetimeClass::FrameLocal : TextureLifetimeClass::Retained,

@@ -10,6 +10,7 @@ import wescene.testing.json_builder;
 
 using namespace owe::script;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace
@@ -952,7 +953,7 @@ TEST(ScriptLayerLookup, MissingLayerHandleResolvesLater) {
     auto late = rstd::sync::Arc<owe::SceneNode>::make(
         Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "late-sound");
     root->AppendChild(late.clone());
-    rt.SetUserProperty("go", rstd::json::from_str(R"({"type":"bool","value":true})").unwrap());
+    rt.SetUserProperty("go", rstd::json::from_str(R"({"type":"bool","value":true})"_str).unwrap());
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
@@ -976,7 +977,7 @@ TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
     effect->runtime_visible = true;
     effect_layer->AddEffect(effect);
     camera->AttatchImgEffect(effect_layer);
-    scene.RegisterCamera(String::make("audio-effect-camera"), rstd::move(camera));
+    scene.RegisterCamera(String::make("audio-effect-camera"_str), rstd::move(camera));
 
     JsRuntime   rt;
     FrameInputs fi {};
@@ -1302,8 +1303,9 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
     // bootstrap getter unwraps at access time. SetUserProperty in
     // between should win.
     JsRuntime rt;
-    owe::Json properties = rstd::json::from_str(R"({"x":{"user":"x1","value":0.5}})").unwrap();
-    rt.SetUserProperty("x1", rstd::json::from_str(R"({"type":"slider","value":-0.665})").unwrap());
+    owe::Json properties = rstd::json::from_str(R"({"x":{"user":"x1","value":0.5}})"_str).unwrap();
+    rt.SetUserProperty("x1",
+                       rstd::json::from_str(R"({"type":"slider","value":-0.665})"_str).unwrap());
     FrameInputs fi {};
     fi.canvas_w = 3840.0f;
     fi.canvas_h = 2160.0f;
@@ -1333,7 +1335,8 @@ TEST(ScriptUserProperty, UserPropertyOverridesFallback) {
 
 TEST(ScriptUserProperty, FallbackWhenUserPropMissing) {
     JsRuntime rt;
-    owe::Json properties = rstd::json::from_str(R"({"x":{"user":"missing","value":0.5}})").unwrap();
+    owe::Json properties =
+        rstd::json::from_str(R"({"x":{"user":"missing","value":0.5}})"_str).unwrap();
     FrameInputs fi {};
     fi.canvas_w = 3840.0f;
     fi.canvas_h = 2160.0f;
@@ -1371,7 +1374,8 @@ TEST(ScriptUserProperty, ApplyUserPropertiesReceivesUnwrappedValue) {
     )JS");
     ASSERT_NE(fs, nullptr);
 
-    rt.SetUserProperty("music", rstd::json::from_str(R"({"type":"combo","value":"5"})").unwrap());
+    rt.SetUserProperty("music",
+                       rstd::json::from_str(R"({"type":"combo","value":"5"})"_str).unwrap());
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
@@ -1392,7 +1396,7 @@ TEST(ScriptUserProperty, TextInputValueRemainsAString) {
     ASSERT_NE(fs, nullptr);
 
     rt.SetUserProperty("text",
-                       rstd::json::from_str(R"({"type":"textinput","value":"true"})").unwrap());
+                       rstd::json::from_str(R"({"type":"textinput","value":"true"})"_str).unwrap());
     rt.TickAll();
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
@@ -1445,7 +1449,7 @@ TEST(ScriptUserProperty, ScriptedOriginLandsAtCenter) {
     rt.SetFrameInputs(fi);
 
     owe::Json properties =
-        rstd::json::from_str(R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})")
+        rstd::json::from_str(R"({"x":{"user":"x7","value":0.5},"y":{"user":"y8","value":0.5}})"_str)
             .unwrap();
 
     auto* fs = rt.MakeFieldScript(

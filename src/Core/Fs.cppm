@@ -16,10 +16,10 @@ export namespace owe::fs
 using BinaryReader = owe::io::BinaryReader;
 using BinaryWriter = owe::io::BinaryWriter;
 
-inline Path ToPath(std::string_view path) { return Path(rstd::cppstd::as_str(path)); }
+inline Path ToPath(std::string_view path) { return Path(rstd::cppstd::as_str(path).unwrap()); }
 
 inline std::string ToStdString(Path path) {
-    return std::string(reinterpret_cast<const char*>(path.data()), path.len().to_primitive());
+    return rstd::cppstd::to_string(path.as_os_str().to_str().unwrap());
 }
 
 inline auto OpenBinary(VFS& vfs, std::string_view path) -> rstd::io::Result<BinaryReader> {

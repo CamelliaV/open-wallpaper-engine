@@ -15,11 +15,15 @@ owe::SceneMesh::Submesh MakeSubmesh() {
 
     owe::SceneVertexArray vertices(attrs, rstd::usize(2));
     std::array<float, 6>  positions { 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
-    (void)vertices.SetVertex("a_Position", positions);
+    (void)vertices.SetVertex(
+        "a_Position",
+        rstd::slice<float>::from_raw_parts(positions.data(), rstd::usize(positions.size())));
 
     owe::SceneIndexArray    indices(rstd::usize(3));
     std::array<uint32_t, 3> tri { 0, 1, 2 };
-    indices.Assign(rstd::usize(), tri);
+    indices.Assign(
+        rstd::usize(),
+        rstd::slice<rstd::uint32_t>::from_raw_parts(tri.data(), rstd::usize(tri.size())));
 
     owe::SceneMesh::Submesh submesh;
     submesh.vertex_arrays.push_back(std::move(vertices));

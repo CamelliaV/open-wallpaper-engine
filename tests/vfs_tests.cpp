@@ -6,6 +6,7 @@ import wescene.fs;
 import wescene.pkg_fs;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 namespace
 {
@@ -17,7 +18,7 @@ auto FsError(rstd::io::error::ErrorKind::Entity kind) -> rstd::io::error::Error 
 struct MemorySource {
     std::string data;
 
-    auto read_at(mut_ref<byte[]> buffer, u64 offset) const -> rstd::io::Result<usize> {
+    auto read_at(mut_ref<u8[]> buffer, u64 offset) const -> rstd::io::Result<usize> {
         auto position = rstd::try_from<usize>(offset);
         if (position.is_err()) return rstd::Ok(usize());
         auto position_value = rstd::move(position).unwrap_unchecked();
@@ -33,7 +34,7 @@ struct MemorySource {
 
 template<>
 struct rstd::Impl<rstd::io::ReadAt, MemorySource> : rstd::ImplBase<MemorySource> {
-    auto read_at(mut_ref<byte[]> buffer, u64 offset) const -> rstd::io::Result<usize> {
+    auto read_at(mut_ref<u8[]> buffer, u64 offset) const -> rstd::io::Result<usize> {
         return this->self().read_at(buffer, offset);
     }
 };
@@ -156,16 +157,16 @@ auto MakeMount(std::unordered_map<std::string, std::string> files, std::string i
 
 TEST(Vfs, OverlayAndUnmountKeepOpenedRangeAlive) {
     owe::fs::VFS vfs;
-    ASSERT_TRUE(vfs.mount("/assets", MakeMount({ { "shared", "lower" } })).is_ok());
-    auto upper = vfs.mount("/assets", MakeMount({ { "shared", "upper" } }));
+    ASSERT_TRUE(vfs.mount("/assets"_str, MakeMount({ { "shared", "lower" } })).is_ok());
+    auto upper = vfs.mount("/assets"_str, MakeMount({ { "shared", "upper" } }));
     ASSERT_TRUE(upper.is_ok());
 
-    auto opened = vfs.open_read("/assets/shared");
+    auto opened = vfs.open_read("/assets/shared"_str);
     ASSERT_TRUE(opened.is_ok());
     auto retained = std::move(opened).unwrap_unchecked();
 
     EXPECT_TRUE(vfs.unmount(*upper));
-    auto visible = vfs.open_read("/assets/shared");
+    auto visible = vfs.open_read("/assets/shared"_str);
     ASSERT_TRUE(visible.is_ok());
     EXPECT_EQ(ReadText(std::move(visible).unwrap_unchecked()), "lower");
     EXPECT_EQ(ReadText(std::move(retained)), "upper");
@@ -173,10 +174,10 @@ TEST(Vfs, OverlayAndUnmountKeepOpenedRangeAlive) {
 
 TEST(Vfs, BackendErrorsAreNotOverlayMisses) {
     owe::fs::VFS vfs;
-    ASSERT_TRUE(vfs.mount("/assets", MakeMount({ { "broken", "lower" } })).is_ok());
-    ASSERT_TRUE(vfs.mount("/assets", MakeMount({}, "broken")).is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, MakeMount({ { "broken", "lower" } })).is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, MakeMount({}, "broken")).is_ok());
 
-    auto opened = vfs.open_read("/assets/broken");
+    auto opened = vfs.open_read("/assets/broken"_str);
     ASSERT_TRUE(opened.is_err());
     EXPECT_EQ(std::move(opened).unwrap_err_unchecked().kind().code,
               rstd::io::error::ErrorKind::InvalidData);
@@ -184,14 +185,14 @@ TEST(Vfs, BackendErrorsAreNotOverlayMisses) {
 
 TEST(Vfs, PathsUseComponentBoundariesAndRejectTraversal) {
     owe::fs::VFS vfs;
-    ASSERT_TRUE(vfs.mount("/asset", MakeMount({ { "file", "value" } })).is_ok());
+    ASSERT_TRUE(vfs.mount("/asset"_str, MakeMount({ { "file", "value" } })).is_ok());
 
-    EXPECT_TRUE(vfs.open_read("/assets/file").is_err());
-    auto invalid = vfs.open_read("/asset/../file");
+    EXPECT_TRUE(vfs.open_read("/assets/file"_str).is_err());
+    auto invalid = vfs.open_read("/asset/../file"_str);
     ASSERT_TRUE(invalid.is_err());
     EXPECT_EQ(std::move(invalid).unwrap_err_unchecked().kind().code,
               rstd::io::error::ErrorKind::InvalidInput);
-    EXPECT_TRUE(vfs.mount("asset", MakeMount({})).is_err());
+    EXPECT_TRUE(vfs.mount("asset"_str, MakeMount({})).is_err());
 }
 
 TEST(Vfs, WriteRoutingPreservesReadonlyOverlay) {
@@ -205,16 +206,16 @@ TEST(Vfs, WriteRoutingPreservesReadonlyOverlay) {
     ASSERT_TRUE(physical.is_ok());
 
     owe::fs::VFS vfs;
-    ASSERT_TRUE(vfs.mount("/assets", std::move(physical).unwrap_unchecked()).is_ok());
-    ASSERT_TRUE(vfs.mount("/assets", MakeMount({ { "locked", "readonly" } })).is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, std::move(physical).unwrap_unchecked()).is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, MakeMount({ { "locked", "readonly" } })).is_ok());
 
-    auto locked = vfs.open_write("/assets/locked", owe::fs::WriteOptions { .truncate = true });
+    auto locked = vfs.open_write("/assets/locked"_str, owe::fs::WriteOptions { .truncate = true });
     ASSERT_TRUE(locked.is_err());
     EXPECT_EQ(std::move(locked).unwrap_err_unchecked().kind().code,
               rstd::io::error::ErrorKind::ReadOnlyFilesystem);
 
-    auto created =
-        vfs.open_write("/assets/new", owe::fs::WriteOptions { .create = true, .truncate = true });
+    auto created = vfs.open_write("/assets/new"_str,
+                                  owe::fs::WriteOptions { .create = true, .truncate = true });
     ASSERT_TRUE(created.is_ok());
     {
         owe::fs::BinaryWriter writer(std::move(created).unwrap_unchecked());

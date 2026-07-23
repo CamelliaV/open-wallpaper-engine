@@ -9,6 +9,7 @@ import wescene.scene;
 import wescene.spec_names;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 namespace
@@ -41,15 +42,15 @@ std::uint32_t CountUvSeamTriangles(const owe::WPMdl::Mesh& mesh) {
 TEST(WPPuppet, ArcOwnedLayerExposesBorrowedTransforms) {
     auto                puppet = Arc<owe::WPPuppet>::make();
     owe::WPPuppet::Bone bone;
-    bone.name = String::make("root");
+    bone.name = String::make("root"_str);
     puppet->bones.push(rstd::move(bone));
     puppet->prepared();
 
     owe::WPPuppetLayer layer(puppet.clone());
     layer.prepared(slice<owe::WPPuppetLayer::AnimationLayer> {});
 
-    EXPECT_EQ(layer.boneIndex("root"), 1u);
-    EXPECT_EQ(layer.boneIndex("missing"), 0u);
+    EXPECT_EQ(layer.boneIndex("root"_str), 1u);
+    EXPECT_EQ(layer.boneIndex("missing"_str), 0u);
     EXPECT_TRUE(layer.boneTransform(0u, 0.0).is_none());
     auto transform = layer.boneTransform(1u, 0.0);
     ASSERT_TRUE(transform.is_some());
@@ -66,14 +67,14 @@ TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
     owe::fs::VFS vfs;
     auto         assets_fs = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
     if (assets_fs.is_ok()) {
-        ASSERT_TRUE(vfs.mount("/assets", std::move(assets_fs).unwrap_unchecked()).is_ok());
+        ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets_fs).unwrap_unchecked()).is_ok());
     }
     auto pkg_fs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path.string()));
     ASSERT_TRUE(pkg_fs.is_ok());
-    ASSERT_TRUE(vfs.mount("/assets", pkg_fs->mount_handle()).is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, pkg_fs->mount_handle()).is_ok());
 
     owe::WPMdl mdl;
-    ASSERT_TRUE(owe::WPMdlParser::Parse("models/球体01/球体01.mdl", vfs, mdl));
+    ASSERT_TRUE(owe::WPMdlParser::Parse("models/球体01/球体01.mdl"_str, vfs, mdl));
     ASSERT_FALSE(mdl.meshes.is_empty());
 
     const auto& mesh = mdl.meshes[usize()];

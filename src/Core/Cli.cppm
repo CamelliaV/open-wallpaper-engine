@@ -26,7 +26,7 @@ void WriteMessage(ref<str> text, rstd::argparse::OutputTarget::Tag target) {
     FILE* stream = target == rstd::argparse::OutputTarget::Tag::Stdout ? stdout : stderr;
     auto  size   = text.size().to_primitive();
     std::fwrite(text.data(), 1, size, stream);
-    if (size == 0 || text.data()[size - 1] != '\n') std::fputc('\n', stream);
+    if (size == 0 || text[usize(size - 1)] != u8('\n')) std::fputc('\n', stream);
 }
 
 auto Build(rstd::argparse::Command&& command)
@@ -74,9 +74,10 @@ auto ParseArgs(rstd::argparse::Command&& command, int argc, char** argv)
     -> Result<rstd::argparse::Matches, ParseExit> {
     auto arguments = Vec<rstd::ffi::OsString>::with_capacity(static_cast<usize>(argc));
     for (int i = 0; i < argc; ++i) {
-        auto bytes = ref<rstd::ffi::OsStr>::from_raw_parts(
-            reinterpret_cast<const rstd::uint8_t*>(argv[i]), usize(std::strlen(argv[i])));
-        arguments.push(rstd::ffi::OsString::from(bytes));
+        auto bytes = slice<byte>::from_raw_parts(reinterpret_cast<const byte*>(argv[i]),
+                                                 usize(std::strlen(argv[i])));
+        auto os    = ref<rstd::ffi::OsStr>::from_encoded_bytes_unchecked(rstd::as_u8_slice(bytes));
+        arguments.push(rstd::ffi::OsString::from(os));
     }
 
     auto built = Build(rstd::move(command));

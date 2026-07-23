@@ -17,6 +17,7 @@ import wescene.pkg_asset_version;
 
 using namespace owe;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::sync::Arc;
 
 enum class WPTexFlagEnum : uint32_t
@@ -450,7 +451,7 @@ auto owe::ParseImages(ref<dyn<IImageParser>> parser, slice<String> names, usize 
         } else {
             images.push(Err(ImageParseError {
                 .kind    = ImageParseErrorKind::DecodeFailed,
-                .message = String::make("texture parse task failed"),
+                .message = String::make("texture parse task failed"_str),
             }));
         }
     }

@@ -5,10 +5,11 @@ module;
 module weweb;
 
 import rstd.cppstd;
-
 import :browser_host;
 import :cef;
 import :cef_internal;
+
+using namespace rstd::literals;
 
 namespace weweb
 {
@@ -230,7 +231,7 @@ void BrowserHost::ApplyVolume(float volume) {
         if (browser && browser->GetHost()) browser->GetHost()->SetAudioMuted(volume <= 0.0f);
     }
     auto object = rstd::json::Map::make();
-    object.insert(::alloc::string::String::make(rstd::cppstd::as_str("value")),
+    object.insert(::alloc::string::String::make("value"_str),
                   rstd::into<owe::Json>(rstd::f32(volume)));
     auto v = owe::Json::Object(rstd::move(object));
     ApplyUserProperty("audio", v);
@@ -258,7 +259,7 @@ void BrowserHost::ApplyUserProperty(std::string_view key, const owe::Json& value
     // Page-side listener convention (mirrors BuildPropertyListenerSnippet):
     //   window.wallpaperPropertyListener.applyUserProperties({key: {value: V}}).
     auto object = rstd::json::Map::make();
-    object.insert(::alloc::string::String::make(rstd::cppstd::as_str(key)), value.clone());
+    object.insert(::alloc::string::String::make(rstd::cppstd::as_str(key).unwrap()), value.clone());
     auto        properties = owe::Json::Object(rstd::move(object));
     std::string snippet =
         "(function(){"

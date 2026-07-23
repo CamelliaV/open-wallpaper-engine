@@ -13,6 +13,7 @@ import wescene.scene;
 
 using namespace owe::vulkan;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::cppstd::as_str;
 
 CustomShaderPass::CustomShaderPass(Desc&& desc): m_desc(std::move(desc)) {}
@@ -23,7 +24,7 @@ namespace
 Option<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::string_view name) {
     if (name.empty()) return None();
     if (! owe::IsSpecTex(name)) return Some(MakeImportedTextureRequest(name));
-    auto target = scene.RenderTarget(as_str(name));
+    auto target = scene.RenderTarget(as_str(name).unwrap());
     if (target.is_none()) return None();
     return Some(MakeRenderTargetTextureRequest(name, **target));
 }
@@ -41,7 +42,7 @@ PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
     }
 
     if (! m_desc.output.empty() && IsSpecTex(m_desc.output)) {
-        auto target = scene.RenderTarget(as_str(m_desc.output));
+        auto target = scene.RenderTarget(as_str(m_desc.output).unwrap());
         if (target.is_some()) {
             const auto& rt             = **target;
             auto        output_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
@@ -172,7 +173,7 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
                                                   : resource::BufferLifetimeClass::Retained,
                 .content_version = vertex.DataGeneration(),
             },
-            rstd::slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(vertex.Data()),
+            rstd::slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(vertex.Data()),
                                             vertex.CapacitySizeOf()));
         m_desc.buffer_uses.push(rstd::move(use));
     }
@@ -196,7 +197,7 @@ void CustomShaderPass::declareResources(ResourceDeclarationContext& context) {
                                               : resource::BufferLifetimeClass::Retained,
             .content_version = index.DataGeneration(),
         },
-        rstd::slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(index.Data()),
+        rstd::slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(index.Data()),
                                         index.CapacitySizeof()));
     m_desc.buffer_uses.push(rstd::move(use));
 }
@@ -347,15 +348,15 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
         const auto& next     = textures[i];
         auto&       old      = m_desc.texture_bindings[i];
         auto        next_dep = ClassifySceneMaterialTexture(next);
-        if (old.name == rstd::cppstd::as_str(next) &&
+        if (old.name == rstd::cppstd::as_str(next).unwrap() &&
             ! IsLocalSceneMaterialTextureDependency(next_dep))
             continue;
 
         TextureBindingRequest binding;
         if (! next.empty()) {
-            binding.name    = rstd::string::String::make(rstd::cppstd::as_str(next));
+            binding.name    = rstd::string::String::make(rstd::cppstd::as_str(next).unwrap());
             binding.request = rstd::Some(MakeImportedTextureRequest(
-                next, render_scene.textureDescId(rstd::cppstd::as_str(next))));
+                next, render_scene.textureDescId(rstd::cppstd::as_str(next).unwrap())));
         }
 
         if (! SameTextureBindingRequest(old, binding)) {
@@ -376,7 +377,7 @@ auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareCo
     auto prepared = resources.Resolve(*m_desc.shader_use);
     if (prepared.is_none()) {
         return Err(UniformBufferUpdateError {
-            .message = String::make("prepared uniform shader is unavailable"),
+            .message = String::make("prepared uniform shader is unavailable"_str),
         });
     }
     const auto& artifact = (**prepared).shader.physical->artifact;
@@ -392,7 +393,7 @@ auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareCo
     auto draw = prepare->ResolveDraw(draw_item);
     if (draw.is_none()) {
         return Err(UniformBufferUpdateError {
-            .message = String::make("uniform texture metadata draw is unavailable"),
+            .message = String::make("uniform texture metadata draw is unavailable"_str),
         });
     }
     auto textures =
@@ -496,7 +497,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     {
         auto& tex_name = m_desc.output;
         rstd_assert(IsSpecTex(tex_name));
-        auto target = scene.RenderTarget(as_str(tex_name));
+        auto target = scene.RenderTarget(as_str(tex_name).unwrap());
         rstd_assert(target.is_some());
         if (target.is_none()) return;
         const auto& rt  = **target;
@@ -531,7 +532,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     const auto& slots   = mesh.MaterialSlots();
     if (submesh.material_slot >= slots.size() || ! slots[submesh.material_slot]) return;
     SceneMaterial& material_ref = *slots[submesh.material_slot];
-    auto           output_rt    = scene.RenderTarget(as_str(m_desc.output));
+    auto           output_rt    = scene.RenderTarget(as_str(m_desc.output).unwrap());
     if (output_rt.is_none()) return;
     const bool has_depth_attachment = (**output_rt).withDepth && UsesDepthAttachment(material_ref);
     m_desc.has_depth_attachment     = has_depth_attachment;

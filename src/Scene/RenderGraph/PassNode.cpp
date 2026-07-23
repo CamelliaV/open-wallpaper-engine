@@ -2,19 +2,20 @@ module wescene.rgraph;
 import rstd;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using namespace owe::rg;
 
 namespace
 {
 auto DotEscape(rstd::ref<rstd::str> value) -> String {
     auto out = String::make();
-    for (std::size_t index = 0; index < value.size().to_primitive(); ++index) {
-        switch (static_cast<char>(value.data()[index])) {
-        case '\\': out.push_str("\\\\"); break;
-        case '"': out.push_str("\\\""); break;
-        case '\n': out.push_str("\\n"); break;
+    for (auto value_byte : value) {
+        switch (static_cast<char>(value_byte.to_primitive())) {
+        case '\\': out.push_str("\\\\"_str); break;
+        case '"': out.push_str("\\\""_str); break;
+        case '\n': out.push_str("\\n"_str); break;
         case '\r': break;
-        default: out.push_back(value.data()[index]); break;
+        default: out.push_ascii(value_byte); break;
         }
     }
     return out;
@@ -22,11 +23,11 @@ auto DotEscape(rstd::ref<rstd::str> value) -> String {
 
 auto PassTypeName(PassNode::Type type) -> rstd::ref<rstd::str> {
     switch (type) {
-    case PassNode::Type::CustomShader: return "CustomShader";
-    case PassNode::Type::Copy: return "Copy";
-    case PassNode::Type::Virtual: return "Virtual";
+    case PassNode::Type::CustomShader: return "CustomShader"_str;
+    case PassNode::Type::Copy: return "Copy"_str;
+    case PassNode::Type::Virtual: return "Virtual"_str;
     }
-    return "Unknown";
+    return "Unknown"_str;
 }
 } // namespace
 

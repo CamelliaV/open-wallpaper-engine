@@ -8,6 +8,7 @@ using ::alloc::string::String;
 using ::alloc::sync::Arc;
 using ::alloc::vec::Vec;
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 export namespace owe::fs
 {
@@ -79,7 +80,7 @@ auto normalize(Path path, bool rooted) -> rstd::io::Result<rstd::path::PathBuf> 
         if (first.is_none() || ! first->is_root_dir()) {
             return rstd::Err(error(rstd::io::error::ErrorKind::InvalidInput));
         }
-        output = rstd::path::PathBuf::from("/");
+        output = rstd::path::PathBuf::from("/"_str);
     }
 
     while (true) {

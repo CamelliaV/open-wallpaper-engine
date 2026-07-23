@@ -74,7 +74,7 @@ bool FinPass::prepareResourceStates(
 
 void FinPass::prepare(Scene& scene, const Device&, PassPrepareContext& context) {
     auto tex_name = std::string(m_desc.result);
-    if (scene.RenderTarget(as_str(tex_name)).is_none()) {
+    if (scene.RenderTarget(as_str(tex_name).unwrap()).is_none()) {
         rstd_error("FinPass: scene render target \"{}\" not found", tex_name);
         return;
     }

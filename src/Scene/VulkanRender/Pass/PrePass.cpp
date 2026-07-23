@@ -87,7 +87,7 @@ std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() c
 void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& context) {
     {
         auto tex_name = std::string(m_desc.result);
-        if (scene.RenderTarget(as_str(tex_name)).is_none()) {
+        if (scene.RenderTarget(as_str(tex_name).unwrap()).is_none()) {
             rstd_error("frame result render target {} not found", tex_name);
             return;
         }
@@ -102,7 +102,7 @@ void PrePass::prepare(Scene& scene, const Device& device, PassPrepareContext& co
     }
     {
         auto tex_name = std::string(m_desc.result);
-        auto target   = scene.RenderTarget(as_str(tex_name));
+        auto target   = scene.RenderTarget(as_str(tex_name).unwrap());
         if (target.is_none()) return;
         m_desc.samples = TextureSampleCount((**target).sample_count);
         if (m_desc.samples != VK_SAMPLE_COUNT_1_BIT) {

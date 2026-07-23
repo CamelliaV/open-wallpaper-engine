@@ -185,9 +185,10 @@ public:
                 .stage_flags      = binding.stageFlags,
             });
         }
-        std::sort(bindings.begin(), bindings.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.binding < rhs.binding;
-        });
+        rstd::slice_::sort_unstable_by(bindings.as_mut_slice().as_mut_ref(),
+                                       [](const auto& lhs, const auto& rhs) {
+                                           return lhs.binding < rhs.binding;
+                                       });
         for (usize index = usize(); index < bindings.len(); ++index) {
             if (bindings[index].descriptor_count == 0 || bindings[index].stage_flags == 0 ||
                 (index > usize() &&

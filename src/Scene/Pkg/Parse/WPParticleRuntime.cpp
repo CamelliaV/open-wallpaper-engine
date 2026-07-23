@@ -15,6 +15,7 @@ import wescene.scene;
 import wescene.utils;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using namespace owe;
 using rstd::sync::Arc;
 
@@ -29,11 +30,9 @@ auto ControlpointRotation(const Eigen::Vector3f& angles) -> Eigen::Matrix3d {
 }
 
 template<typename Attribute, typename... Args>
-auto RegisterAttribute(particle::ParticleSchemaBuilder& builder, const char* name,
-                       const char* owner, Args&&... args)
-    -> particle::ParticleAttributeKey<Attribute> {
-    auto result =
-        builder.Register<Attribute>(ref<str>(name), ref<str>(owner), rstd::forward<Args>(args)...);
+auto RegisterAttribute(particle::ParticleSchemaBuilder& builder, ref<str> name, ref<str> owner,
+                       Args&&... args) -> particle::ParticleAttributeKey<Attribute> {
+    auto result = builder.Register<Attribute>(name, owner, rstd::forward<Args>(args)...);
     if (result.is_err()) rstd::panic { "failed to register particle attribute" };
     return result.unwrap();
 }
@@ -147,28 +146,33 @@ auto WPParticleAttributes::Register(particle::ParticleSchemaBuilder& builder)
     const Eigen::Vector3f zero = Eigen::Vector3f::Zero();
     const Eigen::Vector3f one  = Eigen::Vector3f::Ones();
     return {
-        .position = RegisterAttribute<particle::PositionAttribute>(builder, "position", "we", zero),
-        .velocity = RegisterAttribute<particle::VelocityAttribute>(builder, "velocity", "we", zero),
-        .acceleration =
-            RegisterAttribute<particle::AccelerationAttribute>(builder, "acceleration", "we", zero),
-        .rotation = RegisterAttribute<particle::RotationAttribute>(builder, "rotation", "we", zero),
+        .position =
+            RegisterAttribute<particle::PositionAttribute>(builder, "position"_str, "we"_str, zero),
+        .velocity =
+            RegisterAttribute<particle::VelocityAttribute>(builder, "velocity"_str, "we"_str, zero),
+        .acceleration = RegisterAttribute<particle::AccelerationAttribute>(
+            builder, "acceleration"_str, "we"_str, zero),
+        .rotation =
+            RegisterAttribute<particle::RotationAttribute>(builder, "rotation"_str, "we"_str, zero),
         .angular_velocity = RegisterAttribute<particle::AngularVelocityAttribute>(
-            builder, "angular_velocity", "we", zero),
+            builder, "angular_velocity"_str, "we"_str, zero),
         .angular_acceleration = RegisterAttribute<particle::AngularAccelerationAttribute>(
-            builder, "angular_acceleration", "we", zero),
-        .color    = RegisterAttribute<particle::ColorAttribute>(builder, "color", "we", one),
-        .alpha    = RegisterAttribute<particle::AlphaAttribute>(builder, "alpha", "we", 1.0f),
-        .size     = RegisterAttribute<particle::SizeAttribute>(builder, "size", "we", 20.0f),
-        .lifetime = RegisterAttribute<particle::LifetimeAttribute>(builder, "lifetime", "we", 1.0f),
-        .random   = RegisterAttribute<particle::RandomAttribute>(builder, "random", "we", 0.0f),
-        .initial_color =
-            RegisterAttribute<particle::InitialColorAttribute>(builder, "initial_color", "we", one),
+            builder, "angular_acceleration"_str, "we"_str, zero),
+        .color = RegisterAttribute<particle::ColorAttribute>(builder, "color"_str, "we"_str, one),
+        .alpha = RegisterAttribute<particle::AlphaAttribute>(builder, "alpha"_str, "we"_str, 1.0f),
+        .size  = RegisterAttribute<particle::SizeAttribute>(builder, "size"_str, "we"_str, 20.0f),
+        .lifetime =
+            RegisterAttribute<particle::LifetimeAttribute>(builder, "lifetime"_str, "we"_str, 1.0f),
+        .random =
+            RegisterAttribute<particle::RandomAttribute>(builder, "random"_str, "we"_str, 0.0f),
+        .initial_color = RegisterAttribute<particle::InitialColorAttribute>(
+            builder, "initial_color"_str, "we"_str, one),
         .initial_alpha = RegisterAttribute<particle::InitialAlphaAttribute>(
-            builder, "initial_alpha", "we", 1.0f),
-        .initial_size =
-            RegisterAttribute<particle::InitialSizeAttribute>(builder, "initial_size", "we", 20.0f),
+            builder, "initial_alpha"_str, "we"_str, 1.0f),
+        .initial_size = RegisterAttribute<particle::InitialSizeAttribute>(
+            builder, "initial_size"_str, "we"_str, 20.0f),
         .initial_lifetime = RegisterAttribute<particle::InitialLifetimeAttribute>(
-            builder, "initial_lifetime", "we", 1.0f),
+            builder, "initial_lifetime"_str, "we"_str, 1.0f),
     };
 }
 
@@ -415,8 +419,11 @@ WPParticleSubSystem::WPParticleSubSystem(
       m_trail_uniform_state(rstd::move(trail_uniform_state)) {
     m_attributes.Require(m_program);
     if (m_trail_length != u32()) {
-        m_trail_key = Some(RegisterAttribute<WPTrailHistoryAttribute>(
-            m_schema_builder, "trail_history", "we.rope", rstd::as_cast<usize>(m_trail_length)));
+        m_trail_key =
+            Some(RegisterAttribute<WPTrailHistoryAttribute>(m_schema_builder,
+                                                            "trail_history"_str,
+                                                            "we.rope"_str,
+                                                            rstd::as_cast<usize>(m_trail_length)));
         m_program.Require(*m_trail_key);
     }
 

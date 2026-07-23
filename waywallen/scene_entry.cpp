@@ -31,6 +31,7 @@ namespace
 {
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 struct Options {
     std::string ipc_path;
@@ -84,17 +85,17 @@ bool env_flag_enabled(const char* name) {
 }
 
 std::string shader_cache_dir() {
-    auto                configured = rstd::env::var("XDG_CACHE_HOME");
+    auto                configured = rstd::env::var("XDG_CACHE_HOME"_str);
     rstd::path::PathBuf path;
     if (configured.is_some() && ! configured->is_empty()) {
         path = rstd::path::PathBuf::from(rstd::move(configured).unwrap_unchecked());
     } else {
-        auto home = rstd::env::var("HOME");
+        auto home = rstd::env::var("HOME"_str);
         if (home.is_none() || home->is_empty()) return {};
         path = rstd::path::PathBuf::from(rstd::move(home).unwrap_unchecked());
-        path.push(ref<rstd::path::Path>(".cache"));
+        path.push(".cache"_str);
     }
-    path.push(ref<rstd::path::Path>("wescene-renderer"));
+    path.push("wescene-renderer"_str);
     auto text = path.as_path().to_str();
     return text.is_some() ? rstd::cppstd::to_string(*text) : std::string {};
 }
@@ -230,42 +231,42 @@ const T& ArgValue(const rstd::argparse::Matches& matches, const rstd::argparse::
 Options parse_args(int argc, char** argv) {
     using namespace rstd::argparse;
 
-    auto command = Command::make("waywallen-wescene-renderer");
-    auto ipc     = command.add_arg(Arg<rstd::string::String>::value("ipc", string_parser())
-                                       .long_name("ipc")
-                                       .help("Unix-domain socket path for daemon IPC")
+    auto command = Command::make("waywallen-wescene-renderer"_str);
+    auto ipc     = command.add_arg(Arg<rstd::string::String>::value("ipc"_str, string_parser())
+                                       .long_name("ipc"_str)
+                                       .help("Unix-domain socket path for daemon IPC"_str)
                                        .required());
-    auto path    = command.add_arg(Arg<rstd::string::String>::value("path", string_parser())
-                                       .long_name("path")
-                                       .help("Wallpaper Engine .pkg path (canonical resource)")
-                                       .default_value(""));
-    auto assets  = command.add_arg(Arg<rstd::string::String>::value("assets", string_parser())
-                                       .long_name("assets")
-                                       .help("Optional Wallpaper Engine assets directory")
-                                       .default_value(""));
+    auto path    = command.add_arg(Arg<rstd::string::String>::value("path"_str, string_parser())
+                                       .long_name("path"_str)
+                                       .help("Wallpaper Engine .pkg path (canonical resource)"_str)
+                                       .default_value(""_str));
+    auto assets  = command.add_arg(Arg<rstd::string::String>::value("assets"_str, string_parser())
+                                       .long_name("assets"_str)
+                                       .help("Optional Wallpaper Engine assets directory"_str)
+                                       .default_value(""_str));
     auto workshop_id =
-        command.add_arg(Arg<rstd::string::String>::value("workshop_id", string_parser())
-                            .long_name("workshop_id")
-                            .help("Optional Steam workshop id (informational)")
-                            .default_value(""));
+        command.add_arg(Arg<rstd::string::String>::value("workshop_id"_str, string_parser())
+                            .long_name("workshop_id"_str)
+                            .help("Optional Steam workshop id (informational)"_str)
+                            .default_value(""_str));
     auto render_node =
-        command.add_arg(Arg<rstd::string::String>::value("render-node", string_parser())
-                            .long_name("render-node")
+        command.add_arg(Arg<rstd::string::String>::value("render-node"_str, string_parser())
+                            .long_name("render-node"_str)
                             .help("DRM render-node path to pin Vulkan device selection to "
-                                  "(empty => let Vulkan pick the default)")
-                            .default_value(""));
+                                  "(empty => let Vulkan pick the default)"_str)
+                            .default_value(""_str));
     auto hwdec =
-        command.add_arg(Arg<rstd::string::String>::value("hwdec", string_parser())
-                            .long_name("hwdec")
-                            .help("Video texture decoder mode: auto, vulkan, vaapi, or none")
-                            .default_value(""));
+        command.add_arg(Arg<rstd::string::String>::value("hwdec"_str, string_parser())
+                            .long_name("hwdec"_str)
+                            .help("Video texture decoder mode: auto, vulkan, vaapi, or none"_str)
+                            .default_value(""_str));
     auto load_bench_output =
-        command.add_arg(Arg<rstd::string::String>::value("load-bench-output", string_parser())
-                            .long_name("load-bench-output")
-                            .help("Write scene load probe report to FILE")
-                            .value_name("FILE")
-                            .default_value(""));
-    command.add_arg(Arg<rstd::string::String>::value("remaining", string_parser())
+        command.add_arg(Arg<rstd::string::String>::value("load-bench-output"_str, string_parser())
+                            .long_name("load-bench-output"_str)
+                            .help("Write scene load probe report to FILE"_str)
+                            .value_name("FILE"_str)
+                            .default_value(""_str));
+    command.add_arg(Arg<rstd::string::String>::value("remaining"_str, string_parser())
                         .num_args(NumArgs::any())
                         .allow_hyphen_values());
 
@@ -332,7 +333,7 @@ bool parse_bool(const char* s, bool def) {
 }
 
 bool parse_user_property_bool(const owe::Json& raw, bool& out) {
-    auto        member = raw.get("value");
+    auto        member = raw.get("value"_str);
     const auto& value  = member.is_some() ? **member : raw;
     if (value.is_boolean()) {
         out = *value.as_bool();
@@ -893,7 +894,8 @@ int run(int argc, char** argv) {
                             return;
                         }
                         opts.initial_user_properties.insert(
-                            ::alloc::string::String::make(rstd::cppstd::as_str(k)), v.clone());
+                            ::alloc::string::String::make(rstd::cppstd::as_str(k).unwrap()),
+                            v.clone());
                     });
                 }
             }

@@ -9,6 +9,7 @@ import wescene.scene;
 import wescene.text;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 using rstd::cppstd::to_string;
 using rstd::sync::Arc;
 
@@ -25,7 +26,7 @@ public:
         -> rstd::Result<rstd::empty, owe::UniformError> {
         if (! Wants(output)) {
             return rstd::Err(owe::UniformError {
-                .message = rstd::string::String::make("unexpected uniform output"),
+                .message = rstd::string::String::make("unexpected uniform output"_str),
             });
         }
         m_value   = owe::UniformValue(value.data, value.size);
@@ -156,32 +157,32 @@ TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {
     owe::Scene  scene;
     std::string first;
     std::string second;
-    scene.RegisterUserTextBinding(String::make("title"),
+    scene.RegisterUserTextBinding(String::make("title"_str),
                                   Box<dyn<FnMut<void(ref<str>)>>>::make([&](ref<str> value) {
                                       first = to_string(value);
                                   }));
-    scene.RegisterUserTextBinding(String::make("title"),
+    scene.RegisterUserTextBinding(String::make("title"_str),
                                   Box<dyn<FnMut<void(ref<str>)>>>::make([&](ref<str> value) {
                                       second = to_string(value);
                                   }));
 
     auto property = owe::ParseJson(R"({"type":"textinput","value":"updated"})").unwrap();
-    EXPECT_TRUE(scene.ApplyUserTextBindings("title", property));
+    EXPECT_TRUE(scene.ApplyUserTextBindings("title"_str, property));
     EXPECT_EQ(first, "updated");
     EXPECT_EQ(second, "updated");
-    EXPECT_FALSE(scene.ApplyUserTextBindings("other", property));
+    EXPECT_FALSE(scene.ApplyUserTextBindings("other"_str, property));
 }
 
 TEST(SceneUserTextBinding, AppliesEmptyString) {
     owe::Scene  scene;
     std::string value = "default";
-    scene.RegisterUserTextBinding(String::make("title"),
+    scene.RegisterUserTextBinding(String::make("title"_str),
                                   Box<dyn<FnMut<void(ref<str>)>>>::make([&](ref<str> next) {
                                       value = to_string(next);
                                   }));
 
     auto property = owe::ParseJson(R"({"type":"textinput","value":""})").unwrap();
-    EXPECT_TRUE(scene.ApplyUserTextBindings("title", property));
+    EXPECT_TRUE(scene.ApplyUserTextBindings("title"_str, property));
     EXPECT_TRUE(value.empty());
 }
 
@@ -189,15 +190,15 @@ TEST(SceneUserPropertyBinding, AppliesJsonPayloadToOwnedCallback) {
     owe::Scene scene;
     bool       called = false;
     scene.RegisterUserPropertyBinding(
-        String::make("camera"),
+        String::make("camera"_str),
         Box<dyn<FnMut<void(const owe::Json&)>>>::make([&](const owe::Json& property) {
             called = property.is_object();
         }));
 
     auto property = owe::ParseJson(R"({"value":true})").unwrap();
-    EXPECT_TRUE(scene.ApplyUserPropertyBindings("camera", property));
+    EXPECT_TRUE(scene.ApplyUserPropertyBindings("camera"_str, property));
     EXPECT_TRUE(called);
-    EXPECT_FALSE(scene.ApplyUserPropertyBindings("other", property));
+    EXPECT_FALSE(scene.ApplyUserPropertyBindings("other"_str, property));
 }
 
 TEST(SceneTransformUpdater, ReceivesRuntimeElapsedTime) {
@@ -242,9 +243,9 @@ TEST(SceneCameraProjection, UsesExplicitProjectionFactories) {
 TEST(SceneCameraPath, UserBindingMutatesRegisteredArc) {
     owe::Scene scene;
     auto       path                = Arc<owe::SceneCameraPath>::make();
-    path->visible_user_binding.key = String::make("camera-path");
+    path->visible_user_binding.key = String::make("camera-path"_str);
     scene.RegisterCameraPath(path.clone());
-    scene.RegisterCameraPathUserBinding(String::make("camera-path"), path.clone());
+    scene.RegisterCameraPathUserBinding(String::make("camera-path"_str), path.clone());
 
     auto disabled = owe::ParseJson(R"({"value":false})").unwrap();
     EXPECT_TRUE(scene.ApplyUserCameraPathVisibilityBindings("camera-path", disabled));
@@ -306,8 +307,8 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     auto camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
     camera->AttatchNode(camera_node.as_ptr());
-    scene.RegisterCamera(String::make("default"), camera.clone());
-    ASSERT_TRUE(scene.SetActiveCamera(ref<str>("default")));
+    scene.RegisterCamera(String::make("default"_str), camera.clone());
+    ASSERT_TRUE(scene.SetActiveCamera("default"_str));
 
     auto parent = Arc<owe::SceneNode>::make(Eigen::Vector3f { 1982.0f, 1053.0f, 0.0f },
                                             Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
@@ -334,7 +335,7 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     state->Advance(owe::SceneFrame {});
 
     auto camera_resolver = Arc<owe::WPUniformCameraResolver>::make(camera.clone());
-    camera_resolver->Add(String::make("default"), camera.clone());
+    camera_resolver->Add(String::make("default"_str), camera.clone());
 
     auto parent_state = Arc<owe::WPUniformNodeState>::make(parent.clone(), camera_resolver.clone());
     parent_state->propagated_parallax_depth      = { -1.56f, -0.79f };
@@ -388,8 +389,8 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
                                                      2160.0f,
                                                      "_rt_effect_pingpong_a_test",
                                                      "_rt_effect_pingpong_b_test"));
-    scene.RegisterCamera(String::make("layer"), layer_camera.clone());
-    camera_resolver->Add(String::make("layer"), layer_camera.clone());
+    scene.RegisterCamera(String::make("layer"_str), layer_camera.clone());
+    camera_resolver->Add(String::make("layer"_str), layer_camera.clone());
     effect->SetCamera("layer");
     parent_state->propagate_parallax_to_children = true;
     mvp                                          = capture_mvp();
