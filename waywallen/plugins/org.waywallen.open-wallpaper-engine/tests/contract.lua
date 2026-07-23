@@ -303,6 +303,14 @@ equal(info.capabilities.discover.subscription, true, "subscription capability")
 equal(info.capabilities.discover.download, nil, "download capability must be absent")
 equal(info.capabilities.discover.resolve, nil, "resolve capability must be absent")
 equal(info.capabilities.discover.remote_hint, nil, "remote hint must be absent")
+equal(#info.capabilities.discover.filters, 6, "discover filter count")
+equal(info.capabilities.discover.filters[1].id, "type", "type filter")
+equal(info.capabilities.discover.filters[1].type, "select", "type filter control")
+equal(info.capabilities.discover.filters[3].values[1], "Mature", "mature filter value")
+truthy(
+    info.capabilities.discover.filters[3].confirmation:find("18 or older", 1, true),
+    "mature filter confirmation"
+)
 equal(info.actions[1].label, "Log in to Steam", "Steam login label")
 equal(info.actions[1].browse_button_label, "Log in to Steam", "Steam browse login button label")
 equal(info.actions[1].description, nil, "Steam manage action description")
@@ -314,6 +322,7 @@ equal(
 )
 equal(main.discover.download, nil, "download callback must be absent")
 equal(main.discover.resolve, nil, "resolve callback must be absent")
+equal(main.discover.tags, nil, "dynamic tag callback must be absent")
 truthy(type(main.subscription.status) == "function", "subscription.status missing")
 truthy(type(main.qrlogin.begin) == "function", "qrlogin.begin missing")
 

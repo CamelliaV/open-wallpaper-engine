@@ -4,10 +4,6 @@ local map = import("wallpaper_engine.map")
 local M = {}
 local cached_details = {}
 
-function M.tags(ctx)
-    return api.fetch_tags(ctx)
-end
-
 function M.search(ctx, params)
     local result = api.search(ctx, params)
     local items = {}

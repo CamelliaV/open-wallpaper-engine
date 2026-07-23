@@ -76,7 +76,7 @@ function M.info()
                     { key = "most_subscribed", label = "Most subscribed" },
                     { key = "top_rated", label = "Top rated" },
                 },
-                tags = api.tags,
+                filters = api.filters,
             },
             wallpaper = {
                 properties = true,

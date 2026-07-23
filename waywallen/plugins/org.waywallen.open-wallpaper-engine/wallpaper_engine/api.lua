@@ -4,7 +4,6 @@ local session = import("wallpaper_engine.session")
 M.APPID = "431960"
 local QUERYFILES = "https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/"
 local FILEDETAILS = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
-local BROWSE_PAGE = "https://steamcommunity.com/workshop/browse/?appid=" .. M.APPID
 local NUMPERPAGE = 30
 
 -- sort key -> EPublishedFileQueryType (+ trend window in days).
@@ -30,45 +29,111 @@ M.TYPE_WP = {
 
 local RATING_TAGS = { Questionable = true, Mature = true }
 
--- Tags the workshop declares that never make sense as wallpaper filters: the
--- non-renderable/non-wallpaper types and categories, and the default rating.
-local EXCLUDE_TAGS = {
-    Application = true, Wallpaper = true, Preset = true, Asset = true,
-    Everyone = true, ["Asset Pack"] = true,
+M.filters = {
+    {
+        id = "type",
+        title = "Type",
+        type = "select",
+        values = { "Scene", "Video", "Web" },
+    },
+    {
+        id = "questionable",
+        title = "Questionable content",
+        type = "toggle",
+        values = { "Questionable" },
+        description = "Include Workshop items tagged as questionable.",
+    },
+    {
+        id = "mature",
+        title = "Mature content (NSFW)",
+        type = "toggle",
+        values = { "Mature" },
+        description = "Include mature-tagged Workshop items.",
+        confirmation =
+            "This shows wallpapers tagged as mature / NSFW. " ..
+            "You must be 18 or older to enable this. Continue?",
+    },
+    {
+        id = "miscellaneous",
+        title = "Miscellaneous",
+        type = "multi_select",
+        values = {
+            "Approved",
+            "Audio responsive",
+            "3D",
+            "Customizable",
+            "Puppet Warp",
+            "HDR",
+            "Media Integration",
+            "User Shortcut",
+            "Video Texture",
+        },
+    },
+    {
+        id = "genre",
+        title = "Genre",
+        type = "multi_select",
+        values = {
+            "Abstract",
+            "Animal",
+            "Anime",
+            "Cartoon",
+            "CGI",
+            "Cyberpunk",
+            "Fantasy",
+            "Game",
+            "Girls",
+            "Guys",
+            "Landscape",
+            "Medieval",
+            "Memes",
+            "MMD",
+            "Music",
+            "Nature",
+            "Pixel art",
+            "Relaxing",
+            "Retro",
+            "Sci-Fi",
+            "Sports",
+            "Technology",
+            "Television",
+            "Vehicle",
+            "Unspecified",
+        },
+    },
+    {
+        id = "resolution",
+        title = "Resolution",
+        type = "select",
+        values = {
+            "Standard Definition",
+            "1280 x 720",
+            "1366 x 768",
+            "1920 x 1080",
+            "2560 x 1440",
+            "3840 x 2160",
+            "Ultrawide Standard Definition",
+            "Ultrawide 2560 x 1080",
+            "Ultrawide 3440 x 1440",
+            "Dual Standard Definition",
+            "Dual 3840 x 1080",
+            "Dual 5120 x 1440",
+            "Dual 7680 x 2160",
+            "Triple Standard Definition",
+            "Triple 4096 x 768",
+            "Triple 5760 x 1080",
+            "Triple 7680 x 1440",
+            "Triple 11520 x 2160",
+            "Portrait Standard Definition",
+            "Portrait 720 x 1280",
+            "Portrait 1080 x 1920",
+            "Portrait 1440 x 2560",
+            "Portrait 2160 x 3840",
+            "Other resolution",
+            "Dynamic resolution",
+        },
+    },
 }
-
--- Fallback
-M.tags = { "Scene", "Video", "Web", "Questionable", "Mature" }
-
--- Web scraped tags
-local cached_tags
-
-function M.fetch_tags(ctx)
-    if cached_tags then
-        return cached_tags
-    end
-    local rsp = ctx.http:get(BROWSE_PAGE):timeout(15):send()
-    if not rsp:ok() then
-        error("steam workshop tags http " .. tostring(rsp:status()))
-    end
-    local html = rsp:text() or ""
-    local d = html:find("declaredTags", 1, true)
-    local s = d and html:find("mtx_tags", d, true)
-    local e = s and html:find("readytouse_tags", s, true)
-    if not s or not e then
-        error("could not locate the workshop tag taxonomy")
-    end
-    local block = html:sub(s, e):gsub('\\"', '"')
-    local tags, seen = {}, {}
-    for name, admin in block:gmatch('"name":"([^"]+)","display_name":"[^"]*","admin_only":(%a+)') do
-        if admin == "false" and not EXCLUDE_TAGS[name] and not seen[name] then
-            seen[name] = true
-            table.insert(tags, name)
-        end
-    end
-    cached_tags = tags
-    return tags
-end
 
 function M.search(ctx, params)
     local sort = SORTS[params.sort] or SORTS.trend_week
@@ -77,7 +142,7 @@ function M.search(ctx, params)
     -- Ratings are excluded unless the user opted them in via a tag.
     local excluded = {
         Questionable = true, Mature = true,
-        Application = true, Preset = true, Asset = true,
+        Application = true, Preset = true, Asset = true, ["Asset Pack"] = true,
     }
     local required = {}
     for _, tag in ipairs(params.tags or {}) do
