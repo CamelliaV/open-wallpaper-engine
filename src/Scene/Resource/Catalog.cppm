@@ -40,13 +40,38 @@ struct TextureContentProvider {
     struct Api {
         using Trait = TextureContentProvider;
 
-        auto LoadTexture(const TextureRequest& request) -> Result<mut_ref<Image>, ResourceError> {
+        auto ResolveTextureKey(const TextureRequest& request) const
+            -> Result<String, ResourceError> {
             return rstd::trait_call<0>(this, request);
+        }
+
+        auto LoadTextures(slice<String> keys)
+            -> Vec<Result<rstd::sync::Arc<Image>, ResourceError>> {
+            return rstd::trait_call<1>(this, keys);
         }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::LoadTexture>;
+    using Funcs = TraitFuncs<&T::ResolveTextureKey, &T::LoadTextures>;
+};
+
+struct TexturePrepareObserver {
+    using Trait                  = TexturePrepareObserver;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = TexturePrepareObserver;
+
+        void BeginTexturePlan() { rstd::trait_call<0>(this); }
+        void EndTexturePlan() { rstd::trait_call<1>(this); }
+        void BeginTextureUpload() { rstd::trait_call<2>(this); }
+        void EndTextureUpload() { rstd::trait_call<3>(this); }
+    };
+
+    template<typename T>
+    using Funcs = TraitFuncs<&T::BeginTexturePlan, &T::EndTexturePlan, &T::BeginTextureUpload,
+                             &T::EndTextureUpload>;
 };
 
 struct BufferCatalog {

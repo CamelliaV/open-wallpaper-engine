@@ -122,8 +122,8 @@ struct VulkanRender::Impl {
                                   resource::ResourcePlanSections);
     void refreshPreparedTextures(Scene&, const RenderSceneSnapshot&);
     void invalidatePreparedRenderItems(slice<owe::RenderItemId>, PassInvalidationFlags);
-    void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&,
-                                    slice<owe::RenderItemId>, PassInvalidationFlags);
+    void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&, slice<owe::RenderItemId>,
+                                    PassInvalidationFlags);
     void refreshPreparedMaterial(Scene&, const RenderSceneSnapshot&, owe::SceneMaterialId,
                                  PassInvalidationFlags);
     bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&, owe::SceneMaterialId);
@@ -148,7 +148,8 @@ struct VulkanRender::Impl {
     Box<FinPass> m_finpass { Box<FinPass>::make(FinPass::Desc {}) };
     ReDrawCB     m_redraw_cb;
 
-    ShaderReflectionCache m_shader_reflection_cache;
+    ShaderReflectionCache      m_shader_reflection_cache;
+    SceneLoadBenchRecorderView m_pending_load_bench;
 
     vvk::CommandBuffers             m_cmds;
     std::vector<vvk::CommandBuffer> m_upload_cmds;
@@ -642,8 +643,13 @@ void VulkanRender::Impl::commitPreparedUploads(SceneLoadBenchRecorderView load_b
 }
 
 bool VulkanRender::Impl::waitForPreparedUploads(RenderingResources& rr) {
+    auto wait_span =
+        SceneLoadSpan(m_pending_load_bench, &SceneLoadProbeIds::render_texture_upload_wait);
     auto pending = rr.resources.PendingUpload();
-    if (pending.is_none()) return true;
+    if (pending.is_none()) {
+        m_pending_load_bench = {};
+        return true;
+    }
     std::uint64_t counter = 0;
     VVK_CHECK_ACT(return false, rr.sem_upload.GetCounter(&counter));
     if (counter < pending->value.to_primitive()) {
@@ -651,6 +657,7 @@ bool VulkanRender::Impl::waitForPreparedUploads(RenderingResources& rr) {
                              rr.sem_upload.Wait(pending->value.to_primitive(), vk_wait_time));
     }
     rr.resources.CompleteUploadsThrough(pending->value);
+    m_pending_load_bench = {};
     return true;
 }
 
@@ -1054,8 +1061,9 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
                                             const RenderSceneSnapshot& render_scene,
                                             SceneLoadBenchRecorderView load_bench) {
     if (! m_inited) return;
-    auto compile_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_graph_compile);
-    m_program.loaded  = false;
+    m_pending_load_bench = load_bench;
+    auto compile_span    = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_graph_compile);
+    m_program.loaded     = false;
 
     {
         auto program_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_program_build);
@@ -1114,16 +1122,16 @@ void VulkanRender::Impl::refreshPreparedResources(Scene&                        
     commitPreparedUploads();
 }
 
-void VulkanRender::Impl::invalidatePreparedRenderItems(
-    slice<owe::RenderItemId> render_items, PassInvalidationFlags flags) {
+void VulkanRender::Impl::invalidatePreparedRenderItems(slice<owe::RenderItemId> render_items,
+                                                       PassInvalidationFlags    flags) {
     if (! m_inited) return;
     m_program.invalidateRenderItems(render_items, flags);
 }
 
-void VulkanRender::Impl::refreshPreparedRenderItems(Scene&                             scene,
-                                                    const RenderSceneSnapshot&         render_scene,
-                                                    slice<owe::RenderItemId>           render_items,
-                                                    PassInvalidationFlags              flags) {
+void VulkanRender::Impl::refreshPreparedRenderItems(Scene&                     scene,
+                                                    const RenderSceneSnapshot& render_scene,
+                                                    slice<owe::RenderItemId>   render_items,
+                                                    PassInvalidationFlags      flags) {
     invalidatePreparedRenderItems(render_items, flags);
     refreshPreparedResources(scene, render_scene);
 }

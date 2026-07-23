@@ -341,84 +341,6 @@ CreateImage(const Device& device, VkExtent3D extent, rstd::uint32_t miplevel, Vk
     return None();
 }
 
-inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
-                              std::span<const VkExtent3D> in_exts, const vvk::Queue& queue,
-                              vvk::CommandBuffer& cmd, const ImageParameters& image) {
-    VkResult result;
-    do {
-        result = cmd.Begin(VkCommandBufferBeginInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        });
-        if (result != VK_SUCCESS) break;
-
-        VkImageSubresourceRange subresourceRange {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = static_cast<rstd::uint32_t>(in_bufs.size()),
-            .baseArrayLayer = 0,
-            .layerCount     = 1,
-        };
-        {
-            VkImageMemoryBarrier in_bar {
-                .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .pNext            = nullptr,
-                .srcAccessMask    = VK_ACCESS_MEMORY_WRITE_BIT,
-                .dstAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .image            = image.handle,
-                .subresourceRange = subresourceRange,
-            };
-            cmd.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                VK_DEPENDENCY_BY_REGION_BIT,
-                                in_bar);
-        }
-        VkBufferImageCopy copy {
-            .imageSubresource =
-                VkImageSubresourceLayers {
-                    .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .baseArrayLayer = 0,
-                    .layerCount     = 1,
-                },
-        };
-        for (std::size_t i = 0; i < in_bufs.size(); ++i) {
-            copy.imageSubresource.mipLevel = static_cast<rstd::uint32_t>(i);
-            copy.imageExtent               = in_exts[i];
-            cmd.CopyBufferToImage(
-                in_bufs[i].handle, image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copy);
-        }
-        {
-            VkImageMemoryBarrier out_bar {
-                .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .pNext            = nullptr,
-                .srcAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
-                .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image            = image.handle,
-                .subresourceRange = subresourceRange,
-            };
-            cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                                VK_DEPENDENCY_BY_REGION_BIT,
-                                out_bar);
-        }
-        result = cmd.End();
-        if (result != VK_SUCCESS) break;
-
-        VkSubmitInfo sub_info {
-            .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext              = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers    = cmd.address(),
-        };
-        result = queue.Submit(sub_info);
-    } while (false);
-    return result;
-}
 } // namespace
 
 usize TextureKey::HashValue(const TextureKey& k) {
@@ -480,23 +402,22 @@ Option<ExImageParameters> TextureCache::CreateExTex(u32 width, u32 height, VkFor
     return opt;
 }
 
-Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateTex(Image& image) {
+Option<rstd::sync::Arc<TextureAllocation>>
+TextureCache::AllocateImportedTexture(const Image& image) {
     if (image.header.type == ImageType::VIDEO) {
         return CreateVideoTex(image);
     }
 
     ImageSlots img_slots;
 
-    if (! m_tex_cmd) allocateCmd();
-
     img_slots.slots.resize(image.slots.size());
 
     auto& sam = image.header.sample;
 
     for (std::size_t i = 0; i < image.slots.size(); ++i) {
-        auto& image_paras   = img_slots.slots[i];
-        auto& image_slot    = image.slots[i];
-        auto  mipmap_levels = image_slot.mipmaps.size();
+        auto&       image_paras   = img_slots.slots[i];
+        const auto& image_slot    = image.slots[i];
+        auto        mipmap_levels = image_slot.mipmaps.size();
 
         // check data
         if (! image_slot) return rstd::None();
@@ -532,42 +453,9 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateTex(Image& image)
             opt.is_some()) {
             image_paras = rstd::move(opt).unwrap();
             AssignImageGeneration(image_paras);
-        } else
-            break;
-
-        std::vector<VmaBufferParameters> stage_bufs;
-        std::vector<VkExtent3D>          extents;
-
-        for (std::size_t j = 0; j < image_slot.mipmaps.size(); ++j) {
-            auto&               image_data = image_slot.mipmaps[j];
-            VmaBufferParameters buf;
-            (void)CreateStagingBuffer(m_device.vma_allocator(),
-                                      static_cast<VkDeviceSize>(image_data.size.to_primitive()),
-                                      buf);
-            {
-                void* v_data;
-                VVK_CHECK(buf.handle.MapMemory(&v_data));
-                std::memcpy(v_data,
-                            image_data.data.get(),
-                            static_cast<std::size_t>(image_data.size.to_primitive()));
-                buf.handle.UnMapMemory();
-            }
-            stage_bufs.emplace_back(std::move(buf));
-            extents.push_back(VkExtent3D { static_cast<rstd::uint32_t>(image_data.width),
-                                           static_cast<rstd::uint32_t>(image_data.height),
-                                           1 });
+        } else {
+            return rstd::None();
         }
-
-        CopyImageData(transform<VmaBufferParameters>(stage_bufs,
-                                                     [](BufferParameters e) {
-                                                         return e;
-                                                     }),
-                      extents,
-                      m_device.graphics_queue().handle,
-                      m_tex_cmd,
-                      ToImageParameters(image_paras));
-
-        m_device.handle().WaitIdle();
     }
     return rstd::Some(rstd::sync::Arc<TextureAllocation>::make(rstd::move(img_slots)));
 }
@@ -827,7 +715,7 @@ struct TextureCache::VideoRegistry {
     }
 };
 
-Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(Image& image) {
+Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Image& image) {
     if (image.slots.empty() || image.slots[0].mipmaps.empty()) return rstd::None();
     auto& mip = image.slots[0].mipmaps[0];
     if (mip.video_source.is_none() || mip.width <= 0 || mip.height <= 0) {

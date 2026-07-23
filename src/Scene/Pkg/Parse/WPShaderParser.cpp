@@ -1,25 +1,31 @@
 module;
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cctype>
+#include <cstdint>
+#include <limits>
 #include <rstd/macro.hpp>
+#include <span>
 #include <string>
+#include <vector>
 
 module wescene.pkg.parse;
 import wescene.spec_names;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.shader_compile;
 import wescene.scene;
-import wescene.pkg_asset_version;
 import wescene.utils;
 import :shader_lex;
 
 static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 
-#define SHADER_DIR    "spvs01"
+#define SHADER_DIR    "spvs03"
 #define SHADER_SUFFIX "spvs"
 
 using namespace owe;
@@ -1658,14 +1664,162 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
     return with_decls + synth.post;
 }
 
-inline std::string GenSha1(std::span<const WPShaderUnit> units) {
-    std::string shas;
-    for (auto& unit : units) {
-        shas += std::to_string(static_cast<unsigned>(unit.stage));
-        shas.push_back(':');
-        shas += utils::genSha1(unit.src);
+using ShaderCacheDigest = std::array<std::uint8_t, 20>;
+
+constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
+constexpr std::uint32_t               kShaderCacheFormatVersion  = 3;
+constexpr std::uint32_t               kShaderCacheAbiVersion     = 1;
+constexpr std::uint32_t               kShaderCacheHeaderSize     = 112;
+constexpr std::uint32_t               kMaxShaderCacheStages      = 16;
+constexpr std::uint32_t               kMaxShaderCacheMapEntries  = 4096;
+constexpr std::uint32_t               kMaxShaderCacheSlots       = 1024;
+constexpr std::uint32_t               kMaxShaderCacheStringSize  = 32 * 1024 * 1024;
+constexpr std::uint32_t               kMaxShaderCachePayloadSize = 256 * 1024 * 1024;
+
+class ShaderCacheByteWriter {
+public:
+    void U32(std::uint32_t value) {
+        m_bytes.push_back(static_cast<std::uint8_t>(value));
+        m_bytes.push_back(static_cast<std::uint8_t>(value >> 8));
+        m_bytes.push_back(static_cast<std::uint8_t>(value >> 16));
+        m_bytes.push_back(static_cast<std::uint8_t>(value >> 24));
     }
-    return utils::genSha1(shas);
+
+    bool Bytes(std::span<const std::uint8_t> value) {
+        if (m_bytes.size() > std::numeric_limits<std::uint32_t>::max() ||
+            value.size() > std::numeric_limits<std::uint32_t>::max() - m_bytes.size()) {
+            return false;
+        }
+        m_bytes.insert(m_bytes.end(), value.begin(), value.end());
+        return true;
+    }
+
+    bool String(std::string_view value) {
+        if (value.size() > kMaxShaderCacheStringSize) return false;
+        U32(static_cast<std::uint32_t>(value.size()));
+        return Bytes(std::span<const std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(value.data()), value.size()));
+    }
+
+    const std::vector<std::uint8_t>& bytes() const noexcept { return m_bytes; }
+    std::vector<std::uint8_t>        Take() noexcept { return std::move(m_bytes); }
+
+private:
+    std::vector<std::uint8_t> m_bytes;
+};
+
+class ShaderCacheByteReader {
+public:
+    explicit ShaderCacheByteReader(std::span<const std::uint8_t> bytes): m_bytes(bytes) {}
+
+    bool U32(std::uint32_t& value) {
+        std::span<const std::uint8_t> bytes;
+        if (! Bytes(4, bytes)) return false;
+        value = static_cast<std::uint32_t>(bytes[0]) | (static_cast<std::uint32_t>(bytes[1]) << 8) |
+                (static_cast<std::uint32_t>(bytes[2]) << 16) |
+                (static_cast<std::uint32_t>(bytes[3]) << 24);
+        return true;
+    }
+
+    bool Bytes(std::size_t size, std::span<const std::uint8_t>& value) {
+        if (size > remaining()) return false;
+        value = m_bytes.subspan(m_position, size);
+        m_position += size;
+        return true;
+    }
+
+    bool String(std::string& value) {
+        std::uint32_t size = 0;
+        if (! U32(size) || size > kMaxShaderCacheStringSize) return false;
+        std::span<const std::uint8_t> bytes;
+        if (! Bytes(size, bytes)) return false;
+        value.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        return true;
+    }
+
+    std::size_t remaining() const noexcept { return m_bytes.size() - m_position; }
+    bool        done() const noexcept { return m_position == m_bytes.size(); }
+
+private:
+    std::span<const std::uint8_t> m_bytes;
+    std::size_t                   m_position { 0 };
+};
+
+int HexDigit(char value) {
+    if (value >= '0' && value <= '9') return value - '0';
+    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+    return -1;
+}
+
+std::optional<ShaderCacheDigest> DecodeShaderCacheDigest(std::string_view value) {
+    if (value.size() != 40) return std::nullopt;
+    ShaderCacheDigest digest {};
+    for (std::size_t i = 0; i < digest.size(); ++i) {
+        const int hi = HexDigit(value[i * 2]);
+        const int lo = HexDigit(value[i * 2 + 1]);
+        if (hi < 0 || lo < 0) return std::nullopt;
+        digest[i] = static_cast<std::uint8_t>((hi << 4) | lo);
+    }
+    return digest;
+}
+
+std::optional<ShaderCacheDigest> HashShaderCacheBytes(std::span<const std::uint8_t> bytes) {
+    return DecodeShaderCacheDigest(utils::genSha1(
+        std::span<const char>(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
+}
+
+struct ShaderCacheIdentity {
+    ShaderCacheDigest cache_key;
+    ShaderCacheDigest source;
+    ShaderCacheDigest combos;
+    std::string       cache_key_hex;
+};
+
+std::optional<ShaderCacheIdentity> MakeShaderCacheIdentity(std::span<const WPShaderUnit> units,
+                                                           const Combos&                 combos) {
+    if (units.size() > kMaxShaderCacheStages || combos.size() > kMaxShaderCacheMapEntries) {
+        return std::nullopt;
+    }
+
+    ShaderCacheByteWriter source;
+    source.U32(static_cast<std::uint32_t>(units.size()));
+    for (const auto& unit : units) {
+        source.U32(static_cast<std::uint32_t>(unit.stage));
+        if (! source.String(unit.src)) return std::nullopt;
+    }
+
+    ShaderCacheByteWriter combo;
+    combo.U32(static_cast<std::uint32_t>(combos.size()));
+    for (const auto& [name, value] : combos) {
+        if (! combo.String(name) || ! combo.String(value)) return std::nullopt;
+    }
+
+    auto source_digest = HashShaderCacheBytes(
+        std::span<const std::uint8_t>(source.bytes().data(), source.bytes().size()));
+    auto combo_digest = HashShaderCacheBytes(
+        std::span<const std::uint8_t>(combo.bytes().data(), combo.bytes().size()));
+    if (! source_digest || ! combo_digest) return std::nullopt;
+
+    ShaderCacheByteWriter key;
+    key.String("owe.shader-cache.v3");
+    key.U32(kShaderCacheAbiVersion);
+    key.Bytes(std::span<const std::uint8_t>(source_digest->data(), source_digest->size()));
+    key.Bytes(std::span<const std::uint8_t>(combo_digest->data(), combo_digest->size()));
+    key.String("vulkan-1.1");
+    key.String("hlsl");
+    key.U32(0);
+
+    const std::string key_hex    = utils::genSha1(std::span<const char>(
+        reinterpret_cast<const char*>(key.bytes().data()), key.bytes().size()));
+    auto              key_digest = DecodeShaderCacheDigest(key_hex);
+    if (! key_digest) return std::nullopt;
+    return ShaderCacheIdentity {
+        .cache_key     = *key_digest,
+        .source        = *source_digest,
+        .combos        = *combo_digest,
+        .cache_key_hex = key_hex,
+    };
 }
 
 inline rstd::path::PathBuf GetCachePath(ref<rstd::path::Path> cache_dir, std::string_view scene_id,
@@ -1678,40 +1832,330 @@ inline rstd::path::PathBuf GetCachePath(ref<rstd::path::Path> cache_dir, std::st
     return path;
 }
 
-inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::BinaryReader& file) {
-    codes.clear();
-    std::int32_t ver = ReadShaderCacheVersion(file);
-    if (ver != 1) return false;
-
-    std::uint32_t count = file.ReadUint32();
-    rstd_assert(count <= 16);
-    if (count > 16) return false;
-
-    codes.resize(count);
-    for (std::size_t i = 0; i < count; i++) {
-        auto& c = codes[i];
-
-        std::uint32_t size = file.ReadUint32();
-        rstd_assert(size % 4 == 0);
-        if (size % 4 != 0) return false;
-
-        c.resize(size / 4);
-        file.Read((char*)c.data(), size);
+bool WriteCacheMap(ShaderCacheByteWriter& writer, const Map<std::string, std::string>& values) {
+    if (values.size() > kMaxShaderCacheMapEntries) return false;
+    writer.U32(static_cast<std::uint32_t>(values.size()));
+    for (const auto& [name, value] : values) {
+        if (! writer.String(name) || ! writer.String(value)) return false;
     }
     return true;
 }
 
-inline void SaveShaderToFile(std::span<const ShaderCode> codes, fs::BinaryWriter& file) {
-    char nop[256] { '\0' };
-
-    WriteShaderCacheVersion(file, 1);
-    file.WriteUint32(static_cast<std::uint32_t>(codes.size()));
-    for (const auto& c : codes) {
-        const auto size = static_cast<std::uint32_t>(c.size() * 4);
-        file.WriteUint32(size);
-        file.Write((const char*)c.data(), size);
+bool ReadCacheMap(ShaderCacheByteReader& reader, Map<std::string, std::string>& values) {
+    std::uint32_t count = 0;
+    if (! reader.U32(count) || count > kMaxShaderCacheMapEntries) return false;
+    values.clear();
+    for (std::uint32_t i = 0; i < count; ++i) {
+        std::string name;
+        std::string value;
+        if (! reader.String(name) || ! reader.String(value) ||
+            ! values.emplace(std::move(name), std::move(value)).second) {
+            return false;
+        }
     }
-    file.Write(nop, sizeof(nop));
+    return true;
+}
+
+bool WriteCacheSlots(ShaderCacheByteWriter& writer, const Set<unsigned>& slots) {
+    if (slots.size() > kMaxShaderCacheSlots) return false;
+    writer.U32(static_cast<std::uint32_t>(slots.size()));
+    for (const auto slot : slots) writer.U32(static_cast<std::uint32_t>(slot));
+    return true;
+}
+
+bool ReadCacheSlots(ShaderCacheByteReader& reader, Set<unsigned>& slots) {
+    std::uint32_t count = 0;
+    if (! reader.U32(count) || count > kMaxShaderCacheSlots) return false;
+    slots.clear();
+    for (std::uint32_t i = 0; i < count; ++i) {
+        std::uint32_t slot = 0;
+        if (! reader.U32(slot) || ! slots.insert(static_cast<unsigned>(slot)).second) return false;
+    }
+    return true;
+}
+
+struct ShaderCacheArtifact {
+    std::vector<WPShaderUnit> units;
+    std::vector<ShaderCode>   codes;
+};
+
+enum class ShaderCacheReadStatus
+{
+    Hit,
+    Miss,
+    Invalid,
+};
+
+struct ShaderCacheReadResult {
+    ShaderCacheReadStatus status { ShaderCacheReadStatus::Invalid };
+    ShaderCacheArtifact   artifact;
+    std::string           reason;
+};
+
+class ShaderCacheArtifactCodec {
+public:
+    static std::optional<std::vector<std::uint8_t>> Encode(const ShaderCacheIdentity&    identity,
+                                                           std::span<const WPShaderUnit> units,
+                                                           std::span<const ShaderCode>   codes) {
+        if (units.empty() || units.size() != codes.size() || units.size() > kMaxShaderCacheStages) {
+            return std::nullopt;
+        }
+
+        ShaderCacheByteWriter payload;
+        for (std::size_t i = 0; i < units.size(); ++i) {
+            if (static_cast<std::uint32_t>(units[i].stage) >
+                static_cast<std::uint32_t>(ShaderType::FRAGMENT)) {
+                return std::nullopt;
+            }
+            ShaderCacheByteWriter record;
+            record.U32(static_cast<std::uint32_t>(units[i].stage));
+            if (! record.String(units[i].src) ||
+                ! WriteCacheMap(record, units[i].preprocess_info.input) ||
+                ! WriteCacheMap(record, units[i].preprocess_info.output) ||
+                ! WriteCacheMap(record, units[i].preprocess_info.uniforms) ||
+                ! WriteCacheSlots(record, units[i].preprocess_info.active_tex_slots) ||
+                codes[i].size() > std::numeric_limits<std::uint32_t>::max() / 4) {
+                return std::nullopt;
+            }
+
+            record.U32(static_cast<std::uint32_t>(codes[i].size() * 4));
+            for (const auto word : codes[i]) record.U32(word);
+            if (record.bytes().size() > kMaxShaderCachePayloadSize - sizeof(std::uint32_t) ||
+                payload.bytes().size() >
+                    kMaxShaderCachePayloadSize - sizeof(std::uint32_t) - record.bytes().size()) {
+                return std::nullopt;
+            }
+            payload.U32(static_cast<std::uint32_t>(record.bytes().size()));
+            if (! payload.Bytes(
+                    std::span<const std::uint8_t>(record.bytes().data(), record.bytes().size()))) {
+                return std::nullopt;
+            }
+        }
+        if (payload.bytes().size() > kMaxShaderCachePayloadSize) return std::nullopt;
+
+        auto payload_digest = HashShaderCacheBytes(
+            std::span<const std::uint8_t>(payload.bytes().data(), payload.bytes().size()));
+        if (! payload_digest) return std::nullopt;
+
+        ShaderCacheByteWriter artifact;
+        artifact.Bytes(
+            std::span<const std::uint8_t>(kShaderCacheMagic.data(), kShaderCacheMagic.size()));
+        artifact.U32(kShaderCacheFormatVersion);
+        artifact.U32(kShaderCacheAbiVersion);
+        artifact.U32(kShaderCacheHeaderSize);
+        artifact.U32(static_cast<std::uint32_t>(payload.bytes().size()));
+        artifact.U32(static_cast<std::uint32_t>(units.size()));
+        artifact.U32(0);
+        artifact.Bytes(
+            std::span<const std::uint8_t>(identity.cache_key.data(), identity.cache_key.size()));
+        artifact.Bytes(
+            std::span<const std::uint8_t>(identity.source.data(), identity.source.size()));
+        artifact.Bytes(
+            std::span<const std::uint8_t>(identity.combos.data(), identity.combos.size()));
+        artifact.Bytes(
+            std::span<const std::uint8_t>(payload_digest->data(), payload_digest->size()));
+        if (artifact.bytes().size() != kShaderCacheHeaderSize ||
+            ! artifact.Bytes(
+                std::span<const std::uint8_t>(payload.bytes().data(), payload.bytes().size()))) {
+            return std::nullopt;
+        }
+        return artifact.Take();
+    }
+
+    static ShaderCacheReadResult Decode(const ShaderCacheIdentity&    identity,
+                                        std::span<const WPShaderUnit> expected_units,
+                                        std::span<const std::uint8_t> bytes) {
+        if (bytes.size() < kShaderCacheHeaderSize) return Invalid("truncated header");
+        if (bytes.size() > kShaderCacheHeaderSize + kMaxShaderCachePayloadSize) {
+            return Invalid("artifact exceeds size limit");
+        }
+
+        ShaderCacheByteReader         reader(bytes);
+        std::span<const std::uint8_t> magic;
+        std::uint32_t                 format_version = 0;
+        std::uint32_t                 shader_abi     = 0;
+        std::uint32_t                 header_size    = 0;
+        std::uint32_t                 payload_size   = 0;
+        std::uint32_t                 stage_count    = 0;
+        std::uint32_t                 flags          = 0;
+        if (! reader.Bytes(kShaderCacheMagic.size(), magic) ||
+            ! std::equal(magic.begin(), magic.end(), kShaderCacheMagic.begin()) ||
+            ! reader.U32(format_version) || ! reader.U32(shader_abi) || ! reader.U32(header_size) ||
+            ! reader.U32(payload_size) || ! reader.U32(stage_count) || ! reader.U32(flags)) {
+            return Invalid("invalid header");
+        }
+        if (format_version != kShaderCacheFormatVersion || shader_abi != kShaderCacheAbiVersion ||
+            header_size != kShaderCacheHeaderSize || flags != 0) {
+            return Invalid("unsupported format or ABI");
+        }
+        if (stage_count == 0 || stage_count > kMaxShaderCacheStages ||
+            stage_count != expected_units.size()) {
+            return Invalid("stage count mismatch");
+        }
+
+        ShaderCacheDigest cache_key {};
+        ShaderCacheDigest source {};
+        ShaderCacheDigest combos {};
+        ShaderCacheDigest payload_digest {};
+        if (! ReadDigest(reader, cache_key) || ! ReadDigest(reader, source) ||
+            ! ReadDigest(reader, combos) || ! ReadDigest(reader, payload_digest)) {
+            return Invalid("truncated identity");
+        }
+        if (cache_key != identity.cache_key || source != identity.source ||
+            combos != identity.combos) {
+            return Invalid("identity mismatch");
+        }
+        if (payload_size > kMaxShaderCachePayloadSize || payload_size != reader.remaining()) {
+            return Invalid("payload size mismatch");
+        }
+
+        std::span<const std::uint8_t> payload;
+        if (! reader.Bytes(payload_size, payload) || ! reader.done()) {
+            return Invalid("truncated payload");
+        }
+        auto actual_payload_digest = HashShaderCacheBytes(payload);
+        if (! actual_payload_digest || *actual_payload_digest != payload_digest) {
+            return Invalid("payload digest mismatch");
+        }
+
+        ShaderCacheArtifact artifact;
+        artifact.units.reserve(stage_count);
+        artifact.codes.reserve(stage_count);
+        ShaderCacheByteReader payload_reader(payload);
+        for (std::uint32_t i = 0; i < stage_count; ++i) {
+            std::uint32_t                 record_size = 0;
+            std::span<const std::uint8_t> record_bytes;
+            if (! payload_reader.U32(record_size) || record_size > payload_reader.remaining() ||
+                ! payload_reader.Bytes(record_size, record_bytes)) {
+                return Invalid("invalid stage record size");
+            }
+
+            ShaderCacheByteReader record(record_bytes);
+            std::uint32_t         stage_value = 0;
+            if (! record.U32(stage_value) ||
+                stage_value > static_cast<std::uint32_t>(ShaderType::FRAGMENT)) {
+                return Invalid("invalid shader stage");
+            }
+            const auto stage = static_cast<ShaderType>(stage_value);
+            if (stage != expected_units[i].stage) return Invalid("shader stage mismatch");
+
+            WPShaderUnit unit { .stage = stage };
+            if (! record.String(unit.src) || ! ReadCacheMap(record, unit.preprocess_info.input) ||
+                ! ReadCacheMap(record, unit.preprocess_info.output) ||
+                ! ReadCacheMap(record, unit.preprocess_info.uniforms) ||
+                ! ReadCacheSlots(record, unit.preprocess_info.active_tex_slots)) {
+                return Invalid("invalid shader metadata");
+            }
+
+            std::uint32_t spirv_size = 0;
+            if (! record.U32(spirv_size) || spirv_size % 4 != 0 ||
+                spirv_size > record.remaining()) {
+                return Invalid("invalid SPIR-V size");
+            }
+            ShaderCode code;
+            code.reserve(spirv_size / 4);
+            for (std::uint32_t word = 0; word < spirv_size / 4; ++word) {
+                std::uint32_t value = 0;
+                if (! record.U32(value)) return Invalid("truncated SPIR-V");
+                code.push_back(value);
+            }
+            if (! record.done()) return Invalid("unexpected stage data");
+            artifact.units.push_back(std::move(unit));
+            artifact.codes.push_back(std::move(code));
+        }
+        if (! payload_reader.done()) return Invalid("unexpected payload data");
+        return ShaderCacheReadResult {
+            .status   = ShaderCacheReadStatus::Hit,
+            .artifact = std::move(artifact),
+        };
+    }
+
+private:
+    static bool ReadDigest(ShaderCacheByteReader& reader, ShaderCacheDigest& digest) {
+        std::span<const std::uint8_t> bytes;
+        if (! reader.Bytes(digest.size(), bytes)) return false;
+        std::copy(bytes.begin(), bytes.end(), digest.begin());
+        return true;
+    }
+
+    static ShaderCacheReadResult Invalid(std::string reason) {
+        return ShaderCacheReadResult {
+            .status = ShaderCacheReadStatus::Invalid,
+            .reason = std::move(reason),
+        };
+    }
+};
+
+bool PublishShaderCacheArtifact(ref<rstd::path::Path> path, std::string_view cache_key,
+                                std::span<const std::uint8_t> bytes) {
+    auto parent = path.parent();
+    if (parent.is_none()) return false;
+
+    auto created = rstd::fs::create_dir_all(*parent);
+    if (created.is_err()) {
+        rstd_warn("cannot create shader cache directory '{}': {}",
+                  *parent,
+                  rstd::move(created).unwrap_err_unchecked());
+        return false;
+    }
+
+    static std::atomic<std::uint64_t> temporary_sequence { 0 };
+    for (unsigned attempt = 0; attempt < 16; ++attempt) {
+        const std::string temporary_name =
+            std::string(cache_key) + "." + std::to_string(rstd::process::id().to_primitive()) +
+            "." + std::to_string(temporary_sequence.fetch_add(1, std::memory_order_relaxed)) +
+            ".tmp";
+        auto temporary_path = rstd::path::PathBuf::from(*parent);
+        temporary_path.push(ref<rstd::path::Path>(rstd::cppstd::as_str(temporary_name)));
+
+        auto opened = rstd::fs::File::create_new(temporary_path.as_path());
+        if (opened.is_err()) {
+            auto error = rstd::move(opened).unwrap_err_unchecked();
+            if (error.kind().code == rstd::io::error::ErrorKind::AlreadyExists) continue;
+            rstd_warn("cannot create shader cache temporary file '{}': {}",
+                      temporary_path.as_path(),
+                      error);
+            return false;
+        }
+
+        bool write_ok = false;
+        {
+            auto file = rstd::move(opened).unwrap_unchecked();
+            auto data = rstd::slice<u8>::from_raw_parts(reinterpret_cast<const u8*>(bytes.data()),
+                                                        rstd::usize(bytes.size()));
+            auto written = rstd::io::write_all(file, rstd::as_bytes(data));
+            if (written.is_err()) {
+                rstd_warn("cannot write shader cache temporary file '{}': {}",
+                          temporary_path.as_path(),
+                          rstd::move(written).unwrap_err_unchecked());
+            } else {
+                auto flushed = file.flush();
+                if (flushed.is_err()) {
+                    rstd_warn("cannot flush shader cache temporary file '{}': {}",
+                              temporary_path.as_path(),
+                              rstd::move(flushed).unwrap_err_unchecked());
+                } else {
+                    write_ok = true;
+                }
+            }
+        }
+
+        if (! write_ok) {
+            static_cast<void>(rstd::fs::remove_file(temporary_path.as_path()));
+            return false;
+        }
+
+        auto published = rstd::fs::rename(temporary_path.as_path(), path);
+        if (published.is_ok()) return true;
+        rstd_warn("cannot publish shader cache '{}': {}",
+                  path,
+                  rstd::move(published).unwrap_err_unchecked());
+        static_cast<void>(rstd::fs::remove_file(temporary_path.as_path()));
+        return false;
+    }
+
+    rstd_warn("cannot reserve a shader cache temporary file for '{}'", path);
+    return false;
 }
 
 } // namespace
@@ -1918,6 +2362,48 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
                                   Option<ref<rstd::path::Path>>    cache_dir) {
     MaybeRecordCompile(scene_id, units, shader_info, texs);
 
+    Option<rstd::path::PathBuf>        cache_file_path;
+    std::optional<ShaderCacheIdentity> cache_identity;
+    if (cache_dir.is_some()) {
+        cache_identity = MakeShaderCacheIdentity(units, shader_info->combos);
+        if (cache_identity) {
+            cache_file_path =
+                Some(GetCachePath(*cache_dir, scene_id, cache_identity->cache_key_hex));
+            auto                  cached = rstd::fs::read(cache_file_path->as_path());
+            ShaderCacheReadResult decoded;
+            if (cached.is_ok()) {
+                auto cached_bytes = rstd::move(cached).unwrap_unchecked();
+                decoded           = ShaderCacheArtifactCodec::Decode(
+                    *cache_identity,
+                    std::span<const WPShaderUnit>(units.data(), units.size()),
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t*>(cached_bytes.data()),
+                        cached_bytes.len().to_primitive()));
+            } else {
+                auto error = rstd::move(cached).unwrap_err_unchecked();
+                if (error.kind().code == rstd::io::error::ErrorKind::NotFound) {
+                    decoded.status = ShaderCacheReadStatus::Miss;
+                } else {
+                    rstd_warn(
+                        "cannot read shader cache '{}': {}", cache_file_path->as_path(), error);
+                }
+            }
+            if (decoded.status == ShaderCacheReadStatus::Hit) {
+                std::move(
+                    decoded.artifact.units.begin(), decoded.artifact.units.end(), units.begin());
+                codes = std::move(decoded.artifact.codes);
+                return true;
+            }
+            if (decoded.status == ShaderCacheReadStatus::Invalid && ! decoded.reason.empty()) {
+                rstd_warn("shader cache '{}' is invalid ({}); recompiling",
+                          cache_file_path->as_path(),
+                          decoded.reason);
+            }
+        } else {
+            rstd_warn("shader cache identity exceeds format limits; compiling without cache");
+        }
+    }
+
     std::for_each(units.begin(), units.end(), [shader_info](auto& unit) {
         unit.src = Preprocessor(unit.src, unit.stage, shader_info->combos, unit.preprocess_info);
     });
@@ -1969,48 +2455,21 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         return true;
     };
 
-    if (cache_dir.is_none()) return compile(units, codes);
-
-    const std::string sha1            = GenSha1(units);
-    auto              cache_file_path = GetCachePath(*cache_dir, scene_id, sha1);
-    auto              cached          = rstd::fs::read(cache_file_path.as_path());
-    if (cached.is_ok()) {
-        fs::BinaryReader reader(rstd::move(cached).unwrap_unchecked());
-        if (::LoadShaderFromFile(codes, reader) && codes.size() == units.size()) return true;
-        rstd_warn("shader cache '{}' is invalid; recompiling", cache_file_path.as_path());
-    } else {
-        auto error = rstd::move(cached).unwrap_err_unchecked();
-        if (error.kind().code != rstd::io::error::ErrorKind::NotFound) {
-            rstd_warn("cannot read shader cache '{}': {}", cache_file_path.as_path(), error);
-        }
-    }
-
     if (! compile(units, codes)) return false;
-
-    auto parent = cache_file_path.as_path().parent();
-    if (parent.is_none()) return true;
-    auto created = rstd::fs::create_dir_all(*parent);
-    if (created.is_err()) {
-        rstd_warn("cannot create shader cache directory '{}': {}",
-                  *parent,
-                  rstd::move(created).unwrap_err_unchecked());
-        return true;
-    }
-
-    auto file = rstd::fs::File::create(cache_file_path.as_path());
-    if (file.is_err()) {
-        rstd_warn("cannot create shader cache '{}': {}",
-                  cache_file_path.as_path(),
-                  rstd::move(file).unwrap_err_unchecked());
-        return true;
-    }
-    fs::BinaryWriter writer(rstd::io::WriteSeekHandle::make(rstd::move(file).unwrap_unchecked()));
-    ::SaveShaderToFile(codes, writer);
-    auto flushed = writer.flush();
-    if (flushed.is_err()) {
-        rstd_warn("cannot flush shader cache '{}': {}",
-                  cache_file_path.as_path(),
-                  rstd::move(flushed).unwrap_err_unchecked());
+    if (cache_file_path.is_some() && cache_identity) {
+        auto artifact = ShaderCacheArtifactCodec::Encode(
+            *cache_identity,
+            std::span<const WPShaderUnit>(units.data(), units.size()),
+            std::span<const ShaderCode>(codes.data(), codes.size()));
+        if (! artifact) {
+            rstd_warn("cannot encode shader cache artifact '{}'; continuing without cache",
+                      cache_file_path->as_path());
+        } else {
+            PublishShaderCacheArtifact(
+                cache_file_path->as_path(),
+                cache_identity->cache_key_hex,
+                std::span<const std::uint8_t>(artifact->data(), artifact->size()));
+        }
     }
     return true;
 }

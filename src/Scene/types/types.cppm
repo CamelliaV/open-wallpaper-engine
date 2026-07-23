@@ -271,7 +271,7 @@ struct Image : NoCopy, NoMove {
 
         std::vector<ImageData> mipmaps;
 
-        operator bool() { return width != 0 && height != 0 && ! mipmaps.empty(); }
+        explicit operator bool() const { return width != 0 && height != 0 && ! mipmaps.empty(); }
     };
     ImageHeader       header;
     std::vector<Slot> slots;

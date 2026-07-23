@@ -349,6 +349,46 @@ private:
 
 class ResourcePrepareService;
 
+class TexturePrepareTrace {
+public:
+    enum class Kind
+    {
+        Plan,
+        Upload,
+    };
+
+    TexturePrepareTrace(Option<mut_ref<dyn<resource::TexturePrepareObserver>>> observer, Kind kind)
+        : m_observer(observer), m_kind(kind) {
+        if (m_observer.is_none()) return;
+        if (m_kind == Kind::Plan) {
+            (*m_observer)->BeginTexturePlan();
+        } else {
+            (*m_observer)->BeginTextureUpload();
+        }
+    }
+
+    ~TexturePrepareTrace() { Finish(); }
+
+    TexturePrepareTrace(const TexturePrepareTrace&)                    = delete;
+    TexturePrepareTrace(TexturePrepareTrace&&)                         = delete;
+    auto operator=(const TexturePrepareTrace&) -> TexturePrepareTrace& = delete;
+    auto operator=(TexturePrepareTrace&&) -> TexturePrepareTrace&      = delete;
+
+    void Finish() {
+        if (m_observer.is_none()) return;
+        if (m_kind == Kind::Plan) {
+            (*m_observer)->EndTexturePlan();
+        } else {
+            (*m_observer)->EndTextureUpload();
+        }
+        m_observer = None();
+    }
+
+private:
+    Option<mut_ref<dyn<resource::TexturePrepareObserver>>> m_observer;
+    Kind                                                   m_kind;
+};
+
 struct ResourceContentProviders {
     Option<mut_ref<dyn<resource::TextureContentProvider>>> texture;
     Option<mut_ref<dyn<resource::BufferContentProvider>>>  buffer;
@@ -385,13 +425,27 @@ public:
           m_shaders(shaders) {}
 
     auto Prepare(const resource::ResourcePlan& plan, ResourceContentProviders providers = {},
-                 resource::ResourcePlanSections sections = resource::ResourcePlanAll)
+                 resource::ResourcePlanSections sections = resource::ResourcePlanAll,
+                 Option<mut_ref<dyn<resource::TexturePrepareObserver>>> texture_observer = None())
         -> Result<PreparedResourceTable, resource::ResourceError> {
-        PreparedResourceTable      table(plan.generation);
-        ResourcePlanPrepareVisitor visitor(*this, table, rstd::move(providers));
+        PreparedResourceTable    table(plan.generation);
+        auto                     texture_provider = rstd::move(providers.texture);
+        ResourceContentProviders remaining {
+            .buffer = rstd::move(providers.buffer),
+            .shader = rstd::move(providers.shader),
+        };
+        ResourcePlanPrepareVisitor visitor(*this, table, rstd::move(remaining));
         auto object  = rstd::dyn<resource::ResourcePlanVisitor>::from_ref(visitor);
-        auto visited = resource::VisitResourcePlan(plan, object, sections);
+        auto visited = resource::VisitResourcePlan(
+            plan,
+            object,
+            sections & (resource::ResourcePlanBuffers | resource::ResourcePlanShaders));
         if (visited.is_err()) return Err(rstd::move(visited).unwrap_err_unchecked());
+        if (resource::ResourcePlanIncludes(sections, resource::ResourcePlanTextures)) {
+            auto prepared = PrepareTextures(
+                plan.textures.as_slice(), table, rstd::move(texture_provider), texture_observer);
+            if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
+        }
         return Ok(rstd::move(table));
     }
 
@@ -446,58 +500,157 @@ public:
         return Ok(empty {});
     }
 
-    auto PrepareTexture(const resource::TexturePlanEntry& entry, PreparedResourceTable& table,
-                        Option<mut_ref<dyn<resource::TextureContentProvider>>> content)
+    auto PrepareTextures(slice<resource::TexturePlanEntry> entries, PreparedResourceTable& table,
+                         Option<mut_ref<dyn<resource::TextureContentProvider>>> content,
+                         Option<mut_ref<dyn<resource::TexturePrepareObserver>>> observer)
         -> Result<empty, resource::ResourceError> {
-        auto handle = m_textures.Register(entry.request.clone());
-        if (! handle.Valid()) {
-            return Err(resource::ResourceError {
-                .kind    = resource::ResourceErrorKind::MissingDefinition,
-                .message = rstd::format("invalid texture request {}", entry.request.name.as_str()),
-            });
-        }
+        struct PendingUse {
+            resource::TextureUseHandle use;
+            resource::TextureHandle    resource;
+            resource::TextureRequest   request;
+        };
+        struct PendingContent {
+            String                                  key;
+            Vec<PendingUse>                         uses;
+            Option<vulkan::PreparedImageAllocation> prepared;
+        };
 
-        auto physical = m_textures.ResolveCurrent(handle);
-        if (physical.is_none()) {
-            auto image = Resolve(entry.request, content);
-            if (image.is_err()) return Err(rstd::move(image).unwrap_err_unchecked());
-            auto resolved      = rstd::move(image).unwrap_unchecked();
-            auto resolved_view = resolved->View();
-            auto ready_value =
-                resolved_view.slots.empty() ? u64(1) : u64(resolved_view.getActive().generation);
-            auto published = m_textures.Publish(
-                handle, rstd::move(resolved), resource::ReadyToken { .value = ready_value });
-            if (published.is_none()) {
+        auto                pending       = Vec<PendingContent>::make();
+        auto                pending_index = rstd::collections::HashMap<String, usize>::make();
+        TexturePrepareTrace plan_trace(observer, TexturePrepareTrace::Kind::Plan);
+
+        for (usize entry_index {}; entry_index < entries.len(); ++entry_index) {
+            const auto& entry  = entries[entry_index];
+            auto        handle = m_textures.Register(entry.request.clone());
+            if (! handle.Valid()) {
                 return Err(resource::ResourceError {
-                    .kind = resource::ResourceErrorKind::BackendFailure,
+                    .kind = resource::ResourceErrorKind::MissingDefinition,
                     .message =
-                        rstd::format("publish texture {} failed", entry.request.name.as_str()),
+                        rstd::format("invalid texture request {}", entry.request.name.as_str()),
                 });
             }
-            physical = m_textures.ResolveCurrent(handle);
-        }
 
-        if (physical.is_none()) {
-            return Err(resource::ResourceError {
-                .kind    = resource::ResourceErrorKind::BackendFailure,
-                .message = rstd::format("resolve texture {} failed", entry.request.name.as_str()),
+            auto physical = m_textures.ResolveCurrent(handle);
+            if (physical.is_some()) {
+                auto inserted =
+                    InsertPrepared(entry.handle, handle, entry.request.clone(), **physical, table);
+                if (inserted.is_err()) return inserted;
+                continue;
+            }
+
+            if (entry.request.kind != resource::TextureRequestKind::Imported) {
+                auto allocated = AllocateTexture(entry.request);
+                if (allocated.is_err()) {
+                    return Err(rstd::move(allocated).unwrap_err_unchecked());
+                }
+                auto published = PublishPrepared(entry.handle,
+                                                 handle,
+                                                 entry.request.clone(),
+                                                 rstd::move(allocated).unwrap_unchecked(),
+                                                 None<vulkan::ImageUploadTicket>(),
+                                                 table);
+                if (published.is_err()) return published;
+                continue;
+            }
+
+            if (content.is_none()) {
+                return Err(resource::ResourceError {
+                    .kind = resource::ResourceErrorKind::MissingContent,
+                    .message =
+                        rstd::format("texture content {} unavailable", entry.request.name.as_str()),
+                });
+            }
+
+            auto resolved = (*content)->ResolveTextureKey(entry.request);
+            if (resolved.is_err()) return Err(rstd::move(resolved).unwrap_err_unchecked());
+            auto  key   = rstd::move(resolved).unwrap_unchecked();
+            auto  found = pending_index.get(key.as_str());
+            usize index;
+            if (found.is_some()) {
+                index = **found;
+            } else {
+                index = pending.len();
+                (void)pending_index.insert(key.clone(), index);
+                pending.push(PendingContent {
+                    .key      = rstd::move(key),
+                    .uses     = Vec<PendingUse>::make(),
+                    .prepared = None<vulkan::PreparedImageAllocation>(),
+                });
+            }
+            pending[index].uses.push(PendingUse {
+                .use      = entry.handle,
+                .resource = handle,
+                .request  = entry.request.clone(),
             });
         }
-        (void)table.Insert(PreparedTexture {
-            .use                 = entry.handle,
-            .resource            = handle,
-            .request             = entry.request.clone(),
-            .physical            = (**physical).allocation.clone(),
-            .image               = (**physical).allocation->View(),
-            .physical_generation = (**physical).generation,
-            .ready               = (**physical).ready,
-        });
+        plan_trace.Finish();
+
+        constexpr usize batch_size { 4 };
+        for (usize offset {}; offset < pending.len(); offset += batch_size) {
+            const auto count = rstd::min(batch_size, pending.len() - offset);
+            auto       keys  = Vec<String>::with_capacity(count);
+            for (usize index {}; index < count; ++index) {
+                keys.push(pending[offset + index].key.clone());
+            }
+
+            auto loaded = (*content)->LoadTextures(keys.as_slice());
+            if (loaded.len() != count) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = rstd::format(
+                        "texture content batch returned {} of {} results", loaded.len(), count),
+                });
+            }
+
+            TexturePrepareTrace upload_trace(observer, TexturePrepareTrace::Kind::Upload);
+            for (usize index {}; index < count; ++index) {
+                auto& item = loaded[index];
+                if (item.is_err()) return Err(rstd::move(item).unwrap_err_unchecked());
+                if (m_textures_backend.is_none()) {
+                    return Err(resource::ResourceError {
+                        .kind    = resource::ResourceErrorKind::BackendFailure,
+                        .message = rstd::format("texture backend unavailable"),
+                    });
+                }
+                auto image   = rstd::move(item).unwrap_unchecked();
+                auto created = (*m_textures_backend)->CreateImportedTexture(image.deref());
+                if (created.is_none()) {
+                    return Err(resource::ResourceError {
+                        .kind    = resource::ResourceErrorKind::BackendFailure,
+                        .message = rstd::format("create imported texture {} failed",
+                                                pending[offset + index].key.as_str()),
+                    });
+                }
+
+                pending[offset + index].prepared = Some(rstd::move(*created));
+            }
+        }
+
+        for (auto& content_item : pending) {
+            if (content_item.prepared.is_none()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = rstd::format("texture content {} was not prepared",
+                                            content_item.key.as_str()),
+                });
+            }
+            auto prepared   = rstd::move(content_item.prepared).unwrap_unchecked();
+            auto allocation = rstd::move(prepared.allocation);
+            for (auto& use : content_item.uses) {
+                auto published = PublishPrepared(use.use,
+                                                 use.resource,
+                                                 rstd::move(use.request),
+                                                 allocation.clone(),
+                                                 prepared.upload,
+                                                 table);
+                if (published.is_err()) return published;
+            }
+        }
         return Ok(empty {});
     }
 
 private:
-    auto Resolve(const resource::TextureRequest&                        request,
-                 Option<mut_ref<dyn<resource::TextureContentProvider>>> content)
+    auto AllocateTexture(const resource::TextureRequest& request)
         -> Result<rstd::sync::Arc<vulkan::TextureAllocation>, resource::ResourceError> {
         if (m_textures_backend.is_none()) {
             return Err(resource::ResourceError {
@@ -505,28 +658,6 @@ private:
                 .message = rstd::format("texture backend unavailable"),
             });
         }
-        if (request.kind == resource::TextureRequestKind::Imported) {
-            if (content.is_none()) {
-                return Err(resource::ResourceError {
-                    .kind = resource::ResourceErrorKind::MissingContent,
-                    .message =
-                        rstd::format("texture content {} unavailable", request.name.as_str()),
-                });
-            }
-            auto loaded = (*content)->LoadTexture(request);
-            if (loaded.is_err()) return Err(rstd::move(loaded).unwrap_err_unchecked());
-            auto created =
-                (*m_textures_backend)->CreateImportedTexture(rstd::move(loaded).unwrap_unchecked());
-            if (created.is_none()) {
-                return Err(resource::ResourceError {
-                    .kind = resource::ResourceErrorKind::BackendFailure,
-                    .message =
-                        rstd::format("create imported texture {} failed", request.name.as_str()),
-                });
-            }
-            return Ok(rstd::move(*created));
-        }
-
         if (request.definition.is_none()) {
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::MissingDefinition,
@@ -541,6 +672,84 @@ private:
             });
         }
         return Ok(rstd::move(*image));
+    }
+
+    auto PublishPrepared(resource::TextureUseHandle use, resource::TextureHandle handle,
+                         resource::TextureRequest                   request,
+                         rstd::sync::Arc<vulkan::TextureAllocation> allocation,
+                         Option<vulkan::ImageUploadTicket> upload, PreparedResourceTable& table)
+        -> Result<empty, resource::ResourceError> {
+        auto physical = m_textures.ResolveCurrent(handle);
+        if (physical.is_none()) {
+            auto prepared_allocation = allocation.clone();
+            auto view                = allocation->View();
+            auto ready               = resource::ReadyToken {};
+            if (upload.is_none()) {
+                ready.value = view.slots.empty() ? u64(1) : u64(view.getActive().generation);
+            }
+            auto published = m_textures.Publish(handle, rstd::move(allocation), ready, upload);
+            if (published.is_none()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = rstd::format("publish texture {} failed", request.name.as_str()),
+                });
+            }
+            if (upload.is_some()) {
+                return InsertPrepared(use,
+                                      handle,
+                                      rstd::move(request),
+                                      rstd::move(prepared_allocation),
+                                      *published,
+                                      ready,
+                                      table);
+            }
+            physical = m_textures.ResolveCurrent(handle);
+        }
+        if (physical.is_none()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("resolve texture {} failed", request.name.as_str()),
+            });
+        }
+        return InsertPrepared(use, handle, rstd::move(request), **physical, table);
+    }
+
+    static auto InsertPrepared(resource::TextureUseHandle use, resource::TextureHandle handle,
+                               resource::TextureRequest         request,
+                               const resource::TexturePhysical& physical,
+                               PreparedResourceTable&           table)
+        -> Result<empty, resource::ResourceError> {
+        return InsertPrepared(use,
+                              handle,
+                              rstd::move(request),
+                              physical.allocation.clone(),
+                              physical.generation,
+                              physical.ready,
+                              table);
+    }
+
+    static auto InsertPrepared(resource::TextureUseHandle use, resource::TextureHandle handle,
+                               resource::TextureRequest                   request,
+                               rstd::sync::Arc<vulkan::TextureAllocation> allocation,
+                               u64 physical_generation, resource::ReadyToken ready,
+                               PreparedResourceTable& table)
+        -> Result<empty, resource::ResourceError> {
+        auto image = allocation->View();
+        if (! table.Insert(PreparedTexture {
+                .use                 = use,
+                .resource            = handle,
+                .request             = rstd::move(request),
+                .physical            = rstd::move(allocation),
+                .image               = rstd::move(image),
+                .physical_generation = physical_generation,
+                .ready               = ready,
+            })) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("duplicate texture use {}", use.index),
+            });
+        }
+        return Ok(empty {});
     }
 
     static auto ToTextureKey(const resource::TextureDefinition& definition) -> vulkan::TextureKey {
@@ -577,7 +786,8 @@ private:
 
 inline auto ResourcePlanPrepareVisitor::VisitTexture(const resource::TexturePlanEntry& entry)
     -> Result<empty, resource::ResourceError> {
-    return m_service.PrepareTexture(entry, m_table, m_providers.texture);
+    (void)entry;
+    return Ok(empty {});
 }
 
 inline auto ResourcePlanPrepareVisitor::VisitBuffer(const resource::BufferPlanEntry& entry)

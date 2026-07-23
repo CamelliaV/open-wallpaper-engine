@@ -606,7 +606,7 @@ public:
     void SetVideoDecodeOptions(VideoDecodeOptions);
 
     Option<ExImageParameters> CreateExTex(u32 witdh, u32 height, VkFormat, VkImageTiling);
-    rstd::Option<rstd::sync::Arc<TextureAllocation>> CreateTex(Image&);
+    rstd::Option<rstd::sync::Arc<TextureAllocation>> AllocateImportedTexture(const Image&);
     rstd::Option<rstd::sync::Arc<TextureAllocation>> AllocateTexture(TextureKey);
 
     /* Per-frame hook: advance every registered video-tex by `dt_seconds`,
@@ -625,10 +625,10 @@ private:
     u64                        nextImageGeneration();
     void                       AssignImageGeneration(VmaImageParameters&);
     void                       AssignImageGeneration(ExImageParameters&);
-    /* VIDEO-typed Image branch of CreateTex: registers a wavsen
+    /* VIDEO-typed Image branch of AllocateImportedTexture: registers a wavsen
      * VideoDecoder + stable RGBA8 VkImage and returns an ImageSlotsRef
      * pointing at that same VkImage so material binding is transparent. */
-    rstd::Option<rstd::sync::Arc<TextureAllocation>> CreateVideoTex(Image&);
+    rstd::Option<rstd::sync::Arc<TextureAllocation>> CreateVideoTex(const Image&);
     void                                             allocateCmd();
     vvk::CommandBuffers                              m_tex_cmds;
     vvk::CommandBuffer                               m_tex_cmd;
@@ -644,6 +644,96 @@ private:
     Option<Box<VideoRegistry>> m_video_registry;
 };
 
+struct ImageUploadTicket {
+    u64 value { 0 };
+
+    bool        Valid() const noexcept { return value != u64(); }
+    friend bool operator==(const ImageUploadTicket&, const ImageUploadTicket&) = default;
+};
+
+struct PreparedImageAllocation {
+    rstd::sync::Arc<TextureAllocation> allocation;
+    rstd::Option<ImageUploadTicket>    upload;
+};
+
+class ImageUploadManager;
+
+class RecordedImageUploads : NoCopy {
+public:
+    RecordedImageUploads() = default;
+    ~RecordedImageUploads();
+
+    RecordedImageUploads(RecordedImageUploads&&) noexcept;
+    RecordedImageUploads& operator=(RecordedImageUploads&&) noexcept;
+
+    bool Valid() const noexcept;
+
+private:
+    struct State;
+    friend class ImageUploadManager;
+    friend class ImageUploadBatchLease;
+
+    RecordedImageUploads(ImageUploadManager* owner, std::shared_ptr<State> state);
+    void Reset();
+
+    ImageUploadManager*    m_owner { nullptr };
+    std::shared_ptr<State> m_state;
+};
+
+class ImageUploadBatchLease : NoCopy {
+public:
+    ImageUploadBatchLease() = default;
+    ~ImageUploadBatchLease();
+
+    ImageUploadBatchLease(ImageUploadBatchLease&&) noexcept;
+    ImageUploadBatchLease& operator=(ImageUploadBatchLease&&) noexcept;
+
+    bool                               Valid() const noexcept;
+    std::span<const ImageUploadTicket> Tickets() const noexcept;
+
+private:
+    friend class ImageUploadManager;
+    explicit ImageUploadBatchLease(std::shared_ptr<RecordedImageUploads::State> state);
+
+    std::shared_ptr<RecordedImageUploads::State> m_state;
+};
+
+class ImageUploadManager : NoCopy, NoMove {
+public:
+    explicit ImageUploadManager(const Device&);
+    ~ImageUploadManager();
+
+    bool init();
+    void destroy();
+
+    auto QueueWrite(rstd::sync::Arc<TextureAllocation> allocation, const Image& image)
+        -> Option<ImageUploadTicket>;
+
+    bool HasPendingUploads() const noexcept;
+    bool RecordPendingUploads(vvk::CommandBuffer& command, RecordedImageUploads& recorded);
+    auto CommitRecordedUploads(RecordedImageUploads&& recorded) -> Option<ImageUploadBatchLease>;
+    void CancelRecordedUploads(const std::shared_ptr<RecordedImageUploads::State>& state);
+    void DiscardPendingUploads();
+    void Trim();
+
+private:
+    struct Impl;
+    Box<Impl> m_impl;
+};
+
+class ImagePrepareContext {
+public:
+    ImagePrepareContext(TextureCache& textures, ImageUploadManager& uploads)
+        : m_textures(textures), m_uploads(uploads) {}
+
+    auto CreateImportedTexture(ref<Image> image) -> Option<PreparedImageAllocation>;
+    auto AllocateTexture(TextureKey key) -> Option<rstd::sync::Arc<TextureAllocation>>;
+
+private:
+    TextureCache&       m_textures;
+    ImageUploadManager& m_uploads;
+};
+
 struct ImagePrepareBackend {
     using Trait                  = ImagePrepareBackend;
     static constexpr bool direct = false;
@@ -652,8 +742,8 @@ struct ImagePrepareBackend {
     struct Api {
         using Trait = ImagePrepareBackend;
 
-        auto CreateImportedTexture(rstd::mut_ref<Image> image)
-            -> rstd::Option<rstd::sync::Arc<TextureAllocation>> {
+        auto CreateImportedTexture(rstd::ref<Image> image)
+            -> rstd::Option<PreparedImageAllocation> {
             return rstd::trait_call<0>(this, image);
         }
 
@@ -1226,11 +1316,11 @@ struct Impl<owe::vulkan::BufferBackend, owe::vulkan::BufferManager>
 };
 
 template<>
-struct Impl<owe::vulkan::ImagePrepareBackend, owe::vulkan::TextureCache>
-    : ImplBase<owe::vulkan::TextureCache> {
-    auto CreateImportedTexture(mut_ref<owe::Image> image)
-        -> Option<sync::Arc<owe::vulkan::TextureAllocation>> {
-        return this->self().CreateTex(*image);
+struct Impl<owe::vulkan::ImagePrepareBackend, owe::vulkan::ImagePrepareContext>
+    : ImplBase<owe::vulkan::ImagePrepareContext> {
+    auto CreateImportedTexture(ref<owe::Image> image)
+        -> Option<owe::vulkan::PreparedImageAllocation> {
+        return this->self().CreateImportedTexture(image);
     }
 
     auto AllocateTexture(owe::vulkan::TextureKey key)

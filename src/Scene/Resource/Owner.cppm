@@ -30,9 +30,12 @@ public:
 
         auto buffer_manager = Box<vulkan::BufferManager>::make(device);
         if (! buffer_manager.get()->init()) return false;
+        auto image_uploads = Box<vulkan::ImageUploadManager>::make(device);
+        if (! image_uploads.get()->init()) return false;
 
         m_textures       = Some(Box<vulkan::TextureCache>::make(device));
         m_buffer_manager = Some(rstd::move(buffer_manager));
+        m_image_uploads  = Some(rstd::move(image_uploads));
         return true;
     }
 
@@ -41,7 +44,9 @@ public:
         m_uploads.Reset();
         m_buffer_entries.Reset();
         if (m_buffer_manager.is_some()) m_buffer_manager->get()->destroy();
+        if (m_image_uploads.is_some()) m_image_uploads->get()->destroy();
         m_buffer_manager = None();
+        m_image_uploads  = None();
         m_textures       = None();
         m_texture_entries.Reset();
         m_shader_entries.Reset();
@@ -56,7 +61,9 @@ public:
         m_framebuffer_diagnostics.Reset();
     }
 
-    bool Ready() const noexcept { return m_textures.is_some() && m_buffer_manager.is_some(); }
+    bool Ready() const noexcept {
+        return m_textures.is_some() && m_buffer_manager.is_some() && m_image_uploads.is_some();
+    }
 
     auto Textures() -> vulkan::TextureCache& { return *m_textures->get(); }
     auto Textures() const -> const vulkan::TextureCache& {
@@ -65,6 +72,10 @@ public:
     auto BufferManager() -> vulkan::BufferManager& { return *m_buffer_manager->get(); }
     auto BufferManager() const -> const vulkan::BufferManager& {
         return *m_buffer_manager->as_ptr().as_raw_ptr();
+    }
+    auto ImageUploads() -> vulkan::ImageUploadManager& { return *m_image_uploads->get(); }
+    auto ImageUploads() const -> const vulkan::ImageUploadManager& {
+        return *m_image_uploads->as_ptr().as_raw_ptr();
     }
 
     auto TextureEntries() -> resource::TextureRegistry& { return m_texture_entries; }
@@ -89,23 +100,24 @@ public:
     }
 
 private:
-    Option<Box<vulkan::TextureCache>>  m_textures;
-    Option<Box<vulkan::BufferManager>> m_buffer_manager;
-    resource::TextureRegistry          m_texture_entries;
-    BufferRegistry                     m_buffer_entries;
-    ShaderRegistry                     m_shader_entries;
-    DescriptorLayoutRegistry           m_descriptor_layouts;
-    DescriptorSystem                   m_descriptor_system;
-    UploadScheduler                    m_uploads;
-    SubmissionTracker                  m_submissions;
-    ResourceStateTracker               m_states;
-    MemoryBudgetPolicy                 m_memory;
-    ExternalResourceBridge             m_external;
-    PipelineRegistry                   m_pipeline_cache;
-    RenderPassRegistry                 m_render_pass_cache;
-    FramebufferRegistry                m_framebuffer_cache;
-    PipelineCacheDiagnostics           m_pipeline_diagnostics;
-    FramebufferCacheDiagnostics        m_framebuffer_diagnostics;
+    Option<Box<vulkan::TextureCache>>       m_textures;
+    Option<Box<vulkan::BufferManager>>      m_buffer_manager;
+    Option<Box<vulkan::ImageUploadManager>> m_image_uploads;
+    resource::TextureRegistry               m_texture_entries;
+    BufferRegistry                          m_buffer_entries;
+    ShaderRegistry                          m_shader_entries;
+    DescriptorLayoutRegistry                m_descriptor_layouts;
+    DescriptorSystem                        m_descriptor_system;
+    UploadScheduler                         m_uploads;
+    SubmissionTracker                       m_submissions;
+    ResourceStateTracker                    m_states;
+    MemoryBudgetPolicy                      m_memory;
+    ExternalResourceBridge                  m_external;
+    PipelineRegistry                        m_pipeline_cache;
+    RenderPassRegistry                      m_render_pass_cache;
+    FramebufferRegistry                     m_framebuffer_cache;
+    PipelineCacheDiagnostics                m_pipeline_diagnostics;
+    FramebufferCacheDiagnostics             m_framebuffer_diagnostics;
 };
 
 } // namespace owe::resource_registry

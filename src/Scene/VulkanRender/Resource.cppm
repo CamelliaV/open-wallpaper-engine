@@ -12,6 +12,7 @@ export import wescene.resource;
 export import wescene.resource_registry;
 import wescene.vulkan;
 import wescene.scene;
+import wescene.load_bench;
 
 using namespace rstd::prelude;
 using rstd::collections::HashMap;
@@ -269,29 +270,35 @@ inline Option<String> ResolveImportedTextureName(const RenderSceneSnapshot& rend
 
 class SnapshotImportedTextureProvider {
 public:
-    SnapshotImportedTextureProvider(const RenderSceneSnapshot& render_scene, ref<Scene> scene)
-        : m_catalog(rstd::dyn<resource::TextureCatalog>::from_ref(render_scene)), m_scene(scene) {}
+    SnapshotImportedTextureProvider(const RenderSceneSnapshot& render_scene, ref<Scene> scene,
+                                    SceneLoadBenchRecorderView load_bench = {})
+        : m_catalog(rstd::dyn<resource::TextureCatalog>::from_ref(render_scene)),
+          m_scene(scene),
+          m_load_bench(load_bench) {}
 
-    auto LoadTexture(const TextureRequest& request)
-        -> rstd::Result<rstd::mut_ref<Image>, resource::ResourceError> {
-        auto name   = ResolveName(request);
-        auto loaded = m_loaded_content.get(name.as_str());
-        if (loaded.is_some()) return Ok((*loaded)->deref_mut());
+    auto ResolveTextureKey(const TextureRequest& request) const
+        -> Result<String, resource::ResourceError> {
+        return Ok(ResolveName(request));
+    }
 
-        auto parsed = m_scene->ParseImage(name.as_str());
-        if (parsed.is_err()) {
-            auto error = rstd::move(parsed).unwrap_err_unchecked();
-            return rstd::Err(resource::ResourceError {
+    auto LoadTextures(slice<String> keys) -> Vec<Result<Arc<Image>, resource::ResourceError>> {
+        auto decode_span = SceneLoadSpan(m_load_bench, &SceneLoadProbeIds::render_texture_decode);
+        auto parsed      = m_scene->ParseImages(keys);
+        auto results = Vec<Result<Arc<Image>, resource::ResourceError>>::with_capacity(keys.len());
+        for (auto& item : parsed) {
+            if (item.is_ok()) {
+                results.push(Ok(rstd::move(item).unwrap_unchecked()));
+                continue;
+            }
+            auto error = rstd::move(item).unwrap_err_unchecked();
+            results.push(Err(resource::ResourceError {
                 .kind    = error.kind == ImageParseErrorKind::MissingContent
                                ? resource::ResourceErrorKind::MissingContent
                                : resource::ResourceErrorKind::BackendFailure,
                 .message = rstd::move(error.message),
-            });
+            }));
         }
-        auto image   = rstd::move(parsed).unwrap_unchecked();
-        auto content = image.deref_mut();
-        (void)m_loaded_content.insert(rstd::move(name), rstd::move(image));
-        return Ok(content);
+        return results;
     }
 
 private:
@@ -305,7 +312,28 @@ private:
 
     mutable ref<dyn<resource::TextureCatalog>> m_catalog;
     ref<Scene>                                 m_scene;
-    HashMap<String, Arc<Image>>                m_loaded_content;
+    SceneLoadBenchRecorderView                 m_load_bench;
+};
+
+class SnapshotTexturePrepareObserver {
+public:
+    explicit SnapshotTexturePrepareObserver(SceneLoadBenchRecorderView load_bench)
+        : m_load_bench(load_bench) {}
+
+    void BeginTexturePlan() {
+        m_plan = Some(SceneLoadSpan(m_load_bench, &SceneLoadProbeIds::render_texture_plan));
+    }
+    void EndTexturePlan() { (void)m_plan.take(); }
+    void BeginTextureUpload() {
+        m_upload =
+            Some(SceneLoadSpan(m_load_bench, &SceneLoadProbeIds::render_texture_upload_prepare));
+    }
+    void EndTextureUpload() { (void)m_upload.take(); }
+
+private:
+    SceneLoadBenchRecorderView m_load_bench;
+    Option<SceneLoadSpanGuard> m_plan;
+    Option<SceneLoadSpanGuard> m_upload;
 };
 
 struct RenderingResources {
@@ -351,10 +379,24 @@ struct Impl<owe::resource::TextureCatalog, owe::RenderSceneSnapshot>
 template<>
 struct Impl<owe::resource::TextureContentProvider, owe::vulkan::SnapshotImportedTextureProvider>
     : ImplBase<owe::vulkan::SnapshotImportedTextureProvider> {
-    auto LoadTexture(const owe::resource::TextureRequest& request)
-        -> Result<mut_ref<owe::Image>, owe::resource::ResourceError> {
-        return this->self().LoadTexture(request);
+    auto ResolveTextureKey(const owe::resource::TextureRequest& request) const
+        -> Result<String, owe::resource::ResourceError> {
+        return this->self().ResolveTextureKey(request);
     }
+
+    auto LoadTextures(slice<String> keys)
+        -> Vec<Result<Arc<owe::Image>, owe::resource::ResourceError>> {
+        return this->self().LoadTextures(keys);
+    }
+};
+
+template<>
+struct Impl<owe::resource::TexturePrepareObserver, owe::vulkan::SnapshotTexturePrepareObserver>
+    : ImplBase<owe::vulkan::SnapshotTexturePrepareObserver> {
+    void BeginTexturePlan() { this->self().BeginTexturePlan(); }
+    void EndTexturePlan() { this->self().EndTexturePlan(); }
+    void BeginTextureUpload() { this->self().BeginTextureUpload(); }
+    void EndTextureUpload() { this->self().EndTextureUpload(); }
 };
 
 } // namespace rstd

@@ -11,8 +11,9 @@ export namespace owe::resource_registry
 using namespace rstd::prelude;
 
 struct UploadLease {
-    resource::ReadyToken           ready;
-    vulkan::BufferUploadBatchLease buffers;
+    resource::ReadyToken                   ready;
+    Option<vulkan::BufferUploadBatchLease> buffers;
+    Option<vulkan::ImageUploadBatchLease>  images;
 };
 
 class UploadScheduler {
@@ -23,19 +24,26 @@ public:
         return resource::ReadyToken { .value = m_next_value };
     }
 
-    bool MarkSubmitted(resource::ReadyToken ready, vulkan::BufferUploadBatchLease buffers) {
+    bool MarkSubmitted(resource::ReadyToken ready, Option<vulkan::BufferUploadBatchLease> buffers,
+                       Option<vulkan::ImageUploadBatchLease> images) {
         if (! ready.Valid() || ready.value > m_next_value) return false;
         if (m_in_flight
                 .insert(ready.value,
                         UploadLease {
                             .ready   = ready,
                             .buffers = rstd::move(buffers),
+                            .images  = rstd::move(images),
                         })
                 .is_some()) {
             return false;
         }
         if (m_pending.is_none() || m_pending->value < ready.value) m_pending = Some(ready);
         return true;
+    }
+
+    bool MarkSubmitted(resource::ReadyToken ready, vulkan::BufferUploadBatchLease buffers) {
+        return MarkSubmitted(
+            ready, Some(rstd::move(buffers)), None<vulkan::ImageUploadBatchLease>());
     }
 
     auto Pending() const -> Option<resource::ReadyToken> {

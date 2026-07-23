@@ -1620,13 +1620,16 @@ struct IImageParser {
         auto Parse(ref<str> name) const -> Result<Arc<Image>, ImageParseError> {
             return rstd::trait_call<0>(this, name);
         }
+        auto ParseMany(slice<String> names) const -> Vec<Result<Arc<Image>, ImageParseError>> {
+            return rstd::trait_call<1>(this, names);
+        }
         auto ParseHeader(ref<str> name) const -> Result<ImageHeader, ImageParseError> {
-            return rstd::trait_call<1>(this, name);
+            return rstd::trait_call<2>(this, name);
         }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Parse, &T::ParseHeader>;
+    using Funcs = TraitFuncs<&T::Parse, &T::ParseMany, &T::ParseHeader>;
 };
 
 struct WallpaperLayerId {
@@ -2102,6 +2105,7 @@ public:
         m_image_parser = Some(rstd::move(parser));
     }
     auto ParseImage(ref<str> name) const -> Result<Arc<Image>, ImageParseError>;
+    auto ParseImages(slice<String> names) const -> Vec<Result<Arc<Image>, ImageParseError>>;
     auto ParseImageHeader(ref<str> name) const -> Result<ImageHeader, ImageParseError>;
     void RegisterRuntimeImage(String name, Arc<Image> image);
 

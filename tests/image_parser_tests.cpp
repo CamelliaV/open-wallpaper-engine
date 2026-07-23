@@ -31,11 +31,42 @@ public:
         return Ok(owe::ImageHeader {});
     }
 
+    auto ParseMany(slice<String> names) const
+        -> Vec<Result<Arc<owe::Image>, owe::ImageParseError>> {
+        auto parser = dyn<owe::IImageParser>::from_ref(*this);
+        return owe::ParseImages(parser.as_ref(), names);
+    }
+
     int peak() const { return m_peak.load(); }
 
 private:
     mutable std::atomic<int> m_active { 0 };
     mutable std::atomic<int> m_peak { 0 };
+};
+
+class MixedImageParser {
+public:
+    auto Parse(ref<str> name) const -> Result<Arc<owe::Image>, owe::ImageParseError> {
+        if (rstd::cppstd::as_string_view(name) == "bad") {
+            return Err(owe::ImageParseError {
+                .kind    = owe::ImageParseErrorKind::DecodeFailed,
+                .message = String::make("bad image"),
+            });
+        }
+        auto image = Arc<owe::Image>::make();
+        image->key = rstd::cppstd::to_string(name);
+        return Ok(rstd::move(image));
+    }
+
+    auto ParseHeader(ref<str>) const -> Result<owe::ImageHeader, owe::ImageParseError> {
+        return Ok(owe::ImageHeader {});
+    }
+
+    auto ParseMany(slice<String> names) const
+        -> Vec<Result<Arc<owe::Image>, owe::ImageParseError>> {
+        auto parser = dyn<owe::IImageParser>::from_ref(*this);
+        return owe::ParseImages(parser.as_ref(), names);
+    }
 };
 
 TEST(ImageParser, BatchPreservesOrderAndBoundsConcurrency) {
@@ -55,6 +86,30 @@ TEST(ImageParser, BatchPreservesOrderAndBoundsConcurrency) {
     }
     EXPECT_GT(parser.peak(), 1);
     EXPECT_LE(parser.peak(), 4);
+}
+
+TEST(ImageParser, SceneBatchPreservesRuntimeParserAndErrorPositions) {
+    owe::Scene scene;
+    scene.SetImageParser(Box<dyn<owe::IImageParser>>::make(MixedImageParser {}));
+    auto runtime = Arc<owe::Image>::make();
+    runtime->key = "runtime-value";
+    scene.RegisterRuntimeImage(String::make("runtime"), runtime.clone());
+
+    Vec<String> names;
+    for (const char* name : { "first", "runtime", "bad", "last" }) {
+        names.push(String::make(name));
+    }
+    auto images = scene.ParseImages(names.as_slice());
+
+    ASSERT_EQ(images.len(), names.len());
+    ASSERT_TRUE(images[usize(0)].is_ok());
+    EXPECT_EQ((*images[usize(0)])->key, "first");
+    ASSERT_TRUE(images[usize(1)].is_ok());
+    EXPECT_TRUE(Arc<owe::Image>::ptr_eq(*images[usize(1)], runtime));
+    ASSERT_TRUE(images[usize(2)].is_err());
+    EXPECT_EQ(images[usize(2)].unwrap_err_unchecked().kind, owe::ImageParseErrorKind::DecodeFailed);
+    ASSERT_TRUE(images[usize(3)].is_ok());
+    EXPECT_EQ((*images[usize(3)])->key, "last");
 }
 
 } // namespace

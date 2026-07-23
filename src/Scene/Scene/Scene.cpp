@@ -1398,15 +1398,50 @@ bool Scene::EnsureTextureDescriptor(std::string_view key) {
 }
 
 auto Scene::ParseImage(ref<str> name) const -> Result<Arc<Image>, ImageParseError> {
-    auto runtime = m_runtime_images.get(name);
-    if (runtime.is_some()) return Ok((*runtime)->clone());
-    if (m_image_parser.is_none()) {
+    auto names = Vec<String>::with_capacity(usize(1));
+    names.push(String::make(name));
+    auto images = ParseImages(names.as_slice());
+    if (images.is_empty()) {
         return Err(ImageParseError {
             .kind    = ImageParseErrorKind::MissingContent,
-            .message = rstd::format("image parser unavailable for {}", name),
+            .message = rstd::format("image {} unavailable", name),
         });
     }
-    return (*m_image_parser)->Parse(name);
+    return rstd::move(images[usize()]);
+}
+
+auto Scene::ParseImages(slice<String> names) const -> Vec<Result<Arc<Image>, ImageParseError>> {
+    auto delegated_names = Vec<String>::with_capacity(names.len());
+    for (usize index {}; index < names.len(); ++index) {
+        if (m_runtime_images.get(names[index].as_str()).is_none()) {
+            delegated_names.push(names[index].clone());
+        }
+    }
+
+    auto delegated = Vec<Result<Arc<Image>, ImageParseError>>::make();
+    if (! delegated_names.is_empty() && m_image_parser.is_some()) {
+        delegated = (*m_image_parser)->ParseMany(delegated_names.as_slice());
+    }
+
+    auto  results = Vec<Result<Arc<Image>, ImageParseError>>::with_capacity(names.len());
+    usize delegated_index {};
+    for (usize index {}; index < names.len(); ++index) {
+        auto runtime = m_runtime_images.get(names[index].as_str());
+        if (runtime.is_some()) {
+            results.push(Ok((*runtime)->clone()));
+            continue;
+        }
+        if (delegated_index < delegated.len()) {
+            results.push(rstd::move(delegated[delegated_index]));
+        } else {
+            results.push(Err(ImageParseError {
+                .kind    = ImageParseErrorKind::MissingContent,
+                .message = rstd::format("image parser unavailable for {}", names[index].as_str()),
+            }));
+        }
+        ++delegated_index;
+    }
+    return results;
 }
 
 auto Scene::ParseImageHeader(ref<str> name) const -> Result<ImageHeader, ImageParseError> {

@@ -6,6 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <filesystem>
+#include <fstream>
+
 import rstd.cppstd;
 import wescene.fs;
 import wescene.pkg.parse;
@@ -319,6 +323,8 @@ TEST(WPShaderParser, CompileSceneShaderVariantUsesPhysicalFileCache) {
     owe::SceneShaderVariantDesc desc;
     desc.scene_id    = "physical-cache-test";
     desc.shader_name = "physical-cache-test";
+    desc.texture_infos.resize(1);
+    desc.texture_infos[0].enabled = true;
     desc.stages.push_back(owe::SceneShaderVariantStage {
         .stage      = owe::ShaderType::VERTEX,
         .source_key = "/assets/shaders/physical-cache-test.vert",
@@ -333,8 +339,10 @@ void main() {
         .stage      = owe::ShaderType::FRAGMENT,
         .source_key = "/assets/shaders/physical-cache-test.frag",
         .source     = R"(
+uniform float g_Brightness;
+uniform sampler2D g_Texture0;
 void main() {
-    gl_FragColor = vec4(1.0);
+    gl_FragColor = texSample2D(g_Texture0, vec2(0.5)) * g_Brightness;
 }
 )",
     });
@@ -347,18 +355,103 @@ void main() {
     ASSERT_TRUE(first.ok) << first.error;
     ASSERT_TRUE(first.shader);
 
-    const auto shader_cache = root / desc.scene_id / "spvs01";
+    const auto shader_cache = root / desc.scene_id / "spvs03";
     ASSERT_TRUE(std::filesystem::is_directory(shader_cache));
     const auto files = std::filesystem::directory_iterator(shader_cache);
     ASSERT_NE(files, std::filesystem::directory_iterator {});
-    EXPECT_EQ(files->path().extension(), ".spvs");
-    EXPECT_GT(files->file_size(), 0u);
+    const auto artifact_path = files->path();
+    EXPECT_EQ(artifact_path.extension(), ".spvs");
+    EXPECT_GT(files->file_size(), 112u);
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(shader_cache),
+                            std::filesystem::directory_iterator {}),
+              1);
+
+    std::array<unsigned char, 28> header {};
+    {
+        std::ifstream artifact_file(artifact_path, std::ios::binary);
+        ASSERT_TRUE(artifact_file.read(reinterpret_cast<char*>(header.data()), header.size()));
+    }
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(header.data()), 8),
+              std::string("OWESPV3\0", 8));
+    const auto read_u32 = [&header](std::size_t offset) {
+        return static_cast<std::uint32_t>(header[offset]) |
+               (static_cast<std::uint32_t>(header[offset + 1]) << 8) |
+               (static_cast<std::uint32_t>(header[offset + 2]) << 16) |
+               (static_cast<std::uint32_t>(header[offset + 3]) << 24);
+    };
+    EXPECT_EQ(read_u32(8), 3u);
+    EXPECT_EQ(read_u32(12), 1u);
+    EXPECT_EQ(read_u32(16), 112u);
+    EXPECT_EQ(read_u32(24), 2u);
+    const auto initial_write_time = std::filesystem::last_write_time(artifact_path);
 
     const auto second =
         owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
     ASSERT_TRUE(second.ok) << second.error;
     ASSERT_TRUE(second.shader);
     EXPECT_EQ(second.shader->codes, first.shader->codes);
+    EXPECT_TRUE(second.variant.stages[1].uniforms.contains("g_Brightness"));
+    EXPECT_TRUE(second.variant.stages[1].active_texture_slots.contains(0));
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(shader_cache),
+                            std::filesystem::directory_iterator {}),
+              1);
+    EXPECT_EQ(std::filesystem::last_write_time(artifact_path), initial_write_time);
+
+    std::filesystem::resize_file(artifact_path, 16);
+    const auto after_truncation =
+        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    ASSERT_TRUE(after_truncation.ok) << after_truncation.error;
+    ASSERT_TRUE(after_truncation.shader);
+    EXPECT_EQ(after_truncation.shader->codes, first.shader->codes);
+    EXPECT_GT(std::filesystem::file_size(artifact_path), 112u);
+
+    {
+        std::fstream artifact(artifact_path, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(artifact.seekg(52));
+        char byte = 0;
+        ASSERT_TRUE(artifact.read(&byte, 1));
+        byte ^= 1;
+        ASSERT_TRUE(artifact.seekp(52));
+        ASSERT_TRUE(artifact.write(&byte, 1));
+    }
+    const auto after_identity_corruption =
+        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    ASSERT_TRUE(after_identity_corruption.ok) << after_identity_corruption.error;
+    ASSERT_TRUE(after_identity_corruption.shader);
+    EXPECT_EQ(after_identity_corruption.shader->codes, first.shader->codes);
+
+    {
+        std::fstream artifact(artifact_path, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(artifact.seekg(-1, std::ios::end));
+        char byte = 0;
+        ASSERT_TRUE(artifact.read(&byte, 1));
+        byte ^= 1;
+        ASSERT_TRUE(artifact.seekp(-1, std::ios::end));
+        ASSERT_TRUE(artifact.write(&byte, 1));
+    }
+    const auto after_payload_corruption =
+        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    ASSERT_TRUE(after_payload_corruption.ok) << after_payload_corruption.error;
+    ASSERT_TRUE(after_payload_corruption.shader);
+    EXPECT_EQ(after_payload_corruption.shader->codes, first.shader->codes);
+
+    const auto different_combo = owe::WPShaderParser::CompileSceneShaderVariant(
+        desc, vfs, { { "CACHE_VARIANT", "1" } }, Some(cache_path.as_path()));
+    ASSERT_TRUE(different_combo.ok) << different_combo.error;
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(shader_cache),
+                            std::filesystem::directory_iterator {}),
+              2);
+
+    desc.stages[1].source += "\n// source identity variant";
+    const auto different_source =
+        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    ASSERT_TRUE(different_source.ok) << different_source.error;
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(shader_cache),
+                            std::filesystem::directory_iterator {}),
+              3);
+    for (const auto& entry : std::filesystem::directory_iterator(shader_cache)) {
+        EXPECT_EQ(entry.path().extension(), ".spvs");
+    }
 
     std::filesystem::remove_all(root);
 }

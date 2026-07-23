@@ -432,16 +432,17 @@ auto owe::ParseImages(ref<dyn<IImageParser>> parser, slice<String> names, usize 
         worker_count, worker_count);
     if (group.is_err()) return parse_sequential();
 
-    for (usize index {}; index < names.len(); ++index) {
-        auto name      = names[index].clone();
+    usize submitted_count {};
+    for (; submitted_count < names.len(); ++submitted_count) {
+        auto name      = names[submitted_count].clone();
         auto submitted = group->submit([parser, name = rstd::move(name)]() mutable {
             return parser->Parse(name.as_str());
         });
-        if (submitted.is_err()) return parse_sequential();
+        if (submitted.is_err()) break;
     }
 
     auto outcomes = rstd::move(*group).join();
-    auto images   = Vec<Result<Arc<Image>, ImageParseError>>::with_capacity(outcomes.len());
+    auto images   = Vec<Result<Arc<Image>, ImageParseError>>::with_capacity(names.len());
     for (auto& outcome : outcomes) {
         auto value = rstd::move(outcome).into_value();
         if (value.is_some()) {
@@ -452,6 +453,9 @@ auto owe::ParseImages(ref<dyn<IImageParser>> parser, slice<String> names, usize 
                 .message = String::make("texture parse task failed"),
             }));
         }
+    }
+    for (usize index = submitted_count; index < names.len(); ++index) {
+        images.push(parser->Parse(names[index].as_str()));
     }
     return images;
 }

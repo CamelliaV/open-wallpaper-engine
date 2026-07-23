@@ -1,9 +1,13 @@
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <span>
+#include <string>
+#include <vector>
 
 import rstd;
 import rstd.cppstd;
 import wescene.resource_registry;
+import wescene.types;
 import wescene.vulkan;
 
 namespace
@@ -23,15 +27,18 @@ struct ShaderArtifactProvider {
 };
 
 struct BufferContentProvider {
-    rstd::usize loads { 0 };
+    rstd::usize              loads { 0 };
+    rstd::vec::Vec<rstd::u8> content;
+
+    BufferContentProvider(): content(rstd::vec::Vec<rstd::u8>::make()) {
+        content.push(rstd::u8(1));
+        content.push(rstd::u8(2));
+    }
 
     auto LoadBuffer(const owe::resource::BufferRequest&)
-        -> rstd::Result<rstd::vec::Vec<rstd::u8>, owe::resource::ResourceError> {
+        -> rstd::Result<rstd::slice<rstd::u8>, owe::resource::ResourceError> {
         ++loads;
-        auto bytes = rstd::vec::Vec<rstd::u8>::make();
-        bytes.push(rstd::u8(1));
-        bytes.push(rstd::u8(2));
-        return rstd::Ok(rstd::move(bytes));
+        return rstd::Ok(content.as_slice());
     }
 };
 
@@ -54,6 +61,61 @@ struct BufferBackend {
         ++writes;
         ++next_ticket;
         return rstd::Some(owe::vulkan::BufferUploadTicket { .value = next_ticket });
+    }
+};
+
+auto TextureAllocation(rstd::uint64_t generation)
+    -> rstd::sync::Arc<owe::vulkan::TextureAllocation>;
+
+struct TextureContentProvider {
+    mutable rstd::usize      resolves { 0 };
+    rstd::usize              loads { 0 };
+    std::vector<rstd::usize> batch_sizes;
+
+    auto ResolveTextureKey(const owe::resource::TextureRequest& request) const
+        -> rstd::Result<rstd::string::String, owe::resource::ResourceError> {
+        ++resolves;
+        auto name = rstd::cppstd::as_string_view(request.name.as_str());
+        if (name.starts_with("alias-")) {
+            return rstd::Ok(rstd::string::String::make(rstd::cppstd::as_str("shared")));
+        }
+        return rstd::Ok(request.name.clone());
+    }
+
+    auto LoadTextures(rstd::slice<rstd::string::String> keys)
+        -> rstd::vec::Vec<rstd::Result<rstd::sync::Arc<owe::Image>, owe::resource::ResourceError>> {
+        ++loads;
+        batch_sizes.push_back(keys.len());
+        auto images =
+            rstd::vec::Vec<rstd::Result<rstd::sync::Arc<owe::Image>,
+                                        owe::resource::ResourceError>>::with_capacity(keys.len());
+        for (rstd::usize index {}; index < keys.len(); ++index) {
+            auto image = rstd::sync::Arc<owe::Image>::make();
+            image->key = rstd::cppstd::to_string(keys[index].as_str());
+            images.push(rstd::Ok(rstd::move(image)));
+        }
+        return images;
+    }
+};
+
+struct ImageBackend {
+    rstd::usize creates { 0 };
+    rstd::u64   generation { 0 };
+
+    auto CreateImportedTexture(rstd::ref<owe::Image>)
+        -> rstd::Option<owe::vulkan::PreparedImageAllocation> {
+        ++creates;
+        ++generation;
+        return rstd::Some(owe::vulkan::PreparedImageAllocation {
+            .allocation = TextureAllocation(generation.to_primitive()),
+        });
+    }
+
+    auto AllocateTexture(owe::vulkan::TextureKey)
+        -> rstd::Option<rstd::sync::Arc<owe::vulkan::TextureAllocation>> {
+        ++creates;
+        ++generation;
+        return rstd::Some(TextureAllocation(generation.to_primitive()));
     }
 };
 
@@ -168,6 +230,28 @@ TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
     ASSERT_TRUE(physical.is_some());
     EXPECT_EQ((**physical).generation, rstd::u64(2));
     EXPECT_EQ((**physical).ready.value, rstd::u64(5));
+}
+
+TEST(TextureRegistry, PublishesUploadedPhysicalOnlyAfterSubmission) {
+    owe::resource::TextureRegistry registry;
+    auto                           handle = registry.Register(owe::resource::TextureRequest {
+        .kind = owe::resource::TextureRequestKind::Imported,
+        .name = rstd::string::String::make(rstd::cppstd::as_str("asset")),
+    });
+    owe::vulkan::ImageUploadTicket ticket { .value = rstd::u64(7) };
+
+    auto published = registry.Publish(
+        handle, TextureAllocation(9), owe::resource::ReadyToken {}, rstd::Some(ticket));
+    ASSERT_TRUE(published.is_some());
+    EXPECT_TRUE(registry.ResolveCurrent(handle).is_none());
+
+    registry.MarkUploadsSubmitted(
+        std::span<const owe::vulkan::ImageUploadTicket>(&ticket, std::size_t(1)),
+        rstd::Some(owe::resource::ReadyToken { .value = rstd::u64(11) }));
+    auto physical = registry.ResolveCurrent(handle);
+    ASSERT_TRUE(physical.is_some());
+    EXPECT_EQ((**physical).generation, rstd::u64(1));
+    EXPECT_EQ((**physical).ready.value, rstd::u64(11));
 }
 
 TEST(ShaderRegistry, OwnsArtifactsByRequestIdentity) {
@@ -360,6 +444,59 @@ TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
     EXPECT_EQ(buffer_provider.loads, rstd::usize(1));
     EXPECT_EQ(upload_backend.allocations, rstd::usize(1));
     EXPECT_EQ(shader_provider.loads, rstd::usize(1));
+}
+
+TEST(ResourcePrepareService, BatchesDeduplicatesAndCachesImportedTextures) {
+    owe::resource::TextureRegistry         textures;
+    owe::resource_registry::BufferRegistry buffers;
+    owe::resource_registry::ShaderRegistry shaders;
+    BufferBackend                          buffer_backend;
+    ImageBackend                           image_backend;
+    TextureContentProvider                 content_provider;
+    auto buffer  = rstd::dyn<owe::vulkan::BufferBackend>::from_ref(buffer_backend);
+    auto image   = rstd::dyn<owe::vulkan::ImagePrepareBackend>::from_ref(image_backend);
+    auto content = rstd::dyn<owe::resource::TextureContentProvider>::from_ref(content_provider);
+
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(21) };
+    for (std::uint64_t index = 0; index < 10; ++index) {
+        auto name = index < 2 ? std::string("alias-") + std::to_string(index)
+                              : std::string("texture-") + std::to_string(index);
+        plan.textures.push(owe::resource::TexturePlanEntry {
+            .handle = owe::resource::TextureUseHandle { .index      = rstd::u64(index),
+                                                        .generation = rstd::u64(21) },
+            .request =
+                owe::resource::TextureRequest {
+                    .kind = owe::resource::TextureRequestKind::Imported,
+                    .name = rstd::string::String::make(rstd::cppstd::as_str(name)),
+                },
+        });
+    }
+
+    owe::resource_registry::ResourcePrepareService service(
+        textures, rstd::Some(image.as_mut_ref()), buffers, buffer.as_mut_ref(), shaders);
+    auto first = service.Prepare(plan,
+                                 owe::resource_registry::ResourceContentProviders {
+                                     .texture = rstd::Some(content.as_mut_ref()),
+                                 });
+    ASSERT_TRUE(first.is_ok());
+    EXPECT_EQ(first->TextureCount(), rstd::usize(10));
+    EXPECT_EQ(content_provider.resolves, rstd::usize(10));
+    EXPECT_EQ(content_provider.loads, rstd::usize(3));
+    ASSERT_EQ(content_provider.batch_sizes.size(), std::size_t(3));
+    EXPECT_EQ(content_provider.batch_sizes[0], rstd::usize(4));
+    EXPECT_EQ(content_provider.batch_sizes[1], rstd::usize(4));
+    EXPECT_EQ(content_provider.batch_sizes[2], rstd::usize(1));
+    EXPECT_EQ(image_backend.creates, rstd::usize(9));
+
+    auto second = service.Prepare(plan,
+                                  owe::resource_registry::ResourceContentProviders {
+                                      .texture = rstd::Some(content.as_mut_ref()),
+                                  });
+    ASSERT_TRUE(second.is_ok());
+    EXPECT_EQ(second->TextureCount(), rstd::usize(10));
+    EXPECT_EQ(content_provider.resolves, rstd::usize(10));
+    EXPECT_EQ(content_provider.loads, rstd::usize(3));
+    EXPECT_EQ(image_backend.creates, rstd::usize(9));
 }
 
 TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {

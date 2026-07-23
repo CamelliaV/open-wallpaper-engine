@@ -35,6 +35,15 @@ public:
             .message = String::make("missing fake image"),
         });
     }
+    auto ParseMany(slice<String> names) const
+        -> Vec<Result<Arc<owe::Image>, owe::ImageParseError>> {
+        auto images =
+            Vec<Result<Arc<owe::Image>, owe::ImageParseError>>::with_capacity(names.len());
+        for (usize index {}; index < names.len(); ++index) {
+            images.push(Parse(names[index].as_str()));
+        }
+        return images;
+    }
     auto ParseHeader(ref<str>) const -> Result<owe::ImageHeader, owe::ImageParseError> {
         owe::ImageHeader header;
         header.width  = 64;

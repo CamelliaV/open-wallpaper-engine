@@ -195,6 +195,19 @@ struct BufferCopyOperation {
     BufferUploadClass            usage { BufferUploadClass::Vertex };
 };
 
+struct ImageMipCopyOperation {
+    std::shared_ptr<UploadBlock> source;
+    VkDeviceSize                 source_offset { 0 };
+    VkExtent3D                   extent {};
+    rstd::uint32_t               mip_level { 0 };
+};
+
+struct ImageCopyOperation {
+    rstd::sync::Arc<TextureAllocation> destination_lease;
+    ImageParameters                    destination;
+    std::vector<ImageMipCopyOperation> mipmaps;
+};
+
 } // namespace
 
 struct BufferAllocation::State {
@@ -217,6 +230,14 @@ struct RecordedBufferUploads::State {
     std::vector<BufferUploadTicket>           tickets;
 };
 
+struct RecordedImageUploads::State {
+    u64                                       serial { 0 };
+    bool                                      recorded { false };
+    std::vector<ImageCopyOperation>           copies;
+    std::vector<std::shared_ptr<UploadBlock>> blocks;
+    std::vector<ImageUploadTicket>            tickets;
+};
+
 struct BufferManager::Impl {
     explicit Impl(const Device& value): device(value) {}
 
@@ -227,6 +248,17 @@ struct BufferManager::Impl {
     std::vector<std::shared_ptr<BufferPage>>      pages;
     std::vector<std::shared_ptr<UploadBlock>>     upload_blocks;
     std::shared_ptr<RecordedBufferUploads::State> pending;
+};
+
+struct ImageUploadManager::Impl {
+    explicit Impl(const Device& value): device(value) {}
+
+    const Device&                                device;
+    bool                                         initialized { false };
+    u64                                          next_ticket { 0 };
+    u64                                          next_batch { 0 };
+    std::vector<std::shared_ptr<UploadBlock>>    upload_blocks;
+    std::shared_ptr<RecordedImageUploads::State> pending;
 };
 
 BufferAllocation::BufferAllocation(std::shared_ptr<State> state): m_state(std::move(state)) {}
@@ -505,6 +537,294 @@ void BufferManager::Trim() {
                                                    return true;
                                                }),
                                 m_impl->upload_blocks.end());
+}
+
+RecordedImageUploads::RecordedImageUploads(ImageUploadManager* owner, std::shared_ptr<State> state)
+    : m_owner(owner), m_state(std::move(state)) {}
+
+RecordedImageUploads::~RecordedImageUploads() { Reset(); }
+
+RecordedImageUploads::RecordedImageUploads(RecordedImageUploads&& other) noexcept
+    : m_owner(other.m_owner), m_state(std::move(other.m_state)) {
+    other.m_owner = nullptr;
+}
+
+RecordedImageUploads& RecordedImageUploads::operator=(RecordedImageUploads&& other) noexcept {
+    if (this == &other) return *this;
+    Reset();
+    m_owner       = other.m_owner;
+    m_state       = std::move(other.m_state);
+    other.m_owner = nullptr;
+    return *this;
+}
+
+bool RecordedImageUploads::Valid() const noexcept { return m_owner != nullptr && m_state; }
+
+void RecordedImageUploads::Reset() {
+    if (m_owner && m_state) m_owner->CancelRecordedUploads(m_state);
+    m_owner = nullptr;
+    m_state.reset();
+}
+
+ImageUploadBatchLease::ImageUploadBatchLease(std::shared_ptr<RecordedImageUploads::State> state)
+    : m_state(std::move(state)) {}
+
+ImageUploadBatchLease::~ImageUploadBatchLease() = default;
+ImageUploadBatchLease::ImageUploadBatchLease(ImageUploadBatchLease&& other) noexcept
+    : m_state(std::move(other.m_state)) {}
+
+ImageUploadBatchLease& ImageUploadBatchLease::operator=(ImageUploadBatchLease&& other) noexcept {
+    if (this != &other) m_state = std::move(other.m_state);
+    return *this;
+}
+
+bool ImageUploadBatchLease::Valid() const noexcept { return static_cast<bool>(m_state); }
+
+std::span<const ImageUploadTicket> ImageUploadBatchLease::Tickets() const noexcept {
+    if (! m_state) return {};
+    return m_state->tickets;
+}
+
+ImageUploadManager::ImageUploadManager(const Device& device): m_impl(Box<Impl>::make(device)) {}
+ImageUploadManager::~ImageUploadManager() { destroy(); }
+
+bool ImageUploadManager::init() {
+    m_impl->initialized = true;
+    return true;
+}
+
+void ImageUploadManager::destroy() {
+    if (! m_impl->initialized) return;
+    m_impl->pending.reset();
+    m_impl->upload_blocks.clear();
+    m_impl->initialized = false;
+}
+
+Option<ImageUploadTicket>
+ImageUploadManager::QueueWrite(rstd::sync::Arc<TextureAllocation> allocation, const Image& image) {
+    if (! m_impl->initialized || image.header.type == ImageType::VIDEO) return None();
+    auto destinations = allocation->View();
+    if (destinations.slots.size() != image.slots.size() || destinations.slots.empty()) {
+        return None();
+    }
+    if (m_impl->pending && m_impl->pending->recorded) {
+        rstd_error("queue image write while the pending upload batch is recorded");
+        return None();
+    }
+    if (! m_impl->pending) {
+        ++m_impl->next_batch;
+        if (m_impl->next_batch == u64()) ++m_impl->next_batch;
+        m_impl->pending         = std::make_shared<RecordedImageUploads::State>();
+        m_impl->pending->serial = m_impl->next_batch;
+    }
+
+    std::vector<ImageCopyOperation> operations;
+    operations.reserve(image.slots.size());
+    for (std::size_t slot_index = 0; slot_index < image.slots.size(); ++slot_index) {
+        const auto& source_slot = image.slots[slot_index];
+        const auto& destination = destinations.slots[slot_index];
+        if (! source_slot || source_slot.mipmaps.size() != destination.mipmap_level) return None();
+
+        ImageCopyOperation operation {
+            .destination_lease = allocation.clone(),
+            .destination       = destination,
+        };
+        operation.mipmaps.reserve(source_slot.mipmaps.size());
+        for (std::size_t mip_index = 0; mip_index < source_slot.mipmaps.size(); ++mip_index) {
+            const auto& source = source_slot.mipmaps[mip_index];
+            const auto  size   = static_cast<VkDeviceSize>(source.size.to_primitive());
+            if (size == 0 || source.data == nullptr || source.width <= 0 || source.height <= 0) {
+                return None();
+            }
+
+            VkDeviceSize                 upload_offset { 0 };
+            std::shared_ptr<UploadBlock> block;
+            for (const auto& candidate : m_impl->pending->blocks) {
+                if (candidate->TryAllocate(size, 256, upload_offset)) {
+                    block = candidate;
+                    break;
+                }
+            }
+            if (! block) {
+                for (const auto& candidate : m_impl->upload_blocks) {
+                    if (candidate.use_count() != 1 || candidate->size() < size) continue;
+                    candidate->Reset();
+                    if (candidate->TryAllocate(size, 256, upload_offset)) {
+                        block = candidate;
+                        break;
+                    }
+                }
+                if (! block) {
+                    const auto block_size =
+                        size > kUploadBlockSize ? AlignUp(size, kLargeAlignment) : kUploadBlockSize;
+                    block = UploadBlock::Create(m_impl->device, block_size);
+                    if (! block || ! block->TryAllocate(size, 256, upload_offset)) return None();
+                    m_impl->upload_blocks.push_back(block);
+                    rstd_info("new image upload buffer block, size: {}, blocks: {}",
+                              block_size,
+                              m_impl->upload_blocks.size());
+                }
+                m_impl->pending->blocks.push_back(block);
+            }
+
+            block->Write(
+                upload_offset,
+                std::span<const rstd::uint8_t>(source.data.get(), static_cast<std::size_t>(size)));
+            operation.mipmaps.push_back(ImageMipCopyOperation {
+                .source        = rstd::move(block),
+                .source_offset = upload_offset,
+                .extent        = VkExtent3D { static_cast<rstd::uint32_t>(source.width),
+                                              static_cast<rstd::uint32_t>(source.height),
+                                              1 },
+                .mip_level     = static_cast<rstd::uint32_t>(mip_index),
+            });
+        }
+        operations.push_back(rstd::move(operation));
+    }
+
+    for (auto& operation : operations) {
+        m_impl->pending->copies.push_back(rstd::move(operation));
+    }
+    ++m_impl->next_ticket;
+    if (m_impl->next_ticket == u64()) ++m_impl->next_ticket;
+    ImageUploadTicket ticket { .value = m_impl->next_ticket };
+    m_impl->pending->tickets.push_back(ticket);
+    return Some(ticket);
+}
+
+bool ImageUploadManager::HasPendingUploads() const noexcept {
+    return m_impl->pending && ! m_impl->pending->copies.empty();
+}
+
+bool ImageUploadManager::RecordPendingUploads(vvk::CommandBuffer&   command,
+                                              RecordedImageUploads& recorded) {
+    recorded.Reset();
+    if (! HasPendingUploads()) return true;
+    if (m_impl->pending->recorded) {
+        rstd_error("image upload batch is already recorded");
+        return false;
+    }
+    for (const auto& block : m_impl->pending->blocks) {
+        if (! block->Flush()) return false;
+    }
+
+    for (const auto& copy : m_impl->pending->copies) {
+        VkImageSubresourceRange range {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = static_cast<rstd::uint32_t>(copy.mipmaps.size()),
+            .baseArrayLayer = 0,
+            .layerCount     = 1,
+        };
+        VkImageMemoryBarrier to_transfer {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask    = 0,
+            .dstAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image            = copy.destination.handle,
+            .subresourceRange = range,
+        };
+        command.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_DEPENDENCY_BY_REGION_BIT,
+                                to_transfer);
+
+        for (const auto& mip : copy.mipmaps) {
+            VkBufferImageCopy region {
+                .bufferOffset = mip.source_offset,
+                .imageSubresource =
+                    VkImageSubresourceLayers {
+                        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .mipLevel       = mip.mip_level,
+                        .baseArrayLayer = 0,
+                        .layerCount     = 1,
+                    },
+                .imageExtent = mip.extent,
+            };
+            command.CopyBufferToImage(mip.source->handle(),
+                                      copy.destination.handle,
+                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                      region);
+        }
+
+        VkImageMemoryBarrier to_sampled {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image            = copy.destination.handle,
+            .subresourceRange = range,
+        };
+        command.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                VK_DEPENDENCY_BY_REGION_BIT,
+                                to_sampled);
+    }
+
+    m_impl->pending->recorded = true;
+    recorded                  = RecordedImageUploads(this, m_impl->pending);
+    return true;
+}
+
+auto ImageUploadManager::CommitRecordedUploads(RecordedImageUploads&& recorded)
+    -> Option<ImageUploadBatchLease> {
+    if (! recorded.Valid() || recorded.m_owner != this || recorded.m_state != m_impl->pending ||
+        ! recorded.m_state->recorded) {
+        return None();
+    }
+    auto state       = std::move(recorded.m_state);
+    recorded.m_owner = nullptr;
+    state->recorded  = false;
+    m_impl->pending.reset();
+    return Some(ImageUploadBatchLease(std::move(state)));
+}
+
+void ImageUploadManager::CancelRecordedUploads(
+    const std::shared_ptr<RecordedImageUploads::State>& state) {
+    if (state && state == m_impl->pending) state->recorded = false;
+}
+
+void ImageUploadManager::DiscardPendingUploads() { m_impl->pending.reset(); }
+
+void ImageUploadManager::Trim() {
+    bool kept_upload_block = false;
+    m_impl->upload_blocks.erase(std::remove_if(m_impl->upload_blocks.begin(),
+                                               m_impl->upload_blocks.end(),
+                                               [&kept_upload_block](const auto& block) {
+                                                   if (block.use_count() != 1) return false;
+                                                   if (! kept_upload_block) {
+                                                       kept_upload_block = true;
+                                                       return false;
+                                                   }
+                                                   return true;
+                                               }),
+                                m_impl->upload_blocks.end());
+}
+
+auto ImagePrepareContext::CreateImportedTexture(ref<Image> image)
+    -> Option<PreparedImageAllocation> {
+    auto allocation = m_textures.AllocateImportedTexture(*image);
+    if (allocation.is_none()) return None();
+    if (image->header.type == ImageType::VIDEO) {
+        return Some(PreparedImageAllocation {
+            .allocation = rstd::move(*allocation),
+        });
+    }
+    auto ticket = m_uploads.QueueWrite(allocation->clone(), *image);
+    if (ticket.is_none()) return None();
+    return Some(PreparedImageAllocation {
+        .allocation = rstd::move(*allocation),
+        .upload     = Some(*ticket),
+    });
+}
+
+auto ImagePrepareContext::AllocateTexture(TextureKey key)
+    -> Option<rstd::sync::Arc<TextureAllocation>> {
+    return m_textures.AllocateTexture(rstd::move(key));
 }
 
 } // namespace owe::vulkan

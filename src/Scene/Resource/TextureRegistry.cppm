@@ -1,3 +1,7 @@
+module;
+
+#include <span>
+
 export module wescene.resource_registry:texture_registry;
 import rstd;
 import wescene.resource;
@@ -22,6 +26,11 @@ struct TexturePhysical {
     u64                                        definition_version { 0 };
     u64                                        content_version { 0 };
     ReadyToken                                 ready;
+};
+
+struct PendingTextureUpload {
+    TextureHandle   handle;
+    TexturePhysical physical;
 };
 
 struct TextureRegistryIdentity {
@@ -96,35 +105,61 @@ public:
     }
 
     auto Publish(resource::TextureHandle                    handle,
-                 rstd::sync::Arc<vulkan::TextureAllocation> allocation, ReadyToken ready)
-        -> Option<u64> {
+                 rstd::sync::Arc<vulkan::TextureAllocation> allocation, ReadyToken ready,
+                 Option<vulkan::ImageUploadTicket> upload = None()) -> Option<u64> {
         auto image = allocation->View();
         if (ResolveTexture(handle).is_none() || image.slots.empty()) return None();
 
         auto logical = ResolveTexture(handle);
         if (logical.is_none()) return None();
-        auto source_generation = image.getActive().generation;
-        auto physical          = m_resources.get_mut(handle);
-        if (physical.is_some()) {
-            if ((**physical).source_generation != source_generation) ++(**physical).generation;
-            (**physical).allocation         = rstd::move(allocation);
-            (**physical).source_generation  = source_generation;
-            (**physical).definition_version = (**logical).definition_version;
-            (**physical).content_version    = (**logical).content_version;
-            (**physical).ready              = ready;
-            return Some((**physical).generation);
+        auto source_generation   = image.getActive().generation;
+        auto current             = m_resources.get(handle);
+        u64  physical_generation = current.is_some() ? (**current).generation : u64(1);
+        if (current.is_some() && (**current).source_generation != source_generation) {
+            ++physical_generation;
         }
-
-        (void)m_resources.insert(handle,
-                                 TexturePhysical {
-                                     .allocation         = rstd::move(allocation),
-                                     .source_generation  = source_generation,
-                                     .definition_version = (**logical).definition_version,
-                                     .content_version    = (**logical).content_version,
-                                     .ready              = ready,
-                                 });
-        return Some(u64(1));
+        TexturePhysical physical {
+            .allocation         = rstd::move(allocation),
+            .generation         = physical_generation,
+            .source_generation  = source_generation,
+            .definition_version = (**logical).definition_version,
+            .content_version    = (**logical).content_version,
+            .ready              = ready,
+        };
+        if (upload.is_some() && upload->Valid()) {
+            auto pending = m_pending_uploads.get_mut(upload->value);
+            if (pending.is_none()) {
+                (void)m_pending_uploads.insert(upload->value, Vec<PendingTextureUpload>::make());
+                pending = m_pending_uploads.get_mut(upload->value);
+            }
+            if (pending.is_some()) {
+                for (auto& item : **pending) {
+                    if (item.handle != handle) continue;
+                    item.physical = rstd::move(physical);
+                    return Some(physical_generation);
+                }
+                (*pending)->push(
+                    PendingTextureUpload { .handle = handle, .physical = rstd::move(physical) });
+            }
+        } else {
+            (void)m_resources.insert(handle, rstd::move(physical));
+        }
+        return Some(physical_generation);
     }
+
+    void MarkUploadsSubmitted(std::span<const vulkan::ImageUploadTicket> tickets,
+                              Option<ReadyToken>                         ready) {
+        for (const auto& ticket : tickets) {
+            auto pending = m_pending_uploads.remove(ticket.value);
+            if (pending.is_none()) continue;
+            for (auto& item : *pending) {
+                if (ready.is_some()) item.physical.ready = *ready;
+                (void)m_resources.insert(item.handle, rstd::move(item.physical));
+            }
+        }
+    }
+
+    void DiscardPendingUploads() { m_pending_uploads.clear(); }
 
     auto ResolveTexture(resource::TextureHandle handle) const noexcept -> Option<ref<Texture>> {
         return m_textures.get(handle);
@@ -188,6 +223,7 @@ public:
 
     void Reset() {
         m_resources.clear();
+        m_pending_uploads.clear();
         m_textures.clear();
         m_handles.clear();
         m_next_index = u64();
@@ -207,6 +243,7 @@ private:
     HandleMap<Texture>                                                           m_textures;
     HandleMap<TexturePhysical>                                                   m_resources;
     rstd::collections::HashMap<TextureRegistryIdentity, resource::TextureHandle> m_handles;
+    rstd::collections::HashMap<u64, Vec<PendingTextureUpload>>                   m_pending_uploads;
 };
 
 } // namespace owe::resource

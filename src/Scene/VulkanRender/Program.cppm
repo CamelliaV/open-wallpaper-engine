@@ -546,9 +546,12 @@ struct RenderProgram {
         }
 
         SnapshotImportedTextureProvider imported_textures(
-            render_scene, ref<Scene>::from_raw_parts(rstd::addressof(scene)));
-        auto content =
+            render_scene, ref<Scene>::from_raw_parts(rstd::addressof(scene)), load_bench);
+        SnapshotTexturePrepareObserver texture_observer(load_bench);
+        auto                           content =
             rstd::dyn<owe::resource::TextureContentProvider>::from_ref(imported_textures);
+        auto observer =
+            rstd::dyn<owe::resource::TexturePrepareObserver>::from_ref(texture_observer);
         auto buffer_content =
             rstd::dyn<owe::resource::BufferContentProvider>::from_ref(declarations);
         DeclaredShaderArtifactProvider declared_shaders(declarations);
@@ -561,7 +564,8 @@ struct RenderProgram {
                                          .buffer  = rstd::Some(buffer_content.as_mut_ref()),
                                          .shader  = rstd::Some(shader_artifacts.as_mut_ref()),
                                      },
-                                     sections);
+                                     sections,
+                                     Some(observer.as_mut_ref()));
         if (prepared.is_err()) {
             auto error = rstd::move(prepared).unwrap_err_unchecked();
             rstd_error("prepare resource plan failed: {}", error.message);
@@ -675,7 +679,10 @@ struct RenderProgram {
                                  .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                              }));
         RecordedBufferUploads recorded;
-        if (! rr.resources.RecordPendingUploads(upload_cmd, recorded)) return u64();
+        RecordedImageUploads  recorded_images;
+        if (! rr.resources.RecordPendingUploads(upload_cmd, recorded, recorded_images)) {
+            return u64();
+        }
         VVK_CHECK_ACT(return u64(), upload_cmd.End());
         {
             auto                          ready        = rr.resources.ReserveUpload();
@@ -697,7 +704,10 @@ struct RenderProgram {
                 .pSignalSemaphores    = rr.sem_upload.address(),
             };
             VVK_CHECK_ACT(return u64(), device.graphics_queue().handle.Submit(sub_info, {}));
-            if (! rr.resources.MarkUploadSubmitted(ready, rstd::move(recorded))) return u64();
+            if (! rr.resources.MarkUploadSubmitted(
+                    ready, rstd::move(recorded), rstd::move(recorded_images))) {
+                return u64();
+            }
             loaded = true;
             return u64(signal_value);
         }
