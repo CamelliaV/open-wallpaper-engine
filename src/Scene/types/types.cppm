@@ -91,6 +91,34 @@ enum class ShaderType
     FRAGMENT
 };
 
+enum class ShaderScalarKind
+{
+    Unknown,
+    Float,
+    SignedInteger,
+    UnsignedInteger,
+    Boolean,
+};
+
+enum class ShaderMatrixMajor
+{
+    None,
+    Row,
+    Column,
+};
+
+enum class ShaderMatrixConvention
+{
+    ColumnVector,
+    RowVector,
+};
+
+enum class ShaderMatrixAbi
+{
+    NativeSpirv,
+    Hlsl,
+};
+
 enum class TextureType
 {
     IMG_2D,

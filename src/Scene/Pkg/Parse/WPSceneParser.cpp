@@ -1463,9 +1463,11 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
 
     SceneMaterialCustomShader materialShader;
 
-    auto& shader = materialShader.shader;
-    shader       = std::make_shared<SceneShader>();
-    shader->name = wpmat.shader;
+    auto& shader              = materialShader.shader;
+    shader                    = std::make_shared<SceneShader>();
+    shader->name              = wpmat.shader;
+    shader->matrix_convention = ShaderMatrixConvention::RowVector;
+    shader->matrix_abi        = ShaderMatrixAbi::Hlsl;
     std::string shaderPath("/assets/shaders/" + wpmat.shader);
 
     std::vector<WPShaderUnit> sd_units;
@@ -3628,8 +3630,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
 
         SceneMaterial scene_mat;
         WPShaderInfo  shader_info;
-        shader_info.baseConstSvs            = context.global_base_uniforms;
-        shader_info.normalize_tangent_space = true;
+        shader_info.baseConstSvs = context.global_base_uniforms;
         if (mdl.puppet.is_some() && ! (*mdl.puppet)->bones.is_empty()) {
             WPMdlParser::AddPuppetShaderInfo(shader_info, mdl);
         }

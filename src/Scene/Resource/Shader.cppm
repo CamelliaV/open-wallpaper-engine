@@ -72,17 +72,37 @@ struct ShaderArtifactStage {
 };
 
 struct ShaderArtifactUniformMember {
-    String name;
-    u32    offset {};
-    usize  size {};
-    usize  count { usize(1) };
+    String              name;
+    u32                 offset {};
+    usize               size {};
+    usize               count { usize(1) };
+    ShaderScalarKind    scalar_kind { ShaderScalarKind::Unknown };
+    u32                 scalar_width {};
+    u32                 vector_components { u32(1) };
+    u32                 matrix_rows {};
+    u32                 matrix_columns {};
+    u32                 matrix_stride {};
+    ShaderMatrixMajor   matrix_major { ShaderMatrixMajor::None };
+    u32                 array_stride {};
+    rstd::vec::Vec<u32> array_dimensions;
 
     auto clone() const -> ShaderArtifactUniformMember {
+        auto dimensions = rstd::vec::Vec<u32>::with_capacity(array_dimensions.len());
+        for (auto dimension : array_dimensions) dimensions.push(u32(dimension));
         return ShaderArtifactUniformMember {
-            .name   = name.clone(),
-            .offset = offset,
-            .size   = size,
-            .count  = count,
+            .name              = name.clone(),
+            .offset            = offset,
+            .size              = size,
+            .count             = count,
+            .scalar_kind       = scalar_kind,
+            .scalar_width      = scalar_width,
+            .vector_components = vector_components,
+            .matrix_rows       = matrix_rows,
+            .matrix_columns    = matrix_columns,
+            .matrix_stride     = matrix_stride,
+            .matrix_major      = matrix_major,
+            .array_stride      = array_stride,
+            .array_dimensions  = rstd::move(dimensions),
         };
     }
 };
@@ -136,9 +156,11 @@ struct ShaderArtifactVertexInput {
 };
 
 struct ShaderArtifact {
-    ShaderDefinitionId                              source;
-    u64                                             content_version { u64(1) };
-    rstd::vec::Vec<ShaderArtifactStage>             stages;
+    ShaderDefinitionId                  source;
+    u64                                 content_version { u64(1) };
+    ShaderMatrixConvention              matrix_convention { ShaderMatrixConvention::ColumnVector };
+    ShaderMatrixAbi                     matrix_abi { ShaderMatrixAbi::NativeSpirv };
+    rstd::vec::Vec<ShaderArtifactStage> stages;
     rstd::vec::Vec<ShaderArtifactUniformBlock>      uniform_blocks;
     rstd::vec::Vec<ShaderArtifactDescriptorBinding> descriptor_bindings;
     rstd::vec::Vec<ShaderArtifactVertexInput>       vertex_inputs;
@@ -158,6 +180,8 @@ struct ShaderArtifact {
         return ShaderArtifact {
             .source              = source,
             .content_version     = content_version,
+            .matrix_convention   = matrix_convention,
+            .matrix_abi          = matrix_abi,
             .stages              = rstd::move(cloned_stages),
             .uniform_blocks      = rstd::move(cloned_blocks),
             .descriptor_bindings = rstd::move(cloned_bindings),

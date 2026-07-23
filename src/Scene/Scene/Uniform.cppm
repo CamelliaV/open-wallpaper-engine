@@ -14,9 +14,57 @@ export namespace owe
 
 using ShaderValueInter = rstd::array<float, 16>;
 
+enum class UniformScalarType : rstd::uint8_t
+{
+    Float32,
+};
+
+enum class UniformValueKind : rstd::uint8_t
+{
+    Linear,
+    Matrix,
+};
+
+enum class UniformMatrixStorage : rstd::uint8_t
+{
+    RowMajor,
+    ColumnMajor,
+};
+
+struct UniformValueLayout {
+    UniformScalarType    scalar { UniformScalarType::Float32 };
+    UniformValueKind     kind { UniformValueKind::Linear };
+    u32                  rows { u32(1) };
+    u32                  columns { u32(1) };
+    usize                array_count { usize(1) };
+    UniformMatrixStorage matrix_storage { UniformMatrixStorage::ColumnMajor };
+
+    static auto Linear(usize elements) -> UniformValueLayout {
+        return { .columns = u32(static_cast<rstd::uint32_t>(elements.to_primitive())) };
+    }
+
+    static auto Matrix(u32 rows, u32 columns, usize array_count, UniformMatrixStorage storage)
+        -> UniformValueLayout {
+        return {
+            .kind           = UniformValueKind::Matrix,
+            .rows           = rows,
+            .columns        = columns,
+            .array_count    = array_count,
+            .matrix_storage = storage,
+        };
+    }
+
+    usize MatrixElements() const {
+        return usize(rows.to_primitive()) * usize(columns.to_primitive());
+    }
+
+    friend bool operator==(const UniformValueLayout&, const UniformValueLayout&) = default;
+};
+
 struct UniformValueView {
-    const float* data { nullptr };
-    usize        size {};
+    const float*       data { nullptr };
+    usize              size {};
+    UniformValueLayout layout;
 };
 
 class ShaderValue {
@@ -30,13 +78,15 @@ public:
         : m_dynamic(other.m_dynamic),
           m_value(other.m_value),
           m_dynamic_value(CloneDynamic(other.m_dynamic_value)),
-          m_size(other.m_size) {}
+          m_size(other.m_size),
+          m_layout(other.m_layout) {}
     ShaderValue& operator=(const ShaderValue& other) noexcept {
         if (this == &other) return *this;
         m_dynamic       = other.m_dynamic;
         m_value         = other.m_value;
         m_dynamic_value = CloneDynamic(other.m_dynamic_value);
         m_size          = other.m_size;
+        m_layout        = other.m_layout;
         return *this;
     }
 
@@ -56,13 +106,29 @@ public:
     ShaderValue(const value_type* ptr, usize num) noexcept {
         fromSlice(slice<value_type>::from_raw_parts(ptr, num));
     }
+    explicit ShaderValue(UniformValueView view) noexcept {
+        fromSlice(slice<value_type>::from_raw_parts(view.data, view.size));
+        m_layout = view.layout;
+    }
 
     static ShaderValue fromMatrix(const Eigen::Ref<const Eigen::MatrixXf>& mat) {
-        return ShaderValue(mat.data(), usize(mat.size()));
+        auto value     = ShaderValue(mat.data(), usize(mat.size()));
+        value.m_layout = UniformValueLayout::Matrix(u32(static_cast<rstd::uint32_t>(mat.rows())),
+                                                    u32(static_cast<rstd::uint32_t>(mat.cols())),
+                                                    usize(1),
+                                                    UniformMatrixStorage::ColumnMajor);
+        return value;
     }
     static ShaderValue fromMatrix(const Eigen::Ref<const Eigen::MatrixXd>& mat) {
-        const Eigen::Ref<const Eigen::MatrixXf>& matf = mat.cast<float>();
+        Eigen::MatrixXf matf = mat.cast<float>();
         return fromMatrix(matf);
+    }
+    static ShaderValue fromMatrixArray(const value_type* ptr, u32 rows, u32 columns, usize count,
+                                       UniformMatrixStorage storage) {
+        auto value =
+            ShaderValue(ptr, usize(rows.to_primitive()) * usize(columns.to_primitive()) * count);
+        value.m_layout = UniformValueLayout::Matrix(rows, columns, count, storage);
+        return value;
     }
 
     const auto& operator[](usize index) const { return value()[index]; }
@@ -70,7 +136,7 @@ public:
 
     auto  data() const noexcept { return value().as_raw_ptr(); }
     usize size() const noexcept { return m_size; }
-    auto  View() const noexcept -> UniformValueView { return { data(), size() }; }
+    auto  View() const noexcept -> UniformValueView { return { data(), size(), m_layout }; }
 
     void setSize(usize size) noexcept { m_size = rstd::cmp::min(size, value().len()); }
 
@@ -88,10 +154,11 @@ private:
         return m_value.as_slice();
     }
 
-    bool             m_dynamic { false };
-    ShaderValueInter m_value;
-    Vec<value_type>  m_dynamic_value;
-    usize            m_size {};
+    bool               m_dynamic { false };
+    ShaderValueInter   m_value;
+    Vec<value_type>    m_dynamic_value;
+    usize              m_size {};
+    UniformValueLayout m_layout;
 };
 
 using UniformValue   = ShaderValue;
@@ -118,21 +185,38 @@ struct UniformSourceAttachment {
     rstd::int32_t   priority { 0 };
 };
 
-enum class UniformScalarType : rstd::uint8_t
-{
-    Float32,
-};
-
 struct UniformValueShape {
     UniformScalarType scalar { UniformScalarType::Float32 };
+    UniformValueKind  kind { UniformValueKind::Linear };
     u32               min_elements {};
     u32               max_elements {};
+    u32               rows { u32(1) };
+    u32               columns { u32(1) };
+    usize             min_array_count { usize(1) };
+    usize             max_array_count { usize(1) };
 
     static auto Float(u32 elements) -> UniformValueShape {
         return { .min_elements = elements, .max_elements = elements };
     }
     static auto FloatRange(u32 min_elements, u32 max_elements) -> UniformValueShape {
         return { .min_elements = min_elements, .max_elements = max_elements };
+    }
+    static auto Matrix(u32 rows, u32 columns) -> UniformValueShape {
+        return {
+            .kind    = UniformValueKind::Matrix,
+            .rows    = rows,
+            .columns = columns,
+        };
+    }
+    static auto MatrixArray(u32 rows, u32 columns, usize min_count, usize max_count)
+        -> UniformValueShape {
+        return {
+            .kind            = UniformValueKind::Matrix,
+            .rows            = rows,
+            .columns         = columns,
+            .min_array_count = min_count,
+            .max_array_count = max_count,
+        };
     }
 };
 

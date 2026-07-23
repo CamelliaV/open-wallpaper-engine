@@ -8,6 +8,7 @@ using namespace rstd::prelude;
 
 void ShaderValue::fromSlice(slice<value_type> values) noexcept {
     m_size    = values.len();
+    m_layout  = UniformValueLayout::Linear(values.len());
     m_dynamic = values.len() > m_value.len();
     if (m_dynamic) {
         m_dynamic_value.clear();

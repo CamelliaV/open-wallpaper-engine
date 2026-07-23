@@ -55,13 +55,33 @@ auto SceneUniformBindingPrepareContext::ResolveSource(UniformSourceId source) co
     return m_scene->Resolve(source);
 }
 
+namespace
+{
+
+struct MatrixCoordinate {
+    u32 row;
+    u32 column;
+};
+
+MatrixCoordinate SceneMatrixCoordinate(u32 row, u32 column, ShaderMatrixConvention convention,
+                                       ShaderMatrixAbi matrix_abi) {
+    const auto shader_row    = matrix_abi == ShaderMatrixAbi::Hlsl ? column : row;
+    const auto shader_column = matrix_abi == ShaderMatrixAbi::Hlsl ? row : column;
+    return convention == ShaderMatrixConvention::RowVector
+               ? MatrixCoordinate { shader_column, shader_row }
+               : MatrixCoordinate { shader_row, shader_column };
+}
+
+} // namespace
+
 namespace detail
 {
 
 class SourceBindingCompiler {
 public:
-    SourceBindingCompiler(const UniformBufferLayout& layout, BoundUniformSource& source)
-        : m_layout(layout), m_source(source) {}
+    SourceBindingCompiler(const UniformBufferLayout& layout, BoundUniformSource& source,
+                          ShaderMatrixConvention convention, ShaderMatrixAbi matrix_abi)
+        : m_layout(layout), m_source(source), m_convention(convention), m_matrix_abi(matrix_abi) {}
 
     auto Bind(UniformOutputId output, ref<str> shader_member, UniformValueShape shape)
         -> Result<bool, UniformError> {
@@ -75,18 +95,46 @@ public:
                         rstd::format("uniform {} has non-float size {}", shader_member, slot.size),
                 });
             }
-            const auto elements =
-                u32(static_cast<rstd::uint32_t>((slot.size / usize(sizeof(float))).to_primitive()));
-            if ((shape.min_elements != u32() && elements < shape.min_elements) ||
-                (shape.max_elements != u32() && elements > shape.max_elements)) {
+            if (slot.scalar_kind != ShaderScalarKind::Unknown &&
+                (shape.scalar != UniformScalarType::Float32 ||
+                 slot.scalar_kind != ShaderScalarKind::Float || slot.scalar_width != u32(32))) {
                 return Err(UniformError {
-                    .message = rstd::format("uniform {} shape mismatch: reflected {} floats, "
-                                            "source expects {}..{}",
-                                            shader_member,
-                                            elements,
-                                            shape.min_elements,
-                                            shape.max_elements),
+                    .message =
+                        rstd::format("uniform {} scalar type does not match source", shader_member),
                 });
+            }
+            const bool matrix = slot.matrix_rows != u32() && slot.matrix_columns != u32();
+            if (matrix != (shape.kind == UniformValueKind::Matrix)) {
+                return Err(UniformError {
+                    .message = rstd::format("uniform {} value kind does not match reflection",
+                                            shader_member),
+                });
+            }
+            if (matrix) {
+                const auto last = SceneMatrixCoordinate(slot.matrix_rows - u32(1),
+                                                        slot.matrix_columns - u32(1),
+                                                        m_convention,
+                                                        m_matrix_abi);
+                if (shape.rows <= last.row || shape.columns <= last.column ||
+                    slot.count < shape.min_array_count || slot.count > shape.max_array_count) {
+                    return Err(UniformError {
+                        .message = rstd::format("uniform {} matrix shape mismatch", shader_member),
+                    });
+                }
+            } else {
+                const auto elements =
+                    u32(static_cast<rstd::uint32_t>(slot.LogicalFloatElements().to_primitive()));
+                if ((shape.min_elements != u32() && elements < shape.min_elements) ||
+                    (shape.max_elements != u32() && elements > shape.max_elements)) {
+                    return Err(UniformError {
+                        .message = rstd::format("uniform {} shape mismatch: reflected {} floats, "
+                                                "source expects {}..{}",
+                                                shader_member,
+                                                elements,
+                                                shape.min_elements,
+                                                shape.max_elements),
+                    });
+                }
             }
             bool exists = false;
             for (const auto& binding : m_source.outputs) {
@@ -109,6 +157,8 @@ public:
 private:
     const UniformBufferLayout& m_layout;
     BoundUniformSource&        m_source;
+    ShaderMatrixConvention     m_convention;
+    ShaderMatrixAbi            m_matrix_abi;
 };
 
 class SourceValueWriter {
@@ -127,7 +177,13 @@ public:
         bool wrote = false;
         for (const auto& binding : m_source.outputs) {
             if (binding.output != output) continue;
-            wrote = m_binding.WriteSlot(binding.slot_index, value) || wrote;
+            auto result = m_binding.WriteSlot(binding.slot_index, value);
+            if (result.is_err()) {
+                return Err(UniformError {
+                    .message = rstd::move(result).unwrap_err_unchecked().message,
+                });
+            }
+            wrote = rstd::move(result).unwrap_unchecked() || wrote;
         }
         if (! wrote) {
             return Err(UniformError {
@@ -213,6 +269,205 @@ private:
 namespace owe::vulkan
 {
 
+namespace
+{
+
+bool WriteFloat(mut_ref<u8[]> destination, usize offset, float value) {
+    if (offset > destination.len() || usize(sizeof(float)) > destination.len() - offset)
+        return false;
+    auto bytes =
+        slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(&value), usize(sizeof(float)));
+    for (usize index {}; index < bytes.len(); ++index) destination[offset + index] = bytes[index];
+    return true;
+}
+
+float MatrixValue(UniformValueView value, usize matrix, u32 row, u32 column) {
+    const auto rows     = usize(value.layout.rows.to_primitive());
+    const auto columns  = usize(value.layout.columns.to_primitive());
+    const auto base     = matrix * rows * columns;
+    const auto row_i    = usize(row.to_primitive());
+    const auto column_i = usize(column.to_primitive());
+    const auto index    = value.layout.matrix_storage == UniformMatrixStorage::ColumnMajor
+                              ? base + column_i * rows + row_i
+                              : base + row_i * columns + column_i;
+    return value.data[index.to_primitive()];
+}
+
+auto SerializeMatrixValue(mut_ref<u8[]> destination, const UniformSlot& slot,
+                          UniformValueView value, ShaderMatrixConvention convention,
+                          ShaderMatrixAbi matrix_abi) -> Result<empty, UniformBufferUpdateError> {
+    if (slot.scalar_kind != ShaderScalarKind::Float || slot.scalar_width != u32(32)) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format("uniform {} matrix scalar is not float32", slot.name.as_str()),
+        });
+    }
+    if (slot.matrix_rows == u32() || slot.matrix_columns == u32() ||
+        slot.matrix_major == ShaderMatrixMajor::None || slot.matrix_stride == u32()) {
+        return Err(UniformBufferUpdateError {
+            .message =
+                rstd::format("uniform {} has incomplete matrix reflection", slot.name.as_str()),
+        });
+    }
+
+    const auto source_rows    = value.layout.rows;
+    const auto source_columns = value.layout.columns;
+    const auto last           = SceneMatrixCoordinate(
+        slot.matrix_rows - u32(1), slot.matrix_columns - u32(1), convention, matrix_abi);
+    const bool source_fits     = source_rows > last.row && source_columns > last.column &&
+                                 value.layout.array_count >= slot.count;
+    const auto source_elements = value.layout.MatrixElements() * value.layout.array_count;
+    if (! source_fits || value.size < source_elements) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format("uniform {} matrix shape {}x{}[{}] cannot fill {}x{}[{}]",
+                                    slot.name.as_str(),
+                                    source_rows,
+                                    source_columns,
+                                    value.layout.array_count,
+                                    slot.matrix_rows,
+                                    slot.matrix_columns,
+                                    slot.count),
+        });
+    }
+
+    const auto scalar_size = usize(sizeof(float));
+    const auto stride      = usize(slot.matrix_stride.to_primitive());
+    const auto major_count = slot.matrix_major == ShaderMatrixMajor::Row
+                                 ? usize(slot.matrix_rows.to_primitive())
+                                 : usize(slot.matrix_columns.to_primitive());
+    const auto minor_count = slot.matrix_major == ShaderMatrixMajor::Row
+                                 ? usize(slot.matrix_columns.to_primitive())
+                                 : usize(slot.matrix_rows.to_primitive());
+    if (stride < minor_count * scalar_size) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format(
+                "uniform {} matrix stride {} is too small", slot.name.as_str(), slot.matrix_stride),
+        });
+    }
+    const auto matrix_size = major_count * stride;
+    const auto array_stride =
+        slot.count > usize(1) ? usize(slot.array_stride.to_primitive()) : matrix_size;
+    if (slot.count > usize(1) && array_stride < matrix_size) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format(
+                "uniform {} array stride {} is too small", slot.name.as_str(), slot.array_stride),
+        });
+    }
+
+    const auto write_count = slot.count;
+    for (usize matrix {}; matrix < write_count; ++matrix) {
+        const auto matrix_base = slot.offset + matrix * array_stride;
+        for (u32 row {}; row < slot.matrix_rows; ++row) {
+            for (u32 column {}; column < slot.matrix_columns; ++column) {
+                const auto source = SceneMatrixCoordinate(row, column, convention, matrix_abi);
+                const auto target_offset = slot.matrix_major == ShaderMatrixMajor::Row
+                                               ? matrix_base + usize(row.to_primitive()) * stride +
+                                                     usize(column.to_primitive()) * scalar_size
+                                               : matrix_base +
+                                                     usize(column.to_primitive()) * stride +
+                                                     usize(row.to_primitive()) * scalar_size;
+                if (! WriteFloat(destination,
+                                 target_offset,
+                                 MatrixValue(value, matrix, source.row, source.column))) {
+                    return Err(UniformBufferUpdateError {
+                        .message = rstd::format("uniform {} matrix write exceeds block",
+                                                slot.name.as_str()),
+                    });
+                }
+            }
+        }
+    }
+    return Ok(empty {});
+}
+
+auto SerializeLinearValue(mut_ref<u8[]> destination, const UniformSlot& slot,
+                          UniformValueView value) -> Result<empty, UniformBufferUpdateError> {
+    const auto scalar_size = usize(sizeof(float));
+    if (slot.scalar_kind != ShaderScalarKind::Unknown &&
+        (slot.scalar_kind != ShaderScalarKind::Float || slot.scalar_width != u32(32))) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format("uniform {} scalar is not float32", slot.name.as_str()),
+        });
+    }
+    if (slot.scalar_kind != ShaderScalarKind::Unknown && value.size < slot.LogicalFloatElements()) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format("uniform {} value has {} floats, expected at least {}",
+                                    slot.name.as_str(),
+                                    value.size,
+                                    slot.LogicalFloatElements()),
+        });
+    }
+
+    if (slot.scalar_kind == ShaderScalarKind::Unknown || slot.array_stride == u32() ||
+        slot.count <= usize(1)) {
+        const auto count = rstd::cmp::min(value.size, slot.size / scalar_size);
+        for (usize index {}; index < count; ++index) {
+            if (! WriteFloat(destination,
+                             slot.offset + index * scalar_size,
+                             value.data[index.to_primitive()])) {
+                return Err(UniformBufferUpdateError {
+                    .message = rstd::format("uniform {} write exceeds block", slot.name.as_str()),
+                });
+            }
+        }
+        return Ok(empty {});
+    }
+
+    const auto components   = usize(slot.vector_components.to_primitive());
+    const auto write_count  = rstd::cmp::min(slot.count, value.size / components);
+    const auto array_stride = usize(slot.array_stride.to_primitive());
+    if (array_stride < components * scalar_size) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format(
+                "uniform {} array stride {} is too small", slot.name.as_str(), slot.array_stride),
+        });
+    }
+    for (usize element {}; element < write_count; ++element) {
+        for (usize component {}; component < components; ++component) {
+            const auto source = element * components + component;
+            if (! WriteFloat(destination,
+                             slot.offset + element * array_stride + component * scalar_size,
+                             value.data[source.to_primitive()])) {
+                return Err(UniformBufferUpdateError {
+                    .message =
+                        rstd::format("uniform {} array write exceeds block", slot.name.as_str()),
+                });
+            }
+        }
+    }
+    return Ok(empty {});
+}
+
+} // namespace
+
+auto SerializeUniformValue(mut_ref<u8[]> destination, const UniformSlot& slot,
+                           UniformValueView value, ShaderMatrixConvention convention,
+                           ShaderMatrixAbi matrix_abi) -> Result<empty, UniformBufferUpdateError> {
+    if (value.data == nullptr) {
+        return Err(UniformBufferUpdateError {
+            .message = rstd::format("uniform {} value is empty", slot.name.as_str()),
+        });
+    }
+    if (slot.offset > destination.len() || slot.size > destination.len() - slot.offset) {
+        return Err(UniformBufferUpdateError {
+            .message =
+                rstd::format("uniform {} lies outside destination block", slot.name.as_str()),
+        });
+    }
+    const bool reflected_matrix = slot.matrix_rows != u32() && slot.matrix_columns != u32();
+    const bool value_matrix     = value.layout.kind == UniformValueKind::Matrix;
+    if (reflected_matrix != value_matrix) {
+        return Err(UniformBufferUpdateError {
+            .message =
+                rstd::format("uniform {} value kind does not match reflection", slot.name.as_str()),
+        });
+    }
+    for (usize index {}; index < slot.size; ++index) destination[slot.offset + index] = u8();
+    if (value_matrix) {
+        return SerializeMatrixValue(destination, slot, value, convention, matrix_abi);
+    }
+    return SerializeLinearValue(destination, slot, value);
+}
+
 auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock& block)
     -> Result<UniformBufferLayout, UniformBufferUpdateError> {
     UniformBufferLayout layout { .size = block.size };
@@ -226,11 +481,22 @@ auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock& bloc
                     "uniform {} lies outside block {}", member.name.as_str(), block.name.as_str()),
             });
         }
+        auto dimensions = rstd::vec::Vec<u32>::with_capacity(member.array_dimensions.len());
+        for (auto dimension : member.array_dimensions) dimensions.push(u32(dimension));
         layout.slots.push(UniformSlot {
-            .name   = member.name.clone(),
-            .offset = offset,
-            .size   = member.size,
-            .count  = member.count,
+            .name              = member.name.clone(),
+            .offset            = offset,
+            .size              = member.size,
+            .count             = member.count,
+            .scalar_kind       = member.scalar_kind,
+            .scalar_width      = member.scalar_width,
+            .vector_components = member.vector_components,
+            .matrix_rows       = member.matrix_rows,
+            .matrix_columns    = member.matrix_columns,
+            .matrix_stride     = member.matrix_stride,
+            .matrix_major      = member.matrix_major,
+            .array_stride      = member.array_stride,
+            .array_dimensions  = rstd::move(dimensions),
         });
     }
 
@@ -257,7 +523,8 @@ auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock& bloc
 UniformBufferBinding::UniformBufferBinding(
     SceneDrawItemId draw_item, resource::BufferUseHandle buffer, UniformBufferLayout layout,
     Vec<BoundUniformSource> sources, ShaderValues defaults, ref<SceneMaterial> material,
-    Vec<PreparedUniformTextureMetadata> textures, SceneRenderViewKind render_view)
+    Vec<PreparedUniformTextureMetadata> textures, SceneRenderViewKind render_view,
+    ShaderMatrixConvention matrix_convention, ShaderMatrixAbi matrix_abi)
     : m_draw_item(draw_item),
       m_buffer(buffer),
       m_layout(rstd::move(layout)),
@@ -267,47 +534,32 @@ UniformBufferBinding::UniformBufferBinding(
       m_defaults(rstd::move(defaults)),
       m_material(material),
       m_textures(rstd::move(textures)),
-      m_render_view(render_view) {
+      m_render_view(render_view),
+      m_matrix_convention(matrix_convention),
+      m_matrix_abi(matrix_abi) {
     m_data.resize(m_layout.size, u8(0));
     m_base_data.resize(m_layout.size, u8(0));
 }
 
-bool UniformBufferBinding::WriteSlot(usize slot_index, UniformValueView value) const {
-    if (slot_index >= m_layout.slots.len() || value.data == nullptr) return false;
-    const auto& slot       = m_layout.slots[slot_index];
-    const usize value_size = value.size * usize(sizeof(float));
-    auto source = slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(value.data), value_size);
-    rstd::vec::Vec<float> resized;
-    if (slot.size != value_size && slot.size % usize(sizeof(float)) == usize()) {
-        const auto count = slot.size / usize(sizeof(float));
-        resized          = rstd::vec::Vec<float>::with_capacity(count);
-        resized.resize(count, 0.0f);
-        for (usize index {}; index < rstd::cmp::min(value.size, count); ++index) {
-            resized[index] = value.data[index.to_primitive()];
-        }
-        source =
-            slice<u8>::from_raw_parts(reinterpret_cast<const byte*>(resized.data()), slot.size);
-    } else if (slot.size != value_size) {
-        rstd_warn("uniform {} size mismatch: reflected {} bytes, value {} bytes",
-                  slot.name.as_str(),
-                  slot.size,
-                  value_size);
-        source =
-            slice<u8>::from_raw_parts(source.as_raw_ptr(), rstd::cmp::min(slot.size, source.len()));
-    }
-    if (slot.offset > m_data.len() || source.len() > m_data.len() - slot.offset) return false;
-    for (usize index {}; index < source.len(); ++index) {
-        m_data[slot.offset + index] = source[index];
-    }
-    return true;
+auto UniformBufferBinding::WriteSlot(usize slot_index, UniformValueView value) const
+    -> Result<bool, UniformBufferUpdateError> {
+    if (slot_index >= m_layout.slots.len()) return Ok(false);
+    auto serialized = SerializeUniformValue(m_data.as_mut_slice().as_mut_ref(),
+                                            m_layout.slots[slot_index],
+                                            value,
+                                            m_matrix_convention,
+                                            m_matrix_abi);
+    if (serialized.is_err()) return Err(rstd::move(serialized).unwrap_err_unchecked());
+    return Ok(true);
 }
 
-bool UniformBufferBinding::WriteName(std::string_view name, const UniformValue& value) const {
+auto UniformBufferBinding::WriteName(std::string_view name, const UniformValue& value) const
+    -> Result<bool, UniformBufferUpdateError> {
     for (usize index {}; index < m_layout.slots.len(); ++index) {
         if (rstd::cppstd::as_string_view(m_layout.slots[index].name.as_str()) != name) continue;
         return WriteSlot(index, value.View());
     }
-    return false;
+    return Ok(false);
 }
 
 auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         frame_context,
@@ -317,9 +569,13 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
     const bool force    = ! m_uploaded || m_material_version != material.customShader.value_version;
     if (force) {
         for (usize index {}; index < m_data.len(); ++index) m_data[index] = u8();
-        for (const auto& [name, value] : m_defaults) WriteName(name, value);
+        for (const auto& [name, value] : m_defaults) {
+            auto written = WriteName(name, value);
+            if (written.is_err()) return Err(rstd::move(written).unwrap_err_unchecked());
+        }
         for (const auto& [name, value] : material.customShader.constValues) {
-            WriteName(name, value);
+            auto written = WriteName(name, value);
+            if (written.is_err()) return Err(rstd::move(written).unwrap_err_unchecked());
         }
         m_base_data = m_data.clone();
     }
@@ -369,7 +625,8 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
                               SceneDrawItemId draw_item, resource::BufferUseHandle buffer,
                               const resource::ShaderArtifactUniformBlock& block,
                               Vec<PreparedUniformTextureMetadata>         textures,
-                              SceneRenderViewKind                         render_view)
+                              SceneRenderViewKind                         render_view,
+                              ShaderMatrixConvention matrix_convention, ShaderMatrixAbi matrix_abi)
     -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError> {
     auto draw = prepare->ResolveDraw(draw_item);
     if (draw.is_none()) {
@@ -436,7 +693,7 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
             .source   = *source,
             .priority = candidate.priority,
         };
-        detail::SourceBindingCompiler compiler_impl(layout, bound);
+        detail::SourceBindingCompiler compiler_impl(layout, bound, matrix_convention, matrix_abi);
         auto                          compiler  = dyn<UniformBindingSink>::from_ref(compiler_impl);
         auto                          described = bound.source->Describe(compiler.as_mut_ref());
         if (described.is_err()) {
@@ -469,7 +726,9 @@ auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>> prepare,
                                  shader.default_uniforms,
                                  draw->material,
                                  rstd::move(textures),
-                                 render_view);
+                                 render_view,
+                                 matrix_convention,
+                                 matrix_abi);
     return Ok(Box<dyn<UniformBufferUpdate>>::make(rstd::move(binding)));
 }
 

@@ -1,5 +1,7 @@
 #include <vulkan/vulkan_core.h>
 
+#include <cstring>
+
 #include <gtest/gtest.h>
 
 import rstd;
@@ -162,6 +164,12 @@ std::shared_ptr<owe::SceneMesh> MakeUniformMesh(std::shared_ptr<owe::SceneShader
     return mesh;
 }
 
+float ReadFloat(const rstd::vec::Vec<rstd::u8>& bytes, rstd::usize offset) {
+    float value {};
+    std::memcpy(&value, bytes.data() + offset.to_primitive(), sizeof(value));
+    return value;
+}
+
 } // namespace
 
 TEST(UniformBufferLayout, PreservesReflectedSlots) {
@@ -211,6 +219,220 @@ TEST(UniformBufferLayout, RejectsMemberOutsideBlock) {
     };
 
     EXPECT_TRUE(owe::vulkan::CompileUniformBufferLayout(block).is_err());
+}
+
+TEST(UniformBufferSerializer, PacksColumnVectorMatrixUsingReflectedStride) {
+    const rstd::array<float, 9> values { 1.0f, 4.0f, 7.0f, 2.0f, 5.0f, 8.0f, 3.0f, 6.0f, 9.0f };
+    auto value = owe::UniformValue::fromMatrixArray(values.data(),
+                                                    rstd::u32(3),
+                                                    rstd::u32(3),
+                                                    rstd::usize(1),
+                                                    owe::UniformMatrixStorage::ColumnMajor);
+    auto bytes = rstd::vec::Vec<rstd::u8>::make();
+    bytes.resize(rstd::usize(48), rstd::u8(0xff));
+    auto slot = owe::vulkan::UniformSlot {
+        .name              = rstd::string::String::make("matrix"_str),
+        .size              = rstd::usize(48),
+        .scalar_kind       = owe::ShaderScalarKind::Float,
+        .scalar_width      = rstd::u32(32),
+        .vector_components = rstd::u32(3),
+        .matrix_rows       = rstd::u32(3),
+        .matrix_columns    = rstd::u32(3),
+        .matrix_stride     = rstd::u32(16),
+        .matrix_major      = owe::ShaderMatrixMajor::Row,
+    };
+
+    auto result = owe::vulkan::SerializeUniformValue(bytes.as_mut_slice().as_mut_ref(),
+                                                     slot,
+                                                     value.View(),
+                                                     owe::ShaderMatrixConvention::ColumnVector);
+
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(0)), 1.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(4)), 2.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(8)), 3.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(12)), 0.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(16)), 4.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(32)), 7.0f);
+}
+
+TEST(UniformBufferSerializer, ConvertsColumnVectorTransformToWeRowVectorMatrix) {
+    const rstd::array<float, 16> values { 1.0f, 4.0f, 7.0f, 0.0f, 2.0f,  5.0f,  8.0f,  0.0f,
+                                          3.0f, 6.0f, 9.0f, 0.0f, 10.0f, 20.0f, 30.0f, 1.0f };
+    auto value = owe::UniformValue::fromMatrixArray(values.data(),
+                                                    rstd::u32(4),
+                                                    rstd::u32(4),
+                                                    rstd::usize(1),
+                                                    owe::UniformMatrixStorage::ColumnMajor);
+    auto bytes = rstd::vec::Vec<rstd::u8>::make();
+    bytes.resize(rstd::usize(48), rstd::u8(0xff));
+    auto slot = owe::vulkan::UniformSlot {
+        .name              = rstd::string::String::make("transform"_str),
+        .size              = rstd::usize(48),
+        .scalar_kind       = owe::ShaderScalarKind::Float,
+        .scalar_width      = rstd::u32(32),
+        .vector_components = rstd::u32(3),
+        .matrix_rows       = rstd::u32(3),
+        .matrix_columns    = rstd::u32(4),
+        .matrix_stride     = rstd::u32(16),
+        .matrix_major      = owe::ShaderMatrixMajor::Row,
+    };
+
+    auto result = owe::vulkan::SerializeUniformValue(bytes.as_mut_slice().as_mut_ref(),
+                                                     slot,
+                                                     value.View(),
+                                                     owe::ShaderMatrixConvention::RowVector,
+                                                     owe::ShaderMatrixAbi::Hlsl);
+
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(0)), 1.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(4)), 2.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(8)), 3.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(12)), 10.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(16)), 4.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(32)), 7.0f);
+}
+
+TEST(UniformBufferSerializer, PreservesColumnVectorSemanticsForHlslShader) {
+    const rstd::array<float, 9> values { 1.0f, 4.0f, 7.0f, 2.0f, 5.0f, 8.0f, 3.0f, 6.0f, 9.0f };
+    auto value = owe::UniformValue::fromMatrixArray(values.data(),
+                                                    rstd::u32(3),
+                                                    rstd::u32(3),
+                                                    rstd::usize(1),
+                                                    owe::UniformMatrixStorage::ColumnMajor);
+    auto bytes = rstd::vec::Vec<rstd::u8>::make();
+    bytes.resize(rstd::usize(48), rstd::u8(0xff));
+    auto slot = owe::vulkan::UniformSlot {
+        .name              = rstd::string::String::make("matrix"_str),
+        .size              = rstd::usize(48),
+        .scalar_kind       = owe::ShaderScalarKind::Float,
+        .scalar_width      = rstd::u32(32),
+        .vector_components = rstd::u32(3),
+        .matrix_rows       = rstd::u32(3),
+        .matrix_columns    = rstd::u32(3),
+        .matrix_stride     = rstd::u32(16),
+        .matrix_major      = owe::ShaderMatrixMajor::Row,
+    };
+
+    auto result = owe::vulkan::SerializeUniformValue(bytes.as_mut_slice().as_mut_ref(),
+                                                     slot,
+                                                     value.View(),
+                                                     owe::ShaderMatrixConvention::ColumnVector,
+                                                     owe::ShaderMatrixAbi::Hlsl);
+
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(0)), 1.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(4)), 4.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(8)), 7.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(16)), 2.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(32)), 3.0f);
+}
+
+TEST(UniformBufferSerializer, RejectsLinearValueForMatrixSlot) {
+    const rstd::array<float, 4> values { 1.0f, 2.0f, 3.0f, 4.0f };
+    auto                        value = owe::UniformValue(values);
+    auto                        bytes = rstd::vec::Vec<rstd::u8>::make();
+    bytes.resize(rstd::usize(16), rstd::u8());
+    auto slot = owe::vulkan::UniformSlot {
+        .name              = rstd::string::String::make("matrix"_str),
+        .size              = rstd::usize(16),
+        .scalar_kind       = owe::ShaderScalarKind::Float,
+        .scalar_width      = rstd::u32(32),
+        .vector_components = rstd::u32(2),
+        .matrix_rows       = rstd::u32(2),
+        .matrix_columns    = rstd::u32(2),
+        .matrix_stride     = rstd::u32(8),
+        .matrix_major      = owe::ShaderMatrixMajor::Row,
+    };
+
+    auto result = owe::vulkan::SerializeUniformValue(bytes.as_mut_slice().as_mut_ref(),
+                                                     slot,
+                                                     value.View(),
+                                                     owe::ShaderMatrixConvention::ColumnVector);
+
+    EXPECT_TRUE(result.is_err());
+}
+
+TEST(UniformBufferSerializer, RejectsShortMatrixArray) {
+    const rstd::array<float, 4> values { 1.0f, 3.0f, 2.0f, 4.0f };
+    auto value = owe::UniformValue::fromMatrixArray(values.data(),
+                                                    rstd::u32(2),
+                                                    rstd::u32(2),
+                                                    rstd::usize(1),
+                                                    owe::UniformMatrixStorage::ColumnMajor);
+    auto bytes = rstd::vec::Vec<rstd::u8>::make();
+    bytes.resize(rstd::usize(32), rstd::u8());
+    auto slot = owe::vulkan::UniformSlot {
+        .name              = rstd::string::String::make("matrices"_str),
+        .size              = rstd::usize(32),
+        .count             = rstd::usize(2),
+        .scalar_kind       = owe::ShaderScalarKind::Float,
+        .scalar_width      = rstd::u32(32),
+        .vector_components = rstd::u32(2),
+        .matrix_rows       = rstd::u32(2),
+        .matrix_columns    = rstd::u32(2),
+        .matrix_stride     = rstd::u32(8),
+        .matrix_major      = owe::ShaderMatrixMajor::Row,
+        .array_stride      = rstd::u32(16),
+    };
+
+    auto result = owe::vulkan::SerializeUniformValue(bytes.as_mut_slice().as_mut_ref(),
+                                                     slot,
+                                                     value.View(),
+                                                     owe::ShaderMatrixConvention::ColumnVector);
+
+    EXPECT_TRUE(result.is_err());
+}
+
+TEST(UniformBufferSerializer, RejectsShortVectorArray) {
+    const rstd::array<float, 3> values { 1.0f, 2.0f, 3.0f };
+    auto                        value = owe::UniformValue(values);
+    auto                        bytes = rstd::vec::Vec<rstd::u8>::make();
+    bytes.resize(rstd::usize(32), rstd::u8());
+    auto slot = owe::vulkan::UniformSlot {
+        .name              = rstd::string::String::make("vectors"_str),
+        .size              = rstd::usize(32),
+        .count             = rstd::usize(2),
+        .scalar_kind       = owe::ShaderScalarKind::Float,
+        .scalar_width      = rstd::u32(32),
+        .vector_components = rstd::u32(2),
+        .array_stride      = rstd::u32(16),
+    };
+
+    auto result = owe::vulkan::SerializeUniformValue(bytes.as_mut_slice().as_mut_ref(),
+                                                     slot,
+                                                     value.View(),
+                                                     owe::ShaderMatrixConvention::ColumnVector);
+
+    EXPECT_TRUE(result.is_err());
+}
+
+TEST(UniformBufferSerializer, PacksVectorArraysUsingReflectedArrayStride) {
+    const rstd::array<float, 4> values { 1.0f, 2.0f, 3.0f, 4.0f };
+    auto                        value = owe::UniformValue(values);
+    auto                        bytes = rstd::vec::Vec<rstd::u8>::make();
+    bytes.resize(rstd::usize(32), rstd::u8(0xff));
+    auto slot = owe::vulkan::UniformSlot {
+        .name              = rstd::string::String::make("vectors"_str),
+        .size              = rstd::usize(32),
+        .count             = rstd::usize(2),
+        .scalar_kind       = owe::ShaderScalarKind::Float,
+        .scalar_width      = rstd::u32(32),
+        .vector_components = rstd::u32(2),
+        .array_stride      = rstd::u32(16),
+    };
+
+    auto result = owe::vulkan::SerializeUniformValue(bytes.as_mut_slice().as_mut_ref(),
+                                                     slot,
+                                                     value.View(),
+                                                     owe::ShaderMatrixConvention::ColumnVector);
+
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(0)), 1.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(4)), 2.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(8)), 0.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(16)), 3.0f);
+    EXPECT_FLOAT_EQ(ReadFloat(bytes, rstd::usize(20)), 4.0f);
 }
 
 TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
@@ -471,7 +693,9 @@ TEST(UniformBufferBinding, OrdersSourcesAndSkipsUnchangedVersions) {
 
 TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
     owe::resource::ShaderArtifact artifact;
-    auto                          code = rstd::vec::Vec<rstd::u32>::make();
+    artifact.matrix_convention = owe::ShaderMatrixConvention::RowVector;
+    artifact.matrix_abi        = owe::ShaderMatrixAbi::Hlsl;
+    auto code                  = rstd::vec::Vec<rstd::u32>::make();
     code.push(rstd::u32(1));
     code.push(rstd::u32(2));
     code.push(rstd::u32(3));
@@ -504,6 +728,10 @@ TEST(ShaderArtifact, ReconstructsPreparedInterfaceWithoutCacheLookup) {
         .location = rstd::u32(3),
         .format   = rstd::u32(static_cast<rstd::uint32_t>(VK_FORMAT_R32G32_SFLOAT)),
     });
+
+    auto cloned = artifact.clone();
+    EXPECT_EQ(cloned.matrix_convention, owe::ShaderMatrixConvention::RowVector);
+    EXPECT_EQ(cloned.matrix_abi, owe::ShaderMatrixAbi::Hlsl);
 
     auto stages     = owe::vulkan::ShaderSpvsFromArtifact(artifact);
     auto reflection = owe::vulkan::ShaderReflectionFromArtifact(artifact);

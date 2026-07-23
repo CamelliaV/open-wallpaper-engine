@@ -438,7 +438,9 @@ auto CustomShaderPass::createUniformBufferUpdate(ref<dyn<UniformBindingPrepareCo
                                             *m_desc.ubo_use,
                                             artifact.uniform_blocks[usize()],
                                             rstd::move(textures),
-                                            m_desc.render_view);
+                                            m_desc.render_view,
+                                            artifact.matrix_convention,
+                                            artifact.matrix_abi);
     if (binding.is_err()) return Err(rstd::move(binding).unwrap_err_unchecked());
     return Ok(Some(rstd::move(binding).unwrap_unchecked()));
 }

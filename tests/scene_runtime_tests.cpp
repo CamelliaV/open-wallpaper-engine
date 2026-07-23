@@ -29,7 +29,7 @@ public:
                 .message = rstd::string::String::make("unexpected uniform output"_str),
             });
         }
-        m_value   = owe::UniformValue(value.data, value.size);
+        m_value   = owe::UniformValue(value);
         m_written = true;
         return rstd::Ok(rstd::empty {});
     }
@@ -59,12 +59,22 @@ public:
         if (name == "g_ModelMatrix"_str) {
             model_shape = shape;
             found_model = true;
+        } else if (name == "g_AudioSpectrum16Left"_str) {
+            spectrum_shape = shape;
+            found_spectrum = true;
+        } else if (name == "g_LightsPosition"_str) {
+            light_position_shape = shape;
+            found_light_position = true;
         }
         return rstd::Ok(true);
     }
 
     owe::UniformValueShape model_shape;
+    owe::UniformValueShape spectrum_shape;
+    owe::UniformValueShape light_position_shape;
     bool                   found_model { false };
+    bool                   found_spectrum { false };
+    bool                   found_light_position { false };
 };
 
 class UpdateContext {
@@ -100,7 +110,7 @@ auto Capture(const owe::SceneFrame& frame, const Source& source, Output output)
 
 } // namespace scene_test
 
-TEST(WPTransformUniformSource, AcceptsMat3AndMat4ModelMatrices) {
+TEST(WPTransformUniformSource, DescribesModelAsMat4) {
     auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     auto camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0));
@@ -115,8 +125,59 @@ TEST(WPTransformUniformSource, AcceptsMat3AndMat4ModelMatrices) {
 
     ASSERT_TRUE(result.is_ok());
     ASSERT_TRUE(sink_impl.found_model);
-    EXPECT_EQ(sink_impl.model_shape.min_elements, rstd::u32(12));
-    EXPECT_EQ(sink_impl.model_shape.max_elements, rstd::u32(16));
+    EXPECT_EQ(sink_impl.model_shape.kind, owe::UniformValueKind::Matrix);
+    EXPECT_EQ(sink_impl.model_shape.rows, rstd::u32(4));
+    EXPECT_EQ(sink_impl.model_shape.columns, rstd::u32(4));
+}
+
+TEST(WPAudioUniformSource, ExposesLogicalSpectrumValues) {
+    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+    rstd::array<float, 64> left {};
+    rstd::array<float, 64> right {};
+    for (usize band {}; band < usize(16); ++band) {
+        for (usize offset {}; offset < usize(4); ++offset) {
+            left[band * usize(4) + offset] = static_cast<float>(band.to_primitive() + 1);
+        }
+    }
+    state->SetAudioSpectrum(left.as_slice(), right.as_slice());
+    owe::WPAudioUniformSource source(state.clone());
+
+    scene_test::ShapeSink shape_sink_impl;
+    auto shape_sink = rstd::dyn<owe::UniformBindingSink>::from_ref(shape_sink_impl);
+    auto described  = source.Describe(shape_sink.as_mut_ref());
+
+    ASSERT_TRUE(described.is_ok());
+    ASSERT_TRUE(shape_sink_impl.found_spectrum);
+    EXPECT_EQ(shape_sink_impl.spectrum_shape.kind, owe::UniformValueKind::Linear);
+    EXPECT_EQ(shape_sink_impl.spectrum_shape.min_elements, rstd::u32(16));
+    EXPECT_EQ(shape_sink_impl.spectrum_shape.max_elements, rstd::u32(16));
+
+    owe::SceneFrame frame;
+    auto value = scene_test::Capture(frame, source, owe::WPAudioUniformOutput::Spectrum16Left);
+    ASSERT_EQ(value.size(), usize(16));
+    EXPECT_EQ(value.View().layout.kind, owe::UniformValueKind::Linear);
+    for (usize band {}; band < usize(16); ++band) {
+        EXPECT_FLOAT_EQ(value[band], static_cast<float>(band.to_primitive() + 1));
+    }
+}
+
+TEST(WPLightUniformSource, ExposesLogicalVec3Array) {
+    auto                      lights = Vec<ref<owe::SceneLight>>::make();
+    owe::WPLightUniformSource source(rstd::move(lights));
+    scene_test::ShapeSink     shape_sink_impl;
+    auto shape_sink = rstd::dyn<owe::UniformBindingSink>::from_ref(shape_sink_impl);
+    auto described  = source.Describe(shape_sink.as_mut_ref());
+
+    ASSERT_TRUE(described.is_ok());
+    ASSERT_TRUE(shape_sink_impl.found_light_position);
+    EXPECT_EQ(shape_sink_impl.light_position_shape.kind, owe::UniformValueKind::Linear);
+    EXPECT_EQ(shape_sink_impl.light_position_shape.min_elements, rstd::u32(12));
+    EXPECT_EQ(shape_sink_impl.light_position_shape.max_elements, rstd::u32(12));
+
+    owe::SceneFrame frame;
+    auto            value = scene_test::Capture(frame, source, owe::WPLightUniformOutput::Position);
+    ASSERT_EQ(value.size(), usize(12));
+    for (usize index {}; index < value.size(); ++index) EXPECT_FLOAT_EQ(value[index], 0.0f);
 }
 
 TEST(AudioResponseDemand, AggregatesLeasesAndHonorsRuntimeGate) {

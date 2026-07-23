@@ -95,8 +95,10 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
     }
 
     resource::ShaderArtifact artifact {
-        .source          = request.source,
-        .content_version = request.content_version,
+        .source            = request.source,
+        .content_version   = request.content_version,
+        .matrix_convention = m_shader->matrix_convention,
+        .matrix_abi        = m_shader->matrix_abi,
     };
     artifact.stages.reserve(usize((**reflection).stages.size()));
     for (const auto& stage : (**reflection).stages) {
@@ -114,11 +116,23 @@ auto SceneShaderArtifactProvider::LoadShader(const resource::ShaderRequest& requ
         auto members = rstd::vec::Vec<resource::ShaderArtifactUniformMember>::with_capacity(
             usize(block.member_map.size()));
         for (const auto& [name, member] : block.member_map) {
+            auto dimensions =
+                rstd::vec::Vec<u32>::with_capacity(usize(member.array_dimensions.size()));
+            for (auto dimension : member.array_dimensions) dimensions.push(u32(dimension));
             members.push(resource::ShaderArtifactUniformMember {
-                .name   = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
-                .offset = u32(member.offset),
-                .size   = member.size,
-                .count  = member.num,
+                .name         = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
+                .offset       = u32(member.offset),
+                .size         = member.size,
+                .count        = member.num,
+                .scalar_kind  = member.scalar_kind,
+                .scalar_width = u32(member.scalar_width),
+                .vector_components = u32(member.vector_components),
+                .matrix_rows       = u32(member.matrix_rows),
+                .matrix_columns    = u32(member.matrix_columns),
+                .matrix_stride     = u32(member.matrix_stride),
+                .matrix_major      = member.matrix_major,
+                .array_stride      = u32(member.array_stride),
+                .array_dimensions  = rstd::move(dimensions),
             });
         }
         artifact.uniform_blocks.push(resource::ShaderArtifactUniformBlock {
@@ -173,13 +187,26 @@ auto ShaderReflectionFromArtifact(const resource::ShaderArtifact& artifact) -> S
             .name  = rstd::cppstd::to_string(block.name.as_str()),
         };
         for (const auto& member : block.members) {
+            ShaderReflected::BlockedUniform reflected_member {
+                .block_index       = static_cast<int>(index.to_primitive()),
+                .offset            = member.offset.to_primitive(),
+                .size              = member.size,
+                .num               = member.count,
+                .scalar_kind       = member.scalar_kind,
+                .scalar_width      = member.scalar_width.to_primitive(),
+                .vector_components = member.vector_components.to_primitive(),
+                .matrix_rows       = member.matrix_rows.to_primitive(),
+                .matrix_columns    = member.matrix_columns.to_primitive(),
+                .matrix_stride     = member.matrix_stride.to_primitive(),
+                .matrix_major      = member.matrix_major,
+                .array_stride      = member.array_stride.to_primitive(),
+            };
+            reflected_member.array_dimensions.reserve(member.array_dimensions.len().to_primitive());
+            for (auto dimension : member.array_dimensions) {
+                reflected_member.array_dimensions.push_back(dimension.to_primitive());
+            }
             prepared.member_map.emplace(rstd::cppstd::to_string(member.name.as_str()),
-                                        ShaderReflected::BlockedUniform {
-                                            .block_index = static_cast<int>(index.to_primitive()),
-                                            .offset      = member.offset.to_primitive(),
-                                            .size        = member.size,
-                                            .num         = member.count,
-                                        });
+                                        std::move(reflected_member));
         }
         reflected.blocks.push_back(std::move(prepared));
     }

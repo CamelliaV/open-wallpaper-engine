@@ -696,9 +696,10 @@ std::shared_ptr<owe::SceneShader> CompileInlineShader(std::string_view name,
         return nullptr;
     }
 
-    auto shader  = std::make_shared<owe::SceneShader>();
-    shader->id   = owe::u32();
-    shader->name = std::string(name);
+    auto shader        = std::make_shared<owe::SceneShader>();
+    shader->id         = owe::u32();
+    shader->name       = std::string(name);
+    shader->matrix_abi = owe::ShaderMatrixAbi::Hlsl;
     shader->codes.reserve(spvs.size());
     for (auto& spv : spvs) {
         shader->codes.emplace_back(std::move(spv->spirv));
@@ -738,7 +739,7 @@ auto TextUniformSource::Describe(rstd::mut_ref<rstd::dyn<UniformBindingSink>> si
                 .value = rstd::u32(static_cast<rstd::uint32_t>(output)),
             },
             name,
-            UniformValueShape::Float(rstd::u32(16)));
+            UniformValueShape::Matrix(rstd::u32(4), rstd::u32(4)));
     };
     auto model = bind(TextUniformOutput::ModelViewProjection, G_MVP);
     if (model.is_err()) return rstd::Err(rstd::move(model).unwrap_err_unchecked());

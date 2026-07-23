@@ -150,10 +150,6 @@ inline std::string ReplaceAll(std::string body, std::string_view needle, std::st
 // main_ps) that shuffles between the static globals and the
 // SV_*-annotated entry struct.
 static constexpr const char* pre_shader_code = R"(// auto-generated WE→HLSL prologue
-// glslang's HLSL frontend defaults to row-major matrix packing in SPIR-V
-// (RowMajor decoration on cbuffer members). The C++ uploader writes
-// column-major data (Eigen default), so force column-major packing here.
-#pragma pack_matrix(column_major)
 #define HLSL 1
 #define GLSL 0
 #define highp
@@ -175,19 +171,15 @@ static constexpr const char* pre_shader_code = R"(// auto-generated WE→HLSL pr
 #define mat2 float2x2
 #define mat3 float3x3
 #define mat4 float4x4
-// GLSL `matCxR` declares C columns × R rows. HLSL `floatRxC` declares R rows
-// × C columns — the indices are swapped. With column-major packing the
-// in-memory layout matches and `mul(M, v)` produces the same result, so the
-// macros transpose the type-name indices and leave semantics alone.
 #define mat2x2 float2x2
 #define mat3x3 float3x3
 #define mat4x4 float4x4
-#define mat2x3 float3x2
-#define mat2x4 float4x2
-#define mat3x2 float2x3
-#define mat3x4 float4x3
-#define mat4x2 float2x4
-#define mat4x3 float3x4
+#define mat2x3 float2x3
+#define mat2x4 float2x4
+#define mat3x2 float3x2
+#define mat3x4 float3x4
+#define mat4x2 float4x2
+#define mat4x3 float4x3
 
 #define CAST2(x) ((float2)(x))
 #define CAST3(x) ((float3)(x))
@@ -219,41 +211,6 @@ float4 mod(float4 a, float  b) { return a - b * floor(a / b); }
 // HLSL has saturate, mul, lerp, frac, ddx/ddy, fwidth, max, min, clip, log10,
 // pow as builtins — most of the C++-side overload workarounds needed for the
 // GLSL frontend disappear here.
-
-// WE shaders write `mul(vec, matrix)` (HLSL vector-first row-vector
-// convention). The C++ side uploads matrices designed for GLSL-style
-// column-vector multiply (`MVP * v`). Under HLSL native semantics this
-// would compute `transpose(M) * v`, transposing every transform. Overload
-// `_ww_mul` for each common type combination — each overload calls HLSL
-// native `mul` with operands swapped — then `#define mul _ww_mul` redirects.
-float2   _ww_mul(float2   v, float2x2 M) { return mul(M, v); }
-float3   _ww_mul(float3   v, float3x3 M) { return mul(M, v); }
-float4   _ww_mul(float4   v, float4x4 M) { return mul(M, v); }
-float2x2 _ww_mul(float2x2 A, float2x2 B) { return mul(B, A); }
-float3x3 _ww_mul(float3x3 A, float3x3 B) { return mul(B, A); }
-float4x4 _ww_mul(float4x4 A, float4x4 B) { return mul(B, A); }
-float2   _ww_mul(float2x2 M, float2   v) { return mul(v, M); }
-float3   _ww_mul(float3x3 M, float3   v) { return mul(v, M); }
-float4   _ww_mul(float4x4 M, float4   v) { return mul(v, M); }
-// Rectangular variants (`mat4x3 g_Bones[]` → HLSL float3x4). Vec-first and
-// matrix-first WE callsites both appear; without explicit overloads, HLSL's
-// implicit truncations make several candidates match and the resolver
-// reports ambiguity.
-float3   _ww_mul(float4   v, float3x4 M) { return mul(M, v); }
-float3   _ww_mul(float3x4 M, float4   v) { return mul(M, v); }
-// Scalar passthroughs.
-float    _ww_mul(float a, float b)   { return a * b; }
-float2   _ww_mul(float a, float2 b)  { return a * b; }
-float3   _ww_mul(float a, float3 b)  { return a * b; }
-float4   _ww_mul(float a, float4 b)  { return a * b; }
-float2   _ww_mul(float2 a, float b)  { return a * b; }
-float3   _ww_mul(float3 a, float b)  { return a * b; }
-float4   _ww_mul(float4 a, float b)  { return a * b; }
-// Vector-vector: HLSL `mul(v, v)` returns dot product.
-float    _ww_mul(float2 a, float2 b) { return dot(a, b); }
-float    _ww_mul(float3 a, float3 b) { return dot(a, b); }
-float    _ww_mul(float4 a, float4 b) { return dot(a, b); }
-#define mul _ww_mul
 
 // `uniform`, `attribute`, `varying` are intentionally NOT #define'd here.
 // glslang's preprocess pass runs over this prologue; if any of them were
@@ -330,12 +287,6 @@ static constexpr const char* pre_shader_tail_geom = R"()";
 // lines + emits `struct WW_VSOut/WW_PSIn` + `cbuffer ww_Uniforms` + replaces
 // `void main()` with the GS entry signature.
 static constexpr const char* pre_shader_code_gs_hlsl = R"(// auto-generated WE→HLSL prologue (GS)
-// glslang's HLSL frontend defaults to row-major matrix packing in SPIR-V
-// (RowMajor decoration on cbuffer members). The VS/FS GLSL synth emits a
-// std140 UBO with default column-major matrices and the C++ uploader writes
-// column-major data, so a row-major GS reads the transpose. Force column-
-// major packing here so the GS sees the same matrix as the rest.
-#pragma pack_matrix(column_major)
 #define HLSL 1
 #define GLSL 0
 #define highp
@@ -353,12 +304,12 @@ static constexpr const char* pre_shader_code_gs_hlsl = R"(// auto-generated WE�
 #define mat2x2 float2x2
 #define mat3x3 float3x3
 #define mat4x4 float4x4
-#define mat2x3 float3x2
-#define mat2x4 float4x2
-#define mat3x2 float2x3
-#define mat3x4 float4x3
-#define mat4x2 float2x4
-#define mat4x3 float3x4
+#define mat2x3 float2x3
+#define mat2x4 float2x4
+#define mat3x2 float3x2
+#define mat3x4 float3x4
+#define mat4x2 float4x2
+#define mat4x3 float4x3
 #define CAST2(x)   ((float2)(x))
 #define CAST3(x)   ((float3)(x))
 #define CAST4(x)   ((float4)(x))
@@ -368,37 +319,6 @@ static constexpr const char* pre_shader_code_gs_hlsl = R"(// auto-generated WE�
 #define atan(a,b)  atan2((a),(b))
 #define dFdx       ddx
 #define dFdy(x)    (-ddy(x))
-
-// glslang's HLSL frontend always tags cbuffer matrices `RowMajor` in SPIR-V
-// regardless of `#pragma pack_matrix` or `column_major` qualifiers (verified
-// on glslang 16.3.0). With column-major data uploaded from C++ (Eigen
-// default), the shader's effective matrix is the transpose of the source.
-// HLSL `mul(M, v)` lowers (via glslang) to `OpVectorTimesMatrix V M`, which
-// combined with the implicit transpose yields `source_M * V` — exactly the
-// transform WE intends. `_ww_mul` swaps WE's vec-first `mul(v, M)` to that
-// form.
-float2   _ww_mul(float2   v, float2x2 M) { return mul(M, v); }
-float3   _ww_mul(float3   v, float3x3 M) { return mul(M, v); }
-float4   _ww_mul(float4   v, float4x4 M) { return mul(M, v); }
-float2x2 _ww_mul(float2x2 A, float2x2 B) { return mul(B, A); }
-float3x3 _ww_mul(float3x3 A, float3x3 B) { return mul(B, A); }
-float4x4 _ww_mul(float4x4 A, float4x4 B) { return mul(B, A); }
-float2   _ww_mul(float2x2 M, float2   v) { return mul(v, M); }
-float3   _ww_mul(float3x3 M, float3   v) { return mul(v, M); }
-float4   _ww_mul(float4x4 M, float4   v) { return mul(v, M); }
-float3   _ww_mul(float4   v, float3x4 M) { return mul(M, v); }
-float3   _ww_mul(float3x4 M, float4   v) { return mul(v, M); }
-float    _ww_mul(float a, float b)        { return a * b; }
-float2   _ww_mul(float a, float2 b)       { return a * b; }
-float3   _ww_mul(float a, float3 b)       { return a * b; }
-float4   _ww_mul(float a, float4 b)       { return a * b; }
-float2   _ww_mul(float2 a, float b)       { return a * b; }
-float3   _ww_mul(float3 a, float b)       { return a * b; }
-float4   _ww_mul(float4 a, float b)       { return a * b; }
-float    _ww_mul(float2 a, float2 b)      { return dot(a, b); }
-float    _ww_mul(float3 a, float3 b)      { return dot(a, b); }
-float    _ww_mul(float4 a, float4 b)      { return dot(a, b); }
-#define mul _ww_mul
 
 // `gl_Position` is the SV_Position struct field's GLSL name; rename to the
 // canonical struct field name so `IN[0].gl_Position` / `v.gl_Position` both
@@ -419,10 +339,6 @@ inline bool IsShaderTrivia(shader_lex::TokenKind kind) {
 
 inline shader_lex::Token NextShaderToken(shader_lex::Lexer& lx) {
     return lx.NextSkip(IsShaderTrivia);
-}
-
-inline bool TokenIs(shader_lex::Token token, ref<str> text) {
-    return token.kind == shader_lex::TokenKind::Ident && token.text == text;
 }
 
 inline bool PunctIs(shader_lex::Token token, char c) {
@@ -543,83 +459,6 @@ inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
     return out;
 }
 
-inline bool IsLocalMatrixConstructor(rstd::ref<rstd::str> name) {
-    return name == "mat2"_str || name == "mat3"_str || name == "mat4"_str || name == "mat2x2"_str ||
-           name == "mat2x3"_str || name == "mat2x4"_str || name == "mat3x2"_str ||
-           name == "mat3x3"_str || name == "mat3x4"_str || name == "mat4x2"_str ||
-           name == "mat4x3"_str || name == "mat4x4"_str || name == "float2x2"_str ||
-           name == "float2x3"_str || name == "float2x4"_str || name == "float3x2"_str ||
-           name == "float3x3"_str || name == "float3x4"_str || name == "float4x2"_str ||
-           name == "float4x3"_str || name == "float4x4"_str;
-}
-
-inline String NormalizeLocalMatrixMul(ref<str> src) {
-    shader_lex::Lexer lx(src);
-    auto              out = String::make();
-    usize             copied {};
-    bool              changed { false };
-
-    for (;;) {
-        auto name = lx.Next();
-        if (name.kind == shader_lex::TokenKind::Eof) break;
-        if (! TokenIs(name, "mul"_str)) continue;
-
-        auto save = lx.Save();
-        auto open = NextShaderToken(lx);
-        if (! PunctIs(open, '(')) {
-            lx.Restore(save);
-            continue;
-        }
-
-        int                        depth = 1;
-        std::optional<std::size_t> comma_end;
-        std::optional<std::size_t> close_start;
-        for (;;) {
-            auto t = lx.Next();
-            if (t.kind == shader_lex::TokenKind::Eof) break;
-            if (PunctIs(t, '(') || PunctIs(t, '[') || PunctIs(t, '{')) {
-                ++depth;
-                continue;
-            }
-            if (PunctIs(t, ')') || PunctIs(t, ']') || PunctIs(t, '}')) {
-                --depth;
-                if (depth == 0) {
-                    close_start = t.offset.to_primitive();
-                    break;
-                }
-                continue;
-            }
-            if (depth == 1 && PunctIs(t, ',') && ! comma_end) {
-                comma_end = (t.offset + t.text.size()).to_primitive();
-            }
-        }
-
-        if (! comma_end || ! close_start) {
-            lx.Restore(save);
-            continue;
-        }
-
-        shader_lex::Lexer probe(src);
-        probe.SeekTo(rstd::usize(*comma_end));
-        auto second = NextShaderToken(probe);
-        if (second.kind != shader_lex::TokenKind::Ident ||
-            ! IsLocalMatrixConstructor(second.text)) {
-            continue;
-        }
-
-        out.push_str(*rstd::str_::get(src, copied, second.offset));
-        out.push_str("transpose("_str);
-        out.push_str(*rstd::str_::get(src, second.offset, usize(*close_start)));
-        out.push_ascii(u8(')'));
-        copied  = usize(*close_start);
-        changed = true;
-    }
-
-    if (! changed) return String::make(src);
-    out.push_str(*rstd::str_::get_from(src, copied));
-    return out;
-}
-
 inline bool LineDefinesMacro(ref<str> src, usize line_start, ref<str> macro_name) {
     shader_lex::Cursor c(src);
     c.SeekTo(line_start);
@@ -647,101 +486,6 @@ inline String UndefBeforeUserMacroDefines(ref<str> src, ref<str> macro_name) {
         if (w.LineEnd() < src.size()) out.push_ascii(u8('\n'));
     }
     return changed ? rstd::move(out) : String::make(src);
-}
-
-inline bool Contains(slice<String> values, ref<str> value) {
-    for (usize index {}; index < values.len(); ++index) {
-        if (values[index].as_str() == value) return true;
-    }
-    return false;
-}
-
-inline Vec<String> CollectBuildTangentSpaceVars(ref<str> src) {
-    Vec<String>       vars;
-    shader_lex::Lexer lx(src);
-    for (;;) {
-        auto t = NextShaderToken(lx);
-        if (t.kind == shader_lex::TokenKind::Eof) break;
-        if (! TokenIs(t, "mat3"_str)) continue;
-
-        auto name = NextShaderToken(lx);
-        if (name.kind != shader_lex::TokenKind::Ident) continue;
-        if (! PunctIs(NextShaderToken(lx), '=')) continue;
-        if (! TokenIs(NextShaderToken(lx), "BuildTangentSpace"_str)) continue;
-        if (! PunctIs(NextShaderToken(lx), '(')) continue;
-        if (! Contains(vars.as_slice(), name.text)) vars.push(String::make(name.text));
-    }
-    return vars;
-}
-
-inline void NormalizeExpandedShaderSource(std::string& src) {
-    auto source             = rstd::cppstd::as_str(src).unwrap();
-    auto tangent_space_vars = CollectBuildTangentSpaceVars(source);
-    if (tangent_space_vars.is_empty()) return;
-
-    shader_lex::Lexer lx(source);
-    std::string       out;
-    std::size_t       copied = 0;
-    for (;;) {
-        auto t = lx.Next();
-        if (t.kind == shader_lex::TokenKind::Eof) break;
-        if (! TokenIs(t, "mul"_str)) continue;
-
-        auto save  = lx.Save();
-        auto open  = NextShaderToken(lx);
-        auto arg   = NextShaderToken(lx);
-        auto comma = NextShaderToken(lx);
-        if (! PunctIs(open, '(') || arg.kind != shader_lex::TokenKind::Ident ||
-            ! Contains(tangent_space_vars.as_slice(), arg.text) || ! PunctIs(comma, ',')) {
-            lx.Restore(save);
-            continue;
-        }
-
-        out.append(src, copied, t.offset.to_primitive() - copied);
-        out.append("mul(transpose(");
-        out.append(rstd::cppstd::as_string_view(arg.text));
-        out.append("),");
-        copied = (comma.offset + comma.text.size()).to_primitive();
-    }
-    out.append(src, copied, std::string::npos);
-    src = std::move(out);
-}
-
-inline std::string PatchCommonPerspectiveInclude(std::string_view include_name, std::string src) {
-    if (include_name != "common_perspective.h") return src;
-    if (src.find("_ww_perspective_mat") != std::string::npos) return src;
-
-    static constexpr std::string_view helper = R"(
-mat3 _ww_perspective_mat(mat3 m) {
-#if HLSL
-	// Local perspective matrices are not uploaded through a cbuffer, so they
-	// must compensate the global WE mul shim explicitly.
-	return transpose(m);
-#else
-	return m;
-#endif
-}
-
-)";
-
-    std::string out;
-    out.reserve(src.size() + helper.size() + 64);
-    out.append(helper);
-
-    static constexpr std::string_view needle { "return m;" };
-    static constexpr std::string_view repl { "return _ww_perspective_mat(m);" };
-    std::size_t                       pos = 0;
-    for (;;) {
-        std::size_t next = src.find(needle, pos);
-        if (next == std::string::npos) {
-            out.append(src, pos, std::string::npos);
-            break;
-        }
-        out.append(src, pos, next - pos);
-        out.append(repl);
-        pos = next + needle.size();
-    }
-    return out;
 }
 
 inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
@@ -778,7 +522,6 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
         } else {
             rstd_error("Can't read shader include {}", includeName);
         }
-        includeSrc = PatchCommonPerspectiveInclude(includeName, std::move(includeSrc));
         output.append("\n//-----include ");
         output.append(includeName);
         output.append("\n");
@@ -1470,9 +1213,8 @@ inline void MergeUniform(Map<std::string, std::string>& uniforms_union, std::str
 // per member. glslang's HLSL frontend hard-codes HLSL cbuffer packing on
 // HLSL sources (see ShaderLang.cpp `setHlslOffsets` when EShSourceHlsl);
 // without `packoffset`, scalars get packed into the trailing padding of
-// vec3 / vec3[] members, and the C++ uploader (which writes contiguous
-// `stride*N` blocks) silently corrupts those neighbours. Annotating each
-// member with the std140 (register, component) overrides the auto-packing.
+// vec3 / vec3[] members. Explicit offsets keep the shared block layout
+// identical across stages and leave physical padding to reflected serialization.
 inline std::string EmitCBufferStd140(const Map<std::string, std::string>& uniforms_union) {
     std::string out;
     out += "[[vk::binding(0, 0)]] cbuffer ww_Uniforms {\n";
@@ -1552,10 +1294,8 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
         synth += EmitGSHLSLStruct("WW_VSOut", std::move(in_decls));
         synth += EmitGSHLSLStruct("WW_PSIn", std::move(out_decls));
 
-        // Cross-stage uniform union as an HLSL cbuffer matching VS/FS UBO
-        // layout (binding=0, set=0). std140 / column-major matches the
-        // glslang GLSL-side block; uploader writes one buffer used by all
-        // stages.
+        // Cross-stage uniform union as an HLSL cbuffer matching the VS/FS
+        // block at binding 0, set 0. One reflected layout feeds every stage.
         Map<std::string, std::string> uniforms_union_local;
         if (! uniforms_union_in) {
             auto absorb = [&](const Map<std::string, std::string>& m) {
@@ -1668,7 +1408,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion  = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion     = 1;
+constexpr std::uint32_t               kShaderCacheAbiVersion     = 3;
 constexpr std::uint32_t               kShaderCacheHeaderSize     = 112;
 constexpr std::uint32_t               kMaxShaderCacheStages      = 16;
 constexpr std::uint32_t               kMaxShaderCacheMapEntries  = 4096;
@@ -2196,10 +1936,6 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
         cursor = w.LineEnd().to_primitive();
     }
     newsrc.append(src, cursor, std::string::npos);
-    if (pWPShaderInfo != nullptr && pWPShaderInfo->normalize_tangent_space) {
-        NormalizeExpandedShaderSource(newsrc);
-    }
-
     ParseWPShader(all_includes, pWPShaderInfo, texinfos);
     ParseWPShader(newsrc, pWPShaderInfo, texinfos);
 
@@ -2210,8 +1946,7 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
                                             ShaderType type) {
     auto undefined = UndefBeforeUserMacroDefines(rstd::cppstd::as_str(src).unwrap(), "M_PI_2"_str);
     auto normalized_audio = NormalizePackedAudioSpectrumAccess(undefined.as_str());
-    auto normalized_local = NormalizeLocalMatrixMul(normalized_audio.as_str());
-    auto user_src         = rstd::cppstd::to_string(normalized_local.as_str());
+    auto user_src         = rstd::cppstd::to_string(normalized_audio.as_str());
 
     // All stages route through glslang's HLSL frontend.
     std::string pre;
@@ -2717,13 +2452,15 @@ WPShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs
     }
     WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(result.variant, units, spvs);
 
-    auto shader              = std::make_shared<SceneShader>();
-    shader->name             = desc.shader_name;
-    shader->codes            = std::move(spvs);
-    shader->sampler_bindings = result.variant.sampler_bindings;
-    shader->default_uniforms = result.info.svs;
-    result.shader            = std::move(shader);
-    result.ok                = true;
+    auto shader               = std::make_shared<SceneShader>();
+    shader->name              = desc.shader_name;
+    shader->matrix_convention = ShaderMatrixConvention::RowVector;
+    shader->matrix_abi        = ShaderMatrixAbi::Hlsl;
+    shader->codes             = std::move(spvs);
+    shader->sampler_bindings  = result.variant.sampler_bindings;
+    shader->default_uniforms  = result.info.svs;
+    result.shader             = std::move(shader);
+    result.ok                 = true;
     return result;
 }
 

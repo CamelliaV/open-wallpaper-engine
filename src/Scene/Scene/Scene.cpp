@@ -265,7 +265,7 @@ Option<SceneCameraLookAtKey> eval_lookat_tracks(slice<SceneCameraLookAtTrack> tr
 }
 
 bool shader_values_equal(const ShaderValue& a, const ShaderValue& b) {
-    if (a.size() != b.size()) return false;
+    if (a.size() != b.size() || a.View().layout != b.View().layout) return false;
     for (usize i {}; i < a.size(); ++i) {
         if (a[i] != b[i]) return false;
     }
@@ -283,7 +283,11 @@ ShaderValue eval_shader_value_animation(const SceneShaderValueAnimation& animati
 
     if (value.size() == 1) {
         value[0] = (**animation.curve).EvaluateScalar(value[0], runtime);
-        return ShaderValue(std::span<const float>(value));
+        return ShaderValue(UniformValueView {
+            .data   = value.data(),
+            .size   = usize(value.size()),
+            .layout = animation.base.View().layout,
+        });
     }
 
     Eigen::Vector3f base { value[0],
@@ -293,7 +297,11 @@ ShaderValue eval_shader_value_animation(const SceneShaderValueAnimation& animati
     value[0]                 = animated.x();
     if (value.size() > 1) value[1] = animated.y();
     if (value.size() > 2) value[2] = animated.z();
-    return ShaderValue(std::span<const float>(value));
+    return ShaderValue(UniformValueView {
+        .data   = value.data(),
+        .size   = usize(value.size()),
+        .layout = animation.base.View().layout,
+    });
 }
 
 void collect_linked_ids_from_material(const SceneMaterial& material, BTreeSet<i32>& out) {

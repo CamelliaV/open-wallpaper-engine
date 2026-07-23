@@ -33,10 +33,19 @@ using Uni_ShaderSpv = Box<ShaderSpv>;
 
 struct ShaderReflected {
     struct BlockedUniform {
-        int      block_index;
-        unsigned offset;
-        usize    size { 0 };
-        usize    num { 1 };
+        int                   block_index;
+        unsigned              offset;
+        usize                 size { 0 };
+        usize                 num { 1 };
+        ShaderScalarKind      scalar_kind { ShaderScalarKind::Unknown };
+        unsigned              scalar_width {};
+        unsigned              vector_components { 1 };
+        unsigned              matrix_rows {};
+        unsigned              matrix_columns {};
+        unsigned              matrix_stride {};
+        ShaderMatrixMajor     matrix_major { ShaderMatrixMajor::None };
+        unsigned              array_stride {};
+        std::vector<unsigned> array_dimensions;
     };
     struct Block {
         int         index;

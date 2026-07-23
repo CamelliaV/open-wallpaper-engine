@@ -3,6 +3,7 @@ import rstd;
 import rstd.cppstd;
 import wescene.resource;
 import wescene.scene;
+import wescene.types;
 
 using namespace rstd::prelude;
 
@@ -14,10 +15,27 @@ struct UniformBufferUpdateError {
 };
 
 struct UniformSlot {
-    String name;
-    usize  offset { 0 };
-    usize  size { 0 };
-    usize  count { 1 };
+    String              name;
+    usize               offset { 0 };
+    usize               size { 0 };
+    usize               count { 1 };
+    ShaderScalarKind    scalar_kind { ShaderScalarKind::Unknown };
+    u32                 scalar_width {};
+    u32                 vector_components { u32(1) };
+    u32                 matrix_rows {};
+    u32                 matrix_columns {};
+    u32                 matrix_stride {};
+    ShaderMatrixMajor   matrix_major { ShaderMatrixMajor::None };
+    u32                 array_stride {};
+    rstd::vec::Vec<u32> array_dimensions;
+
+    usize LogicalFloatElements() const {
+        if (scalar_kind == ShaderScalarKind::Unknown) return size / usize(sizeof(float));
+        if (matrix_rows != u32() && matrix_columns != u32()) {
+            return usize(matrix_rows.to_primitive()) * usize(matrix_columns.to_primitive()) * count;
+        }
+        return usize(vector_components.to_primitive()) * count;
+    }
 };
 
 struct UniformBufferLayout {
@@ -27,6 +45,11 @@ struct UniformBufferLayout {
 
 auto CompileUniformBufferLayout(const resource::ShaderArtifactUniformBlock&)
     -> Result<UniformBufferLayout, UniformBufferUpdateError>;
+
+auto SerializeUniformValue(mut_ref<u8[]> destination, const UniformSlot&, UniformValueView,
+                           ShaderMatrixConvention,
+                           ShaderMatrixAbi matrix_abi = ShaderMatrixAbi::NativeSpirv)
+    -> Result<empty, UniformBufferUpdateError>;
 
 struct UniformBufferFrameContext {
     using Trait                  = UniformBufferFrameContext;
@@ -165,14 +188,17 @@ class UniformBufferBinding {
 public:
     UniformBufferBinding(SceneDrawItemId, resource::BufferUseHandle, UniformBufferLayout,
                          Vec<BoundUniformSource>, ShaderValues, ref<SceneMaterial>,
-                         Vec<PreparedUniformTextureMetadata>, SceneRenderViewKind);
+                         Vec<PreparedUniformTextureMetadata>, SceneRenderViewKind,
+                         ShaderMatrixConvention, ShaderMatrixAbi);
 
     auto Update(ref<dyn<UniformBufferFrameContext>>,
                 mut_ref<dyn<resource::BufferContentWriter>>) const
         -> Result<empty, UniformBufferUpdateError>;
 
-    bool WriteSlot(usize slot_index, UniformValueView value) const;
-    bool WriteName(std::string_view, const UniformValue&) const;
+    auto WriteSlot(usize slot_index, UniformValueView value) const
+        -> Result<bool, UniformBufferUpdateError>;
+    auto WriteName(std::string_view, const UniformValue&) const
+        -> Result<bool, UniformBufferUpdateError>;
 
 private:
     SceneDrawItemId                     m_draw_item;
@@ -185,16 +211,19 @@ private:
     ref<SceneMaterial>                  m_material;
     Vec<PreparedUniformTextureMetadata> m_textures;
     SceneRenderViewKind                 m_render_view { SceneRenderViewKind::Primary };
-    mutable u64                         m_content_version { 0 };
-    mutable u64                         m_material_version { 0 };
-    mutable bool                        m_uploaded { false };
+    ShaderMatrixConvention m_matrix_convention { ShaderMatrixConvention::ColumnVector };
+    ShaderMatrixAbi        m_matrix_abi { ShaderMatrixAbi::NativeSpirv };
+    mutable u64            m_content_version { 0 };
+    mutable u64            m_material_version { 0 };
+    mutable bool           m_uploaded { false };
 };
 
-auto MakeUniformBufferBinding(ref<dyn<UniformBindingPrepareContext>>, SceneDrawItemId,
-                              resource::BufferUseHandle,
-                              const resource::ShaderArtifactUniformBlock&,
-                              Vec<PreparedUniformTextureMetadata> textures = {},
-                              SceneRenderViewKind render_view = SceneRenderViewKind::Primary)
+auto MakeUniformBufferBinding(
+    ref<dyn<UniformBindingPrepareContext>>, SceneDrawItemId, resource::BufferUseHandle,
+    const resource::ShaderArtifactUniformBlock&, Vec<PreparedUniformTextureMetadata> textures = {},
+    SceneRenderViewKind    render_view       = SceneRenderViewKind::Primary,
+    ShaderMatrixConvention matrix_convention = ShaderMatrixConvention::ColumnVector,
+    ShaderMatrixAbi        matrix_abi        = ShaderMatrixAbi::NativeSpirv)
     -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError>;
 
 } // namespace owe::vulkan

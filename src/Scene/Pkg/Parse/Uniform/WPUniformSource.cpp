@@ -170,9 +170,9 @@ auto Bind(mut_ref<dyn<UniformBindingSink>> sink, UniformOutputId output, ref<str
 
 template<typename Output>
 struct BindingEntry {
-    Output   output;
-    ref<str> name;
-    u32      elements;
+    Output            output;
+    ref<str>          name;
+    UniformValueShape shape;
 };
 
 template<typename Output, std::size_t N>
@@ -180,8 +180,7 @@ auto BindEntries(mut_ref<dyn<UniformBindingSink>>            sink,
                  const rstd::array<BindingEntry<Output>, N>& entries)
     -> Result<empty, UniformError> {
     for (const auto& entry : entries) {
-        auto result =
-            Bind(sink, entry.output, entry.name, UniformValueShape::Float(entry.elements));
+        auto result = Bind(sink, entry.output, entry.name, entry.shape);
         if (result.is_err()) return result;
     }
     return Ok(empty {});
@@ -294,24 +293,37 @@ void WPUniformSceneState::ApplyUserProperty(std::string_view field, const Json& 
 auto WPTransformUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = WPTransformUniformOutput;
-    auto model   = Bind(sink, Output::Model, G_M, UniformValueShape::FloatRange(u32(12), u32(16)));
+    auto model   = Bind(sink, Output::Model, G_M, UniformValueShape::Matrix(u32(4), u32(4)));
     if (model.is_err()) return model;
 
     const rstd::array<BindingEntry<Output>, 12> entries {
-        BindingEntry<Output> { Output::ModelInverse, G_MI, u32(16) },
-        BindingEntry<Output> { Output::AlternateModel, G_AM, u32(16) },
-        BindingEntry<Output> { Output::ModelViewProjection, G_MVP, u32(16) },
-        BindingEntry<Output> { Output::ModelViewProjectionInverse, G_MVPI, u32(16) },
-        BindingEntry<Output> { Output::EyePosition, G_EYEPOSITION, u32(3) },
-        BindingEntry<Output> { Output::EffectModel, G_EFFECTMODELMATRIX, u32(16) },
-        BindingEntry<Output> { Output::EffectModelViewProjection, G_EMVP, u32(16) },
+        BindingEntry<Output> {
+            Output::ModelInverse, G_MI, UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::AlternateModel, G_AM, UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::ModelViewProjection, G_MVP, UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::ModelViewProjectionInverse, G_MVPI, UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::EyePosition, G_EYEPOSITION, UniformValueShape::Float(u32(3)) },
+        BindingEntry<Output> {
+            Output::EffectModel, G_EFFECTMODELMATRIX, UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::EffectModelViewProjection, G_EMVP, UniformValueShape::Matrix(u32(4), u32(4)) },
         BindingEntry<Output> { Output::EffectModelViewProjectionInverse,
                                G_EFFECTMODELVIEWPROJECTIONMATRIXINVERSE,
-                               u32(16) },
-        BindingEntry<Output> { Output::LayerModel, G_LAYERMODELMATRIX, u32(16) },
-        BindingEntry<Output> { Output::EffectTextureViewProjection, G_ETVP, u32(16) },
-        BindingEntry<Output> { Output::EffectTextureViewProjectionInverse, G_ETVPI, u32(16) },
-        BindingEntry<Output> { Output::ViewProjection, G_VP, u32(16) },
+                               UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::LayerModel, G_LAYERMODELMATRIX, UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> { Output::EffectTextureViewProjection,
+                               G_ETVP,
+                               UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> { Output::EffectTextureViewProjectionInverse,
+                               G_ETVPI,
+                               UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::ViewProjection, G_VP, UniformValueShape::Matrix(u32(4), u32(4)) },
     };
     return BindEntries(sink, entries);
 }
@@ -445,16 +457,21 @@ auto WPFrameUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = WPFrameUniformOutput;
     const rstd::array<BindingEntry<Output>, 10> entries {
-        BindingEntry<Output> { Output::Time, G_TIME, u32(1) },
-        BindingEntry<Output> { Output::FrameTime, G_FRAMETIME, u32(1) },
-        BindingEntry<Output> { Output::DayTime, G_DAYTIME, u32(1) },
-        BindingEntry<Output> { Output::DayTime, G_DAYTIME_LEGACY, u32(1) },
-        BindingEntry<Output> { Output::PointerPosition, G_POINTERPOSITION, u32(2) },
-        BindingEntry<Output> { Output::PointerPositionLast, G_POINTERPOSITIONLAST, u32(2) },
-        BindingEntry<Output> { Output::ParallaxPosition, G_PARALLAXPOSITION, u32(2) },
-        BindingEntry<Output> { Output::TexelSize, G_TEXELSIZE, u32(2) },
-        BindingEntry<Output> { Output::TexelSizeHalf, G_TEXELSIZEHALF, u32(2) },
-        BindingEntry<Output> { Output::Screen, G_SCREEN, u32(3) },
+        BindingEntry<Output> { Output::Time, G_TIME, UniformValueShape::Float(u32(1)) },
+        BindingEntry<Output> { Output::FrameTime, G_FRAMETIME, UniformValueShape::Float(u32(1)) },
+        BindingEntry<Output> { Output::DayTime, G_DAYTIME, UniformValueShape::Float(u32(1)) },
+        BindingEntry<Output> {
+            Output::DayTime, G_DAYTIME_LEGACY, UniformValueShape::Float(u32(1)) },
+        BindingEntry<Output> {
+            Output::PointerPosition, G_POINTERPOSITION, UniformValueShape::Float(u32(2)) },
+        BindingEntry<Output> {
+            Output::PointerPositionLast, G_POINTERPOSITIONLAST, UniformValueShape::Float(u32(2)) },
+        BindingEntry<Output> {
+            Output::ParallaxPosition, G_PARALLAXPOSITION, UniformValueShape::Float(u32(2)) },
+        BindingEntry<Output> { Output::TexelSize, G_TEXELSIZE, UniformValueShape::Float(u32(2)) },
+        BindingEntry<Output> {
+            Output::TexelSizeHalf, G_TEXELSIZEHALF, UniformValueShape::Float(u32(2)) },
+        BindingEntry<Output> { Output::Screen, G_SCREEN, UniformValueShape::Float(u32(3)) },
     };
     return BindEntries(sink, entries);
 }
@@ -502,12 +519,18 @@ auto WPAudioUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = WPAudioUniformOutput;
     const rstd::array<BindingEntry<Output>, 6> entries {
-        BindingEntry<Output> { Output::Spectrum16Left, G_AUDIO_SPEC_16_L, u32(64) },
-        BindingEntry<Output> { Output::Spectrum16Right, G_AUDIO_SPEC_16_R, u32(64) },
-        BindingEntry<Output> { Output::Spectrum32Left, G_AUDIO_SPEC_32_L, u32(128) },
-        BindingEntry<Output> { Output::Spectrum32Right, G_AUDIO_SPEC_32_R, u32(128) },
-        BindingEntry<Output> { Output::Spectrum64Left, G_AUDIO_SPEC_64_L, u32(256) },
-        BindingEntry<Output> { Output::Spectrum64Right, G_AUDIO_SPEC_64_R, u32(256) },
+        BindingEntry<Output> {
+            Output::Spectrum16Left, G_AUDIO_SPEC_16_L, UniformValueShape::Float(u32(16)) },
+        BindingEntry<Output> {
+            Output::Spectrum16Right, G_AUDIO_SPEC_16_R, UniformValueShape::Float(u32(16)) },
+        BindingEntry<Output> {
+            Output::Spectrum32Left, G_AUDIO_SPEC_32_L, UniformValueShape::Float(u32(32)) },
+        BindingEntry<Output> {
+            Output::Spectrum32Right, G_AUDIO_SPEC_32_R, UniformValueShape::Float(u32(32)) },
+        BindingEntry<Output> {
+            Output::Spectrum64Left, G_AUDIO_SPEC_64_L, UniformValueShape::Float(u32(64)) },
+        BindingEntry<Output> {
+            Output::Spectrum64Right, G_AUDIO_SPEC_64_R, UniformValueShape::Float(u32(64)) },
     };
     return BindEntries(sink, entries);
 }
@@ -540,13 +563,8 @@ auto WPAudioUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
     AverageResample64(inputs.audio_left.as_slice(), audio_32_left);
     AverageResample64(inputs.audio_right.as_slice(), audio_32_right);
     auto write_audio = [&](Output output, slice<float> values) {
-        if (! writer.Wants(output)) return;
-        auto packed = Vec<float>::with_capacity(values.len() * usize(4));
-        packed.resize(values.len() * usize(4), 0.0f);
-        for (usize index {}; index < values.len(); ++index) {
-            packed[index * usize(4)] = values[index];
-        }
-        writer.Write(output, UniformValue(packed.data(), packed.len()));
+        if (writer.Wants(output))
+            writer.Write(output, UniformValue(values.as_raw_ptr(), values.len()));
     };
     write_audio(Output::Spectrum16Left, audio_16_left.as_slice());
     write_audio(Output::Spectrum16Right, audio_16_right.as_slice());
@@ -561,11 +579,11 @@ auto WPColorUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = WPColorUniformOutput;
     const rstd::array<BindingEntry<Output>, 5> entries {
-        BindingEntry<Output> { Output::UserAlpha, G_USERALPHA, u32(1) },
-        BindingEntry<Output> { Output::Color4, G_COLOR4, u32(4) },
-        BindingEntry<Output> { Output::Color, G_COLOR, u32(3) },
-        BindingEntry<Output> { Output::Alpha, G_ALPHA, u32(1) },
-        BindingEntry<Output> { Output::Brightness, G_BRIGHTNESS, u32(1) },
+        BindingEntry<Output> { Output::UserAlpha, G_USERALPHA, UniformValueShape::Float(u32(1)) },
+        BindingEntry<Output> { Output::Color4, G_COLOR4, UniformValueShape::Float(u32(4)) },
+        BindingEntry<Output> { Output::Color, G_COLOR, UniformValueShape::Float(u32(3)) },
+        BindingEntry<Output> { Output::Alpha, G_ALPHA, UniformValueShape::Float(u32(1)) },
+        BindingEntry<Output> { Output::Brightness, G_BRIGHTNESS, UniformValueShape::Float(u32(1)) },
     };
     return BindEntries(sink, entries);
 }
@@ -615,9 +633,9 @@ auto WPLightUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = WPLightUniformOutput;
     const rstd::array<BindingEntry<Output>, 3> entries {
-        BindingEntry<Output> { Output::Position, G_LP, u32(16) },
-        BindingEntry<Output> { Output::ColorLegacy, G_LCP, u32(12) },
-        BindingEntry<Output> { Output::ColorRadius, G_LCR, u32(16) },
+        BindingEntry<Output> { Output::Position, G_LP, UniformValueShape::Float(u32(12)) },
+        BindingEntry<Output> { Output::ColorLegacy, G_LCP, UniformValueShape::Float(u32(12)) },
+        BindingEntry<Output> { Output::ColorRadius, G_LCR, UniformValueShape::Float(u32(16)) },
     };
     return BindEntries(sink, entries);
 }
@@ -632,16 +650,16 @@ auto WPLightUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
     using Output = WPLightUniformOutput;
     WPUniformWriter        writer(sink);
     constexpr usize        max_lights { 4 };
-    rstd::array<float, 16> positions {};
+    rstd::array<float, 12> positions {};
     rstd::array<float, 16> colors_radius {};
     rstd::array<float, 12> colors_legacy {};
     for (usize index {}; index < rstd::cmp::min(max_lights, m_lights.len()); ++index) {
         const auto& light = *m_lights[index];
         if (light.node() == nullptr || ! light.runtimeVisible()) continue;
         const auto position                        = light.node()->Translate();
-        positions[index * usize(4)]                = position.x();
-        positions[index * usize(4) + usize(1)]     = position.y();
-        positions[index * usize(4) + usize(2)]     = position.z();
+        positions[index * usize(3)]                = position.x();
+        positions[index * usize(3) + usize(1)]     = position.y();
+        positions[index * usize(3) + usize(2)]     = position.z();
         colors_radius[index * usize(4)]            = light.color().x();
         colors_radius[index * usize(4) + usize(1)] = light.color().y();
         colors_radius[index * usize(4) + usize(2)] = light.color().z();
@@ -746,7 +764,7 @@ auto WPPuppetUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) cons
     return Bind(sink,
                 UniformOutputId { .value = u32() },
                 G_BONES,
-                UniformValueShape::FloatRange(u32(16), u32(4096)));
+                UniformValueShape::MatrixArray(u32(4), u32(4), usize(1), usize(256)));
 }
 
 auto WPPuppetUniformSource::Version(ref<dyn<UniformUpdateContext>> context) const -> u64 {
@@ -760,7 +778,11 @@ auto WPPuppetUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     if (! sink->Wants(output)) return Ok(empty {});
     auto matrices = m_layer->genFrame(context->Frame()->elapsed.to_primitive());
     if (matrices.is_empty()) return Ok(empty {});
-    auto value = UniformValue(matrices[usize()].data(), matrices.len() * usize(16));
+    auto value = UniformValue::fromMatrixArray(matrices[usize()].data(),
+                                               u32(4),
+                                               u32(4),
+                                               matrices.len(),
+                                               UniformMatrixStorage::ColumnMajor);
     return sink->Write(output, value.View());
 }
 

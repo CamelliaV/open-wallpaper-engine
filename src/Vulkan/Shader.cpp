@@ -21,6 +21,93 @@ using namespace owe::vulkan;
 
 namespace
 {
+
+ShaderScalarKind ReflectedScalarKind(const SpvReflectBlockVariable& variable) {
+    if (variable.type_description == nullptr) return ShaderScalarKind::Unknown;
+    const auto flags = variable.type_description->type_flags;
+    if ((flags & SPV_REFLECT_TYPE_FLAG_FLOAT) != 0) return ShaderScalarKind::Float;
+    if ((flags & SPV_REFLECT_TYPE_FLAG_BOOL) != 0) return ShaderScalarKind::Boolean;
+    if ((flags & SPV_REFLECT_TYPE_FLAG_INT) == 0) return ShaderScalarKind::Unknown;
+    return variable.numeric.scalar.signedness != 0 ? ShaderScalarKind::SignedInteger
+                                                   : ShaderScalarKind::UnsignedInteger;
+}
+
+ShaderMatrixMajor ReflectedMatrixMajor(const SpvReflectBlockVariable& variable) {
+    if ((variable.decoration_flags & SPV_REFLECT_DECORATION_ROW_MAJOR) != 0)
+        return ShaderMatrixMajor::Row;
+    if ((variable.decoration_flags & SPV_REFLECT_DECORATION_COLUMN_MAJOR) != 0)
+        return ShaderMatrixMajor::Column;
+    return ShaderMatrixMajor::None;
+}
+
+unsigned ReflectedMatrixStride(const SpvReflectBlockVariable& variable, ShaderMatrixMajor major) {
+    if (variable.numeric.matrix.stride != 0) return variable.numeric.matrix.stride;
+    const auto major_count = major == ShaderMatrixMajor::Row ? variable.numeric.matrix.row_count
+                                                             : variable.numeric.matrix.column_count;
+    if (major_count == 0 || variable.array.stride == 0 ||
+        variable.array.stride % major_count != 0) {
+        return 0;
+    }
+    return variable.array.stride / major_count;
+}
+
+usize ReflectedArrayCount(const SpvReflectArrayTraits& array) {
+    usize count { 1 };
+    for (std::uint32_t index = 0; index < array.dims_count; ++index) {
+        count *= usize(array.dims[index]);
+    }
+    return count;
+}
+
+auto ReflectBlockedUniform(const SpvReflectBlockVariable& variable, int block_index)
+    -> ShaderReflected::BlockedUniform {
+    ShaderReflected::BlockedUniform uniform {};
+    uniform.block_index  = block_index;
+    uniform.size         = usize(variable.size);
+    uniform.offset       = variable.offset;
+    uniform.num          = ReflectedArrayCount(variable.array);
+    uniform.scalar_kind  = ReflectedScalarKind(variable);
+    uniform.scalar_width = variable.numeric.scalar.width;
+    uniform.vector_components =
+        variable.numeric.vector.component_count == 0 ? 1 : variable.numeric.vector.component_count;
+    uniform.matrix_rows    = variable.numeric.matrix.row_count;
+    uniform.matrix_columns = variable.numeric.matrix.column_count;
+    uniform.matrix_major   = ReflectedMatrixMajor(variable);
+    uniform.matrix_stride  = ReflectedMatrixStride(variable, uniform.matrix_major);
+    uniform.array_stride   = variable.array.stride;
+    uniform.array_dimensions.reserve(variable.array.dims_count);
+    for (std::uint32_t dimension = 0; dimension < variable.array.dims_count; ++dimension) {
+        uniform.array_dimensions.push_back(variable.array.dims[dimension]);
+    }
+    return uniform;
+}
+
+bool SameBlockedUniformLayout(const ShaderReflected::BlockedUniform& lhs,
+                              const ShaderReflected::BlockedUniform& rhs) {
+    return lhs.offset == rhs.offset && lhs.size == rhs.size && lhs.num == rhs.num &&
+           lhs.scalar_kind == rhs.scalar_kind && lhs.scalar_width == rhs.scalar_width &&
+           lhs.vector_components == rhs.vector_components && lhs.matrix_rows == rhs.matrix_rows &&
+           lhs.matrix_columns == rhs.matrix_columns && lhs.matrix_stride == rhs.matrix_stride &&
+           lhs.matrix_major == rhs.matrix_major && lhs.array_stride == rhs.array_stride &&
+           lhs.array_dimensions == rhs.array_dimensions;
+}
+
+bool SameUniformBlockLayout(const ShaderReflected::Block&  reflected,
+                            const SpvReflectBlockVariable& block) {
+    if (reflected.size != block.size || reflected.member_map.size() != block.member_count)
+        return false;
+    for (std::uint32_t index = 0; index < block.member_count; ++index) {
+        const auto& variable = block.members[index];
+        auto        existing = reflected.member_map.find(variable.name);
+        if (existing == reflected.member_map.end() ||
+            ! SameBlockedUniformLayout(existing->second,
+                                       ReflectBlockedUniform(variable, reflected.index))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Spill a payload to /tmp/<sha1> for post-mortem inspection. Returns the
 // written path so callers can mention it in the error message.
 std::string logToTmpfileWithSha1(std::span<const char> in) {
@@ -123,6 +210,7 @@ inline const char* DefaultEntryName(SourceLang lang, owe::ShaderType s) {
 bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
                              std::vector<Uni_ShaderSpv>& spvs, ShaderReflected& ref) {
     spvs.clear();
+    Map<std::string, usize> uniform_block_indices;
     for (const auto& code : codes) {
         spv_reflect::ShaderModule spv_ref(code, SPV_REFLECT_MODULE_FLAG_NO_COPY);
         VkShaderStageFlagBits     stage = ::ToVkType(spv_ref.GetShaderStage());
@@ -156,26 +244,37 @@ bool owe::vulkan::GenReflect(std::span<const std::vector<unsigned>> codes,
 
             if (exists(ref.binding_map, bind_name)) {
                 auto& bind = ref.binding_map[bind_name];
+                if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+                    auto block_index = uniform_block_indices.find(bind_name);
+                    if (block_index == uniform_block_indices.end() ||
+                        ! SameUniformBlockLayout(ref.blocks[block_index->second.to_primitive()],
+                                                 b.block)) {
+                        rstd_error("uniform block {} layout differs across shader stages",
+                                   bind_name);
+                        return false;
+                    }
+                }
                 bind.stageFlags |= stage;
                 continue;
             }
             if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
                 auto& block      = b.block;
                 auto  block_name = std::string(block.name).empty() ? bind_name : block.name;
-                ref.blocks.push_back(ShaderReflected::Block {
-                    .size = block.size, .name = block.name, .member_map = {} });
-                auto& ref_block = ref.blocks.front();
+                ref.blocks.push_back(
+                    ShaderReflected::Block { .index      = static_cast<int>(ref.blocks.size()),
+                                             .size       = block.size,
+                                             .name       = std::move(block_name),
+                                             .member_map = {} });
+                auto& ref_block                  = ref.blocks.back();
+                uniform_block_indices[bind_name] = usize(ref.blocks.size() - 1);
 
                 vkbinding.binding         = b.binding;
                 vkbinding.descriptorCount = 1;
                 vkbinding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 
                 for (std::uint32_t i = 0; i < block.member_count; i++) {
-                    auto&                           unif = block.members[i];
-                    ShaderReflected::BlockedUniform bunif {};
-                    bunif.size                      = usize(unif.size);
-                    bunif.offset                    = unif.offset;
-                    ref_block.member_map[unif.name] = bunif;
+                    auto& unif                      = block.members[i];
+                    ref_block.member_map[unif.name] = ReflectBlockedUniform(unif, ref_block.index);
                 }
             } else if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
                        b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {

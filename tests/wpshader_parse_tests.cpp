@@ -14,6 +14,7 @@ import rstd.cppstd;
 import wescene.fs;
 import wescene.pkg.parse;
 import wescene.scene;
+import wescene.shader_compile;
 import wescene.types;
 
 using owe::ParseWPShader;
@@ -218,7 +219,7 @@ float sample(float barID) {
     EXPECT_NE(out.find("g_AudioSpectrum64Left[(int)(barID)]"), std::string::npos);
 }
 
-TEST(WPShaderParser, PreShaderHeaderTransposesLocalMatrixConstructorMul) {
+TEST(WPShaderParser, PreShaderHeaderPreservesLocalMatrixConstructorMul) {
     const std::string out = owe::WPShaderParser::PreShaderHeader(
         R"(
 vec2 rotate(vec2 uv, float th) {
@@ -228,11 +229,47 @@ vec2 rotate(vec2 uv, float th) {
         {},
         owe::ShaderType::FRAGMENT);
 
-    EXPECT_NE(out.find("mul(uv, transpose(mat2(cos(th), sin(th), -sin(th), cos(th))))"),
-              std::string::npos);
+    EXPECT_NE(out.find("mul(uv, mat2(cos(th), sin(th), -sin(th), cos(th)))"), std::string::npos);
+    EXPECT_EQ(out.find("transpose(float2x2"), std::string::npos);
+    EXPECT_EQ(out.find("_ww_mul"), std::string::npos);
 }
 
-TEST(WPShaderParser, CommonPerspectiveIncludeCompensatesLocalMatrixMul) {
+TEST(WPShaderParser, PreShaderHeaderPreservesNestedMatrixConstructors) {
+    const std::string out = owe::WPShaderParser::PreShaderHeader(
+        R"(
+mat3 rotate(vec3 c, vec3 s) {
+    return mul(mul(mat3(c.z, -s.z, 0, s.z, c.z, 0, 0, 0, 1),
+                   mat3(1, 0, 0, 0, c.x, -s.x, 0, s.x, c.x)),
+               mat3(c.y, 0, s.y, 0, 1, 0, -s.y, 0, c.y));
+}
+)",
+        {},
+        owe::ShaderType::GEOMETRY);
+
+    EXPECT_NE(out.find("mul(mul(mat3(c.z, -s.z"), std::string::npos);
+    EXPECT_EQ(out.find("transpose(float3x3"), std::string::npos);
+}
+
+TEST(WPShaderParser, PreShaderHeaderUsesHlslRectangularMatrixDimensions) {
+    const std::string out = owe::WPShaderParser::PreShaderHeader(
+        R"(
+mat2x3 glslMatrix() {
+    return mat2x3(1, 2, 3, 4, 5, 6);
+}
+float3x2 hlslMatrix() {
+    return float3x2(1, 2, 3, 4, 5, 6);
+}
+)",
+        {},
+        owe::ShaderType::VERTEX);
+
+    EXPECT_NE(out.find("#define mat2x3 float2x3"), std::string::npos);
+    EXPECT_NE(out.find("#define mat4x3 float4x3"), std::string::npos);
+    EXPECT_NE(out.find("return mat2x3(1, 2, 3, 4, 5, 6);"), std::string::npos);
+    EXPECT_NE(out.find("return float3x2(1, 2, 3, 4, 5, 6);"), std::string::npos);
+}
+
+TEST(WPShaderParser, CommonPerspectiveIncludePreservesMatrixSource) {
     auto root =
         std::filesystem::temp_directory_path() /
         ("owe-wpshader-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
@@ -260,8 +297,8 @@ mat3 squareToQuad(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
     const std::string out = owe::WPShaderParser::PreShaderSrc(
         vfs, "#include \"common_perspective.h\"\nvoid main(){}\n", nullptr, {});
 
-    EXPECT_NE(out.find("_ww_perspective_mat"), std::string::npos);
-    EXPECT_NE(out.find("return _ww_perspective_mat(m);"), std::string::npos);
+    EXPECT_EQ(out.find("_ww_perspective_mat"), std::string::npos);
+    EXPECT_NE(out.find("return m;"), std::string::npos);
 
     std::filesystem::remove_all(root);
 }
@@ -313,6 +350,130 @@ void main() {
     ASSERT_TRUE(result.shader);
     ASSERT_EQ(result.shader->codes.size(), 2u);
     EXPECT_FALSE(result.shader->codes[1].empty());
+
+    std::vector<owe::vulkan::Uni_ShaderSpv> spvs;
+    owe::vulkan::ShaderReflected            reflected;
+    ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
+    ASSERT_EQ(reflected.blocks.size(), 1u);
+    const auto& members = reflected.blocks.front().member_map;
+    ASSERT_TRUE(members.contains("g_AudioSpectrum64Left"));
+    const auto& spectrum = members.at("g_AudioSpectrum64Left");
+    EXPECT_EQ(spectrum.scalar_kind, owe::ShaderScalarKind::Float);
+    EXPECT_EQ(spectrum.scalar_width, 32u);
+    EXPECT_EQ(spectrum.vector_components, 1u);
+    EXPECT_EQ(spectrum.num, rstd::usize(64));
+    EXPECT_EQ(spectrum.array_stride, 16u);
+}
+
+TEST(WPShaderParser, CompileSceneShaderVariantAcceptsNativeMatrixConstructors) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "matrix-constructor-test";
+    desc.shader_name = "matrix-constructor-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/matrix-constructor-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+mat3 rotate(vec3 c, vec3 s) {
+    return mul(mul(mat3(c.z, -s.z, 0, s.z, c.z, 0, 0, 0, 1),
+                   mat3(1, 0, 0, 0, c.x, -s.x, 0, s.x, c.x)),
+               mat3(c.y, 0, s.y, 0, 1, 0, -s.y, 0, c.y));
+}
+mat2x3 rectangular() {
+    return mat2x3(1, 2, 3, 4, 5, 6);
+}
+void main() {
+    mat2x3 rectangularValue = rectangular();
+    vec3 p = mul(a_Position, rotate(vec3(1), vec3(0)));
+    gl_Position = vec4(p + vec3(rectangularValue[0][0] * 0), 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/matrix-constructor-test.frag",
+        .source     = R"(
+void main() {
+    gl_FragColor = vec4(1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    ASSERT_EQ(result.shader->codes.size(), 2u);
+    EXPECT_FALSE(result.shader->codes[0].empty());
+    EXPECT_FALSE(result.shader->codes[1].empty());
+}
+
+TEST(WPShaderParser, ReflectsNativeHlslMatrixLayout) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "matrix-reflection-test";
+    desc.shader_name = "matrix-reflection-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/matrix-reflection-test.vert",
+        .source     = R"(
+attribute vec4 a_Position;
+uniform mat2 g_Mat2;
+uniform mat3 g_Mat3;
+uniform mat4 g_Mat4;
+uniform mat4x3 g_Bones[2];
+void main() {
+    vec2 p2 = mul(a_Position.xy, g_Mat2);
+    vec3 p3 = mul(a_Position.xyz, g_Mat3);
+    vec3 bone = mul(a_Position, g_Bones[1]);
+    gl_Position = mul(vec4(bone + p3 + vec3(p2, 0.0), 1.0), g_Mat4);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/matrix-reflection-test.frag",
+        .source     = R"(
+void main() {
+    gl_FragColor = vec4(1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    EXPECT_EQ(result.shader->matrix_convention, owe::ShaderMatrixConvention::RowVector);
+    EXPECT_EQ(result.shader->matrix_abi, owe::ShaderMatrixAbi::Hlsl);
+    std::vector<owe::vulkan::Uni_ShaderSpv> spvs;
+    owe::vulkan::ShaderReflected            reflected;
+    ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
+    ASSERT_EQ(reflected.blocks.size(), 1u);
+    const auto& members = reflected.blocks.front().member_map;
+    ASSERT_TRUE(members.contains("g_Mat2"));
+    ASSERT_TRUE(members.contains("g_Mat3"));
+    ASSERT_TRUE(members.contains("g_Mat4"));
+    ASSERT_TRUE(members.contains("g_Bones"));
+
+    const auto& mat3 = members.at("g_Mat3");
+    EXPECT_EQ(mat3.scalar_kind, owe::ShaderScalarKind::Float);
+    EXPECT_EQ(mat3.scalar_width, 32u);
+    EXPECT_EQ(mat3.matrix_rows, 3u);
+    EXPECT_EQ(mat3.matrix_columns, 3u);
+    EXPECT_EQ(mat3.matrix_major, owe::ShaderMatrixMajor::Row);
+    EXPECT_EQ(mat3.matrix_stride, 16u);
+
+    const auto& bones = members.at("g_Bones");
+    EXPECT_EQ(bones.matrix_rows, 3u);
+    EXPECT_EQ(bones.matrix_columns, 4u);
+    EXPECT_EQ(bones.matrix_major, owe::ShaderMatrixMajor::Row);
+    EXPECT_EQ(bones.matrix_stride, 16u);
+    EXPECT_EQ(bones.array_stride, 48u);
+    EXPECT_EQ(bones.num, rstd::usize(2));
+    ASSERT_EQ(bones.array_dimensions.size(), 1u);
+    EXPECT_EQ(bones.array_dimensions.front(), 2u);
 }
 
 TEST(WPShaderParser, CompileSceneShaderVariantUsesPhysicalFileCache) {
@@ -381,7 +542,7 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 1u);
+    EXPECT_EQ(read_u32(12), 3u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);

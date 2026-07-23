@@ -52,8 +52,10 @@ struct SceneSamplerBinding {
 
 struct SceneShader {
 public:
-    u32         id { 0 };
-    std::string name;
+    u32                    id { 0 };
+    std::string            name;
+    ShaderMatrixConvention matrix_convention { ShaderMatrixConvention::ColumnVector };
+    ShaderMatrixAbi        matrix_abi { ShaderMatrixAbi::NativeSpirv };
 
     std::vector<ShaderCode> codes;
 
@@ -86,7 +88,10 @@ inline usize SceneShaderCodeHash(std::span<const ShaderCode> codes) {
 }
 
 inline usize SceneShaderCodeHash(const SceneShader& shader) {
-    return SceneShaderCodeHash(shader.codes);
+    std::size_t seed = SceneShaderCodeHash(shader.codes).to_primitive();
+    utils::hash_combine(seed, static_cast<unsigned>(shader.matrix_convention));
+    utils::hash_combine(seed, static_cast<unsigned>(shader.matrix_abi));
+    return usize(seed);
 }
 
 struct SceneShaderTextureCompileInfo {

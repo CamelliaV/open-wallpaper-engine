@@ -39,7 +39,6 @@ struct WPShaderInfo {
     ShaderValueMap   baseConstSvs;
     WPAliasValueDict alias;
     WPDefaultTexs    defTexs;
-    bool             normalize_tangent_space { false };
 
     // Full annotation metadata. Renderer reads `combos / svs / defTexs /
     // alias` on the hot path; the editor / material UI and the user-property
