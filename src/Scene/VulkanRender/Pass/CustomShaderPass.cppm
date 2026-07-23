@@ -60,13 +60,13 @@ public:
         VkClearValue clear_value;
         // Scene clear color snapshot; None keeps the pass-owned clear value.
         Option<array<float, 3>> clear_value_src;
-        bool                 blending { false };
-        bool                 clear_output { false };
-        bool                 transparent_clear { false };
-        bool                 clear_depth { false };
-        bool                 preserve_output { false };
-        VkAttachmentLoadOp   color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
-        VkAttachmentLoadOp   depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        bool                    blending { false };
+        bool                    clear_output { false };
+        bool                    transparent_clear { false };
+        bool                    clear_depth { false };
+        bool                    preserve_output { false };
+        VkAttachmentLoadOp      color_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        VkAttachmentLoadOp      depth_load_op { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
         rstd::Option<resource::DescriptorBindingHandle> descriptor_binding;
         std::optional<PipelineCacheKey>                 pipeline_cache_key;
         std::optional<RenderPassCacheKey>               render_pass_cache_key;

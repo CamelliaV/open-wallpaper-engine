@@ -14,6 +14,14 @@ struct PreparedExternalFrame {
     FrameSurfaceLease    lease;
     PreparedBarrierBatch before_copy;
     PreparedBarrierBatch after_copy;
+
+    auto clone() const -> PreparedExternalFrame {
+        return PreparedExternalFrame {
+            .lease       = lease,
+            .before_copy = before_copy.clone(),
+            .after_copy  = after_copy.clone(),
+        };
+    }
 };
 
 class ExternalResourceBridge {

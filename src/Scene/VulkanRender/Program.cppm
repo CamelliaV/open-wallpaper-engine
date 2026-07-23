@@ -75,6 +75,18 @@ struct PreparedPassDiagnostic {
     bool                                      prepared { false };
 };
 
+enum class RenderProgramPrepareStatus
+{
+    BatchReady,
+    Complete,
+    Failed,
+};
+
+struct UploadCommitResult {
+    bool success { false };
+    u64  signal_value {};
+};
+
 struct RenderProgram {
     enum class PreparedPassKind
     {
@@ -144,20 +156,22 @@ struct RenderProgram {
         rstd::vec::Vec<rstd::usize> scoped_passes;
     };
 
-    rstd::vec::Vec<PreparedPassRecord>                pass_records;
-    rstd::vec::Vec<RenderPassScope>                   scopes;
-    owe::resource::ResourcePlan                       resource_plan;
-    rstd::Option<rstd::mut_ref<owe::rg::RenderGraph>> graph;
-    rstd::vec::Vec<rstd::mut_ref<VulkanPass>>         frame_passes;
-    rstd::Option<rstd::mut_ref<PrePass>>              frame_prepass;
-    rstd::Option<rstd::mut_ref<FinPass>>              frame_finpass;
-    rstd::vec::Vec<Box<dyn<UniformBufferUpdate>>>     uniform_update_owners;
-    rstd::vec::Vec<ref<dyn<UniformBufferUpdate>>>     uniform_updates;
-    bool                                              loaded { false };
+    rstd::vec::Vec<PreparedPassRecord>                      pass_records;
+    rstd::vec::Vec<RenderPassScope>                         scopes;
+    owe::resource::ResourcePlan                             resource_plan;
+    rstd::Option<rstd::mut_ref<owe::rg::RenderGraph>>       graph;
+    rstd::vec::Vec<rstd::mut_ref<VulkanPass>>               frame_passes;
+    rstd::Option<rstd::mut_ref<PrePass>>                    frame_prepass;
+    rstd::Option<rstd::mut_ref<FinPass>>                    frame_finpass;
+    rstd::vec::Vec<Box<dyn<UniformBufferUpdate>>>           uniform_update_owners;
+    rstd::vec::Vec<ref<dyn<UniformBufferUpdate>>>           uniform_updates;
+    rstd::Option<resource_registry::ResourcePrepareSession> resource_prepare_session;
+    bool                                                    loaded { false };
 
     void clear() {
         uniform_updates.clear();
         uniform_update_owners.clear();
+        resource_prepare_session = rstd::None();
         scopes.clear();
         pass_records.clear();
         resource_plan = {};
@@ -513,15 +527,16 @@ struct RenderProgram {
         }
     }
 
-    bool prepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
-                 const owe::RenderSceneSnapshot& render_scene,
-                 resource::ResourcePlanSections  sections   = resource::ResourcePlanAll,
-                 SceneLoadBenchRecorderView      load_bench = {}) {
+    auto beginPrepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
+                      const owe::RenderSceneSnapshot& render_scene,
+                      resource::ResourcePlanSections  sections = resource::ResourcePlanAll,
+                      SceneLoadBenchRecorderView load_bench    = {}) -> RenderProgramPrepareStatus {
         auto prepare_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_resources_prepare);
         loaded            = false;
+        resource_prepare_session = rstd::None();
         if (rr.shader_reflection_cache.is_none()) {
             rstd_error("shader artifact compiler unavailable");
-            return false;
+            return RenderProgramPrepareStatus::Failed;
         }
         ResourceDeclarationContext declarations(resource_plan, **rr.shader_reflection_cache);
         const bool                 prepare_buffers =
@@ -530,7 +545,7 @@ struct RenderProgram {
             resource::ResourcePlanIncludes(sections, resource::ResourcePlanShaders);
         if (prepare_buffers != prepare_shaders) {
             rstd_error("render resource declaration requires buffers and shaders together");
-            return false;
+            return RenderProgramPrepareStatus::Failed;
         }
         if (prepare_buffers) {
             resource_plan.buffers.clear();
@@ -547,7 +562,7 @@ struct RenderProgram {
         }
 
         SnapshotImportedTextureProvider imported_textures(
-            render_scene, ref<Scene>::from_raw_parts(rstd::addressof(scene)), load_bench);
+            render_scene, ref<Scene>::from_raw_parts(rstd::addressof(scene)));
         SnapshotTexturePrepareObserver texture_observer(load_bench);
         auto                           content =
             rstd::dyn<owe::resource::TextureContentProvider>::from_ref(imported_textures);
@@ -558,20 +573,48 @@ struct RenderProgram {
         DeclaredShaderArtifactProvider declared_shaders(declarations);
         auto                           shader_artifacts =
             rstd::dyn<owe::resource::ShaderArtifactProvider>::from_ref(declared_shaders);
-        auto prepared =
-            rr.resources.PreparePlan(resource_plan,
-                                     owe::resource_registry::ResourceContentProviders {
-                                         .texture = rstd::Some(content),
-                                         .buffer  = rstd::Some(buffer_content.as_mut_ref()),
-                                         .shader  = rstd::Some(shader_artifacts.as_mut_ref()),
-                                     },
-                                     sections,
-                                     Some(observer.as_mut_ref()));
-        if (prepared.is_err()) {
-            auto error = rstd::move(prepared).unwrap_err_unchecked();
+        auto started =
+            rr.resources.BeginPreparePlan(resource_plan,
+                                          owe::resource_registry::ResourceContentProviders {
+                                              .texture = rstd::Some(content),
+                                              .buffer  = rstd::Some(buffer_content.as_mut_ref()),
+                                              .shader  = rstd::Some(shader_artifacts.as_mut_ref()),
+                                          },
+                                          sections,
+                                          Some(observer.as_mut_ref()));
+        if (started.is_err()) {
+            auto error = rstd::move(started).unwrap_err_unchecked();
             rstd_error("prepare resource plan failed: {}", error.message);
-            return false;
+            return RenderProgramPrepareStatus::Failed;
         }
+        resource_prepare_session.insert(rstd::move(started).unwrap_unchecked());
+        return continuePrepare(scene, device, rr, load_bench);
+    }
+
+    auto continuePrepare(owe::Scene& scene, const Device& device, RenderingResources& rr,
+                         SceneLoadBenchRecorderView load_bench = {}) -> RenderProgramPrepareStatus {
+        auto prepare_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_resources_prepare);
+        if (resource_prepare_session.is_none()) return RenderProgramPrepareStatus::Failed;
+        SnapshotTexturePrepareObserver texture_observer(load_bench);
+        auto                           observer =
+            rstd::dyn<owe::resource::TexturePrepareObserver>::from_ref(texture_observer);
+        auto progress = rr.resources.ContinuePreparePlan(*resource_prepare_session,
+                                                         Some(observer.as_mut_ref()));
+        if (progress.is_err()) {
+            auto error = rstd::move(progress).unwrap_err_unchecked();
+            rstd_error("prepare resource plan failed: {}", error.message);
+            resource_prepare_session = rstd::None();
+            return RenderProgramPrepareStatus::Failed;
+        }
+        if (progress.unwrap_unchecked() == resource_registry::ResourcePrepareProgress::BatchReady) {
+            return RenderProgramPrepareStatus::BatchReady;
+        }
+        resource_prepare_session = rstd::None();
+        return finishPrepare(scene, device, rr);
+    }
+
+    auto finishPrepare(owe::Scene& scene, const Device& device, RenderingResources& rr)
+        -> RenderProgramPrepareStatus {
         rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
         rstd::Option<owe::resource::TextureUseHandle> frame_msaa_use   = rstd::None();
         std::string                                   frame_msaa_name;
@@ -607,7 +650,7 @@ struct RenderProgram {
             if (pass.is_none()) continue;
             if (! pass->prepareResourceStates(state_preparer.as_mut_ref())) {
                 rstd_error("prepare resource states failed for {}", record.pass_name);
-                return false;
+                return RenderProgramPrepareStatus::Failed;
             }
         }
         auto graphics =
@@ -630,7 +673,7 @@ struct RenderProgram {
                 record.prepareIfNeeded(*pass, scene, device, prepare_context);
                 if (! pass->prepared()) {
                     rstd_error("prepare pass failed for {}", record.pass_name);
-                    return false;
+                    return RenderProgramPrepareStatus::Failed;
                 }
                 record.resources = pass->resourceUses();
             }
@@ -649,7 +692,7 @@ struct RenderProgram {
                 rstd_error("prepare uniform binding failed for {}: {}",
                            record.pass_name,
                            error.message.as_str());
-                return false;
+                return RenderProgramPrepareStatus::Failed;
             }
             auto binding = rstd::move(created).unwrap_unchecked();
             if (binding.is_some()) {
@@ -660,7 +703,13 @@ struct RenderProgram {
         for (const auto& binding : uniform_update_owners) {
             uniform_updates.push(binding.as_ref());
         }
-        return true;
+        return RenderProgramPrepareStatus::Complete;
+    }
+
+    void abortPrepare(RenderingResources& rr) {
+        rr.resources.AbortPreparePlan();
+        resource_prepare_session = rstd::None();
+        loaded                   = false;
     }
 
     void invalidateAllPreparedPasses() {
@@ -668,13 +717,12 @@ struct RenderProgram {
         loaded = false;
     }
 
-    u64 commitUploads(const Device& device, RenderingResources& rr,
-                      vvk::CommandBuffer& upload_cmd) {
+    auto commitUploads(const Device& device, RenderingResources& rr, vvk::CommandBuffer& upload_cmd)
+        -> UploadCommitResult {
         if (! rr.resources.HasPendingUploads()) {
-            loaded = true;
-            return u64();
+            return UploadCommitResult { .success = true };
         }
-        VVK_CHECK_ACT(return u64(),
+        VVK_CHECK_ACT(return UploadCommitResult {},
                              upload_cmd.Begin(VkCommandBufferBeginInfo {
                                  .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                  .pNext = nullptr,
@@ -683,9 +731,9 @@ struct RenderProgram {
         RecordedBufferUploads recorded;
         RecordedImageUploads  recorded_images;
         if (! rr.resources.RecordPendingUploads(upload_cmd, recorded, recorded_images)) {
-            return u64();
+            return UploadCommitResult {};
         }
-        VVK_CHECK_ACT(return u64(), upload_cmd.End());
+        VVK_CHECK_ACT(return UploadCommitResult {}, upload_cmd.End());
         {
             auto                          ready        = rr.resources.ReserveUpload();
             const uint64_t                signal_value = ready.value.to_primitive();
@@ -705,15 +753,15 @@ struct RenderProgram {
                 .signalSemaphoreCount = 1,
                 .pSignalSemaphores    = rr.sem_upload.address(),
             };
-            VVK_CHECK_ACT(return u64(), device.graphics_queue().handle.Submit(sub_info, {}));
+            VVK_CHECK_ACT(return UploadCommitResult {},
+                                 device.graphics_queue().handle.Submit(sub_info, {}));
             if (! rr.resources.MarkUploadSubmitted(
                     ready, rstd::move(recorded), rstd::move(recorded_images))) {
-                return u64();
+                return UploadCommitResult {};
             }
-            loaded = true;
-            return u64(signal_value);
+            return UploadCommitResult { .success = true, .signal_value = u64(signal_value) };
         }
-        return u64();
+        return UploadCommitResult {};
     }
 
     void rebuildScopes() {

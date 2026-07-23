@@ -32,6 +32,23 @@ struct TextureCatalog {
     using Funcs = TraitFuncs<&T::ResolveTexture, &T::FindTexture>;
 };
 
+struct TextureLoader {
+    using Trait                  = TextureLoader;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = TextureLoader;
+
+        auto LoadTexture(ref<str> key) const -> Result<rstd::sync::Arc<Image>, ResourceError> {
+            return rstd::trait_call<0>(this, key);
+        }
+    };
+
+    template<typename T>
+    using Funcs = TraitFuncs<&T::LoadTexture>;
+};
+
 struct TextureContentProvider {
     using Trait                  = TextureContentProvider;
     static constexpr bool direct = false;
@@ -45,14 +62,14 @@ struct TextureContentProvider {
             return rstd::trait_call<0>(this, request);
         }
 
-        auto LoadTextures(slice<String> keys)
-            -> Vec<Result<rstd::sync::Arc<Image>, ResourceError>> {
-            return rstd::trait_call<1>(this, keys);
+        auto OpenTextureLoader() const
+            -> Result<rstd::sync::Arc<dyn<TextureLoader>>, ResourceError> {
+            return rstd::trait_call<1>(this);
         }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::ResolveTextureKey, &T::LoadTextures>;
+    using Funcs = TraitFuncs<&T::ResolveTextureKey, &T::OpenTextureLoader>;
 };
 
 struct TexturePrepareObserver {
@@ -65,13 +82,15 @@ struct TexturePrepareObserver {
 
         void BeginTexturePlan() { rstd::trait_call<0>(this); }
         void EndTexturePlan() { rstd::trait_call<1>(this); }
-        void BeginTextureUpload() { rstd::trait_call<2>(this); }
-        void EndTextureUpload() { rstd::trait_call<3>(this); }
+        void BeginTextureDecode() { rstd::trait_call<2>(this); }
+        void EndTextureDecode() { rstd::trait_call<3>(this); }
+        void BeginTextureUpload() { rstd::trait_call<4>(this); }
+        void EndTextureUpload() { rstd::trait_call<5>(this); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::BeginTexturePlan, &T::EndTexturePlan, &T::BeginTextureUpload,
-                             &T::EndTextureUpload>;
+    using Funcs = TraitFuncs<&T::BeginTexturePlan, &T::EndTexturePlan, &T::BeginTextureDecode,
+                             &T::EndTextureDecode, &T::BeginTextureUpload, &T::EndTextureUpload>;
 };
 
 struct BufferCatalog {

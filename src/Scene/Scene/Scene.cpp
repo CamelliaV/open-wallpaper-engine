@@ -1408,16 +1408,15 @@ bool Scene::EnsureTextureDescriptor(std::string_view key) {
 }
 
 auto Scene::ParseImage(ref<str> name) const -> Result<Arc<Image>, ImageParseError> {
-    auto names = Vec<String>::with_capacity(usize(1));
-    names.push(String::make(name));
-    auto images = ParseImages(names.as_slice());
-    if (images.is_empty()) {
+    auto runtime = m_runtime_images.get(name);
+    if (runtime.is_some()) return Ok((*runtime)->clone());
+    if (m_image_parser.is_none()) {
         return Err(ImageParseError {
             .kind    = ImageParseErrorKind::MissingContent,
-            .message = rstd::format("image {} unavailable", name),
+            .message = rstd::format("image parser unavailable for {}", name),
         });
     }
-    return rstd::move(images[usize()]);
+    return (*m_image_parser)->Parse(name);
 }
 
 auto Scene::ParseImages(slice<String> names) const -> Vec<Result<Arc<Image>, ImageParseError>> {

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <atomic>
 #include <span>
 #include <string>
 #include <vector>
@@ -69,10 +70,21 @@ struct BufferBackend {
 auto TextureAllocation(rstd::uint64_t generation)
     -> rstd::sync::Arc<owe::vulkan::TextureAllocation>;
 
+struct TextureLoader {
+    std::atomic<std::size_t>* loads;
+
+    auto LoadTexture(rstd::ref<rstd::str> key) const
+        -> rstd::Result<rstd::sync::Arc<owe::Image>, owe::resource::ResourceError> {
+        loads->fetch_add(1, std::memory_order_relaxed);
+        auto image = rstd::sync::Arc<owe::Image>::make();
+        image->key = rstd::cppstd::to_string(key);
+        return rstd::Ok(rstd::move(image));
+    }
+};
+
 struct TextureContentProvider {
-    mutable rstd::usize      resolves { 0 };
-    rstd::usize              loads { 0 };
-    std::vector<rstd::usize> batch_sizes;
+    mutable rstd::usize              resolves { 0 };
+    mutable std::atomic<std::size_t> loads { 0 };
 
     auto ResolveTextureKey(const owe::resource::TextureRequest& request) const
         -> rstd::Result<rstd::string::String, owe::resource::ResourceError> {
@@ -84,19 +96,13 @@ struct TextureContentProvider {
         return rstd::Ok(request.name.clone());
     }
 
-    auto LoadTextures(rstd::slice<rstd::string::String> keys)
-        -> rstd::vec::Vec<rstd::Result<rstd::sync::Arc<owe::Image>, owe::resource::ResourceError>> {
-        ++loads;
-        batch_sizes.push_back(keys.len());
-        auto images =
-            rstd::vec::Vec<rstd::Result<rstd::sync::Arc<owe::Image>,
-                                        owe::resource::ResourceError>>::with_capacity(keys.len());
-        for (rstd::usize index {}; index < keys.len(); ++index) {
-            auto image = rstd::sync::Arc<owe::Image>::make();
-            image->key = rstd::cppstd::to_string(keys[index].as_str());
-            images.push(rstd::Ok(rstd::move(image)));
-        }
-        return images;
+    auto OpenTextureLoader() const
+        -> rstd::Result<rstd::sync::Arc<rstd::dyn<owe::resource::TextureLoader>>,
+                        owe::resource::ResourceError> {
+        return rstd::Ok(
+            rstd::sync::Arc<rstd::dyn<owe::resource::TextureLoader>>::make(TextureLoader {
+                .loads = &loads,
+            }));
     }
 };
 
@@ -475,18 +481,27 @@ TEST(ResourcePrepareService, BatchesDeduplicatesAndCachesImportedTextures) {
 
     owe::resource_registry::ResourcePrepareService service(
         textures, rstd::Some(image.as_mut_ref()), buffers, buffer.as_mut_ref(), shaders);
-    auto first = service.Prepare(plan,
+    auto started = service.Begin(plan,
                                  owe::resource_registry::ResourceContentProviders {
                                      .texture = rstd::Some(content.as_mut_ref()),
                                  });
-    ASSERT_TRUE(first.is_ok());
-    EXPECT_EQ(first->TextureCount(), rstd::usize(10));
+    ASSERT_TRUE(started.is_ok());
+    auto        session = rstd::move(started).unwrap_unchecked();
+    rstd::usize batches {};
+    while (true) {
+        auto progress = service.Continue(session);
+        ASSERT_TRUE(progress.is_ok());
+        if (progress.unwrap_unchecked() ==
+            owe::resource_registry::ResourcePrepareProgress::Complete) {
+            break;
+        }
+        ++batches;
+    }
+    auto first = rstd::move(session).TakeTable();
+    EXPECT_EQ(first.TextureCount(), rstd::usize(10));
+    EXPECT_EQ(batches, rstd::usize(3));
     EXPECT_EQ(content_provider.resolves, rstd::usize(10));
-    EXPECT_EQ(content_provider.loads, rstd::usize(3));
-    ASSERT_EQ(content_provider.batch_sizes.size(), std::size_t(3));
-    EXPECT_EQ(content_provider.batch_sizes[0], rstd::usize(4));
-    EXPECT_EQ(content_provider.batch_sizes[1], rstd::usize(4));
-    EXPECT_EQ(content_provider.batch_sizes[2], rstd::usize(1));
+    EXPECT_EQ(content_provider.loads.load(std::memory_order_relaxed), std::size_t(9));
     EXPECT_EQ(image_backend.creates, rstd::usize(9));
 
     auto second = service.Prepare(plan,
@@ -496,7 +511,7 @@ TEST(ResourcePrepareService, BatchesDeduplicatesAndCachesImportedTextures) {
     ASSERT_TRUE(second.is_ok());
     EXPECT_EQ(second->TextureCount(), rstd::usize(10));
     EXPECT_EQ(content_provider.resolves, rstd::usize(10));
-    EXPECT_EQ(content_provider.loads, rstd::usize(3));
+    EXPECT_EQ(content_provider.loads.load(std::memory_order_relaxed), std::size_t(9));
     EXPECT_EQ(image_backend.creates, rstd::usize(9));
 }
 
@@ -531,6 +546,61 @@ TEST(PreparedResourceTable, ResolvesTypedUsesWithoutRegistryLookup) {
     ASSERT_EQ(leases.textures.len(), rstd::usize(1));
     EXPECT_EQ(leases.textures[rstd::usize()].resource.index, rstd::u64(2));
     EXPECT_EQ(leases.textures[rstd::usize()].physical_generation, rstd::u64(3));
+}
+
+TEST(PreparedResourceTable, RestoresReplacedSectionsAfterPrepareFailure) {
+    owe::resource_registry::PreparedResourceTable prepared(rstd::u64(5));
+    auto                                          old_use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(1), .generation = rstd::u64(5) };
+    auto old_allocation = TextureAllocation(3);
+    ASSERT_TRUE(prepared.Insert(owe::resource_registry::PreparedTexture {
+        .use = old_use,
+        .resource =
+            owe::resource::TextureHandle { .index = rstd::u64(2), .generation = rstd::u64(1) },
+        .request =
+            owe::resource::TextureRequest {
+                .kind = owe::resource::TextureRequestKind::Imported,
+                .name = rstd::string::String::make("old"_str),
+            },
+        .physical = old_allocation.clone(),
+        .image    = old_allocation->View(),
+    }));
+    auto descriptor = owe::resource::DescriptorBindingHandle {
+        .index      = rstd::u64(8),
+        .generation = rstd::u64(5),
+    };
+    ASSERT_TRUE(prepared.Insert(owe::resource_registry::PreparedDescriptorBinding {
+        .handle = descriptor,
+        .images = rstd::vec::Vec<owe::resource_registry::DescriptorImageBinding>::make(),
+    }));
+
+    auto rollback = prepared.clone();
+
+    owe::resource_registry::PreparedResourceTable replacement(rstd::u64(6));
+    auto                                          new_use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(4), .generation = rstd::u64(6) };
+    auto new_allocation = TextureAllocation(7);
+    ASSERT_TRUE(replacement.Insert(owe::resource_registry::PreparedTexture {
+        .use = new_use,
+        .resource =
+            owe::resource::TextureHandle { .index = rstd::u64(5), .generation = rstd::u64(1) },
+        .request =
+            owe::resource::TextureRequest {
+                .kind = owe::resource::TextureRequestKind::Imported,
+                .name = rstd::string::String::make("new"_str),
+            },
+        .physical = new_allocation.clone(),
+        .image    = new_allocation->View(),
+    }));
+    replacement.CarryForward(rstd::move(prepared), owe::resource::ResourcePlanTextures);
+    replacement.Remove(descriptor);
+
+    replacement = rstd::move(rollback);
+    EXPECT_EQ(replacement.Generation(), rstd::u64(5));
+    EXPECT_EQ(replacement.TextureCount(), rstd::usize(1));
+    EXPECT_TRUE(replacement.Resolve(old_use).is_some());
+    EXPECT_TRUE(replacement.Resolve(new_use).is_none());
+    EXPECT_TRUE(replacement.Resolve(descriptor).is_some());
 }
 
 TEST(PreparedResourceTable, PinsEveryPreparedGenerationInOneLeaseSet) {

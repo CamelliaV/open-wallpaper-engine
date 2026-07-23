@@ -124,7 +124,8 @@ public:
     bool Initialize(const vulkan::Device& device) { return m_registries.Initialize(device); }
 
     void Reset() {
-        m_prepared = PreparedResourceTable {};
+        m_prepare_rollback = None();
+        m_prepared         = PreparedResourceTable {};
         m_registries.Reset();
     }
 
@@ -135,6 +136,28 @@ public:
                 resource::ResourcePlanSections sections = resource::ResourcePlanAll,
                 Option<mut_ref<dyn<resource::TexturePrepareObserver>>> texture_observer = None())
         -> Result<empty, resource::ResourceError> {
+        auto started = BeginPreparePlan(plan, rstd::move(providers), sections, texture_observer);
+        if (started.is_err()) return Err(rstd::move(started).unwrap_err_unchecked());
+        auto session = rstd::move(started).unwrap_unchecked();
+        while (true) {
+            auto progress = ContinuePreparePlan(session, texture_observer);
+            if (progress.is_err()) return Err(rstd::move(progress).unwrap_err_unchecked());
+            if (progress.unwrap_unchecked() == ResourcePrepareProgress::Complete) break;
+        }
+        CommitPreparePlan();
+        return Ok(empty {});
+    }
+
+    auto BeginPreparePlan(const resource::ResourcePlan& plan, ResourceContentProviders providers,
+                          resource::ResourcePlanSections sections = resource::ResourcePlanAll,
+                          Option<mut_ref<dyn<resource::TexturePrepareObserver>>> texture_observer =
+                              None()) -> Result<ResourcePrepareSession, resource::ResourceError> {
+        if (m_prepare_rollback.is_some()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("resource prepare transaction is already active"),
+            });
+        }
         vulkan::ImagePrepareContext image_context(m_registries.Textures(),
                                                   m_registries.ImageUploads());
         auto image_backend  = dyn<vulkan::ImagePrepareBackend>::from_ref(image_context);
@@ -144,24 +167,65 @@ public:
                                        m_registries.Buffers(),
                                        buffer_backend.as_mut_ref(),
                                        m_registries.Shaders());
-        auto prepared = service.Prepare(plan, rstd::move(providers), sections, texture_observer);
-        if (prepared.is_err()) {
-            m_registries.ImageUploads().DiscardPendingUploads();
-            m_registries.TextureEntries().DiscardPendingUploads();
-            return Err(rstd::move(prepared).unwrap_err_unchecked());
+        auto started = service.Begin(plan, rstd::move(providers), sections, texture_observer);
+        if (started.is_err()) {
+            AbortPreparePlan();
+            return Err(rstd::move(started).unwrap_err_unchecked());
         }
-        auto next = rstd::move(prepared).unwrap_unchecked();
+        return Ok(rstd::move(started).unwrap_unchecked());
+    }
+
+    auto ContinuePreparePlan(
+        ResourcePrepareSession&                                session,
+        Option<mut_ref<dyn<resource::TexturePrepareObserver>>> texture_observer = None())
+        -> Result<ResourcePrepareProgress, resource::ResourceError> {
+        vulkan::ImagePrepareContext image_context(m_registries.Textures(),
+                                                  m_registries.ImageUploads());
+        auto image_backend  = dyn<vulkan::ImagePrepareBackend>::from_ref(image_context);
+        auto buffer_backend = dyn<vulkan::BufferBackend>::from_ref(m_registries.BufferManager());
+        ResourcePrepareService service(m_registries.TextureEntries(),
+                                       Some(image_backend.as_mut_ref()),
+                                       m_registries.Buffers(),
+                                       buffer_backend.as_mut_ref(),
+                                       m_registries.Shaders());
+        auto                   progress = service.Continue(session, texture_observer);
+        if (progress.is_err()) {
+            AbortPreparePlan();
+            return Err(rstd::move(progress).unwrap_err_unchecked());
+        }
+        if (progress.unwrap_unchecked() == ResourcePrepareProgress::BatchReady) {
+            return Ok(ResourcePrepareProgress::BatchReady);
+        }
+
+        const auto& plan     = session.Plan();
+        const auto  sections = session.Sections();
+        auto        next     = rstd::move(session).TakeTable();
         if (resource::ResourcePlanIncludes(sections, resource::ResourcePlanTextures) &&
             ! m_registries.States().Compile(plan, next)) {
+            AbortPreparePlan();
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
                 .message = rstd::format("compile resource state plan failed"),
             });
         }
+        auto previous = m_prepared.clone();
         next.CarryForward(rstd::move(m_prepared), sections);
-        m_prepared = rstd::move(next);
-        return Ok(empty {});
+        m_prepared         = rstd::move(next);
+        m_prepare_rollback = Some(PrepareRollback {
+            .table = rstd::move(previous),
+        });
+        return Ok(ResourcePrepareProgress::Complete);
     }
+
+    void AbortPreparePlan() {
+        m_registries.ImageUploads().DiscardPendingUploads();
+        m_registries.TextureEntries().DiscardPendingUploads();
+        auto rollback = m_prepare_rollback.take();
+        if (rollback.is_none()) return;
+        m_prepared = rstd::move(rollback->table);
+    }
+
+    void CommitPreparePlan() { m_prepare_rollback = None(); }
 
     auto Prepared() const -> const PreparedResourceTable& { return m_prepared; }
     auto States() -> ResourceStateTracker& { return m_registries.States(); }
@@ -495,7 +559,8 @@ public:
             device, m_registries.Textures(), width, height, tiling);
     }
     void ClearTextures() {
-        m_prepared = PreparedResourceTable {};
+        m_prepare_rollback = None();
+        m_prepared         = PreparedResourceTable {};
         m_registries.ImageUploads().DiscardPendingUploads();
         m_registries.TextureEntries().Reset();
         m_registries.Textures().Clear();
@@ -512,8 +577,13 @@ public:
     }
 
 private:
-    ResourceRegistries    m_registries;
-    PreparedResourceTable m_prepared;
+    struct PrepareRollback {
+        PreparedResourceTable table;
+    };
+
+    ResourceRegistries      m_registries;
+    PreparedResourceTable   m_prepared;
+    Option<PrepareRollback> m_prepare_rollback;
 };
 
 } // namespace owe::resource_registry

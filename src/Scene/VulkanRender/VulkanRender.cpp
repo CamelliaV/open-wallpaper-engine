@@ -137,11 +137,13 @@ struct VulkanRender::Impl {
 
     bool                      initRes();
     rstd::Option<std::size_t> acquireUploadCommandSlot(RenderingResources&);
-    void                      commitPreparedUploads(SceneLoadBenchRecorderView load_bench = {});
-    bool                      waitForPreparedUploads(RenderingResources&);
-    void                      drawFrameSwapchain(Scene&);
-    void                      drawFrameOffscreen(Scene&);
-    bool                      onSwapchainReady(unsigned width, unsigned height);
+    bool                      commitPreparedUploads(SceneLoadBenchRecorderView load_bench = {});
+    bool prepareProgram(Scene&, const RenderSceneSnapshot&, resource::ResourcePlanSections,
+                        SceneLoadBenchRecorderView = {});
+    bool waitForPreparedUploads(RenderingResources&);
+    void drawFrameSwapchain(Scene&);
+    void drawFrameOffscreen(Scene&);
+    bool onSwapchainReady(unsigned width, unsigned height);
 
     Instance     m_instance;
     Box<Device>  m_device { Box<Device>::make() };
@@ -635,14 +637,18 @@ rstd::Option<std::size_t> VulkanRender::Impl::acquireUploadCommandSlot(Rendering
     return rstd::Some<std::size_t>(slot);
 }
 
-void VulkanRender::Impl::commitPreparedUploads(SceneLoadBenchRecorderView load_bench) {
+bool VulkanRender::Impl::commitPreparedUploads(SceneLoadBenchRecorderView load_bench) {
     auto upload_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_upload_submit);
-    auto slot        = acquireUploadCommandSlot(m_rendering_resources);
-    if (slot.is_none()) return;
-    auto signal_value =
+    if (! m_rendering_resources.resources.HasPendingUploads()) return true;
+    auto slot = acquireUploadCommandSlot(m_rendering_resources);
+    if (slot.is_none()) return false;
+    auto committed =
         m_program.commitUploads(*m_device, m_rendering_resources, m_upload_cmds[*slot]);
-    if (signal_value == u64()) return;
-    m_upload_cmd_values[*slot] = signal_value.to_primitive();
+    if (! committed.success) return false;
+    if (committed.signal_value != u64()) {
+        m_upload_cmd_values[*slot] = committed.signal_value.to_primitive();
+    }
+    return true;
 }
 
 bool VulkanRender::Impl::waitForPreparedUploads(RenderingResources& rr) {
@@ -1060,6 +1066,36 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
     compileRenderGraph(scene, rg, render_scene, {});
 }
 
+bool VulkanRender::Impl::prepareProgram(Scene& scene, const RenderSceneSnapshot& render_scene,
+                                        resource::ResourcePlanSections sections,
+                                        SceneLoadBenchRecorderView     load_bench) {
+    auto status = m_program.beginPrepare(
+        scene, *m_device, m_rendering_resources, render_scene, sections, load_bench);
+    while (status == RenderProgramPrepareStatus::BatchReady) {
+        if (! commitPreparedUploads(load_bench)) {
+            m_program.abortPrepare(m_rendering_resources);
+            return false;
+        }
+        status = m_program.continuePrepare(scene, *m_device, m_rendering_resources, load_bench);
+    }
+    if (status == RenderProgramPrepareStatus::Failed) {
+        m_program.abortPrepare(m_rendering_resources);
+        return false;
+    }
+
+    {
+        auto scopes_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_scopes);
+        m_program.rebuildScopes();
+    }
+    if (! commitPreparedUploads(load_bench)) {
+        m_program.abortPrepare(m_rendering_resources);
+        return false;
+    }
+    m_rendering_resources.resources.CommitPreparePlan();
+    m_program.loaded = true;
+    return true;
+}
+
 void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
                                             const RenderSceneSnapshot& render_scene,
                                             SceneLoadBenchRecorderView load_bench) {
@@ -1080,19 +1116,7 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
         m_program.finalizeFramePassRequests(scene);
         m_program.finalizeResourceRequests(scene);
     }
-    if (! m_program.prepare(scene,
-                            *m_device,
-                            m_rendering_resources,
-                            render_scene,
-                            resource::ResourcePlanAll,
-                            load_bench))
-        return;
-    {
-        auto scopes_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_scopes);
-        m_program.rebuildScopes();
-    }
-
-    commitPreparedUploads(load_bench);
+    (void)prepareProgram(scene, render_scene, resource::ResourcePlanAll, load_bench);
 };
 
 void VulkanRender::Impl::refreshPreparedResources(Scene& scene) {
@@ -1118,11 +1142,7 @@ void VulkanRender::Impl::refreshPreparedResources(Scene&                        
     configureRenderTargets(scene);
     m_program.finalizeFramePassRequests(scene);
     m_program.finalizeResourceRequests(scene);
-    if (! m_program.prepare(scene, *m_device, m_rendering_resources, render_scene, sections))
-        return;
-    m_program.rebuildScopes();
-
-    commitPreparedUploads();
+    (void)prepareProgram(scene, render_scene, sections);
 }
 
 void VulkanRender::Impl::invalidatePreparedRenderItems(slice<owe::RenderItemId> render_items,

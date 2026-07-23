@@ -51,6 +51,12 @@ public:
     auto Size() const noexcept -> usize { return m_barriers.len(); }
     bool Empty() const noexcept { return m_barriers.is_empty(); }
 
+    auto clone() const -> PreparedBarrierBatch {
+        PreparedBarrierBatch cloned;
+        for (const auto& barrier : m_barriers) cloned.Add(barrier);
+        return cloned;
+    }
+
 private:
     rstd::vec::Vec<PreparedImageBarrier> m_barriers;
 };

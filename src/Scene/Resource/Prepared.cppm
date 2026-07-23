@@ -15,6 +15,7 @@ export namespace owe::resource_registry
 {
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 struct PreparedTexture {
     resource::TextureUseHandle                 use;
@@ -308,6 +309,89 @@ public:
         m_externals     = rstd::move(previous.m_externals);
     }
 
+    auto clone() const -> PreparedResourceTable {
+        PreparedResourceTable cloned(m_generation);
+
+        auto textures = m_textures.values();
+        for (auto value = textures.next(); value.is_some(); value = textures.next()) {
+            const auto& texture = **value;
+            (void)cloned.Insert(PreparedTexture {
+                .use                 = texture.use,
+                .resource            = texture.resource,
+                .request             = texture.request.clone(),
+                .physical            = texture.physical.clone(),
+                .image               = texture.image,
+                .physical_generation = texture.physical_generation,
+                .ready               = texture.ready,
+            });
+        }
+
+        auto buffers = m_buffers.values();
+        for (auto value = buffers.next(); value.is_some(); value = buffers.next()) {
+            const auto& buffer = **value;
+            (void)cloned.Insert(PreparedBufferUse {
+                .use    = buffer.use,
+                .buffer = buffer.buffer.clone(),
+            });
+        }
+
+        auto shaders = m_shaders.values();
+        for (auto value = shaders.next(); value.is_some(); value = shaders.next()) {
+            const auto& shader = **value;
+            (void)cloned.Insert(PreparedShaderUse {
+                .use    = shader.use,
+                .shader = shader.shader.clone(),
+            });
+        }
+
+        auto pipelines = m_pipelines.values();
+        for (auto value = pipelines.next(); value.is_some(); value = pipelines.next()) {
+            const auto& pipeline = **value;
+            (void)cloned.Insert(PreparedPipeline {
+                .use         = pipeline.use,
+                .resource    = pipeline.resource,
+                .render_pass = pipeline.render_pass,
+                .physical    = pipeline.physical.clone(),
+            });
+        }
+
+        auto render_passes = m_render_passes.values();
+        for (auto value = render_passes.next(); value.is_some(); value = render_passes.next()) {
+            const auto& render_pass = **value;
+            (void)cloned.Insert(PreparedRenderPass {
+                .use       = render_pass.use,
+                .resource  = render_pass.resource,
+                .cache_key = render_pass.cache_key,
+                .physical  = render_pass.physical.clone(),
+            });
+        }
+
+        auto framebuffers = m_framebuffers.values();
+        for (auto value = framebuffers.next(); value.is_some(); value = framebuffers.next()) {
+            const auto& framebuffer = **value;
+            (void)cloned.Insert(PreparedFramebuffer {
+                .use      = framebuffer.use,
+                .resource = framebuffer.resource,
+                .physical = framebuffer.physical.clone(),
+            });
+        }
+
+        auto descriptors = m_descriptors.values();
+        for (auto value = descriptors.next(); value.is_some(); value = descriptors.next()) {
+            (void)cloned.Insert((**value).clone());
+        }
+
+        auto externals = m_externals.values();
+        for (auto value = externals.next(); value.is_some(); value = externals.next()) {
+            const auto& external = **value;
+            cloned.Insert(PreparedExternalUse {
+                .use   = external.use,
+                .frame = external.frame.clone(),
+            });
+        }
+        return cloned;
+    }
+
     void ClearPreparedState() {
         m_pipelines.clear();
         m_render_passes.clear();
@@ -354,6 +438,7 @@ public:
     enum class Kind
     {
         Plan,
+        Decode,
         Upload,
     };
 
@@ -362,6 +447,8 @@ public:
         if (m_observer.is_none()) return;
         if (m_kind == Kind::Plan) {
             (*m_observer)->BeginTexturePlan();
+        } else if (m_kind == Kind::Decode) {
+            (*m_observer)->BeginTextureDecode();
         } else {
             (*m_observer)->BeginTextureUpload();
         }
@@ -378,6 +465,8 @@ public:
         if (m_observer.is_none()) return;
         if (m_kind == Kind::Plan) {
             (*m_observer)->EndTexturePlan();
+        } else if (m_kind == Kind::Decode) {
+            (*m_observer)->EndTextureDecode();
         } else {
             (*m_observer)->EndTextureUpload();
         }
@@ -393,6 +482,57 @@ struct ResourceContentProviders {
     Option<mut_ref<dyn<resource::TextureContentProvider>>> texture;
     Option<mut_ref<dyn<resource::BufferContentProvider>>>  buffer;
     Option<mut_ref<dyn<resource::ShaderArtifactProvider>>> shader;
+};
+
+enum class ResourcePrepareProgress
+{
+    BatchReady,
+    Complete,
+};
+
+class ResourcePrepareSession {
+public:
+    ResourcePrepareSession(const ResourcePrepareSession&)                        = delete;
+    auto operator=(const ResourcePrepareSession&) -> ResourcePrepareSession&     = delete;
+    ResourcePrepareSession(ResourcePrepareSession&&) noexcept                    = default;
+    auto operator=(ResourcePrepareSession&&) noexcept -> ResourcePrepareSession& = delete;
+
+    auto Plan() const noexcept -> const resource::ResourcePlan& { return *m_plan; }
+    auto Sections() const noexcept -> resource::ResourcePlanSections { return m_sections; }
+    auto TakeTable() && -> PreparedResourceTable { return rstd::move(m_table); }
+
+private:
+    friend class ResourcePrepareService;
+
+    struct PendingUse {
+        resource::TextureUseHandle use;
+        resource::TextureHandle    resource;
+        resource::TextureRequest   request;
+    };
+
+    struct PendingContent {
+        String          key;
+        Vec<PendingUse> uses;
+    };
+
+    struct DecodedContent {
+        usize                                                   index;
+        Result<rstd::sync::Arc<Image>, resource::ResourceError> image;
+    };
+
+    ResourcePrepareSession(const resource::ResourcePlan&  plan,
+                           resource::ResourcePlanSections sections)
+        : m_plan(rstd::addressof(plan)), m_sections(sections), m_table(plan.generation) {}
+
+    const resource::ResourcePlan*                         m_plan;
+    resource::ResourcePlanSections                        m_sections;
+    PreparedResourceTable                                 m_table;
+    Vec<PendingContent>                                   m_pending { Vec<PendingContent>::make() };
+    usize                                                 m_next_submit {};
+    usize                                                 m_completed {};
+    Option<rstd::sync::Arc<dyn<resource::TextureLoader>>> m_loader;
+    Option<rstd::thread::ThreadPool>                      m_pool;
+    Option<rstd::thread::BlockingTaskSet<DecodedContent>> m_tasks;
 };
 
 class ResourcePlanPrepareVisitor {
@@ -424,29 +564,44 @@ public:
           m_buffer_backend(buffer_backend),
           m_shaders(shaders) {}
 
-    auto Prepare(const resource::ResourcePlan& plan, ResourceContentProviders providers = {},
-                 resource::ResourcePlanSections sections = resource::ResourcePlanAll,
-                 Option<mut_ref<dyn<resource::TexturePrepareObserver>>> texture_observer = None())
-        -> Result<PreparedResourceTable, resource::ResourceError> {
-        PreparedResourceTable    table(plan.generation);
+    auto Begin(const resource::ResourcePlan& plan, ResourceContentProviders providers = {},
+               resource::ResourcePlanSections sections = resource::ResourcePlanAll,
+               Option<mut_ref<dyn<resource::TexturePrepareObserver>>> texture_observer = None())
+        -> Result<ResourcePrepareSession, resource::ResourceError> {
+        ResourcePrepareSession   session(plan, sections);
         auto                     texture_provider = rstd::move(providers.texture);
         ResourceContentProviders remaining {
             .buffer = rstd::move(providers.buffer),
             .shader = rstd::move(providers.shader),
         };
-        ResourcePlanPrepareVisitor visitor(*this, table, rstd::move(remaining));
+        if (resource::ResourcePlanIncludes(sections, resource::ResourcePlanTextures)) {
+            auto prepared = BeginTextures(
+                plan.textures.as_slice(), session, rstd::move(texture_provider), texture_observer);
+            if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
+        }
+        ResourcePlanPrepareVisitor visitor(*this, session.m_table, rstd::move(remaining));
         auto object  = rstd::dyn<resource::ResourcePlanVisitor>::from_ref(visitor);
         auto visited = resource::VisitResourcePlan(
             plan,
             object,
             sections & (resource::ResourcePlanBuffers | resource::ResourcePlanShaders));
         if (visited.is_err()) return Err(rstd::move(visited).unwrap_err_unchecked());
-        if (resource::ResourcePlanIncludes(sections, resource::ResourcePlanTextures)) {
-            auto prepared = PrepareTextures(
-                plan.textures.as_slice(), table, rstd::move(texture_provider), texture_observer);
-            if (prepared.is_err()) return Err(rstd::move(prepared).unwrap_err_unchecked());
+        return Ok(rstd::move(session));
+    }
+
+    auto Prepare(const resource::ResourcePlan& plan, ResourceContentProviders providers = {},
+                 resource::ResourcePlanSections sections = resource::ResourcePlanAll,
+                 Option<mut_ref<dyn<resource::TexturePrepareObserver>>> texture_observer = None())
+        -> Result<PreparedResourceTable, resource::ResourceError> {
+        auto started = Begin(plan, rstd::move(providers), sections, texture_observer);
+        if (started.is_err()) return Err(rstd::move(started).unwrap_err_unchecked());
+        auto session = rstd::move(started).unwrap_unchecked();
+        while (true) {
+            auto progress = Continue(session, texture_observer);
+            if (progress.is_err()) return Err(rstd::move(progress).unwrap_err_unchecked());
+            if (progress.unwrap_unchecked() == ResourcePrepareProgress::Complete) break;
         }
-        return Ok(rstd::move(table));
+        return Ok(rstd::move(session).TakeTable());
     }
 
     auto PrepareBuffer(const resource::BufferPlanEntry& entry, PreparedResourceTable& table,
@@ -500,22 +655,10 @@ public:
         return Ok(empty {});
     }
 
-    auto PrepareTextures(slice<resource::TexturePlanEntry> entries, PreparedResourceTable& table,
-                         Option<mut_ref<dyn<resource::TextureContentProvider>>> content,
-                         Option<mut_ref<dyn<resource::TexturePrepareObserver>>> observer)
+    auto BeginTextures(slice<resource::TexturePlanEntry> entries, ResourcePrepareSession& session,
+                       Option<mut_ref<dyn<resource::TextureContentProvider>>> content,
+                       Option<mut_ref<dyn<resource::TexturePrepareObserver>>> observer)
         -> Result<empty, resource::ResourceError> {
-        struct PendingUse {
-            resource::TextureUseHandle use;
-            resource::TextureHandle    resource;
-            resource::TextureRequest   request;
-        };
-        struct PendingContent {
-            String                                  key;
-            Vec<PendingUse>                         uses;
-            Option<vulkan::PreparedImageAllocation> prepared;
-        };
-
-        auto                pending       = Vec<PendingContent>::make();
         auto                pending_index = rstd::collections::HashMap<String, usize>::make();
         TexturePrepareTrace plan_trace(observer, TexturePrepareTrace::Kind::Plan);
 
@@ -532,8 +675,8 @@ public:
 
             auto physical = m_textures.ResolveCurrent(handle);
             if (physical.is_some()) {
-                auto inserted =
-                    InsertPrepared(entry.handle, handle, entry.request.clone(), **physical, table);
+                auto inserted = InsertPrepared(
+                    entry.handle, handle, entry.request.clone(), **physical, session.m_table);
                 if (inserted.is_err()) return inserted;
                 continue;
             }
@@ -548,8 +691,10 @@ public:
                                                  entry.request.clone(),
                                                  rstd::move(allocated).unwrap_unchecked(),
                                                  None<vulkan::ImageUploadTicket>(),
-                                                 table);
-                if (published.is_err()) return published;
+                                                 session.m_table);
+                if (published.is_err()) {
+                    return Err(rstd::move(published).unwrap_err_unchecked());
+                }
                 continue;
             }
 
@@ -569,15 +714,14 @@ public:
             if (found.is_some()) {
                 index = **found;
             } else {
-                index = pending.len();
+                index = session.m_pending.len();
                 (void)pending_index.insert(key.clone(), index);
-                pending.push(PendingContent {
-                    .key      = rstd::move(key),
-                    .uses     = Vec<PendingUse>::make(),
-                    .prepared = None<vulkan::PreparedImageAllocation>(),
+                session.m_pending.push(ResourcePrepareSession::PendingContent {
+                    .key  = rstd::move(key),
+                    .uses = Vec<ResourcePrepareSession::PendingUse>::make(),
                 });
             }
-            pending[index].uses.push(PendingUse {
+            session.m_pending[index].uses.push(ResourcePrepareSession::PendingUse {
                 .use      = entry.handle,
                 .resource = handle,
                 .request  = entry.request.clone(),
@@ -585,71 +729,147 @@ public:
         }
         plan_trace.Finish();
 
-        constexpr usize batch_size { 4 };
-        for (usize offset {}; offset < pending.len(); offset += batch_size) {
-            const auto count = rstd::min(batch_size, pending.len() - offset);
-            auto       keys  = Vec<String>::with_capacity(count);
-            for (usize index {}; index < count; ++index) {
-                keys.push(pending[offset + index].key.clone());
-            }
+        if (session.m_pending.is_empty()) return Ok(empty {});
+        auto loader = (*content)->OpenTextureLoader();
+        if (loader.is_err()) return Err(rstd::move(loader).unwrap_err_unchecked());
+        session.m_loader = Some(rstd::move(loader).unwrap_unchecked());
 
-            auto loaded = (*content)->LoadTextures(keys.as_slice());
-            if (loaded.len() != count) {
+        const auto worker_count = rstd::min(usize(4), session.m_pending.len());
+        auto       builder      = rstd::thread::ThreadPoolBuilder::make();
+        builder.worker_count(worker_count);
+        builder.thread_name(String::make("owe-texture-decode"_str));
+        auto pool = builder.build();
+        if (pool.is_err()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = String::make("create texture decode thread pool failed"_str),
+            });
+        }
+        session.m_pool = Some(rstd::move(pool).unwrap_unchecked());
+        auto tasks = rstd::thread::BlockingTaskSet<ResourcePrepareSession::DecodedContent>::make(
+            session.m_pool->handle(), worker_count);
+        if (tasks.is_err()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = String::make("create texture decode task set failed"_str),
+            });
+        }
+        session.m_tasks = Some(rstd::move(tasks).unwrap_unchecked());
+        return SubmitAvailable(session);
+    }
+
+    auto Continue(ResourcePrepareSession&                                session,
+                  Option<mut_ref<dyn<resource::TexturePrepareObserver>>> observer = None())
+        -> Result<ResourcePrepareProgress, resource::ResourceError> {
+        if (session.m_completed == session.m_pending.len()) {
+            FinishTasks(session);
+            return Ok(ResourcePrepareProgress::Complete);
+        }
+
+        constexpr usize batch_size { 4 };
+        usize           prepared_count {};
+        while (prepared_count < batch_size && session.m_completed < session.m_pending.len()) {
+            TexturePrepareTrace decode_trace(observer, TexturePrepareTrace::Kind::Decode);
+            auto                completion = session.m_tasks->recv();
+            decode_trace.Finish();
+            if (completion.is_none()) {
                 return Err(resource::ResourceError {
                     .kind    = resource::ResourceErrorKind::BackendFailure,
-                    .message = rstd::format(
-                        "texture content batch returned {} of {} results", loaded.len(), count),
+                    .message = String::make("texture decode task set closed early"_str),
+                });
+            }
+            auto decoded = rstd::move(*completion).into_value();
+            if (decoded.is_none()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = String::make("texture decode task cancelled"_str),
+                });
+            }
+            auto item = rstd::move(decoded).unwrap_unchecked();
+            if (item.image.is_err()) {
+                return Err(rstd::move(item.image).unwrap_err_unchecked());
+            }
+            if (m_textures_backend.is_none()) {
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = String::make("texture backend unavailable"_str),
                 });
             }
 
-            TexturePrepareTrace upload_trace(observer, TexturePrepareTrace::Kind::Upload);
-            for (usize index {}; index < count; ++index) {
-                auto& item = loaded[index];
-                if (item.is_err()) return Err(rstd::move(item).unwrap_err_unchecked());
-                if (m_textures_backend.is_none()) {
-                    return Err(resource::ResourceError {
-                        .kind    = resource::ResourceErrorKind::BackendFailure,
-                        .message = rstd::format("texture backend unavailable"),
-                    });
-                }
-                auto image   = rstd::move(item).unwrap_unchecked();
+            {
+                TexturePrepareTrace upload_trace(observer, TexturePrepareTrace::Kind::Upload);
+                auto                image = rstd::move(item.image).unwrap_unchecked();
                 auto created = (*m_textures_backend)->CreateImportedTexture(image.deref());
                 if (created.is_none()) {
                     return Err(resource::ResourceError {
                         .kind    = resource::ResourceErrorKind::BackendFailure,
                         .message = rstd::format("create imported texture {} failed",
-                                                pending[offset + index].key.as_str()),
+                                                session.m_pending[item.index].key.as_str()),
                     });
                 }
+                auto prepared   = rstd::move(*created);
+                auto allocation = rstd::move(prepared.allocation);
+                for (auto& use : session.m_pending[item.index].uses) {
+                    auto published = PublishPrepared(use.use,
+                                                     use.resource,
+                                                     rstd::move(use.request),
+                                                     allocation.clone(),
+                                                     prepared.upload,
+                                                     session.m_table);
+                    if (published.is_err()) {
+                        return Err(rstd::move(published).unwrap_err_unchecked());
+                    }
+                }
+                upload_trace.Finish();
+            }
 
-                pending[offset + index].prepared = Some(rstd::move(*created));
-            }
+            ++session.m_completed;
+            ++prepared_count;
+            auto submitted = SubmitAvailable(session);
+            if (submitted.is_err()) return Err(rstd::move(submitted).unwrap_err_unchecked());
         }
-
-        for (auto& content_item : pending) {
-            if (content_item.prepared.is_none()) {
-                return Err(resource::ResourceError {
-                    .kind    = resource::ResourceErrorKind::BackendFailure,
-                    .message = rstd::format("texture content {} was not prepared",
-                                            content_item.key.as_str()),
-                });
-            }
-            auto prepared   = rstd::move(content_item.prepared).unwrap_unchecked();
-            auto allocation = rstd::move(prepared.allocation);
-            for (auto& use : content_item.uses) {
-                auto published = PublishPrepared(use.use,
-                                                 use.resource,
-                                                 rstd::move(use.request),
-                                                 allocation.clone(),
-                                                 prepared.upload,
-                                                 table);
-                if (published.is_err()) return published;
-            }
-        }
-        return Ok(empty {});
+        return Ok(ResourcePrepareProgress::BatchReady);
     }
 
 private:
+    static auto SubmitAvailable(ResourcePrepareSession& session)
+        -> Result<empty, resource::ResourceError> {
+        while (session.m_next_submit < session.m_pending.len()) {
+            const auto index     = session.m_next_submit;
+            auto       key       = session.m_pending[index].key.clone();
+            auto       loader    = session.m_loader->clone();
+            auto       submitted = session.m_tasks->try_submit(
+                [index, key = rstd::move(key), loader = rstd::move(loader)]() mutable {
+                    return ResourcePrepareSession::DecodedContent {
+                        .index = index,
+                        .image = loader->LoadTexture(key.as_str()),
+                    };
+                });
+            if (submitted.is_err()) {
+                if (submitted.unwrap_err_unchecked() ==
+                    rstd::thread::BlockingTaskSetSubmitError::Full) {
+                    break;
+                }
+                return Err(resource::ResourceError {
+                    .kind    = resource::ResourceErrorKind::BackendFailure,
+                    .message = String::make("submit texture decode task failed"_str),
+                });
+            }
+            ++session.m_next_submit;
+        }
+        if (session.m_next_submit == session.m_pending.len()) session.m_tasks->close();
+        return Ok(empty {});
+    }
+
+    static void FinishTasks(ResourcePrepareSession& session) {
+        {
+            auto tasks = session.m_tasks.take();
+        }
+        auto pool = session.m_pool.take();
+        if (pool.is_some()) rstd::move(*pool).join();
+        session.m_loader = None();
+    }
+
     auto AllocateTexture(const resource::TextureRequest& request)
         -> Result<rstd::sync::Arc<vulkan::TextureAllocation>, resource::ResourceError> {
         if (m_textures_backend.is_none()) {

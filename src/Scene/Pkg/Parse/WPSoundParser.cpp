@@ -217,7 +217,7 @@ Arc<dyn<SceneSoundControl>> WPSoundParser::Parse(const wpscene::SoundObject& obj
     state->playing.store(! obj.startsilent, Ordering::Release);
     state->volume.store(f32(config.volume), Ordering::Release);
     auto control = Arc<dyn<SceneSoundControl>>::make(WPSoundControl(state.clone()));
-    auto ss = std::make_unique<WPSoundStream>(
+    auto ss      = std::make_unique<WPSoundStream>(
         obj.sound, vfs, config, rstd::move(state), rstd::move(audio_average));
     sm.mount(std::move(ss));
     return control;

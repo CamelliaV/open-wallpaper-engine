@@ -109,8 +109,8 @@ public:
     void refreshPreparedResources(Scene&, const RenderSceneSnapshot&);
     void refreshPreparedTextures(Scene&, const RenderSceneSnapshot&);
     void invalidatePreparedRenderItems(slice<RenderItemId>, PassInvalidationFlags);
-    void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&,
-                                    slice<RenderItemId>, PassInvalidationFlags);
+    void refreshPreparedRenderItems(Scene&, const RenderSceneSnapshot&, slice<RenderItemId>,
+                                    PassInvalidationFlags);
     void refreshPreparedMaterial(Scene&, const RenderSceneSnapshot&, SceneMaterialId,
                                  PassInvalidationFlags);
     bool refreshPreparedMaterialTextures(Scene&, const RenderSceneSnapshot&, SceneMaterialId);

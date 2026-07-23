@@ -268,37 +268,39 @@ inline Option<String> ResolveImportedTextureName(const RenderSceneSnapshot& rend
     return Some(resolved->name.clone());
 }
 
+class SnapshotImportedTextureLoader {
+public:
+    explicit SnapshotImportedTextureLoader(ref<Scene> scene): m_scene(scene) {}
+
+    auto LoadTexture(ref<str> key) const -> Result<Arc<Image>, resource::ResourceError> {
+        auto parsed = m_scene->ParseImage(key);
+        if (parsed.is_ok()) return Ok(rstd::move(parsed).unwrap_unchecked());
+        auto error = rstd::move(parsed).unwrap_err_unchecked();
+        return Err(resource::ResourceError {
+            .kind    = error.kind == ImageParseErrorKind::MissingContent
+                           ? resource::ResourceErrorKind::MissingContent
+                           : resource::ResourceErrorKind::BackendFailure,
+            .message = rstd::move(error.message),
+        });
+    }
+
+private:
+    ref<Scene> m_scene;
+};
+
 class SnapshotImportedTextureProvider {
 public:
-    SnapshotImportedTextureProvider(const RenderSceneSnapshot& render_scene, ref<Scene> scene,
-                                    SceneLoadBenchRecorderView load_bench = {})
-        : m_catalog(rstd::dyn<resource::TextureCatalog>::from_ref(render_scene)),
-          m_scene(scene),
-          m_load_bench(load_bench) {}
+    SnapshotImportedTextureProvider(const RenderSceneSnapshot& render_scene, ref<Scene> scene)
+        : m_catalog(rstd::dyn<resource::TextureCatalog>::from_ref(render_scene)), m_scene(scene) {}
 
     auto ResolveTextureKey(const TextureRequest& request) const
         -> Result<String, resource::ResourceError> {
         return Ok(ResolveName(request));
     }
 
-    auto LoadTextures(slice<String> keys) -> Vec<Result<Arc<Image>, resource::ResourceError>> {
-        auto decode_span = SceneLoadSpan(m_load_bench, &SceneLoadProbeIds::render_texture_decode);
-        auto parsed      = m_scene->ParseImages(keys);
-        auto results = Vec<Result<Arc<Image>, resource::ResourceError>>::with_capacity(keys.len());
-        for (auto& item : parsed) {
-            if (item.is_ok()) {
-                results.push(Ok(rstd::move(item).unwrap_unchecked()));
-                continue;
-            }
-            auto error = rstd::move(item).unwrap_err_unchecked();
-            results.push(Err(resource::ResourceError {
-                .kind    = error.kind == ImageParseErrorKind::MissingContent
-                               ? resource::ResourceErrorKind::MissingContent
-                               : resource::ResourceErrorKind::BackendFailure,
-                .message = rstd::move(error.message),
-            }));
-        }
-        return results;
+    auto OpenTextureLoader() const
+        -> Result<Arc<dyn<resource::TextureLoader>>, resource::ResourceError> {
+        return Ok(Arc<dyn<resource::TextureLoader>>::make(SnapshotImportedTextureLoader(m_scene)));
     }
 
 private:
@@ -312,7 +314,6 @@ private:
 
     mutable ref<dyn<resource::TextureCatalog>> m_catalog;
     ref<Scene>                                 m_scene;
-    SceneLoadBenchRecorderView                 m_load_bench;
 };
 
 class SnapshotTexturePrepareObserver {
@@ -324,6 +325,10 @@ public:
         m_plan = Some(SceneLoadSpan(m_load_bench, &SceneLoadProbeIds::render_texture_plan));
     }
     void EndTexturePlan() { (void)m_plan.take(); }
+    void BeginTextureDecode() {
+        m_decode = Some(SceneLoadSpan(m_load_bench, &SceneLoadProbeIds::render_texture_decode));
+    }
+    void EndTextureDecode() { (void)m_decode.take(); }
     void BeginTextureUpload() {
         m_upload =
             Some(SceneLoadSpan(m_load_bench, &SceneLoadProbeIds::render_texture_upload_prepare));
@@ -333,6 +338,7 @@ public:
 private:
     SceneLoadBenchRecorderView m_load_bench;
     Option<SceneLoadSpanGuard> m_plan;
+    Option<SceneLoadSpanGuard> m_decode;
     Option<SceneLoadSpanGuard> m_upload;
 };
 
@@ -377,6 +383,14 @@ struct Impl<owe::resource::TextureCatalog, owe::RenderSceneSnapshot>
 };
 
 template<>
+struct Impl<owe::resource::TextureLoader, owe::vulkan::SnapshotImportedTextureLoader>
+    : ImplBase<owe::vulkan::SnapshotImportedTextureLoader> {
+    auto LoadTexture(ref<str> key) const -> Result<Arc<owe::Image>, owe::resource::ResourceError> {
+        return this->self().LoadTexture(key);
+    }
+};
+
+template<>
 struct Impl<owe::resource::TextureContentProvider, owe::vulkan::SnapshotImportedTextureProvider>
     : ImplBase<owe::vulkan::SnapshotImportedTextureProvider> {
     auto ResolveTextureKey(const owe::resource::TextureRequest& request) const
@@ -384,9 +398,9 @@ struct Impl<owe::resource::TextureContentProvider, owe::vulkan::SnapshotImported
         return this->self().ResolveTextureKey(request);
     }
 
-    auto LoadTextures(slice<String> keys)
-        -> Vec<Result<Arc<owe::Image>, owe::resource::ResourceError>> {
-        return this->self().LoadTextures(keys);
+    auto OpenTextureLoader() const
+        -> Result<Arc<dyn<owe::resource::TextureLoader>>, owe::resource::ResourceError> {
+        return this->self().OpenTextureLoader();
     }
 };
 
@@ -395,6 +409,8 @@ struct Impl<owe::resource::TexturePrepareObserver, owe::vulkan::SnapshotTextureP
     : ImplBase<owe::vulkan::SnapshotTexturePrepareObserver> {
     void BeginTexturePlan() { this->self().BeginTexturePlan(); }
     void EndTexturePlan() { this->self().EndTexturePlan(); }
+    void BeginTextureDecode() { this->self().BeginTextureDecode(); }
+    void EndTextureDecode() { this->self().EndTextureDecode(); }
     void BeginTextureUpload() { this->self().BeginTextureUpload(); }
     void EndTextureUpload() { this->self().EndTextureUpload(); }
 };
