@@ -432,12 +432,8 @@ inline bool PunctIs(shader_lex::Token token, char c) {
 
 // Legacy WE shaders sometimes address audio float arrays as std140 vec4 groups.
 inline bool IsAudioSpectrumName(rstd::ref<rstd::str> name) {
-    return name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_L).unwrap() ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_16_R).unwrap() ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_L).unwrap() ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_32_R).unwrap() ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_L).unwrap() ||
-           name == rstd::cppstd::as_str(G_AUDIO_SPEC_64_R).unwrap();
+    return name == G_AUDIO_SPEC_16_L || name == G_AUDIO_SPEC_16_R || name == G_AUDIO_SPEC_32_L ||
+           name == G_AUDIO_SPEC_32_R || name == G_AUDIO_SPEC_64_L || name == G_AUDIO_SPEC_64_R;
 }
 
 struct ShaderBracketExpr {
@@ -2688,8 +2684,9 @@ WPShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs
         result.info.combos[key]          = value;
         result.variant.input_combos[key] = value;
     }
-    if (has_geometry_stage && ! result.info.combos.contains(std::string(WE_CB_GS_ENABLED))) {
-        result.info.combos[std::string(WE_CB_GS_ENABLED)] = "1";
+    if (has_geometry_stage &&
+        ! result.info.combos.contains(rstd::cppstd::to_string(WE_CB_GS_ENABLED))) {
+        result.info.combos[rstd::cppstd::to_string(WE_CB_GS_ENABLED)] = "1";
     }
     MergeVariantFallbackMetadata(result.info, desc);
 
@@ -2789,16 +2786,16 @@ WPShaderParser::CompileMaterialShader(const Json& material_json, fs::VFS& vfs,
     for (const auto& kv : combos_override) {
         r.info.combos[kv.first] = kv.second;
     }
-    if (r.info.combos.find(std::string(WE_CB_BLENDMODE)) == r.info.combos.end())
-        r.info.combos[std::string(WE_CB_BLENDMODE)] = "0";
-    if (r.info.combos.find(std::string(WE_CB_BONECOUNT)) == r.info.combos.end())
-        r.info.combos[std::string(WE_CB_BONECOUNT)] = "1";
+    if (r.info.combos.find(rstd::cppstd::as_string_view(WE_CB_BLENDMODE)) == r.info.combos.end())
+        r.info.combos[rstd::cppstd::to_string(WE_CB_BLENDMODE)] = "0";
+    if (r.info.combos.find(rstd::cppstd::as_string_view(WE_CB_BONECOUNT)) == r.info.combos.end())
+        r.info.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] = "1";
 
     std::vector<WPShaderUnit> units;
     units.push_back({ ShaderType::VERTEX, std::move(vert_src), {} });
     if (! geom_src.empty()) {
         units.push_back({ ShaderType::GEOMETRY, std::move(geom_src), {} });
-        r.info.combos[std::string(WE_CB_GS_ENABLED)] = "1";
+        r.info.combos[rstd::cppstd::to_string(WE_CB_GS_ENABLED)] = "1";
     }
     units.push_back({ ShaderType::FRAGMENT, std::move(frag_src), {} });
 

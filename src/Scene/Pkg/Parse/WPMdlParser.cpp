@@ -1181,14 +1181,14 @@ void WPMdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl
 }
 
 void WPMdlParser::AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl) {
-    info.combos[std::string(WE_CB_SKINNING)] = "1";
-    info.combos[std::string(WE_CB_BONECOUNT)] =
+    info.combos[rstd::cppstd::to_string(WE_CB_SKINNING)] = "1";
+    info.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] =
         std::to_string((*mdl.puppet)->bones.len().to_primitive());
 }
 
 void WPMdlParser::AddPuppetMatInfo(wpscene::Material& mat, const WPMdl& mdl) {
-    mat.combos[std::string(WE_CB_SKINNING)] = 1;
-    mat.combos[std::string(WE_CB_BONECOUNT)] =
+    mat.combos[rstd::cppstd::to_string(WE_CB_SKINNING)] = 1;
+    mat.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] =
         static_cast<int>((*mdl.puppet)->bones.len().to_primitive());
     mat.use_puppet = true;
 }

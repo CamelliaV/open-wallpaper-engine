@@ -22,8 +22,9 @@ CopyPass::~CopyPass() {};
 PassInvalidationFlags CopyPass::finalizeResourceRequests(Scene& scene) {
     PassInvalidationFlags flags   = PassInvalidationNone;
     auto                  refresh = [&scene](std::string_view name) -> Option<TextureRequest> {
-        if (name.empty() || ! IsSpecTex(name)) return None();
-        auto target = scene.RenderTarget(as_str(name).unwrap());
+        auto text = as_str(name).unwrap();
+        if (name.empty() || ! IsSpecTex(text)) return None();
+        auto target = scene.RenderTarget(text);
         if (target.is_none()) return None();
         return Some(MakeRenderTargetTextureRequest(name, **target));
     };

@@ -106,11 +106,12 @@ void WriteSized(std::ofstream& output, std::string_view value) {
     output.write(value.data(), static_cast<std::streamsize>(value.size()));
 }
 
-void WritePkg(const std::filesystem::path& path, std::int32_t body_length) {
+void WritePkg(const std::filesystem::path& path, std::int32_t body_length,
+              std::string_view entry_path = "Materials/Foo.bin") {
     std::ofstream output(path, std::ios::binary);
     WriteSized(output, "PKGV0001");
     WriteI32(output, 1);
-    WriteSized(output, "Materials/Foo.bin");
+    WriteSized(output, entry_path);
     WriteI32(output, 0);
     WriteI32(output, body_length);
     output.write("hello", 5);
@@ -249,6 +250,18 @@ TEST(PkgFs, ReusesHeaderAndRejectsInvalidEntryRanges) {
     ASSERT_TRUE(invalid.is_err());
     EXPECT_EQ(std::move(invalid).unwrap_err_unchecked().kind().code,
               rstd::io::error::ErrorKind::InvalidData);
+}
+
+TEST(PkgFs, PreservesUtf8WhileFoldingAsciiPathCase) {
+    TempDirectory temp;
+    auto          path = temp.path / "utf8.pkg";
+    WritePkg(path, 5, "Materials/École/贴图.BIN");
+
+    auto pkg = owe::fs::WPPkgFs::open(owe::fs::ToPath(path.string()));
+    ASSERT_TRUE(pkg.is_ok());
+    auto source = pkg->open_read(owe::fs::ToPath("/materials/École/贴图.bin"));
+    ASSERT_TRUE(source.is_ok());
+    EXPECT_EQ(ReadText(std::move(source).unwrap_unchecked()), "hello");
 }
 
 } // namespace

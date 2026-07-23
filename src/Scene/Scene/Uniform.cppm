@@ -154,8 +154,8 @@ struct UniformBindingSink {
     struct Api {
         using Trait = UniformBindingSink;
 
-        auto Bind(UniformOutputId output, std::string_view shader_member,
-                  UniformValueShape shape = {}) -> Result<bool, UniformError> {
+        auto Bind(UniformOutputId output, ref<str> shader_member, UniformValueShape shape = {})
+            -> Result<bool, UniformError> {
             return rstd::trait_call<0>(this, output, shader_member, shape);
         }
     };

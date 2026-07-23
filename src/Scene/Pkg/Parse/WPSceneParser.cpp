@@ -299,7 +299,7 @@ SceneNode* RootOf(SceneNode* node) {
 
 void CollectLinkedSourceIdsFromJsonValue(const Json& value, HashSet<std::int32_t>& out) {
     if (value.is_string()) {
-        auto s = rstd::cppstd::to_string(*value.as_str());
+        auto s = *value.as_str();
         if (auto id = ParseImageLayerCompositeId(s)) out.insert(static_cast<std::int32_t>(*id));
         if (IsSpecLinkTex(s)) out.insert(rstd::as_cast<std::int32_t>(ParseLinkTex(s)));
         return;
@@ -1018,8 +1018,8 @@ void GenCardMesh(SceneMesh& mesh, const std::array<float, 2> size,
     // clang-format on
 
     SceneVertexArray vertex(MakeAttrSet({ VAttr::Position, VAttr::TexCoord }), usize(4));
-    vertex.SetVertex(WE_IN_POSITION, pos.as_slice());
-    vertex.SetVertex(WE_IN_TEXCOORD, texCoord.as_slice());
+    vertex.SetVertex(as_string_view(WE_IN_POSITION), pos.as_slice());
+    vertex.SetVertex(as_string_view(WE_IN_TEXCOORD), texCoord.as_slice());
     mesh.AddVertexArray(std::move(vertex));
 }
 
@@ -1040,7 +1040,7 @@ void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_
         mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), usize(count * 4)));
         mesh.AddIndexArray(SceneIndexArray(usize(count * 6)));
     }
-    mesh.GetVertexArray(usize(0)).SetOption(WE_CB_THICK_FORMAT, thick_format);
+    mesh.GetVertexArray(usize(0)).SetOption(as_string_view(WE_CB_THICK_FORMAT), thick_format);
 }
 
 bool IsLayerCompositeShader(std::string_view shader) {
@@ -1085,8 +1085,8 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
     mesh.SetPrimitive(MeshPrimitive::POINT);
     mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), usize(count)));
     mesh.GetVertexArray(usize(0)).SetOption(
-        trail_renderer ? WE_PRENDER_ROPE_TRAIL : WE_PRENDER_ROPE, true);
-    mesh.GetVertexArray(usize(0)).SetOption(WE_CB_THICK_FORMAT, thick_format);
+        as_string_view(trail_renderer ? WE_PRENDER_ROPE_TRAIL : WE_PRENDER_ROPE), true);
+    mesh.GetVertexArray(usize(0)).SetOption(as_string_view(WE_CB_THICK_FORMAT), thick_format);
 }
 
 struct ParticleRenderDesc {
@@ -1258,7 +1258,7 @@ BlendMode ParseBlendMode(std::string_view str) {
 
 void ApplyImageColorBlend(wpscene::Material& material, const wpscene::ImageObject& image) {
     if (image.colorBlendMode == 0) return;
-    material.combos[std::string(WE_CB_BLENDMODE)] = image.colorBlendMode;
+    material.combos[rstd::cppstd::to_string(WE_CB_BLENDMODE)] = image.colorBlendMode;
 }
 
 std::int32_t CountVisibleImageEffects(std::span<const wpscene::ImageEffect> effects) {
@@ -1281,37 +1281,38 @@ CullMode ParseCullMode(std::string_view str) {
 
 void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const WPShaderInfo& sinfo,
                       Scene& scene) {
-    if (IsSpecTex(name)) {
-        if (name == WE_FULL_FRAME_BUFFER) {
-            name = SpecTex_Default;
+    auto text = as_str(name).unwrap();
+    if (IsSpecTex(text)) {
+        if (text == WE_FULL_FRAME_BUFFER) {
+            name = rstd::cppstd::to_string(SpecTex_Default);
             if (wpmat.shader == "genericimage2" &&
-                ! exists(sinfo.combos, std::string(WE_CB_BLENDMODE)))
+                ! exists(sinfo.combos, as_string_view(WE_CB_BLENDMODE)))
                 name = "";
             /*
             if(wpmat.shader == "genericparticle") {
                 name = "_rt_ParticleRefract";
             }
             */
-        } else if (auto wpid = ParseImageLayerCompositeId(name)) {
+        } else if (auto wpid = ParseImageLayerCompositeId(text)) {
             rstd_info("link tex \"{}\"", name);
             name = GenLinkTex(*wpid);
-        } else if (sstart_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
-        } else if (sstart_with(name, WE_SHADOW_ATLAS_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, WE_MIP_MAPPED_FRAME_BUFFER)) {
+        } else if (rstd::str_::starts_with(text, WE_SHADOW_ATLAS_PREFIX)) {
             name.clear();
-        } else if (sstart_with(name, OWE_BLOOM_MIP_PREFIX)) {
-        } else if (sstart_with(name, WE_REFLECTION_PREFIX)) {
-            name = std::string(WE_REFLECTION_PREFIX);
+        } else if (rstd::str_::starts_with(text, OWE_BLOOM_MIP_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, WE_REFLECTION_PREFIX)) {
+            name = rstd::cppstd::to_string(WE_REFLECTION_PREFIX);
             scene.EnablePlanarReflection();
-        } else if (sstart_with(name, OWE_EFFECT_PPONG_PREFIX)) {
-        } else if (sstart_with(name, WE_HALF_COMPO_BUFFER_PREFIX)) {
-        } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
-        } else if (sstart_with(name, WE_FULL_COMPO_BUFFER_PREFIX)) {
-        } else if (sstart_with(name, WE_EIGHT_COMPO_BUFFER_PREFIX)) {
-        } else if (sstart_with(name, WE_VOLUMETRICS_PREFIX) ||
-                   sstart_with(name, WE_QUARTER_FORCE_RG_PREFIX) ||
-                   sstart_with(name, WE_BLOOM_PREFIX) ||
-                   sstart_with(name, WE_QUARTER_FRAME_BUFFER_PREFIX) ||
-                   sstart_with(name, WE_EIGHTH_FRAME_BUFFER_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, OWE_EFFECT_PPONG_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, WE_HALF_COMPO_BUFFER_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, WE_FULL_COMPO_BUFFER_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, WE_EIGHT_COMPO_BUFFER_PREFIX)) {
+        } else if (rstd::str_::starts_with(text, WE_VOLUMETRICS_PREFIX) ||
+                   rstd::str_::starts_with(text, WE_QUARTER_FORCE_RG_PREFIX) ||
+                   rstd::str_::starts_with(text, WE_BLOOM_PREFIX) ||
+                   rstd::str_::starts_with(text, WE_QUARTER_FRAME_BUFFER_PREFIX) ||
+                   rstd::str_::starts_with(text, WE_EIGHTH_FRAME_BUFFER_PREFIX)) {
             name.clear();
         } else if (scene.RenderTarget(as_str(name).unwrap()).is_some()) {
             // an effect-local fbo registered with a non-conventional name
@@ -1351,7 +1352,7 @@ void ApplyLegacyAtmosphereLightCombo(const wpscene::Material& material, WPShader
 
 void ApplyLegacyAtmosphereUniformAliases(const wpscene::Material& material, WPShaderInfo& info) {
     if (! IsLegacyAtmosphereMaterial(material)) return;
-    info.baseConstSvs[std::string(G_VIEWFORWARD)] = std::array { 0.0f, 0.0f, 1.0f };
+    info.baseConstSvs[rstd::cppstd::to_string(G_VIEWFORWARD)] = std::array { 0.0f, 0.0f, 1.0f };
 
     auto prefer_legacy = [&](std::string_view legacy, std::string_view current) {
         if (! material.constantshadervalues.contains(std::string(legacy))) return;
@@ -1492,8 +1493,8 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
         std::string geom_path = shaderPath + ".geom";
         if (vfs.metadata(fs::ToPath(geom_path)).is_ok()) {
             add_shader_unit(ShaderType::GEOMETRY, std::move(geom_path));
-            pWPShaderInfo->combos[std::string(WE_CB_GS_ENABLED)] = "1";
-            geometry_shader_enabled                              = true;
+            pWPShaderInfo->combos[rstd::cppstd::to_string(WE_CB_GS_ENABLED)] = "1";
+            geometry_shader_enabled                                          = true;
             if (out_geometry_shader) *out_geometry_shader = true;
         }
     }
@@ -1504,7 +1505,7 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
     for (const auto& el : wpmat.textures) {
         if (el.empty()) {
             texinfos.push_back({ false });
-        } else if (! IsSpecTex(el)) {
+        } else if (! IsSpecTex(as_str(el).unwrap())) {
             auto parsed_header = pScene->ParseImageHeader(rstd::cppstd::as_str(el).unwrap());
             auto texh      = parsed_header.is_ok() ? rstd::move(parsed_header).unwrap_unchecked()
                                                    : ImageHeader {};
@@ -1560,9 +1561,10 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
         }
 
         std::array<std::int32_t, 4> resolution {};
-        if (IsSpecTex(name)) {
+        auto                        texture_name = as_str(name).unwrap();
+        if (IsSpecTex(texture_name)) {
             auto target = pScene->RenderTarget(as_str(name).unwrap());
-            if (! IsSpecLinkTex(name) && target.is_none()) {
+            if (! IsSpecLinkTex(texture_name) && target.is_none()) {
                 rstd_error("{} not found in render targes", name);
             } else if (target.is_some()) {
                 const auto& rt = **target;
@@ -1611,18 +1613,19 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
                 material.hasSprite = true;
                 const auto& f1     = texh.spriteAnim.GetCurFrame();
                 if (wpmat.shader == "genericparticle" || wpmat.shader == "genericropeparticle") {
-                    pWPShaderInfo->combos[std::string(WE_CB_SPRITESHEET)]  = "1";
-                    pWPShaderInfo->combos[std::string(WE_CB_THICK_FORMAT)] = "1";
+                    pWPShaderInfo->combos[rstd::cppstd::to_string(WE_CB_SPRITESHEET)]  = "1";
+                    pWPShaderInfo->combos[rstd::cppstd::to_string(WE_CB_THICK_FORMAT)] = "1";
                     if (algorism::IsPowOfTwo(u32(static_cast<std::uint32_t>(texh.width))) &&
                         algorism::IsPowOfTwo(u32(static_cast<std::uint32_t>(texh.height)))) {
-                        pWPShaderInfo->combos[std::string(WE_CB_SPRITESHEETBLENDNPOT)] = "1";
+                        pWPShaderInfo->combos[rstd::cppstd::to_string(WE_CB_SPRITESHEETBLENDNPOT)] =
+                            "1";
                         resolution[2] = resolution[0] - resolution[0] % (int)f1.width;
                         resolution[3] = resolution[1] - resolution[1] % (int)f1.height;
                         material.texture_metadata.back().sample_extent = {
                             static_cast<float>(resolution[2]), static_cast<float>(resolution[3])
                         };
                     }
-                    materialShader.constValues[std::string(G_RENDERVAR1)] =
+                    materialShader.constValues[rstd::cppstd::to_string(G_RENDERVAR1)] =
                         std::array { f1.xAxis[0],
                                      f1.yAxis[1],
                                      static_cast<float>(texh.spriteAnim.numFrames().to_primitive()),
@@ -1636,9 +1639,9 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
             materialShader.constValues[gResolution] = array_cast<float>(resolution);
         }
     }
-    if (exists(pWPShaderInfo->combos, std::string(WE_CB_LIGHTING))) {
+    if (exists(pWPShaderInfo->combos, rstd::cppstd::to_string(WE_CB_LIGHTING))) {
         // pWPShaderInfo->combos["PRELIGHTING"] =
-        // pWPShaderInfo->combos.at(std::string(WE_CB_LIGHTING));
+        // pWPShaderInfo->combos.at(rstd::cppstd::to_string(WE_CB_LIGHTING));
     }
 
     auto scene_id              = as_string_view(pScene->SceneId());
@@ -2003,9 +2006,10 @@ bool CanUseImageAsSystemMediaFallback(const wpscene::ImageObject& image) {
 }
 
 std::string ResolveLinkedImageFallback(const ParseContext& context, std::string_view texture) {
-    std::optional<std::uint32_t> linked_id = ParseImageLayerCompositeId(texture);
-    if (! linked_id && IsSpecLinkTex(texture)) {
-        linked_id = ParseLinkTex(texture).to_primitive();
+    auto                         name      = as_str(texture).unwrap();
+    std::optional<std::uint32_t> linked_id = ParseImageLayerCompositeId(name);
+    if (! linked_id && IsSpecLinkTex(name)) {
+        linked_id = ParseLinkTex(name).to_primitive();
     }
     if (! linked_id) return {};
 
@@ -2046,7 +2050,7 @@ void IndexSystemMediaImageFallbacks(ParseContext& context, slice<SceneObjectVar>
         if (! CanUseImageAsSystemMediaFallback(image)) continue;
 
         auto texture = ResolveMaterialTextureSlot(context, image.material, usize(0));
-        if (texture.empty() || IsSpecTex(texture)) continue;
+        if (texture.empty() || IsSpecTex(as_str(texture).unwrap())) continue;
         (void)context.system_media_image_fallbacks.insert(
             image.id, String::make(rstd::cppstd::as_str(texture).unwrap()));
     }
@@ -2258,17 +2262,18 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     context.ortho_h = ortho_extent[usize(1)];
 
     {
-        auto& gb                       = context.global_base_uniforms;
-        gb[std::string(G_VIEWUP)]      = std::array { 0.0f, 1.0f, 0.0f };
-        gb[std::string(G_VIEWRIGHT)]   = std::array { 1.0f, 0.0f, 0.0f };
-        gb[std::string(G_VIEWFORWARD)] = std::array { 0.0f, 0.0f, -1.0f };
-        gb[std::string(G_EYEPOSITION)] = std::array { 0.0f, 0.0f, 0.0f };
-        gb[std::string(G_TEXELSIZE)]   = std::array { 1.0f / 1920.0f, 1.0f / 1080.0f };
-        gb[std::string(G_TEXELSIZEHALF)] =
+        auto& gb                                   = context.global_base_uniforms;
+        gb[rstd::cppstd::to_string(G_VIEWUP)]      = std::array { 0.0f, 1.0f, 0.0f };
+        gb[rstd::cppstd::to_string(G_VIEWRIGHT)]   = std::array { 1.0f, 0.0f, 0.0f };
+        gb[rstd::cppstd::to_string(G_VIEWFORWARD)] = std::array { 0.0f, 0.0f, -1.0f };
+        gb[rstd::cppstd::to_string(G_EYEPOSITION)] = std::array { 0.0f, 0.0f, 0.0f };
+        gb[rstd::cppstd::to_string(G_TEXELSIZE)]   = std::array { 1.0f / 1920.0f, 1.0f / 1080.0f };
+        gb[rstd::cppstd::to_string(G_TEXELSIZEHALF)] =
             std::array { 1.0f / 1920.0f / 2.0f, 1.0f / 1080.0f / 2.0f };
-        gb[std::string(G_LIGHTAMBIENTCOLOR)]  = sc.general.ambientcolor;
-        gb[std::string(G_LIGHTSKYLIGHTCOLOR)] = sc.general.skylightcolor;
-        gb[std::string(G_NORMALMODELMATRIX)]  = ShaderValue::fromMatrix(Matrix4f::Identity());
+        gb[rstd::cppstd::to_string(G_LIGHTAMBIENTCOLOR)]  = sc.general.ambientcolor;
+        gb[rstd::cppstd::to_string(G_LIGHTSKYLIGHTCOLOR)] = sc.general.skylightcolor;
+        gb[rstd::cppstd::to_string(G_NORMALMODELMATRIX)] =
+            ShaderValue::fromMatrix(Matrix4f::Identity());
     }
 
     {
@@ -2377,7 +2382,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             return;
         }
         colorMat.FromJson(*json);
-        colorMat.combos[std::string(WE_CB_BONECOUNT)] = 1;
+        colorMat.combos[rstd::cppstd::to_string(WE_CB_BONECOUNT)] = 1;
         ApplyImageColorBlend(colorMat, wpimgobj);
         colorEffect.materials.push_back(std::move(colorMat));
         wpimgobj.effects.push_back(std::move(colorEffect));
@@ -2479,14 +2484,14 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
 
-        baseConstSvs[std::string(G_COLOR4)] = std::array<float, 4> {
+        baseConstSvs[rstd::cppstd::to_string(G_COLOR4)] = std::array<float, 4> {
             wpimgobj.color[0], wpimgobj.color[1], wpimgobj.color[2], wpimgobj.alpha
         };
-        baseConstSvs[std::string(G_COLOR)] =
+        baseConstSvs[rstd::cppstd::to_string(G_COLOR)] =
             std::array<float, 3> { wpimgobj.color[0], wpimgobj.color[1], wpimgobj.color[2] };
-        baseConstSvs[std::string(G_ALPHA)]      = wpimgobj.alpha;
-        baseConstSvs[std::string(G_USERALPHA)]  = wpimgobj.alpha;
-        baseConstSvs[std::string(G_BRIGHTNESS)] = wpimgobj.brightness;
+        baseConstSvs[rstd::cppstd::to_string(G_ALPHA)]      = wpimgobj.alpha;
+        baseConstSvs[rstd::cppstd::to_string(G_USERALPHA)]  = wpimgobj.alpha;
+        baseConstSvs[rstd::cppstd::to_string(G_BRIGHTNESS)] = wpimgobj.brightness;
 
         shaderInfo.baseConstSvs = baseConstSvs;
 
@@ -2799,8 +2804,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         }
         spImgNode->SetCamera(nodeAddr);
         std::string effect_ppong_a, effect_ppong_b;
-        effect_ppong_a = OWE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
-        effect_ppong_b = OWE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
+        effect_ppong_a = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_A) + nodeAddr;
+        effect_ppong_b = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) + nodeAddr;
         // set image effect
         auto imgEffectLayer =
             std::make_shared<SceneImageEffectLayer>(spImgNode.as_ptr(),
@@ -2873,9 +2878,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     // prefix so IsSpecTex / render-target lookups treat them
                     // as render targets instead of disk textures.
                     std::string rtname =
-                        sstart_with(wpfbo.name, WE_SPEC_PREFIX)
+                        rstd::str_::starts_with(as_str(wpfbo.name).unwrap(), WE_SPEC_PREFIX)
                             ? wpfbo.name + "_" + effaddr
-                            : std::string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
+                            : rstd::cppstd::to_string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
                     if (wpimgobj.fullscreen) {
                         SceneRenderTarget target {
                             .width      = 2,
@@ -2941,8 +2946,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             bool eff_mat_ok { true };
 
             for (std::size_t i_mat = 0; i_mat < wpeffobj.materials.size(); i_mat++) {
-                wpscene::Material                wpmat = wpeffobj.materials.at(i_mat).clone();
-                std::string                      matOutRT { OWE_EFFECT_PPONG_PREFIX_B };
+                wpscene::Material wpmat = wpeffobj.materials.at(i_mat).clone();
+                std::string       matOutRT { rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) };
                 std::optional<wpscene::Material> user_texture_fallback;
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
@@ -2962,7 +2967,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 // (`_rt_imageLayerComposite_<self>[_a|_b]`) wants this layer's
                 // running chain result.
                 for (auto& t : wpmat.textures) {
-                    if (ParseImageLayerCompositeId(t) == static_cast<std::uint32_t>(wpimgobj.id))
+                    if (ParseImageLayerCompositeId(as_str(t).unwrap()) ==
+                        static_cast<std::uint32_t>(wpimgobj.id))
                         t = effect_ppong_a;
                 }
                 if (wpmat.textures.size() == 0) wpmat.textures.resize(1);
@@ -2973,9 +2979,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 std::string  effmataddr = getAddr(spEffNode.as_ptr());
                 WPShaderInfo wpEffShaderInfo;
                 wpEffShaderInfo.baseConstSvs = baseConstSvs;
-                wpEffShaderInfo.baseConstSvs[std::string(G_ETVP)] =
+                wpEffShaderInfo.baseConstSvs[rstd::cppstd::to_string(G_ETVP)] =
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
-                wpEffShaderInfo.baseConstSvs[std::string(G_ETVPI)] =
+                wpEffShaderInfo.baseConstSvs[rstd::cppstd::to_string(G_ETVPI)] =
                     ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
                 SceneMaterial            material;
                 WPUniformNodeConfigDraft svData;
@@ -3306,13 +3312,16 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     svData.use_camera_eye_position = particle_obj.flags[wpscene::Particle::FlagEnum::perspective];
 
     WPShaderInfo shaderInfo;
-    shaderInfo.baseConstSvs                                    = context.global_base_uniforms;
-    shaderInfo.baseConstSvs[std::string(G_ORIENTATIONUP)]      = std::array { 0.0f, 1.0f, 0.0f };
-    shaderInfo.baseConstSvs[std::string(G_ORIENTATIONRIGHT)]   = std::array { 1.0f, 0.0f, 0.0f };
-    shaderInfo.baseConstSvs[std::string(G_ORIENTATIONFORWARD)] = std::array { 0.0f, 0.0f, 1.0f };
-    shaderInfo.baseConstSvs[std::string(G_VIEWUP)]             = std::array { 0.0f, 1.0f, 0.0f };
-    shaderInfo.baseConstSvs[std::string(G_VIEWRIGHT)]          = std::array { 1.0f, 0.0f, 0.0f };
-    shaderInfo.baseConstSvs[std::string(G_EYEPOSITION)]        = std::array {
+    shaderInfo.baseConstSvs = context.global_base_uniforms;
+    shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_ORIENTATIONUP)] =
+        std::array { 0.0f, 1.0f, 0.0f };
+    shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_ORIENTATIONRIGHT)] =
+        std::array { 1.0f, 0.0f, 0.0f };
+    shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_ORIENTATIONFORWARD)] =
+        std::array { 0.0f, 0.0f, 1.0f };
+    shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_VIEWUP)]    = std::array { 0.0f, 1.0f, 0.0f };
+    shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_VIEWRIGHT)] = std::array { 1.0f, 0.0f, 0.0f };
+    shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_EYEPOSITION)] = std::array {
         static_cast<float>(context.ortho_w) / 2.0f,
         static_cast<float>(context.ortho_h) / 2.0f,
         1000.0f,
@@ -3331,13 +3340,14 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             (float)in_SegmentUVTimeOffset,
             (float)in_SegmentMaxCount,
         };
-        shaderInfo.baseConstSvs[std::string(G_RENDERVAR0)] = render_var;
+        shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_RENDERVAR0)] = render_var;
         if (render_rope_trail) {
             trail_uniform_state = Some(Arc<WPParticleTrailUniformState>::make(
                 WPParticleTrailUniformState { .render_var = render_var }));
         }
-        shaderInfo.combos[std::string(WE_CB_TRAILRENDERER)] = "1";
-        if (! render_rope_trail) shaderInfo.combos[std::string(WE_CB_THICK_FORMAT)] = "1";
+        shaderInfo.combos[rstd::cppstd::to_string(WE_CB_TRAILRENDERER)] = "1";
+        if (! render_rope_trail)
+            shaderInfo.combos[rstd::cppstd::to_string(WE_CB_THICK_FORMAT)] = "1";
     }
     if (rope_shader) {
         std::int32_t subdiv = static_cast<std::int32_t>(std::round(wppartRenderer.subdivision));
@@ -3994,10 +4004,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         scene, mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr()));
     {
         const std::string addr    = getAddr(sp_node.as_ptr());
-        const std::string ppong_a = std::string(OWE_EFFECT_PPONG_PREFIX_A) + addr;
-        const std::string ppong_b = std::string(OWE_EFFECT_PPONG_PREFIX_B) + addr;
+        const std::string ppong_a = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_A) + addr;
+        const std::string ppong_b = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) + addr;
         const std::string effect_final =
-            std::string(OWE_EFFECT_PPONG_PREFIX_A) + "text_final_" + addr;
+            rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_A) + "text_final_" + addr;
         runtime_targets->camera_key   = addr;
         runtime_targets->ppong_a      = ppong_a;
         runtime_targets->ppong_b      = ppong_b;
@@ -4054,7 +4064,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             bg_mesh->ChangeMeshDataFrom(*scene.DefaultEffectMesh());
             SceneMaterial bg_material;
             bg_material.name                = "text_copybackground";
-            bg_material.textures            = { std::string(SpecTex_Default) };
+            bg_material.textures            = { rstd::cppstd::to_string(SpecTex_Default) };
             bg_material.defines             = { "g_Texture0" };
             bg_material.blenmode            = BlendMode::Normal;
             bg_material.customShader.shader = copy_background_shader;
@@ -4083,12 +4093,13 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         compose_sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
 
-        ShaderValueMap effect_base             = context.global_base_uniforms;
-        effect_base[std::string(G_COLOR4)]     = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
-        effect_base[std::string(G_COLOR)]      = std::array<float, 3> { 1.0f, 1.0f, 1.0f };
-        effect_base[std::string(G_ALPHA)]      = 1.0f;
-        effect_base[std::string(G_USERALPHA)]  = 1.0f;
-        effect_base[std::string(G_BRIGHTNESS)] = 1.0f;
+        ShaderValueMap effect_base = context.global_base_uniforms;
+        effect_base[rstd::cppstd::to_string(G_COLOR4)] =
+            std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+        effect_base[rstd::cppstd::to_string(G_COLOR)] = std::array<float, 3> { 1.0f, 1.0f, 1.0f };
+        effect_base[rstd::cppstd::to_string(G_ALPHA)] = 1.0f;
+        effect_base[rstd::cppstd::to_string(G_USERALPHA)]  = 1.0f;
+        effect_base[rstd::cppstd::to_string(G_BRIGHTNESS)] = 1.0f;
 
         struct LoadedTextMaterial {
             wpscene::Material        source;
@@ -4160,9 +4171,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                 const std::string effaddr = getAddr(layer.get());
                 for (const auto& wpfbo : wpeffobj.fbos) {
                     const std::string rtname =
-                        sstart_with(wpfbo.name, WE_SPEC_PREFIX)
+                        rstd::str_::starts_with(as_str(wpfbo.name).unwrap(), WE_SPEC_PREFIX)
                             ? wpfbo.name + "_" + effaddr
-                            : std::string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
+                            : rstd::cppstd::to_string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
                     auto fbo_size = TextEffectFboExtent(initial_geometry, wpfbo.scale, wpfbo.fit);
                     scene.RegisterRenderTarget(String::make(as_str(rtname).unwrap()),
                                                SceneRenderTarget { .width      = fbo_size[0],
@@ -4195,8 +4206,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
                 bool effect_ok = true;
                 for (std::size_t i_mat = 0; i_mat < wpeffobj.materials.size(); ++i_mat) {
-                    wpscene::Material                wpmat = wpeffobj.materials.at(i_mat).clone();
-                    std::string                      matOutRT { OWE_EFFECT_PPONG_PREFIX_B };
+                    wpscene::Material wpmat = wpeffobj.materials.at(i_mat).clone();
+                    std::string matOutRT { rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) };
                     std::optional<wpscene::Material> user_texture_fallback;
                     if (wpeffobj.passes.size() > i_mat) {
                         const auto& pass = wpeffobj.passes.at(i_mat);
@@ -4212,7 +4223,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                         }
                     }
                     for (auto& tex : wpmat.textures) {
-                        if (ParseImageLayerCompositeId(tex) == static_cast<std::uint32_t>(obj.id))
+                        if (ParseImageLayerCompositeId(as_str(tex).unwrap()) ==
+                            static_cast<std::uint32_t>(obj.id))
                             tex = ppong_a;
                     }
                     if (wpmat.textures.empty()) wpmat.textures.resize(1);
@@ -4221,9 +4233,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     auto         effect_node = Arc<SceneNode>::make();
                     WPShaderInfo shader_info;
                     shader_info.baseConstSvs = effect_base;
-                    shader_info.baseConstSvs[std::string(G_ETVP)] =
+                    shader_info.baseConstSvs[rstd::cppstd::to_string(G_ETVP)] =
                         ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
-                    shader_info.baseConstSvs[std::string(G_ETVPI)] =
+                    shader_info.baseConstSvs[rstd::cppstd::to_string(G_ETVPI)] =
                         ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
 
                     SceneMaterial            mat;
@@ -4368,8 +4380,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         auto* mesh = compose_ptr->Mesh();
         if (mesh == nullptr) return;
         auto& v = mesh->GetVertexArray(usize(0));
-        v.SetVertex(WE_IN_POSITION, pos.as_slice());
-        v.SetVertex(WE_IN_TEXCOORD, uv.as_slice());
+        v.SetVertex(as_string_view(WE_IN_POSITION), pos.as_slice());
+        v.SetVertex(as_string_view(WE_IN_TEXCOORD), uv.as_slice());
         mesh->SetDirty();
     };
     rebuild_compose(initial_metrics);
@@ -4773,7 +4785,7 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
             Some(WPShaderCacheDirectory(rstd::move(shader_cache_dir).unwrap_unchecked()));
     }
 
-    context.scene->RegisterRenderTarget(String::make(as_str(SpecTex_Default).unwrap()),
+    context.scene->RegisterRenderTarget(String::make(SpecTex_Default),
                                         SceneRenderTarget {
                                             .width             = context.ortho_w,
                                             .height            = context.ortho_h,
@@ -4782,12 +4794,12 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
                                             .preserve_on_write = true,
                                         });
     context.scene->RegisterRenderTarget(
-        String::make(as_str(WE_MIP_MAPPED_FRAME_BUFFER).unwrap()),
+        String::make(WE_MIP_MAPPED_FRAME_BUFFER),
         SceneRenderTarget {
             .width      = context.ortho_w,
             .height     = context.ortho_h,
             .has_mipmap = true,
-            .bind       = { .enable = true, .name = SpecTex_Default.data() },
+            .bind       = { .enable = true, .name = rstd::cppstd::to_string(SpecTex_Default) },
         });
 
     context.scene->SetSceneId(String::make(scene_id));
@@ -5149,8 +5161,8 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
     declare_rt("_rt_bloom_combine", 1.0f);
 
     const std::unordered_map<std::string, std::string> fboMap {
-        { "previous", std::string(SpecTex_Default) },
-        { "_rt_default", std::string(SpecTex_Default) },
+        { "previous", rstd::cppstd::to_string(SpecTex_Default) },
+        { "_rt_default", rstd::cppstd::to_string(SpecTex_Default) },
         { "_rt_bloom_mip1", "_rt_bloom_mip1" },
         { "_rt_bloom_mip2", "_rt_bloom_mip2" },
         { "_rt_bloom_combine", "_rt_bloom_combine" },
@@ -5223,7 +5235,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
             return std::array { x, y, -x, -y };
         };
         auto set_render_var = [](WPShaderInfo& info, std::array<float, 4> value) {
-            info.baseConstSvs[std::string(G_RENDERVAR0)] = value;
+            info.baseConstSvs[rstd::cppstd::to_string(G_RENDERVAR0)] = value;
         };
         float threshold = g.bloomhdrthreshold;
         float knee      = threshold * g.bloomhdrfeather;
@@ -5313,7 +5325,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
 
     pp->steps.push(ScenePostProcessStep::Copy(ScenePostProcessCopy {
         .src = "_rt_bloom_combine",
-        .dst = std::string(SpecTex_Default),
+        .dst = rstd::cppstd::to_string(SpecTex_Default),
     }));
 
     (void)scene.RegisterPostProcess(rstd::move(pp));

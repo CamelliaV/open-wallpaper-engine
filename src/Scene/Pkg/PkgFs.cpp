@@ -55,13 +55,9 @@ auto LookupKey(Path path) -> rstd::io::Result<String> {
             return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidFilename));
         }
         if (output.len() > usize(1)) output.push_ascii(u8('/'));
-        for (auto value_byte : *value) {
-            auto lowered = value_byte >= u8('A') && value_byte <= u8('Z')
-                               ? value_byte - u8('A') + u8('a')
-                               : value_byte;
-            output.push_ascii(lowered);
-        }
+        output.push_str(*value);
     }
+    output->make_ascii_lowercase();
     return rstd::Ok(rstd::move(output));
 }
 

@@ -18,6 +18,7 @@ using namespace rstd::literals;
 using namespace rstd::prelude;
 using rstd::collections::BTreeSet;
 using rstd::cppstd::as_str;
+using rstd::cppstd::as_string_view;
 
 namespace
 {
@@ -65,10 +66,11 @@ struct LinkTextureConsumer {
 };
 
 static rg::TextureDesc MakeTextureDescBase(std::string_view key) {
+    auto name = as_str(key).unwrap();
     return rg::TextureDesc {
-        .name = String::make(rstd::cppstd::as_str(key).unwrap()),
-        .key  = String::make(rstd::cppstd::as_str(key).unwrap()),
-        .kind = IsSpecTex(key) ? rg::TextureKind::Temp : rg::TextureKind::Imported,
+        .name = String::make(name),
+        .key  = String::make(name),
+        .kind = IsSpecTex(name) ? rg::TextureKind::Temp : rg::TextureKind::Imported,
     };
 }
 
@@ -114,16 +116,15 @@ struct ExtraInfo {
 static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       extra,
                                                                std::string_view key) {
     if (key.empty()) return None();
-    if (! IsSpecTex(key)) {
+    auto name = as_str(key).unwrap();
+    if (! IsSpecTex(name)) {
         Option<RenderTextureDescId> texture;
-        if (extra.render_scene != nullptr)
-            texture = extra.render_scene->textureDescId(rstd::cppstd::as_str(key).unwrap());
+        if (extra.render_scene != nullptr) texture = extra.render_scene->textureDescId(name);
         return Some(vulkan::MakeImportedTextureRequest(key, texture));
     }
 
     if (extra.render_scene != nullptr) {
-        if (auto desc_id =
-                extra.render_scene->renderTargetDescId(rstd::cppstd::as_str(key).unwrap())) {
+        if (auto desc_id = extra.render_scene->renderTargetDescId(name)) {
             if (auto* desc = extra.render_scene->renderTargetDesc(*desc_id)) {
                 return Some(vulkan::MakeRenderTargetTextureRequest(key, desc->desc));
             }
@@ -131,7 +132,7 @@ static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       
     }
 
     if (extra.scene != nullptr) {
-        auto target = extra.scene->RenderTarget(as_str(key).unwrap());
+        auto target = extra.scene->RenderTarget(name);
         if (target.is_some()) {
             return Some(vulkan::MakeRenderTargetTextureRequest(key, **target));
         }
@@ -257,7 +258,7 @@ static rg::TextureNodeRef AddMipFramebufferHistory(ExtraInfo&              extra
         return *extra.mip_framebuffer_history;
     }
 
-    auto history_desc = MakeTextureDesc(extra, WE_MIP_MAPPED_FRAME_BUFFER);
+    auto history_desc = MakeTextureDesc(extra, as_string_view(WE_MIP_MAPPED_FRAME_BUFFER));
     history_desc.kind = rg::TextureKind::Temp;
     auto history      = builder.createTexture(history_desc);
     builder.markVirtualWrite(history);
@@ -268,9 +269,10 @@ static rg::TextureNodeRef AddMipFramebufferHistory(ExtraInfo&              extra
 static void StoreMipFramebufferHistory(ExtraInfo& extra) {
     if (extra.mip_framebuffer_history.is_none()) return;
 
-    auto history_desc = MakeTextureDesc(extra, WE_MIP_MAPPED_FRAME_BUFFER);
+    auto history_desc = MakeTextureDesc(extra, as_string_view(WE_MIP_MAPPED_FRAME_BUFFER));
     history_desc.kind = rg::TextureKind::Temp;
-    AddCopyPass(extra, MakeTextureDesc(extra, SpecTex_Default), rstd::move(history_desc));
+    AddCopyPass(
+        extra, MakeTextureDesc(extra, as_string_view(SpecTex_Default)), rstd::move(history_desc));
 }
 
 static SceneImageEffectLayer*
@@ -372,8 +374,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     if (url.empty()) {
                         pdesc.texture_bindings.emplace_back();
                         continue;
-                    } else if (IsSpecLinkTex(url)) {
-                        auto id = ParseLinkTex(url);
+                    } else if (auto name = as_str(url).unwrap(); IsSpecLinkTex(name)) {
+                        auto id = ParseLinkTex(name);
                         extra.link_finalizer.addConsumer(
                             pass,
                             WallpaperLayerId { .value = rstd::as_cast<i32>(id) },
@@ -382,12 +384,13 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         continue;
                     } else {
                         auto desc = MakeTextureDesc(extra, url);
-                        if (sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
+                        if (rstd::str_::starts_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
                             input = Some(AddMipFramebufferHistory(extra, builder));
                         } else {
                             input = Some(builder.createTexture(desc));
                         }
-                        if (IsSpecTex(url) && ! sstart_with(url, WE_MIP_MAPPED_FRAME_BUFFER)) {
+                        if (IsSpecTex(name) &&
+                            ! rstd::str_::starts_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
                             builder.markVirtualWrite(*input);
                         }
                     }
@@ -476,9 +479,10 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     extra.link_finalizer.recordSource(*source_layer,
                                                       CaptureTextureOutput(extra, output_node));
                 }
-                if (IsSpecLinkTex(pass_output)) {
+                auto output_name = as_str(pass_output).unwrap();
+                if (IsSpecLinkTex(output_name)) {
                     extra.link_finalizer.recordSource(
-                        WallpaperLayerId { .value = rstd::as_cast<i32>(ParseLinkTex(pass_output)) },
+                        WallpaperLayerId { .value = rstd::as_cast<i32>(ParseLinkTex(output_name)) },
                         CaptureTextureOutput(extra, output_node));
                 }
             });
@@ -541,7 +545,9 @@ static void ConfigureNestedOutput(SceneNode* node, std::string_view output,
     if (camera.is_none() || ! (**camera).HasImgEffect()) return;
     auto& effect_layer = (**camera).GetImgEffect();
     if (! effect_layer) return;
-    if (output != SpecTex_Default && effect_layer->FinalTarget() == SpecTex_Default) {
+    auto output_text = as_str(output).unwrap();
+    if (output_text != SpecTex_Default &&
+        as_str(effect_layer->FinalTarget()).unwrap() == SpecTex_Default) {
         effect_layer->SetFinalTarget(std::string(output));
     }
     if (effect_layer->FinalTarget() == output) {
@@ -631,7 +637,8 @@ static bool SamplesPlanarReflection(SceneNode& node) {
     for (const auto& material : mesh->MaterialSlots()) {
         if (! material) continue;
         for (const auto& texture : material->textures) {
-            if (sstart_with(texture, WE_REFLECTION_PREFIX)) return true;
+            if (rstd::str_::starts_with(as_str(texture).unwrap(), WE_REFLECTION_PREFIX))
+                return true;
         }
     }
     return false;
@@ -642,7 +649,7 @@ static void EmitPlanarReflectionNode(SceneNode* node, ExtraInfo& extra,
     if (node == nullptr || emit_skip_subtrees.count(node) != 0) return;
     if (node->Reflected() && ! SamplesPlanarReflection(*node)) {
         ToGraphPass(node,
-                    WE_REFLECTION_PREFIX,
+                    as_string_view(WE_REFLECTION_PREFIX),
                     None<WallpaperLayerId>(),
                     extra,
                     true,
@@ -674,8 +681,12 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
         EmitPlanarReflectionNode(scene.RootMut().as_raw_ptr(), extra, emit_skip_subtrees);
     }
 
-    EmitSceneNode(
-        scene.RootMut().as_raw_ptr(), SpecTex_Default, {}, extra, emit_skip_subtrees, linked_ids);
+    EmitSceneNode(scene.RootMut().as_raw_ptr(),
+                  as_string_view(SpecTex_Default),
+                  {},
+                  extra,
+                  emit_skip_subtrees,
+                  linked_ids);
 
     // Emit global post-process passes after the main scene-graph traversal.
     // Each step is either a CustomShaderPass (built on the synthetic node's
@@ -685,9 +696,9 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
         const auto& pp = post_processes[index];
         for (auto& step : pp->steps) {
             if (step.is_Pass()) {
-                auto&            sp = step.as_Pass().value;
-                std::string_view target =
-                    sp.output.empty() ? SpecTex_Default : std::string_view(sp.output);
+                auto&            sp     = step.as_Pass().value;
+                std::string_view target = sp.output.empty() ? as_string_view(SpecTex_Default)
+                                                            : std::string_view(sp.output);
                 ToGraphPass(
                     sp.node.as_ptr(), target, scene.ResolveLayerLinkSource(*sp.node), extra);
             } else {

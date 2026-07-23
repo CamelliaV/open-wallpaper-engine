@@ -428,7 +428,7 @@ struct RenderProgram {
             }
         }
         if (msaa_samples != VK_SAMPLE_COUNT_1_BIT) {
-            auto target = scene.RenderTargetMut(as_str(owe::SpecTex_Default).unwrap());
+            auto target = scene.RenderTargetMut(owe::SpecTex_Default);
             if (target.is_some()) {
                 (**target).sample_count = static_cast<unsigned>(msaa_samples);
             }
@@ -449,8 +449,8 @@ struct RenderProgram {
             .frame_index = rstd::usize(1),
         };
 
-        const std::string key(owe::SpecTex_Default);
-        auto              target = scene.RenderTarget(as_str(key).unwrap());
+        const auto key    = rstd::cppstd::to_string(owe::SpecTex_Default);
+        auto       target = scene.RenderTarget(as_str(key).unwrap());
         if (target.is_none()) {
             if (prepass.setResultRequest(rstd::None())) {
                 invalidatePass(prepass_handle,
@@ -575,11 +575,12 @@ struct RenderProgram {
         rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
         rstd::Option<owe::resource::TextureUseHandle> frame_msaa_use   = rstd::None();
         std::string                                   frame_msaa_name;
-        auto frame_target = scene.RenderTarget(as_str(owe::SpecTex_Default).unwrap());
+        auto frame_target = scene.RenderTarget(owe::SpecTex_Default);
         if (frame_target.is_some()) {
             auto samples = TextureSampleCount((**frame_target).sample_count);
             if (samples != VK_SAMPLE_COUNT_1_BIT) {
-                frame_msaa_name = MsaaTwinName(owe::SpecTex_Default, samples);
+                frame_msaa_name =
+                    MsaaTwinName(rstd::cppstd::as_string_view(owe::SpecTex_Default), samples);
             }
         }
         for (const auto& entry : resource_plan.textures) {
@@ -588,7 +589,7 @@ struct RenderProgram {
                 .index      = entry.handle.index,
                 .generation = entry.handle.generation,
             };
-            if (name == owe::SpecTex_Default) {
+            if (name == rstd::cppstd::as_string_view(owe::SpecTex_Default)) {
                 frame_result_use = rstd::Some(use);
             } else if (! frame_msaa_name.empty() && name == frame_msaa_name) {
                 frame_msaa_use = rstd::Some(use);

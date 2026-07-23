@@ -57,8 +57,9 @@ public:
 
     auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
         -> rstd::Result<rstd::empty, owe::UniformError> {
-        auto result = sink->Bind(
-            m_output, m_name, owe::UniformValueShape::FloatRange(rstd::u32(1), rstd::u32(4)));
+        auto result = sink->Bind(m_output,
+                                 rstd::cppstd::as_str(m_name).unwrap(),
+                                 owe::UniformValueShape::FloatRange(rstd::u32(1), rstd::u32(4)));
         if (result.is_err()) return rstd::Err(std::move(result).unwrap_err_unchecked());
         return rstd::Ok(rstd::empty {});
     }
@@ -90,7 +91,7 @@ public:
     auto Describe(rstd::mut_ref<rstd::dyn<owe::UniformBindingSink>> sink) const
         -> rstd::Result<rstd::empty, owe::UniformError> {
         auto result =
-            sink->Bind(m_output, "texture_extent", owe::UniformValueShape::Float(rstd::u32(4)));
+            sink->Bind(m_output, "texture_extent"_str, owe::UniformValueShape::Float(rstd::u32(4)));
         if (result.is_err()) return rstd::Err(rstd::move(result).unwrap_err_unchecked());
         return rstd::Ok(rstd::empty {});
     }

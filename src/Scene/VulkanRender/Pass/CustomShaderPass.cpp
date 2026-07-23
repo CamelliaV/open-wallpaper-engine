@@ -23,8 +23,9 @@ namespace
 {
 Option<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::string_view name) {
     if (name.empty()) return None();
-    if (! owe::IsSpecTex(name)) return Some(MakeImportedTextureRequest(name));
-    auto target = scene.RenderTarget(as_str(name).unwrap());
+    auto text = as_str(name).unwrap();
+    if (! owe::IsSpecTex(text)) return Some(MakeImportedTextureRequest(name));
+    auto target = scene.RenderTarget(text);
     if (target.is_none()) return None();
     return Some(MakeRenderTargetTextureRequest(name, **target));
 }
@@ -34,15 +35,18 @@ Option<TextureRequest> TextureRequestFromScene(owe::Scene& scene, std::string_vi
 PassInvalidationFlags CustomShaderPass::finalizeResourceRequests(Scene& scene) {
     PassInvalidationFlags flags = PassInvalidationNone;
     for (auto& binding : m_desc.texture_bindings) {
-        auto name = rstd::cppstd::as_string_view(binding.name.as_str());
-        if (name.empty() || ! IsSpecTex(name)) continue;
-        if (SetTextureRequestIfChanged(binding.request, TextureRequestFromScene(scene, name))) {
+        auto name = binding.name.as_str();
+        if (name.is_empty() || ! IsSpecTex(name)) continue;
+        if (SetTextureRequestIfChanged(
+                binding.request,
+                TextureRequestFromScene(scene, rstd::cppstd::as_string_view(name)))) {
             flags |= ToPassInvalidationFlags(PassInvalidation::Resources);
         }
     }
 
-    if (! m_desc.output.empty() && IsSpecTex(m_desc.output)) {
-        auto target = scene.RenderTarget(as_str(m_desc.output).unwrap());
+    auto output_name = as_str(m_desc.output).unwrap();
+    if (! m_desc.output.empty() && IsSpecTex(output_name)) {
+        auto target = scene.RenderTarget(output_name);
         if (target.is_some()) {
             const auto& rt             = **target;
             auto        output_request = MakeRenderTargetTextureRequest(m_desc.output, rt);
@@ -496,8 +500,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     rstd::Option<TextureRequest> depth_attachment_request;
     {
         auto& tex_name = m_desc.output;
-        rstd_assert(IsSpecTex(tex_name));
-        auto target = scene.RenderTarget(as_str(tex_name).unwrap());
+        auto  name     = as_str(tex_name).unwrap();
+        rstd_assert(IsSpecTex(name));
+        auto target = scene.RenderTarget(name);
         rstd_assert(target.is_some());
         if (target.is_none()) return;
         const auto& rt  = **target;

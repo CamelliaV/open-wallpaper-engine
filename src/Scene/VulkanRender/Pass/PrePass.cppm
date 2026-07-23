@@ -16,7 +16,7 @@ class PrePass : public VulkanPass {
 public:
     struct Desc {
         // in
-        std::string_view                         result { SpecTex_Default };
+        std::string_view result { rstd::cppstd::as_string_view(SpecTex_Default) };
         rstd::Option<resource::TextureUseHandle> result_use;
         rstd::Option<resource::TextureUseHandle> result_msaa_use;
         rstd::Option<TextureRequest>             result_request;

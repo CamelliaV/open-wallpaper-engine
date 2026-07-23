@@ -154,14 +154,14 @@ private:
 };
 
 template<typename Output>
-auto Bind(mut_ref<dyn<UniformBindingSink>> sink, Output output, std::string_view name,
+auto Bind(mut_ref<dyn<UniformBindingSink>> sink, Output output, ref<str> name,
           UniformValueShape shape) -> Result<empty, UniformError> {
     auto result = sink->Bind(ToUniformOutput(output), name, shape);
     if (result.is_err()) return Err(rstd::move(result).unwrap_err_unchecked());
     return Ok(empty {});
 }
 
-auto Bind(mut_ref<dyn<UniformBindingSink>> sink, UniformOutputId output, std::string_view name,
+auto Bind(mut_ref<dyn<UniformBindingSink>> sink, UniformOutputId output, ref<str> name,
           UniformValueShape shape) -> Result<empty, UniformError> {
     auto result = sink->Bind(output, name, shape);
     if (result.is_err()) return Err(rstd::move(result).unwrap_err_unchecked());
@@ -170,9 +170,9 @@ auto Bind(mut_ref<dyn<UniformBindingSink>> sink, UniformOutputId output, std::st
 
 template<typename Output>
 struct BindingEntry {
-    Output           output;
-    std::string_view name;
-    u32              elements;
+    Output   output;
+    ref<str> name;
+    u32      elements;
 };
 
 template<typename Output, std::size_t N>
@@ -663,25 +663,29 @@ auto WPLightUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
 auto WPTextureUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     for (std::size_t index = 0; index < WE_GLTEX_NAMES.size(); ++index) {
-        auto resolution = Bind(sink,
-                               WPTextureResolutionOutput(index),
-                               WE_GLTEX_RESOLUTION_NAMES[index],
-                               UniformValueShape::Float(u32(4)));
+        auto resolution =
+            Bind(sink,
+                 WPTextureResolutionOutput(index),
+                 rstd::cppstd::as_str(std::string_view(WE_GLTEX_RESOLUTION_NAMES[index])).unwrap(),
+                 UniformValueShape::Float(u32(4)));
         if (resolution.is_err()) return resolution;
-        auto mipmap = Bind(sink,
-                           WPTextureMipmapOutput(index),
-                           WE_GLTEX_MIPMAPINFO_NAMES[index],
-                           UniformValueShape::Float(u32(1)));
+        auto mipmap =
+            Bind(sink,
+                 WPTextureMipmapOutput(index),
+                 rstd::cppstd::as_str(std::string_view(WE_GLTEX_MIPMAPINFO_NAMES[index])).unwrap(),
+                 UniformValueShape::Float(u32(1)));
         if (mipmap.is_err()) return mipmap;
-        auto rotation = Bind(sink,
-                             WPTextureRotationOutput(index),
-                             WE_GLTEX_ROTATION_NAMES[index],
-                             UniformValueShape::Float(u32(4)));
+        auto rotation =
+            Bind(sink,
+                 WPTextureRotationOutput(index),
+                 rstd::cppstd::as_str(std::string_view(WE_GLTEX_ROTATION_NAMES[index])).unwrap(),
+                 UniformValueShape::Float(u32(4)));
         if (rotation.is_err()) return rotation;
-        auto translation = Bind(sink,
-                                WPTextureTranslationOutput(index),
-                                WE_GLTEX_TRANSLATION_NAMES[index],
-                                UniformValueShape::Float(u32(2)));
+        auto translation =
+            Bind(sink,
+                 WPTextureTranslationOutput(index),
+                 rstd::cppstd::as_str(std::string_view(WE_GLTEX_TRANSLATION_NAMES[index])).unwrap(),
+                 UniformValueShape::Float(u32(2)));
         if (translation.is_err()) return translation;
     }
     return Ok(empty {});

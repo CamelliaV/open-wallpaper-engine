@@ -30,8 +30,8 @@ struct AttrSlot {
 
 auto FindAttrSlot(
     const owe::Map<std::string, SceneVertexArray::SceneVertexAttributeOffset>& attributes,
-    std::string_view name) noexcept -> AttrSlot {
-    auto found = attributes.find(std::string(name));
+    ref<str> name) noexcept -> AttrSlot {
+    auto found = attributes.find(rstd::cppstd::as_string_view(name));
     if (found == attributes.end()) return {};
     return {
         .offset  = found->second.offset / usize(sizeof(float)),
@@ -431,14 +431,16 @@ void UpdateIndexArray(u32 first, usize count, SceneIndexArray& indices) noexcept
 void WPParticleRawGenerator::Extract(particle::ParticleExtractContext& context) {
     auto&     mesh     = m_subsystem->Mesh();
     auto&     vertices = mesh.GetVertexArray(usize());
-    WPGOption option { .thick_format = vertices.GetOption(WE_CB_THICK_FORMAT) };
+    WPGOption option {
+        .thick_format = vertices.GetOption(rstd::cppstd::as_string_view(WE_CB_THICK_FORMAT)),
+    };
 
-    if (vertices.GetOption(WE_PRENDER_ROPE)) {
+    if (vertices.GetOption(rstd::cppstd::as_string_view(WE_PRENDER_ROPE))) {
         vertices.ResetSize();
         (void)GenRopeParticleData(context, *m_subsystem, option, vertices);
         return;
     }
-    if (vertices.GetOption(WE_PRENDER_ROPE_TRAIL)) {
+    if (vertices.GetOption(rstd::cppstd::as_string_view(WE_PRENDER_ROPE_TRAIL))) {
         vertices.ResetSize();
         (void)GenRopeTrailData(context, *m_subsystem, option, vertices);
         return;

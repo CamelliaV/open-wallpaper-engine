@@ -298,7 +298,8 @@ ShaderValue eval_shader_value_animation(const SceneShaderValueAnimation& animati
 
 void collect_linked_ids_from_material(const SceneMaterial& material, BTreeSet<i32>& out) {
     for (const auto& texture : material.textures) {
-        if (IsSpecLinkTex(texture)) out.insert(rstd::as_cast<i32>(ParseLinkTex(texture)));
+        auto name = rstd::cppstd::as_str(texture).unwrap();
+        if (IsSpecLinkTex(name)) out.insert(rstd::as_cast<i32>(ParseLinkTex(name)));
     }
 }
 
@@ -1381,8 +1382,8 @@ void Scene::RebuildResourceIndex() {
 }
 
 bool Scene::EnsureTextureDescriptor(std::string_view key) {
-    if (key.empty() || IsSpecTex(key)) return true;
     auto name = rstd::cppstd::as_str(key).unwrap();
+    if (key.empty() || IsSpecTex(name)) return true;
     if (m_textures.contains_key(name)) return true;
     auto header = ParseImageHeader(rstd::cppstd::as_str(key).unwrap());
     if (header.is_err()) return false;
@@ -1461,9 +1462,9 @@ void Scene::RegisterRuntimeImage(String name, Arc<Image> image) {
     (void)m_runtime_images.insert(rstd::move(name), rstd::move(image));
 }
 
-bool Scene::SetMaterialShaderValue(SceneMaterial& material, std::string_view uniform_name,
+bool Scene::SetMaterialShaderValue(SceneMaterial& material, ref<str> uniform_name,
                                    const ShaderValue& value) {
-    return material.SetShaderValue(std::string(uniform_name), value);
+    return material.SetShaderValue(rstd::cppstd::to_string(uniform_name), value);
 }
 
 SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
@@ -1891,12 +1892,12 @@ void Scene::CaptureCameraPathViewports() {
 
 void Scene::EnablePlanarReflection() {
     m_planar_reflection_enabled = true;
-    const std::string key(WE_REFLECTION_PREFIX);
+    const auto key              = rstd::cppstd::to_string(WE_REFLECTION_PREFIX);
     if (RenderTarget(as_str(key).unwrap()).is_some()) return;
 
     std::int32_t width   = m_ortho[usize()].to_primitive();
     std::int32_t height  = m_ortho[usize(1)].to_primitive();
-    auto         primary = RenderTarget(as_str(SpecTex_Default).unwrap());
+    auto         primary = RenderTarget(SpecTex_Default);
     if (primary.is_some()) {
         width  = (**primary).width;
         height = (**primary).height;

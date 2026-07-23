@@ -1535,7 +1535,7 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
         if (mesh && mesh->Material()) {
             std::string tag = "[node id=" + std::to_string(n->ID().to_primitive()) +
                               " depth=" + std::to_string(depth) + "]";
-            std::string output { owe::SpecTex_Default };
+            std::string output { rstd::cppstd::to_string(owe::SpecTex_Default) };
             std::shared_ptr<owe::SceneImageEffectLayer> eff_layer;
             if (! n->Camera().empty()) {
                 auto camera = scene.Camera(rstd::cppstd::as_str(n->Camera()).unwrap());
@@ -1612,7 +1612,8 @@ void DumpPostProcesses(FILE* out, const owe::Scene& scene) {
                 DumpPass(out,
                          tag,
                          *sp.node.as_ptr(),
-                         sp.output.empty() ? std::string(owe::SpecTex_Default) : sp.output);
+                         sp.output.empty() ? rstd::cppstd::to_string(owe::SpecTex_Default)
+                                           : sp.output);
             } else {
                 const auto& cp = step.as_Copy().value;
                 std::fprintf(out,

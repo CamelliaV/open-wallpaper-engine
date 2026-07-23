@@ -312,7 +312,7 @@ inline std::vector<SceneVertexArray::SceneVertexAttribute>
 MakeAttrSet(std::span<const VertexAttrSpec> specs) {
     std::vector<SceneVertexArray::SceneVertexAttribute> out;
     out.reserve(specs.size());
-    for (auto& s : specs) out.push_back({ std::string(s.name), s.type, s.padding });
+    for (auto& s : specs) out.push_back({ rstd::cppstd::to_string(s.name), s.type, s.padding });
     return out;
 }
 
@@ -368,10 +368,11 @@ enum class SceneMaterialTextureDependency
 
 inline SceneMaterialTextureDependency ClassifySceneMaterialTexture(std::string_view texture) {
     if (texture.empty()) return SceneMaterialTextureDependency::Empty;
-    if (IsSpecLinkTex(texture)) return SceneMaterialTextureDependency::LinkRenderTarget;
-    if (sstart_with(texture, WE_MIP_MAPPED_FRAME_BUFFER))
+    auto text = rstd::cppstd::as_str(texture).unwrap();
+    if (IsSpecLinkTex(text)) return SceneMaterialTextureDependency::LinkRenderTarget;
+    if (rstd::str_::starts_with(text, WE_MIP_MAPPED_FRAME_BUFFER))
         return SceneMaterialTextureDependency::MipMappedFramebuffer;
-    if (IsSpecTex(texture)) return SceneMaterialTextureDependency::RenderTarget;
+    if (IsSpecTex(text)) return SceneMaterialTextureDependency::RenderTarget;
     return SceneMaterialTextureDependency::Imported;
 }
 
@@ -1546,7 +1547,7 @@ private:
     bool           m_final_depth_test { false };
     bool           m_final_depth_write { false };
     CullMode       m_final_cull_mode { CullMode::None };
-    std::string    m_final_target { SpecTex_Default };
+    std::string    m_final_target { rstd::cppstd::to_string(SpecTex_Default) };
     std::string    m_final_camera;
     bool           m_skip_when_no_runtime_effect { false };
     bool           m_resolved { false };
@@ -2201,7 +2202,7 @@ public:
     void        CaptureCameraPathViewports();
     std::string EnsureLinkRenderTarget(WallpaperLayerId source_layer, const SceneNode& source_node);
     bool        EnsureTextureDescriptor(std::string_view key);
-    bool        SetMaterialShaderValue(SceneMaterial& material, std::string_view uniform_name,
+    bool        SetMaterialShaderValue(SceneMaterial& material, ref<str> uniform_name,
                                        const ShaderValue& value);
     SceneMaterialTextureSlotMutation SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
                                                             std::string_view texture);

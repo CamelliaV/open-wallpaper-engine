@@ -9,6 +9,7 @@ import rstd.log;
 import wescene.types;
 
 using namespace rstd::prelude;
+using namespace rstd::literals;
 
 #define BASE_GLTEX_NAMES(ext)                                                                      \
     "g_Texture0" #ext, "g_Texture1" #ext, "g_Texture2" #ext, "g_Texture3" #ext, "g_Texture4" #ext, \
@@ -25,76 +26,76 @@ inline constexpr std::array WE_GLTEX_TRANSLATION_NAMES { BASE_GLTEX_NAMES(Transl
 inline constexpr std::array WE_GLTEX_MIPMAPINFO_NAMES { BASE_GLTEX_NAMES(MipMapInfo) };
 inline constexpr std::array WE_GLTEX_TEXEL_NAMES { BASE_GLTEX_NAMES(Texel) };
 
-inline constexpr std::string_view WE_SPEC_PREFIX { "_rt_" };
+inline constexpr ref<str> WE_SPEC_PREFIX = "_rt_"_str;
 // --- Names that originate from Wallpaper Engine content
-inline constexpr std::string_view WE_IMAGE_LAYER_COMPOSITE_PREFIX { "_rt_imageLayerComposite_" };
-inline constexpr std::string_view WE_FULL_COMPO_BUFFER_PREFIX { "_rt_FullCompoBuffer" };
-inline constexpr std::string_view WE_HALF_COMPO_BUFFER_PREFIX { "_rt_HalfCompoBuffer" };
-inline constexpr std::string_view WE_QUARTER_COMPO_BUFFER_PREFIX { "_rt_QuarterCompoBuffer" };
-inline constexpr std::string_view WE_EIGHT_COMPO_BUFFER_PREFIX { "_rt_EightBuffer" };
-inline constexpr std::string_view WE_FULL_FRAME_BUFFER { "_rt_FullFrameBuffer" };
-inline constexpr std::string_view WE_MIP_MAPPED_FRAME_BUFFER { "_rt_MipMappedFrameBuffer" };
+inline constexpr ref<str> WE_IMAGE_LAYER_COMPOSITE_PREFIX = "_rt_imageLayerComposite_"_str;
+inline constexpr ref<str> WE_FULL_COMPO_BUFFER_PREFIX     = "_rt_FullCompoBuffer"_str;
+inline constexpr ref<str> WE_HALF_COMPO_BUFFER_PREFIX     = "_rt_HalfCompoBuffer"_str;
+inline constexpr ref<str> WE_QUARTER_COMPO_BUFFER_PREFIX  = "_rt_QuarterCompoBuffer"_str;
+inline constexpr ref<str> WE_EIGHT_COMPO_BUFFER_PREFIX    = "_rt_EightBuffer"_str;
+inline constexpr ref<str> WE_FULL_FRAME_BUFFER            = "_rt_FullFrameBuffer"_str;
+inline constexpr ref<str> WE_MIP_MAPPED_FRAME_BUFFER      = "_rt_MipMappedFrameBuffer"_str;
 // Other WE engine RTs seen in the assets.
-inline constexpr std::string_view WE_SHADOW_ATLAS_PREFIX { "_rt_shadowAtlas" };
-inline constexpr std::string_view WE_REFLECTION_PREFIX { "_rt_Reflection" };
-inline constexpr std::string_view WE_VOLUMETRICS_PREFIX { "_rt_volumetrics" };
-inline constexpr std::string_view WE_QUARTER_FORCE_RG_PREFIX { "_rt_QuarterForceRG" };
-inline constexpr std::string_view WE_BLOOM_PREFIX { "_rt_Bloom" };
-inline constexpr std::string_view WE_QUARTER_FRAME_BUFFER_PREFIX { "_rt_QuarterFrameBuffer" };
-inline constexpr std::string_view WE_EIGHTH_FRAME_BUFFER_PREFIX { "_rt_EighthFrameBuffer" };
+inline constexpr ref<str> WE_SHADOW_ATLAS_PREFIX         = "_rt_shadowAtlas"_str;
+inline constexpr ref<str> WE_REFLECTION_PREFIX           = "_rt_Reflection"_str;
+inline constexpr ref<str> WE_VOLUMETRICS_PREFIX          = "_rt_volumetrics"_str;
+inline constexpr ref<str> WE_QUARTER_FORCE_RG_PREFIX     = "_rt_QuarterForceRG"_str;
+inline constexpr ref<str> WE_BLOOM_PREFIX                = "_rt_Bloom"_str;
+inline constexpr ref<str> WE_QUARTER_FRAME_BUFFER_PREFIX = "_rt_QuarterFrameBuffer"_str;
+inline constexpr ref<str> WE_EIGHTH_FRAME_BUFFER_PREFIX  = "_rt_EighthFrameBuffer"_str;
 
 // --- Names coined by owe ---
-inline constexpr std::string_view OWE_EFFECT_PPONG_PREFIX { "_rt_effect_pingpong_" };
-inline constexpr std::string_view OWE_EFFECT_PPONG_PREFIX_A { "_rt_effect_pingpong_a_" };
-inline constexpr std::string_view OWE_EFFECT_PPONG_PREFIX_B { "_rt_effect_pingpong_b_" };
-inline constexpr std::string_view OWE_BLOOM_MIP_PREFIX { "_rt_bloom_mip" };
-inline constexpr std::string_view SpecTex_Default { "_rt_default" };
-inline constexpr std::string_view SpecTex_Link { "_rt_link_" };
+inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX   = "_rt_effect_pingpong_"_str;
+inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX_A = "_rt_effect_pingpong_a_"_str;
+inline constexpr ref<str> OWE_EFFECT_PPONG_PREFIX_B = "_rt_effect_pingpong_b_"_str;
+inline constexpr ref<str> OWE_BLOOM_MIP_PREFIX      = "_rt_bloom_mip"_str;
+inline constexpr ref<str> SpecTex_Default           = "_rt_default"_str;
+inline constexpr ref<str> SpecTex_Link              = "_rt_link_"_str;
 
-inline constexpr std::string_view WE_IN_POSITION { "a_Position" };
-inline constexpr std::string_view WE_IN_NORMAL { "a_Normal" };
-inline constexpr std::string_view WE_IN_TEXCOORD { "a_TexCoord" };
-inline constexpr std::string_view WE_IN_TANGENT4 { "a_Tangent4" };
-inline constexpr std::string_view WE_IN_BLENDINDICES { "a_BlendIndices" };
-inline constexpr std::string_view WE_IN_BLENDWEIGHTS { "a_BlendWeights" };
-inline constexpr std::string_view WE_IN_CENTER { "a_Center" };
-inline constexpr std::string_view WE_IN_COLOR4U { "a_Color4u" };
-inline constexpr std::string_view WE_IN_POSITIONC1 { "a_PositionC1" };
+inline constexpr ref<str> WE_IN_POSITION     = "a_Position"_str;
+inline constexpr ref<str> WE_IN_NORMAL       = "a_Normal"_str;
+inline constexpr ref<str> WE_IN_TEXCOORD     = "a_TexCoord"_str;
+inline constexpr ref<str> WE_IN_TANGENT4     = "a_Tangent4"_str;
+inline constexpr ref<str> WE_IN_BLENDINDICES = "a_BlendIndices"_str;
+inline constexpr ref<str> WE_IN_BLENDWEIGHTS = "a_BlendWeights"_str;
+inline constexpr ref<str> WE_IN_CENTER       = "a_Center"_str;
+inline constexpr ref<str> WE_IN_COLOR4U      = "a_Color4u"_str;
+inline constexpr ref<str> WE_IN_POSITIONC1   = "a_PositionC1"_str;
 
 // particle
 
-inline constexpr std::string_view WE_IN_POSITIONVEC4 { "a_PositionVec4" };
-inline constexpr std::string_view WE_IN_COLOR { "a_Color" };
-inline constexpr std::string_view WE_IN_TEXCOORDVEC4 { "a_TexCoordVec4" };
-inline constexpr std::string_view WE_IN_TEXCOORDVEC4C1 { "a_TexCoordVec4C1" };
-inline constexpr std::string_view WE_IN_TEXCOORDVEC4C2 { "a_TexCoordVec4C2" };
-inline constexpr std::string_view WE_IN_TEXCOORDVEC4C3 { "a_TexCoordVec4C3" };
-inline constexpr std::string_view WE_IN_TEXCOORDVEC3C2 { "a_TexCoordVec3C2" };
-inline constexpr std::string_view WE_IN_TEXCOORDC2 { "a_TexCoordC2" };
-inline constexpr std::string_view WE_IN_TEXCOORDC3 { "a_TexCoordC3" };
-inline constexpr std::string_view WE_IN_TEXCOORDC4 { "a_TexCoordC4" };
-inline constexpr std::string_view WE_CB_BLENDMODE { "BLENDMODE" };
-inline constexpr std::string_view WE_CB_BONECOUNT { "BONECOUNT" };
-inline constexpr std::string_view WE_CB_SPRITESHEET { "SPRITESHEET" };
-inline constexpr std::string_view WE_CB_SPRITESHEETBLENDNPOT { "SPRITESHEETBLENDNPOT" };
-inline constexpr std::string_view WE_CB_THICK_FORMAT { "THICKFORMAT" };
-inline constexpr std::string_view WE_CB_TRAILRENDERER { "TRAILRENDERER" };
-inline constexpr std::string_view WE_CB_GS_ENABLED { "GS_ENABLED" };
-inline constexpr std::string_view WE_CB_LIGHTING { "LIGHTING" };
-inline constexpr std::string_view WE_CB_REFLECTION { "REFLECTION" };
-inline constexpr std::string_view WE_CB_NORMALMAP { "NORMALMAP" };
-inline constexpr std::string_view WE_CB_MORPHING { "MORPHING" };
-inline constexpr std::string_view WE_CB_SKINNING { "SKINNING" };
-inline constexpr std::string_view WE_CB_POINTEMITTER { "POINTEMITTER" };
-inline constexpr std::string_view WE_CB_LINEEMITTER { "LINEEMITTER" };
-inline constexpr std::string_view WE_PRENDER_ROPE { "PRENDER_ROPE" };
-inline constexpr std::string_view WE_PRENDER_ROPE_TRAIL { "PRENDER_ROPE_TRAIL" };
+inline constexpr ref<str> WE_IN_POSITIONVEC4         = "a_PositionVec4"_str;
+inline constexpr ref<str> WE_IN_COLOR                = "a_Color"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDVEC4         = "a_TexCoordVec4"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDVEC4C1       = "a_TexCoordVec4C1"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDVEC4C2       = "a_TexCoordVec4C2"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDVEC4C3       = "a_TexCoordVec4C3"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDVEC3C2       = "a_TexCoordVec3C2"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDC2           = "a_TexCoordC2"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDC3           = "a_TexCoordC3"_str;
+inline constexpr ref<str> WE_IN_TEXCOORDC4           = "a_TexCoordC4"_str;
+inline constexpr ref<str> WE_CB_BLENDMODE            = "BLENDMODE"_str;
+inline constexpr ref<str> WE_CB_BONECOUNT            = "BONECOUNT"_str;
+inline constexpr ref<str> WE_CB_SPRITESHEET          = "SPRITESHEET"_str;
+inline constexpr ref<str> WE_CB_SPRITESHEETBLENDNPOT = "SPRITESHEETBLENDNPOT"_str;
+inline constexpr ref<str> WE_CB_THICK_FORMAT         = "THICKFORMAT"_str;
+inline constexpr ref<str> WE_CB_TRAILRENDERER        = "TRAILRENDERER"_str;
+inline constexpr ref<str> WE_CB_GS_ENABLED           = "GS_ENABLED"_str;
+inline constexpr ref<str> WE_CB_LIGHTING             = "LIGHTING"_str;
+inline constexpr ref<str> WE_CB_REFLECTION           = "REFLECTION"_str;
+inline constexpr ref<str> WE_CB_NORMALMAP            = "NORMALMAP"_str;
+inline constexpr ref<str> WE_CB_MORPHING             = "MORPHING"_str;
+inline constexpr ref<str> WE_CB_SKINNING             = "SKINNING"_str;
+inline constexpr ref<str> WE_CB_POINTEMITTER         = "POINTEMITTER"_str;
+inline constexpr ref<str> WE_CB_LINEEMITTER          = "LINEEMITTER"_str;
+inline constexpr ref<str> WE_PRENDER_ROPE            = "PRENDER_ROPE"_str;
+inline constexpr ref<str> WE_PRENDER_ROPE_TRAIL      = "PRENDER_ROPE_TRAIL"_str;
 
 // Compile-time (name, type) pair for declarative attribute layouts.
 struct VertexAttrSpec {
-    std::string_view name;
-    VertexType       type;
-    bool             padding { true };
+    ref<str>   name;
+    VertexType type;
+    bool       padding { true };
 };
 
 namespace VAttr
@@ -120,87 +121,85 @@ inline constexpr VertexAttrSpec Color4u { WE_IN_COLOR4U, VertexType::FLOAT4 };
 inline constexpr VertexAttrSpec PositionC1 { WE_IN_POSITIONC1, VertexType::FLOAT3 };
 } // namespace VAttr
 
-inline constexpr std::string_view G_M { "g_ModelMatrix" };
-inline constexpr std::string_view G_VP { "g_ViewProjectionMatrix" };
-inline constexpr std::string_view G_MVP { "g_ModelViewProjectionMatrix" };
-inline constexpr std::string_view G_AM { "g_AltModelMatrix" };
-inline constexpr std::string_view G_ALTVIEWPROJECTIONMATRIX { "g_AltViewProjectionMatrix" };
-inline constexpr std::string_view G_MI { "g_ModelMatrixInverse" };
-inline constexpr std::string_view G_MVPI { "g_ModelViewProjectionMatrixInverse" };
-inline constexpr std::string_view G_EYEPOSITION { "g_EyePosition" };
-inline constexpr std::string_view G_EFFECTMODELMATRIX { "g_EffectModelMatrix" };
-inline constexpr std::string_view G_EFFECTMODELVIEWPROJECTIONMATRIX {
-    "g_EffectModelViewProjectionMatrix"
-};
-inline constexpr std::string_view G_EFFECTMODELVIEWPROJECTIONMATRIXINVERSE {
-    "g_EffectModelViewProjectionMatrixInverse"
-};
-inline constexpr std::string_view G_EFFECTTEXTUREPROJECTIONMATRIX {
-    "g_EffectTextureProjectionMatrix"
-};
-inline constexpr std::string_view G_EFFECTTEXTUREPROJECTIONMATRIXINVERSE {
-    "g_EffectTextureProjectionMatrixInverse"
-};
-inline constexpr std::string_view G_LAYERMODELMATRIX { "g_LayerModelMatrix" };
-inline constexpr std::string_view G_EMVP { "g_EffectModelViewProjectionMatrix" };
-inline constexpr std::string_view G_ETVP { "g_EffectTextureProjectionMatrix" };
-inline constexpr std::string_view G_ETVPI { "g_EffectTextureProjectionMatrixInverse" };
-inline constexpr std::string_view G_LP { "g_LightsPosition" };
-inline constexpr std::string_view G_LCP { "g_LightsColorPremultiplied" };
-inline constexpr std::string_view G_LCR { "g_LightsColorRadius" };
-inline constexpr std::string_view G_LIGHTAMBIENTCOLOR { "g_LightAmbientColor" };
-inline constexpr std::string_view G_LIGHTSKYLIGHTCOLOR { "g_LightSkylightColor" };
+inline constexpr ref<str> G_M                       = "g_ModelMatrix"_str;
+inline constexpr ref<str> G_VP                      = "g_ViewProjectionMatrix"_str;
+inline constexpr ref<str> G_MVP                     = "g_ModelViewProjectionMatrix"_str;
+inline constexpr ref<str> G_AM                      = "g_AltModelMatrix"_str;
+inline constexpr ref<str> G_ALTVIEWPROJECTIONMATRIX = "g_AltViewProjectionMatrix"_str;
+inline constexpr ref<str> G_MI                      = "g_ModelMatrixInverse"_str;
+inline constexpr ref<str> G_MVPI                    = "g_ModelViewProjectionMatrixInverse"_str;
+inline constexpr ref<str> G_EYEPOSITION             = "g_EyePosition"_str;
+inline constexpr ref<str> G_EFFECTMODELMATRIX       = "g_EffectModelMatrix"_str;
+inline constexpr ref<str> G_EFFECTMODELVIEWPROJECTIONMATRIX =
+    "g_EffectModelViewProjectionMatrix"_str;
+inline constexpr ref<str> G_EFFECTMODELVIEWPROJECTIONMATRIXINVERSE =
+    "g_EffectModelViewProjectionMatrixInverse"_str;
+inline constexpr ref<str> G_EFFECTTEXTUREPROJECTIONMATRIX = "g_EffectTextureProjectionMatrix"_str;
+inline constexpr ref<str> G_EFFECTTEXTUREPROJECTIONMATRIXINVERSE =
+    "g_EffectTextureProjectionMatrixInverse"_str;
+inline constexpr ref<str> G_LAYERMODELMATRIX   = "g_LayerModelMatrix"_str;
+inline constexpr ref<str> G_EMVP               = "g_EffectModelViewProjectionMatrix"_str;
+inline constexpr ref<str> G_ETVP               = "g_EffectTextureProjectionMatrix"_str;
+inline constexpr ref<str> G_ETVPI              = "g_EffectTextureProjectionMatrixInverse"_str;
+inline constexpr ref<str> G_LP                 = "g_LightsPosition"_str;
+inline constexpr ref<str> G_LCP                = "g_LightsColorPremultiplied"_str;
+inline constexpr ref<str> G_LCR                = "g_LightsColorRadius"_str;
+inline constexpr ref<str> G_LIGHTAMBIENTCOLOR  = "g_LightAmbientColor"_str;
+inline constexpr ref<str> G_LIGHTSKYLIGHTCOLOR = "g_LightSkylightColor"_str;
 
-inline constexpr std::string_view G_TIME { "g_Time" };
-inline constexpr std::string_view G_FRAMETIME { "g_Frametime" };
-inline constexpr std::string_view G_DAYTIME { "g_Daytime" };
-inline constexpr std::string_view G_DAYTIME_LEGACY { "g_DayTime" };
-inline constexpr std::string_view G_POINTERPOSITION { "g_PointerPosition" };
-inline constexpr std::string_view G_POINTERPOSITIONLAST { "g_PointerPositionLast" };
-inline constexpr std::string_view G_TEXELSIZE { "g_TexelSize" };
-inline constexpr std::string_view G_TEXELSIZEHALF { "g_TexelSizeHalf" };
-inline constexpr std::string_view G_TEXTURE0SAMPLERSTATE { "g_Texture0SamplerState" };
-inline constexpr std::string_view G_BONES { "g_Bones" };
-inline constexpr std::string_view G_BONESALPHA { "g_BonesAlpha" };
-inline constexpr std::string_view G_SCREEN { "g_Screen" };
-inline constexpr std::string_view G_PARALLAXPOSITION { "g_ParallaxPosition" };
-inline constexpr std::string_view G_MORPHWEIGHTS { "g_MorphWeights" };
-inline constexpr std::string_view G_MORPHOFFSETS { "g_MorphOffsets" };
-inline constexpr std::string_view G_VIEWPORTVIEWPROJECTIONMATRICES {
-    "g_ViewportViewProjectionMatrices"
-};
-inline constexpr std::string_view G_VIEWUP { "g_ViewUp" };
-inline constexpr std::string_view G_VIEWRIGHT { "g_ViewRight" };
-inline constexpr std::string_view G_VIEWFORWARD { "g_ViewForward" };
-inline constexpr std::string_view G_ORIENTATIONUP { "g_OrientationUp" };
-inline constexpr std::string_view G_ORIENTATIONRIGHT { "g_OrientationRight" };
-inline constexpr std::string_view G_ORIENTATIONFORWARD { "g_OrientationForward" };
-inline constexpr std::string_view G_NORMALMODELMATRIX { "g_NormalModelMatrix" };
-inline constexpr std::string_view G_COLOR4 { "g_Color4" };
-inline constexpr std::string_view G_COLOR { "g_Color" };
-inline constexpr std::string_view G_ALPHA { "g_Alpha" };
-inline constexpr std::string_view G_USERALPHA { "g_UserAlpha" };
-inline constexpr std::string_view G_BRIGHTNESS { "g_Brightness" };
-inline constexpr std::string_view G_RENDERVAR0 { "g_RenderVar0" };
-inline constexpr std::string_view G_RENDERVAR1 { "g_RenderVar1" };
-inline constexpr std::string_view G_RENDERVAR2 { "g_RenderVar2" };
-inline constexpr std::string_view G_AUDIOFREQUENCYMIN { "g_AudioFrequencyMin" };
-inline constexpr std::string_view G_AUDIOFREQUENCYMAX { "g_AudioFrequencyMax" };
+inline constexpr ref<str> G_TIME                           = "g_Time"_str;
+inline constexpr ref<str> G_FRAMETIME                      = "g_Frametime"_str;
+inline constexpr ref<str> G_DAYTIME                        = "g_Daytime"_str;
+inline constexpr ref<str> G_DAYTIME_LEGACY                 = "g_DayTime"_str;
+inline constexpr ref<str> G_POINTERPOSITION                = "g_PointerPosition"_str;
+inline constexpr ref<str> G_POINTERPOSITIONLAST            = "g_PointerPositionLast"_str;
+inline constexpr ref<str> G_TEXELSIZE                      = "g_TexelSize"_str;
+inline constexpr ref<str> G_TEXELSIZEHALF                  = "g_TexelSizeHalf"_str;
+inline constexpr ref<str> G_TEXTURE0SAMPLERSTATE           = "g_Texture0SamplerState"_str;
+inline constexpr ref<str> G_BONES                          = "g_Bones"_str;
+inline constexpr ref<str> G_BONESALPHA                     = "g_BonesAlpha"_str;
+inline constexpr ref<str> G_SCREEN                         = "g_Screen"_str;
+inline constexpr ref<str> G_PARALLAXPOSITION               = "g_ParallaxPosition"_str;
+inline constexpr ref<str> G_MORPHWEIGHTS                   = "g_MorphWeights"_str;
+inline constexpr ref<str> G_MORPHOFFSETS                   = "g_MorphOffsets"_str;
+inline constexpr ref<str> G_VIEWPORTVIEWPROJECTIONMATRICES = "g_ViewportViewProjectionMatrices"_str;
+inline constexpr ref<str> G_VIEWUP                         = "g_ViewUp"_str;
+inline constexpr ref<str> G_VIEWRIGHT                      = "g_ViewRight"_str;
+inline constexpr ref<str> G_VIEWFORWARD                    = "g_ViewForward"_str;
+inline constexpr ref<str> G_ORIENTATIONUP                  = "g_OrientationUp"_str;
+inline constexpr ref<str> G_ORIENTATIONRIGHT               = "g_OrientationRight"_str;
+inline constexpr ref<str> G_ORIENTATIONFORWARD             = "g_OrientationForward"_str;
+inline constexpr ref<str> G_NORMALMODELMATRIX              = "g_NormalModelMatrix"_str;
+inline constexpr ref<str> G_COLOR4                         = "g_Color4"_str;
+inline constexpr ref<str> G_COLOR                          = "g_Color"_str;
+inline constexpr ref<str> G_ALPHA                          = "g_Alpha"_str;
+inline constexpr ref<str> G_USERALPHA                      = "g_UserAlpha"_str;
+inline constexpr ref<str> G_BRIGHTNESS                     = "g_Brightness"_str;
+inline constexpr ref<str> G_RENDERVAR0                     = "g_RenderVar0"_str;
+inline constexpr ref<str> G_RENDERVAR1                     = "g_RenderVar1"_str;
+inline constexpr ref<str> G_RENDERVAR2                     = "g_RenderVar2"_str;
+inline constexpr ref<str> G_AUDIOFREQUENCYMIN              = "g_AudioFrequencyMin"_str;
+inline constexpr ref<str> G_AUDIOFREQUENCYMAX              = "g_AudioFrequencyMax"_str;
 
 // WE audio-bar shaders read one of three (Left, Right) array pairs depending
 // on the chosen Frequency Resolution combo. owe sources from wavsen's 64-bin
 // log-spaced spectrum; we downsample to 16/32 by averaging neighboring bins.
-inline constexpr std::string_view G_AUDIO_SPEC_16_L { "g_AudioSpectrum16Left" };
-inline constexpr std::string_view G_AUDIO_SPEC_16_R { "g_AudioSpectrum16Right" };
-inline constexpr std::string_view G_AUDIO_SPEC_32_L { "g_AudioSpectrum32Left" };
-inline constexpr std::string_view G_AUDIO_SPEC_32_R { "g_AudioSpectrum32Right" };
-inline constexpr std::string_view G_AUDIO_SPEC_64_L { "g_AudioSpectrum64Left" };
-inline constexpr std::string_view G_AUDIO_SPEC_64_R { "g_AudioSpectrum64Right" };
+inline constexpr ref<str> G_AUDIO_SPEC_16_L = "g_AudioSpectrum16Left"_str;
+inline constexpr ref<str> G_AUDIO_SPEC_16_R = "g_AudioSpectrum16Right"_str;
+inline constexpr ref<str> G_AUDIO_SPEC_32_L = "g_AudioSpectrum32Left"_str;
+inline constexpr ref<str> G_AUDIO_SPEC_32_R = "g_AudioSpectrum32Right"_str;
+inline constexpr ref<str> G_AUDIO_SPEC_64_L = "g_AudioSpectrum64Left"_str;
+inline constexpr ref<str> G_AUDIO_SPEC_64_R = "g_AudioSpectrum64Right"_str;
 
-inline bool IsSpecTex(const std::string_view name) { return name.starts_with(WE_SPEC_PREFIX); }
-inline bool IsSpecLinkTex(const std::string_view name) { return name.starts_with(SpecTex_Link); }
-inline u32  ParseLinkTex(const std::string_view name) {
-    auto result = rstd::from_str<u32>(rstd::cppstd::as_str(name.substr(9)).unwrap());
+inline bool IsSpecTex(ref<str> name) { return rstd::str_::starts_with(name, WE_SPEC_PREFIX); }
+inline bool IsSpecLinkTex(ref<str> name) { return rstd::str_::starts_with(name, SpecTex_Link); }
+inline u32  ParseLinkTex(ref<str> name) {
+    auto suffix = rstd::str_::strip_prefix(name, SpecTex_Link);
+    if (suffix.is_none()) {
+        rstd_error("invalid linked texture id: {}", name);
+        return u32();
+    }
+    auto result = rstd::from_str<u32>(*suffix);
     if (result.is_err()) {
         rstd_error("invalid linked texture id: {}", name);
         return u32();
@@ -208,22 +207,25 @@ inline u32  ParseLinkTex(const std::string_view name) {
     return rstd::move(result).unwrap();
 }
 inline std::string GenLinkTex(std::ptrdiff_t id) {
-    return std::string(SpecTex_Link) + std::to_string(id);
+    return rstd::cppstd::to_string(SpecTex_Link) + std::to_string(id);
 }
 
-inline bool IsImageLayerComposite(const std::string_view name) {
-    return name.starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
+inline bool IsImageLayerComposite(ref<str> name) {
+    return rstd::str_::starts_with(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX);
 }
 // Parse <id> from `_rt_imageLayerComposite_<id>[_a|_b]`; nullopt when it isn't a
 // composite ref or no id digits follow the prefix.
-inline std::optional<std::uint32_t> ParseImageLayerCompositeId(const std::string_view name) {
-    if (! IsImageLayerComposite(name)) return std::nullopt;
-    const std::string_view rest = name.substr(WE_IMAGE_LAYER_COMPOSITE_PREFIX.size());
-    std::size_t            i    = 0;
-    std::uint32_t          id   = 0;
-    for (; i < rest.size() && rest[i] >= '0' && rest[i] <= '9'; ++i)
-        id = id * 10u + std::uint32_t(rest[i] - '0');
-    if (i == 0) return std::nullopt;
+inline std::optional<std::uint32_t> ParseImageLayerCompositeId(ref<str> name) {
+    auto rest = rstd::str_::strip_prefix(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX);
+    if (rest.is_none()) return std::nullopt;
+    usize         i {};
+    std::uint32_t id = 0;
+    for (; i < rest->size(); ++i) {
+        auto value = (*rest)[i].to_primitive();
+        if (value < '0' || value > '9') break;
+        id = id * 10u + std::uint32_t(value - '0');
+    }
+    if (i == usize()) return std::nullopt;
     return id;
 }
 

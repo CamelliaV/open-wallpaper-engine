@@ -63,12 +63,12 @@ public:
     SourceBindingCompiler(const UniformBufferLayout& layout, BoundUniformSource& source)
         : m_layout(layout), m_source(source) {}
 
-    auto Bind(UniformOutputId output, std::string_view shader_member, UniformValueShape shape)
+    auto Bind(UniformOutputId output, ref<str> shader_member, UniformValueShape shape)
         -> Result<bool, UniformError> {
         bool matched = false;
         for (usize index {}; index < m_layout.slots.len(); ++index) {
             const auto& slot = m_layout.slots[index];
-            if (rstd::cppstd::as_string_view(slot.name.as_str()) != shader_member) continue;
+            if (slot.name.as_str() != shader_member) continue;
             if (slot.size % usize(sizeof(float)) != usize()) {
                 return Err(UniformError {
                     .message =

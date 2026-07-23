@@ -532,7 +532,7 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
     material->customShader.shader = std::move(shader);
 
     const auto value_version = material->customShader.value_version;
-    EXPECT_TRUE(scene.SetMaterialShaderValue(*material, "u_Color", owe::ShaderValue(0.5f)));
+    EXPECT_TRUE(scene.SetMaterialShaderValue(*material, "u_Color"_str, owe::ShaderValue(0.5f)));
     auto color_it = material->customShader.constValues.find("u_Color");
     ASSERT_NE(color_it, material->customShader.constValues.end());
     ASSERT_EQ(color_it->second.size(), rstd::usize(4));
@@ -541,7 +541,7 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
     EXPECT_GT(material->customShader.value_version, value_version);
 
     const auto updated_version = material->customShader.value_version;
-    EXPECT_FALSE(scene.SetMaterialShaderValue(*material, "", owe::ShaderValue(1.0f)));
+    EXPECT_FALSE(scene.SetMaterialShaderValue(*material, ""_str, owe::ShaderValue(1.0f)));
     EXPECT_EQ(material->customShader.value_version, updated_version);
 
     auto mutation = scene.SetMaterialTextureSlot(*material, rstd::u32(), "tex/runtime");

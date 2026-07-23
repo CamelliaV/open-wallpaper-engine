@@ -732,7 +732,7 @@ std::shared_ptr<owe::SceneShader> GetTextCopyBackgroundSceneShader() {
 
 auto TextUniformSource::Describe(rstd::mut_ref<rstd::dyn<UniformBindingSink>> sink) const
     -> rstd::Result<rstd::empty, UniformError> {
-    auto bind = [&](TextUniformOutput output, std::string_view name) {
+    auto bind = [&](TextUniformOutput output, ref<str> name) {
         return sink->Bind(
             UniformOutputId {
                 .value = rstd::u32(static_cast<rstd::uint32_t>(output)),
@@ -1170,13 +1170,13 @@ void TextLayouter::SetText(std::string_view utf8) {
     // already laid out by SceneVertexArray; SetVertex scatters by name.
     auto& v = im.mesh->GetVertexArray(rstd::usize());
     v.SetVertex(
-        WE_IN_POSITION,
+        rstd::cppstd::as_string_view(WE_IN_POSITION),
         rstd::slice<float>::from_raw_parts(im.positions.data(), rstd::usize(im.positions.size())));
     v.SetVertex(
-        WE_IN_TEXCOORD,
+        rstd::cppstd::as_string_view(WE_IN_TEXCOORD),
         rstd::slice<float>::from_raw_parts(im.texcoords.data(), rstd::usize(im.texcoords.size())));
     v.SetVertex(
-        WE_IN_COLOR,
+        rstd::cppstd::as_string_view(WE_IN_COLOR),
         rstd::slice<float>::from_raw_parts(im.colors.data(), rstd::usize(im.colors.size())));
 
     auto& idx = im.mesh->GetIndexArray(rstd::usize());

@@ -54,9 +54,9 @@ public:
 
 class ShapeSink {
 public:
-    auto Bind(owe::UniformOutputId, std::string_view name, owe::UniformValueShape shape)
+    auto Bind(owe::UniformOutputId, ref<str> name, owe::UniformValueShape shape)
         -> rstd::Result<bool, owe::UniformError> {
-        if (name == "g_ModelMatrix") {
+        if (name == "g_ModelMatrix"_str) {
             model_shape = shape;
             found_model = true;
         }

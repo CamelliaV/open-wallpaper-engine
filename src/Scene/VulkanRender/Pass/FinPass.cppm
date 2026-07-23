@@ -19,7 +19,7 @@ class FinPass : public VulkanPass {
 public:
     struct Desc {
         // in
-        std::string_view                          result { SpecTex_Default }; // scene RT key
+        std::string_view result { rstd::cppstd::as_string_view(SpecTex_Default) }; // scene RT key
         rstd::Option<TextureRequest>              result_request;
         rstd::Option<resource::TextureUseHandle>  result_use;
         rstd::Option<resource::ExternalUseHandle> external_use;

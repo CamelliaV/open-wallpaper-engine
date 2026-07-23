@@ -155,7 +155,7 @@ void ApplyShaderUniforms(Scene& scene, const std::string& key, const Json& prope
         const auto& binding = bindings[index];
         if (binding.material) {
             scene.SetMaterialShaderValue(
-                *binding.material, as_string_view(binding.uniform.as_str()), coerced.value);
+                *binding.material, binding.uniform.as_str(), coerced.value);
         }
     }
 }
@@ -352,8 +352,8 @@ Eigen::Vector3f CurrentImageColor(SceneNode* node) {
     return node->IsColorOverridden() ? node->Color() : node->BaseColor();
 }
 
-bool MaterialHasUniform(const SceneMaterial& material, std::string_view uniform_name) {
-    const std::string name(uniform_name);
+bool MaterialHasUniform(const SceneMaterial& material, ref<str> uniform_name) {
+    const auto name = to_string(uniform_name);
     if (material.customShader.constValues.contains(name)) return true;
     if (material.customShader.shader &&
         material.customShader.shader->default_uniforms.contains(name))
