@@ -1916,7 +1916,11 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
 
 std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos& combos,
                                             ShaderType type) {
-    auto undefined = UndefBeforeUserMacroDefines(rstd::cppstd::as_str(src).unwrap(), "M_PI_2"_str);
+    // Some workshop shaders contain full-width semicolons, which glslang rejects
+    // while compiling the Vulkan shader source.
+    auto compatible = ReplaceAll(src, "\xEF\xBC\x9B", ";");
+    auto undefined =
+        UndefBeforeUserMacroDefines(rstd::cppstd::as_str(compatible).unwrap(), "M_PI_2"_str);
     auto normalized_audio = NormalizePackedAudioSpectrumAccess(undefined.as_str());
     auto user_src         = rstd::cppstd::to_string(normalized_audio.as_str());
 

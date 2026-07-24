@@ -281,6 +281,17 @@ TEST(ShaderLex, LexerUnterminatedStringTerminatesAtEol) {
     EXPECT_EQ(lx.Next().kind, TokenKind::Newline);
 }
 
+TEST(ShaderLex, LexerKeepsUnknownUtf8OnCharacterBoundaries) {
+    Lexer lx("left；right"_str);
+
+    EXPECT_EQ(lx.Next().text, "left"_str);
+    auto unknown = lx.Next();
+    EXPECT_EQ(unknown.kind, TokenKind::Unknown);
+    EXPECT_EQ(unknown.text, "；"_str);
+    EXPECT_EQ(lx.Next().text, "right"_str);
+    EXPECT_EQ(lx.Next().kind, TokenKind::Eof);
+}
+
 TEST(ShaderLex, ClassifyPreproc) {
     auto cls = [](ref<str> s) {
         return ClassifyPreproc(Cursor(s));

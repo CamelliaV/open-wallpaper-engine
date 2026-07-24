@@ -219,6 +219,14 @@ float sample(float barID) {
     EXPECT_NE(out.find("g_AudioSpectrum64Left[(int)(barID)]"), std::string::npos);
 }
 
+TEST(WPShaderParser, PreShaderHeaderNormalizesFullwidthSemicolon) {
+    const std::string out = owe::WPShaderParser::PreShaderHeader(
+        "void main() { gl_FragColor = vec4(1.0)； }\n", {}, owe::ShaderType::FRAGMENT);
+
+    EXPECT_EQ(out.find("；"), std::string::npos);
+    EXPECT_NE(out.find("gl_FragColor = vec4(1.0);"), std::string::npos);
+}
+
 TEST(WPShaderParser, PreShaderHeaderPreservesLocalMatrixConstructorMul) {
     const std::string out = owe::WPShaderParser::PreShaderHeader(
         R"(

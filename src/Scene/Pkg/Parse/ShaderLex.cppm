@@ -386,7 +386,10 @@ private:
             ++m_pos;
             return { TokenKind::Punct, *rstd::str_::get(m_src, start, m_pos), start };
         }
-        ++m_pos;
+        auto [code_point, width] =
+            rstd::char_::decode_utf8(m_src.data() + m_pos.to_primitive(), m_src.size() - m_pos);
+        (void)code_point;
+        m_pos += width;
         return { TokenKind::Unknown, *rstd::str_::get(m_src, start, m_pos), start };
     }
 
