@@ -16,12 +16,19 @@ namespace
 
 auto EmitCount(f64& timer, float speed) -> u32 {
     if (speed <= 0.0f) return u32();
-    double duration = static_cast<double>(1.0f / speed);
-    if (duration > timer.to_primitive()) return u32();
-    auto count = u32(static_cast<rstd::uint32_t>(timer.to_primitive() / duration));
-    while (duration < timer.to_primitive()) timer -= f64(duration);
-    if (timer < f64()) timer = f64();
-    return count;
+    if (! std::isfinite(speed)) {
+        timer = f64();
+        return u32::MAX;
+    }
+
+    const double elapsed  = timer.to_primitive();
+    const double duration = static_cast<double>(1.0f / speed);
+    if (elapsed < duration) return u32();
+
+    const double count = std::floor(elapsed / duration);
+    timer              = f64(std::fmod(elapsed, duration));
+    if (count >= static_cast<double>(u32::MAX.to_primitive())) return u32::MAX;
+    return u32(static_cast<rstd::uint32_t>(count));
 }
 
 auto ResolveEmitCount(f64& timer, float speed, u32 instantaneous, bool one_per_frame, bool empty)
