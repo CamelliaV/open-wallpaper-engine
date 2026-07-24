@@ -1488,6 +1488,7 @@ SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& ma
 
     current                               = std::string(texture);
     material.texture_metadata[slot_index] = {};
+    material.SetTextureBindingsDirty();
     if (m_resource_index.Empty()) RebuildResourceIndex();
     m_texture_animations.Rebuild(*this);
     return SceneMaterialTextureSlotMutation {
@@ -1819,7 +1820,8 @@ Vec<SceneMaterialDirtyEvent> Scene::ConsumePreparedMaterialDirtyEvents() {
             consume     = SceneMaterialDirtyAll;
             event_flags = SceneMaterialDirtyGraph;
         } else {
-            consume     = flags & (SceneMaterialDirtyResources | SceneMaterialDirtyPipeline);
+            consume     = flags & (SceneMaterialDirtyResources | SceneMaterialDirtyPipeline |
+                                   SceneMaterialDirtyTextureBindings);
             event_flags = consume;
         }
         if (consume == SceneMaterialDirtyNone) continue;
@@ -1828,7 +1830,8 @@ Vec<SceneMaterialDirtyEvent> Scene::ConsumePreparedMaterialDirtyEvents() {
         if ((consumed & SceneMaterialDirtyGraph) != 0) {
             event_flags = SceneMaterialDirtyGraph;
         } else {
-            event_flags = consumed & (SceneMaterialDirtyResources | SceneMaterialDirtyPipeline);
+            event_flags = consumed & (SceneMaterialDirtyResources | SceneMaterialDirtyPipeline |
+                                      SceneMaterialDirtyTextureBindings);
         }
         if (event_flags == SceneMaterialDirtyNone) continue;
 

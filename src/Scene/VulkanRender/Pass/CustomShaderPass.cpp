@@ -291,6 +291,7 @@ std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagno
             .role    = "sampled",
             .slot    = u32(static_cast<rstd::uint32_t>(i)),
             .name    = rstd::cppstd::to_string(binding.name.as_str()),
+            .use     = binding.use,
             .request = binding.request.is_some() ? rstd::Some(binding.request->clone())
                                                  : rstd::None<TextureRequest>(),
         });
@@ -299,6 +300,7 @@ std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagno
         out.push_back(PassTextureRequestDiagnostic {
             .role    = "output",
             .name    = m_desc.output,
+            .use     = m_desc.output_use,
             .request = m_desc.output_request.is_some() ? rstd::Some(m_desc.output_request->clone())
                                                        : rstd::None<TextureRequest>(),
         });
@@ -307,6 +309,7 @@ std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagno
         out.push_back(PassTextureRequestDiagnostic {
             .role    = "output-msaa",
             .name    = rstd::cppstd::to_string(m_desc.output_msaa_request->name.as_str()),
+            .use     = m_desc.output_msaa_use,
             .request = rstd::Some(m_desc.output_msaa_request->clone()),
         });
     }
@@ -314,6 +317,7 @@ std::vector<PassTextureRequestDiagnostic> CustomShaderPass::textureRequestDiagno
         out.push_back(PassTextureRequestDiagnostic {
             .role    = "depth",
             .name    = rstd::cppstd::to_string(m_desc.depth_request->name.as_str()),
+            .use     = m_desc.depth_use,
             .request = rstd::Some(m_desc.depth_request->clone()),
         });
     }
@@ -359,6 +363,7 @@ CustomShaderPass::refreshMaterialTextureBindings(const RenderSceneSnapshot& rend
         TextureBindingRequest binding;
         if (! next.empty()) {
             binding.name    = rstd::string::String::make(rstd::cppstd::as_str(next).unwrap());
+            binding.use     = old.use;
             binding.request = rstd::Some(MakeImportedTextureRequest(
                 next, render_scene.textureDescId(rstd::cppstd::as_str(next).unwrap())));
         }

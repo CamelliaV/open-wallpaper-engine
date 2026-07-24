@@ -57,6 +57,16 @@ struct ResourcePlan {
     rstd::vec::Vec<TexturePlanEntry> textures;
     rstd::vec::Vec<BufferPlanEntry>  buffers;
     rstd::vec::Vec<ShaderPlanEntry>  shaders;
+
+    bool UpdateTextureRequest(TextureUseHandle handle, TextureRequest request) {
+        if (handle.generation != generation) return false;
+        for (auto& entry : textures) {
+            if (entry.handle != handle) continue;
+            entry.request = rstd::move(request);
+            return true;
+        }
+        return false;
+    }
 };
 
 using ResourcePlanSections = rstd::uint32_t;

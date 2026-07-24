@@ -770,6 +770,70 @@ TEST(TextureBindingRequest, CarriesNameAndTypedRequest) {
     EXPECT_TRUE(empty.empty());
 }
 
+TEST(ResourcePlan, UpdatesTextureRequestByStableUse) {
+    auto use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(3), .generation = rstd::u64(7) };
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(7) };
+    plan.textures.push(owe::resource::TexturePlanEntry {
+        .handle  = use,
+        .request = owe::vulkan::MakeImportedTextureRequest("texture-old"),
+    });
+
+    EXPECT_TRUE(
+        plan.UpdateTextureRequest(use, owe::vulkan::MakeImportedTextureRequest("texture-new")));
+    EXPECT_EQ(plan.textures[rstd::usize()].request.name, "texture-new"_str);
+    EXPECT_FALSE(plan.UpdateTextureRequest(
+        owe::resource::TextureUseHandle { .index = use.index, .generation = rstd::u64(8) },
+        owe::vulkan::MakeImportedTextureRequest("texture-invalid")));
+    EXPECT_EQ(plan.textures[rstd::usize()].request.name, "texture-new"_str);
+}
+
+TEST(CustomShaderPass, RefreshesImportedTextureOnStableUse) {
+    owe::Scene scene;
+    scene.RootMut()->ID() = rstd::i32(1);
+    scene.RegisterTexture(String::make("texture-old"_str),
+                          owe::SceneTexture { .url = "texture-old" });
+
+    auto node  = Arc<owe::SceneNode>::make();
+    node->ID() = rstd::i32(2);
+    auto mesh  = MakeUniformMesh(std::make_shared<owe::SceneShader>());
+    mesh->MaterialSlots()[0]->textures.push_back("texture-old");
+    node->AddMesh(mesh);
+    scene.RootMut()->AppendChild(node.clone());
+
+    auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    auto old_desc = snapshot.textureDescId("texture-old"_str);
+    ASSERT_TRUE(old_desc.is_some());
+    auto use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(4), .generation = rstd::u64(9) };
+    std::vector<owe::vulkan::TextureBindingRequest> bindings;
+    bindings.push_back(owe::vulkan::TextureBindingRequest {
+        .name    = String::make("texture-old"_str),
+        .use     = rstd::Some(use),
+        .request = rstd::Some(owe::vulkan::MakeImportedTextureRequest("texture-old", old_desc)),
+    });
+    owe::vulkan::CustomShaderPass pass(owe::vulkan::CustomShaderPass::Desc {
+        .node = rstd::Some(rstd::mut_ref<owe::SceneNode>::from_raw_parts(node.as_ptr())),
+        .texture_bindings = std::move(bindings),
+    });
+
+    scene.RegisterTexture(String::make("texture-new"_str),
+                          owe::SceneTexture { .url = "texture-new" });
+    ASSERT_TRUE(scene.SetMaterialTextureSlot(*mesh->MaterialSlots()[0], rstd::u32(), "texture-new")
+                    .changed);
+    auto refresh = pass.refreshMaterialTextureBindings(snapshot);
+    EXPECT_NE(refresh.invalidation_flags, owe::vulkan::PassInvalidationNone);
+    EXPECT_FALSE(refresh.requires_graph_rebuild);
+
+    auto diagnostics = pass.textureRequestDiagnostics();
+    ASSERT_EQ(diagnostics.size(), 1u);
+    ASSERT_TRUE(diagnostics[0].use.is_some());
+    EXPECT_EQ(*diagnostics[0].use, use);
+    ASSERT_TRUE(diagnostics[0].request.is_some());
+    EXPECT_EQ(diagnostics[0].request->name, "texture-new"_str);
+    EXPECT_TRUE(diagnostics[0].request->source.is_none());
+}
+
 TEST(PreparedPassResources, ResolvesOnlyDeclaredUses) {
     owe::resource_registry::PreparedResourceTable table(rstd::u64(6));
     auto                                          allowed =
@@ -924,12 +988,15 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
         owe::vulkan::MakeMsaaTextureRequest("_rt_default::msaa4", rt, VK_SAMPLE_COUNT_4_BIT);
     auto depth = owe::vulkan::MakeDepthTextureRequest("_rt_default::depth", rt);
 
+    auto texture_use =
+        owe::resource::TextureUseHandle { .index = rstd::u64(1), .generation = rstd::u64(1) };
     owe::vulkan::CustomShaderPass custom(owe::vulkan::CustomShaderPass::Desc {
         .texture_bindings =
-            [](owe::vulkan::TextureRequest request) {
+            [texture_use](owe::vulkan::TextureRequest request) mutable {
                 std::vector<owe::vulkan::TextureBindingRequest> bindings;
                 bindings.push_back(owe::vulkan::TextureBindingRequest {
                     .name    = rstd::string::String::make("textures/main.png"_str),
+                    .use     = rstd::Some(texture_use),
                     .request = rstd::Some(std::move(request)),
                 });
                 return bindings;
@@ -942,6 +1009,7 @@ TEST(PassTextureRequestDiagnostics, ReportsPassOwnedTextureRequests) {
     ASSERT_EQ(custom_diag.size(), 3u);
     EXPECT_EQ(custom_diag[0].role, "sampled");
     EXPECT_EQ(custom_diag[0].slot, rstd::u32());
+    EXPECT_EQ(*custom_diag[0].use, texture_use);
     EXPECT_EQ(custom_diag[0].request->kind, owe::vulkan::TextureRequestKind::Imported);
     EXPECT_EQ(custom_diag[1].role, "output");
     EXPECT_EQ(custom_diag[1].request->kind, owe::vulkan::TextureRequestKind::RenderTarget);

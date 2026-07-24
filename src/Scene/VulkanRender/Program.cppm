@@ -515,6 +515,10 @@ struct RenderProgram {
             }
             for (const auto& diagnostic : pass->textureRequestDiagnostics()) {
                 if (diagnostic.request.is_none()) continue;
+                if (diagnostic.use.is_some() && resource_plan.UpdateTextureRequest(
+                                                    *diagnostic.use, diagnostic.request->clone())) {
+                    continue;
+                }
                 auto request_name = rstd::cppstd::as_string_view(diagnostic.request->name.as_str());
                 for (auto& entry : resource_plan.textures) {
                     if (entry.request.kind != diagnostic.request->kind ||

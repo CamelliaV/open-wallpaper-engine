@@ -365,11 +365,12 @@ private:
 
     SceneRuntimeController& m_main;
 
-    Box<vulkan::VulkanRender>           m_render;
-    Option<Box<Scene>>                  m_scene_owner;
-    Scene*                              m_scene { nullptr };
-    Option<Arc<WPUniformRuntimeInput>>  m_uniform_input_owner;
-    WPUniformRuntimeInput*              m_uniform_input { nullptr };
+    Box<vulkan::VulkanRender>          m_render;
+    Option<Box<Scene>>                 m_scene_owner;
+    Scene*                             m_scene { nullptr };
+    Option<Arc<WPUniformRuntimeInput>> m_uniform_input_owner;
+    WPUniformRuntimeInput*             m_uniform_input { nullptr };
+    // Identity snapshot owned by the compiled render graph.
     RenderSceneSnapshot                 m_render_scene;
     Option<Box<rg::RenderGraph>>        m_rg;
     f32                                 m_speed { 1.0f };
@@ -644,7 +645,6 @@ void SceneRenderController::refreshPreparedRenderTargetDirtyEvents() {
     auto events = m_scene->ConsumePreparedRenderTargetDirtyEvents();
     if (events.is_empty()) return;
 
-    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
     m_render->refreshPreparedTextures(*m_scene, m_render_scene);
 }
 
@@ -661,7 +661,6 @@ void SceneRenderController::refreshPreparedMeshDirtyEvents() {
         return;
     }
 
-    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
     for (const auto& event : events) {
         if ((event.flags & SceneMeshDirtyData) == 0) continue;
         m_render->refreshPreparedMesh(
@@ -685,7 +684,18 @@ void SceneRenderController::refreshPreparedMaterialDirtyEvents() {
         return;
     }
 
-    m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
+    Vec<SceneMaterialId> texture_materials;
+    for (const auto& event : events) {
+        if ((event.flags & SceneMaterialDirtyTextureBindings) != 0) {
+            PushUniqueMaterialId(texture_materials, event.material);
+        }
+    }
+    if (! texture_materials.is_empty() &&
+        ! m_render->refreshPreparedMaterialTextures(
+            *m_scene, m_render_scene, texture_materials.as_slice())) {
+        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
+        return;
+    }
     for (const auto& event : events) {
         auto flags = MaterialDirtyToPassInvalidationFlags(event.flags);
         if (flags == vulkan::PassInvalidationNone) continue;
@@ -742,16 +752,6 @@ void SceneRenderController::on(RenderMsg::SetUserProperty_payload&& m) {
         mutation        = SceneUserPropertyApplier::Apply(*m_scene, m.key, m.property);
     }
 
-    if (! mutation.texture_materials.is_empty() && renderInited() && m_rg.is_some() &&
-        ! mutation.graph_changed) {
-        auto refresh_span =
-            SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_user_property_refresh);
-        m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
-        if (! m_render->refreshPreparedMaterialTextures(
-                *m_scene, m_render_scene, mutation.texture_materials.as_slice())) {
-            mutation.graph_changed = true;
-        }
-    }
     if (mutation.diagnostics_changed && m_main_tx) {
         auto diagnostics = CollectSceneUserPropertyDiagnostics(*m_scene, m.key);
         (void)m_main_tx->send(MainMsg::UserPropertyDiagnostics(rstd::move(diagnostics)));
@@ -775,30 +775,10 @@ void SceneRenderController::on(RenderMsg::SetMediaStatus_payload&& m) {
 
     owe::script::SetSceneMediaStatus(*m_scene, ToScriptMediaStatus(m.status));
 
-    Vec<SceneMaterialId> texture_materials;
-    for (auto material : SceneUserPropertyApplier::ApplyTexture(
-             *m_scene, "$mediaThumbnail", RuntimeTextureProperty(m.status.art_url))) {
-        PushUniqueMaterialId(texture_materials, material);
-    }
-    for (auto material : SceneUserPropertyApplier::ApplyTexture(
-             *m_scene,
-             "$mediaPreviousThumbnail",
-             RuntimeTextureProperty(m.status.previous_art_url))) {
-        PushUniqueMaterialId(texture_materials, material);
-    }
-
-    bool requires_graph_rebuild = false;
-    if (! texture_materials.is_empty() && renderInited() && m_rg.is_some()) {
-        m_render_scene = ExtractRenderSceneSnapshot(*m_scene);
-        if (! m_render->refreshPreparedMaterialTextures(
-                *m_scene, m_render_scene, texture_materials.as_slice())) {
-            requires_graph_rebuild = true;
-        }
-    }
-    if (requires_graph_rebuild) {
-        rebuildRenderGraph(vulkan::RenderGraphResourceRetention::KeepSceneTextures, false);
-        return;
-    }
+    (void)SceneUserPropertyApplier::ApplyTexture(
+        *m_scene, "$mediaThumbnail", RuntimeTextureProperty(m.status.art_url));
+    (void)SceneUserPropertyApplier::ApplyTexture(
+        *m_scene, "$mediaPreviousThumbnail", RuntimeTextureProperty(m.status.previous_art_url));
     if (renderInited() && m_rg.is_some()) refreshPreparedMaterialDirtyEvents();
 }
 

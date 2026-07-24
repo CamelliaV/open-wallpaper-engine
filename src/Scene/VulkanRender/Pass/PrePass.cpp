@@ -71,6 +71,7 @@ std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() c
     out.push_back(PassTextureRequestDiagnostic {
         .role    = "frame-result",
         .name    = std::string(m_desc.result),
+        .use     = m_desc.result_use,
         .request = m_desc.result_request.is_some() ? rstd::Some(m_desc.result_request->clone())
                                                    : rstd::None<TextureRequest>(),
     });
@@ -78,6 +79,7 @@ std::vector<PassTextureRequestDiagnostic> PrePass::textureRequestDiagnostics() c
         out.push_back(PassTextureRequestDiagnostic {
             .role    = "frame-result-msaa",
             .name    = rstd::cppstd::to_string(m_desc.result_msaa_request->name.as_str()),
+            .use     = m_desc.result_msaa_use,
             .request = rstd::Some(m_desc.result_msaa_request->clone()),
         });
     }

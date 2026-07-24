@@ -53,12 +53,14 @@ std::vector<PassTextureRequestDiagnostic> CopyPass::textureRequestDiagnostics() 
     out.push_back(PassTextureRequestDiagnostic {
         .role    = "copy-src",
         .name    = m_desc.src,
+        .use     = m_desc.src_use,
         .request = m_desc.src_request.is_some() ? rstd::Some(m_desc.src_request->clone())
                                                 : rstd::None<TextureRequest>(),
     });
     out.push_back(PassTextureRequestDiagnostic {
         .role    = "copy-dst",
         .name    = m_desc.dst,
+        .use     = m_desc.dst_use,
         .request = m_desc.dst_request.is_some() ? rstd::Some(m_desc.dst_request->clone())
                                                 : rstd::None<TextureRequest>(),
     });

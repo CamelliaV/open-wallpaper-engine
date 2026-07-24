@@ -403,9 +403,10 @@ using SceneMaterialDirtyFlags = rstd::uint32_t;
 
 enum class SceneMaterialDirty : SceneMaterialDirtyFlags
 {
-    Resources = 1u << 0u,
-    Pipeline  = 1u << 1u,
-    Graph     = 1u << 2u,
+    Resources       = 1u << 0u,
+    Pipeline        = 1u << 1u,
+    Graph           = 1u << 2u,
+    TextureBindings = 1u << 3u,
 };
 
 inline constexpr SceneMaterialDirtyFlags SceneMaterialDirtyNone { 0u };
@@ -418,8 +419,12 @@ inline constexpr SceneMaterialDirtyFlags SceneMaterialDirtyPipeline {
 inline constexpr SceneMaterialDirtyFlags SceneMaterialDirtyGraph {
     static_cast<SceneMaterialDirtyFlags>(SceneMaterialDirty::Graph),
 };
+inline constexpr SceneMaterialDirtyFlags SceneMaterialDirtyTextureBindings {
+    static_cast<SceneMaterialDirtyFlags>(SceneMaterialDirty::TextureBindings),
+};
 inline constexpr SceneMaterialDirtyFlags SceneMaterialDirtyAll {
-    SceneMaterialDirtyResources | SceneMaterialDirtyPipeline | SceneMaterialDirtyGraph,
+    SceneMaterialDirtyResources | SceneMaterialDirtyPipeline | SceneMaterialDirtyGraph |
+        SceneMaterialDirtyTextureBindings,
 };
 
 inline bool SceneShaderVariantHasActiveTextureMetadata(const SceneShaderVariantDesc& desc) {
@@ -554,6 +559,7 @@ public:
     void SetResourceDirty() { SetDirty(SceneMaterialDirtyResources); }
     void SetPipelineDirty() { SetDirty(SceneMaterialDirtyPipeline); }
     void SetGraphDirty() { SetDirty(SceneMaterialDirtyGraph); }
+    void SetTextureBindingsDirty() { SetDirty(SceneMaterialDirtyTextureBindings); }
     SceneMaterialDirtyFlags DirtyFlags() const { return m_dirty_flags.load(); }
     SceneMaterialDirtyFlags
     ConsumeDirtyFlags(SceneMaterialDirtyFlags mask = SceneMaterialDirtyAll) {

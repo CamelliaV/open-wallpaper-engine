@@ -42,10 +42,11 @@ struct MaterialTextureBindingRefresh {
 };
 
 struct PassTextureRequestDiagnostic {
-    std::string                  role;
-    u32                          slot { 0 };
-    std::string                  name;
-    rstd::Option<TextureRequest> request;
+    std::string                              role;
+    u32                                      slot { 0 };
+    std::string                              name;
+    rstd::Option<resource::TextureUseHandle> use;
+    rstd::Option<TextureRequest>             request;
 };
 
 struct PassResourceUses {

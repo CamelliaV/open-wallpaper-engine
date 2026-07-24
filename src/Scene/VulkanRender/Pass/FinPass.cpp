@@ -55,6 +55,7 @@ std::vector<PassTextureRequestDiagnostic> FinPass::textureRequestDiagnostics() c
     out.push_back(PassTextureRequestDiagnostic {
         .role    = "frame-result",
         .name    = std::string(m_desc.result),
+        .use     = m_desc.result_use,
         .request = m_desc.result_request.is_some() ? rstd::Some(m_desc.result_request->clone())
                                                    : rstd::None<TextureRequest>(),
     });

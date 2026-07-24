@@ -559,6 +559,10 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
     EXPECT_TRUE(scene.Texture("_rt_default"_str).is_none());
     ASSERT_GE(material->textures.size(), 2u);
     EXPECT_EQ(material->textures[1], "_rt_default");
+    EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyTextureBindings);
+    auto texture_events = scene.ConsumePreparedMaterialDirtyEvents();
+    ASSERT_EQ(texture_events.len(), usize(1));
+    EXPECT_EQ(texture_events[usize()].flags, owe::SceneMaterialDirtyTextureBindings);
 }
 
 TEST(SceneMaterialShaderVariant, CarriesCompileDescriptorThroughMaterialMove) {
@@ -1311,5 +1315,11 @@ TEST(SceneMaterialDirtyEvents, RoutesMaterialDirtyByOwner) {
     events = scene.ConsumePreparedMaterialDirtyEvents();
     ASSERT_EQ(events.len(), usize(1));
     EXPECT_EQ(events[usize()].flags, owe::SceneMaterialDirtyGraph);
+    EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyNone);
+
+    material->SetTextureBindingsDirty();
+    events = scene.ConsumePreparedMaterialDirtyEvents();
+    ASSERT_EQ(events.len(), usize(1));
+    EXPECT_EQ(events[usize()].flags, owe::SceneMaterialDirtyTextureBindings);
     EXPECT_EQ(material->DirtyFlags(), owe::SceneMaterialDirtyNone);
 }
