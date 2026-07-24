@@ -1037,23 +1037,15 @@ void GenCardMesh(SceneMesh& mesh, const std::array<float, 2> size,
     mesh.AddVertexArray(std::move(vertex));
 }
 
-void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
-                     bool thick_format, bool geometry_shader) {
-    (void)particle;
+void SetParticleMesh(SceneMesh& mesh, uint32_t count, bool thick_format) {
     std::vector<VertexAttrSpec> specs {
         VAttr::Position,
         VAttr::TexCoordVec4,
         VAttr::Color,
     };
     if (thick_format) specs.push_back(VAttr::TexCoordVec4C1);
-    if (geometry_shader) {
-        mesh.SetPrimitive(MeshPrimitive::POINT);
-        mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), usize(count)));
-    } else {
-        specs.push_back(VAttr::TexCoordC2);
-        mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), usize(count * 4)));
-        mesh.AddIndexArray(SceneIndexArray(usize(count * 6)));
-    }
+    mesh.SetPrimitive(MeshPrimitive::POINT);
+    mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), usize(count)));
     mesh.GetVertexArray(usize(0)).SetOption(as_string_view(WE_CB_THICK_FORMAT), thick_format);
 }
 
@@ -1105,14 +1097,12 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
 struct ParticleRenderDesc {
     bool rope { false };
     bool trail { false };
-    bool geometry_shader { false };
 };
 
 ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render) {
     ParticleRenderDesc desc;
-    desc.rope            = render.name == "rope";
-    desc.trail           = send_with(render.name, "trail");
-    desc.geometry_shader = desc.rope || render.name == "sprite" || desc.trail;
+    desc.rope  = render.name == "rope";
+    desc.trail = send_with(render.name, "trail");
     return desc;
 }
 
@@ -1478,12 +1468,16 @@ SceneShaderVariantDesc MakeSceneShaderVariantDesc(
     return desc;
 }
 
+enum class GeometryStageRequirement
+{
+    None,
+    Required,
+};
+
 bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
                   const WPSceneShaderEnvironment& environment, const wpscene::Material& wpmat,
                   Scene* pScene, SceneMaterial* pMaterial, WPShaderInfo* pWPShaderInfo = nullptr,
-                  bool enable_geometry_shader = false, bool* out_geometry_shader = nullptr) {
-    if (out_geometry_shader) *out_geometry_shader = false;
-
+                  GeometryStageRequirement geometry_stage = GeometryStageRequirement::None) {
     auto& material   = *pMaterial;
     auto  blend_mode = ParseBlendMode(wpmat.blending);
 
@@ -1522,15 +1516,15 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
         });
     };
     add_shader_unit(ShaderType::VERTEX, shaderPath + ".vert");
-    bool geometry_shader_enabled = false;
-    if (enable_geometry_shader) {
+    bool has_geometry_stage = geometry_stage == GeometryStageRequirement::Required;
+    if (has_geometry_stage) {
         std::string geom_path = shaderPath + ".geom";
-        if (vfs.metadata(fs::ToPath(geom_path)).is_ok()) {
-            add_shader_unit(ShaderType::GEOMETRY, std::move(geom_path));
-            pWPShaderInfo->combos[rstd::cppstd::to_string(WE_CB_GS_ENABLED)] = "1";
-            geometry_shader_enabled                                          = true;
-            if (out_geometry_shader) *out_geometry_shader = true;
+        if (vfs.metadata(fs::ToPath(geom_path)).is_err()) {
+            rstd_error("required geometry shader source missing: {}", geom_path);
+            return false;
         }
+        add_shader_unit(ShaderType::GEOMETRY, std::move(geom_path));
+        pWPShaderInfo->combos[rstd::cppstd::to_string(WE_CB_GS_ENABLED)] = "1";
     }
     add_shader_unit(ShaderType::FRAGMENT, shaderPath + ".frag");
 
@@ -1688,7 +1682,7 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
                                                             sd_source_keys,
                                                             sd_original_sources,
                                                             texinfos,
-                                                            geometry_shader_enabled);
+                                                            has_geometry_stage);
     variant_desc.texture_slots = material.textures;
 
     if (! WPShaderParser::CompileToSpv(
@@ -3401,8 +3395,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         shaderInfo.combos["SPRITESHEETBLEND"] = "1";
     }
 
-    bool mat_ok              = false;
-    bool use_geometry_shader = false;
+    bool mat_ok = false;
     try {
         mat_ok = LoadMaterial(vfs,
                               context.ShaderCachePath(),
@@ -3411,8 +3404,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                               context.scene.get(),
                               &material,
                               &shaderInfo,
-                              render_desc.geometry_shader,
-                              &use_geometry_shader);
+                              GeometryStageRequirement::Required);
     } catch (const std::exception& e) {
         rstd_error("load particleobj '{}' material exception: {}", wppartobj.name, e.what());
     }
@@ -3467,7 +3459,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         if (render_rope) {
             SetRopeParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format);
         } else {
-            SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format, use_geometry_shader);
+            SetParticleMesh(mesh, mesh_maxcount, thick_format);
         }
     }
 

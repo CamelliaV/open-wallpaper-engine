@@ -56,18 +56,17 @@ bool Device::CheckGPU(vvk::PhysicalDevice gpu, std::span<const Extension> exts,
             }
         }
     }
-    if (requires_timeline_semaphore) {
-        VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline_features {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR,
-            .pNext = nullptr,
-        };
-        VkPhysicalDeviceFeatures2KHR features2 {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
-            .pNext = &timeline_features,
-        };
-        gpu.GetFeatures2KHR(features2);
-        if (! timeline_features.timelineSemaphore) return false;
-    }
+    VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline_features {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR,
+        .pNext = nullptr,
+    };
+    VkPhysicalDeviceFeatures2KHR features2 {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
+        .pNext = requires_timeline_semaphore ? &timeline_features : nullptr,
+    };
+    gpu.GetFeatures2KHR(features2);
+    if (! features2.features.geometryShader) return false;
+    if (requires_timeline_semaphore && ! timeline_features.timelineSemaphore) return false;
     return true;
 }
 
@@ -144,10 +143,7 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
     device.m_enabled_device_extensions.assign(tested_exts.begin(), tested_exts.end());
     bool rq_surface = ! inst.offscreen();
 
-    // Opt in to optional features the renderer actually uses. Geometry
-    // shaders drive the genericropeparticle spline subdivision; without
-    // pEnabledFeatures.geometryShader=VK_TRUE, the driver rejects a
-    // pipeline with a GS stage.
+    // The WE particle vertex ABI requires geometry shaders.
     VkPhysicalDeviceTimelineSemaphoreFeaturesKHR supported_timeline {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR,
         .pNext = nullptr,
@@ -166,8 +162,12 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
         rstd_error("required vulkan feature timelineSemaphore is not supported");
         return false;
     }
+    if (! supported2.features.geometryShader) {
+        rstd_error("required vulkan feature geometryShader is not supported");
+        return false;
+    }
     VkPhysicalDeviceFeatures enabled {};
-    enabled.geometryShader    = supported2.features.geometryShader;
+    enabled.geometryShader    = VK_TRUE;
     enabled.sampleRateShading = supported2.features.sampleRateShading;
     enabled.samplerAnisotropy = supported2.features.samplerAnisotropy;
     VkPhysicalDeviceTimelineSemaphoreFeaturesKHR enabled_timeline {

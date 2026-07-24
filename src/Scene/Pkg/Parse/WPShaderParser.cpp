@@ -2512,7 +2512,7 @@ WPShaderParser::CompileMaterialShader(const Json& material_json, fs::VFS& vfs,
     std::string vert_src = rstd::move(vert_source).unwrap_unchecked();
     std::string frag_src = rstd::move(frag_source).unwrap_unchecked();
     std::string geom_src;
-    if (mat.shader == "genericropeparticle") {
+    if (mat.shader == "genericparticle" || mat.shader == "genericropeparticle") {
         auto geom_source = fs::ReadFileContent(vfs, shader_path + ".geom");
         if (geom_source.is_err()) {
             r.error = "shader source missing: " + shader_path + ".geom";

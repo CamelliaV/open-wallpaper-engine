@@ -99,108 +99,6 @@ auto AnimationLifetime(const WPExtractParticle& value, WPParticleAnimationSpec a
     return 0.0f;
 }
 
-template<rstd::size_t N>
-void AssignVertexTimes(std::span<float> destination, const rstd::array<float, N>& source,
-                       usize count) noexcept {
-    auto destination_size = usize(destination.size()) / count;
-    for (usize index {}; index < count; ++index) {
-        auto offset = index * destination_size;
-        std::copy(source.begin(), source.end(), destination.begin() + offset.to_primitive());
-    }
-}
-
-template<rstd::size_t N>
-void AssignVertex(std::span<float> destination, const rstd::array<float, N>& source,
-                  usize count) noexcept {
-    auto destination_size = usize(destination.size()) / count;
-    auto source_size      = usize(N) / count;
-    for (usize index {}; index < count; ++index) {
-        auto destination_offset = index * destination_size;
-        auto source_offset      = index * source_size;
-        std::copy(source.begin() + source_offset.to_primitive(),
-                  source.begin() + (source_offset + source_size).to_primitive(),
-                  destination.begin() + destination_offset.to_primitive());
-    }
-}
-
-auto GenParticleData(slice<WPExtractInstance> instances, const WPParticleSubSystem& subsystem,
-                     WPGOption option, SceneVertexArray& vertices) noexcept -> usize {
-    rstd::array<float, 32 * 4> storage {};
-    auto                       one_size   = vertices.OneSize();
-    auto                       total_size = one_size * usize(4);
-    usize                      output_index {};
-
-    for (const auto& instance : instances) {
-        if (subsystem.InstanceState(instance.instance_index).no_live_particle) continue;
-        for (auto slot : instance.slots) {
-            auto value = instance.Particle(slot);
-            if (value.lifetime <= 0.0f) continue;
-
-            auto  position = subsystem.RenderPosition(instance.instance_index, value.position);
-            auto  size     = value.size * 0.5f;
-            auto  lifetime = AnimationLifetime(value, subsystem.AnimationSpec());
-            usize offset {};
-
-            AssignVertexTimes(std::span<float> { storage.data() + offset.to_primitive(),
-                                                 total_size.to_primitive() },
-                              rstd::array<float, 3> { position[0], position[1], position[2] },
-                              usize(4));
-            offset += usize(4);
-
-            AssignVertex(std::span<float> { storage.data() + offset.to_primitive(),
-                                            total_size.to_primitive() },
-                         rstd::array<float, 16> {
-                             0.0f,
-                             1.0f,
-                             value.rotation[2],
-                             size,
-                             1.0f,
-                             1.0f,
-                             value.rotation[2],
-                             size,
-                             1.0f,
-                             0.0f,
-                             value.rotation[2],
-                             size,
-                             0.0f,
-                             0.0f,
-                             value.rotation[2],
-                             size,
-                         },
-                         usize(4));
-            offset += usize(4);
-
-            AssignVertexTimes(std::span<float> { storage.data() + offset.to_primitive(),
-                                                 total_size.to_primitive() },
-                              rstd::array<float, 4> {
-                                  value.color[0], value.color[1], value.color[2], value.alpha },
-                              usize(4));
-            offset += usize(4);
-
-            if (option.thick_format) {
-                AssignVertexTimes(std::span<float> { storage.data() + offset.to_primitive(),
-                                                     total_size.to_primitive() },
-                                  rstd::array<float, 4> {
-                                      value.velocity[0],
-                                      value.velocity[1],
-                                      value.velocity[2],
-                                      lifetime,
-                                  },
-                                  usize(4));
-                offset += usize(4);
-            }
-
-            AssignVertexTimes(std::span<float> { storage.data() + offset.to_primitive(),
-                                                 total_size.to_primitive() },
-                              rstd::array<float, 2> { value.rotation[0], value.rotation[1] },
-                              usize(4));
-            vertices.SetVertexs(output_index++ * usize(4),
-                                rstd::slice<float>::from_raw_parts(storage.data(), total_size));
-        }
-    }
-    return output_index;
-}
-
 auto GenParticlePointData(slice<WPExtractInstance> instances, const WPParticleSubSystem& subsystem,
                           WPGOption option, SceneVertexArray& vertices) noexcept -> usize {
     auto                   one_size          = vertices.OneSize();
@@ -432,18 +330,6 @@ auto GenRopeTrailData(slice<WPExtractInstance> instances, const WPParticleSubSys
     return output_count;
 }
 
-void UpdateIndexArray(u32 first, usize count, SceneIndexArray& indices) noexcept {
-    constexpr usize                single_size { 6 };
-    rstd::uint32_t                 current = first.to_primitive() * 4U;
-    rstd::array<rstd::uint32_t, 6> values {
-        current, current + 1U, current + 3U, current + 1U, current + 2U, current + 3U,
-    };
-    for (usize index = rstd::as_cast<usize>(first); index < count; ++index) {
-        indices.Assign(index * single_size, values.as_slice());
-        for (auto& value : values) value += 4U;
-    }
-}
-
 } // namespace
 
 void WPParticleRawGenerator::Compile(particle::ParticleViewCompiler& compiler) {
@@ -499,17 +385,6 @@ void WPParticleRawGenerator::Extract(particle::ParticleExtractContext& context) 
         (void)GenRopeTrailData(instances.as_slice(), *m_subsystem, option, vertices);
         return;
     }
-    if (mesh.Primitive() == MeshPrimitive::POINT) {
-        vertices.ResetSize();
-        (void)GenParticlePointData(instances.as_slice(), *m_subsystem, option, vertices);
-        return;
-    }
-
-    auto  particle_count = GenParticleData(instances.as_slice(), *m_subsystem, option, vertices);
-    auto& indices        = mesh.GetIndexArray(usize());
-    auto  index_count    = rstd::as_cast<u32>(indices.DataCount() / usize(6));
-    if (particle_count > rstd::as_cast<usize>(index_count)) {
-        UpdateIndexArray(index_count, particle_count, indices);
-    }
-    indices.SetRenderDataCount(particle_count * usize(6));
+    vertices.ResetSize();
+    (void)GenParticlePointData(instances.as_slice(), *m_subsystem, option, vertices);
 }
