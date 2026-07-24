@@ -96,6 +96,31 @@ TEST(DrawBufferKey, KeepsDynamicAllocationGenerationSeparateFromDataGeneration) 
     EXPECT_EQ(keys[1].data_generation, mesh.Submeshes()[0].index_arrays[0].DataGeneration());
 }
 
+TEST(DrawBufferKey, ObservesCompletedVertexRewriteGeneration) {
+    owe::SceneMesh mesh(true);
+    mesh.Submeshes().push_back(MakeSubmesh());
+    auto& vertices   = mesh.Submeshes()[0].vertex_arrays[0];
+    auto  generation = vertices.DataGeneration();
+
+    auto rewrite = vertices.RewriteVertices([](owe::SceneVertexWriter& writer) {
+        auto vertex = writer.AppendZeroedVertex();
+        ASSERT_TRUE(vertex.is_some());
+        (*vertex)[rstd::usize()] = 3.0f;
+    });
+    ASSERT_FALSE(rewrite.overflowed);
+
+    owe::vulkan::DrawBufferRequest request {
+        .render_item   = { .index = rstd::u32(4), .generation = rstd::u64(6) },
+        .mesh          = &mesh,
+        .submesh_index = rstd::u32(),
+    };
+    auto keys = owe::vulkan::BuildDrawBufferKeys(request, rstd::u64(9));
+    ASSERT_FALSE(keys.empty());
+    EXPECT_EQ(vertices.DataGeneration(), generation + rstd::u64(1));
+    EXPECT_EQ(keys[0].data_generation, vertices.DataGeneration());
+    EXPECT_EQ(vertices.VertexCount(), rstd::usize(1));
+}
+
 TEST(DrawBufferKey, ReturnsEmptyForInvalidRequest) {
     owe::SceneMesh mesh;
     EXPECT_TRUE(owe::vulkan::BuildDrawBufferKeys({ .mesh = nullptr }, rstd::u64(1)).empty());

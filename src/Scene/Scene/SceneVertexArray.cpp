@@ -30,6 +30,31 @@ SceneVertexArray::RealAttributeSize(const SceneVertexArray::SceneVertexAttribute
     return attr.padding ? 4 : TypeCount(attr.type);
 }
 
+auto SceneVertexWriter::AppendZeroedVertex() noexcept -> Option<mut_ref<float[]>> {
+    if (m_stride == usize() || m_written >= Capacity()) {
+        m_overflowed = true;
+        return None();
+    }
+
+    auto start = m_written * m_stride;
+    auto vertex =
+        mut_ref<float[]>::from_raw_parts(m_data.as_raw_ptr() + start.to_primitive(), m_stride);
+    for (usize index {}; index < m_stride; ++index) vertex[index] = 0.0f;
+    ++m_written;
+    return Some(vertex);
+}
+
+auto SceneVertexArray::FinishVertexRewrite(const SceneVertexWriter& writer) noexcept
+    -> SceneVertexWriteResult {
+    m_size = writer.Written() * m_oneSize;
+    BumpDataGeneration();
+    return {
+        .vertex_count = writer.Written(),
+        .capacity     = writer.Capacity(),
+        .overflowed   = writer.Overflowed(),
+    };
+}
+
 SceneVertexArray::SceneVertexArray(const std::vector<SceneVertexAttribute>& attrs,
                                    const usize                              count)
     : m_attributes(attrs) {

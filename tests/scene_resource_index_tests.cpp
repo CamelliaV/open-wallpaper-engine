@@ -1178,6 +1178,102 @@ TEST(SceneGeometryDataGeneration, IncrementsWhenGeometryDataChanges) {
     EXPECT_GT(indices.DataGeneration(), index_generation);
 }
 
+TEST(SceneVertexArray, RewritePublishesSizeAndGenerationOnce) {
+    std::vector<owe::SceneVertexArray::SceneVertexAttribute> attrs {
+        { .name = "a_Position", .type = owe::VertexType::FLOAT3 },
+    };
+    owe::SceneVertexArray vertices(attrs, rstd::usize(3));
+    auto                  generation = vertices.DataGeneration();
+
+    auto first = vertices.RewriteVertices([&](owe::SceneVertexWriter& writer) {
+        EXPECT_EQ(writer.Stride(), rstd::usize(4));
+        EXPECT_EQ(writer.Capacity(), rstd::usize(3));
+        for (rstd::usize index {}; index < rstd::usize(3); ++index) {
+            auto vertex = writer.AppendZeroedVertex();
+            ASSERT_TRUE(vertex.is_some());
+            (*vertex)[rstd::usize()]  = static_cast<float>(index.to_primitive() + 1);
+            (*vertex)[rstd::usize(1)] = static_cast<float>(index.to_primitive() + 2);
+            (*vertex)[rstd::usize(2)] = static_cast<float>(index.to_primitive() + 3);
+        }
+        EXPECT_EQ(writer.Written(), rstd::usize(3));
+        EXPECT_EQ(vertices.DataGeneration(), generation);
+    });
+
+    EXPECT_FALSE(first.overflowed);
+    EXPECT_EQ(first.vertex_count, rstd::usize(3));
+    EXPECT_EQ(first.capacity, rstd::usize(3));
+    EXPECT_EQ(vertices.DataGeneration(), generation + rstd::u64(1));
+    EXPECT_EQ(vertices.VertexCount(), rstd::usize(3));
+    EXPECT_EQ(vertices.DataSize(), rstd::usize(12));
+    EXPECT_FLOAT_EQ(vertices.Data()[3], 0.0f);
+    EXPECT_FLOAT_EQ(vertices.Data()[7], 0.0f);
+    EXPECT_FLOAT_EQ(vertices.Data()[11], 0.0f);
+
+    generation  = vertices.DataGeneration();
+    auto shrunk = vertices.RewriteVertices([&](owe::SceneVertexWriter& writer) {
+        auto vertex = writer.AppendZeroedVertex();
+        ASSERT_TRUE(vertex.is_some());
+        (*vertex)[rstd::usize()] = 9.0f;
+    });
+    EXPECT_FALSE(shrunk.overflowed);
+    EXPECT_EQ(shrunk.vertex_count, rstd::usize(1));
+    EXPECT_EQ(vertices.DataGeneration(), generation + rstd::u64(1));
+    EXPECT_EQ(vertices.VertexCount(), rstd::usize(1));
+    EXPECT_FLOAT_EQ(vertices.Data()[1], 0.0f);
+    EXPECT_FLOAT_EQ(vertices.Data()[2], 0.0f);
+    EXPECT_FLOAT_EQ(vertices.Data()[3], 0.0f);
+
+    generation = vertices.DataGeneration();
+    auto empty = vertices.RewriteVertices([](owe::SceneVertexWriter&) {
+    });
+    EXPECT_FALSE(empty.overflowed);
+    EXPECT_EQ(empty.vertex_count, rstd::usize());
+    EXPECT_EQ(vertices.DataGeneration(), generation + rstd::u64(1));
+    EXPECT_EQ(vertices.VertexCount(), rstd::usize());
+    EXPECT_EQ(vertices.DataSizeOf(), rstd::usize());
+}
+
+TEST(SceneVertexArray, RewriteStopsAtCapacityAndCommitsPrefix) {
+    std::vector<owe::SceneVertexArray::SceneVertexAttribute> attrs {
+        { .name = "a_Position", .type = owe::VertexType::FLOAT3 },
+    };
+    owe::SceneVertexArray vertices(attrs, rstd::usize(1));
+    auto                  generation = vertices.DataGeneration();
+
+    auto result = vertices.RewriteVertices([](owe::SceneVertexWriter& writer) {
+        auto first = writer.AppendZeroedVertex();
+        ASSERT_TRUE(first.is_some());
+        (*first)[rstd::usize()] = 4.0f;
+        EXPECT_TRUE(writer.AppendZeroedVertex().is_none());
+        EXPECT_TRUE(writer.Overflowed());
+    });
+
+    EXPECT_TRUE(result.overflowed);
+    EXPECT_EQ(result.vertex_count, rstd::usize(1));
+    EXPECT_EQ(result.capacity, rstd::usize(1));
+    EXPECT_EQ(vertices.DataGeneration(), generation + rstd::u64(1));
+    EXPECT_EQ(vertices.VertexCount(), rstd::usize(1));
+    EXPECT_FLOAT_EQ(vertices.Data()[0], 4.0f);
+}
+
+TEST(SceneVertexArray, RewriteRejectsZeroStride) {
+    std::vector<owe::SceneVertexArray::SceneVertexAttribute> attrs;
+    owe::SceneVertexArray                                    vertices(attrs, rstd::usize(1));
+    auto                                                     generation = vertices.DataGeneration();
+
+    auto result = vertices.RewriteVertices([](owe::SceneVertexWriter& writer) {
+        EXPECT_EQ(writer.Stride(), rstd::usize());
+        EXPECT_EQ(writer.Capacity(), rstd::usize());
+        EXPECT_TRUE(writer.AppendZeroedVertex().is_none());
+    });
+
+    EXPECT_TRUE(result.overflowed);
+    EXPECT_EQ(result.vertex_count, rstd::usize());
+    EXPECT_EQ(result.capacity, rstd::usize());
+    EXPECT_EQ(vertices.DataGeneration(), generation + rstd::u64(1));
+    EXPECT_EQ(vertices.VertexCount(), rstd::usize());
+}
+
 TEST(SceneVertexArray, AddVertexAppendsAndMoveKeepsOwnedState) {
     std::vector<owe::SceneVertexArray::SceneVertexAttribute> attrs {
         { .name = "a_Position", .type = owe::VertexType::FLOAT3 },

@@ -244,6 +244,36 @@ private:
 // SceneVertexArray.h
 // ============================================================================
 
+struct SceneVertexWriteResult {
+    usize vertex_count {};
+    usize capacity {};
+    bool  overflowed { false };
+};
+
+class SceneVertexWriter : NoCopy, NoMove {
+public:
+    auto AppendZeroedVertex() noexcept -> Option<mut_ref<float[]>>;
+
+    usize Stride() const noexcept { return m_stride; }
+    usize Capacity() const noexcept { return m_capacity; }
+    usize Written() const noexcept { return m_written; }
+    bool  Overflowed() const noexcept { return m_overflowed; }
+
+private:
+    friend class SceneVertexArray;
+
+    SceneVertexWriter(mut_ref<float[]> data, usize stride) noexcept
+        : m_data(data),
+          m_stride(stride),
+          m_capacity(stride == usize() ? usize() : data.len() / stride) {}
+
+    mut_ref<float[]> m_data;
+    usize            m_stride {};
+    usize            m_capacity {};
+    usize            m_written {};
+    bool             m_overflowed { false };
+};
+
 class SceneVertexArray : NoCopy {
 public:
     struct SceneVertexAttribute {
@@ -266,10 +296,20 @@ public:
     bool SetVertex(std::string_view name, slice<float> data) noexcept;
     bool SetVertexs(usize index, slice<float> data) noexcept;
 
+    template<typename Fill>
+    [[nodiscard]] auto RewriteVertices(Fill&& fill) -> SceneVertexWriteResult {
+        SceneVertexWriter writer(m_data.as_mut_slice().as_mut_ref(), m_oneSize);
+        try {
+            fill(writer);
+        } catch (...) {
+            (void)FinishVertexRewrite(writer);
+            throw;
+        }
+        return FinishVertexRewrite(writer);
+    }
+
     // Drops the active size to zero without releasing capacity. Subsequent
-    // SetVertexs calls regrow it. Used by per-frame dynamic geners (rope
-    // particles) so the high-water mark from a previous frame doesn't keep
-    // VertexCount() inflated when fewer segments are emitted this frame.
+    // SetVertexs calls regrow it.
     void ResetSize() noexcept;
 
     bool GetOption(std::string_view) const;
@@ -278,7 +318,7 @@ public:
     const float* Data() const { return m_data.is_empty() ? nullptr : m_data.begin(); }
     usize        DataSize() const { return m_size; }
     usize        DataSizeOf() const { return m_size * usize(sizeof(float)); }
-    usize        VertexCount() const { return m_size / m_oneSize; }
+    usize        VertexCount() const { return m_oneSize == usize() ? usize() : m_size / m_oneSize; }
     usize        CapacitySize() const { return m_data.len(); }
     usize        CapacitySizeOf() const { return m_data.len() * usize(sizeof(float)); }
     usize        OneSize() const { return m_oneSize; }
@@ -296,6 +336,7 @@ public:
 
 private:
     bool TrySetSize(usize) noexcept;
+    auto FinishVertexRewrite(const SceneVertexWriter&) noexcept -> SceneVertexWriteResult;
     void BumpDataGeneration() noexcept { ++m_generation; }
 
     std::vector<SceneVertexAttribute> m_attributes;
