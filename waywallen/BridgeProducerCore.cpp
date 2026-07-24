@@ -54,6 +54,13 @@ BridgeProducerCore::BridgeProducerCore(std::shared_ptr<BridgeSession> session)
 
 BridgeProducerCore::~BridgeProducerCore() = default;
 
+void BridgeProducerCore::markSessionLost() {
+    m_session_lost     = true;
+    m_slot_count       = 0;
+    m_have_pending     = false;
+    m_pending_identity = {};
+}
+
 void BridgeProducerCore::queueDirective(const ww_pool_directive_t& directive) {
     {
         std::lock_guard<std::mutex> lk(m_pending_mu);
@@ -63,6 +70,10 @@ void BridgeProducerCore::queueDirective(const ww_pool_directive_t& directive) {
 }
 
 void BridgeProducerCore::drainPendingDirective() {
+    if (m_session_lost) {
+        m_pending_valid.store(false, std::memory_order_release);
+        return;
+    }
     if (! m_pending_valid.load(std::memory_order_acquire)) return;
 
     ww_pool_directive_t d {};
@@ -73,6 +84,10 @@ void BridgeProducerCore::drainPendingDirective() {
     }
 
     int rc = applyDirective(d);
+    if (rc == -EPIPE) {
+        markSessionLost();
+        return;
+    }
     if (rc == -EBUSY) {
         std::lock_guard<std::mutex> lk(m_pending_mu);
         if (! m_pending_valid.load(std::memory_order_acquire)) {
@@ -172,6 +187,11 @@ int BridgeProducerCore::applyDirective(const ww_pool_directive_t& directive) {
 
 BridgeSlotAcquireResult BridgeProducerCore::acquireSlot() {
     BridgeSlotAcquireResult result;
+    if (m_session_lost) {
+        result.status     = BridgeSlotAcquireStatus::SessionLost;
+        result.error_code = -EPIPE;
+        return result;
+    }
     if (m_slot_count == 0) return result;
     if (m_have_pending) {
         result.status     = BridgeSlotAcquireStatus::Error;
@@ -181,7 +201,9 @@ BridgeSlotAcquireResult BridgeProducerCore::acquireSlot() {
 
     ww_pool_slot_acquire_result_t acquired {};
     if (int rc = m_session->tryAcquireAnyForRender(acquired); rc != 0) {
-        result.status     = BridgeSlotAcquireStatus::Error;
+        if (rc == -EPIPE) markSessionLost();
+        result.status =
+            rc == -EPIPE ? BridgeSlotAcquireStatus::SessionLost : BridgeSlotAcquireStatus::Error;
         result.error_code = rc;
         return result;
     }
@@ -195,6 +217,7 @@ BridgeSlotAcquireResult BridgeProducerCore::acquireSlot() {
         break;
     case WW_POOL_SLOT_ACQUIRE_BUSY: result.status = BridgeSlotAcquireStatus::Busy; return result;
     case WW_POOL_SLOT_ACQUIRE_SESSION_LOST:
+        markSessionLost();
         result.status     = BridgeSlotAcquireStatus::SessionLost;
         result.error_code = acquired.error_code;
         return result;
@@ -264,6 +287,14 @@ BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdenti
     ww_pool_slot_submit_result_t submitted {};
     int rc = m_session->submitAcquiredSlot(bridge_identity, producer_sync_fd, submitted);
     if (rc != 0) {
+        if (rc == -EPIPE) {
+            markSessionLost();
+            return BridgeSlotCompletionResult {
+                .status     = BridgeSlotCompletionStatus::SessionLost,
+                .identity   = identity,
+                .error_code = rc,
+            };
+        }
         std::fprintf(
             stderr, "BridgeProducerCore: submit_slot(%u) rc=%d\n", identity.slot_index, rc);
         // Bridge contract: bridge always closes the fd. We don't dup-close.
@@ -277,8 +308,7 @@ BridgeSlotCompletionResult BridgeProducerCore::submitSlot(const BridgeSlotIdenti
         };
     }
     if (submitted.status == WW_POOL_SLOT_SUBMIT_SESSION_LOST) {
-        m_have_pending     = false;
-        m_pending_identity = {};
+        markSessionLost();
         return BridgeSlotCompletionResult {
             .status     = BridgeSlotCompletionStatus::SessionLost,
             .identity   = identity,
@@ -325,9 +355,11 @@ BridgeSlotCompletionResult BridgeProducerCore::abortSlot(const BridgeSlotIdentit
     };
     int rc = m_session->abortAcquiredSlot(bridge_identity);
     if (rc != 0) {
+        if (rc == -EPIPE) markSessionLost();
         return BridgeSlotCompletionResult {
-            .status     = rc == -ESTALE ? BridgeSlotCompletionStatus::StaleIdentity
-                                        : BridgeSlotCompletionStatus::ProtocolError,
+            .status     = rc == -EPIPE    ? BridgeSlotCompletionStatus::SessionLost
+                          : rc == -ESTALE ? BridgeSlotCompletionStatus::StaleIdentity
+                                          : BridgeSlotCompletionStatus::ProtocolError,
             .identity   = identity,
             .error_code = rc,
         };

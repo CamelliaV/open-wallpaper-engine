@@ -140,13 +140,17 @@ public:
     // responsible for any happens-before they need (typical pattern:
     // call from inside the producer thread right after
     // drainPendingDirective).
-    bool     ready() const { return m_slot_count > 0 && m_export_format != VK_FORMAT_UNDEFINED; }
+    bool ready() const {
+        return ! m_session_lost && m_slot_count > 0 && m_export_format != VK_FORMAT_UNDEFINED;
+    }
     uint32_t width() const { return m_width; }
     uint32_t height() const { return m_height; }
     VkFormat format() const { return m_export_format; }
     uint32_t fourcc() const { return m_fourcc; }
 
 private:
+    void markSessionLost();
+
     // Producer-thread-only. Runs the bridge's apply_directive,
     // publishes new geometry/format on success. Returns:
     //   0   success — m_slot_count == directive.count
@@ -170,6 +174,7 @@ private:
 
     uint32_t           m_slot_count { 0 };
     bool               m_have_pending { false };
+    bool               m_session_lost { false };
     BridgeSlotIdentity m_pending_identity;
     uint32_t           m_width { 0 };
     uint32_t           m_height { 0 };
