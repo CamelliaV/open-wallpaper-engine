@@ -189,6 +189,23 @@ TEST(ScriptAudio, RegisterAudioBuffersResamplesRequestedResolution) {
                          361.5);
 }
 
+TEST(ScriptAudio, RegisterAudioBuffersAcceptsResolution64Constant) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+
+    auto* fs = MakeProbe(rt,
+                         "test/audio_buffers_resolution_64_constant",
+                         R"JS(
+        const audio = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_64);
+        export function update() { return audio.average.length; }
+    )JS");
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_DOUBLE_EQ(LastScalar(fs), 64.0);
+}
+
 TEST(ScriptAudio, RegisterAudioBuffersHoldsOneRuntimeDemandLease) {
     auto              demand = rstd::sync::Arc<owe::AudioResponseDemand>::make();
     std::vector<bool> changes;
@@ -1292,6 +1309,42 @@ TEST(ScriptScene, CreateLayerUsesRegisteredAssetQueue) {
     EXPECT_FLOAT_EQ(coin->Translate().x(), 8.0f);
     EXPECT_FLOAT_EQ(coin->Translate().y(), 9.0f);
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+}
+
+TEST(ScriptScene, CreateLayerActivatesOnlyConsumedGenericClones) {
+    auto root  = Arc<owe::SceneNode>::make();
+    auto first = Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "first");
+    auto second = Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "second");
+    first->SetVisible(false);
+    second->SetVisible(false);
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    rt.SetSceneRoot(root.as_ptr());
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let ok = 0;
+            export function init() {
+                const layer = thisScene.createLayer('models/bar.json');
+                ok = layer.visible ? 1 : 0;
+            }
+            export function update() { return ok; }
+        )JS",
+        "test/create_layer_activates_consumed_generic_clone",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        root.as_ptr(),
+        std::vector<owe::SceneNode*> { first.as_ptr(), second.as_ptr() });
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_TRUE(first->Visible());
+    EXPECT_FALSE(second->Visible());
+    EXPECT_DOUBLE_EQ(LastScalar(fs), 1.0);
 }
 
 // ---------------------------------------------------------------------------

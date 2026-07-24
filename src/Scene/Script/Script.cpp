@@ -1201,6 +1201,7 @@ if (! globalThis.engine) globalThis.engine = {};
 globalThis.engine.userProperties = {};
 globalThis.engine.AUDIO_RESOLUTION_16 = 16;
 globalThis.engine.AUDIO_RESOLUTION_32 = 32;
+globalThis.engine.AUDIO_RESOLUTION_64 = 64;
 // WE exposes these as zero-arg query functions; some scripts call them
 // (`engine.isRunningInEditor()`), others read as boolean. Provide a
 // callable that also coerces to false when accessed as a value (the

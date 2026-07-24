@@ -77,14 +77,14 @@ struct CopyableArcHold {
 };
 
 // Detect the WE audio-bar fanout pattern: scripts that bind a layer's
-// `visible` field, call engine.registerAudioBuffers(N), and then create
-// N-1 sibling layers in init() via thisScene.createLayer(...). owe doesn't
-// have a runtime model parser, so we pre-spawn the N-1 SceneNode clones at
-// parse time (sharing the template's mesh + shader-value record) and hand
-// them to the script through FieldScript::clone_queue.
+// `visible` field, call engine.registerAudioBuffers(N), and create sibling
+// layers in init() via thisScene.createLayer(...). owe doesn't have a runtime
+// model parser, so we pre-spawn N-1 hidden SceneNode clones as the maximum
+// audio-driven capacity and hand them to FieldScript::clone_queue. init()
+// activates only the clones it consumes; the rest remain hidden.
 //
-// Returns N (resolution) when the source matches the pattern, otherwise 0.
-unsigned DetectAudioFanoutCount(std::string_view src) {
+// Returns N (capacity) when the source matches the pattern, otherwise 0.
+unsigned DetectAudioFanoutCapacity(std::string_view src) {
     auto pos = src.find("registerAudioBuffers");
     if (pos == std::string_view::npos) return 0;
     if (src.find("createLayer") == std::string_view::npos) return 0;
@@ -109,6 +109,19 @@ unsigned DetectAudioFanoutCount(std::string_view src) {
 
     // Numeric literal: registerAudioBuffers(64).
     if (pos < src.size() && is_digit(src[pos])) return read_num(pos);
+
+    // Public WE constants: registerAudioBuffers(engine.AUDIO_RESOLUTION_64).
+    constexpr std::string_view resolution_prefix = "engine.AUDIO_RESOLUTION_";
+    if (src.substr(pos).starts_with(resolution_prefix)) {
+        const std::size_t value_pos = pos + resolution_prefix.size();
+        if (value_pos >= src.size() || ! is_digit(src[value_pos])) return 0;
+        const unsigned value = read_num(value_pos);
+        std::size_t    end   = value_pos;
+        while (end < src.size() && is_digit(src[end])) ++end;
+        if (end < src.size() && is_ident(src[end])) return 0;
+        if (value == 16 || value == 32 || value == 64) return value;
+        return 0;
+    }
 
     // Variable: registerAudioBuffers(audioBuffer) with `var audioBuffer = 64`
     // earlier (the common WE audio-bar template). Resolve the first
@@ -398,6 +411,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
         clone->SetPerspective(tmpl->Perspective());
         if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
         clone->AddMesh(tmpl->MeshShared());
+        clone->SetVisible(false);
         clone->ID() = i32(-static_cast<std::int32_t>(i) - 1); // negative IDs reserved for clones
         if (auto config = FindWPUniformConfig(context, *tmpl); config != nullptr)
             SetWPUniformConfig(context, clone, config->Clone());
@@ -868,7 +882,7 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
         }
         std::string                  sha = utils::genSha1(std::span<const char>(sb.source));
         std::vector<owe::SceneNode*> clones;
-        if (unsigned n = DetectAudioFanoutCount(sb.source); n > 1) {
+        if (unsigned n = DetectAudioFanoutCapacity(sb.source); n > 1) {
             clones = SpawnLayerClones(context, node, n - 1);
         }
         auto  props         = ScriptPropertiesForField(context, field, sb);
