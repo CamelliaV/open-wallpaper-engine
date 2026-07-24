@@ -1566,8 +1566,6 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
     ApplyLegacyAtmosphereUniformAliases(wpmat, *pWPShaderInfo);
     ApplyLegacyAtmosphereShaderCompat(wpmat, sd_units);
 
-    shader->default_uniforms = pWPShaderInfo->svs;
-
     for (const auto& el : wpmat.combos) {
         pWPShaderInfo->combos[el.first] = std::to_string(el.second);
     }
@@ -1699,6 +1697,8 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
             scene_id, sd_units, shader->codes, pWPShaderInfo, texinfos, shader_cache_dir)) {
         return false;
     }
+    shader->default_uniforms      = pWPShaderInfo->svs;
+    variant_desc.default_uniforms = pWPShaderInfo->svs;
     WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(
         variant_desc, sd_units, shader->codes);
     shader->sampler_bindings = variant_desc.sampler_bindings;
@@ -1717,10 +1717,6 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
     for (const auto& el : pWPShaderInfo->baseConstSvs) {
         materialShader.constValues[el.first] = el.second;
     }
-    material.customShader         = rstd::move(materialShader);
-    material.customShader.variant = std::move(variant_desc);
-    material.name                 = wpmat.shader;
-
     // Register bindings only after AddMaterial places the material in its
     // stable mesh-owned allocation. Registering the stack-local pointer here
     // would leave a dangling binding after the move.
@@ -1732,20 +1728,15 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
             .name          = var.name.clone(),
             .default_value = var.default_value.clone(),
         });
-        if (! var.default_value.is_null()) {
-            ShaderValue sv;
-            const auto& v = var.default_value;
-            if (v.is_string()) {
-                std::vector<float> tmp;
-                owe::GetJsonValue(v, tmp);
-                sv = std::span<const float>(tmp);
-            } else if (v.is_number()) {
-                sv.setSize(usize(1));
-                owe::GetJsonValue(v, sv[usize(0)]);
-            }
-            if (sv.size() != usize()) material.customShader.constValues[uniform_name] = sv;
+        if (auto value = shader->default_uniforms.find(uniform_name);
+            value != shader->default_uniforms.end()) {
+            materialShader.constValues[uniform_name] = value->second;
         }
     }
+
+    material.customShader         = rstd::move(materialShader);
+    material.customShader.variant = std::move(variant_desc);
+    material.name                 = wpmat.shader;
 
     return true;
 }

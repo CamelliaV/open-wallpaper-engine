@@ -444,6 +444,45 @@ void main() {
     ASSERT_EQ(result.shader->codes.size(), 2u);
 }
 
+TEST(WPShaderParser, CompileSceneShaderVariantShapesCrossStageUniformDefaults) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "cross-stage-uniform-default-test";
+    desc.shader_name = "cross-stage-uniform-default-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/cross-stage-uniform-default-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+uniform vec2 u_refResolution; // {"material":"resolution","default":"512 512"}
+void main() {
+    gl_Position = vec4(a_Position.xy / u_refResolution, a_Position.z, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/cross-stage-uniform-default-test.frag",
+        .source     = R"(
+uniform float u_refResolution; // {"material":"resolution","default":512}
+void main() {
+    gl_FragColor = vec4(1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    const auto& shader_default = result.shader->default_uniforms.at("u_refResolution");
+    ASSERT_EQ(shader_default.size(), rstd::usize(2));
+    EXPECT_FLOAT_EQ(shader_default[rstd::usize()], 512.0f);
+    EXPECT_FLOAT_EQ(shader_default[rstd::usize(1)], 512.0f);
+    const auto& variant_default = result.variant.default_uniforms.at("u_refResolution");
+    EXPECT_EQ(variant_default.size(), rstd::usize(2));
+}
+
 TEST(WPShaderParser, CompileSceneShaderVariantAcceptsNativeMatrixConstructors) {
     owe::SceneShaderVariantDesc desc;
     desc.scene_id    = "matrix-constructor-test";

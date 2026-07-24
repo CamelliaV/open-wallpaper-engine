@@ -1182,6 +1182,52 @@ inline void MergeUniform(Map<std::string, std::string>& uniforms_union, std::str
     }
 }
 
+Map<std::string, std::string> BuildUniformUnion(std::span<const WPShaderUnit> units) {
+    Map<std::string, std::string> uniforms;
+    for (const auto& unit : units) {
+        for (const auto& [name, ty] : unit.preprocess_info.uniforms) {
+            MergeUniform(uniforms, name, ty);
+        }
+    }
+    return uniforms;
+}
+
+usize LinearUniformElementCount(std::string_view ty) {
+    const auto [base_ty, array] = SplitUniformType(ty);
+    if (! array.empty()) return usize();
+
+    const auto hlsl_ty = ToHLSLType(base_ty);
+    if (hlsl_ty == "float" || hlsl_ty == "int" || hlsl_ty == "uint" || hlsl_ty == "bool") {
+        return usize(1);
+    }
+    for (std::string_view prefix : { "float", "int", "uint", "bool" }) {
+        if (! hlsl_ty.starts_with(prefix) || hlsl_ty.size() != prefix.size() + 1) continue;
+        const char width = hlsl_ty.back();
+        if (width >= '2' && width <= '4') return usize(static_cast<std::size_t>(width - '0'));
+    }
+    return usize();
+}
+
+void ShapeShaderValues(ShaderValues& values, const Map<std::string, std::string>& uniforms) {
+    for (auto& [name, value] : values) {
+        if (value.size() != usize(1)) continue;
+        auto uniform = uniforms.find(name);
+        if (uniform == uniforms.end()) continue;
+        const auto elements = LinearUniformElementCount(uniform->second);
+        if (elements <= usize(1) || elements > usize(4)) continue;
+
+        std::array<float, 4> shaped;
+        shaped.fill(value[usize()]);
+        value = ShaderValue(shaped.data(), elements);
+    }
+}
+
+void ShapeShaderDefaults(std::span<const WPShaderUnit> units, WPShaderInfo& info) {
+    const auto uniforms = BuildUniformUnion(units);
+    ShapeShaderValues(info.svs, uniforms);
+    ShapeShaderValues(info.baseConstSvs, uniforms);
+}
+
 // Emit `cbuffer ww_Uniforms { ... };` body with explicit std140 `:packoffset`
 // per member. glslang's HLSL frontend hard-codes HLSL cbuffer packing on
 // HLSL sources (see ShaderLang.cpp `setHlslOffsets` when EShSourceHlsl);
@@ -2096,6 +2142,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
                 std::move(
                     decoded.artifact.units.begin(), decoded.artifact.units.end(), units.begin());
                 codes = std::move(decoded.artifact.codes);
+                ShapeShaderDefaults(units, *shader_info);
                 return true;
             }
             if (decoded.status == ShaderCacheReadStatus::Invalid && ! decoded.reason.empty()) {
@@ -2111,6 +2158,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
     std::for_each(units.begin(), units.end(), [shader_info](auto& unit) {
         unit.src = Preprocessor(unit.src, unit.stage, shader_info->combos, unit.preprocess_info);
     });
+    ShapeShaderDefaults(units, *shader_info);
 
     auto compile = [](std::span<WPShaderUnit> units, std::vector<ShaderCode>& codes) {
         // Build the cross-stage uniform union UP FRONT over ALL stages. Doing
@@ -2119,12 +2167,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         // by VS in a 3-stage VS→GS→FS chain), which results in different UBO
         // sizes per stage and the runtime allocating a buffer too small for
         // the longest stage.
-        Map<std::string, std::string> uniforms_union;
-        for (auto& unit : units) {
-            for (const auto& [name, ty] : unit.preprocess_info.uniforms) {
-                MergeUniform(uniforms_union, name, ty);
-            }
-        }
+        auto uniforms_union = BuildUniformUnion(units);
 
         std::vector<vulkan::ShaderCompUnit> vunits(units.size());
         for (std::size_t i = 0; i < units.size(); i++) {
@@ -2426,6 +2469,7 @@ WPShaderParser::CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs
         result.error = "CompileToSpv failed";
         return result;
     }
+    result.variant.default_uniforms = result.info.svs;
     WPShaderParser::UpdateSceneShaderVariantDescFromCompiledUnits(result.variant, units, spvs);
 
     auto shader               = std::make_shared<SceneShader>();
