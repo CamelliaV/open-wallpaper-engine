@@ -323,6 +323,7 @@ equal(
 equal(main.discover.download, nil, "download callback must be absent")
 equal(main.discover.resolve, nil, "resolve callback must be absent")
 equal(main.discover.tags, nil, "dynamic tag callback must be absent")
+equal(main.source.remove, nil, "source remove callback must be absent")
 truthy(type(main.subscription.status) == "function", "subscription.status missing")
 truthy(type(main.qrlogin.begin) == "function", "qrlogin.begin missing")
 
@@ -704,19 +705,33 @@ equal(classify_calls, 0, "remote calls must not classify local projects")
 local steam_root = "/fixture/steam"
 local workshop = steam_root .. project.WORKSHOP
 local item_dir = workshop .. "/3765064055"
+local local_projects = steam_root .. project.PROJECTS_REL .. "/myprojects"
+local local_item_dir = local_projects .. "/local-fixture"
 local source_ctx = {
     libraries = function() return { steam_root } end,
     fs = {
         exists = function(path)
             return path == workshop
+                or path == local_projects
                 or path == item_dir .. "/project.json"
                 or path == item_dir .. "/scene.pkg"
                 or path == item_dir .. "/preview.jpg"
+                or path == local_item_dir .. "/project.json"
+                or path == local_item_dir .. "/scene.pkg"
+                or path == local_item_dir .. "/preview.jpg"
         end,
-        list_dirs = function(path) return path == workshop and { item_dir } or {} end,
+        list_dirs = function(path)
+            if path == workshop then return { item_dir } end
+            if path == local_projects then return { local_item_dir } end
+            return {}
+        end,
         basename = function(path) return path:match("([^/]+)$") end,
         read = function(path)
-            if path == item_dir .. "/project.json" then return "fixture-project" end
+            if path == item_dir .. "/project.json"
+                or path == local_item_dir .. "/project.json"
+            then
+                return "fixture-project"
+            end
             return nil
         end,
         glob = function() return {} end,
@@ -736,9 +751,11 @@ local source_ctx = {
     log = function() end,
 }
 local source_items = main.source.scan(source_ctx)
-equal(classify_calls, 1, "explicit source scan must classify local projects")
-equal(#source_items, 1, "source scan item count")
+equal(classify_calls, 2, "explicit source scan must classify local projects")
+equal(#source_items, 2, "source scan item count")
 equal(source_items[1].resource, item_dir .. "/scene.pkg", "source scan resource")
+equal(source_items[1].external_id, "3765064055", "source Workshop subscription id")
+equal(source_items[2].external_id, nil, "local project must not expose a subscription id")
 project.classify = original_classify
 
 print("OWE waywallen Lua contract fixtures passed")
