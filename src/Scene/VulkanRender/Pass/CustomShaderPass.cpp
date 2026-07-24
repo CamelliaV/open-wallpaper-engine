@@ -664,6 +664,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
     {
         VkPipelineColorBlendAttachmentState color_blend {};
         VkAttachmentLoadOp                  loadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        const auto                          blendmode = material_ref.blenmode;
         {
             VkColorComponentFlags colorMask =
                 VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
@@ -673,7 +674,6 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
             if (writes_alpha) colorMask |= VK_COLOR_COMPONENT_A_BIT;
             color_blend.colorWriteMask = colorMask;
 
-            auto blendmode = material_ref.blenmode;
             SetBlend(blendmode, color_blend);
             SetAlphaBlendWritePolicy(color_blend, writes_alpha);
             m_desc.blending = color_blend.blendEnable;
@@ -691,6 +691,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         GraphicsPipeline pipeline_state;
         pipeline_state.toDefault();
         pipeline_state.setSampleCount(m_desc.samples);
+        SetAlphaToCoverage(blendmode, pipeline_state.multisample);
         if (has_depth_attachment) SetDepthState(material_ref, pipeline_state.depth);
         SetCullMode(material_ref.cull_mode, pipeline_state.raster);
         const bool          has_index = m_desc.draw_buffers.hasIndex();

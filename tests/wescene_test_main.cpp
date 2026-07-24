@@ -1461,6 +1461,7 @@ const char* BlendModeStr(owe::BlendMode m) {
     case owe::BlendMode::Disable: return "disable";
     case owe::BlendMode::Translucent: return "translucent";
     case owe::BlendMode::Additive: return "additive";
+    case owe::BlendMode::AlphaToCoverage: return "alpha-to-coverage";
     case owe::BlendMode::Normal: return "normal";
     }
     return "?";

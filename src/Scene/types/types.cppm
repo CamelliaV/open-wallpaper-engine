@@ -74,6 +74,7 @@ enum class BlendMode
     Disable,
     Translucent,
     Additive,
+    AlphaToCoverage,
     Normal
 };
 

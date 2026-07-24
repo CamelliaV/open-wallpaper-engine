@@ -169,6 +169,25 @@ float ReadFloat(const rstd::vec::Vec<rstd::u8>& bytes, rstd::usize offset) {
 
 } // namespace
 
+TEST(PassCommon, ConfiguresAlphaToCoverageWithoutColorBlending) {
+    VkPipelineColorBlendAttachmentState blend {};
+    owe::vulkan::SetBlend(owe::BlendMode::AlphaToCoverage, blend);
+    EXPECT_FALSE(blend.blendEnable);
+
+    VkPipelineMultisampleStateCreateInfo multisample {};
+    owe::vulkan::SetAlphaToCoverage(owe::BlendMode::AlphaToCoverage, multisample);
+    EXPECT_TRUE(multisample.alphaToCoverageEnable);
+
+    VkAttachmentLoadOp load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    owe::vulkan::SetAttachmentLoadOp(owe::BlendMode::AlphaToCoverage, load_op);
+    EXPECT_EQ(load_op, VK_ATTACHMENT_LOAD_OP_LOAD);
+
+    owe::SceneMaterial material;
+    material.blenmode    = owe::BlendMode::AlphaToCoverage;
+    material.depth_write = true;
+    EXPECT_TRUE(owe::vulkan::EffectiveDepthWrite(material));
+}
+
 TEST(UniformBufferLayout, PreservesReflectedSlots) {
     auto members = rstd::vec::Vec<owe::resource::ShaderArtifactUniformMember>::make();
     members.push(owe::resource::ShaderArtifactUniformMember {

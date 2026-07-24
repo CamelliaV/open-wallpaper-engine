@@ -1245,6 +1245,8 @@ BlendMode ParseBlendMode(std::string_view str) {
         bm = BlendMode::Translucent;
     } else if (str == "additive") {
         bm = BlendMode::Additive;
+    } else if (str == "alphatocoverage") {
+        bm = BlendMode::AlphaToCoverage;
     } else if (str == "normal") {
         bm = BlendMode::Normal;
     } else if (str == "disabled") {
@@ -1453,7 +1455,8 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
                   bool* out_geometry_shader = nullptr) {
     if (out_geometry_shader) *out_geometry_shader = false;
 
-    auto& material = *pMaterial;
+    auto& material   = *pMaterial;
+    auto  blend_mode = ParseBlendMode(wpmat.blending);
 
     std::unique_ptr<WPShaderInfo> upWPShaderInfo(nullptr);
     if (pWPShaderInfo == nullptr) {
@@ -1536,6 +1539,9 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
 
     for (const auto& el : wpmat.combos) {
         pWPShaderInfo->combos[el.first] = std::to_string(el.second);
+    }
+    if (blend_mode == BlendMode::AlphaToCoverage) {
+        pWPShaderInfo->combos["ALPHATOCOVERAGE"] = "1";
     }
     ApplyLegacyAtmosphereLightCombo(wpmat, *pWPShaderInfo);
 
@@ -1665,7 +1671,7 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
         variant_desc, sd_units, shader->codes);
     shader->sampler_bindings = variant_desc.sampler_bindings;
 
-    material.blenmode    = ParseBlendMode(wpmat.blending);
+    material.blenmode    = blend_mode;
     material.depth_test  = ParseEnabled(wpmat.depthtest);
     material.depth_write = ParseEnabled(wpmat.depthwrite);
     material.cull_mode   = ParseCullMode(wpmat.cullmode);
