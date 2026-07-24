@@ -3259,6 +3259,7 @@ struct ParticleChildPtr {
     wpscene::ParticleChild* child { nullptr };
     SceneNode*              node_parent { nullptr };
     WPParticleSubSystem*    particle_parent { nullptr };
+    bool                    inherit_instance_override { false };
 
     // Effective world scale at node_parent. Particle child origins are
     // pre-divided by this so the shader's MVP scale recovers the authored
@@ -3267,17 +3268,19 @@ struct ParticleChildPtr {
 };
 
 wpscene::ParticleInstanceoverride ParticleOverrideForNode(const wpscene::ParticleObject& obj,
-                                                          bool                           is_child) {
+                                                          bool                           is_child,
+                                                          bool inherit_instance_override) {
     if (! is_child) return obj.instanceoverride;
 
     wpscene::ParticleInstanceoverride out;
-    const auto&                       parent = obj.instanceoverride;
-    out.enabled                              = parent.enabled;
-    out.alpha                                = parent.alpha;
-    out.overColor                            = parent.overColor;
-    out.overColorn                           = parent.overColorn;
-    out.color                                = parent.color;
-    out.colorn                               = parent.colorn;
+    if (! inherit_instance_override) return out;
+    const auto& parent = obj.instanceoverride;
+    out.enabled        = parent.enabled;
+    out.alpha          = parent.alpha;
+    out.overColor      = parent.overColor;
+    out.overColorn     = parent.overColorn;
+    out.color          = parent.color;
+    out.colorn         = parent.colorn;
     for (std::string_view field : { "alpha", "color", "colorn" }) {
         if (auto it = parent.bindings.find(std::string(field)); it != parent.bindings.end()) {
             out.bindings.emplace(it->first, it->second);
@@ -3345,10 +3348,10 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     // this node's local scale. Propagated to child particle nodes.
     Eigen::Vector3f node_world_scale = child_ptr.world_scale.cwiseProduct(spNode->Scale());
 
-    // Child presets inherit the placed object's opacity/tint but keep their
-    // own size, lifetime, rate and count.
-    auto override_state =
-        Arc<wpscene::ParticleInstanceoverride>::make(ParticleOverrideForNode(wppartobj, is_child));
+    // The placed object's opacity/tint enters its direct child presets only. A preset's own
+    // children keep their authored values instead of inheriting the scene override transitively.
+    auto override_state = Arc<wpscene::ParticleInstanceoverride>::make(
+        ParticleOverrideForNode(wppartobj, is_child, child_ptr.inherit_instance_override));
     auto& override = *override_state;
 
     auto& particle_obj = *p_particle_obj;
@@ -3553,10 +3556,11 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         ParseParticleObj(context,
                          wppartobj,
                          {
-                             .child           = &child,
-                             .node_parent     = spNode.as_ptr(),
-                             .particle_parent = particleSub.get(),
-                             .world_scale     = node_world_scale,
+                             .child                     = &child,
+                             .node_parent               = spNode.as_ptr(),
+                             .particle_parent           = particleSub.get(),
+                             .inherit_instance_override = ! is_child,
+                             .world_scale               = node_world_scale,
                          });
     }
 

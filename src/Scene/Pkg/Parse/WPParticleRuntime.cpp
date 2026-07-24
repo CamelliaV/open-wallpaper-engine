@@ -87,6 +87,20 @@ private:
     WPParticleAttributes m_attributes;
 };
 
+class WPWorldSpaceSpawnProgram {
+public:
+    explicit WPWorldSpaceSpawnProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
+
+    void Initialize(particle::ParticleSpawnContext& context) {
+        auto frame = WPParticleFrameFrom(context.frame);
+        auto value = MakeWPParticleRef(context.storage, m_attributes, context.slot);
+        value.position += frame->subsystem->InstanceState(frame->instance_index).bounded.position;
+    }
+
+private:
+    WPParticleAttributes m_attributes;
+};
+
 class WPTrailUpdateProgram {
 public:
     WPTrailUpdateProgram(WPParticleAttributes                                    attributes,
@@ -430,6 +444,10 @@ WPParticleSubSystem::~WPParticleSubSystem() = default;
 
 void WPParticleSubSystem::Finalize() {
     if (m_system.is_some()) return;
+    if (m_world_space) {
+        m_program.AddSpawn(
+            Box<dyn<particle::ParticleSpawnProgram>>::make(WPWorldSpaceSpawnProgram(m_attributes)));
+    }
     m_program.AddLifecycle(
         Box<dyn<particle::ParticleLifecycleProgram>>::make(WPLifecycleProgram(m_attributes)));
     m_program.AddEvent(Box<dyn<particle::ParticleEventProgram>>::make(WPChildEventProgram(*this)));
@@ -503,7 +521,7 @@ auto WPParticleSubSystem::FollowPosition(const particle::ParticleStorage& storag
                                          usize                            parent_instance_index,
                                          particle::ParticleSlot slot) const -> Eigen::Vector3f {
     auto value = MakeWPParticleConstRef(storage, m_attributes, slot);
-    auto pos   = m_instance_states[parent_instance_index].bounded.position + value.position;
+    auto pos   = RenderPosition(parent_instance_index, value.position);
     if (! m_follow_anchor.trail_renderer) return pos;
 
     float speed = value.velocity.norm();
@@ -514,6 +532,12 @@ auto WPParticleSubSystem::FollowPosition(const particle::ParticleStorage& storag
     float visual_half_length =
         (value.size * 0.5f) * m_follow_anchor.texture_ratio * trail_length * 0.5f;
     return pos + value.velocity.normalized() * visual_half_length;
+}
+
+auto WPParticleSubSystem::RenderPosition(usize                  instance_index,
+                                         const Eigen::Vector3f& position) const -> Eigen::Vector3f {
+    if (m_world_space) return position;
+    return m_instance_states[instance_index].bounded.position + position;
 }
 
 void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {

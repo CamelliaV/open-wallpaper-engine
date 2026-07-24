@@ -538,6 +538,8 @@ public:
         return m_trail_key;
     }
     auto AnimationSpec() const noexcept -> WPParticleAnimationSpec { return m_animation_spec; }
+    auto RenderPosition(usize instance_index, const Eigen::Vector3f& position) const
+        -> Eigen::Vector3f;
     auto Mesh() noexcept -> SceneMesh& { return *m_mesh; }
     auto System() noexcept -> particle::ParticleSystem&;
 

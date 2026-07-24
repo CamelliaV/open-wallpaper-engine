@@ -94,8 +94,7 @@ auto GenParticleData(particle::ParticleExtractContext& context,
                 particle_storage, subsystem.Attributes(), particle::ParticleSlot { slot_index });
             if (value.lifetime <= 0.0f) continue;
 
-            auto position =
-                subsystem.InstanceState(instance_index).bounded.position + value.position;
+            auto  position = subsystem.RenderPosition(instance_index, value.position);
             auto  size     = value.size * 0.5f;
             auto  lifetime = AnimationLifetime(value, subsystem.AnimationSpec());
             usize offset {};
@@ -196,9 +195,8 @@ auto GenParticlePointData(particle::ParticleExtractContext& context,
                 particle_storage, subsystem.Attributes(), particle::ParticleSlot { slot_index });
             if (value.lifetime <= 0.0f) continue;
 
-            auto render_position =
-                subsystem.InstanceState(instance_index).bounded.position + value.position;
-            auto lifetime = AnimationLifetime(value, subsystem.AnimationSpec());
+            auto render_position = subsystem.RenderPosition(instance_index, value.position);
+            auto lifetime        = AnimationLifetime(value, subsystem.AnimationSpec());
             for (usize index {}; index < one_size; ++index) data[index] = 0.0f;
             write3(position, render_position[0], render_position[1], render_position[2]);
             write4(texcoord,
@@ -274,8 +272,7 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
                                           particle::ParticleSlot { slots[index.to_primitive()] });
         };
         auto render_position = [&](const WPParticleConstRef& value) {
-            return (subsystem.InstanceState(instance_index).bounded.position + value.position)
-                .eval();
+            return subsystem.RenderPosition(instance_index, value.position);
         };
 
         float sequence_offset {};
@@ -319,9 +316,10 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
     return output_count;
 }
 
-auto GenRopeTrailSegments(const WPParticleConstRef& value, const Eigen::Vector3f& instance_position,
-                          const WPTrailHistoryAttribute& trails, WPGOption option,
-                          SceneVertexArray& vertices, usize output_index) -> usize {
+auto GenRopeTrailSegments(const WPParticleConstRef& value, const WPParticleSubSystem& subsystem,
+                          usize instance_index, const WPTrailHistoryAttribute& trails,
+                          WPGOption option, SceneVertexArray& vertices, usize output_index)
+    -> usize {
     auto state = trails.State(value.slot);
     if (state.len == usize()) return usize();
 
@@ -359,8 +357,9 @@ auto GenRopeTrailSegments(const WPParticleConstRef& value, const Eigen::Vector3f
     };
 
     auto point = [&](usize point_index) -> Eigen::Vector3f {
-        if (point_index == usize()) return (value.position + instance_position).eval();
-        return (trails.At(value.slot, state.len - point_index) + instance_position).eval();
+        if (point_index == usize()) return subsystem.RenderPosition(instance_index, value.position);
+        return subsystem.RenderPosition(instance_index,
+                                        trails.At(value.slot, state.len - point_index));
     };
 
     for (usize sample_index {}; sample_index < state.len; ++sample_index) {
@@ -403,13 +402,8 @@ auto GenRopeTrailData(particle::ParticleExtractContext& context,
             auto value = MakeWPParticleConstRef(
                 particle_storage, subsystem.Attributes(), particle::ParticleSlot { slot_index });
             if (value.lifetime <= 0.0f) continue;
-            output_count +=
-                GenRopeTrailSegments(value,
-                                     subsystem.InstanceState(instance_index).bounded.position,
-                                     *trails,
-                                     option,
-                                     vertices,
-                                     output_count);
+            output_count += GenRopeTrailSegments(
+                value, subsystem, instance_index, *trails, option, vertices, output_count);
         }
     }
     return output_count;
