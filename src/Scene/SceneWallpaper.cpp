@@ -98,6 +98,18 @@ auto CloneUserPropertyDiagnostics(slice<SceneUserPropertyDiagnostic> diagnostics
     return cloned;
 }
 
+float LocalTimeOfDay() {
+    auto  now        = rstd::time::SystemTime::now().as_unix_time();
+    auto  wall_clock = static_cast<std::time_t>(now.seconds.to_primitive());
+    auto* local      = std::localtime(&wall_clock);
+    if (local == nullptr) return 0.0f;
+
+    auto subsecond = static_cast<double>(now.nanoseconds.to_primitive()) /
+                     static_cast<double>(rstd::time::NANOS_PER_SEC.to_primitive());
+    auto seconds   = double(local->tm_hour * 3600 + local->tm_min * 60 + local->tm_sec) + subsecond;
+    return static_cast<float>(seconds / 86400.0);
+}
+
 Json MakeUserPropertyDescriptor(Json value) {
     if (value.get("value"_str).is_some()) return value;
     auto object = rstd::json::Map::make();
@@ -515,14 +527,15 @@ void SceneRenderController::onDraw() {
         // The runtime is a no-op when no ScriptScene is installed.
         {
             owe::script::FrameInputs fi;
-            fi.frametime = static_cast<float>(m_scene->Runtime().Frame().delta.to_primitive() *
-                                              m_speed.to_primitive());
-            fi.runtime   = static_cast<float>(m_scene->Runtime().Frame().elapsed.to_primitive());
-            auto ortho   = m_scene->Ortho();
-            fi.canvas_w  = static_cast<float>(ortho[usize()].to_primitive());
-            fi.canvas_h  = static_cast<float>(ortho[usize(1)].to_primitive());
-            fi.screen_w  = fi.canvas_w;
-            fi.screen_h  = fi.canvas_h;
+            fi.frametime   = static_cast<float>(m_scene->Runtime().Frame().delta.to_primitive() *
+                                                m_speed.to_primitive());
+            fi.runtime     = static_cast<float>(m_scene->Runtime().Frame().elapsed.to_primitive());
+            fi.time_of_day = LocalTimeOfDay();
+            auto ortho     = m_scene->Ortho();
+            fi.canvas_w    = static_cast<float>(ortho[usize()].to_primitive());
+            fi.canvas_h    = static_cast<float>(ortho[usize(1)].to_primitive());
+            fi.screen_w    = fi.canvas_w;
+            fi.screen_h    = fi.canvas_h;
             {
                 auto pos    = m_mouse_pos.load();
                 fi.cursor_x = pos[usize()];
