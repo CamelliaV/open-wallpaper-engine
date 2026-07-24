@@ -2118,7 +2118,9 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
                 const_value[0]         = const_value[0] * 2.0f - 1.0f;
                 const_value[1]         = const_value[1] * 2.0f - 1.0f;
             }
-            material.customShader.constValues[glname] = const_value;
+            material.SetShaderValue(
+                glname,
+                ShaderValue(std::span<const float>(const_value.data(), const_value.size())));
             if (auto it = wpmat.constantshadervalues_animations.find(name);
                 it != wpmat.constantshadervalues_animations.end()) {
                 auto curve = Arc<SceneAnimationCurve>::make(ToSceneAnimationCurve(it->second));
