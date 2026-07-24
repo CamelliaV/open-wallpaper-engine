@@ -99,14 +99,15 @@ auto CloneUserPropertyDiagnostics(slice<SceneUserPropertyDiagnostic> diagnostics
 }
 
 float LocalTimeOfDay() {
-    auto  now        = rstd::time::SystemTime::now().as_unix_time();
-    auto  wall_clock = static_cast<std::time_t>(now.seconds.to_primitive());
-    auto* local      = std::localtime(&wall_clock);
-    if (local == nullptr) return 0.0f;
+    auto local = rstd::time::OffsetDateTime::now_local();
+    if (local.is_err()) return 0.0f;
 
-    auto subsecond = static_cast<double>(now.nanoseconds.to_primitive()) /
+    auto time      = local->time();
+    auto subsecond = static_cast<double>(time.nanosecond().to_primitive()) /
                      static_cast<double>(rstd::time::NANOS_PER_SEC.to_primitive());
-    auto seconds   = double(local->tm_hour * 3600 + local->tm_min * 60 + local->tm_sec) + subsecond;
+    auto seconds   = double(time.hour().to_primitive() * 3600 + time.minute().to_primitive() * 60 +
+                            time.second().to_primitive()) +
+                     subsecond;
     return static_cast<float>(seconds / 86400.0);
 }
 
