@@ -4046,8 +4046,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         .horizontal = initial_halign,
         .vertical   = initial_valign,
         .origin     = Vector3f(obj.origin.data()),
-        .width      = text_bbox_w,
-        .height     = text_bbox_h,
+        .width      = text_w,
+        .height     = text_h,
     });
 
     auto compose_node =
@@ -4421,8 +4421,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         metrics.padding     = text_padding;
         const auto geometry = text::ResolveTextGeometry(geometry_policy, metrics);
         (void)runtime_targets->Apply(geometry);
-        anchor_state->width  = geometry.draw_width;
-        anchor_state->height = geometry.draw_height;
+        anchor_state->width  = metrics.text_width;
+        anchor_state->height = metrics.text_height;
         compose_ptr->SetSize({ geometry.draw_width, geometry.draw_height });
         apply_text_anchor();
         const float                  hx = geometry.draw_width * 0.5f;
