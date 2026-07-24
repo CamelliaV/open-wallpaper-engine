@@ -1082,7 +1082,7 @@ std::array<float, 2> ImageEffectTargetSize(const ParseContext&         context,
 }
 
 void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
-                         bool thick_format, bool trail_renderer) {
+                         bool thick_format) {
     (void)particle;
     std::vector<VertexAttrSpec> specs {
         VAttr::PositionVec4,
@@ -1098,14 +1098,12 @@ void SetRopeParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uin
     specs.push_back(VAttr::Color);
     mesh.SetPrimitive(MeshPrimitive::POINT);
     mesh.AddVertexArray(SceneVertexArray(MakeAttrSet(specs), usize(count)));
-    mesh.GetVertexArray(usize(0)).SetOption(
-        as_string_view(trail_renderer ? WE_PRENDER_ROPE_TRAIL : WE_PRENDER_ROPE), true);
+    mesh.GetVertexArray(usize(0)).SetOption(as_string_view(WE_PRENDER_ROPE), true);
     mesh.GetVertexArray(usize(0)).SetOption(as_string_view(WE_CB_THICK_FORMAT), thick_format);
 }
 
 struct ParticleRenderDesc {
     bool rope { false };
-    bool rope_trail { false };
     bool trail { false };
     bool geometry_shader { false };
 };
@@ -1113,9 +1111,8 @@ struct ParticleRenderDesc {
 ParticleRenderDesc DescribeParticleRender(const wpscene::ParticleRender& render) {
     ParticleRenderDesc desc;
     desc.rope            = render.name == "rope";
-    desc.rope_trail      = render.name == "ropetrail";
     desc.trail           = send_with(render.name, "trail");
-    desc.geometry_shader = desc.rope || desc.rope_trail || render.name == "sprite" || desc.trail;
+    desc.geometry_shader = desc.rope || render.name == "sprite" || desc.trail;
     return desc;
 }
 
@@ -3357,14 +3354,12 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     auto& particle_obj = *p_particle_obj;
     auto& vfs          = *context.vfs;
 
-    auto wppartRenderer    = particle_obj.renderers.at(0);
-    auto render_desc       = DescribeParticleRender(wppartRenderer);
-    bool render_rope       = render_desc.rope;
-    bool render_rope_trail = render_desc.rope_trail;
-    bool rope_shader       = render_rope || render_rope_trail;
-    bool hastrail          = render_desc.trail;
+    auto wppartRenderer = particle_obj.renderers.at(0);
+    auto render_desc    = DescribeParticleRender(wppartRenderer);
+    bool render_rope    = render_desc.rope;
+    bool hastrail       = render_desc.trail;
 
-    if (rope_shader) particle_obj.material.shader = "genericropeparticle";
+    if (render_rope) particle_obj.material.shader = "genericropeparticle";
 
     // wppartobj.origin[1] = context.ortho_h - wppartobj.origin[1];
 
@@ -3401,7 +3396,6 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     std::uint32_t maxcount = particle_obj.maxcount;
     maxcount               = std::min(maxcount, 20000u);
 
-    Option<Arc<WPParticleTrailUniformState>> trail_uniform_state;
     if (hastrail) {
         double          in_SegmentUVTimeOffset = 0.0;
         double          in_SegmentMaxCount     = maxcount - 1.0;
@@ -3411,16 +3405,11 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             (float)in_SegmentUVTimeOffset,
             (float)in_SegmentMaxCount,
         };
-        shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_RENDERVAR0)] = render_var;
-        if (render_rope_trail) {
-            trail_uniform_state = Some(Arc<WPParticleTrailUniformState>::make(
-                WPParticleTrailUniformState { .render_var = render_var }));
-        }
+        shaderInfo.baseConstSvs[rstd::cppstd::to_string(G_RENDERVAR0)]  = render_var;
         shaderInfo.combos[rstd::cppstd::to_string(WE_CB_TRAILRENDERER)] = "1";
-        if (! render_rope_trail)
-            shaderInfo.combos[rstd::cppstd::to_string(WE_CB_THICK_FORMAT)] = "1";
+        if (! render_rope) shaderInfo.combos[rstd::cppstd::to_string(WE_CB_THICK_FORMAT)] = "1";
     }
-    if (rope_shader) {
+    if (render_rope) {
         std::int32_t subdiv = static_cast<std::int32_t>(std::round(wppartRenderer.subdivision));
         if (subdiv < 0) subdiv = 0;
         shaderInfo.combos["TRAILSUBDIVISION"] = std::to_string(subdiv);
@@ -3458,16 +3447,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     bool  hasSprite          = material.hasSprite;
     (void)hasSprite;
 
-    bool          thick_format = material.hasSprite || (hastrail && ! render_rope_trail);
-    std::uint32_t trail_length = 0;
-    if (render_rope_trail) {
-        std::int32_t seg = wppartRenderer.segments.to_primitive();
-        if (seg < 1) seg = 1;
-        if (seg > 256) seg = 256;
-        trail_length = static_cast<std::uint32_t>(seg);
-    }
+    bool                   thick_format = material.hasSprite || (hastrail && ! render_rope);
     WPParticleFollowAnchor follow_anchor;
-    if (hastrail && ! render_rope_trail) {
+    if (hastrail && ! render_rope) {
         follow_anchor.trail_renderer = true;
         follow_anchor.length         = wppartRenderer.length;
         follow_anchor.max_length     = wppartRenderer.maxlength;
@@ -3477,24 +3459,23 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     auto spawn_type         = ParseSpawnType(child_data.type);
     auto max_instance_count = u32(
         static_cast<std::uint32_t>(std::max(child_data.maxcount.to_primitive(), std::int32_t(0))));
-    auto particleSub = Box<WPParticleSubSystem>::make(
-        *context.scene,
-        spMesh,
-        u32(maxcount),
-        f64(override.rate),
-        max_instance_count,
-        f64(child_data.probability),
-        spawn_type,
-        WPParticleAnimationSpec {
-            .mode                = animationmode,
-            .sequence_multiplier = sequencemultiplier,
-        },
-        follow_anchor,
-        u32(trail_length),
-        f64(render_rope_trail ? static_cast<double>(wppartRenderer.length) : 0.0),
-        f64(static_cast<double>(particle_obj.starttime)),
-        particle_obj.flags[wpscene::Particle::FlagEnum::wordspace],
-        trail_uniform_state.is_some() ? Some((*trail_uniform_state).clone()) : None());
+    auto particleSub =
+        Box<WPParticleSubSystem>::make(*context.scene,
+                                       spMesh,
+                                       u32(maxcount),
+                                       f64(override.rate),
+                                       max_instance_count,
+                                       f64(child_data.probability),
+                                       spawn_type,
+                                       WPParticleAnimationSpec {
+                                           .mode                = animationmode,
+                                           .sequence_multiplier = sequencemultiplier,
+                                       },
+                                       follow_anchor,
+                                       u32(),
+                                       f64(),
+                                       f64(static_cast<double>(particle_obj.starttime)),
+                                       particle_obj.flags[wpscene::Particle::FlagEnum::wordspace]);
 
     {
         auto mesh_capacity = particleSub->MaxParticleCapacity();
@@ -3503,17 +3484,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             return;
         }
         auto mesh_maxcount = mesh_capacity->to_primitive();
-        if (rope_shader) {
-            std::uint32_t rope_vertices = mesh_maxcount;
-            if (render_rope_trail) {
-                auto capacity = mesh_capacity->checked_mul(u32(trail_length));
-                if (capacity.is_none()) {
-                    rstd_error("particle rope capacity overflow for '{}'", spNode->Name());
-                    return;
-                }
-                rope_vertices = capacity->to_primitive();
-            }
-            SetRopeParticleMesh(mesh, particle_obj, rope_vertices, thick_format, render_rope_trail);
+        if (render_rope) {
+            SetRopeParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format);
         } else {
             SetParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format, use_geometry_shader);
         }
@@ -3545,12 +3517,6 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         context.scene.get(), mesh.Material(), particle_obj.material, shaderInfo);
     spNode->AddMesh(spMesh);
     SetWPUniformConfig(context, spNode, rstd::move(svData));
-    if (trail_uniform_state.is_some()) {
-        context.particle_trail_uniform_configs.push(ParseContext::ParticleTrailUniformConfigDraft {
-            .node          = spNode.clone(),
-            .uniform_state = rstd::move(*trail_uniform_state),
-        });
-    }
 
     for (auto& child : particle_obj.children) {
         ParseParticleObj(context,
