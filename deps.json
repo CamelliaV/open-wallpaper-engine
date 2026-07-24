@@ -49,7 +49,7 @@
   {
     "dest": "build/_flatpak_deps/rstd-src",
     "disable-shallow-clone": true,
-    "commit": "1897acb48f08cb76abcf09ab219ff767511c708b",
+    "commit": "9422a8949e7e1f8a761ff7e6d83dc20097ba92c9",
     "type": "git",
     "url": "https://github.com/litocpp/rstd.git",
     "x-cmake": {

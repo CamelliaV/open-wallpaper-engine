@@ -509,6 +509,12 @@ auto WPTexImageParser::ParseHeader(ref<str> name) const -> Result<ImageHeader, I
         std::vector<std::vector<float>> imageDatas(image_count);
         for (std::size_t i_image = 0; i_image < image_count; i_image++) {
             int mipmap_count = file.ReadInt32();
+            if (mipmap_count < 0) {
+                return Err(ImageParseError {
+                    .kind    = ImageParseErrorKind::InvalidData,
+                    .message = rstd::format("texture {} has a negative sprite mip count", name),
+                });
+            }
             for (int32_t i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
                 int32_t width  = file.ReadInt32();
                 int32_t height = file.ReadInt32();
@@ -523,26 +529,32 @@ auto WPTexImageParser::ParseHeader(ref<str> name) const -> Result<ImageHeader, I
                     (void)LZ4_compressed;
                     (void)decompressed_size;
                 }
-                long src_size = file.ReadInt32();
-                file.SeekCur(src_size);
+                std::int32_t src_size = file.ReadInt32();
+                if (src_size < 0 || ! file.SeekCur(src_size)) {
+                    return Err(ImageParseError {
+                        .kind    = ImageParseErrorKind::InvalidData,
+                        .message = rstd::format("texture {} has an invalid sprite mip body", name),
+                    });
+                }
             }
         }
         // sprite pos
         ver.texs                       = ReadTexVersion(file);
         header.extraHeader["texs"].val = ver.texs;
-        // texs out of [1,3] means the body walk above ended at the wrong
-        // offset (corrupt file or a layout drift this parser doesn't
-        // know). Reading framecount + frame records past that point gives
-        // us garbage, and worse, dereferences imageDatas with whatever
-        // the next 4 bytes happen to be — historically that asserted on
-        // an empty inner vector and aborted the whole process. Bail out
-        // with the structural fields we already populated; sprite-frame
-        // info is best-effort anyway in our renderer pipeline.
         if (ver.texs < 1 || ver.texs > 3) {
-            rstd_error("WPTexImageParser: unsupported texs version {} for {}", ver.texs, name);
-            return Ok(rstd::move(header));
+            return Err(ImageParseError {
+                .kind = ImageParseErrorKind::InvalidData,
+                .message =
+                    rstd::format("texture {} has unsupported texs version {}", name, ver.texs),
+            });
         }
         int32_t framecount = file.ReadInt32();
+        if (framecount <= 0) {
+            return Err(ImageParseError {
+                .kind    = ImageParseErrorKind::InvalidData,
+                .message = rstd::format("texture {} has no sprite frames", name),
+            });
+        }
         if (ver.sprite_has_atlas_size()) {
             std::int32_t width  = file.ReadInt32();
             std::int32_t height = file.ReadInt32();
@@ -603,6 +615,12 @@ auto WPTexImageParser::ParseHeader(ref<str> name) const -> Result<ImageHeader, I
             sf.yAxis[1] /= spriteHeight;
             sf.rate = sf.height / sf.width;
             header.spriteAnim.AppendFrame(sf);
+        }
+        if (header.spriteAnim.numFrames() == usize()) {
+            return Err(ImageParseError {
+                .kind    = ImageParseErrorKind::InvalidData,
+                .message = rstd::format("texture {} has no valid sprite frames", name),
+            });
         }
     } else {
         std::int32_t mipmap_count = file.ReadInt32();
