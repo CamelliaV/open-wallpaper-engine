@@ -3110,8 +3110,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
 
-        if (! wpimgobj.fullscreen && ! passthrough_can_composite_final &&
-            ! last_effect_can_composite_final) {
+        if (! wpimgobj.fullscreen && ! wpimgobj.copybackground &&
+            ! passthrough_can_composite_final && ! last_effect_can_composite_final) {
             wpscene::Material passthrough_mat;
             auto json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
             if (! json) {
