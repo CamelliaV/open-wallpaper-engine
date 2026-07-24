@@ -41,14 +41,12 @@ bool IsPkgVersionStamp(std::string_view stamp) {
 }
 
 auto LookupKey(Path path) -> rstd::io::Result<String> {
+    auto normalized = rstd_try(resolve_beneath("/"_str, path));
     auto output     = String::make("/"_str);
-    auto components = path.components();
+    auto components = normalized.as_path().components();
     while (true) {
         auto component = components.next();
         if (component.is_none()) break;
-        if (component->is_parent_dir()) {
-            return rstd::Err(FsError(rstd::io::error::ErrorKind::InvalidInput));
-        }
         if (! component->is_normal()) continue;
         auto value = component->as_os_str().to_str();
         if (value.is_none()) {

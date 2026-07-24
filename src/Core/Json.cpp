@@ -285,7 +285,7 @@ auto ParseJson(std::string_view source, rstd::json::ParseOptions options)
     return rstd::json::from_str(rstd::cppstd::as_str(source).unwrap(), options);
 }
 
-auto ReadJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions options)
+auto ReadJsonFile(fs::VFS& vfs, fs::Path path, rstd::json::ParseOptions options)
     -> rstd::Result<Json, JsonFileError> {
     auto io_error = [](auto error) {
         return JsonFileError { JsonFileErrorKind::Io, rstd::format("{}", error) };
@@ -296,6 +296,16 @@ auto ReadJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions 
     auto content = rstd_try(fs::ReadFileContent(vfs, path), io_error);
     auto parsed  = rstd_try(ParseJson(content, options), parse_error);
     return Ok(rstd::move(parsed));
+}
+
+auto ReadAssetJsonFile(fs::VFS& vfs, std::string_view path, rstd::json::ParseOptions options)
+    -> rstd::Result<Json, JsonFileError> {
+    auto resolved = fs::ResolveAssetPath(path);
+    if (resolved.is_err()) {
+        auto error = rstd::move(resolved).unwrap_err_unchecked();
+        return Err(JsonFileError { JsonFileErrorKind::Io, rstd::format("{}", error) });
+    }
+    return ReadJsonFile(vfs, resolved->as_path(), options);
 }
 
 auto Dump(const Json& value, Option<usize> indent) -> std::string {

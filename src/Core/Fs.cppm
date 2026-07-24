@@ -22,9 +22,17 @@ inline std::string ToStdString(Path path) {
     return rstd::cppstd::to_string(path.as_os_str().to_str().unwrap());
 }
 
-inline auto OpenBinary(VFS& vfs, std::string_view path) -> rstd::io::Result<BinaryReader> {
-    auto range = rstd_try(vfs.open_read(ToPath(path)));
+inline auto ResolveAssetPath(std::string_view path) -> rstd::io::Result<rstd::path::PathBuf> {
+    return resolve_beneath(ToPath("/assets"), ToPath(path));
+}
+
+inline auto OpenBinary(VFS& vfs, Path path) -> rstd::io::Result<BinaryReader> {
+    auto range = rstd_try(vfs.open_read(path));
     return Ok(BinaryReader(rstd::move(range)));
+}
+
+inline auto OpenBinary(VFS& vfs, std::string_view path) -> rstd::io::Result<BinaryReader> {
+    return OpenBinary(vfs, ToPath(path));
 }
 
 inline auto OpenBinaryWriter(VFS& vfs, std::string_view path, WriteOptions options)
@@ -41,9 +49,13 @@ inline auto OpenPhysicalBinary(std::string_view path) -> rstd::io::Result<Binary
     return Ok(BinaryReader(rstd::move(range)));
 }
 
-inline auto ReadFileContent(VFS& vfs, std::string_view path) -> rstd::io::Result<std::string> {
+inline auto ReadFileContent(VFS& vfs, Path path) -> rstd::io::Result<std::string> {
     auto reader = rstd_try(OpenBinary(vfs, path));
     return reader.read_all_string();
+}
+
+inline auto ReadFileContent(VFS& vfs, std::string_view path) -> rstd::io::Result<std::string> {
+    return ReadFileContent(vfs, ToPath(path));
 }
 
 } // namespace owe::fs

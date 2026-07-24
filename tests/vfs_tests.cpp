@@ -264,4 +264,23 @@ TEST(PkgFs, PreservesUtf8WhileFoldingAsciiPathCase) {
     EXPECT_EQ(ReadText(std::move(source).unwrap_unchecked()), "hello");
 }
 
+TEST(PkgFs, ResolvesAuthoredParentPathsInsideAssetRoot) {
+    TempDirectory temp;
+    auto          path = temp.path / "parent.pkg";
+    WritePkg(path, 5, "../海景画/particles/snow.json");
+
+    auto pkg = owe::fs::WPPkgFs::open(owe::fs::ToPath(path.string()));
+    ASSERT_TRUE(pkg.is_ok());
+
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.mount("/assets"_str, pkg->mount_handle()).is_ok());
+    auto asset = owe::fs::ResolveAssetPath("../海景画/particles/snow.json");
+    ASSERT_TRUE(asset.is_ok());
+    EXPECT_EQ(owe::fs::ToStdString(asset->as_path()), "/assets/海景画/particles/snow.json");
+
+    auto source = vfs.open_read(asset->as_path());
+    ASSERT_TRUE(source.is_ok());
+    EXPECT_EQ(ReadText(std::move(source).unwrap_unchecked()), "hello");
+}
+
 } // namespace

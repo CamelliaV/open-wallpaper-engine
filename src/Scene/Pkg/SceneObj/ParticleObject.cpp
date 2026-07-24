@@ -13,8 +13,8 @@ using namespace rstd::literals;
 namespace
 {
 
-auto LoadJsonFile(owe::fs::VFS& vfs, const std::string& path) -> std::optional<owe::Json> {
-    auto parsed = owe::ReadJsonFile(vfs, path);
+auto LoadAssetJsonFile(owe::fs::VFS& vfs, std::string_view path) -> std::optional<owe::Json> {
+    auto parsed = owe::ReadAssetJsonFile(vfs, path);
     if (parsed.is_err()) {
         auto error = rstd::move(parsed).unwrap_err_unchecked();
         rstd_error("Can't load json {}: {}", path, error.message.as_str());
@@ -33,7 +33,7 @@ bool ParticleChild::FromJson(const owe::Json& json, fs::VFS& vfs) {
         return false;
     }
 
-    auto jParticle = LoadJsonFile(vfs, "/assets/" + name);
+    auto jParticle = LoadAssetJsonFile(vfs, name);
     if (! jParticle) return false;
 
     if (! obj.FromJson(*jParticle, vfs)) return false;
@@ -234,7 +234,7 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
     if (json.get("material"_str).is_some()) {
         std::string matPath;
         owe::GetJsonValue(json, "material", matPath);
-        auto jMat = LoadJsonFile(vfs, "/assets/" + matPath);
+        auto jMat = LoadAssetJsonFile(vfs, matPath);
         if (! jMat) return false;
         material.FromJson(*jMat);
     } else {
@@ -286,7 +286,7 @@ bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion 
 
     AbsorbAllFieldBindings(json, field_bindings);
 
-    auto jParticle = LoadJsonFile(vfs, "/assets/" + particle);
+    auto jParticle = LoadAssetJsonFile(vfs, particle);
     if (! jParticle) return false;
     if (! particleObj.FromJson(*jParticle, vfs)) return false;
     return true;

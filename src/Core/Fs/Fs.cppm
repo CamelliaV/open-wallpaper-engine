@@ -121,6 +121,28 @@ bool is_readonly(const rstd::io::error::Error& error) {
 
 } // namespace detail
 
+auto resolve_beneath(Path root, Path path) -> rstd::io::Result<rstd::path::PathBuf> {
+    auto  output     = rstd_try(detail::normalize_global(root));
+    auto  components = path.components();
+    usize depth {};
+
+    while (true) {
+        auto component = components.next();
+        if (component.is_none()) break;
+        if (component->is_parent_dir()) {
+            if (depth != usize()) {
+                output.pop();
+                --depth;
+            }
+            continue;
+        }
+        if (! component->is_normal()) continue;
+        output.push(Path(component->as_os_str()));
+        ++depth;
+    }
+    return Ok(rstd::move(output));
+}
+
 class PhysicalFs {
 public:
     PhysicalFs(const PhysicalFs&)                        = delete;
