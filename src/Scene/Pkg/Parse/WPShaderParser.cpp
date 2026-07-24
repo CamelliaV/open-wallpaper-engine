@@ -872,47 +872,22 @@ inline std::optional<IODecl> ParseIODecl(const std::string& line) {
                     rstd::cppstd::to_string(m->array) };
 }
 
-// (base, components) for a scalar / vector type. Recognizes HLSL (floatN /
-// intN / uintN / boolN) and GLSL (vecN / ivecN / uvecN / bvecN) spellings, plus
-// the scalar forms. components==0 means "don't widen" (matrices, unknown).
-struct ScalarVec {
-    std::string_view base;
-    unsigned         comps { 0 };
+enum class IODeclPrecedence
+{
+    KeepExisting,
+    PreferIncoming,
 };
-inline ScalarVec DecomposeVecType(std::string_view t) {
-    if (t.find('x') != std::string_view::npos) return {}; // floatRxC matrix
-    auto suffixed = [&](std::string_view base) -> ScalarVec {
-        if (t == base) return { base, 1 };
-        if (t.size() == base.size() + 1 && t.substr(0, base.size()) == base) {
-            char c = t.back();
-            if (c >= '2' && c <= '4') return { base, unsigned(c - '0') };
-        }
-        return {};
-    };
-    for (std::string_view base : { std::string_view("float"),
-                                   std::string_view("int"),
-                                   std::string_view("uint"),
-                                   std::string_view("bool") }) {
-        if (auto r = suffixed(base); r.comps) return r;
-    }
-    // GLSL vector spellings normalize to the matching HLSL base kind.
-    if (t == "vec2" || t == "vec3" || t == "vec4") return { "float", unsigned(t.back() - '0') };
-    if (t == "ivec2" || t == "ivec3" || t == "ivec4") return { "int", unsigned(t.back() - '0') };
-    if (t == "uvec2" || t == "uvec3" || t == "uvec4") return { "uint", unsigned(t.back() - '0') };
-    if (t == "bvec2" || t == "bvec3" || t == "bvec4") return { "bool", unsigned(t.back() - '0') };
-    return {};
-}
 
-// WE links a varying by name across stages; when the same name is declared with
-// different widths (e.g. VS `vec4 v_TexCoord` but FS `vec2 v_TexCoord` that
-// still reads `.zw`), the producing stage's wider type is the real interface and
-// the narrow consumer just swizzles a subset. fxc tolerates this; glslang
-// rejects the out-of-range swizzle. Pick the wider type (same base kind) so both
-// stages agree. Falls back to `a` when the types aren't comparable vectors.
-inline std::string WiderType(const std::string& a, const std::string& b) {
-    ScalarVec da = DecomposeVecType(a), db = DecomposeVecType(b);
-    if (da.comps == 0 || db.comps == 0 || da.base != db.base) return a;
-    return db.comps > da.comps ? b : a;
+inline void AddIODecl(std::vector<IODecl>& decls, const IODecl& decl, IODeclPrecedence precedence) {
+    for (auto& existing : decls) {
+        if (existing.name != decl.name) continue;
+        if (precedence == IODeclPrecedence::PreferIncoming) {
+            existing.type  = decl.type;
+            existing.array = decl.array;
+        }
+        return;
+    }
+    decls.push_back(decl);
 }
 
 // Pull all `attribute|varying|in|out TYPE NAME;` decls out, return them
@@ -1259,14 +1234,10 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
         std::string body          = StripUniforms(stripped);
 
         std::vector<IODecl> in_decls, out_decls;
-        auto                add_to = [](std::vector<IODecl>& v, const IODecl& d) {
-            for (auto& e : v) {
-                if (e.name == d.name) {
-                    e.type = WiderType(e.type, d.type);
-                    return;
-                }
-            }
-            v.push_back(d);
+        auto add_to = [](std::vector<IODecl>& v,
+                         const IODecl&        d,
+                         IODeclPrecedence     precedence = IODeclPrecedence::KeepExisting) {
+            AddIODecl(v, d, precedence);
         };
         auto add_in = [&](const IODecl& d) {
             add_to(in_decls, d);
@@ -1282,7 +1253,9 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
         }
         if (pre)
             for (auto& [k, v] : pre->output) {
-                if (auto d = ParseIODecl(v); d) add_in(*d);
+                if (auto d = ParseIODecl(v); d) {
+                    add_to(in_decls, *d, IODeclPrecedence::PreferIncoming);
+                }
             }
         if (next)
             for (auto& [k, v] : next->input) {
@@ -1328,27 +1301,26 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
     std::string stage3 = StripUniforms(stage2);
 
     // Partition IO decls into VS-attributes (`a` storage) and varyings
-    // (everything else). The cross-stage union ensures vert and frag pick
-    // identical location indices alphabetically.
+    // (everything else). The producing stage owns each cross-stage interface
+    // type; consumers only contribute names missing from that interface.
     std::vector<IODecl> attrs, varyings;
-    auto                add = [&](const IODecl& d) {
+    auto add = [&](const IODecl& d, IODeclPrecedence precedence = IODeclPrecedence::KeepExisting) {
         std::vector<IODecl>& v = (d.storage == 'a') ? attrs : varyings;
-        for (auto& e : v) {
-            if (e.name == d.name) {
-                e.type = WiderType(e.type, d.type);
-                return;
-            }
-        }
-        v.push_back(d);
+        AddIODecl(v, d, precedence);
     };
     for (const auto& d : io_decls) add(d);
-    auto add_from_line = [&](const std::string& line) {
-        if (auto d = ParseIODecl(line); d) add(*d);
+    auto add_from_line = [&](const std::string& line, IODeclPrecedence precedence) {
+        if (auto d = ParseIODecl(line); d) add(*d, precedence);
     };
-    if (pre)
-        for (auto& [k, v] : pre->output) add_from_line(v);
-    if (next)
-        for (auto& [k, v] : next->input) add_from_line(v);
+    if (unit.stage == ShaderType::VERTEX && next) {
+        for (auto& [k, v] : next->input) {
+            add_from_line(v, IODeclPrecedence::KeepExisting);
+        }
+    } else if (unit.stage == ShaderType::FRAGMENT && pre) {
+        for (auto& [k, v] : pre->output) {
+            add_from_line(v, IODeclPrecedence::PreferIncoming);
+        }
+    }
 
     // Synthesize the HLSL entry point: static globals for every attr /
     // varying, WW_VSIn/WW_VSOut/WW_PSIn structs, and a main_vs / main_ps
@@ -1407,14 +1379,16 @@ Finalprocessor(const WPShaderUnit& unit, const WPPreprocessorInfo* pre,
 using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
-constexpr std::uint32_t               kShaderCacheFormatVersion  = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion     = 3;
-constexpr std::uint32_t               kShaderCacheHeaderSize     = 112;
-constexpr std::uint32_t               kMaxShaderCacheStages      = 16;
-constexpr std::uint32_t               kMaxShaderCacheMapEntries  = 4096;
-constexpr std::uint32_t               kMaxShaderCacheSlots       = 1024;
-constexpr std::uint32_t               kMaxShaderCacheStringSize  = 32 * 1024 * 1024;
-constexpr std::uint32_t               kMaxShaderCachePayloadSize = 256 * 1024 * 1024;
+constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 4;
+// 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
+constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
+    kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());
+constexpr std::uint32_t kMaxShaderCacheStages      = 16;
+constexpr std::uint32_t kMaxShaderCacheMapEntries  = 4096;
+constexpr std::uint32_t kMaxShaderCacheSlots       = 1024;
+constexpr std::uint32_t kMaxShaderCacheStringSize  = 32 * 1024 * 1024;
+constexpr std::uint32_t kMaxShaderCachePayloadSize = 256 * 1024 * 1024;
 
 class ShaderCacheByteWriter {
 public:

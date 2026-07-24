@@ -365,6 +365,77 @@ void main() {
     EXPECT_EQ(spectrum.array_stride, 16u);
 }
 
+TEST(WPShaderParser, CompileSceneShaderVariantUsesNarrowProducerVaryingType) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "narrow-producer-varying-test";
+    desc.shader_name = "narrow-producer-varying-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/narrow-producer-varying-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+varying vec2 v_TexCoord;
+void main() {
+    v_TexCoord = a_Position.xy;
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/narrow-producer-varying-test.frag",
+        .source     = R"(
+varying vec4 v_TexCoord;
+void main() {
+    vec2 uv = v_TexCoord * vec2(1.0, 1.0);
+    gl_FragColor = vec4(uv, 0.0, 1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    ASSERT_EQ(result.shader->codes.size(), 2u);
+}
+
+TEST(WPShaderParser, CompileSceneShaderVariantUsesWideProducerVaryingType) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "wide-producer-varying-test";
+    desc.shader_name = "wide-producer-varying-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/wide-producer-varying-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+varying vec4 v_TexCoord;
+void main() {
+    v_TexCoord = vec4(a_Position.xy, 0.25, 0.75);
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/wide-producer-varying-test.frag",
+        .source     = R"(
+varying vec2 v_TexCoord;
+void main() {
+    gl_FragColor = vec4(v_TexCoord.zw, 0.0, 1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    ASSERT_EQ(result.shader->codes.size(), 2u);
+}
+
 TEST(WPShaderParser, CompileSceneShaderVariantAcceptsNativeMatrixConstructors) {
     owe::SceneShaderVariantDesc desc;
     desc.scene_id    = "matrix-constructor-test";
@@ -542,7 +613,7 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 3u);
+    EXPECT_EQ(read_u32(12), 4u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);
