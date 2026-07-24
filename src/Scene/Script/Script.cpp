@@ -1506,6 +1506,8 @@ export function sign(x) { return Math.sign(x); }
 export function fract(x) { return x - Math.floor(x); }
 export function deg2rad(d) { return d * (Math.PI / 180); }
 export function rad2deg(r) { return r * (180 / Math.PI); }
+deg2rad.valueOf = () => Math.PI / 180;
+rad2deg.valueOf = () => 180 / Math.PI;
 )JS";
 
 // WE's `WEVector` module. Corpus only exercises `angleVector2` (degrees ->
@@ -1965,6 +1967,15 @@ JSValue NodeGetTransformMatrix(JSContext* ctx, JSValueConst this_val, int, JSVal
     return obj;
 }
 
+JSValue NodeRotateObjectSpace(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* n = GetLayerNode(this_val);
+    if (! n || argc < 1) return JS_UNDEFINED;
+    double x = 0, y = 0, z = 0;
+    if (! ReadXYZ(ctx, argv[0], x, y, z)) return JS_UNDEFINED;
+    n->RotateObjectSpace({ float(x), float(y), float(z) });
+    return JS_UNDEFINED;
+}
+
 JSValue BoneTransformTranslation(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "__wwTranslation");
     if (! JS_IsUndefined(v)) return v;
@@ -2316,6 +2327,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("pointsize", NodeGetPointSize, NodeSetPointSize),
     JS_CFUNC_DEF("getParent", 0, NodeGetParent),
     JS_CFUNC_DEF("getTransformMatrix", 0, NodeGetTransformMatrix),
+    JS_CFUNC_DEF("rotateObjectSpace", 1, NodeRotateObjectSpace),
     JS_CFUNC_DEF("getChildren", 0, NodeGetChildren),
     JS_CFUNC_DEF("getName", 0, NodeGetName),
     JS_CFUNC_DEF("getLayer", 1, NodeGetLayer),

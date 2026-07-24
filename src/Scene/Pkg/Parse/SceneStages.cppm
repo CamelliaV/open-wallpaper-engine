@@ -42,6 +42,11 @@ struct PuppetLayerRegistry {
     HashMap<SceneNode*, Arc<WPPuppetLayer>> fallback_by_node;
 };
 
+struct WPSceneShaderEnvironment {
+    bool fog_distance { false };
+    bool fog_height { false };
+};
+
 // Per-Parse state. Built by BuildContext, mutated by ProcessObjects,
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
@@ -59,10 +64,11 @@ struct ParseContext {
         return Some(shader_cache_directory->path());
     }
 
-    ShaderValueMap         global_base_uniforms;
-    Option<Arc<SceneNode>> effect_camera_node;
-    Option<Arc<SceneNode>> global_camera_node;
-    Option<Arc<SceneNode>> global_perspective_camera_node;
+    ShaderValueMap           global_base_uniforms;
+    WPSceneShaderEnvironment shader_environment;
+    Option<Arc<SceneNode>>   effect_camera_node;
+    Option<Arc<SceneNode>>   global_camera_node;
+    Option<Arc<SceneNode>>   global_perspective_camera_node;
 
     // Lazily allocated by WireFieldScripts as objects with script
     // bindings come in. Installed onto the Scene by FinalizeScene.

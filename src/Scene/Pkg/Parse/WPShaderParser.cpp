@@ -236,19 +236,17 @@ float4 mod(float4 a, float  b) { return a - b * floor(a / b); }
 #define texture(t, uv)             texSample2D((t), (uv))
 #define textureLod(t, uv, lod)     texSample2DLod((t), (uv), (lod))
 
-// PerformLighting_V1 is referenced by WE's generic4/genericparticle PBR
-// shaders but its body is normally injected by WE's HLSL toolchain based
-// on `LIGHTS_*` combos. We don't have that injection step; stub here so
-// compilation succeeds. The stub is "albedo × view-aligned shading" —
-// darker than WE but visible.
+// WE injects PerformLighting_V1 from the active scene lights. Until that
+// injection is available, an empty light set must contribute no direct light;
+// the caller combines this result with the scene's ambient light.
 float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
                           float3 specularTint, float3 f0, float roughness, float metallic) {
-    return albedo * max(dot(normalize(normal), normalize(viewVector)), 0.0);
+    return float3(0.0, 0.0, 0.0);
 }
 float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
                           float3 specularTint, float3 f0, float roughness, float metallic,
                           float ao) {
-    return albedo * ao * max(dot(normalize(normal), normalize(viewVector)), 0.0);
+    return float3(0.0, 0.0, 0.0);
 }
 
 __SHADER_TAIL__
@@ -1380,7 +1378,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion    = 4;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 5;
 // 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
 constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
     kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());

@@ -146,6 +146,10 @@ inline constexpr ref<str> G_LCP                = "g_LightsColorPremultiplied"_st
 inline constexpr ref<str> G_LCR                = "g_LightsColorRadius"_str;
 inline constexpr ref<str> G_LIGHTAMBIENTCOLOR  = "g_LightAmbientColor"_str;
 inline constexpr ref<str> G_LIGHTSKYLIGHTCOLOR = "g_LightSkylightColor"_str;
+inline constexpr ref<str> G_FOGDISTANCECOLOR   = "g_FogDistanceColor"_str;
+inline constexpr ref<str> G_FOGDISTANCEPARAMS  = "g_FogDistanceParams"_str;
+inline constexpr ref<str> G_FOGHEIGHTCOLOR     = "g_FogHeightColor"_str;
+inline constexpr ref<str> G_FOGHEIGHTPARAMS    = "g_FogHeightParams"_str;
 
 inline constexpr ref<str> G_TIME                           = "g_Time"_str;
 inline constexpr ref<str> G_FRAMETIME                      = "g_Frametime"_str;

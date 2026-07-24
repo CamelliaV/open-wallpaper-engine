@@ -23,6 +23,17 @@ Matrix4d SceneNode::GetLocalTrans() const {
     return trans.matrix();
 }
 
+void SceneNode::RotateObjectSpace(const Vector3f& rotation) {
+    const Quaternionf current = AngleAxisf(m_rotation.z(), Vector3f::UnitZ()) *
+                                AngleAxisf(m_rotation.y(), Vector3f::UnitY()) *
+                                AngleAxisf(m_rotation.x(), Vector3f::UnitX());
+    const Quaternionf local   = AngleAxisf(rotation.z(), Vector3f::UnitZ()) *
+                                AngleAxisf(rotation.y(), Vector3f::UnitY()) *
+                                AngleAxisf(rotation.x(), Vector3f::UnitX());
+    const Vector3f    zyx     = (current * local).toRotationMatrix().canonicalEulerAngles(2, 1, 0);
+    SetRotation({ zyx.z(), zyx.y(), zyx.x() });
+}
+
 void SceneNode::UpdateTrans() {
     if (! m_dirty) return;
     m_dirty = false;

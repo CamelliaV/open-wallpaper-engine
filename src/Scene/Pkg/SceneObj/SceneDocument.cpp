@@ -162,9 +162,6 @@ void parse_v22_plus(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "fogdistancecolor", g.fogdistancecolor, false);
     owe::GetJsonValue(json, "fogdistancestartdensity", g.fogdistancestartdensity, false);
     owe::GetJsonValue(json, "fogdistanceenddensity", g.fogdistanceenddensity, false);
-}
-
-void parse_v23_plus(SceneGeneral& g, const owe::Json& json) {
     owe::GetJsonValue(json, "fogheight", g.fogheight, false);
     owe::GetJsonValue(json, "fogheightstart", g.fogheightstart, false);
     owe::GetJsonValue(json, "fogheightend", g.fogheightend, false);
@@ -280,7 +277,6 @@ bool SceneGeneral::FromJson(const owe::Json& json, SceneVersion v) {
     if (wants(v, 20)) parse_v20_plus(*this, json);
     if (wants(v, 21)) parse_v21_plus(*this, json);
     if (wants(v, 22)) parse_v22_plus(*this, json);
-    if (wants(v, 23)) parse_v23_plus(*this, json);
     if (wants(v, 21)) parse_lightconfig(*this, json);
     AbsorbAllFieldBindings(json, field_bindings);
     capture_user_bindings(*this, json);

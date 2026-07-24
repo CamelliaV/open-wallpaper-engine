@@ -1064,9 +1064,13 @@ TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
                 let b = M.smoothstep(0, 1, 0.5);
                 let c = M.deg2rad(180);   // ≈ π
                 let d = M.rad2deg(Math.PI);  // 180
+                let e = 180 * M.deg2rad;
+                let f = Math.PI * M.rad2deg;
                 return Math.round(a * 100) + Math.round(b * 100) * 100
                        + Math.round(c * 1000) * 10000   // π*1000 ≈ 3142
-                       + Math.round(d) * 1000000000;     // 180 * 1e9
+                       + Math.round(d) * 1000000000
+                       + Math.round((e - c) * 1000000)
+                       + Math.round((f - d) * 1000000);
             }
         )JS",
         "test/wemath_smoothstep",

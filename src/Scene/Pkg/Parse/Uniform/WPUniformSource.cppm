@@ -17,6 +17,7 @@ enum class WPTransformUniformOutput : rstd::uint32_t
 {
     ModelInverse,
     Model,
+    NormalModel,
     AlternateModel,
     ModelViewProjection,
     ModelViewProjectionInverse,

@@ -12,8 +12,8 @@ namespace wpscene
 {
 
 // pkg container version (the "PKGV00xx" stamp at the head of scene.pkg).
-// Spans 1..23 in the live corpus. All scene.json schema evolution is gated
-// on this axis (lightconfig/fog/hdr added in v23, etc.).
+// Spans 1..23 in the live corpus. Scene JSON fields are read according to
+// the earliest container version observed to carry them.
 using SceneVersion = std::uint16_t;
 
 // scene.json self-reported revision (top-level "version" int). Independent
@@ -124,8 +124,6 @@ public:
     std::array<float, 3> fogdistancecolor { 1.0f, 1.0f, 1.0f };
     float                fogdistancestartdensity { 0.0f };
     float                fogdistanceenddensity { 0.0f };
-
-    // ---- PKGV0023+ ------------------------------------------------------
     bool                 fogheight { false };
     float                fogheightstart { 0.0f };
     float                fogheightend { 0.0f };

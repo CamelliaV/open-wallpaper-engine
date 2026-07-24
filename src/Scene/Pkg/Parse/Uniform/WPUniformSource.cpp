@@ -296,9 +296,11 @@ auto WPTransformUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) c
     auto model   = Bind(sink, Output::Model, G_M, UniformValueShape::Matrix(u32(4), u32(4)));
     if (model.is_err()) return model;
 
-    const rstd::array<BindingEntry<Output>, 12> entries {
+    const rstd::array<BindingEntry<Output>, 13> entries {
         BindingEntry<Output> {
             Output::ModelInverse, G_MI, UniformValueShape::Matrix(u32(4), u32(4)) },
+        BindingEntry<Output> {
+            Output::NormalModel, G_NORMALMODELMATRIX, UniformValueShape::Matrix(u32(3), u32(3)) },
         BindingEntry<Output> {
             Output::AlternateModel, G_AM, UniformValueShape::Matrix(u32(4), u32(4)) },
         BindingEntry<Output> {
@@ -348,6 +350,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     const auto frame            = context->Frame();
     const bool req_mi           = writer.Wants(Output::ModelInverse);
     const bool req_m            = writer.Wants(Output::Model);
+    const bool req_normal_model = writer.Wants(Output::NormalModel);
     const bool req_am           = writer.Wants(Output::AlternateModel);
     const bool req_mvp          = writer.Wants(Output::ModelViewProjection);
     const bool req_mvpi         = writer.Wants(Output::ModelViewProjectionInverse);
@@ -379,7 +382,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
                      rstd::array<float, 3> { position.x(), position.y(), position.z() });
     }
 
-    if (req_m || req_am || req_mvp || req_mi || req_mvpi || req_effect_model) {
+    if (req_m || req_normal_model || req_am || req_mvp || req_mi || req_mvpi || req_effect_model) {
         Matrix4d    model    = node.ModelTrans();
         const auto& parallax = m_state->CameraParallax();
         auto        attached = camera.GetAttachedNode();
@@ -405,6 +408,14 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
         }
 
         if (req_m) writer.Write(Output::Model, ShaderValue::fromMatrix(model));
+        if (req_normal_model) {
+            Matrix3d normal_model = model.block<3, 3>(0, 0);
+            if (std::abs(normal_model.determinant()) > 1e-12)
+                normal_model = normal_model.inverse().transpose();
+            else
+                normal_model.setIdentity();
+            writer.Write(Output::NormalModel, ShaderValue::fromMatrix(normal_model));
+        }
         if (req_am) writer.Write(Output::AlternateModel, ShaderValue::fromMatrix(model));
         if (req_mi) writer.Write(Output::ModelInverse, ShaderValue::fromMatrix(model.inverse()));
         if (req_mvp || req_mvpi) {

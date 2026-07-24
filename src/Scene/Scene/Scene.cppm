@@ -1189,6 +1189,7 @@ public:
         m_rotation = v;
         MarkTransDirty();
     }
+    void RotateObjectSpace(const Eigen::Vector3f& rotation);
     void SetTranslate(Eigen::Vector3f v) {
         m_translate = v;
         MarkTransDirty();
