@@ -266,7 +266,7 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
         std::sort(slots.begin(), slots.end(), [&](usize lhs, usize rhs) {
             return states[lhs].spawn_sequence < states[rhs].spawn_sequence;
         });
-        if (slots.empty()) continue;
+        if (slots.size() < 2) continue;
 
         auto particle = [&](usize index) {
             return MakeWPParticleConstRef(particle_storage,
@@ -289,11 +289,11 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
                 sequence_offset = -std::clamp(newest_age / emit_period, 0.0f, 1.0f);
         }
 
-        auto count = usize(slots.size());
-        for (usize index {}; index < count; ++index) {
+        auto segment_count = usize(slots.size() - 1);
+        for (usize index {}; index < segment_count; ++index) {
             auto previous_index = index == usize() ? usize() : index - usize(1);
-            auto next_index     = rstd::cmp::min(index + usize(1), count - usize(1));
-            auto after_index    = rstd::cmp::min(index + usize(2), count - usize(1));
+            auto next_index     = index + usize(1);
+            auto after_index    = rstd::cmp::min(index + usize(2), usize(slots.size() - 1));
             auto current        = particle(index);
             auto previous       = particle(previous_index);
             auto next           = particle(next_index);
@@ -301,7 +301,8 @@ auto GenRopeParticleData(particle::ParticleExtractContext& context,
 
             for (usize index {}; index < one_size; ++index) data[index] = 0.0f;
             write4(position, render_position(current), current.size * 0.5f);
-            write4(endpoint, render_position(next), static_cast<float>(count.to_primitive()));
+            write4(
+                endpoint, render_position(next), static_cast<float>(segment_count.to_primitive()));
             write4(previous_point,
                    render_position(previous),
                    static_cast<float>(index.to_primitive()) + sequence_offset);

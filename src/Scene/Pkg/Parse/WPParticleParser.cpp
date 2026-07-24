@@ -462,7 +462,7 @@ WPParticleParser::GenInitializer(const Json& wpj, WPParticleAttributes attribute
                     result -= normal * result.dot(normal);
                     if (result.squaredNorm() <= 1e-8f) result = forward;
                     result.normalize();
-                    pos += result * 0.005f / r.timescale;
+                    pos += result * 0.005f * static_cast<float>(r.timescale);
                     duration -= f64(0.01);
                 } while (duration > f64(0.01));
 
