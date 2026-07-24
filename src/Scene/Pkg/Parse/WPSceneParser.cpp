@@ -1228,6 +1228,7 @@ void LoadOperator(WPParticleSubSystem& system, const wpscene::Particle& particle
 }
 void LoadEmitter(WPParticleSubSystem& system, const wpscene::Particle& particle, float count,
                  i32 cp_start_index = i32()) {
+    usize emitter_index {};
     for (const auto& em : particle.emitters) {
         auto newEm = em;
         newEm.rate *= count;
@@ -1236,7 +1237,8 @@ void LoadEmitter(WPParticleSubSystem& system, const wpscene::Particle& particle,
         // authored as `controlpoint: 0` always samples cps[0] even when WE
         // wired it through `cps[cp_start_index]`.
         if (newEm.controlpoint >= i32()) newEm.controlpoint += cp_start_index;
-        system.AddEmitter(WPParticleParser::GenEmitter(newEm, system.Attributes()));
+        system.AddEmitter(
+            WPParticleParser::GenEmitter(newEm, system.Attributes(), emitter_index++));
     }
 }
 

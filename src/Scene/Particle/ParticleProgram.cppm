@@ -143,6 +143,12 @@ private:
     }
 };
 
+enum class ParticleEventPhase
+{
+    BeforeEmit,
+    AfterEmit,
+};
+
 struct ParticleSpawnContext {
     ParticleStorage&         storage;
     ParticleSlot             slot;
@@ -172,6 +178,7 @@ struct ParticleEventContext {
     ParticleStorage&         storage;
     ref<ParticleSlotEvents>  events;
     ref<dyn<rstd::any::Any>> frame;
+    ParticleEventPhase       phase;
     f64                      delta {};
     f64                      elapsed {};
 };
@@ -361,15 +368,6 @@ public:
         auto& events  = instance.Events();
         events.Clear();
 
-        ParticleEmitterContext emitter_context(storage,
-                                               events,
-                                               m_definition.program.m_spawn,
-                                               frame,
-                                               m_definition.max_slots,
-                                               delta,
-                                               elapsed);
-        for (auto& emitter : m_definition.program.m_emitters) emitter->Emit(emitter_context);
-
         ParticleLifecycleContext lifecycle_context {
             .storage = storage,
             .columns = columns,
@@ -381,15 +379,26 @@ public:
         for (auto& lifecycle : m_definition.program.m_lifecycle) {
             lifecycle->Update(lifecycle_context);
         }
+        bool had_lifecycle_events = ! events.spawned.is_empty() || ! events.died.is_empty();
+        ProcessEvents(
+            storage, events, frame, ParticleEventPhase::BeforeEmit, delta, elapsed, false);
+        events.Clear();
 
-        ParticleEventContext event_context {
-            .storage = storage,
-            .events  = ref<ParticleSlotEvents>::from_raw_parts(rstd::addressof(events)),
-            .frame   = frame,
-            .delta   = delta,
-            .elapsed = elapsed,
-        };
-        for (auto& event : m_definition.program.m_events) event->Process(event_context);
+        ParticleEmitterContext emitter_context(storage,
+                                               events,
+                                               m_definition.program.m_spawn,
+                                               frame,
+                                               m_definition.max_slots,
+                                               delta,
+                                               elapsed);
+        for (auto& emitter : m_definition.program.m_emitters) emitter->Emit(emitter_context);
+        ProcessEvents(storage,
+                      events,
+                      frame,
+                      ParticleEventPhase::AfterEmit,
+                      delta,
+                      elapsed,
+                      had_lifecycle_events);
 
         auto states = storage.ValuesMut(storage.SlotStateKey());
         for (usize index {}; index < states.len(); ++index) states[index].fresh = false;
@@ -414,6 +423,21 @@ public:
     }
 
 private:
+    void ProcessEvents(ParticleStorage& storage, ParticleSlotEvents& events,
+                       ref<dyn<rstd::any::Any>> frame, ParticleEventPhase phase, f64 delta,
+                       f64 elapsed, bool force) {
+        if (! force && events.spawned.is_empty() && events.died.is_empty()) return;
+        ParticleEventContext context {
+            .storage = storage,
+            .events  = ref<ParticleSlotEvents>::from_raw_parts(rstd::addressof(events)),
+            .frame   = frame,
+            .phase   = phase,
+            .delta   = delta,
+            .elapsed = elapsed,
+        };
+        for (auto& event : m_definition.program.m_events) event->Process(context);
+    }
+
     ParticleDefinition                    m_definition;
     rstd::vec::Vec<Box<ParticleInstance>> m_instances;
 };

@@ -1168,7 +1168,8 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
 }
 
 Box<dyn<particle::ParticleEmitterProgram>>
-WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleAttributes attributes) {
+WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleAttributes attributes,
+                             usize emitter_index) {
     WPParticleAudioResponse audio_response {
         .enable    = wpe.audioprocessingmode != u32(),
         .amount    = wpe.audioamount,
@@ -1191,7 +1192,7 @@ WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleAttributes a
         box.controlpoint   = wpe.controlpoint;
         box.audio_response = audio_response;
         return Box<dyn<particle::ParticleEmitterProgram>>::make(
-            WPBoxEmitterProgram(attributes, rstd::move(box)));
+            WPBoxEmitterProgram(attributes, rstd::move(box), emitter_index));
     } else if (wpe.name == "sphererandom") {
         WPParticleSphereEmitterArgs sphere;
         sphere.emit_speed     = wpe.rate;
@@ -1208,7 +1209,7 @@ WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleAttributes a
         sphere.controlpoint   = wpe.controlpoint;
         sphere.audio_response = audio_response;
         return Box<dyn<particle::ParticleEmitterProgram>>::make(
-            WPSphereEmitterProgram(attributes, rstd::move(sphere)));
+            WPSphereEmitterProgram(attributes, rstd::move(sphere), emitter_index));
     }
 
     struct NoopEmitter {

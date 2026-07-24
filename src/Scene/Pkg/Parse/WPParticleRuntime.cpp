@@ -42,9 +42,7 @@ public:
     explicit WPLifecycleProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
 
     void Update(particle::ParticleLifecycleContext& context) {
-        auto frame     = WPParticleFrameFrom(context.frame);
         auto particles = WPParticleBatch(context.storage, context.columns, m_attributes);
-        bool has_live  = false;
         for (usize index {}; index < particles.Len(); ++index) {
             auto value = particles.Particle(index);
             if (! value.state.active) continue;
@@ -55,12 +53,9 @@ public:
             value.lifetime += -context.delta.to_primitive();
             if (value.lifetime <= 0.0f) {
                 context.Kill(value.slot);
-            } else {
-                has_live = true;
             }
         }
         particles.ValidateStorage();
-        frame->subsystem->InstanceStateMut(frame->instance_index).no_live_particle = ! has_live;
     }
 
 private:
@@ -505,9 +500,10 @@ auto WPParticleSubSystem::QueryNewInstance() -> Option<WPParticleInstanceRef> {
 }
 
 auto WPParticleSubSystem::FollowPosition(const particle::ParticleStorage& storage,
+                                         usize                            parent_instance_index,
                                          particle::ParticleSlot slot) const -> Eigen::Vector3f {
     auto value = MakeWPParticleConstRef(storage, m_attributes, slot);
-    auto pos   = value.position;
+    auto pos   = m_instance_states[parent_instance_index].bounded.position + value.position;
     if (! m_follow_anchor.trail_renderer) return pos;
 
     float speed = value.velocity.norm();
@@ -608,7 +604,8 @@ void WPParticleSubSystem::UpdateBoundedState(WPParticleInstanceRef current) {
     if (bounded.particle_index >= isize() &&
         rstd::as_cast<usize>(bounded.particle_index) < parent_storage.Len()) {
         particle::ParticleSlot slot { .index = rstd::as_cast<usize>(bounded.particle_index) };
-        bounded.position = bounded.parent_subsystem->FollowPosition(parent_storage, slot);
+        bounded.position = bounded.parent_subsystem->FollowPosition(
+            parent_storage, bounded.parent_instance_index, slot);
         if (m_spawn_type == SpawnType::EVENT_DEATH) bounded.particle_index = isize(-1);
 
         if (! current.state->death && type_has_death) {
@@ -647,7 +644,17 @@ void WPParticleSubSystem::Advance(f64 frame_time, f64 child_frame_time, bool upd
         }
 
         m_frame.instance_index = index;
+        Warmup(current, frame_ref);
+        m_pending_child_deaths.clear();
         System().Advance(*current.instance, frame_ref, frame_time, m_time);
+        current.state->no_live_particle = true;
+        auto states =
+            current.instance->Storage().Values(current.instance->Storage().SlotStateKey());
+        for (const auto& state : states) {
+            if (! state.active) continue;
+            current.state->no_live_particle = false;
+            break;
+        }
         if (m_spawn_type == SpawnType::EVENT_DEATH) current.state->death = true;
     }
 
@@ -661,8 +668,12 @@ void WPParticleSubSystem::Advance(f64 frame_time, f64 child_frame_time, bool upd
     }
 }
 
-void WPParticleSubSystem::Warmup() {
+void WPParticleSubSystem::Warmup(WPParticleInstanceRef    current,
+                                 ref<dyn<rstd::any::Any>> frame_ref) {
+    if (! current.state->warmup_pending) return;
+    current.state->warmup_pending = false;
     if (m_start_time <= f64()) return;
+
     constexpr double kFrameTime  = 1.0 / 60.0;
     constexpr auto   kMaxFrames  = u32(240);
     auto             frame_count = u32(static_cast<rstd::uint32_t>(
@@ -670,16 +681,25 @@ void WPParticleSubSystem::Warmup() {
     frame_count                  = rstd::cmp::min(frame_count, kMaxFrames);
     auto frame_time =
         f64(m_start_time.to_primitive() / static_cast<double>(frame_count.to_primitive()));
+
+    auto saved_time          = m_frame.time;
+    auto saved_delta         = m_frame.delta;
+    auto saved_emitter_delta = m_frame.emitter_delta;
+    auto warmup_start        = std::max(0.0, m_time.to_primitive() - m_start_time.to_primitive());
     for (u32 index {}; index < frame_count; ++index) {
-        Advance(frame_time, frame_time, false);
+        m_frame.time = f64(warmup_start + frame_time.to_primitive() *
+                                              static_cast<double>((index + u32(1)).to_primitive()));
+        m_frame.delta         = frame_time;
+        m_frame.emitter_delta = frame_time;
+        m_pending_child_deaths.clear();
+        System().Advance(*current.instance, frame_ref, frame_time, m_frame.time);
     }
+    m_frame.time          = saved_time;
+    m_frame.delta         = saved_delta;
+    m_frame.emitter_delta = saved_emitter_delta;
 }
 
 void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
-    if (! m_started) {
-        m_started = true;
-        Warmup();
-    }
     auto rate =
         m_instance_override.is_some() ? (*m_instance_override)->rate : m_rate.to_primitive();
     Advance(frame_time * f64(std::max(rate, 0.0)), frame_time, update_mesh);
@@ -688,7 +708,7 @@ void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
 void WPParticleSubSystem::SpawnChild(WPParticleInstanceRef parent, WPParticleSubSystem& child,
                                      particle::ParticleSlot slot, Eigen::Vector3f position,
                                      bool fixed) {
-    if (! fixed) position = FollowPosition(parent.instance->Storage(), slot);
+    if (! fixed) position = FollowPosition(parent.instance->Storage(), parent.index, slot);
     auto instance = child.QueryNewInstance();
     if (instance.is_none()) return;
     instance->state->bounded = {
@@ -702,6 +722,40 @@ void WPParticleSubSystem::SpawnChild(WPParticleInstanceRef parent, WPParticleSub
     };
 }
 
+auto WPParticleSubSystem::HasBoundInstance(particle::ParticleInstance* parent,
+                                           usize                       parent_instance_index,
+                                           particle::ParticleSlot      slot) const -> bool {
+    for (const auto& state : m_instance_states) {
+        const auto& bounded = state.bounded;
+        if (! state.death && bounded.parent == parent &&
+            bounded.parent_instance_index == parent_instance_index &&
+            bounded.particle_index ==
+                isize(static_cast<rstd::intptr_t>(slot.index.to_primitive()))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void WPParticleSubSystem::ReleaseBoundInstances(particle::ParticleInstance* parent,
+                                                usize                       parent_instance_index,
+                                                particle::ParticleSlot      slot) {
+    for (usize index {}; index < System().InstanceCount(); ++index) {
+        auto& state   = m_instance_states[index];
+        auto& bounded = state.bounded;
+        if (bounded.parent != parent || bounded.parent_instance_index != parent_instance_index ||
+            bounded.particle_index !=
+                isize(static_cast<rstd::intptr_t>(slot.index.to_primitive()))) {
+            continue;
+        }
+        state.death = true;
+        if (m_spawn_type == SpawnType::EVENT_FOLLOW) {
+            System().Instance(index).Storage().Clear();
+            state.no_live_particle = true;
+        }
+    }
+}
+
 void WPParticleSubSystem::ProcessChildEvents(particle::ParticleEventContext& context) {
     auto                  frame = WPParticleFrameFrom(context.frame);
     WPParticleInstanceRef parent {
@@ -709,27 +763,55 @@ void WPParticleSubSystem::ProcessChildEvents(particle::ParticleEventContext& con
         .state    = rstd::addressof(m_instance_states[frame->instance_index]),
         .index    = frame->instance_index,
     };
-    for (const auto& transition : context.events->transitions) {
-        if (transition.spawned) {
-            for (auto& child : m_children) {
-                if (child->Type() != SpawnType::EVENT_FOLLOW &&
-                    child->Type() != SpawnType::EVENT_SPAWN) {
-                    continue;
-                }
-                SpawnChild(parent, *child, transition.slot);
-            }
-        }
-        if (transition.died) {
+
+    if (context.phase == particle::ParticleEventPhase::BeforeEmit) {
+        for (const auto& transition : context.events->transitions) {
+            if (! transition.died) continue;
+            m_pending_child_deaths.emplace_back(transition.slot);
             for (auto& child : m_children) {
                 if (child->Type() != SpawnType::EVENT_DEATH) continue;
-                SpawnChild(parent,
-                           *child,
-                           transition.slot,
-                           FollowPosition(parent.instance->Storage(), transition.slot),
-                           true);
+                SpawnChild(
+                    parent,
+                    *child,
+                    transition.slot,
+                    FollowPosition(parent.instance->Storage(), parent.index, transition.slot),
+                    true);
             }
         }
+        return;
     }
+
+    auto spawned = [&](particle::ParticleSlot slot) {
+        for (const auto& value : context.events->spawned) {
+            if (value == slot) return true;
+        }
+        return false;
+    };
+    for (const auto& slot : m_pending_child_deaths) {
+        bool replaced = spawned(slot);
+        for (auto& child : m_children) {
+            if (child->Type() == SpawnType::EVENT_FOLLOW && replaced) continue;
+            if (child->Type() != SpawnType::EVENT_FOLLOW &&
+                child->Type() != SpawnType::EVENT_SPAWN) {
+                continue;
+            }
+            child->ReleaseBoundInstances(parent.instance, parent.index, slot);
+        }
+    }
+    for (const auto& slot : context.events->spawned) {
+        for (auto& child : m_children) {
+            if (child->Type() == SpawnType::EVENT_FOLLOW &&
+                child->HasBoundInstance(parent.instance, parent.index, slot)) {
+                continue;
+            }
+            if (child->Type() != SpawnType::EVENT_FOLLOW &&
+                child->Type() != SpawnType::EVENT_SPAWN) {
+                continue;
+            }
+            SpawnChild(parent, *child, slot);
+        }
+    }
+    m_pending_child_deaths.clear();
 }
 
 void WPParticleRuntime::Update(ref<SceneFrame> frame) { Tick(frame->delta); }

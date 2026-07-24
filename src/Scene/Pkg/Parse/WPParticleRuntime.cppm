@@ -390,30 +390,29 @@ struct WPParticleSphereEmitterArgs {
 
 class WPBoxEmitterProgram {
 public:
-    WPBoxEmitterProgram(WPParticleAttributes attributes, WPParticleBoxEmitterArgs args)
-        : m_attributes(attributes), m_args(rstd::move(args)) {}
+    WPBoxEmitterProgram(WPParticleAttributes attributes, WPParticleBoxEmitterArgs args, usize index)
+        : m_attributes(attributes), m_args(rstd::move(args)), m_index(index) {}
 
     void Emit(particle::ParticleEmitterContext&);
 
 private:
     WPParticleAttributes     m_attributes;
     WPParticleBoxEmitterArgs m_args;
-    f64                      m_timer {};
-    f64                      m_elapsed {};
+    usize                    m_index {};
 };
 
 class WPSphereEmitterProgram {
 public:
-    WPSphereEmitterProgram(WPParticleAttributes attributes, WPParticleSphereEmitterArgs args)
-        : m_attributes(attributes), m_args(rstd::move(args)) {}
+    WPSphereEmitterProgram(WPParticleAttributes attributes, WPParticleSphereEmitterArgs args,
+                           usize index)
+        : m_attributes(attributes), m_args(rstd::move(args)), m_index(index) {}
 
     void Emit(particle::ParticleEmitterContext&);
 
 private:
     WPParticleAttributes        m_attributes;
     WPParticleSphereEmitterArgs m_args;
-    f64                         m_timer {};
-    f64                         m_elapsed {};
+    usize                       m_index {};
 };
 
 struct WPParticleAnimationSpec {
@@ -424,6 +423,11 @@ struct WPParticleAnimationSpec {
 class WPParticleSubSystem;
 
 struct WPParticleInstanceState {
+    struct EmitterState {
+        f64 timer {};
+        f64 elapsed {};
+    };
+
     struct BoundedData {
         particle::ParticleInstance* parent { nullptr };
         const WPParticleSubSystem*  parent_subsystem { nullptr };
@@ -433,13 +437,22 @@ struct WPParticleInstanceState {
         Eigen::Vector3f             position { 0.0f, 0.0f, 0.0f };
     } bounded;
 
-    bool death { false };
-    bool no_live_particle { false };
+    bool                         death { false };
+    bool                         no_live_particle { false };
+    bool                         warmup_pending { true };
+    rstd::vec::Vec<EmitterState> emitters;
+
+    auto Emitter(usize index) -> EmitterState& {
+        while (emitters.len() <= index) emitters.emplace_back();
+        return emitters[index];
+    }
 
     void Reset() {
         bounded          = {};
         death            = false;
         no_live_particle = false;
+        warmup_pending   = true;
+        emitters.clear();
     }
 };
 
@@ -512,8 +525,8 @@ public:
     auto MaxParticleCapacity() const noexcept -> Option<u32> {
         return m_max_count.checked_mul(m_max_instance_count);
     }
-    auto FollowPosition(const particle::ParticleStorage&, particle::ParticleSlot) const
-        -> Eigen::Vector3f;
+    auto FollowPosition(const particle::ParticleStorage&, usize parent_instance_index,
+                        particle::ParticleSlot) const -> Eigen::Vector3f;
     auto InstanceState(usize index) const -> const WPParticleInstanceState& {
         return m_instance_states[index];
     }
@@ -531,10 +544,12 @@ public:
     void ProcessChildEvents(particle::ParticleEventContext&);
 
 private:
-    void Warmup();
+    void Warmup(WPParticleInstanceRef, ref<dyn<rstd::any::Any>>);
     void Advance(f64 frame_time, f64 child_frame_time, bool update_mesh);
     void UpdateFrameInput(f64 frame_time);
     void UpdateBoundedState(WPParticleInstanceRef);
+    auto HasBoundInstance(particle::ParticleInstance*, usize, particle::ParticleSlot) const -> bool;
+    void ReleaseBoundInstances(particle::ParticleInstance*, usize, particle::ParticleSlot);
     void SpawnChild(WPParticleInstanceRef, WPParticleSubSystem&, particle::ParticleSlot,
                     Eigen::Vector3f position = Eigen::Vector3f::Zero(), bool fixed = false);
 
@@ -558,7 +573,6 @@ private:
     f64                                                             m_time {};
     f64                                                             m_start_time {};
     bool                                                            m_world_space { false };
-    bool                                                            m_started { false };
     u32                                                             m_max_instance_count { 1 };
     f64                                                             m_probability { 1.0 };
     SpawnType                                m_spawn_type { SpawnType::STATIC };
@@ -566,6 +580,7 @@ private:
     f64                                      m_trail_sample_interval {};
     f64                                      m_trail_sample_accumulator {};
     Option<Arc<WPParticleTrailUniformState>> m_trail_uniform_state;
+    rstd::vec::Vec<particle::ParticleSlot>   m_pending_child_deaths;
 };
 
 class WPParticleRuntime {

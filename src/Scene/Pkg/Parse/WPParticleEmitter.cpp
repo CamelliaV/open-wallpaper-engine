@@ -14,29 +14,43 @@ using namespace owe;
 namespace
 {
 
-auto EmitCount(f64& timer, float speed) -> u32 {
+auto EmitCount(f64 timer, float speed) -> u32 {
     if (speed <= 0.0f) return u32();
-    if (! std::isfinite(speed)) {
-        timer = f64();
-        return u32::MAX;
-    }
+    if (! std::isfinite(speed)) return u32::MAX;
 
     const double elapsed  = timer.to_primitive();
     const double duration = static_cast<double>(1.0f / speed);
     if (elapsed < duration) return u32();
 
     const double count = std::floor(elapsed / duration);
-    timer              = f64(std::fmod(elapsed, duration));
     if (count >= static_cast<double>(u32::MAX.to_primitive())) return u32::MAX;
     return u32(static_cast<rstd::uint32_t>(count));
 }
 
-auto ResolveEmitCount(f64& timer, float speed, u32 instantaneous, bool one_per_frame, bool empty)
+auto ResolveEmitCount(f64 timer, float speed, u32 instantaneous, bool one_per_frame, bool empty)
     -> u32 {
     if (instantaneous > u32() && empty) return instantaneous;
     if (speed <= 0.0f) return u32();
     auto count = EmitCount(timer, speed);
     return one_per_frame && count > u32(1) ? u32(1) : count;
+}
+
+void CommitEmitCount(f64& timer, float speed, u32 requested, u32 emitted, bool one_per_frame) {
+    if (requested == u32() || speed <= 0.0f) return;
+    if (! std::isfinite(speed)) {
+        timer = f64();
+        return;
+    }
+
+    const double duration  = static_cast<double>(1.0f / speed);
+    double       remaining = std::max(
+        0.0, timer.to_primitive() - duration * static_cast<double>(emitted.to_primitive()));
+    if (emitted < requested) {
+        remaining = std::min(remaining, duration);
+    } else if (one_per_frame) {
+        remaining = std::fmod(remaining, duration);
+    }
+    timer = f64(remaining);
 }
 
 auto EmitDuration(float speed) noexcept -> f64 {
@@ -132,20 +146,22 @@ void WPBoxEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
     auto frame = WPParticleFrameFrom(context.Frame());
     if (! InstanceCanEmit(frame)) return;
 
-    m_elapsed += frame->emitter_delta;
-    if (m_args.duration > 0.0f && m_elapsed > f64(m_args.duration)) return;
-    m_timer += frame->emitter_delta;
+    auto& emitter = frame->subsystem->InstanceStateMut(frame->instance_index).Emitter(m_index);
+    emitter.elapsed += frame->emitter_delta;
+    if (m_args.duration > 0.0f && emitter.elapsed > f64(m_args.duration)) return;
+    emitter.timer += frame->emitter_delta;
 
     auto  controlpoints = frame->subsystem->Controlpoints();
     auto  origin        = ResolveEmitterOrigin(controlpoints, m_args.controlpoint, m_args.origin);
     float emit_speed = m_args.emit_speed *
                        AudioResponseScale(frame->audio_average.as_slice(), m_args.audio_response);
-    auto  emit_count = ResolveEmitCount(m_timer,
+    auto  emit_count = ResolveEmitCount(emitter.timer,
                                         emit_speed,
                                         m_args.instantaneous,
                                         m_args.one_per_frame,
                                         context.Storage().Len() == usize());
-    for (u32 emitted {}; emitted < emit_count; ++emitted) {
+    u32   emitted {};
+    for (; emitted < emit_count; ++emitted) {
         auto slot = context.Acquire();
         if (slot.is_none()) break;
 
@@ -167,15 +183,17 @@ void WPBoxEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
         }
         context.Initialize(*slot, EmitDuration(emit_speed));
     }
+    CommitEmitCount(emitter.timer, emit_speed, emit_count, emitted, m_args.one_per_frame);
 }
 
 void WPSphereEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
     auto frame = WPParticleFrameFrom(context.Frame());
     if (! InstanceCanEmit(frame)) return;
 
-    m_elapsed += frame->emitter_delta;
-    if (m_args.duration > 0.0f && m_elapsed > f64(m_args.duration)) return;
-    m_timer += frame->emitter_delta;
+    auto& emitter = frame->subsystem->InstanceStateMut(frame->instance_index).Emitter(m_index);
+    emitter.elapsed += frame->emitter_delta;
+    if (m_args.duration > 0.0f && emitter.elapsed > f64(m_args.duration)) return;
+    emitter.timer += frame->emitter_delta;
 
     auto controlpoints = frame->subsystem->Controlpoints();
     auto origin        = ResolveEmitterOrigin(controlpoints, m_args.controlpoint, m_args.origin);
@@ -183,12 +201,13 @@ void WPSphereEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
     auto            dimensions = ActiveAxisCount(directions);
     float emit_speed = m_args.emit_speed *
                        AudioResponseScale(frame->audio_average.as_slice(), m_args.audio_response);
-    auto  emit_count = ResolveEmitCount(m_timer,
+    auto  emit_count = ResolveEmitCount(emitter.timer,
                                         emit_speed,
                                         m_args.instantaneous,
                                         m_args.one_per_frame,
                                         context.Storage().Len() == usize());
-    for (u32 emitted {}; emitted < emit_count; ++emitted) {
+    u32   emitted {};
+    for (; emitted < emit_count; ++emitted) {
         auto slot = context.Acquire();
         if (slot.is_none()) break;
 
@@ -207,4 +226,5 @@ void WPSphereEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
         }
         context.Initialize(*slot, EmitDuration(emit_speed));
     }
+    CommitEmitCount(emitter.timer, emit_speed, emit_count, emitted, m_args.one_per_frame);
 }

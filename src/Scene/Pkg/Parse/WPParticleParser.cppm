@@ -24,7 +24,7 @@ public:
     GenOperator(const Json&, Arc<wpscene::ParticleInstanceoverride>, WPParticleSubSystem&,
                 usize operator_index);
     static Box<dyn<particle::ParticleEmitterProgram>> GenEmitter(const wpscene::Emitter&,
-                                                                 WPParticleAttributes);
+                                                                 WPParticleAttributes, usize);
     static Box<dyn<particle::ParticleSpawnProgram>>
         GenOverride(Arc<wpscene::ParticleInstanceoverride>, WPParticleAttributes);
 };

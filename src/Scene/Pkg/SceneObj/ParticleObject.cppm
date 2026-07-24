@@ -115,6 +115,12 @@ public:
 };
 class ParticleChild {
 public:
+    enum class FlagEnum
+    {
+        eventfollow = 1, // 2
+    };
+    using EFlags = BitFlags<FlagEnum>;
+
     bool FromJson(const owe::Json&, fs::VFS&);
 
     // static
@@ -124,8 +130,8 @@ public:
     std::string type { "static" };
     std::string name;
     i32         maxcount { 20 };
+    EFlags      flags { 0 };
 
-    // flags
     i32   controlpointstartindex { 0 };
     float probability { 1.0f };
 

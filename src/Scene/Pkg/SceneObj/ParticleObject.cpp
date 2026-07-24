@@ -27,7 +27,17 @@ auto LoadAssetJsonFile(owe::fs::VFS& vfs, std::string_view path) -> std::optiona
 
 bool ParticleChild::FromJson(const owe::Json& json, fs::VFS& vfs) {
     owe::GetJsonValue(json, "name", name);
-    owe::GetJsonValue(json, "type", type);
+
+    uint32_t raw_flags {};
+    owe::GetJsonValue(json, "flags", raw_flags, false);
+    flags = EFlags(raw_flags);
+
+    if (json.get("type"_str).is_some()) {
+        owe::GetJsonValue(json, "type", type);
+    } else if (flags[FlagEnum::eventfollow]) {
+        // Legacy child entries encode event-follow attachment in flags without a type field.
+        type = "eventfollow";
+    }
 
     if (name.empty()) {
         return false;

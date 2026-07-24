@@ -82,6 +82,47 @@ struct TraceLifecycle {
     void Update(particle::ParticleLifecycleContext&) { trace->push(i32(3)); }
 };
 
+struct LifetimeSpawn {
+    particle::ParticleAttributeKey<TemperatureAttribute> lifetime;
+
+    void Initialize(particle::ParticleSpawnContext& context) {
+        particle::ParticleSlotWriter slot(context.storage, context.slot);
+        slot.Write(lifetime) = 1.0f;
+    }
+};
+
+struct ContinuousEmitter {
+    void Emit(particle::ParticleEmitterContext& context) {
+        auto slot = context.Acquire();
+        if (slot.is_some()) context.Initialize(*slot, f64());
+    }
+};
+
+struct ExpiringLifecycle {
+    particle::ParticleAttributeKey<TemperatureAttribute> lifetime;
+
+    void Update(particle::ParticleLifecycleContext& context) {
+        auto states = context.storage.Values(context.storage.SlotStateKey());
+        auto values = context.columns.ValuesMut(context.storage, lifetime);
+        for (usize index {}; index < states.len(); ++index) {
+            if (! states[index].active) continue;
+            values[index] -= context.delta.to_primitive();
+            if (values[index] <= 0.0f) {
+                context.Kill(particle::ParticleSlot { .index = index });
+            }
+        }
+    }
+};
+
+struct TransitionTraceEvent {
+    rstd::vec::Vec<i32>* trace;
+
+    void Process(particle::ParticleEventContext& context) {
+        if (! context.events->died.is_empty()) trace->push(i32(-1));
+        if (! context.events->spawned.is_empty()) trace->push(i32(1));
+    }
+};
+
 struct TraceEvent {
     rstd::vec::Vec<i32>* trace;
     usize*               spawned;
@@ -285,14 +326,51 @@ TEST(ParticleProgram, RunsPreparedProgramsInContractOrder) {
     system.Advance(instance, frame_ref, f64(1.0 / 60.0), f64(1.0 / 60.0));
     system.Extract(frame_ref);
 
-    ASSERT_EQ(trace.len(), usize(7));
-    for (usize index {}; index < trace.len(); ++index) {
-        EXPECT_EQ(trace[index], i32(static_cast<rstd::int32_t>(index.to_primitive() + 1)));
-    }
+    const rstd::array<i32, 7> expected {
+        i32(3), i32(1), i32(2), i32(4), i32(5), i32(6), i32(7),
+    };
+    ASSERT_EQ(trace.len(), expected.len());
+    for (usize index {}; index < trace.len(); ++index) EXPECT_EQ(trace[index], expected[index]);
     EXPECT_EQ(spawned, usize(1));
     particle::ParticleSlotReader value(instance.Storage(), particle::ParticleSlot {});
     EXPECT_FLOAT_EQ(value.Read(temperature), 42.0f);
     EXPECT_FALSE(value.Read(instance.Storage().SlotStateKey()).fresh);
+}
+
+TEST(ParticleProgram, ReusesExpiredCapacityWithoutAnEmptyFrame) {
+    particle::ParticleSchemaBuilder builder;
+    auto lifetime = Register<TemperatureAttribute>(builder, "lifetime"_str, "test"_str, 0.0f);
+    rstd::vec::Vec<i32> transitions;
+
+    particle::ParticleProgram program;
+    program.Require(lifetime);
+    program.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(ContinuousEmitter {}));
+    program.AddSpawn(
+        Box<dyn<particle::ParticleSpawnProgram>>::make(LifetimeSpawn { .lifetime = lifetime }));
+    program.AddLifecycle(Box<dyn<particle::ParticleLifecycleProgram>>::make(
+        ExpiringLifecycle { .lifetime = lifetime }));
+    program.AddEvent(Box<dyn<particle::ParticleEventProgram>>::make(
+        TransitionTraceEvent { .trace = rstd::addressof(transitions) }));
+
+    auto definition = particle::ParticleDefinition::Prepare(
+        rstd::move(builder).Build(), rstd::move(program), usize(1));
+    ASSERT_TRUE(definition.is_ok());
+    particle::ParticleSystem system(rstd::move(definition).unwrap());
+    auto&                    instance = system.CreateInstance();
+    EmptyFrame               frame;
+    auto                     frame_ref = rstd::dyn<rstd::any::Any>::from_ref(frame).as_ref();
+
+    system.Advance(instance, frame_ref, f64(1.0), f64(1.0));
+    EXPECT_TRUE(instance.Storage().Values(instance.Storage().SlotStateKey())[usize()].active);
+    system.Advance(instance, frame_ref, f64(1.0), f64(2.0));
+    EXPECT_TRUE(instance.Storage().Values(instance.Storage().SlotStateKey())[usize()].active);
+    EXPECT_FLOAT_EQ(instance.Storage().Values(lifetime)[usize()], 1.0f);
+
+    const rstd::array<i32, 3> expected { i32(1), i32(-1), i32(1) };
+    ASSERT_EQ(transitions.len(), expected.len());
+    for (usize index {}; index < transitions.len(); ++index) {
+        EXPECT_EQ(transitions[index], expected[index]);
+    }
 }
 
 TEST(WPParticleSubSystem, DerivesMeshCapacityFromItsOwnInstancePool) {
