@@ -226,3 +226,31 @@ auto MakeUniformBufferBinding(
     -> Result<Box<dyn<UniformBufferUpdate>>, UniformBufferUpdateError>;
 
 } // namespace owe::vulkan
+
+export namespace rstd
+{
+
+template<>
+struct Impl<fmt::Display, owe::vulkan::UniformBufferUpdateError>
+    : ImplBase<owe::vulkan::UniformBufferUpdateError> {
+    auto fmt(fmt::Formatter& formatter) const -> bool {
+        return formatter.write_fmt(fmt::Arguments::make("{}", this->self().message));
+    }
+};
+
+template<>
+struct Impl<fmt::Debug, owe::vulkan::UniformBufferUpdateError>
+    : ImplBase<owe::vulkan::UniformBufferUpdateError> {
+    auto fmt(fmt::Formatter& formatter) const -> bool {
+        return formatter.write_fmt(
+            fmt::Arguments::make("UniformBufferUpdateError({})", this->self().message));
+    }
+};
+
+template<>
+struct Impl<error::Error, owe::vulkan::UniformBufferUpdateError>
+    : DefaultInImpl<error::Error, owe::vulkan::UniformBufferUpdateError> {};
+
+} // namespace rstd
+
+static_assert(rstd::Impled<owe::vulkan::UniformBufferUpdateError, rstd::error::Error>);

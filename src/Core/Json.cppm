@@ -64,3 +64,29 @@ inline auto JsonFromStd(std::string_view value) -> Json {
 }
 
 } // namespace owe
+
+export namespace rstd
+{
+
+template<>
+struct Impl<fmt::Display, owe::JsonFileError> : ImplBase<owe::JsonFileError> {
+    auto fmt(fmt::Formatter& formatter) const -> bool {
+        return formatter.write_fmt(fmt::Arguments::make("{}", this->self().message));
+    }
+};
+
+template<>
+struct Impl<fmt::Debug, owe::JsonFileError> : ImplBase<owe::JsonFileError> {
+    auto fmt(fmt::Formatter& formatter) const -> bool {
+        return formatter.write_fmt(fmt::Arguments::make("JsonFileError(kind={}, message={})",
+                                                        static_cast<int>(this->self().kind),
+                                                        this->self().message));
+    }
+};
+
+template<>
+struct Impl<error::Error, owe::JsonFileError> : DefaultInImpl<error::Error, owe::JsonFileError> {};
+
+} // namespace rstd
+
+static_assert(rstd::Impled<owe::JsonFileError, rstd::error::Error>);
