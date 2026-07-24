@@ -130,6 +130,29 @@ TEST(WPTransformUniformSource, DescribesModelAsMat4) {
     EXPECT_EQ(sink_impl.model_shape.columns, rstd::u32(4));
 }
 
+TEST(WPTransformUniformSource, AppliesGeometryTransformAfterNodeTransform) {
+    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+    auto camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1.0, 1.0, -1.0, 1.0));
+    auto resolver = Arc<owe::WPUniformCameraResolver>::make(rstd::move(camera));
+    auto node     = Arc<owe::SceneNode>::make();
+    node->SetTranslate({ 100.0f, 200.0f, 0.0f });
+    node->SetScale({ 2.0f, 3.0f, 1.0f });
+    auto mesh = std::make_shared<owe::SceneMesh>();
+    mesh->SetGeometryTransform(
+        Eigen::Affine3d(Eigen::Translation3d(Eigen::Vector3d(10.0, -20.0, 0.0))).matrix());
+    node->AddMesh(mesh);
+    auto node_state = Arc<owe::WPUniformNodeState>::make(node.clone(), rstd::move(resolver));
+    owe::WPTransformUniformSource source(state.clone(), rstd::move(node_state));
+
+    auto model =
+        scene_test::Capture(owe::SceneFrame {}, source, owe::WPTransformUniformOutput::Model);
+
+    ASSERT_GT(model.size().to_primitive(), 13u);
+    EXPECT_NEAR(model[usize(12)], 120.0f, 1e-5f);
+    EXPECT_NEAR(model[usize(13)], 140.0f, 1e-5f);
+}
+
 TEST(WPAudioUniformSource, ExposesLogicalSpectrumValues) {
     auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     rstd::array<float, 64> left {};

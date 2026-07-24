@@ -57,6 +57,23 @@ TEST(WPPuppet, ArcOwnedLayerExposesBorrowedTransforms) {
     EXPECT_TRUE(transform->matrix().isApprox(Eigen::Matrix4f::Identity()));
 }
 
+TEST(WPMdlMesh, KeepsPuppetPositionsInMdlLocalSpace) {
+    owe::WPMdl::Mesh source;
+    source.positions.push(array<float, 3> { 244.0f, 349.5f, 0.0f });
+    source.texcoords.push(array<float, 2> { 0.25f, 0.75f });
+    source.indices.push(array<std::uint32_t, 3> { 0u, 0u, 0u });
+
+    owe::SceneMesh::Submesh submesh;
+    owe::WPMdlParser::GenMeshFromMdl(submesh, source);
+
+    ASSERT_EQ(submesh.vertex_arrays.size(), 1u);
+    const auto& vertices = submesh.vertex_arrays.front();
+    ASSERT_NE(vertices.Data(), nullptr);
+    EXPECT_FLOAT_EQ(vertices.Data()[0], 244.0f);
+    EXPECT_FLOAT_EQ(vertices.Data()[1], 349.5f);
+    EXPECT_FLOAT_EQ(vertices.Data()[2], 0.0f);
+}
+
 TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
     const std::filesystem::path pkg_path =
         std::filesystem::path(WAYWALLEN_WORKSHOP_DIR) / "3557068717" / "scene.pkg";

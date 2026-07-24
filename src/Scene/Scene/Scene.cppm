@@ -826,6 +826,11 @@ public:
 
     SceneMaterial* Material() { return m_materials.empty() ? nullptr : m_materials[0].get(); }
 
+    const Eigen::Matrix4d& GeometryTransform() const { return m_data->geometry_transform; }
+    void                   SetGeometryTransform(Eigen::Matrix4d transform) {
+        m_data->geometry_transform = rstd::move(transform);
+    }
+
     void ChangeMeshDataFrom(const SceneMesh& o) { m_data = o.m_data; }
 
     const std::vector<DrawRange>& DrawRanges() const {
@@ -838,6 +843,7 @@ public:
 
 private:
     struct Data {
+        Eigen::Matrix4d      geometry_transform { Eigen::Matrix4d::Identity() };
         std::vector<Submesh> submeshes;
     };
 

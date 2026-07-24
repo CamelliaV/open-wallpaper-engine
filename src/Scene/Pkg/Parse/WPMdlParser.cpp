@@ -1048,7 +1048,7 @@ Option<wpscene::Material> WPMdlParser::ParseMaterial(ref<str> material_ref, fs::
 }
 
 void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
-                                 array<float, 2> texcoord_scale, Eigen::Vector3f position_offset) {
+                                 array<float, 2> texcoord_scale) {
     const size_t vert_num = src.positions.len().to_primitive();
     if (vert_num == 0) return;
     if (! src.part_uv2.is_empty() || ! src.parts.is_empty()) {
@@ -1063,10 +1063,10 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
 
     // Position is always present (the parser would have failed otherwise).
     specs.push_back(VAttr::Position);
-    packers.push_back([&src, position_offset](size_t i, float* dst) {
-        dst[0] = src.positions[usize(i)][usize(0)] + position_offset.x();
-        dst[1] = src.positions[usize(i)][usize(1)] + position_offset.y();
-        dst[2] = src.positions[usize(i)][usize(2)] + position_offset.z();
+    packers.push_back([&src](size_t i, float* dst) {
+        dst[0] = src.positions[usize(i)][usize(0)];
+        dst[1] = src.positions[usize(i)][usize(1)];
+        dst[2] = src.positions[usize(i)][usize(2)];
     });
     if (! src.normals.is_empty()) {
         specs.push_back(VAttr::Normal);
@@ -1165,9 +1165,8 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
 
 void WPMdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
                                         slice<uint32_t> clip_part_indices,
-                                        array<float, 2> texcoord_scale,
-                                        Eigen::Vector3f position_offset) {
-    GenMeshFromMdl(submesh, src, texcoord_scale, position_offset);
+                                        array<float, 2> texcoord_scale) {
+    GenMeshFromMdl(submesh, src, texcoord_scale);
     // `clip_part_indices` are positions in src.parts[] (0-based), not `part.id`.
     std::vector<SceneMesh::DrawRange> ranges;
     for (usize i {}; i < clip_part_indices.len(); ++i) {

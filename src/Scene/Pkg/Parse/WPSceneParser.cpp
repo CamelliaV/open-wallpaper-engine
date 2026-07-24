@@ -2636,21 +2636,15 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             for (const auto& mb : pmesh.masks) {
                 target.Submeshes().emplace_back();
                 auto& pre_sm = target.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm,
-                                                   pmesh,
-                                                   mb.part_ids_b.as_slice(),
-                                                   { mapRate[0], mapRate[1] },
-                                                   alignment_offset);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    pre_sm, pmesh, mb.part_ids_b.as_slice(), { mapRate[0], mapRate[1] });
                 pre_sm.material_slot   = slot++;
                 pre_sm.output_override = std::string(PUPPET_MASK_RT);
 
                 target.Submeshes().emplace_back();
                 auto& clip_sm = target.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm,
-                                                   pmesh,
-                                                   mb.part_ids_a.as_slice(),
-                                                   { mapRate[0], mapRate[1] },
-                                                   alignment_offset);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    clip_sm, pmesh, mb.part_ids_a.as_slice(), { mapRate[0], mapRate[1] });
                 clip_sm.material_slot = slot++;
             }
         }
@@ -2658,15 +2652,15 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 
     if (puppet) {
         if (hasEffect) {
+            effct_final_mesh.SetGeometryTransform(
+                Affine3d(Translation3d(alignment_offset.cast<double>())).matrix());
             GenCardMesh(
                 mesh, { geometry_size[0], geometry_size[1] }, mapRate, source_alignment_offset);
             for (const auto& m : puppet->meshes) {
                 if (m.positions.is_empty()) continue;
                 effct_final_mesh.Submeshes().emplace_back();
-                WPMdlParser::GenMeshFromMdl(effct_final_mesh.Submeshes().back(),
-                                            m,
-                                            { mapRate[0], mapRate[1] },
-                                            alignment_offset);
+                WPMdlParser::GenMeshFromMdl(
+                    effct_final_mesh.Submeshes().back(), m, { mapRate[0], mapRate[1] });
             }
             if (has_bones) add_puppet_mask_submeshes(effct_final_mesh, 1);
 
@@ -2680,11 +2674,12 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 wpimgobj.effects.push_back(std::move(puppet_effect));
             }
         } else {
+            mesh.SetGeometryTransform(
+                Affine3d(Translation3d(alignment_offset.cast<double>())).matrix());
             for (const auto& m : puppet->meshes) {
                 if (m.positions.is_empty()) continue;
                 mesh.Submeshes().emplace_back();
-                WPMdlParser::GenMeshFromMdl(
-                    mesh.Submeshes().back(), m, { mapRate[0], mapRate[1] }, alignment_offset);
+                WPMdlParser::GenMeshFromMdl(mesh.Submeshes().back(), m, { mapRate[0], mapRate[1] });
             }
         }
     }
@@ -2777,11 +2772,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 track_image_property_material(mesh.MaterialSlots().back().get());
                 mesh.Submeshes().emplace_back();
                 auto& pre_sm = mesh.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(pre_sm,
-                                                   pmesh,
-                                                   mb.part_ids_b.as_slice(),
-                                                   { mapRate[0], mapRate[1] },
-                                                   alignment_offset);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    pre_sm, pmesh, mb.part_ids_b.as_slice(), { mapRate[0], mapRate[1] });
                 pre_sm.material_slot   = pre_slot;
                 pre_sm.output_override = std::string(PUPPET_MASK_RT);
 
@@ -2812,11 +2804,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 track_image_property_material(mesh.MaterialSlots().back().get());
                 mesh.Submeshes().emplace_back();
                 auto& clip_sm = mesh.Submeshes().back();
-                WPMdlParser::GenMaskSubmeshFromMdl(clip_sm,
-                                                   pmesh,
-                                                   mb.part_ids_a.as_slice(),
-                                                   { mapRate[0], mapRate[1] },
-                                                   alignment_offset);
+                WPMdlParser::GenMaskSubmeshFromMdl(
+                    clip_sm, pmesh, mb.part_ids_a.as_slice(), { mapRate[0], mapRate[1] });
                 clip_sm.material_slot = clip_slot;
             }
         }

@@ -407,6 +407,8 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
             model = Affine3d(Translation3d(Vector3d(shift.x(), shift.y(), 0.0))).matrix() * model;
         }
 
+        if (auto* mesh = node.Mesh(); mesh != nullptr) model *= mesh->GeometryTransform();
+
         if (req_m) writer.Write(Output::Model, ShaderValue::fromMatrix(model));
         if (req_normal_model) {
             Matrix3d normal_model = model.block<3, 3>(0, 0);

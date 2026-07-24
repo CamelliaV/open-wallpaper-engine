@@ -124,16 +124,14 @@ public:
     // be wired separately via AddPuppetShaderInfo / AddPuppetMatInfo when the
     // mesh has bone weights.
     static void GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
-                               array<float, 2> texcoord_scale  = { 1.0f, 1.0f },
-                               Eigen::Vector3f position_offset = Eigen::Vector3f::Zero());
+                               array<float, 2> texcoord_scale = { 1.0f, 1.0f });
 
     // Like GenMeshFromMdl, but the submesh draws only the parts whose `id` is
     // in `clip_part_ids` — used for clipping-mask submeshes that only cover the
     // affected (e.g. iris) parts. Material slot is the caller's responsibility.
     static void GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
                                       slice<uint32_t> clip_part_ids,
-                                      array<float, 2> texcoord_scale  = { 1.0f, 1.0f },
-                                      Eigen::Vector3f position_offset = Eigen::Vector3f::Zero());
+                                      array<float, 2> texcoord_scale = { 1.0f, 1.0f });
 };
 
 } // namespace owe
