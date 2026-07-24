@@ -86,9 +86,16 @@ public:
     }
 
     rstd::size_t Read(void* buffer, rstd::size_t size) {
-        auto result = read(buffer, usize(size));
-        return result.is_ok() ? rstd::move(result).unwrap_unchecked().to_primitive()
-                              : rstd::size_t {};
+        auto*        bytes = static_cast<byte*>(buffer);
+        rstd::size_t total {};
+        while (total < size) {
+            auto result = read(bytes + total, usize(size - total));
+            if (result.is_err()) break;
+            auto count = rstd::move(result).unwrap_unchecked().to_primitive();
+            if (count == 0) break;
+            total += count;
+        }
+        return total;
     }
 
     char* Gets(char* buffer, rstd::size_t size) {
@@ -200,8 +207,9 @@ private:
     }
 
     static auto prepare(rstd::io::ReadRange range) -> Prepared {
-        auto len = range.len();
-        return Prepared { .handle = rstd::io::ReadSeekHandle::make(rstd::move(range).into_reader()),
+        auto len    = range.len();
+        auto reader = rstd::io::BufReader(rstd::move(range).into_reader());
+        return Prepared { .handle = rstd::io::ReadSeekHandle::make(rstd::move(reader)),
                           .len    = len };
     }
 

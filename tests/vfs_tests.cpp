@@ -184,6 +184,23 @@ TEST(Vfs, BackendErrorsAreNotOverlayMisses) {
               rstd::io::error::ErrorKind::InvalidData);
 }
 
+TEST(BinaryReader, CompletesReadsAcrossBufferedBoundary) {
+    std::string bytes(8195, '\0');
+    bytes[8191] = '\x78';
+    bytes[8192] = '\x56';
+    bytes[8193] = '\x34';
+    bytes[8194] = '\x12';
+
+    auto source = rstd::io::SharedReadAt::make(MemorySource { std::move(bytes) });
+    auto range  = rstd::io::ReadRange::make(std::move(source), u64(), u64(8195));
+    ASSERT_TRUE(range.is_ok());
+    owe::fs::BinaryReader reader(std::move(range).unwrap_unchecked());
+
+    std::string prefix(8191, '\0');
+    EXPECT_EQ(reader.Read(prefix.data(), prefix.size()), prefix.size());
+    EXPECT_EQ(reader.ReadUint32(), 0x12345678u);
+}
+
 TEST(Vfs, PathsUseComponentBoundariesAndRejectTraversal) {
     owe::fs::VFS vfs;
     ASSERT_TRUE(vfs.mount("/asset"_str, MakeMount({ { "file", "value" } })).is_ok());
