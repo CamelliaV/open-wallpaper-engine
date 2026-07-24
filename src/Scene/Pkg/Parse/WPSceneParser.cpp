@@ -1277,6 +1277,15 @@ void ApplyImageColorBlend(wpscene::Material& material, const wpscene::ImageObjec
     material.combos[rstd::cppstd::to_string(WE_CB_BLENDMODE)] = image.colorBlendMode;
 }
 
+ShaderValueMap NeutralColorUniforms(ShaderValueMap values) {
+    values[rstd::cppstd::to_string(G_COLOR4)]     = std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
+    values[rstd::cppstd::to_string(G_COLOR)]      = std::array<float, 3> { 1.0f, 1.0f, 1.0f };
+    values[rstd::cppstd::to_string(G_ALPHA)]      = 1.0f;
+    values[rstd::cppstd::to_string(G_USERALPHA)]  = 1.0f;
+    values[rstd::cppstd::to_string(G_BRIGHTNESS)] = 1.0f;
+    return values;
+}
+
 std::int32_t CountVisibleImageEffects(std::span<const wpscene::ImageEffect> effects) {
     std::int32_t count = 0;
     for (const auto& effect : effects) {
@@ -3184,7 +3193,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     auto spFinalNode = Arc<SceneNode>::make();
 
                     WPShaderInfo wpFinalShaderInfo;
-                    wpFinalShaderInfo.baseConstSvs = baseConstSvs;
+                    wpFinalShaderInfo.baseConstSvs = NeutralColorUniforms(baseConstSvs);
                     SceneMaterial            finalMaterial;
                     WPUniformNodeConfigDraft finalSvData;
                     finalSvData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
@@ -3202,7 +3211,6 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                         LoadConstvalue(finalMaterial, passthrough_mat, wpFinalShaderInfo);
                         auto spFinalMesh = std::make_shared<SceneMesh>();
                         spFinalMesh->AddMaterial(std::move(finalMaterial));
-                        track_image_property_material(spFinalMesh->MaterialSlots().back().get());
                         RegisterShaderUserVarIndex(context.scene.get(),
                                                    spFinalMesh->Material(),
                                                    passthrough_mat,
@@ -4152,13 +4160,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
         compose_sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
 
-        ShaderValueMap effect_base = context.global_base_uniforms;
-        effect_base[rstd::cppstd::to_string(G_COLOR4)] =
-            std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
-        effect_base[rstd::cppstd::to_string(G_COLOR)] = std::array<float, 3> { 1.0f, 1.0f, 1.0f };
-        effect_base[rstd::cppstd::to_string(G_ALPHA)] = 1.0f;
-        effect_base[rstd::cppstd::to_string(G_USERALPHA)]  = 1.0f;
-        effect_base[rstd::cppstd::to_string(G_BRIGHTNESS)] = 1.0f;
+        ShaderValueMap effect_base = NeutralColorUniforms(context.global_base_uniforms);
 
         struct LoadedTextMaterial {
             wpscene::Material        source;
