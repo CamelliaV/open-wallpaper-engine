@@ -1208,11 +1208,10 @@ void LoadControlPoint(WPParticleSubSystem& system, const wpscene::Particle& part
 void LoadInitializer(WPParticleSubSystem& system, const wpscene::Particle& particle,
                      Arc<wpscene::ParticleInstanceoverride> over_state) {
     for (const auto& initializer : particle.initializers) {
-        system.AddInitializer(WPParticleParser::GenInitializer(initializer, system.Attributes()));
+        system.AddInitializer(WPParticleParser::GenInitializer(initializer));
     }
     if (over_state->enabled) {
-        system.AddInitializer(
-            WPParticleParser::GenOverride(rstd::move(over_state), system.Attributes()));
+        system.AddInitializer(WPParticleParser::GenOverride(rstd::move(over_state)));
     }
 }
 void LoadOperator(WPParticleSubSystem& system, const wpscene::Particle& particle,
@@ -1234,8 +1233,7 @@ void LoadEmitter(WPParticleSubSystem& system, const wpscene::Particle& particle,
         // authored as `controlpoint: 0` always samples cps[0] even when WE
         // wired it through `cps[cp_start_index]`.
         if (newEm.controlpoint >= i32()) newEm.controlpoint += cp_start_index;
-        system.AddEmitter(
-            WPParticleParser::GenEmitter(newEm, system.Attributes(), emitter_index++));
+        system.AddEmitter(WPParticleParser::GenEmitter(newEm, system, emitter_index++));
     }
 }
 

@@ -142,6 +142,10 @@ bool InstanceCanEmit(ref<WPParticleFrame> frame) {
 
 } // namespace
 
+void WPBoxEmitterProgram::Compile(particle::ParticleViewCompiler& compiler) {
+    m_pipeline->Compile(compiler);
+}
+
 void WPBoxEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
     auto frame = WPParticleFrameFrom(context.Frame());
     if (! InstanceCanEmit(frame)) return;
@@ -155,16 +159,11 @@ void WPBoxEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
     auto  origin        = ResolveEmitterOrigin(controlpoints, m_args.controlpoint, m_args.origin);
     float emit_speed = m_args.emit_speed *
                        AudioResponseScale(frame->audio_average.as_slice(), m_args.audio_response);
-    auto  emit_count = ResolveEmitCount(emitter.timer,
-                                        emit_speed,
-                                        m_args.instantaneous,
-                                        m_args.one_per_frame,
-                                        context.Storage().Len() == usize());
-    u32   emitted {};
-    for (; emitted < emit_count; ++emitted) {
-        auto slot = context.Acquire();
-        if (slot.is_none()) break;
-
+    auto  emit_count = ResolveEmitCount(
+        emitter.timer, emit_speed, m_args.instantaneous, m_args.one_per_frame, context.Empty());
+    auto requests = context.Acquire(rstd::as_cast<usize>(emit_count), EmitDuration(emit_speed));
+    auto columns  = m_pipeline->Bind(context.View());
+    for (auto request : requests) {
         Eigen::Vector3d position;
         for (usize component {}; component < usize(3); ++component) {
             position[component.to_primitive()] = algorism::lerp(Random::get(-1.0, 1.0),
@@ -173,17 +172,24 @@ void WPBoxEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
         }
         position =
             position.cwiseProduct(Eigen::Vector3f { m_args.directions.data() }.cast<double>());
-        auto value     = MakeWPParticleRef(context.Storage(), m_attributes, *slot);
-        value.position = position.cast<float>();
-        value.position = (value.position.cast<double>() + origin).cast<float>();
-        double speed   = Random::get(m_args.min_speed, m_args.max_speed);
+        columns.positions[request.slot.index] = position.cast<float>();
+        columns.positions[request.slot.index] =
+            (columns.positions[request.slot.index].cast<double>() + origin).cast<float>();
+        double speed = Random::get(m_args.min_speed, m_args.max_speed);
         if (speed != 0.0 && position.squaredNorm() > 1e-12) {
-            value.velocity =
-                (value.velocity.cast<double>() + speed * position.normalized()).cast<float>();
+            columns.velocities[request.slot.index] =
+                (columns.velocities[request.slot.index].cast<double>() +
+                 speed * position.normalized())
+                    .cast<float>();
         }
-        context.Initialize(*slot, EmitDuration(emit_speed));
+        m_pipeline->Initialize(columns, request, context.Frame());
     }
+    auto emitted = rstd::as_cast<u32>(requests.len());
     CommitEmitCount(emitter.timer, emit_speed, emit_count, emitted, m_args.one_per_frame);
+}
+
+void WPSphereEmitterProgram::Compile(particle::ParticleViewCompiler& compiler) {
+    m_pipeline->Compile(compiler);
 }
 
 void WPSphereEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
@@ -201,30 +207,28 @@ void WPSphereEmitterProgram::Emit(particle::ParticleEmitterContext& context) {
     auto            dimensions = ActiveAxisCount(directions);
     float emit_speed = m_args.emit_speed *
                        AudioResponseScale(frame->audio_average.as_slice(), m_args.audio_response);
-    auto  emit_count = ResolveEmitCount(emitter.timer,
-                                        emit_speed,
-                                        m_args.instantaneous,
-                                        m_args.one_per_frame,
-                                        context.Storage().Len() == usize());
-    u32   emitted {};
-    for (; emitted < emit_count; ++emitted) {
-        auto slot = context.Acquire();
-        if (slot.is_none()) break;
-
+    auto  emit_count = ResolveEmitCount(
+        emitter.timer, emit_speed, m_args.instantaneous, m_args.one_per_frame, context.Empty());
+    auto requests = context.Acquire(rstd::as_cast<usize>(emit_count), EmitDuration(emit_speed));
+    auto columns  = m_pipeline->Bind(context.View());
+    for (auto request : requests) {
         double          radius = RandomRadius(m_args.min_distance, m_args.max_distance, dimensions);
         Eigen::Vector3d unit   = RandomDirectedUnit(directions);
         Eigen::Vector3d position = radius * unit.cwiseProduct(directions.cwiseAbs());
         ApplySign(position, m_args.sign[usize()], m_args.sign[usize(1)], m_args.sign[usize(2)]);
 
-        auto value     = MakeWPParticleRef(context.Storage(), m_attributes, *slot);
-        value.position = position.cast<float>();
-        value.position = (value.position.cast<double>() + origin).cast<float>();
-        double speed   = Random::get(m_args.min_speed, m_args.max_speed);
+        columns.positions[request.slot.index] = position.cast<float>();
+        columns.positions[request.slot.index] =
+            (columns.positions[request.slot.index].cast<double>() + origin).cast<float>();
+        double speed = Random::get(m_args.min_speed, m_args.max_speed);
         if (speed != 0.0 && position.squaredNorm() > 1e-12) {
-            value.velocity =
-                (value.velocity.cast<double>() + speed * position.normalized()).cast<float>();
+            columns.velocities[request.slot.index] =
+                (columns.velocities[request.slot.index].cast<double>() +
+                 speed * position.normalized())
+                    .cast<float>();
         }
-        context.Initialize(*slot, EmitDuration(emit_speed));
+        m_pipeline->Initialize(columns, request, context.Frame());
     }
+    auto emitted = rstd::as_cast<u32>(requests.len());
     CommitEmitCount(emitter.timer, emit_speed, emit_count, emitted, m_args.one_per_frame);
 }

@@ -23,11 +23,12 @@ struct ParticleEmitterProgram {
     struct Api {
         using Trait = ParticleEmitterProgram;
 
-        void Emit(ParticleEmitterContext& context) { rstd::trait_call<0>(this, context); }
+        void Compile(ParticleViewCompiler& compiler) { rstd::trait_call<0>(this, compiler); }
+        void Emit(ParticleEmitterContext& context) { rstd::trait_call<1>(this, context); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Emit>;
+    using Funcs = TraitFuncs<&T::Compile, &T::Emit>;
 };
 
 struct ParticleSpawnProgram {
@@ -38,11 +39,12 @@ struct ParticleSpawnProgram {
     struct Api {
         using Trait = ParticleSpawnProgram;
 
-        void Initialize(ParticleSpawnContext& context) { rstd::trait_call<0>(this, context); }
+        void Compile(ParticleViewCompiler& compiler) { rstd::trait_call<0>(this, compiler); }
+        void Initialize(ParticleSpawnContext& context) { rstd::trait_call<1>(this, context); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Initialize>;
+    using Funcs = TraitFuncs<&T::Compile, &T::Initialize>;
 };
 
 struct ParticleLifecycleProgram {
@@ -53,11 +55,12 @@ struct ParticleLifecycleProgram {
     struct Api {
         using Trait = ParticleLifecycleProgram;
 
-        void Update(ParticleLifecycleContext& context) { rstd::trait_call<0>(this, context); }
+        void Compile(ParticleViewCompiler& compiler) { rstd::trait_call<0>(this, compiler); }
+        void Update(ParticleLifecycleContext& context) { rstd::trait_call<1>(this, context); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Update>;
+    using Funcs = TraitFuncs<&T::Compile, &T::Update>;
 };
 
 struct ParticleEventProgram {
@@ -68,11 +71,12 @@ struct ParticleEventProgram {
     struct Api {
         using Trait = ParticleEventProgram;
 
-        void Process(ParticleEventContext& context) { rstd::trait_call<0>(this, context); }
+        void Compile(ParticleViewCompiler& compiler) { rstd::trait_call<0>(this, compiler); }
+        void Process(ParticleEventContext& context) { rstd::trait_call<1>(this, context); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Process>;
+    using Funcs = TraitFuncs<&T::Compile, &T::Process>;
 };
 
 struct ParticleUpdateProgram {
@@ -83,11 +87,12 @@ struct ParticleUpdateProgram {
     struct Api {
         using Trait = ParticleUpdateProgram;
 
-        void Update(ParticleUpdateContext& context) { rstd::trait_call<0>(this, context); }
+        void Compile(ParticleViewCompiler& compiler) { rstd::trait_call<0>(this, compiler); }
+        void Update(ParticleUpdateContext& context) { rstd::trait_call<1>(this, context); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Update>;
+    using Funcs = TraitFuncs<&T::Compile, &T::Update>;
 };
 
 struct ParticleExtractProgram {
@@ -98,11 +103,12 @@ struct ParticleExtractProgram {
     struct Api {
         using Trait = ParticleExtractProgram;
 
-        void Extract(ParticleExtractContext& context) { rstd::trait_call<0>(this, context); }
+        void Compile(ParticleViewCompiler& compiler) { rstd::trait_call<0>(this, compiler); }
+        void Extract(ParticleExtractContext& context) { rstd::trait_call<1>(this, context); }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::Extract>;
+    using Funcs = TraitFuncs<&T::Compile, &T::Extract>;
 };
 
 struct ParticleSlotTransition {
@@ -149,23 +155,27 @@ enum class ParticleEventPhase
     AfterEmit,
 };
 
+struct ParticleSpawnRequest {
+    ParticleSlot slot;
+    f64          emitter_duration {};
+};
+
 struct ParticleSpawnContext {
-    ParticleStorage&         storage;
-    ParticleSlot             slot;
-    ref<dyn<rstd::any::Any>> frame;
-    f64                      emitter_duration {};
+    ParticleWriteView           view;
+    slice<ParticleSpawnRequest> particles;
+    ref<dyn<rstd::any::Any>>    frame;
 };
 
 struct ParticleLifecycleContext {
-    ParticleStorage&         storage;
-    ParticleColumnCache&     columns;
+    ParticleWriteView        view;
+    slice<ParticleSlot>      slots;
     ParticleSlotEvents&      events;
     ref<dyn<rstd::any::Any>> frame;
     f64                      delta {};
     f64                      elapsed {};
 
     void Kill(ParticleSlot slot) {
-        auto states = storage.ValuesMut(storage.SlotStateKey());
+        auto states = view.StatesMut();
         if (slot.index >= states.len()) rstd::panic { "particle slot out of bounds" };
         if (! states[slot.index].active) return;
         states[slot.index].active = false;
@@ -175,7 +185,7 @@ struct ParticleLifecycleContext {
 };
 
 struct ParticleEventContext {
-    ParticleStorage&         storage;
+    ParticleReadView         view;
     ref<ParticleSlotEvents>  events;
     ref<dyn<rstd::any::Any>> frame;
     ParticleEventPhase       phase;
@@ -184,8 +194,8 @@ struct ParticleEventContext {
 };
 
 struct ParticleUpdateContext {
-    ParticleStorage&         storage;
-    ParticleColumnCache&     columns;
+    ParticleWriteView        view;
+    slice<ParticleSlot>      slots;
     ref<dyn<rstd::any::Any>> frame;
     f64                      delta {};
     f64                      elapsed {};
@@ -193,22 +203,6 @@ struct ParticleUpdateContext {
 
 class ParticleProgram {
 public:
-    template<typename Attribute>
-    void Require(ParticleAttributeKey<Attribute> key) {
-        auto requirement = RequireParticleAttribute(key);
-        for (const auto& existing : m_requirements) {
-            if (existing.id == requirement.id && existing.schema_slot == requirement.schema_slot &&
-                existing.concrete_type == requirement.concrete_type) {
-                return;
-            }
-        }
-        m_requirements.push(rstd::move(requirement));
-    }
-
-    auto Requirements() const noexcept -> slice<ParticleAttributeRequirement> {
-        return m_requirements.as_slice();
-    }
-
     void AddEmitter(Box<dyn<ParticleEmitterProgram>> program) {
         m_emitters.push(rstd::move(program));
     }
@@ -228,8 +222,8 @@ public:
 private:
     friend class ParticleEmitterContext;
     friend class ParticleSystem;
+    friend struct ParticleDefinition;
 
-    rstd::vec::Vec<ParticleAttributeRequirement>       m_requirements;
     rstd::vec::Vec<Box<dyn<ParticleEmitterProgram>>>   m_emitters;
     rstd::vec::Vec<Box<dyn<ParticleSpawnProgram>>>     m_spawn;
     rstd::vec::Vec<Box<dyn<ParticleLifecycleProgram>>> m_lifecycle;
@@ -240,73 +234,117 @@ private:
 };
 
 struct ParticleDefinition {
-    ParticleSchema  schema;
-    ParticleProgram program;
-    usize           max_slots {};
+    ParticleSchema     schema;
+    ParticleProgram    program;
+    ParticleViewLayout view_layout;
+    usize              max_slots {};
 
     static auto Prepare(ParticleSchema schema, ParticleProgram program, usize max_slots)
         -> Result<ParticleDefinition, ParticleSchemaError> {
-        auto requirements = program.Requirements();
-        for (usize index {}; index < requirements.len(); ++index) {
-            auto result = schema.Validate(requirements[index]);
-            if (result.is_err()) return Err(rstd::move(result).unwrap_err());
-        }
+        ParticleViewCompiler compiler(schema);
+        compiler.WriteBase(schema.SlotStateKey());
+        compiler.WriteBase(schema.PositionKey());
+        for (auto& emitter : program.m_emitters) emitter->Compile(compiler);
+        for (auto& spawn : program.m_spawn) spawn->Compile(compiler);
+        for (auto& lifecycle : program.m_lifecycle) lifecycle->Compile(compiler);
+        for (auto& event : program.m_events) event->Compile(compiler);
+        for (auto& update : program.m_updates) update->Compile(compiler);
+        for (auto& update : program.m_post_updates) update->Compile(compiler);
+        for (auto& extractor : program.m_extractors) extractor->Compile(compiler);
+        auto layout = rstd::move(compiler).Finish();
+        if (layout.is_err()) return Err(rstd::move(layout).unwrap_err());
         return Ok(ParticleDefinition {
-            .schema    = rstd::move(schema),
-            .program   = rstd::move(program),
-            .max_slots = max_slots,
+            .schema      = rstd::move(schema),
+            .program     = rstd::move(program),
+            .view_layout = rstd::move(layout).unwrap(),
+            .max_slots   = max_slots,
         });
     }
 };
 
 class ParticleInstance {
 public:
-    explicit ParticleInstance(const ParticleSchema& schema): m_storage(schema.CreateStorage()) {}
+    ParticleInstance(const ParticleSchema& schema, const ParticleViewLayout& layout)
+        : m_storage(schema.CreateStorage()), m_binding(layout, m_storage) {}
+
+    ParticleInstance(const ParticleInstance&)            = delete;
+    ParticleInstance& operator=(const ParticleInstance&) = delete;
+    ParticleInstance(ParticleInstance&&)                 = delete;
+    ParticleInstance& operator=(ParticleInstance&&)      = delete;
 
     ParticleStorage&       Storage() noexcept { return m_storage; }
     const ParticleStorage& Storage() const noexcept { return m_storage; }
-    ParticleColumnCache&   Columns() noexcept { return m_columns; }
+    ParticleViewBinding&   Binding() noexcept { return m_binding; }
     ParticleSlotEvents&    Events() noexcept { return m_events; }
-    bool                   Active() const noexcept { return m_active; }
-    void                   SetActive(bool active) noexcept { m_active = active; }
+    auto ActiveSlots() const noexcept -> slice<ParticleSlot> { return m_active_slots.as_slice(); }
+    bool Active() const noexcept { return m_active; }
+    void SetActive(bool active) noexcept { m_active = active; }
+
+    void RefreshActiveSlots() {
+        auto states = m_binding.Read().States();
+        m_active_slots.clear();
+        if (m_active_slots.capacity() < states.len()) {
+            m_active_slots.reserve(states.len() - m_active_slots.len());
+        }
+        for (usize index {}; index < states.len(); ++index) {
+            if (states[index].active) m_active_slots.emplace_back(ParticleSlot { .index = index });
+        }
+    }
 
     void Reset() {
         m_storage.Clear();
         m_events.Clear();
+        m_active_slots.clear();
         m_active = true;
     }
 
 private:
-    ParticleStorage     m_storage;
-    ParticleColumnCache m_columns;
-    ParticleSlotEvents  m_events;
-    bool                m_active { true };
+    ParticleStorage              m_storage;
+    ParticleViewBinding          m_binding;
+    ParticleSlotEvents           m_events;
+    rstd::vec::Vec<ParticleSlot> m_active_slots;
+    bool                         m_active { true };
+};
+
+struct ParticleExtractInstance {
+    ParticleReadView    view;
+    slice<ParticleSlot> slots;
+    usize               instance_index {};
 };
 
 struct ParticleExtractContext {
-    slice<Box<ParticleInstance>> instances;
-    ref<dyn<rstd::any::Any>>     frame;
+    slice<ParticleExtractInstance> instances;
+    ref<dyn<rstd::any::Any>>       frame;
 };
 
 class ParticleEmitterContext {
 public:
-    ParticleStorage& Storage() noexcept { return *m_storage; }
-    auto             Frame() const noexcept -> ref<dyn<rstd::any::Any>> { return m_frame; }
-    f64              Delta() const noexcept { return m_delta; }
-    f64              Elapsed() const noexcept { return m_elapsed; }
+    bool Empty() const noexcept { return m_storage->Len() == usize(); }
+    auto Frame() const noexcept -> ref<dyn<rstd::any::Any>> { return m_frame; }
+    f64  Delta() const noexcept { return m_delta; }
+    f64  Elapsed() const noexcept { return m_elapsed; }
 
-    auto Acquire() -> Option<ParticleSlot> {
-        auto slot = m_storage->AcquireSlot(m_max_slots);
-        if (slot.is_some()) m_events->RecordSpawn(*slot);
-        return slot;
+    auto Acquire(usize count, f64 emitter_duration) -> slice<ParticleSpawnRequest> {
+        m_requests.clear();
+        auto slots = m_storage->AcquireSlots(count, m_max_slots);
+        for (auto slot : slots) {
+            m_events->RecordSpawn(slot);
+            m_requests.emplace_back(ParticleSpawnRequest {
+                .slot             = slot,
+                .emitter_duration = emitter_duration,
+            });
+        }
+        return m_requests.as_slice();
     }
 
-    void Initialize(ParticleSlot slot, f64 emitter_duration) {
+    auto View() -> ParticleWriteView { return m_binding->Write(); }
+
+    void Initialize(slice<ParticleSpawnRequest> particles) {
+        if (particles.is_empty()) return;
         ParticleSpawnContext context {
-            .storage          = *m_storage,
-            .slot             = slot,
-            .frame            = m_frame,
-            .emitter_duration = emitter_duration,
+            .view      = m_binding->Write(),
+            .particles = particles,
+            .frame     = m_frame,
         };
         for (auto& program : *m_spawn) program->Initialize(context);
     }
@@ -314,10 +352,12 @@ public:
 private:
     friend class ParticleSystem;
 
-    ParticleEmitterContext(ParticleStorage& storage, ParticleSlotEvents& events,
+    ParticleEmitterContext(ParticleStorage& storage, ParticleViewBinding& binding,
+                           ParticleSlotEvents&                             events,
                            rstd::vec::Vec<Box<dyn<ParticleSpawnProgram>>>& spawn,
                            ref<dyn<rstd::any::Any>> frame, usize max_slots, f64 delta, f64 elapsed)
         : m_storage(rstd::addressof(storage)),
+          m_binding(rstd::addressof(binding)),
           m_events(rstd::addressof(events)),
           m_spawn(rstd::addressof(spawn)),
           m_frame(frame),
@@ -326,12 +366,14 @@ private:
           m_elapsed(elapsed) {}
 
     ParticleStorage*                                m_storage;
+    ParticleViewBinding*                            m_binding;
     ParticleSlotEvents*                             m_events;
     rstd::vec::Vec<Box<dyn<ParticleSpawnProgram>>>* m_spawn;
     ref<dyn<rstd::any::Any>>                        m_frame;
     usize                                           m_max_slots;
     f64                                             m_delta;
     f64                                             m_elapsed;
+    rstd::vec::Vec<ParticleSpawnRequest>            m_requests;
 };
 
 class ParticleSystem {
@@ -339,7 +381,8 @@ public:
     explicit ParticleSystem(ParticleDefinition definition): m_definition(rstd::move(definition)) {}
 
     auto CreateInstance() -> ParticleInstance& {
-        m_instances.push(Box<ParticleInstance>::make(m_definition.schema));
+        m_instances.push(
+            Box<ParticleInstance>::make(m_definition.schema, m_definition.view_layout));
         return *m_instances[m_instances.len() - usize(1)];
     }
 
@@ -364,13 +407,14 @@ public:
         if (! instance.Active()) return;
 
         auto& storage = instance.Storage();
-        auto& columns = instance.Columns();
+        auto& binding = instance.Binding();
         auto& events  = instance.Events();
         events.Clear();
+        instance.RefreshActiveSlots();
 
         ParticleLifecycleContext lifecycle_context {
-            .storage = storage,
-            .columns = columns,
+            .view    = binding.Write(),
+            .slots   = instance.ActiveSlots(),
             .events  = events,
             .frame   = frame,
             .delta   = delta,
@@ -381,10 +425,11 @@ public:
         }
         bool had_lifecycle_events = ! events.spawned.is_empty() || ! events.died.is_empty();
         ProcessEvents(
-            storage, events, frame, ParticleEventPhase::BeforeEmit, delta, elapsed, false);
+            binding, events, frame, ParticleEventPhase::BeforeEmit, delta, elapsed, false);
         events.Clear();
 
         ParticleEmitterContext emitter_context(storage,
+                                               binding,
                                                events,
                                                m_definition.program.m_spawn,
                                                frame,
@@ -392,7 +437,7 @@ public:
                                                delta,
                                                elapsed);
         for (auto& emitter : m_definition.program.m_emitters) emitter->Emit(emitter_context);
-        ProcessEvents(storage,
+        ProcessEvents(binding,
                       events,
                       frame,
                       ParticleEventPhase::AfterEmit,
@@ -400,12 +445,13 @@ public:
                       elapsed,
                       had_lifecycle_events);
 
-        auto states = storage.ValuesMut(storage.SlotStateKey());
-        for (usize index {}; index < states.len(); ++index) states[index].fresh = false;
+        instance.RefreshActiveSlots();
+        auto states = binding.Write().StatesMut();
+        for (auto slot : instance.ActiveSlots()) states[slot.index].fresh = false;
 
         ParticleUpdateContext update_context {
-            .storage = storage,
-            .columns = columns,
+            .view    = binding.Write(),
+            .slots   = instance.ActiveSlots(),
             .frame   = frame,
             .delta   = delta,
             .elapsed = elapsed,
@@ -415,20 +461,30 @@ public:
     }
 
     void Extract(ref<dyn<rstd::any::Any>> frame) {
+        auto instances = rstd::vec::Vec<ParticleExtractInstance>::with_capacity(m_instances.len());
+        for (usize index {}; index < m_instances.len(); ++index) {
+            auto& instance = *m_instances[index];
+            instance.RefreshActiveSlots();
+            instances.emplace_back(ParticleExtractInstance {
+                .view           = instance.Binding().Read(),
+                .slots          = instance.ActiveSlots(),
+                .instance_index = index,
+            });
+        }
         ParticleExtractContext context {
-            .instances = m_instances.as_slice(),
+            .instances = instances.as_slice(),
             .frame     = frame,
         };
         for (auto& extractor : m_definition.program.m_extractors) extractor->Extract(context);
     }
 
 private:
-    void ProcessEvents(ParticleStorage& storage, ParticleSlotEvents& events,
+    void ProcessEvents(ParticleViewBinding& binding, ParticleSlotEvents& events,
                        ref<dyn<rstd::any::Any>> frame, ParticleEventPhase phase, f64 delta,
                        f64 elapsed, bool force) {
         if (! force && events.spawned.is_empty() && events.died.is_empty()) return;
         ParticleEventContext context {
-            .storage = storage,
+            .view    = binding.Read(),
             .events  = ref<ParticleSlotEvents>::from_raw_parts(rstd::addressof(events)),
             .frame   = frame,
             .phase   = phase,

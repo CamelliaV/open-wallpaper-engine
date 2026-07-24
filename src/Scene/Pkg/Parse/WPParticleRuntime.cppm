@@ -72,61 +72,7 @@ struct WPParticleAttributes {
     particle::ParticleAttributeKey<particle::InitialLifetimeAttribute>     initial_lifetime;
 
     static auto Register(particle::ParticleSchemaBuilder&) -> WPParticleAttributes;
-    void        Require(particle::ParticleProgram&) const;
 };
-
-struct WPParticleInitialRef {
-    Eigen::Vector3f& color;
-    float&           alpha;
-    float&           size;
-    float&           lifetime;
-};
-
-struct WPParticleRef {
-    particle::ParticleSlot       slot;
-    particle::ParticleSlotState& state;
-    Eigen::Vector3f&             position;
-    Eigen::Vector3f&             color;
-    float&                       alpha;
-    float&                       size;
-    float&                       lifetime;
-    Eigen::Vector3f&             rotation;
-    Eigen::Vector3f&             velocity;
-    Eigen::Vector3f&             acceleration;
-    Eigen::Vector3f&             angular_velocity;
-    Eigen::Vector3f&             angular_acceleration;
-    float&                       random;
-    WPParticleInitialRef         initial;
-};
-
-struct WPParticleInitialConstRef {
-    const Eigen::Vector3f& color;
-    const float&           alpha;
-    const float&           size;
-    const float&           lifetime;
-};
-
-struct WPParticleConstRef {
-    particle::ParticleSlot             slot;
-    const particle::ParticleSlotState& state;
-    const Eigen::Vector3f&             position;
-    const Eigen::Vector3f&             color;
-    const float&                       alpha;
-    const float&                       size;
-    const float&                       lifetime;
-    const Eigen::Vector3f&             rotation;
-    const Eigen::Vector3f&             velocity;
-    const Eigen::Vector3f&             acceleration;
-    const Eigen::Vector3f&             angular_velocity;
-    const Eigen::Vector3f&             angular_acceleration;
-    const float&                       random;
-    WPParticleInitialConstRef          initial;
-};
-
-auto MakeWPParticleRef(particle::ParticleStorage&, const WPParticleAttributes&,
-                       particle::ParticleSlot) -> WPParticleRef;
-auto MakeWPParticleConstRef(const particle::ParticleStorage&, const WPParticleAttributes&,
-                            particle::ParticleSlot) -> WPParticleConstRef;
 
 #define OWE_WP_OSCILLATION_ATTRIBUTE(Name, Type)                                                   \
     struct Name {                                                                                  \
@@ -143,8 +89,8 @@ auto MakeWPParticleConstRef(const particle::ParticleStorage&, const WPParticleAt
         auto Len() const noexcept -> usize { return storage.Len(); }                               \
         auto Capacity() const noexcept -> usize { return storage.Capacity(); }                     \
         void Reserve(usize total_slots) { storage.Reserve(total_slots); }                          \
-        void AppendDefault() { storage.AppendDefault(); }                                          \
-        void Reset(particle::ParticleSlot) {}                                                      \
+        void AppendDefaults(usize count) { storage.AppendDefaults(count); }                        \
+        void ResetSlots(slice<particle::ParticleSlot>) {}                                          \
         void Clear() { storage.Clear(); }                                                          \
         auto Values() const noexcept -> slice<Value> { return storage.Values(); }                  \
         auto ValuesMut() noexcept -> mut_ref<Value[]> { return storage.ValuesMut(); }              \
@@ -190,16 +136,6 @@ struct WPOscillationAttributes {
     particle::ParticleAttributeKey<WPOscillationFrequencyAttribute> frequency;
     particle::ParticleAttributeKey<WPOscillationScaleAttribute>     scale;
     particle::ParticleAttributeKey<WPOscillationPhaseAttribute>     phase;
-
-    template<typename Storage>
-    auto ValuesMut(Storage& storage) const -> WPOscillationValues {
-        return {
-            .reset     = storage.ValuesMut(reset),
-            .frequency = storage.ValuesMut(frequency),
-            .scale     = storage.ValuesMut(scale),
-            .phase     = storage.ValuesMut(phase),
-        };
-    }
 };
 
 struct WPTrailSlotState {
@@ -222,8 +158,8 @@ struct WPTrailHistoryAttribute {
     auto Len() const noexcept -> usize;
     auto Capacity() const noexcept -> usize;
     void Reserve(usize total_slots);
-    void AppendDefault();
-    void Reset(particle::ParticleSlot slot);
+    void AppendDefaults(usize count);
+    void ResetSlots(slice<particle::ParticleSlot> slots);
     void Clear();
     auto CloneEmpty() const -> WPTrailHistoryAttribute;
 
@@ -257,104 +193,76 @@ struct WPParticleFrame {
 
 auto WPParticleFrameFrom(ref<dyn<rstd::any::Any>>) -> ref<WPParticleFrame>;
 
-struct WPParticleBatch {
-    slice<WPParticleControlpoint> controlpoints;
-    Eigen::Matrix3d               world_from_local_dir { Eigen::Matrix3d::Identity() };
-    Eigen::Matrix3d               local_from_world_dir { Eigen::Matrix3d::Identity() };
-    bool                          world_space { false };
-    f64                           time {};
-    f64                           time_pass {};
-
-    WPParticleBatch(particle::ParticleStorage&, particle::ParticleColumnCache&,
-                    const WPParticleAttributes&);
-
-    auto Len() const noexcept -> usize { return m_len; }
-    auto Particle(usize index) -> WPParticleRef {
-        const auto raw_index = index.to_primitive();
-        return {
-            .slot                 = particle::ParticleSlot { .index = index },
-            .state                = m_state[raw_index],
-            .position             = m_position[raw_index],
-            .color                = m_color[raw_index],
-            .alpha                = m_alpha[raw_index],
-            .size                 = m_size[raw_index],
-            .lifetime             = m_lifetime[raw_index],
-            .rotation             = m_rotation[raw_index],
-            .velocity             = m_velocity[raw_index],
-            .acceleration         = m_acceleration[raw_index],
-            .angular_velocity     = m_angular_velocity[raw_index],
-            .angular_acceleration = m_angular_acceleration[raw_index],
-            .random               = m_random[raw_index],
-            .initial = {
-                .color    = m_initial_color[raw_index],
-                .alpha    = m_initial_alpha[raw_index],
-                .size     = m_initial_size[raw_index],
-                .lifetime = m_initial_lifetime[raw_index],
-            },
-        };
-    }
-
-    template<typename Attribute>
-    auto ValuesMut(particle::ParticleAttributeKey<Attribute> key)
-        -> mut_ref<typename Attribute::Value[]> {
-        ValidateStorage();
-        return m_columns->ValuesMut(*m_storage, key);
-    }
-
-    void ValidateStorage() const;
-
-private:
-    particle::ParticleStorage*     m_storage { nullptr };
-    particle::ParticleColumnCache* m_columns { nullptr };
-    u64                            m_column_version {};
-    usize                          m_len {};
-    particle::ParticleSlotState*   m_state { nullptr };
-    Eigen::Vector3f*               m_position { nullptr };
-    Eigen::Vector3f*               m_color { nullptr };
-    float*                         m_alpha { nullptr };
-    float*                         m_size { nullptr };
-    float*                         m_lifetime { nullptr };
-    Eigen::Vector3f*               m_rotation { nullptr };
-    Eigen::Vector3f*               m_velocity { nullptr };
-    Eigen::Vector3f*               m_acceleration { nullptr };
-    Eigen::Vector3f*               m_angular_velocity { nullptr };
-    Eigen::Vector3f*               m_angular_acceleration { nullptr };
-    float*                         m_random { nullptr };
-    Eigen::Vector3f*               m_initial_color { nullptr };
-    float*                         m_initial_alpha { nullptr };
-    float*                         m_initial_size { nullptr };
-    float*                         m_initial_lifetime { nullptr };
+struct WPParticleSpawnColumns {
+    mut_ref<particle::ParticleSlotState[]> states;
+    mut_ref<Eigen::Vector3f[]>             positions;
+    mut_ref<Eigen::Vector3f[]>             velocities;
+    mut_ref<Eigen::Vector3f[]>             rotations;
+    mut_ref<Eigen::Vector3f[]>             angular_velocities;
+    mut_ref<Eigen::Vector3f[]>             colors;
+    mut_ref<float[]>                       alphas;
+    mut_ref<float[]>                       sizes;
+    mut_ref<float[]>                       lifetimes;
+    mut_ref<float[]>                       randoms;
+    mut_ref<Eigen::Vector3f[]>             initial_colors;
+    mut_ref<float[]>                       initial_alphas;
+    mut_ref<float[]>                       initial_sizes;
+    mut_ref<float[]>                       initial_lifetimes;
 };
 
-class WPParticleInitProgram {
+class WPParticleSpawnInstruction {
 public:
-    template<typename F>
-    WPParticleInitProgram(WPParticleAttributes attributes, F&& function)
-        : m_attributes(attributes),
-          m_function(Box<dyn<FnMut<void(WPParticleRef, f64)>>>::make(rstd::forward<F>(function))) {}
+    WPParticleSpawnInstruction(const WPParticleSpawnInstruction&)                    = delete;
+    auto operator=(const WPParticleSpawnInstruction&) -> WPParticleSpawnInstruction& = delete;
+    WPParticleSpawnInstruction(WPParticleSpawnInstruction&&) noexcept;
+    auto operator=(WPParticleSpawnInstruction&&) noexcept -> WPParticleSpawnInstruction&;
+    ~WPParticleSpawnInstruction();
 
-    void Initialize(particle::ParticleSpawnContext& context) {
-        auto value = MakeWPParticleRef(context.storage, m_attributes, context.slot);
-        m_function->operator()(value, context.emitter_duration);
-    }
+    void Initialize(WPParticleSpawnColumns&, particle::ParticleSpawnRequest,
+                    ref<dyn<rstd::any::Any>>);
 
 private:
-    WPParticleAttributes                      m_attributes;
-    Box<dyn<FnMut<void(WPParticleRef, f64)>>> m_function;
+    struct Impl;
+
+    explicit WPParticleSpawnInstruction(Box<Impl>);
+    template<typename T>
+    static auto Make(T value) -> WPParticleSpawnInstruction;
+
+    friend class WPParticleParser;
+
+    Box<Impl> m_impl;
 };
 
-class WPParticleUpdateProgram {
+class WPParticleSpawnPipeline {
 public:
-    template<typename F>
-    WPParticleUpdateProgram(WPParticleAttributes attributes, F&& function)
-        : m_attributes(attributes),
-          m_function(Box<dyn<FnMut<void(WPParticleBatch&)>>>::make(rstd::forward<F>(function))) {}
+    explicit WPParticleSpawnPipeline(WPParticleAttributes attributes): m_attributes(attributes) {}
 
-    void Update(particle::ParticleUpdateContext& context);
+    void Add(WPParticleSpawnInstruction instruction) {
+        m_instructions.push(rstd::move(instruction));
+    }
+    void EnableWorldSpace() noexcept { m_world_space = true; }
+    void Compile(particle::ParticleViewCompiler&);
+    auto Bind(particle::ParticleWriteView) -> WPParticleSpawnColumns;
+    void Initialize(WPParticleSpawnColumns&, particle::ParticleSpawnRequest,
+                    ref<dyn<rstd::any::Any>>);
 
 private:
-    WPParticleAttributes                    m_attributes;
-    Box<dyn<FnMut<void(WPParticleBatch&)>>> m_function;
+    WPParticleAttributes                                             m_attributes;
+    rstd::vec::Vec<WPParticleSpawnInstruction>                       m_instructions;
+    particle::ParticleWriteIndex<particle::VelocityAttribute>        m_velocity;
+    particle::ParticleWriteIndex<particle::RotationAttribute>        m_rotation;
+    particle::ParticleWriteIndex<particle::AngularVelocityAttribute> m_angular_velocity;
+    particle::ParticleWriteIndex<particle::ColorAttribute>           m_color;
+    particle::ParticleWriteIndex<particle::AlphaAttribute>           m_alpha;
+    particle::ParticleWriteIndex<particle::SizeAttribute>            m_size;
+    particle::ParticleWriteIndex<particle::LifetimeAttribute>        m_lifetime;
+    particle::ParticleWriteIndex<particle::RandomAttribute>          m_random;
+    particle::ParticleWriteIndex<particle::InitialColorAttribute>    m_initial_color;
+    particle::ParticleWriteIndex<particle::InitialAlphaAttribute>    m_initial_alpha;
+    particle::ParticleWriteIndex<particle::InitialSizeAttribute>     m_initial_size;
+    particle::ParticleWriteIndex<particle::InitialLifetimeAttribute> m_initial_lifetime;
+    bool                                                             m_world_space { false };
+    bool                                                             m_compiled { false };
 };
 
 struct WPParticleBoxEmitterArgs {
@@ -390,27 +298,30 @@ struct WPParticleSphereEmitterArgs {
 
 class WPBoxEmitterProgram {
 public:
-    WPBoxEmitterProgram(WPParticleAttributes attributes, WPParticleBoxEmitterArgs args, usize index)
-        : m_attributes(attributes), m_args(rstd::move(args)), m_index(index) {}
+    WPBoxEmitterProgram(WPParticleSpawnPipeline& pipeline, WPParticleBoxEmitterArgs args,
+                        usize index)
+        : m_pipeline(rstd::addressof(pipeline)), m_args(rstd::move(args)), m_index(index) {}
 
+    void Compile(particle::ParticleViewCompiler&);
     void Emit(particle::ParticleEmitterContext&);
 
 private:
-    WPParticleAttributes     m_attributes;
+    WPParticleSpawnPipeline* m_pipeline;
     WPParticleBoxEmitterArgs m_args;
     usize                    m_index {};
 };
 
 class WPSphereEmitterProgram {
 public:
-    WPSphereEmitterProgram(WPParticleAttributes attributes, WPParticleSphereEmitterArgs args,
+    WPSphereEmitterProgram(WPParticleSpawnPipeline& pipeline, WPParticleSphereEmitterArgs args,
                            usize index)
-        : m_attributes(attributes), m_args(rstd::move(args)), m_index(index) {}
+        : m_pipeline(rstd::addressof(pipeline)), m_args(rstd::move(args)), m_index(index) {}
 
+    void Compile(particle::ParticleViewCompiler&);
     void Emit(particle::ParticleEmitterContext&);
 
 private:
-    WPParticleAttributes        m_attributes;
+    WPParticleSpawnPipeline*    m_pipeline;
     WPParticleSphereEmitterArgs m_args;
     usize                       m_index {};
 };
@@ -495,17 +406,13 @@ public:
     auto QueryNewInstance() -> Option<WPParticleInstanceRef>;
 
     void AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>);
-    void AddInitializer(Box<dyn<particle::ParticleSpawnProgram>>);
+    void AddInitializer(WPParticleSpawnInstruction);
     void AddOperator(Box<dyn<particle::ParticleUpdateProgram>>);
     void AddChild(Box<WPParticleSubSystem>);
 
-    template<typename Attribute>
-    void RequireAttribute(particle::ParticleAttributeKey<Attribute> key) {
-        m_program.Require(key);
-    }
-
     auto SchemaBuilder() noexcept -> particle::ParticleSchemaBuilder& { return m_schema_builder; }
     auto Attributes() const noexcept -> const WPParticleAttributes& { return m_attributes; }
+    auto SpawnPipeline() noexcept -> WPParticleSpawnPipeline& { return m_spawn_pipeline; }
     auto Controlpoints() const noexcept -> slice<WPParticleControlpoint> {
         return m_controlpoints.as_slice();
     }
@@ -525,8 +432,10 @@ public:
     auto MaxParticleCapacity() const noexcept -> Option<u32> {
         return m_max_count.checked_mul(m_max_instance_count);
     }
-    auto FollowPosition(const particle::ParticleStorage&, usize parent_instance_index,
+    void CompileRuntimeView(particle::ParticleViewCompiler&);
+    auto FollowPosition(particle::ParticleInstance&, usize parent_instance_index,
                         particle::ParticleSlot) const -> Eigen::Vector3f;
+    bool LifetimeAlive(particle::ParticleInstance&, particle::ParticleSlot) const;
     auto InstanceState(usize index) const -> const WPParticleInstanceState& {
         return m_instance_states[index];
     }
@@ -560,6 +469,7 @@ private:
     SceneNode*                                                      m_owner_node { nullptr };
     particle::ParticleSchemaBuilder                                 m_schema_builder;
     WPParticleAttributes                                            m_attributes;
+    WPParticleSpawnPipeline                                         m_spawn_pipeline;
     Option<particle::ParticleAttributeKey<WPTrailHistoryAttribute>> m_trail_key;
     particle::ParticleProgram                                       m_program;
     Option<Box<particle::ParticleSystem>>                           m_system;
@@ -577,12 +487,15 @@ private:
     bool                                                            m_world_space { false };
     u32                                                             m_max_instance_count { 1 };
     f64                                                             m_probability { 1.0 };
-    SpawnType                                m_spawn_type { SpawnType::STATIC };
-    u32                                      m_trail_length {};
-    f64                                      m_trail_sample_interval {};
-    f64                                      m_trail_sample_accumulator {};
-    Option<Arc<WPParticleTrailUniformState>> m_trail_uniform_state;
-    rstd::vec::Vec<particle::ParticleSlot>   m_pending_child_deaths;
+    SpawnType                                                m_spawn_type { SpawnType::STATIC };
+    u32                                                      m_trail_length {};
+    f64                                                      m_trail_sample_interval {};
+    f64                                                      m_trail_sample_accumulator {};
+    Option<Arc<WPParticleTrailUniformState>>                 m_trail_uniform_state;
+    rstd::vec::Vec<particle::ParticleSlot>                   m_pending_child_deaths;
+    particle::ParticleReadIndex<particle::VelocityAttribute> m_follow_velocity;
+    particle::ParticleReadIndex<particle::SizeAttribute>     m_follow_size;
+    particle::ParticleReadIndex<particle::LifetimeAttribute> m_follow_lifetime;
 };
 
 class WPParticleRuntime {
@@ -606,10 +519,20 @@ class WPParticleRawGenerator {
 public:
     WPParticleRawGenerator(WPParticleSubSystem& subsystem): m_subsystem(&subsystem) {}
 
+    void Compile(particle::ParticleViewCompiler&);
     void Extract(particle::ParticleExtractContext&);
 
 private:
-    WPParticleSubSystem* m_subsystem;
+    WPParticleSubSystem*                                            m_subsystem;
+    particle::ParticleReadIndex<particle::VelocityAttribute>        m_velocity;
+    particle::ParticleReadIndex<particle::RotationAttribute>        m_rotation;
+    particle::ParticleReadIndex<particle::ColorAttribute>           m_color;
+    particle::ParticleReadIndex<particle::AlphaAttribute>           m_alpha;
+    particle::ParticleReadIndex<particle::SizeAttribute>            m_size;
+    particle::ParticleReadIndex<particle::LifetimeAttribute>        m_lifetime;
+    particle::ParticleReadIndex<particle::RandomAttribute>          m_random;
+    particle::ParticleReadIndex<particle::InitialLifetimeAttribute> m_initial_lifetime;
+    particle::ParticleReadObjectIndex<WPTrailHistoryAttribute>      m_trail;
 };
 
 } // namespace owe

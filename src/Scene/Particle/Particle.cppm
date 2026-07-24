@@ -70,14 +70,14 @@ struct ParticleAttribute {
         auto Len() const noexcept -> usize { return rstd::trait_call<3>(this); }
         auto Capacity() const noexcept -> usize { return rstd::trait_call<4>(this); }
         void Reserve(usize total_slots) { rstd::trait_call<5>(this, total_slots); }
-        void AppendDefault() { rstd::trait_call<6>(this); }
-        void Reset(ParticleSlot slot) { rstd::trait_call<7>(this, slot); }
+        void AppendDefaults(usize count) { rstd::trait_call<6>(this, count); }
+        void ResetSlots(slice<ParticleSlot> slots) { rstd::trait_call<7>(this, slots); }
         void Clear() { rstd::trait_call<8>(this); }
     };
 
     template<typename T>
     using Funcs = TraitFuncs<&T::Descriptor, &T::ConcreteType, &T::ValueType, &T::Len, &T::Capacity,
-                             &T::Reserve, &T::AppendDefault, &T::Reset, &T::Clear>;
+                             &T::Reserve, &T::AppendDefaults, &T::ResetSlots, &T::Clear>;
 };
 
 struct ParticleAttributeFactory {
@@ -146,8 +146,12 @@ public:
     void Reserve(usize total_slots) {
         if (total_slots > m_values.capacity()) m_values.reserve(total_slots - m_values.len());
     }
-    void AppendDefault() { m_values.emplace_back(m_default); }
-    void Reset(ParticleSlot slot) { m_values[slot.index] = m_default; }
+    void AppendDefaults(usize count) {
+        for (usize index {}; index < count; ++index) m_values.emplace_back(m_default);
+    }
+    void ResetSlots(slice<ParticleSlot> slots) {
+        for (auto slot : slots) m_values[slot.index] = m_default;
+    }
     void Clear() { m_values.clear(); }
 
     auto Values() const noexcept -> slice<Value> { return m_values.as_slice(); }
@@ -176,8 +180,8 @@ private:
         auto Len() const noexcept -> usize { return storage.Len(); }                               \
         auto Capacity() const noexcept -> usize { return storage.Capacity(); }                     \
         void Reserve(usize total_slots) { storage.Reserve(total_slots); }                          \
-        void AppendDefault() { storage.AppendDefault(); }                                          \
-        void Reset(ParticleSlot slot) { storage.Reset(slot); }                                     \
+        void AppendDefaults(usize count) { storage.AppendDefaults(count); }                        \
+        void ResetSlots(slice<ParticleSlot> slots) { storage.ResetSlots(slots); }                  \
         void Clear() { storage.Clear(); }                                                          \
         auto Values() const noexcept -> slice<Value> { return storage.Values(); }                  \
         auto ValuesMut() noexcept -> mut_ref<Value[]> { return storage.ValuesMut(); }              \
@@ -229,6 +233,8 @@ private:
 };
 
 class ParticleStorage;
+class ParticleViewCompiler;
+class ParticleViewBinding;
 
 class ParticleSchema {
 public:
@@ -249,6 +255,9 @@ public:
     }
     auto SlotStateKey() const noexcept -> ParticleAttributeKey<SlotStateAttribute> {
         return m_slot_state_key;
+    }
+    auto PositionKey() const noexcept -> ParticleAttributeKey<PositionAttribute> {
+        return m_position_key;
     }
 
     auto Validate(ParticleAttributeRequirement requirement) const
@@ -276,14 +285,17 @@ private:
 
     ParticleSchema(rstd::vec::Vec<Box<dyn<ParticleAttributeFactory>>> factories,
                    rstd::collections::HashMap<u64, usize>             id_slots,
-                   ParticleAttributeKey<SlotStateAttribute>           slot_state_key)
+                   ParticleAttributeKey<SlotStateAttribute>           slot_state_key,
+                   ParticleAttributeKey<PositionAttribute>            position_key)
         : m_factories(rstd::move(factories)),
           m_id_slots(rstd::move(id_slots)),
-          m_slot_state_key(slot_state_key) {}
+          m_slot_state_key(slot_state_key),
+          m_position_key(position_key) {}
 
     rstd::vec::Vec<Box<dyn<ParticleAttributeFactory>>> m_factories;
     rstd::collections::HashMap<u64, usize>             m_id_slots;
     ParticleAttributeKey<SlotStateAttribute>           m_slot_state_key;
+    ParticleAttributeKey<PositionAttribute>            m_position_key;
 };
 
 class ParticleSchemaBuilder {
@@ -328,11 +340,15 @@ public:
     }
 
     auto Build() && -> ParticleSchema {
-        return ParticleSchema(rstd::move(m_factories), rstd::move(m_id_slots), m_slot_state_key);
+        return ParticleSchema(
+            rstd::move(m_factories), rstd::move(m_id_slots), m_slot_state_key, m_position_key);
     }
 
     auto SlotStateKey() const noexcept -> ParticleAttributeKey<SlotStateAttribute> {
         return m_slot_state_key;
+    }
+    auto PositionKey() const noexcept -> ParticleAttributeKey<PositionAttribute> {
+        return m_position_key;
     }
 
 private:
@@ -340,6 +356,7 @@ private:
     rstd::vec::Vec<Box<dyn<ParticleAttributeFactory>>> m_factories;
     rstd::collections::HashMap<u64, usize>             m_id_slots;
     ParticleAttributeKey<SlotStateAttribute>           m_slot_state_key;
+    ParticleAttributeKey<PositionAttribute>            m_position_key;
 };
 
 class ParticleStorage {
@@ -357,27 +374,51 @@ public:
     }
 
     void Reserve(usize total_slots) {
+        bool needs_reserve { false };
+        for (const auto& attribute : m_attributes) {
+            if (attribute->Capacity() < total_slots) {
+                needs_reserve = true;
+                break;
+            }
+        }
+        if (! needs_reserve) return;
         for (auto& attribute : m_attributes) attribute->Reserve(total_slots);
         BumpStructureVersion();
         BumpColumnVersion();
         CheckInvariant();
     }
 
-    auto AppendSlot() -> ParticleSlot {
-        Reserve(m_len + usize(1));
-        for (auto& attribute : m_attributes) attribute->AppendDefault();
-        ParticleSlot slot { .index = m_len++ };
+    auto AppendSlots(usize count) -> rstd::vec::Vec<ParticleSlot> {
+        auto slots = rstd::vec::Vec<ParticleSlot>::with_capacity(count);
+        if (count == usize()) return slots;
+
+        Reserve(m_len + count);
+        for (auto& attribute : m_attributes) attribute->AppendDefaults(count);
+        for (usize index {}; index < count; ++index) {
+            slots.emplace_back(ParticleSlot { .index = m_len + index });
+        }
+        m_len += count;
         BumpStructureVersion();
         BumpColumnVersion();
         CheckInvariant();
-        return slot;
+        return slots;
+    }
+
+    auto AppendSlot() -> ParticleSlot {
+        auto slots = AppendSlots(usize(1));
+        return slots[usize()];
+    }
+
+    void ResetSlots(slice<ParticleSlot> slots) {
+        for (auto slot : slots) {
+            if (slot.index >= m_len) rstd::panic { "particle slot out of bounds" };
+        }
+        for (auto& attribute : m_attributes) attribute->ResetSlots(slots);
+        CheckInvariant();
     }
 
     void ResetSlot(ParticleSlot slot) {
-        if (slot.index >= m_len) rstd::panic { "particle slot out of bounds" };
-        for (auto& attribute : m_attributes) attribute->Reset(slot);
-        BumpStructureVersion();
-        CheckInvariant();
+        ResetSlots(slice<ParticleSlot>::from_raw_parts(rstd::addressof(slot), usize(1)));
     }
 
     void Clear() {
@@ -389,30 +430,42 @@ public:
         CheckInvariant();
     }
 
-    auto AcquireSlot(usize max_slots) -> Option<ParticleSlot> {
+    auto AcquireSlots(usize count, usize max_slots) -> rstd::vec::Vec<ParticleSlot> {
+        auto acquired = rstd::vec::Vec<ParticleSlot>::with_capacity(count);
+        if (count == usize()) return acquired;
+
         auto states = Values(m_slot_state_key);
         for (usize index {}; index < states.len(); ++index) {
             if (states[index].active) continue;
-            ParticleSlot slot { .index = index };
-            ResetSlot(slot);
-            auto current   = ValuesMut(m_slot_state_key);
-            current[index] = {
+            acquired.emplace_back(ParticleSlot { .index = index });
+            if (acquired.len() == count) break;
+        }
+
+        auto reused_count = acquired.len();
+        if (reused_count != usize()) ResetSlots(acquired.as_slice());
+
+        auto available    = max_slots > m_len ? max_slots - m_len : usize();
+        auto append_count = rstd::cmp::min(count - acquired.len(), available);
+        if (append_count != usize()) {
+            auto appended = AppendSlots(append_count);
+            for (auto slot : appended) acquired.emplace_back(slot);
+        }
+
+        auto current = ValuesMut(m_slot_state_key);
+        for (auto slot : acquired) {
+            current[slot.index] = {
                 .active         = true,
                 .fresh          = true,
                 .spawn_sequence = m_next_spawn_sequence++,
             };
-            return Some(slot);
         }
-        if (m_len >= max_slots) return None();
+        return acquired;
+    }
 
-        auto slot           = AppendSlot();
-        auto current        = ValuesMut(m_slot_state_key);
-        current[slot.index] = {
-            .active         = true,
-            .fresh          = true,
-            .spawn_sequence = m_next_spawn_sequence++,
-        };
-        return Some(slot);
+    auto AcquireSlot(usize max_slots) -> Option<ParticleSlot> {
+        auto slots = AcquireSlots(usize(1), max_slots);
+        if (slots.is_empty()) return None();
+        return Some(slots[usize()]);
     }
 
     void ReleaseSlot(ParticleSlot slot) {
@@ -453,11 +506,15 @@ public:
 
 private:
     friend class ParticleSchema;
-    friend class ParticleColumnCache;
+    friend class ParticleViewCompiler;
+    friend class ParticleViewBinding;
 
     ParticleStorage(rstd::vec::Vec<Box<dyn<ParticleAttribute>>> attributes,
-                    ParticleAttributeKey<SlotStateAttribute>    slot_state_key)
-        : m_attributes(rstd::move(attributes)), m_slot_state_key(slot_state_key) {
+                    ParticleAttributeKey<SlotStateAttribute>    slot_state_key,
+                    ParticleAttributeKey<PositionAttribute>     position_key)
+        : m_attributes(rstd::move(attributes)),
+          m_slot_state_key(slot_state_key),
+          m_position_key(position_key) {
         CheckInvariant();
     }
 
@@ -472,8 +529,6 @@ private:
             rstd::panic { "particle attribute key does not match storage" };
         }
     }
-
-    auto AttributeCount() const noexcept -> usize { return m_attributes.len(); }
 
     void CheckInvariant() const {
         for (const auto& attribute : m_attributes) {
@@ -497,91 +552,478 @@ private:
     u64                                         m_column_version { 1 };
     rstd::vec::Vec<Box<dyn<ParticleAttribute>>> m_attributes;
     ParticleAttributeKey<SlotStateAttribute>    m_slot_state_key;
+    ParticleAttributeKey<PositionAttribute>     m_position_key;
 };
 
-class ParticleColumnCache {
+template<typename Attribute>
+class ParticleReadIndex {
 public:
-    template<typename Attribute>
-    auto ValuesMut(ParticleStorage& storage, ParticleAttributeKey<Attribute> key)
-        -> mut_ref<typename Attribute::Value[]> {
-        Refresh(storage);
-        if (! key.Valid() || key.schema_slot >= m_columns.len()) {
-            rstd::panic { "invalid particle attribute key" };
-        }
+    ParticleReadIndex() = default;
+    bool Valid() const noexcept { return m_value != usize::MAX; }
 
-        auto& entry         = m_columns[key.schema_slot];
-        auto  concrete_type = rstd::any::TypeId::of<Attribute>();
-        if (entry.concrete_type.is_some() &&
-            (entry.id != key.id || *entry.concrete_type != concrete_type)) {
-            rstd::panic { "particle attribute key does not match storage" };
+private:
+    explicit ParticleReadIndex(usize value): m_value(value) {}
+
+    friend class ParticleViewCompiler;
+    friend class ParticleReadView;
+    friend class ParticleWriteView;
+
+    usize m_value { usize::MAX };
+};
+
+template<typename Attribute>
+class ParticleWriteIndex {
+public:
+    ParticleWriteIndex() = default;
+    bool Valid() const noexcept { return m_value != usize::MAX; }
+
+private:
+    explicit ParticleWriteIndex(usize value): m_value(value) {}
+
+    friend class ParticleViewCompiler;
+    friend class ParticleWriteView;
+
+    usize m_value { usize::MAX };
+};
+
+template<typename Attribute>
+class ParticleReadObjectIndex {
+public:
+    ParticleReadObjectIndex() = default;
+    bool Valid() const noexcept { return m_value != usize::MAX; }
+
+private:
+    explicit ParticleReadObjectIndex(usize value): m_value(value) {}
+
+    friend class ParticleViewCompiler;
+    friend class ParticleReadView;
+    friend class ParticleWriteView;
+
+    usize m_value { usize::MAX };
+};
+
+template<typename Attribute>
+class ParticleWriteObjectIndex {
+public:
+    ParticleWriteObjectIndex() = default;
+    bool Valid() const noexcept { return m_value != usize::MAX; }
+
+private:
+    explicit ParticleWriteObjectIndex(usize value): m_value(value) {}
+
+    friend class ParticleViewCompiler;
+    friend class ParticleWriteView;
+
+    usize m_value { usize::MAX };
+};
+
+struct ParticleBoundColumn {
+    void* object { nullptr };
+    const void* (*read)(const void*) { nullptr };
+    void* (*write)(void*) { nullptr };
+};
+
+struct ParticleViewColumnLayout {
+    ParticleAttributeId id;
+    usize               schema_slot { usize::MAX };
+    rstd::any::TypeId   concrete_type;
+    ParticleBoundColumn (*bind)(ParticleStorage&, usize) { nullptr };
+    bool readable { false };
+    bool writable { false };
+};
+
+struct ParticleViewObjectLayout {
+    ParticleAttributeId id;
+    usize               schema_slot { usize::MAX };
+    rstd::any::TypeId   concrete_type;
+    void* (*bind)(ParticleStorage&, usize) { nullptr };
+    bool readable { false };
+    bool writable { false };
+};
+
+class ParticleViewLayout {
+public:
+    ParticleViewLayout(const ParticleViewLayout&)                = delete;
+    ParticleViewLayout& operator=(const ParticleViewLayout&)     = delete;
+    ParticleViewLayout(ParticleViewLayout&&) noexcept            = default;
+    ParticleViewLayout& operator=(ParticleViewLayout&&) noexcept = default;
+
+    auto ColumnCount() const noexcept -> usize { return m_columns.len(); }
+    auto ObjectCount() const noexcept -> usize { return m_objects.len(); }
+
+private:
+    friend class ParticleViewCompiler;
+    friend class ParticleViewBinding;
+
+    ParticleViewLayout(ParticleViewColumnLayout state, ParticleViewColumnLayout position)
+        : m_state(rstd::move(state)), m_position(rstd::move(position)) {}
+
+    ParticleViewColumnLayout                 m_state;
+    ParticleViewColumnLayout                 m_position;
+    rstd::vec::Vec<ParticleViewColumnLayout> m_columns;
+    rstd::vec::Vec<ParticleViewObjectLayout> m_objects;
+};
+
+class ParticleViewCompiler {
+public:
+    explicit ParticleViewCompiler(const ParticleSchema& schema)
+        : m_schema(rstd::addressof(schema)),
+          m_layout(MakeColumnLayout(schema.SlotStateKey()),
+                   MakeColumnLayout(schema.PositionKey())) {}
+
+    void ReadBase(ParticleAttributeKey<SlotStateAttribute> key) {
+        ValidateBase(key, m_schema->SlotStateKey(), m_layout.m_state, false);
+    }
+    void WriteBase(ParticleAttributeKey<SlotStateAttribute> key) {
+        ValidateBase(key, m_schema->SlotStateKey(), m_layout.m_state, true);
+    }
+    void ReadBase(ParticleAttributeKey<PositionAttribute> key) {
+        ValidateBase(key, m_schema->PositionKey(), m_layout.m_position, false);
+    }
+    void WriteBase(ParticleAttributeKey<PositionAttribute> key) {
+        ValidateBase(key, m_schema->PositionKey(), m_layout.m_position, true);
+    }
+
+    template<typename Attribute>
+    auto Read(ParticleAttributeKey<Attribute> key) -> ParticleReadIndex<Attribute> {
+        auto index = CompileColumn(key, false);
+        return ParticleReadIndex<Attribute>(index);
+    }
+
+    template<typename Attribute>
+    auto Write(ParticleAttributeKey<Attribute> key) -> ParticleWriteIndex<Attribute> {
+        auto index = CompileColumn(key, true);
+        return ParticleWriteIndex<Attribute>(index);
+    }
+
+    template<typename Attribute>
+    auto ReadObject(ParticleAttributeKey<Attribute> key) -> ParticleReadObjectIndex<Attribute> {
+        auto index = CompileObject(key, false);
+        return ParticleReadObjectIndex<Attribute>(index);
+    }
+
+    template<typename Attribute>
+    auto WriteObject(ParticleAttributeKey<Attribute> key) -> ParticleWriteObjectIndex<Attribute> {
+        auto index = CompileObject(key, true);
+        return ParticleWriteObjectIndex<Attribute>(index);
+    }
+
+    auto Finish() && -> Result<ParticleViewLayout, ParticleSchemaError> {
+        if (m_error.is_some()) return Err(rstd::move(m_error).unwrap());
+        return Ok(rstd::move(m_layout));
+    }
+
+private:
+    template<typename Attribute>
+    static auto ReadValues(const void* object) -> const void* {
+        return static_cast<const Attribute*>(object)->Values().as_raw_ptr();
+    }
+
+    template<typename Attribute>
+    static auto WriteValues(void* object) -> void* {
+        return static_cast<Attribute*>(object)->ValuesMut().as_raw_ptr();
+    }
+
+    template<typename Attribute>
+    static auto BindColumn(ParticleStorage& storage, usize schema_slot) -> ParticleBoundColumn {
+        auto erased = storage.m_attributes[schema_slot].as_mut_ptr();
+        auto object = static_cast<Attribute*>(erased.as_raw_ptr());
+        return ParticleBoundColumn {
+            .object = object,
+            .read   = &ReadValues<Attribute>,
+            .write  = &WriteValues<Attribute>,
+        };
+    }
+
+    template<typename Attribute>
+    static auto BindObject(ParticleStorage& storage, usize schema_slot) -> void* {
+        auto erased = storage.m_attributes[schema_slot].as_mut_ptr();
+        return static_cast<Attribute*>(erased.as_raw_ptr());
+    }
+
+    template<typename Attribute>
+    static auto MakeColumnLayout(ParticleAttributeKey<Attribute> key) -> ParticleViewColumnLayout {
+        return {
+            .id            = key.id,
+            .schema_slot   = key.schema_slot,
+            .concrete_type = rstd::any::TypeId::of<Attribute>(),
+            .bind          = &BindColumn<Attribute>,
+        };
+    }
+
+    template<typename Attribute>
+    void Validate(ParticleAttributeKey<Attribute> key) {
+        if (m_error.is_some()) return;
+        auto result = m_schema->Validate(RequireParticleAttribute(key));
+        if (result.is_err()) m_error = Some(rstd::move(result).unwrap_err());
+    }
+
+    template<typename Attribute>
+    void ValidateBase(ParticleAttributeKey<Attribute> key, ParticleAttributeKey<Attribute> expected,
+                      ParticleViewColumnLayout& layout, bool write) {
+        Validate(key);
+        if (m_error.is_some()) return;
+        if (key.id != expected.id || key.schema_slot != expected.schema_slot) {
+            SetError("particle base attribute does not match schema"_str);
+            return;
         }
-        if (! entry.resolved) {
-            auto values         = storage.ValuesMut(key);
-            entry.id            = key.id;
-            entry.concrete_type = Some(concrete_type);
-            entry.values        = values.as_raw_ptr();
-            entry.len           = values.len();
-            entry.resolved      = true;
+        layout.readable = true;
+        layout.writable = layout.writable || write;
+    }
+
+    bool IsBaseSlot(usize schema_slot) const noexcept {
+        return schema_slot == m_layout.m_state.schema_slot ||
+               schema_slot == m_layout.m_position.schema_slot;
+    }
+
+    template<typename Attribute>
+    auto CompileColumn(ParticleAttributeKey<Attribute> key, bool write) -> usize {
+        Validate(key);
+        if (m_error.is_some()) return usize::MAX;
+        if (IsBaseSlot(key.schema_slot)) {
+            SetError("particle base attribute must use base view access"_str);
+            return usize::MAX;
+        }
+        for (usize index {}; index < m_layout.m_columns.len(); ++index) {
+            auto& column = m_layout.m_columns[index];
+            if (column.schema_slot != key.schema_slot) continue;
+            column.readable = true;
+            column.writable = column.writable || write;
+            return index;
+        }
+        auto layout     = MakeColumnLayout(key);
+        layout.readable = true;
+        layout.writable = write;
+        auto index      = m_layout.m_columns.len();
+        m_layout.m_columns.emplace_back(rstd::move(layout));
+        return index;
+    }
+
+    template<typename Attribute>
+    auto CompileObject(ParticleAttributeKey<Attribute> key, bool write) -> usize {
+        Validate(key);
+        if (m_error.is_some()) return usize::MAX;
+        for (usize index {}; index < m_layout.m_objects.len(); ++index) {
+            auto& object = m_layout.m_objects[index];
+            if (object.schema_slot != key.schema_slot) continue;
+            object.readable = true;
+            object.writable = object.writable || write;
+            return index;
+        }
+        auto index = m_layout.m_objects.len();
+        m_layout.m_objects.emplace_back(ParticleViewObjectLayout {
+            .id            = key.id,
+            .schema_slot   = key.schema_slot,
+            .concrete_type = rstd::any::TypeId::of<Attribute>(),
+            .bind          = &BindObject<Attribute>,
+            .readable      = true,
+            .writable      = write,
+        });
+        return index;
+    }
+
+    void SetError(ref<str> message) {
+        if (m_error.is_none()) {
+            m_error = Some(ParticleSchemaError { .message = String::make(message) });
+        }
+    }
+
+    const ParticleSchema*       m_schema;
+    ParticleViewLayout          m_layout;
+    Option<ParticleSchemaError> m_error;
+};
+
+class ParticleReadView {
+public:
+    auto Len() const noexcept -> usize { return m_len; }
+    auto Generation() const noexcept -> u64 { return m_generation; }
+    auto States() const noexcept -> slice<ParticleSlotState> {
+        return slice<ParticleSlotState>::from_raw_parts(m_states, m_len);
+    }
+    auto Positions() const noexcept -> slice<Eigen::Vector3f> {
+        return slice<Eigen::Vector3f>::from_raw_parts(m_positions, m_len);
+    }
+
+    template<typename Attribute>
+    auto Read(ParticleReadIndex<Attribute> index) const -> slice<typename Attribute::Value> {
+        if (! index.Valid() || index.m_value >= m_columns.len()) {
+            rstd::panic { "invalid particle read index" };
+        }
+        return slice<typename Attribute::Value>::from_raw_parts(
+            static_cast<const typename Attribute::Value*>(m_columns[index.m_value]), m_len);
+    }
+
+    template<typename Attribute>
+    auto ReadObject(ParticleReadObjectIndex<Attribute> index) const -> ref<Attribute> {
+        if (! index.Valid() || index.m_value >= m_objects.len()) {
+            rstd::panic { "invalid particle object read index" };
+        }
+        return ref<Attribute>::from_raw_parts(
+            static_cast<const Attribute*>(m_objects[index.m_value]));
+    }
+
+private:
+    friend class ParticleViewBinding;
+
+    ParticleReadView(usize len, u64 generation, const ParticleSlotState* states,
+                     const Eigen::Vector3f* positions, slice<const void*> columns,
+                     slice<const void*> objects)
+        : m_len(len),
+          m_generation(generation),
+          m_states(states),
+          m_positions(positions),
+          m_columns(columns),
+          m_objects(objects) {}
+
+    usize                    m_len {};
+    u64                      m_generation {};
+    const ParticleSlotState* m_states { nullptr };
+    const Eigen::Vector3f*   m_positions { nullptr };
+    slice<const void*>       m_columns;
+    slice<const void*>       m_objects;
+};
+
+class ParticleWriteView {
+public:
+    auto Len() const noexcept -> usize { return m_len; }
+    auto Generation() const noexcept -> u64 { return m_generation; }
+    auto States() const noexcept -> slice<ParticleSlotState> {
+        return slice<ParticleSlotState>::from_raw_parts(m_states, m_len);
+    }
+    auto StatesMut() const noexcept -> mut_ref<ParticleSlotState[]> {
+        return mut_ref<ParticleSlotState[]>::from_raw_parts(m_states, m_len);
+    }
+    auto Positions() const noexcept -> slice<Eigen::Vector3f> {
+        return slice<Eigen::Vector3f>::from_raw_parts(m_positions, m_len);
+    }
+    auto PositionsMut() const noexcept -> mut_ref<Eigen::Vector3f[]> {
+        return mut_ref<Eigen::Vector3f[]>::from_raw_parts(m_positions, m_len);
+    }
+
+    template<typename Attribute>
+    auto Read(ParticleReadIndex<Attribute> index) const -> slice<typename Attribute::Value> {
+        if (! index.Valid() || index.m_value >= m_columns.len()) {
+            rstd::panic { "invalid particle read index" };
+        }
+        return slice<typename Attribute::Value>::from_raw_parts(
+            static_cast<const typename Attribute::Value*>(m_columns[index.m_value]), m_len);
+    }
+
+    template<typename Attribute>
+    auto Write(ParticleWriteIndex<Attribute> index) const -> mut_ref<typename Attribute::Value[]> {
+        if (! index.Valid() || index.m_value >= m_columns.len()) {
+            rstd::panic { "invalid particle write index" };
         }
         return mut_ref<typename Attribute::Value[]>::from_raw_parts(
-            static_cast<typename Attribute::Value*>(entry.values), entry.len);
+            static_cast<typename Attribute::Value*>(m_columns[index.m_value]), m_len);
     }
-
-private:
-    struct Entry {
-        ParticleAttributeId       id;
-        Option<rstd::any::TypeId> concrete_type;
-        void*                     values { nullptr };
-        usize                     len {};
-        bool                      resolved { false };
-    };
-
-    void Refresh(ParticleStorage& storage) {
-        auto storage_ptr = rstd::addressof(storage);
-        auto version     = storage.ColumnVersion();
-        if (m_storage == storage_ptr && m_version == version) return;
-
-        if (m_storage != storage_ptr || m_columns.len() != storage.AttributeCount()) {
-            m_columns.clear();
-            for (usize index {}; index < storage.AttributeCount(); ++index) {
-                m_columns.emplace_back();
-            }
-        } else {
-            for (auto& entry : m_columns) {
-                entry.values   = nullptr;
-                entry.len      = usize();
-                entry.resolved = false;
-            }
-        }
-        m_storage = storage_ptr;
-        m_version = version;
-    }
-
-    ParticleStorage*      m_storage { nullptr };
-    u64                   m_version {};
-    rstd::vec::Vec<Entry> m_columns;
-};
-
-class ParticleReadQuery {
-public:
-    explicit ParticleReadQuery(const ParticleStorage& storage)
-        : m_storage(rstd::addressof(storage)), m_version(storage.StructureVersion()) {}
 
     template<typename Attribute>
-    auto Read(ParticleAttributeKey<Attribute> key) const -> slice<typename Attribute::Value> {
-        CheckVersion();
-        return m_storage->Values(key);
+    auto ReadObject(ParticleReadObjectIndex<Attribute> index) const -> ref<Attribute> {
+        if (! index.Valid() || index.m_value >= m_objects.len()) {
+            rstd::panic { "invalid particle object read index" };
+        }
+        return ref<Attribute>::from_raw_parts(
+            static_cast<const Attribute*>(m_objects[index.m_value]));
+    }
+
+    template<typename Attribute>
+    auto WriteObject(ParticleWriteObjectIndex<Attribute> index) const -> mut_ref<Attribute> {
+        if (! index.Valid() || index.m_value >= m_objects.len()) {
+            rstd::panic { "invalid particle object write index" };
+        }
+        return mut_ref<Attribute>::from_raw_parts(
+            static_cast<Attribute*>(m_objects[index.m_value]));
     }
 
 private:
-    void CheckVersion() const {
-        if (m_storage->StructureVersion() != m_version) {
-            rstd::panic { "particle query used after structural mutation" };
+    friend class ParticleViewBinding;
+
+    ParticleWriteView(usize len, u64 generation, ParticleSlotState* states,
+                      Eigen::Vector3f* positions, slice<void*> columns, slice<void*> objects)
+        : m_len(len),
+          m_generation(generation),
+          m_states(states),
+          m_positions(positions),
+          m_columns(columns),
+          m_objects(objects) {}
+
+    usize              m_len {};
+    u64                m_generation {};
+    ParticleSlotState* m_states { nullptr };
+    Eigen::Vector3f*   m_positions { nullptr };
+    slice<void*>       m_columns;
+    slice<void*>       m_objects;
+};
+
+class ParticleViewBinding {
+public:
+    ParticleViewBinding(const ParticleViewLayout& layout, ParticleStorage& storage)
+        : m_storage(rstd::addressof(storage)),
+          m_state(layout.m_state.bind(storage, layout.m_state.schema_slot)),
+          m_position(layout.m_position.bind(storage, layout.m_position.schema_slot)),
+          m_columns(rstd::vec::Vec<ParticleBoundColumn>::with_capacity(layout.m_columns.len())),
+          m_read_columns(rstd::vec::Vec<const void*>::with_capacity(layout.m_columns.len())),
+          m_write_columns(rstd::vec::Vec<void*>::with_capacity(layout.m_columns.len())),
+          m_read_objects(rstd::vec::Vec<const void*>::with_capacity(layout.m_objects.len())),
+          m_write_objects(rstd::vec::Vec<void*>::with_capacity(layout.m_objects.len())) {
+        for (const auto& column : layout.m_columns) {
+            m_columns.emplace_back(column.bind(storage, column.schema_slot));
         }
+        for (const auto& object : layout.m_objects) {
+            auto value = object.bind(storage, object.schema_slot);
+            m_read_objects.emplace_back(value);
+            m_write_objects.emplace_back(value);
+        }
+        Refresh();
     }
 
-    const ParticleStorage* m_storage;
-    u64                    m_version;
+    auto Read() -> ParticleReadView {
+        Refresh();
+        return ParticleReadView(
+            m_storage->Len(),
+            m_storage->ColumnVersion(),
+            static_cast<const ParticleSlotState*>(m_state.read(m_state.object)),
+            static_cast<const Eigen::Vector3f*>(m_position.read(m_position.object)),
+            m_read_columns.as_slice(),
+            m_read_objects.as_slice());
+    }
+
+    auto Write() -> ParticleWriteView {
+        Refresh();
+        return ParticleWriteView(m_storage->Len(),
+                                 m_storage->ColumnVersion(),
+                                 static_cast<ParticleSlotState*>(m_state.write(m_state.object)),
+                                 static_cast<Eigen::Vector3f*>(m_position.write(m_position.object)),
+                                 m_write_columns.as_slice(),
+                                 m_write_objects.as_slice());
+    }
+
+private:
+    void Refresh() {
+        auto version = m_storage->ColumnVersion();
+        if (m_version == version && m_len == m_storage->Len()) return;
+
+        m_read_columns.clear();
+        m_write_columns.clear();
+        for (auto& column : m_columns) {
+            m_read_columns.emplace_back(column.read(column.object));
+            m_write_columns.emplace_back(column.write(column.object));
+        }
+        m_version = version;
+        m_len     = m_storage->Len();
+    }
+
+    ParticleStorage*                    m_storage;
+    ParticleBoundColumn                 m_state;
+    ParticleBoundColumn                 m_position;
+    rstd::vec::Vec<ParticleBoundColumn> m_columns;
+    rstd::vec::Vec<const void*>         m_read_columns;
+    rstd::vec::Vec<void*>               m_write_columns;
+    rstd::vec::Vec<const void*>         m_read_objects;
+    rstd::vec::Vec<void*>               m_write_objects;
+    u64                                 m_version {};
+    usize                               m_len { usize::MAX };
 };
 
 class ParticleSlotReader {
@@ -644,45 +1086,22 @@ private:
     u64              m_version;
 };
 
-class ParticleWriteQuery {
-public:
-    explicit ParticleWriteQuery(ParticleStorage& storage)
-        : m_storage(rstd::addressof(storage)), m_version(storage.StructureVersion()) {}
-
-    template<typename Attribute>
-    auto Read(ParticleAttributeKey<Attribute> key) const -> slice<typename Attribute::Value> {
-        CheckVersion();
-        return m_storage->Values(key);
-    }
-
-    template<typename Attribute>
-    auto Write(ParticleAttributeKey<Attribute> key) -> mut_ref<typename Attribute::Value[]> {
-        CheckVersion();
-        return m_storage->ValuesMut(key);
-    }
-
-private:
-    void CheckVersion() const {
-        if (m_storage->StructureVersion() != m_version) {
-            rstd::panic { "particle query used after structural mutation" };
-        }
-    }
-
-    ParticleStorage* m_storage;
-    u64              m_version;
-};
-
 inline ParticleSchemaBuilder::ParticleSchemaBuilder() {
-    auto key =
+    auto state =
         Register<SlotStateAttribute>("slot_state"_str, "framework"_str, ParticleSlotState {});
-    if (key.is_err()) rstd::panic { "failed to register particle slot state" };
-    m_slot_state_key = key.unwrap();
+    if (state.is_err()) rstd::panic { "failed to register particle slot state" };
+    m_slot_state_key = state.unwrap();
+
+    auto position =
+        Register<PositionAttribute>("position"_str, "framework"_str, Eigen::Vector3f::Zero());
+    if (position.is_err()) rstd::panic { "failed to register particle position" };
+    m_position_key = position.unwrap();
 }
 
 inline auto ParticleSchema::CreateStorage() const -> ParticleStorage {
     auto attributes = rstd::vec::Vec<Box<dyn<ParticleAttribute>>>::with_capacity(m_factories.len());
     for (const auto& factory : m_factories) attributes.push(factory->Create());
-    return ParticleStorage(rstd::move(attributes), m_slot_state_key);
+    return ParticleStorage(rstd::move(attributes), m_slot_state_key, m_position_key);
 }
 
 } // namespace owe::particle

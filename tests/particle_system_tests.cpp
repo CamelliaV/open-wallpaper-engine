@@ -39,8 +39,8 @@ struct TemperatureAttribute {
     auto Len() const noexcept -> usize { return storage.Len(); }
     auto Capacity() const noexcept -> usize { return storage.Capacity(); }
     void Reserve(usize total_slots) { storage.Reserve(total_slots); }
-    void AppendDefault() { storage.AppendDefault(); }
-    void Reset(particle::ParticleSlot slot) { storage.Reset(slot); }
+    void AppendDefaults(usize count) { storage.AppendDefaults(count); }
+    void ResetSlots(slice<particle::ParticleSlot> slots) { storage.ResetSlots(slots); }
     void Clear() { storage.Clear(); }
     auto Values() const noexcept -> slice<Value> { return storage.Values(); }
     auto ValuesMut() noexcept -> mut_ref<Value[]> {
@@ -57,59 +57,67 @@ struct TemperatureAttribute {
 struct TraceEmitter {
     rstd::vec::Vec<i32>* trace;
 
+    void Compile(particle::ParticleViewCompiler&) {}
     void Emit(particle::ParticleEmitterContext& context) {
         trace->push(i32(1));
-        auto slot = context.Acquire();
-        if (slot.is_none()) rstd::panic { "particle test could not acquire slot" };
-        context.Initialize(*slot, f64());
+        auto particles = context.Acquire(usize(1), f64());
+        if (particles.is_empty()) rstd::panic { "particle test could not acquire slot" };
+        context.Initialize(particles);
     }
 };
 
 struct TraceSpawn {
     rstd::vec::Vec<i32>*                                 trace;
     particle::ParticleAttributeKey<TemperatureAttribute> temperature;
+    particle::ParticleWriteIndex<TemperatureAttribute>   index;
+
+    void Compile(particle::ParticleViewCompiler& compiler) { index = compiler.Write(temperature); }
 
     void Initialize(particle::ParticleSpawnContext& context) {
         trace->push(i32(2));
-        particle::ParticleSlotWriter slot(context.storage, context.slot);
-        slot.Write(temperature) = 42.0f;
+        auto values = context.view.Write(index);
+        for (auto request : context.particles) values[request.slot.index] = 42.0f;
     }
 };
 
 struct TraceLifecycle {
     rstd::vec::Vec<i32>* trace;
 
+    void Compile(particle::ParticleViewCompiler&) {}
     void Update(particle::ParticleLifecycleContext&) { trace->push(i32(3)); }
 };
 
 struct LifetimeSpawn {
     particle::ParticleAttributeKey<TemperatureAttribute> lifetime;
+    particle::ParticleWriteIndex<TemperatureAttribute>   index;
+
+    void Compile(particle::ParticleViewCompiler& compiler) { index = compiler.Write(lifetime); }
 
     void Initialize(particle::ParticleSpawnContext& context) {
-        particle::ParticleSlotWriter slot(context.storage, context.slot);
-        slot.Write(lifetime) = 1.0f;
+        auto values = context.view.Write(index);
+        for (auto request : context.particles) values[request.slot.index] = 1.0f;
     }
 };
 
 struct ContinuousEmitter {
+    void Compile(particle::ParticleViewCompiler&) {}
     void Emit(particle::ParticleEmitterContext& context) {
-        auto slot = context.Acquire();
-        if (slot.is_some()) context.Initialize(*slot, f64());
+        auto particles = context.Acquire(usize(1), f64());
+        context.Initialize(particles);
     }
 };
 
 struct ExpiringLifecycle {
     particle::ParticleAttributeKey<TemperatureAttribute> lifetime;
+    particle::ParticleWriteIndex<TemperatureAttribute>   index;
+
+    void Compile(particle::ParticleViewCompiler& compiler) { index = compiler.Write(lifetime); }
 
     void Update(particle::ParticleLifecycleContext& context) {
-        auto states = context.storage.Values(context.storage.SlotStateKey());
-        auto values = context.columns.ValuesMut(context.storage, lifetime);
-        for (usize index {}; index < states.len(); ++index) {
-            if (! states[index].active) continue;
-            values[index] -= context.delta.to_primitive();
-            if (values[index] <= 0.0f) {
-                context.Kill(particle::ParticleSlot { .index = index });
-            }
+        auto values = context.view.Write(index);
+        for (auto slot : context.slots) {
+            values[slot.index] -= context.delta.to_primitive();
+            if (values[slot.index] <= 0.0f) context.Kill(slot);
         }
     }
 };
@@ -117,6 +125,7 @@ struct ExpiringLifecycle {
 struct TransitionTraceEvent {
     rstd::vec::Vec<i32>* trace;
 
+    void Compile(particle::ParticleViewCompiler&) {}
     void Process(particle::ParticleEventContext& context) {
         if (! context.events->died.is_empty()) trace->push(i32(-1));
         if (! context.events->spawned.is_empty()) trace->push(i32(1));
@@ -127,6 +136,7 @@ struct TraceEvent {
     rstd::vec::Vec<i32>* trace;
     usize*               spawned;
 
+    void Compile(particle::ParticleViewCompiler&) {}
     void Process(particle::ParticleEventContext& context) {
         trace->push(i32(4));
         *spawned = context.events->spawned.len();
@@ -137,13 +147,22 @@ struct TraceUpdate {
     rstd::vec::Vec<i32>* trace;
     i32                  value;
 
+    void Compile(particle::ParticleViewCompiler&) {}
     void Update(particle::ParticleUpdateContext&) { trace->emplace_back(value); }
 };
 
 struct TraceExtract {
     rstd::vec::Vec<i32>* trace;
 
+    void Compile(particle::ParticleViewCompiler&) {}
     void Extract(particle::ParticleExtractContext&) { trace->push(i32(7)); }
+};
+
+struct InvalidKeyProgram {
+    particle::ParticleAttributeKey<particle::ColorAttribute> key;
+
+    void Compile(particle::ParticleViewCompiler& compiler) { (void)compiler.Read(key); }
+    void Update(particle::ParticleUpdateContext&) {}
 };
 
 struct EmptyFrame {};
@@ -152,9 +171,8 @@ struct EmptyFrame {};
 
 TEST(ParticleStorage, OwnsIndependentAttributesAndReusesStableSlots) {
     particle::ParticleSchemaBuilder builder;
-    auto                            position = Register<particle::PositionAttribute>(
-        builder, "position"_str, "test"_str, Eigen::Vector3f::Zero());
-    auto temperature =
+    auto                            position = builder.PositionKey();
+    auto                            temperature =
         Register<TemperatureAttribute>(builder, "temperature"_str, "test"_str, 18.0f);
     auto schema  = rstd::move(builder).Build();
     auto storage = schema.CreateStorage();
@@ -187,10 +205,9 @@ TEST(ParticleStorage, OwnsIndependentAttributesAndReusesStableSlots) {
 
 TEST(ParticleSchema, RejectsDuplicateNamesAndMismatchedTypedKeys) {
     particle::ParticleSchemaBuilder duplicate_builder;
-    auto                            position = Register<particle::PositionAttribute>(
-        duplicate_builder, "value"_str, "test"_str, Eigen::Vector3f::Zero());
-    auto duplicate = duplicate_builder.Register<particle::ColorAttribute>(
-        "value"_str, "test"_str, Eigen::Vector3f::Ones());
+    auto                            position = duplicate_builder.PositionKey();
+    auto duplicate                           = duplicate_builder.Register<particle::ColorAttribute>(
+        "position"_str, "test"_str, Eigen::Vector3f::Ones());
     EXPECT_TRUE(duplicate.is_err());
 
     auto schema  = rstd::move(duplicate_builder).Build();
@@ -201,78 +218,50 @@ TEST(ParticleSchema, RejectsDuplicateNamesAndMismatchedTypedKeys) {
         .schema_slot = position.schema_slot,
     };
     EXPECT_DEATH((void)storage.Values(wrong), "particle attribute key does not match storage");
-
-    particle::ParticleColumnCache columns;
-    (void)columns.ValuesMut(storage, position);
-    EXPECT_DEATH((void)columns.ValuesMut(storage, wrong),
-                 "particle attribute key does not match storage");
 }
 
 TEST(ParticleSchema, RejectsMissingProgramRequirementsDuringPrepare) {
     particle::ParticleSchemaBuilder builder;
-    auto                            position = Register<particle::PositionAttribute>(
-        builder, "position"_str, "test"_str, Eigen::Vector3f::Zero());
-    particle::ParticleProgram program;
-    program.Require(particle::ParticleAttributeKey<particle::ColorAttribute> {
-        .id          = position.id,
-        .schema_slot = position.schema_slot,
-    });
+    auto                            position = builder.PositionKey();
+    particle::ParticleProgram       program;
+    program.AddUpdate(Box<dyn<particle::ParticleUpdateProgram>>::make(InvalidKeyProgram {
+        .key =
+            particle::ParticleAttributeKey<particle::ColorAttribute> {
+                .id          = position.id,
+                .schema_slot = position.schema_slot,
+            },
+    }));
 
     auto definition = particle::ParticleDefinition::Prepare(
         rstd::move(builder).Build(), rstd::move(program), usize(4));
     EXPECT_TRUE(definition.is_err());
 }
 
-TEST(ParticleQuery, RejectsUseAfterStructuralMutation) {
+TEST(ParticleView, RefreshesBoundColumnsAfterStructuralMutation) {
     particle::ParticleSchemaBuilder builder;
     auto temperature = Register<TemperatureAttribute>(builder, "temperature"_str, "test"_str, 1.0f);
     auto schema      = rstd::move(builder).Build();
-    auto storage     = schema.CreateStorage();
-    (void)storage.AppendSlot();
-    particle::ParticleReadQuery query(storage);
-    EXPECT_EQ(query.Read(temperature).len(), usize(1));
-
-    (void)storage.AppendSlot();
-    EXPECT_DEATH((void)query.Read(temperature), "particle query used after structural mutation");
-}
-
-TEST(ParticleColumnCache, ReusesResolvedColumnsUntilLayoutChanges) {
-    particle::ParticleSchemaBuilder builder;
-    auto temperature = Register<TemperatureAttribute>(builder, "temperature"_str, "test"_str, 1.0f);
-    auto schema      = rstd::move(builder).Build();
-    auto storage     = schema.CreateStorage();
-    auto slot        = storage.AppendSlot();
-
+    particle::ParticleViewCompiler compiler(schema);
+    auto                           temperature_index = compiler.Write(temperature);
+    auto                           layout_result     = rstd::move(compiler).Finish();
+    ASSERT_TRUE(layout_result.is_ok());
+    auto                          layout  = rstd::move(layout_result).unwrap();
+    auto                          storage = schema.CreateStorage();
+    particle::ParticleViewBinding binding(layout, storage);
     TemperatureAttribute::values_mut_calls = usize();
-    particle::ParticleColumnCache columns;
-    columns.ValuesMut(storage, temperature)[slot.index] = 2.0f;
-    EXPECT_FLOAT_EQ(columns.ValuesMut(storage, temperature)[slot.index], 2.0f);
+
+    auto slot                                            = storage.AppendSlot();
+    binding.Write().Write(temperature_index)[slot.index] = 2.0f;
+    EXPECT_FLOAT_EQ(binding.Write().Write(temperature_index)[slot.index], 2.0f);
     EXPECT_EQ(TemperatureAttribute::values_mut_calls, usize(1));
 
     storage.ResetSlot(slot);
-    EXPECT_FLOAT_EQ(columns.ValuesMut(storage, temperature)[slot.index], 1.0f);
+    EXPECT_FLOAT_EQ(binding.Write().Write(temperature_index)[slot.index], 1.0f);
     EXPECT_EQ(TemperatureAttribute::values_mut_calls, usize(1));
 
     (void)storage.AppendSlot();
-    (void)columns.ValuesMut(storage, temperature);
+    (void)binding.Write().Write(temperature_index);
     EXPECT_EQ(TemperatureAttribute::values_mut_calls, usize(2));
-}
-
-TEST(WPParticleBatch, UsesResolvedColumnsUntilStorageLayoutChanges) {
-    particle::ParticleSchemaBuilder builder;
-    auto                            attributes = owe::WPParticleAttributes::Register(builder);
-    auto                            schema     = rstd::move(builder).Build();
-    auto                            storage    = schema.CreateStorage();
-    auto                            slot       = storage.AppendSlot();
-
-    particle::ParticleColumnCache columns;
-    owe::WPParticleBatch          particles(storage, columns, attributes);
-    particles.Particle(slot.index).position = Eigen::Vector3f { 1.0f, 2.0f, 3.0f };
-    EXPECT_EQ(storage.Values(attributes.position)[slot.index],
-              (Eigen::Vector3f { 1.0f, 2.0f, 3.0f }));
-
-    (void)storage.AppendSlot();
-    EXPECT_DEATH(particles.ValidateStorage(), "particle batch used after column layout mutation");
 }
 
 TEST(ParticleSlotEvents, CombinesTransitionsInStableSlotOrder) {
@@ -300,7 +289,6 @@ TEST(ParticleProgram, RunsPreparedProgramsInContractOrder) {
     usize               spawned {};
 
     particle::ParticleProgram program;
-    program.Require(temperature);
     program.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(
         TraceEmitter { .trace = rstd::addressof(trace) }));
     program.AddSpawn(Box<dyn<particle::ParticleSpawnProgram>>::make(
@@ -343,7 +331,6 @@ TEST(ParticleProgram, ReusesExpiredCapacityWithoutAnEmptyFrame) {
     rstd::vec::Vec<i32> transitions;
 
     particle::ParticleProgram program;
-    program.Require(lifetime);
     program.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(ContinuousEmitter {}));
     program.AddSpawn(
         Box<dyn<particle::ParticleSpawnProgram>>::make(LifetimeSpawn { .lifetime = lifetime }));

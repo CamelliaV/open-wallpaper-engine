@@ -41,64 +41,57 @@ class WPLifecycleProgram {
 public:
     explicit WPLifecycleProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
 
-    void Update(particle::ParticleLifecycleContext& context) {
-        auto particles = WPParticleBatch(context.storage, context.columns, m_attributes);
-        for (usize index {}; index < particles.Len(); ++index) {
-            auto value = particles.Particle(index);
-            if (! value.state.active) continue;
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        m_alpha         = compiler.Write(m_attributes.alpha);
+        m_size          = compiler.Write(m_attributes.size);
+        m_color         = compiler.Write(m_attributes.color);
+        m_lifetime      = compiler.Write(m_attributes.lifetime);
+        m_initial_alpha = compiler.Read(m_attributes.initial_alpha);
+        m_initial_size  = compiler.Read(m_attributes.initial_size);
+        m_initial_color = compiler.Read(m_attributes.initial_color);
+    }
 
-            value.alpha = value.initial.alpha;
-            value.size  = value.initial.size;
-            value.color = value.initial.color;
-            value.lifetime += -context.delta.to_primitive();
-            if (value.lifetime <= 0.0f) {
-                context.Kill(value.slot);
-            }
+    void Update(particle::ParticleLifecycleContext& context) {
+        auto alpha         = context.view.Write(m_alpha);
+        auto size          = context.view.Write(m_size);
+        auto color         = context.view.Write(m_color);
+        auto lifetime      = context.view.Write(m_lifetime);
+        auto initial_alpha = context.view.Read(m_initial_alpha);
+        auto initial_size  = context.view.Read(m_initial_size);
+        auto initial_color = context.view.Read(m_initial_color);
+        for (auto slot : context.slots) {
+            alpha[slot.index] = initial_alpha[slot.index];
+            size[slot.index]  = initial_size[slot.index];
+            color[slot.index] = initial_color[slot.index];
+            lifetime[slot.index] -= context.delta.to_primitive();
+            if (lifetime[slot.index] <= 0.0f) context.Kill(slot);
         }
-        particles.ValidateStorage();
     }
 
 private:
-    WPParticleAttributes m_attributes;
+    WPParticleAttributes                                         m_attributes;
+    particle::ParticleWriteIndex<particle::AlphaAttribute>       m_alpha;
+    particle::ParticleWriteIndex<particle::SizeAttribute>        m_size;
+    particle::ParticleWriteIndex<particle::ColorAttribute>       m_color;
+    particle::ParticleWriteIndex<particle::LifetimeAttribute>    m_lifetime;
+    particle::ParticleReadIndex<particle::InitialAlphaAttribute> m_initial_alpha;
+    particle::ParticleReadIndex<particle::InitialSizeAttribute>  m_initial_size;
+    particle::ParticleReadIndex<particle::InitialColorAttribute> m_initial_color;
 };
 
 class WPChildEventProgram {
 public:
     explicit WPChildEventProgram(WPParticleSubSystem& subsystem): m_subsystem(&subsystem) {}
 
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        m_subsystem->CompileRuntimeView(compiler);
+    }
     void Process(particle::ParticleEventContext& context) {
         m_subsystem->ProcessChildEvents(context);
     }
 
 private:
     WPParticleSubSystem* m_subsystem;
-};
-
-class WPSpawnMetadataProgram {
-public:
-    explicit WPSpawnMetadataProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
-
-    void Initialize(particle::ParticleSpawnContext& context) {
-        auto value   = MakeWPParticleRef(context.storage, m_attributes, context.slot);
-        value.random = Random::get(0.0f, 1.0f);
-    }
-
-private:
-    WPParticleAttributes m_attributes;
-};
-
-class WPWorldSpaceSpawnProgram {
-public:
-    explicit WPWorldSpaceSpawnProgram(WPParticleAttributes attributes): m_attributes(attributes) {}
-
-    void Initialize(particle::ParticleSpawnContext& context) {
-        auto frame = WPParticleFrameFrom(context.frame);
-        auto value = MakeWPParticleRef(context.storage, m_attributes, context.slot);
-        value.position += frame->subsystem->InstanceState(frame->instance_index).bounded.position;
-    }
-
-private:
-    WPParticleAttributes m_attributes;
 };
 
 class WPTrailUpdateProgram {
@@ -108,21 +101,24 @@ public:
                          f64                                                     sample_interval)
         : m_attributes(attributes), m_trail(trail), m_sample_interval(sample_interval) {}
 
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        compiler.ReadBase(m_attributes.position);
+        m_trail_object = compiler.WriteObject(m_trail);
+    }
+
     void Update(particle::ParticleUpdateContext& context) {
         auto frame     = WPParticleFrameFrom(context.frame);
-        auto states    = context.storage.Values(context.storage.SlotStateKey());
-        auto positions = context.storage.Values(m_attributes.position);
-        auto trail     = context.storage.AttributeMut(m_trail);
+        auto positions = context.view.Positions();
+        auto trail     = context.view.WriteObject(m_trail_object);
 
         auto interval     = m_sample_interval.to_primitive();
         auto delta        = context.delta.to_primitive();
         auto remainder    = frame->trail_sample_remainder.to_primitive();
         auto sample_steps = rstd::cmp::min(frame->trail_sample_steps, trail->SampleCapacity());
 
-        for (usize index {}; index < states.len(); ++index) {
-            if (! states[index].active) continue;
-            particle::ParticleSlot slot { .index = index };
-            auto                   state = trail->State(slot);
+        for (auto slot : context.slots) {
+            auto index = slot.index;
+            auto state = trail->State(slot);
             if (! state.has_previous_position) {
                 trail->Initialize(slot, positions[index]);
                 trail->SetPreviousPosition(slot, positions[index]);
@@ -143,9 +139,10 @@ public:
     }
 
 private:
-    WPParticleAttributes                                    m_attributes;
-    particle::ParticleAttributeKey<WPTrailHistoryAttribute> m_trail;
-    f64                                                     m_sample_interval {};
+    WPParticleAttributes                                        m_attributes;
+    particle::ParticleAttributeKey<WPTrailHistoryAttribute>     m_trail;
+    particle::ParticleWriteObjectIndex<WPTrailHistoryAttribute> m_trail_object;
+    f64                                                         m_sample_interval {};
 };
 
 } // namespace
@@ -155,8 +152,7 @@ auto WPParticleAttributes::Register(particle::ParticleSchemaBuilder& builder)
     const Eigen::Vector3f zero = Eigen::Vector3f::Zero();
     const Eigen::Vector3f one  = Eigen::Vector3f::Ones();
     return {
-        .position =
-            RegisterAttribute<particle::PositionAttribute>(builder, "position"_str, "we"_str, zero),
+        .position = builder.PositionKey(),
         .velocity =
             RegisterAttribute<particle::VelocityAttribute>(builder, "velocity"_str, "we"_str, zero),
         .acceleration = RegisterAttribute<particle::AccelerationAttribute>(
@@ -182,76 +178,6 @@ auto WPParticleAttributes::Register(particle::ParticleSchemaBuilder& builder)
             builder, "initial_size"_str, "we"_str, 20.0f),
         .initial_lifetime = RegisterAttribute<particle::InitialLifetimeAttribute>(
             builder, "initial_lifetime"_str, "we"_str, 1.0f),
-    };
-}
-
-void WPParticleAttributes::Require(particle::ParticleProgram& program) const {
-    program.Require(position);
-    program.Require(velocity);
-    program.Require(acceleration);
-    program.Require(rotation);
-    program.Require(angular_velocity);
-    program.Require(angular_acceleration);
-    program.Require(color);
-    program.Require(alpha);
-    program.Require(size);
-    program.Require(lifetime);
-    program.Require(random);
-    program.Require(initial_color);
-    program.Require(initial_alpha);
-    program.Require(initial_size);
-    program.Require(initial_lifetime);
-}
-
-auto owe::MakeWPParticleRef(particle::ParticleStorage&  storage,
-                            const WPParticleAttributes& attributes, particle::ParticleSlot slot)
-    -> WPParticleRef {
-    return {
-        .slot                 = slot,
-        .state                = storage.ValuesMut(storage.SlotStateKey())[slot.index],
-        .position             = storage.ValuesMut(attributes.position)[slot.index],
-        .color                = storage.ValuesMut(attributes.color)[slot.index],
-        .alpha                = storage.ValuesMut(attributes.alpha)[slot.index],
-        .size                 = storage.ValuesMut(attributes.size)[slot.index],
-        .lifetime             = storage.ValuesMut(attributes.lifetime)[slot.index],
-        .rotation             = storage.ValuesMut(attributes.rotation)[slot.index],
-        .velocity             = storage.ValuesMut(attributes.velocity)[slot.index],
-        .acceleration         = storage.ValuesMut(attributes.acceleration)[slot.index],
-        .angular_velocity     = storage.ValuesMut(attributes.angular_velocity)[slot.index],
-        .angular_acceleration = storage.ValuesMut(attributes.angular_acceleration)[slot.index],
-        .random               = storage.ValuesMut(attributes.random)[slot.index],
-        .initial = {
-            .color    = storage.ValuesMut(attributes.initial_color)[slot.index],
-            .alpha    = storage.ValuesMut(attributes.initial_alpha)[slot.index],
-            .size     = storage.ValuesMut(attributes.initial_size)[slot.index],
-            .lifetime = storage.ValuesMut(attributes.initial_lifetime)[slot.index],
-        },
-    };
-}
-
-auto owe::MakeWPParticleConstRef(const particle::ParticleStorage& storage,
-                                 const WPParticleAttributes&      attributes,
-                                 particle::ParticleSlot           slot) -> WPParticleConstRef {
-    return {
-        .slot                 = slot,
-        .state                = storage.Values(storage.SlotStateKey())[slot.index],
-        .position             = storage.Values(attributes.position)[slot.index],
-        .color                = storage.Values(attributes.color)[slot.index],
-        .alpha                = storage.Values(attributes.alpha)[slot.index],
-        .size                 = storage.Values(attributes.size)[slot.index],
-        .lifetime             = storage.Values(attributes.lifetime)[slot.index],
-        .rotation             = storage.Values(attributes.rotation)[slot.index],
-        .velocity             = storage.Values(attributes.velocity)[slot.index],
-        .acceleration         = storage.Values(attributes.acceleration)[slot.index],
-        .angular_velocity     = storage.Values(attributes.angular_velocity)[slot.index],
-        .angular_acceleration = storage.Values(attributes.angular_acceleration)[slot.index],
-        .random               = storage.Values(attributes.random)[slot.index],
-        .initial = {
-            .color    = storage.Values(attributes.initial_color)[slot.index],
-            .alpha    = storage.Values(attributes.initial_alpha)[slot.index],
-            .size     = storage.Values(attributes.initial_size)[slot.index],
-            .lifetime = storage.Values(attributes.initial_lifetime)[slot.index],
-        },
     };
 }
 
@@ -287,18 +213,22 @@ void WPTrailHistoryAttribute::Reserve(usize total_slots) {
     }
 }
 
-void WPTrailHistoryAttribute::AppendDefault() {
-    m_states.emplace_back();
-    for (usize index {}; index < m_sample_capacity; ++index) {
-        m_positions.emplace_back(Eigen::Vector3f::Zero());
+void WPTrailHistoryAttribute::AppendDefaults(usize count) {
+    for (usize slot {}; slot < count; ++slot) {
+        m_states.emplace_back();
+        for (usize index {}; index < m_sample_capacity; ++index) {
+            m_positions.emplace_back(Eigen::Vector3f::Zero());
+        }
     }
 }
 
-void WPTrailHistoryAttribute::Reset(particle::ParticleSlot slot) {
-    m_states[slot.index] = {};
-    auto begin           = slot.index * m_sample_capacity;
-    for (usize index {}; index < m_sample_capacity; ++index) {
-        m_positions[begin + index] = Eigen::Vector3f::Zero();
+void WPTrailHistoryAttribute::ResetSlots(slice<particle::ParticleSlot> slots) {
+    for (auto slot : slots) {
+        m_states[slot.index] = {};
+        auto begin           = slot.index * m_sample_capacity;
+        for (usize index {}; index < m_sample_capacity; ++index) {
+            m_positions[begin + index] = Eigen::Vector3f::Zero();
+        }
     }
 }
 
@@ -359,48 +289,53 @@ auto owe::WPParticleFrameFrom(ref<dyn<rstd::any::Any>> frame) -> ref<WPParticleF
     return *value;
 }
 
-WPParticleBatch::WPParticleBatch(particle::ParticleStorage&     storage,
-                                 particle::ParticleColumnCache& columns,
-                                 const WPParticleAttributes&    attributes)
-    : m_storage(rstd::addressof(storage)),
-      m_columns(rstd::addressof(columns)),
-      m_column_version(storage.ColumnVersion()),
-      m_len(storage.Len()),
-      m_state(columns.ValuesMut(storage, storage.SlotStateKey()).as_raw_ptr()),
-      m_position(columns.ValuesMut(storage, attributes.position).as_raw_ptr()),
-      m_color(columns.ValuesMut(storage, attributes.color).as_raw_ptr()),
-      m_alpha(columns.ValuesMut(storage, attributes.alpha).as_raw_ptr()),
-      m_size(columns.ValuesMut(storage, attributes.size).as_raw_ptr()),
-      m_lifetime(columns.ValuesMut(storage, attributes.lifetime).as_raw_ptr()),
-      m_rotation(columns.ValuesMut(storage, attributes.rotation).as_raw_ptr()),
-      m_velocity(columns.ValuesMut(storage, attributes.velocity).as_raw_ptr()),
-      m_acceleration(columns.ValuesMut(storage, attributes.acceleration).as_raw_ptr()),
-      m_angular_velocity(columns.ValuesMut(storage, attributes.angular_velocity).as_raw_ptr()),
-      m_angular_acceleration(
-          columns.ValuesMut(storage, attributes.angular_acceleration).as_raw_ptr()),
-      m_random(columns.ValuesMut(storage, attributes.random).as_raw_ptr()),
-      m_initial_color(columns.ValuesMut(storage, attributes.initial_color).as_raw_ptr()),
-      m_initial_alpha(columns.ValuesMut(storage, attributes.initial_alpha).as_raw_ptr()),
-      m_initial_size(columns.ValuesMut(storage, attributes.initial_size).as_raw_ptr()),
-      m_initial_lifetime(columns.ValuesMut(storage, attributes.initial_lifetime).as_raw_ptr()) {}
-
-void WPParticleBatch::ValidateStorage() const {
-    if (m_storage->ColumnVersion() != m_column_version) {
-        rstd::panic { "particle batch used after column layout mutation" };
-    }
+void WPParticleSpawnPipeline::Compile(particle::ParticleViewCompiler& compiler) {
+    if (m_compiled) return;
+    compiler.WriteBase(m_attributes.position);
+    m_velocity         = compiler.Write(m_attributes.velocity);
+    m_rotation         = compiler.Write(m_attributes.rotation);
+    m_angular_velocity = compiler.Write(m_attributes.angular_velocity);
+    m_color            = compiler.Write(m_attributes.color);
+    m_alpha            = compiler.Write(m_attributes.alpha);
+    m_size             = compiler.Write(m_attributes.size);
+    m_lifetime         = compiler.Write(m_attributes.lifetime);
+    m_random           = compiler.Write(m_attributes.random);
+    m_initial_color    = compiler.Write(m_attributes.initial_color);
+    m_initial_alpha    = compiler.Write(m_attributes.initial_alpha);
+    m_initial_size     = compiler.Write(m_attributes.initial_size);
+    m_initial_lifetime = compiler.Write(m_attributes.initial_lifetime);
+    m_compiled         = true;
 }
 
-void WPParticleUpdateProgram::Update(particle::ParticleUpdateContext& context) {
-    auto            frame = WPParticleFrameFrom(context.frame);
-    WPParticleBatch batch(context.storage, context.columns, m_attributes);
-    batch.controlpoints        = frame->subsystem->Controlpoints();
-    batch.world_from_local_dir = frame->world_from_local_dir;
-    batch.local_from_world_dir = frame->local_from_world_dir;
-    batch.world_space          = frame->world_space;
-    batch.time                 = frame->time;
-    batch.time_pass            = context.delta;
-    m_function->operator()(batch);
-    batch.ValidateStorage();
+auto WPParticleSpawnPipeline::Bind(particle::ParticleWriteView view) -> WPParticleSpawnColumns {
+    if (! m_compiled) rstd::panic { "particle spawn pipeline is not compiled" };
+    return {
+        .states             = view.StatesMut(),
+        .positions          = view.PositionsMut(),
+        .velocities         = view.Write(m_velocity),
+        .rotations          = view.Write(m_rotation),
+        .angular_velocities = view.Write(m_angular_velocity),
+        .colors             = view.Write(m_color),
+        .alphas             = view.Write(m_alpha),
+        .sizes              = view.Write(m_size),
+        .lifetimes          = view.Write(m_lifetime),
+        .randoms            = view.Write(m_random),
+        .initial_colors     = view.Write(m_initial_color),
+        .initial_alphas     = view.Write(m_initial_alpha),
+        .initial_sizes      = view.Write(m_initial_size),
+        .initial_lifetimes  = view.Write(m_initial_lifetime),
+    };
+}
+
+void WPParticleSpawnPipeline::Initialize(WPParticleSpawnColumns&        columns,
+                                         particle::ParticleSpawnRequest request,
+                                         ref<dyn<rstd::any::Any>>       frame) {
+    columns.randoms[request.slot.index] = Random::get(0.0f, 1.0f);
+    for (auto& instruction : m_instructions) instruction.Initialize(columns, request, frame);
+    if (! m_world_space) return;
+    auto wp_frame = WPParticleFrameFrom(frame);
+    columns.positions[request.slot.index] +=
+        wp_frame->subsystem->InstanceState(wp_frame->instance_index).bounded.position;
 }
 
 WPParticleSubSystem::WPParticleSubSystem(
@@ -411,6 +346,7 @@ WPParticleSubSystem::WPParticleSubSystem(
     : m_scene(scene),
       m_mesh(rstd::move(mesh)),
       m_attributes(WPParticleAttributes::Register(m_schema_builder)),
+      m_spawn_pipeline(m_attributes),
       m_animation_spec(animation_spec),
       m_follow_anchor(follow_anchor),
       m_max_count(max_count),
@@ -426,28 +362,20 @@ WPParticleSubSystem::WPParticleSubSystem(
                                   : f64(trail_duration.to_primitive() /
                                         static_cast<double>(trail_length.to_primitive()))),
       m_trail_uniform_state(rstd::move(trail_uniform_state)) {
-    m_attributes.Require(m_program);
     if (m_trail_length != u32()) {
         m_trail_key =
             Some(RegisterAttribute<WPTrailHistoryAttribute>(m_schema_builder,
                                                             "trail_history"_str,
                                                             "we.rope"_str,
                                                             rstd::as_cast<usize>(m_trail_length)));
-        m_program.Require(*m_trail_key);
     }
-
-    AddInitializer(
-        Box<dyn<particle::ParticleSpawnProgram>>::make(WPSpawnMetadataProgram(m_attributes)));
 }
 
 WPParticleSubSystem::~WPParticleSubSystem() = default;
 
 void WPParticleSubSystem::Finalize() {
     if (m_system.is_some()) return;
-    if (m_world_space) {
-        m_program.AddSpawn(
-            Box<dyn<particle::ParticleSpawnProgram>>::make(WPWorldSpaceSpawnProgram(m_attributes)));
-    }
+    if (m_world_space) m_spawn_pipeline.EnableWorldSpace();
     m_program.AddLifecycle(
         Box<dyn<particle::ParticleLifecycleProgram>>::make(WPLifecycleProgram(m_attributes)));
     m_program.AddEvent(Box<dyn<particle::ParticleEventProgram>>::make(WPChildEventProgram(*this)));
@@ -473,8 +401,8 @@ void WPParticleSubSystem::AddEmitter(Box<dyn<particle::ParticleEmitterProgram>> 
     m_program.AddEmitter(rstd::move(emitter));
 }
 
-void WPParticleSubSystem::AddInitializer(Box<dyn<particle::ParticleSpawnProgram>> initializer) {
-    m_program.AddSpawn(rstd::move(initializer));
+void WPParticleSubSystem::AddInitializer(WPParticleSpawnInstruction initializer) {
+    m_spawn_pipeline.Add(rstd::move(initializer));
 }
 
 void WPParticleSubSystem::AddOperator(Box<dyn<particle::ParticleUpdateProgram>> update) {
@@ -517,21 +445,36 @@ auto WPParticleSubSystem::QueryNewInstance() -> Option<WPParticleInstanceRef> {
     });
 }
 
-auto WPParticleSubSystem::FollowPosition(const particle::ParticleStorage& storage,
-                                         usize                            parent_instance_index,
+void WPParticleSubSystem::CompileRuntimeView(particle::ParticleViewCompiler& compiler) {
+    compiler.ReadBase(m_attributes.position);
+    m_follow_velocity = compiler.Read(m_attributes.velocity);
+    m_follow_size     = compiler.Read(m_attributes.size);
+    m_follow_lifetime = compiler.Read(m_attributes.lifetime);
+}
+
+auto WPParticleSubSystem::FollowPosition(particle::ParticleInstance& instance,
+                                         usize                       parent_instance_index,
                                          particle::ParticleSlot slot) const -> Eigen::Vector3f {
-    auto value = MakeWPParticleConstRef(storage, m_attributes, slot);
-    auto pos   = RenderPosition(parent_instance_index, value.position);
+    auto       view       = instance.Binding().Read();
+    const auto positions  = view.Positions();
+    const auto velocities = view.Read(m_follow_velocity);
+    const auto sizes      = view.Read(m_follow_size);
+    auto       pos        = RenderPosition(parent_instance_index, positions[slot.index]);
     if (! m_follow_anchor.trail_renderer) return pos;
 
-    float speed = value.velocity.norm();
+    float speed = velocities[slot.index].norm();
     if (speed <= 1e-6f) return pos;
     float trail_length =
         std::max(0.0f, std::min(speed * m_follow_anchor.length, m_follow_anchor.max_length));
     if (trail_length <= 0.0f) return pos;
     float visual_half_length =
-        (value.size * 0.5f) * m_follow_anchor.texture_ratio * trail_length * 0.5f;
-    return pos + value.velocity.normalized() * visual_half_length;
+        (sizes[slot.index] * 0.5f) * m_follow_anchor.texture_ratio * trail_length * 0.5f;
+    return pos + velocities[slot.index].normalized() * visual_half_length;
+}
+
+bool WPParticleSubSystem::LifetimeAlive(particle::ParticleInstance& instance,
+                                        particle::ParticleSlot      slot) const {
+    return instance.Binding().Read().Read(m_follow_lifetime)[slot.index] > 0.0f;
 }
 
 auto WPParticleSubSystem::RenderPosition(usize                  instance_index,
@@ -629,14 +572,12 @@ void WPParticleSubSystem::UpdateBoundedState(WPParticleInstanceRef current) {
         rstd::as_cast<usize>(bounded.particle_index) < parent_storage.Len()) {
         particle::ParticleSlot slot { .index = rstd::as_cast<usize>(bounded.particle_index) };
         bounded.position = bounded.parent_subsystem->FollowPosition(
-            parent_storage, bounded.parent_instance_index, slot);
+            *bounded.parent, bounded.parent_instance_index, slot);
         if (m_spawn_type == SpawnType::EVENT_DEATH) bounded.particle_index = isize(-1);
 
         if (! current.state->death && type_has_death) {
-            auto value = MakeWPParticleConstRef(
-                parent_storage, bounded.parent_subsystem->Attributes(), slot);
-            bool lifetime_ok             = value.lifetime > 0.0f;
-            current.state->death         = ! lifetime_ok && bounded.previous_lifetime_ok;
+            bool lifetime_ok     = bounded.parent_subsystem->LifetimeAlive(*bounded.parent, slot);
+            current.state->death = ! lifetime_ok && bounded.previous_lifetime_ok;
             bounded.previous_lifetime_ok = lifetime_ok;
         }
     }
@@ -672,8 +613,7 @@ void WPParticleSubSystem::Advance(f64 frame_time, f64 child_frame_time, bool upd
         m_pending_child_deaths.clear();
         System().Advance(*current.instance, frame_ref, frame_time, m_time);
         current.state->no_live_particle = true;
-        auto states =
-            current.instance->Storage().Values(current.instance->Storage().SlotStateKey());
+        auto states                     = current.instance->Binding().Read().States();
         for (const auto& state : states) {
             if (! state.active) continue;
             current.state->no_live_particle = false;
@@ -732,7 +672,7 @@ void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
 void WPParticleSubSystem::SpawnChild(WPParticleInstanceRef parent, WPParticleSubSystem& child,
                                      particle::ParticleSlot slot, Eigen::Vector3f position,
                                      bool fixed) {
-    if (! fixed) position = FollowPosition(parent.instance->Storage(), parent.index, slot);
+    if (! fixed) position = FollowPosition(*parent.instance, parent.index, slot);
     auto instance = child.QueryNewInstance();
     if (instance.is_none()) return;
     instance->state->bounded = {
@@ -794,12 +734,11 @@ void WPParticleSubSystem::ProcessChildEvents(particle::ParticleEventContext& con
             m_pending_child_deaths.emplace_back(transition.slot);
             for (auto& child : m_children) {
                 if (child->Type() != SpawnType::EVENT_DEATH) continue;
-                SpawnChild(
-                    parent,
-                    *child,
-                    transition.slot,
-                    FollowPosition(parent.instance->Storage(), parent.index, transition.slot),
-                    true);
+                SpawnChild(parent,
+                           *child,
+                           transition.slot,
+                           FollowPosition(*parent.instance, parent.index, transition.slot),
+                           true);
             }
         }
         return;

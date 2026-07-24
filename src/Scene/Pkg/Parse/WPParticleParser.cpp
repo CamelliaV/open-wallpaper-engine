@@ -17,123 +17,11 @@ using namespace Eigen;
 using namespace rstd::literals;
 using rstd::sync::Arc;
 
-namespace WPParticleModify
-{
-
-void Move(WPParticleRef value, const Eigen::Vector3d& offset) {
-    value.position = (value.position.cast<double>() + offset).cast<float>();
-}
-
-void ChangeVelocity(WPParticleRef value, const Eigen::Vector3d& velocity) {
-    value.velocity = (value.velocity.cast<double>() + velocity).cast<float>();
-}
-
-void ChangeVelocity(WPParticleRef value, double x, double y, double z) {
-    ChangeVelocity(value, { x, y, z });
-}
-
-void Accelerate(WPParticleRef value, const Eigen::Vector3d& acceleration, f64 time) {
-    ChangeVelocity(value, acceleration * time.to_primitive());
-}
-
-void ChangeAngularVelocity(WPParticleRef value, const Eigen::Vector3d& velocity) {
-    value.angular_velocity = (value.angular_velocity.cast<double>() + velocity).cast<float>();
-}
-
-void ChangeAngularVelocity(WPParticleRef value, double x, double y, double z) {
-    ChangeAngularVelocity(value, { x, y, z });
-}
-
-void AngularAccelerate(WPParticleRef value, const Eigen::Vector3d& acceleration, f64 time) {
-    ChangeAngularVelocity(value, acceleration * time.to_primitive());
-}
-
-void ChangeRotation(WPParticleRef value, const Eigen::Vector3d& rotation) {
-    value.rotation = (value.rotation.cast<double>() + rotation).cast<float>();
-}
-
-void ChangeRotation(WPParticleRef value, double x, double y, double z) {
-    ChangeRotation(value, { x, y, z });
-}
-
-void InitLifetime(WPParticleRef value, float lifetime) {
-    value.lifetime         = lifetime;
-    value.initial.lifetime = lifetime;
-}
-
-void InitSize(WPParticleRef value, double size) {
-    value.size         = static_cast<float>(size);
-    value.initial.size = static_cast<float>(size);
-}
-
-void InitAlpha(WPParticleRef value, double alpha) {
-    value.alpha         = static_cast<float>(alpha);
-    value.initial.alpha = static_cast<float>(alpha);
-}
-
-void InitColor(WPParticleRef value, double red, double green, double blue) {
-    value.color         = Eigen::Vector3d(red, green, blue).cast<float>();
-    value.initial.color = value.color;
-}
-
-void MutiplyInitLifeTime(WPParticleRef value, double multiplier) {
-    value.lifetime *= multiplier;
-    value.initial.lifetime = value.lifetime;
-}
-
-void MutiplyInitAlpha(WPParticleRef value, double multiplier) {
-    value.alpha *= multiplier;
-    value.initial.alpha = value.alpha;
-}
-
-void MutiplyInitSize(WPParticleRef value, double multiplier) {
-    value.size *= multiplier;
-    value.initial.size = value.size;
-}
-
-void MutiplyVelocity(WPParticleRef value, double multiplier) { value.velocity *= multiplier; }
-
-void MutiplyAlpha(WPParticleRef value, double multiplier) { value.alpha *= multiplier; }
-
-void MutiplySize(WPParticleRef value, double multiplier) { value.size *= multiplier; }
-
-void MutiplyColor(WPParticleRef value, double red, double green, double blue) {
-    value.color =
-        Eigen::Vector3d(red, green, blue).cwiseProduct(value.color.cast<double>()).cast<float>();
-}
-
-auto LifetimePos(WPParticleRef value) -> double {
-    if (value.lifetime < 0.0f) return 1.0;
-    return 1.0 - static_cast<double>(value.lifetime / value.initial.lifetime);
-}
-
-auto LifetimePassed(WPParticleRef value) noexcept -> double {
-    return static_cast<double>(value.initial.lifetime - value.lifetime);
-}
-
-auto LifetimeOk(WPParticleRef value) noexcept -> bool { return value.lifetime > 0.0f; }
-auto GetPos(WPParticleRef value) -> const Eigen::Vector3f& { return value.position; }
-auto GetVelocity(WPParticleRef value) -> const Eigen::Vector3f& { return value.velocity; }
-auto GetAngular(WPParticleRef value) -> const Eigen::Vector3f& { return value.rotation; }
-
-} // namespace WPParticleModify
-
-namespace PM = WPParticleModify;
-
 namespace
 {
 
 constexpr float  kTau   = rstd::f32::consts::TAU.to_primitive();
 constexpr double kTau64 = rstd::f64::consts::TAU.to_primitive();
-
-inline void Color(WPParticleRef p, const std::array<float, 3> min, const std::array<float, 3> max) {
-    double               random = Random::get(0.0, 1.0);
-    std::array<float, 3> result;
-    for (int32_t i = 0; i < 3; i++) {
-        result[i] = (float)algorism::lerp(random, min[i], max[i]);
-    }
-    PM::InitColor(p, result[0], result[1], result[2]);
-}
 
 inline Vector3d GenRandomVec3(const std::array<float, 3>& min, const std::array<float, 3>& max) {
     Vector3d result(3);
@@ -169,9 +57,9 @@ auto SequenceIndex(u64 sequence, u64 count, SequenceLimitBehavior behavior) -> u
     return sequence % count;
 }
 
-auto SpawnSequence(const particle::ParticleSpawnContext& context) -> u64 {
-    return context.storage.Values(context.storage.SlotStateKey())[context.slot.index]
-        .spawn_sequence;
+template<typename States>
+auto SpawnSequence(const States& states, particle::ParticleSlot slot) -> u64 {
+    return states[slot.index].spawn_sequence;
 }
 
 auto SequenceBasis(const Eigen::Vector3d& axis) -> Eigen::Vector3d {
@@ -201,48 +89,42 @@ struct MapSequenceAroundControlPoint {
     }
 };
 
-class WPMapSequenceAroundControlPointProgram {
-public:
-    WPMapSequenceAroundControlPointProgram(WPParticleAttributes          attributes,
-                                           MapSequenceAroundControlPoint config)
-        : m_attributes(attributes), m_config(rstd::move(config)) {}
+struct WPMapSequenceAroundControlPointProgram {
+    MapSequenceAroundControlPoint config;
 
-    void Initialize(particle::ParticleSpawnContext& context) {
-        auto frame         = WPParticleFrameFrom(context.frame);
-        auto value         = MakeWPParticleRef(context.storage, m_attributes, context.slot);
-        auto sequence      = SpawnSequence(context);
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>> frame_context) {
+        auto frame         = WPParticleFrameFrom(frame_context);
         auto controlpoints = frame->subsystem->Controlpoints();
-        auto controlpoint  = rstd::as_cast<usize>(m_config.controlpoint % i32(8));
+        auto controlpoint  = rstd::as_cast<usize>(config.controlpoint % i32(8));
         auto center        = controlpoints[controlpoint].offset;
 
-        Eigen::Vector3d axis { Eigen::Vector3f { m_config.axis.data() }.cast<double>() };
+        Eigen::Vector3d axis { Eigen::Vector3f { config.axis.data() }.cast<double>() };
         if (axis.squaredNorm() <= 1e-12) axis = Eigen::Vector3d { 0.0, 0.0, 1.0 };
         axis.normalize();
-        auto relative = value.position.cast<double>() - center;
-        auto parallel = axis * relative.dot(axis);
-        auto radius   = (relative - parallel).norm();
         auto basis    = SequenceBasis(axis);
         basis         = (basis - axis * basis.dot(axis)).normalized();
         auto tangent  = basis.cross(axis).normalized();
+        auto slot     = request.slot;
+        auto sequence = SpawnSequence(columns.states, slot);
+        auto relative = columns.positions[slot.index].cast<double>() - center;
+        auto parallel = axis * relative.dot(axis);
+        auto radius   = (relative - parallel).norm();
         auto angle    = kTau64 * static_cast<double>(sequence.to_primitive()) /
-                        std::max(1e-6, static_cast<double>(m_config.count));
-        angle *= static_cast<double>(m_config.bounds[1] - m_config.bounds[0]);
-        angle += kTau64 * static_cast<double>(m_config.bounds[0]);
-        value.position =
+                        std::max(1e-6, static_cast<double>(config.count));
+        angle *= static_cast<double>(config.bounds[1] - config.bounds[0]);
+        angle += kTau64 * static_cast<double>(config.bounds[0]);
+        columns.positions[slot.index] =
             (center + parallel + radius * (std::cos(angle) * basis + std::sin(angle) * tangent))
                 .cast<float>();
 
-        auto velocity = GenRandomVec3(m_config.speed_min, m_config.speed_max);
+        auto velocity = GenRandomVec3(config.speed_min, config.speed_max);
         if (velocity.squaredNorm() > 1e-12) {
-            value.velocity =
-                (value.velocity.cast<double>() + Eigen::AngleAxisd(-angle, axis) * velocity)
-                    .cast<float>();
+            columns.velocities[slot.index] = (columns.velocities[slot.index].cast<double>() +
+                                              Eigen::AngleAxisd(-angle, axis) * velocity)
+                                                 .cast<float>();
         }
     }
-
-private:
-    WPParticleAttributes          m_attributes;
-    MapSequenceAroundControlPoint m_config;
 };
 
 struct MapSequenceBetweenControlPoints {
@@ -262,38 +144,31 @@ struct MapSequenceBetweenControlPoints {
     }
 };
 
-class WPMapSequenceBetweenControlPointsProgram {
-public:
-    WPMapSequenceBetweenControlPointsProgram(WPParticleAttributes            attributes,
-                                             MapSequenceBetweenControlPoints config)
-        : m_attributes(attributes), m_config(rstd::move(config)) {}
+struct WPMapSequenceBetweenControlPointsProgram {
+    MapSequenceBetweenControlPoints config;
 
-    void Initialize(particle::ParticleSpawnContext& context) {
-        auto frame         = WPParticleFrameFrom(context.frame);
-        auto value         = MakeWPParticleRef(context.storage, m_attributes, context.slot);
-        auto sequence      = SpawnSequence(context);
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>> frame_context) {
+        auto frame         = WPParticleFrameFrom(frame_context);
         auto controlpoints = frame->subsystem->Controlpoints();
-        auto start_index   = rstd::as_cast<usize>(m_config.controlpoint_start % i32(8));
-        auto end_index     = rstd::as_cast<usize>(m_config.controlpoint_end % i32(8));
+        auto start_index   = rstd::as_cast<usize>(config.controlpoint_start % i32(8));
+        auto end_index     = rstd::as_cast<usize>(config.controlpoint_end % i32(8));
         auto start         = controlpoints[start_index].offset;
         auto end           = controlpoints[end_index].offset;
         auto path          = end - start;
-        auto count         = rstd::as_cast<u64>(m_config.count);
-        auto index         = SequenceIndex(sequence, count, m_config.limit_behavior);
+        auto count         = rstd::as_cast<u64>(config.count);
+        auto sequence      = SpawnSequence(columns.states, request.slot);
+        auto index         = SequenceIndex(sequence, count, config.limit_behavior);
         auto amount        = static_cast<double>(index.to_primitive()) /
                              static_cast<double>((count - u64(1)).to_primitive());
 
-        Eigen::Vector3d relative = value.position.cast<double>() - start;
+        Eigen::Vector3d relative = columns.positions[request.slot.index].cast<double>() - start;
         if (path.squaredNorm() > 1e-12) {
             auto direction = path.normalized();
             relative -= direction * relative.dot(direction);
         }
-        value.position = (start + amount * path + relative).cast<float>();
+        columns.positions[request.slot.index] = (start + amount * path + relative).cast<float>();
     }
-
-private:
-    WPParticleAttributes            m_attributes;
-    MapSequenceBetweenControlPoints m_config;
 };
 
 inline float UiColorToLinear(float value) { return value * value; }
@@ -353,9 +228,184 @@ std::array<float, N> mapVertex(const std::array<float, N>& v, float (*oper)(floa
     return result;
 };
 
-Box<dyn<particle::ParticleSpawnProgram>>
-WPParticleParser::GenInitializer(const Json& wpj, WPParticleAttributes attributes) {
-    using namespace std::placeholders;
+struct WPNoopSpawnProgram {
+    void Initialize(WPParticleSpawnColumns&, particle::ParticleSpawnRequest,
+                    ref<dyn<rstd::any::Any>>) {}
+};
+
+struct WPColorRandomProgram {
+    std::array<float, 3> min;
+    std::array<float, 3> max;
+
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>>) {
+        auto            random = Random::get(0.0, 1.0);
+        Eigen::Vector3f value;
+        for (usize component {}; component < usize(3); ++component) {
+            auto raw   = component.to_primitive();
+            value[raw] = static_cast<float>(algorism::lerp(random, min[raw], max[raw]));
+        }
+        columns.colors[request.slot.index]         = value;
+        columns.initial_colors[request.slot.index] = value;
+    }
+};
+
+struct WPLifetimeRandomProgram {
+    SingleRandom config;
+
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>>) {
+        auto value                                    = Random::get(config.min, config.max);
+        columns.lifetimes[request.slot.index]         = value;
+        columns.initial_lifetimes[request.slot.index] = value;
+    }
+};
+
+struct WPSizeRandomProgram {
+    SingleRandom config;
+
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>>) {
+        auto value                                = Random::get(config.min, config.max);
+        columns.sizes[request.slot.index]         = value;
+        columns.initial_sizes[request.slot.index] = value;
+    }
+};
+
+struct WPAlphaRandomProgram {
+    SingleRandom config;
+
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>>) {
+        auto value                                 = Random::get(config.min, config.max);
+        columns.alphas[request.slot.index]         = value;
+        columns.initial_alphas[request.slot.index] = value;
+    }
+};
+
+struct WPVectorRandomProgram {
+    enum class Target
+    {
+        Velocity,
+        Rotation,
+        AngularVelocity,
+    };
+
+    VecRandom config;
+    Target    target { Target::Velocity };
+
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>>) {
+        auto value = GenRandomVec3(config.min, config.max).cast<float>();
+        if (target == Target::Velocity) {
+            columns.velocities[request.slot.index] += value;
+        } else if (target == Target::Rotation) {
+            columns.rotations[request.slot.index] += value;
+        } else {
+            columns.angular_velocities[request.slot.index] += value;
+        }
+    }
+};
+
+struct WPTurbulentVelocityRandomProgram {
+    TurbulentRandom config;
+    Eigen::Vector3f normal;
+    Eigen::Vector3f forward;
+    Eigen::Vector3f position;
+
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>>) {
+        auto  duration = request.emitter_duration;
+        float speed    = Random::get(config.speedmin, config.speedmax);
+        float phase    = Random::get(config.phasemin, config.phasemax);
+        if (duration > f64(10.0)) {
+            position[0] += speed;
+            duration = f64();
+        }
+        Eigen::Vector3f result;
+        do {
+            result = algorism::CurlNoise((position + normal * phase).cast<double>()).cast<float>();
+            result -= normal * result.dot(normal);
+            if (result.squaredNorm() <= 1e-8f) result = forward;
+            result.normalize();
+            position += result * 0.005f * static_cast<float>(config.timescale);
+            duration -= f64(0.01);
+        } while (duration > f64(0.01));
+
+        auto cosine = std::clamp(result.dot(forward), -1.0f, 1.0f);
+        auto angle  = static_cast<float>(std::atan2(normal.dot(forward.cross(result)), cosine));
+        auto scale  = std::max(0.0f, config.scale * 0.5f);
+        result      = Eigen::AngleAxisf(angle * scale + config.offset, normal) * forward;
+        columns.velocities[request.slot.index] += result * speed;
+    }
+};
+
+struct WPOverrideSpawnProgram {
+    Arc<wpscene::ParticleInstanceoverride> override;
+
+    void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
+                    ref<dyn<rstd::any::Any>>) {
+        auto index = request.slot.index;
+        columns.lifetimes[index] *= override->lifetime;
+        columns.initial_lifetimes[index] = columns.lifetimes[index];
+        columns.alphas[index] *= UiScalarToLinear(override->alpha);
+        columns.initial_alphas[index] = columns.alphas[index];
+        columns.sizes[index] *= override->size;
+        columns.initial_sizes[index] = columns.sizes[index];
+        columns.velocities[index] *= override->speed;
+        if (override->overColor || override->overColorn) {
+            Eigen::Vector3f value;
+            if (override->overColor) {
+                value = { UiColorToLinear(override->color[0] / 255.0f),
+                          UiColorToLinear(override->color[1] / 255.0f),
+                          UiColorToLinear(override->color[2] / 255.0f) };
+            } else {
+                value = { UiColorToLinear(override->colorn[0]),
+                          UiColorToLinear(override->colorn[1]),
+                          UiColorToLinear(override->colorn[2]) };
+            }
+            columns.colors[index]         = value;
+            columns.initial_colors[index] = value;
+        }
+    }
+};
+
+using WPParticleSpawnInstructionValue =
+    std::variant<WPNoopSpawnProgram, WPColorRandomProgram, WPLifetimeRandomProgram,
+                 WPSizeRandomProgram, WPAlphaRandomProgram, WPVectorRandomProgram,
+                 WPTurbulentVelocityRandomProgram, WPMapSequenceAroundControlPointProgram,
+                 WPMapSequenceBetweenControlPointsProgram, WPOverrideSpawnProgram>;
+
+struct WPParticleSpawnInstruction::Impl {
+    template<typename T>
+    explicit Impl(T value): value(rstd::move(value)) {}
+
+    WPParticleSpawnInstructionValue value;
+};
+
+WPParticleSpawnInstruction::WPParticleSpawnInstruction(Box<Impl> impl): m_impl(rstd::move(impl)) {}
+WPParticleSpawnInstruction::WPParticleSpawnInstruction(WPParticleSpawnInstruction&&) noexcept =
+    default;
+auto WPParticleSpawnInstruction::operator=(WPParticleSpawnInstruction&&) noexcept
+    -> WPParticleSpawnInstruction&                        = default;
+WPParticleSpawnInstruction::~WPParticleSpawnInstruction() = default;
+
+template<typename T>
+auto WPParticleSpawnInstruction::Make(T value) -> WPParticleSpawnInstruction {
+    return WPParticleSpawnInstruction(Box<Impl>::make(rstd::move(value)));
+}
+
+void WPParticleSpawnInstruction::Initialize(WPParticleSpawnColumns&        columns,
+                                            particle::ParticleSpawnRequest request,
+                                            ref<dyn<rstd::any::Any>>       frame) {
+    std::visit(
+        [&](auto& instruction) {
+            instruction.Initialize(columns, request, frame);
+        },
+        m_impl->value);
+}
+
+WPParticleSpawnInstruction WPParticleParser::GenInitializer(const Json& wpj) {
     do {
         if (wpj.get("name"_str).is_none()) break;
         std::string name;
@@ -366,75 +416,54 @@ WPParticleParser::GenInitializer(const Json& wpj, WPParticleAttributes attribute
             r.min = { 0.0f, 0.0f, 0.0f };
             r.max = { 255.0f, 255.0f, 255.0f };
             VecRandom::ReadFromJson(wpj, r);
-
-            auto function = [=](WPParticleRef p, f64) {
-                Color(p,
-                      mapVertex(r.min,
-                                [](float x) {
-                                    return x / 255.0f;
-                                }),
-                      mapVertex(r.max, [](float x) {
-                          return x / 255.0f;
-                      }));
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPColorRandomProgram {
+                .min = mapVertex(r.min,
+                                 [](float value) {
+                                     return value / 255.0f;
+                                 }),
+                .max = mapVertex(r.max,
+                                 [](float value) {
+                                     return value / 255.0f;
+                                 }),
+            });
         } else if (name == "lifetimerandom") {
             SingleRandom r = { 0.0f, 1.0f };
             SingleRandom::ReadFromJson(wpj, r);
-            auto function = [=](WPParticleRef p, f64) {
-                PM::InitLifetime(p, Random::get(r.min, r.max));
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPLifetimeRandomProgram { .config = r });
         } else if (name == "sizerandom") {
             SingleRandom r = { 0.0f, 20.0f };
             SingleRandom::ReadFromJson(wpj, r);
-            auto function = [=](WPParticleRef p, f64) {
-                PM::InitSize(p, Random::get(r.min, r.max));
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPSizeRandomProgram { .config = r });
         } else if (name == "alpharandom") {
             SingleRandom r = { 0.05f, 1.0f };
             SingleRandom::ReadFromJson(wpj, r);
-            auto function = [=](WPParticleRef p, f64) {
-                PM::InitAlpha(p, Random::get(r.min, r.max));
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPAlphaRandomProgram { .config = r });
         } else if (name == "velocityrandom") {
             VecRandom r;
             r.min[0] = r.min[1] = -32.0f;
             r.max[0] = r.max[1] = 32.0f;
             VecRandom::ReadFromJson(wpj, r);
-            auto function = [=](WPParticleRef p, f64) {
-                auto result = GenRandomVec3(r.min, r.max);
-                PM::ChangeVelocity(p, result[0], result[1], result[2]);
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPVectorRandomProgram {
+                .config = r,
+                .target = WPVectorRandomProgram::Target::Velocity,
+            });
         } else if (name == "rotationrandom") {
             VecRandom r;
             r.max[2] = kTau;
             VecRandom::ReadFromJson(wpj, r);
-            auto function = [=](WPParticleRef p, f64) {
-                auto result = GenRandomVec3(r.min, r.max);
-                PM::ChangeRotation(p, result[0], result[1], result[2]);
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPVectorRandomProgram {
+                .config = r,
+                .target = WPVectorRandomProgram::Target::Rotation,
+            });
         } else if (name == "angularvelocityrandom") {
             VecRandom r;
             r.min[2] = -5.0f;
             r.max[2] = 5.0f;
             VecRandom::ReadFromJson(wpj, r);
-            auto function = [=](WPParticleRef p, f64) {
-                auto result = GenRandomVec3(r.min, r.max);
-                PM::ChangeAngularVelocity(p, result[0], result[1], result[2]);
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPVectorRandomProgram {
+                .config = r,
+                .target = WPVectorRandomProgram::Target::AngularVelocity,
+            });
         } else if (name == "turbulentvelocityrandom") {
             TurbulentRandom r;
             TurbulentRandom::ReadFromJson(wpj, r);
@@ -447,75 +476,29 @@ WPParticleParser::GenInitializer(const Json& wpj, WPParticleAttributes attribute
             if (forward.squaredNorm() <= 1e-8f) forward = normal.unitOrthogonal();
             forward.normalize();
 
-            Vector3f pos      = GenRandomVec3({ 0, 0, 0 }, { 10.0f, 10.0f, 10.0f }).cast<float>();
-            auto     function = [=](WPParticleRef p, f64 duration) mutable {
-                float speed = Random::get(r.speedmin, r.speedmax);
-                float phase = Random::get(r.phasemin, r.phasemax);
-                if (duration > f64(10.0)) {
-                    pos[0] += speed;
-                    duration = f64();
-                }
-                Vector3f result;
-                do {
-                    result =
-                        algorism::CurlNoise((pos + normal * phase).cast<double>()).cast<float>();
-                    result -= normal * result.dot(normal);
-                    if (result.squaredNorm() <= 1e-8f) result = forward;
-                    result.normalize();
-                    pos += result * 0.005f * static_cast<float>(r.timescale);
-                    duration -= f64(0.01);
-                } while (duration > f64(0.01));
-
-                auto cosine = std::clamp(result.dot(forward), -1.0f, 1.0f);
-                auto angle =
-                    static_cast<float>(std::atan2(normal.dot(forward.cross(result)), cosine));
-                auto scale = std::max(0.0f, r.scale * 0.5f);
-                result     = AngleAxisf(angle * scale + r.offset, normal) * forward;
-                result *= speed;
-                PM::ChangeVelocity(p, result[0], result[1], result[2]);
-            };
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPParticleInitProgram(attributes, rstd::move(function)));
+            return WPParticleSpawnInstruction::Make(WPTurbulentVelocityRandomProgram {
+                .config   = r,
+                .normal   = normal,
+                .forward  = forward,
+                .position = GenRandomVec3({ 0, 0, 0 }, { 10.0f, 10.0f, 10.0f }).cast<float>(),
+            });
         } else if (name == "mapsequencearoundcontrolpoint") {
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPMapSequenceAroundControlPointProgram(
-                    attributes, MapSequenceAroundControlPoint::ReadFromJson(wpj)));
+            return WPParticleSpawnInstruction::Make(WPMapSequenceAroundControlPointProgram {
+                .config = MapSequenceAroundControlPoint::ReadFromJson(wpj),
+            });
         } else if (name == "mapsequencebetweencontrolpoints") {
-            return Box<dyn<particle::ParticleSpawnProgram>>::make(
-                WPMapSequenceBetweenControlPointsProgram(
-                    attributes, MapSequenceBetweenControlPoints::ReadFromJson(wpj)));
+            return WPParticleSpawnInstruction::Make(WPMapSequenceBetweenControlPointsProgram {
+                .config = MapSequenceBetweenControlPoints::ReadFromJson(wpj),
+            });
         }
     } while (false);
-    return Box<dyn<particle::ParticleSpawnProgram>>::make(
-        WPParticleInitProgram(attributes, [](WPParticleRef, f64) {
-        }));
+    return WPParticleSpawnInstruction::Make(WPNoopSpawnProgram {});
 }
 
-Box<dyn<particle::ParticleSpawnProgram>>
-WPParticleParser::GenOverride(Arc<wpscene::ParticleInstanceoverride> over,
-                              WPParticleAttributes                   attributes) {
-    auto function = [over = rstd::move(over)](WPParticleRef p, f64) {
-        PM::MutiplyInitLifeTime(p, over->lifetime);
-        PM::MutiplyInitAlpha(p, UiScalarToLinear(over->alpha));
-        PM::MutiplyInitSize(p, over->size);
-        PM::MutiplyVelocity(p, over->speed);
-        if (over->overColor) {
-            PM::InitColor(p,
-                          UiColorToLinear(over->color[0] / 255.0f),
-                          UiColorToLinear(over->color[1] / 255.0f),
-                          UiColorToLinear(over->color[2] / 255.0f));
-        } else if (over->overColorn) {
-            // `colorn` = "color (normalized)" -> absolute 0..1 RGB override
-            // (matches WE editor behaviour: picking red in the UI yields a
-            // red trail regardless of the base colorrandom initializer).
-            PM::InitColor(p,
-                          UiColorToLinear(over->colorn[0]),
-                          UiColorToLinear(over->colorn[1]),
-                          UiColorToLinear(over->colorn[2]));
-        }
-    };
-    return Box<dyn<particle::ParticleSpawnProgram>>::make(
-        WPParticleInitProgram(attributes, rstd::move(function)));
+WPParticleSpawnInstruction
+WPParticleParser::GenOverride(Arc<wpscene::ParticleInstanceoverride> over) {
+    return WPParticleSpawnInstruction::Make(
+        WPOverrideSpawnProgram { .override = rstd::move(over) });
 }
 double FadeValueChange(float life, float start, float end, float startValue,
                        float endValue) noexcept {
@@ -592,8 +575,8 @@ struct FrequencyValue {
         owe::GetJsonValue(j, "mask", v.mask, false);
         return v;
     };
-    inline void GenFrequency(WPParticleRef p, WPOscillationStateRef st) {
-        if (! PM::LifetimeOk(p)) st.reset = true;
+    inline void GenFrequency(bool lifetime_ok, WPOscillationStateRef st) {
+        if (! lifetime_ok) st.reset = true;
         if (st.reset) {
             st.frequency = Random::get(frequencymin, frequencymax);
             st.scale     = Random::get(scalemin, scalemax);
@@ -771,8 +754,8 @@ public:
     auto Len() const noexcept -> usize { return m_storage.Len(); }
     auto Capacity() const noexcept -> usize { return m_storage.Capacity(); }
     void Reserve(usize total_slots) { m_storage.Reserve(total_slots); }
-    void AppendDefault() { m_storage.AppendDefault(); }
-    void Reset(particle::ParticleSlot slot) { m_storage.Reset(slot); }
+    void AppendDefaults(usize count) { m_storage.AppendDefaults(count); }
+    void ResetSlots(slice<particle::ParticleSlot> slots) { m_storage.ResetSlots(slots); }
     void Clear() { m_storage.Clear(); }
     auto Values() const noexcept -> slice<Value> { return m_storage.Values(); }
     auto ValuesMut() noexcept -> mut_ref<Value[]> { return m_storage.ValuesMut(); }
@@ -805,16 +788,7 @@ auto RegisterMaintainDistanceAttribute(WPParticleSubSystem& subsystem, usize ope
         "we.operator.maintain_distance"_str,
         MaintainDistanceState {});
     if (result.is_err()) rstd::panic { "failed to register maintain distance attribute" };
-    auto key = result.unwrap();
-    subsystem.RequireAttribute(key);
-    return key;
-}
-
-template<typename F>
-auto MakeUpdateProgram(WPParticleAttributes attributes, F&& function)
-    -> Box<dyn<particle::ParticleUpdateProgram>> {
-    return Box<dyn<particle::ParticleUpdateProgram>>::make(
-        WPParticleUpdateProgram(attributes, rstd::forward<F>(function)));
+    return result.unwrap();
 }
 
 template<typename Attribute, typename Value>
@@ -844,12 +818,498 @@ auto RegisterOscillationAttributes(WPParticleSubSystem& subsystem, usize operato
         .phase = RegisterOscillationAttribute<WPOscillationPhaseAttribute>(
             builder, prefix + "_phase", 0.0f),
     };
-    subsystem.RequireAttribute(attributes.reset);
-    subsystem.RequireAttribute(attributes.frequency);
-    subsystem.RequireAttribute(attributes.scale);
-    subsystem.RequireAttribute(attributes.phase);
     return attributes;
 }
+
+auto LifetimePosition(float lifetime, float initial_lifetime) noexcept -> double {
+    if (lifetime < 0.0f) return 1.0;
+    return 1.0 - static_cast<double>(lifetime / initial_lifetime);
+}
+
+auto LifetimePassed(float lifetime, float initial_lifetime) noexcept -> double {
+    return static_cast<double>(initial_lifetime - lifetime);
+}
+
+struct WPMovementOperator {
+    WPParticleAttributes                                      attributes;
+    float                                                     drag {};
+    Eigen::Vector3d                                           gravity;
+    Arc<wpscene::ParticleInstanceoverride>                    override;
+    particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        compiler.WriteBase(attributes.position);
+        velocity = compiler.Write(attributes.velocity);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto frame      = WPParticleFrameFrom(context.frame);
+        auto positions  = context.view.PositionsMut();
+        auto velocities = context.view.Write(velocity);
+        auto delta      = context.delta.to_primitive();
+        auto speed      = override->speed;
+        for (auto slot : context.slots) {
+            auto world_velocity =
+                frame->world_from_local_dir * velocities[slot.index].cast<double>();
+            Eigen::Vector3d acceleration =
+                frame->local_from_world_dir * algorism::DragForce(world_velocity, drag);
+            acceleration += frame->world_space ? frame->local_from_world_dir * gravity : gravity;
+            velocities[slot.index] =
+                (velocities[slot.index].cast<double>() + speed * acceleration * delta)
+                    .cast<float>();
+            positions[slot.index] = (positions[slot.index].cast<double>() +
+                                     velocities[slot.index].cast<double>() * delta)
+                                        .cast<float>();
+        }
+    }
+};
+
+struct WPAngularMovementOperator {
+    WPParticleAttributes                                             attributes;
+    float                                                            drag {};
+    Eigen::Vector3d                                                  force;
+    particle::ParticleWriteIndex<particle::RotationAttribute>        rotation;
+    particle::ParticleWriteIndex<particle::AngularVelocityAttribute> angular_velocity;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        rotation         = compiler.Write(attributes.rotation);
+        angular_velocity = compiler.Write(attributes.angular_velocity);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto rotations  = context.view.Write(rotation);
+        auto velocities = context.view.Write(angular_velocity);
+        auto delta      = context.delta.to_primitive();
+        for (auto slot : context.slots) {
+            auto acceleration =
+                algorism::DragForce(rotations[slot.index].cast<double>(), drag) + force;
+            velocities[slot.index] =
+                (velocities[slot.index].cast<double>() + acceleration * delta).cast<float>();
+            rotations[slot.index] = (rotations[slot.index].cast<double>() +
+                                     velocities[slot.index].cast<double>() * delta)
+                                        .cast<float>();
+        }
+    }
+};
+
+struct WPScalarChangeOperator {
+    enum class Target
+    {
+        Size,
+        Alpha,
+    };
+
+    WPParticleAttributes                                            attributes;
+    ValueChange                                                     change;
+    Target                                                          target { Target::Alpha };
+    Arc<wpscene::ParticleInstanceoverride>                          override;
+    particle::ParticleWriteIndex<particle::SizeAttribute>           size;
+    particle::ParticleWriteIndex<particle::AlphaAttribute>          alpha;
+    particle::ParticleReadIndex<particle::LifetimeAttribute>        lifetime;
+    particle::ParticleReadIndex<particle::InitialLifetimeAttribute> initial_lifetime;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        if (target == Target::Size)
+            size = compiler.Write(attributes.size);
+        else
+            alpha = compiler.Write(attributes.alpha);
+        lifetime         = compiler.Read(attributes.lifetime);
+        initial_lifetime = compiler.Read(attributes.initial_lifetime);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto lifetimes = context.view.Read(lifetime);
+        auto initial   = context.view.Read(initial_lifetime);
+        if (target == Target::Size) {
+            auto values = context.view.Write(size);
+            auto scale  = override->size;
+            for (auto slot : context.slots) {
+                values[slot.index] *=
+                    scale *
+                    FadeValueChange(LifetimePosition(lifetimes[slot.index], initial[slot.index]),
+                                    change);
+            }
+        } else {
+            auto values = context.view.Write(alpha);
+            for (auto slot : context.slots) {
+                values[slot.index] *= FadeValueChange(
+                    LifetimePosition(lifetimes[slot.index], initial[slot.index]), change);
+            }
+        }
+    }
+};
+
+struct WPAlphaFadeOperator {
+    WPParticleAttributes                                            attributes;
+    float                                                           fade_in { 0.5f };
+    float                                                           fade_out { 0.5f };
+    particle::ParticleWriteIndex<particle::AlphaAttribute>          alpha;
+    particle::ParticleReadIndex<particle::LifetimeAttribute>        lifetime;
+    particle::ParticleReadIndex<particle::InitialLifetimeAttribute> initial_lifetime;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        alpha            = compiler.Write(attributes.alpha);
+        lifetime         = compiler.Read(attributes.lifetime);
+        initial_lifetime = compiler.Read(attributes.initial_lifetime);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto values    = context.view.Write(alpha);
+        auto lifetimes = context.view.Read(lifetime);
+        auto initial   = context.view.Read(initial_lifetime);
+        for (auto slot : context.slots) {
+            auto life = LifetimePosition(lifetimes[slot.index], initial[slot.index]);
+            if (life <= fade_in) {
+                values[slot.index] *= FadeValueChange(life, 0, fade_in, 0, 1.0f);
+            } else if (life > fade_out) {
+                values[slot.index] *= 1.0f - FadeValueChange(life, fade_out, 1.0f, 0, 1.0f);
+            }
+        }
+    }
+};
+
+struct WPColorChangeOperator {
+    WPParticleAttributes                                            attributes;
+    VecChange                                                       change;
+    particle::ParticleWriteIndex<particle::ColorAttribute>          color;
+    particle::ParticleReadIndex<particle::LifetimeAttribute>        lifetime;
+    particle::ParticleReadIndex<particle::InitialLifetimeAttribute> initial_lifetime;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        color            = compiler.Write(attributes.color);
+        lifetime         = compiler.Read(attributes.lifetime);
+        initial_lifetime = compiler.Read(attributes.initial_lifetime);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto colors    = context.view.Write(color);
+        auto lifetimes = context.view.Read(lifetime);
+        auto initial   = context.view.Read(initial_lifetime);
+        for (auto slot : context.slots) {
+            auto            life = LifetimePosition(lifetimes[slot.index], initial[slot.index]);
+            Eigen::Vector3f factor;
+            for (usize component {}; component < usize(3); ++component) {
+                auto raw    = component.to_primitive();
+                factor[raw] = static_cast<float>(FadeValueChange(life,
+                                                                 change.starttime,
+                                                                 change.endtime,
+                                                                 change.startvalue[raw],
+                                                                 change.endvalue[raw]));
+            }
+            colors[slot.index] = colors[slot.index].cwiseProduct(factor);
+        }
+    }
+};
+
+struct WPOscillationIndices {
+    particle::ParticleWriteIndex<WPOscillationResetAttribute>     reset;
+    particle::ParticleWriteIndex<WPOscillationFrequencyAttribute> frequency;
+    particle::ParticleWriteIndex<WPOscillationScaleAttribute>     scale;
+    particle::ParticleWriteIndex<WPOscillationPhaseAttribute>     phase;
+
+    void Compile(particle::ParticleViewCompiler& compiler,
+                 const WPOscillationAttributes&  attributes) {
+        reset     = compiler.Write(attributes.reset);
+        frequency = compiler.Write(attributes.frequency);
+        scale     = compiler.Write(attributes.scale);
+        phase     = compiler.Write(attributes.phase);
+    }
+
+    auto Bind(particle::ParticleWriteView view) const -> WPOscillationValues {
+        return {
+            .reset     = view.Write(reset),
+            .frequency = view.Write(frequency),
+            .scale     = view.Write(scale),
+            .phase     = view.Write(phase),
+        };
+    }
+};
+
+struct WPOscillateScalarOperator {
+    enum class Target
+    {
+        Alpha,
+        Size,
+    };
+
+    WPParticleAttributes                                            attributes;
+    WPOscillationAttributes                                         state_attributes;
+    FrequencyValue                                                  frequency;
+    Target                                                          target { Target::Alpha };
+    WPOscillationIndices                                            state;
+    particle::ParticleWriteIndex<particle::AlphaAttribute>          alpha;
+    particle::ParticleWriteIndex<particle::SizeAttribute>           size;
+    particle::ParticleReadIndex<particle::LifetimeAttribute>        lifetime;
+    particle::ParticleReadIndex<particle::InitialLifetimeAttribute> initial_lifetime;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        if (target == Target::Alpha)
+            alpha = compiler.Write(attributes.alpha);
+        else
+            size = compiler.Write(attributes.size);
+        lifetime         = compiler.Read(attributes.lifetime);
+        initial_lifetime = compiler.Read(attributes.initial_lifetime);
+        state.Compile(compiler, state_attributes);
+    }
+
+    template<typename Values>
+    void Apply(Values values, particle::ParticleUpdateContext& context) {
+        auto lifetimes = context.view.Read(lifetime);
+        auto initial   = context.view.Read(initial_lifetime);
+        auto states    = state.Bind(context.view);
+        for (auto slot : context.slots) {
+            auto oscillator = states.At(slot.index);
+            frequency.GenFrequency(lifetimes[slot.index] > 0.0f, oscillator);
+            values[slot.index] *= frequency.GetScale(
+                oscillator, LifetimePassed(lifetimes[slot.index], initial[slot.index]));
+        }
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        if (target == Target::Alpha)
+            Apply(context.view.Write(alpha), context);
+        else
+            Apply(context.view.Write(size), context);
+    }
+};
+
+struct WPOscillatePositionOperator {
+    WPParticleAttributes                                            attributes;
+    rstd::array<FrequencyValue, 3>                                  frequencies;
+    rstd::array<WPOscillationAttributes, 3>                         state_attributes;
+    rstd::array<WPOscillationIndices, 3>                            states;
+    particle::ParticleReadIndex<particle::LifetimeAttribute>        lifetime;
+    particle::ParticleReadIndex<particle::InitialLifetimeAttribute> initial_lifetime;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        compiler.WriteBase(attributes.position);
+        lifetime         = compiler.Read(attributes.lifetime);
+        initial_lifetime = compiler.Read(attributes.initial_lifetime);
+        for (usize index {}; index < usize(3); ++index) {
+            states[index].Compile(compiler, state_attributes[index]);
+        }
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto                                positions = context.view.PositionsMut();
+        auto                                lifetimes = context.view.Read(lifetime);
+        auto                                initial   = context.view.Read(initial_lifetime);
+        rstd::array<WPOscillationValues, 3> values {
+            states[usize()].Bind(context.view),
+            states[usize(1)].Bind(context.view),
+            states[usize(2)].Bind(context.view),
+        };
+        for (auto slot : context.slots) {
+            Eigen::Vector3d offset { Eigen::Vector3d::Zero() };
+            auto            time = LifetimePassed(lifetimes[slot.index], initial[slot.index]);
+            for (usize component {}; component < usize(3); ++component) {
+                auto raw = component.to_primitive();
+                if (frequencies[usize()].mask[raw] < 0.01f) continue;
+                auto oscillator = values[component].At(slot.index);
+                frequencies[component].GenFrequency(lifetimes[slot.index] > 0.0f, oscillator);
+                offset[raw] = frequencies[component].GetMove(oscillator, time, context.delta);
+            }
+            positions[slot.index] = (positions[slot.index].cast<double>() + offset).cast<float>();
+        }
+    }
+};
+
+struct WPTurbulenceOperator {
+    WPParticleAttributes                                      attributes;
+    Turbulence                                                config;
+    double                                                    phase {};
+    double                                                    speed {};
+    particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        compiler.ReadBase(attributes.position);
+        velocity = compiler.Write(attributes.velocity);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto frame      = WPParticleFrameFrom(context.frame);
+        auto positions  = context.view.Positions();
+        auto velocities = context.view.Write(velocity);
+        auto delta      = context.delta.to_primitive();
+        for (auto slot : context.slots) {
+            Eigen::Vector3d position = positions[slot.index].cast<double>();
+            position.x() += phase + config.timescale * frame->time.to_primitive();
+            Eigen::Vector3d result =
+                speed * algorism::CurlNoise(position * config.scale * 2).normalized();
+            for (usize component {}; component < usize(3); ++component) {
+                if (config.mask[component.to_primitive()] == 0) {
+                    result[component.to_primitive()] = 0.0;
+                }
+            }
+            velocities[slot.index] =
+                (velocities[slot.index].cast<double>() + result * delta).cast<float>();
+        }
+    }
+};
+
+struct WPVortexOperator {
+    WPParticleAttributes                                      attributes;
+    Vortex                                                    config;
+    bool                                                      extended { false };
+    particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        compiler.ReadBase(attributes.position);
+        velocity = compiler.Write(attributes.velocity);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto particle_frame = WPParticleFrameFrom(context.frame);
+        auto frame      = ResolveVortexFrame(config, particle_frame->subsystem->Controlpoints());
+        auto positions  = context.view.Positions();
+        auto velocities = context.view.Write(velocity);
+        auto delta      = context.delta.to_primitive();
+        for (auto slot : context.slots) {
+            auto relative        = positions[slot.index].cast<double>() - frame.center;
+            auto radial          = relative - frame.axis * relative.dot(frame.axis);
+            auto radial_distance = radial.norm();
+            if (radial_distance <= 1e-9) continue;
+
+            if (! extended) {
+                auto direction = -frame.axis.cross(radial).normalized();
+                velocities[slot.index] =
+                    (velocities[slot.index].cast<double>() +
+                     direction * VortexSpeedAtDistance(config, radial_distance) * 0.5 * delta)
+                        .cast<float>();
+                continue;
+            }
+
+            auto distance =
+                config.flags[Vortex::FlagEnum::infinite_axis] ? radial_distance : relative.norm();
+            bool ring_shape = config.ringradius > 0.0f && config.ringwidth > 0.0f &&
+                              config.ringpulldistance > 0.0f;
+            if (ring_shape) {
+                auto ring_position = radial.normalized() * static_cast<double>(config.ringradius);
+                auto ring_delta    = ring_position - relative;
+                auto ring_distance = ring_delta.norm();
+                if (ring_distance >= static_cast<double>(config.ringpulldistance)) continue;
+
+                auto ring_width = static_cast<double>(config.ringwidth);
+                auto pull_range =
+                    std::max(static_cast<double>(config.ringpulldistance) - ring_width, 1e-9);
+                double ring_influence {};
+                double pull_influence {};
+                double ring_speed {};
+                if (ring_distance <= ring_width) {
+                    auto amount    = ring_distance / ring_width;
+                    ring_speed     = algorism::lerp(amount, config.speedinner, config.speedouter);
+                    ring_influence = 1.0;
+                    pull_influence = amount;
+                } else {
+                    pull_influence = (ring_distance - ring_width) / pull_range;
+                    ring_influence = std::sqrt(1.0 - pull_influence);
+                    ring_speed     = config.speedouter;
+                }
+
+                auto            ring_strength = ring_speed * ring_influence * 0.5;
+                auto            tangent       = -frame.axis.cross(radial).normalized();
+                Eigen::Vector3d current       = velocities[slot.index].cast<double>();
+                if (! config.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
+                    current += tangent * ring_strength * delta;
+                } else {
+                    auto axis_velocity = frame.axis * current.dot(frame.axis);
+                    auto tangent_speed = current.dot(tangent) + ring_strength * delta;
+                    current            = axis_velocity + tangent * tangent_speed;
+                }
+                auto pull_strength = std::abs(VortexSpeedAtDistance(config, distance)) * 0.5;
+                current += ring_delta.normalized() * pull_strength * pull_influence * delta;
+                velocities[slot.index] = current.cast<float>();
+                continue;
+            }
+
+            auto strength = VortexSpeedAtDistance(config, distance) * 0.5;
+            if (std::abs(strength) <= 1e-9) continue;
+            auto            tangent = -frame.axis.cross(radial).normalized();
+            Eigen::Vector3d current = velocities[slot.index].cast<double>();
+            if (! config.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
+                current += tangent * strength * delta;
+            } else {
+                auto axis_velocity = frame.axis * current.dot(frame.axis);
+                auto tangent_speed = current.dot(tangent) + strength * delta;
+                current            = axis_velocity + tangent * tangent_speed;
+            }
+            velocities[slot.index] = current.cast<float>();
+        }
+    }
+};
+
+struct WPMaintainDistanceOperator {
+    WPParticleAttributes                                      attributes;
+    MaintainDistance                                          config;
+    particle::ParticleAttributeKey<MaintainDistanceAttribute> state_key;
+    particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
+    particle::ParticleWriteIndex<MaintainDistanceAttribute>   state;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        compiler.ReadBase(attributes.position);
+        velocity = compiler.Write(attributes.velocity);
+        state    = compiler.Write(state_key);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto frame      = WPParticleFrameFrom(context.frame);
+        auto positions  = context.view.Positions();
+        auto velocities = context.view.Write(velocity);
+        auto states     = context.view.Write(state);
+        auto center =
+            frame->subsystem->Controlpoints()[rstd::as_cast<usize>(config.controlpoint)].offset;
+        for (auto slot : context.slots) {
+            auto relative = positions[slot.index].cast<double>() - center;
+            auto distance = relative.norm();
+            if (distance <= 1e-9) continue;
+            if (! states[slot.index].initialized) {
+                states[slot.index].distance    = static_cast<float>(distance);
+                states[slot.index].initialized = true;
+            }
+            auto direction       = relative / distance;
+            auto current         = velocities[slot.index].cast<double>();
+            auto radial_velocity = current.dot(direction);
+            auto target_velocity = (static_cast<double>(states[slot.index].distance) - distance) *
+                                   static_cast<double>(config.variable_strength);
+            velocities[slot.index] =
+                (current + direction * (target_velocity - radial_velocity)).cast<float>();
+        }
+    }
+};
+
+struct WPControlPointAttractOperator {
+    WPParticleAttributes                                      attributes;
+    ControlPointForce                                         config;
+    particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
+
+    void Compile(particle::ParticleViewCompiler& compiler) {
+        compiler.ReadBase(attributes.position);
+        velocity = compiler.Write(attributes.velocity);
+    }
+
+    void Update(particle::ParticleUpdateContext& context) {
+        auto frame      = WPParticleFrameFrom(context.frame);
+        auto positions  = context.view.Positions();
+        auto velocities = context.view.Write(velocity);
+        auto offset =
+            frame->subsystem->Controlpoints()[rstd::as_cast<usize>(config.controlpoint)].offset +
+            Eigen::Vector3f { config.origin.data() }.cast<double>();
+        auto delta = context.delta.to_primitive();
+        for (auto slot : context.slots) {
+            auto difference = offset - positions[slot.index].cast<double>();
+            if (difference.norm() < config.threshold) {
+                velocities[slot.index] = (velocities[slot.index].cast<double>() +
+                                          difference.normalized() * config.scale * delta)
+                                             .cast<float>();
+            }
+        }
+    }
+};
+
+struct WPNoopUpdateOperator {
+    void Compile(particle::ParticleViewCompiler&) {}
+    void Update(particle::ParticleUpdateContext&) {}
+};
 
 Box<dyn<particle::ParticleUpdateProgram>>
 WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceoverride> over_state,
@@ -860,315 +1320,119 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
         std::string name;
         owe::GetJsonValue(wpj, "name", name);
         if (name == "movement") {
-            float drag { 0.0f };
-
+            float                drag { 0.0f };
             std::array<float, 3> gravity { 0, 0, 0 };
             owe::GetJsonValue(wpj, "drag", drag, false);
             owe::GetJsonValue(wpj, "gravity", gravity, false);
-            Vector3d vecG = Vector3f(gravity.data()).cast<double>();
-            auto function = [drag, vecG, over_state = over_state.clone()](WPParticleBatch& info) {
-                auto speed = over_state->speed;
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p = info.Particle(index);
-                    Vector3d world_velocity =
-                        info.world_from_local_dir * PM::GetVelocity(p).cast<double>();
-                    Vector3d acc =
-                        info.local_from_world_dir * algorism::DragForce(world_velocity, drag);
-                    if (info.world_space)
-                        acc += info.local_from_world_dir * vecG;
-                    else
-                        acc += vecG;
-                    PM::Accelerate(p, speed * acc, info.time_pass);
-                    PM::Move(p, p.velocity.cast<double>() * info.time_pass.to_primitive());
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPMovementOperator {
+                .attributes = attributes,
+                .drag       = drag,
+                .gravity    = Vector3f(gravity.data()).cast<double>(),
+                .override   = over_state.clone(),
+            });
         } else if (name == "angularmovement") {
             float                drag { 0.0f };
             std::array<float, 3> force { 0, 0, 0 };
             owe::GetJsonValue(wpj, "drag", drag, false);
             owe::GetJsonValue(wpj, "force", force, false);
-            Vector3d vecF     = Vector3f(force.data()).cast<double>();
-            auto     function = [=](WPParticleBatch& info) {
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p = info.Particle(index);
-                    Vector3d acc =
-                        algorism::DragForce(PM::GetAngular(p).cast<double>(), drag) + vecF;
-                    PM::AngularAccelerate(p, acc, info.time_pass);
-                    PM::ChangeRotation(
-                        p, p.angular_velocity.cast<double>() * info.time_pass.to_primitive());
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPAngularMovementOperator {
+                .attributes = attributes,
+                .drag       = drag,
+                .force      = Vector3f(force.data()).cast<double>(),
+            });
         } else if (name == "sizechange") {
-            auto vc       = ValueChange::ReadFromJson(wpj);
-            auto function = [vc, over_state = over_state.clone()](WPParticleBatch& info) {
-                auto size_over = over_state->size;
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto p = info.Particle(index);
-                    PM::MutiplySize(p, size_over * FadeValueChange(PM::LifetimePos(p), vc));
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
-
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPScalarChangeOperator {
+                .attributes = attributes,
+                .change     = ValueChange::ReadFromJson(wpj),
+                .target     = WPScalarChangeOperator::Target::Size,
+                .override   = over_state.clone(),
+            });
         } else if (name == "alphafade") {
             float fadeintime { 0.5f }, fadeouttime { 0.5f };
             owe::GetJsonValue(wpj, "fadeintime", fadeintime, false);
             owe::GetJsonValue(wpj, "fadeouttime", fadeouttime, false);
-            auto function = [fadeintime, fadeouttime](WPParticleBatch& info) {
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto p    = info.Particle(index);
-                    auto life = PM::LifetimePos(p);
-                    if (life <= fadeintime)
-                        PM::MutiplyAlpha(p, FadeValueChange(life, 0, fadeintime, 0, 1.0f));
-                    else if (life > fadeouttime)
-                        PM::MutiplyAlpha(p,
-                                         1.0f - FadeValueChange(life, fadeouttime, 1.0f, 0, 1.0f));
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPAlphaFadeOperator {
+                .attributes = attributes,
+                .fade_in    = fadeintime,
+                .fade_out   = fadeouttime,
+            });
         } else if (name == "alphachange") {
-            auto vc       = ValueChange::ReadFromJson(wpj);
-            auto function = [vc](WPParticleBatch& info) {
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto p = info.Particle(index);
-                    PM::MutiplyAlpha(p, FadeValueChange(PM::LifetimePos(p), vc));
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPScalarChangeOperator {
+                .attributes = attributes,
+                .change     = ValueChange::ReadFromJson(wpj),
+                .target     = WPScalarChangeOperator::Target::Alpha,
+                .override   = over_state.clone(),
+            });
         } else if (name == "colorchange") {
-            auto vc       = VecChange::ReadFromJson(wpj);
-            auto function = [vc](WPParticleBatch& info) {
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p    = info.Particle(index);
-                    auto     life = PM::LifetimePos(p);
-                    Vector3f result;
-                    for (unsigned i = 0; i < 3; i++)
-                        result[i] = FadeValueChange(
-                            life, vc.starttime, vc.endtime, vc.startvalue[i], vc.endvalue[i]);
-                    PM::MutiplyColor(p, result[0], result[1], result[2]);
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPColorChangeOperator {
+                .attributes = attributes,
+                .change     = VecChange::ReadFromJson(wpj),
+            });
         } else if (name == "oscillatealpha") {
-            FrequencyValue fv = FrequencyValue::ReadFromJson(wpj, name);
-            auto state_keys   = RegisterOscillationAttributes(subsystem, operator_index, "alpha");
-            auto function     = [fv, state_keys](WPParticleBatch& info) mutable {
-                auto states = state_keys.ValuesMut(info);
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto p     = info.Particle(index);
-                    auto state = states.At(index);
-                    fv.GenFrequency(p, state);
-                    PM::MutiplyAlpha(p, fv.GetScale(state, PM::LifetimePassed(p)));
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPOscillateScalarOperator {
+                .attributes = attributes,
+                .state_attributes =
+                    RegisterOscillationAttributes(subsystem, operator_index, "alpha"),
+                .frequency = FrequencyValue::ReadFromJson(wpj, name),
+                .target    = WPOscillateScalarOperator::Target::Alpha,
+            });
         } else if (name == "oscillatesize") {
-            FrequencyValue fv = FrequencyValue::ReadFromJson(wpj, name);
-            auto state_keys   = RegisterOscillationAttributes(subsystem, operator_index, "size");
-            auto function     = [fv, state_keys](WPParticleBatch& info) mutable {
-                auto states = state_keys.ValuesMut(info);
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto p     = info.Particle(index);
-                    auto state = states.At(index);
-                    fv.GenFrequency(p, state);
-                    PM::MutiplySize(p, fv.GetScale(state, PM::LifetimePassed(p)));
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
-
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPOscillateScalarOperator {
+                .attributes = attributes,
+                .state_attributes =
+                    RegisterOscillationAttributes(subsystem, operator_index, "size"),
+                .frequency = FrequencyValue::ReadFromJson(wpj, name),
+                .target    = WPOscillateScalarOperator::Target::Size,
+            });
         } else if (name == "oscillateposition") {
-            FrequencyValue                         fvx = FrequencyValue::ReadFromJson(wpj, name);
-            std::array<FrequencyValue, 3>          fxp = { fvx, fvx, fvx };
-            std::array<WPOscillationAttributes, 3> state_keys {
-                RegisterOscillationAttributes(subsystem, operator_index, "position_x"),
-                RegisterOscillationAttributes(subsystem, operator_index, "position_y"),
-                RegisterOscillationAttributes(subsystem, operator_index, "position_z"),
-            };
-            auto function = [fxp, state_keys](WPParticleBatch& info) mutable {
-                std::array<WPOscillationValues, 3> states {
-                    state_keys[0].ValuesMut(info),
-                    state_keys[1].ValuesMut(info),
-                    state_keys[2].ValuesMut(info),
-                };
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p = info.Particle(index);
-                    Vector3d del { Vector3d::Zero() };
-                    auto     time = PM::LifetimePassed(p);
-                    for (usize d {}; d < usize(3); ++d) {
-                        auto component = d.to_primitive();
-                        if (fxp[0].mask[component] < 0.01) continue;
-                        auto state = states[component].At(index);
-                        fxp[component].GenFrequency(p, state);
-                        del[component] = fxp[component].GetMove(state, time, info.time_pass);
-                    }
-                    PM::Move(p, del);
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            auto frequency = FrequencyValue::ReadFromJson(wpj, name);
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(
+                WPOscillatePositionOperator {
+                    .attributes  = attributes,
+                    .frequencies = { frequency, frequency, frequency },
+                    .state_attributes = {
+                        RegisterOscillationAttributes(subsystem, operator_index, "position_x"),
+                        RegisterOscillationAttributes(subsystem, operator_index, "position_y"),
+                        RegisterOscillationAttributes(subsystem, operator_index, "position_z"),
+                    },
+                });
         } else if (name == "turbulence") {
-            Turbulence tur   = Turbulence::ReadFromJson(wpj);
-            double     phase = Random::get(tur.phasemin, tur.phasemax);
-            double     speed = Random::get(tur.speedmin, tur.speedmax);
-
-            auto function = [=](WPParticleBatch& info) {
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p   = info.Particle(index);
-                    Vector3d pos = PM::GetPos(p).cast<double>();
-                    pos.x() += phase + tur.timescale * info.time.to_primitive();
-                    Vector3d result = speed * algorism::CurlNoise(pos * tur.scale * 2).normalized();
-                    for (usize index {}; index < usize(3); ++index) {
-                        auto component = index.to_primitive();
-                        if (tur.mask[component] == 0) result[component] = 0;
-                    }
-                    PM::Accelerate(p, result, info.time_pass);
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            auto config = Turbulence::ReadFromJson(wpj);
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPTurbulenceOperator {
+                .attributes = attributes,
+                .config     = config,
+                .phase      = Random::get(config.phasemin, config.phasemax),
+                .speed      = Random::get(config.speedmin, config.speedmax),
+            });
         } else if (name == "vortex") {
-            Vortex v        = Vortex::ReadFromJson(wpj);
-            auto   function = [=](WPParticleBatch& info) {
-                auto  frame  = ResolveVortexFrame(v, info.controlpoints);
-                auto& offset = frame.center;
-                auto& axis   = frame.axis;
-
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p        = info.Particle(index);
-                    Vector3d relative = p.position.cast<double>() - offset;
-                    Vector3d radial   = relative - axis * relative.dot(axis);
-                    double   distance = radial.norm();
-                    if (distance <= 1e-9) continue;
-                    Vector3d direct = -axis.cross(radial).normalized();
-                    PM::Accelerate(
-                        p, direct * VortexSpeedAtDistance(v, distance) * 0.5, info.time_pass);
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPVortexOperator {
+                .attributes = attributes,
+                .config     = Vortex::ReadFromJson(wpj),
+            });
         } else if (name == "vortex_v2") {
-            Vortex v        = Vortex::ReadFromJson(wpj);
-            auto   function = [=](WPParticleBatch& info) {
-                auto  frame  = ResolveVortexFrame(v, info.controlpoints);
-                auto& offset = frame.center;
-                auto& axis   = frame.axis;
-
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p               = info.Particle(index);
-                    Vector3d relative        = p.position.cast<double>() - offset;
-                    Vector3d radial          = relative - axis * relative.dot(axis);
-                    double   radial_distance = radial.norm();
-                    if (radial_distance <= 1e-9) continue;
-
-                    auto distance = v.flags[Vortex::FlagEnum::infinite_axis] ? radial_distance
-                                                                             : relative.norm();
-
-                    bool ring_shape =
-                        v.ringradius > 0.0f && v.ringwidth > 0.0f && v.ringpulldistance > 0.0f;
-                    if (ring_shape) {
-                        Vector3d ring_position =
-                            radial.normalized() * static_cast<double>(v.ringradius);
-                        Vector3d ring_delta    = ring_position - relative;
-                        auto     ring_distance = ring_delta.norm();
-                        if (ring_distance >= static_cast<double>(v.ringpulldistance)) continue;
-
-                        auto ring_width = static_cast<double>(v.ringwidth);
-                        auto pull_range =
-                            std::max(static_cast<double>(v.ringpulldistance) - ring_width, 1e-9);
-                        double ring_influence {};
-                        double pull_influence {};
-                        double ring_speed {};
-                        if (ring_distance <= ring_width) {
-                            auto amount    = ring_distance / ring_width;
-                            ring_speed     = algorism::lerp(amount, v.speedinner, v.speedouter);
-                            ring_influence = 1.0;
-                            pull_influence = amount;
-                        } else {
-                            pull_influence = (ring_distance - ring_width) / pull_range;
-                            ring_influence = std::sqrt(1.0 - pull_influence);
-                            ring_speed     = v.speedouter;
-                        }
-
-                        auto     ring_strength = ring_speed * ring_influence * 0.5;
-                        Vector3d tangent       = -axis.cross(radial).normalized();
-                        if (! v.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
-                            PM::Accelerate(p, tangent * ring_strength, info.time_pass);
-                        } else {
-                            Vector3d velocity      = p.velocity.cast<double>();
-                            auto     axis_velocity = axis * velocity.dot(axis);
-                            auto     tangent_speed = velocity.dot(tangent) +
-                                                     ring_strength * info.time_pass.to_primitive();
-                            p.velocity = (axis_velocity + tangent * tangent_speed).cast<float>();
-                        }
-                        auto pull_strength = std::abs(VortexSpeedAtDistance(v, distance)) * 0.5;
-                        PM::Accelerate(p,
-                                       ring_delta.normalized() * pull_strength * pull_influence,
-                                       info.time_pass);
-                        continue;
-                    }
-
-                    auto strength = VortexSpeedAtDistance(v, distance) * 0.5;
-                    if (std::abs(strength) <= 1e-9) continue;
-
-                    Vector3d tangent = -axis.cross(radial).normalized();
-                    if (! v.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
-                        PM::Accelerate(p, tangent * strength, info.time_pass);
-                        continue;
-                    }
-
-                    Vector3d velocity      = p.velocity.cast<double>();
-                    auto     axis_velocity = axis * velocity.dot(axis);
-                    auto     tangent_speed =
-                        velocity.dot(tangent) + strength * info.time_pass.to_primitive();
-                    p.velocity = (axis_velocity + tangent * tangent_speed).cast<float>();
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPVortexOperator {
+                .attributes = attributes,
+                .config     = Vortex::ReadFromJson(wpj),
+                .extended   = true,
+            });
         } else if (name == "maintaindistancetocontrolpoint") {
-            auto config    = MaintainDistance::ReadFromJson(wpj);
-            auto state_key = RegisterMaintainDistanceAttribute(subsystem, operator_index);
-            auto function  = [=](WPParticleBatch& info) {
-                auto states = info.ValuesMut(state_key);
-                auto center = info.controlpoints[rstd::as_cast<usize>(config.controlpoint)].offset;
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p        = info.Particle(index);
-                    auto&    state    = states[index];
-                    Vector3d relative = p.position.cast<double>() - center;
-                    double   distance = relative.norm();
-                    if (distance <= 1e-9) continue;
-                    if (! state.initialized) {
-                        state.distance    = static_cast<float>(distance);
-                        state.initialized = true;
-                    }
-                    auto direction       = relative / distance;
-                    auto radial_velocity = p.velocity.cast<double>().dot(direction);
-                    auto target_velocity = (static_cast<double>(state.distance) - distance) *
-                                           static_cast<double>(config.variable_strength);
-                    PM::ChangeVelocity(p, direction * (target_velocity - radial_velocity));
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPMaintainDistanceOperator {
+                .attributes = attributes,
+                .config     = MaintainDistance::ReadFromJson(wpj),
+                .state_key  = RegisterMaintainDistanceAttribute(subsystem, operator_index),
+            });
         } else if (name == "controlpointattract") {
-            ControlPointForce c        = ControlPointForce::ReadFromJson(wpj);
-            auto              function = [=](WPParticleBatch& info) {
-                Vector3d offset = info.controlpoints[rstd::as_cast<usize>(c.controlpoint)].offset +
-                                  Vector3f { c.origin.data() }.cast<double>();
-                for (usize index {}; index < info.Len(); ++index) {
-                    auto     p        = info.Particle(index);
-                    Vector3d diff     = offset - PM::GetPos(p).cast<double>();
-                    double   distance = diff.norm();
-                    if (distance < c.threshold) {
-                        PM::Accelerate(p, diff.normalized() * c.scale, info.time_pass);
-                    }
-                }
-            };
-            return MakeUpdateProgram(attributes, rstd::move(function));
+            return Box<dyn<particle::ParticleUpdateProgram>>::make(WPControlPointAttractOperator {
+                .attributes = attributes,
+                .config     = ControlPointForce::ReadFromJson(wpj),
+            });
         }
     } while (false);
-    return MakeUpdateProgram(attributes, [](WPParticleBatch&) {
-    });
+    return Box<dyn<particle::ParticleUpdateProgram>>::make(WPNoopUpdateOperator {});
 }
 
 Box<dyn<particle::ParticleEmitterProgram>>
-WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleAttributes attributes,
+WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleSubSystem& subsystem,
                              usize emitter_index) {
     WPParticleAudioResponse audio_response {
         .enable    = wpe.audioprocessingmode != u32(),
@@ -1192,7 +1456,7 @@ WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleAttributes a
         box.controlpoint   = wpe.controlpoint;
         box.audio_response = audio_response;
         return Box<dyn<particle::ParticleEmitterProgram>>::make(
-            WPBoxEmitterProgram(attributes, rstd::move(box), emitter_index));
+            WPBoxEmitterProgram(subsystem.SpawnPipeline(), rstd::move(box), emitter_index));
     } else if (wpe.name == "sphererandom") {
         WPParticleSphereEmitterArgs sphere;
         sphere.emit_speed     = wpe.rate;
@@ -1209,10 +1473,11 @@ WPParticleParser::GenEmitter(const wpscene::Emitter& wpe, WPParticleAttributes a
         sphere.controlpoint   = wpe.controlpoint;
         sphere.audio_response = audio_response;
         return Box<dyn<particle::ParticleEmitterProgram>>::make(
-            WPSphereEmitterProgram(attributes, rstd::move(sphere), emitter_index));
+            WPSphereEmitterProgram(subsystem.SpawnPipeline(), rstd::move(sphere), emitter_index));
     }
 
     struct NoopEmitter {
+        void Compile(particle::ParticleViewCompiler&) {}
         void Emit(particle::ParticleEmitterContext&) {}
     };
     return Box<dyn<particle::ParticleEmitterProgram>>::make(NoopEmitter {});

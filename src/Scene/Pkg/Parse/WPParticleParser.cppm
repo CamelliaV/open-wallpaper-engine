@@ -18,14 +18,12 @@ export namespace owe
 {
 class WPParticleParser {
 public:
-    static Box<dyn<particle::ParticleSpawnProgram>> GenInitializer(const Json&,
-                                                                   WPParticleAttributes);
+    static WPParticleSpawnInstruction GenInitializer(const Json&);
     static Box<dyn<particle::ParticleUpdateProgram>>
     GenOperator(const Json&, Arc<wpscene::ParticleInstanceoverride>, WPParticleSubSystem&,
                 usize operator_index);
     static Box<dyn<particle::ParticleEmitterProgram>> GenEmitter(const wpscene::Emitter&,
-                                                                 WPParticleAttributes, usize);
-    static Box<dyn<particle::ParticleSpawnProgram>>
-        GenOverride(Arc<wpscene::ParticleInstanceoverride>, WPParticleAttributes);
+                                                                 WPParticleSubSystem&, usize);
+    static WPParticleSpawnInstruction GenOverride(Arc<wpscene::ParticleInstanceoverride>);
 };
 } // namespace owe
