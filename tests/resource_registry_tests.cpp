@@ -342,14 +342,27 @@ TEST(BufferRegistry, UpdatesDynamicContentWithoutReplacingItsPlannedCapacity) {
     EXPECT_EQ(upload_backend.last_request.usage, owe::vulkan::BufferUploadClass::Vertex);
 
     content.push(rstd::u8(3));
-    auto updated =
-        registry.Update(buffer.resource, content.as_slice(), rstd::u64(2), upload.as_mut_ref());
+    auto updated = registry.Update(buffer.resource, content.as_slice(), upload.as_mut_ref());
     ASSERT_TRUE(updated.is_ok());
     EXPECT_EQ(upload_backend.allocations, rstd::usize(1));
     EXPECT_EQ(upload_backend.writes, rstd::usize(2));
     auto physical = registry.Resolve(buffer.resource);
     ASSERT_TRUE(physical.is_some());
     EXPECT_EQ((**physical).source_generation, rstd::u64(2));
+
+    request.content_version = rstd::u64(7);
+    content[rstd::usize()]  = rstd::u8(4);
+    auto prepared_again = registry.Ensure(request.clone(), content.as_slice(), upload.as_mut_ref());
+    ASSERT_TRUE(prepared_again.is_ok());
+    EXPECT_EQ(upload_backend.allocations, rstd::usize(1));
+    EXPECT_EQ(upload_backend.writes, rstd::usize(2));
+
+    updated = registry.Update(buffer.resource, content.as_slice(), upload.as_mut_ref());
+    ASSERT_TRUE(updated.is_ok());
+    EXPECT_EQ(upload_backend.writes, rstd::usize(3));
+    physical = registry.Resolve(buffer.resource);
+    ASSERT_TRUE(physical.is_some());
+    EXPECT_EQ((**physical).source_generation, rstd::u64(3));
 }
 
 TEST(BufferRegistry, ReusesPhysicalAllocationAcrossPreparedContentVersions) {

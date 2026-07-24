@@ -36,7 +36,7 @@ struct BufferPhysical {
 
 struct PendingBufferUpload {
     rstd::sync::Arc<BufferPhysical> physical;
-    u64                             content_version { 0 };
+    u64                             source_generation { 0 };
 };
 
 struct PreparedBuffer {
@@ -79,9 +79,11 @@ public:
         auto existing = m_resources.get(handle);
         if (existing.is_some() &&
             (**existing)->definition_generation == (**entry).definition_version) {
-            auto queued =
-                QueueWrite((**existing).clone(), content, request.content_version, backend);
-            if (queued.is_err()) return Err(rstd::move(queued).unwrap_err_unchecked());
+            if ((**entry).request.lifetime != resource::BufferLifetimeClass::Dynamic) {
+                auto queued =
+                    QueueWrite((**existing).clone(), content, request.content_version, backend);
+                if (queued.is_err()) return Err(rstd::move(queued).unwrap_err_unchecked());
+            }
             return Ok(PreparedBuffer {
                 .resource = handle,
                 .physical = (**existing).clone(),
@@ -122,7 +124,7 @@ public:
         return m_entries.get(handle);
     }
 
-    auto Update(resource::BufferHandle handle, slice<u8> content, u64 content_version,
+    auto Update(resource::BufferHandle handle, slice<u8> content,
                 mut_ref<dyn<vulkan::BufferBackend>> backend)
         -> Result<empty, resource::ResourceError> {
         auto entry    = m_entries.get_mut(handle);
@@ -134,10 +136,12 @@ public:
                 .message = rstd::format("dynamic buffer is unavailable"),
             });
         }
-        auto queued = QueueWrite((**physical).clone(), content, content_version, backend);
+        auto source_generation = (**physical)->source_generation + u64(1);
+        if (source_generation == u64()) source_generation = u64(1);
+        auto queued = QueueWrite((**physical).clone(), content, source_generation, backend);
         if (queued.is_err()) return queued;
-        if ((**entry).request.content_version != content_version) ++(**entry).content_version;
-        (**entry).request.content_version = content_version;
+        ++(**entry).content_version;
+        if ((**entry).content_version == u64()) (**entry).content_version = u64(1);
         return Ok(empty {});
     }
 
@@ -146,7 +150,7 @@ public:
         for (const auto& ticket : tickets) {
             auto pending = m_pending_uploads.remove(ticket.value);
             if (pending.is_none()) continue;
-            pending->physical->submitted_generation = pending->content_version;
+            pending->physical->submitted_generation = pending->source_generation;
             if (ready.is_some()) pending->physical->ready = *ready;
         }
     }
@@ -172,9 +176,9 @@ public:
 
 private:
     auto QueueWrite(rstd::sync::Arc<BufferPhysical> physical, slice<u8> content,
-                    u64 content_version, mut_ref<dyn<vulkan::BufferBackend>> backend)
+                    u64 source_generation, mut_ref<dyn<vulkan::BufferBackend>> backend)
         -> Result<empty, resource::ResourceError> {
-        if (physical->source_generation == content_version) return Ok(empty {});
+        if (physical->source_generation == source_generation) return Ok(empty {});
         auto allocation =
             mut_ref<vulkan::BufferAllocation>::from_raw_parts(rstd::addressof(physical->buffer));
         auto ticket = backend->QueueBufferWrite(allocation, content);
@@ -184,15 +188,15 @@ private:
                 .message = rstd::format("queue buffer write failed"),
             });
         }
-        physical->source_generation = content_version;
+        physical->source_generation = source_generation;
         if (ticket->Valid()) {
             (void)m_pending_uploads.insert(ticket->value,
                                            PendingBufferUpload {
-                                               .physical        = physical.clone(),
-                                               .content_version = content_version,
+                                               .physical          = physical.clone(),
+                                               .source_generation = source_generation,
                                            });
         } else {
-            physical->submitted_generation = content_version;
+            physical->submitted_generation = source_generation;
         }
         return Ok(empty {});
     }

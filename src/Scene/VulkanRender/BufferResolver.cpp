@@ -152,8 +152,7 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(
         const auto& vertex                     = submesh.vertex_arrays[i];
         buffers.vertex_keys[i].data_generation = vertex.DataGeneration();
         auto updated = writer->UpdateBuffer(buffers.vertices[usize(i)],
-                                            bytesOf(vertex.Data(), vertex.DataSizeOf()),
-                                            vertex.DataGeneration());
+                                            bytesOf(vertex.Data(), vertex.DataSizeOf()));
         if (updated.is_err()) return require_reprepare();
     }
 
@@ -163,8 +162,8 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(
         if (buffers.index_key.is_some()) {
             buffers.index_key->data_generation = index.DataGeneration();
         }
-        auto updated = writer->UpdateBuffer(
-            *buffers.index, bytesOf(index.Data(), index.DataSizeOf()), index.DataGeneration());
+        auto updated =
+            writer->UpdateBuffer(*buffers.index, bytesOf(index.Data(), index.DataSizeOf()));
         if (updated.is_err()) return require_reprepare();
     } else if (! submesh.vertex_arrays.empty()) {
         buffers.draw_count = rstd::as_cast<u32>(submesh.vertex_arrays[0].VertexCount());

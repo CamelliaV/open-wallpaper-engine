@@ -135,9 +135,8 @@ struct BufferContentWriter {
     struct Api {
         using Trait = BufferContentWriter;
 
-        auto UpdateBuffer(BufferUseHandle use, slice<u8> content, u64 content_version)
-            -> Result<empty, ResourceError> {
-            return rstd::trait_call<0>(this, use, content, content_version);
+        auto UpdateBuffer(BufferUseHandle use, slice<u8> content) -> Result<empty, ResourceError> {
+            return rstd::trait_call<0>(this, use, content);
         }
     };
 

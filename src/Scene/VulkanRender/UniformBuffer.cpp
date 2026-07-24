@@ -609,9 +609,7 @@ auto UniformBufferBinding::Update(ref<dyn<UniformBufferFrameContext>>         fr
         bound.evaluated = true;
     }
 
-    ++m_content_version;
-    if (m_content_version == u64()) ++m_content_version;
-    auto updated = buffers->UpdateBuffer(m_buffer, m_data.as_slice(), m_content_version);
+    auto updated = buffers->UpdateBuffer(m_buffer, m_data.as_slice());
     if (updated.is_err()) {
         auto error = rstd::move(updated).unwrap_err_unchecked();
         return Err(UniformBufferUpdateError { .message = rstd::move(error.message) });

@@ -213,7 +213,6 @@ private:
     SceneRenderViewKind                 m_render_view { SceneRenderViewKind::Primary };
     ShaderMatrixConvention m_matrix_convention { ShaderMatrixConvention::ColumnVector };
     ShaderMatrixAbi        m_matrix_abi { ShaderMatrixAbi::NativeSpirv };
-    mutable u64            m_content_version { 0 };
     mutable u64            m_material_version { 0 };
     mutable bool           m_uploaded { false };
 };

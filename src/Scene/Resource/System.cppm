@@ -430,7 +430,7 @@ public:
         return m_registries.BufferManager().RecordPendingUploads(command, buffers);
     }
 
-    auto UpdateBuffer(resource::BufferUseHandle use, slice<u8> content, u64 content_version)
+    auto UpdateBuffer(resource::BufferUseHandle use, slice<u8> content)
         -> Result<empty, resource::ResourceError> {
         auto prepared = m_prepared.Resolve(use);
         if (prepared.is_none()) {
@@ -441,7 +441,7 @@ public:
         }
         auto backend = dyn<vulkan::BufferBackend>::from_ref(m_registries.BufferManager());
         return m_registries.Buffers().Update(
-            (**prepared).buffer.resource, content, content_version, backend.as_mut_ref());
+            (**prepared).buffer.resource, content, backend.as_mut_ref());
     }
 
     auto ReserveUpload() -> resource::ReadyToken { return m_registries.Uploads().Reserve(); }
@@ -653,9 +653,9 @@ struct Impl<owe::resource_registry::ExternalResourcePreparer,
 template<>
 struct Impl<owe::resource::BufferContentWriter, owe::resource_registry::RenderResourceSystem>
     : ImplBase<owe::resource_registry::RenderResourceSystem> {
-    auto UpdateBuffer(owe::resource::BufferUseHandle use, slice<u8> content, u64 content_version)
+    auto UpdateBuffer(owe::resource::BufferUseHandle use, slice<u8> content)
         -> Result<empty, owe::resource::ResourceError> {
-        return this->self().UpdateBuffer(use, content, content_version);
+        return this->self().UpdateBuffer(use, content);
     }
 };
 

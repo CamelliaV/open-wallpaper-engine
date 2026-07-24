@@ -25,11 +25,9 @@ struct StaticSourceState {
 
 class BufferWriter {
 public:
-    auto UpdateBuffer(owe::resource::BufferUseHandle use, rstd::slice<rstd::u8> content,
-                      rstd::u64 content_version)
+    auto UpdateBuffer(owe::resource::BufferUseHandle use, rstd::slice<rstd::u8> content)
         -> rstd::Result<rstd::empty, owe::resource::ResourceError> {
-        last_use     = use;
-        last_version = content_version;
+        last_use = use;
         ++update_count;
         bytes.clear();
         bytes.reserve(content.len().to_primitive());
@@ -40,7 +38,6 @@ public:
     }
 
     owe::resource::BufferUseHandle last_use;
-    rstd::u64                      last_version { 0 };
     rstd::u64                      update_count { 0 };
     std::vector<rstd::u8>          bytes;
 };
@@ -489,7 +486,6 @@ TEST(UniformBufferBinding, UpdatesGenericSceneThroughBufferWriterTrait) {
 
     ASSERT_TRUE(updated.is_ok());
     EXPECT_EQ(writer.last_use, buffer);
-    EXPECT_GT(writer.last_version, rstd::u64());
     ASSERT_EQ(writer.bytes.size(), 16u);
     std::array<float, 4> values {};
     std::memcpy(values.data(), writer.bytes.data(), writer.bytes.size());
