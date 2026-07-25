@@ -216,52 +216,74 @@ void GenRopeParticleData(slice<WPExtractInstance> instances, const WPParticleSub
         });
         if (slots.size() < 2) continue;
 
-        auto particle = [&](usize index) {
-            return instance.Particle(particle::ParticleSlot { slots[index.to_primitive()] });
+        auto particle = [&](std::size_t index) {
+            return instance.Particle(particle::ParticleSlot { slots[index] });
         };
         auto render_position = [&](const WPExtractParticle& value) {
             return subsystem.RenderPosition(instance.instance_index, value.position);
         };
 
-        float sequence_offset {};
-        if (slots.size() > 1) {
-            auto newest      = particle(usize(slots.size() - 1));
-            auto before      = particle(usize(slots.size() - 2));
-            auto newest_age  = newest.initial_lifetime - newest.lifetime;
-            auto before_age  = before.initial_lifetime - before.lifetime;
-            auto emit_period = before_age - newest_age;
+        auto emit_group = [&](std::size_t begin, std::size_t end) -> bool {
+            if (end - begin < 2) return true;
+
+            auto  newest      = particle(end - 1);
+            auto  before      = particle(end - 2);
+            auto  newest_age  = newest.initial_lifetime - newest.lifetime;
+            auto  before_age  = before.initial_lifetime - before.lifetime;
+            auto  emit_period = before_age - newest_age;
+            float sequence_offset {};
             if (emit_period > 1e-6f)
                 sequence_offset = -std::clamp(newest_age / emit_period, 0.0f, 1.0f);
+
+            auto segment_count = end - begin - 1;
+            for (std::size_t index = begin; index < end - 1; ++index) {
+                auto previous_index = index == begin ? begin : index - 1;
+                auto next_index     = index + 1;
+                auto after_index    = std::min(index + 2, end - 1);
+                auto current        = particle(index);
+                auto previous       = particle(previous_index);
+                auto next           = particle(next_index);
+                auto after          = particle(after_index);
+
+                auto destination = writer.AppendZeroedVertex();
+                if (destination.is_none()) return false;
+                auto data = *destination;
+                Write4(data, layout.position, render_position(current), current.size * 0.5f);
+                Write4(data,
+                       layout.endpoint,
+                       render_position(next),
+                       static_cast<float>(segment_count));
+                Write4(data,
+                       layout.previous_point,
+                       render_position(previous),
+                       static_cast<float>(index - begin) + sequence_offset);
+                if (option.thick_format)
+                    Write4(data, layout.next_point, render_position(after), next.size * 0.5f);
+                else
+                    Write3(data, layout.next_point, render_position(after));
+                WriteColor(data, layout.color_end, next);
+                WriteColor(data, layout.color, current);
+            }
+            return true;
+        };
+
+        auto sequence_count = subsystem.RopeSequenceCount();
+        if (sequence_count.is_none()) {
+            if (! emit_group(0, slots.size())) return;
+            continue;
         }
 
-        auto segment_count = usize(slots.size() - 1);
-        for (usize index {}; index < segment_count; ++index) {
-            auto previous_index = index == usize() ? usize() : index - usize(1);
-            auto next_index     = index + usize(1);
-            auto after_index    = rstd::cmp::min(index + usize(2), usize(slots.size() - 1));
-            auto current        = particle(index);
-            auto previous       = particle(previous_index);
-            auto next           = particle(next_index);
-            auto after          = particle(after_index);
-
-            auto destination = writer.AppendZeroedVertex();
-            if (destination.is_none()) return;
-            auto data = *destination;
-            Write4(data, layout.position, render_position(current), current.size * 0.5f);
-            Write4(data,
-                   layout.endpoint,
-                   render_position(next),
-                   static_cast<float>(segment_count.to_primitive()));
-            Write4(data,
-                   layout.previous_point,
-                   render_position(previous),
-                   static_cast<float>(index.to_primitive()) + sequence_offset);
-            if (option.thick_format)
-                Write4(data, layout.next_point, render_position(after), next.size * 0.5f);
-            else
-                Write3(data, layout.next_point, render_position(after));
-            WriteColor(data, layout.color_end, next);
-            WriteColor(data, layout.color, current);
+        auto count = rstd::as_cast<u64>(rstd::cmp::max(*sequence_count, u32(2)));
+        auto group = [&](std::size_t index) {
+            return instance.states[slots[index]].spawn_sequence / count;
+        };
+        std::size_t begin {};
+        while (begin < slots.size()) {
+            auto        sequence_group = group(begin);
+            std::size_t end            = begin + 1;
+            while (end < slots.size() && group(end) == sequence_group) ++end;
+            if (! emit_group(begin, end)) return;
+            begin = end;
         }
     }
 }

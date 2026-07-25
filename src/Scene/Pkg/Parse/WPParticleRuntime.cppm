@@ -181,8 +181,10 @@ struct WPParticleFrame {
     class WPParticleSubSystem* subsystem { nullptr };
     usize                      instance_index {};
     rstd::array<float, 16>     audio_average {};
+    Eigen::Vector3d            mouse_local { Eigen::Vector3d::Zero() };
     Eigen::Matrix3d            world_from_local_dir { Eigen::Matrix3d::Identity() };
     Eigen::Matrix3d            local_from_world_dir { Eigen::Matrix3d::Identity() };
+    Eigen::Matrix4d            local_from_world { Eigen::Matrix4d::Identity() };
     f64                        time {};
     f64                        delta {};
     f64                        emitter_delta {};
@@ -220,6 +222,7 @@ public:
 
     void Initialize(WPParticleSpawnColumns&, particle::ParticleSpawnRequest,
                     ref<dyn<rstd::any::Any>>);
+    auto SequenceCount() const -> Option<u32>;
 
 private:
     struct Impl;
@@ -378,6 +381,7 @@ public:
     enum class SpawnType
     {
         STATIC,
+        STATIC_CONTROLPOINT,
         EVENT_FOLLOW,
         EVENT_SPAWN,
         EVENT_DEATH,
@@ -426,6 +430,9 @@ public:
         m_controlpoints[index].angle_curve = Some(rstd::move(curve));
     }
     void SetOwnerNode(SceneNode* node) noexcept { m_owner_node = node; }
+    void SetParentControlpointStartIndex(i32 value) {
+        m_parent_controlpoint_start_index = Some(value);
+    }
 
     auto Type() const noexcept -> SpawnType { return m_spawn_type; }
     auto MaxInstanceCount() const noexcept -> u32 { return m_max_instance_count; }
@@ -446,6 +453,8 @@ public:
         -> Option<particle::ParticleAttributeKey<WPTrailHistoryAttribute>> {
         return m_trail_key;
     }
+    auto RopeSequenceCount() const noexcept -> Option<u32> { return m_rope_sequence_count; }
+    void SetRopeSequenceCount(u32 value) noexcept { m_rope_sequence_count = Some(value); }
     auto AnimationSpec() const noexcept -> WPParticleAnimationSpec { return m_animation_spec; }
     auto RenderPosition(usize instance_index, const Eigen::Vector3f& position) const
         -> Eigen::Vector3f;
@@ -458,6 +467,7 @@ private:
     void Warmup(WPParticleInstanceRef, ref<dyn<rstd::any::Any>>);
     void Advance(f64 frame_time, f64 child_frame_time, bool update_mesh);
     void UpdateFrameInput(f64 frame_time);
+    void UpdateControlpoints(WPParticleInstanceRef);
     void UpdateBoundedState(WPParticleInstanceRef);
     auto HasBoundInstance(particle::ParticleInstance*, usize, particle::ParticleSlot) const -> bool;
     void ReleaseBoundInstances(particle::ParticleInstance*, usize, particle::ParticleSlot);
@@ -471,22 +481,24 @@ private:
     WPParticleAttributes                                            m_attributes;
     WPParticleSpawnPipeline                                         m_spawn_pipeline;
     Option<particle::ParticleAttributeKey<WPTrailHistoryAttribute>> m_trail_key;
+    Option<u32>                                                     m_rope_sequence_count;
     particle::ParticleProgram                                       m_program;
     Option<Box<particle::ParticleSystem>>                           m_system;
     rstd::vec::Vec<WPParticleInstanceState>                         m_instance_states;
     rstd::vec::Vec<Box<WPParticleSubSystem>>                        m_children;
     rstd::array<WPParticleControlpoint, 8>                          m_controlpoints;
-    Option<Arc<wpscene::ParticleInstanceoverride>>                  m_instance_override;
-    WPParticleFrame                                                 m_frame;
-    WPParticleAnimationSpec                                         m_animation_spec;
-    WPParticleFollowAnchor                                          m_follow_anchor;
-    u32                                                             m_max_count;
-    f64                                                             m_rate;
-    f64                                                             m_time {};
-    f64                                                             m_start_time {};
-    bool                                                            m_world_space { false };
-    u32                                                             m_max_instance_count { 1 };
-    f64                                                             m_probability { 1.0 };
+    Option<i32>                                              m_parent_controlpoint_start_index;
+    Option<Arc<wpscene::ParticleInstanceoverride>>           m_instance_override;
+    WPParticleFrame                                          m_frame;
+    WPParticleAnimationSpec                                  m_animation_spec;
+    WPParticleFollowAnchor                                   m_follow_anchor;
+    u32                                                      m_max_count;
+    f64                                                      m_rate;
+    f64                                                      m_time {};
+    f64                                                      m_start_time {};
+    bool                                                     m_world_space { false };
+    u32                                                      m_max_instance_count { 1 };
+    f64                                                      m_probability { 1.0 };
     SpawnType                                                m_spawn_type { SpawnType::STATIC };
     u32                                                      m_trail_length {};
     f64                                                      m_trail_sample_interval {};

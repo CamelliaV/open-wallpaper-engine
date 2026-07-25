@@ -18,7 +18,7 @@ export namespace owe
 {
 class WPParticleParser {
 public:
-    static WPParticleSpawnInstruction GenInitializer(const Json&);
+    static WPParticleSpawnInstruction GenInitializer(const Json&, u32 implicit_sequence_count);
     static Box<dyn<particle::ParticleUpdateProgram>>
     GenOperator(const Json&, Arc<wpscene::ParticleInstanceoverride>, WPParticleSubSystem&,
                 usize operator_index);

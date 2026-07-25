@@ -1,4 +1,5 @@
 export module wescene.pkg.scene_obj:particle_object;
+import rstd;
 import wescene.core;
 import rstd.cppstd;
 import wescene.utils;
@@ -8,6 +9,8 @@ export import :field_binding;
 import :visibility_binding;
 export import :material;
 import :scene_document;
+
+using namespace rstd::prelude;
 
 export namespace owe
 
@@ -68,6 +71,7 @@ public:
     std::array<float, 3>   origin { 0, 0, 0 };
     std::array<int32_t, 3> sign { 0, 0, 0 };
     u32                    instantaneous { 0 };
+    u32                    max_emit_per_period { 0 };
     float                  speedmin { 0 };
     float                  speedmax { 0 };
     u32                    audioprocessingmode { 0 };
@@ -132,8 +136,8 @@ public:
     i32         maxcount { 20 };
     EFlags      flags { 0 };
 
-    i32   controlpointstartindex { 0 };
-    float probability { 1.0f };
+    Option<i32> controlpointstartindex;
+    float       probability { 1.0f };
 
     std::array<float, 3> angles { 0, 0, 0 };
     std::array<float, 3> origin { 0, 0, 0 };
@@ -160,12 +164,10 @@ public:
     std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
     std::array<float, 3> colorn { 1.0f, 1.0f, 1.0f };
 
-    // controlpoint{0..7} carry "x y z" triplet strings (per-particle CP
-    // overrides); controlpointangle{0..7} carry euler triplets in the same
-    // string format. Captured into static arrays of array<float,3>.
-    std::array<std::array<float, 3>, 8>  controlpoint {};
-    std::array<std::array<float, 3>, 8>  controlpointangle {};
-    std::shared_ptr<const FieldBindings> field_bindings;
+    // Presence distinguishes an absent override from an explicit world-space origin.
+    std::array<std::optional<std::array<float, 3>>, 8> controlpoint;
+    std::array<std::array<float, 3>, 8>                controlpointangle {};
+    std::shared_ptr<const FieldBindings>               field_bindings;
 
     // field name (e.g. "alpha", "size", "color", "colorn", "lifetime",
     // "rate", "speed", "count", "brightness") -> user-property key when the

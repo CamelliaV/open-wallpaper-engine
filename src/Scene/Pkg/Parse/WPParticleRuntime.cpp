@@ -495,39 +495,23 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
     Eigen::Vector3d mouse_local          = mouse_world;
     Eigen::Matrix3d world_from_local_dir = Eigen::Matrix3d::Identity();
     Eigen::Matrix3d local_from_world_dir = Eigen::Matrix3d::Identity();
+    Eigen::Matrix4d local_from_world     = Eigen::Matrix4d::Identity();
     if (m_owner_node != nullptr) {
         m_owner_node->UpdateTrans();
         world_from_local_dir = m_owner_node->ModelTrans().block<3, 3>(0, 0);
         if (std::abs(world_from_local_dir.determinant()) > 1e-9) {
             local_from_world_dir = world_from_local_dir.inverse();
         }
-        Eigen::Matrix4d inverse = m_owner_node->ModelTrans().inverse();
+        local_from_world = m_owner_node->ModelTrans().inverse();
         Eigen::Vector4d value =
-            inverse * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
+            local_from_world * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
         mouse_local = value.head<3>();
     }
-    auto runtime = m_scene.Runtime().Frame().elapsed.to_primitive();
-    for (usize index {}; index < m_controlpoints.len(); ++index) {
-        auto&           controlpoint = m_controlpoints[index];
-        Eigen::Vector3f position_override { Eigen::Vector3f::Zero() };
-        Eigen::Vector3f angles { Eigen::Vector3f::Zero() };
-        if (m_instance_override.is_some()) {
-            auto source_index = index.to_primitive();
-            position_override =
-                Eigen::Vector3f { (*m_instance_override)->controlpoint[source_index].data() };
-            angles =
-                Eigen::Vector3f { (*m_instance_override)->controlpointangle[source_index].data() };
-        }
-        controlpoint.offset = controlpoint.base_offset + position_override.cast<double>();
-        if (controlpoint.link_mouse) controlpoint.offset += mouse_local;
-        if (controlpoint.angle_curve)
-            angles = controlpoint.angle_curve->EvaluateVec3(angles, runtime);
-        controlpoint.rotation = ControlpointRotation(angles);
-    }
-
     m_frame.subsystem              = this;
+    m_frame.mouse_local            = mouse_local;
     m_frame.world_from_local_dir   = world_from_local_dir;
     m_frame.local_from_world_dir   = local_from_world_dir;
+    m_frame.local_from_world       = local_from_world;
     m_frame.world_space            = m_world_space;
     m_frame.time                   = m_time;
     m_frame.delta                  = frame_time;
@@ -560,19 +544,81 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
     }
 }
 
+void WPParticleSubSystem::UpdateControlpoints(WPParticleInstanceRef current) {
+    auto runtime = m_scene.Runtime().Frame().elapsed.to_primitive();
+    for (usize index {}; index < m_controlpoints.len(); ++index) {
+        auto&           controlpoint = m_controlpoints[index];
+        Eigen::Vector3f angles { Eigen::Vector3f::Zero() };
+        controlpoint.offset = controlpoint.base_offset;
+        if (m_instance_override.is_some()) {
+            auto        source_index      = index.to_primitive();
+            const auto& position_override = (*m_instance_override)->controlpoint[source_index];
+            if (position_override.has_value()) {
+                auto position = Eigen::Vector3f { position_override->data() }.cast<double>();
+                if (controlpoint.worldspace) {
+                    auto local = m_frame.local_from_world *
+                                 Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
+                    controlpoint.offset = local.head<3>();
+                } else {
+                    controlpoint.offset += position;
+                }
+            }
+            angles =
+                Eigen::Vector3f { (*m_instance_override)->controlpointangle[source_index].data() };
+        }
+        if (controlpoint.link_mouse) controlpoint.offset += m_frame.mouse_local;
+        if (controlpoint.angle_curve)
+            angles = controlpoint.angle_curve->EvaluateVec3(angles, runtime);
+        controlpoint.rotation = ControlpointRotation(angles);
+    }
+
+    if (m_spawn_type != SpawnType::STATIC_CONTROLPOINT ||
+        m_parent_controlpoint_start_index.is_none()) {
+        return;
+    }
+    auto& bounded = current.state->bounded;
+    if (bounded.parent == nullptr || bounded.parent_subsystem == nullptr) return;
+
+    auto               view   = bounded.parent->Binding().Read();
+    auto               states = view.States();
+    std::vector<usize> slots;
+    slots.reserve(states.len().to_primitive());
+    for (usize index {}; index < states.len(); ++index) {
+        if (states[index].active) slots.push_back(index);
+    }
+    std::sort(slots.begin(), slots.end(), [&](usize lhs, usize rhs) {
+        return states[lhs].spawn_sequence < states[rhs].spawn_sequence;
+    });
+
+    auto controlpoint_index =
+        rstd::as_cast<usize>(rstd::cmp::max(*m_parent_controlpoint_start_index, i32()));
+    for (auto slot_index : slots) {
+        if (controlpoint_index >= m_controlpoints.len()) break;
+        particle::ParticleSlot slot { .index = slot_index };
+        auto                   position = bounded.parent_subsystem->FollowPosition(
+            *bounded.parent, bounded.parent_instance_index, slot);
+        m_controlpoints[controlpoint_index].offset =
+            (position - current.state->bounded.position).cast<double>();
+        ++controlpoint_index;
+    }
+}
+
 void WPParticleSubSystem::UpdateBoundedState(WPParticleInstanceRef current) {
     auto& bounded = current.state->bounded;
     if (bounded.parent == nullptr || bounded.parent_subsystem == nullptr) return;
 
-    bool type_has_death =
-        m_spawn_type == SpawnType::EVENT_SPAWN || m_spawn_type == SpawnType::EVENT_FOLLOW;
+    bool type_has_death = m_spawn_type == SpawnType::EVENT_SPAWN ||
+                          m_spawn_type == SpawnType::EVENT_FOLLOW ||
+                          m_spawn_type == SpawnType::STATIC_CONTROLPOINT;
 
     auto& parent_storage = bounded.parent->Storage();
     if (bounded.particle_index >= isize() &&
         rstd::as_cast<usize>(bounded.particle_index) < parent_storage.Len()) {
         particle::ParticleSlot slot { .index = rstd::as_cast<usize>(bounded.particle_index) };
-        bounded.position = bounded.parent_subsystem->FollowPosition(
-            *bounded.parent, bounded.parent_instance_index, slot);
+        if (m_spawn_type != SpawnType::STATIC_CONTROLPOINT) {
+            bounded.position = bounded.parent_subsystem->FollowPosition(
+                *bounded.parent, bounded.parent_instance_index, slot);
+        }
         if (m_spawn_type == SpawnType::EVENT_DEATH) bounded.particle_index = isize(-1);
 
         if (! current.state->death && type_has_death) {
@@ -604,11 +650,13 @@ void WPParticleSubSystem::Advance(f64 frame_time, f64 child_frame_time, bool upd
             .index    = index,
         };
         UpdateBoundedState(current);
-        if (current.state->death && m_spawn_type == SpawnType::EVENT_FOLLOW) {
+        if (current.state->death && (m_spawn_type == SpawnType::EVENT_FOLLOW ||
+                                     m_spawn_type == SpawnType::STATIC_CONTROLPOINT)) {
             current.instance->Storage().Clear();
         }
 
         m_frame.instance_index = index;
+        UpdateControlpoints(current);
         Warmup(current, frame_ref);
         m_pending_child_deaths.clear();
         System().Advance(*current.instance, frame_ref, frame_time, m_time);
@@ -672,7 +720,10 @@ void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
 void WPParticleSubSystem::SpawnChild(WPParticleInstanceRef parent, WPParticleSubSystem& child,
                                      particle::ParticleSlot slot, Eigen::Vector3f position,
                                      bool fixed) {
-    if (! fixed) position = FollowPosition(*parent.instance, parent.index, slot);
+    if (child.Type() == SpawnType::STATIC_CONTROLPOINT)
+        position = parent.state->bounded.position;
+    else if (! fixed)
+        position = FollowPosition(*parent.instance, parent.index, slot);
     auto instance = child.QueryNewInstance();
     if (instance.is_none()) return;
     instance->state->bounded = {
@@ -713,7 +764,8 @@ void WPParticleSubSystem::ReleaseBoundInstances(particle::ParticleInstance* pare
             continue;
         }
         state.death = true;
-        if (m_spawn_type == SpawnType::EVENT_FOLLOW) {
+        if (m_spawn_type == SpawnType::EVENT_FOLLOW ||
+            m_spawn_type == SpawnType::STATIC_CONTROLPOINT) {
             System().Instance(index).Storage().Clear();
             state.no_live_particle = true;
         }
@@ -755,7 +807,8 @@ void WPParticleSubSystem::ProcessChildEvents(particle::ParticleEventContext& con
         for (auto& child : m_children) {
             if (child->Type() == SpawnType::EVENT_FOLLOW && replaced) continue;
             if (child->Type() != SpawnType::EVENT_FOLLOW &&
-                child->Type() != SpawnType::EVENT_SPAWN) {
+                child->Type() != SpawnType::EVENT_SPAWN &&
+                child->Type() != SpawnType::STATIC_CONTROLPOINT) {
                 continue;
             }
             child->ReleaseBoundInstances(parent.instance, parent.index, slot);
@@ -768,7 +821,8 @@ void WPParticleSubSystem::ProcessChildEvents(particle::ParticleEventContext& con
                 continue;
             }
             if (child->Type() != SpawnType::EVENT_FOLLOW &&
-                child->Type() != SpawnType::EVENT_SPAWN) {
+                child->Type() != SpawnType::EVENT_SPAWN &&
+                child->Type() != SpawnType::STATIC_CONTROLPOINT) {
                 continue;
             }
             SpawnChild(parent, *child, slot);

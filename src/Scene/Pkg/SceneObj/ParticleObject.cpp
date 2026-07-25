@@ -8,6 +8,7 @@ import rstd.log;
 import rstd.cppstd;
 
 using namespace owe::wpscene;
+using namespace rstd::prelude;
 using namespace rstd::literals;
 
 namespace
@@ -49,7 +50,12 @@ bool ParticleChild::FromJson(const owe::Json& json, fs::VFS& vfs) {
     if (! obj.FromJson(*jParticle, vfs)) return false;
 
     owe::GetJsonValue(json, "maxcount", maxcount, false);
-    owe::GetJsonValue(json, "controlpointstartindex", controlpointstartindex, false);
+    auto controlpoint_start = json.get("controlpointstartindex"_str);
+    if (controlpoint_start.is_some() && ! (*controlpoint_start)->is_null()) {
+        i32 value {};
+        owe::GetJsonValue(json, "controlpointstartindex", value, false);
+        controlpointstartindex = Some(value);
+    }
     owe::GetJsonValue(json, "probability", probability, false);
     owe::GetJsonValue(json, "origin", origin, false);
     owe::GetJsonValue(json, "scale", scale, false);
@@ -89,6 +95,7 @@ bool Emitter::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "speedmin", speedmin, false);
     owe::GetJsonValue(json, "speedmax", speedmax, false);
     owe::GetJsonValue(json, "instantaneous", instantaneous, false);
+    owe::GetJsonValue(json, "maxtoemitperperiod", max_emit_per_period, false);
     owe::GetJsonValue(json, "distancemax", distancemax, false);
     owe::GetJsonValue(json, "distancemin", distancemin, false);
     owe::GetJsonValue(json, "rate", rate, false);
@@ -167,7 +174,12 @@ bool ParticleInstanceoverride::FromJosn(const owe::Json& json) {
                                    "controlpointangle3", "controlpointangle4", "controlpointangle5",
                                    "controlpointangle6", "controlpointangle7" };
         for (int i = 0; i < 8; ++i) {
-            owe::GetJsonValue(json, cp_keys[i], controlpoint[i], false);
+            auto value = json.get(rstd::cppstd::as_str(cp_keys[i]).unwrap());
+            if (value.is_some() && ! (*value)->is_null()) {
+                std::array<float, 3> point {};
+                owe::GetJsonValue(json, cp_keys[i], point, false);
+                controlpoint[i] = point;
+            }
             bind(rstd::cppstd::as_str(cp_keys[i]).unwrap());
             owe::GetJsonValue(json, cpa_keys[i], controlpointangle[i], false);
             bind(rstd::cppstd::as_str(cpa_keys[i]).unwrap());

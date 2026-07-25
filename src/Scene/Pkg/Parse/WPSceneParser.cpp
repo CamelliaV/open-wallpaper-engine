@@ -1124,11 +1124,12 @@ struct WPParticleOverrideControl {
         auto write_scalar = [&](float& destination) {
             if (values.len() >= usize(1)) destination = values[usize()];
         };
-        auto write_vec3 = [&](std::array<float, 3>& destination, float scale) {
-            if (values.len() < usize(3)) return;
+        auto write_vec3 = [&](std::array<float, 3>& destination, float scale) -> bool {
+            if (values.len() < usize(3)) return false;
             destination = { values[usize()] * scale,
                             values[usize(1)] * scale,
                             values[usize(2)] * scale };
+            return true;
         };
 
         auto field_view = as_string_view(field.as_str());
@@ -1157,7 +1158,10 @@ struct WPParticleOverrideControl {
             try {
                 int index = std::stoi(
                     std::string(field_view.substr(std::string_view("controlpoint").size())));
-                if (index >= 0 && index < 8) write_vec3(state->controlpoint[index], 1.0f);
+                if (index >= 0 && index < 8) {
+                    std::array<float, 3> point {};
+                    if (write_vec3(point, 1.0f)) state->controlpoint[index] = point;
+                }
             } catch (...) {
             }
         } else if (field_view.starts_with("controlpointangle")) {
@@ -1197,8 +1201,18 @@ void LoadControlPoint(WPParticleSubSystem& system, const wpscene::Particle& part
 }
 void LoadInitializer(WPParticleSubSystem& system, const wpscene::Particle& particle,
                      Arc<wpscene::ParticleInstanceoverride> over_state) {
+    u32 implicit_sequence_count { 2 };
+    for (const auto& emitter : particle.emitters) {
+        if (emitter.max_emit_per_period > u32()) {
+            implicit_sequence_count = emitter.max_emit_per_period;
+            break;
+        }
+    }
     for (const auto& initializer : particle.initializers) {
-        system.AddInitializer(WPParticleParser::GenInitializer(initializer));
+        auto instruction = WPParticleParser::GenInitializer(initializer, implicit_sequence_count);
+        auto count       = instruction.SequenceCount();
+        if (count.is_some()) system.SetRopeSequenceCount(*count);
+        system.AddInitializer(rstd::move(instruction));
     }
     if (over_state->enabled) {
         system.AddInitializer(WPParticleParser::GenOverride(rstd::move(over_state)));
@@ -1212,17 +1226,11 @@ void LoadOperator(WPParticleSubSystem& system, const wpscene::Particle& particle
             WPParticleParser::GenOperator(operation, over_state.clone(), system, index++));
     }
 }
-void LoadEmitter(WPParticleSubSystem& system, const wpscene::Particle& particle, float count,
-                 i32 cp_start_index = i32()) {
+void LoadEmitter(WPParticleSubSystem& system, const wpscene::Particle& particle, float count) {
     usize emitter_index {};
     for (const auto& em : particle.emitters) {
         auto newEm = em;
         newEm.rate *= count;
-        // controlpointstartindex on the parent's child entry biases the
-        // child emitter's controlpoint index. Without this, a child JSON
-        // authored as `controlpoint: 0` always samples cps[0] even when WE
-        // wired it through `cps[cp_start_index]`.
-        if (newEm.controlpoint >= i32()) newEm.controlpoint += cp_start_index;
         system.AddEmitter(WPParticleParser::GenEmitter(newEm, system, emitter_index++));
     }
 }
@@ -3271,7 +3279,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
               probability(o.probability) {}
         std::string type { "static" };
         i32         maxcount { 20 };
-        i32         controlpointstartindex { 0 };
+        Option<i32> controlpointstartindex;
         float       probability { 1.0f };
     };
 
@@ -3428,7 +3436,11 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         follow_anchor.texture_ratio  = ParticleTextureRatio(material);
     }
 
-    auto spawn_type         = ParseSpawnType(child_data.type);
+    auto spawn_type = ParseSpawnType(child_data.type);
+    if (is_child && spawn_type == WPParticleSubSystem::SpawnType::STATIC &&
+        child_data.controlpointstartindex.is_some()) {
+        spawn_type = WPParticleSubSystem::SpawnType::STATIC_CONTROLPOINT;
+    }
     auto max_instance_count = u32(
         static_cast<std::uint32_t>(std::max(child_data.maxcount.to_primitive(), std::int32_t(0))));
     auto particleSub =
@@ -3464,10 +3476,9 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     }
 
     particleSub->SetOwnerNode(spNode.as_ptr());
-    LoadEmitter(*particleSub,
-                particle_obj,
-                override.count,
-                is_child ? child_data.controlpointstartindex : i32());
+    if (child_data.controlpointstartindex.is_some())
+        particleSub->SetParentControlpointStartIndex(*child_data.controlpointstartindex);
+    LoadEmitter(*particleSub, particle_obj, override.count);
     LoadInitializer(*particleSub, particle_obj, override_state.clone());
     LoadOperator(*particleSub, particle_obj, override_state.clone());
     LoadControlPoint(*particleSub, particle_obj, override_state.clone());

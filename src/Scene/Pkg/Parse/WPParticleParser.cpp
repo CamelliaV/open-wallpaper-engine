@@ -133,12 +133,16 @@ struct MapSequenceBetweenControlPoints {
     u32                   count { 2 };
     SequenceLimitBehavior limit_behavior { SequenceLimitBehavior::Repeat };
 
-    static auto ReadFromJson(const Json& json) -> MapSequenceBetweenControlPoints {
+    static auto ReadFromJson(const Json& json, u32 implicit_count)
+        -> MapSequenceBetweenControlPoints {
         MapSequenceBetweenControlPoints value;
+        value.count = rstd::cmp::max(implicit_count, u32(2));
         owe::GetJsonValue(json, "controlpointstart", value.controlpoint_start, false);
         owe::GetJsonValue(json, "controlpointend", value.controlpoint_end, false);
-        owe::GetJsonValue(json, "count", value.count, false);
-        value.count          = rstd::cmp::max(value.count, u32(2));
+        if (json.get("count"_str).is_some()) {
+            owe::GetJsonValue(json, "count", value.count, false);
+            value.count = rstd::cmp::max(value.count, u32(2));
+        }
         value.limit_behavior = ParseSequenceLimitBehavior(json);
         return value;
     }
@@ -390,6 +394,17 @@ auto WPParticleSpawnInstruction::operator=(WPParticleSpawnInstruction&&) noexcep
     -> WPParticleSpawnInstruction&                        = default;
 WPParticleSpawnInstruction::~WPParticleSpawnInstruction() = default;
 
+auto WPParticleSpawnInstruction::SequenceCount() const -> Option<u32> {
+    return std::visit(
+        [](const auto& instruction) -> Option<u32> {
+            using Instruction = std::remove_cvref_t<decltype(instruction)>;
+            if constexpr (std::is_same_v<Instruction, WPMapSequenceBetweenControlPointsProgram>)
+                return Some(u32(instruction.config.count.to_primitive()));
+            return None();
+        },
+        m_impl->value);
+}
+
 template<typename T>
 auto WPParticleSpawnInstruction::Make(T value) -> WPParticleSpawnInstruction {
     return WPParticleSpawnInstruction(Box<Impl>::make(rstd::move(value)));
@@ -405,7 +420,8 @@ void WPParticleSpawnInstruction::Initialize(WPParticleSpawnColumns&        colum
         m_impl->value);
 }
 
-WPParticleSpawnInstruction WPParticleParser::GenInitializer(const Json& wpj) {
+WPParticleSpawnInstruction WPParticleParser::GenInitializer(const Json& wpj,
+                                                            u32         implicit_sequence_count) {
     do {
         if (wpj.get("name"_str).is_none()) break;
         std::string name;
@@ -488,7 +504,8 @@ WPParticleSpawnInstruction WPParticleParser::GenInitializer(const Json& wpj) {
             });
         } else if (name == "mapsequencebetweencontrolpoints") {
             return WPParticleSpawnInstruction::Make(WPMapSequenceBetweenControlPointsProgram {
-                .config = MapSequenceBetweenControlPoints::ReadFromJson(wpj),
+                .config =
+                    MapSequenceBetweenControlPoints::ReadFromJson(wpj, implicit_sequence_count),
             });
         }
     } while (false);

@@ -3,9 +3,11 @@
 import rstd;
 import rstd.cppstd;
 import eigen;
+import wescene.json;
 import wescene.particle;
 import wescene.particle.program;
 import wescene.pkg.parse;
+import wescene.scene;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;
@@ -375,4 +377,139 @@ TEST(WPParticleSubSystem, DerivesMeshCapacityFromItsOwnInstancePool) {
 
     EXPECT_TRUE(
         SubSystem::MaxParticleCapacity(u32::MAX, u32(2), SpawnType::EVENT_FOLLOW).is_none());
+}
+
+TEST(ParticleInstanceOverride, TracksProvidedControlpoints) {
+    auto json = owe::ParseJson(R"({"size":2,"controlpoint1":"120 240 0"})").unwrap();
+    owe::wpscene::ParticleInstanceoverride override;
+
+    ASSERT_TRUE(override.FromJosn(json));
+    EXPECT_FALSE(override.controlpoint[0].has_value());
+    ASSERT_TRUE(override.controlpoint[1].has_value());
+    EXPECT_FLOAT_EQ((*override.controlpoint[1])[0], 120.0f);
+    EXPECT_FLOAT_EQ((*override.controlpoint[1])[1], 240.0f);
+    EXPECT_FALSE(override.controlpoint[2].has_value());
+}
+
+TEST(WPParticleSubSystem, ResolvesWorldControlpointOverridesThroughOwnerTransform) {
+    owe::Scene               scene;
+    auto                     mesh = std::make_shared<owe::SceneMesh>();
+    owe::WPParticleSubSystem subsystem(scene,
+                                       mesh,
+                                       u32(1),
+                                       f64(),
+                                       u32(1),
+                                       f64(1.0),
+                                       owe::WPParticleSubSystem::SpawnType::STATIC,
+                                       owe::WPParticleAnimationSpec {});
+
+    auto points                  = subsystem.ControlpointsMut();
+    points[usize(1)].base_offset = Eigen::Vector3d { 0.0, -450.0, 0.0 };
+    points[usize(1)].worldspace  = true;
+    points[usize(2)].base_offset = Eigen::Vector3d { 3.0, 4.0, 0.0 };
+    points[usize(2)].worldspace  = true;
+    points[usize(3)].base_offset = Eigen::Vector3d { 1.0, 2.0, 0.0 };
+
+    auto owner    = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 100.0f, 200.0f, 0.0f },
+                                                          Eigen::Vector3f { 2.0f, 4.0f, 1.0f },
+                                                          Eigen::Vector3f::Zero());
+    auto override = rstd::sync::Arc<owe::wpscene::ParticleInstanceoverride>::make();
+    override->enabled         = true;
+    override->controlpoint[1] = std::array<float, 3> { 120.0f, 240.0f, 0.0f };
+    override->controlpoint[3] = std::array<float, 3> { 3.0f, 4.0f, 0.0f };
+    subsystem.SetOwnerNode(owner.as_ptr());
+    subsystem.SetInstanceOverride(override.clone());
+    subsystem.Finalize();
+    subsystem.Tick(f64(), false);
+
+    auto resolved = subsystem.Controlpoints();
+    EXPECT_TRUE(resolved[usize(1)].offset.isApprox(Eigen::Vector3d { 10.0, 10.0, 0.0 }));
+    EXPECT_TRUE(resolved[usize(2)].offset.isApprox(Eigen::Vector3d { 3.0, 4.0, 0.0 }));
+    EXPECT_TRUE(resolved[usize(3)].offset.isApprox(Eigen::Vector3d { 4.0, 6.0, 0.0 }));
+}
+
+TEST(WPParticleSubSystem, UsesEmitterPeriodLimitForImplicitControlpointSequenceCount) {
+    owe::Scene               scene;
+    auto                     mesh = std::make_shared<owe::SceneMesh>();
+    owe::WPParticleSubSystem subsystem(scene,
+                                       mesh,
+                                       u32(4),
+                                       f64(),
+                                       u32(1),
+                                       f64(1.0),
+                                       owe::WPParticleSubSystem::SpawnType::STATIC,
+                                       owe::WPParticleAnimationSpec {});
+
+    subsystem.ControlpointsMut()[usize(1)].base_offset = Eigen::Vector3d { 300.0, 0.0, 0.0 };
+    subsystem.AddInitializer(owe::WPParticleParser::GenInitializer(
+        owe::ParseJson(R"({"name":"lifetimerandom","min":1,"max":1})").unwrap(), u32(4)));
+    auto sequence = owe::WPParticleParser::GenInitializer(
+        owe::ParseJson(R"({"name":"mapsequencebetweencontrolpoints"})").unwrap(), u32(4));
+    ASSERT_EQ(sequence.SequenceCount(), Some(u32(4)));
+    subsystem.SetRopeSequenceCount(*sequence.SequenceCount());
+    subsystem.AddInitializer(rstd::move(sequence));
+    auto explicit_sequence = owe::WPParticleParser::GenInitializer(
+        owe::ParseJson(R"({"name":"mapsequencebetweencontrolpoints","count":3})").unwrap(), u32(4));
+    EXPECT_EQ(explicit_sequence.SequenceCount(), Some(u32(3)));
+    EXPECT_EQ(subsystem.RopeSequenceCount(), Some(u32(4)));
+    subsystem.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(
+        owe::WPSphereEmitterProgram(subsystem.SpawnPipeline(),
+                                    owe::WPParticleSphereEmitterArgs {
+                                        .directions    = { 1.0f, 1.0f, 0.0f },
+                                        .instantaneous = u32(4),
+                                    },
+                                    usize())));
+    subsystem.Finalize();
+    subsystem.Tick(f64(), false);
+
+    auto positions = subsystem.System().Instance(usize()).Binding().Read().Positions();
+    ASSERT_EQ(positions.len(), usize(4));
+    EXPECT_TRUE(positions[usize()].isApprox(Eigen::Vector3f { 0.0f, 0.0f, 0.0f }));
+    EXPECT_TRUE(positions[usize(1)].isApprox(Eigen::Vector3f { 100.0f, 0.0f, 0.0f }));
+    EXPECT_TRUE(positions[usize(2)].isApprox(Eigen::Vector3f { 200.0f, 0.0f, 0.0f }));
+    EXPECT_TRUE(positions[usize(3)].isApprox(Eigen::Vector3f { 300.0f, 0.0f, 0.0f }));
+}
+
+TEST(WPParticleSubSystem, MapsParentParticlesIntoStaticChildControlpoints) {
+    owe::Scene               scene;
+    auto                     parent_mesh = std::make_shared<owe::SceneMesh>();
+    owe::WPParticleSubSystem parent(scene,
+                                    parent_mesh,
+                                    u32(1),
+                                    f64(),
+                                    u32(1),
+                                    f64(1.0),
+                                    owe::WPParticleSubSystem::SpawnType::STATIC,
+                                    owe::WPParticleAnimationSpec {});
+    parent.AddInitializer(owe::WPParticleParser::GenInitializer(
+        owe::ParseJson(R"({"name":"lifetimerandom","min":1,"max":1})").unwrap(), u32(2)));
+    parent.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(
+        owe::WPSphereEmitterProgram(parent.SpawnPipeline(),
+                                    owe::WPParticleSphereEmitterArgs {
+                                        .origin        = { 50.0f, 0.0f, 0.0f },
+                                        .instantaneous = u32(1),
+                                    },
+                                    usize())));
+
+    auto child = Box<owe::WPParticleSubSystem>::make(
+        scene,
+        std::make_shared<owe::SceneMesh>(),
+        u32(1),
+        f64(),
+        u32(1),
+        f64(1.0),
+        owe::WPParticleSubSystem::SpawnType::STATIC_CONTROLPOINT,
+        owe::WPParticleAnimationSpec {});
+    child->SetParentControlpointStartIndex(i32(1));
+    child->Finalize();
+    auto* child_system = child.get();
+    parent.AddChild(rstd::move(child));
+    parent.Finalize();
+
+    parent.Tick(f64(1.0 / 60.0), false);
+
+    ASSERT_EQ(child_system->System().InstanceCount(), usize(1));
+    EXPECT_TRUE(child_system->Controlpoints()[usize()].offset.isZero());
+    EXPECT_TRUE(child_system->Controlpoints()[usize(1)].offset.isApprox(
+        Eigen::Vector3d { 50.0, 0.0, 0.0 }));
 }
