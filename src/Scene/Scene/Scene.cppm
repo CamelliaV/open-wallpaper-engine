@@ -1321,6 +1321,16 @@ public:
     bool  Visible() const { return m_visible; }
     float UserAlpha() const { return m_user_alpha; }
     void  SetVisible(bool v) {
+        // A sound layer is audible only while its layer is visible, which is
+        // how scenes implement track selectors: the selector binds each sound
+        // layer's visibility to a user property.
+        if (m_sound_control.is_some() && v != m_visible) {
+            if (v) {
+                (*m_sound_control)->Play();
+            } else {
+                (*m_sound_control)->Stop();
+            }
+        }
         m_visible            = v;
         m_visible_overridden = true;
     }

@@ -1811,6 +1811,20 @@ TEST(ScriptScene, ParticleInstanceAndPlaybackUseNodeCapability) {
     EXPECT_NEAR(LastScalar(fs), 1024.8, 1e-5);
 }
 
+TEST(SceneNodeSound, VisibilityStartsAndStopsTheSoundControl) {
+    auto layer = Arc<owe::SceneNode>::make();
+    auto state = Arc<SoundControlState>::make();
+    layer->SetSoundControl(
+        Arc<dyn<owe::SceneSoundControl>>::make(SoundControlProbe { state.clone() }));
+    ASSERT_TRUE(state->playing);
+
+    layer->SetVisible(false);
+    EXPECT_FALSE(state->playing);
+
+    layer->SetVisible(true);
+    EXPECT_TRUE(state->playing);
+}
+
 TEST(ScriptScene, SoundVolumeUsesSoundControl) {
     auto root  = Arc<owe::SceneNode>::make();
     auto layer = Arc<owe::SceneNode>::make();
