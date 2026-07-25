@@ -1142,7 +1142,7 @@ void ApplyParticleOverride(wpscene::ParticleInstanceoverride& state, ref<str> fi
     };
 
     auto parse_index = [&](ref<str> prefix) -> Option<usize> {
-        auto suffix = rstd::str_::strip_prefix(field, prefix);
+        auto suffix = field.strip_prefix(prefix);
         if (suffix.is_none()) return None();
         auto parsed = rstd::from_str<usize>(*suffix);
         if (parsed.is_err()) return None();
@@ -1371,23 +1371,23 @@ void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const W
         } else if (auto wpid = ParseImageLayerCompositeId(text)) {
             rstd_info("link tex \"{}\"", name);
             name = GenLinkTex(*wpid);
-        } else if (rstd::str_::starts_with(text, WE_MIP_MAPPED_FRAME_BUFFER)) {
-        } else if (rstd::str_::starts_with(text, WE_SHADOW_ATLAS_PREFIX)) {
+        } else if (text.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
+        } else if (text.starts_with(WE_SHADOW_ATLAS_PREFIX)) {
             name.clear();
-        } else if (rstd::str_::starts_with(text, OWE_BLOOM_MIP_PREFIX)) {
-        } else if (rstd::str_::starts_with(text, WE_REFLECTION_PREFIX)) {
+        } else if (text.starts_with(OWE_BLOOM_MIP_PREFIX)) {
+        } else if (text.starts_with(WE_REFLECTION_PREFIX)) {
             name = rstd::cppstd::to_string(WE_REFLECTION_PREFIX);
             scene.EnablePlanarReflection();
-        } else if (rstd::str_::starts_with(text, OWE_EFFECT_PPONG_PREFIX)) {
-        } else if (rstd::str_::starts_with(text, WE_HALF_COMPO_BUFFER_PREFIX)) {
-        } else if (rstd::str_::starts_with(text, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
-        } else if (rstd::str_::starts_with(text, WE_FULL_COMPO_BUFFER_PREFIX)) {
-        } else if (rstd::str_::starts_with(text, WE_EIGHT_COMPO_BUFFER_PREFIX)) {
-        } else if (rstd::str_::starts_with(text, WE_VOLUMETRICS_PREFIX) ||
-                   rstd::str_::starts_with(text, WE_QUARTER_FORCE_RG_PREFIX) ||
-                   rstd::str_::starts_with(text, WE_BLOOM_PREFIX) ||
-                   rstd::str_::starts_with(text, WE_QUARTER_FRAME_BUFFER_PREFIX) ||
-                   rstd::str_::starts_with(text, WE_EIGHTH_FRAME_BUFFER_PREFIX)) {
+        } else if (text.starts_with(OWE_EFFECT_PPONG_PREFIX)) {
+        } else if (text.starts_with(WE_HALF_COMPO_BUFFER_PREFIX)) {
+        } else if (text.starts_with(WE_QUARTER_COMPO_BUFFER_PREFIX)) {
+        } else if (text.starts_with(WE_FULL_COMPO_BUFFER_PREFIX)) {
+        } else if (text.starts_with(WE_EIGHT_COMPO_BUFFER_PREFIX)) {
+        } else if (text.starts_with(WE_VOLUMETRICS_PREFIX) ||
+                   text.starts_with(WE_QUARTER_FORCE_RG_PREFIX) ||
+                   text.starts_with(WE_BLOOM_PREFIX) ||
+                   text.starts_with(WE_QUARTER_FRAME_BUFFER_PREFIX) ||
+                   text.starts_with(WE_EIGHTH_FRAME_BUFFER_PREFIX)) {
             name.clear();
         } else if (scene.RenderTarget(as_str(name).unwrap()).is_some()) {
             // an effect-local fbo registered with a non-conventional name
@@ -2015,10 +2015,10 @@ Vector3f AlignmentOffset(ref<str> align, Vector2f size) {
     size.y() *= 1.0f;
 
     // topleft top center ...
-    if (rstd::str_::contains(align, "top"_str)) offset.y() -= size.y();
-    if (rstd::str_::contains(align, "left"_str)) offset.x() += size.x();
-    if (rstd::str_::contains(align, "right"_str)) offset.x() -= size.x();
-    if (rstd::str_::contains(align, "bottom"_str)) offset.y() += size.y();
+    if (align.contains("top"_str)) offset.y() -= size.y();
+    if (align.contains("left"_str)) offset.x() += size.x();
+    if (align.contains("right"_str)) offset.x() -= size.x();
+    if (align.contains("bottom"_str)) offset.y() += size.y();
 
     return offset;
 }
@@ -3033,7 +3033,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                     // prefix so IsSpecTex / render-target lookups treat them
                     // as render targets instead of disk textures.
                     std::string rtname =
-                        rstd::str_::starts_with(as_str(wpfbo.name).unwrap(), WE_SPEC_PREFIX)
+                        as_str(wpfbo.name).unwrap().starts_with(WE_SPEC_PREFIX)
                             ? wpfbo.name + "_" + effaddr
                             : rstd::cppstd::to_string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
                     if (wpimgobj.fullscreen) {
@@ -4468,7 +4468,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                 const std::string effaddr = getAddr(layer.get());
                 for (const auto& wpfbo : wpeffobj.fbos) {
                     const std::string rtname =
-                        rstd::str_::starts_with(as_str(wpfbo.name).unwrap(), WE_SPEC_PREFIX)
+                        as_str(wpfbo.name).unwrap().starts_with(WE_SPEC_PREFIX)
                             ? wpfbo.name + "_" + effaddr
                             : rstd::cppstd::to_string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
                     auto fbo_size = TextEffectFboExtent(initial_geometry, wpfbo.scale, wpfbo.fit);
@@ -5115,7 +5115,7 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
     return context;
 }
 
-bool AssetEndsWith(ref<str> asset, ref<str> suffix) { return rstd::str_::ends_with(asset, suffix); }
+bool AssetEndsWith(ref<str> asset, ref<str> suffix) { return asset.ends_with(suffix); }
 
 void ResolveRegisteredAsset(ParseContext& context, ref<str> asset) {
     if (AssetEndsWith(asset, ".mdl"_str)) {
@@ -5131,8 +5131,7 @@ void ResolveRegisteredAsset(ParseContext& context, ref<str> asset) {
         node->SetVisible(false);
         (void)context.dynamic_model_prototypes.insert(String::make(asset), rstd::move(node));
         (void)context.node_id_map.remove(model.id);
-    } else if (AssetEndsWith(asset, ".json"_str) &&
-               rstd::str_::starts_with(asset, "particles/"_str)) {
+    } else if (AssetEndsWith(asset, ".json"_str) && asset.starts_with("particles/"_str)) {
         if (context.dynamic_particle_prototypes.contains_key(asset)) return;
         wpscene::ParticleObject particle;
         if (! particle.FromAsset(asset, *context.vfs)) return;

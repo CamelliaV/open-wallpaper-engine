@@ -56,10 +56,8 @@ public:
         while (pos < m_src.size() && ByteAt(pos) != '\n') ++pos;
         return pos;
     }
-    ref<str> CurrentLine() const noexcept {
-        return *rstd::str_::get(m_src, LineStart(), LineEnd());
-    }
-    void SkipLine() noexcept {
+    ref<str> CurrentLine() const noexcept { return *m_src.get(LineStart(), LineEnd()); }
+    void     SkipLine() noexcept {
         usize e = LineEnd();
         SeekTo(e < m_src.size() ? e + usize(1) : e);
     }
@@ -103,13 +101,13 @@ public:
         if (m_pos >= m_src.size() || ! IsIdStart(ByteAt(m_pos))) return None();
         usize s = m_pos++;
         while (m_pos < m_src.size() && IsIdCont(ByteAt(m_pos))) ++m_pos;
-        return rstd::str_::get(m_src, s, m_pos);
+        return m_src.get(s, m_pos);
     }
     Option<ref<str>> ReadInt() noexcept {
         if (m_pos >= m_src.size() || ! IsDigit(ByteAt(m_pos))) return None();
         usize s = m_pos++;
         while (m_pos < m_src.size() && IsDigit(ByteAt(m_pos))) ++m_pos;
-        return rstd::str_::get(m_src, s, m_pos);
+        return m_src.get(s, m_pos);
     }
     // Match `[...]`. Returns the bracketed text including brackets. Content
     // between [] isn't validated as integer — the caller decides.
@@ -121,7 +119,7 @@ public:
         if (p >= m_src.size() || ByteAt(p) != ']') return None();
         ++p;
         m_pos = p;
-        return rstd::str_::get(m_src, s, p);
+        return m_src.get(s, p);
     }
 
     bool MatchChar(char c) noexcept {
@@ -133,14 +131,14 @@ public:
     }
     bool MatchPunct(ref<str> s) noexcept {
         if (m_pos + s.size() > m_src.size()) return false;
-        if (*rstd::str_::get(m_src, m_pos, m_pos + s.size()) != s) return false;
+        if (*m_src.get(m_pos, m_pos + s.size()) != s) return false;
         m_pos += s.size();
         return true;
     }
     // Match a keyword at an identifier boundary, so "uniform" does not match "uniformly".
     bool MatchKeyword(ref<str> kw) noexcept {
         if (m_pos + kw.size() > m_src.size()) return false;
-        if (*rstd::str_::get(m_src, m_pos, m_pos + kw.size()) != kw) return false;
+        if (*m_src.get(m_pos, m_pos + kw.size()) != kw) return false;
         if (m_pos + kw.size() < m_src.size() && IsIdCont(ByteAt(m_pos + kw.size()))) return false;
         m_pos += kw.size();
         return true;
@@ -203,12 +201,12 @@ public:
         // When the entire line is masked by an enclosing block comment, hide
         // it from callers so token scans never see the masked text.
         if (m_line_masked) return {};
-        return *rstd::str_::get(m_src, m_line_start, m_line_end);
+        return *m_src.get(m_line_start, m_line_end);
     }
     // Raw line text including any masked content. Stripper passes use this
     // so the original bytes (including block-comment text) survive into the
     // output unchanged.
-    ref<str> RawLine() const noexcept { return *rstd::str_::get(m_src, m_line_start, m_line_end); }
+    ref<str> RawLine() const noexcept { return *m_src.get(m_line_start, m_line_end); }
     Cursor   LineCursor() const noexcept {
         // The returned Cursor scans only the visible part of the line.
         return Cursor { Line() };
@@ -340,16 +338,16 @@ private:
 
         if (c0 == '\n') {
             ++m_pos;
-            return { TokenKind::Newline, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::Newline, *m_src.get(start, m_pos), start };
         }
         if (IsHSpace(c0)) {
             while (m_pos < m_src.size() && IsHSpace(ByteAt(m_pos))) ++m_pos;
-            return { TokenKind::HSpace, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::HSpace, *m_src.get(start, m_pos), start };
         }
         if (c0 == '/' && m_pos + usize(1) < m_src.size() && ByteAt(m_pos + usize(1)) == '/') {
             m_pos += usize(2);
             while (m_pos < m_src.size() && ByteAt(m_pos) != '\n') ++m_pos;
-            return { TokenKind::LineComment, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::LineComment, *m_src.get(start, m_pos), start };
         }
         if (c0 == '/' && m_pos + usize(1) < m_src.size() && ByteAt(m_pos + usize(1)) == '*') {
             m_pos += usize(2);
@@ -360,37 +358,37 @@ private:
                 m_pos += usize(2);
             else
                 m_pos = m_src.size();
-            return { TokenKind::BlockComment, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::BlockComment, *m_src.get(start, m_pos), start };
         }
         if (IsIdStart(c0)) {
             ++m_pos;
             while (m_pos < m_src.size() && IsIdCont(ByteAt(m_pos))) ++m_pos;
-            return { TokenKind::Ident, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::Ident, *m_src.get(start, m_pos), start };
         }
         if (IsDigit(c0)) {
             ++m_pos;
             while (m_pos < m_src.size() && IsDigit(ByteAt(m_pos))) ++m_pos;
-            return { TokenKind::Int, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::Int, *m_src.get(start, m_pos), start };
         }
         if (c0 == '"') {
             ++m_pos;
             while (m_pos < m_src.size() && ByteAt(m_pos) != '"' && ByteAt(m_pos) != '\n') ++m_pos;
             if (m_pos < m_src.size() && ByteAt(m_pos) == '"') ++m_pos;
-            return { TokenKind::String, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::String, *m_src.get(start, m_pos), start };
         }
         if (c0 == '#') {
             ++m_pos;
-            return { TokenKind::Hash, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::Hash, *m_src.get(start, m_pos), start };
         }
         if ((unsigned char)c0 >= 0x20 && (unsigned char)c0 < 0x7f) {
             ++m_pos;
-            return { TokenKind::Punct, *rstd::str_::get(m_src, start, m_pos), start };
+            return { TokenKind::Punct, *m_src.get(start, m_pos), start };
         }
         auto [code_point, width] =
             rstd::char_::decode_utf8(m_src.data() + m_pos.to_primitive(), m_src.size() - m_pos);
         (void)code_point;
         m_pos += width;
-        return { TokenKind::Unknown, *rstd::str_::get(m_src, start, m_pos), start };
+        return { TokenKind::Unknown, *m_src.get(start, m_pos), start };
     }
 
     char ByteAt(usize pos) const noexcept { return static_cast<char>(m_src[pos].to_primitive()); }
@@ -419,7 +417,7 @@ enum class PpKind
 };
 
 inline PpKind ClassifyPreproc(Cursor c) noexcept {
-    Lexer lx(*rstd::str_::get_from(c.Source(), c.Pos()));
+    Lexer lx(*c.Source().get(c.Pos(), c.Source().size()));
     // First non-HSpace token must be Hash.
     Token t = lx.NextSkip([](TokenKind k) {
         return k == TokenKind::HSpace;

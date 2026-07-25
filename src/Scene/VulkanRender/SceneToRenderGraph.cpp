@@ -380,13 +380,12 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         continue;
                     } else {
                         auto desc = MakeTextureDesc(extra, url);
-                        if (rstd::str_::starts_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
+                        if (name.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
                             input = Some(AddMipFramebufferHistory(extra, builder));
                         } else {
                             input = Some(builder.createTexture(desc));
                         }
-                        if (IsSpecTex(name) &&
-                            ! rstd::str_::starts_with(name, WE_MIP_MAPPED_FRAME_BUFFER)) {
+                        if (IsSpecTex(name) && ! name.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
                             builder.markVirtualWrite(*input);
                         }
                     }
@@ -633,8 +632,7 @@ static bool SamplesPlanarReflection(SceneNode& node) {
     for (const auto& material : mesh->MaterialSlots()) {
         if (! material) continue;
         for (const auto& texture : material->textures) {
-            if (rstd::str_::starts_with(as_str(texture).unwrap(), WE_REFLECTION_PREFIX))
-                return true;
+            if (as_str(texture).unwrap().starts_with(WE_REFLECTION_PREFIX)) return true;
         }
     }
     return false;

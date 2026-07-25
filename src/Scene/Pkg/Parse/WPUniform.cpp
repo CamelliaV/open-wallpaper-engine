@@ -5,7 +5,6 @@ import wescene.json;
 using namespace rstd::prelude;
 using namespace rstd::literals;
 using rstd::collections::HashMap;
-using rstd::str_::starts_with;
 
 namespace owe::wpscene
 {
@@ -73,7 +72,7 @@ bool WPUniformTex::FromJson(const Json& json) {
 
 bool WPUniformVar::FromJson(const Json& json, String uniform_name) {
     name    = rstd::move(uniform_name);
-    is_user = starts_with(name.as_str(), "u_"_str);
+    is_user = name->starts_with("u_"_str);
     (void)ReadString(json, "material"_str, material);
     (void)ReadString(json, "label"_str, label);
     (void)ReadString(json, "group"_str, group);

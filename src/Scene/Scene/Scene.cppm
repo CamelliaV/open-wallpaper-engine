@@ -416,7 +416,7 @@ inline SceneMaterialTextureDependency ClassifySceneMaterialTexture(std::string_v
     if (texture.empty()) return SceneMaterialTextureDependency::Empty;
     auto text = rstd::cppstd::as_str(texture).unwrap();
     if (IsSpecLinkTex(text)) return SceneMaterialTextureDependency::LinkRenderTarget;
-    if (rstd::str_::starts_with(text, WE_MIP_MAPPED_FRAME_BUFFER))
+    if (text.starts_with(WE_MIP_MAPPED_FRAME_BUFFER))
         return SceneMaterialTextureDependency::MipMappedFramebuffer;
     if (IsSpecTex(text)) return SceneMaterialTextureDependency::RenderTarget;
     return SceneMaterialTextureDependency::Imported;

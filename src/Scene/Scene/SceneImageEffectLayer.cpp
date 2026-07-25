@@ -73,12 +73,10 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                                 .first;
             cmd.src       = state_it->second.src;
             cmd.dst       = state_it->second.dst;
-            if (rstd::str_::starts_with(rstd::cppstd::as_str(cmd.src).unwrap(),
-                                        OWE_EFFECT_PPONG_PREFIX_A))
+            if (rstd::cppstd::as_str(cmd.src).unwrap().starts_with(OWE_EFFECT_PPONG_PREFIX_A))
                 cmd.src = ppong_a;
 
-            if (rstd::str_::starts_with(rstd::cppstd::as_str(cmd.dst).unwrap(),
-                                        OWE_EFFECT_PPONG_PREFIX_A))
+            if (rstd::cppstd::as_str(cmd.dst).unwrap().starts_with(OWE_EFFECT_PPONG_PREFIX_A))
                 cmd.dst = ppong_a;
         }
         for (auto it = eff.nodes.begin(); it != eff.nodes.end(); it++) {
@@ -89,8 +87,9 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             auto& state = state_it->second;
             if (inserted) {
                 for (std::size_t i = 0; i < material.textures.size(); ++i) {
-                    if (rstd::str_::starts_with(rstd::cppstd::as_str(material.textures[i]).unwrap(),
-                                                OWE_EFFECT_PPONG_PREFIX_A))
+                    if (rstd::cppstd::as_str(material.textures[i])
+                            .unwrap()
+                            .starts_with(OWE_EFFECT_PPONG_PREFIX_A))
                         state.pingpong_input_slots.push_back(i);
                 }
             }
@@ -100,8 +99,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             }
 
             auto output = rstd::cppstd::as_str(it->output).unwrap();
-            if (rstd::str_::starts_with(output, OWE_EFFECT_PPONG_PREFIX_B) ||
-                output == SpecTex_Default) {
+            if (output.starts_with(OWE_EFFECT_PPONG_PREFIX_B) || output == SpecTex_Default) {
                 it->output  = ppong_b;
                 last_output = &(*it);
             }

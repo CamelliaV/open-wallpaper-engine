@@ -185,10 +185,10 @@ TEST(ShaderLex, LineWalkerMasksBlockCommentLines) {
     EXPECT_EQ(w.Line(), "alpha"_str);
     w.Step();
     // Line that opens block — still visible (content before `/*`).
-    EXPECT_TRUE(rstd::str_::find(w.Line(), "uniform"_str).is_none());
+    EXPECT_TRUE(w.Line().find("uniform"_str).is_none());
     w.Step();
     // Inside the block comment — masked.
-    EXPECT_TRUE(rstd::str_::is_empty(w.Line()));
+    EXPECT_TRUE(w.Line().is_empty());
     w.Step();
     // `*/` ends the block; content after is visible (just `*/` itself).
     w.Step();

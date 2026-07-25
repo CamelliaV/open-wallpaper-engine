@@ -53,7 +53,7 @@ inline std::optional<DeclMatch> TryParseDeclLine(ref<str> src, usize line_start,
                                                  std::initializer_list<ref<str>> storage_kws) {
     shader_lex::Cursor source(src, line_start);
     auto               line_end = source.LineEnd();
-    shader_lex::Cursor c(*rstd::str_::get(src, line_start, line_end));
+    shader_lex::Cursor c(*src.get(line_start, line_end));
     c.SkipHSpace();
 
     ref<str> kw;
@@ -65,7 +65,7 @@ inline std::optional<DeclMatch> TryParseDeclLine(ref<str> src, usize line_start,
         }
         c.Restore(s);
     }
-    if (rstd::str_::is_empty(kw)) return std::nullopt;
+    if (kw.is_empty()) return std::nullopt;
     c.SkipHSpace();
     auto tn = shader_lex::ReadTypeName(c);
     if (! tn) return std::nullopt;
@@ -383,7 +383,7 @@ inline std::optional<ShaderBracketExpr> ReadBracketExpr(shader_lex::Lexer& lx, r
         if (depth == 0) {
             return ShaderBracketExpr {
                 .close_end = t.offset + t.text.size(),
-                .expr      = *rstd::str_::get(src, usize(expr_start), t.offset),
+                .expr      = *src.get(usize(expr_start), t.offset),
             };
         }
     }
@@ -450,7 +450,7 @@ inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
             continue;
         }
 
-        out.push_str(*rstd::str_::get(src, copied, name.offset));
+        out.push_str(*src.get(copied, name.offset));
         out.push_str(name.text);
         out.push_ascii(u8('['));
         auto flattened = FlattenAudioSpectrumAccess(group->expr, component->expr);
@@ -461,7 +461,7 @@ inline String NormalizePackedAudioSpectrumAccess(ref<str> src) {
     }
 
     if (! changed) return String::make(src);
-    out.push_str(*rstd::str_::get_from(src, copied));
+    out.push_str(*src.get(copied, src.size()));
     return out;
 }
 
@@ -488,7 +488,7 @@ inline String UndefBeforeUserMacroDefines(ref<str> src, ref<str> macro_name) {
             out.push_str("\n#endif\n"_str);
             changed = true;
         }
-        out.push_str(*rstd::str_::get(src, w.LineStart(), w.LineEnd()));
+        out.push_str(*src.get(w.LineStart(), w.LineEnd()));
         if (w.LineEnd() < src.size()) out.push_ascii(u8('\n'));
     }
     return changed ? rstd::move(out) : String::make(src);
@@ -518,7 +518,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
         // on the same line (rare in practice) are skipped — matching the
         // original behavior.
         output.append(input_view, pos, w.LineStart().to_primitive() - pos);
-        auto        line_view = *rstd::str_::get(input, w.LineStart(), w.LineEnd());
+        auto        line_view = *input.get(w.LineStart(), w.LineEnd());
         std::string line      = rstd::cppstd::to_string(line_view);
         auto        in_p      = line.find_first_of('\"');
         auto        in_e      = line.find_last_of('\"');
@@ -739,8 +739,8 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         if (IsSamplerType(m.type)) {
             // Track active sampler slot if it's a `g_TextureN`.
             const ref<str> kTex { "g_Texture"_str };
-            if (m.name.size() > kTex.size() && rstd::str_::starts_with(m.name, kTex)) {
-                auto     num   = *rstd::str_::get_from(m.name, kTex.size());
+            if (m.name.size() > kTex.size() && m.name.starts_with(kTex)) {
+                auto     num   = *m.name.get(kTex.size(), m.name.size());
                 unsigned slot  = 0;
                 auto*    begin = reinterpret_cast<const char*>(num.data());
                 auto [ptr, ec] = std::from_chars(begin, begin + num.size().to_primitive(), slot);

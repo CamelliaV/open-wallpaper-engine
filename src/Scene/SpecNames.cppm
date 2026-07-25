@@ -195,10 +195,10 @@ inline constexpr ref<str> G_AUDIO_SPEC_32_R = "g_AudioSpectrum32Right"_str;
 inline constexpr ref<str> G_AUDIO_SPEC_64_L = "g_AudioSpectrum64Left"_str;
 inline constexpr ref<str> G_AUDIO_SPEC_64_R = "g_AudioSpectrum64Right"_str;
 
-inline bool IsSpecTex(ref<str> name) { return rstd::str_::starts_with(name, WE_SPEC_PREFIX); }
-inline bool IsSpecLinkTex(ref<str> name) { return rstd::str_::starts_with(name, SpecTex_Link); }
+inline bool IsSpecTex(ref<str> name) { return name.starts_with(WE_SPEC_PREFIX); }
+inline bool IsSpecLinkTex(ref<str> name) { return name.starts_with(SpecTex_Link); }
 inline u32  ParseLinkTex(ref<str> name) {
-    auto suffix = rstd::str_::strip_prefix(name, SpecTex_Link);
+    auto suffix = name.strip_prefix(SpecTex_Link);
     if (suffix.is_none()) {
         rstd_error("invalid linked texture id: {}", name);
         return u32();
@@ -215,12 +215,12 @@ inline std::string GenLinkTex(std::ptrdiff_t id) {
 }
 
 inline bool IsImageLayerComposite(ref<str> name) {
-    return rstd::str_::starts_with(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX);
+    return name.starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
 }
 // Parse <id> from `_rt_imageLayerComposite_<id>[_a|_b]`; nullopt when it isn't a
 // composite ref or no id digits follow the prefix.
 inline std::optional<std::uint32_t> ParseImageLayerCompositeId(ref<str> name) {
-    auto rest = rstd::str_::strip_prefix(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX);
+    auto rest = name.strip_prefix(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
     if (rest.is_none()) return std::nullopt;
     usize         i {};
     std::uint32_t id = 0;
