@@ -18,6 +18,10 @@ struct WPUniformTex {
     struct Component {
         String label;
         String combo;
+
+        auto clone() const -> Component {
+            return { .label = label.clone(), .combo = combo.clone() };
+        }
     };
     String               material; // unique key for material override
     String               label;    // editor display name
@@ -41,6 +45,32 @@ struct WPUniformTex {
     i32    order {};
 
     bool FromJson(const Json&);
+
+    auto clone() const -> WPUniformTex {
+        Vec<Component> cloned_components;
+        cloned_components.reserve(components.len());
+        for (const auto& component : components) cloned_components.push(component.clone());
+        return {
+            .material          = material.clone(),
+            .label             = label.clone(),
+            .default_          = default_.clone(),
+            .mode              = mode.clone(),
+            .combo             = combo.clone(),
+            .paintdefaultcolor = paintdefaultcolor,
+            .components        = rstd::move(cloned_components),
+            .requireany        = requireany,
+            .require           = require.clone(),
+            .hidden            = hidden,
+            .nonremovable      = nonremovable,
+            .group             = group.clone(),
+            .linked            = linked,
+            .format            = format.clone(),
+            .formatcombo       = formatcombo,
+            .direction         = direction,
+            .conversion        = conversion.clone(),
+            .order             = order,
+        };
+    }
 };
 
 // Scalar / vec / color / UV uniform metadata. Covers `g_*` user-controlled
@@ -63,6 +93,23 @@ struct WPUniformVar {
     Json default_value;
 
     bool FromJson(const Json&, String uniform_name);
+
+    auto clone() const -> WPUniformVar {
+        return {
+            .name          = name.clone(),
+            .material      = material.clone(),
+            .label         = label.clone(),
+            .group         = group.clone(),
+            .type          = type.clone(),
+            .position      = position,
+            .linked        = linked,
+            .nobindings    = nobindings,
+            .is_user       = is_user,
+            .range         = range,
+            .has_range     = has_range,
+            .default_value = default_value.clone(),
+        };
+    }
 };
 
 // [COMBO] preprocessor switch declaration. `combo` is the IDENT that gets
@@ -77,6 +124,17 @@ struct WPCombo {
     HashMap<String, i32> require; // gating combos
 
     bool FromJson(const Json&);
+
+    auto clone() const -> WPCombo {
+        return {
+            .material = material.clone(),
+            .combo    = combo.clone(),
+            .type     = type.clone(),
+            .default_ = default_,
+            .options  = options.clone(),
+            .require  = require.clone(),
+        };
+    }
 };
 
 } // namespace wpscene

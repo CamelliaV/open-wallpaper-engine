@@ -630,8 +630,12 @@ void main() {
     const auto   cache_text = root.string();
     const auto   cache_path = rstd::path::PathBuf::from(rstd::cppstd::as_str(cache_text).unwrap());
     owe::fs::VFS vfs;
-    const auto   first =
-        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    const auto   compile_cached = [&](const owe::SceneShaderVariantDesc& value,
+                                      const owe::Combos&                 combos = {}) {
+        owe::WPShaderCache cache(Some(rstd::path::PathBuf::from(cache_path.as_path())));
+        return owe::WPShaderParser::CompileSceneShaderVariant(value, vfs, combos, &cache);
+    };
+    const auto first = compile_cached(desc);
     ASSERT_TRUE(first.ok) << first.error;
     ASSERT_TRUE(first.shader);
 
@@ -660,13 +664,12 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 4u);
+    EXPECT_EQ(read_u32(12), 5u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);
 
-    const auto second =
-        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    const auto second = compile_cached(desc);
     ASSERT_TRUE(second.ok) << second.error;
     ASSERT_TRUE(second.shader);
     EXPECT_EQ(second.shader->codes, first.shader->codes);
@@ -678,8 +681,7 @@ void main() {
     EXPECT_EQ(std::filesystem::last_write_time(artifact_path), initial_write_time);
 
     std::filesystem::resize_file(artifact_path, 16);
-    const auto after_truncation =
-        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    const auto after_truncation = compile_cached(desc);
     ASSERT_TRUE(after_truncation.ok) << after_truncation.error;
     ASSERT_TRUE(after_truncation.shader);
     EXPECT_EQ(after_truncation.shader->codes, first.shader->codes);
@@ -694,8 +696,7 @@ void main() {
         ASSERT_TRUE(artifact.seekp(52));
         ASSERT_TRUE(artifact.write(&byte, 1));
     }
-    const auto after_identity_corruption =
-        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    const auto after_identity_corruption = compile_cached(desc);
     ASSERT_TRUE(after_identity_corruption.ok) << after_identity_corruption.error;
     ASSERT_TRUE(after_identity_corruption.shader);
     EXPECT_EQ(after_identity_corruption.shader->codes, first.shader->codes);
@@ -709,22 +710,19 @@ void main() {
         ASSERT_TRUE(artifact.seekp(-1, std::ios::end));
         ASSERT_TRUE(artifact.write(&byte, 1));
     }
-    const auto after_payload_corruption =
-        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    const auto after_payload_corruption = compile_cached(desc);
     ASSERT_TRUE(after_payload_corruption.ok) << after_payload_corruption.error;
     ASSERT_TRUE(after_payload_corruption.shader);
     EXPECT_EQ(after_payload_corruption.shader->codes, first.shader->codes);
 
-    const auto different_combo = owe::WPShaderParser::CompileSceneShaderVariant(
-        desc, vfs, { { "CACHE_VARIANT", "1" } }, Some(cache_path.as_path()));
+    const auto different_combo = compile_cached(desc, { { "CACHE_VARIANT", "1" } });
     ASSERT_TRUE(different_combo.ok) << different_combo.error;
     EXPECT_EQ(std::distance(std::filesystem::directory_iterator(shader_cache),
                             std::filesystem::directory_iterator {}),
               2);
 
     desc.stages[1].source += "\n// source identity variant";
-    const auto different_source =
-        owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs, {}, Some(cache_path.as_path()));
+    const auto different_source = compile_cached(desc);
     ASSERT_TRUE(different_source.ok) << different_source.error;
     EXPECT_EQ(std::distance(std::filesystem::directory_iterator(shader_cache),
                             std::filesystem::directory_iterator {}),

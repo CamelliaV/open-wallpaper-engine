@@ -1539,7 +1539,7 @@ enum class GeometryStageRequirement
     Required,
 };
 
-bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
+bool LoadMaterial(fs::VFS& vfs, WPShaderCache& shader_cache,
                   const WPSceneShaderEnvironment& environment, const wpscene::Material& wpmat,
                   Scene* pScene, SceneMaterial* pMaterial, WPShaderInfo* pWPShaderInfo = nullptr,
                   GeometryStageRequirement geometry_stage = GeometryStageRequirement::None) {
@@ -1618,7 +1618,8 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
     }
 
     for (auto& unit : sd_units) {
-        unit.src = WPShaderParser::PreShaderSrc(vfs, unit.src, pWPShaderInfo, texinfos);
+        unit.src =
+            WPShaderParser::PreShaderSrc(vfs, unit.src, pWPShaderInfo, texinfos, &shader_cache);
     }
     ApplyLegacyAtmosphereUniformAliases(wpmat, *pWPShaderInfo);
     ApplyLegacyAtmosphereShaderCompat(wpmat, sd_units);
@@ -1751,7 +1752,7 @@ bool LoadMaterial(fs::VFS& vfs, Option<ref<rstd::path::Path>> shader_cache_dir,
     variant_desc.texture_slots = material.textures;
 
     if (! WPShaderParser::CompileToSpv(
-            scene_id, sd_units, shader->codes, pWPShaderInfo, texinfos, shader_cache_dir)) {
+            scene_id, sd_units, shader->codes, pWPShaderInfo, texinfos, &shader_cache)) {
         return false;
     }
     shader->default_uniforms      = pWPShaderInfo->svs;
@@ -2607,7 +2608,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         shaderInfo.baseConstSvs = baseConstSvs;
 
         if (! LoadMaterial(vfs,
-                           context.ShaderCachePath(),
+                           context.shader_cache,
                            context.shader_environment,
                            image_wpmat,
                            context.scene.get(),
@@ -2790,7 +2791,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 WPShaderInfo  mask_shaderInfo;
                 mask_shaderInfo.baseConstSvs = baseConstSvs;
                 if (! LoadMaterial(vfs,
-                                   context.ShaderCachePath(),
+                                   context.shader_cache,
                                    context.shader_environment,
                                    mask_wpmat,
                                    context.scene.get(),
@@ -2821,7 +2822,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 WPShaderInfo  clip_shaderInfo;
                 clip_shaderInfo.baseConstSvs = baseConstSvs;
                 if (! LoadMaterial(vfs,
-                                   context.ShaderCachePath(),
+                                   context.shader_cache,
                                    context.shader_environment,
                                    clip_wpmat,
                                    context.scene.get(),
@@ -3072,7 +3073,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                 svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
                 SceneShaderValueAnimationMap final_quad_shader_values;
                 if (! LoadMaterial(vfs,
-                                   context.ShaderCachePath(),
+                                   context.shader_cache,
                                    context.shader_environment,
                                    wpmat,
                                    context.scene.get(),
@@ -3131,7 +3132,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             WPShaderInfo  mask_shaderInfo;
                             mask_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
                             if (! LoadMaterial(vfs,
-                                               context.ShaderCachePath(),
+                                               context.shader_cache,
                                                context.shader_environment,
                                                mask_wpmat,
                                                context.scene.get(),
@@ -3154,7 +3155,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                             WPShaderInfo  clip_shaderInfo;
                             clip_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
                             if (! LoadMaterial(vfs,
-                                               context.ShaderCachePath(),
+                                               context.shader_cache,
                                                context.shader_environment,
                                                clip_wpmat,
                                                context.scene.get(),
@@ -3223,7 +3224,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                     finalSvData.parallax_depth                 = { wpimgobj.parallaxDepth[0],
                                                                    wpimgobj.parallaxDepth[1] };
                     if (LoadMaterial(vfs,
-                                     context.ShaderCachePath(),
+                                     context.shader_cache,
                                      context.shader_environment,
                                      passthrough_mat,
                                      context.scene.get(),
@@ -3468,7 +3469,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     bool mat_ok = false;
     try {
         mat_ok = LoadMaterial(vfs,
-                              context.ShaderCachePath(),
+                              context.shader_cache,
                               context.shader_environment,
                               particle_obj.material,
                               context.scene.get(),
@@ -3718,7 +3719,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
         }
 
         if (! LoadMaterial(vfs,
-                           context.ShaderCachePath(),
+                           context.shader_cache,
                            context.shader_environment,
                            *wpmat,
                            context.scene.get(),
@@ -4208,7 +4209,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             WPShaderInfo             si;
             si.baseConstSvs = effect_base;
             if (! LoadMaterial(*context.vfs,
-                               context.ShaderCachePath(),
+                               context.shader_cache,
                                context.shader_environment,
                                pt_mat,
                                &scene,
@@ -4331,7 +4332,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                      initial_geometry.effect_frame_height };
                     SceneShaderValueAnimationMap final_quad_shader_values;
                     if (! LoadMaterial(*context.vfs,
-                                       context.ShaderCachePath(),
+                                       context.shader_cache,
                                        context.shader_environment,
                                        wpmat,
                                        &scene,
@@ -4866,10 +4867,7 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
     InitContext(context, vfs, sc, ortho_extent);
     ParseCamera(context, sc);
     context.user_properties = user_properties;
-    if (shader_cache_dir.is_some()) {
-        context.shader_cache_directory =
-            Some(WPShaderCacheDirectory(rstd::move(shader_cache_dir).unwrap_unchecked()));
-    }
+    context.shader_cache    = WPShaderCache(rstd::move(shader_cache_dir));
 
     context.scene->RegisterRenderTarget(String::make(SpecTex_Default),
                                         SceneRenderTarget {
@@ -5208,10 +5206,8 @@ Box<Scene> FinalizeScene(ParseContext& context) {
         context.scene->Runtime().RegisterSystem(context.particle_runtime.take().unwrap(),
                                                 SceneRuntimeSchedule::BeforeRender);
     }
-    if (context.shader_cache_directory.is_some()) {
-        context.scene->InstallExtension(Box<WPShaderCacheDirectory>::make(
-            rstd::move(context.shader_cache_directory).unwrap_unchecked()));
-    }
+    context.shader_cache.ReleaseTransientEntries();
+    context.scene->InstallExtension(Box<WPShaderCache>::make(rstd::move(context.shader_cache)));
     FinalizeUniformSources(context);
     return rstd::move(context.scene);
 }
@@ -5271,7 +5267,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         SceneMaterial            material;
         WPUniformNodeConfigDraft svData;
         if (! LoadMaterial(vfs,
-                           context.ShaderCachePath(),
+                           context.shader_cache,
                            context.shader_environment,
                            wpmat,
                            &scene,

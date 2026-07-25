@@ -78,14 +78,84 @@ struct WPShaderUnit {
     WPPreprocessorInfo preprocess_info;
 };
 
-class WPShaderCacheDirectory {
-public:
-    explicit WPShaderCacheDirectory(rstd::path::PathBuf path): m_path(rstd::move(path)) {}
+class WPShaderCache {
+    struct SourceEntry {
+        String       source;
+        WPShaderInfo annotations;
+        usize        bytes {};
+    };
 
-    auto path() const noexcept -> ref<rstd::path::Path> { return m_path.as_path(); }
+    struct CompiledStage {
+        ShaderType                                 stage;
+        rstd::collections::HashMap<String, String> uniforms;
+        Vec<u32>                                   active_tex_slots;
+    };
+
+    struct CompileEntry {
+        Vec<CompiledStage> stages;
+        Vec<Vec<u32>>      codes;
+        usize              bytes {};
+    };
+
+    static constexpr usize kMaxSourceBytes { 4 * 1024 * 1024 };
+    static constexpr usize kMaxCompileBytes { 8 * 1024 * 1024 };
+    static constexpr usize kMaxSourceEntries { 64 };
+    static constexpr usize kMaxCompileEntries { 32 };
+
+public:
+    explicit WPShaderCache(Option<rstd::path::PathBuf> directory = None())
+        : m_directory(rstd::move(directory)) {}
+
+    auto directory() const noexcept -> Option<ref<rstd::path::Path>> {
+        if (m_directory.is_none()) return None();
+        return Some(m_directory->as_path());
+    }
+
+    void ReleaseTransientEntries() {
+        m_source_entries  = rstd::collections::HashMap<String, SourceEntry>::make();
+        m_compile_entries = rstd::collections::HashMap<String, CompileEntry>::make();
+        m_source_order    = Vec<String>::make();
+        m_compile_order   = Vec<String>::make();
+        m_source_bytes    = usize {};
+        m_compile_bytes   = usize {};
+    }
 
 private:
-    rstd::path::PathBuf m_path;
+    bool ReserveSource(usize bytes) {
+        if (bytes > kMaxSourceBytes) return false;
+        while (! m_source_order.is_empty() && (m_source_entries.len() >= kMaxSourceEntries ||
+                                               m_source_bytes + bytes > kMaxSourceBytes)) {
+            auto key     = m_source_order.remove(usize {});
+            auto removed = m_source_entries.remove(key.as_str());
+            if (removed.is_some()) {
+                m_source_bytes -= removed->bytes;
+            }
+        }
+        return true;
+    }
+
+    bool ReserveCompile(usize bytes) {
+        if (bytes > kMaxCompileBytes) return false;
+        while (! m_compile_order.is_empty() && (m_compile_entries.len() >= kMaxCompileEntries ||
+                                                m_compile_bytes + bytes > kMaxCompileBytes)) {
+            auto key     = m_compile_order.remove(usize {});
+            auto removed = m_compile_entries.remove(key.as_str());
+            if (removed.is_some()) {
+                m_compile_bytes -= removed->bytes;
+            }
+        }
+        return true;
+    }
+
+    Option<rstd::path::PathBuf>                      m_directory;
+    rstd::collections::HashMap<String, SourceEntry>  m_source_entries;
+    rstd::collections::HashMap<String, CompileEntry> m_compile_entries;
+    Vec<String>                                      m_source_order;
+    Vec<String>                                      m_compile_order;
+    usize                                            m_source_bytes {};
+    usize                                            m_compile_bytes {};
+
+    friend class WPShaderParser;
 };
 
 // Output of CompileMaterialShader. On ok=true, spvs holds one SPIR-V
@@ -118,7 +188,8 @@ void ParseWPShader(const std::string& src, WPShaderInfo* info,
 class WPShaderParser {
 public:
     static std::string PreShaderSrc(fs::VFS&, const std::string& src, WPShaderInfo* pWPShaderInfo,
-                                    const std::vector<WPShaderTexInfo>& texs);
+                                    const std::vector<WPShaderTexInfo>& texs,
+                                    WPShaderCache*                      cache = nullptr);
 
     static std::string PreShaderHeader(const std::string& src, const Combos& combos, ShaderType);
 
@@ -127,8 +198,7 @@ public:
 
     static bool CompileToSpv(std::string_view         scene_id, std::span<WPShaderUnit>,
                              std::vector<ShaderCode>& spvs, WPShaderInfo*,
-                             std::span<const WPShaderTexInfo>,
-                             Option<ref<rstd::path::Path>> cache_dir = None());
+                             std::span<const WPShaderTexInfo>, WPShaderCache* cache = nullptr);
 
     static void UpdateSceneShaderVariantDescFromCompiledUnits(SceneShaderVariantDesc&,
                                                               std::span<const WPShaderUnit>,
@@ -148,14 +218,14 @@ public:
     // (color-blend mode, sprite-sheet flags, puppet bone count beyond
     // default, etc.) are NOT injected. Materials that hard-require them
     // will fail compile here; supply the right values via combos_override.
-    static CompileMaterialShaderResult
-    CompileMaterialShader(const Json& material_json, fs::VFS& vfs,
-                          std::string_view scene_id = "test", const Combos& combos_override = {},
-                          Option<ref<rstd::path::Path>> cache_dir = None());
+    static CompileMaterialShaderResult CompileMaterialShader(const Json&      material_json,
+                                                             fs::VFS&         vfs,
+                                                             std::string_view scene_id = "test",
+                                                             const Combos&    combos_override = {},
+                                                             WPShaderCache*   cache = nullptr);
 
     static CompileSceneShaderVariantResult
     CompileSceneShaderVariant(const SceneShaderVariantDesc& desc, fs::VFS& vfs,
-                              const Combos&                 combos_override = {},
-                              Option<ref<rstd::path::Path>> cache_dir       = None());
+                              const Combos& combos_override = {}, WPShaderCache* cache = nullptr);
 };
 } // namespace owe
