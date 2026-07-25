@@ -449,8 +449,8 @@ public:
         return m_max_count.checked_mul(m_max_instance_count);
     }
     void CompileRuntimeView(particle::ParticleViewCompiler&);
-    auto FollowPosition(particle::ParticleInstance&, usize parent_instance_index,
-                        particle::ParticleSlot) const -> Eigen::Vector3f;
+    auto FollowWorldPosition(particle::ParticleInstance&, usize parent_instance_index,
+                             particle::ParticleSlot) const -> Eigen::Vector3f;
     bool LifetimeAlive(particle::ParticleInstance&, particle::ParticleSlot) const;
     auto InstanceState(usize index) const -> const WPParticleInstanceState& {
         return m_instance_states[index];
@@ -480,6 +480,8 @@ private:
     void UpdateFrameInput(f64 frame_time);
     void UpdateControlpoints(WPParticleInstanceRef);
     void UpdateBoundedState(WPParticleInstanceRef);
+    auto OwnerLocalToWorld(const Eigen::Vector3f& position) const -> Eigen::Vector3f;
+    auto OwnerWorldToLocal(const Eigen::Vector3f& position) const -> Eigen::Vector3f;
     auto HasBoundInstance(particle::ParticleInstance*, usize, particle::ParticleSlot) const -> bool;
     void ReleaseBoundInstances(particle::ParticleInstance*, usize, particle::ParticleSlot);
     void SpawnChild(WPParticleInstanceRef, WPParticleSubSystem&, particle::ParticleSlot,

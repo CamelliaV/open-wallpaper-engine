@@ -417,6 +417,68 @@ TEST(WPParticleSubSystem, PlaybackResetClearsAndRestartsIndependentStorage) {
     EXPECT_GT(subsystem.System().Instance(usize()).Storage().Len(), usize());
 }
 
+TEST(WPParticleSubSystem, ConvertsWorldSpaceFollowAnchorsIntoChildLocalSpace) {
+    owe::Scene scene;
+    auto       parent_node =
+        rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 100.0f, 200.0f, 0.0f },
+                                              Eigen::Vector3f { 2.0f, 3.0f, 1.0f },
+                                              Eigen::Vector3f::Zero());
+    auto child_node = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 10.0f, -20.0f, 0.0f },
+                                                            Eigen::Vector3f { 0.5f, 2.0f, 1.0f },
+                                                            Eigen::Vector3f::Zero());
+    parent_node->AppendChild(child_node.clone());
+
+    owe::WPParticleSubSystem parent(scene,
+                                    std::make_shared<owe::SceneMesh>(),
+                                    u32(1),
+                                    f64(),
+                                    u32(1),
+                                    f64(1.0),
+                                    owe::WPParticleSubSystem::SpawnType::STATIC,
+                                    owe::WPParticleAnimationSpec {},
+                                    {},
+                                    u32(),
+                                    f64(),
+                                    f64(),
+                                    true);
+    parent.SetOwnerNode(parent_node.as_ptr());
+    parent.AddInitializer(owe::WPParticleParser::GenInitializer(
+        owe::ParseJson(R"({"name":"lifetimerandom","min":10,"max":10})").unwrap(), u32(1)));
+    parent.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(
+        owe::WPSphereEmitterProgram(parent.SpawnPipeline(),
+                                    owe::WPParticleSphereEmitterArgs {
+                                        .origin        = { 5.0f, 6.0f, 0.0f },
+                                        .instantaneous = u32(1),
+                                    },
+                                    usize())));
+
+    auto child =
+        Box<owe::WPParticleSubSystem>::make(scene,
+                                            std::make_shared<owe::SceneMesh>(),
+                                            u32(1),
+                                            f64(),
+                                            u32(1),
+                                            f64(1.0),
+                                            owe::WPParticleSubSystem::SpawnType::EVENT_FOLLOW,
+                                            owe::WPParticleAnimationSpec {});
+    child->SetOwnerNode(child_node.as_ptr());
+    child->Finalize();
+    auto* child_system = child.get();
+    parent.AddChild(rstd::move(child));
+    parent.Finalize();
+
+    parent.Tick(f64(), false);
+
+    ASSERT_EQ(parent.System().InstanceCount(), usize(1));
+    ASSERT_EQ(child_system->System().InstanceCount(), usize(1));
+    auto parent_position = parent.System().Instance(usize()).Binding().Read().Positions()[usize()];
+    auto child_anchor    = child_system->InstanceState(usize()).bounded.position;
+    child_node->UpdateTrans();
+    auto resolved = child_node->ModelTrans() *
+                    Eigen::Vector4d(child_anchor.x(), child_anchor.y(), child_anchor.z(), 1.0);
+    EXPECT_TRUE(resolved.head<3>().cast<float>().isApprox(parent_position));
+}
+
 TEST(ParticleInstanceOverride, TracksProvidedControlpoints) {
     auto json = owe::ParseJson(R"({"size":2,"controlpoint1":"120 240 0"})").unwrap();
     owe::wpscene::ParticleInstanceoverride override;

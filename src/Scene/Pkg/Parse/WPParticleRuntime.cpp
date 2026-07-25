@@ -461,24 +461,26 @@ void WPParticleSubSystem::CompileRuntimeView(particle::ParticleViewCompiler& com
     m_follow_lifetime = compiler.Read(m_attributes.lifetime);
 }
 
-auto WPParticleSubSystem::FollowPosition(particle::ParticleInstance& instance,
-                                         usize                       parent_instance_index,
-                                         particle::ParticleSlot slot) const -> Eigen::Vector3f {
+auto WPParticleSubSystem::FollowWorldPosition(particle::ParticleInstance& instance,
+                                              usize                       parent_instance_index,
+                                              particle::ParticleSlot      slot) const
+    -> Eigen::Vector3f {
     auto       view       = instance.Binding().Read();
     const auto positions  = view.Positions();
     const auto velocities = view.Read(m_follow_velocity);
     const auto sizes      = view.Read(m_follow_size);
     auto       pos        = RenderPosition(parent_instance_index, positions[slot.index]);
-    if (! m_follow_anchor.trail_renderer) return pos;
+    if (! m_follow_anchor.trail_renderer) return m_world_space ? pos : OwnerLocalToWorld(pos);
 
     float speed = velocities[slot.index].norm();
-    if (speed <= 1e-6f) return pos;
+    if (speed <= 1e-6f) return m_world_space ? pos : OwnerLocalToWorld(pos);
     float trail_length =
         std::max(0.0f, std::min(speed * m_follow_anchor.length, m_follow_anchor.max_length));
-    if (trail_length <= 0.0f) return pos;
+    if (trail_length <= 0.0f) return m_world_space ? pos : OwnerLocalToWorld(pos);
     float visual_half_length =
         (sizes[slot.index] * 0.5f) * m_follow_anchor.texture_ratio * trail_length * 0.5f;
-    return pos + velocities[slot.index].normalized() * visual_half_length;
+    pos += velocities[slot.index].normalized() * visual_half_length;
+    return m_world_space ? pos : OwnerLocalToWorld(pos);
 }
 
 bool WPParticleSubSystem::LifetimeAlive(particle::ParticleInstance& instance,
@@ -490,6 +492,24 @@ auto WPParticleSubSystem::RenderPosition(usize                  instance_index,
                                          const Eigen::Vector3f& position) const -> Eigen::Vector3f {
     if (m_world_space) return position;
     return m_instance_states[instance_index].bounded.position + position;
+}
+
+auto WPParticleSubSystem::OwnerLocalToWorld(const Eigen::Vector3f& position) const
+    -> Eigen::Vector3f {
+    if (m_owner_node == nullptr) return position;
+    m_owner_node->UpdateTrans();
+    auto world =
+        m_owner_node->ModelTrans() * Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
+    return world.head<3>().cast<float>();
+}
+
+auto WPParticleSubSystem::OwnerWorldToLocal(const Eigen::Vector3f& position) const
+    -> Eigen::Vector3f {
+    if (m_owner_node == nullptr) return position;
+    m_owner_node->UpdateTrans();
+    auto local = m_owner_node->ModelTrans().inverse() *
+                 Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
+    return local.head<3>().cast<float>();
 }
 
 void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
@@ -612,8 +632,8 @@ void WPParticleSubSystem::UpdateControlpoints(WPParticleInstanceRef current) {
     for (auto slot_index : slots) {
         if (controlpoint_index >= m_controlpoints.len()) break;
         particle::ParticleSlot slot { .index = slot_index };
-        auto                   position = bounded.parent_subsystem->FollowPosition(
-            *bounded.parent, bounded.parent_instance_index, slot);
+        auto position = OwnerWorldToLocal(bounded.parent_subsystem->FollowWorldPosition(
+            *bounded.parent, bounded.parent_instance_index, slot));
         m_controlpoints[controlpoint_index].offset =
             (position - current.state->bounded.position).cast<double>();
         ++controlpoint_index;
@@ -633,8 +653,8 @@ void WPParticleSubSystem::UpdateBoundedState(WPParticleInstanceRef current) {
         rstd::as_cast<usize>(bounded.particle_index) < parent_storage.Len()) {
         particle::ParticleSlot slot { .index = rstd::as_cast<usize>(bounded.particle_index) };
         if (m_spawn_type != SpawnType::STATIC_CONTROLPOINT) {
-            bounded.position = bounded.parent_subsystem->FollowPosition(
-                *bounded.parent, bounded.parent_instance_index, slot);
+            bounded.position = OwnerWorldToLocal(bounded.parent_subsystem->FollowWorldPosition(
+                *bounded.parent, bounded.parent_instance_index, slot));
         }
         if (m_spawn_type == SpawnType::EVENT_DEATH) bounded.particle_index = isize(-1);
 
@@ -768,9 +788,10 @@ void WPParticleSubSystem::SpawnChild(WPParticleInstanceRef parent, WPParticleSub
                                      particle::ParticleSlot slot, Eigen::Vector3f position,
                                      bool fixed) {
     if (child.Type() == SpawnType::STATIC_CONTROLPOINT)
-        position = parent.state->bounded.position;
+        position = OwnerLocalToWorld(parent.state->bounded.position);
     else if (! fixed)
-        position = FollowPosition(*parent.instance, parent.index, slot);
+        position = FollowWorldPosition(*parent.instance, parent.index, slot);
+    position      = child.OwnerWorldToLocal(position);
     auto instance = child.QueryNewInstance();
     if (instance.is_none()) return;
     instance->state->bounded = {
@@ -836,7 +857,7 @@ void WPParticleSubSystem::ProcessChildEvents(particle::ParticleEventContext& con
                 SpawnChild(parent,
                            *child,
                            transition.slot,
-                           FollowPosition(*parent.instance, parent.index, transition.slot),
+                           FollowWorldPosition(*parent.instance, parent.index, transition.slot),
                            true);
             }
         }
