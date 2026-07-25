@@ -143,6 +143,34 @@ public:
     std::string        alpha_user_key;
 };
 
+class ShapeObject {
+public:
+    bool FromJson(const owe::Json&, fs::VFS&, SceneVersion);
+
+    int32_t                  id { 0 };
+    std::string              name;
+    std::string              shape;
+    std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
+    std::array<float, 3>     angles { 0.0f, 0.0f, 0.0f };
+    bool                     visible { true };
+    std::vector<ImageEffect> effects;
+
+    bool                      locktransforms { false };
+    bool                      muteineditor { false };
+    bool                      nointerpolation { false };
+    bool                      reflected { true };
+    bool                      castshadow { false };
+    bool                      disablepropagation { false };
+    std::uint32_t             parent { 0 };
+    std::string               attachment;
+    std::vector<std::int32_t> dependencies;
+    FieldBindings             field_bindings;
+
+    VisibleUserBinding visible_user;
+    std::string        visible_user_key;
+};
+
 class ImageAssetInfo {
 public:
     std::optional<std::array<float, 2>> size;

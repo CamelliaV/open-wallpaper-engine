@@ -330,7 +330,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         }
     }
 
-    for (std::size_t smi = 0; smi < mesh->Submeshes().size(); smi++) {
+    const bool draw_source = imgeff == nullptr || imgeff->RequiresSourceDraw();
+    for (std::size_t smi = 0; draw_source && smi < mesh->Submeshes().size(); smi++) {
         const auto& submesh       = mesh->Submeshes()[smi];
         const auto  material_slot = static_cast<std::size_t>(submesh.material_slot);
         if (material_slot >= slots.size() || ! slots[material_slot]) continue;

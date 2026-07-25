@@ -163,6 +163,7 @@ bool FieldBindingsWriteLayerText(const wpscene::FieldBindings& fb) {
 
 const wpscene::FieldBindings& SceneObjectFieldBindings(const SceneObjectVar& object) {
     if (object.is_Image()) return object.as_Image().value.field_bindings;
+    if (object.is_Shape()) return object.as_Shape().value.field_bindings;
     if (object.is_Particle()) return object.as_Particle().value.field_bindings;
     if (object.is_Sound()) return object.as_Sound().value.field_bindings;
     if (object.is_Light()) return object.as_Light().value.field_bindings;
@@ -2495,7 +2496,8 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     }
 }
 
-void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
+void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
+                   bool requires_source_draw = true) {
     auto& wpimgobj = img_obj;
     // Invisible image layers are kept in the scene tree because their composite
     // may be sampled by other layers via `_rt_imageLayerComposite_<id>`. The
@@ -2966,6 +2968,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                     effect_ppong_b);
         image_effect_layer = imgEffectLayer.get();
         {
+            imgEffectLayer->SetRequiresSourceDraw(requires_source_draw);
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
             imgEffectLayer->SetSkipWhenNoRuntimeEffect(wpimgobj.fullscreen || isPassthrough);
@@ -2999,7 +3002,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         int32_t    i_eff = -1;
         bool       last_effect_can_composite_final { false };
         const bool allow_transparent_previous_final = ! solid_composite_context;
-        const bool passthrough_can_composite_final  = isPassthrough;
+        const bool passthrough_can_composite_final  = isPassthrough || ! requires_source_draw;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
             if (! wpeffobj.visible && wpeffobj.visible_user.empty()) {
@@ -3363,6 +3366,59 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             String::make(rstd::cppstd::as_str(wpimgobj.attachment).unwrap()),
             image_puppet_layer.is_some() ? Some((*image_puppet_layer).clone()) : None(),
         });
+}
+
+void ParseShapeObj(ParseContext& context, wpscene::ShapeObject& shape_obj) {
+    if (shape_obj.shape != "quad") {
+        rstd_error("unsupported shape '{}' for '{}'", shape_obj.shape, shape_obj.name);
+        return;
+    }
+
+    const wpscene::ImageEffect* first_effect { nullptr };
+    const wpscene::ImageEffect* last_effect { nullptr };
+    for (const auto& effect : shape_obj.effects) {
+        if (! effect.visible && effect.visible_user.empty()) continue;
+        if (first_effect == nullptr) first_effect = &effect;
+        last_effect = &effect;
+    }
+    if (first_effect == nullptr || first_effect->passes.empty() || last_effect == nullptr ||
+        last_effect->materials.empty() || last_effect->passes.empty()) {
+        rstd_error("shape '{}' has no renderable effect", shape_obj.name);
+        return;
+    }
+    auto direct_draw = first_effect->passes.front().combos.find("DIRECTDRAW");
+    if (direct_draw == first_effect->passes.front().combos.end() || direct_draw->second == 0) {
+        rstd_error("shape '{}' first effect is not direct draw", shape_obj.name);
+        return;
+    }
+
+    wpscene::ImageObject image;
+    image.id        = shape_obj.id;
+    image.name      = rstd::move(shape_obj.name);
+    image.origin    = shape_obj.origin;
+    image.scale     = shape_obj.scale;
+    image.angles    = shape_obj.angles;
+    const auto edge = static_cast<float>(context.ortho_h) * 0.5f;
+    image.size      = { edge, edge };
+    image.visible   = shape_obj.visible;
+    image.material  = last_effect->materials.back().clone();
+    image.material.MergePass(last_effect->passes.back());
+    image.material.blending  = "additive";
+    image.effects            = rstd::move(shape_obj.effects);
+    image.nopadding          = true;
+    image.locktransforms     = shape_obj.locktransforms;
+    image.muteineditor       = shape_obj.muteineditor;
+    image.nointerpolation    = shape_obj.nointerpolation;
+    image.reflected          = shape_obj.reflected;
+    image.castshadow         = shape_obj.castshadow;
+    image.disablepropagation = shape_obj.disablepropagation;
+    image.parent             = shape_obj.parent;
+    image.attachment         = rstd::move(shape_obj.attachment);
+    image.dependencies       = rstd::move(shape_obj.dependencies);
+    image.field_bindings     = rstd::move(shape_obj.field_bindings);
+    image.visible_user       = rstd::move(shape_obj.visible_user);
+    image.visible_user_key   = rstd::move(shape_obj.visible_user_key);
+    ParseImageObj(context, image, false);
 }
 
 struct ParticleChildPtr {
@@ -4887,6 +4943,10 @@ SceneObjectVar MakeSceneObject(wpscene::ImageObject value) {
     return SceneObjectVar::Image(rstd::move(value));
 }
 
+SceneObjectVar MakeSceneObject(wpscene::ShapeObject value) {
+    return SceneObjectVar::Shape(rstd::move(value));
+}
+
 SceneObjectVar MakeSceneObject(wpscene::ParticleObject value) {
     return SceneObjectVar::Particle(rstd::move(value));
 }
@@ -4921,7 +4981,8 @@ void AddSceneObject(Vec<SceneObjectVar>& objs, const Json& json_obj, fs::VFS& vf
         return;
     }
     ResolveVisibleUserBinding(scene_obj.visible, scene_obj.visible_user, user_props);
-    if constexpr (std::is_same_v<T, wpscene::ImageObject>) {
+    if constexpr (std::is_same_v<T, wpscene::ImageObject> ||
+                  std::is_same_v<T, wpscene::ShapeObject>) {
         for (auto& effect : scene_obj.effects)
             ResolveVisibleUserBinding(effect.visible, effect.visible_user, user_props);
     }
@@ -4976,6 +5037,9 @@ Vec<SceneObjectVar> ExpandObjects(const Json& json, fs::VFS& vfs, wpscene::Scene
         // (no rendering yet) so the data stays absorbed.
         if (auto value = obj.get("image"_str); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::ImageObject>(
+                scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
+        } else if (auto value = obj.get("shape"_str); value.is_some() && ! (*value)->is_null()) {
+            AddSceneObject<wpscene::ShapeObject>(
                 scene_objs, obj, vfs, v, user_props, linked_source_ids, force_invisible);
         } else if (auto value = obj.get("particle"_str); value.is_some() && ! (*value)->is_null()) {
             AddSceneObject<wpscene::ParticleObject>(
@@ -5159,6 +5223,10 @@ void ProcessObjects(ParseContext& context, mut_ref<SceneObjectVar[]> scene_objs,
             if (! (opts.kinds & ProcessOpts::Image)) continue;
             auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_image);
             ParseImageObj(context, object.as_Image().value);
+        } else if (object.is_Shape()) {
+            if (! (opts.kinds & ProcessOpts::Image)) continue;
+            auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_image);
+            ParseShapeObj(context, object.as_Shape().value);
         } else if (object.is_Particle()) {
             if (! (opts.kinds & ProcessOpts::Particle)) continue;
             auto span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::parse_object_particle);

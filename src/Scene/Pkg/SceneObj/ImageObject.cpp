@@ -342,3 +342,37 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     AbsorbAllFieldBindings(json, field_bindings);
     return true;
 }
+
+bool ShapeObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) {
+    owe::GetJsonValue(json, "shape", shape);
+    ReadVisibleProperty(json, visible, visible_user);
+    visible_user_key = visible_user.name;
+    owe::GetJsonValue(json, "name", name, false);
+    owe::GetJsonValue(json, "id", id, false);
+    owe::GetJsonValue(json, "origin", origin);
+    owe::GetJsonValue(json, "angles", angles);
+    owe::GetJsonValue(json, "scale", scale);
+
+    if (auto values = json.get("effects"_str); values.is_some()) {
+        auto array = (*values)->as_array();
+        if (array.is_some()) {
+            for (const auto& value : **array) {
+                ImageEffect effect;
+                if (! effect.FromJson(value, vfs, v)) return false;
+                effects.push_back(std::move(effect));
+            }
+        }
+    }
+
+    owe::GetJsonValue(json, "locktransforms", locktransforms, false);
+    owe::GetJsonValue(json, "muteineditor", muteineditor, false);
+    owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+    owe::GetJsonValue(json, "reflected", reflected, false);
+    owe::GetJsonValue(json, "castshadow", castshadow, false);
+    owe::GetJsonValue(json, "disablepropagation", disablepropagation, false);
+    owe::GetJsonValue(json, "parent", parent, false);
+    owe::GetJsonValue(json, "attachment", attachment, false);
+    owe::GetJsonValue(json, "dependencies", dependencies, false);
+    AbsorbAllFieldBindings(json, field_bindings);
+    return true;
+}

@@ -528,6 +528,87 @@ TEST(WPParticleSubSystem, ResolvesWorldControlpointOverridesThroughOwnerTransfor
     EXPECT_TRUE(resolved[usize(3)].offset.isApprox(Eigen::Vector3d { 4.0, 6.0, 0.0 }));
 }
 
+TEST(WPParticleSubSystem, ResolvesWorldSpaceControlpointsForSimulation) {
+    owe::Scene               scene;
+    auto                     mesh = std::make_shared<owe::SceneMesh>();
+    owe::WPParticleSubSystem subsystem(scene,
+                                       mesh,
+                                       u32(1),
+                                       f64(),
+                                       u32(1),
+                                       f64(1.0),
+                                       owe::WPParticleSubSystem::SpawnType::STATIC,
+                                       owe::WPParticleAnimationSpec {},
+                                       {},
+                                       u32(),
+                                       f64(),
+                                       f64(),
+                                       true);
+    auto owner = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 100.0f, 200.0f, 0.0f },
+                                                       Eigen::Vector3f { 2.0f, 4.0f, 1.0f },
+                                                       Eigen::Vector3f::Zero());
+    subsystem.SetOwnerNode(owner.as_ptr());
+    subsystem.ControlpointsMut()[usize(1)].base_offset = Eigen::Vector3d { 3.0, 4.0, 0.0 };
+    subsystem.Finalize();
+    subsystem.Tick(f64(), false);
+
+    auto resolved = subsystem.SimulationControlpoint(usize(1));
+    EXPECT_TRUE(resolved.center.isApprox(Eigen::Vector3d { 106.0, 216.0, 0.0 }));
+    Eigen::Matrix3d expected_basis = Eigen::Vector3d { 2.0, 4.0, 1.0 }.asDiagonal();
+    EXPECT_TRUE(resolved.basis.isApprox(expected_basis));
+}
+
+TEST(WPParticleSubSystem, AppliesVortexAroundWorldSpaceOwner) {
+    owe::Scene               scene;
+    auto                     mesh = std::make_shared<owe::SceneMesh>();
+    owe::WPParticleSubSystem subsystem(scene,
+                                       mesh,
+                                       u32(1),
+                                       f64(),
+                                       u32(1),
+                                       f64(1.0),
+                                       owe::WPParticleSubSystem::SpawnType::STATIC,
+                                       owe::WPParticleAnimationSpec {},
+                                       {},
+                                       u32(),
+                                       f64(),
+                                       f64(),
+                                       true);
+    auto owner    = rstd::sync::Arc<owe::SceneNode>::make(Eigen::Vector3f { 1000.0f, 800.0f, 0.0f },
+                                                          Eigen::Vector3f::Ones(),
+                                                          Eigen::Vector3f::Zero());
+    auto override = rstd::sync::Arc<owe::wpscene::ParticleInstanceoverride>::make();
+    override->enabled              = true;
+    override->controlpointangle[1] = std::array<float, 3> { 1.57079632679f, 0.0f, 0.0f };
+    subsystem.SetOwnerNode(owner.as_ptr());
+    subsystem.SetInstanceOverride(override.clone());
+    subsystem.AddInitializer(owe::WPParticleParser::GenInitializer(
+        owe::ParseJson(R"({"name":"lifetimerandom","min":10,"max":10})").unwrap(), u32(1)));
+    subsystem.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(
+        owe::WPBoxEmitterProgram(subsystem.SpawnPipeline(),
+                                 owe::WPParticleBoxEmitterArgs {
+                                     .origin        = { 200.0f, 0.0f, 0.0f },
+                                     .instantaneous = u32(1),
+                                 },
+                                 usize())));
+    subsystem.AddOperator(owe::WPParticleParser::GenOperator(
+        owe::ParseJson(R"({"name":"movement"})").unwrap(), override.clone(), subsystem, usize()));
+    subsystem.AddOperator(owe::WPParticleParser::GenOperator(
+        owe::ParseJson(
+            R"({"name":"vortex_v2","controlpoint":1,"flags":2,"ringpulldistance":250,"ringradius":256,"ringwidth":5,"speedinner":0,"speedouter":2500})")
+            .unwrap(),
+        override.clone(),
+        subsystem,
+        usize(1)));
+    subsystem.Finalize();
+    subsystem.Tick(f64(1.0 / 60.0), false);
+    subsystem.Tick(f64(1.0 / 60.0), false);
+
+    auto positions = subsystem.System().Instance(usize()).Binding().Read().Positions();
+    ASSERT_EQ(positions.len(), usize(1));
+    EXPECT_GT(std::abs(positions[usize()].z()), 0.01f);
+}
+
 TEST(WPParticleSubSystem, UsesEmitterPeriodLimitForImplicitControlpointSequenceCount) {
     owe::Scene               scene;
     auto                     mesh = std::make_shared<owe::SceneMesh>();

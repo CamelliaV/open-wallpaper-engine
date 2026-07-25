@@ -32,9 +32,10 @@ export namespace owe
 
 class SceneObjectVar {
     RSTD_ENUM(SceneObjectVar, (Image, (wpscene::ImageObject value;)),
-              (Particle, (wpscene::ParticleObject value;)), (Sound, (wpscene::SoundObject value;)),
-              (Light, (wpscene::LightObject value;)), (Text, (wpscene::TextObject value;)),
-              (Model, (wpscene::ModelObject value;)), (Camera, (wpscene::CameraObject value;)))
+              (Shape, (wpscene::ShapeObject value;)), (Particle, (wpscene::ParticleObject value;)),
+              (Sound, (wpscene::SoundObject value;)), (Light, (wpscene::LightObject value;)),
+              (Text, (wpscene::TextObject value;)), (Model, (wpscene::ModelObject value;)),
+              (Camera, (wpscene::CameraObject value;)))
 };
 
 struct PuppetLayerRegistry {

@@ -494,6 +494,27 @@ auto WPParticleSubSystem::RenderPosition(usize                  instance_index,
     return m_instance_states[instance_index].bounded.position + position;
 }
 
+auto WPParticleSubSystem::SimulationControlpoint(usize index) const
+    -> WPParticleSimulationControlpoint {
+    const auto& controlpoint = m_controlpoints[index];
+    if (! m_world_space) {
+        return {
+            .center = controlpoint.offset,
+            .basis  = controlpoint.rotation,
+        };
+    }
+
+    const auto& world_from_local = m_frame.world_from_spawn_space;
+    auto        center           = world_from_local * Eigen::Vector4d(controlpoint.offset.x(),
+                                                                      controlpoint.offset.y(),
+                                                                      controlpoint.offset.z(),
+                                                                      1.0);
+    return {
+        .center = center.head<3>(),
+        .basis  = world_from_local.block<3, 3>(0, 0) * controlpoint.rotation,
+    };
+}
+
 auto WPParticleSubSystem::OwnerLocalToWorld(const Eigen::Vector3f& position) const
     -> Eigen::Vector3f {
     if (m_owner_node == nullptr) return position;
@@ -530,17 +551,15 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
         m_owner_node->UpdateTrans();
         const auto model       = m_owner_node->ModelTrans();
         world_from_spawn_space = model;
+        local_from_world       = model.inverse();
+        Eigen::Vector4d value =
+            local_from_world * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
+        mouse_local = value.head<3>();
         if (! m_world_space) {
             world_from_local_dir = model.block<3, 3>(0, 0);
             if (std::abs(world_from_local_dir.determinant()) > 1e-9) {
                 local_from_world_dir = world_from_local_dir.inverse();
             }
-            local_from_world = model.inverse();
-            Eigen::Vector4d value =
-                local_from_world * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
-            mouse_local = value.head<3>();
-        } else {
-            local_from_world = model.inverse();
         }
     }
     m_frame.subsystem              = this;

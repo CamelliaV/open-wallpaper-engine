@@ -1662,6 +1662,12 @@ public:
     }
     void SetSkipWhenNoRuntimeEffect(bool value) { m_skip_when_no_runtime_effect = value; }
     bool SkipWhenNoRuntimeEffect() const { return m_skip_when_no_runtime_effect; }
+    void SetRequiresSourceDraw(bool value) {
+        if (m_requires_source_draw == value) return;
+        m_requires_source_draw = value;
+        m_resolved             = false;
+    }
+    bool RequiresSourceDraw() const { return m_requires_source_draw; }
 
     // Idempotent: second and later calls are no-ops until any of the
     // mutating setters above (or AddEffect) flips m_resolved back to false.
@@ -1694,6 +1700,7 @@ private:
     std::string    m_final_target { rstd::cppstd::to_string(SpecTex_Default) };
     std::string    m_final_camera;
     bool           m_skip_when_no_runtime_effect { false };
+    bool           m_requires_source_draw { true };
     bool           m_resolved { false };
 
     std::vector<std::shared_ptr<SceneImageEffect>>                    m_effects;

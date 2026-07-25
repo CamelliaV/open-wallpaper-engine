@@ -35,6 +35,11 @@ struct WPParticleControlpoint {
     Option<SceneAnimationCurve> angle_curve;
 };
 
+struct WPParticleSimulationControlpoint {
+    Eigen::Vector3d center { Eigen::Vector3d::Zero() };
+    Eigen::Matrix3d basis { Eigen::Matrix3d::Identity() };
+};
+
 struct WPParticleAudioResponse {
     bool                  enable { false };
     float                 amount { 1.0f };
@@ -429,6 +434,7 @@ public:
     auto ControlpointsMut() noexcept -> mut_ref<WPParticleControlpoint[]> {
         return m_controlpoints.as_mut_slice();
     }
+    auto SimulationControlpoint(usize index) const -> WPParticleSimulationControlpoint;
     void SetInstanceOverride(Arc<wpscene::ParticleInstanceoverride> value) {
         m_instance_override = Some(rstd::move(value));
     }

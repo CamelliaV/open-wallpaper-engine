@@ -716,16 +716,15 @@ struct VortexFrame {
     Vector3d axis { Vector3d::UnitZ() };
 };
 
-auto ResolveVortexFrame(const Vortex& vortex, slice<WPParticleControlpoint> controlpoints)
-    -> VortexFrame {
-    const auto& controlpoint = controlpoints[rstd::as_cast<usize>(vortex.controlpoint)];
-    Vector3d    local_offset = Vector3f { vortex.offset.data() }.cast<double>();
-    Vector3d    axis         = Vector3f { vortex.axis.data() }.cast<double>();
-    local_offset             = controlpoint.rotation * local_offset;
-    axis                     = controlpoint.rotation * axis;
+auto ResolveVortexFrame(const Vortex& vortex, const WPParticleSubSystem& subsystem) -> VortexFrame {
+    auto controlpoint = subsystem.SimulationControlpoint(rstd::as_cast<usize>(vortex.controlpoint));
+    Vector3d local_offset = Vector3f { vortex.offset.data() }.cast<double>();
+    Vector3d axis         = Vector3f { vortex.axis.data() }.cast<double>();
+    local_offset          = controlpoint.basis * local_offset;
+    axis                  = controlpoint.basis * axis;
     if (axis.squaredNorm() <= 1e-12) axis = Vector3d::UnitZ();
     return {
-        .center = controlpoint.offset + local_offset,
+        .center = controlpoint.center + local_offset,
         .axis   = axis.normalized(),
     };
 }
@@ -1190,10 +1189,10 @@ struct WPVortexOperator {
 
     void Update(particle::ParticleUpdateContext& context) {
         auto particle_frame = WPParticleFrameFrom(context.frame);
-        auto frame      = ResolveVortexFrame(config, particle_frame->subsystem->Controlpoints());
-        auto positions  = context.view.Positions();
-        auto velocities = context.view.Write(velocity);
-        auto delta      = context.delta.to_primitive();
+        auto frame          = ResolveVortexFrame(config, *particle_frame->subsystem);
+        auto positions      = context.view.Positions();
+        auto velocities     = context.view.Write(velocity);
+        auto delta          = context.delta.to_primitive();
         for (auto slot : context.slots) {
             auto relative        = positions[slot.index].cast<double>() - frame.center;
             auto radial          = relative - frame.axis * relative.dot(frame.axis);
@@ -1287,7 +1286,8 @@ struct WPMaintainDistanceOperator {
         auto velocities = context.view.Write(velocity);
         auto states     = context.view.Write(state);
         auto center =
-            frame->subsystem->Controlpoints()[rstd::as_cast<usize>(config.controlpoint)].offset;
+            frame->subsystem->SimulationControlpoint(rstd::as_cast<usize>(config.controlpoint))
+                .center;
         for (auto slot : context.slots) {
             auto relative = positions[slot.index].cast<double>() - center;
             auto distance = relative.norm();
@@ -1321,10 +1321,11 @@ struct WPControlPointAttractOperator {
         auto frame      = WPParticleFrameFrom(context.frame);
         auto positions  = context.view.Positions();
         auto velocities = context.view.Write(velocity);
-        auto offset =
-            frame->subsystem->Controlpoints()[rstd::as_cast<usize>(config.controlpoint)].offset +
-            Eigen::Vector3f { config.origin.data() }.cast<double>();
-        auto delta = context.delta.to_primitive();
+        auto controlpoint =
+            frame->subsystem->SimulationControlpoint(rstd::as_cast<usize>(config.controlpoint));
+        auto offset = controlpoint.center +
+                      controlpoint.basis * Eigen::Vector3f { config.origin.data() }.cast<double>();
+        auto delta  = context.delta.to_primitive();
         for (auto slot : context.slots) {
             auto difference = offset - positions[slot.index].cast<double>();
             if (difference.norm() < config.threshold) {
