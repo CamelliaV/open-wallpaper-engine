@@ -11,12 +11,14 @@ import eigen;
 import wescene.spec_names;
 import wescene.core;
 import wescene.types;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.scene;
 import wescene.shader_compile;
 
 using namespace rstd::prelude;
+using rstd::collections::HashMap;
 using rstd::sync::Arc;
 
 namespace owe::text
@@ -61,19 +63,6 @@ private:
 
     FT_Library m_lib { nullptr };
 };
-
-std::uint64_t HashBlob(std::span<const std::byte> blob) {
-    // FNV-1a 64. Good enough for keying — collisions only matter if the
-    // caller hands us two genuinely different fonts whose hashes collide,
-    // which is fine since the underlying FT_Face open is the source of truth
-    // (we cache per-pixel-size below the blob).
-    std::uint64_t h = 1469598103934665603ull;
-    for (std::byte b : blob) {
-        h ^= static_cast<std::uint64_t>(static_cast<std::uint8_t>(b));
-        h *= 1099511628211ull;
-    }
-    return h;
-}
 
 bool IsFontExt(const std::filesystem::path& p) {
     auto ext = p.extension().string();
@@ -366,40 +355,30 @@ void FontFace::Populate(std::span<const std::uint32_t> codepoints) {
 // -- FontCache ------------------------------------------------------------
 
 struct FontCache::Impl {
-    struct Key {
-        std::uint64_t blob_hash;
-        std::uint32_t pixel_size;
-        bool          operator==(const Key& o) const noexcept {
-            return blob_hash == o.blob_hash && pixel_size == o.pixel_size;
-        }
-    };
-    struct KeyHash {
-        std::size_t operator()(const Key& k) const noexcept {
-            return std::hash<std::uint64_t> {}(k.blob_hash) ^
-                   (std::hash<std::uint32_t> {}(k.pixel_size) << 1);
-        }
-    };
-    std::unordered_map<Key, std::unique_ptr<FontFace>, KeyHash> faces;
+    HashMap<String, HashMap<u32, Box<FontFace>>> faces;
+    u64                                          next_atlas_id { 0 };
 };
 
 FontCache::FontCache(): m_impl(std::make_unique<Impl>()) {}
 FontCache::~FontCache() = default;
 
-FontFace* FontCache::GetFace(std::shared_ptr<std::vector<std::byte>> blob,
-                             std::uint32_t                           pixel_size) {
-    if (! blob || blob->empty() || pixel_size == 0) return nullptr;
+FontFace* FontCache::GetFace(const ResolvedBlob& font, std::uint32_t pixel_size) {
+    if (! font.bytes || font.bytes->empty() || font.source.empty() || pixel_size == 0)
+        return nullptr;
 
-    auto      blob_span = std::span<const std::byte>(blob->data(), blob->size());
-    auto      blob_hash = HashBlob(blob_span);
-    Impl::Key key { blob_hash, pixel_size };
-    if (auto it = m_impl->faces.find(key); it != m_impl->faces.end()) {
-        return it->second.get();
+    auto source = rstd::cppstd::as_str(font.source).unwrap();
+    if (auto source_faces = m_impl->faces.get_mut(source); source_faces.is_some()) {
+        if (auto face = (*source_faces)->get_mut(u32(pixel_size)); face.is_some()) {
+            return (*face)->as_mut_ptr().as_raw_ptr();
+        }
     }
+
+    auto blob_span = std::span<const std::byte>(font.bytes->data(), font.bytes->size());
 
     FT_Library lib = FtLibrary::Get().handle();
     if (lib == nullptr) return nullptr;
 
-    auto face = std::make_unique<FontFace>();
+    auto face = Box<FontFace>::make();
     if (FT_New_Memory_Face(lib,
                            reinterpret_cast<const FT_Byte*>(blob_span.data()),
                            static_cast<FT_Long>(blob_span.size()),
@@ -414,21 +393,27 @@ FontFace* FontCache::GetFace(std::shared_ptr<std::vector<std::byte>> blob,
     }
     // Keep the bytes alive for the face's lifetime: FT_Face holds raw
     // pointers into this buffer and dereferences them on every glyph load.
-    face->m_impl->blob       = std::move(blob);
+    face->m_impl->blob       = font.bytes;
     face->m_impl->pixel_size = pixel_size;
     face->m_impl->ResetAtlas(AtlasDimForPixelSize(pixel_size));
     face->m_impl->atlas_url =
-        "_text_atlas_" + std::to_string(blob_hash) + "_" + std::to_string(pixel_size);
+        "_text_atlas_" + std::to_string((m_impl->next_atlas_id++).to_primitive());
 
-    auto* raw          = face.get();
-    m_impl->faces[key] = std::move(face);
+    FontFace* raw          = face.as_mut_ptr().as_raw_ptr();
+    auto      source_faces = m_impl->faces.get_mut(source);
+    if (source_faces.is_none()) {
+        (void)m_impl->faces.insert(String::make(source), HashMap<u32, Box<FontFace>>::make());
+        source_faces = m_impl->faces.get_mut(source);
+    }
+    (void)(*source_faces)->insert(u32(pixel_size), rstd::move(face));
     return raw;
 }
 
 std::vector<FontFace*> FontCache::Faces() const {
     std::vector<FontFace*> out;
-    out.reserve(m_impl->faces.size());
-    for (auto& [_k, f] : m_impl->faces) out.push_back(f.get());
+    for (auto source_faces : m_impl->faces.values()) {
+        for (auto face : source_faces->values()) out.push_back(face->as_mut_ptr().as_raw_ptr());
+    }
     return out;
 }
 

@@ -51,13 +51,14 @@ struct WPSceneShaderEnvironment {
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
-    Box<Scene>                   scene { Box<Scene>::make() };
-    Option<WPParticleRuntime>    particle_runtime;
-    std::int32_t                 ortho_w { 0 };
-    std::int32_t                 ortho_h { 0 };
-    fs::VFS*                     vfs { nullptr };
-    Option<ref<rstd::json::Map>> user_properties;
-    WPShaderCache                shader_cache;
+    Box<Scene>                                     scene { Box<Scene>::make() };
+    Option<WPParticleRuntime>                      particle_runtime;
+    std::int32_t                                   ortho_w { 0 };
+    std::int32_t                                   ortho_h { 0 };
+    fs::VFS*                                       vfs { nullptr };
+    Option<ref<rstd::json::Map>>                   user_properties;
+    WPShaderCache                                  shader_cache;
+    HashMap<String, text::FontCache::ResolvedBlob> font_sources;
 
     ShaderValueMap           global_base_uniforms;
     WPSceneShaderEnvironment shader_environment;

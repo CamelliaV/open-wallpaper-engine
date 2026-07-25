@@ -4003,33 +4003,53 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     // so match on the basename.
     const bool is_systemfont =
         std::filesystem::path(font_name).filename().native().starts_with("systemfont_");
+    std::string font_source_key;
     if (! font_name.empty() && ! is_systemfont) {
         // scene.json's `font` is a pkg-relative path, e.g. `fonts/2.ttf` or
         // `fonts/workshop/<id>/X.otf`. The pkg mounts at /assets so the full
         // VFS path is /assets/<font_name>.
         std::string vfs_path =
             (std::filesystem::path("/assets") / font_name).lexically_normal().native();
-        auto blob = fs::ReadFileContent(*context.vfs, vfs_path);
-        if (blob.is_ok() && ! blob->empty()) {
-            auto blob_str = rstd::move(blob).unwrap_unchecked();
-            auto bytes    = std::make_shared<std::vector<std::byte>>(blob_str.size());
-            std::memcpy(bytes->data(), blob_str.data(), blob_str.size());
-            resolved.bytes  = std::move(bytes);
-            resolved.source = vfs_path;
+        font_source_key = vfs_path;
+        auto key        = rstd::cppstd::as_str(font_source_key).unwrap();
+        if (auto cached = context.font_sources.get(key); cached.is_some()) {
+            resolved = **cached;
+        } else {
+            auto blob = fs::ReadFileContent(*context.vfs, vfs_path);
+            if (blob.is_ok() && ! blob->empty()) {
+                auto blob_str = rstd::move(blob).unwrap_unchecked();
+                auto bytes    = std::make_shared<std::vector<std::byte>>(blob_str.size());
+                std::memcpy(bytes->data(), blob_str.data(), blob_str.size());
+                resolved.bytes  = std::move(bytes);
+                resolved.source = vfs_path;
+            }
         }
     }
     if (! resolved.bytes) {
-        resolved = text::FontCache::ResolveSystemFont(font_name, /*fallback_to_any=*/true);
+        font_source_key = "system:" + font_name;
+        auto key        = rstd::cppstd::as_str(font_source_key).unwrap();
+        if (auto cached = context.font_sources.get(key); cached.is_some()) {
+            resolved = **cached;
+        } else {
+            resolved = text::FontCache::ResolveSystemFont(font_name, /*fallback_to_any=*/true);
+        }
     }
     if (! resolved.bytes) {
         rstd_error("text '{}': could not resolve font '{}'", obj.name, font_name);
         return;
     }
 
+    if (font_source_key.empty()) font_source_key = resolved.source;
+    auto source_key = rstd::cppstd::as_str(font_source_key).unwrap();
+    if (! context.font_sources.contains_key(source_key)) {
+        (void)context.font_sources.insert(String::make(source_key), resolved);
+    }
+    const auto& font_source = **context.font_sources.get(source_key);
+
     std::uint32_t px = TextPointSizeToPx(obj.pointsize);
 
     auto& font_cache = text::EnsureSceneFontCache(*context.scene);
-    auto* face       = font_cache.GetFace(resolved.bytes, px);
+    auto* face       = font_cache.GetFace(font_source, px);
     if (face == nullptr) {
         rstd_error("text '{}': FreeType failed to open '{}'", obj.name, resolved.source);
         return;
@@ -4637,7 +4657,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     };
     auto set_pointsize = [scene          = context.scene.get(),
                           font_cache_ptr = &font_cache,
-                          font_blob      = resolved.bytes,
+                          font_source    = font_source,
                           sp_mesh,
                           layouter,
                           rebuild_compose,
@@ -4648,7 +4668,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             return;
         }
         auto* next_face = font_cache_ptr->GetFace(
-            font_blob, TextPointSizeToPx(static_cast<float>(next_point_size)));
+            font_source, TextPointSizeToPx(static_cast<float>(next_point_size)));
         if (next_face == nullptr) return;
         next_face->Populate(text::DecodeUtf8(*current_text));
         if (! EnsureTextAtlas(*scene, *next_face)) return;
