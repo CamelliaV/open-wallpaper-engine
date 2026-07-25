@@ -49,7 +49,15 @@ set(BUILD_EXTERNAL          OFF CACHE INTERNAL "")
 set(GLSLANG_TESTS           OFF CACHE INTERNAL "")
 set(BUILD_TESTING           OFF CACHE INTERNAL "")
 
-fetchdeps(${CMAKE_SOURCE_DIR}/deps.json)
+fetchdeps(${CMAKE_SOURCE_DIR}/deps.json NAMES
+    eigen
+    spirv_reflect
+    glslang
+    vma
+    rstd
+    vvk
+    wavsen
+    quickjs)
 
 # Post-fetch setup for eigen (header-only, source_subdir=cmake-noop).
 add_library(eigen INTERFACE)
@@ -58,11 +66,3 @@ target_include_directories(eigen SYSTEM INTERFACE ${eigen_SOURCE_DIR})
 
 # Audio output is handled by wavsen::audio (pulse/pipewire-backed,
 # selectable via WAVSEN_AUDIO_BACKEND in the wavsen subtree).
-
-# Promote CEF source dir to global scope so weweb/cmake/cef.cmake can
-# reach it via add_subdirectory from the project root. fetchdeps()
-# populates `cef_SOURCE_DIR` here in third_party/, but only this scope
-# sees it without an explicit cache.
-if(DEFINED cef_SOURCE_DIR)
-    set(cef_SOURCE_DIR "${cef_SOURCE_DIR}" CACHE INTERNAL "" FORCE)
-endif()

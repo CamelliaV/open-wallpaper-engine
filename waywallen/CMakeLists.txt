@@ -82,6 +82,12 @@ install(TARGETS waywallen-wescene-renderer
 # both share the workspace `install/` prefix and the same Lua source
 # component advertises both wp_types.
 if(BUILD_WEWEB)
+    weweb_get_cef_runtime(
+        _OWE_CEF_BINARY_DIR
+        _OWE_CEF_BINARY_FILES
+        _OWE_CEF_RESOURCE_DIR
+        _OWE_CEF_RESOURCE_FILES)
+
     # Headless Vulkan producer device (DMA-BUF import + bridge-slot blit).
     add_library(waywallen-web-producer-device STATIC)
     target_sources(waywallen-web-producer-device
@@ -139,8 +145,8 @@ if(BUILD_WEWEB)
         RUNTIME DESTINATION ${_OWE_WEWEB_INSTALL_DIR}
     )
     list(APPEND _OWE_STRIP_FILES ${OWE_WEWEB_BIN})
-    # CEF_BINARY_FILES / CEF_RESOURCE_FILES are basenames; prepend
-    # CEF_BINARY_DIR / CEF_RESOURCE_DIR for absolute paths.
+    # CEF runtime entries are basenames; prepend their source directories
+    # for absolute install paths.
     #
     # TODO: make this work with our vulkan stack
     # Skipped 
@@ -150,24 +156,24 @@ if(BUILD_WEWEB)
     #                            we drop the loader above.
     #   vk_swiftshader_icd.json — JSON registering the ICD;
     set(_CEF_SKIP) #libvulkan.so.1 libvk_swiftshader.so vk_swiftshader_icd.json)
-    foreach(_f IN LISTS CEF_BINARY_FILES)
+    foreach(_f IN LISTS _OWE_CEF_BINARY_FILES)
         if(NOT _f IN_LIST _CEF_SKIP)
-            install(FILES ${CEF_BINARY_DIR}/${_f}
+            install(FILES ${_OWE_CEF_BINARY_DIR}/${_f}
                 DESTINATION ${_OWE_WEWEB_INSTALL_DIR})
             if(_f STREQUAL "chrome-sandbox" OR _f MATCHES "\\.so(\\.[0-9]+)*$")
                 list(APPEND _OWE_STRIP_FILES ${_OWE_WEWEB_FILES_PREFIX}/${_f})
             endif()
         endif()
     endforeach()
-    # CEF_RESOURCE_FILES contains a `locales` directory entry mixed in
+    # The resource list contains a `locales` directory entry mixed in
     # with .pak / .dat files — split per type.
-    foreach(_f IN LISTS CEF_RESOURCE_FILES)
+    foreach(_f IN LISTS _OWE_CEF_RESOURCE_FILES)
         if(_f STREQUAL "locales")
-            install(DIRECTORY ${CEF_RESOURCE_DIR}/locales/
+            install(DIRECTORY ${_OWE_CEF_RESOURCE_DIR}/locales/
                 DESTINATION ${_OWE_WEWEB_INSTALL_DIR}/locales
                 FILES_MATCHING PATTERN "*.pak")
         else()
-            install(FILES ${CEF_RESOURCE_DIR}/${_f}
+            install(FILES ${_OWE_CEF_RESOURCE_DIR}/${_f}
                 DESTINATION ${_OWE_WEWEB_INSTALL_DIR})
         endif()
     endforeach()
@@ -228,15 +234,15 @@ set(_OWE_FILES
 )
 if(BUILD_WEWEB)
     list(APPEND _OWE_FILES ${OWE_WEWEB_BIN})
-    foreach(_f IN LISTS CEF_BINARY_FILES)
+    foreach(_f IN LISTS _OWE_CEF_BINARY_FILES)
         if(NOT _f IN_LIST _CEF_SKIP)
             list(APPEND _OWE_FILES ${_OWE_WEWEB_FILES_PREFIX}/${_f})
         endif()
     endforeach()
-    foreach(_f IN LISTS CEF_RESOURCE_FILES)
+    foreach(_f IN LISTS _OWE_CEF_RESOURCE_FILES)
         if(_f STREQUAL "locales")
-            file(GLOB _owe_paks RELATIVE ${CEF_RESOURCE_DIR}/locales
-                ${CEF_RESOURCE_DIR}/locales/*.pak)
+            file(GLOB _owe_paks RELATIVE ${_OWE_CEF_RESOURCE_DIR}/locales
+                ${_OWE_CEF_RESOURCE_DIR}/locales/*.pak)
             list(TRANSFORM _owe_paks PREPEND "${_OWE_WEWEB_FILES_PREFIX}/locales/")
             list(APPEND _OWE_FILES ${_owe_paks})
         else()

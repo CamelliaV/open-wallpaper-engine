@@ -74,8 +74,7 @@ if(BUILD_WEWEB)
         owe-web-host
         wavsen::audio
         PkgConfig::GLFW
-        Vulkan::Vulkan
-        ${CEF_STANDARD_LIBS})
+        Vulkan::Vulkan)
     set_target_properties(WebViewer PROPERTIES
         CXX_SCAN_FOR_MODULES ON
         BUILD_RPATH   "\$ORIGIN"

@@ -61,10 +61,6 @@ option(OWE_WAYWALLEN_PLUGIN_BUNDLE_LAYOUT
     "Install waywallen plugin files as a plugin-root bundle for CPack"
     OFF)
 
-if(BUILD_WEWEB)
-    include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
-endif()
-
 add_subdirectory(src)
 
 

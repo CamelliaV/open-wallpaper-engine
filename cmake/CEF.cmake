@@ -1,12 +1,13 @@
 # CEF integration glue.
 #
-# Runs after the top-level fetchdeps() has populated cef_SOURCE_DIR with the
+# Included by src/Web after fetchdeps() has populated cef_SOURCE_DIR with the
 # extracted CEF binary distribution. Defines:
 #
 #   * libcef_lib         — IMPORTED target wrapping the prebuilt libcef.so.
 #   * libcef_dll_wrapper — STATIC, built from CEF's libcef_dll/ sources.
 #   * weweb_apply_cef_target_settings(target)
 #   * weweb_apply_cef_module_target_settings(target)
+#   * weweb_get_cef_runtime(...)
 #   * weweb_stage_cef_runtime(target)
 #
 # CEF's own cmake helpers (find_package(CEF) + cef_macros + cef_variables)
@@ -14,8 +15,7 @@
 
 if(NOT DEFINED cef_SOURCE_DIR)
     message(FATAL_ERROR
-        "weweb: cef_SOURCE_DIR is unset. fetchdeps() must run before "
-        "add_subdirectory(weweb).")
+        "weweb: cef_SOURCE_DIR is unset. fetchdeps() must run before CEF setup.")
 endif()
 
 # Tell FindCEF.cmake where to look. CACHE FORCE because find_package(CEF) is
@@ -41,6 +41,11 @@ find_package(CEF REQUIRED)
 # regardless of our build type, only the wrapper compile around it differs.
 set(CEF_BINARY_DIR "${CEF_BINARY_DIR_RELEASE}")
 set(CEF_LIB_DEBUG  "${CEF_LIB_RELEASE}")
+
+set_property(GLOBAL PROPERTY WEWEB_CEF_BINARY_DIR "${CEF_BINARY_DIR}")
+set_property(GLOBAL PROPERTY WEWEB_CEF_BINARY_FILES "${CEF_BINARY_FILES}")
+set_property(GLOBAL PROPERTY WEWEB_CEF_RESOURCE_DIR "${CEF_RESOURCE_DIR}")
+set_property(GLOBAL PROPERTY WEWEB_CEF_RESOURCE_FILES "${CEF_RESOURCE_FILES}")
 
 # Build the C++ wrapper (libcef_dll/CMakeLists.txt defines target
 # libcef_dll_wrapper). Stash it under our build tree so paths stay tidy.
@@ -70,11 +75,23 @@ function(weweb_apply_cef_module_target_settings target)
     target_include_directories(${target} SYSTEM PRIVATE ${CEF_INCLUDE_PATH})
 endfunction()
 
+function(weweb_get_cef_runtime out_binary_dir out_binary_files out_resource_dir out_resource_files)
+    get_property(_binary_dir GLOBAL PROPERTY WEWEB_CEF_BINARY_DIR)
+    get_property(_binary_files GLOBAL PROPERTY WEWEB_CEF_BINARY_FILES)
+    get_property(_resource_dir GLOBAL PROPERTY WEWEB_CEF_RESOURCE_DIR)
+    get_property(_resource_files GLOBAL PROPERTY WEWEB_CEF_RESOURCE_FILES)
+    set(${out_binary_dir} "${_binary_dir}" PARENT_SCOPE)
+    set(${out_binary_files} "${_binary_files}" PARENT_SCOPE)
+    set(${out_resource_dir} "${_resource_dir}" PARENT_SCOPE)
+    set(${out_resource_files} "${_resource_files}" PARENT_SCOPE)
+endfunction()
+
 # Stage CEF runtime files (libcef.so, libEGL.so, libGLESv2.so, libv8…,
 # *.pak, icudtl.dat, locales/) next to a compiled binary so it can run
 # straight out of the build tree. CefInitialize will SIGABRT if these
 # aren't found in CEF_RESOURCES_DIR / CEF_BINARY_DIR.
 function(weweb_stage_cef_runtime target)
-    COPY_FILES(${target} "${CEF_BINARY_FILES}"   "${CEF_BINARY_DIR}"   "$<TARGET_FILE_DIR:${target}>")
-    COPY_FILES(${target} "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "$<TARGET_FILE_DIR:${target}>")
+    weweb_get_cef_runtime(_binary_dir _binary_files _resource_dir _resource_files)
+    COPY_FILES(${target} "${_binary_files}"   "${_binary_dir}"   "$<TARGET_FILE_DIR:${target}>")
+    COPY_FILES(${target} "${_resource_files}" "${_resource_dir}" "$<TARGET_FILE_DIR:${target}>")
 endfunction()
