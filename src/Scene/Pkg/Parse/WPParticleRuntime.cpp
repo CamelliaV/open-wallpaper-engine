@@ -333,12 +333,12 @@ void WPParticleSpawnPipeline::Initialize(WPParticleSpawnColumns&        columns,
     columns.randoms[request.slot.index] = Random::get(0.0f, 1.0f);
     for (auto& instruction : m_instructions) instruction.Initialize(columns, request, frame);
     if (! m_world_space) return;
-    auto wp_frame = WPParticleFrameFrom(frame);
-    auto index    = request.slot.index;
-    auto local_position =
+    auto            wp_frame = WPParticleFrameFrom(frame);
+    auto            index    = request.slot.index;
+    Eigen::Vector3f local_position =
         columns.positions[index] +
         wp_frame->subsystem->InstanceState(wp_frame->instance_index).bounded.position;
-    auto world_position =
+    Eigen::Vector4d world_position =
         wp_frame->world_from_spawn_space *
         Eigen::Vector4d(local_position.x(), local_position.y(), local_position.z(), 1.0);
     columns.positions[index]  = world_position.head<3>().cast<float>();
@@ -504,11 +504,11 @@ auto WPParticleSubSystem::SimulationControlpoint(usize index) const
         };
     }
 
-    const auto& world_from_local = m_frame.world_from_spawn_space;
-    auto        center           = world_from_local * Eigen::Vector4d(controlpoint.offset.x(),
-                                                                      controlpoint.offset.y(),
-                                                                      controlpoint.offset.z(),
-                                                                      1.0);
+    const auto&     world_from_local = m_frame.world_from_spawn_space;
+    Eigen::Vector4d center           = world_from_local * Eigen::Vector4d(controlpoint.offset.x(),
+                                                                          controlpoint.offset.y(),
+                                                                          controlpoint.offset.z(),
+                                                                          1.0);
     return {
         .center = center.head<3>(),
         .basis  = world_from_local.block<3, 3>(0, 0) * controlpoint.rotation,
@@ -519,7 +519,7 @@ auto WPParticleSubSystem::OwnerLocalToWorld(const Eigen::Vector3f& position) con
     -> Eigen::Vector3f {
     if (m_owner_node == nullptr) return position;
     m_owner_node->UpdateTrans();
-    auto world =
+    Eigen::Vector4d world =
         m_owner_node->ModelTrans() * Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
     return world.head<3>().cast<float>();
 }
@@ -528,8 +528,8 @@ auto WPParticleSubSystem::OwnerWorldToLocal(const Eigen::Vector3f& position) con
     -> Eigen::Vector3f {
     if (m_owner_node == nullptr) return position;
     m_owner_node->UpdateTrans();
-    auto local = m_owner_node->ModelTrans().inverse() *
-                 Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
+    Eigen::Vector4d local = m_owner_node->ModelTrans().inverse() *
+                            Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
     return local.head<3>().cast<float>();
 }
 
@@ -610,10 +610,12 @@ void WPParticleSubSystem::UpdateControlpoints(WPParticleInstanceRef current) {
             auto        source_index      = index.to_primitive();
             const auto& position_override = (*m_instance_override)->controlpoint[source_index];
             if (position_override.has_value()) {
-                auto position = Eigen::Vector3f { position_override->data() }.cast<double>();
+                Eigen::Vector3d position =
+                    Eigen::Vector3f { position_override->data() }.cast<double>();
                 if (controlpoint.worldspace) {
-                    auto local = m_frame.local_from_world *
-                                 Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
+                    Eigen::Vector4d local =
+                        m_frame.local_from_world *
+                        Eigen::Vector4d(position.x(), position.y(), position.z(), 1.0);
                     controlpoint.offset = local.head<3>();
                 } else {
                     controlpoint.offset += position;

@@ -909,7 +909,7 @@ struct WPAngularMovementOperator {
         auto velocities = context.view.Write(angular_velocity);
         auto delta      = context.delta.to_primitive();
         for (auto slot : context.slots) {
-            auto acceleration =
+            Eigen::Vector3d acceleration =
                 algorism::DragForce(rotations[slot.index].cast<double>(), drag) + force;
             velocities[slot.index] =
                 (velocities[slot.index].cast<double>() + acceleration * delta).cast<float>();
@@ -1200,7 +1200,7 @@ struct WPVortexOperator {
             if (radial_distance <= 1e-9) continue;
 
             if (! extended) {
-                auto direction = -frame.axis.cross(radial).normalized();
+                Eigen::Vector3d direction = -frame.axis.cross(radial).normalized();
                 velocities[slot.index] =
                     (velocities[slot.index].cast<double>() +
                      direction * VortexSpeedAtDistance(config, radial_distance) * 0.5 * delta)
@@ -1213,7 +1213,8 @@ struct WPVortexOperator {
             bool ring_shape = config.ringradius > 0.0f && config.ringwidth > 0.0f &&
                               config.ringpulldistance > 0.0f;
             if (ring_shape) {
-                auto ring_position = radial.normalized() * static_cast<double>(config.ringradius);
+                Eigen::Vector3d ring_position =
+                    radial.normalized() * static_cast<double>(config.ringradius);
                 auto ring_delta    = ring_position - relative;
                 auto ring_distance = ring_delta.norm();
                 if (ring_distance >= static_cast<double>(config.ringpulldistance)) continue;
@@ -1236,7 +1237,7 @@ struct WPVortexOperator {
                 }
 
                 auto            ring_strength = ring_speed * ring_influence * 0.5;
-                auto            tangent       = -frame.axis.cross(radial).normalized();
+                Eigen::Vector3d tangent       = -frame.axis.cross(radial).normalized();
                 Eigen::Vector3d current       = velocities[slot.index].cast<double>();
                 if (! config.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
                     current += tangent * ring_strength * delta;
@@ -1253,7 +1254,7 @@ struct WPVortexOperator {
 
             auto strength = VortexSpeedAtDistance(config, distance) * 0.5;
             if (std::abs(strength) <= 1e-9) continue;
-            auto            tangent = -frame.axis.cross(radial).normalized();
+            Eigen::Vector3d tangent = -frame.axis.cross(radial).normalized();
             Eigen::Vector3d current = velocities[slot.index].cast<double>();
             if (! config.flags[Vortex::FlagEnum::maintain_distance_to_center]) {
                 current += tangent * strength * delta;
@@ -1323,9 +1324,10 @@ struct WPControlPointAttractOperator {
         auto velocities = context.view.Write(velocity);
         auto controlpoint =
             frame->subsystem->SimulationControlpoint(rstd::as_cast<usize>(config.controlpoint));
-        auto offset = controlpoint.center +
-                      controlpoint.basis * Eigen::Vector3f { config.origin.data() }.cast<double>();
-        auto delta  = context.delta.to_primitive();
+        Eigen::Vector3d offset =
+            controlpoint.center +
+            controlpoint.basis * Eigen::Vector3f { config.origin.data() }.cast<double>();
+        auto delta = context.delta.to_primitive();
         for (auto slot : context.slots) {
             auto difference = offset - positions[slot.index].cast<double>();
             if (difference.norm() < config.threshold) {

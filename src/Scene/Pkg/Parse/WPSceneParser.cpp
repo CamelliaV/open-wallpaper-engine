@@ -445,7 +445,7 @@ script::ScriptScene& EnsureScriptScene(ParseContext& context) {
                     node->UpdateTrans();
                     Eigen::Affine3f world = Eigen::Affine3f::Identity();
                     world.matrix()        = node->ModelTrans().cast<float>();
-                    auto t                = (world * *bone).translation();
+                    Eigen::Vector3f t     = (world * *bone).translation();
                     return script::BoneTranslation { t.x(), t.y(), t.z() };
                 });
         if (context.user_properties.is_some())
@@ -3335,8 +3335,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                 const Vector3f delta =
                     AlignmentOffset(alignment, { geometry_size[0], geometry_size[1] }) -
                     alignment_offset;
-                auto transform = alignment_base_transform *
-                                 Affine3d(Translation3d(delta.cast<double>())).matrix();
+                Matrix4d transform = alignment_base_transform *
+                                     Affine3d(Translation3d(delta.cast<double>())).matrix();
                 if (image_effect_layer)
                     image_effect_layer->FinalMesh().SetGeometryTransform(rstd::move(transform));
                 else if (node)

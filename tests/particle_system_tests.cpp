@@ -473,9 +473,11 @@ TEST(WPParticleSubSystem, ConvertsWorldSpaceFollowAnchorsIntoChildLocalSpace) {
     ASSERT_EQ(child_system->System().InstanceCount(), usize(1));
     auto parent_position = parent.System().Instance(usize()).Binding().Read().Positions()[usize()];
     auto child_anchor    = child_system->InstanceState(usize()).bounded.position;
+    EXPECT_TRUE(child_anchor.allFinite());
     child_node->UpdateTrans();
-    auto resolved = child_node->ModelTrans() *
-                    Eigen::Vector4d(child_anchor.x(), child_anchor.y(), child_anchor.z(), 1.0);
+    Eigen::Vector4d resolved =
+        child_node->ModelTrans() *
+        Eigen::Vector4d(child_anchor.x(), child_anchor.y(), child_anchor.z(), 1.0);
     EXPECT_TRUE(resolved.head<3>().cast<float>().isApprox(parent_position));
 }
 
