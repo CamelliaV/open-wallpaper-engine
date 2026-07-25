@@ -1682,9 +1682,12 @@ TEST(ScriptMedia, DispatchesPropertiesPlaybackAndThumbnailEvents) {
         }
         export function mediaThumbnailChanged(event) {
             thisObject.visible = event.hasThumbnail;
+            const colorDelta = event.textColor.subtract(event.tertiaryColor)
+                .add(event.highContrastColor);
             if (event.hasThumbnail && event.thumbnail === "/tmp/cover.png" &&
                 event.previousThumbnail === "/tmp/previous.png" &&
-                event.primaryColor.x === 1 && event.secondaryColor.x === 0) {
+                event.primaryColor.x === 1 && event.secondaryColor.x === 0 &&
+                event.tertiaryColor.x === 0 && colorDelta.lengthSqr() === 0) {
                 thumb = 1;
             }
         }
