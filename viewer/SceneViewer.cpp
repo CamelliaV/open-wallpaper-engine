@@ -18,8 +18,6 @@ using namespace std;
 using namespace rstd::prelude;
 using namespace rstd::literals;
 
-atomic<bool> renderCall(false);
-
 class StdinJsonControl {
 public:
     explicit StdinJsonControl(bool enabled): m_enabled(enabled) {
@@ -154,11 +152,6 @@ void cursor_enter_callback(GLFWwindow* win, int entered) {
     if (! data || ! data->psw || data->mouse_position_locked) return;
     data->psw->mouseEnter(entered != 0);
 }
-}
-
-void updateCallback() {
-    renderCall = true;
-    glfwPostEmptyEvent();
 }
 
 std::optional<std::array<double, 2>> parseMousePosition(const std::string& value) {
@@ -326,7 +319,7 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::seconds(seconds));
     } else {
         while (! glfwWindowShouldClose(window)) {
-            glfwPollEvents();
+            glfwWaitEventsTimeout(1.0 / 30.0);
             stdin_control.poll(*psw);
             apply_locked_mouse();
             update_audio();
