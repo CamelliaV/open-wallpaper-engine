@@ -2,23 +2,70 @@
   <description>
     <p>Added:</p>
     <ul>
-      <li>Steam Workshop discovery, authentication and subscription management through the Waywallen plugin source.</li>
-      <li>Scripted dynamic scene layers, runtime user-property control and media thumbnail colors.</li>
-      <li>Planar reflections, legacy 3D material inputs and integrated audio spectrum playback.</li>
+      <li>Steam Workshop discovery through the Waywallen plugin source.</li>
+      <li>Steam account authentication.</li>
+      <li>Steam Workshop subscription management.</li>
+      <li>Runtime user-property controls in SceneViewer.</li>
+      <li>Script-created dynamic scene layers.</li>
+      <li>Media thumbnail colors for scene scripts.</li>
+      <li>Planar reflection rendering.</li>
+      <li>Legacy 3D material inputs.</li>
+      <li>Waywallen audio spectrum input.</li>
+      <li>First-frame load benchmark reports.</li>
     </ul>
     <p>Fixes:</p>
     <ul>
-      <li>Particle trails, child emitters, follow anchors, sprite animation, warmup, fog and world-space rendering.</li>
-      <li>Render target identity, nested composites, framebuffer history and dynamic resource refresh.</li>
-      <li>Wallpaper Engine shader varyings, matrix layout, uniform defaults and material value handling.</li>
-      <li>Scripted effects, image alignment, text effects, puppet attachments and model transforms.</li>
-      <li>Renderer bridge shutdown, audio activation and frame pacing.</li>
+      <li>Child particle mesh capacity.</li>
+      <li>Child particle lifecycle.</li>
+      <li>Child particle color inheritance.</li>
+      <li>Child particle follow anchors.</li>
+      <li>Rope trail sampling.</li>
+      <li>Lightning rope sequencing.</li>
+      <li>Velocity-based particle trails.</li>
+      <li>World-space particle trails.</li>
+      <li>Multi-image particle sprite animation.</li>
+      <li>Particle time scaling.</li>
+      <li>Particle warmup stalls.</li>
+      <li>Particle fog under perspective cameras.</li>
+      <li>World-space particle controls.</li>
+      <li>Particle direct-draw shapes.</li>
+      <li>Render target identity during dynamic updates.</li>
+      <li>Nested link texture outputs.</li>
+      <li>Composite layer content preservation.</li>
+      <li>Mip framebuffer history.</li>
+      <li>Dynamic buffer content preservation.</li>
+      <li>Dynamic texture binding refresh.</li>
+      <li>Wallpaper Engine cross-stage shader varyings.</li>
+      <li>Wallpaper Engine HLSL matrix layout.</li>
+      <li>Cross-stage uniform defaults.</li>
+      <li>Full-width semicolons in shaders.</li>
+      <li>Unused material values no longer report missing GLSL uniforms.</li>
+      <li>Copybackground custom effects.</li>
+      <li>Script-driven image alignment.</li>
+      <li>Scripted effect draw alignment.</li>
+      <li>Text effect alignment.</li>
+      <li>Puppet geometry alignment.</li>
+      <li>Puppet attachment transforms.</li>
+      <li>Model fog eye position.</li>
+      <li>Scripted model rotation.</li>
+      <li>Renderer bridge shutdown after session loss.</li>
+      <li>Audio device activation ordering.</li>
+      <li>SceneViewer event polling.</li>
     </ul>
     <p>Improved:</p>
     <ul>
-      <li>Renderer resource ownership, preparation and caching.</li>
-      <li>Package IO, scene runtime and Vulkan infrastructure migration to rstd and vvk.</li>
-      <li>Texture upload, shader compilation and particle update performance.</li>
+      <li>Renderer-neutral resource registries.</li>
+      <li>Render resource ownership tracking.</li>
+      <li>Render resource preparation.</li>
+      <li>Shader parse artifact caching.</li>
+      <li>Persistent shader compilation caching.</li>
+      <li>Parallel texture preparation.</li>
+      <li>Streaming texture uploads.</li>
+      <li>Particle attribute caching.</li>
+      <li>Batched particle vertex uploads.</li>
+      <li>Package IO migration to rstd.</li>
+      <li>Scene runtime migration to rstd.</li>
+      <li>Vulkan infrastructure migration to vvk.</li>
     </ul>
   </description>
 </release>
