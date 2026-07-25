@@ -972,9 +972,7 @@ int run(int argc, char** argv) {
     wp_config.user_properties = rstd::move(opts.initial_user_properties);
     wp_config.fps             = opts.initial_fps;
     wp_config.volume          = effective_volume(host);
-    // Mute first so loadScene's SoundManager::init() short-circuits when
-    // audio is disabled; the audio device + system output never open.
-    wp_config.muted = ! effective_audio_enabled(host);
+    wp_config.muted           = ! effective_audio_enabled(host);
     wp.configure(rstd::move(wp_config));
 
     // The factory runs inside VulkanRender::init after the GPU is picked

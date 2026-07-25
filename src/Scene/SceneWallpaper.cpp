@@ -56,6 +56,7 @@ class MainMsg final {
               (SetFps, (u32 fps;)), (SetVolume, (f32 volume;)),
               (SetVolumeScale, (f32 scale; u32 fade_ms { 0 };)), (SetMuted, (bool muted;)),
               (SetAudioClientIdentity, (SceneAudioClientIdentity identity;)),
+              (AudioDeviceEvent, (wavsen::audio::AudioDeviceEvent event;)),
               (SetFillMode, (FillMode mode;)), (SetSpeed, (f32 speed;)),
               (SetUserProperty, (std::string key; Json value;)),
               (SetFirstFrameCallback, (FirstFrameCallback cb;)),
@@ -243,6 +244,7 @@ public:
     void on(MainMsg::SetVolumeScale_payload&&);
     void on(MainMsg::SetMuted_payload&&);
     void on(MainMsg::SetAudioClientIdentity_payload&&);
+    void on(MainMsg::AudioDeviceEvent_payload&&);
     void on(MainMsg::SetFillMode_payload&&);
     void on(MainMsg::SetSpeed_payload&&);
     void on(MainMsg::SetUserProperty_payload&&);
@@ -281,6 +283,7 @@ private:
     UserPropertyDiagnosticCallback   m_user_property_diagnostic_cb;
     ClearColorCallback               m_clear_color_cb;
     u64                              m_audio_pause_generation {};
+    bool                             m_audio_activated {};
 
     Option<SceneLoadBenchHandle>               m_load_bench;
     Option<rstd::bench::probe::ProbeCollector> m_load_bench_collector;
@@ -1011,6 +1014,7 @@ void SceneRuntimeController::startMainLoop() {
                 RSTD_CASE_PAYLOAD(SetVolumeScale, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetMuted, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetAudioClientIdentity, value) { on(rstd::move(value)); }
+                RSTD_CASE_PAYLOAD(AudioDeviceEvent, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetFillMode, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetSpeed, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(SetUserProperty, value) { on(rstd::move(value)); }
@@ -1026,6 +1030,7 @@ void SceneRuntimeController::startMainLoop() {
                 RSTD_CASE_PAYLOAD(LoadBenchFinish, value) { on(rstd::move(value)); }
                 RSTD_CASE_PAYLOAD(FirstFrame, value) { on(rstd::move(value)); }
                 RSTD_CASE(Shutdown) {
+                    m_sound_manager->shutdown();
                     finishLoadBench();
                     shutdown = true;
                 }
@@ -1057,6 +1062,14 @@ void SceneRuntimeController::stopMainLoop() {
 
 void SceneRuntimeController::onLoadScene() {
     if (m_render_controller->renderInited()) {
+        if (! m_audio_activated) {
+            auto tx = sender();
+            m_sound_manager->activate(
+                [tx = rstd::move(tx)](wavsen::audio::AudioDeviceEvent event) mutable {
+                    (void)tx.send(MainMsg::AudioDeviceEvent(rstd::move(event)));
+                });
+            m_audio_activated = true;
+        }
         loadScene();
     }
 }
@@ -1105,8 +1118,12 @@ void SceneRuntimeController::on(MainMsg::SetAudioClientIdentity_payload&& m) {
         .media_role       = rstd::move(m.identity.media_role),
     };
     if (! m_sound_manager->set_identity(rstd::move(identity))) {
-        rstd_warn("audio identity cannot change after device initialization");
+        rstd_warn("audio identity cannot change after audio shutdown");
     }
+}
+
+void SceneRuntimeController::on(MainMsg::AudioDeviceEvent_payload&& m) {
+    m_sound_manager->on_device_event(rstd::move(m.event));
 }
 
 void SceneRuntimeController::on(MainMsg::SetFillMode_payload&& m) {
@@ -1217,12 +1234,7 @@ void SceneRuntimeController::loadScene() {
 
     {
         auto span = SceneLoadSpan(loadBenchView(), &SceneLoadProbeIds::load_audio);
-        if (! m_sound_manager->is_inited()) {
-            m_sound_manager->init();
-            m_sound_manager->play();
-        } else {
-            m_sound_manager->unmount_all();
-        }
+        m_sound_manager->unmount_all();
     }
 
     Option<ParsedScene> parsed_scene;

@@ -367,7 +367,7 @@ bool RunSceneParseBase(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v, std:
 
 // Runs the full WPSceneParser::Parse pipeline: scene parse + per-image
 // shader compile + bloom auto-injection + scene-graph allocation.
-// SoundManager is default-constructed but never Init()'d so Sound
+// SoundManager is default-constructed but never activated, so Sound
 // objects parse without opening an audio device.
 bool RunSceneParseFull(owe::fs::VFS& vfs, owe::wpscene::SceneVersion pkg_v,
                        const std::string& pkg_id, std::string& err) {

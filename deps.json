@@ -69,7 +69,7 @@
     }
   },
   {
-    "commit": "21827be2f34e14188b6dd8702cd5ebe22bdcbe3a",
+    "commit": "49e5ce5c4bbf27bb17fb986d5c9944d9167cf5ae",
     "dest": "build/_flatpak_deps/wavsen-src",
     "disable-shallow-clone": true,
     "type": "git",
