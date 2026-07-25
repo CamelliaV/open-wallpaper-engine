@@ -2151,7 +2151,12 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
         std::string               glname = ResolveShaderMaterialKey(info, name);
         if (glname.empty()) {
             if (IsLegacyAtmosphereShadowValue(wpmat, name)) continue;
-            rstd_error("ShaderValue: {} not found in glsl", name);
+            if (wpmat.constantshadervalues_animations.contains(name)) {
+                rstd_warn("animated shader value '{}' has no uniform in '{}'", name, wpmat.shader);
+            } else {
+                rstd_debug(
+                    "ignoring shader value '{}' without a uniform in '{}'", name, wpmat.shader);
+            }
         } else {
             std::vector<float> const_value = value;
             bool               normalize_position =
@@ -2622,27 +2627,6 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
         auto texture =
             context.scene->Texture(rstd::cppstd::as_str(material.textures.front()).unwrap());
         point_source = texture.is_some() && (**texture).sample.magFilter == TextureFilter::NEAREST;
-    }
-
-    for (const auto& cs : image_wpmat.constantshadervalues) {
-        const auto&               name  = cs.first;
-        const std::vector<float>& value = cs.second;
-        std::string               glname;
-        if (shaderInfo.alias.count(name) != 0) {
-            glname = shaderInfo.alias.at(name);
-        } else {
-            for (const auto& el : shaderInfo.alias) {
-                if (el.second.substr(2) == name) {
-                    glname = el.second;
-                    break;
-                }
-            }
-        }
-        if (glname.empty()) {
-            rstd_error("ShaderValue: {} not found in glsl", name);
-        } else {
-            material.customShader.constValues[glname] = value;
-        }
     }
 
     // mesh
