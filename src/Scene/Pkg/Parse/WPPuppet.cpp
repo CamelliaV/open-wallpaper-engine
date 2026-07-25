@@ -103,6 +103,24 @@ void WPPuppet::prepared() {
         }
         b.inv_bind = b.world_bind.inverse();
     }
+    for (auto& attachment : attachments) {
+        attachment.bind_xform = attachment.local_xform;
+        if (usize(attachment.bone_index) >= bones.len()) continue;
+
+        Vec<uint32_t> chain;
+        uint32_t      bone_index = attachment.bone_index;
+        while (bone_index != NO_PARENT && usize(bone_index) < bones.len()) {
+            chain.push(uint32_t(bone_index));
+            bone_index = bones[usize(bone_index)].file_parent;
+        }
+
+        Eigen::Affine3f bone_bind = Eigen::Affine3f::Identity();
+        for (usize i = chain.len(); i > usize();) {
+            --i;
+            bone_bind = bone_bind * bones[usize(chain[i])].local_bind;
+        }
+        attachment.bind_xform = bone_bind * attachment.local_xform;
+    }
     for (auto& anim : anims) {
         anim.frame_time = 1.0f / anim.fps;
         anim.max_time   = static_cast<double>(anim.length) / anim.fps;
@@ -118,6 +136,19 @@ void WPPuppet::prepared() {
     for (usize i {}; i < bones.len(); ++i) {
         m_final_affines.emplace_back(Affine3f::Identity());
     }
+}
+
+Option<usize> WPPuppet::attachmentIndex(ref<str> name) const noexcept {
+    for (usize i {}; i < attachments.len(); ++i) {
+        if (attachments[i].name == name) return Some(i);
+    }
+    return None();
+}
+
+Option<Eigen::Affine3f> WPPuppet::attachmentBindTransform(usize index) const noexcept {
+    if (index >= attachments.len()) return None();
+    Eigen::Affine3f transform = attachments[index].bind_xform;
+    return Some(rstd::move(transform));
 }
 
 slice<Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer, double time) noexcept {
@@ -381,6 +412,18 @@ Option<Eigen::Affine3f> WPPuppetLayer::boneTransform(uint32_t index, double time
     auto frame = genFrame(time);
     if (zero_based >= frame.len()) return None();
     Eigen::Affine3f transform = frame[zero_based] * m_puppet->bones[zero_based].world_bind;
+    return Some(rstd::move(transform));
+}
+
+Option<Eigen::Affine3f> WPPuppetLayer::attachmentTransform(usize index, double time) noexcept {
+    if (index >= m_puppet->attachments.len()) return None();
+    const auto& attachment = m_puppet->attachments[index];
+    const usize bone_index(attachment.bone_index);
+    if (bone_index >= m_puppet->bones.len()) return None();
+
+    auto frame = genFrame(time);
+    if (bone_index >= frame.len()) return None();
+    Eigen::Affine3f transform = frame[bone_index] * attachment.bind_xform;
     return Some(rstd::move(transform));
 }
 

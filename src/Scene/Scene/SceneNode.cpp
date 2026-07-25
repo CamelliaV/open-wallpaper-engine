@@ -20,7 +20,7 @@ Matrix4d SceneNode::GetLocalTrans() const {
 
     trans.pretranslate(m_translate.cast<double>());
 
-    return trans.matrix();
+    return m_local_frame * trans.matrix();
 }
 
 void SceneNode::RotateObjectSpace(const Vector3f& rotation) {

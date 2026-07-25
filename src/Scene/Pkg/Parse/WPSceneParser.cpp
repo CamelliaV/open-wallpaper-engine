@@ -439,6 +439,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
     for (unsigned i = 0; i < count; ++i) {
         auto clone =
             Arc<SceneNode>::make(tmpl->Translate(), tmpl->Scale(), tmpl->Rotation(), tmpl->Name());
+        clone->SetLocalFrame(tmpl->LocalFrame());
         clone->SetSize(tmpl->Size());
         clone->SetGeometryTransform(tmpl->GeometryTransform());
         clone->SetPerspective(tmpl->Perspective());
@@ -5121,56 +5122,35 @@ Box<Scene> FinalizeScene(ParseContext& context) {
             parent_node = (*(**parent).node).as_ptr();
             parent_ref  = &**parent;
         }
-        // MDAT bone-anchor: if the child carries `attachment = "<name>"` and
-        // the parent owns a puppet with a matching MDAT entry, offset the
-        // child by the attachment's local-space translation (e.g. forehead
-        // bangs anchored to the head bone of the character body puppet).
-        // Bone-following animation is deliberately omitted — static bind
-        // position is enough for the visible-frame placement; sim bones do
-        // not drift far from bind in practice.
+        // Named MDAT anchors provide the child's local frame in the parent
+        // puppet's bind space.
         if (! ref.attachment.is_empty() && parent_ref && parent_ref->puppet.is_some()) {
-            const auto& puppet = **parent_ref->puppet;
-            const auto& atts   = puppet.attachments;
-            auto        ait    = std::find_if(atts.begin(), atts.end(), [&](const auto& a) {
-                return a.name == ref.attachment.as_str();
-            });
-            if (ait != atts.end() && ait->bone_index < puppet.bones.len().to_primitive()) {
-                // Walk the original on-file parent chain to compose the
-                // anchored bone's puppet-local bind. ApplyMDLS3CentroidPivot
-                // has already flattened bind_parent / anim_parent for the
-                // skinning path; file_parent is preserved for this lookup.
-                Eigen::Affine3f       bone_world = Eigen::Affine3f::Identity();
-                std::vector<uint32_t> chain;
-                uint32_t              bi = ait->bone_index;
-                while (bi != WPPuppet::NO_PARENT && bi < puppet.bones.len().to_primitive()) {
-                    chain.push_back(bi);
-                    bi = puppet.bones[usize(bi)].file_parent;
-                }
-                for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-                    bone_world = bone_world * puppet.bones[usize(*it)].local_bind;
-                }
+            const auto& puppet           = **parent_ref->puppet;
+            auto        attachment_index = puppet.attachmentIndex(ref.attachment.as_str());
+            if (attachment_index.is_some()) {
                 auto apply_bind_offset = [&]() {
-                    Eigen::Affine3f anchor = bone_world * ait->local_xform;
-                    Vector3f        offset = anchor.translation();
+                    auto anchor = puppet.attachmentBindTransform(*attachment_index);
+                    if (anchor.is_none()) return;
                     if (ref.apply_attachment_offset.is_some()) {
-                        (*ref.apply_attachment_offset)->operator()(offset);
+                        (*ref.apply_attachment_offset)->operator()(anchor->translation());
                     } else {
-                        (*ref.node)->SetTranslate((*ref.node)->Translate() + offset);
+                        (*ref.node)->SetLocalFrame(anchor->matrix().cast<double>() *
+                                                   (*ref.node)->LocalFrame());
                     }
                 };
                 if (ref.apply_attachment_offset.is_none() && parent_ref->puppet_layer.is_some()) {
-                    SceneNode* node  = (*ref.node).as_ptr();
-                    auto       layer = CopyableArcHold((*parent_ref->puppet_layer).clone());
-                    auto       attachment_index = ait->bone_index;
-                    auto       attachment_xform = ait->local_xform;
-                    auto       base             = node->Translate();
-                    auto       update =
-                        [node, layer, attachment_index, attachment_xform, base](f64 time) {
-                            auto bone = layer.value->boneTransform(
-                                static_cast<uint32_t>(attachment_index) + 1u, time.to_primitive());
-                            if (bone.is_none()) return;
-                            node->SetTranslate(base + (*bone * attachment_xform).translation());
-                        };
+                    SceneNode* node       = (*ref.node).as_ptr();
+                    auto       layer      = CopyableArcHold((*parent_ref->puppet_layer).clone());
+                    auto       local_base = node->LocalFrame();
+                    auto       update     = [node,
+                                             layer,
+                                             attachment_index = *attachment_index,
+                                             local_base       = rstd::move(local_base)](f64 time) {
+                        auto anchor =
+                            layer.value->attachmentTransform(attachment_index, time.to_primitive());
+                        if (anchor.is_none()) return;
+                        node->SetLocalFrame(anchor->matrix().cast<double>() * local_base);
+                    };
                     update(context.scene->Runtime().Frame().elapsed);
                     context.scene->RegisterTransformUpdater(
                         Box<dyn<FnMut<void(f64)>>>::make(rstd::move(update)));

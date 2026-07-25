@@ -89,6 +89,8 @@ public:
         uint16_t        bone_index { 0 }; // hexpat MDAT Attachment.unk
         String          name;
         Eigen::Affine3f local_xform { Eigen::Affine3f::Identity() };
+
+        Eigen::Affine3f bind_xform { Eigen::Affine3f::Identity() };
     };
     struct BoneFrame {
         Eigen::Vector3f position;
@@ -221,8 +223,10 @@ public:
     // uses standard chain LBS. Set at parse time from `header.mdlv`.
     bool world_anchored_bones { false };
 
-    slice<Eigen::Affine3f> genFrame(WPPuppetLayer&, double time) noexcept;
-    void                   prepared();
+    slice<Eigen::Affine3f>  genFrame(WPPuppetLayer&, double time) noexcept;
+    void                    prepared();
+    Option<usize>           attachmentIndex(ref<str> name) const noexcept;
+    Option<Eigen::Affine3f> attachmentBindTransform(usize index) const noexcept;
 
 private:
     Vec<Eigen::Affine3f> m_final_affines;
@@ -258,6 +262,7 @@ public:
     slice<Eigen::Affine3f>  genFrame(double time) noexcept;
     uint32_t                boneIndex(ref<str> name) const noexcept;
     Option<Eigen::Affine3f> boneTransform(uint32_t index, double time) noexcept;
+    Option<Eigen::Affine3f> attachmentTransform(usize index, double time) noexcept;
 
     void updateInterpolation(double time) noexcept;
 
