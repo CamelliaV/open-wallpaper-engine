@@ -288,6 +288,67 @@ TEST(ScriptNodeSize, ParserSetSizeFlowsToScript) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 320.0 + 240.0 * 1000);
 }
 
+TEST(ScriptNodeParent, CursorCallbackParentChainTerminatesAtUnparentedNode) {
+    auto root  = Arc<owe::SceneNode>::make();
+    auto child = Arc<owe::SceneNode>::make();
+    root->AppendChild(child.clone());
+    child->SetTranslate({ 500.0f, 500.0f, 0.0f });
+    child->SetSize({ 200.0f, 200.0f });
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    fi.canvas_w               = 1920.0f;
+    fi.canvas_h               = 1080.0f;
+    fi.cursor_in_window       = true;
+    fi.cursor_x               = 500.0f / fi.canvas_w;
+    fi.cursor_y               = 1.0f - 500.0f / fi.canvas_h;
+    fi.mouse_buttons_released = 1u << 0;
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let result = 0;
+            export function cursorUp() {
+                let layer = thisLayer;
+                let depth = 0;
+                while (typeof layer !== 'undefined' && layer != null && depth < 8) {
+                    depth++;
+                    layer = layer.getParent();
+                }
+                result = typeof layer === 'undefined' ? depth : -depth;
+            }
+            export function update() { return result; }
+        )JS",
+        "test/parent_chain_terminates",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        child.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs), 2.0);
+}
+
+TEST(ScriptNodeParent, DefaultLayerParentIsUndefined) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            export function update() {
+                return typeof thisLayer.getParent() === 'undefined' ? 1 : 0;
+            }
+        )JS",
+        "test/default_layer_parent",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0));
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs), 1.0);
+}
+
 TEST(ScriptNodeSoftMutation, VisibleAndAlphaWrites) {
     owe::SceneNode node;
     JsRuntime      rt;

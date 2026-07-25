@@ -1336,9 +1336,8 @@ globalThis.Vec4 = Vec4;
 
 // --- thisLayer / thisScene stub ---------------------------------------------
 // Stand-in for the per-script SceneNode binding. Property reads return
-// sensible defaults; writes are silently accepted. A few well-known
-// methods (getParent / getTransformMatrix) return shaped values so
-// `parent.getTransformMatrix().m[13]` style accesses don't TypeError.
+// sensible defaults; writes are silently accepted. getTransformMatrix returns
+// a shaped value so matrix accesses don't TypeError.
 function __wwCreateNodeStub() {
     const props = {
         origin:         new Vec3(0, 0, 0),
@@ -1358,7 +1357,7 @@ function __wwCreateNodeStub() {
     const identity = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
     const handler = {
         get(target, key) {
-            if (key === 'getParent')           return () => __wwCreateNodeStub();
+            if (key === 'getParent')           return () => undefined;
             if (key === 'getTransformMatrix')  return () => ({ m: identity.slice() });
             if (key === 'getChildren')         return () => [];
             if (key === 'getName')             return () => '';
@@ -2092,15 +2091,10 @@ JSValue NodeSetPointSize(JSContext* ctx, JSValueConst this_val, JSValueConst val
 
 // --- methods ----------------------------------------------------------------
 
-// Always return SOMETHING — many scripts cache `parent = thisLayer.getParent()`
-// at init time and dereference it later without a null check. When there's
-// no real parent (root layer or unbound node), hand back the default JS
-// stub so `parent.origin` etc. silently no-op instead of TypeError'ing.
 JSValue NodeGetParent(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
     auto* n = GetLayerNode(this_val);
     if (n && n->Parent()) return WrapLayerNode(ctx, n->Parent());
-    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    return JS_DupValue(ctx, host->default_layer);
+    return JS_UNDEFINED;
 }
 
 JSValue NodeGetTransformMatrix(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
