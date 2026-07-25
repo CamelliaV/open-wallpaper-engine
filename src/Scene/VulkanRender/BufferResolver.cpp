@@ -132,14 +132,22 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(
     rstd::mut_ref<rstd::dyn<resource::BufferContentWriter>> writer) {
     if (! buffers.dynamic) return true;
     if (request.mesh == nullptr) return false;
-    SceneMesh& mesh          = *request.mesh;
-    const auto submesh_index = request.submesh_index;
-    if ((mesh.DirtyFlags() & SceneMeshDirtyData) == 0) return true;
+    SceneMesh&        mesh                 = *request.mesh;
+    const auto        submesh_index        = request.submesh_index;
     const std::size_t native_submesh_index = submesh_index.to_primitive();
     if (native_submesh_index >= mesh.Submeshes().size()) return true;
 
-    const auto& submesh           = mesh.Submeshes()[native_submesh_index];
-    auto        require_reprepare = [&mesh] {
+    const auto& submesh = mesh.Submeshes()[native_submesh_index];
+    if (! submesh.index_arrays.empty()) {
+        buffers.draw_count = rstd::as_cast<u32>(submesh.index_arrays[0].RenderDataCount());
+    } else if (! submesh.vertex_arrays.empty()) {
+        buffers.draw_count = rstd::as_cast<u32>(submesh.vertex_arrays[0].VertexCount());
+    } else {
+        buffers.draw_count = u32();
+    }
+    if ((mesh.DirtyFlags() & SceneMeshDirtyData) == 0) return true;
+
+    auto require_reprepare = [&mesh] {
         mesh.SetLayoutDirty();
         return false;
     };
@@ -157,19 +165,15 @@ bool RenderBufferResolver::updateDynamicDrawBuffers(
     }
 
     if (! submesh.index_arrays.empty()) {
-        const auto& index  = submesh.index_arrays[0];
-        buffers.draw_count = rstd::as_cast<u32>(index.RenderDataCount());
+        const auto& index = submesh.index_arrays[0];
         if (buffers.index_key.is_some()) {
             buffers.index_key->data_generation = index.DataGeneration();
         }
         auto updated =
             writer->UpdateBuffer(*buffers.index, bytesOf(index.Data(), index.DataSizeOf()));
         if (updated.is_err()) return require_reprepare();
-    } else if (! submesh.vertex_arrays.empty()) {
-        buffers.draw_count = rstd::as_cast<u32>(submesh.vertex_arrays[0].VertexCount());
     }
 
-    (void)mesh.ConsumeDirtyFlags(SceneMeshDirtyData);
     return true;
 }
 

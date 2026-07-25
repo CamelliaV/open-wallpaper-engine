@@ -178,58 +178,6 @@ bool SceneWritesLayerText(slice<SceneObjectVar> scene_objs) {
     return false;
 }
 
-std::vector<std::string> DetectRegisteredAssets(std::string_view src) {
-    std::vector<std::string> out;
-    auto                     seen = std::unordered_set<std::string> {};
-    for (std::size_t pos = 0; (pos = src.find("registerAsset", pos)) != std::string_view::npos;) {
-        pos += std::string_view("registerAsset").size();
-        while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\n')) ++pos;
-        if (pos >= src.size() || src[pos] != '(') continue;
-        ++pos;
-        while (pos < src.size() && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\n')) ++pos;
-        if (pos >= src.size() || (src[pos] != '\'' && src[pos] != '"')) continue;
-        char        quote = src[pos++];
-        std::size_t begin = pos;
-        while (pos < src.size()) {
-            if (src[pos] == '\\' && pos + 1 < src.size()) {
-                pos += 2;
-                continue;
-            }
-            if (src[pos] == quote) break;
-            ++pos;
-        }
-        if (pos >= src.size()) break;
-        std::string asset { src.substr(begin, pos - begin) };
-        if (seen.insert(asset).second) out.push_back(std::move(asset));
-    }
-    return out;
-}
-
-std::optional<std::array<float, 2>> ResolveImageAssetSize(ParseContext&    context,
-                                                          std::string_view image_path) {
-    auto info = wpscene::LoadImageAssetInfo(*context.vfs, image_path);
-    if (! info) return std::nullopt;
-    if (info->size) return info->size;
-    if (info->first_texture.empty()) return std::nullopt;
-
-    auto parsed_header =
-        context.scene->ParseImageHeader(rstd::cppstd::as_str(info->first_texture).unwrap());
-    if (parsed_header.is_err()) return std::nullopt;
-    auto    header = rstd::move(parsed_header).unwrap_unchecked();
-    int32_t w      = 0;
-    int32_t h      = 0;
-    if (header.isSprite && header.spriteAnim.numFrames() != usize()) {
-        const auto& frame = header.spriteAnim.GetCurFrame();
-        w                 = static_cast<int32_t>(std::round(frame.width));
-        h                 = static_cast<int32_t>(std::round(frame.height));
-    } else {
-        w = header.width > 0 ? header.width : header.mapWidth;
-        h = header.height > 0 ? header.height : header.mapHeight;
-    }
-    if (w <= 0 || h <= 0) return std::nullopt;
-    return std::array { static_cast<float>(w), static_cast<float>(h) };
-}
-
 bool AppendLayerCompositePassthroughEffect(fs::VFS& vfs, wpscene::ImageObject& image) {
     wpscene::Material material;
     auto              json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
@@ -443,6 +391,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
         clone->SetSize(tmpl->Size());
         clone->SetGeometryTransform(tmpl->GeometryTransform());
         clone->SetPerspective(tmpl->Perspective());
+        clone->SetReflected(tmpl->Reflected());
         if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
         clone->AddMesh(tmpl->MeshShared());
         clone->SetVisible(false);
@@ -520,6 +469,11 @@ void SetScriptInitializationOrder(ParseContext& context, script::FieldScript& sc
     auto order = context.script_initialization_orders.get(node->ID().to_primitive());
     if (order.is_none()) return;
     EnsureScriptScene(context).runtime().SetInitializationOrder(script, **order);
+}
+
+void TrackRegisteredAssets(ParseContext& context, script::FieldScript* script) {
+    if (script && ! script->RegisteredAssets().is_empty())
+        context.registered_asset_scripts.push(rstd::move(script));
 }
 
 std::optional<float> ScriptValueAsFloat(const script::ScriptValue& value) {
@@ -944,13 +898,7 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
             rt.MakeFieldScript(sb.source, sha, kind, props, initial_value, node, std::move(clones));
         if (! fs) continue;
         SetScriptInitializationOrder(context, *fs, node);
-        if (sb.source.find("createLayer") != std::string_view::npos &&
-            sb.source.find("registerAsset") != std::string_view::npos) {
-            context.create_layer_asset_requests.push(
-                { fs,
-                  node->ID().to_primitive(),
-                  String::make(rstd::cppstd::as_str(sb.source).unwrap()) });
-        }
+        TrackRegisteredAssets(context, fs);
         if (! has_actuator) continue;
         if (is_alpha)
             ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp.clone()) });
@@ -983,6 +931,7 @@ void WireCameraShakeScripts(ParseContext& context, const wpscene::FieldBindings&
         std::string sha = utils::genSha1(std::span<const char>(sb.source));
         auto*       fs  = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, sb.initial_value);
         if (! fs) continue;
+        TrackRegisteredAssets(context, fs);
 
         auto state = mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr());
         ss.AddActuator({ fs, [state, field](const script::ScriptValue& value) mutable {
@@ -1023,6 +972,7 @@ void WireCameraFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp
         auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, initial_value, node);
         if (! fs) continue;
         SetScriptInitializationOrder(context, *fs, node);
+        TrackRegisteredAssets(context, fs);
 
         if (field == "origin") {
             auto path         = CopyableArcHold(camera_path.clone());
@@ -1173,63 +1123,106 @@ WPParticleAnimationMode ToAnimMode(const std::string& str) {
     }
 }
 
+void ApplyParticleOverride(wpscene::ParticleInstanceoverride& state, ref<str> field,
+                           slice<float> values) {
+    auto write_scalar = [&](float& destination) {
+        if (values.len() >= usize(1)) destination = values[usize()];
+    };
+    auto write_vec3 = [&](std::array<float, 3>& destination, float scale) -> bool {
+        if (values.len() < usize(3)) return false;
+        destination = { values[usize()] * scale,
+                        values[usize(1)] * scale,
+                        values[usize(2)] * scale };
+        return true;
+    };
+
+    auto parse_index = [&](ref<str> prefix) -> Option<usize> {
+        auto suffix = rstd::str_::strip_prefix(field, prefix);
+        if (suffix.is_none()) return None();
+        auto parsed = rstd::from_str<usize>(*suffix);
+        if (parsed.is_err()) return None();
+        auto index = rstd::move(parsed).unwrap_unchecked();
+        return index < usize(8) ? Some(index) : None();
+    };
+
+    if (field == "alpha"_str)
+        write_scalar(state.alpha);
+    else if (field == "size"_str)
+        write_scalar(state.size);
+    else if (field == "lifetime"_str)
+        write_scalar(state.lifetime);
+    else if (field == "rate"_str)
+        write_scalar(state.rate);
+    else if (field == "speed"_str)
+        write_scalar(state.speed);
+    else if (field == "count"_str)
+        write_scalar(state.count);
+    else if (field == "brightness"_str)
+        write_scalar(state.brightness);
+    else if (field == "color"_str) {
+        write_vec3(state.color, 255.0f);
+        state.overColor = true;
+    } else if (field == "colorn"_str) {
+        write_vec3(state.colorn, 1.0f);
+        state.overColorn = true;
+    } else if (auto index = parse_index("controlpointangle"_str); index.is_some()) {
+        write_vec3(state.controlpointangle[index->to_primitive()], 1.0f);
+    } else if (auto index = parse_index("controlpoint"_str); index.is_some()) {
+        std::array<float, 3> point {};
+        if (write_vec3(point, 1.0f)) state.controlpoint[index->to_primitive()] = point;
+    }
+}
+
+Vec<float> ReadParticleOverride(const wpscene::ParticleInstanceoverride& state, ref<str> field) {
+    auto scalar = [](float value) {
+        Vec<float> out;
+        out.push(float(value));
+        return out;
+    };
+    auto vec3 = [](const std::array<float, 3>& value, float scale) {
+        Vec<float> out;
+        out.push(value[0] * scale);
+        out.push(value[1] * scale);
+        out.push(value[2] * scale);
+        return out;
+    };
+    if (field == "alpha"_str) return scalar(state.alpha);
+    if (field == "size"_str) return scalar(state.size);
+    if (field == "lifetime"_str) return scalar(state.lifetime);
+    if (field == "rate"_str) return scalar(state.rate);
+    if (field == "speed"_str) return scalar(state.speed);
+    if (field == "count"_str) return scalar(state.count);
+    if (field == "brightness"_str) return scalar(state.brightness);
+    if (field == "color"_str) return vec3(state.color, 1.0f / 255.0f);
+    if (field == "colorn"_str) return vec3(state.colorn, 1.0f);
+    return {};
+}
+
 struct WPParticleOverrideControl {
     Arc<wpscene::ParticleInstanceoverride> state;
     String                                 field;
 
-    void Apply(slice<float> values) {
-        auto write_scalar = [&](float& destination) {
-            if (values.len() >= usize(1)) destination = values[usize()];
-        };
-        auto write_vec3 = [&](std::array<float, 3>& destination, float scale) -> bool {
-            if (values.len() < usize(3)) return false;
-            destination = { values[usize()] * scale,
-                            values[usize(1)] * scale,
-                            values[usize(2)] * scale };
-            return true;
-        };
+    void Apply(slice<float> values) { ApplyParticleOverride(*state, field.as_str(), values); }
+};
 
-        auto field_view = as_string_view(field.as_str());
-        if (field_view == "alpha")
-            write_scalar(state->alpha);
-        else if (field_view == "size")
-            write_scalar(state->size);
-        else if (field_view == "lifetime")
-            write_scalar(state->lifetime);
-        else if (field_view == "rate")
-            write_scalar(state->rate);
-        else if (field_view == "speed")
-            write_scalar(state->speed);
-        else if (field_view == "count")
-            write_scalar(state->count);
-        else if (field_view == "brightness")
-            write_scalar(state->brightness);
-        else if (field_view == "color") {
-            write_vec3(state->color, 255.0f);
-            state->overColor = true;
-        } else if (field_view == "colorn") {
-            write_vec3(state->colorn, 1.0f);
-            state->overColorn = true;
-        } else if (field_view.starts_with("controlpoint") &&
-                   ! field_view.starts_with("controlpointangle")) {
-            try {
-                int index = std::stoi(
-                    std::string(field_view.substr(std::string_view("controlpoint").size())));
-                if (index >= 0 && index < 8) {
-                    std::array<float, 3> point {};
-                    if (write_vec3(point, 1.0f)) state->controlpoint[index] = point;
-                }
-            } catch (...) {
-            }
-        } else if (field_view.starts_with("controlpointangle")) {
-            try {
-                int index = std::stoi(
-                    std::string(field_view.substr(std::string_view("controlpointangle").size())));
-                if (index >= 0 && index < 8) write_vec3(state->controlpointangle[index], 1.0f);
-            } catch (...) {
-            }
-        }
+struct WPParticleNodeControl {
+    Arc<wpscene::ParticleInstanceoverride> state;
+    Arc<WPParticlePlaybackState>           playback;
+
+    Vec<float> Get(ref<str> field) const { return ReadParticleOverride(*state, field); }
+    void       Apply(ref<str> field, slice<float> values) {
+        ApplyParticleOverride(*state, field, values);
     }
+    void Play() {
+        playback->playing.store(true, rstd::sync::atomic::Ordering::Release);
+        playback->reset_sequence.fetch_add(u32(1), rstd::sync::atomic::Ordering::AcqRel);
+    }
+    void Stop() {
+        playback->playing.store(false, rstd::sync::atomic::Ordering::Release);
+        playback->reset_sequence.fetch_add(u32(1), rstd::sync::atomic::Ordering::AcqRel);
+    }
+    void Pause() { playback->playing.store(false, rstd::sync::atomic::Ordering::Release); }
+    bool IsPlaying() const { return playback->playing.load(rstd::sync::atomic::Ordering::Acquire); }
 };
 
 void LoadControlPoint(WPParticleSubSystem& system, const wpscene::Particle& particle,
@@ -2192,6 +2185,73 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::Material& wpmat,
     }
 }
 
+script::FieldKind ShaderValueScriptKind(usize component_count) {
+    switch (component_count.to_primitive()) {
+    case 1: return script::FieldKind::Scalar;
+    case 2: return script::FieldKind::Vec2;
+    case 3: return script::FieldKind::Vec3;
+    case 4: return script::FieldKind::Vec4;
+    default: return script::FieldKind::Unknown;
+    }
+}
+
+auto ScriptValueAsShaderValue(const script::ScriptValue& value) -> Option<ShaderValue> {
+    if (auto* scalar = std::get_if<script::ScalarValue>(&value))
+        return Some(ShaderValue(static_cast<float>(scalar->v)));
+    if (auto* boolean = std::get_if<script::BoolValue>(&value))
+        return Some(ShaderValue(boolean->v ? 1.0f : 0.0f));
+    if (auto* vector = std::get_if<script::Vec2Value>(&value))
+        return Some(ShaderValue(rstd::array<float, 2> { static_cast<float>(vector->x),
+                                                        static_cast<float>(vector->y) }));
+    if (auto* vector = std::get_if<script::Vec3Value>(&value))
+        return Some(ShaderValue(rstd::array<float, 3> { static_cast<float>(vector->x),
+                                                        static_cast<float>(vector->y),
+                                                        static_cast<float>(vector->z) }));
+    if (auto* vector = std::get_if<script::Vec4Value>(&value))
+        return Some(ShaderValue(rstd::array<float, 4> { static_cast<float>(vector->x),
+                                                        static_cast<float>(vector->y),
+                                                        static_cast<float>(vector->z),
+                                                        static_cast<float>(vector->w) }));
+    if (auto* color = std::get_if<script::ColorValue>(&value))
+        return Some(ShaderValue(rstd::array<float, 3> { static_cast<float>(color->r),
+                                                        static_cast<float>(color->g),
+                                                        static_cast<float>(color->b) }));
+    return None();
+}
+
+void WireMaterialShaderValueScripts(ParseContext& context, const Arc<SceneNode>& owner,
+                                    const std::shared_ptr<SceneMaterial>& material,
+                                    const wpscene::Material& wpmat, const WPShaderInfo& info) {
+    if (! material || wpmat.constantshadervalues_bindings.scripts.empty()) return;
+    auto& scripts = EnsureScriptScene(context);
+    for (const auto& [material_key, binding] : wpmat.constantshadervalues_bindings.scripts) {
+        auto value = wpmat.constantshadervalues.find(material_key);
+        if (value == wpmat.constantshadervalues.end()) continue;
+        auto kind = ShaderValueScriptKind(usize(value->second.size()));
+        if (kind == script::FieldKind::Unknown) continue;
+        auto uniform_name = ResolveShaderMaterialKey(info, material_key);
+        if (uniform_name.empty()) continue;
+
+        auto  sha          = utils::genSha1(std::span<const char>(binding.source));
+        auto* field_script = scripts.runtime().MakeFieldScript(
+            binding.source, sha, kind, binding.properties, binding.initial_value, owner.as_ptr());
+        if (! field_script) continue;
+        SetScriptInitializationOrder(context, *field_script, owner.as_ptr());
+        TrackRegisteredAssets(context, field_script);
+        auto* scene = context.scene.get();
+        scripts.AddActuator({
+            field_script,
+            [scene, material, uniform_name = rstd::move(uniform_name)](
+                const script::ScriptValue& script_value) {
+                auto value = ScriptValueAsShaderValue(script_value);
+                if (value.is_none()) return;
+                (void)scene->SetMaterialShaderValue(
+                    *material, rstd::cppstd::as_str(uniform_name).unwrap(), *value);
+            },
+        });
+    }
+}
+
 // parse
 
 void ParseCamera(ParseContext& context, const wpscene::SceneMetadata& sc) {
@@ -2532,6 +2592,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     const bool solid_composite_context = HasSolidCompositeContext(context, wpimgobj);
     spImgNode->SetSize({ geometry_size[0], geometry_size[1] });
     spImgNode->SetPerspective(wpimgobj.perspective);
+    spImgNode->SetReflected(wpimgobj.reflected);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID() = i32(wpimgobj.id);
     if (! wpimgobj.visible_user.empty())
@@ -2734,6 +2795,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     RegisterShaderUserVarIndex(context.scene.get(), mesh.Material(), image_wpmat, shaderInfo);
     RegisterMaterialUserTextureIndex(
         context.scene.get(), mesh.Material(), image_user_texture_fallback, shaderInfo);
+    WireMaterialShaderValueScripts(
+        context, spImgNode, mesh.MaterialSlots().back(), image_wpmat, shaderInfo);
 
     // Puppet clipping masks: each MaskBlock becomes a pair of submeshes.
     // 1) Pre-pass: clippingmaskimage4 over `part_ids_b` (mask shape mesh)
@@ -3111,6 +3174,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                      *user_texture_fallback,
                                                      wpEffShaderInfo);
                 }
+                WireMaterialShaderValueScripts(
+                    context, spImgNode, spMesh->MaterialSlots().front(), wpmat, wpEffShaderInfo);
                 auto add_puppet_mask_materials = [&]() -> bool {
                     if (! (puppet && wpmat.use_puppet && puppet_has_masks)) return true;
                     const std::string source_tex =
@@ -3297,10 +3362,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
 }
 
 struct ParticleChildPtr {
-    wpscene::ParticleChild* child { nullptr };
-    SceneNode*              node_parent { nullptr };
-    WPParticleSubSystem*    particle_parent { nullptr };
-    bool                    inherit_instance_override { false };
+    wpscene::ParticleChild*              child { nullptr };
+    SceneNode*                           node_parent { nullptr };
+    WPParticleSubSystem*                 particle_parent { nullptr };
+    Option<Arc<WPParticlePlaybackState>> playback;
+    bool                                 inherit_instance_override { false };
 
     // Effective world scale at node_parent. Particle child origins are
     // pre-divided by this so the shader's MVP scale recovers the authored
@@ -3368,6 +3434,12 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
         child_data = ChildData(*child_ptr.child);
 
     } else {
+        if (! wppartobj.particle.empty() &&
+            ! context.dynamic_particle_prototypes.contains_key(
+                rstd::cppstd::as_str(wppartobj.particle).unwrap())) {
+            (void)context.dynamic_particle_prototypes.insert(
+                String::make(rstd::cppstd::as_str(wppartobj.particle).unwrap()), wppartobj.Clone());
+        }
         p_particle_obj = &wppartobj.particleObj;
         spNodeOpt      = Some(Arc<SceneNode>::make(Vector3f(wppartobj.origin.data()),
                                                    Vector3f(wppartobj.scale.data()),
@@ -3384,6 +3456,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
             spNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wppartobj.visible_user));
     }
     auto& spNode = *spNodeOpt;
+    spNode->SetReflected(wppartobj.reflected);
 
     // Effective world scale at this SceneNode: parent's world scale times
     // this node's local scale. Propagated to child particle nodes.
@@ -3393,7 +3466,10 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     // children keep their authored values instead of inheriting the scene override transitively.
     auto override_state = Arc<wpscene::ParticleInstanceoverride>::make(
         ParticleOverrideForNode(wppartobj, is_child, child_ptr.inherit_instance_override));
-    auto& override = *override_state;
+    auto& override       = *override_state;
+    auto  playback_state = is_child && child_ptr.playback.is_some()
+                               ? (*child_ptr.playback).clone()
+                               : Arc<WPParticlePlaybackState>::make();
 
     auto& particle_obj = *p_particle_obj;
     auto& vfs          = *context.vfs;
@@ -3539,6 +3615,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     }
 
     particleSub->SetOwnerNode(spNode.as_ptr());
+    particleSub->SetPlaybackState(playback_state.clone());
     if (child_data.controlpointstartindex.is_some())
         particleSub->SetParentControlpointStartIndex(*child_data.controlpointstartindex);
     LoadEmitter(*particleSub, particle_obj, override.count);
@@ -3561,6 +3638,8 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     mesh.AddMaterial(std::move(material));
     RegisterShaderUserVarIndex(
         context.scene.get(), mesh.Material(), particle_obj.material, shaderInfo);
+    WireMaterialShaderValueScripts(
+        context, spNode, mesh.MaterialSlots().back(), particle_obj.material, shaderInfo);
     spNode->AddMesh(spMesh);
     SetWPUniformConfig(context, spNode, rstd::move(svData));
 
@@ -3571,6 +3650,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                              .child                     = &child,
                              .node_parent               = spNode.as_ptr(),
                              .particle_parent           = particleSub.get(),
+                             .playback                  = Some(playback_state.clone()),
                              .inherit_instance_override = ! is_child,
                              .world_scale               = node_world_scale,
                          });
@@ -3581,7 +3661,13 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     else
         context.particle_runtime->Add(rstd::move(particleSub));
 
-    if (! is_child) AssignNodeFieldAnimations(*spNode.as_ptr(), wppartobj.field_bindings);
+    if (! is_child) {
+        spNode->SetParticleControl(Arc<dyn<SceneParticleControl>>::make(WPParticleNodeControl {
+            .state    = override_state.clone(),
+            .playback = playback_state.clone(),
+        }));
+        AssignNodeFieldAnimations(*spNode.as_ptr(), wppartobj.field_bindings);
+    }
     WireFieldScripts(context, spNode, wppartobj.field_bindings);
     if (is_child)
         child_ptr.node_parent->AppendChild(spNode.clone());
@@ -3614,6 +3700,7 @@ void ParseSoundObj(ParseContext& context, wpscene::SoundObject& obj,
             rstd::cppstd::as_str(obj.volume_user_key).unwrap(), control.clone());
     }
     node->SetSoundControl(rstd::move(control));
+    node->SetVolume(obj.volume);
 
     AssignNodeFieldAnimations(*node.as_ptr(), obj.field_bindings);
     WireFieldScripts(context, node, obj.field_bindings);
@@ -3705,7 +3792,18 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     for (const auto& mdl_mesh : mdl.meshes) {
         if (mdl_mesh.positions.is_empty()) continue;
 
-        auto wpmat = WPMdlParser::ParseMaterial(mdl_mesh.mat_json_file, vfs);
+        if (mdl_mesh.mat_json_files.is_empty()) continue;
+        usize skin_index(model_obj.skin);
+        if (skin_index >= mdl_mesh.mat_json_files.len()) {
+            rstd_error("model '{}' skin {} exceeds {} material variants; using skin 0",
+                       model_obj.name,
+                       model_obj.skin,
+                       mdl_mesh.mat_json_files.len());
+            skin_index = usize();
+        }
+        const auto& material_ref = mdl_mesh.mat_json_files[skin_index];
+
+        auto wpmat = WPMdlParser::ParseMaterial(material_ref, vfs);
         if (! wpmat) continue;
         if (mdl.puppet.is_some() && ! (*mdl.puppet)->bones.is_empty()) {
             WPMdlParser::AddPuppetMatInfo(*wpmat, mdl);
@@ -3725,8 +3823,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
                            context.scene.get(),
                            &scene_mat,
                            &shader_info)) {
-            rstd_error(
-                "load model material '{}' failed for '{}'", mdl_mesh.mat_json_file, model_obj.name);
+            rstd_error("load model material '{}' failed for '{}'", material_ref, model_obj.name);
             continue;
         }
         LoadConstvalue(scene_mat, *wpmat, shader_info);
@@ -3736,6 +3833,8 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
         mesh->AddMaterial(std::move(scene_mat));
         RegisterShaderUserVarIndex(
             context.scene.get(), mesh->MaterialSlots().back().get(), *wpmat, shader_info);
+        WireMaterialShaderValueScripts(
+            context, node, mesh->MaterialSlots().back(), *wpmat, shader_info);
 
         mesh->Submeshes().emplace_back();
         auto& submesh = mesh->Submeshes().back();
@@ -3752,6 +3851,10 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
     SetWPUniformConfig(context, node, rstd::move(svData));
     AssignNodeFieldAnimations(*node.as_ptr(), model_obj.field_bindings);
     WireFieldScripts(context, node, model_obj.field_bindings);
+    if (model_obj.skin == 0) {
+        (void)context.dynamic_model_prototypes.insert(
+            String::make(rstd::cppstd::as_str(model_obj.model).unwrap()), node.clone());
+    }
     RegisterNodeRef(
         context,
         model_obj.id,
@@ -4070,6 +4173,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
     auto compose_node =
         Arc<SceneNode>::make(Vector3f::Zero(), Vector3f::Ones(), Vector3f::Zero(), obj.name);
+    compose_node->SetReflected(obj.reflected);
     // Layer RT must cover the source glyph bounds, not the main canvas.
     // Clock/date scripts often render a large text source and shrink it with
     // the scene transform when composing into the world.
@@ -4350,6 +4454,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                         RegisterMaterialUserTextureIndex(
                             &scene, mesh->Material(), *user_texture_fallback, shader_info);
                     }
+                    WireMaterialShaderValueScripts(
+                        context, compose_node, mesh->MaterialSlots().front(), wpmat, shader_info);
                     effect_node->AddMesh(mesh);
                     SetWPUniformConfig(context, effect_node, rstd::move(sv));
                     runtime_targets->effect_nodes.push_back(
@@ -4572,6 +4678,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        compose_node.as_ptr());
         if (fs) {
             SetScriptInitializationOrder(context, *fs, compose_node.as_ptr());
+            TrackRegisteredAssets(context, fs);
             ss.AddActuator({
                 fs,
                 [set_text](const script::ScriptValue& v) {
@@ -4592,6 +4699,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        compose_node.as_ptr());
         if (fs) {
             SetScriptInitializationOrder(context, *fs, compose_node.as_ptr());
+            TrackRegisteredAssets(context, fs);
             ss.AddActuator({
                 fs,
                 [set_pointsize](const script::ScriptValue& v) {
@@ -4890,69 +4998,106 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
     return context;
 }
 
-std::unordered_map<std::string, std::vector<owe::SceneNode*>>
-SpawnCreateLayerAssetClones(ParseContext& context, std::int32_t owner_id, ref<str> source) {
-    constexpr unsigned                                            pool_size = 8;
-    std::unordered_map<std::string, std::vector<owe::SceneNode*>> out;
-    const auto source_view = rstd::cppstd::as_string_view(source);
-    if (source_view.find("createLayer") == std::string_view::npos) return out;
+bool AssetEndsWith(ref<str> asset, ref<str> suffix) { return rstd::str_::ends_with(asset, suffix); }
 
-    auto owner = context.node_id_map.get(owner_id);
-    if (owner.is_none() || (**owner).node.is_none()) return out;
-
-    for (const auto& asset : DetectRegisteredAssets(source_view)) {
-        if (! sstart_with(asset, "models/") || ! asset.ends_with(".json")) continue;
-        auto size = ResolveImageAssetSize(context, asset);
-        if (! size) continue;
-        auto& nodes = out[asset];
-        nodes.reserve(pool_size);
-        for (unsigned i = 0; i < pool_size; ++i) {
-            wpscene::ImageObject image;
-            auto size_str = std::to_string((*size)[0]) + " " + std::to_string((*size)[1]);
-            auto object   = rstd::json::Map::make();
-            auto set      = [&](std::string_view key, Json value) {
-                object.insert(::alloc::string::String::make(rstd::cppstd::as_str(key).unwrap()),
-                              rstd::move(value));
-            };
-            set("id", rstd::into<Json>(i32(context.next_dynamic_layer_id--)));
-            set("name", JsonFromStd("__createLayer:" + asset));
-            set("image", JsonFromStd(asset));
-            set("origin", JsonFromStd("0 0 0"));
-            set("angles", JsonFromStd("0 0 0"));
-            set("scale", JsonFromStd("1 1 1"));
-            set("size", JsonFromStd(size_str));
-            set("visible", rstd::into<Json>(true));
-            auto json = Json::Object(rstd::move(object));
-            if (! image.FromJson(json, *context.vfs)) continue;
-            ParseImageObj(context, image);
-            auto found = context.node_id_map.get(image.id);
-            if (found.is_none() || (**found).node.is_none()) continue;
-            auto node = (*(**found).node).clone();
-            node->SetVisible(false);
-            nodes.push_back(node.as_ptr());
-            AddLayerClone(context, owner_id, rstd::move(node));
-            (void)context.node_id_map.remove(image.id);
-        }
-        if (nodes.empty()) out.erase(asset);
+void ResolveRegisteredAsset(ParseContext& context, ref<str> asset) {
+    if (AssetEndsWith(asset, ".mdl"_str)) {
+        if (context.dynamic_model_prototypes.contains_key(asset)) return;
+        wpscene::ModelObject model;
+        model.id    = context.next_dynamic_layer_id--;
+        model.name  = rstd::cppstd::to_string(asset);
+        model.model = model.name;
+        ParseModelObj(context, model);
+        auto parsed = context.node_id_map.get(model.id);
+        if (parsed.is_none() || (**parsed).node.is_none()) return;
+        auto node = (*(**parsed).node).clone();
+        node->SetVisible(false);
+        (void)context.dynamic_model_prototypes.insert(String::make(asset), rstd::move(node));
+        (void)context.node_id_map.remove(model.id);
+    } else if (AssetEndsWith(asset, ".json"_str) &&
+               rstd::str_::starts_with(asset, "particles/"_str)) {
+        if (context.dynamic_particle_prototypes.contains_key(asset)) return;
+        wpscene::ParticleObject particle;
+        if (! particle.FromAsset(asset, *context.vfs)) return;
+        (void)context.dynamic_particle_prototypes.insert(String::make(asset), rstd::move(particle));
     }
-    return out;
 }
 
-void ResolveCreateLayerAssetRequests(ParseContext& context) {
-    for (auto& req : context.create_layer_asset_requests) {
-        if (! req.script) continue;
-        auto queues = SpawnCreateLayerAssetClones(context, req.owner_id, req.source.as_str());
-        for (auto& [asset, nodes] : queues) {
-            req.script->AddAssetCloneQueue(std::move(asset), std::move(nodes));
+void ResolveRegisteredAssets(ParseContext& context) {
+    for (auto* script : context.registered_asset_scripts) {
+        if (! script) continue;
+        for (const auto& asset : script->RegisteredAssets()) {
+            ResolveRegisteredAsset(context, asset.as_str());
         }
     }
-    context.create_layer_asset_requests.clear();
+}
+
+Option<Arc<SceneNode>> InstantiateRegisteredAsset(ParseContext& context, SceneNode* owner,
+                                                  ref<str> asset) {
+    auto attach = [&](Arc<SceneNode> node) {
+        SceneNode* parent =
+            owner && owner->Parent() ? owner->Parent() : context.scene->RootMut().as_raw_ptr();
+        parent->AppendChild(node.clone());
+        return Some(rstd::move(node));
+    };
+
+    ResolveRegisteredAsset(context, asset);
+    if (AssetEndsWith(asset, ".mdl"_str)) {
+        auto prototype = context.dynamic_model_prototypes.get(asset);
+        if (prototype.is_none()) return None();
+        auto& source = ***prototype;
+        auto  node   = Arc<SceneNode>::make(Eigen::Vector3f::Zero(),
+                                            Eigen::Vector3f::Ones(),
+                                            Eigen::Vector3f::Zero(),
+                                            rstd::cppstd::to_string(asset));
+        node->ID()   = i32(context.next_dynamic_layer_id--);
+        node->SetPerspective(source.Perspective());
+        node->SetReflected(source.Reflected());
+        if (! source.Camera().empty()) node->SetCamera(source.Camera());
+        if (source.Mesh()) node->AddMesh(source.Mesh()->CloneInstance());
+        if (auto config = FindWPUniformConfig(context, source); config != nullptr)
+            SetWPUniformConfig(context, node, config->Clone());
+        return attach(rstd::move(node));
+    } else if (AssetEndsWith(asset, ".json"_str)) {
+        auto prototype = context.dynamic_particle_prototypes.get(asset);
+        if (prototype.is_none()) return None();
+        auto particle    = (**prototype).Clone();
+        particle.id      = context.next_dynamic_layer_id--;
+        particle.name    = rstd::cppstd::to_string(asset);
+        particle.origin  = { 0.0f, 0.0f, 0.0f };
+        particle.scale   = { 1.0f, 1.0f, 1.0f };
+        particle.angles  = { 0.0f, 0.0f, 0.0f };
+        particle.parent  = 0;
+        particle.visible = true;
+        ParseParticleObj(context, particle);
+        auto parsed = context.node_id_map.get(particle.id);
+        if (parsed.is_none() || (**parsed).node.is_none()) return None();
+        auto node = (*(**parsed).node).clone();
+        (void)context.node_id_map.remove(particle.id);
+        return attach(rstd::move(node));
+    } else if (AssetEndsWith(asset, ".ogg"_str)) {
+        if (! context.sound_manager) return None();
+        wpscene::SoundObject sound;
+        sound.id          = context.next_dynamic_layer_id--;
+        sound.name        = rstd::cppstd::to_string(asset);
+        sound.startsilent = false;
+        sound.sound.push_back(sound.name);
+        ParseSoundObj(context, sound, *context.sound_manager);
+        auto parsed = context.node_id_map.get(sound.id);
+        if (parsed.is_none() || (**parsed).node.is_none()) return None();
+        auto node = (*(**parsed).node).clone();
+        (void)context.node_id_map.remove(sound.id);
+        return attach(rstd::move(node));
+    } else {
+        return None();
+    }
 }
 
 void ProcessObjects(ParseContext& context, mut_ref<SceneObjectVar[]> scene_objs,
                     wavsen::audio::SoundManager* sm, ProcessOpts opts,
                     SceneLoadBenchRecorderView load_bench) {
     WPShaderParser::InitGlslang();
+    context.sound_manager = sm;
     IndexSystemMediaImageFallbacks(context, scene_objs.as_ref());
 
     for (usize index {}; index < scene_objs.len(); ++index) {
@@ -4987,7 +5132,7 @@ void ProcessObjects(ParseContext& context, mut_ref<SceneObjectVar[]> scene_objs,
         }
     }
 
-    ResolveCreateLayerAssetRequests(context);
+    ResolveRegisteredAssets(context);
     WPShaderParser::FinalGlslang();
 }
 
@@ -5198,7 +5343,17 @@ Box<Scene> FinalizeScene(ParseContext& context) {
             runtime.RegisterInitialLayerConfig((*(**node).node).as_ptr(), (**config).clone());
         }
         runtime.SetScene(context.scene.get());
+        runtime.SetLayerFactory(script::JsRuntime::LayerFactory::make(
+            [&context](SceneNode* owner, ref<str> asset) -> Option<Arc<SceneNode>> {
+                auto node = InstantiateRegisteredAsset(context, owner, asset);
+                if (node.is_none())
+                    rstd_error("registered layer asset '{}' is unsupported or unavailable", asset);
+                return node;
+            }));
+        WPShaderParser::InitGlslang();
         runtime.SetSceneRoot(context.scene->RootMut().as_raw_ptr());
+        WPShaderParser::FinalGlslang();
+        runtime.ClearLayerFactory();
         owe::script::InstallScriptScene(*context.scene,
                                         context.script_scene.take().unwrap_unchecked());
     }

@@ -204,6 +204,68 @@ TEST(WPShaderParser, UndefsBuiltinMacroBeforeUserRedefine) {
     EXPECT_LT(undef_pos, define_pos);
 }
 
+TEST(WPShaderParser, UndefsDerivativeAliasesBeforeUserRedefine) {
+    const std::string out = owe::WPShaderParser::PreShaderHeader(
+        R"(
+#if HLSL
+#define dFdx ddx
+#define dFdy ddy
+#define textureGrad(s, uv, dx, dy) texSample2DGrad(s, uv, dx, dy)
+#endif
+void main() {}
+)",
+        {},
+        owe::ShaderType::FRAGMENT);
+
+    const auto dfdx_undef  = out.find("#undef dFdx");
+    const auto dfdx_define = out.rfind("#define dFdx ddx");
+    const auto dfdy_undef  = out.find("#undef dFdy");
+    const auto dfdy_define = out.rfind("#define dFdy ddy");
+    ASSERT_NE(dfdx_undef, std::string::npos);
+    ASSERT_NE(dfdx_define, std::string::npos);
+    ASSERT_NE(dfdy_undef, std::string::npos);
+    ASSERT_NE(dfdy_define, std::string::npos);
+    EXPECT_LT(dfdx_undef, dfdx_define);
+    EXPECT_LT(dfdy_undef, dfdy_define);
+    EXPECT_EQ(out.find("#undef textureGrad"), std::string::npos);
+}
+
+TEST(WPShaderParser, CompileSceneShaderVariantAcceptsBothAtanForms) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id    = "atan-overloads-test";
+    desc.shader_name = "atan-overloads-test";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/atan-overloads-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+varying vec2 v_TexCoord;
+void main() {
+    v_TexCoord = a_Position.xy;
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/atan-overloads-test.frag",
+        .source     = R"(
+varying vec2 v_TexCoord;
+void main() {
+    float one = atan(v_TexCoord.y / v_TexCoord.x);
+    float two = atan(v_TexCoord.y, v_TexCoord.x);
+    gl_FragColor = vec4(one, two, 0.0, 1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+}
+
 TEST(WPShaderParser, PreShaderHeaderFlattensPackedAudioSpectrumAccess) {
     const std::string out = owe::WPShaderParser::PreShaderHeader(
         R"(

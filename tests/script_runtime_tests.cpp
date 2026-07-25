@@ -45,6 +45,52 @@ double LastScalar(FieldScript* fs) {
     return std::get<ScalarValue>(fs->last_value()).v;
 }
 
+struct ParticleControlState {
+    std::array<float, 3> colorn { 1.0f, 1.0f, 1.0f };
+    bool                 playing { true };
+    int                  resets { 0 };
+};
+
+struct ParticleControlProbe {
+    Arc<ParticleControlState> state;
+
+    Vec<float> Get(ref<str> field) const {
+        Vec<float> out;
+        if (field != "colorn"_str) return out;
+        for (float value : state->colorn) out.push(float(value));
+        return out;
+    }
+    void Apply(ref<str> field, slice<float> values) {
+        if (field != "colorn"_str || values.len() < usize(3)) return;
+        state->colorn = { values[usize()], values[usize(1)], values[usize(2)] };
+    }
+    void Play() {
+        state->playing = true;
+        state->resets++;
+    }
+    void Stop() {
+        state->playing = false;
+        state->resets++;
+    }
+    void Pause() { state->playing = false; }
+    bool IsPlaying() const { return state->playing; }
+};
+
+struct SoundControlState {
+    float volume { 1.0f };
+    bool  playing { true };
+};
+
+struct SoundControlProbe {
+    Arc<SoundControlState> state;
+
+    void Play() { state->playing = true; }
+    void Stop() { state->playing = false; }
+    void Pause() { state->playing = false; }
+    bool IsPlaying() const { return state->playing; }
+    void SetVolume(float volume) { state->volume = volume; }
+};
+
 } // namespace
 
 TEST(ScriptInitialization, UsesSceneOwnerOrderInsteadOfRegistrationOrder) {
@@ -79,6 +125,28 @@ TEST(ScriptInitialization, UsesSceneOwnerOrderInsteadOfRegistrationOrder) {
     rt.TickAll();
 
     EXPECT_EQ(LastScalar(consumer), 7.0);
+}
+
+TEST(ScriptValueCoercion, PreservesVec4InitialAndReturnValues) {
+    JsRuntime rt;
+    auto*     script = rt.MakeFieldScript(
+        R"JS(
+            export function update(value) { return value.add(new Vec4(1, 2, 3, 4)); }
+        )JS",
+        "test/vec4_value",
+        FieldKind::Vec4,
+        owe::MakeObject(),
+        owe::IntoJson("0.5 1.5 2.5 3.5"));
+    ASSERT_NE(script, nullptr);
+
+    rt.TickAll();
+
+    ASSERT_TRUE(std::holds_alternative<Vec4Value>(script->last_value()));
+    const auto& value = std::get<Vec4Value>(script->last_value());
+    EXPECT_DOUBLE_EQ(value.x, 1.5);
+    EXPECT_DOUBLE_EQ(value.y, 3.5);
+    EXPECT_DOUBLE_EQ(value.z, 5.5);
+    EXPECT_DOUBLE_EQ(value.w, 7.5);
 }
 
 TEST(ScriptTimer, SetTimeoutFiresAfterDelay) {
@@ -1538,6 +1606,46 @@ TEST(ScriptScene, DestroyLayerHidesSceneNode) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptScene, CameraTransformsRoundTripThroughSceneOwner) {
+    owe::Scene scene;
+    auto       camera = Arc<owe::SceneCamera>::make(
+        owe::SceneCamera::MakePerspective(16.0 / 9.0, 0.01, 1000.0, 53.0));
+    camera->SetLookAt({ 0.0, 0.0, 250.0 }, { 0.0, 1.0, 0.0 }, { 0.0, 1.0, 0.0 });
+    scene.RegisterCamera(String::make("main"_str), rstd::move(camera));
+    ASSERT_TRUE(scene.SetActiveCamera("main"_str));
+
+    JsRuntime rt;
+    rt.SetScene(&scene);
+    auto* script = rt.MakeFieldScript(
+        R"JS(
+            export function init() {
+                const camera = thisScene.getCameraTransforms();
+                camera.eye = new Vec3(3, 4, 5);
+                camera.center = new Vec3(0, 0, 0);
+                thisScene.setCameraTransforms(camera);
+            }
+            export function update() {
+                const camera = thisScene.getCameraTransforms();
+                return camera.eye.x * 100 + camera.eye.y * 10 + camera.eye.z;
+            }
+        )JS",
+        "test/camera_transforms_round_trip",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0));
+    ASSERT_NE(script, nullptr);
+
+    rt.SetSceneRoot(scene.RootMut().as_raw_ptr());
+    rt.TickAll();
+
+    auto transforms = scene.ActiveCameraTransforms();
+    ASSERT_TRUE(transforms.is_some());
+    EXPECT_TRUE(transforms->eye.isApprox(Eigen::Vector3d { 3.0, 4.0, 5.0 }));
+    EXPECT_TRUE(transforms->center.isApprox(Eigen::Vector3d::Zero()));
+    EXPECT_TRUE(transforms->up.isApprox(Eigen::Vector3d::UnitY()));
+    EXPECT_DOUBLE_EQ(LastScalar(script), 345.0);
+}
+
 TEST(ScriptScene, CreateLayerUsesRegisteredAssetQueue) {
     auto root = rstd::sync::Arc<owe::SceneNode>::make();
     auto coin = rstd::sync::Arc<owe::SceneNode>::make(
@@ -1615,6 +1723,126 @@ TEST(ScriptScene, CreateLayerActivatesOnlyConsumedGenericClones) {
     EXPECT_TRUE(first->Visible());
     EXPECT_FALSE(second->Visible());
     EXPECT_DOUBLE_EQ(LastScalar(fs), 1.0);
+}
+
+TEST(ScriptScene, RegisteredAssetFactoryCreatesBeyondLegacyPoolAndReusesDestroyedLayer) {
+    auto                     root = Arc<owe::SceneNode>::make();
+    Vec<Arc<owe::SceneNode>> created;
+
+    JsRuntime rt;
+    rt.SetLayerFactory(JsRuntime::LayerFactory::make(
+        [&root, &created](owe::SceneNode*, ref<str> asset) -> Option<Arc<owe::SceneNode>> {
+            if (asset != "models/prism.mdl"_str) return None();
+            auto node = Arc<owe::SceneNode>::make();
+            node->SetVisible(false);
+            root->AppendChild(node.clone());
+            created.push(node.clone());
+            return Some(rstd::move(node));
+        }));
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            const prism = engine.registerAsset('models/prism.mdl');
+            let result = 0;
+            export function init() {
+                const layers = [];
+                for (let i = 0; i < 12; ++i) {
+                    const layer = thisScene.createLayer(prism);
+                    layer.origin = new Vec3(i, 0, 0);
+                    layers.push(layer);
+                }
+                thisScene.destroyLayer(layers[0]);
+                const reused = thisScene.createLayer(prism);
+                result = reused.origin.x === 0 ? 12 : -1;
+            }
+            export function update() { return result; }
+        )JS",
+        "test/registered_asset_factory",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        root.as_ptr());
+    ASSERT_NE(fs, nullptr);
+    ASSERT_EQ(fs->RegisteredAssets().len(), usize(1));
+
+    rt.SetSceneRoot(root.as_ptr());
+    rt.ClearLayerFactory();
+    rt.TickAll();
+
+    EXPECT_EQ(created.len(), usize(12));
+    EXPECT_EQ(root->GetChildren().len(), usize(12));
+    EXPECT_DOUBLE_EQ(LastScalar(fs), 12.0);
+    EXPECT_TRUE(created[usize()]->Visible());
+}
+
+TEST(ScriptScene, ParticleInstanceAndPlaybackUseNodeCapability) {
+    auto root  = Arc<owe::SceneNode>::make();
+    auto layer = Arc<owe::SceneNode>::make();
+    auto state = Arc<ParticleControlState>::make();
+    layer->SetParticleControl(
+        Arc<dyn<owe::SceneParticleControl>>::make(ParticleControlProbe { state.clone() }));
+    root->AppendChild(layer.clone());
+
+    JsRuntime rt;
+    auto*     fs = rt.MakeFieldScript(
+        R"JS(
+            export function init() {
+                thisLayer.instance.colorn = new Vec3(0.2, 0.4, 0.8);
+                thisLayer.stop();
+                thisLayer.play();
+            }
+            export function update() {
+                const color = thisLayer.instance.colorn;
+                return color.x * 100 + color.y * 10 + color.z + (thisLayer.isPlaying() ? 1000 : 0);
+            }
+        )JS",
+        "test/particle_instance_control",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        layer.as_ptr());
+    ASSERT_NE(fs, nullptr);
+    rt.SetSceneRoot(root.as_ptr());
+    rt.TickAll();
+
+    EXPECT_FLOAT_EQ(state->colorn[0], 0.2f);
+    EXPECT_FLOAT_EQ(state->colorn[1], 0.4f);
+    EXPECT_FLOAT_EQ(state->colorn[2], 0.8f);
+    EXPECT_EQ(state->resets, 2);
+    EXPECT_NEAR(LastScalar(fs), 1024.8, 1e-5);
+}
+
+TEST(ScriptScene, SoundVolumeUsesSoundControl) {
+    auto root  = Arc<owe::SceneNode>::make();
+    auto layer = Arc<owe::SceneNode>::make();
+    auto state = Arc<SoundControlState>::make();
+    layer->SetSoundControl(
+        Arc<dyn<owe::SceneSoundControl>>::make(SoundControlProbe { state.clone() }));
+    root->AppendChild(layer.clone());
+
+    JsRuntime rt;
+    auto*     fs = rt.MakeFieldScript(
+        R"JS(
+            export function init() {
+                thisLayer.stop();
+                thisLayer.volume = 0.25;
+                thisLayer.play();
+            }
+            export function update() {
+                return thisLayer.volume + (thisLayer.isPlaying() ? 1 : 0);
+            }
+        )JS",
+        "test/sound_volume_control",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        layer.as_ptr());
+    ASSERT_NE(fs, nullptr);
+    rt.SetSceneRoot(root.as_ptr());
+    rt.TickAll();
+
+    EXPECT_FLOAT_EQ(state->volume, 0.25f);
+    EXPECT_TRUE(state->playing);
+    EXPECT_DOUBLE_EQ(LastScalar(fs), 1.25);
 }
 
 // ---------------------------------------------------------------------------

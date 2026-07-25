@@ -1216,6 +1216,23 @@ auto Scene::ActiveCameraHandle() const -> Option<Arc<SceneCamera>> {
     return CameraHandle((*m_active_camera).as_str());
 }
 
+auto Scene::ActiveCameraTransforms() const -> Option<SceneCameraTransforms> {
+    auto camera = ActiveCamera();
+    if (camera.is_none()) return None();
+    return Some((**camera).Transforms());
+}
+
+bool Scene::SetActiveCameraTransforms(const SceneCameraTransforms& transforms) {
+    if (m_active_camera.is_none()) return false;
+    auto name = (*m_active_camera).clone();
+    {
+        auto camera = CameraMut(name.as_str());
+        if (camera.is_none() || ! (**camera).SetTransforms(transforms)) return false;
+    }
+    UpdateLinkedCamera(name.as_str());
+    return true;
+}
+
 bool SceneMaterial::SetShaderValueAnimation(String uniform_name, Arc<SceneAnimationCurve> curve) {
     if (uniform_name.is_empty() || curve->Empty()) return false;
     auto uniform_key = rstd::cppstd::to_string(uniform_name.as_str());

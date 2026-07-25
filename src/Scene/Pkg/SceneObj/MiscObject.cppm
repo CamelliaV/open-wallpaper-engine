@@ -71,6 +71,7 @@ struct TextObject {
     int32_t                  colorBlendMode { 0 };
     std::array<float, 2>     size { 0.0f, 0.0f };
     bool                     perspective { false };
+    bool                     reflected { true };
     bool                     copybackground { false };
     bool                     solid { false };
     bool                     opaquebackground { false };
@@ -120,6 +121,7 @@ struct TextObject {
         owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);
         owe::GetJsonValue(json, "size", size, false);
         owe::GetJsonValue(json, "perspective", perspective, false);
+        owe::GetJsonValue(json, "reflected", reflected, false);
         owe::GetJsonValue(json, "copybackground", copybackground, false);
         owe::GetJsonValue(json, "solid", solid, false);
         owe::GetJsonValue(json, "opaquebackground", opaquebackground, false);
@@ -161,10 +163,11 @@ struct ModelObject {
     owe::Json                 instance;
     FieldBindings             field_bindings;
 
-    std::string model;
-    std::string attachment;
-    bool        perspective { false };
-    bool        reflected { true };
+    std::string   model;
+    std::string   attachment;
+    std::uint32_t skin { 0 };
+    bool          perspective { false };
+    bool          reflected { true };
 
     std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
     VisibleUserBinding                         visible_user;
@@ -191,6 +194,7 @@ struct ModelObject {
 
         owe::GetJsonValue(json, "model", model, false);
         owe::GetJsonValue(json, "attachment", attachment, false);
+        owe::GetJsonValue(json, "skin", skin, false);
         owe::GetJsonValue(json, "perspective", perspective, false);
         owe::GetJsonValue(json, "reflected", reflected, false);
         ReadPuppetAnimationLayers(json, puppet_layers);

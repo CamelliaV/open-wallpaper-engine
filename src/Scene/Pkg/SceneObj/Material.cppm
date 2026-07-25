@@ -33,6 +33,7 @@ public:
     // by GetJsonValue's auto-unwrap.
     std::unordered_map<std::string, std::string> constantshadervalues_user;
     std::unordered_map<std::string, AnimCurve>   constantshadervalues_animations;
+    FieldBindings                                constantshadervalues_bindings;
     // Legacy `usershadervalues`: project.json key -> shader material key.
     std::unordered_map<std::string, std::string> user_shader_values;
     std::string                                  target;
@@ -62,6 +63,7 @@ public:
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::unordered_map<std::string, std::string>        constantshadervalues_user;
     std::unordered_map<std::string, AnimCurve>          constantshadervalues_animations;
+    FieldBindings                                       constantshadervalues_bindings;
     std::unordered_map<std::string, std::string>        user_shader_values;
 
     bool use_puppet { false };

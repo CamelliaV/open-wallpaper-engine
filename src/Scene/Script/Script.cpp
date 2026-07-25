@@ -54,6 +54,7 @@ const char* KindName(FieldKind k) {
     case FieldKind::Bool: return "bool";
     case FieldKind::Vec2: return "vec2";
     case FieldKind::Vec3: return "vec3";
+    case FieldKind::Vec4: return "vec4";
     case FieldKind::Color: return "color";
     case FieldKind::String: return "string";
     }
@@ -69,6 +70,19 @@ JSValue MakeVecValue(JSContext* ctx, double x, double y, double z, int n) {
     JSValue obj     = JS_CallConstructor(ctx, ctor, n, argv);
     for (int i = 0; i < n; ++i) JS_FreeValue(ctx, argv[i]);
     if (n < 3) JS_FreeValue(ctx, argv[2]);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    return obj;
+}
+
+JSValue MakeVec4Value(JSContext* ctx, double x, double y, double z, double w) {
+    JSValue global  = JS_GetGlobalObject(ctx);
+    JSValue ctor    = JS_GetPropertyStr(ctx, global, "Vec4");
+    JSValue argv[4] = {
+        JS_NewFloat64(ctx, x), JS_NewFloat64(ctx, y), JS_NewFloat64(ctx, z), JS_NewFloat64(ctx, w)
+    };
+    JSValue obj = JS_CallConstructor(ctx, ctor, 4, argv);
+    for (auto& arg : argv) JS_FreeValue(ctx, arg);
     JS_FreeValue(ctx, ctor);
     JS_FreeValue(ctx, global);
     return obj;
@@ -155,6 +169,28 @@ ScriptValue CoerceReturn(JSContext* ctx, JSValue ret, FieldKind kind) {
         }
         return v;
     }
+    case FieldKind::Vec4: {
+        Vec4Value v;
+        if (JS_IsArray(ret)) {
+            read_index(ret, 0, v.x);
+            read_index(ret, 1, v.y);
+            read_index(ret, 2, v.z);
+            read_index(ret, 3, v.w);
+        } else if (JS_IsObject(ret)) {
+            read_field(ret, "x", v.x);
+            read_field(ret, "y", v.y);
+            read_field(ret, "z", v.z);
+            read_field(ret, "w", v.w);
+        } else if (JS_IsNumber(ret)) {
+            double d = 0.0;
+            JS_ToFloat64(ctx, &d, ret);
+            if (! IsFinite(d)) return {};
+            return Vec4Value { d, d, d, d };
+        } else {
+            return {};
+        }
+        return v;
+    }
     case FieldKind::Color: {
         ColorValue v;
         if (JS_IsArray(ret)) {
@@ -187,6 +223,7 @@ JSValue ScriptValueToJs(JSContext* ctx, const ScriptValue& value) {
     if (auto* p = std::get_if<BoolValue>(&value)) return JS_NewBool(ctx, p->v);
     if (auto* p = std::get_if<Vec2Value>(&value)) return MakeVecValue(ctx, p->x, p->y, 0.0, 2);
     if (auto* p = std::get_if<Vec3Value>(&value)) return MakeVecValue(ctx, p->x, p->y, p->z, 3);
+    if (auto* p = std::get_if<Vec4Value>(&value)) return MakeVec4Value(ctx, p->x, p->y, p->z, p->w);
     if (auto* p = std::get_if<ColorValue>(&value)) {
         JSValue arr = JS_NewArray(ctx);
         JS_DefinePropertyValueUint32(ctx, arr, 0, JS_NewFloat64(ctx, p->r), JS_PROP_C_W_E);
@@ -327,6 +364,37 @@ JSValue CoerceInitialValue(JSContext* ctx, const Json& v, FieldKind kind) {
         }
         break;
     }
+    case FieldKind::Vec4: {
+        if (v.is_string()) {
+            auto   source = rstd::cppstd::to_string(*v.as_str());
+            auto   fs     = parse_floats(source);
+            double x      = fs.size() > 0 ? fs[0] : 0.0;
+            double y      = fs.size() > 1 ? fs[1] : x;
+            double z      = fs.size() > 2 ? fs[2] : x;
+            double w      = fs.size() > 3 ? fs[3] : x;
+            return MakeVec4Value(ctx, x, y, z, w);
+        }
+        if (auto values = v.as_array(); values.is_some() && (*values)->len() >= usize(4)) {
+            auto x = (**values)[usize(0)].as_f64();
+            auto y = (**values)[usize(1)].as_f64();
+            auto z = (**values)[usize(2)].as_f64();
+            auto w = (**values)[usize(3)].as_f64();
+            if (x.is_some() && y.is_some() && z.is_some() && w.is_some())
+                return MakeVec4Value(ctx,
+                                     x->to_primitive(),
+                                     y->to_primitive(),
+                                     z->to_primitive(),
+                                     w->to_primitive());
+        }
+        if (v.is_number()) {
+            auto number = v.as_f64();
+            if (number.is_some()) {
+                const auto scalar = number->to_primitive();
+                return MakeVec4Value(ctx, scalar, scalar, scalar, scalar);
+            }
+        }
+        break;
+    }
     case FieldKind::Color: {
         if (v.is_string()) {
             auto    source = rstd::cppstd::to_string(*v.as_str());
@@ -395,7 +463,9 @@ struct EngineHostState {
     std::string                                  ls_path;
     // The script currently running. createLayer pops clones from this
     // FieldScript's clone_queue. Set around every init/update/cursor invoke.
-    FieldScript* active_field_script { nullptr };
+    FieldScript*                    active_field_script { nullptr };
+    Vec<String>                     pending_registered_assets;
+    Option<JsRuntime::LayerFactory> layer_factory;
     // SceneNode -> text-content setter. Populated by text layers in the
     // parser; consulted by NodeSetText so `thisLayer.text = "..."` reaches
     // TextLayouter::SetText. Missing entry means the layer is not text-
@@ -475,6 +545,7 @@ struct FieldScript::Impl {
     std::vector<owe::SceneNode*>                                  clone_queue;
     std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clone_queues;
     std::unordered_map<owe::SceneNode*, std::string>              clone_asset_keys;
+    Vec<String>                                                   registered_assets;
 };
 
 FieldScript::FieldScript(): m_impl(std::make_unique<Impl>()) {}
@@ -483,6 +554,9 @@ FieldKind          FieldScript::field_kind() const noexcept { return m_impl->kin
 const ScriptValue& FieldScript::last_value() const noexcept { return m_impl->last_value; }
 bool               FieldScript::alive() const noexcept { return m_impl->alive; }
 std::string_view   FieldScript::script_sha() const noexcept { return m_impl->sha; }
+slice<String>      FieldScript::RegisteredAssets() const noexcept {
+    return m_impl->registered_assets.as_slice();
+}
 void FieldScript::AddAssetCloneQueue(std::string asset, std::vector<owe::SceneNode*> nodes) {
     if (asset.empty() || nodes.empty()) return;
     auto& queue = m_impl->asset_clone_queues[asset];
@@ -1019,11 +1093,23 @@ void SweepDeferred(JSContext* ctx, EngineHostState* host) {
                          host->deferred.end());
 }
 
-// engine.registerAsset(...) — return the first arg unchanged so chained
-// `.something` works without throwing (even if the result isn't useful).
 JSValue EngineRegisterAsset(JSContext* ctx, JSValueConst /*this_val*/, int argc,
                             JSValueConst* argv) {
-    if (argc > 0) return JS_DupValue(ctx, argv[0]);
+    if (argc > 0) {
+        const char* value = JS_ToCString(ctx, argv[0]);
+        if (value != nullptr) {
+            auto* host   = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+            auto  asset  = String::make(rstd::cppstd::as_str(value).unwrap());
+            auto& assets = host->active_field_script
+                               ? host->active_field_script->m_impl->registered_assets
+                               : host->pending_registered_assets;
+            bool  found { false };
+            for (const auto& registered : assets) found = found || registered == asset;
+            if (! found) assets.push(rstd::move(asset));
+            JS_FreeCString(ctx, value);
+        }
+        return JS_DupValue(ctx, argv[0]);
+    }
     return JS_NewObject(ctx);
 }
 
@@ -1662,9 +1748,10 @@ JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*)
 // the SceneNode pointer in JS_GetOpaque; lifetime is owned by Scene, the
 // finalizer is a no-op (we don't dereference on free, just drop the ref).
 
-static JSClassID s_layer_class_id    = 0;
-static JSClassID s_effect_class_id   = 0;
-static JSClassID s_material_class_id = 0;
+static JSClassID s_layer_class_id             = 0;
+static JSClassID s_effect_class_id            = 0;
+static JSClassID s_material_class_id          = 0;
+static JSClassID s_particle_instance_class_id = 0;
 
 struct LayerHandle {
     EngineHostState* host { nullptr };
@@ -1725,6 +1812,10 @@ JSClassDef s_material_class_def {
     .exotic     = &s_material_exotic,
 };
 
+JSClassDef s_particle_instance_class_def {
+    .class_name = "WWParticleInstance",
+};
+
 inline owe::SceneNode* GetLayerNode(JSValueConst v) {
     return ResolveLayerNode(static_cast<LayerHandle*>(JS_GetOpaque(v, s_layer_class_id)));
 }
@@ -1742,6 +1833,13 @@ JSValue WrapLayerName(JSContext* ctx, std::string name) {
     if (JS_IsException(obj)) return obj;
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     JS_SetOpaque(obj, new LayerHandle { .host = host, .node = nullptr, .name = std::move(name) });
+    return obj;
+}
+
+JSValue WrapParticleInstance(JSContext* ctx, owe::SceneNode* node) {
+    JSValue obj = JS_NewObjectClass(ctx, s_particle_instance_class_id);
+    if (JS_IsException(obj)) return obj;
+    JS_SetOpaque(obj, node);
     return obj;
 }
 
@@ -1971,6 +2069,78 @@ JSValue NodeSetColor(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     if (! ReadXYZ(ctx, val, x, y, z)) return JS_UNDEFINED;
     n->SetColor({ float(x), float(y), float(z) });
     return JS_UNDEFINED;
+}
+JSValue NodeGetVolume(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    return JS_NewFloat64(ctx, n ? n->Volume() : 1.0);
+}
+JSValue NodeSetVolume(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    double volume { 1.0 };
+    if (JS_ToFloat64(ctx, &volume, val) == 0) n->SetVolume(static_cast<float>(volume));
+    return JS_UNDEFINED;
+}
+
+JSValue ParticleGet(JSContext* ctx, JSValueConst this_val, ref<str> field, bool vector) {
+    auto* node = static_cast<owe::SceneNode*>(JS_GetOpaque(this_val, s_particle_instance_class_id));
+    if (! node) return JS_UNDEFINED;
+    auto control = node->ParticleControlHandle();
+    if (control.is_none()) return JS_UNDEFINED;
+    auto value = (*control)->Get(field);
+    if (vector) {
+        if (value.len() < usize(3)) return JS_UNDEFINED;
+        return MakeVec3(ctx, value[usize()], value[usize(1)], value[usize(2)]);
+    }
+    return value.is_empty() ? JS_UNDEFINED : JS_NewFloat64(ctx, value[usize()]);
+}
+
+JSValue ParticleSet(JSContext* ctx, JSValueConst this_val, JSValueConst value, ref<str> field,
+                    bool vector) {
+    auto* node = static_cast<owe::SceneNode*>(JS_GetOpaque(this_val, s_particle_instance_class_id));
+    if (! node) return JS_UNDEFINED;
+    auto control = node->ParticleControlHandle();
+    if (control.is_none()) return JS_UNDEFINED;
+    Vec<float> values;
+    if (vector) {
+        double x {}, y {}, z {};
+        if (! ReadXYZ(ctx, value, x, y, z)) return JS_UNDEFINED;
+        values.push(static_cast<float>(x));
+        values.push(static_cast<float>(y));
+        values.push(static_cast<float>(z));
+    } else {
+        double scalar {};
+        if (JS_ToFloat64(ctx, &scalar, value) != 0) return JS_UNDEFINED;
+        values.push(static_cast<float>(scalar));
+    }
+    (*control)->Apply(field, values.as_slice());
+    return JS_UNDEFINED;
+}
+
+#define OWE_PARTICLE_PROPERTY(Name, Field, Vector)                                         \
+    JSValue ParticleGet##Name(JSContext* ctx, JSValueConst this_val) {                     \
+        return ParticleGet(ctx, this_val, Field, Vector);                                  \
+    }                                                                                      \
+    JSValue ParticleSet##Name(JSContext* ctx, JSValueConst this_val, JSValueConst value) { \
+        return ParticleSet(ctx, this_val, value, Field, Vector);                           \
+    }
+
+OWE_PARTICLE_PROPERTY(Alpha, "alpha"_str, false)
+OWE_PARTICLE_PROPERTY(Size, "size"_str, false)
+OWE_PARTICLE_PROPERTY(Lifetime, "lifetime"_str, false)
+OWE_PARTICLE_PROPERTY(Rate, "rate"_str, false)
+OWE_PARTICLE_PROPERTY(Speed, "speed"_str, false)
+OWE_PARTICLE_PROPERTY(Count, "count"_str, false)
+OWE_PARTICLE_PROPERTY(Brightness, "brightness"_str, false)
+OWE_PARTICLE_PROPERTY(Color, "color"_str, true)
+OWE_PARTICLE_PROPERTY(Colorn, "colorn"_str, true)
+
+#undef OWE_PARTICLE_PROPERTY
+
+JSValue NodeGetParticleInstance(JSContext* ctx, JSValueConst this_val) {
+    auto* node = GetLayerNode(this_val);
+    if (! node || node->ParticleControl().is_none()) return JS_UNDEFINED;
+    return WrapParticleInstance(ctx, node);
 }
 JSValue NodeGetPerspective(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
@@ -2307,16 +2477,70 @@ JSValue NodeSceneGetInitialLayerConfig(JSContext* ctx, JSValueConst, int argc, J
     return JS_NewObject(ctx);
 }
 
-// thisScene.createLayer(model_path) — WE-style runtime layer spawn. The
-// model path is ignored: parser-side pre-spawned a queue of SceneNode clones
-// (one per expected createLayer call) when the script binding showed the
-// audio-bar pattern. Pop the next clone here; fall back to the default
-// stub when no clones remain so the script's caller still gets an object.
+JSValue NodeSceneGetCameraTransforms(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (! host || ! host->scene) return JS_ThrowTypeError(ctx, "scene camera is not available");
+    auto transforms = host->scene->ActiveCameraTransforms();
+    if (transforms.is_none()) return JS_ThrowTypeError(ctx, "active scene camera is not available");
+
+    JSValue out = JS_NewObject(ctx);
+    JS_DefinePropertyValueStr(
+        ctx,
+        out,
+        "eye",
+        MakeVec3(ctx, transforms->eye.x(), transforms->eye.y(), transforms->eye.z()),
+        JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx,
+        out,
+        "center",
+        MakeVec3(ctx, transforms->center.x(), transforms->center.y(), transforms->center.z()),
+        JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(
+        ctx,
+        out,
+        "up",
+        MakeVec3(ctx, transforms->up.x(), transforms->up.y(), transforms->up.z()),
+        JS_PROP_C_W_E);
+    return out;
+}
+
+bool ReadOptionalCameraVector(JSContext* ctx, JSValueConst object, const char* name,
+                              Eigen::Vector3d& out) {
+    JSValue value = JS_GetPropertyStr(ctx, object, name);
+    if (JS_IsUndefined(value)) {
+        JS_FreeValue(ctx, value);
+        return true;
+    }
+    double     x {}, y {}, z {};
+    const bool ok = ReadXYZ(ctx, value, x, y, z);
+    JS_FreeValue(ctx, value);
+    if (! ok) return false;
+    out = Eigen::Vector3d { x, y, z };
+    return true;
+}
+
+JSValue NodeSceneSetCameraTransforms(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (! host || ! host->scene) return JS_ThrowTypeError(ctx, "scene camera is not available");
+    if (argc < 1 || ! JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "camera transforms must be an object");
+    auto transforms = host->scene->ActiveCameraTransforms();
+    if (transforms.is_none()) return JS_ThrowTypeError(ctx, "active scene camera is not available");
+    if (! ReadOptionalCameraVector(ctx, argv[0], "eye", transforms->eye) ||
+        ! ReadOptionalCameraVector(ctx, argv[0], "center", transforms->center) ||
+        ! ReadOptionalCameraVector(ctx, argv[0], "up", transforms->up))
+        return JS_ThrowTypeError(ctx, "camera transform vectors require x, y and z");
+    if (! host->scene->SetActiveCameraTransforms(*transforms))
+        return JS_ThrowRangeError(ctx, "camera transforms are degenerate");
+    return JS_UNDEFINED;
+}
+
 JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc,
                              JSValueConst* argv) {
     auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
     auto* fs   = host->active_field_script;
-    if (! fs) return JS_DupValue(ctx, host->default_layer);
+    if (! fs) return JS_ThrowReferenceError(ctx, "createLayer requires an active field script");
 
     owe::SceneNode* node = nullptr;
     if (argc > 0 && ! JS_IsObject(argv[0])) {
@@ -2327,6 +2551,18 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc
                 node = it->second.front();
                 it->second.erase(it->second.begin());
             }
+            bool registered { false };
+            for (const auto& value : fs->m_impl->registered_assets) {
+                registered = registered || rstd::cppstd::as_string_view(value.as_str()) == asset;
+            }
+            if (! node && registered && host->layer_factory.is_some()) {
+                auto created =
+                    (**host->layer_factory)(fs->m_impl->node, rstd::cppstd::as_str(asset).unwrap());
+                if (created.is_some()) {
+                    node                               = (*created).as_ptr();
+                    fs->m_impl->clone_asset_keys[node] = asset;
+                }
+            }
             JS_FreeCString(ctx, asset);
         }
     }
@@ -2334,8 +2570,9 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc
         node = fs->m_impl->clone_queue.front();
         fs->m_impl->clone_queue.erase(fs->m_impl->clone_queue.begin());
     }
-    if (! node) return JS_DupValue(ctx, host->default_layer);
+    if (! node) return JS_ThrowReferenceError(ctx, "createLayer asset is unavailable");
     node->SetVisible(true);
+    node->Play();
     if (argc > 0 && JS_IsObject(argv[0])) {
         JSValue perspective = JS_GetPropertyStr(ctx, argv[0], "perspective");
         if (! JS_IsUndefined(perspective)) node->SetPerspective(JS_ToBool(ctx, perspective) != 0);
@@ -2348,6 +2585,7 @@ JSValue NodeSceneDestroyLayer(JSContext* ctx, JSValueConst, int argc, JSValueCon
     if (argc < 1) return JS_UNDEFINED;
     if (auto* n = GetLayerNode(argv[0])) {
         n->SetVisible(false);
+        n->Stop();
         auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
         auto* fs   = host ? host->active_field_script : nullptr;
         if (fs) {
@@ -2506,6 +2744,8 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("alpha", NodeGetAlpha, NodeSetAlpha),
     JS_CGETSET_DEF("brightness", NodeGetBrightness, NodeSetBrightness),
     JS_CGETSET_DEF("color", NodeGetColor, NodeSetColor),
+    JS_CGETSET_DEF("volume", NodeGetVolume, NodeSetVolume),
+    JS_CGETSET_DEF("instance", NodeGetParticleInstance, NodeSetIgnore),
     JS_CGETSET_DEF("perspective", NodeGetPerspective, NodeSetPerspective),
     JS_CGETSET_DEF("alignment", NodeGetAlignment, NodeSetAlignment),
     JS_CGETSET_DEF("text", NodeGetText, NodeSetText),
@@ -2523,6 +2763,8 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getEffectCount", 0, NodeGetEffectCount),
     JS_CFUNC_DEF("enumerateLayers", 0, NodeSceneEnumerateLayers),
     JS_CFUNC_DEF("getInitialLayerConfig", 1, NodeSceneGetInitialLayerConfig),
+    JS_CFUNC_DEF("getCameraTransforms", 0, NodeSceneGetCameraTransforms),
+    JS_CFUNC_DEF("setCameraTransforms", 1, NodeSceneSetCameraTransforms),
     JS_CFUNC_DEF("getBoneIndex", 1, NodeGetBoneIndex),
     JS_CFUNC_DEF("getBoneTransform", 1, NodeGetBoneTransform),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
@@ -2548,6 +2790,30 @@ void InitLayerClass(JSContext* ctx, JSRuntime* rt) {
                                s_layer_proto_funcs,
                                sizeof(s_layer_proto_funcs) / sizeof(s_layer_proto_funcs[0]));
     JS_SetClassProto(ctx, s_layer_class_id, proto);
+}
+
+const JSCFunctionListEntry s_particle_instance_proto_funcs[] = {
+    JS_CGETSET_DEF("alpha", ParticleGetAlpha, ParticleSetAlpha),
+    JS_CGETSET_DEF("size", ParticleGetSize, ParticleSetSize),
+    JS_CGETSET_DEF("lifetime", ParticleGetLifetime, ParticleSetLifetime),
+    JS_CGETSET_DEF("rate", ParticleGetRate, ParticleSetRate),
+    JS_CGETSET_DEF("speed", ParticleGetSpeed, ParticleSetSpeed),
+    JS_CGETSET_DEF("count", ParticleGetCount, ParticleSetCount),
+    JS_CGETSET_DEF("brightness", ParticleGetBrightness, ParticleSetBrightness),
+    JS_CGETSET_DEF("color", ParticleGetColor, ParticleSetColor),
+    JS_CGETSET_DEF("colorn", ParticleGetColorn, ParticleSetColorn),
+};
+
+void InitParticleInstanceClass(JSContext* ctx, JSRuntime* rt) {
+    if (s_particle_instance_class_id == 0) JS_NewClassID(rt, &s_particle_instance_class_id);
+    JS_NewClass(rt, s_particle_instance_class_id, &s_particle_instance_class_def);
+    JSValue proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx,
+                               proto,
+                               s_particle_instance_proto_funcs,
+                               sizeof(s_particle_instance_proto_funcs) /
+                                   sizeof(s_particle_instance_proto_funcs[0]));
+    JS_SetClassProto(ctx, s_particle_instance_class_id, proto);
 }
 
 const JSCFunctionListEntry s_effect_proto_funcs[] = {
@@ -2682,6 +2948,7 @@ JsRuntime::JsRuntime(): m_impl(std::make_unique<Impl>()) {
     JS_SetModuleLoaderFunc(
         m_impl->rt, /*normalize=*/nullptr, BuiltinModuleLoader, /*opaque=*/nullptr);
     InitLayerClass(m_impl->ctx, m_impl->rt);
+    InitParticleInstanceClass(m_impl->ctx, m_impl->rt);
     InitEffectClass(m_impl->ctx, m_impl->rt);
     InitMaterialClass(m_impl->ctx, m_impl->rt);
     InitTexAnimClass(m_impl->ctx, m_impl->rt);
@@ -3010,6 +3277,12 @@ void JsRuntime::RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alig
                                                     });
 }
 
+void JsRuntime::SetLayerFactory(LayerFactory factory) {
+    m_impl->host.layer_factory = Some(rstd::move(factory));
+}
+
+void JsRuntime::ClearLayerFactory() { m_impl->host.layer_factory = None(); }
+
 // --- Module load + FieldScript construction ---------------------------------
 
 namespace
@@ -3055,6 +3328,7 @@ FieldScript* JsRuntime::MakeFieldScript(
     std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clones) {
     JSContext* ctx = m_impl->ctx;
     if (! ctx) return nullptr;
+    m_impl->host.pending_registered_assets.clear();
 
     // Wrap `node` (if any) up front. Bind it as `thisLayer` for the
     // duration of module eval + init so module-body top-level statements
@@ -3107,6 +3381,7 @@ FieldScript* JsRuntime::MakeFieldScript(
     I->node          = node;
     I->wrapped_layer = wrapped; // takes ownership; freed in JsRuntime dtor
     I->clone_queue   = std::move(clones);
+    I->registered_assets = rstd::move(m_impl->host.pending_registered_assets);
     for (auto& [asset, nodes] : asset_clones) {
         fs->AddAssetCloneQueue(std::move(asset), std::move(nodes));
     }

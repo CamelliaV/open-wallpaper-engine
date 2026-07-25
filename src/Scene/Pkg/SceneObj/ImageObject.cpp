@@ -324,6 +324,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     owe::GetJsonValue(json, "parent", parent, false);
     owe::GetJsonValue(json, "attachment", attachment, false);
     owe::GetJsonValue(json, "perspective", perspective, false);
+    owe::GetJsonValue(json, "reflected", reflected, false);
     owe::GetJsonValue(json, "copybackground", copybackground, false);
     owe::GetJsonValue(json, "solid", solid, false);
     owe::GetJsonValue(json, "opaquebackground", opaquebackground, false);

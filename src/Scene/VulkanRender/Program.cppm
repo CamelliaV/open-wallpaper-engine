@@ -862,6 +862,11 @@ struct RenderProgram {
                 return false;
             }
         }
+        for (auto& record : pass_records) {
+            auto pass = resolve(record);
+            if (! pass || ! pass->prepared()) continue;
+            pass->completeUpdate();
+        }
         return true;
     }
 

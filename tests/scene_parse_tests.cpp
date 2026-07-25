@@ -57,6 +57,27 @@ TEST(TextObjectJson, ReadsDirectUserValueBinding) {
     owe::wpscene::TextObject text;
     ASSERT_TRUE(text.FromJson(parsed.unwrap(), vfs));
     EXPECT_EQ(text.text_user.name, "title");
+    EXPECT_TRUE(text.reflected);
+}
+
+TEST(TextObjectJson, ReadsReflectionParticipation) {
+    auto parsed = owe::ParseJson(R"({"reflected":false})");
+    ASSERT_TRUE(parsed.is_ok());
+
+    owe::fs::VFS             vfs;
+    owe::wpscene::TextObject text;
+    ASSERT_TRUE(text.FromJson(parsed.unwrap(), vfs));
+    EXPECT_FALSE(text.reflected);
+}
+
+TEST(ModelObjectJson, ReadsMaterialSkin) {
+    auto parsed = owe::ParseJson(R"({"model":"models/prism.mdl","skin":2})");
+    ASSERT_TRUE(parsed.is_ok());
+
+    owe::fs::VFS              vfs;
+    owe::wpscene::ModelObject model;
+    ASSERT_TRUE(model.FromJson(parsed.unwrap(), vfs));
+    EXPECT_EQ(model.skin, 2u);
 }
 
 namespace

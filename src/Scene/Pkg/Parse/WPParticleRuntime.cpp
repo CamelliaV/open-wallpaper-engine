@@ -728,7 +728,37 @@ void WPParticleSubSystem::Warmup(WPParticleInstanceRef    current,
     m_frame.emitter_delta = saved_emitter_delta;
 }
 
+bool WPParticleSubSystem::SyncPlayback() {
+    if (m_playback_state.is_none()) return false;
+    const auto sequence =
+        (*m_playback_state)->reset_sequence.load(rstd::sync::atomic::Ordering::Acquire);
+    if (sequence == m_seen_reset_sequence) return false;
+
+    m_seen_reset_sequence      = sequence;
+    m_time                     = f64();
+    m_trail_sample_accumulator = f64();
+    for (usize index {}; index < System().InstanceCount(); ++index) {
+        System().Instance(index).Reset();
+        m_instance_states[index].Reset();
+    }
+    return true;
+}
+
+void WPParticleSubSystem::ExtractCurrentMesh() {
+    UpdateFrameInput(f64());
+    auto frame_ref = rstd::dyn<rstd::any::Any>::from_ref(m_frame).as_ref();
+    System().Extract(frame_ref);
+    m_mesh->SetDirty();
+}
+
 void WPParticleSubSystem::Tick(f64 frame_time, bool update_mesh) {
+    const bool reset = SyncPlayback();
+    if (m_playback_state.is_some() &&
+        ! (*m_playback_state)->playing.load(rstd::sync::atomic::Ordering::Acquire)) {
+        if (reset && update_mesh) ExtractCurrentMesh();
+        for (auto& child : m_children) child->Tick(f64(), update_mesh);
+        return;
+    }
     auto rate =
         m_instance_override.is_some() ? (*m_instance_override)->rate : m_rate.to_primitive();
     Advance(frame_time * f64(std::max(rate, 0.0)), frame_time, update_mesh);

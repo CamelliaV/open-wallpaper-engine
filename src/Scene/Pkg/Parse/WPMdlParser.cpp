@@ -171,14 +171,15 @@ bool UsesUint32Indices(const WPMdlHeader& header, uint32_t vertex_num) {
     return header.mdlv >= 23 && vertex_num > std::numeric_limits<uint16_t>::max();
 }
 
-// hexpat Mesh<MdlV, TopFlag, SinglePuppet>:
-//   CStr mat_json + u32 flag_a + (if flag_a==2: u32) + (if MdlV>=17: aabb)
+// hexpat Mesh<MdlV, TopFlag, SinglePuppet, SkinCount>:
+//   CStr mat_json[SkinCount] + u32 flag_a + (if flag_a==2: u32) + (if MdlV>=17: aabb)
 //   + (if MdlV>14: u32 mesh_flag) + u32 vertex_size + Vertex[]
 //   + u32 indices_size + Triangle[] + (if MdlV>=21: Parts) + (if MdlV>21: Masks)
 bool ParseMesh(fs::BinaryReader& f, const WPMdlHeader& header, WPMdl::Mesh& mesh,
                std::string_view path) {
-    mesh.mat_json_file = ReadOwnedString(f);
-    mesh.flag_a        = f.ReadUint32();
+    ResetDefault(mesh.mat_json_files, usize(header.skin_count));
+    for (auto& material : mesh.mat_json_files) material = ReadOwnedString(f);
+    mesh.flag_a = f.ReadUint32();
     if (mesh.flag_a == 2) {
         mesh.has_flag_a2_one = (f.ReadUint32() == 1);
     }
@@ -911,14 +912,15 @@ void ApplyMDLS3CentroidPivot(WPMdl& mdl) {
     }
 }
 
-// hexpat Header: VersionTag mdlv + u32 mdl_flag + s32 always_one(==1) + u32 mesh_count.
+// hexpat Header: VersionTag mdlv + u32 mdl_flag + u32 skin_count + u32 mesh_count.
 bool ReadHeaderFromStream(fs::BinaryReader& f, WPMdlHeader& h, std::string_view path_for_log) {
     h.mdlv       = ReadMdlVersion(f);
     h.mdl_flag   = f.ReadUint32();
-    h.unk_a      = f.ReadUint32();
+    h.skin_count = f.ReadUint32();
     h.mesh_count = f.ReadUint32();
-    if (h.unk_a != 1) {
-        rstd_info("mdl '{}' header always_one={} (expected 1)", std::string(path_for_log), h.unk_a);
+    if (h.skin_count == 0) {
+        rstd_error("mdl '{}' header has no material skins", std::string(path_for_log));
+        return false;
     }
     return true;
 }

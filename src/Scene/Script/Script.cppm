@@ -27,6 +27,9 @@ struct Vec2Value {
 struct Vec3Value {
     double x { 0.0 }, y { 0.0 }, z { 0.0 };
 };
+struct Vec4Value {
+    double x { 0.0 }, y { 0.0 }, z { 0.0 }, w { 0.0 };
+};
 struct ColorValue {
     double r { 0.0 }, g { 0.0 }, b { 0.0 };
 };
@@ -38,7 +41,7 @@ struct BoolValue {
 };
 
 using ScriptValue = std::variant<std::monostate, ScalarValue, BoolValue, Vec2Value, Vec3Value,
-                                 ColorValue, StringValue>;
+                                 Vec4Value, ColorValue, StringValue>;
 
 struct BoneTranslation {
     float x { 0.0f }, y { 0.0f }, z { 0.0f };
@@ -54,6 +57,7 @@ enum class FieldKind
     Bool,
     Vec2,
     Vec3,
+    Vec4,
     Color,
     String
 };
@@ -211,6 +215,10 @@ public:
     void RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alignment,
                                       ImageAlignmentSetter setter);
 
+    using LayerFactory = Arc<dyn<FnMut<Option<Arc<owe::SceneNode>>(owe::SceneNode*, ref<str>)>>>;
+    void SetLayerFactory(LayerFactory factory);
+    void ClearLayerFactory();
+
     // Same exposure rule as FieldScript::Impl above: opaque outside the
     // module, but visible to peer module impl files.
     struct Impl;
@@ -226,6 +234,7 @@ public:
     const ScriptValue& last_value() const noexcept;
     bool               alive() const noexcept;
     std::string_view   script_sha() const noexcept;
+    slice<String>      RegisteredAssets() const noexcept;
     void               AddAssetCloneQueue(std::string asset, std::vector<owe::SceneNode*> nodes);
 
     // Impl is intentionally exposed inside the wescene.script module so

@@ -107,6 +107,7 @@ public:
 
     void prepare(Scene&, const Device&, PassPrepareContext&) override;
     bool update(PassUpdateContext&) override;
+    void completeUpdate() override;
     void record(PassRecordContext&) override;
     void destory(const Device&) override;
     bool supportsRenderScope() const override;

@@ -925,6 +925,13 @@ bool CustomShaderPass::update(PassUpdateContext& context) {
     return true;
 }
 
+void CustomShaderPass::completeUpdate() {
+    if (! m_desc.draw_buffers.dynamic || m_desc.node.is_none()) return;
+    auto* mesh = (*m_desc.node)->Mesh();
+    if (mesh == nullptr) return;
+    (void)mesh->ConsumeDirtyFlags(SceneMeshDirtyData);
+}
+
 void CustomShaderPass::prepareRenderScopeDraw(PassRecordContext& context) {
     recordSampledImageBarriers(context);
 }

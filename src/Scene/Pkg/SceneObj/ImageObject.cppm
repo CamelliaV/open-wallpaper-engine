@@ -107,7 +107,8 @@ public:
     ObjectInstance            instance;                  // PKGV0018+; instance binding
 
     // Image-kind specifics (gates listed for reference; reads are unconditional via _NOWARN).
-    bool                 perspective { false };    // PKGV0002+
+    bool                 perspective { false }; // PKGV0002+
+    bool                 reflected { true };
     bool                 copybackground { false }; // PKGV0001+
     bool                 solid { false };          // PKGV0002+
     bool                 solid_layer { false };

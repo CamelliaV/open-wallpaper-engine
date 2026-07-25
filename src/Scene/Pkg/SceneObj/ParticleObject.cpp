@@ -63,6 +63,21 @@ bool ParticleChild::FromJson(const owe::Json& json, fs::VFS& vfs) {
     return true;
 }
 
+ParticleChild ParticleChild::Clone() const {
+    ParticleChild out;
+    out.type                   = type;
+    out.name                   = name;
+    out.maxcount               = maxcount;
+    out.flags                  = flags;
+    out.controlpointstartindex = controlpointstartindex;
+    out.probability            = probability;
+    out.angles                 = angles;
+    out.origin                 = origin;
+    out.scale                  = scale;
+    out.obj                    = obj.Clone();
+    return out;
+}
+
 bool ParticleControlpoint::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "id", id);
 
@@ -276,8 +291,59 @@ bool Particle::FromJson(const owe::Json& json, fs::VFS& vfs) {
     return true;
 }
 
+Particle Particle::Clone() const {
+    Particle out;
+    out.emitters      = emitters;
+    out.renderers     = renderers;
+    out.controlpoints = controlpoints;
+    for (const auto& value : initializers) out.initializers.push(value.clone());
+    for (const auto& value : operators) out.operators.push(value.clone());
+    out.material = material.clone();
+    out.children.reserve(children.size());
+    for (const auto& child : children) out.children.push_back(child.Clone());
+    out.animationmode      = animationmode;
+    out.sequencemultiplier = sequencemultiplier;
+    out.maxcount           = maxcount;
+    out.starttime          = starttime;
+    out.flags              = flags;
+    return out;
+}
+
 bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
+}
+
+bool ParticleObject::FromAsset(ref<str> asset, fs::VFS& vfs) {
+    particle  = rstd::cppstd::to_string(asset);
+    name      = particle;
+    auto json = LoadAssetJsonFile(vfs, rstd::cppstd::as_string_view(asset));
+    return json && particleObj.FromJson(*json, vfs);
+}
+
+ParticleObject ParticleObject::Clone() const {
+    ParticleObject out;
+    out.id               = id;
+    out.name             = name;
+    out.origin           = origin;
+    out.scale            = scale;
+    out.angles           = angles;
+    out.parallaxDepth    = parallaxDepth;
+    out.visible          = visible;
+    out.particle         = particle;
+    out.particleObj      = particleObj.Clone();
+    out.instanceoverride = instanceoverride;
+    out.locktransforms   = locktransforms;
+    out.muteineditor     = muteineditor;
+    out.nointerpolation  = nointerpolation;
+    out.reflected        = reflected;
+    out.parent           = parent;
+    out.attachment       = attachment;
+    out.dependencies     = dependencies;
+    out.instance         = instance.clone();
+    out.particlesrc      = particlesrc.clone();
+    out.controlpoint     = controlpoint;
+    out.visible_user_key = visible_user_key;
+    return out;
 }
 
 bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion /*v*/) {
@@ -299,6 +365,7 @@ bool ParticleObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion 
     owe::GetJsonValue(json, "locktransforms", locktransforms, false);
     owe::GetJsonValue(json, "muteineditor", muteineditor, false);
     owe::GetJsonValue(json, "nointerpolation", nointerpolation, false);
+    owe::GetJsonValue(json, "reflected", reflected, false);
     owe::GetJsonValue(json, "parent", parent, false);
     owe::GetJsonValue(json, "attachment", attachment, false);
     owe::GetJsonValue(json, "dependencies", dependencies, false);

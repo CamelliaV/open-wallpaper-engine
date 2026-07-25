@@ -37,39 +37,39 @@ void MergeUserTextures(const rstd::json::Array& src, rstd::json::Array& dst) {
 void LoadConstantShaderValue(std::string name, const owe::Json& json,
                              std::unordered_map<std::string, std::vector<float>>& constant_values,
                              std::unordered_map<std::string, std::string>&        user_values,
-                             std::unordered_map<std::string, AnimCurve>&          animations) {
+                             std::unordered_map<std::string, AnimCurve>&          animations,
+                             FieldBindings&                                       bindings) {
     std::vector<float> value;
     owe::GetJsonValue(json, value);
     constant_values[name] = std::move(value);
     if (! json.is_object()) return;
 
+    (void)AbsorbFieldBinding(name, json, bindings);
+
     if (auto user = json.get("user"_str); user.is_some()) {
         auto string = (*user)->as_str();
         if (string.is_some()) user_values[name] = rstd::cppstd::to_string(*string);
     }
-    if (auto animation = json.get("animation"_str); animation.is_some()) {
-        AnimCurve curve;
-        if (ParseAnimCurve(**animation, curve)) {
-            animations[name] = std::move(curve);
-        }
-    }
+    if (auto animation = bindings.animations.find(name); animation != bindings.animations.end())
+        animations[name] = animation->second.clone();
 }
 
 } // namespace
 
 auto owe::wpscene::Material::clone() const -> Material {
     Material clone;
-    clone.blending                  = blending;
-    clone.cullmode                  = cullmode;
-    clone.shader                    = shader;
-    clone.depthtest                 = depthtest;
-    clone.depthwrite                = depthwrite;
-    clone.textures                  = textures;
-    clone.combos                    = combos;
-    clone.constantshadervalues      = constantshadervalues;
-    clone.constantshadervalues_user = constantshadervalues_user;
-    clone.user_shader_values        = user_shader_values;
-    clone.use_puppet                = use_puppet;
+    clone.blending                      = blending;
+    clone.cullmode                      = cullmode;
+    clone.shader                        = shader;
+    clone.depthtest                     = depthtest;
+    clone.depthwrite                    = depthwrite;
+    clone.textures                      = textures;
+    clone.combos                        = combos;
+    clone.constantshadervalues          = constantshadervalues;
+    clone.constantshadervalues_user     = constantshadervalues_user;
+    clone.user_shader_values            = user_shader_values;
+    clone.use_puppet                    = use_puppet;
+    clone.constantshadervalues_bindings = constantshadervalues_bindings.clone();
     MergeUserTextures(usertextures, clone.usertextures);
     for (const auto& [name, curve] : constantshadervalues_animations)
         clone.constantshadervalues_animations[name] = curve.clone();
@@ -100,6 +100,7 @@ void MaterialPass::Update(const MaterialPass& p) {
     for (const auto& el : p.constantshadervalues_animations) {
         constantshadervalues_animations[el.first] = el.second.clone();
     }
+    constantshadervalues_bindings.Update(p.constantshadervalues_bindings);
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
     }
@@ -127,6 +128,7 @@ void Material::MergePass(const MaterialPass& p) {
     for (const auto& el : p.constantshadervalues_animations) {
         constantshadervalues_animations[el.first] = el.second.clone();
     }
+    constantshadervalues_bindings.Update(p.constantshadervalues_bindings);
     for (const auto& el : p.user_shader_values) {
         user_shader_values[el.first] = el.second;
     }
@@ -162,7 +164,8 @@ bool MaterialPass::FromJson(const owe::Json& json) {
                                         *entry_value,
                                         constantshadervalues,
                                         constantshadervalues_user,
-                                        constantshadervalues_animations);
+                                        constantshadervalues_animations,
+                                        constantshadervalues_bindings);
             });
     }
     LoadUserShaderValues(json, user_shader_values);
@@ -237,7 +240,8 @@ bool Material::FromJson(const owe::Json& json, SceneVersion /*v*/) {
                                         *entry_value,
                                         constantshadervalues,
                                         constantshadervalues_user,
-                                        constantshadervalues_animations);
+                                        constantshadervalues_animations,
+                                        constantshadervalues_bindings);
             });
     }
     LoadUserShaderValues(jContent, user_shader_values);

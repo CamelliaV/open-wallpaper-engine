@@ -802,7 +802,7 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
             SetSnapshot(jm, "ok", ok);
             SetSnapshot(jm, "mdlv", h.mdlv);
             owe::SetJson(jm, "flag", emit_flag(h.mdl_flag));
-            SetSnapshot(jm, "unk_a", static_cast<int64_t>(h.unk_a));
+            SetSnapshot(jm, "skin_count", static_cast<int64_t>(h.skin_count));
             SetSnapshot(jm, "mesh_count", static_cast<int64_t>(h.mesh_count));
             owe::AppendJson(jmdl, std::move(jm));
         }
@@ -829,12 +829,15 @@ Json DumpWorkshop(const std::string& workshop_dir, std::string& err, DumpFlags f
         SetSnapshot(jm, "ok", ok);
         SetSnapshot(jm, "mdlv", mdl.header.mdlv);
         owe::SetJson(jm, "flag", emit_flag(mdl.header.mdl_flag));
-        SetSnapshot(jm, "unk_a", static_cast<int64_t>(mdl.header.unk_a));
+        SetSnapshot(jm, "skin_count", static_cast<int64_t>(mdl.header.skin_count));
         SetSnapshot(jm, "mesh_count", static_cast<int64_t>(mdl.header.mesh_count));
         SetSnapshot(jm, "mdls", mdl.mdls);
         SetSnapshot(jm, "mdla", mdl.mdla);
         const WPMdl::Mesh* m0 = mdl.meshes.is_empty() ? nullptr : &mdl.meshes[usize()];
-        SetSnapshot(jm, "mat_json_file", m0 ? m0->mat_json_file.as_str() : ref<str>());
+        SetSnapshot(jm,
+                    "mat_json_file",
+                    m0 && ! m0->mat_json_files.is_empty() ? m0->mat_json_files[usize()].as_str()
+                                                          : ref<str>());
         SetSnapshot(
             jm, "vertex_count", m0 ? static_cast<int>(m0->positions.len().to_primitive()) : 0);
         SetSnapshot(jm, "index_count", m0 ? static_cast<int>(m0->indices.len().to_primitive()) : 0);

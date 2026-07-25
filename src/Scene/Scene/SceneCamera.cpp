@@ -55,6 +55,32 @@ Vector3d SceneCamera::GetDirection() const {
     return -Vector3d::UnitZ();
 }
 
+auto SceneCamera::Transforms() const -> SceneCameraTransforms {
+    if (m_lookat) return SceneCameraTransforms { .eye = m_eye, .center = m_center, .up = m_up };
+    if (m_node) {
+        const Matrix4d frame = NodeCameraFrame(*m_node);
+        const Vector3d eye   = frame.block<3, 1>(0, 3);
+        return SceneCameraTransforms {
+            .eye    = eye,
+            .center = eye - frame.block<3, 1>(0, 2),
+            .up     = frame.block<3, 1>(0, 1),
+        };
+    }
+    return {};
+}
+
+bool SceneCamera::SetTransforms(const SceneCameraTransforms& transforms) {
+    const Vector3d direction = transforms.center - transforms.eye;
+    if (! transforms.eye.allFinite() || ! transforms.center.allFinite() ||
+        ! transforms.up.allFinite() || direction.squaredNorm() <= 1e-20 ||
+        transforms.up.squaredNorm() <= 1e-20 ||
+        direction.cross(transforms.up).squaredNorm() <= 1e-20)
+        return false;
+    SetLookAt(transforms.eye, transforms.center, transforms.up);
+    Update();
+    return true;
+}
+
 Matrix4d SceneCamera::GetViewMatrix() {
     CalculateViewProjectionMatrix();
     return m_viewMat;

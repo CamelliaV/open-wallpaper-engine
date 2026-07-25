@@ -588,10 +588,11 @@ void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries, owe:
             ++c.mdl_ok;
             if (! quiet)
                 std::fprintf(stdout,
-                             "OK    %s mdl-header %s  mdlv=%d mesh=%u flag=%s\n",
+                             "OK    %s mdl-header %s  mdlv=%d skin=%u mesh=%u flag=%s\n",
                              pkg_id.c_str(),
                              e.path.c_str(),
                              h.mdlv,
+                             h.skin_count,
                              h.mesh_count,
                              FormatMdlFlag(h.mdl_flag).c_str());
         } else {
@@ -607,6 +608,7 @@ void ValidateMdlsHeader(const std::vector<owe::testing::PkgEntry>& entries, owe:
             SetJsonField(entry, "path", e.path);
             if (ok) {
                 SetJsonField(entry, "mdlv", h.mdlv);
+                SetJsonField(entry, "skin_count", h.skin_count);
                 SetJsonField(entry, "mesh_count", h.mesh_count);
                 auto flag_arr = owe::MakeArray();
                 for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {

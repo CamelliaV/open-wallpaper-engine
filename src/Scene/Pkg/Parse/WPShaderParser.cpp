@@ -188,9 +188,13 @@ static constexpr const char* pre_shader_code = R"(// auto-generated WE→HLSL pr
 
 #define mix(a,b,t) lerp((a),(b),(t))
 #define fract frac
-#define atan(a,b) atan2((a),(b))
 #define dFdx ddx
 #define dFdy(x) (-ddy(x))
+
+float  atan(float  y, float  x) { return atan2(y, x); }
+float2 atan(float2 y, float2 x) { return atan2(y, x); }
+float3 atan(float3 y, float3 x) { return atan2(y, x); }
+float4 atan(float4 y, float4 x) { return atan2(y, x); }
 
 // GLSL `mod(a, b)` is `a - b * floor(a / b)` and isn't an HLSL builtin
 // (HLSL has `fmod`, but it uses trunc for the quotient — different sign
@@ -314,9 +318,13 @@ static constexpr const char* pre_shader_code_gs_hlsl = R"(// auto-generated WE�
 #define CAST3X3(x) ((float3x3)(x))
 #define mix(a,b,t) lerp((a),(b),(t))
 #define fract      frac
-#define atan(a,b)  atan2((a),(b))
 #define dFdx       ddx
 #define dFdy(x)    (-ddy(x))
+
+float  atan(float  y, float  x) { return atan2(y, x); }
+float2 atan(float2 y, float2 x) { return atan2(y, x); }
+float3 atan(float3 y, float3 x) { return atan2(y, x); }
+float4 atan(float4 y, float4 x) { return atan2(y, x); }
 
 // `gl_Position` is the SV_Position struct field's GLSL name; rename to the
 // canonical struct field name so `IN[0].gl_Position` / `v.gl_Position` both
@@ -484,6 +492,14 @@ inline String UndefBeforeUserMacroDefines(ref<str> src, ref<str> macro_name) {
         if (w.LineEnd() < src.size()) out.push_ascii(u8('\n'));
     }
     return changed ? rstd::move(out) : String::make(src);
+}
+
+inline String UndefBeforeConflictingMacroDefines(ref<str> src) {
+    auto out = String::make(src);
+    for (auto macro_name : rstd::array<ref<str>, 3> { "M_PI_2"_str, "dFdx"_str, "dFdy"_str }) {
+        out = UndefBeforeUserMacroDefines(out.as_str(), macro_name);
+    }
+    return out;
 }
 
 inline std::string LoadGlslInclude(fs::VFS& vfs, ref<str> input) {
@@ -2057,8 +2073,7 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
     // Some workshop shaders contain full-width semicolons, which glslang rejects
     // while compiling the Vulkan shader source.
     auto compatible = ReplaceAll(src, "\xEF\xBC\x9B", ";");
-    auto undefined =
-        UndefBeforeUserMacroDefines(rstd::cppstd::as_str(compatible).unwrap(), "M_PI_2"_str);
+    auto undefined  = UndefBeforeConflictingMacroDefines(rstd::cppstd::as_str(compatible).unwrap());
     auto normalized_audio = NormalizePackedAudioSpectrumAccess(undefined.as_str());
     auto user_src         = rstd::cppstd::to_string(normalized_audio.as_str());
 

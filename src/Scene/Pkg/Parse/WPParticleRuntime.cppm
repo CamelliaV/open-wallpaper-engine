@@ -335,6 +335,11 @@ struct WPParticleAnimationSpec {
     float                   sequence_multiplier { 1.0f };
 };
 
+struct WPParticlePlaybackState {
+    rstd::sync::atomic::Atomic<bool> playing { true };
+    rstd::sync::atomic::Atomic<u32>  reset_sequence {};
+};
+
 class WPParticleSubSystem;
 
 struct WPParticleInstanceState {
@@ -431,6 +436,9 @@ public:
         m_controlpoints[index].angle_curve = Some(rstd::move(curve));
     }
     void SetOwnerNode(SceneNode* node) noexcept { m_owner_node = node; }
+    void SetPlaybackState(Arc<WPParticlePlaybackState> state) {
+        m_playback_state = Some(rstd::move(state));
+    }
     void SetParentControlpointStartIndex(i32 value) {
         m_parent_controlpoint_start_index = Some(value);
     }
@@ -466,6 +474,8 @@ public:
 
 private:
     void Warmup(WPParticleInstanceRef, ref<dyn<rstd::any::Any>>);
+    bool SyncPlayback();
+    void ExtractCurrentMesh();
     void Advance(f64 frame_time, f64 child_frame_time, bool update_mesh);
     void UpdateFrameInput(f64 frame_time);
     void UpdateControlpoints(WPParticleInstanceRef);
@@ -505,6 +515,8 @@ private:
     f64                                                      m_trail_sample_interval {};
     f64                                                      m_trail_sample_accumulator {};
     Option<Arc<WPParticleTrailUniformState>>                 m_trail_uniform_state;
+    Option<Arc<WPParticlePlaybackState>>                     m_playback_state;
+    u32                                                      m_seen_reset_sequence {};
     rstd::vec::Vec<particle::ParticleSlot>                   m_pending_child_deaths;
     particle::ParticleReadIndex<particle::VelocityAttribute> m_follow_velocity;
     particle::ParticleReadIndex<particle::SizeAttribute>     m_follow_size;

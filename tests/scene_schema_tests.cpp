@@ -127,6 +127,8 @@ const std::set<std::string>& kParsedObjectKeys() {
         "parent",
         "dependencies",
         "instance",
+        // shared by drawable kinds
+        "reflected",
         // image-only
         "image",
         "alignment",
@@ -197,7 +199,7 @@ const std::set<std::string>& kParsedObjectKeys() {
         // model-only (ModelObject)
         "model",
         "attachment",
-        "reflected",
+        "skin",
         // camera-only (CameraObject)
         "camera",
         "fov",

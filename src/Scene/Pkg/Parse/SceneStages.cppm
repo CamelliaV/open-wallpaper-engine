@@ -134,12 +134,10 @@ struct ParseContext {
     // z-position instead of jumping to the front of the root child list.
     HashMap<std::int32_t, Vec<Arc<SceneNode>>> layer_clones;
     std::int32_t                               next_dynamic_layer_id { -100000 };
-    struct CreateLayerAssetRequest {
-        owe::script::FieldScript* script { nullptr };
-        std::int32_t              owner_id { 0 };
-        String                    source;
-    };
-    Vec<CreateLayerAssetRequest> create_layer_asset_requests;
+    Vec<owe::script::FieldScript*>             registered_asset_scripts;
+    HashMap<String, Arc<SceneNode>>            dynamic_model_prototypes;
+    HashMap<String, wpscene::ParticleObject>   dynamic_particle_prototypes;
+    wavsen::audio::SoundManager*               sound_manager { nullptr };
 
     HashMap<std::int32_t, String> system_media_image_fallbacks;
     HashSet<std::int32_t>         hidden_link_source_ids;

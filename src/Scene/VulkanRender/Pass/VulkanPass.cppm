@@ -257,6 +257,7 @@ public:
     virtual ~VulkanPass()                                                             = default;
     virtual void                  prepare(Scene&, const Device&, PassPrepareContext&) = 0;
     virtual bool                  update(PassUpdateContext&) { return true; }
+    virtual void                  completeUpdate() {}
     virtual void                  record(PassRecordContext&) = 0;
     virtual void                  destory(const Device&)     = 0;
     virtual PassInvalidationFlags finalizeResourceRequests(Scene&) { return PassInvalidationNone; }

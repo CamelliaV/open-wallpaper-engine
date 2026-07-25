@@ -379,6 +379,44 @@ TEST(WPParticleSubSystem, DerivesMeshCapacityFromItsOwnInstancePool) {
         SubSystem::MaxParticleCapacity(u32::MAX, u32(2), SpawnType::EVENT_FOLLOW).is_none());
 }
 
+TEST(WPParticleSubSystem, PlaybackResetClearsAndRestartsIndependentStorage) {
+    owe::Scene               scene;
+    auto                     mesh = std::make_shared<owe::SceneMesh>();
+    owe::WPParticleSubSystem subsystem(scene,
+                                       mesh,
+                                       u32(4),
+                                       f64(1.0),
+                                       u32(1),
+                                       f64(1.0),
+                                       owe::WPParticleSubSystem::SpawnType::STATIC,
+                                       owe::WPParticleAnimationSpec {});
+    auto                     playback = rstd::sync::Arc<owe::WPParticlePlaybackState>::make();
+    subsystem.SetPlaybackState(playback.clone());
+    subsystem.AddInitializer(owe::WPParticleParser::GenInitializer(
+        owe::ParseJson(R"({"name":"lifetimerandom","min":10,"max":10})").unwrap(), u32(4)));
+    subsystem.AddEmitter(Box<dyn<particle::ParticleEmitterProgram>>::make(
+        owe::WPSphereEmitterProgram(subsystem.SpawnPipeline(),
+                                    owe::WPParticleSphereEmitterArgs {
+                                        .directions    = { 1.0f, 1.0f, 0.0f },
+                                        .instantaneous = u32(1),
+                                    },
+                                    usize())));
+    subsystem.Finalize();
+    subsystem.Tick(f64(1.0 / 60.0), false);
+    ASSERT_EQ(subsystem.System().InstanceCount(), usize(1));
+    EXPECT_GT(subsystem.System().Instance(usize()).Storage().Len(), usize());
+
+    playback->playing.store(false, rstd::sync::atomic::Ordering::Release);
+    playback->reset_sequence.fetch_add(u32(1), rstd::sync::atomic::Ordering::AcqRel);
+    subsystem.Tick(f64(1.0 / 60.0), false);
+    EXPECT_EQ(subsystem.System().Instance(usize()).Storage().Len(), usize());
+
+    playback->playing.store(true, rstd::sync::atomic::Ordering::Release);
+    playback->reset_sequence.fetch_add(u32(1), rstd::sync::atomic::Ordering::AcqRel);
+    subsystem.Tick(f64(1.0 / 60.0), false);
+    EXPECT_GT(subsystem.System().Instance(usize()).Storage().Len(), usize());
+}
+
 TEST(ParticleInstanceOverride, TracksProvidedControlpoints) {
     auto json = owe::ParseJson(R"({"size":2,"controlpoint1":"120 240 0"})").unwrap();
     owe::wpscene::ParticleInstanceoverride override;

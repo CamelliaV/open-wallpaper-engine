@@ -874,6 +874,19 @@ public:
 
     void ChangeMeshDataFrom(const SceneMesh& o) { m_data = o.m_data; }
 
+    std::shared_ptr<SceneMesh> CloneInstance() const {
+        auto clone         = std::make_shared<SceneMesh>(m_dynamic);
+        clone->m_primitive = m_primitive;
+        clone->m_pointSize = m_pointSize;
+        clone->m_data      = m_data;
+        clone->m_materials.reserve(m_materials.size());
+        for (const auto& material : m_materials) {
+            clone->m_materials.push_back(material ? std::make_shared<SceneMaterial>(*material)
+                                                  : nullptr);
+        }
+        return clone;
+    }
+
     const std::vector<DrawRange>& DrawRanges() const {
         static const std::vector<DrawRange> kEmpty;
         return m_data->submeshes.empty() ? kEmpty : m_data->submeshes[0].draw_ranges;
@@ -916,6 +929,12 @@ struct ScenePostProcess;
 // ============================================================================
 // SceneCamera.h
 // ============================================================================
+
+struct SceneCameraTransforms {
+    Eigen::Vector3d eye { Eigen::Vector3d::Zero() };
+    Eigen::Vector3d center { -Eigen::Vector3d::UnitZ() };
+    Eigen::Vector3d up { Eigen::Vector3d::UnitY() };
+};
 
 class SceneCamera {
 public:
@@ -965,6 +984,8 @@ public:
         m_lookat = true;
     }
     bool IsLookAt() const { return m_lookat; }
+    auto Transforms() const -> SceneCameraTransforms;
+    bool SetTransforms(const SceneCameraTransforms& transforms);
 
     void        AttatchImgEffect(std::shared_ptr<SceneImageEffectLayer> eff) { m_imgEffect = eff; }
     bool        HasImgEffect() const { return (bool)m_imgEffect; }
@@ -1147,6 +1168,27 @@ public:
 
     template<typename T>
     using Funcs = TraitFuncs<&T::Apply>;
+};
+
+class SceneParticleControl {
+public:
+    using Trait                  = SceneParticleControl;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = SceneParticleControl;
+
+        Vec<float> Get(ref<str> field) const { return rstd::trait_call<0>(this, field); }
+        void Apply(ref<str> field, slice<float> value) { rstd::trait_call<1>(this, field, value); }
+        void Play() { rstd::trait_call<2>(this); }
+        void Stop() { rstd::trait_call<3>(this); }
+        void Pause() { rstd::trait_call<4>(this); }
+        bool IsPlaying() const { return rstd::trait_call<5>(this); }
+    };
+
+    template<typename T>
+    using Funcs = TraitFuncs<&T::Get, &T::Apply, &T::Play, &T::Stop, &T::Pause, &T::IsPlaying>;
 };
 
 // ============================================================================
@@ -1349,11 +1391,19 @@ public:
             (*m_sound_control)->Play();
             return;
         }
+        if (m_particle_control) {
+            (*m_particle_control)->Play();
+            return;
+        }
         m_layer_playing = true;
     }
     void Stop() {
         if (m_sound_control) {
             (*m_sound_control)->Stop();
+            return;
+        }
+        if (m_particle_control) {
+            (*m_particle_control)->Stop();
             return;
         }
         m_layer_playing = false;
@@ -1363,10 +1413,15 @@ public:
             (*m_sound_control)->Pause();
             return;
         }
+        if (m_particle_control) {
+            (*m_particle_control)->Pause();
+            return;
+        }
         m_layer_playing = false;
     }
     bool IsPlaying() const {
         if (m_sound_control) return (*m_sound_control)->IsPlaying();
+        if (m_particle_control) return (*m_particle_control)->IsPlaying();
         return m_layer_playing;
     }
     void SetSoundControl(Arc<dyn<SceneSoundControl>> control) {
@@ -1375,6 +1430,22 @@ public:
     Option<ref<dyn<SceneSoundControl>>> SoundControl() const {
         if (m_sound_control.is_none()) return None();
         return Some(m_sound_control->deref());
+    }
+    float Volume() const { return m_volume; }
+    void  SetVolume(float volume) {
+        m_volume = rstd::f32(volume).clamp(rstd::f32(), rstd::f32(1.0f)).to_primitive();
+        if (m_sound_control) (*m_sound_control)->SetVolume(m_volume);
+    }
+    void SetParticleControl(Arc<dyn<SceneParticleControl>> control) {
+        m_particle_control = Some(rstd::move(control));
+    }
+    Option<ref<dyn<SceneParticleControl>>> ParticleControl() const {
+        if (m_particle_control.is_none()) return None();
+        return Some(m_particle_control->deref());
+    }
+    Option<Arc<dyn<SceneParticleControl>>> ParticleControlHandle() const {
+        if (m_particle_control.is_none()) return None();
+        return Some((*m_particle_control).clone());
     }
 
     void CopyTrans(const SceneNode& node) {
@@ -1445,28 +1516,30 @@ private:
     Eigen::Vector2f m_size { 0.0f, 0.0f };
     Eigen::Matrix4d m_geometry_transform { Eigen::Matrix4d::Identity() };
 
-    bool                                m_visible { true };
-    SceneUserVisibilityBinding          m_visible_user_binding {};
-    bool                                m_visible_overridden { false };
-    float                               m_user_alpha { 1.0f };
-    bool                                m_alpha_overridden { false };
-    SceneNode*                          m_alpha_source { nullptr };
-    Eigen::Vector3f                     m_origin_base { 0.0f, 0.0f, 0.0f };
-    Eigen::Vector3f                     m_scale_base { 1.0f, 1.0f, 1.0f };
-    Eigen::Vector3f                     m_rotation_base { 0.0f, 0.0f, 0.0f };
-    Option<SceneAnimationCurve>         m_origin_curve;
-    Option<SceneAnimationCurve>         m_scale_curve;
-    Option<SceneAnimationCurve>         m_rotation_curve;
-    Option<SceneAnimationCurve>         m_alpha_curve;
-    float                               m_brightness { 1.0f };
-    bool                                m_brightness_overridden { false };
-    Eigen::Vector3f                     m_color { 1.0f, 1.0f, 1.0f };
-    bool                                m_color_overridden { false };
-    Eigen::Vector3f                     m_base_color { 1.0f, 1.0f, 1.0f };
-    float                               m_base_alpha { 1.0f };
-    TextureAnimatorState                m_tex_anim {};
-    bool                                m_layer_playing { true };
-    Option<Arc<dyn<SceneSoundControl>>> m_sound_control;
+    bool                                   m_visible { true };
+    SceneUserVisibilityBinding             m_visible_user_binding {};
+    bool                                   m_visible_overridden { false };
+    float                                  m_user_alpha { 1.0f };
+    bool                                   m_alpha_overridden { false };
+    SceneNode*                             m_alpha_source { nullptr };
+    Eigen::Vector3f                        m_origin_base { 0.0f, 0.0f, 0.0f };
+    Eigen::Vector3f                        m_scale_base { 1.0f, 1.0f, 1.0f };
+    Eigen::Vector3f                        m_rotation_base { 0.0f, 0.0f, 0.0f };
+    Option<SceneAnimationCurve>            m_origin_curve;
+    Option<SceneAnimationCurve>            m_scale_curve;
+    Option<SceneAnimationCurve>            m_rotation_curve;
+    Option<SceneAnimationCurve>            m_alpha_curve;
+    float                                  m_brightness { 1.0f };
+    bool                                   m_brightness_overridden { false };
+    Eigen::Vector3f                        m_color { 1.0f, 1.0f, 1.0f };
+    bool                                   m_color_overridden { false };
+    Eigen::Vector3f                        m_base_color { 1.0f, 1.0f, 1.0f };
+    float                                  m_base_alpha { 1.0f };
+    TextureAnimatorState                   m_tex_anim {};
+    bool                                   m_layer_playing { true };
+    float                                  m_volume { 1.0f };
+    Option<Arc<dyn<SceneSoundControl>>>    m_sound_control;
+    Option<Arc<dyn<SceneParticleControl>>> m_particle_control;
 
     std::shared_ptr<SceneMesh> m_mesh;
 
@@ -2118,6 +2191,8 @@ public:
     bool SetActiveCamera(ref<str> name);
     auto ActiveCamera() const -> Option<ref<SceneCamera>>;
     auto ActiveCameraHandle() const -> Option<Arc<SceneCamera>>;
+    auto ActiveCameraTransforms() const -> Option<SceneCameraTransforms>;
+    bool SetActiveCameraTransforms(const SceneCameraTransforms& transforms);
 
     Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, std::string_view name);
     Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, usize index);

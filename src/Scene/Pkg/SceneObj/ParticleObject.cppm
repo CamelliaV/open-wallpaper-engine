@@ -99,7 +99,8 @@ public:
     using EFlags = BitFlags<FlagEnum>;
 
 public:
-    bool FromJson(const owe::Json&, fs::VFS&);
+    bool     FromJson(const owe::Json&, fs::VFS&);
+    Particle Clone() const;
 
     std::vector<Emitter>              emitters;
     rstd::json::Array                 initializers;
@@ -125,7 +126,8 @@ public:
     };
     using EFlags = BitFlags<FlagEnum>;
 
-    bool FromJson(const owe::Json&, fs::VFS&);
+    bool          FromJson(const owe::Json&, fs::VFS&);
+    ParticleChild Clone() const;
 
     // static
     // eventfollow
@@ -182,7 +184,9 @@ class ParticleObject {
 public:
     bool                     FromJson(const owe::Json&, fs::VFS&);               // legacy
     bool                     FromJson(const owe::Json&, fs::VFS&, SceneVersion); // canonical
-    int32_t                  id;
+    bool                     FromAsset(ref<str>, fs::VFS&);
+    ParticleObject           Clone() const;
+    int32_t                  id { 0 };
     std::string              name;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
@@ -197,6 +201,7 @@ public:
     bool                      locktransforms { false };
     bool                      muteineditor { false };
     bool                      nointerpolation { false };
+    bool                      reflected { true };
     std::uint32_t             parent { 0 };
     std::string               attachment;
     std::vector<std::int32_t> dependencies;

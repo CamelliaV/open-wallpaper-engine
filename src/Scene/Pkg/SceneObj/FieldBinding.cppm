@@ -85,6 +85,8 @@ struct ScriptBinding {
     owe::Json   properties;
     owe::Json   initial_value;
     std::string user;
+
+    auto clone() const -> ScriptBinding;
 };
 
 // Side-channel container attached to every parseable object kind. Only
@@ -94,7 +96,12 @@ struct FieldBindings {
     std::unordered_map<std::string, AnimCurve>     animations;
     rstd::json::Map                                scriptproperties;
     std::unordered_map<std::string, ScriptBinding> scripts;
+
+    auto clone() const -> FieldBindings;
+    void Update(const FieldBindings& other);
 };
+
+std::size_t AbsorbFieldBinding(std::string_view field, const owe::Json& value, FieldBindings& out);
 
 // Walks every direct child of `obj_json` and, when the child is an
 // object containing `animation` and/or `scriptproperties`, captures into

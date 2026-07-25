@@ -19,11 +19,11 @@ export namespace owe
 {
 
 // File header preceding the per-mesh body. Per hexpat: 4-byte version tag +
-// u32 vertex layout flag + u32 always-one + u32 mesh_count.
+// u32 vertex layout flag + u32 skin_count + u32 mesh_count.
 struct WPMdlHeader {
     rstd::int32_t  mdlv { 13 };
     rstd::uint32_t mdl_flag { 0 }; // vertex layout bitmask; mdlv<=14 meshes inherit this
-    rstd::uint32_t unk_a { 1 };    // always_one in hexpat
+    rstd::uint32_t skin_count { 1 };
     rstd::uint32_t mesh_count { 1 };
 };
 
@@ -33,7 +33,7 @@ struct WPMdl {
     // One element per header.mesh_count. mesh_count > 1 only seen on static
     // (non-puppet) meshes; renderer currently consumes meshes[0] only.
     struct Mesh {
-        String          mat_json_file;
+        Vec<String>     mat_json_files;
         rstd::uint32_t  flag_a { 0 }; // hexpat Mesh.flag_a (usually 0; 2 has trailing 1)
         bool            has_flag_a2_one { false };
         rstd::uint32_t  flag { 0 }; // per-mesh vertex layout flag (mdlv>14); 0 = inherit header
@@ -109,7 +109,7 @@ struct WPMdl {
 
 class WPMdlParser {
 public:
-    // Reads only the bytes preceding mat_json_file. Cheap; safe to call
+    // Reads only the bytes preceding mat_json_files. Cheap; safe to call
     // over the whole corpus even on mdls that would hang full Parse.
     static bool ParseHeader(ref<str> path, fs::VFS&, WPMdlHeader&);
 

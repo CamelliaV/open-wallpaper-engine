@@ -121,3 +121,34 @@ TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
     EXPECT_EQ(index_array.Data()[780286], 520190u);
     EXPECT_EQ(index_array.Data()[780287], 520191u);
 }
+
+TEST(WPMdlMesh, Mdlv23ReadsPerMeshMaterialSkins) {
+    const std::filesystem::path pkg_path =
+        std::filesystem::path(WAYWALLEN_WORKSHOP_DIR) / "1979606285" / "scene.pkg";
+    if (! std::filesystem::exists(pkg_path)) {
+        GTEST_SKIP() << "workshop 1979606285 is not available";
+    }
+
+    owe::fs::VFS vfs;
+    auto         assets_fs = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    if (assets_fs.is_ok()) {
+        ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets_fs).unwrap_unchecked()).is_ok());
+    }
+    auto pkg_fs = owe::fs::WPPkgFs::open(owe::fs::ToPath(pkg_path.string()));
+    ASSERT_TRUE(pkg_fs.is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, pkg_fs->mount_handle()).is_ok());
+
+    owe::WPMdl mdl;
+    ASSERT_TRUE(owe::WPMdlParser::Parse("models/prism/prism.mdl"_str, vfs, mdl));
+    ASSERT_EQ(mdl.header.mdlv, 23);
+    ASSERT_EQ(mdl.header.skin_count, 2u);
+    ASSERT_EQ(mdl.header.mesh_count, 1u);
+    ASSERT_EQ(mdl.meshes.len(), usize(1));
+
+    const auto& mesh = mdl.meshes[usize()];
+    ASSERT_EQ(mesh.mat_json_files.len(), usize(2));
+    EXPECT_EQ(mesh.mat_json_files[usize()].as_str(), "materials/prism/prism.json"_str);
+    EXPECT_EQ(mesh.mat_json_files[usize(1)].as_str(), "materials/prism/prism_main.json"_str);
+    EXPECT_EQ(mesh.positions.len(), usize(60));
+    EXPECT_EQ(mesh.indices.len(), usize(32));
+}

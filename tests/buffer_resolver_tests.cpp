@@ -8,6 +8,17 @@ import wescene.vulkan_render;
 namespace
 {
 
+class BufferWriter {
+public:
+    auto UpdateBuffer(owe::resource::BufferUseHandle, rstd::slice<rstd::u8>)
+        -> rstd::Result<rstd::empty, owe::resource::ResourceError> {
+        ++update_count;
+        return rstd::Ok(rstd::empty {});
+    }
+
+    rstd::u32 update_count {};
+};
+
 owe::SceneMesh::Submesh MakeSubmesh() {
     std::vector<owe::SceneVertexArray::SceneVertexAttribute> attrs {
         { .name = "a_Position", .type = owe::VertexType::FLOAT3 },
@@ -127,4 +138,42 @@ TEST(DrawBufferKey, ReturnsEmptyForInvalidRequest) {
     EXPECT_TRUE(owe::vulkan::BuildDrawBufferKeys({ .mesh = &mesh, .submesh_index = rstd::u32(1) },
                                                  rstd::u64(1))
                     .empty());
+}
+
+TEST(DynamicDrawBuffer, UpdatesEveryViewBeforeDirtyDataIsConsumed) {
+    owe::SceneMesh mesh(true);
+    mesh.Submeshes().push_back(MakeSubmesh());
+    mesh.Submeshes()[0].index_arrays[0].SetRenderDataCount(rstd::usize(2));
+    mesh.SetDirty();
+
+    auto make_buffers = [] {
+        owe::vulkan::DrawBufferRefs buffers;
+        buffers.dynamic = true;
+        buffers.vertex_keys.push_back({});
+        buffers.index_key = rstd::Some(owe::vulkan::DrawBufferKey {});
+        buffers.vertices.push(
+            owe::resource::BufferUseHandle { .index = rstd::u64(1), .generation = rstd::u64(1) });
+        buffers.index = rstd::Some(
+            owe::resource::BufferUseHandle { .index = rstd::u64(2), .generation = rstd::u64(1) });
+        return buffers;
+    };
+    auto reflection_buffers = make_buffers();
+    auto primary_buffers    = make_buffers();
+
+    owe::vulkan::DrawBufferRequest request {
+        .render_item   = { .index = rstd::u32(3), .generation = rstd::u64(5) },
+        .mesh          = &mesh,
+        .submesh_index = rstd::u32(),
+    };
+    BufferWriter writer;
+    auto         writer_trait = rstd::dyn<owe::resource::BufferContentWriter>::from_ref(writer);
+
+    EXPECT_TRUE(owe::vulkan::RenderBufferResolver::updateDynamicDrawBuffers(
+        request, reflection_buffers, writer_trait.as_mut_ref()));
+    EXPECT_TRUE(owe::vulkan::RenderBufferResolver::updateDynamicDrawBuffers(
+        request, primary_buffers, writer_trait.as_mut_ref()));
+    EXPECT_EQ(reflection_buffers.draw_count, rstd::u32(2));
+    EXPECT_EQ(primary_buffers.draw_count, rstd::u32(2));
+    EXPECT_EQ(writer.update_count, rstd::u32(4));
+    EXPECT_NE(mesh.DirtyFlags() & owe::SceneMeshDirtyData, owe::SceneMeshDirtyNone);
 }

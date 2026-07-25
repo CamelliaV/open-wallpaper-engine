@@ -88,6 +88,22 @@ TEST(SceneLights, OwnsRegisteredLightsBehindBorrowedViews) {
     EXPECT_FALSE(lights[usize()]->runtimeVisible());
 }
 
+TEST(SceneMesh, CloneInstanceSharesGeometryAndOwnsMaterials) {
+    auto source = MakeSingleSubmesh("source");
+    auto clone  = source->CloneInstance();
+
+    ASSERT_EQ(source->Submeshes().size(), 1u);
+    ASSERT_EQ(clone->Submeshes().size(), 1u);
+    ASSERT_EQ(source->MaterialSlots().size(), 1u);
+    ASSERT_EQ(clone->MaterialSlots().size(), 1u);
+    EXPECT_EQ(&source->Submeshes()[0], &clone->Submeshes()[0]);
+    EXPECT_NE(source->MaterialSlots()[0].get(), clone->MaterialSlots()[0].get());
+
+    clone->MaterialSlots()[0]->name = "clone";
+    EXPECT_EQ(source->MaterialSlots()[0]->name, "source");
+    EXPECT_EQ(clone->MaterialSlots()[0]->name, "clone");
+}
+
 TEST(SceneResourceIndex, ResolvesDrawItemsAndNamedResources) {
     owe::Scene scene;
     scene.RootMut()->ID() = rstd::i32(1);
@@ -1150,6 +1166,34 @@ TEST(SceneCameras, ActiveCameraTracksRegisteredReplacement) {
     ASSERT_TRUE(active.is_some());
     EXPECT_DOUBLE_EQ((**active).Width(), 200.0);
     EXPECT_EQ(scene.CameraNames().len(), usize(1));
+}
+
+TEST(SceneCameras, ActiveTransformsUpdateLinkedCamera) {
+    owe::Scene scene;
+    auto       source =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakePerspective(1.0, 0.01, 1000.0, 53.0));
+    source->SetLookAt({ 0.0, 0.0, 10.0 }, Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitY());
+    auto linked =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakePerspective(1.0, 0.01, 1000.0, 53.0));
+    scene.RegisterCamera(String::make("main"_str), rstd::move(source));
+    scene.RegisterCamera(String::make("linked"_str), rstd::move(linked));
+    scene.RegisterLinkedCamera(String::make("main"_str), String::make("linked"_str));
+    ASSERT_TRUE(scene.SetActiveCamera("main"_str));
+
+    const owe::SceneCameraTransforms transforms {
+        .eye    = { 3.0, 4.0, 5.0 },
+        .center = { 0.0, 1.0, 0.0 },
+        .up     = { 0.0, 1.0, 0.0 },
+    };
+    ASSERT_TRUE(scene.SetActiveCameraTransforms(transforms));
+
+    auto current = scene.ActiveCameraTransforms();
+    auto copy    = scene.Camera("linked"_str);
+    ASSERT_TRUE(current.is_some());
+    ASSERT_TRUE(copy.is_some());
+    EXPECT_TRUE(current->eye.isApprox(transforms.eye));
+    EXPECT_TRUE((**copy).Transforms().eye.isApprox(transforms.eye));
+    EXPECT_TRUE((**copy).Transforms().center.isApprox(transforms.center));
 }
 
 TEST(SceneGeometryDataGeneration, IncrementsWhenGeometryDataChanges) {
