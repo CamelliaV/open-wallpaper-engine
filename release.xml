@@ -15,39 +15,27 @@
     </ul>
     <p>Fixes:</p>
     <ul>
-      <li>Child particle mesh capacity.</li>
-      <li>Child particle lifecycle.</li>
-      <li>Child particle color inheritance.</li>
-      <li>Child particle follow anchors.</li>
-      <li>Rope trail sampling.</li>
-      <li>Lightning rope sequencing.</li>
-      <li>Velocity-based particle trails.</li>
-      <li>World-space particle trails.</li>
+      <li>Child particle mesh capacity and lifecycle.</li>
+      <li>Child particle color inheritance and follow anchors.</li>
+      <li>Rope trail sampling and lightning sequencing.</li>
+      <li>Velocity-based and world-space particle trails.</li>
       <li>Multi-image particle sprite animation.</li>
-      <li>Particle time scaling.</li>
-      <li>Particle warmup stalls.</li>
+      <li>Particle time scaling and warmup stalls.</li>
       <li>Particle fog under perspective cameras.</li>
-      <li>World-space particle controls.</li>
-      <li>Particle direct-draw shapes.</li>
+      <li>World-space particle controls and direct-draw shapes.</li>
       <li>Render target identity during dynamic updates.</li>
       <li>Nested link texture outputs.</li>
-      <li>Composite layer content preservation.</li>
-      <li>Mip framebuffer history.</li>
-      <li>Dynamic buffer content preservation.</li>
-      <li>Dynamic texture binding refresh.</li>
-      <li>Wallpaper Engine cross-stage shader varyings.</li>
+      <li>Composite layer contents and mip framebuffer history.</li>
+      <li>Dynamic buffer contents and texture binding refresh.</li>
+      <li>Wallpaper Engine cross-stage shader varyings and uniform defaults.</li>
       <li>Wallpaper Engine HLSL matrix layout.</li>
-      <li>Cross-stage uniform defaults.</li>
       <li>Full-width semicolons in shaders.</li>
       <li>Unused material values no longer report missing GLSL uniforms.</li>
       <li>Copybackground custom effects.</li>
-      <li>Script-driven image alignment.</li>
-      <li>Scripted effect draw alignment.</li>
+      <li>Script-driven image alignment and effect draws.</li>
       <li>Text effect alignment.</li>
-      <li>Puppet geometry alignment.</li>
-      <li>Puppet attachment transforms.</li>
-      <li>Model fog eye position.</li>
-      <li>Scripted model rotation.</li>
+      <li>Puppet geometry alignment and attachment transforms.</li>
+      <li>Model fog eye position and scripted rotation.</li>
       <li>Renderer bridge shutdown after session loss.</li>
       <li>Audio device activation ordering.</li>
       <li>SceneViewer event polling.</li>
