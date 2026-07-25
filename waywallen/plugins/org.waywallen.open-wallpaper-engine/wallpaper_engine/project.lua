@@ -6,6 +6,20 @@ M.ASSETS_REL = "/steamapps/common/wallpaper_engine/assets"
 M.PROJECTS_REL = "/steamapps/common/wallpaper_engine/projects"
 M.LOCAL_DIRS = { "defaultprojects", "myprojects" }
 
+-- Users are asked to register the directory that *contains* steamapps, but they
+-- routinely pick steamapps itself, or the workshop content directory they can
+-- see the wallpapers in. Fold those back to the Steam root, so the paths built
+-- from WORKSHOP/PROJECTS_REL still resolve instead of silently missing.
+function M.normalize_root(path)
+    if type(path) ~= "string" then return path end
+    local root = path:gsub("/+$", "")
+    root = root:gsub("/steamapps/workshop/content/" .. M.WE_APPID .. "$", "")
+    root = root:gsub("/steamapps/workshop/content$", "")
+    root = root:gsub("/steamapps/workshop$", "")
+    root = root:gsub("/steamapps$", "")
+    return root
+end
+
 local VIDEO_EXTS = { mp4 = true, webm = true, mkv = true, avi = true, mov = true }
 
 local SCENE_BASE_BY_FILE = {

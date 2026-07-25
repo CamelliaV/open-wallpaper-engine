@@ -756,6 +756,15 @@ equal(#source_items, 2, "source scan item count")
 equal(source_items[1].resource, item_dir .. "/scene.pkg", "source scan resource")
 equal(source_items[1].external_id, "3765064055", "source Workshop subscription id")
 equal(source_items[2].external_id, nil, "local project must not expose a subscription id")
+
+-- Registering a library that already points inside steamapps must still scan.
+for _, suffix in ipairs({ "/", "/steamapps", "/steamapps/workshop/content/" .. project.WE_APPID }) do
+    local nested_ctx = {}
+    for key, value in pairs(source_ctx) do nested_ctx[key] = value end
+    nested_ctx.libraries = function() return { steam_root .. suffix } end
+    equal(#main.source.scan(nested_ctx), 2, "source scan from library path '" .. suffix .. "'")
+end
+
 project.classify = original_classify
 
 print("OWE waywallen Lua contract fixtures passed")
