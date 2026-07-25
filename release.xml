@@ -1,3 +1,27 @@
+<release version="0.2.0" date="2026-07-25">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Steam Workshop discovery, authentication and subscription management through the Waywallen plugin source.</li>
+      <li>Scripted dynamic scene layers, runtime user-property control and media thumbnail colors.</li>
+      <li>Planar reflections, legacy 3D material inputs and integrated audio spectrum playback.</li>
+    </ul>
+    <p>Fixes:</p>
+    <ul>
+      <li>Particle trails, child emitters, follow anchors, sprite animation, warmup, fog and world-space rendering.</li>
+      <li>Render target identity, nested composites, framebuffer history and dynamic resource refresh.</li>
+      <li>Wallpaper Engine shader varyings, matrix layout, uniform defaults and material value handling.</li>
+      <li>Scripted effects, image alignment, text effects, puppet attachments and model transforms.</li>
+      <li>Renderer bridge shutdown, audio activation and frame pacing.</li>
+    </ul>
+    <p>Improved:</p>
+    <ul>
+      <li>Renderer resource ownership, preparation and caching.</li>
+      <li>Package IO, scene runtime and Vulkan infrastructure migration to rstd and vvk.</li>
+      <li>Texture upload, shader compilation and particle update performance.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.1.12" date="2026-07-12">
   <description>
     <p>Added:</p>
