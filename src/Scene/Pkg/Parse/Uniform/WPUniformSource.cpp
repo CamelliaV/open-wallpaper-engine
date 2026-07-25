@@ -377,7 +377,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     }
 
     writer.Write(Output::ViewProjection, ShaderValue::fromMatrix(view_projection));
-    if (m_node->use_camera_eye_position) {
+    if (m_node->use_camera_eye_position || camera.IsPerspective()) {
         const auto position = camera.GetPosition(render_view).cast<float>();
         writer.Write(Output::EyePosition,
                      rstd::array<float, 3> { position.x(), position.y(), position.z() });

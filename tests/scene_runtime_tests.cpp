@@ -153,6 +153,26 @@ TEST(WPTransformUniformSource, AppliesGeometryTransformAfterNodeTransform) {
     EXPECT_NEAR(model[usize(13)], 140.0f, 1e-5f);
 }
 
+TEST(WPTransformUniformSource, UsesResolvedPerspectiveCameraEyePosition) {
+    auto state  = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+    auto camera = Arc<owe::SceneCamera>::make(
+        owe::SceneCamera::MakePerspective(16.0 / 9.0, 0.1, 10000.0, 60.0));
+    camera->SetLookAt(
+        Eigen::Vector3d { -0.25, 0.5, 3.25 }, Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitY());
+    auto resolver   = Arc<owe::WPUniformCameraResolver>::make(rstd::move(camera));
+    auto scene_node = Arc<owe::SceneNode>::make();
+    auto node = Arc<owe::WPUniformNodeState>::make(rstd::move(scene_node), rstd::move(resolver));
+    owe::WPTransformUniformSource source(rstd::move(state), rstd::move(node));
+
+    auto eye =
+        scene_test::Capture(owe::SceneFrame {}, source, owe::WPTransformUniformOutput::EyePosition);
+
+    ASSERT_EQ(eye.size(), usize(3));
+    EXPECT_FLOAT_EQ(eye[usize()], -0.25f);
+    EXPECT_FLOAT_EQ(eye[usize(1)], 0.5f);
+    EXPECT_FLOAT_EQ(eye[usize(2)], 3.25f);
+}
+
 TEST(WPAudioUniformSource, ExposesLogicalSpectrumValues) {
     auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
     rstd::array<float, 64> left {};
