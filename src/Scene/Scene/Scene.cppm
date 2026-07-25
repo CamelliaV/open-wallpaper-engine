@@ -2120,6 +2120,9 @@ public:
     auto ActiveCameraHandle() const -> Option<Arc<SceneCamera>>;
 
     Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, std::string_view name);
+    Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, usize index);
+    usize                       NodeImageEffectCount(const SceneNode& node);
+    SceneMaterial*              ImageEffectMaterial(const SceneImageEffectRef& ref, usize index);
     bool SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible);
     void EnablePlanarReflection();
     bool PlanarReflectionEnabled() const { return m_planar_reflection_enabled; }
@@ -2275,6 +2278,8 @@ public:
     bool        EnsureTextureDescriptor(std::string_view key);
     bool        SetMaterialShaderValue(SceneMaterial& material, ref<str> uniform_name,
                                        const ShaderValue& value);
+    bool        SetMaterialShaderValueByKey(SceneMaterial& material, ref<str> material_key,
+                                            const ShaderValue& value);
     SceneMaterialTextureSlotMutation SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
                                                             std::string_view texture);
     SceneMaterialShaderVariantMutation

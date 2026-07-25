@@ -453,6 +453,7 @@ struct FieldScript::Impl {
     JSValue          update_fn { JS_UNDEFINED };
     bool             update_takes_arg { false };
     bool             init_done { false };
+    std::uint64_t    initialization_order { 0 };
     JSValue          current_value {
         JS_UNDEFINED
     }; // last `value` returned, kept as JSValue for the (value)-arg form
@@ -1162,6 +1163,17 @@ globalThis.createScriptProperties = function () {
       }
       return applyHostScale(h, h.value);
     };
+    const coerceDescriptorValue = (descriptor, value) => {
+      if (!descriptor || descriptor.kind !== 'Color') return value;
+      if (typeof value === 'string') {
+        const components = value.trim().split(/\s+/).map(Number);
+        return new globalThis.Vec3(components[0] ?? 0, components[1] ?? 0, components[2] ?? 0);
+      }
+      if (Array.isArray(value)) {
+        return new globalThis.Vec3(value[0] ?? 0, value[1] ?? 0, value[2] ?? 0);
+      }
+      return value;
+    };
     // WE substitutes user-prop values verbatim, even when the user's
     // slider range is wider than the script's declared range — corpus
     // wallpapers (e.g. workshop 3327063360) wire `min:-1,max:1` sliders
@@ -1174,7 +1186,7 @@ globalThis.createScriptProperties = function () {
           configurable: true,
           get() {
             if (Object.prototype.hasOwnProperty.call(_hostValues, d.name))
-              return unwrapUserProp(_hostValues[d.name]);
+              return coerceDescriptorValue(d, unwrapUserProp(_hostValues[d.name]));
             return d.value;
           },
         });
@@ -1616,8 +1628,9 @@ JSModuleDef* BuiltinModuleLoader(JSContext* ctx, const char* module_name, void*)
 // the SceneNode pointer in JS_GetOpaque; lifetime is owned by Scene, the
 // finalizer is a no-op (we don't dereference on free, just drop the ref).
 
-static JSClassID s_layer_class_id  = 0;
-static JSClassID s_effect_class_id = 0;
+static JSClassID s_layer_class_id    = 0;
+static JSClassID s_effect_class_id   = 0;
+static JSClassID s_material_class_id = 0;
 
 struct LayerHandle {
     EngineHostState* host { nullptr };
@@ -1647,6 +1660,18 @@ struct EffectHandle {
     bool                        fallback_visible { true };
 };
 
+struct MaterialHandle {
+    EngineHostState* host { nullptr };
+    SceneMaterial*   material { nullptr };
+};
+
+int MaterialSetProperty(JSContext* ctx, JSValueConst obj, JSAtom atom, JSValueConst value,
+                        JSValueConst receiver, int flags);
+
+JSClassExoticMethods s_material_exotic {
+    .set_property = MaterialSetProperty,
+};
+
 void EffectFinalizer(JSRuntime*, JSValue v) {
     delete static_cast<EffectHandle*>(JS_GetOpaque(v, s_effect_class_id));
 }
@@ -1654,6 +1679,16 @@ void EffectFinalizer(JSRuntime*, JSValue v) {
 JSClassDef s_effect_class_def {
     .class_name = "WWEffect",
     .finalizer  = EffectFinalizer,
+};
+
+void MaterialFinalizer(JSRuntime*, JSValue v) {
+    delete static_cast<MaterialHandle*>(JS_GetOpaque(v, s_material_class_id));
+}
+
+JSClassDef s_material_class_def {
+    .class_name = "WWMaterial",
+    .finalizer  = MaterialFinalizer,
+    .exotic     = &s_material_exotic,
 };
 
 inline owe::SceneNode* GetLayerNode(JSValueConst v) {
@@ -1687,6 +1722,14 @@ JSValue WrapEffect(JSContext* ctx, Option<SceneImageEffectRef> ref) {
     bool  visible = ref && ref->effect ? ref->effect->runtime_visible : true;
     JS_SetOpaque(
         obj, new EffectHandle { .host = host, .ref = std::move(ref), .fallback_visible = visible });
+    return obj;
+}
+
+JSValue WrapMaterial(JSContext* ctx, SceneMaterial* material) {
+    JSValue obj = JS_NewObjectClass(ctx, s_material_class_id);
+    if (JS_IsException(obj)) return obj;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    JS_SetOpaque(obj, new MaterialHandle { .host = host, .material = material });
     return obj;
 }
 
@@ -1738,6 +1781,50 @@ inline bool ReadXYZ(JSContext* ctx, JSValueConst v, double& x, double& y, double
     JS_FreeValue(ctx, jy);
     JS_FreeValue(ctx, jz);
     return ok;
+}
+
+Option<ShaderValue> ReadShaderValue(JSContext* ctx, JSValueConst value) {
+    if (JS_IsNumber(value)) {
+        double number {};
+        if (JS_ToFloat64(ctx, &number, value) != 0) return None();
+        return Some(ShaderValue(static_cast<float>(number)));
+    }
+    if (JS_IsBool(value)) return Some(ShaderValue(JS_ToBool(ctx, value) != 0 ? 1.0f : 0.0f));
+    if (! JS_IsObject(value)) return None();
+
+    constexpr rstd::array<const char*, 4> fields { "x", "y", "z", "w" };
+    rstd::array<float, 4>                 values {};
+    usize                                 count {};
+    for (const char* field : fields) {
+        JSValue component = JS_GetPropertyStr(ctx, value, field);
+        if (JS_IsUndefined(component)) {
+            JS_FreeValue(ctx, component);
+            break;
+        }
+        double     number {};
+        const bool ok = JS_ToFloat64(ctx, &number, component) == 0;
+        JS_FreeValue(ctx, component);
+        if (! ok) return None();
+        values[count++] = static_cast<float>(number);
+    }
+    if (count == usize()) return None();
+    return Some(ShaderValue(values.data(), count));
+}
+
+int MaterialSetProperty(JSContext* ctx, JSValueConst obj, JSAtom atom, JSValueConst value,
+                        JSValueConst, int) {
+    auto* handle = static_cast<MaterialHandle*>(JS_GetOpaque(obj, s_material_class_id));
+    if (! handle || ! handle->host || ! handle->host->scene || ! handle->material) return 1;
+
+    const char* key = JS_AtomToCString(ctx, atom);
+    if (! key) return -1;
+    auto shader_value = ReadShaderValue(ctx, value);
+    if (shader_value.is_some()) {
+        handle->host->scene->SetMaterialShaderValueByKey(
+            *handle->material, rstd::cppstd::as_str(key).unwrap(), *shader_value);
+    }
+    JS_FreeCString(ctx, key);
+    return 1;
 }
 
 // --- property accessors -----------------------------------------------------
@@ -1804,7 +1891,13 @@ JSValue NodeGetVisible(JSContext* ctx, JSValueConst this_val) {
 }
 JSValue NodeSetVisible(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     auto* n = GetLayerNode(this_val);
-    if (n) n->SetVisible(JS_ToBool(ctx, val) != 0);
+    if (! n) return JS_UNDEFINED;
+    const bool visible = JS_ToBool(ctx, val) != 0;
+    auto*      host    = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (host && host->scene)
+        host->scene->SetNodeVisible(*n, visible);
+    else
+        n->SetVisible(visible);
     return JS_UNDEFINED;
 }
 JSValue NodeGetAlpha(JSContext* ctx, JSValueConst this_val) {
@@ -2093,11 +2186,41 @@ JSValue NodeGetEffect(JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     auto* n    = GetLayerNode(this_val);
     if (! host || ! host->scene || ! n || argc < 1) return WrapEffect(ctx, None());
 
+    if (JS_IsNumber(argv[0])) {
+        int64_t index {};
+        if (JS_ToInt64(ctx, &index, argv[0]) != 0 || index < 0) return WrapEffect(ctx, None());
+        return WrapEffect(ctx, host->scene->FindNodeImageEffect(*n, usize(index)));
+    }
+
     const char* name = JS_ToCString(ctx, argv[0]);
     if (! name) return WrapEffect(ctx, None());
     auto effect = host->scene->FindNodeImageEffect(*n, name);
     JS_FreeCString(ctx, name);
     return WrapEffect(ctx, std::move(effect));
+}
+
+JSValue NodeGetEffectCount(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto* node = GetLayerNode(this_val);
+    if (! host || ! host->scene || ! node) return JS_NewInt32(ctx, 0);
+    return JS_NewInt64(
+        ctx, static_cast<int64_t>(host->scene->NodeImageEffectCount(*node).to_primitive()));
+}
+
+JSValue EffectGetName(JSContext* ctx, JSValueConst this_val) {
+    auto* handle = GetEffectHandle(this_val);
+    if (! handle || ! handle->ref || ! handle->ref->effect) return JS_NewString(ctx, "");
+    const auto& name = handle->ref->effect->name;
+    return JS_NewStringLen(ctx, name.data(), name.size());
+}
+
+JSValue EffectGetMaterial(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* handle = GetEffectHandle(this_val);
+    if (! handle || ! handle->host || ! handle->host->scene || ! handle->ref || argc < 1)
+        return WrapMaterial(ctx, nullptr);
+    int64_t index {};
+    if (JS_ToInt64(ctx, &index, argv[0]) != 0 || index < 0) return WrapMaterial(ctx, nullptr);
+    return WrapMaterial(ctx, handle->host->scene->ImageEffectMaterial(*handle->ref, usize(index)));
 }
 
 bool TreeContains(owe::SceneNode* root, owe::SceneNode* needle) {
@@ -2362,6 +2485,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getName", 0, NodeGetName),
     JS_CFUNC_DEF("getLayer", 1, NodeGetLayer),
     JS_CFUNC_DEF("getEffect", 1, NodeGetEffect),
+    JS_CFUNC_DEF("getEffectCount", 0, NodeGetEffectCount),
     JS_CFUNC_DEF("enumerateLayers", 0, NodeSceneEnumerateLayers),
     JS_CFUNC_DEF("getInitialLayerConfig", 1, NodeSceneGetInitialLayerConfig),
     JS_CFUNC_DEF("getBoneIndex", 1, NodeGetBoneIndex),
@@ -2393,6 +2517,8 @@ void InitLayerClass(JSContext* ctx, JSRuntime* rt) {
 
 const JSCFunctionListEntry s_effect_proto_funcs[] = {
     JS_CGETSET_DEF("visible", EffectGetVisible, EffectSetVisible),
+    JS_CGETSET_DEF("name", EffectGetName, NodeSetIgnore),
+    JS_CFUNC_DEF("getMaterial", 1, EffectGetMaterial),
 };
 
 void InitEffectClass(JSContext* ctx, JSRuntime* rt) {
@@ -2404,6 +2530,12 @@ void InitEffectClass(JSContext* ctx, JSRuntime* rt) {
                                s_effect_proto_funcs,
                                sizeof(s_effect_proto_funcs) / sizeof(s_effect_proto_funcs[0]));
     JS_SetClassProto(ctx, s_effect_class_id, proto);
+}
+
+void InitMaterialClass(JSContext* ctx, JSRuntime* rt) {
+    if (s_material_class_id == 0) JS_NewClassID(rt, &s_material_class_id);
+    JS_NewClass(rt, s_material_class_id, &s_material_class_def);
+    JS_SetClassProto(ctx, s_material_class_id, JS_NewObject(ctx));
 }
 
 // Stash the bootstrap's `thisLayer` / `thisScene` stubs for restore.
@@ -2513,6 +2645,7 @@ JsRuntime::JsRuntime(): m_impl(std::make_unique<Impl>()) {
         m_impl->rt, /*normalize=*/nullptr, BuiltinModuleLoader, /*opaque=*/nullptr);
     InitLayerClass(m_impl->ctx, m_impl->rt);
     InitEffectClass(m_impl->ctx, m_impl->rt);
+    InitMaterialClass(m_impl->ctx, m_impl->rt);
     InitTexAnimClass(m_impl->ctx, m_impl->rt);
     InstallEngineGlobal(m_impl->ctx);
     // Bootstrap created stub `thisLayer` / `thisScene` on globalThis.
@@ -2679,6 +2812,11 @@ void JsRuntime::SetScene(owe::Scene* scene) {
     m_impl->host.scene = scene;
 }
 
+void JsRuntime::SetInitializationOrder(FieldScript& script, std::uint64_t order) {
+    if (! script.m_impl || script.m_impl->rt != m_impl.get() || script.m_impl->init_done) return;
+    script.m_impl->initialization_order = order;
+}
+
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
     if (! m_impl || ! m_impl->ctx) return;
     if (! JS_IsUndefined(m_impl->wrapped_scene)) JS_FreeValue(m_impl->ctx, m_impl->wrapped_scene);
@@ -2686,9 +2824,14 @@ void JsRuntime::SetSceneRoot(owe::SceneNode* root) {
     m_impl->host.scene_root = root;
     m_impl->wrapped_scene   = root ? WrapLayerNode(m_impl->ctx, root) : JS_UNDEFINED;
     if (! JS_IsUndefined(m_impl->wrapped_scene)) BindThisScene(m_impl->ctx, m_impl->wrapped_scene);
-    for (auto& fs : m_impl->scripts) {
-        RunFieldScriptInit(m_impl->ctx, m_impl.get(), fs.get());
-    }
+    std::vector<FieldScript*> pending;
+    pending.reserve(m_impl->scripts.size());
+    for (auto& fs : m_impl->scripts)
+        if (fs && fs->m_impl && ! fs->m_impl->init_done) pending.push_back(fs.get());
+    std::stable_sort(pending.begin(), pending.end(), [](const auto* left, const auto* right) {
+        return left->m_impl->initialization_order < right->m_impl->initialization_order;
+    });
+    for (auto* fs : pending) RunFieldScriptInit(m_impl->ctx, m_impl.get(), fs);
 }
 
 void JsRuntime::TickAll() {
@@ -3077,6 +3220,23 @@ std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::
             node->SetUserAlpha(static_cast<float>(p->x));
         } else if (auto* p = std::get_if<Vec3Value>(&v)) {
             node->SetUserAlpha(static_cast<float>(p->x));
+        }
+    };
+}
+
+std::function<void(const ScriptValue&)> MakeNodeColorApply(rstd::sync::Arc<owe::SceneNode> node) {
+    return [hold = SceneNodeArcCapture(rstd::move(node))](const ScriptValue& value) {
+        auto& current = hold.node->Color();
+        if (auto* color = std::get_if<Vec3Value>(&value)) {
+            hold.node->SetColor({ static_cast<float>(color->x),
+                                  static_cast<float>(color->y),
+                                  static_cast<float>(color->z) });
+        } else if (auto* color = std::get_if<Vec2Value>(&value)) {
+            hold.node->SetColor(
+                { static_cast<float>(color->x), static_cast<float>(color->y), current.z() });
+        } else if (auto* color = std::get_if<ScalarValue>(&value)) {
+            const auto component = static_cast<float>(color->v);
+            hold.node->SetColor({ component, component, component });
         }
     };
 }

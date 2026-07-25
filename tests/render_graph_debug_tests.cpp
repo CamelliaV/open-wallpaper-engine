@@ -9,6 +9,7 @@ import wescene.vulkan_render;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;
+using rstd::sync::Arc;
 
 namespace
 {
@@ -352,6 +353,79 @@ TEST(SceneRenderGraph, ReusesOneLinkCopyForMultipleConsumers) {
         if (state->type == owe::rg::PassNode::Type::Copy) ++copy_count;
     }
     EXPECT_EQ(copy_count, rstd::usize(1));
+}
+
+TEST(SceneRenderGraph, ElidesVisibilityHiddenSubtreeAndRestoresIt) {
+    owe::Scene scene;
+    scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+
+    auto parent             = Arc<owe::SceneNode>::make();
+    parent->ID()            = rstd::i32(7);
+    auto child              = Arc<owe::SceneNode>::make();
+    child->ID()             = rstd::i32(8);
+    auto               mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial material;
+    material.name = "child";
+    mesh->AddMaterial(std::move(material));
+    mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    child->AddMesh(std::move(mesh));
+    parent->AppendChild(child.clone());
+    scene.RootMut()->AppendChild(parent.clone());
+
+    EXPECT_TRUE(scene.SetNodeVisible(*parent, false));
+    auto hidden_snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    auto hidden_graph    = owe::sceneToRenderGraph(scene, hidden_snapshot);
+    auto hidden_order    = hidden_graph->topologicalOrder();
+    ASSERT_TRUE(hidden_order.is_ok());
+    EXPECT_TRUE(hidden_order.unwrap_unchecked().is_empty());
+
+    EXPECT_TRUE(scene.SetNodeVisible(*parent, true));
+    auto visible_snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    auto visible_graph    = owe::sceneToRenderGraph(scene, visible_snapshot);
+    auto visible_order    = visible_graph->topologicalOrder();
+    ASSERT_TRUE(visible_order.is_ok());
+    EXPECT_EQ(visible_order.unwrap_unchecked().len(), rstd::usize(1));
+}
+
+TEST(SceneRenderGraph, PreservesLinkedSourceBelowVisibilityHiddenParent) {
+    owe::Scene scene;
+    scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+
+    auto parent                    = Arc<owe::SceneNode>::make();
+    parent->ID()                   = rstd::i32(7);
+    auto source                    = Arc<owe::SceneNode>::make();
+    source->ID()                   = rstd::i32(8);
+    auto               source_mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial source_material;
+    source_material.name = "source";
+    source_mesh->AddMaterial(std::move(source_material));
+    source_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    source->AddMesh(std::move(source_mesh));
+    parent->AppendChild(source.clone());
+    scene.RootMut()->AppendChild(parent.clone());
+    scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(8) }, *source);
+
+    auto consumer                    = Arc<owe::SceneNode>::make();
+    consumer->ID()                   = rstd::i32(42);
+    auto               consumer_mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial consumer_material;
+    consumer_material.name     = "consumer";
+    consumer_material.textures = { "_rt_link_8" };
+    consumer_mesh->AddMaterial(std::move(consumer_material));
+    consumer_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    consumer->AddMesh(std::move(consumer_mesh));
+    scene.RootMut()->AppendChild(consumer.clone());
+
+    EXPECT_TRUE(scene.SetNodeVisible(*parent, false));
+    auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    auto graph    = owe::sceneToRenderGraph(scene, snapshot);
+    auto ordered  = graph->topologicalOrder();
+    ASSERT_TRUE(ordered.is_ok());
+    EXPECT_EQ(ordered.unwrap_unchecked().len(), rstd::usize(3));
 }
 
 TEST(VulkanRenderDiagnostics, EmptyBeforeProgramBuild) {

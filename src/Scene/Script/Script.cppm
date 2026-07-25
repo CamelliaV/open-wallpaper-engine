@@ -146,6 +146,10 @@ public:
         std::vector<owe::SceneNode*>                                  clones       = {},
         std::unordered_map<std::string, std::vector<owe::SceneNode*>> asset_clones = {});
 
+    // Pending scripts initialize in ascending owner order when SetSceneRoot
+    // completes scene assembly. Equal orders retain creation order.
+    void SetInitializationOrder(FieldScript& script, std::uint64_t order);
+
     // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`
     // searches from this node. Call once per scene after parsing finishes.
     void SetScene(owe::Scene* scene);
@@ -254,6 +258,9 @@ std::function<void(const ScriptValue&)> MakeNodeTransformApply(rstd::sync::Arc<o
 
 // Build the closure that drives a SceneNode alpha field.
 std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::SceneNode> node);
+
+// Build the closure that drives a SceneNode color field.
+std::function<void(const ScriptValue&)> MakeNodeColorApply(rstd::sync::Arc<owe::SceneNode> node);
 
 // Owns one JsRuntime + the actuator list for one Scene. Constructed and
 // populated by the parser, then installed as a Scene extension.

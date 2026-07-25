@@ -514,6 +514,14 @@ script::ScriptScene& EnsureScriptScene(ParseContext& context) {
     return **context.script_scene;
 }
 
+void SetScriptInitializationOrder(ParseContext& context, script::FieldScript& script,
+                                  const SceneNode* node) {
+    if (node == nullptr) return;
+    auto order = context.script_initialization_orders.get(node->ID().to_primitive());
+    if (order.is_none()) return;
+    EnsureScriptScene(context).runtime().SetInitializationOrder(script, **order);
+}
+
 std::optional<float> ScriptValueAsFloat(const script::ScriptValue& value) {
     if (auto* p = std::get_if<script::ScalarValue>(&value)) return static_cast<float>(p->v);
     if (auto* p = std::get_if<script::BoolValue>(&value)) return p->v ? 1.0f : 0.0f;
@@ -899,6 +907,7 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
         script::FieldKind           kind;
         bool                        has_actuator = true;
         bool                        is_alpha     = false;
+        bool                        is_color     = false;
         if (field == "origin") {
             tgt  = script::NodeTransformTarget::Translate;
             kind = script::FieldKind::Vec3;
@@ -917,8 +926,11 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
         } else if (field == "alpha") {
             kind     = script::FieldKind::Scalar;
             is_alpha = true;
+        } else if (field == "color") {
+            kind     = script::FieldKind::Vec3;
+            is_color = true;
         } else {
-            // text/color/rate/intensity/... are wired elsewhere or not yet supported.
+            // text/rate/intensity/... are wired elsewhere or not yet supported.
             continue;
         }
         std::string                  sha = utils::genSha1(std::span<const char>(sb.source));
@@ -931,6 +943,7 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
         auto* fs =
             rt.MakeFieldScript(sb.source, sha, kind, props, initial_value, node, std::move(clones));
         if (! fs) continue;
+        SetScriptInitializationOrder(context, *fs, node);
         if (sb.source.find("createLayer") != std::string_view::npos &&
             sb.source.find("registerAsset") != std::string_view::npos) {
             context.create_layer_asset_requests.push(
@@ -941,6 +954,8 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
         if (! has_actuator) continue;
         if (is_alpha)
             ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp.clone()) });
+        else if (is_color)
+            ss.AddActuator({ fs, script::MakeNodeColorApply(node_sp.clone()) });
         else if (field == "origin" && origin_apply)
             ss.AddActuator({ fs, origin_apply });
         else if (field == "scale" && scale_apply)
@@ -1007,6 +1022,7 @@ void WireCameraFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp
         auto        initial_value = ScriptInitialValueForField(field, sb.initial_value);
         auto* fs = rt.MakeFieldScript(sb.source, sha, kind, sb.properties, initial_value, node);
         if (! fs) continue;
+        SetScriptInitializationOrder(context, *fs, node);
 
         if (field == "origin") {
             auto path         = CopyableArcHold(camera_path.clone());
@@ -1813,7 +1829,8 @@ bool UsesUnitFinalQuad(const wpscene::Material& wpmat) {
 bool CanCompositeFinalEffectShader(std::string_view shader) {
     return IsLayerCompositeShader(shader) || shader == "effects/transform" ||
            shader == "effects/scroll" || shader == "effects/spin" ||
-           shader == "effects/perspective" || shader == "effects/foliagesway";
+           shader == "effects/perspective" || shader == "effects/foliagesway" ||
+           shader == "effects/blend" || shader == "effects/tint";
 }
 
 bool HasShaderCombo(const WPShaderInfo& info, std::string_view combo_name) {
@@ -4568,6 +4585,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        sb.initial_value,
                                                        compose_node.as_ptr());
         if (fs) {
+            SetScriptInitializationOrder(context, *fs, compose_node.as_ptr());
             ss.AddActuator({
                 fs,
                 [set_text](const script::ScriptValue& v) {
@@ -4587,6 +4605,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        sb.initial_value,
                                                        compose_node.as_ptr());
         if (fs) {
+            SetScriptInitializationOrder(context, *fs, compose_node.as_ptr());
             ss.AddActuator({
                 fs,
                 [set_pointsize](const script::ScriptValue& v) {
@@ -5470,6 +5489,8 @@ auto WPSceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> documen
             if (! o.is_object()) continue;
             std::int32_t id {};
             if (! owe::GetJsonValue(o, "id", id, false)) continue;
+            (void)context.script_initialization_orders.insert(
+                id, static_cast<std::uint64_t>(context.node_id_order.len().to_primitive()));
             context.node_id_order.emplace_back(id);
             std::uint32_t parent = 0;
             owe::GetJsonValue(o, "parent", parent, false);
@@ -5504,7 +5525,7 @@ auto WPSceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> documen
                 bool visible =
                     (**visibility).visible &&
                     ! HasHiddenUserAncestor(static_cast<std::uint32_t>(id), visibility_info);
-                if (! visible) node->SetVisible(false);
+                if (! visible) (void)context.scene->SetNodeVisible(*node, false);
             }
             wpscene::VisibleUserBinding visible_user;
             wpscene::ReadVisibleUserBinding(o, visible_user);

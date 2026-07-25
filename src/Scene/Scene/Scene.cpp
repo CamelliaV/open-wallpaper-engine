@@ -1474,6 +1474,18 @@ bool Scene::SetMaterialShaderValue(SceneMaterial& material, ref<str> uniform_nam
     return material.SetShaderValue(rstd::cppstd::to_string(uniform_name), value);
 }
 
+bool Scene::SetMaterialShaderValueByKey(SceneMaterial& material, ref<str> material_key,
+                                        const ShaderValue& value) {
+    auto uniform_name = rstd::cppstd::to_string(material_key);
+    if (material.customShader.variant.has_value()) {
+        const auto& aliases = material.customShader.variant->uniform_aliases;
+        if (auto alias = aliases.find(uniform_name); alias != aliases.end()) {
+            uniform_name = alias->second;
+        }
+    }
+    return material.SetShaderValue(std::move(uniform_name), value);
+}
+
 SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
                                                                std::string_view texture) {
     if (! EnsureTextureDescriptor(texture)) return {};
@@ -1576,13 +1588,17 @@ bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
     if (! visible) {
         MarkLayerVisibilityElidable(WallpaperLayerId { .value = id });
         const bool is_elidable = m_elidable_layer_ids.contains(id);
-        return was_elidable != is_elidable;
+        const bool changed     = was_elidable != is_elidable;
+        m_render_graph_dirty |= changed;
+        return changed;
     }
 
     if (! m_visibility_elidable_layer_ids.remove(id)) return false;
     RebuildElidableLayerIds();
     const bool is_elidable = m_elidable_layer_ids.contains(id);
-    return was_elidable != is_elidable;
+    const bool changed     = was_elidable != is_elidable;
+    m_render_graph_dirty |= changed;
+    return changed;
 }
 
 bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const Json& property) {
@@ -1611,6 +1627,34 @@ Option<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node,
     auto effect = effect_layer->FindEffect(name);
     if (! effect) return None();
     return Some(SceneImageEffectRef { .layer = effect_layer.get(), .effect = std::move(effect) });
+}
+
+Option<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node, usize index) {
+    if (node.Camera().empty()) return None();
+    auto camera = CameraMut(rstd::cppstd::as_str(node.Camera()).unwrap());
+    if (camera.is_none() || ! (**camera).HasImgEffect()) return None();
+
+    auto& effect_layer = (**camera).GetImgEffect();
+    if (! effect_layer || index >= effect_layer->EffectCount()) return None();
+    auto effect = effect_layer->GetEffect(index);
+    if (! effect) return None();
+    return Some(SceneImageEffectRef { .layer = effect_layer.get(), .effect = std::move(effect) });
+}
+
+usize Scene::NodeImageEffectCount(const SceneNode& node) {
+    if (node.Camera().empty()) return usize();
+    auto camera = CameraMut(rstd::cppstd::as_str(node.Camera()).unwrap());
+    if (camera.is_none() || ! (**camera).HasImgEffect()) return usize();
+    const auto& effect_layer = (**camera).GetImgEffect();
+    return effect_layer ? effect_layer->EffectCount() : usize();
+}
+
+SceneMaterial* Scene::ImageEffectMaterial(const SceneImageEffectRef& ref, usize index) {
+    if (! ref.effect || index >= usize(ref.effect->nodes.size())) return nullptr;
+    auto node = ref.effect->nodes.begin();
+    std::advance(node, index.to_primitive());
+    if (! node->sceneNode || ! node->sceneNode->HasMaterial()) return nullptr;
+    return node->sceneNode->Mesh()->Material();
 }
 
 bool Scene::SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible) {

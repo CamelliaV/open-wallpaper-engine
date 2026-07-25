@@ -47,6 +47,40 @@ double LastScalar(FieldScript* fs) {
 
 } // namespace
 
+TEST(ScriptInitialization, UsesSceneOwnerOrderInsteadOfRegistrationOrder) {
+    auto root = Arc<owe::SceneNode>::make();
+
+    JsRuntime rt;
+    auto*     consumer = rt.MakeFieldScript(
+        R"JS(
+            let seen = -1;
+            export function init() { seen = shared.ready; }
+            export function update() { return seen; }
+        )JS",
+        "test/init_order_consumer",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0));
+    auto* producer = rt.MakeFieldScript(
+        R"JS(
+            export function init() { shared.ready = 7; }
+            export function update() { return 0; }
+        )JS",
+        "test/init_order_producer",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0));
+    ASSERT_NE(consumer, nullptr);
+    ASSERT_NE(producer, nullptr);
+
+    rt.SetInitializationOrder(*consumer, 1);
+    rt.SetInitializationOrder(*producer, 0);
+    rt.SetSceneRoot(root.as_ptr());
+    rt.TickAll();
+
+    EXPECT_EQ(LastScalar(consumer), 7.0);
+}
+
 TEST(ScriptTimer, SetTimeoutFiresAfterDelay) {
     JsRuntime   rt;
     FrameInputs fi {};
@@ -279,6 +313,34 @@ TEST(ScriptNodeSoftMutation, VisibleAndAlphaWrites) {
     EXPECT_EQ(node.EffectiveAlpha(), 0.0f); // hidden wins
 }
 
+TEST(ScriptNodeSoftMutation, VisibleWritesUseSceneVisibilityOwner) {
+    owe::Scene scene;
+    auto       node = Arc<owe::SceneNode>::make();
+    node->ID()      = rstd::i32(17);
+    scene.RootMut()->AppendChild(node.clone());
+
+    JsRuntime rt;
+    rt.SetScene(&scene);
+    auto* script = rt.MakeFieldScript(
+        R"JS(
+            export function init() { thisLayer.visible = false; }
+            export function update() { return thisLayer.visible ? 1 : 0; }
+        )JS",
+        "test/scene_owned_visibility",
+        FieldKind::Bool,
+        owe::MakeObject(),
+        owe::IntoJson(true),
+        node.as_ptr());
+    ASSERT_NE(script, nullptr);
+
+    rt.SetSceneRoot(scene.RootMut().as_raw_ptr());
+    rt.TickAll();
+
+    EXPECT_FALSE(node->Visible());
+    EXPECT_TRUE(scene.IsLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(17) }));
+    EXPECT_TRUE(scene.ConsumeRenderGraphDirty());
+}
+
 TEST(ScriptNodeSoftMutation, VisibleTrueRestoresUserAlpha) {
     owe::SceneNode node;
     JsRuntime      rt;
@@ -374,6 +436,30 @@ TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
     EXPECT_TRUE(node->IsAlphaOverridden());
     EXPECT_FLOAT_EQ(node->UserAlpha(), 0.125f);
     EXPECT_FLOAT_EQ(node->EffectiveAlpha(), 0.125f);
+}
+
+TEST(ScriptNodeActuator, ColorFieldReturnWritesNodeColor) {
+    auto node = Arc<owe::SceneNode>::make();
+
+    ScriptScene ss;
+    auto*       fs = ss.runtime().MakeFieldScript(
+        R"JS(
+            export function update() { return new Vec3(0.2, 0.4, 0.6); }
+        )JS",
+        "test/color_field_return",
+        FieldKind::Vec3,
+        owe::MakeObject(),
+        owe::IntoJson("1 1 1"),
+        node.as_ptr());
+    ASSERT_NE(fs, nullptr);
+    ss.AddActuator({ fs, MakeNodeColorApply(node.clone()) });
+
+    FrameInputs fi {};
+    ss.Tick(fi);
+
+    EXPECT_FLOAT_EQ(node->Color().x(), 0.2f);
+    EXPECT_FLOAT_EQ(node->Color().y(), 0.4f);
+    EXPECT_FLOAT_EQ(node->Color().z(), 0.6f);
 }
 
 TEST(SceneNodeRuntimeAlpha, AlphaSourceContributesOverride) {
@@ -1049,6 +1135,77 @@ TEST(ScriptLayerLookup, GetEffectVisibleWritesSceneDirty) {
     EXPECT_FALSE(effect->runtime_visible);
     EXPECT_TRUE(scene.ConsumeRenderGraphDirty());
     EXPECT_FALSE(scene.ConsumeRenderGraphDirty());
+}
+
+TEST(ScriptLayerLookup, EffectIndexAndMaterialWritesUseSceneMaterialOwner) {
+    owe::Scene scene;
+    auto       root  = Box<owe::SceneNode>::make();
+    auto       layer = Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "color-layer");
+    root->AppendChild(layer.clone());
+    auto* root_pointer = root.get();
+    scene.SetRoot(rstd::move(root));
+
+    layer->SetCamera("color-effect-camera");
+    auto camera =
+        Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(256, 256, -1.0, 1.0));
+    auto effect_layer = std::make_shared<owe::SceneImageEffectLayer>(layer.as_ptr(),
+                                                                     256.0f,
+                                                                     256.0f,
+                                                                     "_rt_effect_pingpong_a_color",
+                                                                     "_rt_effect_pingpong_b_color");
+    auto effect       = std::make_shared<owe::SceneImageEffect>();
+    effect->name      = "color";
+    auto                        effect_node = Arc<owe::SceneNode>::make();
+    auto                        mesh        = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial          material;
+    owe::SceneShaderVariantDesc variant;
+    variant.uniform_aliases["color"] = "g_TintColor";
+    material.customShader.variant    = std::move(variant);
+    material.customShader.constValues["g_TintColor"] =
+        owe::ShaderValue(rstd::array<float, 3> { 1.0f, 0.0f, 0.0f });
+    mesh->AddMaterial(std::move(material));
+    auto* effect_material = mesh->Material();
+    effect_node->AddMesh(std::move(mesh));
+    effect->nodes.push_back(owe::SceneImageEffectNode {
+        .output    = "_rt_effect_pingpong_b_color",
+        .sceneNode = effect_node.clone(),
+    });
+    effect_layer->AddEffect(effect);
+    camera->AttatchImgEffect(effect_layer);
+    scene.RegisterCamera(String::make("color-effect-camera"_str), rstd::move(camera));
+
+    JsRuntime rt;
+    rt.SetScene(&scene);
+    rt.SetSceneRoot(root_pointer);
+    auto  properties = rstd::json::from_str(R"({"color":"0.2 0.4 0.6"})"_str).unwrap();
+    auto* fs         = rt.MakeFieldScript(
+        R"JS(
+            export var scriptProperties = createScriptProperties()
+                .addColor({ name: 'color', value: new Vec3(1, 0, 0) })
+                .finish();
+            export function update() {
+                const effect = thisLayer.getEffect(0);
+                effect.getMaterial(0).color = scriptProperties.color;
+                return thisLayer.getEffectCount() + (effect.name === "color" ? 1 : 0);
+            }
+        )JS",
+        "test/layer_effect_material",
+        FieldKind::Scalar,
+        properties,
+        owe::IntoJson(0),
+        layer.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs), 2.0);
+    ASSERT_NE(effect_material, nullptr);
+    auto color = effect_material->customShader.constValues.find("g_TintColor");
+    ASSERT_NE(color, effect_material->customShader.constValues.end());
+    ASSERT_EQ(color->second.size(), usize(3));
+    EXPECT_FLOAT_EQ(color->second[usize()], 0.2f);
+    EXPECT_FLOAT_EQ(color->second[usize(1)], 0.4f);
+    EXPECT_FLOAT_EQ(color->second[usize(2)], 0.6f);
 }
 
 TEST(ScriptLayerLookup, MissingLayerKeepsDefaultTransformShape) {
