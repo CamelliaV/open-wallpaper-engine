@@ -278,7 +278,14 @@ void WPUniformSceneState::Advance(const SceneFrame& frame) {
 void WPUniformSceneState::ApplyUserProperty(std::string_view field, const Json& property) {
     auto value = UserScalar(property);
     if (value.is_none()) return;
-    if (field == "cameraparallaxmouseinfluence") {
+    if (field == "cameraparallax") {
+        m_camera_parallax.enable = *value >= 0.5f;
+    } else if (field == "cameraparallaxamount") {
+        m_camera_parallax.amount = *value;
+    } else if (field == "cameraparallaxdelay") {
+        m_camera_parallax.delay = *value;
+        SetPointerDelay(*value);
+    } else if (field == "cameraparallaxmouseinfluence") {
         m_camera_parallax.mouse_influence = *value;
     } else if (field == "camerashake") {
         m_camera_shake.enable = *value >= 0.5f;
