@@ -195,6 +195,7 @@ auto WPUniformNodeConfigDraft::Clone() const -> WPUniformNodeConfigDraft {
         .propagated_parallax_depth      = propagated_parallax_depth,
         .propagate_parallax_to_children = propagate_parallax_to_children,
         .use_camera_eye_position        = use_camera_eye_position,
+        .vertices_in_world_space        = vertices_in_world_space,
         .effect_projection_node =
             effect_projection_node.is_some() ? Some((*effect_projection_node).clone()) : None(),
         .effect_projection_size = effect_projection_size,
@@ -383,7 +384,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
     }
 
     if (req_m || req_normal_model || req_am || req_mvp || req_mi || req_mvpi || req_effect_model) {
-        Matrix4d    model    = node.ModelTrans();
+        Matrix4d model = m_node->vertices_in_world_space ? Matrix4d::Identity() : node.ModelTrans();
         const auto& parallax = m_state->CameraParallax();
         auto        attached = camera.GetAttachedNode();
         const bool  own_image_effect =

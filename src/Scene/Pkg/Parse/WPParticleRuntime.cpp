@@ -334,8 +334,17 @@ void WPParticleSpawnPipeline::Initialize(WPParticleSpawnColumns&        columns,
     for (auto& instruction : m_instructions) instruction.Initialize(columns, request, frame);
     if (! m_world_space) return;
     auto wp_frame = WPParticleFrameFrom(frame);
-    columns.positions[request.slot.index] +=
+    auto index    = request.slot.index;
+    auto local_position =
+        columns.positions[index] +
         wp_frame->subsystem->InstanceState(wp_frame->instance_index).bounded.position;
+    auto world_position =
+        wp_frame->world_from_spawn_space *
+        Eigen::Vector4d(local_position.x(), local_position.y(), local_position.z(), 1.0);
+    columns.positions[index]  = world_position.head<3>().cast<float>();
+    columns.velocities[index] = (wp_frame->world_from_spawn_space.block<3, 3>(0, 0) *
+                                 columns.velocities[index].cast<double>())
+                                    .cast<float>();
 }
 
 WPParticleSubSystem::WPParticleSubSystem(
@@ -492,25 +501,33 @@ void WPParticleSubSystem::UpdateFrameInput(f64 frame_time) {
             static_cast<double>(ortho[usize(1)].to_primitive()),
         0.0,
     };
-    Eigen::Vector3d mouse_local          = mouse_world;
-    Eigen::Matrix3d world_from_local_dir = Eigen::Matrix3d::Identity();
-    Eigen::Matrix3d local_from_world_dir = Eigen::Matrix3d::Identity();
-    Eigen::Matrix4d local_from_world     = Eigen::Matrix4d::Identity();
+    Eigen::Vector3d mouse_local            = mouse_world;
+    Eigen::Matrix3d world_from_local_dir   = Eigen::Matrix3d::Identity();
+    Eigen::Matrix3d local_from_world_dir   = Eigen::Matrix3d::Identity();
+    Eigen::Matrix4d local_from_world       = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d world_from_spawn_space = Eigen::Matrix4d::Identity();
     if (m_owner_node != nullptr) {
         m_owner_node->UpdateTrans();
-        world_from_local_dir = m_owner_node->ModelTrans().block<3, 3>(0, 0);
-        if (std::abs(world_from_local_dir.determinant()) > 1e-9) {
-            local_from_world_dir = world_from_local_dir.inverse();
+        const auto model       = m_owner_node->ModelTrans();
+        world_from_spawn_space = model;
+        if (! m_world_space) {
+            world_from_local_dir = model.block<3, 3>(0, 0);
+            if (std::abs(world_from_local_dir.determinant()) > 1e-9) {
+                local_from_world_dir = world_from_local_dir.inverse();
+            }
+            local_from_world = model.inverse();
+            Eigen::Vector4d value =
+                local_from_world * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
+            mouse_local = value.head<3>();
+        } else {
+            local_from_world = model.inverse();
         }
-        local_from_world = m_owner_node->ModelTrans().inverse();
-        Eigen::Vector4d value =
-            local_from_world * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
-        mouse_local = value.head<3>();
     }
     m_frame.subsystem              = this;
     m_frame.mouse_local            = mouse_local;
     m_frame.world_from_local_dir   = world_from_local_dir;
     m_frame.local_from_world_dir   = local_from_world_dir;
+    m_frame.world_from_spawn_space = world_from_spawn_space;
     m_frame.local_from_world       = local_from_world;
     m_frame.world_space            = m_world_space;
     m_frame.time                   = m_time;

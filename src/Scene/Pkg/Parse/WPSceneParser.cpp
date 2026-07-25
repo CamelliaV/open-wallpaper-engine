@@ -3419,6 +3419,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
                                              wppartobj.parallaxDepth[1] };
     }
     svData.use_camera_eye_position = particle_obj.flags[wpscene::Particle::FlagEnum::perspective];
+    svData.vertices_in_world_space = particle_obj.flags[wpscene::Particle::FlagEnum::wordspace];
 
     WPShaderInfo shaderInfo;
     shaderInfo.baseConstSvs = context.global_base_uniforms;
@@ -5061,6 +5062,7 @@ void FinalizeUniformSources(ParseContext& context) {
         state->propagated_parallax_depth      = draft.propagated_parallax_depth;
         state->propagate_parallax_to_children = draft.propagate_parallax_to_children;
         state->use_camera_eye_position        = draft.use_camera_eye_position;
+        state->vertices_in_world_space        = draft.vertices_in_world_space;
         state->effect_projection_size         = draft.effect_projection_size;
         if (draft.effect_projection_node.is_some()) {
             state->effect_projection_node = Some((*draft.effect_projection_node).clone());

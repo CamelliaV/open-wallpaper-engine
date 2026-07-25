@@ -31,6 +31,12 @@ inline Vector3d GenRandomVec3(const std::array<float, 3>& min, const std::array<
     return result;
 }
 
+inline float GenRandom(float min, float max, float exponent) {
+    auto random = Random::get(0.0f, 1.0f);
+    if (exponent != 1.0f) random = std::pow(random, exponent);
+    return static_cast<float>(algorism::lerp(random, min, max));
+}
+
 enum class SequenceLimitBehavior
 {
     Repeat,
@@ -188,6 +194,7 @@ struct SingleRandom {
     static void ReadFromJson(const Json& j, SingleRandom& r) {
         owe::GetJsonValue(j, "min", r.min, false);
         owe::GetJsonValue(j, "max", r.max, false);
+        owe::GetJsonValue(j, "exponent", r.exponent, false);
     };
 };
 struct VecRandom {
@@ -198,6 +205,7 @@ struct VecRandom {
     static void ReadFromJson(const Json& j, VecRandom& r) {
         owe::GetJsonValue(j, "min", r.min, false);
         owe::GetJsonValue(j, "max", r.max, false);
+        owe::GetJsonValue(j, "exponent", r.exponent, false);
     };
 };
 struct TurbulentRandom {
@@ -259,8 +267,8 @@ struct WPLifetimeRandomProgram {
 
     void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
                     ref<dyn<rstd::any::Any>>) {
-        auto value                                    = Random::get(config.min, config.max);
-        columns.lifetimes[request.slot.index]         = value;
+        auto value                            = GenRandom(config.min, config.max, config.exponent);
+        columns.lifetimes[request.slot.index] = value;
         columns.initial_lifetimes[request.slot.index] = value;
     }
 };
@@ -270,8 +278,8 @@ struct WPSizeRandomProgram {
 
     void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
                     ref<dyn<rstd::any::Any>>) {
-        auto value                                = Random::get(config.min, config.max);
-        columns.sizes[request.slot.index]         = value;
+        auto value                        = GenRandom(config.min, config.max, config.exponent);
+        columns.sizes[request.slot.index] = value;
         columns.initial_sizes[request.slot.index] = value;
     }
 };
@@ -281,8 +289,8 @@ struct WPAlphaRandomProgram {
 
     void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
                     ref<dyn<rstd::any::Any>>) {
-        auto value                                 = Random::get(config.min, config.max);
-        columns.alphas[request.slot.index]         = value;
+        auto value                         = GenRandom(config.min, config.max, config.exponent);
+        columns.alphas[request.slot.index] = value;
         columns.initial_alphas[request.slot.index] = value;
     }
 };
@@ -300,7 +308,11 @@ struct WPVectorRandomProgram {
 
     void Initialize(WPParticleSpawnColumns& columns, particle::ParticleSpawnRequest request,
                     ref<dyn<rstd::any::Any>>) {
-        auto value = GenRandomVec3(config.min, config.max).cast<float>();
+        Eigen::Vector3f value;
+        for (usize component {}; component < usize(3); ++component) {
+            auto raw   = component.to_primitive();
+            value[raw] = GenRandom(config.min[raw], config.max[raw], config.exponent);
+        }
         if (target == Target::Velocity) {
             columns.velocities[request.slot.index] += value;
         } else if (target == Target::Rotation) {
@@ -870,10 +882,10 @@ struct WPMovementOperator {
                 frame->world_from_local_dir * velocities[slot.index].cast<double>();
             Eigen::Vector3d acceleration =
                 frame->local_from_world_dir * algorism::DragForce(world_velocity, drag);
-            acceleration += frame->world_space ? frame->local_from_world_dir * gravity : gravity;
+            acceleration +=
+                speed * (frame->world_space ? frame->local_from_world_dir * gravity : gravity);
             velocities[slot.index] =
-                (velocities[slot.index].cast<double>() + speed * acceleration * delta)
-                    .cast<float>();
+                (velocities[slot.index].cast<double>() + acceleration * delta).cast<float>();
             positions[slot.index] = (positions[slot.index].cast<double>() +
                                      velocities[slot.index].cast<double>() * delta)
                                         .cast<float>();
@@ -1134,6 +1146,7 @@ struct WPOscillatePositionOperator {
 struct WPTurbulenceOperator {
     WPParticleAttributes                                      attributes;
     Turbulence                                                config;
+    Arc<wpscene::ParticleInstanceoverride>                    override;
     double                                                    phase {};
     double                                                    speed {};
     particle::ParticleWriteIndex<particle::VelocityAttribute> velocity;
@@ -1151,8 +1164,8 @@ struct WPTurbulenceOperator {
         for (auto slot : context.slots) {
             Eigen::Vector3d position = positions[slot.index].cast<double>();
             position.x() += phase + config.timescale * frame->time.to_primitive();
-            Eigen::Vector3d result =
-                speed * algorism::CurlNoise(position * config.scale * 2).normalized();
+            Eigen::Vector3d result = speed * override->speed *
+                                     algorism::CurlNoise(position * config.scale * 2).normalized();
             for (usize component {}; component < usize(3); ++component) {
                 if (config.mask[component.to_primitive()] == 0) {
                     result[component.to_primitive()] = 0.0;
@@ -1418,6 +1431,7 @@ WPParticleParser::GenOperator(const Json& wpj, Arc<wpscene::ParticleInstanceover
             return Box<dyn<particle::ParticleUpdateProgram>>::make(WPTurbulenceOperator {
                 .attributes = attributes,
                 .config     = config,
+                .override   = over_state.clone(),
                 .phase      = Random::get(config.phasemin, config.phasemax),
                 .speed      = Random::get(config.speedmin, config.speedmax),
             });

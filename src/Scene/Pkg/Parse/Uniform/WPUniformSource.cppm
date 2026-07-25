@@ -132,6 +132,7 @@ struct WPUniformNodeConfigDraft {
     array<float, 2>        propagated_parallax_depth { 0.0f, 0.0f };
     bool                   propagate_parallax_to_children { true };
     bool                   use_camera_eye_position { false };
+    bool                   vertices_in_world_space { false };
     Option<Arc<SceneNode>> effect_projection_node;
     array<float, 2>        effect_projection_size { 0.0f, 0.0f };
 
@@ -160,6 +161,7 @@ struct WPUniformNodeState {
     array<float, 2>              propagated_parallax_depth { 0.0f, 0.0f };
     bool                         propagate_parallax_to_children { true };
     bool                         use_camera_eye_position { false };
+    bool                         vertices_in_world_space { false };
     Option<Arc<SceneNode>>       effect_projection_node;
     array<float, 2>              effect_projection_size { 0.0f, 0.0f };
 
