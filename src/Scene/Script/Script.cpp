@@ -416,6 +416,7 @@ struct EngineHostState {
         JsRuntime::ImageAlignmentSetter setter;
     };
     HashMap<owe::SceneNode*, ImageAlignmentHook> image_alignment_hooks;
+    HashMap<owe::SceneNode*, Json>               initial_layer_configs;
     JsRuntime::BoneIndexResolver                 bone_index_resolver;
     JsRuntime::BoneTransformResolver             bone_transform_resolver;
     owe::SceneNode*                              scene_root { nullptr };
@@ -1229,7 +1230,7 @@ globalThis.engine.AUDIO_RESOLUTION_64 = 64;
 globalThis.engine.isRunningInEditor = function() { return false; };
 globalThis.engine.isScreensaver     = function() { return false; };
 
-// --- Vec2 / Vec3 ---
+// --- Vec2 / Vec3 / Vec4 ---
 // Pure-JS implementations of WE's vector types. The corpus relies on
 // .multiply / .add / .subtract / .divide as Vec3 instance methods (used
 // by every audio-response script binding scale), so a simple class with
@@ -1296,8 +1297,42 @@ class Vec3 {
     return len > 0 ? this.divide(len) : new Vec3(0, 0, 0);
   }
 }
+class Vec4 {
+  constructor(x, y, z, w) {
+    if (typeof x === 'object' && x !== null) {
+      this.x = x.x ?? 0; this.y = x.y ?? 0; this.z = x.z ?? 0; this.w = x.w ?? 0;
+    } else if (typeof x === 'number' && y === undefined && z === undefined && w === undefined) {
+      this.x = x; this.y = x; this.z = x; this.w = x;
+    } else {
+      this.x = (typeof x === 'number') ? x : 0;
+      this.y = (typeof y === 'number') ? y : 0;
+      this.z = (typeof z === 'number') ? z : 0;
+      this.w = (typeof w === 'number') ? w : 0;
+    }
+  }
+  add(o)      { return new Vec4(this.x + (o.x ?? o), this.y + (o.y ?? o), this.z + (o.z ?? o), this.w + (o.w ?? o)); }
+  subtract(o) { return new Vec4(this.x - (o.x ?? o), this.y - (o.y ?? o), this.z - (o.z ?? o), this.w - (o.w ?? o)); }
+  multiply(o) { return new Vec4(this.x * (o.x ?? o), this.y * (o.y ?? o), this.z * (o.z ?? o), this.w * (o.w ?? o)); }
+  divide(o)   { return new Vec4(this.x / (o.x ?? o), this.y / (o.y ?? o), this.z / (o.z ?? o), this.w / (o.w ?? o)); }
+  mix(o, t)   {
+    return new Vec4(
+      this.x + ((o.x ?? o) - this.x) * t,
+      this.y + ((o.y ?? o) - this.y) * t,
+      this.z + ((o.z ?? o) - this.z) * t,
+      this.w + ((o.w ?? o) - this.w) * t);
+  }
+  copy()      { return new Vec4(this.x, this.y, this.z, this.w); }
+  clone()     { return new Vec4(this.x, this.y, this.z, this.w); }
+  length()    { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z + this.w*this.w); }
+  lengthSqr() { return this.x*this.x + this.y*this.y + this.z*this.z + this.w*this.w; }
+  normalize() {
+    const len = this.length();
+    return len > 0 ? this.divide(len) : new Vec4(0, 0, 0, 0);
+  }
+}
 globalThis.Vec2 = Vec2;
 globalThis.Vec3 = Vec3;
+globalThis.Vec4 = Vec4;
 
 // --- thisLayer / thisScene stub ---------------------------------------------
 // Stand-in for the per-script SceneNode binding. Property reads return
@@ -2268,7 +2303,13 @@ JSValue NodeSceneEnumerateLayers(JSContext* ctx, JSValueConst this_val, int, JSV
     return arr;
 }
 
-JSValue NodeSceneGetInitialLayerConfig(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+JSValue NodeSceneGetInitialLayerConfig(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (! host || argc < 1) return JS_NewObject(ctx);
+    auto* node = GetLayerNode(argv[0]);
+    if (! node) return JS_NewObject(ctx);
+    auto config = host->initial_layer_configs.get(node);
+    if (config.is_some()) return JsonToJs(ctx, **config);
     return JS_NewObject(ctx);
 }
 
@@ -2815,6 +2856,11 @@ void JsRuntime::SetScene(owe::Scene* scene) {
 void JsRuntime::SetInitializationOrder(FieldScript& script, std::uint64_t order) {
     if (! script.m_impl || script.m_impl->rt != m_impl.get() || script.m_impl->init_done) return;
     script.m_impl->initialization_order = order;
+}
+
+void JsRuntime::RegisterInitialLayerConfig(owe::SceneNode* node, Json config) {
+    if (! m_impl || node == nullptr) return;
+    (void)m_impl->host.initial_layer_configs.insert(node, rstd::move(config));
 }
 
 void JsRuntime::SetSceneRoot(owe::SceneNode* root) {

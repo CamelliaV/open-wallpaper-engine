@@ -1160,10 +1160,13 @@ TEST(ScriptLayerLookup, EffectIndexAndMaterialWritesUseSceneMaterialOwner) {
     auto                        mesh        = std::make_shared<owe::SceneMesh>();
     owe::SceneMaterial          material;
     owe::SceneShaderVariantDesc variant;
-    variant.uniform_aliases["color"] = "g_TintColor";
-    material.customShader.variant    = std::move(variant);
+    variant.uniform_aliases["color"]       = "g_TintColor";
+    variant.uniform_aliases["channelMask"] = "g_ChannelMask";
+    material.customShader.variant          = std::move(variant);
     material.customShader.constValues["g_TintColor"] =
         owe::ShaderValue(rstd::array<float, 3> { 1.0f, 0.0f, 0.0f });
+    material.customShader.constValues["g_ChannelMask"] =
+        owe::ShaderValue(rstd::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f });
     mesh->AddMaterial(std::move(material));
     auto* effect_material = mesh->Material();
     effect_node->AddMesh(std::move(mesh));
@@ -1187,6 +1190,7 @@ TEST(ScriptLayerLookup, EffectIndexAndMaterialWritesUseSceneMaterialOwner) {
             export function update() {
                 const effect = thisLayer.getEffect(0);
                 effect.getMaterial(0).color = scriptProperties.color;
+                effect.getMaterial(0).channelMask = new Vec4(0, 0.25, 0.5, 0.75);
                 return thisLayer.getEffectCount() + (effect.name === "color" ? 1 : 0);
             }
         )JS",
@@ -1206,6 +1210,13 @@ TEST(ScriptLayerLookup, EffectIndexAndMaterialWritesUseSceneMaterialOwner) {
     EXPECT_FLOAT_EQ(color->second[usize()], 0.2f);
     EXPECT_FLOAT_EQ(color->second[usize(1)], 0.4f);
     EXPECT_FLOAT_EQ(color->second[usize(2)], 0.6f);
+    auto channel_mask = effect_material->customShader.constValues.find("g_ChannelMask");
+    ASSERT_NE(channel_mask, effect_material->customShader.constValues.end());
+    ASSERT_EQ(channel_mask->second.size(), usize(4));
+    EXPECT_FLOAT_EQ(channel_mask->second[usize()], 0.0f);
+    EXPECT_FLOAT_EQ(channel_mask->second[usize(1)], 0.25f);
+    EXPECT_FLOAT_EQ(channel_mask->second[usize(2)], 0.5f);
+    EXPECT_FLOAT_EQ(channel_mask->second[usize(3)], 0.75f);
 }
 
 TEST(ScriptLayerLookup, MissingLayerKeepsDefaultTransformShape) {
@@ -1399,18 +1410,27 @@ TEST(ScriptVector, EngineCanvasSizeSupportsVectorMethods) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1920.0 + 1080.0 * 10000);
 }
 
-TEST(ScriptScene, InitialLayerConfigIsAvailable) {
+TEST(ScriptScene, InitialLayerConfigPreservesAuthoredEffects) {
     owe::SceneNode node;
     JsRuntime      rt;
     FrameInputs    fi {};
     rt.SetFrameInputs(fi);
+    rt.RegisterInitialLayerConfig(
+        &node,
+        rstd::json::from_str(
+            R"({"name":"Brush","effects":[{"name":"Square"},{"name":"Glider"}]})"_str)
+            .unwrap());
     rt.SetSceneRoot(&node);
     auto* fs = rt.MakeFieldScript(
         R"JS(
-            let seen = 0;
+            let seen = -1;
             export function init() {
                 const cfg = thisScene.getInitialLayerConfig(thisLayer);
-                seen = cfg && typeof cfg === 'object' ? 1 : 0;
+                seen = cfg.name === 'Brush' &&
+                       cfg.effects[0].name === 'Square' &&
+                       cfg.effects[1].name === 'Glider'
+                    ? cfg.effects.length
+                    : -1;
             }
             export function update() { return seen; }
         )JS",
@@ -1422,7 +1442,7 @@ TEST(ScriptScene, InitialLayerConfigIsAvailable) {
     ASSERT_NE(fs, nullptr);
 
     rt.TickAll();
-    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
+    EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 2.0);
 }
 
 TEST(ScriptScene, DestroyLayerHidesSceneNode) {

@@ -5206,8 +5206,15 @@ Box<Scene> FinalizeScene(ParseContext& context) {
         // Hand the scene root to the JS runtime so `thisScene.getLayer(name)`
         // can resolve against the live graph. The renderer also ticks the
         // ScriptScene once per frame via owe::script::TickSceneScripts.
-        (*context.script_scene)->runtime().SetScene(context.scene.get());
-        (*context.script_scene)->runtime().SetSceneRoot(context.scene->RootMut().as_raw_ptr());
+        auto& runtime = (*context.script_scene)->runtime();
+        for (auto id : context.node_id_order) {
+            auto node   = context.node_id_map.get(id);
+            auto config = context.initial_layer_configs.get(id);
+            if (node.is_none() || (**node).node.is_none() || config.is_none()) continue;
+            runtime.RegisterInitialLayerConfig((*(**node).node).as_ptr(), (**config).clone());
+        }
+        runtime.SetScene(context.scene.get());
+        runtime.SetSceneRoot(context.scene->RootMut().as_raw_ptr());
         owe::script::InstallScriptScene(*context.scene,
                                         context.script_scene.take().unwrap_unchecked());
     }
@@ -5489,6 +5496,7 @@ auto WPSceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> documen
             if (! o.is_object()) continue;
             std::int32_t id {};
             if (! owe::GetJsonValue(o, "id", id, false)) continue;
+            (void)context.initial_layer_configs.insert(id, o.clone());
             (void)context.script_initialization_orders.insert(
                 id, static_cast<std::uint64_t>(context.node_id_order.len().to_primitive()));
             context.node_id_order.emplace_back(id);

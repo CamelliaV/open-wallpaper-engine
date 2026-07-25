@@ -150,6 +150,10 @@ public:
     // completes scene assembly. Equal orders retain creation order.
     void SetInitializationOrder(FieldScript& script, std::uint64_t order);
 
+    // Preserve the authored scene.json object for getInitialLayerConfig().
+    // The package parser supplies this snapshot before pending initializers run.
+    void RegisterInitialLayerConfig(owe::SceneNode* node, Json config);
+
     // Install the Scene root that backs `thisScene`. `thisScene.getLayer(name)`
     // searches from this node. Call once per scene after parsing finishes.
     void SetScene(owe::Scene* scene);

@@ -131,6 +131,7 @@ struct ParseContext {
     // foreground layers.
     Vec<std::int32_t>                    node_id_order;
     HashMap<std::int32_t, std::uint64_t> script_initialization_orders;
+    HashMap<std::int32_t, Json>          initial_layer_configs;
 
     // Audio-bar fanout clones, keyed by their template layer's id. Held here
     // (not appended to the graph at spawn time) so FinalizeScene can attach
