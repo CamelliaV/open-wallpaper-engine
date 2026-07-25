@@ -205,8 +205,13 @@ struct RenderProgram {
         return rstd::Some<const VulkanPass&>(static_cast<const VulkanPass&>(*resolved));
     }
 
-    void buildFromGraph(owe::rg::RenderGraph& graph) {
-        auto nodes             = graph.topologicalOrder();
+    bool buildFromGraph(owe::rg::RenderGraph& graph) {
+        auto ordered = graph.topologicalOrder();
+        if (ordered.is_err()) {
+            clear();
+            return false;
+        }
+        auto nodes             = rstd::move(ordered).unwrap_unchecked();
         auto node_release_texs = graph.getLastReadTextures(nodes.as_slice());
         auto plan              = graph.resourcePlan();
 
@@ -240,6 +245,7 @@ struct RenderProgram {
             }
             pass_records.push(rstd::move(record));
         }
+        return true;
     }
 
     void injectFramePasses(PrePass& prepass, FinPass& finpass) {

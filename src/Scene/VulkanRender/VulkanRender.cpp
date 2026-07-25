@@ -1106,7 +1106,10 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg,
 
     {
         auto program_span = SceneLoadSpan(load_bench, &SceneLoadProbeIds::render_program_build);
-        m_program.buildFromGraph(rg);
+        if (! m_program.buildFromGraph(rg)) {
+            rstd_error("compile render graph failed: dependency cycle");
+            return;
+        }
         m_program.injectFramePasses(*m_prepass, *m_finpass);
     }
 

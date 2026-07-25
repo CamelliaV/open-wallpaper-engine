@@ -4,6 +4,7 @@ import rstd;
 import rstd.cppstd;
 import wescene.resource;
 import wescene.rgraph;
+import wescene.scene;
 import wescene.vulkan_render;
 
 using namespace rstd::prelude;
@@ -126,6 +127,63 @@ TEST(RenderGraphDebug, PassStateExposesPublicDebugRecord) {
     EXPECT_TRUE(graph.getPass(owe::rg::PassHandle {}).is_none());
 }
 
+TEST(RenderGraphDebug, RejectsDependencyCycles) {
+    owe::rg::RenderGraph graph;
+    auto                 source = owe::rg::TextureNodeRef {};
+    graph.addPass<DebugPass>("draw/source"_str,
+                             owe::rg::PassNode::Type::CustomShader,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 source = builder.createTexture(
+                                     owe::rg::TextureDesc {
+                                         .name = String::make("source"_str),
+                                         .key  = String::make("source"_str),
+                                         .kind = owe::rg::TextureKind::Temp,
+                                     },
+                                     true);
+                                 builder.write(source);
+                             });
+
+    auto consumer = graph.addPass<DebugPass>("draw/consumer"_str,
+                                             owe::rg::PassNode::Type::CustomShader,
+                                             [](owe::rg::RenderGraphBuilder&, DebugPass::Desc&) {
+                                             });
+
+    auto link = owe::rg::TextureNodeRef {};
+    graph.addPass<DebugPass>("copy/link/first"_str,
+                             owe::rg::PassNode::Type::Copy,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 builder.read(source);
+                                 link = builder.createTexture(
+                                     owe::rg::TextureDesc {
+                                         .name = String::make("link"_str),
+                                         .key  = String::make("link"_str),
+                                         .kind = owe::rg::TextureKind::Temp,
+                                     },
+                                     true);
+                                 builder.write(link);
+                             });
+    ASSERT_TRUE(graph.readTexture(consumer, link));
+
+    graph.addPass<DebugPass>("copy/link/second"_str,
+                             owe::rg::PassNode::Type::Copy,
+                             [&](owe::rg::RenderGraphBuilder& builder, DebugPass::Desc&) {
+                                 builder.read(source);
+                                 auto next = builder.createTexture(
+                                     owe::rg::TextureDesc {
+                                         .name = String::make("link"_str),
+                                         .key  = String::make("link"_str),
+                                         .kind = owe::rg::TextureKind::Temp,
+                                     },
+                                     true);
+                                 builder.write(next);
+                                 ASSERT_TRUE(graph.readTexture(consumer, next));
+                             });
+
+    auto ordered = graph.topologicalOrder();
+    ASSERT_TRUE(ordered.is_err());
+    EXPECT_EQ(ordered.unwrap_err_unchecked(), owe::rg::RenderGraphOrderError::Cycle);
+}
+
 TEST(RenderGraphResources, CompilesBackendNeutralTexturePlan) {
     owe::rg::RenderGraph graph;
 
@@ -234,8 +292,10 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
                                  builder.write(next);
                              });
 
-    auto plan  = graph.resourcePlan();
-    auto order = graph.topologicalOrder();
+    auto plan    = graph.resourcePlan();
+    auto ordered = graph.topologicalOrder();
+    ASSERT_TRUE(ordered.is_ok());
+    auto order = rstd::move(ordered).unwrap_unchecked();
     ASSERT_EQ(order.len(), rstd::usize(2));
     EXPECT_EQ(rstd::cppstd::as_string_view(graph.passState(order[rstd::usize()])->name.as_str()),
               "motion/accumulate");
@@ -248,6 +308,50 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
                                               owe::resource::TextureContent::PreserveAcrossFrames),
                   rstd::u32());
     }
+}
+
+TEST(SceneRenderGraph, ReusesOneLinkCopyForMultipleConsumers) {
+    owe::Scene scene;
+    scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+
+    auto source  = rstd::sync::Arc<owe::SceneNode>::make();
+    source->ID() = rstd::i32(7);
+    source->SetSize({ 64.0f, 32.0f });
+    auto               source_mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial source_material;
+    source_material.name = "source";
+    source_mesh->AddMaterial(std::move(source_material));
+    source_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    source->AddMesh(std::move(source_mesh));
+    scene.RootMut()->AppendChild(source.clone());
+
+    auto consumer                    = rstd::sync::Arc<owe::SceneNode>::make();
+    consumer->ID()                   = rstd::i32(42);
+    auto               consumer_mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial consumer_material;
+    consumer_material.name     = "consumer";
+    consumer_material.textures = { "_rt_link_7", "_rt_link_7" };
+    consumer_mesh->AddMaterial(std::move(consumer_material));
+    consumer_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    consumer->AddMesh(std::move(consumer_mesh));
+    scene.RootMut()->AppendChild(consumer.clone());
+
+    auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    auto graph    = owe::sceneToRenderGraph(scene, snapshot);
+    auto ordered  = graph->topologicalOrder();
+    ASSERT_TRUE(ordered.is_ok());
+    auto order = rstd::move(ordered).unwrap_unchecked();
+
+    EXPECT_EQ(order.len(), rstd::usize(3));
+    rstd::usize copy_count {};
+    for (auto handle : order) {
+        auto state = graph->passState(handle);
+        ASSERT_TRUE(state.is_some());
+        if (state->type == owe::rg::PassNode::Type::Copy) ++copy_count;
+    }
+    EXPECT_EQ(copy_count, rstd::usize(1));
 }
 
 TEST(VulkanRenderDiagnostics, EmptyBeforeProgramBuild) {

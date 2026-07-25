@@ -48,6 +48,11 @@ struct PassNodeState {
     PassNode::Type type { PassNode::Type::CustomShader };
 };
 
+enum class RenderGraphOrderError
+{
+    Cycle,
+};
+
 struct RenderGraphBuilder {
     auto createTexture(const TextureDesc&, bool write = false) -> TextureNodeRef;
     void read(TextureNodeRef);
@@ -80,7 +85,8 @@ public:
     auto textureState(TextureNodeRef) const -> rstd::Option<TextureNodeState>;
     auto readTexture(NodeHandle pass_node, TextureNodeRef texture) -> bool;
 
-    auto topologicalOrder() const -> rstd::vec::Vec<NodeHandle>;
+    auto topologicalOrder() const
+        -> rstd::Result<rstd::vec::Vec<NodeHandle>, RenderGraphOrderError>;
     auto getLastReadTextures(rstd::slice<NodeHandle>) const
         -> rstd::vec::Vec<rstd::vec::Vec<TextureNodeState>>;
     auto resourcePlan() const -> resource::ResourcePlan;

@@ -161,7 +161,8 @@ auto RenderGraph::readTexture(NodeHandle pass_node, TextureNodeRef texture) -> b
     return true;
 }
 
-auto RenderGraph::topologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
+auto RenderGraph::topologicalOrder() const
+    -> rstd::Result<rstd::vec::Vec<NodeHandle>, RenderGraphOrderError> {
     auto in_degree = rstd::vec::Vec<usize>::make();
     in_degree.resize(m_dg.NodeNum(), usize());
     for (usize index {}; index < m_dg.NodeNum(); ++index) {
@@ -237,13 +238,8 @@ auto RenderGraph::topologicalOrder() const -> rstd::vec::Vec<NodeHandle> {
         }
     }
 
-    if (visited == m_dg.NodeNum()) return pass_nodes;
-
-    pass_nodes.clear();
-    for (auto handle : m_dg.TopologicalOrder()) {
-        if (isRenderPassNode(handle)) pass_nodes.push(NodeHandle { handle });
-    }
-    return pass_nodes;
+    if (visited != m_dg.NodeNum()) return Err(RenderGraphOrderError::Cycle);
+    return Ok(rstd::move(pass_nodes));
 }
 
 auto RenderGraph::isPassNode(NodeHandle handle) const -> bool {

@@ -222,13 +222,8 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
         }
         auto& pass = static_cast<vulkan::VulkanPass&>(*rgpass);
 
-        const auto&        stored = output_it->second;
-        GraphTextureOutput input {
-            .ref     = stored.ref,
-            .binding = stored.binding.clone(),
-            .desc    = CloneTextureDesc(stored.desc),
-        };
-        auto link_key =
+        auto& input = output_it->second;
+        auto  link_key =
             GenLinkTex(static_cast<std::ptrdiff_t>(consumer.source_layer.value.to_primitive()));
         if (input.binding.name != rstd::cppstd::as_str(link_key).unwrap()) {
             auto copy_desc        = CloneTextureDesc(input.desc);
@@ -246,7 +241,7 @@ void GraphLinkFinalizer::apply(ExtraInfo& extra) {
             rstd_error("link tex {} read failed", consumer.source_layer.value);
             continue;
         }
-        if (! pass.setTextureBinding(consumer.texture_index, std::move(input.binding))) {
+        if (! pass.setTextureBinding(consumer.texture_index, input.binding.clone())) {
             rstd_error("link tex {} binding failed", consumer.source_layer.value);
         }
     }
