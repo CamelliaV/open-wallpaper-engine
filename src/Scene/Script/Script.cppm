@@ -199,6 +199,9 @@ public:
                                   std::function<void(std::string_view)> set_vertical,
                                   std::function<double()>               get_point_size = {},
                                   std::function<void(double)>           set_point_size = {});
+    using ImageAlignmentSetter = Arc<dyn<FnMut<void(ref<str>)>>>;
+    void RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alignment,
+                                      ImageAlignmentSetter setter);
 
     // Same exposure rule as FieldScript::Impl above: opaque outside the
     // module, but visible to peer module impl files.

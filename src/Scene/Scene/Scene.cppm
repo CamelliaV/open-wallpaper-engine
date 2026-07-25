@@ -1250,6 +1250,10 @@ public:
     // reading `thisLayer.size` then fall back to the legacy 100×100 stub.
     const auto& Size() const { return m_size; }
     void        SetSize(Eigen::Vector2f v) { m_size = v; }
+    const auto& GeometryTransform() const { return m_geometry_transform; }
+    void        SetGeometryTransform(Eigen::Matrix4d transform) {
+        m_geometry_transform = rstd::move(transform);
+    }
 
     // Script-driven per-frame overrides. The renderer maps these onto the
     // shader's available runtime tint uniforms without touching baked values
@@ -1432,6 +1436,7 @@ private:
     Eigen::Vector3f m_scale { 1.0f, 1.0f, 1.0f };
     Eigen::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
     Eigen::Vector2f m_size { 0.0f, 0.0f };
+    Eigen::Matrix4d m_geometry_transform { Eigen::Matrix4d::Identity() };
 
     bool                                m_visible { true };
     SceneUserVisibilityBinding          m_visible_user_binding {};

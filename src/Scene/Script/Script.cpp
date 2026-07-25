@@ -13,6 +13,7 @@ import wescene.scene;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;
+using rstd::collections::HashMap;
 
 namespace owe::script
 {
@@ -410,9 +411,14 @@ struct EngineHostState {
         std::function<void(double)>           set_point_size;
     };
     std::unordered_map<owe::SceneNode*, TextAlignHooks> text_align_hooks;
-    JsRuntime::BoneIndexResolver                        bone_index_resolver;
-    JsRuntime::BoneTransformResolver                    bone_transform_resolver;
-    owe::SceneNode*                                     scene_root { nullptr };
+    struct ImageAlignmentHook {
+        String                          alignment;
+        JsRuntime::ImageAlignmentSetter setter;
+    };
+    HashMap<owe::SceneNode*, ImageAlignmentHook> image_alignment_hooks;
+    JsRuntime::BoneIndexResolver                 bone_index_resolver;
+    JsRuntime::BoneTransformResolver             bone_transform_resolver;
+    owe::SceneNode*                              scene_root { nullptr };
 };
 
 uint32_t NormalizeAudioResolution(int32_t requested) {
@@ -900,7 +906,7 @@ void UpdateInputObject(JSContext* ctx) {
 bool HitTestNode(owe::SceneNode* n, const CursorWorld& c) {
     if (! n) return false;
     n->UpdateTrans();
-    Eigen::Matrix4d m  = n->ModelTrans();
+    Eigen::Matrix4d m  = n->ModelTrans() * n->GeometryTransform();
     Eigen::Vector2f sz = n->Size();
     if (sz.x() == 0.0f && sz.y() == 0.0f) sz = Eigen::Vector2f { 100.0f, 100.0f };
     double          hx = sz.x() * 0.5, hy = sz.y() * 0.5;
@@ -1848,6 +1854,29 @@ JSValue NodeSetPerspective(JSContext* ctx, JSValueConst this_val, JSValueConst v
     if (n) n->SetPerspective(JS_ToBool(ctx, val) != 0);
     return JS_UNDEFINED;
 }
+JSValue NodeGetAlignment(JSContext* ctx, JSValueConst this_val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_NewString(ctx, "center");
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  hook = host->image_alignment_hooks.get(n);
+    if (hook.is_none()) return JS_NewString(ctx, "center");
+    auto alignment = (**hook).alignment.as_str();
+    return JS_NewStringLen(
+        ctx, reinterpret_cast<const char*>(alignment.data()), alignment.len().to_primitive());
+}
+JSValue NodeSetAlignment(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
+    auto* n = GetLayerNode(this_val);
+    if (! n) return JS_UNDEFINED;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    auto  hook = host->image_alignment_hooks.get_mut(n);
+    if (hook.is_none()) return JS_UNDEFINED;
+    const char* s = JS_ToCString(ctx, val);
+    if (s == nullptr) return JS_UNDEFINED;
+    (**hook).alignment = String::make(rstd::cppstd::as_str(s).unwrap());
+    (*(**hook).setter)((**hook).alignment.as_str());
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
+}
 JSValue NodeGetVAlign(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return JS_NewString(ctx, "center");
@@ -2320,6 +2349,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CGETSET_DEF("brightness", NodeGetBrightness, NodeSetBrightness),
     JS_CGETSET_DEF("color", NodeGetColor, NodeSetColor),
     JS_CGETSET_DEF("perspective", NodeGetPerspective, NodeSetPerspective),
+    JS_CGETSET_DEF("alignment", NodeGetAlignment, NodeSetAlignment),
     JS_CGETSET_DEF("text", NodeGetText, NodeSetText),
     JS_CGETSET_DEF("name", NodeGetNameValue, NodeSetIgnore),
     JS_CGETSET_DEF("verticalalign", NodeGetVAlign, NodeSetVAlign),
@@ -2782,6 +2812,16 @@ void JsRuntime::RegisterTextAlignSetters(owe::SceneNode* node, std::string horiz
         .get_point_size = std::move(get_point_size),
         .set_point_size = std::move(set_point_size),
     };
+}
+
+void JsRuntime::RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alignment,
+                                             ImageAlignmentSetter setter) {
+    if (node == nullptr) return;
+    (void)m_impl->host.image_alignment_hooks.insert(node,
+                                                    EngineHostState::ImageAlignmentHook {
+                                                        .alignment = String::make(alignment),
+                                                        .setter    = rstd::move(setter),
+                                                    });
 }
 
 // --- Module load + FieldScript construction ---------------------------------

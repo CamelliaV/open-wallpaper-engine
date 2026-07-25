@@ -74,7 +74,14 @@ struct ParseContext {
     // bindings come in. Installed onto the Scene by FinalizeScene.
     // Stays empty when no object has any script binding.
     Option<Box<owe::script::ScriptScene>> script_scene;
-    Arc<PuppetLayerRegistry>              puppet_layers { Arc<PuppetLayerRegistry>::make() };
+    using ImageAlignmentSetter = Arc<dyn<FnMut<void(SceneNode*, ref<str>)>>>;
+    struct ImageAlignmentBinding {
+        SceneNode*           node { nullptr };
+        String               alignment;
+        ImageAlignmentSetter setter;
+    };
+    Vec<ImageAlignmentBinding> image_alignment_bindings;
+    Arc<PuppetLayerRegistry>   puppet_layers { Arc<PuppetLayerRegistry>::make() };
     struct UniformConfigDraft {
         Arc<SceneNode>           node;
         WPUniformNodeConfigDraft config;

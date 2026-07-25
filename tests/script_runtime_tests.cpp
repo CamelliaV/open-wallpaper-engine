@@ -324,6 +324,34 @@ TEST(ScriptNodeSoftMutation, PerspectiveWritesNodeFlag) {
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 1.0);
 }
 
+TEST(ScriptNodeSoftMutation, ImageAlignmentDispatchesRegisteredSetter) {
+    owe::SceneNode node;
+    JsRuntime      rt;
+    String         alignment;
+    rt.RegisterImageAlignmentSetter(
+        &node, "center"_str, JsRuntime::ImageAlignmentSetter::make([&](ref<str> value) {
+            alignment = String::make(value);
+        }));
+
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            thisLayer.alignment = 'bottom';
+            export function update() { return thisLayer.alignment === 'bottom' ? 1 : 0; }
+        )JS",
+        "test/image_alignment_write",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        &node);
+    ASSERT_NE(fs, nullptr);
+
+    EXPECT_EQ(alignment.as_str(), "bottom"_str);
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs), 1.0);
+}
+
 TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
     auto node = rstd::sync::Arc<owe::SceneNode>::make();
 

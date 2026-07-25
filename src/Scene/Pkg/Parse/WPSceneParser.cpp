@@ -384,6 +384,38 @@ float ParticleTextureRatio(const SceneMaterial& material) {
     return r[usize(1)] / r[usize(0)];
 }
 
+void InstallImageAlignmentBinding(script::JsRuntime& runtime, SceneNode* node, ref<str> alignment,
+                                  const ParseContext::ImageAlignmentSetter& setter) {
+    runtime.RegisterImageAlignmentSetter(
+        node,
+        alignment,
+        script::JsRuntime::ImageAlignmentSetter::make(
+            [node, setter = setter.clone()](ref<str> value) mutable {
+                (*setter)(node, value);
+            }));
+}
+
+void RegisterImageAlignmentBinding(ParseContext& context, SceneNode* node, ref<str> alignment,
+                                   ParseContext::ImageAlignmentSetter setter) {
+    if (context.script_scene.is_some()) {
+        InstallImageAlignmentBinding((*context.script_scene)->runtime(), node, alignment, setter);
+    }
+    context.image_alignment_bindings.push(ParseContext::ImageAlignmentBinding {
+        .node      = node,
+        .alignment = String::make(alignment),
+        .setter    = rstd::move(setter),
+    });
+}
+
+void CloneImageAlignmentBinding(ParseContext& context, SceneNode* source, SceneNode* clone) {
+    for (const auto& binding : context.image_alignment_bindings) {
+        if (binding.node != source) continue;
+        RegisterImageAlignmentBinding(
+            context, clone, binding.alignment.as_str(), binding.setter.clone());
+        return;
+    }
+}
+
 Option<Arc<WPPuppetLayer>> FindPuppetLayerWithBone(const Arc<PuppetLayerRegistry>& layers,
                                                    SceneNode* node, std::string_view name,
                                                    uint32_t& index) {
@@ -408,6 +440,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
         auto clone =
             Arc<SceneNode>::make(tmpl->Translate(), tmpl->Scale(), tmpl->Rotation(), tmpl->Name());
         clone->SetSize(tmpl->Size());
+        clone->SetGeometryTransform(tmpl->GeometryTransform());
         clone->SetPerspective(tmpl->Perspective());
         if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
         clone->AddMesh(tmpl->MeshShared());
@@ -418,6 +451,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(ParseContext& context, SceneNode* 
         if (auto layer = LookupPuppetLayer(context.puppet_layers, tmpl); layer.is_some()) {
             RegisterPuppetLayer(context, clone.as_ptr(), rstd::move(*layer));
         }
+        CloneImageAlignmentBinding(context, tmpl, clone.as_ptr());
         out.push_back(clone.as_ptr());
         // Defer attachment to FinalizeScene so the clones land at the
         // template's z-position (right after it), not at the root front.
@@ -469,6 +503,12 @@ script::ScriptScene& EnsureScriptScene(ParseContext& context) {
                 auto key                      = rstd::cppstd::as_string_view(entry_key->as_str());
                 (*context.script_scene)->runtime().SetUserProperty(key, *entry_value);
             });
+        for (const auto& binding : context.image_alignment_bindings) {
+            InstallImageAlignmentBinding((*context.script_scene)->runtime(),
+                                         binding.node,
+                                         binding.alignment.as_str(),
+                                         binding.setter);
+        }
     }
     return **context.script_scene;
 }
@@ -1952,20 +1992,16 @@ void RegisterMaterialUserTextureIndex(Scene* pScene, SceneMaterial* stable_mat,
     }
 }
 
-Vector3f AlignmentOffset(std::string_view align, Vector2f size) {
+Vector3f AlignmentOffset(ref<str> align, Vector2f size) {
     Vector3f offset = Vector3f::Zero();
     size *= 0.5f;
     size.y() *= 1.0f;
 
-    auto contains = [&](std::string_view s) {
-        return align.find(s) != std::string::npos;
-    };
-
     // topleft top center ...
-    if (contains("top")) offset.y() -= size.y();
-    if (contains("left")) offset.x() += size.x();
-    if (contains("right")) offset.x() -= size.x();
-    if (contains("bottom")) offset.y() += size.y();
+    if (rstd::str_::contains(align, "top"_str)) offset.y() -= size.y();
+    if (rstd::str_::contains(align, "left"_str)) offset.x() += size.x();
+    if (rstd::str_::contains(align, "right"_str)) offset.x() -= size.x();
+    if (rstd::str_::contains(align, "bottom"_str)) offset.y() += size.y();
 
     return offset;
 }
@@ -2466,9 +2502,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                     Vector3f(wpimgobj.angles.data()),
                                                     wpimgobj.name);
     const Vector3f alignment_offset =
-        wpimgobj.fullscreen
-            ? Vector3f::Zero()
-            : AlignmentOffset(wpimgobj.alignment, { geometry_size[0], geometry_size[1] });
+        wpimgobj.fullscreen ? Vector3f::Zero()
+                            : AlignmentOffset(rstd::cppstd::as_str(wpimgobj.alignment).unwrap(),
+                                              { geometry_size[0], geometry_size[1] });
     const bool solid_composite_context = HasSolidCompositeContext(context, wpimgobj);
     spImgNode->SetSize({ geometry_size[0], geometry_size[1] });
     spImgNode->SetPerspective(wpimgobj.perspective);
@@ -2686,6 +2722,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
     // material blendmode for last step to use
     auto finalMaterialState = material;
     // disable img material blend, as it's the first effect node now
+    SceneImageEffectLayer* image_effect_layer { nullptr };
     if (hasEffect) {
         material.blenmode = BlendMode::Normal;
     }
@@ -2857,6 +2894,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
                                                     static_cast<float>(effect_extent[1]),
                                                     effect_ppong_a,
                                                     effect_ppong_b);
+        image_effect_layer = imgEffectLayer.get();
         {
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
@@ -3208,6 +3246,27 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj) {
             }
         }
     }
+    const Matrix4d alignment_base_transform =
+        image_effect_layer ? image_effect_layer->FinalMesh().GeometryTransform()
+                           : spImgNode->GeometryTransform();
+    RegisterImageAlignmentBinding(
+        context,
+        spImgNode.as_ptr(),
+        rstd::cppstd::as_str(wpimgobj.alignment).unwrap(),
+        ParseContext::ImageAlignmentSetter::make(
+            [image_effect_layer, alignment_base_transform, alignment_offset, geometry_size](
+                SceneNode* node, ref<str> alignment) {
+                const Vector3f delta =
+                    AlignmentOffset(alignment, { geometry_size[0], geometry_size[1] }) -
+                    alignment_offset;
+                auto transform = alignment_base_transform *
+                                 Affine3d(Translation3d(delta.cast<double>())).matrix();
+                if (image_effect_layer)
+                    image_effect_layer->FinalMesh().SetGeometryTransform(rstd::move(transform));
+                else if (node)
+                    node->SetGeometryTransform(rstd::move(transform));
+            }));
+
     AssignNodeFieldAnimations(*spImgNode.as_ptr(), wpimgobj.field_bindings);
     WireFieldScripts(context, spImgNode, wpimgobj.field_bindings);
     if (! wpimgobj.color_user_key.empty()) {
