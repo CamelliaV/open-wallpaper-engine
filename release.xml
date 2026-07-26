@@ -27,8 +27,8 @@
       <li>Nested link texture outputs.</li>
       <li>Composite layer contents and mip framebuffer history.</li>
       <li>Dynamic buffer contents and texture binding refresh.</li>
-      <li>Wallpaper Engine cross-stage shader varyings and uniform defaults.</li>
-      <li>Wallpaper Engine HLSL matrix layout.</li>
+      <li>Cross-stage shader varyings and uniform defaults.</li>
+      <li>HLSL matrix layout.</li>
       <li>Full-width semicolons in shaders.</li>
       <li>Unused material values no longer report missing GLSL uniforms.</li>
       <li>Copybackground custom effects.</li>
@@ -38,21 +38,17 @@
       <li>Model fog eye position and scripted rotation.</li>
       <li>Renderer bridge shutdown after session loss.</li>
       <li>Audio device activation ordering.</li>
+      <li>Direct draw shape geometry.</li>
       <li>SceneViewer event polling.</li>
     </ul>
     <p>Improved:</p>
     <ul>
-      <li>Renderer-neutral resource registries.</li>
-      <li>Render resource ownership tracking.</li>
       <li>Render resource preparation.</li>
-      <li>Shader parse artifact caching.</li>
-      <li>Persistent shader compilation caching.</li>
       <li>Parallel texture preparation.</li>
-      <li>Streaming texture uploads.</li>
+      <li>Shader caching.</li>
       <li>Particle attribute caching.</li>
       <li>Batched particle vertex uploads.</li>
-      <li>Package IO migration to rstd.</li>
-      <li>Scene runtime migration to rstd.</li>
+      <li>IO migration to rstd.</li>
       <li>Vulkan infrastructure migration to vvk.</li>
     </ul>
   </description>
