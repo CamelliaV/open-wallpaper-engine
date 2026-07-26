@@ -54,7 +54,8 @@ end
 function M.scan(ctx)
     local entries = {}
 
-    for _, steam_root in ipairs(ctx.libraries()) do
+    for _, library in ipairs(ctx.libraries()) do
+        local steam_root = project_util.normalize_root(library)
         local workshop = steam_root .. project_util.WORKSHOP
         if not ctx.fs.exists(workshop) then
             ctx.log("wallpaper_engine: no WE workshop under " .. steam_root)
