@@ -1045,6 +1045,55 @@ void GenCardMesh(SceneMesh& mesh, const std::array<float, 2> size,
     mesh.AddVertexArray(std::move(vertex));
 }
 
+using DirectDrawQuad = array<array<float, 2>, 4>;
+
+auto ReadDirectDrawQuad(const wpscene::Material& material) -> Option<DirectDrawQuad> {
+    constexpr array<ref<str>, 4> names { "point0"_str, "point1"_str, "point2"_str, "point3"_str };
+    DirectDrawQuad               points {};
+    for (usize index {}; index < points.len(); ++index) {
+        auto value = material.constantshadervalues.find(rstd::cppstd::to_string(names[index]));
+        if (value == material.constantshadervalues.end() || value->second.size() != 2 ||
+            ! f32(value->second[0]).is_finite() || ! f32(value->second[1]).is_finite()) {
+            return None();
+        }
+        points[index] = { value->second[0], value->second[1] };
+    }
+    return Some(points);
+}
+
+void GenDirectDrawQuadMesh(SceneMesh& mesh, float edge, const DirectDrawQuad& points) {
+    const auto position = [&](usize index) {
+        return array<float, 3> { (points[index][usize()] - 0.5f) * edge,
+                                 (0.5f - points[index][usize(1)]) * edge,
+                                 0.0f };
+    };
+    const auto             p0 = position(usize());
+    const auto             p1 = position(usize(1));
+    const auto             p2 = position(usize(2));
+    const auto             p3 = position(usize(3));
+    const array<float, 12> positions {
+        p0[usize()], p0[usize(1)], p0[usize(2)], p1[usize()], p1[usize(1)], p1[usize(2)],
+        p2[usize()], p2[usize(1)], p2[usize(2)], p3[usize()], p3[usize(1)], p3[usize(2)],
+    };
+    const array<float, 8> tex_coords {
+        points[usize()][usize()],   points[usize()][usize(1)],  points[usize(1)][usize()],
+        points[usize(1)][usize(1)], points[usize(2)][usize()],  points[usize(2)][usize(1)],
+        points[usize(3)][usize()],  points[usize(3)][usize(1)],
+    };
+    const array<rstd::uint32_t, 6> indices { 0u, 2u, 1u, 0u, 3u, 2u };
+
+    SceneVertexArray vertex(MakeAttrSet({ VAttr::Position, VAttr::TexCoord }), usize(4));
+    vertex.SetVertex(as_string_view(WE_IN_POSITION), positions.as_slice());
+    vertex.SetVertex(as_string_view(WE_IN_TEXCOORD), tex_coords.as_slice());
+    mesh.AddVertexArray(rstd::move(vertex));
+    mesh.AddIndexArray(SceneIndexArray(indices.as_slice()));
+}
+
+struct ImageParseGeometry {
+    bool                   requires_source_draw { true };
+    Option<ref<SceneMesh>> final_mesh { None() };
+};
+
 void SetParticleMesh(SceneMesh& mesh, uint32_t count, bool thick_format) {
     std::vector<VertexAttrSpec> specs {
         VAttr::Position,
@@ -2500,7 +2549,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
 }
 
 void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
-                   bool requires_source_draw = true) {
+                   ImageParseGeometry parse_geometry = {}) {
     auto& wpimgobj = img_obj;
     // Invisible image layers are kept in the scene tree because their composite
     // may be sampled by other layers via `_rt_imageLayerComposite_<id>`. The
@@ -2787,10 +2836,14 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     }
     if (! puppet) {
         GenCardMesh(mesh, { geometry_size[0], geometry_size[1] }, mapRate, source_alignment_offset);
-        GenCardMesh(effct_final_mesh,
-                    { geometry_size[0], geometry_size[1] },
-                    { 1.0f, 1.0f },
-                    alignment_offset);
+        if (parse_geometry.final_mesh.is_some()) {
+            effct_final_mesh.ChangeMeshDataFrom(**parse_geometry.final_mesh);
+        } else {
+            GenCardMesh(effct_final_mesh,
+                        { geometry_size[0], geometry_size[1] },
+                        { 1.0f, 1.0f },
+                        alignment_offset);
+        }
     }
     // material blendmode for last step to use
     auto finalMaterialState = material;
@@ -2971,7 +3024,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                                                     effect_ppong_b);
         image_effect_layer = imgEffectLayer.get();
         {
-            imgEffectLayer->SetRequiresSourceDraw(requires_source_draw);
+            imgEffectLayer->SetRequiresSourceDraw(parse_geometry.requires_source_draw);
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
             imgEffectLayer->SetSkipWhenNoRuntimeEffect(wpimgobj.fullscreen || isPassthrough);
@@ -3005,7 +3058,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         int32_t    i_eff = -1;
         bool       last_effect_can_composite_final { false };
         const bool allow_transparent_previous_final = ! solid_composite_context;
-        const bool passthrough_can_composite_final  = isPassthrough || ! requires_source_draw;
+        const bool passthrough_can_composite_final =
+            isPassthrough || ! parse_geometry.requires_source_draw;
         for (const auto& wpeffobj : wpimgobj.effects) {
             i_eff++;
             if (! wpeffobj.visible && wpeffobj.visible_user.empty()) {
@@ -3384,27 +3438,38 @@ void ParseShapeObj(ParseContext& context, wpscene::ShapeObject& shape_obj) {
         if (first_effect == nullptr) first_effect = &effect;
         last_effect = &effect;
     }
-    if (first_effect == nullptr || first_effect->passes.empty() || last_effect == nullptr ||
-        last_effect->materials.empty() || last_effect->passes.empty()) {
+    if (first_effect == nullptr || first_effect->materials.empty() ||
+        first_effect->passes.empty() || last_effect == nullptr || last_effect->materials.empty() ||
+        last_effect->passes.empty()) {
         rstd_error("shape '{}' has no renderable effect", shape_obj.name);
         return;
     }
-    auto direct_draw = first_effect->passes.front().combos.find("DIRECTDRAW");
-    if (direct_draw == first_effect->passes.front().combos.end() || direct_draw->second == 0) {
+    auto direct_draw_material = first_effect->materials.front().clone();
+    direct_draw_material.MergePass(first_effect->passes.front());
+    auto direct_draw = direct_draw_material.combos.find("DIRECTDRAW");
+    if (direct_draw == direct_draw_material.combos.end() || direct_draw->second == 0) {
         rstd_error("shape '{}' first effect is not direct draw", shape_obj.name);
         return;
     }
+    auto points = ReadDirectDrawQuad(direct_draw_material);
+    if (points.is_none()) {
+        rstd_error("shape '{}' has invalid direct draw points", shape_obj.name);
+        return;
+    }
+
+    const auto edge = static_cast<float>(context.ortho_h);
+    SceneMesh  direct_draw_mesh;
+    GenDirectDrawQuadMesh(direct_draw_mesh, edge, *points);
 
     wpscene::ImageObject image;
-    image.id        = shape_obj.id;
-    image.name      = rstd::move(shape_obj.name);
-    image.origin    = shape_obj.origin;
-    image.scale     = shape_obj.scale;
-    image.angles    = shape_obj.angles;
-    const auto edge = static_cast<float>(context.ortho_h) * 0.5f;
-    image.size      = { edge, edge };
-    image.visible   = shape_obj.visible;
-    image.material  = last_effect->materials.back().clone();
+    image.id       = shape_obj.id;
+    image.name     = rstd::move(shape_obj.name);
+    image.origin   = shape_obj.origin;
+    image.scale    = shape_obj.scale;
+    image.angles   = shape_obj.angles;
+    image.size     = { edge, edge };
+    image.visible  = shape_obj.visible;
+    image.material = last_effect->materials.back().clone();
     image.material.MergePass(last_effect->passes.back());
     image.material.blending  = "additive";
     image.effects            = rstd::move(shape_obj.effects);
@@ -3421,7 +3486,12 @@ void ParseShapeObj(ParseContext& context, wpscene::ShapeObject& shape_obj) {
     image.field_bindings     = rstd::move(shape_obj.field_bindings);
     image.visible_user       = rstd::move(shape_obj.visible_user);
     image.visible_user_key   = rstd::move(shape_obj.visible_user_key);
-    ParseImageObj(context, image, false);
+    ParseImageObj(context,
+                  image,
+                  ImageParseGeometry {
+                      .requires_source_draw = false,
+                      .final_mesh = Some(ref<SceneMesh>::from_raw_parts(&direct_draw_mesh)),
+                  });
 }
 
 struct ParticleChildPtr {
