@@ -2,7 +2,7 @@
   <description>
     <p>Added:</p>
     <ul>
-      <li>Steam Workshop discovery through the Waywallen plugin source.</li>
+      <li>Steam Workshop discovery through the Waywallen plugin source. #56 by @WorkingRobot</li>
       <li>Steam account authentication.</li>
       <li>Steam Workshop subscription management.</li>
       <li>Runtime user-property controls in SceneViewer.</li>
@@ -11,12 +11,14 @@
       <li>Planar reflection rendering.</li>
       <li>Legacy 3D material inputs.</li>
       <li>Waywallen audio spectrum input.</li>
-      <li>First-frame load benchmark reports.</li>
     </ul>
     <p>Fixes:</p>
     <ul>
-      <li>Child particle mesh capacity and lifecycle.</li>
-      <li>Child particle color inheritance and follow anchors.</li>
+      <li>scene: bind all cameraparallax fields to user properties #60 by @ales-drnz</li>
+      <li>scene: stop a sound layer when its layer is hidden #61 by @ales-drnz</li>
+      <li>source: normalize registered Steam library paths #62 by @ales-drnz</li>
+      <li>mirror wrap mode clamping animations to the last keyfram #53 by @NB-Group</li>
+      <li>Child particle mesh capacity, lifecycle, color inheritance and follow anchors.</li>
       <li>Rope trail sampling and lightning sequencing.</li>
       <li>Velocity-based and world-space particle trails.</li>
       <li>Multi-image particle sprite animation.</li>
@@ -39,7 +41,7 @@
       <li>Renderer bridge shutdown after session loss.</li>
       <li>Audio device activation ordering.</li>
       <li>Direct draw shape geometry.</li>
-      <li>SceneViewer event polling.</li>
+      <li>SceneViewer event polling with high cpu usage.</li>
     </ul>
     <p>Improved:</p>
     <ul>
