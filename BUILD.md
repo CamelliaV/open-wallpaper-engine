@@ -23,6 +23,27 @@ cmake --build   build/clang-release
 cmake --install build/clang-release --prefix install
 ```
 
+### CMake 4.4 synthetic BMI builds
+
+OWE uses C++ modules. Starting with CMake 4.4, CMake may create a
+consumer-specific [synthetic target](https://cmake.org/cmake/help/latest/manual/cmake-cxxmodules.7.html#term-synthetic-target)
+when a module consumer and its provider have different compile options. The
+synthetic target rebuilds the provider's BMI with the consumer's compile
+profile; it does not rebuild the provider's object files.
+
+In the tested Linux/Clang build, target-local warning and pthread options, as
+well as CEF target settings, produced multiple `@synth_` variants across the
+rstd and wavsen module graph. Deep synthetic provider closures can contain
+missing build edges or inconsistent original and synthetic BMI mappings.
+Typical symptoms are a missing synthetic BMI or a Clang `ASTReader` crash while
+importing a module.
+
+Current OWE avoids this path by defining one C++ compile profile at the top
+level, before rstd, wavsen, CEF, or any other module provider and consumer is
+created. Targets that import workspace modules use this profile. CEF compile
+definitions and SYSTEM include paths still come from the CEF integration, but
+its complete private compile policy is not applied to module importers.
+
 ## CMake options
 
 | Option | Default | What it gates |
