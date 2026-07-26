@@ -305,7 +305,13 @@ int main(int argc, char** argv) {
         next_audio_update = now + std::chrono::milliseconds(33);
         wavsen::audio::AudioSpectrum spectrum;
         if (audio_capture.snapshot(spectrum)) {
-            psw->setAudioSpectrum(spectrum.left, spectrum.right);
+            std::array<float, 64> left;
+            std::array<float, 64> right;
+            for (rstd::usize i {}; i < rstd::usize(64); ++i) {
+                left[i.to_primitive()]  = spectrum.left[i].to_primitive();
+                right[i.to_primitive()] = spectrum.right[i].to_primitive();
+            }
+            psw->setAudioSpectrum(left, right);
         }
     };
 

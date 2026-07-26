@@ -625,9 +625,9 @@ rstd::vec::Vec<wavsen::video::QueueFamily> QueueFamiliesForFfmpeg(const Device& 
     auto out   = rstd::vec::Vec<wavsen::video::QueueFamily>::with_capacity(props.len());
     for (rstd::uint32_t i = 0; i < props.len().to_primitive(); ++i) {
         out.push(wavsen::video::QueueFamily {
-            .index      = i,
+            .index      = u32(i),
             .flags      = props[usize(i)].queueFlags,
-            .video_caps = 0,
+            .video_caps = u32(),
         });
     }
     return out;
@@ -640,13 +640,13 @@ MakeExternalProducerInfo(const Device& device, rstd::uint32_t width, rstd::uint3
         .physical_device             = *device.gpu(),
         .device                      = *device.handle(),
         .queue                       = *device.graphics_queue().handle,
-        .queue_family_index          = device.graphics_queue().family_index,
+        .queue_family_index          = u32(device.graphics_queue().family_index),
         .queue_families              = QueueFamiliesForFfmpeg(device),
         .enabled_instance_extensions = ExtensionPtrs(device.enabled_instance_extensions()),
         .enabled_device_extensions   = ExtensionPtrs(device.enabled_device_extensions()),
-        .api_version                 = device.instance_api_version(),
-        .width                       = width,
-        .height                      = height,
+        .api_version                 = u32(device.instance_api_version()),
+        .width                       = u32(width),
+        .height                      = u32(height),
     };
 }
 
@@ -671,8 +671,8 @@ struct TextureCache::VideoRegistry {
         rstd::sync::Weak<TextureAllocation> texture = rstd::sync::Weak<TextureAllocation>::make();
         Option<Box<wavsen::video::VideoDecoder>> decoder;
         wavsen::video::Nv12Frame                 nv12_scratch;
-        double                                   pts_acc { 0.0 };
-        double                                   last_pts { -1.0 };
+        f64                                      pts_acc {};
+        f64                                      last_pts { -1.0 };
         bool                                     have_frame { false };
     };
     Vec<Box<Slot>> slots;
@@ -700,10 +700,10 @@ struct TextureCache::VideoRegistry {
         auto r      = wavsen::video::YuvToRgba::create(device.instance_handle(),
                                                        *device.gpu(),
                                                        *device.handle(),
-                                                       device.graphics_queue().family_index,
+                                                       u32(device.graphics_queue().family_index),
                                                        *device.graphics_queue().handle,
-                                                       next_w,
-                                                       next_h);
+                                                       u32(next_w),
+                                                       u32(next_h));
         if (r.is_err()) {
             rstd_error("CreateVideoTex: YuvToRgba create failed: {}",
                        std::move(r).unwrap_err().message);
@@ -851,8 +851,8 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Im
         if (! producer) opts.hwaccel = wavsen::video::HwAccel::None;
     }
     auto dec_r = wavsen::video::VideoDecoder::open_from_stream(std::move(factory),
-                                                               slot->width,
-                                                               slot->height,
+                                                               u32(slot->width),
+                                                               u32(slot->height),
                                                                /*loop=*/true,
                                                                producer,
                                                                opts);
@@ -884,7 +884,7 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
 
     for (auto& up : registry->slots) {
         auto& s = *up;
-        s.pts_acc += dt_seconds;
+        s.pts_acc += f64(dt_seconds);
         auto* yuv = registry->ensureYuv(m_device, s.width, s.height);
         if (! yuv) continue;
 
@@ -902,7 +902,7 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
          * 4 frames per tick to avoid spiral-of-death on heavy stalls. */
         bool got_new = false;
         for (int i = 0; i < 4; ++i) {
-            if (s.last_pts >= 0.0 && s.last_pts > s.pts_acc) break;
+            if (s.last_pts >= f64() && s.last_pts > s.pts_acc) break;
 
             rstd::Result<wavsen::video::NextFrame, wavsen::video::Error> r =
                 rstd::Ok(wavsen::video::NextFrame::Ok);
@@ -922,18 +922,18 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
             }
             auto kind = r.unwrap();
             if (kind == wavsen::video::NextFrame::Eof) {
-                s.pts_acc  = 0.0;
-                s.last_pts = -1.0;
+                s.pts_acc  = f64();
+                s.last_pts = f64(-1.0);
                 break;
             }
             const bool decoder_looped = kind == wavsen::video::NextFrame::Looped;
-            double     frame_pts      = -1.0;
+            f64        frame_pts { -1.0 };
             switch (fkind) {
             case wavsen::video::FrameKind::VulkanShared: frame_pts = vkv.pts_seconds; break;
             case wavsen::video::FrameKind::VaapiDrm: frame_pts = drmv.pts_seconds; break;
             case wavsen::video::FrameKind::Sw: frame_pts = s.nv12_scratch.pts_seconds; break;
             }
-            if (decoder_looped) s.pts_acc = std::max(frame_pts, 0.0);
+            if (decoder_looped) s.pts_acc = frame_pts.max(f64());
             s.last_pts = frame_pts;
             got_new    = true;
             if (decoder_looped) break;
@@ -941,8 +941,8 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
         if (! got_new && s.have_frame) continue; /* nothing to upload */
         if (! got_new) continue;
 
-        rstd::uint32_t cs_id = 0;
-        rstd::uint32_t cr_id = 0;
+        u32 cs_id;
+        u32 cr_id;
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared:
             cs_id = vkv.colorspace;
@@ -957,47 +957,48 @@ void TextureCache::PumpVideoTextures(double dt_seconds) {
             cr_id = s.nv12_scratch.color_range;
             break;
         }
-        const auto color_matrix =
-            wavsen::video::make_color_matrix(static_cast<wavsen::video::ColorSpace>(cs_id),
-                                             static_cast<wavsen::video::ColorRange>(cr_id));
+        const auto color_matrix = wavsen::video::make_color_matrix(
+            static_cast<wavsen::video::ColorSpace>(cs_id.to_primitive()),
+            static_cast<wavsen::video::ColorRange>(cr_id.to_primitive()));
 
         rstd::Result<int, wavsen::video::Error> cv = rstd::Ok(-1);
         switch (fkind) {
         case wavsen::video::FrameKind::VulkanShared: {
             wavsen::video::YuvToRgba::VkFrameImports im {};
             im.y_image           = vkv.img[0];
-            im.uv_image          = vkv.plane_count > 1 ? vkv.img[1] : VK_NULL_HANDLE;
+            im.uv_image          = vkv.plane_count > u32(1) ? vkv.img[1] : VK_NULL_HANDLE;
             im.y_sem             = vkv.sem[0];
-            im.uv_sem            = vkv.plane_count > 1 ? vkv.sem[1] : vkv.sem[0];
+            im.uv_sem            = vkv.plane_count > u32(1) ? vkv.sem[1] : vkv.sem[0];
             im.y_sem_val_in_out  = &vkv.sem_value[0];
-            im.uv_sem_val_in_out = vkv.plane_count > 1 ? &vkv.sem_value[1] : &vkv.sem_value[0];
+            im.uv_sem_val_in_out = vkv.plane_count > u32(1) ? &vkv.sem_value[1] : &vkv.sem_value[0];
             im.y_layout_in_out   = &vkv.layout[0];
-            im.uv_layout_in_out  = vkv.plane_count > 1 ? &vkv.layout[1] : &vkv.layout[0];
+            im.uv_layout_in_out  = vkv.plane_count > u32(1) ? &vkv.layout[1] : &vkv.layout[0];
             im.y_qf_in_out       = &vkv.queue_family[0];
-            im.uv_qf_in_out = vkv.plane_count > 1 ? &vkv.queue_family[1] : &vkv.queue_family[0];
-            im.src_w        = vkv.width;
-            im.src_h        = vkv.height;
-            im.bit_depth    = vkv.bit_depth;
-            cv              = yuv->convert_av_vk_frame(im,
-                                                       ip.handle,
-                                                       s.width,
-                                                       s.height,
-                                                       color_matrix,
-                                                       wavsen::video::ConvertTarget::SampledLocal);
+            im.uv_qf_in_out =
+                vkv.plane_count > u32(1) ? &vkv.queue_family[1] : &vkv.queue_family[0];
+            im.src_w     = vkv.width;
+            im.src_h     = vkv.height;
+            im.bit_depth = vkv.bit_depth;
+            cv           = yuv->convert_av_vk_frame(im,
+                                                    ip.handle,
+                                                    u32(s.width),
+                                                    u32(s.height),
+                                                    color_matrix,
+                                                    wavsen::video::ConvertTarget::SampledLocal);
             break;
         }
         case wavsen::video::FrameKind::VaapiDrm:
             cv = yuv->convert_drm_prime(drmv,
                                         ip.handle,
-                                        s.width,
-                                        s.height,
+                                        u32(s.width),
+                                        u32(s.height),
                                         color_matrix,
                                         wavsen::video::ConvertTarget::SampledLocal);
             break;
         case wavsen::video::FrameKind::Sw:
             cv = yuv->convert_nv12(ip.handle,
-                                   s.width,
-                                   s.height,
+                                   u32(s.width),
+                                   u32(s.height),
                                    s.nv12_scratch.data.data(),
                                    s.nv12_scratch.data.len(),
                                    color_matrix,

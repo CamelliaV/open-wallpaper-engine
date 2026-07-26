@@ -267,8 +267,9 @@ int main(int argc, char** argv) {
             if (audio_capture.snapshot(audio_spec)) {
                 std::array<float, 128> arr {};
                 for (std::size_t i = 0; i < 64; ++i) {
-                    arr[i]      = audio_spec.bins[i];
-                    arr[64 + i] = audio_spec.bins[i];
+                    const auto value = audio_spec.bins[rstd::usize(i)].to_primitive();
+                    arr[i]           = value;
+                    arr[64 + i]      = value;
                 }
                 host.PushAudioData(arr.data(), arr.size());
             }

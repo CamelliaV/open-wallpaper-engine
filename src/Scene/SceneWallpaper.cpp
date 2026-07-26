@@ -1096,11 +1096,11 @@ void SceneRuntimeController::on(MainMsg::SetFps_payload&& m) {
 
 void SceneRuntimeController::on(MainMsg::SetVolume_payload&& m) {
     m_config.volume = m.volume.to_primitive();
-    m_sound_manager->set_volume(m.volume.to_primitive());
+    m_sound_manager->set_volume(m.volume);
 }
 
 void SceneRuntimeController::on(MainMsg::SetVolumeScale_payload&& m) {
-    m_sound_manager->set_volume_scale(m.scale.to_primitive(), m.fade_ms.to_primitive());
+    m_sound_manager->set_volume_scale(m.scale, m.fade_ms);
 }
 
 void SceneRuntimeController::on(MainMsg::SetMuted_payload&& m) {
@@ -1167,7 +1167,7 @@ void SceneRuntimeController::on(MainMsg::PreparedPassDiagnostics_payload&& m) {
 void SceneRuntimeController::on(MainMsg::Stop_payload&& m) {
     const u64 generation = ++m_audio_pause_generation;
     if (m.stop) {
-        if (m.scale_audio) m_sound_manager->set_volume_scale(0.0f, m.fade_ms.to_primitive());
+        if (m.scale_audio) m_sound_manager->set_volume_scale(f32(), m.fade_ms);
         if (m.fade_ms == u32() || ! m.scale_audio) {
             m_sound_manager->pause();
         } else {
@@ -1180,7 +1180,7 @@ void SceneRuntimeController::on(MainMsg::Stop_payload&& m) {
         }
     } else {
         m_sound_manager->play();
-        if (m.scale_audio) m_sound_manager->set_volume_scale(1.0f, m.fade_ms.to_primitive());
+        if (m.scale_audio) m_sound_manager->set_volume_scale(f32(1.0f), m.fade_ms);
     }
     m_render_controller->post(RenderMsg::Stop(m.stop));
 }
