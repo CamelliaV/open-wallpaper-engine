@@ -12,9 +12,14 @@ CEF-based host for Wallpaper Engine web wallpapers.
 
 ## How to use
 
-Build first — see [BUILD.md](BUILD.md). Examples below assume the `clang-release` build tree.
+### Waywallen plugin
+There are prebuilt binaries in [Releases page](https://github.com/waywallen/open-wallpaper-engine/releases).  
+It only works for flatpak and appimage version of waywallen.  
+If you built waywallen yourself, you must [build](BUILD.md)) this.  
+If you use linux distribution package, you must install this as package too.  
 
 ### Standalone viewer
+Build first — see [BUILD.md](BUILD.md). Examples below assume the `clang-release` build tree.
 
 `SceneViewer` is a GLFW + Vulkan window that loads a Wallpaper Engine `pkg` directly. Point it at the Wallpaper Engine's `assets/` directory and a `scene.pkg`:
 
