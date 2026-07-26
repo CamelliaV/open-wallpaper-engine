@@ -1407,6 +1407,12 @@ void Scene::RebuildResourceIndex() {
     m_texture_animations.Rebuild(*this);
 }
 
+void Scene::AttachRuntimeNode(SceneNode& parent, Arc<SceneNode> node) {
+    parent.AppendChild(rstd::move(node));
+    RebuildResourceIndex();
+    m_render_graph_dirty = true;
+}
+
 bool Scene::EnsureTextureDescriptor(std::string_view key) {
     auto name = rstd::cppstd::as_str(key).unwrap();
     if (key.empty() || IsSpecTex(name)) return true;

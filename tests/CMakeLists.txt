@@ -114,6 +114,9 @@ set_target_properties(wpmdl_mesh_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 add_executable(scene_runtime_tests scene_runtime_tests.cpp)
 target_link_libraries(scene_runtime_tests PRIVATE wescene_test_lib owe-script GTest::gtest_main)
+target_compile_definitions(
+    scene_runtime_tests PRIVATE
+    "WAYWALLEN_DEFAULTPROJECT_DIR=\"${CMAKE_SOURCE_DIR}/defaultprojects\"")
 set_target_properties(scene_runtime_tests PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 add_executable(scene_resource_index_tests scene_resource_index_tests.cpp)

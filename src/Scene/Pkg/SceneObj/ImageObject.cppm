@@ -1,5 +1,6 @@
 export module wescene.pkg.scene_obj:image_object;
 import wescene.core;
+import rstd;
 import rstd.cppstd;
 import wescene.fs;
 
@@ -75,10 +76,11 @@ public:
     struct Config {
         bool passthrough { false };
     };
-    bool                     FromJson(const owe::Json&, fs::VFS&);               // legacy
-    bool                     FromJson(const owe::Json&, fs::VFS&, SceneVersion); // canonical
-    int32_t                  id { 0 };
-    std::string              name;
+    bool        FromJson(const owe::Json&, fs::VFS&);               // legacy
+    bool        FromJson(const owe::Json&, fs::VFS&, SceneVersion); // canonical
+    bool        FromAsset(rstd::ref<rstd::str>, rstd::array<float, 2>, fs::VFS&, SceneVersion);
+    int32_t     id { 0 };
+    std::string name;
     std::array<float, 3>     origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3>     scale { 1.0f, 1.0f, 1.0f };
     std::array<float, 3>     angles { 0.0f, 0.0f, 0.0f };

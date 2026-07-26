@@ -1195,16 +1195,14 @@ public:
 // SceneNode.h
 // ============================================================================
 
-// Lifetime invariant — tree topology is frozen post-parse.
+// Lifetime invariant — nodes are never removed after publication.
 //
-// `m_children` / `m_parent` are written only during parse-time construction
-// (WPSceneParser AppendChild / SpawnLayerClones). Once `Scene` is shipped to
-// the render thread via `RenderSetScene`, no code adds, removes, or reorders
-// nodes. The only exception is `SetParentAnchor`, used by
+// `m_children` / `m_parent` are written during parsing and by Scene-owned
+// runtime factories. Runtime-created nodes stay attached for the Scene's
+// lifetime; destroyLayer hides and recycles them. `SetParentAnchor` is used by
 // SceneImageEffectLayer::ResolveEffect to re-anchor an effect's composite
 // node onto its layer's worldNode for transform inheritance — both nodes
-// are parse-time creations and survive for the Scene's lifetime, so the
-// re-anchor never dangles.
+// survive for the Scene's lifetime, so the re-anchor never dangles.
 //
 // post-parse mutations restricted to render thread: m_translate / m_scale /
 // m_rotation, m_visible, m_user_alpha, m_brightness, m_color, m_tex_anim,
@@ -2259,11 +2257,10 @@ public:
         return (*controls)->as_slice();
     }
 
-    // After parse handoff, the tree shape is immutable until Scene destruction.
-    // Render-graph build is read-only; script ticks only mutate node runtime fields.
     auto Root() const -> ref<SceneNode> { return m_scene_graph.deref(); }
     auto RootMut() -> mut_ref<SceneNode> { return m_scene_graph.deref_mut(); }
     void SetRoot(Box<SceneNode> root) { m_scene_graph = rstd::move(root); }
+    void AttachRuntimeNode(SceneNode& parent, Arc<SceneNode> node);
     auto AudioDemand() const -> ref<AudioResponseDemand> { return m_audio_response_demand.deref(); }
     auto AudioDemandMut() -> mut_ref<AudioResponseDemand> {
         return m_audio_response_demand.deref_mut();

@@ -5164,6 +5164,7 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
     ParseContext context;
     InitContext(context, vfs, sc, ortho_extent);
     ParseCamera(context, sc);
+    context.pkg_version     = sc.pkg_version;
     context.user_properties = user_properties;
     context.shader_cache    = WPShaderCache(rstd::move(shader_cache_dir));
 
@@ -5190,8 +5191,68 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
 
 bool AssetEndsWith(ref<str> asset, ref<str> suffix) { return asset.ends_with(suffix); }
 
+Option<array<float, 2>> ResolveImageAssetSize(ParseContext& context, ref<str> asset) {
+    auto info = wpscene::LoadImageAssetInfo(*context.vfs, rstd::cppstd::as_string_view(asset));
+    if (! info) return None();
+    if (info->size) return Some(array<float, 2> { (*info->size)[0], (*info->size)[1] });
+    if (info->first_texture.empty()) return None();
+
+    auto parsed =
+        context.scene->ParseImageHeader(rstd::cppstd::as_str(info->first_texture).unwrap());
+    if (parsed.is_err()) return None();
+    auto  header = rstd::move(parsed).unwrap_unchecked();
+    float width {};
+    float height {};
+    if (header.isSprite && header.spriteAnim.numFrames() > usize()) {
+        const auto& frame = header.spriteAnim.GetCurFrame();
+        width             = frame.width;
+        height            = frame.height;
+    } else {
+        width  = static_cast<float>(header.width > 0 ? header.width : header.mapWidth);
+        height = static_cast<float>(header.height > 0 ? header.height : header.mapHeight);
+    }
+    if (width <= 0.0f || height <= 0.0f) return None();
+    return Some(array<float, 2> { width, height });
+}
+
+Arc<SceneNode> CloneRegisteredNode(ref<SceneNode> source, ref<str> asset, i32 id) {
+    auto node  = Arc<SceneNode>::make(Eigen::Vector3f::Zero(),
+                                      Eigen::Vector3f::Ones(),
+                                      Eigen::Vector3f::Zero(),
+                                      rstd::cppstd::to_string(asset));
+    node->ID() = id;
+    node->SetSize(source->Size());
+    node->SetGeometryTransform(source->GeometryTransform());
+    node->SetPerspective(source->Perspective());
+    node->SetReflected(source->Reflected());
+    node->SetBaseColor(source->BaseColor(), source->BaseAlpha());
+    node->TexAnim() = source->TexAnim();
+    if (! source->Camera().empty()) node->SetCamera(source->Camera());
+    if (source->MeshShared()) node->AddMesh(source->MeshShared()->CloneInstance());
+    return node;
+}
+
 void ResolveRegisteredAsset(ParseContext& context, ref<str> asset) {
-    if (AssetEndsWith(asset, ".mdl"_str)) {
+    if (AssetEndsWith(asset, ".json"_str) && asset.starts_with("models/"_str)) {
+        if (context.dynamic_image_prototypes.contains_key(asset)) return;
+        auto size = ResolveImageAssetSize(context, asset);
+        if (size.is_none()) return;
+
+        wpscene::ImageObject image;
+        image.id = context.next_dynamic_layer_id--;
+        if (! image.FromAsset(asset, *size, *context.vfs, context.pkg_version)) return;
+        ParseImageObj(context, image);
+        auto parsed = context.node_id_map.get(image.id);
+        if (parsed.is_none() || (**parsed).node.is_none()) return;
+        auto node   = (*(**parsed).node).clone();
+        auto config = FindWPUniformConfig(context, *node);
+        if (config == nullptr) return;
+        node->SetVisible(false);
+        (void)context.dynamic_image_prototypes.insert(
+            String::make(asset),
+            ParseContext::DynamicImagePrototype { node.clone(), config->Clone() });
+        (void)context.node_id_map.remove(image.id);
+    } else if (AssetEndsWith(asset, ".mdl"_str)) {
         if (context.dynamic_model_prototypes.contains_key(asset)) return;
         wpscene::ModelObject model;
         model.id    = context.next_dynamic_layer_id--;
@@ -5231,20 +5292,19 @@ Option<Arc<SceneNode>> InstantiateRegisteredAsset(ParseContext& context, SceneNo
     };
 
     ResolveRegisteredAsset(context, asset);
-    if (AssetEndsWith(asset, ".mdl"_str)) {
+    if (AssetEndsWith(asset, ".json"_str) && asset.starts_with("models/"_str)) {
+        auto prototype = context.dynamic_image_prototypes.get(asset);
+        if (prototype.is_none()) return None();
+        auto node = CloneRegisteredNode(
+            (**prototype).node.deref(), asset, i32(context.next_dynamic_layer_id--));
+        SetWPUniformConfig(context, node, (**prototype).uniform_config.Clone());
+        return attach(rstd::move(node));
+    } else if (AssetEndsWith(asset, ".mdl"_str)) {
         auto prototype = context.dynamic_model_prototypes.get(asset);
         if (prototype.is_none()) return None();
-        auto& source = ***prototype;
-        auto  node   = Arc<SceneNode>::make(Eigen::Vector3f::Zero(),
-                                            Eigen::Vector3f::Ones(),
-                                            Eigen::Vector3f::Zero(),
-                                            rstd::cppstd::to_string(asset));
-        node->ID()   = i32(context.next_dynamic_layer_id--);
-        node->SetPerspective(source.Perspective());
-        node->SetReflected(source.Reflected());
-        if (! source.Camera().empty()) node->SetCamera(source.Camera());
-        if (source.Mesh()) node->AddMesh(source.Mesh()->CloneInstance());
-        if (auto config = FindWPUniformConfig(context, source); config != nullptr)
+        auto source = (**prototype).deref();
+        auto node   = CloneRegisteredNode(source, asset, i32(context.next_dynamic_layer_id--));
+        if (auto config = FindWPUniformConfig(context, *source); config != nullptr)
             SetWPUniformConfig(context, node, config->Clone());
         return attach(rstd::move(node));
     } else if (AssetEndsWith(asset, ".json"_str)) {
@@ -5329,6 +5389,37 @@ void ProcessObjects(ParseContext& context, mut_ref<SceneObjectVar[]> scene_objs,
     WPShaderParser::FinalGlslang();
 }
 
+bool RegisterWPUniformNodeSources(Scene& scene, const Arc<WPUniformSceneState>& uniform_state,
+                                  const Arc<WPUniformCameraResolver>& camera_resolver,
+                                  const Arc<SceneNode>&               node,
+                                  const WPUniformNodeConfigDraft&     config) {
+    auto node_id = scene.ResourceIndex().nodeId(*node);
+    if (node_id.is_none()) return false;
+
+    auto state = Arc<WPUniformNodeState>::make(node.clone(), camera_resolver.clone());
+    state->propagated_parallax_depth      = config.propagated_parallax_depth;
+    state->propagate_parallax_to_children = config.propagate_parallax_to_children;
+    state->use_camera_eye_position        = config.use_camera_eye_position;
+    state->vertices_in_world_space        = config.vertices_in_world_space;
+    state->effect_projection_size         = config.effect_projection_size;
+    if (config.effect_projection_node.is_some())
+        state->effect_projection_node = Some((*config.effect_projection_node).clone());
+    uniform_state->SetNodeState(*node_id, state.clone());
+
+    auto       registrar = dyn<UniformSourceRegistrar>::from_ref(scene);
+    auto       writer    = dyn<UniformAttachmentWriter>::from_ref(scene);
+    const auto transform = registrar->Register(Box<dyn<UniformSource>>::make(
+        WPTransformUniformSource { uniform_state.clone(), rstd::move(state) }));
+    const auto color =
+        registrar->Register(Box<dyn<UniformSource>>::make(WPColorUniformSource { node.clone() }));
+    const auto texture =
+        registrar->Register(Box<dyn<UniformSource>>::make(WPTextureUniformSource {}));
+    (void)writer->AttachNode(*node_id, transform, 0);
+    (void)writer->AttachNode(*node_id, color, 0);
+    (void)writer->AttachNode(*node_id, texture, 0);
+    return true;
+}
+
 void FinalizeUniformSources(ParseContext& context) {
     auto& scene = *context.scene;
     scene.RebuildResourceIndex();
@@ -5390,30 +5481,8 @@ void FinalizeUniformSources(ParseContext& context) {
     }
 
     for (auto& entry : context.uniform_configs) {
-        auto& draft   = entry.config;
-        auto  node_id = scene.ResourceIndex().nodeId(*entry.node);
-        if (node_id.is_none()) continue;
-
-        auto state = Arc<WPUniformNodeState>::make(entry.node.clone(), camera_resolver.clone());
-        state->propagated_parallax_depth      = draft.propagated_parallax_depth;
-        state->propagate_parallax_to_children = draft.propagate_parallax_to_children;
-        state->use_camera_eye_position        = draft.use_camera_eye_position;
-        state->vertices_in_world_space        = draft.vertices_in_world_space;
-        state->effect_projection_size         = draft.effect_projection_size;
-        if (draft.effect_projection_node.is_some()) {
-            state->effect_projection_node = Some((*draft.effect_projection_node).clone());
-        }
-        context.uniform_state->SetNodeState(*node_id, state.clone());
-
-        const auto transform = registrar->Register(Box<dyn<UniformSource>>::make(
-            WPTransformUniformSource { context.uniform_state.clone(), rstd::move(state) }));
-        const auto color     = registrar->Register(
-            Box<dyn<UniformSource>>::make(WPColorUniformSource { entry.node.clone() }));
-        const auto texture =
-            registrar->Register(Box<dyn<UniformSource>>::make(WPTextureUniformSource {}));
-        (void)writer->AttachNode(*node_id, transform, 0);
-        (void)writer->AttachNode(*node_id, color, 0);
-        (void)writer->AttachNode(*node_id, texture, 0);
+        (void)RegisterWPUniformNodeSources(
+            scene, context.uniform_state, camera_resolver, entry.node, entry.config);
     }
 
     for (auto& draft : context.particle_trail_uniform_configs) {
@@ -5439,6 +5508,40 @@ void FinalizeUniformSources(ParseContext& context) {
         }
         (void)writer->AttachNode(*node_id, source->second, 10);
     });
+
+    if (! context.dynamic_image_prototypes.is_empty()) {
+        auto scripts = scene.ExtensionMut<script::ScriptScene>();
+        if (scripts.is_some()) {
+            auto prototypes = rstd::move(context.dynamic_image_prototypes);
+            auto next_id    = context.next_dynamic_layer_id;
+            auto scene_ptr  = rstd::addressof(scene);
+            (**scripts).runtime().SetLayerFactory(script::JsRuntime::LayerFactory::make(
+                [scene_ptr,
+                 prototypes = rstd::move(prototypes),
+                 next_id,
+                 uniform_state   = context.uniform_state.clone(),
+                 camera_resolver = camera_resolver.clone()](
+                    SceneNode* owner, ref<str> asset) mutable -> Option<Arc<SceneNode>> {
+                    auto prototype = prototypes.get(asset);
+                    if (prototype.is_none()) return None();
+                    auto node =
+                        CloneRegisteredNode((**prototype).node.deref(), asset, i32(next_id--));
+                    SceneNode* parent = owner && owner->Parent()
+                                            ? owner->Parent()
+                                            : scene_ptr->RootMut().as_raw_ptr();
+                    scene_ptr->AttachRuntimeNode(*parent, node.clone());
+                    if (! RegisterWPUniformNodeSources(*scene_ptr,
+                                                       uniform_state,
+                                                       camera_resolver,
+                                                       node,
+                                                       (**prototype).uniform_config)) {
+                        rstd_error("registered image asset '{}' has no runtime resource id", asset);
+                        return None();
+                    }
+                    return Some(rstd::move(node));
+                }));
+        }
+    }
 }
 
 Box<Scene> FinalizeScene(ParseContext& context) {

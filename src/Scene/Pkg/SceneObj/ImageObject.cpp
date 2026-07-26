@@ -3,6 +3,7 @@ module;
 #include <rstd/macro.hpp>
 
 module wescene.pkg.scene_obj;
+import rstd;
 import rstd.log;
 import rstd.cppstd;
 import wescene.json;
@@ -31,6 +32,30 @@ float NormalizeLayerAlpha(float alpha) {
 
 constexpr std::string_view kFoliageSwayEffect = "effects/foliagesway/effect.json";
 constexpr SceneVersion     kNormalizedFoliageSwayStrengthVersion = 9;
+
+auto LoadImageAssetJson(ImageObject& object, owe::fs::VFS& vfs, SceneVersion version,
+                        bool explicit_no_copy_background) -> std::optional<owe::Json> {
+    auto json = LoadJsonFile(vfs, "/assets/" + object.image);
+    if (! json) return std::nullopt;
+
+    owe::GetJsonValue(*json, "fullscreen", object.fullscreen, false);
+    owe::GetJsonValue(*json, "passthrough", object.config.passthrough, false);
+    owe::GetJsonValue(*json, "nopadding", object.nopadding, false);
+    owe::GetJsonValue(*json, "solidlayer", object.solid_layer, false);
+    owe::GetJsonValue(*json, "puppet", object.puppet, false);
+
+    std::string material_path;
+    if (! owe::GetJsonValue(*json, "material", material_path, false)) {
+        rstd_info("image object no material");
+        return std::nullopt;
+    }
+    auto material_json = LoadJsonFile(vfs, "/assets/" + material_path);
+    if (! material_json) return std::nullopt;
+    object.material.FromJson(*material_json, version);
+    if (object.composite_layer && explicit_no_copy_background)
+        object.material.combos["CLEARALPHA"] = 1;
+    return json;
+}
 
 void ScaleAnimCurve(AnimCurve& curve, float scale) {
     auto scale_axis = [scale](std::vector<AnimKeyframe>& keys) {
@@ -247,10 +272,12 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     ReadVisibleProperty(json, visible, visible_user);
     visible_user_key = visible_user.name;
     owe::GetJsonValue(json, "alignment", alignment, false);
-    auto jImage = LoadJsonFile(vfs, "/assets/" + image);
+    bool copy_background_value { true };
+    bool explicit_no_copy_background =
+        owe::GetJsonValue(json, "copybackground", copy_background_value, false) &&
+        ! copy_background_value;
+    auto jImage = LoadImageAssetJson(*this, vfs, v, explicit_no_copy_background);
     if (! jImage) return false;
-    owe::GetJsonValue(*jImage, "fullscreen", fullscreen, false);
-    owe::GetJsonValue(*jImage, "passthrough", config.passthrough, false);
     owe::GetJsonValue(json, "name", name, false);
     owe::GetJsonValue(json, "id", id, false);
     owe::GetJsonValue(json, "colorBlendMode", colorBlendMode, false);
@@ -273,8 +300,6 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
             size = { origin.at(0) * 2, origin.at(1) * 2 };
         }
     }
-    owe::GetJsonValue(*jImage, "nopadding", nopadding, false);
-    owe::GetJsonValue(*jImage, "solidlayer", solid_layer, false);
     owe::GetJsonValue(json, "color", color, false);
     ReadUserValueBinding(json, "color", color_user);
     color_user_key = color_user.name;
@@ -284,25 +309,6 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     alpha_user_key = alpha_user.name;
     owe::GetJsonValue(json, "brightness", brightness, false);
 
-    owe::GetJsonValue(*jImage, "puppet", puppet, false);
-    bool copy_background_value { true };
-    bool explicit_no_copy_background =
-        owe::GetJsonValue(json, "copybackground", copy_background_value, false) &&
-        ! copy_background_value;
-
-    if (jImage->get("material"_str).is_some()) {
-        std::string matPath;
-        owe::GetJsonValue(*jImage, "material", matPath);
-        auto jMat = LoadJsonFile(vfs, "/assets/" + matPath);
-        if (! jMat) return false;
-        material.FromJson(*jMat, v);
-        if (image == "models/util/composelayer.json" && explicit_no_copy_background) {
-            material.combos["CLEARALPHA"] = 1;
-        }
-    } else {
-        rstd_info("image object no material");
-        return false;
-    }
     if (auto values = json.get("effects"_str); values.is_some()) {
         auto array = (*values)->as_array();
         if (array.is_some()) {
@@ -341,6 +347,15 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     }
     AbsorbAllFieldBindings(json, field_bindings);
     return true;
+}
+
+bool ImageObject::FromAsset(rstd::ref<rstd::str> asset, rstd::array<float, 2> asset_size,
+                            fs::VFS& vfs, SceneVersion version) {
+    image           = rstd::cppstd::to_string(asset);
+    name            = "__createLayer:" + image;
+    size            = { asset_size[rstd::usize()], asset_size[rstd::usize(1)] };
+    composite_layer = image == "models/util/composelayer.json";
+    return LoadImageAssetJson(*this, vfs, version, false).has_value();
 }
 
 bool ShapeObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) {

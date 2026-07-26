@@ -56,6 +56,7 @@ struct ParseContext {
     Option<WPParticleRuntime>                      particle_runtime;
     std::int32_t                                   ortho_w { 0 };
     std::int32_t                                   ortho_h { 0 };
+    wpscene::SceneVersion                          pkg_version { wpscene::kSceneVersionUnknown };
     fs::VFS*                                       vfs { nullptr };
     Option<ref<rstd::json::Map>>                   user_properties;
     WPShaderCache                                  shader_cache;
@@ -138,8 +139,13 @@ struct ParseContext {
     std::int32_t                               next_dynamic_layer_id { -100000 };
     Vec<owe::script::FieldScript*>             registered_asset_scripts;
     HashMap<String, Arc<SceneNode>>            dynamic_model_prototypes;
-    HashMap<String, wpscene::ParticleObject>   dynamic_particle_prototypes;
-    wavsen::audio::SoundManager*               sound_manager { nullptr };
+    struct DynamicImagePrototype {
+        Arc<SceneNode>           node;
+        WPUniformNodeConfigDraft uniform_config;
+    };
+    HashMap<String, DynamicImagePrototype>   dynamic_image_prototypes;
+    HashMap<String, wpscene::ParticleObject> dynamic_particle_prototypes;
+    wavsen::audio::SoundManager*             sound_manager { nullptr };
 
     HashMap<std::int32_t, String> system_media_image_fallbacks;
     HashSet<std::int32_t>         hidden_link_source_ids;
