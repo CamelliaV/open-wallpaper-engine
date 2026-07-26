@@ -1110,12 +1110,13 @@ void SceneRuntimeController::on(MainMsg::SetMuted_payload&& m) {
 
 void SceneRuntimeController::on(MainMsg::SetAudioClientIdentity_payload&& m) {
     auto identity = wavsen::audio::AudioClientIdentity {
-        .application_name = rstd::move(m.identity.application_name),
-        .application_id   = rstd::move(m.identity.application_id),
-        .stream_prefix    = rstd::move(m.identity.stream_prefix),
-        .component        = rstd::move(m.identity.component),
-        .media_name       = rstd::move(m.identity.media_name),
-        .media_role       = rstd::move(m.identity.media_role),
+        .application_name =
+            String::make(rstd::cppstd::as_str(m.identity.application_name).unwrap()),
+        .application_id = String::make(rstd::cppstd::as_str(m.identity.application_id).unwrap()),
+        .stream_prefix  = String::make(rstd::cppstd::as_str(m.identity.stream_prefix).unwrap()),
+        .component      = String::make(rstd::cppstd::as_str(m.identity.component).unwrap()),
+        .media_name     = String::make(rstd::cppstd::as_str(m.identity.media_name).unwrap()),
+        .media_role     = String::make(rstd::cppstd::as_str(m.identity.media_role).unwrap()),
     };
     if (! m_sound_manager->set_identity(rstd::move(identity))) {
         rstd_warn("audio identity cannot change after audio shutdown");
