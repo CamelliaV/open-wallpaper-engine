@@ -112,11 +112,11 @@ struct ParseContext {
         // so a child layer with `attachment = "<name>"` can resolve the
         // matching MDAT entry on its parent's puppet (no second lookup
         // pass needed). Both nullable.
-        Option<Arc<WPPuppet>>                                 puppet;
-        String                                                attachment;
-        Option<Arc<WPPuppetLayer>>                            puppet_layer;
-        Option<Box<dyn<FnMut<void(const Eigen::Vector3f&)>>>> apply_attachment_offset;
-        Vec<Arc<SceneNode>>                                   ordered_before_nodes;
+        Option<Arc<WPPuppet>>                          puppet;
+        String                                         attachment;
+        Option<Arc<WPPuppetLayer>>                     puppet_layer;
+        Option<Box<dyn<FnMut<void(Eigen::Vector3f)>>>> apply_attachment_offset;
+        Vec<Arc<SceneNode>>                            ordered_before_nodes;
     };
     HashMap<std::int32_t, NodeRef>       node_id_map;
     HashMap<std::int32_t, std::uint32_t> object_parent_ids;

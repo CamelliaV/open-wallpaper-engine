@@ -2467,9 +2467,10 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
                 auto state =
                     mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr());
                 scene.RegisterUserPropertyBinding(String::make(as_str(key).unwrap()),
-                                                  Box<dyn<FnMut<void(const Json&)>>>::make(
-                                                      [state, field](const Json& property) mutable {
-                                                          state->ApplyUserProperty(field, property);
+                                                  Box<dyn<FnMut<void(ref<Json>)>>>::make(
+                                                      [state, field](ref<Json> property) mutable {
+                                                          state->ApplyUserProperty(field,
+                                                                                   *property);
                                                       }));
             }
         }
@@ -2487,9 +2488,10 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
                 auto state =
                     mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr());
                 scene.RegisterUserPropertyBinding(String::make(as_str(key).unwrap()),
-                                                  Box<dyn<FnMut<void(const Json&)>>>::make(
-                                                      [state, field](const Json& property) mutable {
-                                                          state->ApplyUserProperty(field, property);
+                                                  Box<dyn<FnMut<void(ref<Json>)>>>::make(
+                                                      [state, field](ref<Json> property) mutable {
+                                                          state->ApplyUserProperty(field,
+                                                                                   *property);
                                                       }));
             }
         }
@@ -4841,8 +4843,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                         None(),
                         String::make(rstd::cppstd::as_str(obj.attachment).unwrap()),
                         None(),
-                        Some(Box<dyn<FnMut<void(const Vector3f&)>>>::make(
-                            [anchor_state, apply_text_anchor](const Vector3f& offset) {
+                        Some(Box<dyn<FnMut<void(Vector3f)>>>::make(
+                            [anchor_state, apply_text_anchor](Vector3f offset) {
                                 anchor_state->origin += offset;
                                 apply_text_anchor();
                             })),

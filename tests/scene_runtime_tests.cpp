@@ -295,8 +295,8 @@ TEST(SceneUserPropertyBinding, AppliesJsonPayloadToOwnedCallback) {
     bool       called = false;
     scene.RegisterUserPropertyBinding(
         String::make("camera"_str),
-        Box<dyn<FnMut<void(const owe::Json&)>>>::make([&](const owe::Json& property) {
-            called = property.is_object();
+        Box<dyn<FnMut<void(ref<owe::Json>)>>>::make([&](ref<owe::Json> property) {
+            called = property->is_object();
         }));
 
     auto property = owe::ParseJson(R"({"value":true})").unwrap();

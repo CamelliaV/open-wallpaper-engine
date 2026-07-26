@@ -1070,10 +1070,10 @@ bool Scene::ApplyUserTextBindings(ref<str> key, const Json& property) {
     return true;
 }
 
-void Scene::RegisterUserPropertyBinding(String key, Box<dyn<FnMut<void(const Json&)>>> setter) {
+void Scene::RegisterUserPropertyBinding(String key, Box<dyn<FnMut<void(ref<Json>)>>> setter) {
     auto setters = m_user_property_index.get_mut(key.as_str());
     if (setters.is_none()) {
-        (void)m_user_property_index.insert(key.clone(), Vec<Box<dyn<FnMut<void(const Json&)>>>> {});
+        (void)m_user_property_index.insert(key.clone(), Vec<Box<dyn<FnMut<void(ref<Json>)>>>> {});
         setters = m_user_property_index.get_mut(key.as_str());
     }
     (*setters)->push(rstd::move(setter));
@@ -1082,8 +1082,9 @@ void Scene::RegisterUserPropertyBinding(String key, Box<dyn<FnMut<void(const Jso
 bool Scene::ApplyUserPropertyBindings(ref<str> key, const Json& property) {
     auto setters = m_user_property_index.get_mut(key);
     if (setters.is_none()) return false;
+    auto property_ref = ref<Json>::from_raw_parts(rstd::addressof(property));
     for (usize index {}; index < (*setters)->len(); ++index) {
-        (**setters)[index]->operator()(property);
+        (**setters)[index]->operator()(property_ref);
     }
     return true;
 }

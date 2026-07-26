@@ -2180,7 +2180,7 @@ public:
     void RegisterUserTextBinding(String key, Box<dyn<FnMut<void(ref<str>)>>> setter);
     bool ApplyUserTextBindings(ref<str> key, const Json& property);
 
-    void RegisterUserPropertyBinding(String key, Box<dyn<FnMut<void(const Json&)>>> setter);
+    void RegisterUserPropertyBinding(String key, Box<dyn<FnMut<void(ref<Json>)>>> setter);
     bool ApplyUserPropertyBindings(ref<str> key, const Json& property);
 
     struct MaterialTextureUserBinding {
@@ -2430,7 +2430,7 @@ private:
     Vec<Box<SceneLight>>          m_lights;
     Vec<Box<ScenePostProcess>>    m_post_processes;
     HashMap<String, Vec<Box<dyn<FnMut<void(ref<str>)>>>>>        m_text_user_index;
-    HashMap<String, Vec<Box<dyn<FnMut<void(const Json&)>>>>>     m_user_property_index;
+    HashMap<String, Vec<Box<dyn<FnMut<void(ref<Json>)>>>>>       m_user_property_index;
     Vec<Box<dyn<FnMut<void(f64)>>>>                              m_transform_updaters;
     HashMap<String, Vec<ShaderUserBinding>>                      m_shader_user_index;
     HashMap<String, Vec<ShaderComboUserBinding>>                 m_shader_combo_user_index;
