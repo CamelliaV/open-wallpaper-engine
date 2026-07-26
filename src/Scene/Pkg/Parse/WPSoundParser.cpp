@@ -214,7 +214,10 @@ Arc<dyn<SceneSoundControl>> WPSoundParser::Parse(const wpscene::SoundObject& obj
     Option<Arc<SceneAudioAverage>> audio_average = None();
     if (scene != nullptr) audio_average = Some(scene->AudioAverageHandle());
     auto state = Arc<WPSoundState>::make();
-    state->playing.store(! obj.startsilent, Ordering::Release);
+    // The node's sound control is attached after its visibility is applied, so
+    // a layer that starts hidden has to be silenced here or it would play until
+    // something toggles it.
+    state->playing.store(obj.visible && ! obj.startsilent, Ordering::Release);
     state->volume.store(f32(config.volume), Ordering::Release);
     auto control = Arc<dyn<SceneSoundControl>>::make(WPSoundControl(state.clone()));
     auto ss      = std::make_unique<WPSoundStream>(
