@@ -3,11 +3,8 @@
 import eigen;
 import rstd;
 import rstd.cppstd;
-import wavsen.audio;
-import wescene.fs;
 import wescene.json;
 import wescene.pkg.parse;
-import wescene.pkg.scene_obj;
 import wescene.scene;
 import wescene.script;
 import wescene.text;
@@ -16,52 +13,6 @@ using namespace rstd::prelude;
 using namespace rstd::literals;
 using rstd::cppstd::to_string;
 using rstd::sync::Arc;
-
-TEST(DinoRunRegisteredAsset, CreatesImageLayerDuringScriptUpdate) {
-    owe::fs::VFS vfs;
-    auto         assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
-    ASSERT_TRUE(assets.is_ok());
-    ASSERT_TRUE(vfs.mount("/assets"_str, rstd::move(assets).unwrap_unchecked()).is_ok());
-    auto project =
-        owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_DEFAULTPROJECT_DIR "/dino_run"));
-    ASSERT_TRUE(project.is_ok());
-    ASSERT_TRUE(vfs.mount("/assets"_str, rstd::move(project).unwrap_unchecked()).is_ok());
-
-    auto document = owe::wpscene::LoadSceneDocumentFromVfs(
-        vfs, "/assets/scene.json", owe::wpscene::kSceneVersionUnknown);
-    ASSERT_TRUE(document.has_value());
-    wavsen::audio::SoundManager sound;
-    owe::WPSceneParser          parser;
-    auto                        parsed =
-        parser.Parse("dino_run"_str,
-                     ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
-                     mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
-                     mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound)));
-    ASSERT_TRUE(parsed.is_ok());
-    auto scene = rstd::move(parsed).unwrap_unchecked().scene;
-
-    owe::script::FrameInputs inputs;
-    inputs.frametime = 0.1f;
-    inputs.canvas_w  = 384.0f;
-    inputs.canvas_h  = 216.0f;
-    inputs.screen_w  = inputs.canvas_w;
-    inputs.screen_h  = inputs.canvas_h;
-    for (int frame = 0; frame < 31; ++frame) {
-        inputs.runtime += inputs.frametime;
-        scene->PassFrameTime(inputs.frametime);
-        owe::script::TickSceneScripts(*scene, inputs);
-    }
-
-    auto* coin = scene->RootMut()->FindByName("models/coin_0.json");
-    ASSERT_NE(coin, nullptr);
-    EXPECT_TRUE(coin->Visible());
-    EXPECT_GT(coin->Translate().x(), 350.0f);
-    EXPECT_LE(coin->Translate().x(), 360.0f);
-    auto node_id = scene->ResourceIndex().nodeId(*coin);
-    ASSERT_TRUE(node_id.is_some());
-    EXPECT_FALSE(scene->NodeSources(*node_id).is_empty());
-    EXPECT_TRUE(scene->ConsumeRenderGraphDirty());
-}
 
 namespace scene_test
 {

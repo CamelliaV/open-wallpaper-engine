@@ -263,8 +263,8 @@ bool ApplyShaderCombos(Scene& scene, const std::string& key, const Json& propert
     scene.ClearUserPropertyDiagnostics(as_str(key).unwrap());
 
     WPShaderCache* shader_cache = nullptr;
-    if (auto cache = scene.ExtensionMut<WPShaderCache>(); cache.is_some()) {
-        shader_cache = rstd::addressof(**cache);
+    if (auto cache = scene.ExtensionMut<Arc<WPShaderCache>>(); cache.is_some()) {
+        shader_cache = (**cache).as_ptr();
     }
     auto vfs = scene.ExtensionMut<fs::VFS>();
     if (vfs.is_none()) {

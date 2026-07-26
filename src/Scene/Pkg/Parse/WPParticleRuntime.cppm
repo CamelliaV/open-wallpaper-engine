@@ -548,6 +548,12 @@ private:
     rstd::vec::Vec<Box<WPParticleSubSystem>> m_subsystems;
 };
 
+struct WPParticleRuntimeSystem {
+    Arc<WPParticleRuntime> runtime;
+
+    void Update(ref<SceneFrame> frame) { runtime->Update(frame); }
+};
+
 class WPParticleRawGenerator {
 public:
     WPParticleRawGenerator(WPParticleSubSystem& subsystem): m_subsystem(&subsystem) {}

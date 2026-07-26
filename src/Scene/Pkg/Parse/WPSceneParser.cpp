@@ -2456,7 +2456,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
     context.vfs = &vfs;
     auto& scene = *context.scene;
     scene.SetImageParser(Box<dyn<IImageParser>>::make(WPTexImageParser(&vfs)));
-    context.particle_runtime = Some(WPParticleRuntime {});
+    context.particle_runtime = Some(Arc<WPParticleRuntime>::make());
     GenCardMesh(*scene.DefaultEffectMeshMut(), { 2.0f, 2.0f });
 
     scene.SetClearColor(array_cast<float>(sc.general.clearcolor));
@@ -2727,7 +2727,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         shaderInfo.baseConstSvs = baseConstSvs;
 
         if (! LoadMaterial(vfs,
-                           context.shader_cache,
+                           *context.shader_cache,
                            context.shader_environment,
                            image_wpmat,
                            context.scene.get(),
@@ -2916,7 +2916,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                 WPShaderInfo  mask_shaderInfo;
                 mask_shaderInfo.baseConstSvs = baseConstSvs;
                 if (! LoadMaterial(vfs,
-                                   context.shader_cache,
+                                   *context.shader_cache,
                                    context.shader_environment,
                                    mask_wpmat,
                                    context.scene.get(),
@@ -2947,7 +2947,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                 WPShaderInfo  clip_shaderInfo;
                 clip_shaderInfo.baseConstSvs = baseConstSvs;
                 if (! LoadMaterial(vfs,
-                                   context.shader_cache,
+                                   *context.shader_cache,
                                    context.shader_environment,
                                    clip_wpmat,
                                    context.scene.get(),
@@ -3200,7 +3200,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                 svData.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
                 SceneShaderValueAnimationMap final_quad_shader_values;
                 if (! LoadMaterial(vfs,
-                                   context.shader_cache,
+                                   *context.shader_cache,
                                    context.shader_environment,
                                    wpmat,
                                    context.scene.get(),
@@ -3261,7 +3261,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                             WPShaderInfo  mask_shaderInfo;
                             mask_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
                             if (! LoadMaterial(vfs,
-                                               context.shader_cache,
+                                               *context.shader_cache,
                                                context.shader_environment,
                                                mask_wpmat,
                                                context.scene.get(),
@@ -3284,7 +3284,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                             WPShaderInfo  clip_shaderInfo;
                             clip_shaderInfo.baseConstSvs = wpEffShaderInfo.baseConstSvs;
                             if (! LoadMaterial(vfs,
-                                               context.shader_cache,
+                                               *context.shader_cache,
                                                context.shader_environment,
                                                clip_wpmat,
                                                context.scene.get(),
@@ -3353,7 +3353,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                     finalSvData.parallax_depth                 = { wpimgobj.parallaxDepth[0],
                                                                    wpimgobj.parallaxDepth[1] };
                     if (LoadMaterial(vfs,
-                                     context.shader_cache,
+                                     *context.shader_cache,
                                      context.shader_environment,
                                      passthrough_mat,
                                      context.scene.get(),
@@ -3686,7 +3686,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     bool mat_ok = false;
     try {
         mat_ok = LoadMaterial(vfs,
-                              context.shader_cache,
+                              *context.shader_cache,
                               context.shader_environment,
                               particle_obj.material,
                               context.scene.get(),
@@ -3821,7 +3821,7 @@ void ParseParticleObj(ParseContext& context, wpscene::ParticleObject& wppartobj,
     if (is_child)
         child_ptr.particle_parent->AddChild(std::move(particleSub));
     else
-        context.particle_runtime->Add(rstd::move(particleSub));
+        (**context.particle_runtime).Add(rstd::move(particleSub));
 
     if (! is_child) {
         spNode->SetParticleControl(Arc<dyn<SceneParticleControl>>::make(WPParticleNodeControl {
@@ -3979,7 +3979,7 @@ void ParseModelObj(ParseContext& context, wpscene::ModelObject& model_obj) {
         }
 
         if (! LoadMaterial(vfs,
-                           context.shader_cache,
+                           *context.shader_cache,
                            context.shader_environment,
                            *wpmat,
                            context.scene.get(),
@@ -4495,7 +4495,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             WPShaderInfo             si;
             si.baseConstSvs = effect_base;
             if (! LoadMaterial(*context.vfs,
-                               context.shader_cache,
+                               *context.shader_cache,
                                context.shader_environment,
                                pt_mat,
                                &scene,
@@ -4618,7 +4618,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                      initial_geometry.effect_frame_height };
                     SceneShaderValueAnimationMap final_quad_shader_values;
                     if (! LoadMaterial(*context.vfs,
-                                       context.shader_cache,
+                                       *context.shader_cache,
                                        context.shader_environment,
                                        wpmat,
                                        &scene,
@@ -5166,7 +5166,7 @@ ParseContext BuildContext(fs::VFS& vfs, ref<str> scene_id, const wpscene::SceneM
     ParseCamera(context, sc);
     context.pkg_version     = sc.pkg_version;
     context.user_properties = user_properties;
-    context.shader_cache    = WPShaderCache(rstd::move(shader_cache_dir));
+    context.shader_cache    = Arc<WPShaderCache>::make(rstd::move(shader_cache_dir));
 
     context.scene->RegisterRenderTarget(String::make(SpecTex_Default),
                                         SceneRenderTarget {
@@ -5420,6 +5420,18 @@ bool RegisterWPUniformNodeSources(Scene& scene, const Arc<WPUniformSceneState>& 
     return true;
 }
 
+bool RegisterWPParticleTrailUniformSource(Scene& scene, const Arc<SceneNode>& node,
+                                          const Arc<WPParticleTrailUniformState>& state) {
+    auto node_id = scene.ResourceIndex().nodeId(*node);
+    if (node_id.is_none()) return false;
+    auto       registrar = dyn<UniformSourceRegistrar>::from_ref(scene);
+    auto       writer    = dyn<UniformAttachmentWriter>::from_ref(scene);
+    const auto source    = registrar->Register(
+        Box<dyn<UniformSource>>::make(WPParticleTrailUniformSource { state.clone() }));
+    (void)writer->AttachNode(*node_id, source, 10);
+    return true;
+}
+
 void FinalizeUniformSources(ParseContext& context) {
     auto& scene = *context.scene;
     scene.RebuildResourceIndex();
@@ -5486,11 +5498,7 @@ void FinalizeUniformSources(ParseContext& context) {
     }
 
     for (auto& draft : context.particle_trail_uniform_configs) {
-        auto node_id = scene.ResourceIndex().nodeId(*draft.node);
-        if (node_id.is_none()) continue;
-        const auto source = registrar->Register(Box<dyn<UniformSource>>::make(
-            WPParticleTrailUniformSource { rstd::move(draft.uniform_state) }));
-        (void)writer->AttachNode(*node_id, source, 10);
+        (void)RegisterWPParticleTrailUniformSource(scene, draft.node, draft.uniform_state);
     }
 
     std::unordered_map<WPPuppetLayer*, UniformSourceId> puppet_sources;
@@ -5509,34 +5517,96 @@ void FinalizeUniformSources(ParseContext& context) {
         (void)writer->AttachNode(*node_id, source->second, 10);
     });
 
-    if (! context.dynamic_image_prototypes.is_empty()) {
+    if (! context.dynamic_image_prototypes.is_empty() ||
+        ! context.dynamic_particle_prototypes.is_empty()) {
         auto scripts = scene.ExtensionMut<script::ScriptScene>();
         if (scripts.is_some()) {
-            auto prototypes = rstd::move(context.dynamic_image_prototypes);
-            auto next_id    = context.next_dynamic_layer_id;
-            auto scene_ptr  = rstd::addressof(scene);
+            auto image_prototypes    = rstd::move(context.dynamic_image_prototypes);
+            auto particle_prototypes = rstd::move(context.dynamic_particle_prototypes);
+            auto particle_runtime    = context.particle_runtime.is_some()
+                                           ? Some((*context.particle_runtime).clone())
+                                           : None<Arc<WPParticleRuntime>>();
+            auto next_id             = context.next_dynamic_layer_id;
+            auto scene_ptr           = rstd::addressof(scene);
             (**scripts).runtime().SetLayerFactory(script::JsRuntime::LayerFactory::make(
                 [scene_ptr,
-                 prototypes = rstd::move(prototypes),
+                 image_prototypes    = rstd::move(image_prototypes),
+                 particle_prototypes = rstd::move(particle_prototypes),
+                 particle_runtime    = rstd::move(particle_runtime),
                  next_id,
-                 uniform_state   = context.uniform_state.clone(),
-                 camera_resolver = camera_resolver.clone()](
+                 ortho_w              = context.ortho_w,
+                 ortho_h              = context.ortho_h,
+                 global_base_uniforms = context.global_base_uniforms,
+                 shader_environment   = context.shader_environment,
+                 uniform_state        = context.uniform_state.clone(),
+                 camera_resolver      = camera_resolver.clone()](
                     SceneNode* owner, ref<str> asset) mutable -> Option<Arc<SceneNode>> {
-                    auto prototype = prototypes.get(asset);
-                    if (prototype.is_none()) return None();
-                    auto node =
-                        CloneRegisteredNode((**prototype).node.deref(), asset, i32(next_id--));
                     SceneNode* parent = owner && owner->Parent()
                                             ? owner->Parent()
                                             : scene_ptr->RootMut().as_raw_ptr();
-                    scene_ptr->AttachRuntimeNode(*parent, node.clone());
-                    if (! RegisterWPUniformNodeSources(*scene_ptr,
-                                                       uniform_state,
-                                                       camera_resolver,
-                                                       node,
-                                                       (**prototype).uniform_config)) {
-                        rstd_error("registered image asset '{}' has no runtime resource id", asset);
+
+                    if (auto prototype = image_prototypes.get(asset); prototype.is_some()) {
+                        auto node =
+                            CloneRegisteredNode((**prototype).node.deref(), asset, i32(next_id--));
+                        scene_ptr->AttachRuntimeNode(*parent, node.clone());
+                        if (! RegisterWPUniformNodeSources(*scene_ptr,
+                                                           uniform_state,
+                                                           camera_resolver,
+                                                           node,
+                                                           (**prototype).uniform_config)) {
+                            rstd_error("registered image asset '{}' has no runtime resource id",
+                                       asset);
+                            return None();
+                        }
+                        return Some(rstd::move(node));
+                    }
+
+                    auto prototype = particle_prototypes.get(asset);
+                    if (prototype.is_none() || particle_runtime.is_none()) return None();
+                    auto vfs   = scene_ptr->ExtensionMut<fs::VFS>();
+                    auto cache = scene_ptr->ExtensionMut<Arc<WPShaderCache>>();
+                    if (vfs.is_none() || cache.is_none()) {
+                        rstd_error("registered particle asset '{}' has no runtime parse services",
+                                   asset);
                         return None();
+                    }
+
+                    ParseContext runtime_context;
+                    runtime_context.scene                 = ParseSceneHandle::Borrow(*scene_ptr);
+                    runtime_context.vfs                   = (*vfs).as_raw_ptr();
+                    runtime_context.ortho_w               = ortho_w;
+                    runtime_context.ortho_h               = ortho_h;
+                    runtime_context.shader_cache          = (**cache).clone();
+                    runtime_context.shader_environment    = shader_environment;
+                    runtime_context.global_base_uniforms  = global_base_uniforms;
+                    runtime_context.particle_runtime      = Some((*particle_runtime).clone());
+                    runtime_context.uniform_state         = uniform_state.clone();
+                    runtime_context.next_dynamic_layer_id = next_id;
+
+                    auto particle    = (**prototype).Clone();
+                    particle.id      = runtime_context.next_dynamic_layer_id--;
+                    particle.name    = rstd::cppstd::to_string(asset);
+                    particle.origin  = { 0.0f, 0.0f, 0.0f };
+                    particle.scale   = { 1.0f, 1.0f, 1.0f };
+                    particle.angles  = { 0.0f, 0.0f, 0.0f };
+                    particle.parent  = 0;
+                    particle.visible = true;
+                    WPShaderParser::InitGlslang();
+                    ParseParticleObj(runtime_context, particle);
+                    WPShaderParser::FinalGlslang();
+                    next_id = runtime_context.next_dynamic_layer_id;
+
+                    auto parsed = runtime_context.node_id_map.get(particle.id);
+                    if (parsed.is_none() || (**parsed).node.is_none()) return None();
+                    auto node = (*(**parsed).node).clone();
+                    scene_ptr->AttachRuntimeNode(*parent, node.clone());
+                    for (auto& entry : runtime_context.uniform_configs) {
+                        (void)RegisterWPUniformNodeSources(
+                            *scene_ptr, uniform_state, camera_resolver, entry.node, entry.config);
+                    }
+                    for (auto& draft : runtime_context.particle_trail_uniform_configs) {
+                        (void)RegisterWPParticleTrailUniformSource(
+                            *scene_ptr, draft.node, draft.uniform_state);
                     }
                     return Some(rstd::move(node));
                 }));
@@ -5654,13 +5724,14 @@ Box<Scene> FinalizeScene(ParseContext& context) {
                                         context.script_scene.take().unwrap_unchecked());
     }
     if (context.particle_runtime.is_some()) {
-        context.scene->Runtime().RegisterSystem(context.particle_runtime.take().unwrap(),
-                                                SceneRuntimeSchedule::BeforeRender);
+        context.scene->Runtime().RegisterSystem(
+            WPParticleRuntimeSystem { (*context.particle_runtime).clone() },
+            SceneRuntimeSchedule::BeforeRender);
     }
-    context.shader_cache.ReleaseTransientEntries();
-    context.scene->InstallExtension(Box<WPShaderCache>::make(rstd::move(context.shader_cache)));
+    context.shader_cache->ReleaseTransientEntries();
+    context.scene->InstallExtension(Box<Arc<WPShaderCache>>::make(context.shader_cache.clone()));
     FinalizeUniformSources(context);
-    return rstd::move(context.scene);
+    return context.scene.Take();
 }
 
 void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::SceneGeneral& g) {
@@ -5718,7 +5789,7 @@ void BuildBloomPostProcess(ParseContext& context, fs::VFS& vfs, const wpscene::S
         SceneMaterial            material;
         WPUniformNodeConfigDraft svData;
         if (! LoadMaterial(vfs,
-                           context.shader_cache,
+                           *context.shader_cache,
                            context.shader_environment,
                            wpmat,
                            &scene,

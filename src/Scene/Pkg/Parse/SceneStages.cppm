@@ -48,18 +48,41 @@ struct WPSceneShaderEnvironment {
     bool fog_height { false };
 };
 
+class ParseSceneHandle {
+public:
+    ParseSceneHandle(): m_owner(Some(Box<Scene>::make())), m_scene((*m_owner).get()) {}
+
+    static auto Borrow(Scene& scene) -> ParseSceneHandle { return ParseSceneHandle(&scene); }
+
+    Scene* get() const noexcept { return m_scene; }
+    Scene* operator->() const noexcept { return m_scene; }
+    Scene& operator*() const noexcept { return *m_scene; }
+
+    auto Take() -> Box<Scene> {
+        auto owner = m_owner.take().unwrap_unchecked();
+        m_scene    = owner.get();
+        return owner;
+    }
+
+private:
+    explicit ParseSceneHandle(Scene* scene): m_scene(scene) {}
+
+    Option<Box<Scene>> m_owner;
+    Scene*             m_scene { nullptr };
+};
+
 // Per-Parse state. Built by BuildContext, mutated by ProcessObjects,
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
 struct ParseContext {
-    Box<Scene>                                     scene { Box<Scene>::make() };
-    Option<WPParticleRuntime>                      particle_runtime;
+    ParseSceneHandle                               scene;
+    Option<Arc<WPParticleRuntime>>                 particle_runtime;
     std::int32_t                                   ortho_w { 0 };
     std::int32_t                                   ortho_h { 0 };
     wpscene::SceneVersion                          pkg_version { wpscene::kSceneVersionUnknown };
     fs::VFS*                                       vfs { nullptr };
     Option<ref<rstd::json::Map>>                   user_properties;
-    WPShaderCache                                  shader_cache;
+    Arc<WPShaderCache>                             shader_cache { Arc<WPShaderCache>::make() };
     HashMap<String, text::FontCache::ResolvedBlob> font_sources;
 
     ShaderValueMap           global_base_uniforms;
