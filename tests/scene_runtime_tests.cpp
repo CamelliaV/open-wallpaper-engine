@@ -401,6 +401,31 @@ TEST(WPUniformSourceRuntimeAlpha, VisibleTrueRestoresLayerAlpha) {
     EXPECT_FLOAT_EQ(restored[rstd::usize(3)], 0.35f);
 }
 
+TEST(WPUniformSourceParallax, UserPropertiesDriveEveryParallaxField) {
+    auto state = Arc<owe::WPUniformSceneState>::make(Arc<owe::AudioResponseDemand>::make());
+    state->CameraParallax() = { true, 0.03f, 0.1f, 0.36f };
+
+    auto disable = owe::ParseJson(R"({"value":false})").unwrap();
+    state->ApplyUserProperty("cameraparallax", disable);
+    EXPECT_FALSE(state->CameraParallax().enable);
+
+    auto enable = owe::ParseJson(R"({"value":true})").unwrap();
+    state->ApplyUserProperty("cameraparallax", enable);
+    EXPECT_TRUE(state->CameraParallax().enable);
+
+    auto amount = owe::ParseJson(R"({"value":0.25})").unwrap();
+    state->ApplyUserProperty("cameraparallaxamount", amount);
+    EXPECT_FLOAT_EQ(state->CameraParallax().amount, 0.25f);
+
+    auto delay = owe::ParseJson(R"({"value":0.5})").unwrap();
+    state->ApplyUserProperty("cameraparallaxdelay", delay);
+    EXPECT_FLOAT_EQ(state->CameraParallax().delay, 0.5f);
+
+    auto influence = owe::ParseJson(R"({"value":0.75})").unwrap();
+    state->ApplyUserProperty("cameraparallaxmouseinfluence", influence);
+    EXPECT_FLOAT_EQ(state->CameraParallax().mouse_influence, 0.75f);
+}
+
 TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     owe::Scene scene;
     scene.SetOrtho({ i32(3840), i32(2160) });

@@ -2461,16 +2461,17 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
         cam_para.mouse_influence                = sc.general.cameraparallaxmouseinfluence;
         context.uniform_state->CameraParallax() = cam_para;
         context.uniform_state->SetPointerDelay(cam_para.delay);
-        if (auto it = sc.general.user_bindings.find("cameraparallaxmouseinfluence");
-            it != sc.general.user_bindings.end()) {
-            auto state =
-                mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr());
-            auto field = it->first;
-            scene.RegisterUserPropertyBinding(String::make(as_str(it->second).unwrap()),
-                                              Box<dyn<FnMut<void(const Json&)>>>::make(
-                                                  [state, field](const Json& property) mutable {
-                                                      state->ApplyUserProperty(field, property);
-                                                  }));
+        for (const auto& [field, key] : sc.general.user_bindings) {
+            if (field == "cameraparallax" || field == "cameraparallaxamount" ||
+                field == "cameraparallaxdelay" || field == "cameraparallaxmouseinfluence") {
+                auto state =
+                    mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr());
+                scene.RegisterUserPropertyBinding(String::make(as_str(key).unwrap()),
+                                                  Box<dyn<FnMut<void(const Json&)>>>::make(
+                                                      [state, field](const Json& property) mutable {
+                                                          state->ApplyUserProperty(field, property);
+                                                      }));
+            }
         }
     }
     {
