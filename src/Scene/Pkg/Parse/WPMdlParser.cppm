@@ -30,8 +30,8 @@ struct WPMdlHeader {
 struct WPMdl {
     WPMdlHeader header;
 
-    // One element per header.mesh_count. mesh_count > 1 only seen on static
-    // (non-puppet) meshes; renderer currently consumes meshes[0] only.
+    // One element per header.mesh_count. Image puppets may use later meshes
+    // for material-specific overlays such as texture-channel animation.
     struct Mesh {
         Vec<String>     mat_json_files;
         rstd::uint32_t  flag_a { 0 }; // hexpat Mesh.flag_a (usually 0; 2 has trailing 1)
@@ -115,6 +115,7 @@ public:
 
     static bool                      Parse(ref<str> path, fs::VFS&, WPMdl&);
     static Option<wpscene::Material> ParseMaterial(ref<str> material_ref, fs::VFS&);
+    static Option<usize>             FindMeshByMaterial(const WPMdl&, ref<str> material_ref);
 
     static void AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl);
     static void AddPuppetMatInfo(wpscene::Material& mat, const WPMdl& mdl);

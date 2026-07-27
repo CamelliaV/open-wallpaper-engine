@@ -74,6 +74,23 @@ TEST(WPMdlMesh, KeepsPuppetPositionsInMdlLocalSpace) {
     EXPECT_FLOAT_EQ(vertices.Data()[2], 0.0f);
 }
 
+TEST(WPMdlMesh, FindsMeshByNormalizedMaterialReference) {
+    owe::WPMdl mdl;
+    mdl.meshes.push(owe::WPMdl::Mesh {});
+    mdl.meshes.push(owe::WPMdl::Mesh {});
+    mdl.meshes[usize()].mat_json_files.push(String::make("materials/main.json"_str));
+    mdl.meshes[usize(1)].mat_json_files.push(String::make("overlay"_str));
+
+    auto main = owe::WPMdlParser::FindMeshByMaterial(mdl, "materials/main"_str);
+    ASSERT_TRUE(main.is_some());
+    EXPECT_EQ(*main, usize());
+
+    auto overlay = owe::WPMdlParser::FindMeshByMaterial(mdl, "materials/overlay.json"_str);
+    ASSERT_TRUE(overlay.is_some());
+    EXPECT_EQ(*overlay, usize(1));
+    EXPECT_TRUE(owe::WPMdlParser::FindMeshByMaterial(mdl, "missing"_str).is_none());
+}
+
 TEST(WPMdlMesh, Mdlv23LargeStaticMeshUsesUint32GlobalIndices) {
     const std::filesystem::path pkg_path =
         std::filesystem::path(WAYWALLEN_WORKSHOP_DIR) / "3557068717" / "scene.pkg";

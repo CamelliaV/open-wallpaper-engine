@@ -513,7 +513,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, PassPrepareCo
         rstd_assert(target.is_some());
         if (target.is_none()) return;
         const auto& rt  = **target;
-        out_force_clear = rt.force_clear;
+        out_force_clear = rt.force_clear && ! m_desc.preserve_output;
         if (m_desc.output_use.is_none()) return;
         auto prepared = context.resources->Resolve(*m_desc.output_use);
         if (prepared.is_none()) {

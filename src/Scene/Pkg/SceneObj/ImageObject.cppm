@@ -95,6 +95,7 @@ public:
     bool                     nopadding { false };
     bool                     visible { true };
     std::string              image;
+    std::string              material_path;
     std::string              alignment { "center" };
     Material                 material;
     std::vector<ImageEffect> effects;

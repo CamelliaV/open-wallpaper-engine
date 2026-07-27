@@ -345,8 +345,15 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         rgraph.addPass<vulkan::CustomShaderPass>(
             rstd::cppstd::as_str(passName).unwrap(),
             rg::PassNode::Type::CustomShader,
-            [material, node, smi, pass_output, source_layer, render_view, &scene, &extra](
-                rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
+            [material,
+             node,
+             smi,
+             pass_output,
+             preserve_output = submesh.preserve_output,
+             source_layer,
+             render_view,
+             &scene,
+             &extra](rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
                 const auto& pass       = builder.workPassNode();
                 pdesc.node             = Some(rstd::mut_ref<SceneNode>::from_raw_parts(node));
                 pdesc.submesh_index    = u32(static_cast<rstd::uint32_t>(smi));
@@ -440,9 +447,10 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 }
                 pdesc.transparent_clear = first_output_write && output_target.clear_on_first_write;
                 pdesc.clear_output =
-                    (first_output_write && output_target.bind.screen) || pdesc.transparent_clear;
-                pdesc.preserve_output =
-                    output_state->version > usize() && output_target.preserve_on_write;
+                    ! preserve_output &&
+                    ((first_output_write && output_target.bind.screen) || pdesc.transparent_clear);
+                pdesc.preserve_output = output_state->version > usize() &&
+                                        (output_target.preserve_on_write || preserve_output);
                 const bool uses_depth =
                     output_target.withDepth && vulkan::UsesDepthAttachment(*material);
                 pdesc.has_depth_attachment = uses_depth;

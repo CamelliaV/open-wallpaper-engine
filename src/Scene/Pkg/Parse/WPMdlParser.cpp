@@ -1049,6 +1049,17 @@ Option<wpscene::Material> WPMdlParser::ParseMaterial(ref<str> material_ref, fs::
     return Some(rstd::move(material));
 }
 
+Option<usize> WPMdlParser::FindMeshByMaterial(const WPMdl& mdl, ref<str> material_ref) {
+    const auto wanted = ResolveMdlMaterialPath(rstd::cppstd::as_string_view(material_ref));
+    for (usize mesh_index {}; mesh_index < mdl.meshes.len(); ++mesh_index) {
+        for (const auto& candidate : mdl.meshes[mesh_index].mat_json_files) {
+            if (ResolveMdlMaterialPath(rstd::cppstd::as_string_view(candidate.as_str())) == wanted)
+                return Some(mesh_index);
+        }
+    }
+    return None();
+}
+
 void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
                                  array<float, 2> texcoord_scale) {
     const size_t vert_num = src.positions.len().to_primitive();

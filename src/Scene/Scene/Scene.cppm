@@ -798,6 +798,7 @@ public:
         // clipping-mask submeshes to write into a shared `_rt_puppet_mask`
         // that the main puppet pass samples via g_Texture8.
         std::string output_override;
+        bool        preserve_output { false };
     };
 
     SceneMesh(bool dynamic = false)

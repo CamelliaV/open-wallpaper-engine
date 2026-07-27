@@ -2572,9 +2572,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     bool hasPuppet = ! wpimgobj.puppet.empty();
     (void)hasPuppet;
 
-    std::unique_ptr<WPMdl> puppet;
-    bool                   has_bones = false;
-    bool                   has_mesh  = false;
+    std::unique_ptr<WPMdl>  puppet;
+    bool                    has_bones = false;
+    bool                    has_mesh  = false;
+    const WPMdl::Mesh*      primary_puppet_mesh { nullptr };
+    Vec<const WPMdl::Mesh*> supplemental_puppet_meshes;
     if (! wpimgobj.puppet.empty()) {
         puppet = std::make_unique<WPMdl>();
         if (! WPMdlParser::Parse(rstd::cppstd::as_str(wpimgobj.puppet).unwrap(), vfs, *puppet)) {
@@ -2582,13 +2584,25 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
             puppet = nullptr;
         } else {
             has_bones = puppet->puppet.is_some() && ! (*puppet->puppet)->bones.is_empty();
-            has_mesh  = false;
-            for (const auto& m : puppet->meshes) {
-                if (! m.positions.is_empty()) {
-                    has_mesh = true;
+            if (! wpimgobj.material_path.empty()) {
+                auto primary_index = WPMdlParser::FindMeshByMaterial(
+                    *puppet, rstd::cppstd::as_str(wpimgobj.material_path).unwrap());
+                if (primary_index.is_some() &&
+                    ! puppet->meshes[*primary_index].positions.is_empty())
+                    primary_puppet_mesh = &puppet->meshes[*primary_index];
+            }
+            if (primary_puppet_mesh == nullptr) {
+                for (const auto& candidate : puppet->meshes) {
+                    if (candidate.positions.is_empty()) continue;
+                    primary_puppet_mesh = &candidate;
                     break;
                 }
             }
+            for (const auto& candidate : puppet->meshes) {
+                if (candidate.positions.is_empty() || &candidate == primary_puppet_mesh) continue;
+                supplemental_puppet_meshes.push(&candidate);
+            }
+            has_mesh = primary_puppet_mesh != nullptr;
             if (! has_bones && ! has_mesh) {
                 rstd_error("puppet has no mesh data: {}", wpimgobj.puppet);
                 puppet = nullptr;
@@ -2675,14 +2689,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     // clipped-main submesh gets a CLIPPINGTARGET combo + g_Texture8 binding.
     constexpr std::string_view PUPPET_MASK_RT   = "_rt_puppet_mask";
     bool                       puppet_has_masks = false;
-    if (puppet) {
-        for (const auto& pmesh : puppet->meshes) {
-            if (! pmesh.masks.is_empty()) {
-                puppet_has_masks = true;
-                break;
-            }
-        }
-    }
+    if (primary_puppet_mesh != nullptr) puppet_has_masks = ! primary_puppet_mesh->masks.is_empty();
     if (puppet_has_masks && has_bones &&
         context.scene->RenderTarget(as_str(PUPPET_MASK_RT).unwrap()).is_none()) {
         SceneRenderTarget rt {};
@@ -2757,9 +2764,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     const std::array<float, 2> mapRate       = Texture0UvScale(material, wpimgobj.nopadding);
     const Vector3f source_alignment_offset   = hasEffect ? Vector3f::Zero() : alignment_offset;
     auto           add_puppet_mask_submeshes = [&](SceneMesh& target, uint32_t first_mask_slot) {
-        if (! puppet_has_masks) return;
+        if (! puppet_has_masks || primary_puppet_mesh == nullptr) return;
         std::set<uint32_t> clipped_indices;
         for (const auto& pmesh : puppet->meshes) {
+            if (&pmesh != primary_puppet_mesh) continue;
             for (const auto& mb : pmesh.masks) {
                 for (auto idx : mb.part_ids_a) clipped_indices.insert(idx);
             }
@@ -2767,6 +2775,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         if (! clipped_indices.empty()) {
             size_t smi = 0;
             for (const auto& pmesh : puppet->meshes) {
+                if (&pmesh != primary_puppet_mesh) continue;
                 if (pmesh.positions.is_empty()) continue;
                 if (smi >= target.Submeshes().size()) break;
                 std::vector<SceneMesh::DrawRange> kept;
@@ -2785,6 +2794,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
 
         uint32_t slot = first_mask_slot;
         for (const auto& pmesh : puppet->meshes) {
+            if (&pmesh != primary_puppet_mesh) continue;
             for (const auto& mb : pmesh.masks) {
                 target.Submeshes().emplace_back();
                 auto& pre_sm = target.Submeshes().back();
@@ -2808,11 +2818,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                 Affine3d(Translation3d(alignment_offset.cast<double>())).matrix());
             GenCardMesh(
                 mesh, { geometry_size[0], geometry_size[1] }, mapRate, source_alignment_offset);
-            for (const auto& m : puppet->meshes) {
-                if (m.positions.is_empty()) continue;
+            if (primary_puppet_mesh != nullptr) {
                 effct_final_mesh.Submeshes().emplace_back();
-                WPMdlParser::GenMeshFromMdl(
-                    effct_final_mesh.Submeshes().back(), m, { mapRate[0], mapRate[1] });
+                WPMdlParser::GenMeshFromMdl(effct_final_mesh.Submeshes().back(),
+                                            *primary_puppet_mesh,
+                                            { mapRate[0], mapRate[1] });
             }
             if (has_bones) add_puppet_mask_submeshes(effct_final_mesh, 1);
 
@@ -2828,10 +2838,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         } else {
             mesh.SetGeometryTransform(
                 Affine3d(Translation3d(alignment_offset.cast<double>())).matrix());
-            for (const auto& m : puppet->meshes) {
-                if (m.positions.is_empty()) continue;
+            if (primary_puppet_mesh != nullptr) {
                 mesh.Submeshes().emplace_back();
-                WPMdlParser::GenMeshFromMdl(mesh.Submeshes().back(), m, { mapRate[0], mapRate[1] });
+                WPMdlParser::GenMeshFromMdl(
+                    mesh.Submeshes().back(), *primary_puppet_mesh, { mapRate[0], mapRate[1] });
             }
         }
     }
@@ -2866,6 +2876,57 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     WireMaterialShaderValueScripts(
         context, spImgNode, mesh.MaterialSlots().back(), image_wpmat, shaderInfo);
 
+    for (const auto* supplemental_mesh : supplemental_puppet_meshes) {
+        if (supplemental_mesh->mat_json_files.is_empty()) continue;
+        const auto& material_ref       = supplemental_mesh->mat_json_files[usize()];
+        auto        supplemental_wpmat = WPMdlParser::ParseMaterial(material_ref, vfs);
+        if (supplemental_wpmat.is_none()) continue;
+
+        auto supplemental_user_texture_fallback = supplemental_wpmat->clone();
+        ApplyUserTextureBindings(context, *supplemental_wpmat);
+
+        SceneMaterial supplemental_material;
+        WPShaderInfo  supplemental_shader_info;
+        supplemental_shader_info.baseConstSvs = baseConstSvs;
+        if (! LoadMaterial(vfs,
+                           *context.shader_cache,
+                           context.shader_environment,
+                           *supplemental_wpmat,
+                           context.scene.get(),
+                           &supplemental_material,
+                           &supplemental_shader_info)) {
+            rstd_warn("load puppet material '{}' failed for '{}'", material_ref, wpimgobj.name);
+            continue;
+        }
+        LoadConstvalue(supplemental_material, *supplemental_wpmat, supplemental_shader_info);
+
+        const auto supplemental_uv_scale = Texture0UvScale(supplemental_material);
+        const auto supplemental_slot     = static_cast<uint32_t>(mesh.MaterialSlots().size());
+        mesh.AddMaterial(std::move(supplemental_material));
+        track_image_property_material(mesh.MaterialSlots().back().get());
+        RegisterShaderUserVarIndex(context.scene.get(),
+                                   mesh.MaterialSlots().back().get(),
+                                   *supplemental_wpmat,
+                                   supplemental_shader_info);
+        RegisterMaterialUserTextureIndex(context.scene.get(),
+                                         mesh.MaterialSlots().back().get(),
+                                         supplemental_user_texture_fallback,
+                                         supplemental_shader_info);
+        WireMaterialShaderValueScripts(context,
+                                       spImgNode,
+                                       mesh.MaterialSlots().back(),
+                                       *supplemental_wpmat,
+                                       supplemental_shader_info);
+
+        mesh.Submeshes().emplace_back();
+        auto& supplemental_submesh = mesh.Submeshes().back();
+        WPMdlParser::GenMeshFromMdl(supplemental_submesh,
+                                    *supplemental_mesh,
+                                    { supplemental_uv_scale[0], supplemental_uv_scale[1] });
+        supplemental_submesh.material_slot   = supplemental_slot;
+        supplemental_submesh.preserve_output = true;
+    }
+
     // Puppet clipping masks: each MaskBlock becomes a pair of submeshes.
     // 1) Pre-pass: clippingmaskimage4 over `part_ids_b` (mask shape mesh)
     //    writes the mask RT.
@@ -2877,6 +2938,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         // `part_ids_a` indexes into pmesh.parts[] (position), not part.id.
         std::set<uint32_t> clipped_indices;
         for (const auto& pmesh : puppet->meshes) {
+            if (&pmesh != primary_puppet_mesh) continue;
             for (const auto& mb : pmesh.masks) {
                 for (auto idx : mb.part_ids_a) clipped_indices.insert(idx);
             }
@@ -2886,6 +2948,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         if (! clipped_indices.empty()) {
             size_t smi = 0;
             for (const auto& pmesh : puppet->meshes) {
+                if (&pmesh != primary_puppet_mesh) continue;
                 if (pmesh.positions.is_empty()) continue;
                 if (smi >= mesh.Submeshes().size()) break;
                 std::vector<SceneMesh::DrawRange> kept;
@@ -2905,6 +2968,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         const std::string albedo_tex =
             image_wpmat.textures.empty() ? std::string {} : image_wpmat.textures[0];
         for (const auto& pmesh : puppet->meshes) {
+            if (&pmesh != primary_puppet_mesh) continue;
             for (const auto& mb : pmesh.masks) {
                 // (1) mask pre-pass submesh
                 wpscene::Material mask_wpmat;
@@ -3251,6 +3315,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                     const std::string source_tex =
                         wpmat.textures.empty() ? std::string {} : wpmat.textures[0];
                     for (const auto& pmesh : puppet->meshes) {
+                        if (&pmesh != primary_puppet_mesh) continue;
                         for (const auto& mb : pmesh.masks) {
                             wpscene::Material mask_wpmat;
                             mask_wpmat.shader     = "clippingmaskimage4";

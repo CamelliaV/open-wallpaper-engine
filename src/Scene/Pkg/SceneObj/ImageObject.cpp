@@ -44,12 +44,11 @@ auto LoadImageAssetJson(ImageObject& object, owe::fs::VFS& vfs, SceneVersion ver
     owe::GetJsonValue(*json, "solidlayer", object.solid_layer, false);
     owe::GetJsonValue(*json, "puppet", object.puppet, false);
 
-    std::string material_path;
-    if (! owe::GetJsonValue(*json, "material", material_path, false)) {
+    if (! owe::GetJsonValue(*json, "material", object.material_path, false)) {
         rstd_info("image object no material");
         return std::nullopt;
     }
-    auto material_json = LoadJsonFile(vfs, "/assets/" + material_path);
+    auto material_json = LoadJsonFile(vfs, "/assets/" + object.material_path);
     if (! material_json) return std::nullopt;
     object.material.FromJson(*material_json, version);
     if (object.composite_layer && explicit_no_copy_background)
