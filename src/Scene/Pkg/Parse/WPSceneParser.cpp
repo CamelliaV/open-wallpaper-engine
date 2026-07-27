@@ -1742,8 +1742,9 @@ bool LoadMaterial(fs::VFS& vfs, WPShaderCache& shader_cache,
             auto scene_texture = pScene->Texture(rstd::cppstd::as_str(name).unwrap());
             if (scene_texture.is_none()) {
                 SceneTexture stex;
-                stex.sample = texh.sample;
-                stex.url    = name;
+                stex.sample  = texh.sample;
+                stex.url     = name;
+                stex.isVideo = texh.type == ImageType::VIDEO;
                 if (texh.isSprite) {
                     stex.isSprite   = texh.isSprite;
                     stex.spriteAnim = texh.spriteAnim;
@@ -2851,6 +2852,11 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     SceneImageEffectLayer* image_effect_layer { nullptr };
     if (hasEffect) {
         material.blenmode = BlendMode::Normal;
+    }
+    if (! material.textures.empty()) {
+        auto control =
+            context.scene->VideoControl(rstd::cppstd::as_str(material.textures.front()).unwrap());
+        if (control.is_some()) spImgNode->SetVideoControl(rstd::move(*control));
     }
     mesh.AddMaterial(std::move(material));
     track_image_property_material(mesh.MaterialSlots().back().get());

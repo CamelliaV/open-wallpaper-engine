@@ -98,6 +98,23 @@ struct TextureDefinition {
     }
 };
 
+struct ImportedTextureContentIdentity {
+    String key;
+    u64    revision { 1 };
+
+    auto clone() const -> ImportedTextureContentIdentity {
+        return ImportedTextureContentIdentity {
+            .key      = key.clone(),
+            .revision = revision,
+        };
+    }
+
+    friend bool operator==(const ImportedTextureContentIdentity& lhs,
+                           const ImportedTextureContentIdentity& rhs) {
+        return lhs.key == rhs.key.as_str() && lhs.revision == rhs.revision;
+    }
+};
+
 enum class TextureRequestKind
 {
     Imported,

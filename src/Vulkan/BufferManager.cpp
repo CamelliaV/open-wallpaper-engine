@@ -805,9 +805,10 @@ void ImageUploadManager::Trim() {
                                 m_impl->upload_blocks.end());
 }
 
-auto ImagePrepareContext::CreateImportedTexture(ref<Image> image)
+auto ImagePrepareContext::CreateImportedTexture(
+    ref<Image> image, Option<rstd::sync::Arc<VideoPlaybackState>> playback)
     -> Option<PreparedImageAllocation> {
-    auto allocation = m_textures.AllocateImportedTexture(*image);
+    auto allocation = m_textures.AllocateImportedTexture(*image, rstd::move(playback));
     if (allocation.is_none()) return None();
     if (image->header.type == ImageType::VIDEO) {
         return Some(PreparedImageAllocation {

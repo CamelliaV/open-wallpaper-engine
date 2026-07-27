@@ -43,12 +43,12 @@ public:
         m_submissions.Reset();
         m_uploads.Reset();
         m_buffer_entries.Reset();
+        m_texture_entries.Reset();
         if (m_buffer_manager.is_some()) m_buffer_manager->get()->destroy();
         if (m_image_uploads.is_some()) m_image_uploads->get()->destroy();
         m_buffer_manager = None();
         m_image_uploads  = None();
         m_textures       = None();
-        m_texture_entries.Reset();
         m_shader_entries.Reset();
         m_descriptor_layouts.Reset();
         m_descriptor_system.Reset();

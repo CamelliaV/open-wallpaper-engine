@@ -478,6 +478,41 @@ TEST(SceneTextures, RegisteredReplacementKeepsOneName) {
     EXPECT_EQ(scene.TextureNames().len(), usize(1));
 }
 
+TEST(SceneTextures, SnapshotSeparatesLocatorGenerationFromContentRevision) {
+    owe::Scene scene;
+    scene.RegisterTexture(String::make("video"_str),
+                          owe::SceneTexture {
+                              .url     = "video-a",
+                              .isVideo = true,
+                          });
+    auto first_control = scene.VideoControl("video"_str);
+    ASSERT_TRUE(first_control.is_some());
+
+    auto first  = owe::ExtractRenderSceneSnapshot(scene);
+    auto second = owe::ExtractRenderSceneSnapshot(scene);
+    ASSERT_EQ(first.TextureDescs().len(), usize(1));
+    ASSERT_EQ(second.TextureDescs().len(), usize(1));
+    EXPECT_NE(first.TextureDescs()[usize()].id.generation,
+              second.TextureDescs()[usize()].id.generation);
+    EXPECT_EQ(first.TextureDescs()[usize()].content_revision, u64(1));
+    EXPECT_EQ(second.TextureDescs()[usize()].content_revision, u64(1));
+    ASSERT_TRUE(second.TextureDescs()[usize()].video_control.is_some());
+    EXPECT_TRUE(Arc<owe::VideoPlaybackState>::ptr_eq(
+        *first_control, *second.TextureDescs()[usize()].video_control));
+
+    scene.RegisterTexture(String::make("video"_str),
+                          owe::SceneTexture {
+                              .url     = "video-b",
+                              .isVideo = true,
+                          });
+    auto replaced = owe::ExtractRenderSceneSnapshot(scene);
+    ASSERT_EQ(replaced.TextureDescs().len(), usize(1));
+    EXPECT_EQ(replaced.TextureDescs()[usize()].content_revision, u64(2));
+    ASSERT_TRUE(replaced.TextureDescs()[usize()].video_control.is_some());
+    EXPECT_FALSE(Arc<owe::VideoPlaybackState>::ptr_eq(
+        *first_control, *replaced.TextureDescs()[usize()].video_control));
+}
+
 TEST(SceneTextures, RuntimeImageOverridesParserContent) {
     owe::Scene scene;
     scene.SetImageParser(Box<dyn<owe::IImageParser>>::make(FakeImageParser {}));
@@ -884,6 +919,22 @@ TEST(SceneVisibility, UserBindingVisibilityChangesRequireGraphRebuild) {
     EXPECT_TRUE(scene.ApplyUserNodeVisibilityBindings("variant", rstd::into<owe::Json>(false)));
     EXPECT_FALSE(node->Visible());
     EXPECT_TRUE(scene.IsLayerElidable(owe::WallpaperLayerId { .value = i32(7) }));
+}
+
+TEST(SceneVisibility, TransientWritesDoNotDirtyTheFinalGraphState) {
+    owe::Scene scene;
+    auto       node = rstd::sync::Arc<owe::SceneNode>::make();
+    node->ID()      = rstd::i32(7);
+    scene.RootMut()->AppendChild(node.clone());
+
+    EXPECT_FALSE(scene.ConsumeRenderGraphDirty());
+    EXPECT_TRUE(scene.SetNodeVisible(*node.as_ptr(), false));
+    EXPECT_TRUE(scene.SetNodeVisible(*node.as_ptr(), true));
+    EXPECT_FALSE(scene.ConsumeRenderGraphDirty());
+
+    EXPECT_TRUE(scene.SetNodeVisible(*node.as_ptr(), false));
+    EXPECT_TRUE(scene.ConsumeRenderGraphDirty());
+    EXPECT_FALSE(scene.ConsumeRenderGraphDirty());
 }
 
 TEST(SceneRenderTargets, EnsureLinkRenderTargetCreatesOwnedDescriptor) {

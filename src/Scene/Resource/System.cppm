@@ -158,6 +158,12 @@ public:
                 .message = rstd::format("resource prepare transaction is already active"),
             });
         }
+        if (! m_registries.TextureEntries().BeginPrepareTransaction()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("texture prepare transaction is already active"),
+            });
+        }
         vulkan::ImagePrepareContext image_context(m_registries.Textures(),
                                                   m_registries.ImageUploads());
         auto image_backend  = dyn<vulkan::ImagePrepareBackend>::from_ref(image_context);
@@ -220,12 +226,18 @@ public:
     void AbortPreparePlan() {
         m_registries.ImageUploads().DiscardPendingUploads();
         m_registries.TextureEntries().DiscardPendingUploads();
+        m_registries.TextureEntries().AbortPrepareTransaction();
         auto rollback = m_prepare_rollback.take();
         if (rollback.is_none()) return;
         m_prepared = rstd::move(rollback->table);
     }
 
-    void CommitPreparePlan() { m_prepare_rollback = None(); }
+    void CommitPreparePlan() {
+        m_prepare_rollback = None();
+        m_registries.TextureEntries().CommitPrepareTransaction();
+        auto active = m_prepared.TextureResources();
+        m_registries.TextureEntries().RetainActive(active.as_slice());
+    }
 
     auto Prepared() const -> const PreparedResourceTable& { return m_prepared; }
     auto States() -> ResourceStateTracker& { return m_registries.States(); }

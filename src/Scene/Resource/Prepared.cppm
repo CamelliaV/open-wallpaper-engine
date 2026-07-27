@@ -198,6 +198,16 @@ public:
     auto DescriptorCount() const noexcept -> usize { return m_descriptors.len(); }
     auto ExternalCount() const noexcept -> usize { return m_externals.len(); }
 
+    auto TextureResources() const -> Vec<resource::TextureHandle> {
+        auto resources = Vec<resource::TextureHandle>::with_capacity(m_textures.len());
+        auto textures  = m_textures.values();
+        for (auto texture = textures.next(); texture.is_some(); texture = textures.next()) {
+            auto resource = (**texture).resource;
+            resources.push(rstd::move(resource));
+        }
+        return resources;
+    }
+
     auto Leases() const -> PreparedResourceLeases {
         auto texture_leases = rstd::vec::Vec<PreparedTextureLease>::with_capacity(m_textures.len());
         auto textures       = m_textures.values();
@@ -511,8 +521,9 @@ private:
     };
 
     struct PendingContent {
-        String          key;
-        Vec<PendingUse> uses;
+        String                                      key;
+        Option<rstd::sync::Arc<VideoPlaybackState>> playback;
+        Vec<PendingUse>                             uses;
     };
 
     struct DecodedContent {
@@ -659,12 +670,30 @@ public:
                        Option<mut_ref<dyn<resource::TextureContentProvider>>> content,
                        Option<mut_ref<dyn<resource::TexturePrepareObserver>>> observer)
         -> Result<empty, resource::ResourceError> {
-        auto                pending_index = rstd::collections::HashMap<String, usize>::make();
+        auto pending_index =
+            rstd::collections::HashMap<resource::ImportedTextureContentIdentity, usize>::make();
         TexturePrepareTrace plan_trace(observer, TexturePrepareTrace::Kind::Plan);
 
         for (usize entry_index {}; entry_index < entries.len(); ++entry_index) {
-            const auto& entry  = entries[entry_index];
-            auto        handle = m_textures.Register(entry.request.clone());
+            const auto& entry            = entries[entry_index];
+            auto        imported_content = None<resource::ImportedTextureContentIdentity>();
+            resource::TextureHandle handle;
+            if (entry.request.kind == resource::TextureRequestKind::Imported) {
+                if (content.is_none()) {
+                    return Err(resource::ResourceError {
+                        .kind    = resource::ResourceErrorKind::MissingContent,
+                        .message = rstd::format("texture content {} unavailable",
+                                                entry.request.name.as_str()),
+                    });
+                }
+                auto resolved = (*content)->ResolveTextureContent(entry.request);
+                if (resolved.is_err()) return Err(rstd::move(resolved).unwrap_err_unchecked());
+                imported_content = Some(rstd::move(resolved).unwrap_unchecked());
+                handle =
+                    m_textures.RegisterImported(entry.request.clone(), imported_content->clone());
+            } else {
+                handle = m_textures.Register(entry.request.clone());
+            }
             if (! handle.Valid()) {
                 return Err(resource::ResourceError {
                     .kind = resource::ResourceErrorKind::MissingDefinition,
@@ -698,27 +727,22 @@ public:
                 continue;
             }
 
-            if (content.is_none()) {
-                return Err(resource::ResourceError {
-                    .kind = resource::ResourceErrorKind::MissingContent,
-                    .message =
-                        rstd::format("texture content {} unavailable", entry.request.name.as_str()),
-                });
-            }
-
-            auto resolved = (*content)->ResolveTextureKey(entry.request);
-            if (resolved.is_err()) return Err(rstd::move(resolved).unwrap_err_unchecked());
-            auto  key   = rstd::move(resolved).unwrap_unchecked();
-            auto  found = pending_index.get(key.as_str());
+            auto  identity = rstd::move(imported_content).unwrap_unchecked();
+            auto  found    = pending_index.get(identity);
+            auto  playback = (*content)->ResolveVideoPlayback(entry.request);
             usize index;
             if (found.is_some()) {
                 index = **found;
+                if (session.m_pending[index].playback.is_none() && playback.is_some()) {
+                    session.m_pending[index].playback = rstd::move(playback);
+                }
             } else {
                 index = session.m_pending.len();
-                (void)pending_index.insert(key.clone(), index);
+                (void)pending_index.insert(identity.clone(), index);
                 session.m_pending.push(ResourcePrepareSession::PendingContent {
-                    .key  = rstd::move(key),
-                    .uses = Vec<ResourcePrepareSession::PendingUse>::make(),
+                    .key      = rstd::move(identity.key),
+                    .playback = rstd::move(playback),
+                    .uses     = Vec<ResourcePrepareSession::PendingUse>::make(),
                 });
             }
             session.m_pending[index].uses.push(ResourcePrepareSession::PendingUse {
@@ -799,7 +823,11 @@ public:
             {
                 TexturePrepareTrace upload_trace(observer, TexturePrepareTrace::Kind::Upload);
                 auto                image = rstd::move(item.image).unwrap_unchecked();
-                auto created = (*m_textures_backend)->CreateImportedTexture(image.deref());
+                auto playback = session.m_pending[item.index].playback.is_some()
+                                    ? Some(session.m_pending[item.index].playback->clone())
+                                    : None<rstd::sync::Arc<VideoPlaybackState>>();
+                auto created  = (*m_textures_backend)
+                                    ->CreateImportedTexture(image.deref(), rstd::move(playback));
                 if (created.is_none()) {
                     return Err(resource::ResourceError {
                         .kind    = resource::ResourceErrorKind::BackendFailure,

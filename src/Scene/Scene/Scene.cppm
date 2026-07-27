@@ -141,6 +141,7 @@ struct SceneTexture {
     std::string     url;
     TextureSample   sample;
     bool            isSprite { false };
+    bool            isVideo { false };
     SpriteAnimation spriteAnim;
 };
 
@@ -1403,6 +1404,10 @@ public:
             (*m_particle_control)->Play();
             return;
         }
+        if (m_video_control) {
+            (*m_video_control)->Play();
+            return;
+        }
         m_layer_playing = true;
     }
     void Stop() {
@@ -1412,6 +1417,10 @@ public:
         }
         if (m_particle_control) {
             (*m_particle_control)->Stop();
+            return;
+        }
+        if (m_video_control) {
+            (*m_video_control)->Stop();
             return;
         }
         m_layer_playing = false;
@@ -1425,11 +1434,16 @@ public:
             (*m_particle_control)->Pause();
             return;
         }
+        if (m_video_control) {
+            (*m_video_control)->Pause();
+            return;
+        }
         m_layer_playing = false;
     }
     bool IsPlaying() const {
         if (m_sound_control) return (*m_sound_control)->IsPlaying();
         if (m_particle_control) return (*m_particle_control)->IsPlaying();
+        if (m_video_control) return (*m_video_control)->Snapshot().playing;
         return m_layer_playing;
     }
     void SetSoundControl(Arc<dyn<SceneSoundControl>> control) {
@@ -1454,6 +1468,13 @@ public:
     Option<Arc<dyn<SceneParticleControl>>> ParticleControlHandle() const {
         if (m_particle_control.is_none()) return None();
         return Some((*m_particle_control).clone());
+    }
+    void SetVideoControl(Arc<VideoPlaybackState> control) {
+        m_video_control = Some(rstd::move(control));
+    }
+    Option<Arc<VideoPlaybackState>> VideoControlHandle() const {
+        return m_video_control.is_some() ? Some(m_video_control->clone())
+                                         : None<Arc<VideoPlaybackState>>();
     }
 
     void CopyTrans(const SceneNode& node) {
@@ -1548,6 +1569,7 @@ private:
     float                                  m_volume { 1.0f };
     Option<Arc<dyn<SceneSoundControl>>>    m_sound_control;
     Option<Arc<dyn<SceneParticleControl>>> m_particle_control;
+    Option<Arc<VideoPlaybackState>>        m_video_control;
 
     std::shared_ptr<SceneMesh> m_mesh;
 
@@ -1972,10 +1994,12 @@ struct RenderItemRecord {
 };
 
 struct RenderTextureDescRecord {
-    RenderTextureDescId id;
-    SceneTextureId      scene_texture;
-    String              key;
-    SceneTexture        desc;
+    RenderTextureDescId             id;
+    SceneTextureId                  scene_texture;
+    String                          key;
+    SceneTexture                    desc;
+    u64                             content_revision { 0 };
+    Option<Arc<VideoPlaybackState>> video_control;
 };
 
 struct RenderTargetDescRecord {
@@ -2193,6 +2217,8 @@ public:
     void RegisterCameraPathUserBinding(String key, Arc<SceneCameraPath>);
     void RegisterTexture(String name, SceneTexture texture);
     auto Texture(ref<str> name) const -> Option<ref<SceneTexture>>;
+    auto TextureContentRevision(ref<str> name) const -> u64;
+    auto VideoControl(ref<str> name) const -> Option<Arc<VideoPlaybackState>>;
     auto TextureNames() const -> slice<String> { return m_texture_names.as_slice(); }
     void RegisterRenderTarget(String name, SceneRenderTarget target);
     auto RenderTarget(ref<str> name) const -> Option<ref<SceneRenderTarget>>;
@@ -2216,11 +2242,7 @@ public:
     bool SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible);
     void EnablePlanarReflection();
     bool PlanarReflectionEnabled() const { return m_planar_reflection_enabled; }
-    bool ConsumeRenderGraphDirty() {
-        bool dirty           = m_render_graph_dirty;
-        m_render_graph_dirty = false;
-        return dirty;
-    }
+    bool ConsumeRenderGraphDirty();
     bool ApplyUserNodeVisibilityBindings(std::string_view key, const Json& property);
     bool ApplyUserImageEffectVisibilityBindings(std::string_view key, const Json& property);
     bool ApplyUserLightVisibilityBindings(std::string_view key, const Json& property);
@@ -2440,6 +2462,8 @@ private:
     Vec<Box<dyn<Any>>>                                           m_extensions;
     HashMap<String, Arc<Image>>                                  m_runtime_images;
     HashMap<String, SceneTexture>                                m_textures;
+    HashMap<String, u64>                                         m_texture_content_revisions;
+    HashMap<String, Arc<VideoPlaybackState>>                     m_video_controls;
     Vec<String>                                                  m_texture_names;
     HashMap<String, SceneRenderTarget>                           m_render_targets;
     Vec<String>                                                  m_render_target_names;
@@ -2465,6 +2489,7 @@ private:
     // User-hidden layers and static identity layers share the same graph-elision
     // result while retaining their independent reasons.
     HashSet<i32> m_elidable_layer_ids;
+    HashSet<i32> m_render_graph_elidable_layer_ids;
     HashSet<i32> m_static_elidable_layer_ids;
     HashSet<i32> m_visibility_elidable_layer_ids;
 };

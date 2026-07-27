@@ -157,6 +157,69 @@ struct TextureSample {
     TextureFilter minFilter { TextureFilter::NEAREST };
 };
 
+struct VideoPlaybackSnapshot {
+    bool      playing { true };
+    rstd::f64 rate { 1.0 };
+    rstd::u64 seek_sequence {};
+    rstd::f64 seek_seconds {};
+};
+
+class VideoPlaybackState {
+public:
+    VideoPlaybackState()                                             = default;
+    VideoPlaybackState(const VideoPlaybackState&)                    = delete;
+    VideoPlaybackState(VideoPlaybackState&&)                         = delete;
+    auto operator=(const VideoPlaybackState&) -> VideoPlaybackState& = delete;
+    auto operator=(VideoPlaybackState&&) -> VideoPlaybackState&      = delete;
+
+    void Play() { m_playing.store(true, rstd::sync::atomic::Ordering::Release); }
+    void Pause() { m_playing.store(false, rstd::sync::atomic::Ordering::Release); }
+    void Stop() {
+        Pause();
+        Seek(rstd::f64());
+    }
+    void Seek(rstd::f64 seconds) {
+        if (! seconds.is_finite() || seconds < rstd::f64()) seconds = rstd::f64();
+        m_current_time.store(seconds, rstd::sync::atomic::Ordering::Release);
+        m_seek_seconds.store(seconds, rstd::sync::atomic::Ordering::Release);
+        m_seek_sequence.fetch_add(rstd::u64(1), rstd::sync::atomic::Ordering::AcqRel);
+    }
+    void SetRate(rstd::f64 rate) {
+        if (! rate.is_finite() || rate <= rstd::f64()) return;
+        m_rate.store(rate, rstd::sync::atomic::Ordering::Release);
+    }
+
+    auto Snapshot() const -> VideoPlaybackSnapshot {
+        return VideoPlaybackSnapshot {
+            .playing       = m_playing.load(rstd::sync::atomic::Ordering::Acquire),
+            .rate          = m_rate.load(rstd::sync::atomic::Ordering::Acquire),
+            .seek_sequence = m_seek_sequence.load(rstd::sync::atomic::Ordering::Acquire),
+            .seek_seconds  = m_seek_seconds.load(rstd::sync::atomic::Ordering::Acquire),
+        };
+    }
+
+    void PublishTime(rstd::f64 current, rstd::Option<rstd::f64> duration) {
+        m_current_time.store(current, rstd::sync::atomic::Ordering::Release);
+        m_duration.store(duration.unwrap_or(rstd::f64(-1.0)),
+                         rstd::sync::atomic::Ordering::Release);
+    }
+    auto CurrentTime() const -> rstd::f64 {
+        return m_current_time.load(rstd::sync::atomic::Ordering::Acquire);
+    }
+    auto Duration() const -> rstd::Option<rstd::f64> {
+        auto value = m_duration.load(rstd::sync::atomic::Ordering::Acquire);
+        return value >= rstd::f64() ? rstd::Some(value) : rstd::None<rstd::f64>();
+    }
+
+private:
+    rstd::sync::atomic::Atomic<bool>      m_playing { true };
+    rstd::sync::atomic::Atomic<rstd::f64> m_rate { rstd::f64(1.0) };
+    rstd::sync::atomic::Atomic<rstd::u64> m_seek_sequence {};
+    rstd::sync::atomic::Atomic<rstd::f64> m_seek_seconds {};
+    rstd::sync::atomic::Atomic<rstd::f64> m_current_time {};
+    rstd::sync::atomic::Atomic<rstd::f64> m_duration { rstd::f64(-1.0) };
+};
+
 enum class VertexType
 {
     FLOAT1,

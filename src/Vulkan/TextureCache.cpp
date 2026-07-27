@@ -403,9 +403,10 @@ Option<ExImageParameters> TextureCache::CreateExTex(u32 width, u32 height, VkFor
 }
 
 Option<rstd::sync::Arc<TextureAllocation>>
-TextureCache::AllocateImportedTexture(const Image& image) {
+TextureCache::AllocateImportedTexture(const Image&                                image,
+                                      Option<rstd::sync::Arc<VideoPlaybackState>> playback) {
     if (image.header.type == ImageType::VIDEO) {
-        return CreateVideoTex(image);
+        return CreateVideoTex(image, rstd::move(playback));
     }
 
     ImageSlots img_slots;
@@ -663,19 +664,24 @@ struct TextureCache::VideoRegistry {
     rstd::uint32_t                        yuv_max_width { 0 };
     rstd::uint32_t                        yuv_max_height { 0 };
 
-    struct Slot {
-        std::string                         key;
-        rstd::uint32_t                      width { 0 };
-        rstd::uint32_t                      height { 0 };
-        VmaImageParameters                  image;
-        rstd::sync::Weak<TextureAllocation> texture = rstd::sync::Weak<TextureAllocation>::make();
-        Option<Box<wavsen::video::VideoDecoder>> decoder;
-        wavsen::video::Nv12Frame                 nv12_scratch;
-        f64                                      pts_acc {};
-        f64                                      last_pts { -1.0 };
-        bool                                     have_frame { false };
+    struct Runtime {
+        VideoRegistry*                              registry { nullptr };
+        const Device*                               device { nullptr };
+        String                                      key;
+        rstd::uint32_t                              width { 0 };
+        rstd::uint32_t                              height { 0 };
+        ImageParameters                             target;
+        Option<rstd::sync::Arc<VideoPlaybackState>> playback;
+        Option<Box<wavsen::video::VideoDecoder>>    decoder;
+        wavsen::video::Nv12Frame                    nv12_scratch;
+        f64                                         pts_acc {};
+        f64                                         last_pts { -1.0 };
+        bool                                        have_frame { false };
+        u64                                         applied_seek_sequence {};
+
+        void Pump(double dt_seconds);
     };
-    Vec<Box<Slot>> slots;
+    Vec<rstd::sync::Weak<dyn<TextureAllocationRuntime>>> runtimes;
 
     const wavsen::video::Producer* ensureProducer(const Device& device, rstd::uint32_t width,
                                                   rstd::uint32_t height) {
@@ -716,7 +722,21 @@ struct TextureCache::VideoRegistry {
     }
 };
 
-Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Image& image) {
+namespace rstd
+{
+
+template<>
+struct Impl<owe::vulkan::TextureAllocationRuntime,
+            owe::vulkan::TextureCache::VideoRegistry::Runtime>
+    : ImplBase<owe::vulkan::TextureCache::VideoRegistry::Runtime> {
+    void Pump(double seconds) { this->self().Pump(seconds); }
+};
+
+} // namespace rstd
+
+Option<rstd::sync::Arc<TextureAllocation>>
+TextureCache::CreateVideoTex(const Image&                                image,
+                             Option<rstd::sync::Arc<VideoPlaybackState>> playback) {
     if (image.slots.empty() || image.slots[0].mipmaps.empty()) return rstd::None();
     auto& mip = image.slots[0].mipmaps[0];
     if (mip.video_source.is_none() || mip.width <= 0 || mip.height <= 0) {
@@ -733,16 +753,19 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Im
 
     auto video_source = (*mip.video_source).clone();
 
-    auto slot = Box<VideoRegistry::Slot>::make();
-    slot->key = image.key;
+    VideoRegistry::Runtime runtime;
+    runtime.registry = registry;
+    runtime.device   = &m_device;
+    runtime.key      = String::make(rstd::cppstd::as_str(image.key).unwrap());
+    runtime.playback = rstd::move(playback);
     /* NV12 chroma is 4:2:0 → both dims even. */
     const auto source_width  = static_cast<rstd::uint32_t>(mip.width);
     const auto source_height = static_cast<rstd::uint32_t>(mip.height);
-    slot->width              = source_width | (source_width & 1u);
-    slot->height             = source_height | (source_height & 1u);
-    if (slot->width != source_width) slot->width = source_width + 1u;
-    if (slot->height != source_height) {
-        slot->height = source_height + 1u;
+    runtime.width            = source_width | (source_width & 1u);
+    runtime.height           = source_height | (source_height & 1u);
+    if (runtime.width != source_width) runtime.width = source_width + 1u;
+    if (runtime.height != source_height) {
+        runtime.height = source_height + 1u;
     }
 
     /* 1) Allocate the stable RGBA8 target. */
@@ -764,7 +787,7 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Im
         .borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
         .unnormalizedCoordinates = false,
     };
-    VkExtent3D ext { slot->width, slot->height, 1 };
+    VkExtent3D ext { runtime.width, runtime.height, 1 };
     auto       img_opt = CreateImage(m_device,
                                      ext,
                                      /*miplevel=*/1u,
@@ -776,16 +799,17 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Im
         rstd_error("CreateVideoTex: VkImage allocation failed for {}", image.key);
         return rstd::None();
     }
-    slot->image = std::move(*img_opt);
-    AssignImageGeneration(slot->image);
+    auto target_image = std::move(*img_opt);
+    AssignImageGeneration(target_image);
+    runtime.target = ToImageParameters(target_image);
 
-    if (! registry->ensureYuv(m_device, slot->width, slot->height)) return None();
+    if (! registry->ensureYuv(m_device, runtime.width, runtime.height)) return None();
 
     /* 2) Initial layout: UNDEFINED → TRANSFER_DST → clear black →
      * SHADER_READ_ONLY. Mirrors the one-shot pattern used by the
      * existing TransImgLayout / CopyImageData helpers in this file. */
     {
-        ImageParameters ip = ToImageParameters(slot->image);
+        ImageParameters ip = runtime.target;
         VVK_CHECK(m_tex_cmd.Begin(VkCommandBufferBeginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,
@@ -847,12 +871,12 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Im
     };
     const wavsen::video::Producer* producer = nullptr;
     if (requested_hwdec != wavsen::video::HwAccel::None) {
-        producer = registry->ensureProducer(m_device, slot->width, slot->height);
+        producer = registry->ensureProducer(m_device, runtime.width, runtime.height);
         if (! producer) opts.hwaccel = wavsen::video::HwAccel::None;
     }
     auto dec_r = wavsen::video::VideoDecoder::open_from_stream(std::move(factory),
-                                                               u32(slot->width),
-                                                               u32(slot->height),
+                                                               u32(runtime.width),
+                                                               u32(runtime.height),
                                                                /*loop=*/true,
                                                                producer,
                                                                opts);
@@ -862,158 +886,199 @@ Option<rstd::sync::Arc<TextureAllocation>> TextureCache::CreateVideoTex(const Im
                    dec_r.unwrap_err().message);
         return None();
     }
-    slot->decoder = rstd::Some(std::move(dec_r).unwrap());
+    runtime.decoder = rstd::Some(std::move(dec_r).unwrap());
+    if (runtime.playback.is_some()) {
+        (*runtime.playback)->PublishTime(f64(), (*runtime.decoder)->duration());
+    }
     rstd_info("CreateVideoTex: {} hwdec={} decoder kind={}",
               image.key,
               HwdecLabel(requested_hwdec),
-              FrameKindLabel((*slot->decoder)->kind()));
+              FrameKindLabel((*runtime.decoder)->kind()));
 
     ImageSlots img_slots {};
     img_slots.slots.resize(1);
-    img_slots.slots[0] = std::move(slot->image);
-    auto allocation    = rstd::sync::Arc<TextureAllocation>::make(rstd::move(img_slots));
-    slot->texture      = allocation.downgrade();
-    registry->slots.push(rstd::move(slot));
+    img_slots.slots[0] = std::move(target_image);
+    auto runtime_owner = rstd::sync::Arc<dyn<TextureAllocationRuntime>>::make(rstd::move(runtime));
+    auto allocation    = rstd::sync::Arc<TextureAllocation>::make(rstd::move(img_slots),
+                                                                  Some(runtime_owner.clone()));
+    registry->runtimes.push(runtime_owner.downgrade());
     return Some(rstd::move(allocation));
+}
+
+void TextureCache::VideoRegistry::Runtime::Pump(double dt_seconds) {
+    if (registry == nullptr || device == nullptr || decoder.is_none()) return;
+    auto& s            = *this;
+    auto  publish_time = [&] {
+        if (s.playback.is_some()) {
+            (*s.playback)->PublishTime(s.pts_acc, (*s.decoder)->duration());
+        }
+    };
+    if (s.playback.is_some()) {
+        auto state = (*s.playback)->Snapshot();
+        if (state.seek_sequence != s.applied_seek_sequence) {
+            auto seeked             = (*s.decoder)->seek(state.seek_seconds);
+            s.applied_seek_sequence = state.seek_sequence;
+            if (seeked.is_err()) {
+                rstd_error("PumpVideoTextures[{}]: seek: {}",
+                           s.key.as_str(),
+                           rstd::move(seeked).unwrap_err().message);
+            } else {
+                s.pts_acc    = state.seek_seconds;
+                s.last_pts   = f64(-1.0);
+                s.have_frame = false;
+            }
+        }
+        if (! state.playing) {
+            publish_time();
+            return;
+        }
+        dt_seconds *= state.rate.to_primitive();
+    }
+    s.pts_acc += f64(dt_seconds);
+    auto* yuv = registry->ensureYuv(*device, s.width, s.height);
+    if (! yuv) {
+        publish_time();
+        return;
+    }
+
+    ImageParameters ip = s.target;
+
+    const auto                  fkind = (*s.decoder)->kind();
+    wavsen::video::VkFrameView  vkv {};
+    wavsen::video::DrmFrameView drmv {};
+
+    /* Drain decoded frames until we catch up to wall time. Cap to
+     * 4 frames per tick to avoid spiral-of-death on heavy stalls. */
+    bool got_new = false;
+    for (int i = 0; i < 4; ++i) {
+        if (s.last_pts >= f64() && s.last_pts > s.pts_acc) break;
+
+        rstd::Result<wavsen::video::NextFrame, wavsen::video::Error> r =
+            rstd::Ok(wavsen::video::NextFrame::Ok);
+        switch (fkind) {
+        case wavsen::video::FrameKind::VulkanShared: r = (*s.decoder)->next_vk_frame(vkv); break;
+        case wavsen::video::FrameKind::VaapiDrm: r = (*s.decoder)->next_drm_frame(drmv); break;
+        case wavsen::video::FrameKind::Sw: r = (*s.decoder)->next_frame(s.nv12_scratch); break;
+        }
+        if (r.is_err()) {
+            rstd_error("PumpVideoTextures[{}]: decode {}: {}",
+                       s.key.as_str(),
+                       FrameKindLabel(fkind),
+                       std::move(r).unwrap_err().message);
+            break;
+        }
+        auto kind = r.unwrap();
+        if (kind == wavsen::video::NextFrame::Eof) {
+            s.pts_acc  = f64();
+            s.last_pts = f64(-1.0);
+            break;
+        }
+        const bool decoder_looped = kind == wavsen::video::NextFrame::Looped;
+        f64        frame_pts { -1.0 };
+        switch (fkind) {
+        case wavsen::video::FrameKind::VulkanShared: frame_pts = vkv.pts_seconds; break;
+        case wavsen::video::FrameKind::VaapiDrm: frame_pts = drmv.pts_seconds; break;
+        case wavsen::video::FrameKind::Sw: frame_pts = s.nv12_scratch.pts_seconds; break;
+        }
+        if (decoder_looped) s.pts_acc = frame_pts.max(f64());
+        s.last_pts = frame_pts;
+        got_new    = true;
+        if (decoder_looped) break;
+    }
+    if (! got_new && s.have_frame) {
+        publish_time();
+        return;
+    }
+    if (! got_new) {
+        publish_time();
+        return;
+    }
+
+    u32 cs_id;
+    u32 cr_id;
+    switch (fkind) {
+    case wavsen::video::FrameKind::VulkanShared:
+        cs_id = vkv.colorspace;
+        cr_id = vkv.color_range;
+        break;
+    case wavsen::video::FrameKind::VaapiDrm:
+        cs_id = drmv.colorspace;
+        cr_id = drmv.color_range;
+        break;
+    case wavsen::video::FrameKind::Sw:
+        cs_id = s.nv12_scratch.colorspace;
+        cr_id = s.nv12_scratch.color_range;
+        break;
+    }
+    const auto color_matrix = wavsen::video::make_color_matrix(
+        static_cast<wavsen::video::ColorSpace>(cs_id.to_primitive()),
+        static_cast<wavsen::video::ColorRange>(cr_id.to_primitive()));
+
+    rstd::Result<int, wavsen::video::Error> cv = rstd::Ok(-1);
+    switch (fkind) {
+    case wavsen::video::FrameKind::VulkanShared: {
+        wavsen::video::YuvToRgba::VkFrameImports im {};
+        im.y_image           = vkv.img[0];
+        im.uv_image          = vkv.plane_count > u32(1) ? vkv.img[1] : VK_NULL_HANDLE;
+        im.y_sem             = vkv.sem[0];
+        im.uv_sem            = vkv.plane_count > u32(1) ? vkv.sem[1] : vkv.sem[0];
+        im.y_sem_val_in_out  = &vkv.sem_value[0];
+        im.uv_sem_val_in_out = vkv.plane_count > u32(1) ? &vkv.sem_value[1] : &vkv.sem_value[0];
+        im.y_layout_in_out   = &vkv.layout[0];
+        im.uv_layout_in_out  = vkv.plane_count > u32(1) ? &vkv.layout[1] : &vkv.layout[0];
+        im.y_qf_in_out       = &vkv.queue_family[0];
+        im.uv_qf_in_out = vkv.plane_count > u32(1) ? &vkv.queue_family[1] : &vkv.queue_family[0];
+        im.src_w        = vkv.width;
+        im.src_h        = vkv.height;
+        im.bit_depth    = vkv.bit_depth;
+        cv              = yuv->convert_av_vk_frame(im,
+                                                   ip.handle,
+                                                   u32(s.width),
+                                                   u32(s.height),
+                                                   color_matrix,
+                                                   wavsen::video::ConvertTarget::SampledLocal);
+        break;
+    }
+    case wavsen::video::FrameKind::VaapiDrm:
+        cv = yuv->convert_drm_prime(drmv,
+                                    ip.handle,
+                                    u32(s.width),
+                                    u32(s.height),
+                                    color_matrix,
+                                    wavsen::video::ConvertTarget::SampledLocal);
+        break;
+    case wavsen::video::FrameKind::Sw:
+        cv = yuv->convert_nv12(ip.handle,
+                               u32(s.width),
+                               u32(s.height),
+                               s.nv12_scratch.data.data(),
+                               s.nv12_scratch.data.len(),
+                               color_matrix,
+                               wavsen::video::ConvertTarget::SampledLocal);
+        break;
+    }
+    if (cv.is_err()) {
+        rstd_error("PumpVideoTextures[{}]: yuv conversion {}: {}",
+                   s.key.as_str(),
+                   FrameKindLabel(fkind),
+                   std::move(cv).unwrap_err().message);
+        publish_time();
+        return;
+    }
+    CloseSyncFd(std::move(cv).unwrap());
+    s.have_frame = true;
+    publish_time();
 }
 
 void TextureCache::PumpVideoTextures(double dt_seconds) {
     if (m_video_registry.is_none()) return;
     auto* registry = m_video_registry->get();
-    if (registry->slots.is_empty()) return;
-
-    for (auto& up : registry->slots) {
-        auto& s = *up;
-        s.pts_acc += f64(dt_seconds);
-        auto* yuv = registry->ensureYuv(m_device, s.width, s.height);
-        if (! yuv) continue;
-
-        auto texture = s.texture.upgrade();
-        if (! texture) continue;
-        auto view = texture->View();
-        if (view.slots.empty()) continue;
-        ImageParameters ip = view.getActive();
-
-        const auto                  fkind = (*s.decoder)->kind();
-        wavsen::video::VkFrameView  vkv {};
-        wavsen::video::DrmFrameView drmv {};
-
-        /* Drain decoded frames until we catch up to wall time. Cap to
-         * 4 frames per tick to avoid spiral-of-death on heavy stalls. */
-        bool got_new = false;
-        for (int i = 0; i < 4; ++i) {
-            if (s.last_pts >= f64() && s.last_pts > s.pts_acc) break;
-
-            rstd::Result<wavsen::video::NextFrame, wavsen::video::Error> r =
-                rstd::Ok(wavsen::video::NextFrame::Ok);
-            switch (fkind) {
-            case wavsen::video::FrameKind::VulkanShared:
-                r = (*s.decoder)->next_vk_frame(vkv);
-                break;
-            case wavsen::video::FrameKind::VaapiDrm: r = (*s.decoder)->next_drm_frame(drmv); break;
-            case wavsen::video::FrameKind::Sw: r = (*s.decoder)->next_frame(s.nv12_scratch); break;
-            }
-            if (r.is_err()) {
-                rstd_error("PumpVideoTextures[{}]: decode {}: {}",
-                           s.key,
-                           FrameKindLabel(fkind),
-                           std::move(r).unwrap_err().message);
-                break;
-            }
-            auto kind = r.unwrap();
-            if (kind == wavsen::video::NextFrame::Eof) {
-                s.pts_acc  = f64();
-                s.last_pts = f64(-1.0);
-                break;
-            }
-            const bool decoder_looped = kind == wavsen::video::NextFrame::Looped;
-            f64        frame_pts { -1.0 };
-            switch (fkind) {
-            case wavsen::video::FrameKind::VulkanShared: frame_pts = vkv.pts_seconds; break;
-            case wavsen::video::FrameKind::VaapiDrm: frame_pts = drmv.pts_seconds; break;
-            case wavsen::video::FrameKind::Sw: frame_pts = s.nv12_scratch.pts_seconds; break;
-            }
-            if (decoder_looped) s.pts_acc = frame_pts.max(f64());
-            s.last_pts = frame_pts;
-            got_new    = true;
-            if (decoder_looped) break;
-        }
-        if (! got_new && s.have_frame) continue; /* nothing to upload */
-        if (! got_new) continue;
-
-        u32 cs_id;
-        u32 cr_id;
-        switch (fkind) {
-        case wavsen::video::FrameKind::VulkanShared:
-            cs_id = vkv.colorspace;
-            cr_id = vkv.color_range;
-            break;
-        case wavsen::video::FrameKind::VaapiDrm:
-            cs_id = drmv.colorspace;
-            cr_id = drmv.color_range;
-            break;
-        case wavsen::video::FrameKind::Sw:
-            cs_id = s.nv12_scratch.colorspace;
-            cr_id = s.nv12_scratch.color_range;
-            break;
-        }
-        const auto color_matrix = wavsen::video::make_color_matrix(
-            static_cast<wavsen::video::ColorSpace>(cs_id.to_primitive()),
-            static_cast<wavsen::video::ColorRange>(cr_id.to_primitive()));
-
-        rstd::Result<int, wavsen::video::Error> cv = rstd::Ok(-1);
-        switch (fkind) {
-        case wavsen::video::FrameKind::VulkanShared: {
-            wavsen::video::YuvToRgba::VkFrameImports im {};
-            im.y_image           = vkv.img[0];
-            im.uv_image          = vkv.plane_count > u32(1) ? vkv.img[1] : VK_NULL_HANDLE;
-            im.y_sem             = vkv.sem[0];
-            im.uv_sem            = vkv.plane_count > u32(1) ? vkv.sem[1] : vkv.sem[0];
-            im.y_sem_val_in_out  = &vkv.sem_value[0];
-            im.uv_sem_val_in_out = vkv.plane_count > u32(1) ? &vkv.sem_value[1] : &vkv.sem_value[0];
-            im.y_layout_in_out   = &vkv.layout[0];
-            im.uv_layout_in_out  = vkv.plane_count > u32(1) ? &vkv.layout[1] : &vkv.layout[0];
-            im.y_qf_in_out       = &vkv.queue_family[0];
-            im.uv_qf_in_out =
-                vkv.plane_count > u32(1) ? &vkv.queue_family[1] : &vkv.queue_family[0];
-            im.src_w     = vkv.width;
-            im.src_h     = vkv.height;
-            im.bit_depth = vkv.bit_depth;
-            cv           = yuv->convert_av_vk_frame(im,
-                                                    ip.handle,
-                                                    u32(s.width),
-                                                    u32(s.height),
-                                                    color_matrix,
-                                                    wavsen::video::ConvertTarget::SampledLocal);
-            break;
-        }
-        case wavsen::video::FrameKind::VaapiDrm:
-            cv = yuv->convert_drm_prime(drmv,
-                                        ip.handle,
-                                        u32(s.width),
-                                        u32(s.height),
-                                        color_matrix,
-                                        wavsen::video::ConvertTarget::SampledLocal);
-            break;
-        case wavsen::video::FrameKind::Sw:
-            cv = yuv->convert_nv12(ip.handle,
-                                   u32(s.width),
-                                   u32(s.height),
-                                   s.nv12_scratch.data.data(),
-                                   s.nv12_scratch.data.len(),
-                                   color_matrix,
-                                   wavsen::video::ConvertTarget::SampledLocal);
-            break;
-        }
-        if (cv.is_err()) {
-            rstd_error("PumpVideoTextures[{}]: yuv conversion {}: {}",
-                       s.key,
-                       FrameKindLabel(fkind),
-                       std::move(cv).unwrap_err().message);
-            continue;
-        }
-        CloseSyncFd(std::move(cv).unwrap());
-        s.have_frame = true;
+    registry->runtimes.retain([](const rstd::sync::Weak<dyn<TextureAllocationRuntime>>& runtime) {
+        return ! runtime.expired();
+    });
+    for (const auto& weak : registry->runtimes) {
+        auto runtime = weak.upgrade();
+        if (runtime) runtime->Pump(dt_seconds);
     }
 }
 
@@ -1115,12 +1180,16 @@ void TextureCache::SetVideoDecodeOptions(VideoDecodeOptions options) {
     if (m_video_registry.is_some()) {
         auto* registry    = m_video_registry->get();
         registry->options = m_video_decode_options;
-        if (registry->slots.is_empty()) (void)registry->producer.take();
+        registry->runtimes.retain(
+            [](const rstd::sync::Weak<dyn<TextureAllocationRuntime>>& runtime) {
+                return ! runtime.expired();
+            });
+        if (registry->runtimes.is_empty()) (void)registry->producer.take();
     }
 }
 
 void TextureCache::Clear() {
-    if (m_video_registry.is_some()) m_video_registry->get()->slots.clear();
+    if (m_video_registry.is_some()) m_video_registry->get()->runtimes.clear();
 }
 
 void owe::vulkan::RecordGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) {

@@ -4,6 +4,7 @@ import rstd.cppstd;
 import rstd;
 import eigen;
 import wescene.json;
+import wescene.types;
 import wescene.scene;
 import wescene.script;
 import wescene.testing.json_builder;
@@ -996,6 +997,41 @@ TEST(ScriptTexAnim, UnboundLayerFallsBackToJsStub) {
     rt.TickAll();
     // JS stub records the frame in a closure local; getFrame returns it.
     EXPECT_EQ(std::get<ScalarValue>(fs->last_value()).v, 7.0);
+}
+
+TEST(ScriptVideoTexture, ControlsStableNativePlaybackState) {
+    owe::SceneNode node;
+    auto           playback = Arc<owe::VideoPlaybackState>::make();
+    playback->PublishTime(f64(2.5), Some(f64(10.0)));
+    node.SetVideoControl(playback.clone());
+
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            const video = thisLayer.getVideoTexture();
+            video.pause();
+            video.rate = 1.5;
+            video.setCurrentTime(4);
+            export function update() {
+                return video.duration + video.getCurrentTime() + (video.isPlaying() ? 1 : 0);
+            }
+        )JS",
+        "test/video_texture_control",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        &node);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    auto state = playback->Snapshot();
+    EXPECT_FALSE(state.playing);
+    EXPECT_EQ(state.rate, f64(1.5));
+    EXPECT_EQ(state.seek_sequence, u64(1));
+    EXPECT_EQ(state.seek_seconds, f64(4.0));
+    EXPECT_EQ(LastScalar(fs), 14.0);
 }
 
 // ---------------------------------------------------------------------------

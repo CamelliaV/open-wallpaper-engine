@@ -291,11 +291,23 @@ private:
 class SnapshotImportedTextureProvider {
 public:
     SnapshotImportedTextureProvider(const RenderSceneSnapshot& render_scene, ref<Scene> scene)
-        : m_catalog(rstd::dyn<resource::TextureCatalog>::from_ref(render_scene)), m_scene(scene) {}
+        : m_render_scene(render_scene), m_scene(scene) {}
 
-    auto ResolveTextureKey(const TextureRequest& request) const
-        -> Result<String, resource::ResourceError> {
-        return Ok(ResolveName(request));
+    auto ResolveTextureContent(const TextureRequest& request) const
+        -> Result<resource::ImportedTextureContentIdentity, resource::ResourceError> {
+        auto record = ResolveRecord(request);
+        if (record == nullptr) {
+            return Ok(resource::ImportedTextureContentIdentity {
+                .key = request.name.clone(),
+            });
+        }
+        auto key = record->desc.url.empty()
+                       ? record->key.clone()
+                       : String::make(rstd::cppstd::as_str(record->desc.url).unwrap());
+        return Ok(resource::ImportedTextureContentIdentity {
+            .key      = rstd::move(key),
+            .revision = record->content_revision,
+        });
     }
 
     auto OpenTextureLoader() const
@@ -303,17 +315,29 @@ public:
         return Ok(Arc<dyn<resource::TextureLoader>>::make(SnapshotImportedTextureLoader(m_scene)));
     }
 
-private:
-    String ResolveName(const TextureRequest& request) const {
-        auto resolved = rstd::None<TextureRequest>();
-        if (request.source.is_some()) resolved = m_catalog->ResolveTexture(*request.source);
-        if (resolved.is_none()) resolved = m_catalog->FindTexture(request.name.as_str());
-        if (resolved.is_some()) return resolved->name.clone();
-        return request.name.clone();
+    auto ResolveVideoPlayback(const TextureRequest& request) const
+        -> Option<Arc<VideoPlaybackState>> {
+        auto record = ResolveRecord(request);
+        return record != nullptr && record->video_control.is_some()
+                   ? Some(record->video_control->clone())
+                   : None<Arc<VideoPlaybackState>>();
     }
 
-    mutable ref<dyn<resource::TextureCatalog>> m_catalog;
-    ref<Scene>                                 m_scene;
+private:
+    const RenderTextureDescRecord* ResolveRecord(const TextureRequest& request) const {
+        if (request.source.is_some()) {
+            auto record = m_render_scene.textureDesc(RenderTextureDescId {
+                .index      = request.source->index,
+                .generation = request.source->generation,
+            });
+            if (record != nullptr) return record;
+        }
+        auto id = m_render_scene.textureDescId(request.name.as_str());
+        return id.is_some() ? m_render_scene.textureDesc(*id) : nullptr;
+    }
+
+    const RenderSceneSnapshot& m_render_scene;
+    ref<Scene>                 m_scene;
 };
 
 class SnapshotTexturePrepareObserver {
@@ -393,14 +417,19 @@ struct Impl<owe::resource::TextureLoader, owe::vulkan::SnapshotImportedTextureLo
 template<>
 struct Impl<owe::resource::TextureContentProvider, owe::vulkan::SnapshotImportedTextureProvider>
     : ImplBase<owe::vulkan::SnapshotImportedTextureProvider> {
-    auto ResolveTextureKey(const owe::resource::TextureRequest& request) const
-        -> Result<String, owe::resource::ResourceError> {
-        return this->self().ResolveTextureKey(request);
+    auto ResolveTextureContent(const owe::resource::TextureRequest& request) const
+        -> Result<owe::resource::ImportedTextureContentIdentity, owe::resource::ResourceError> {
+        return this->self().ResolveTextureContent(request);
     }
 
     auto OpenTextureLoader() const
         -> Result<Arc<dyn<owe::resource::TextureLoader>>, owe::resource::ResourceError> {
         return this->self().OpenTextureLoader();
+    }
+
+    auto ResolveVideoPlayback(const owe::resource::TextureRequest& request) const
+        -> Option<Arc<owe::VideoPlaybackState>> {
+        return this->self().ResolveVideoPlayback(request);
     }
 };
 

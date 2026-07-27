@@ -535,14 +535,32 @@ struct ImageSlotsRef {
     ImageSlotsRef(const ImageSlots&);
 };
 
+struct TextureAllocationRuntime {
+    using Trait                  = TextureAllocationRuntime;
+    static constexpr bool direct = false;
+
+    template<typename Self, typename = void>
+    struct Api {
+        using Trait = TextureAllocationRuntime;
+
+        void Pump(double seconds) { rstd::trait_call<0>(this, seconds); }
+    };
+
+    template<typename T>
+    using Funcs = rstd::TraitFuncs<&T::Pump>;
+};
+
 class TextureAllocation {
 public:
-    explicit TextureAllocation(ImageSlots slots): m_slots(rstd::move(slots)) {}
+    explicit TextureAllocation(
+        ImageSlots slots, Option<rstd::sync::Arc<dyn<TextureAllocationRuntime>>> runtime = None())
+        : m_slots(rstd::move(slots)), m_runtime(rstd::move(runtime)) {}
 
     auto View() const -> ImageSlotsRef { return ImageSlotsRef(m_slots); }
 
 private:
-    ImageSlots m_slots;
+    ImageSlots                                             m_slots;
+    Option<rstd::sync::Arc<dyn<TextureAllocationRuntime>>> m_runtime;
 };
 
 // ---------- Swapchain.hpp ----------
@@ -593,6 +611,8 @@ struct TextureKey {
 
 class TextureCache : NoCopy, NoMove {
 public:
+    struct VideoRegistry;
+
     struct VideoDecodeOptions {
         std::string hwdec { "auto" };
         std::string render_node;
@@ -606,7 +626,8 @@ public:
     void SetVideoDecodeOptions(VideoDecodeOptions);
 
     Option<ExImageParameters> CreateExTex(u32 witdh, u32 height, VkFormat, VkImageTiling);
-    rstd::Option<rstd::sync::Arc<TextureAllocation>> AllocateImportedTexture(const Image&);
+    rstd::Option<rstd::sync::Arc<TextureAllocation>>
+    AllocateImportedTexture(const Image&, Option<rstd::sync::Arc<VideoPlaybackState>> playback);
     rstd::Option<rstd::sync::Arc<TextureAllocation>> AllocateTexture(TextureKey);
 
     /* Per-frame hook: advance every registered video-tex by `dt_seconds`,
@@ -628,10 +649,11 @@ private:
     /* VIDEO-typed Image branch of AllocateImportedTexture: registers a wavsen
      * VideoDecoder + stable RGBA8 VkImage and returns an ImageSlotsRef
      * pointing at that same VkImage so material binding is transparent. */
-    rstd::Option<rstd::sync::Arc<TextureAllocation>> CreateVideoTex(const Image&);
-    void                                             allocateCmd();
-    vvk::CommandBuffers                              m_tex_cmds;
-    vvk::CommandBuffer                               m_tex_cmd;
+    rstd::Option<rstd::sync::Arc<TextureAllocation>>
+         CreateVideoTex(const Image&, Option<rstd::sync::Arc<VideoPlaybackState>> playback);
+    void allocateCmd();
+    vvk::CommandBuffers m_tex_cmds;
+    vvk::CommandBuffer  m_tex_cmd;
 
     const Device&      m_device;
     VideoDecodeOptions m_video_decode_options;
@@ -640,7 +662,6 @@ private:
     /* Opaque pImpl for the active video-tex set. Defined inside
      * TextureCache.cpp to keep wavsen.video out of the public
      * wescene.vulkan module interface. */
-    struct VideoRegistry;
     Option<Box<VideoRegistry>> m_video_registry;
 };
 
@@ -726,7 +747,9 @@ public:
     ImagePrepareContext(TextureCache& textures, ImageUploadManager& uploads)
         : m_textures(textures), m_uploads(uploads) {}
 
-    auto CreateImportedTexture(ref<Image> image) -> Option<PreparedImageAllocation>;
+    auto CreateImportedTexture(ref<Image>                                  image,
+                               Option<rstd::sync::Arc<VideoPlaybackState>> playback)
+        -> Option<PreparedImageAllocation>;
     auto AllocateTexture(TextureKey key) -> Option<rstd::sync::Arc<TextureAllocation>>;
 
 private:
@@ -742,9 +765,10 @@ struct ImagePrepareBackend {
     struct Api {
         using Trait = ImagePrepareBackend;
 
-        auto CreateImportedTexture(rstd::ref<Image> image)
+        auto CreateImportedTexture(rstd::ref<Image>                            image,
+                                   Option<rstd::sync::Arc<VideoPlaybackState>> playback)
             -> rstd::Option<PreparedImageAllocation> {
-            return rstd::trait_call<0>(this, image);
+            return rstd::trait_call<0>(this, image, rstd::move(playback));
         }
 
         auto AllocateTexture(TextureKey key) -> rstd::Option<rstd::sync::Arc<TextureAllocation>> {
@@ -1318,9 +1342,10 @@ struct Impl<owe::vulkan::BufferBackend, owe::vulkan::BufferManager>
 template<>
 struct Impl<owe::vulkan::ImagePrepareBackend, owe::vulkan::ImagePrepareContext>
     : ImplBase<owe::vulkan::ImagePrepareContext> {
-    auto CreateImportedTexture(ref<owe::Image> image)
+    auto CreateImportedTexture(ref<owe::Image>                            image,
+                               Option<sync::Arc<owe::VideoPlaybackState>> playback)
         -> Option<owe::vulkan::PreparedImageAllocation> {
-        return this->self().CreateImportedTexture(image);
+        return this->self().CreateImportedTexture(image, rstd::move(playback));
     }
 
     auto AllocateTexture(owe::vulkan::TextureKey key)

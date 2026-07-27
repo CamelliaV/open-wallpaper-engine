@@ -57,8 +57,8 @@ struct TextureContentProvider {
     struct Api {
         using Trait = TextureContentProvider;
 
-        auto ResolveTextureKey(const TextureRequest& request) const
-            -> Result<String, ResourceError> {
+        auto ResolveTextureContent(const TextureRequest& request) const
+            -> Result<ImportedTextureContentIdentity, ResourceError> {
             return rstd::trait_call<0>(this, request);
         }
 
@@ -66,10 +66,16 @@ struct TextureContentProvider {
             -> Result<rstd::sync::Arc<dyn<TextureLoader>>, ResourceError> {
             return rstd::trait_call<1>(this);
         }
+
+        auto ResolveVideoPlayback(const TextureRequest& request) const
+            -> Option<rstd::sync::Arc<VideoPlaybackState>> {
+            return rstd::trait_call<2>(this, request);
+        }
     };
 
     template<typename T>
-    using Funcs = TraitFuncs<&T::ResolveTextureKey, &T::OpenTextureLoader>;
+    using Funcs =
+        TraitFuncs<&T::ResolveTextureContent, &T::OpenTextureLoader, &T::ResolveVideoPlayback>;
 };
 
 struct TexturePrepareObserver {

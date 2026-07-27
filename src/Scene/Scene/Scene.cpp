@@ -110,6 +110,15 @@ u64 next_render_scene_version() {
     return u64(next.fetch_add(1, std::memory_order_relaxed));
 }
 
+bool same_layer_ids(const HashSet<i32>& lhs, const HashSet<i32>& rhs) {
+    if (lhs.len() != rhs.len()) return false;
+    auto ids = lhs.iter();
+    for (auto id = ids.next(); id.is_some(); id = ids.next()) {
+        if (! rhs.contains(**id)) return false;
+    }
+    return true;
+}
+
 u32 index_from_size(std::size_t size) { return rstd::as_cast<u32>(usize(size)); }
 
 usize index_from_id(u32 index) { return usize(index.to_primitive()); }
@@ -771,14 +780,17 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
             .index      = rstd::as_cast<u32>(m_texture_descs.len()),
             .generation = version.value,
         };
-        auto scene_id = index.textureId(key.as_str()).unwrap_or(SceneTextureId {});
-        auto desc     = scene.Texture(key.as_str());
+        auto scene_id      = index.textureId(key.as_str()).unwrap_or(SceneTextureId {});
+        auto desc          = scene.Texture(key.as_str());
+        auto video_control = scene.VideoControl(key.as_str());
         (void)m_texture_desc_ids.insert(key.clone(), id);
         m_texture_descs.push(RenderTextureDescRecord {
-            .id            = id,
-            .scene_texture = scene_id,
-            .key           = key.clone(),
-            .desc          = desc.is_some() ? **desc : SceneTexture {},
+            .id               = id,
+            .scene_texture    = scene_id,
+            .key              = key.clone(),
+            .desc             = desc.is_some() ? **desc : SceneTexture {},
+            .content_revision = scene.TextureContentRevision(key.as_str()),
+            .video_control    = rstd::move(video_control),
         });
     }
 
@@ -1028,12 +1040,41 @@ Scene::Scene()
 Scene::~Scene() = default;
 
 void Scene::RegisterTexture(String name, SceneTexture texture) {
+    auto revision = m_texture_content_revisions.get_mut(name.as_str());
+    if (revision.is_some()) {
+        ++**revision;
+    } else {
+        (void)m_texture_content_revisions.insert(name.clone(), u64(1));
+    }
+    if (texture.isVideo) {
+        auto control_key = texture.url.empty()
+                               ? name.clone()
+                               : String::make(rstd::cppstd::as_str(texture.url).unwrap());
+        if (! m_video_controls.contains_key(control_key.as_str())) {
+            (void)m_video_controls.insert(rstd::move(control_key), Arc<VideoPlaybackState>::make());
+        }
+    }
     if (! m_textures.contains_key(name.as_str())) m_texture_names.push(name.clone());
     (void)m_textures.insert(rstd::move(name), rstd::move(texture));
 }
 
 auto Scene::Texture(ref<str> name) const -> Option<ref<SceneTexture>> {
     return m_textures.get(name);
+}
+
+auto Scene::TextureContentRevision(ref<str> name) const -> u64 {
+    auto revision = m_texture_content_revisions.get(name);
+    return revision.is_some() ? **revision : u64();
+}
+
+auto Scene::VideoControl(ref<str> name) const -> Option<Arc<VideoPlaybackState>> {
+    auto control = m_video_controls.get(name);
+    if (control.is_some()) return Some((*control)->clone());
+    auto texture = m_textures.get(name);
+    if (texture.is_none() || ! (**texture).isVideo || (**texture).url.empty()) return None();
+    auto key = rstd::cppstd::as_str((**texture).url).unwrap();
+    control  = m_video_controls.get(key);
+    return control.is_some() ? Some((*control)->clone()) : None<Arc<VideoPlaybackState>>();
 }
 
 void Scene::RegisterRenderTarget(String name, SceneRenderTarget target) {
@@ -1421,8 +1462,9 @@ bool Scene::EnsureTextureDescriptor(std::string_view key) {
     if (header.is_err()) return false;
 
     SceneTexture texture;
-    texture.url    = std::string(key);
-    texture.sample = header->sample;
+    texture.url     = std::string(key);
+    texture.sample  = header->sample;
+    texture.isVideo = header->type == ImageType::VIDEO;
     if (header->isSprite) {
         texture.isSprite   = true;
         texture.spriteAnim = header->spriteAnim;
@@ -1490,6 +1532,12 @@ auto Scene::ParseImageHeader(ref<str> name) const -> Result<ImageHeader, ImagePa
 }
 
 void Scene::RegisterRuntimeImage(String name, Arc<Image> image) {
+    auto revision = m_texture_content_revisions.get_mut(name.as_str());
+    if (revision.is_some()) {
+        ++**revision;
+    } else {
+        (void)m_texture_content_revisions.insert(name.clone(), u64(1));
+    }
     (void)m_runtime_images.insert(rstd::move(name), rstd::move(image));
 }
 
@@ -1580,6 +1628,15 @@ void Scene::MarkLayerVisibilityElidable(WallpaperLayerId id) {
     (void)m_elidable_layer_ids.insert(id.value);
 }
 
+bool Scene::ConsumeRenderGraphDirty() {
+    const bool elision_changed =
+        ! same_layer_ids(m_elidable_layer_ids, m_render_graph_elidable_layer_ids);
+    const bool dirty     = m_render_graph_dirty || elision_changed;
+    m_render_graph_dirty = false;
+    if (elision_changed) m_render_graph_elidable_layer_ids = m_elidable_layer_ids.clone();
+    return dirty;
+}
+
 void Scene::RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node) {
     auto previous = m_layer_link_sources.get(id.value);
     if (previous.is_some()) (void)m_node_link_sources.remove(**previous);
@@ -1612,17 +1669,13 @@ bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
     if (! visible) {
         MarkLayerVisibilityElidable(WallpaperLayerId { .value = id });
         const bool is_elidable = m_elidable_layer_ids.contains(id);
-        const bool changed     = was_elidable != is_elidable;
-        m_render_graph_dirty |= changed;
-        return changed;
+        return was_elidable != is_elidable;
     }
 
     if (! m_visibility_elidable_layer_ids.remove(id)) return false;
     RebuildElidableLayerIds();
     const bool is_elidable = m_elidable_layer_ids.contains(id);
-    const bool changed     = was_elidable != is_elidable;
-    m_render_graph_dirty |= changed;
-    return changed;
+    return was_elidable != is_elidable;
 }
 
 bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const Json& property) {

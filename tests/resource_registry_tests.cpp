@@ -13,6 +13,21 @@ import wescene.vulkan;
 
 using namespace rstd::literals;
 
+struct TextureRuntimeProbe {
+    void Pump(double) {}
+};
+
+namespace rstd
+{
+
+template<>
+struct Impl<owe::vulkan::TextureAllocationRuntime, TextureRuntimeProbe>
+    : ImplBase<TextureRuntimeProbe> {
+    void Pump(double seconds) { this->self().Pump(seconds); }
+};
+
+} // namespace rstd
+
 namespace
 {
 
@@ -86,14 +101,19 @@ struct TextureContentProvider {
     mutable rstd::usize              resolves { 0 };
     mutable std::atomic<std::size_t> loads { 0 };
 
-    auto ResolveTextureKey(const owe::resource::TextureRequest& request) const
-        -> rstd::Result<rstd::string::String, owe::resource::ResourceError> {
+    auto ResolveTextureContent(const owe::resource::TextureRequest& request) const
+        -> rstd::Result<owe::resource::ImportedTextureContentIdentity,
+                        owe::resource::ResourceError> {
         ++resolves;
         auto name = rstd::cppstd::as_string_view(request.name.as_str());
         if (name.starts_with("alias-")) {
-            return rstd::Ok(rstd::string::String::make("shared"_str));
+            return rstd::Ok(owe::resource::ImportedTextureContentIdentity {
+                .key = rstd::string::String::make("shared"_str),
+            });
         }
-        return rstd::Ok(request.name.clone());
+        return rstd::Ok(owe::resource::ImportedTextureContentIdentity {
+            .key = request.name.clone(),
+        });
     }
 
     auto OpenTextureLoader() const
@@ -104,13 +124,19 @@ struct TextureContentProvider {
                 .loads = &loads,
             }));
     }
+
+    auto ResolveVideoPlayback(const owe::resource::TextureRequest&) const
+        -> rstd::Option<rstd::sync::Arc<owe::VideoPlaybackState>> {
+        return rstd::None();
+    }
 };
 
 struct ImageBackend {
     rstd::usize creates { 0 };
     rstd::u64   generation { 0 };
 
-    auto CreateImportedTexture(rstd::ref<owe::Image>)
+    auto CreateImportedTexture(rstd::ref<owe::Image>,
+                               rstd::Option<rstd::sync::Arc<owe::VideoPlaybackState>>)
         -> rstd::Option<owe::vulkan::PreparedImageAllocation> {
         ++creates;
         ++generation;
@@ -193,17 +219,206 @@ TEST(TextureRegistry, OwnsLogicalEntriesBehindGenerationalHandles) {
 
 TEST(TextureRegistry, InvalidatesOldHandlesOnReset) {
     owe::resource::TextureRegistry registry;
-    auto                           handle     = registry.Register(owe::resource::TextureRequest {
-        .kind = owe::resource::TextureRequestKind::Imported,
-        .name = rstd::string::String::make("asset"_str),
-    });
-    auto                           generation = registry.Generation();
+    auto                           handle = registry.RegisterImported(
+        owe::resource::TextureRequest {
+            .kind = owe::resource::TextureRequestKind::Imported,
+            .name = rstd::string::String::make("asset"_str),
+        },
+        owe::resource::ImportedTextureContentIdentity {
+            .key = rstd::string::String::make("asset"_str),
+        });
+    auto generation = registry.Generation();
 
     registry.Reset();
 
     EXPECT_GT(registry.Generation(), generation);
     EXPECT_TRUE(registry.ResolveTexture(handle).is_none());
     EXPECT_EQ(registry.Size(), rstd::usize());
+}
+
+TEST(TextureRegistry, KeepsImportedContentAcrossSnapshotLocators) {
+    owe::resource::TextureRegistry registry;
+    auto                           request = owe::resource::TextureRequest {
+        .kind   = owe::resource::TextureRequestKind::Imported,
+        .name   = rstd::string::String::make("asset"_str),
+        .source = rstd::Some(owe::resource::TextureDefinitionId {
+            .index      = rstd::u32(3),
+            .generation = rstd::u64(11),
+        }),
+    };
+    auto content = owe::resource::ImportedTextureContentIdentity {
+        .key = rstd::string::String::make("asset-content"_str),
+    };
+    auto handle = registry.RegisterImported(request.clone(), content.clone());
+    ASSERT_TRUE(
+        registry.Publish(handle, TextureAllocation(7), owe::resource::ReadyToken {}).is_some());
+
+    request.source->generation = rstd::u64(12);
+    EXPECT_EQ(registry.RegisterImported(request.clone(), content.clone()), handle);
+    EXPECT_TRUE(registry.ResolveCurrent(handle).is_some());
+    auto logical = registry.ResolveTexture(handle);
+    ASSERT_TRUE(logical.is_some());
+    EXPECT_EQ((**logical).content_version, rstd::u64(1));
+    EXPECT_EQ((**logical).request.source->generation, rstd::u64(12));
+}
+
+TEST(TextureRegistry, InvalidatesImportedPhysicalOnContentRevisionChange) {
+    owe::resource::TextureRegistry registry;
+    auto                           request = owe::resource::TextureRequest {
+        .kind = owe::resource::TextureRequestKind::Imported,
+        .name = rstd::string::String::make("asset"_str),
+    };
+    auto content = owe::resource::ImportedTextureContentIdentity {
+        .key      = rstd::string::String::make("asset-content"_str),
+        .revision = rstd::u64(4),
+    };
+    auto handle = registry.RegisterImported(request.clone(), content.clone());
+    ASSERT_TRUE(
+        registry.Publish(handle, TextureAllocation(7), owe::resource::ReadyToken {}).is_some());
+
+    content.revision = rstd::u64(5);
+    EXPECT_EQ(registry.RegisterImported(request.clone(), content.clone()), handle);
+    EXPECT_TRUE(registry.ResolveCurrent(handle).is_none());
+    auto logical = registry.ResolveTexture(handle);
+    ASSERT_TRUE(logical.is_some());
+    EXPECT_EQ((**logical).content_version, rstd::u64(2));
+}
+
+TEST(TextureRegistry, RestoresLogicalAndPhysicalStateAfterPrepareAbort) {
+    owe::resource::TextureRegistry registry;
+    auto                           request = owe::resource::TextureRequest {
+        .kind = owe::resource::TextureRequestKind::Imported,
+        .name = rstd::string::String::make("asset"_str),
+    };
+    auto first_content = owe::resource::ImportedTextureContentIdentity {
+        .key      = rstd::string::String::make("first"_str),
+        .revision = rstd::u64(1),
+    };
+    auto handle = registry.RegisterImported(request.clone(), first_content.clone());
+    ASSERT_TRUE(
+        registry.Publish(handle, TextureAllocation(7), owe::resource::ReadyToken {}).is_some());
+    ASSERT_TRUE(registry.BeginPrepareTransaction());
+
+    auto second_content = owe::resource::ImportedTextureContentIdentity {
+        .key      = rstd::string::String::make("second"_str),
+        .revision = rstd::u64(2),
+    };
+    EXPECT_EQ(registry.RegisterImported(request.clone(), second_content.clone()), handle);
+    ASSERT_TRUE(
+        registry.Publish(handle, TextureAllocation(8), owe::resource::ReadyToken {}).is_some());
+    auto current = registry.ResolveCurrent(handle);
+    ASSERT_TRUE(current.is_some());
+    EXPECT_EQ((**current).allocation->View().getActive().generation, rstd::u64(8));
+
+    registry.AbortPrepareTransaction();
+    auto logical  = registry.ResolveTexture(handle);
+    auto physical = registry.ResolveCurrent(handle);
+    ASSERT_TRUE(logical.is_some());
+    ASSERT_TRUE(physical.is_some());
+    ASSERT_TRUE((**logical).imported_content.is_some());
+    EXPECT_EQ((**logical).imported_content->key, "first"_str);
+    EXPECT_EQ((**logical).content_version, rstd::u64(1));
+    EXPECT_EQ((**physical).allocation->View().getActive().generation, rstd::u64(7));
+}
+
+TEST(TextureRegistry, ReleasesPhysicalResourcesOutsideTheActivePlan) {
+    owe::resource::TextureRegistry registry;
+    auto                           first = registry.RegisterImported(
+        owe::resource::TextureRequest {
+            .kind = owe::resource::TextureRequestKind::Imported,
+            .name = rstd::string::String::make("first"_str),
+        },
+        owe::resource::ImportedTextureContentIdentity {
+            .key = rstd::string::String::make("first"_str),
+        });
+    auto second = registry.RegisterImported(
+        owe::resource::TextureRequest {
+            .kind = owe::resource::TextureRequestKind::Imported,
+            .name = rstd::string::String::make("second"_str),
+        },
+        owe::resource::ImportedTextureContentIdentity {
+            .key = rstd::string::String::make("second"_str),
+        });
+    ASSERT_TRUE(
+        registry.Publish(first, TextureAllocation(1), owe::resource::ReadyToken {}).is_some());
+    ASSERT_TRUE(
+        registry.Publish(second, TextureAllocation(2), owe::resource::ReadyToken {}).is_some());
+
+    auto active = rstd::array<owe::resource::TextureHandle, 1> { first };
+    registry.RetainActive(active.as_slice());
+    EXPECT_TRUE(registry.Resolve(first).is_some());
+    EXPECT_TRUE(registry.Resolve(second).is_none());
+}
+
+TEST(TextureAllocation, OwnsAttachedRuntimeForItsWholeLeaseLifetime) {
+    auto weak = rstd::sync::Weak<rstd::dyn<owe::vulkan::TextureAllocationRuntime>>::make();
+    {
+        auto runtime = rstd::sync::Arc<rstd::dyn<owe::vulkan::TextureAllocationRuntime>>::make(
+            TextureRuntimeProbe {});
+        weak = runtime.downgrade();
+        owe::vulkan::ImageSlots slots;
+        auto                    allocation = rstd::sync::Arc<owe::vulkan::TextureAllocation>::make(
+            rstd::move(slots), rstd::Some(runtime.clone()));
+        runtime.reset();
+        EXPECT_FALSE(weak.expired());
+        EXPECT_TRUE(static_cast<bool>(allocation));
+    }
+    EXPECT_TRUE(weak.expired());
+}
+
+TEST(TextureAllocation, SubmissionLeaseDelaysRuntimeReleaseAfterActivePlanRemoval) {
+    auto weak = rstd::sync::Weak<rstd::dyn<owe::vulkan::TextureAllocationRuntime>>::make();
+    owe::resource_registry::SubmissionTracker submissions;
+    owe::resource::CompletionToken            completion;
+    {
+        auto runtime = rstd::sync::Arc<rstd::dyn<owe::vulkan::TextureAllocationRuntime>>::make(
+            TextureRuntimeProbe {});
+        weak = runtime.downgrade();
+        owe::vulkan::ImageSlots slots;
+        slots.slots.resize(1);
+        auto allocation = rstd::sync::Arc<owe::vulkan::TextureAllocation>::make(
+            rstd::move(slots), rstd::Some(runtime.clone()));
+
+        owe::resource::TextureRegistry registry;
+        auto                           handle = registry.RegisterImported(
+            owe::resource::TextureRequest {
+                .kind = owe::resource::TextureRequestKind::Imported,
+                .name = rstd::string::String::make("video"_str),
+            },
+            owe::resource::ImportedTextureContentIdentity {
+                .key = rstd::string::String::make("video"_str),
+            });
+        ASSERT_TRUE(
+            registry.Publish(handle, allocation.clone(), owe::resource::ReadyToken {}).is_some());
+
+        owe::resource_registry::PreparedResourceTable table(rstd::u64(3));
+        ASSERT_TRUE(table.Insert(owe::resource_registry::PreparedTexture {
+            .use      = owe::resource::TextureUseHandle { .generation = rstd::u64(3) },
+            .resource = handle,
+            .request =
+                owe::resource::TextureRequest {
+                    .kind = owe::resource::TextureRequestKind::Imported,
+                    .name = rstd::string::String::make("video"_str),
+                },
+            .physical = allocation.clone(),
+            .image    = allocation->View(),
+        }));
+        completion = submissions.Begin(table);
+        ASSERT_TRUE(completion.Valid());
+
+        table       = owe::resource_registry::PreparedResourceTable {};
+        auto active = rstd::vec::Vec<owe::resource::TextureHandle>::make();
+        registry.RetainActive(active.as_slice());
+        allocation.reset();
+        runtime.reset();
+        EXPECT_FALSE(weak.expired());
+    }
+
+    auto completed = submissions.Complete(completion);
+    ASSERT_TRUE(completed.is_some());
+    EXPECT_FALSE(weak.expired());
+    completed = rstd::None();
+    EXPECT_TRUE(weak.expired());
 }
 
 TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
@@ -241,10 +456,14 @@ TEST(TextureRegistry, PublishesVersionedPhysicalGenerations) {
 
 TEST(TextureRegistry, PublishesUploadedPhysicalOnlyAfterSubmission) {
     owe::resource::TextureRegistry registry;
-    auto                           handle = registry.Register(owe::resource::TextureRequest {
-        .kind = owe::resource::TextureRequestKind::Imported,
-        .name = rstd::string::String::make("asset"_str),
-    });
+    auto                           handle = registry.RegisterImported(
+        owe::resource::TextureRequest {
+            .kind = owe::resource::TextureRequestKind::Imported,
+            .name = rstd::string::String::make("asset"_str),
+        },
+        owe::resource::ImportedTextureContentIdentity {
+            .key = rstd::string::String::make("asset"_str),
+        });
     owe::vulkan::ImageUploadTicket ticket { .value = rstd::u64(7) };
 
     auto published = registry.Publish(
@@ -523,7 +742,7 @@ TEST(ResourcePrepareService, BatchesDeduplicatesAndCachesImportedTextures) {
                                   });
     ASSERT_TRUE(second.is_ok());
     EXPECT_EQ(second->TextureCount(), rstd::usize(10));
-    EXPECT_EQ(content_provider.resolves, rstd::usize(10));
+    EXPECT_EQ(content_provider.resolves, rstd::usize(20));
     EXPECT_EQ(content_provider.loads.load(std::memory_order_relaxed), std::size_t(9));
     EXPECT_EQ(image_backend.creates, rstd::usize(9));
 }

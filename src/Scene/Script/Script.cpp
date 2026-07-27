@@ -9,6 +9,7 @@ import eigen;
 import rstd;
 import rstd.log;
 import rstd.cppstd;
+import wescene.types;
 import wescene.scene;
 
 using namespace rstd::prelude;
@@ -2726,13 +2727,126 @@ JSValue NodeGetAnimationStub(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     return r;
 }
 
-JSValue NodeGetVideoTextureStub(JSContext* ctx, JSValueConst, int, JSValueConst*) {
-    JSValue g = JS_GetGlobalObject(ctx);
-    JSValue f = JS_GetPropertyStr(ctx, g, "__wwCreateVideoTextureStub");
-    JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 0, nullptr);
-    JS_FreeValue(ctx, f);
-    JS_FreeValue(ctx, g);
-    return r;
+static JSClassID s_video_texture_class_id = 0;
+
+struct VideoTextureHandle {
+    Arc<VideoPlaybackState> playback;
+};
+
+void VideoTextureFinalizer(JSRuntime*, JSValue value) {
+    delete static_cast<VideoTextureHandle*>(JS_GetOpaque(value, s_video_texture_class_id));
+}
+
+JSClassDef s_video_texture_class_def {
+    .class_name = "WWVideoTexture",
+    .finalizer  = VideoTextureFinalizer,
+};
+
+VideoPlaybackState* GetVideoPlayback(JSValueConst value) {
+    auto* handle = static_cast<VideoTextureHandle*>(JS_GetOpaque(value, s_video_texture_class_id));
+    return handle != nullptr ? handle->playback.as_ptr().as_raw_ptr() : nullptr;
+}
+
+JSValue VideoTextureGetDuration(JSContext* ctx, JSValueConst this_val) {
+    auto* playback = GetVideoPlayback(this_val);
+    auto  duration = playback != nullptr ? playback->Duration() : None<f64>();
+    return JS_NewFloat64(ctx, duration.unwrap_or(f64()).to_primitive());
+}
+
+JSValue VideoTextureGetRate(JSContext* ctx, JSValueConst this_val) {
+    auto* playback = GetVideoPlayback(this_val);
+    return JS_NewFloat64(ctx, playback != nullptr ? playback->Snapshot().rate.to_primitive() : 1.0);
+}
+
+JSValue VideoTextureSetRate(JSContext* ctx, JSValueConst this_val, JSValueConst value) {
+    double rate = 1.0;
+    if (JS_ToFloat64(ctx, &rate, value) != 0) return JS_UNDEFINED;
+    auto parsed_rate = f64(rate);
+    if (parsed_rate.is_finite() && parsed_rate > f64()) {
+        if (auto* playback = GetVideoPlayback(this_val)) playback->SetRate(parsed_rate);
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue VideoTextureGetVolume(JSContext* ctx, JSValueConst) { return JS_NewFloat64(ctx, 1.0); }
+JSValue VideoTextureSetVolume(JSContext*, JSValueConst, JSValueConst) { return JS_UNDEFINED; }
+
+JSValue VideoTexturePlay(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* playback = GetVideoPlayback(this_val)) playback->Play();
+    return JS_UNDEFINED;
+}
+
+JSValue VideoTextureStop(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* playback = GetVideoPlayback(this_val)) playback->Stop();
+    return JS_UNDEFINED;
+}
+
+JSValue VideoTexturePause(JSContext*, JSValueConst this_val, int, JSValueConst*) {
+    if (auto* playback = GetVideoPlayback(this_val)) playback->Pause();
+    return JS_UNDEFINED;
+}
+
+JSValue VideoTextureSetCurrentTime(JSContext* ctx, JSValueConst this_val, int argc,
+                                   JSValueConst* argv) {
+    if (argc < 1) return JS_UNDEFINED;
+    double seconds = 0.0;
+    if (JS_ToFloat64(ctx, &seconds, argv[0]) != 0) return JS_UNDEFINED;
+    auto parsed_seconds = f64(seconds);
+    if (parsed_seconds.is_finite() && parsed_seconds >= f64()) {
+        if (auto* playback = GetVideoPlayback(this_val)) playback->Seek(parsed_seconds);
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue VideoTextureGetCurrentTime(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* playback = GetVideoPlayback(this_val);
+    return JS_NewFloat64(ctx, playback != nullptr ? playback->CurrentTime().to_primitive() : 0.0);
+}
+
+JSValue VideoTextureIsPlaying(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* playback = GetVideoPlayback(this_val);
+    return JS_NewBool(ctx, playback != nullptr && playback->Snapshot().playing);
+}
+
+const JSCFunctionListEntry s_video_texture_proto_funcs[] = {
+    JS_CGETSET_DEF("duration", VideoTextureGetDuration, NodeSetIgnore),
+    JS_CGETSET_DEF("rate", VideoTextureGetRate, VideoTextureSetRate),
+    JS_CGETSET_DEF("volume", VideoTextureGetVolume, VideoTextureSetVolume),
+    JS_CFUNC_DEF("play", 0, VideoTexturePlay),
+    JS_CFUNC_DEF("stop", 0, VideoTextureStop),
+    JS_CFUNC_DEF("pause", 0, VideoTexturePause),
+    JS_CFUNC_DEF("setCurrentTime", 1, VideoTextureSetCurrentTime),
+    JS_CFUNC_DEF("getCurrentTime", 0, VideoTextureGetCurrentTime),
+    JS_CFUNC_DEF("isPlaying", 0, VideoTextureIsPlaying),
+};
+
+void InitVideoTextureClass(JSContext* ctx, JSRuntime* rt) {
+    if (s_video_texture_class_id == 0) JS_NewClassID(rt, &s_video_texture_class_id);
+    JS_NewClass(rt, s_video_texture_class_id, &s_video_texture_class_def);
+    JSValue proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx,
+                               proto,
+                               s_video_texture_proto_funcs,
+                               sizeof(s_video_texture_proto_funcs) /
+                                   sizeof(s_video_texture_proto_funcs[0]));
+    JS_SetClassProto(ctx, s_video_texture_class_id, proto);
+}
+
+JSValue NodeGetVideoTexture(JSContext* ctx, JSValueConst this_val, int, JSValueConst*) {
+    auto* node     = GetLayerNode(this_val);
+    auto  playback = node != nullptr ? node->VideoControlHandle() : None<Arc<VideoPlaybackState>>();
+    if (playback.is_none()) {
+        JSValue global  = JS_GetGlobalObject(ctx);
+        JSValue factory = JS_GetPropertyStr(ctx, global, "__wwCreateVideoTextureStub");
+        JSValue result  = JS_Call(ctx, factory, JS_UNDEFINED, 0, nullptr);
+        JS_FreeValue(ctx, factory);
+        JS_FreeValue(ctx, global);
+        return result;
+    }
+    JSValue object = JS_NewObjectClass(ctx, s_video_texture_class_id);
+    if (JS_IsException(object)) return object;
+    JS_SetOpaque(object, new VideoTextureHandle { .playback = rstd::move(*playback) });
+    return object;
 }
 
 const JSCFunctionListEntry s_layer_proto_funcs[] = {
@@ -2768,7 +2882,7 @@ const JSCFunctionListEntry s_layer_proto_funcs[] = {
     JS_CFUNC_DEF("getBoneIndex", 1, NodeGetBoneIndex),
     JS_CFUNC_DEF("getBoneTransform", 1, NodeGetBoneTransform),
     JS_CFUNC_DEF("getTextureAnimation", 0, NodeGetTextureAnimation),
-    JS_CFUNC_DEF("getVideoTexture", 0, NodeGetVideoTextureStub),
+    JS_CFUNC_DEF("getVideoTexture", 0, NodeGetVideoTexture),
     JS_CFUNC_DEF("getAnimation", 0, NodeGetAnimationStub),
     JS_CFUNC_DEF("getAnimationLayer", 1, NodeGetAnimationStub),
     JS_CFUNC_DEF("createLayer", 1, NodeSceneCreateLayer),
@@ -2957,6 +3071,7 @@ JsRuntime::JsRuntime(): m_impl(std::make_unique<Impl>()) {
     InitEffectClass(m_impl->ctx, m_impl->rt);
     InitMaterialClass(m_impl->ctx, m_impl->rt);
     InitTexAnimClass(m_impl->ctx, m_impl->rt);
+    InitVideoTextureClass(m_impl->ctx, m_impl->rt);
     InstallEngineGlobal(m_impl->ctx);
     // Bootstrap created stub `thisLayer` / `thisScene` on globalThis.
     // Capture them now so per-script binding can fall back to the stub
