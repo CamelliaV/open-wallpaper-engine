@@ -1447,6 +1447,35 @@ TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
               50.0 + 50.0 * 100 + 3142.0 * 10000 + 180.0 * 1e9);
 }
 
+TEST(ScriptWEVector, VectorAngle2UsesDegrees) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            import * as V from 'WEVector';
+            export function update() {
+                return new Vec3(
+                    V.vectorAngle2(new Vec2(1, 0)),
+                    V.vectorAngle2(new Vec2(0, 1)),
+                    V.vectorAngle2(V.angleVector2(-135)));
+            }
+        )JS",
+        "test/wevector_vector_angle2",
+        FieldKind::Vec3,
+        owe::MakeObject(),
+        owe::IntoJson("0.0 0.0 0.0"),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    ASSERT_TRUE(std::holds_alternative<Vec3Value>(fs->last_value()));
+    const auto& value = std::get<Vec3Value>(fs->last_value());
+    EXPECT_NEAR(value.x, 0.0, 0.001);
+    EXPECT_NEAR(value.y, 90.0, 0.001);
+    EXPECT_NEAR(value.z, -135.0, 0.001);
+}
+
 TEST(ScriptVector, InstanceMixInterpolatesVectors) {
     JsRuntime   rt;
     FrameInputs fi {};

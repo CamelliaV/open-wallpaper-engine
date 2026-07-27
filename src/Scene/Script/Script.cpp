@@ -1649,16 +1649,16 @@ deg2rad.valueOf = () => Math.PI / 180;
 rad2deg.valueOf = () => 180 / Math.PI;
 )JS";
 
-// WE's `WEVector` module. Corpus only exercises `angleVector2` (degrees ->
-// unit Vec2, the circular audio-bar layout in workshop 3365654061); the script
-// recomputes the same layout manually as (cos(deg), sin(deg))*radius, which
-// pins the units/axes. Other helpers are unambiguous vector math, added so
-// future scripts don't trip the loader. Extend once corpus needs more.
+// WE's `WEVector` module. angleVector2 and vectorAngle2 use degrees and the
+// standard x = cos, y = sin axes. Other helpers are unambiguous vector math.
 static constexpr const char* kWEVectorSrc = R"JS(
 function v2(x, y) { return new globalThis.Vec2(x, y); }
 export function angleVector2(angle) {
     const r = angle * Math.PI / 180;
     return v2(Math.cos(r), Math.sin(r));
+}
+export function vectorAngle2(v) {
+    return Math.atan2(v.y, v.x) * 180 / Math.PI;
 }
 export function magnitude(v) { return Math.sqrt(v.x*v.x + v.y*v.y); }
 export function normalize(v) {
