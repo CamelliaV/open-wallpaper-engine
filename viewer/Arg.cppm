@@ -112,12 +112,10 @@ SceneViewerArgs ParseSceneViewerArgs(int argc, char** argv) {
                             .short_name(u8('G'))
                             .long_name("graphviz"_str)
                             .help("generate graphviz of render graph, output to 'graph.dot'"_str));
-    auto stdin_json =
-        command.add_arg(Arg<bool>::flag("stdin-json"_str)
-                            .long_name("stdin-json"_str)
-                            .help("read JSONL commands from stdin, for example: "
-                                  "{\"command\":\"set_user_property\",\"key\":\"name\","
-                                  "\"value\":1}"_str));
+    auto stdin_json = command.add_arg(
+        Arg<bool>::flag("stdin-json"_str)
+            .long_name("stdin-json"_str)
+            .help("read set_user_property and set_mpris JSONL commands from stdin"_str));
     auto cache_path = command.add_arg(Arg<String>::value("cache-path"_str, string_parser())
                                           .short_name(u8('C'))
                                           .long_name("cache-path"_str)

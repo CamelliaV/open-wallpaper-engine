@@ -2885,6 +2885,11 @@ JSValue MakeMediaPropertiesEvent(JSContext* ctx, const MediaStatus& status) {
                               "album",
                               JS_NewStringLen(ctx, status.album.data(), status.album.size()),
                               JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx,
+                              ev,
+                              "albumTitle",
+                              JS_NewStringLen(ctx, status.album.data(), status.album.size()),
+                              JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(
         ctx,
         ev,

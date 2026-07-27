@@ -94,13 +94,24 @@ private:
         }
 
         auto command_name = command.get("command"_str);
-        auto key          = command.get("key"_str);
-        auto value        = command.get("value"_str);
-        if (command_name.is_none() || ! (**command_name).is_string() ||
-            rstd::cppstd::as_string_view(*(**command_name).as_str()) != "set_user_property") {
-            std::cerr << "--stdin-json: unsupported command\n";
+        if (command_name.is_none() || ! (**command_name).is_string()) {
+            std::cerr << "--stdin-json: command requires a string name\n";
             return;
         }
+
+        auto name = rstd::cppstd::as_string_view(*(**command_name).as_str());
+        if (name == "set_user_property") {
+            setUserProperty(wallpaper, command);
+        } else if (name == "set_mpris") {
+            setMpris(wallpaper, command);
+        } else {
+            std::cerr << "--stdin-json: unsupported command\n";
+        }
+    }
+
+    static void setUserProperty(owe::SceneWallpaper& wallpaper, const owe::Json& command) {
+        auto key   = command.get("key"_str);
+        auto value = command.get("value"_str);
         if (key.is_none() || ! (**key).is_string() || value.is_none()) {
             std::cerr
                 << "--stdin-json: set_user_property requires a string key and a value field\n";
@@ -114,6 +125,46 @@ private:
         }
         wallpaper.setUserPropertyJson(property, (**value).clone());
         std::cout << "scene-viewer: queued user property '" << property << "'\n" << std::flush;
+    }
+
+    static bool readString(const owe::Json& command, rstd::ref<rstd::str> key, std::string& value) {
+        auto field = command.get(key);
+        if (field.is_none()) return true;
+        auto text = (**field).as_str();
+        if (text.is_none()) return false;
+        value = rstd::cppstd::to_string(*text);
+        return true;
+    }
+
+    static void setMpris(owe::SceneWallpaper& wallpaper, const owe::Json& command) {
+        auto state = command.get("state"_str);
+        if (state.is_none()) {
+            std::cerr << "--stdin-json: set_mpris requires state 0, 1, or 2\n";
+            return;
+        }
+        auto state_value = (**state).as_u64();
+        if (state_value.is_none() || *state_value > rstd::u64(2)) {
+            std::cerr << "--stdin-json: set_mpris requires state 0, 1, or 2\n";
+            return;
+        }
+
+        owe::MediaStatus status;
+        status.state = static_cast<uint32_t>(state_value->to_primitive());
+        if (! readString(command, "title"_str, status.title) ||
+            ! readString(command, "artist"_str, status.artist) ||
+            ! readString(command, "album"_str, status.album) ||
+            ! readString(command, "album_artist"_str, status.album_artist) ||
+            ! readString(command, "art_url"_str, status.art_url) ||
+            ! readString(command, "previous_art_url"_str, status.previous_art_url)) {
+            std::cerr << "--stdin-json: set_mpris metadata fields must be strings\n";
+            return;
+        }
+
+        auto title   = status.title;
+        auto art_url = status.art_url;
+        wallpaper.setMediaStatus(std::move(status));
+        std::cout << "scene-viewer: queued MPRIS title '" << title << "' art '" << art_url << "'\n"
+                  << std::flush;
     }
 
     bool        m_enabled { false };

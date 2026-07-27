@@ -1976,7 +1976,8 @@ TEST(ScriptMedia, DispatchesPropertiesPlaybackAndThumbnailEvents) {
         let props = 0, playback = 0, thumb = 0;
         export function mediaPropertiesChanged(event) {
             if (event.title === "Song" && event.artist === "Artist" &&
-                event.album === "Album" && event.albumArtist === "Album Artist") {
+                event.album === "Album" && event.albumTitle === "Album" &&
+                event.albumArtist === "Album Artist") {
                 props = 1;
             }
         }
