@@ -58,6 +58,31 @@ struct ResourcePlan {
     rstd::vec::Vec<BufferPlanEntry>  buffers;
     rstd::vec::Vec<ShaderPlanEntry>  shaders;
 
+    auto DeclareTexture(TextureRequest request, ResourceAccess access) -> TextureUseHandle {
+        if (generation == u64()) return {};
+
+        u64 next_index {};
+        for (const auto& entry : textures) {
+            if (entry.handle.generation != generation || ! entry.handle.Valid() ||
+                entry.handle.index < next_index) {
+                continue;
+            }
+            if (entry.handle.index == u64::MAX - u64(1)) return {};
+            next_index = entry.handle.index + u64(1);
+        }
+
+        auto handle = TextureUseHandle {
+            .index      = next_index,
+            .generation = generation,
+        };
+        textures.push(TexturePlanEntry {
+            .handle  = handle,
+            .request = rstd::move(request),
+            .access  = access,
+        });
+        return handle;
+    }
+
     bool UpdateTextureRequest(TextureUseHandle handle, TextureRequest request) {
         if (handle.generation != generation) return false;
         for (auto& entry : textures) {

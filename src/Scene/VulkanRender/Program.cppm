@@ -159,6 +159,7 @@ struct RenderProgram {
     rstd::vec::Vec<PreparedPassRecord>                      pass_records;
     rstd::vec::Vec<RenderPassScope>                         scopes;
     owe::resource::ResourcePlan                             resource_plan;
+    rstd::usize                                             graph_texture_count { 0 };
     rstd::Option<rstd::mut_ref<owe::rg::RenderGraph>>       graph;
     rstd::vec::Vec<rstd::mut_ref<VulkanPass>>               frame_passes;
     rstd::Option<rstd::mut_ref<PrePass>>                    frame_prepass;
@@ -174,8 +175,9 @@ struct RenderProgram {
         resource_prepare_session = rstd::None();
         scopes.clear();
         pass_records.clear();
-        resource_plan = {};
-        graph         = rstd::None();
+        resource_plan       = {};
+        graph_texture_count = rstd::usize();
+        graph               = rstd::None();
         frame_passes.clear();
         frame_prepass = rstd::None();
         frame_finpass = rstd::None();
@@ -218,7 +220,8 @@ struct RenderProgram {
         clear();
         this->graph =
             rstd::Some(rstd::mut_ref<owe::rg::RenderGraph>::from_raw_parts(rstd::addressof(graph)));
-        resource_plan = rstd::move(plan);
+        resource_plan       = rstd::move(plan);
+        graph_texture_count = resource_plan.textures.len();
         pass_records =
             rstd::vec::Vec<PreparedPassRecord>::with_capacity(nodes.len() + rstd::usize(2));
 
@@ -558,6 +561,7 @@ struct RenderProgram {
             return RenderProgramPrepareStatus::Failed;
         }
         if (prepare_buffers) {
+            resource_plan.textures.truncate(graph_texture_count);
             resource_plan.buffers.clear();
             resource_plan.shaders.clear();
             for (auto& record : pass_records) {
@@ -625,34 +629,6 @@ struct RenderProgram {
 
     auto finishPrepare(owe::Scene& scene, const Device& device, RenderingResources& rr)
         -> RenderProgramPrepareStatus {
-        rstd::Option<owe::resource::TextureUseHandle> frame_result_use = rstd::None();
-        rstd::Option<owe::resource::TextureUseHandle> frame_msaa_use   = rstd::None();
-        std::string                                   frame_msaa_name;
-        auto frame_target = scene.RenderTarget(owe::SpecTex_Default);
-        if (frame_target.is_some()) {
-            auto samples = TextureSampleCount((**frame_target).sample_count);
-            if (samples != VK_SAMPLE_COUNT_1_BIT) {
-                frame_msaa_name =
-                    MsaaTwinName(rstd::cppstd::as_string_view(owe::SpecTex_Default), samples);
-            }
-        }
-        for (const auto& entry : resource_plan.textures) {
-            auto name = rstd::cppstd::as_string_view(entry.request.name.as_str());
-            auto use  = owe::resource::TextureUseHandle {
-                .index      = entry.handle.index,
-                .generation = entry.handle.generation,
-            };
-            if (name == rstd::cppstd::as_string_view(owe::SpecTex_Default)) {
-                frame_result_use = rstd::Some(use);
-            } else if (! frame_msaa_name.empty() && name == frame_msaa_name) {
-                frame_msaa_use = rstd::Some(use);
-            }
-        }
-        if (frame_prepass) {
-            (*frame_prepass)->setResultUse(frame_result_use);
-            (*frame_prepass)->setResultMsaaUse(frame_msaa_use);
-        }
-        if (frame_finpass) (*frame_finpass)->setResultUse(frame_result_use);
         auto state_preparer = rstd::dyn<owe::resource_registry::TextureStatePreparer>::from_ref(
             rr.resources.States());
         for (auto& record : pass_records) {

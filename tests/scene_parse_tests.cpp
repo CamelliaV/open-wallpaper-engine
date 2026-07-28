@@ -19,6 +19,8 @@ import wescene.json;
 import wescene.pkg.scene_obj;
 import wescene.testing.scene_parse_probe;
 
+using namespace rstd::literals;
+
 TEST(FieldBindingJson, CompatibilityReaderPopulatesAnimationMetadata) {
     auto parsed = owe::ParseJson(R"({"enabled":true,"x":{"value":1.5},"y":-2.0,"magic":7})");
     ASSERT_TRUE(parsed.is_ok());
@@ -78,6 +80,47 @@ TEST(ModelObjectJson, ReadsMaterialSkin) {
     owe::wpscene::ModelObject model;
     ASSERT_TRUE(model.FromJson(parsed.unwrap(), vfs));
     EXPECT_EQ(model.skin, 2u);
+}
+
+TEST(ImageEffectJson, FailedEffectsAreAbsentFromParsedObjects) {
+    auto image_json = owe::ParseJson(R"({
+        "image": "models/util/fullscreenlayer.json",
+        "effects": [
+            {"file": "effects/_empty/effect.json", "visible": true},
+            {"file": "effects/missing/effect.json", "visible": true}
+        ]
+    })");
+    auto shape_json = owe::ParseJson(R"({
+        "shape": "rectangle",
+        "origin": [0.0, 0.0, 0.0],
+        "angles": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0],
+        "effects": [
+            {"file": "effects/_empty/effect.json", "visible": true},
+            {"file": "effects/missing/effect.json", "visible": true}
+        ]
+    })");
+    ASSERT_TRUE(image_json.is_ok());
+    ASSERT_TRUE(shape_json.is_ok());
+
+    auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    ASSERT_TRUE(assets.is_ok());
+    auto effect_assets = owe::fs::make_physical_fs(
+        owe::fs::ToPath(std::string(WAYWALLEN_ASSETS_DIR) + "/effects/_empty"));
+    ASSERT_TRUE(effect_assets.is_ok());
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.mount("/assets"_str, std::move(assets).unwrap_unchecked()).is_ok());
+    ASSERT_TRUE(vfs.mount("/assets"_str, std::move(effect_assets).unwrap_unchecked()).is_ok());
+
+    owe::wpscene::ImageObject image;
+    ASSERT_TRUE(image.FromJson(image_json.unwrap(), vfs));
+    ASSERT_EQ(image.effects.size(), 1u);
+    EXPECT_FALSE(image.effects[0].materials.empty());
+
+    owe::wpscene::ShapeObject shape;
+    ASSERT_TRUE(shape.FromJson(shape_json.unwrap(), vfs, owe::wpscene::kSceneVersionUnknown));
+    ASSERT_EQ(shape.effects.size(), 1u);
+    EXPECT_FALSE(shape.effects[0].materials.empty());
 }
 
 namespace

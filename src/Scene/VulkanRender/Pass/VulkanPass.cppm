@@ -161,6 +161,11 @@ public:
         return AddBuffer(rstd::move(request), rstd::move(bytes));
     }
 
+    auto AddTexture(resource::TextureRequest request, resource::ResourceAccess access)
+        -> resource::TextureUseHandle {
+        return m_plan.DeclareTexture(rstd::move(request), access);
+    }
+
     auto AddShader(resource::ShaderRequest request, const SceneShader& shader)
         -> resource::ShaderUseHandle {
         auto handle = resource::ShaderUseHandle {

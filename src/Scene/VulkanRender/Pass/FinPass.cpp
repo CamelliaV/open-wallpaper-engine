@@ -36,6 +36,11 @@ bool FinPass::setResultRequest(rstd::Option<TextureRequest> request) {
 }
 
 void FinPass::declareResources(ResourceDeclarationContext& context) {
+    m_desc.result_use = rstd::None();
+    if (m_desc.result_request.is_some()) {
+        m_desc.result_use = rstd::Some(
+            context.AddTexture(m_desc.result_request->clone(), resource::ResourceAccess::Read));
+    }
     m_desc.external_use = rstd::Some(context.ReserveExternal());
 }
 

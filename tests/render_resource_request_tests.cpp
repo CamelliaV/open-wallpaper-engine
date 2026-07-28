@@ -803,6 +803,68 @@ TEST(ResourcePlan, UpdatesTextureRequestByStableUse) {
     EXPECT_EQ(plan.textures[rstd::usize()].request.name, "texture-new"_str);
 }
 
+TEST(FramePassResources, DeclaresTargetUsesOutsideTheRenderGraphPlan) {
+    owe::SceneRenderTarget render_target {
+        .width        = 1920,
+        .height       = 1080,
+        .sample_count = 4,
+    };
+    auto target = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", render_target);
+    auto msaa   = owe::vulkan::MakeMsaaTextureRequest(
+        "_rt_default::msaa4", render_target, VK_SAMPLE_COUNT_4_BIT);
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(7) };
+    plan.textures.push(owe::resource::TexturePlanEntry {
+        .handle =
+            owe::resource::TextureUseHandle { .index = rstd::u64(4), .generation = rstd::u64(7) },
+        .request = owe::vulkan::MakeImportedTextureRequest("graph-input"),
+    });
+    owe::vulkan::ShaderReflectionCache shader_cache;
+    owe::vulkan::PrePass               pre(owe::vulkan::PrePass::Desc {
+        .result_request      = rstd::Some(target.clone()),
+        .result_msaa_request = rstd::Some(rstd::move(msaa)),
+    });
+    owe::vulkan::FinPass               fin(owe::vulkan::FinPass::Desc {
+        .result_request = rstd::Some(target.clone()),
+    });
+    {
+        owe::vulkan::ResourceDeclarationContext declarations(plan, shader_cache);
+        pre.declareResources(declarations);
+        fin.declareResources(declarations);
+    }
+
+    auto pre_diagnostics = pre.textureRequestDiagnostics();
+    auto fin_diagnostics = fin.textureRequestDiagnostics();
+    ASSERT_EQ(pre_diagnostics.size(), 2u);
+    ASSERT_EQ(fin_diagnostics.size(), 1u);
+    ASSERT_TRUE(pre_diagnostics[0].use.is_some());
+    ASSERT_TRUE(pre_diagnostics[1].use.is_some());
+    ASSERT_TRUE(fin_diagnostics[0].use.is_some());
+    EXPECT_EQ(pre_diagnostics[0].use->index, rstd::u64(5));
+    EXPECT_EQ(pre_diagnostics[1].use->index, rstd::u64(6));
+    EXPECT_EQ(fin_diagnostics[0].use->index, rstd::u64(7));
+    EXPECT_NE(*pre_diagnostics[0].use, *fin_diagnostics[0].use);
+    ASSERT_EQ(plan.textures.len(), rstd::usize(4));
+    EXPECT_EQ(plan.textures[rstd::usize(1)].access, owe::resource::ResourceAccess::Write);
+    EXPECT_EQ(plan.textures[rstd::usize(2)].access, owe::resource::ResourceAccess::Write);
+    EXPECT_EQ(plan.textures[rstd::usize(3)].access, owe::resource::ResourceAccess::Read);
+    EXPECT_EQ(plan.textures[rstd::usize(1)].request.name, "_rt_default"_str);
+    EXPECT_EQ(plan.textures[rstd::usize(2)].request.name, "_rt_default::msaa4"_str);
+    EXPECT_EQ(plan.textures[rstd::usize(3)].request.name, "_rt_default"_str);
+
+    plan.textures.truncate(rstd::usize(1));
+    {
+        owe::vulkan::ResourceDeclarationContext declarations(plan, shader_cache);
+        pre.declareResources(declarations);
+        fin.declareResources(declarations);
+    }
+    pre_diagnostics = pre.textureRequestDiagnostics();
+    fin_diagnostics = fin.textureRequestDiagnostics();
+    ASSERT_EQ(plan.textures.len(), rstd::usize(4));
+    EXPECT_EQ(pre_diagnostics[0].use->index, rstd::u64(5));
+    EXPECT_EQ(pre_diagnostics[1].use->index, rstd::u64(6));
+    EXPECT_EQ(fin_diagnostics[0].use->index, rstd::u64(7));
+}
+
 TEST(CustomShaderPass, RefreshesImportedTextureOnStableUse) {
     owe::Scene scene;
     scene.RootMut()->ID() = rstd::i32(1);

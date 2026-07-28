@@ -235,6 +235,24 @@ bool ImageEffect::FromFileJson(const owe::Json& json, fs::VFS& vfs) {
     return true;
 }
 
+namespace
+{
+
+void ReadImageEffects(const owe::Json& json, owe::fs::VFS& vfs, SceneVersion version,
+                      std::vector<ImageEffect>& effects) {
+    auto values = json.get("effects"_str);
+    if (values.is_none()) return;
+    auto array = (*values)->as_array();
+    if (array.is_none()) return;
+
+    for (const auto& value : **array) {
+        ImageEffect effect;
+        if (effect.FromJson(value, vfs, version)) effects.push_back(std::move(effect));
+    }
+}
+
+} // namespace
+
 bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs) {
     return FromJson(json, vfs, kSceneVersionUnknown);
 }
@@ -308,16 +326,7 @@ bool ImageObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     alpha_user_key = alpha_user.name;
     owe::GetJsonValue(json, "brightness", brightness, false);
 
-    if (auto values = json.get("effects"_str); values.is_some()) {
-        auto array = (*values)->as_array();
-        if (array.is_some()) {
-            for (const auto& jE : **array) {
-                ImageEffect wpeff;
-                wpeff.FromJson(jE, vfs, v);
-                effects.push_back(std::move(wpeff));
-            }
-        }
-    }
+    ReadImageEffects(json, vfs, v, effects);
     ReadPuppetAnimationLayers(json, puppet_layers);
     if (auto config_json = json.get("config"_str); config_json.is_some()) {
         owe::GetJsonValue(**config_json, "passthrough", config.passthrough, false);
@@ -367,16 +376,7 @@ bool ShapeObject::FromJson(const owe::Json& json, fs::VFS& vfs, SceneVersion v) 
     owe::GetJsonValue(json, "angles", angles);
     owe::GetJsonValue(json, "scale", scale);
 
-    if (auto values = json.get("effects"_str); values.is_some()) {
-        auto array = (*values)->as_array();
-        if (array.is_some()) {
-            for (const auto& value : **array) {
-                ImageEffect effect;
-                if (! effect.FromJson(value, vfs, v)) return false;
-                effects.push_back(std::move(effect));
-            }
-        }
-    }
+    ReadImageEffects(json, vfs, v, effects);
 
     owe::GetJsonValue(json, "locktransforms", locktransforms, false);
     owe::GetJsonValue(json, "muteineditor", muteineditor, false);

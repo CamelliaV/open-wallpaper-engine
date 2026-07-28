@@ -34,14 +34,8 @@ public:
     PrePass(Desc&&);
     virtual ~PrePass();
 
-    bool setResultRequest(rstd::Option<TextureRequest>,
-                          rstd::Option<TextureRequest> msaa_request = rstd::None());
-    void setResultUse(rstd::Option<resource::TextureUseHandle> use) {
-        m_desc.result_use = rstd::move(use);
-    }
-    void setResultMsaaUse(rstd::Option<resource::TextureUseHandle> use) {
-        m_desc.result_msaa_use = rstd::move(use);
-    }
+    bool             setResultRequest(rstd::Option<TextureRequest>,
+                                      rstd::Option<TextureRequest> msaa_request = rstd::None());
     void             declareResources(ResourceDeclarationContext&) override;
     PassResourceUses resourceUses() const override;
     bool             prepareResourceStates(
