@@ -272,6 +272,9 @@ std::function<void(const ScriptValue&)> MakeNodeTransformApply(rstd::sync::Arc<o
 // Build the closure that drives a SceneNode alpha field.
 std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::SceneNode> node);
 
+// Build the closure that drives a SceneNode volume field.
+std::function<void(const ScriptValue&)> MakeNodeVolumeApply(rstd::sync::Arc<owe::SceneNode> node);
+
 // Build the closure that drives a SceneNode color field.
 std::function<void(const ScriptValue&)> MakeNodeColorApply(rstd::sync::Arc<owe::SceneNode> node);
 

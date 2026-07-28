@@ -3662,6 +3662,20 @@ std::function<void(const ScriptValue&)> MakeNodeAlphaApply(rstd::sync::Arc<owe::
     };
 }
 
+std::function<void(const ScriptValue&)> MakeNodeVolumeApply(rstd::sync::Arc<owe::SceneNode> node) {
+    return [hold = SceneNodeArcCapture(rstd::move(node))](const ScriptValue& value) {
+        if (auto* volume = std::get_if<ScalarValue>(&value)) {
+            hold.node->SetVolume(static_cast<float>(volume->v));
+        } else if (auto* volume = std::get_if<BoolValue>(&value)) {
+            hold.node->SetVolume(volume->v ? 1.0f : 0.0f);
+        } else if (auto* volume = std::get_if<Vec2Value>(&value)) {
+            hold.node->SetVolume(static_cast<float>(volume->x));
+        } else if (auto* volume = std::get_if<Vec3Value>(&value)) {
+            hold.node->SetVolume(static_cast<float>(volume->x));
+        }
+    };
+}
+
 std::function<void(const ScriptValue&)> MakeNodeColorApply(rstd::sync::Arc<owe::SceneNode> node) {
     return [hold = SceneNodeArcCapture(rstd::move(node))](const ScriptValue& value) {
         auto& current = hold.node->Color();

@@ -3,6 +3,8 @@
 import eigen;
 import rstd;
 import rstd.cppstd;
+import wavsen.audio;
+import wescene.fs;
 import wescene.json;
 import wescene.pkg.parse;
 import wescene.scene;
@@ -256,6 +258,59 @@ TEST(SceneAudioAverage, SharesAtomicStateWithStreamOwner) {
     stream_owner->Store(usize(3), f32(0.75f));
 
     EXPECT_FLOAT_EQ(scene.AudioAverage(usize(3)).to_primitive(), 0.75f);
+}
+
+TEST(WPSceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {},
+            "objects": [
+                {
+                    "id": 1,
+                    "name": "BGM Controller",
+                    "sound": ["sounds/controller.mp3"],
+                    "startsilent": true,
+                    "volume": {
+                        "value": 0.7,
+                        "script": "export function applyUserProperties(properties) { if (properties.song_selection) thisScene.getLayer('BGM Target').play(); } export function update(value) { return value * 0.5; }"
+                    }
+                },
+                {
+                    "id": 2,
+                    "name": "BGM Target",
+                    "sound": ["sounds/target.mp3"],
+                    "startsilent": true,
+                    "volume": 0.7
+                }
+            ]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    owe::fs::VFS                vfs;
+    wavsen::audio::SoundManager sound_manager;
+    owe::WPSceneParser          parser;
+    auto                        parsed = parser.Parse(
+        "sound-script"_str,
+        ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(parsed.is_ok());
+
+    auto scene      = rstd::move(parsed).unwrap();
+    auto controller = scene.scene->RootMut()->FindByName("BGM Controller");
+    auto target     = scene.scene->RootMut()->FindByName("BGM Target");
+    ASSERT_NE(controller, nullptr);
+    ASSERT_NE(target, nullptr);
+    EXPECT_FALSE(target->IsPlaying());
+
+    auto property = rstd::json::from_str(R"({"type":"combo","value":"0"})"_str).unwrap();
+    owe::script::SetSceneUserProperty(*scene.scene, "song_selection", property);
+    EXPECT_TRUE(target->IsPlaying());
+
+    owe::script::TickSceneScripts(*scene.scene, owe::script::FrameInputs {});
+    EXPECT_FLOAT_EQ(controller->Volume(), 0.35f);
 }
 
 TEST(SceneUserTextBinding, AppliesDescriptorPayloadToMatchingBindings) {

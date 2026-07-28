@@ -863,6 +863,7 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
         bool                        has_actuator = true;
         bool                        is_alpha     = false;
         bool                        is_color     = false;
+        bool                        is_volume    = false;
         if (field == "origin") {
             tgt  = script::NodeTransformTarget::Translate;
             kind = script::FieldKind::Vec3;
@@ -884,6 +885,9 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
         } else if (field == "color") {
             kind     = script::FieldKind::Vec3;
             is_color = true;
+        } else if (field == "volume") {
+            kind      = script::FieldKind::Scalar;
+            is_volume = true;
         } else {
             // text/rate/intensity/... are wired elsewhere or not yet supported.
             continue;
@@ -905,6 +909,8 @@ void WireFieldScripts(ParseContext& context, const Arc<SceneNode>& node_sp,
             ss.AddActuator({ fs, script::MakeNodeAlphaApply(node_sp.clone()) });
         else if (is_color)
             ss.AddActuator({ fs, script::MakeNodeColorApply(node_sp.clone()) });
+        else if (is_volume)
+            ss.AddActuator({ fs, script::MakeNodeVolumeApply(node_sp.clone()) });
         else if (field == "origin" && origin_apply)
             ss.AddActuator({ fs, origin_apply });
         else if (field == "scale" && scale_apply)
