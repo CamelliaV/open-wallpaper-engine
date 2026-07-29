@@ -20,6 +20,7 @@ entry_version = 3
 bin = "@OWE_WESCENE_BIN@"
 types = ["scene"]
 priority = 100
+activity = "continuous"
 spawn_version = 8
 extras = ["assets", "workshop_id"]
 

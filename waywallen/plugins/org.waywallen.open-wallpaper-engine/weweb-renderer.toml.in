@@ -5,6 +5,7 @@
 bin = "@OWE_WEWEB_BIN@"
 types = ["web"]
 priority = 100
+activity = "continuous"
 spawn_version = 8
 extras = ["workshop_id"]
 
