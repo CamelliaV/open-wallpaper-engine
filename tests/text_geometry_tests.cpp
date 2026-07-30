@@ -9,7 +9,7 @@ import wescene.scene;
 import wescene.text;
 import wescene.types;
 
-TEST(FontFace, TabAdvancesWithoutRasterizingAControlGlyph) {
+TEST(FontFace, TabHasNoLayoutOrRasterizedGlyph) {
     auto font = owe::text::FontCache::ResolveSystemFont("systemfont_monospace");
     ASSERT_NE(font.bytes, nullptr);
 
@@ -24,22 +24,22 @@ TEST(FontFace, TabAdvancesWithoutRasterizingAControlGlyph) {
     ASSERT_NE(tab, nullptr);
     EXPECT_EQ(tab->pixel_w, 0u);
     EXPECT_EQ(tab->pixel_h, 0u);
-    EXPECT_GT(tab->advance_x, 0.0f);
+    EXPECT_EQ(tab->advance_x, 0.0f);
 }
 
-TEST(TextLayouter, TabMatchesFourSpaceIndentWithoutAControlQuad) {
+TEST(TextLayouter, TabIsIgnoredWithoutAControlQuad) {
     auto font = owe::text::FontCache::ResolveSystemFont("systemfont_monospace");
     ASSERT_NE(font.bytes, nullptr);
 
     owe::text::FontCache cache;
     auto*                face = cache.GetFace(font, 64);
     ASSERT_NE(face, nullptr);
-    const auto tab_text   = owe::text::DecodeUtf8("\tA");
-    const auto space_text = owe::text::DecodeUtf8("    A");
+    const auto tab_text   = owe::text::DecodeUtf8("hour:\n\t\t\t\tminute:");
+    const auto plain_text = owe::text::DecodeUtf8("hour:\nminute:");
     face->Populate(tab_text);
-    face->Populate(space_text);
+    face->Populate(plain_text);
 
-    constexpr std::size_t peak_quads = 8;
+    constexpr std::size_t peak_quads = 16;
     auto                  mesh       = std::make_shared<owe::SceneMesh>();
     std::vector<owe::SceneVertexArray::SceneVertexAttribute> attributes {
         { .name = "a_Position", .type = owe::VertexType::FLOAT3 },
@@ -50,13 +50,13 @@ TEST(TextLayouter, TabMatchesFourSpaceIndentWithoutAControlQuad) {
     mesh->AddIndexArray(owe::SceneIndexArray(rstd::usize(peak_quads * 6)));
 
     owe::text::TextLayouter layouter(face, mesh, {}, peak_quads);
-    layouter.SetText("\tA");
+    layouter.SetText("hour:\n\t\t\t\tminute:");
     const float tab_width = layouter.TextWidth();
-    EXPECT_EQ(mesh->GetIndexArray(rstd::usize()).RenderDataCount(), rstd::usize(6));
+    EXPECT_EQ(mesh->GetIndexArray(rstd::usize()).RenderDataCount(), rstd::usize(72));
 
-    layouter.SetText("    A");
+    layouter.SetText("hour:\nminute:");
     EXPECT_FLOAT_EQ(layouter.TextWidth(), tab_width);
-    EXPECT_EQ(mesh->GetIndexArray(rstd::usize()).RenderDataCount(), rstd::usize(6));
+    EXPECT_EQ(mesh->GetIndexArray(rstd::usize()).RenderDataCount(), rstd::usize(72));
 }
 
 TEST(TextGeometry, DynamicEffectFollowsCurrentTextBounds) {
