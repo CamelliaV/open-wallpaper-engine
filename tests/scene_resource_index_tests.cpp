@@ -616,6 +616,24 @@ TEST(SceneMaterialRuntimeMutation, UpdatesShaderValuesAndTextureSlotsThroughScen
     EXPECT_EQ(texture_events[usize()].flags, owe::SceneMaterialDirtyTextureBindings);
 }
 
+TEST(SceneMaterialRuntimeMutation, ZeroFillsShortShaderVectorsToDeclaredShape) {
+    owe::SceneMaterial material;
+    auto               shader = std::make_shared<owe::SceneShader>();
+    shader->default_uniforms["g_CloudSpeeds"] =
+        owe::ShaderValue(rstd::array<float, 4> { 0.01f, 0.01f, -0.02f, -0.02f });
+    material.customShader.shader = std::move(shader);
+
+    ASSERT_TRUE(material.SetShaderValue("g_CloudSpeeds",
+                                        owe::ShaderValue(rstd::array<float, 2> { 0.01f, -0.02f })));
+
+    const auto& value = material.customShader.constValues.at("g_CloudSpeeds");
+    ASSERT_EQ(value.size(), rstd::usize(4));
+    EXPECT_FLOAT_EQ(value[rstd::usize(0)], 0.01f);
+    EXPECT_FLOAT_EQ(value[rstd::usize(1)], -0.02f);
+    EXPECT_FLOAT_EQ(value[rstd::usize(2)], 0.0f);
+    EXPECT_FLOAT_EQ(value[rstd::usize(3)], 0.0f);
+}
+
 TEST(SceneMaterialShaderVariant, CarriesCompileDescriptorThroughMaterialMove) {
     owe::SceneMaterial material;
     material.name = "variant";

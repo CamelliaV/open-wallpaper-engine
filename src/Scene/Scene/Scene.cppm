@@ -700,22 +700,26 @@ public:
 
 private:
     ShaderValue ShapeShaderValue(std::string_view uniform_name, const ShaderValue& value) const {
-        if (value.size() != usize(1)) return value;
+        if (value.size() == usize()) return value;
 
         usize target_size {};
         if (auto it = customShader.constValues.find(std::string(uniform_name));
             it != customShader.constValues.end()) {
             target_size = it->second.size();
         }
-        if (target_size <= usize(1) && customShader.shader) {
+        if (customShader.shader) {
             if (auto it = customShader.shader->default_uniforms.find(std::string(uniform_name));
                 it != customShader.shader->default_uniforms.end()) {
-                target_size = it->second.size();
+                if (it->second.size() > target_size) target_size = it->second.size();
             }
         }
-        if (target_size <= usize(1) || target_size > usize(4)) return value;
+        if (target_size <= value.size() || target_size > usize(4)) return value;
 
-        std::vector<float> shaped(target_size.to_primitive(), value[usize()]);
+        const auto         fill = value.size() == usize(1) ? value[usize()] : 0.0f;
+        std::vector<float> shaped(target_size.to_primitive(), fill);
+        for (usize index {}; index < value.size(); ++index) {
+            shaped[index.to_primitive()] = value[index];
+        }
         return ShaderValue(std::span<const float>(shaped));
     }
 
