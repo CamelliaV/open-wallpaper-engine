@@ -483,6 +483,11 @@ struct EngineHostState {
         std::function<void(double)>           set_point_size;
     };
     std::unordered_map<owe::SceneNode*, TextAlignHooks> text_align_hooks;
+    struct NodeOriginHooks {
+        JsRuntime::NodeOriginGetter getter;
+        JsRuntime::NodeOriginSetter setter;
+    };
+    HashMap<owe::SceneNode*, NodeOriginHooks> node_origin_hooks;
     struct ImageAlignmentHook {
         String                          alignment;
         JsRuntime::ImageAlignmentSetter setter;
@@ -1976,6 +1981,14 @@ int MaterialSetProperty(JSContext* ctx, JSValueConst obj, JSAtom atom, JSValueCo
 JSValue NodeGetOrigin(JSContext* ctx, JSValueConst this_val) {
     auto* n = GetLayerNode(this_val);
     if (! n) return MakeVec3(ctx, 0, 0, 0);
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (host != nullptr) {
+        auto hook = host->node_origin_hooks.get_mut(n);
+        if (hook.is_some()) {
+            const auto origin = (*(**hook).getter)();
+            return MakeVec3(ctx, origin.x, origin.y, origin.z);
+        }
+    }
     auto v = n->Translate();
     return MakeVec3(ctx, v.x(), v.y(), v.z());
 }
@@ -1984,6 +1997,14 @@ JSValue NodeSetOrigin(JSContext* ctx, JSValueConst this_val, JSValueConst val) {
     if (! n) return JS_UNDEFINED;
     double x = 0, y = 0, z = 0;
     if (! ReadXYZ(ctx, val, x, y, z)) return JS_UNDEFINED;
+    auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    if (host != nullptr) {
+        auto hook = host->node_origin_hooks.get_mut(n);
+        if (hook.is_some()) {
+            (*(**hook).setter)(Vec3Value { .x = x, .y = y, .z = z });
+            return JS_UNDEFINED;
+        }
+    }
     n->SetTranslate({ float(x), float(y), float(z) });
     return JS_UNDEFINED;
 }
@@ -3429,6 +3450,15 @@ void JsRuntime::RegisterTextAlignSetters(owe::SceneNode* node, std::string horiz
         .get_point_size = std::move(get_point_size),
         .set_point_size = std::move(set_point_size),
     };
+}
+
+void JsRuntime::RegisterNodeOriginAccessors(owe::SceneNode* node, NodeOriginGetter getter,
+                                            NodeOriginSetter setter) {
+    if (node == nullptr) return;
+    (void)m_impl->host.node_origin_hooks.insert(
+        node,
+        EngineHostState::NodeOriginHooks { .getter = rstd::move(getter),
+                                           .setter = rstd::move(setter) });
 }
 
 void JsRuntime::RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alignment,

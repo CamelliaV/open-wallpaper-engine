@@ -4843,12 +4843,15 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     };
     update_text_layout(initial_metrics);
 
-    auto apply_text_origin = [anchor_state, apply_text_anchor](const script::ScriptValue& value) {
+    auto set_text_origin = [anchor_state, apply_text_anchor](Vector3f next) {
+        anchor_state->origin = next;
+        apply_text_anchor();
+    };
+    auto apply_text_origin = [anchor_state, set_text_origin](const script::ScriptValue& value) {
         Vector3f current = anchor_state->origin;
         auto     next    = ScriptValueAsVec3(value, current);
         if (! next) return;
-        anchor_state->origin = *next;
-        apply_text_anchor();
+        set_text_origin(*next);
     };
     auto apply_text_scale = [layer_hold, apply_text_anchor](const script::ScriptValue& value) {
         auto*    layer_ptr = layer_hold.get();
@@ -4893,7 +4896,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         update_text_layout(layouter->Metrics());
     };
 
-    EnsureScriptScene(context).runtime().RegisterTextAlignSetters(
+    auto& script_runtime = EnsureScriptScene(context).runtime();
+    script_runtime.RegisterTextAlignSetters(
         layer_node.as_ptr(),
         anchor_state->horizontal,
         anchor_state->vertical,
@@ -4904,6 +4908,18 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             return *current_point_size;
         },
         set_pointsize);
+    script_runtime.RegisterNodeOriginAccessors(
+        layer_node.as_ptr(),
+        script::JsRuntime::NodeOriginGetter::make([anchor_state]() {
+            const auto& origin = anchor_state->origin;
+            return script::Vec3Value { .x = origin.x(), .y = origin.y(), .z = origin.z() };
+        }),
+        script::JsRuntime::NodeOriginSetter::make(
+            [set_text_origin](script::Vec3Value origin) mutable {
+                set_text_origin(Vector3f { static_cast<float>(origin.x),
+                                           static_cast<float>(origin.y),
+                                           static_cast<float>(origin.z) });
+            }));
 
     AssignNodeFieldAnimations(*layer_node.as_ptr(), obj.field_bindings);
     WireFieldScripts(context, layer_node, obj.field_bindings, apply_text_origin, apply_text_scale);

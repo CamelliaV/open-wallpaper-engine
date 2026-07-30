@@ -544,6 +544,45 @@ TEST(ScriptNodeSoftMutation, ImageAlignmentDispatchesRegisteredSetter) {
     EXPECT_EQ(LastScalar(fs), 1.0);
 }
 
+TEST(ScriptNodeSoftMutation, OriginDispatchesRegisteredAccessors) {
+    owe::SceneNode node;
+    JsRuntime      rt;
+    Vec3Value      logical_origin { .x = 10.0, .y = 20.0, .z = 0.0 };
+    rt.RegisterNodeOriginAccessors(
+        &node,
+        JsRuntime::NodeOriginGetter::make([&logical_origin]() {
+            return logical_origin;
+        }),
+        JsRuntime::NodeOriginSetter::make([&node, &logical_origin](Vec3Value origin) {
+            logical_origin = origin;
+            node.SetTranslate({ static_cast<float>(origin.x + 50.0),
+                                static_cast<float>(origin.y),
+                                static_cast<float>(origin.z) });
+        }));
+
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            thisLayer.origin = new Vec3(42, 7, 3);
+            export function update() {
+                const origin = thisLayer.origin;
+                return origin.x * 100 + origin.y * 10 + origin.z;
+            }
+        )JS",
+        "test/node_origin_accessors",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        &node);
+    ASSERT_NE(fs, nullptr);
+
+    EXPECT_FLOAT_EQ(node.Translate().x(), 92.0f);
+    EXPECT_FLOAT_EQ(node.Translate().y(), 7.0f);
+    rt.TickAll();
+    EXPECT_EQ(LastScalar(fs), 4273.0);
+}
+
 TEST(ScriptNodeActuator, AlphaFieldReturnWritesNodeAlpha) {
     auto node = rstd::sync::Arc<owe::SceneNode>::make();
 

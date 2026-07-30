@@ -211,6 +211,10 @@ public:
                                   std::function<void(std::string_view)> set_vertical,
                                   std::function<double()>               get_point_size = {},
                                   std::function<void(double)>           set_point_size = {});
+    using NodeOriginGetter = Arc<dyn<FnMut<Vec3Value()>>>;
+    using NodeOriginSetter = Arc<dyn<FnMut<void(Vec3Value)>>>;
+    void RegisterNodeOriginAccessors(owe::SceneNode* node, NodeOriginGetter getter,
+                                     NodeOriginSetter setter);
     using ImageAlignmentSetter = Arc<dyn<FnMut<void(ref<str>)>>>;
     void RegisterImageAlignmentSetter(owe::SceneNode* node, ref<str> alignment,
                                       ImageAlignmentSetter setter);
