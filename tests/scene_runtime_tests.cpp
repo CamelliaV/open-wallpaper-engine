@@ -436,6 +436,21 @@ TEST(SceneCameraProjection, UsesExplicitProjectionFactories) {
     EXPECT_DOUBLE_EQ(perspective.Fov(), 45.0);
 }
 
+TEST(SceneCameraProjection, AppliesViewportScaleToOrthographicExtent) {
+    owe::Scene scene;
+    scene.SetOrtho({ i32(1920), i32(1080) });
+    scene.SetViewportScale(f32(1.5f));
+
+    auto extent = scene.OrthographicProjectionExtent();
+    EXPECT_DOUBLE_EQ(extent[usize()], 1280.0);
+    EXPECT_DOUBLE_EQ(extent[usize(1)], 720.0);
+
+    scene.SetViewportScale(f32());
+    extent = scene.OrthographicProjectionExtent();
+    EXPECT_DOUBLE_EQ(extent[usize()], 1920.0);
+    EXPECT_DOUBLE_EQ(extent[usize(1)], 1080.0);
+}
+
 TEST(SceneCameraPath, UserBindingMutatesRegisteredArc) {
     owe::Scene scene;
     auto       path                = Arc<owe::SceneCameraPath>::make();

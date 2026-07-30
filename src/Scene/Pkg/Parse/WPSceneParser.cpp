@@ -2326,8 +2326,9 @@ void ParseCamera(ParseContext& context, const wpscene::SceneMetadata& sc) {
     scene.RootMut()->AppendChild((*context.effect_camera_node).clone());
 
     // global camera
-    auto     global_camera = Arc<SceneCamera>::make(SceneCamera::MakeOrthographic(
-        context.ortho_w / general.zoom, context.ortho_h / general.zoom, -5000.0, 5000.0));
+    auto     projection_extent = scene.OrthographicProjectionExtent();
+    auto     global_camera     = Arc<SceneCamera>::make(SceneCamera::MakeOrthographic(
+        projection_extent[usize()], projection_extent[usize(1)], -5000.0, 5000.0));
     Vector3f cori { (float)context.ortho_w / 2.0f, (float)context.ortho_h / 2.0f, 0 },
         cscale { 1.0f, 1.0f, 1.0f }, cangle(Vector3f::Zero());
 
@@ -2472,6 +2473,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, const wpscene::SceneMetada
         scene.SetClearColorUserKey(String::make(as_str(it->second).unwrap()));
     }
     scene.SetOrtho({ i32(ortho_extent[usize()]), i32(ortho_extent[usize(1)]) });
+    scene.SetViewportScale(f32(sc.general.zoom));
     context.ortho_w = ortho_extent[usize()];
     context.ortho_h = ortho_extent[usize(1)];
 

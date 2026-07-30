@@ -980,8 +980,8 @@ void VulkanRender::Impl::UpdateCameraFillMode(owe::Scene& scene, owe::FillMode f
     auto height = m_device->out_extent().height;
 
     if (width == 0) return;
-    auto   ortho = scene.Ortho();
-    double sw = ortho[usize()].to_primitive(), sh = ortho[usize(1)].to_primitive();
+    auto   projection_extent = scene.OrthographicProjectionExtent();
+    double sw = projection_extent[usize()], sh = projection_extent[usize(1)];
     double fboAspect = width / (double)height, sAspect = sw / sh;
     auto   global      = scene.CameraMut("global"_str);
     auto   perspective = scene.CameraMut("global_perspective"_str);

@@ -2368,6 +2368,15 @@ public:
 
     void SetOrtho(array<i32, 2> extent) { m_ortho = rstd::move(extent); }
     auto Ortho() const -> array<i32, 2> { return m_ortho; }
+    void SetViewportScale(f32 scale) {
+        m_viewport_scale = scale.is_finite() && scale > f32() ? scale : f32(1.0f);
+    }
+    auto ViewportScale() const -> f32 { return m_viewport_scale; }
+    auto OrthographicProjectionExtent() const -> array<double, 2> {
+        const double scale = static_cast<double>(m_viewport_scale.to_primitive());
+        return { static_cast<double>(m_ortho[usize()].to_primitive()) / scale,
+                 static_cast<double>(m_ortho[usize(1)].to_primitive()) / scale };
+    }
     void SetPointerPosition(array<float, 2> position) { m_pointer_position = rstd::move(position); }
     auto PointerPosition() const -> array<float, 2> { return m_pointer_position; }
     void SetClearColor(array<float, 3> color) { m_clear_color = rstd::move(color); }
@@ -2441,6 +2450,7 @@ private:
     String                        m_scene_id { String::make("unknown_id"_str) };
     SceneMesh                     m_default_effect_mesh;
     array<i32, 2>                 m_ortho { i32(1920), i32(1080) };
+    f32                           m_viewport_scale { 1.0f };
     array<float, 2>               m_pointer_position { 0.5f, 0.5f };
     array<float, 3>               m_clear_color { 1.0f, 1.0f, 1.0f };
     String                        m_clear_color_user_key;
