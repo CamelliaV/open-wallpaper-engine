@@ -753,10 +753,8 @@ auto WPTextureUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
         if (texture->has_mipmap) {
             writer.Write(WPTextureMipmapOutput(index), texture->mipmap_level);
         }
-        if (texture->has_transform) {
-            writer.Write(WPTextureRotationOutput(index), texture->rotation);
-            writer.Write(WPTextureTranslationOutput(index), texture->translation);
-        }
+        writer.Write(WPTextureRotationOutput(index), texture->rotation);
+        writer.Write(WPTextureTranslationOutput(index), texture->translation);
     }
     return writer.Finish();
 }

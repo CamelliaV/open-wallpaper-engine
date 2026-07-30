@@ -4131,7 +4131,6 @@ auto UserPropertyValue(Option<ref<rstd::json::Map>> user_props, std::string_view
 }
 
 void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
-    if (! obj.visible && obj.visible_user.empty()) return;
     if (! obj.visible) {
         context.scene->MarkLayerVisibilityElidable(
             WallpaperLayerId { .value = static_cast<i32>(obj.id) });
@@ -5143,12 +5142,13 @@ void AddSceneObject(Vec<SceneObjectVar>& objs, const Json& json_obj, fs::VFS& vf
     const bool preserve_hidden_user_bound = ! scene_obj.visible && ! scene_obj.visible_user.empty();
     const bool preserve_hidden_visible_script =
         ! scene_obj.visible && scene_obj.field_bindings.scripts.count("visible") != 0;
+    constexpr bool preserve_hidden_text = std::is_same_v<T, wpscene::TextObject>;
     // Image objects keep going even when visible=false: another layer's
     // material may reference them via `_rt_imageLayerComposite_<id>`. The
     // render-graph builder later decides whether to actually emit passes.
     if constexpr (! std::is_same_v<T, wpscene::ImageObject>) {
         constexpr bool preserve_user_visibility = ! std::is_same_v<T, wpscene::SoundObject>;
-        if (! scene_obj.visible && ! preserve_hidden_link_source &&
+        if (! scene_obj.visible && ! preserve_hidden_link_source && ! preserve_hidden_text &&
             ! (preserve_user_visibility &&
                (preserve_hidden_user_bound || preserve_hidden_visible_script)))
             return;

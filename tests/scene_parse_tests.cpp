@@ -16,6 +16,7 @@
 import rstd.cppstd;
 import wescene.fs;
 import wescene.json;
+import wescene.pkg.parse;
 import wescene.pkg.scene_obj;
 import wescene.testing.scene_parse_probe;
 
@@ -70,6 +71,25 @@ TEST(TextObjectJson, ReadsReflectionParticipation) {
     owe::wpscene::TextObject text;
     ASSERT_TRUE(text.FromJson(parsed.unwrap(), vfs));
     EXPECT_FALSE(text.reflected);
+}
+
+TEST(SceneObjectExpansion, PreservesHiddenTextLayers) {
+    auto parsed = owe::ParseJson(R"({
+        "objects": [{
+            "id": 7,
+            "name": "Style1",
+            "text": "progress",
+            "visible": false
+        }]
+    })");
+    ASSERT_TRUE(parsed.is_ok());
+
+    owe::fs::VFS vfs;
+    auto objects = owe::ExpandObjects(parsed.unwrap(), vfs, owe::wpscene::kSceneVersionUnknown);
+
+    ASSERT_EQ(objects.len(), rstd::usize(1));
+    ASSERT_TRUE(objects[rstd::usize()].is_Text());
+    EXPECT_FALSE(objects[rstd::usize()].as_Text().value.visible);
 }
 
 TEST(ModelObjectJson, ReadsMaterialSkin) {

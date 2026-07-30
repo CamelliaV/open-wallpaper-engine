@@ -55,6 +55,20 @@ public:
     auto TexelSize() const -> rstd::array<float, 2> { return { 1.0f / 1920.0f, 1.0f / 1080.0f }; }
 };
 
+class StaticTextureResources {
+public:
+    auto Texture(rstd::usize index) const -> rstd::Option<owe::UniformTextureView> {
+        if (index != rstd::usize()) return rstd::None();
+        return rstd::Some(owe::UniformTextureView {
+            .has_extent    = true,
+            .source_extent = { 512.0f, 512.0f },
+            .sample_extent = { 512.0f, 512.0f },
+        });
+    }
+    auto Viewport() const -> rstd::array<float, 2> { return { 1920.0f, 1080.0f }; }
+    auto TexelSize() const -> rstd::array<float, 2> { return { 1.0f / 1920.0f, 1.0f / 1080.0f }; }
+};
+
 class ShapeSink {
 public:
     auto Bind(owe::UniformOutputId, ref<str> name, owe::UniformValueShape shape)
@@ -82,7 +96,8 @@ public:
 
 class UpdateContext {
 public:
-    UpdateContext(const owe::SceneFrame& frame, const EmptyResources& resources)
+    template<typename Resources>
+    UpdateContext(const owe::SceneFrame& frame, const Resources& resources)
         : m_frame(rstd::ref<owe::SceneFrame>::from_raw_parts(rstd::addressof(frame))),
           m_resources(rstd::dyn<owe::UniformResourceView>::from_ref(resources)) {}
 
@@ -224,6 +239,27 @@ TEST(WPLightUniformSource, ExposesLogicalVec3Array) {
     auto            value = scene_test::Capture(frame, source, owe::WPLightUniformOutput::Position);
     ASSERT_EQ(value.size(), usize(12));
     for (usize index {}; index < value.size(); ++index) EXPECT_FLOAT_EQ(value[index], 0.0f);
+}
+
+TEST(WPTextureUniformSource, StaticTextureUsesIdentityTransform) {
+    owe::SceneFrame                    frame;
+    scene_test::StaticTextureResources resources;
+    scene_test::UpdateContext          context_impl(frame, resources);
+    owe::WPTextureUniformSource        source;
+    scene_test::UniformSink            sink_impl(owe::WPTextureRotationOutput(0));
+    auto context = rstd::dyn<owe::UniformUpdateContext>::from_ref(context_impl);
+    auto sink    = rstd::dyn<owe::UniformValueSink>::from_ref(sink_impl);
+
+    auto result = source.Evaluate(context.as_ref(), sink.as_mut_ref());
+
+    ASSERT_TRUE(result.is_ok());
+    ASSERT_TRUE(sink_impl.Written());
+    const auto& rotation = sink_impl.Value();
+    ASSERT_EQ(rotation.size(), usize(4));
+    EXPECT_FLOAT_EQ(rotation[usize()], 1.0f);
+    EXPECT_FLOAT_EQ(rotation[usize(1)], 0.0f);
+    EXPECT_FLOAT_EQ(rotation[usize(2)], 0.0f);
+    EXPECT_FLOAT_EQ(rotation[usize(3)], 1.0f);
 }
 
 TEST(AudioResponseDemand, AggregatesLeasesAndHonorsRuntimeGate) {
