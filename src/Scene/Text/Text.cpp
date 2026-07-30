@@ -301,6 +301,19 @@ void FontFace::Populate(std::span<const std::uint32_t> codepoints) {
     for (std::uint32_t codepoint : codepoints) {
         if (impl.glyphs.find(codepoint) != impl.glyphs.end()) continue;
 
+        if (codepoint == '\t') {
+            constexpr std::uint32_t space_codepoint = ' ';
+            if (impl.glyphs.find(space_codepoint) == impl.glyphs.end()) {
+                Populate(std::span<const std::uint32_t>(&space_codepoint, 1));
+            }
+            const auto* space         = Lookup(space_codepoint);
+            const float space_advance = space != nullptr && space->advance_x > 0.0f
+                                            ? space->advance_x
+                                            : static_cast<float>(impl.pixel_size) * 0.5f;
+            impl.glyphs.emplace(codepoint, GlyphInfo { .advance_x = space_advance });
+            continue;
+        }
+
         FT_Face render_face = impl.face;
         FT_UInt glyph_index = FT_Get_Char_Index(render_face, codepoint);
         if (glyph_index == 0) {
@@ -783,13 +796,24 @@ auto TextUniformSource::Evaluate(rstd::ref<rstd::dyn<UniformUpdateContext>>,
 namespace
 {
 
+struct TextLineGlyph {
+    const GlyphInfo* info { nullptr };
+    float            advance { 0.0f };
+};
+
 struct TextLineRunGI {
-    std::vector<const GlyphInfo*> glyphs;
-    float                         width { 0.0f };
+    std::vector<TextLineGlyph> glyphs;
+    float                      width { 0.0f };
 };
 
 bool ContainsSubstring(std::string_view s, std::string_view what) noexcept {
     return s.find(what) != std::string::npos;
+}
+
+float TextGlyphAdvance(std::uint32_t codepoint, const GlyphInfo& glyph, float line_width) {
+    if (codepoint != '\t') return glyph.advance_x;
+    const float tab_width = std::max(1.0f, glyph.advance_x * 4.0f);
+    return tab_width - std::fmod(line_width, tab_width);
 }
 
 } // namespace
@@ -956,9 +980,10 @@ void TextLayouter::SetText(std::string_view utf8) {
             }
             continue;
         }
-        lines.back().glyphs.push_back(gi);
-        lines.back().width += gi->advance_x;
-        ++total_glyph_quads;
+        const float advance = TextGlyphAdvance(cp, *gi, lines.back().width);
+        lines.back().glyphs.push_back(TextLineGlyph { .info = gi, .advance = advance });
+        lines.back().width += advance;
+        if (gi->pixel_w != 0 && gi->pixel_h != 0) ++total_glyph_quads;
     }
 
     bool        has_bg      = im.style.opaquebackground;
@@ -1112,11 +1137,11 @@ void TextLayouter::SetText(std::string_view utf8) {
         float baseline_y = text_top - fm.ascender - static_cast<float>(li) * fm.line_height;
 
         float pen_x = line_origin_x;
-        for (auto* gi : line.glyphs) {
+        for (const auto& glyph : line.glyphs) {
+            const auto* gi = glyph.info;
             if (q >= im.peak_quads) break;
             if (gi->pixel_w == 0 || gi->pixel_h == 0) {
-                pen_x += gi->advance_x;
-                ++emitted_glyphs;
+                pen_x += glyph.advance;
                 continue;
             }
             float left   = pen_x + gi->bearing_x;
@@ -1131,7 +1156,7 @@ void TextLayouter::SetText(std::string_view utf8) {
                 static_cast<float>(gi->atlas_y + gi->pixel_h) / static_cast<float>(fm.atlas_h);
             write_quad(q++, left, right, bottom, top, u_l, u_r, v_t, v_b, text_rgba);
             include_glyph_bounds(left, right, bottom, top);
-            pen_x += gi->advance_x;
+            pen_x += glyph.advance;
             ++emitted_glyphs;
             if (emitted_glyphs >= total_glyph_quads) break;
         }

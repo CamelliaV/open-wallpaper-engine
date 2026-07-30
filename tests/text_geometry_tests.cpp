@@ -1,6 +1,63 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <memory>
+#include <vector>
+
+import rstd;
+import wescene.scene;
 import wescene.text;
+import wescene.types;
+
+TEST(FontFace, TabAdvancesWithoutRasterizingAControlGlyph) {
+    auto font = owe::text::FontCache::ResolveSystemFont("systemfont_monospace");
+    ASSERT_NE(font.bytes, nullptr);
+
+    owe::text::FontCache cache;
+    auto*                face = cache.GetFace(font, 64);
+    ASSERT_NE(face, nullptr);
+
+    const std::array<std::uint32_t, 1> codepoints { '\t' };
+    face->Populate(codepoints);
+
+    const auto* tab = face->Lookup('\t');
+    ASSERT_NE(tab, nullptr);
+    EXPECT_EQ(tab->pixel_w, 0u);
+    EXPECT_EQ(tab->pixel_h, 0u);
+    EXPECT_GT(tab->advance_x, 0.0f);
+}
+
+TEST(TextLayouter, TabMatchesFourSpaceIndentWithoutAControlQuad) {
+    auto font = owe::text::FontCache::ResolveSystemFont("systemfont_monospace");
+    ASSERT_NE(font.bytes, nullptr);
+
+    owe::text::FontCache cache;
+    auto*                face = cache.GetFace(font, 64);
+    ASSERT_NE(face, nullptr);
+    const auto tab_text   = owe::text::DecodeUtf8("\tA");
+    const auto space_text = owe::text::DecodeUtf8("    A");
+    face->Populate(tab_text);
+    face->Populate(space_text);
+
+    constexpr std::size_t peak_quads = 8;
+    auto                  mesh       = std::make_shared<owe::SceneMesh>();
+    std::vector<owe::SceneVertexArray::SceneVertexAttribute> attributes {
+        { .name = "a_Position", .type = owe::VertexType::FLOAT3 },
+        { .name = "a_TexCoord", .type = owe::VertexType::FLOAT2 },
+        { .name = "a_Color", .type = owe::VertexType::FLOAT4 },
+    };
+    mesh->AddVertexArray(owe::SceneVertexArray(attributes, rstd::usize(peak_quads * 4)));
+    mesh->AddIndexArray(owe::SceneIndexArray(rstd::usize(peak_quads * 6)));
+
+    owe::text::TextLayouter layouter(face, mesh, {}, peak_quads);
+    layouter.SetText("\tA");
+    const float tab_width = layouter.TextWidth();
+    EXPECT_EQ(mesh->GetIndexArray(rstd::usize()).RenderDataCount(), rstd::usize(6));
+
+    layouter.SetText("    A");
+    EXPECT_FLOAT_EQ(layouter.TextWidth(), tab_width);
+    EXPECT_EQ(mesh->GetIndexArray(rstd::usize()).RenderDataCount(), rstd::usize(6));
+}
 
 TEST(TextGeometry, DynamicEffectFollowsCurrentTextBounds) {
     const owe::text::TextGeometryPolicy policy {

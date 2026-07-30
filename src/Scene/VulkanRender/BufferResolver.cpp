@@ -114,7 +114,7 @@ Option<DrawBufferRefs> RenderBufferResolver::prepareDrawBuffers(const DrawBuffer
 
     if (! submesh.index_arrays.empty()) {
         const auto& index = submesh.index_arrays[0];
-        out.draw_count    = rstd::as_cast<u32>(index.DataCount());
+        out.draw_count    = rstd::as_cast<u32>(index.RenderDataCount());
         out.index_key     = Some<DrawBufferKey>(keys.back());
 
         auto use_index = submesh.vertex_arrays.size();
