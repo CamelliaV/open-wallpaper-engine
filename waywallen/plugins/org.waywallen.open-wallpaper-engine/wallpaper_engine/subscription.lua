@@ -1,4 +1,5 @@
 local session = import("wallpaper_engine.session")
+local workshop = import("wallpaper_engine.workshop")
 
 local M = {}
 
@@ -34,6 +35,7 @@ end
 function M.clear()
     cache = {}
     cache_generation = session.generation()
+    workshop.forget()
 end
 
 local function parse_page_state(ctx, html)
@@ -104,8 +106,13 @@ function M.status(ctx, ids)
     for _, id in ipairs(ids) do
         local key = tostring(id)
         local cached = cache[key]
+        local recorded = workshop.state(key)
         if cached and cached.expires_at > now then
             result[key] = cached.state
+        elseif recorded then
+            -- Steam already wrote this subscription down on this machine, so
+            -- the detail page would only confirm what the client knows.
+            result[key] = recorded
         else
             local ok, value = pcall(request_page, ctx, key, true)
             if not ok then
@@ -145,6 +152,7 @@ local function set_subscription(ctx, id, subscribed)
         state = subscribed and "subscribed" or "unsubscribed",
         expires_at = ctx.time.now() + MUTATION_GRACE_MS,
     }
+    workshop.mark(id, subscribed)
     return { accepted = true }
 end
 

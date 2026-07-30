@@ -211,6 +211,7 @@ install(FILES
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/source.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/subscription.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/wallpaper.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/workshop.lua
     DESTINATION ${_OWE_PLUGIN_DIR}/wallpaper_engine
 )
 
@@ -230,6 +231,7 @@ set(_OWE_FILES
     wallpaper_engine/source.lua
     wallpaper_engine/subscription.lua
     wallpaper_engine/wallpaper.lua
+    wallpaper_engine/workshop.lua
     ${OWE_WESCENE_BIN}
 )
 if(BUILD_WEWEB)

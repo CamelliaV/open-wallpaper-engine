@@ -111,4 +111,33 @@ return {
         },
     },
     mutation_accepted = { response = {} },
+    -- Shape Steam writes to steamapps/workshop/appworkshop_431960.acf: one
+    -- subscribed item, plus a comment and an escaped quote the reader has to
+    -- survive. The hand-placed directory 2589297069 appears in no record.
+    workshop_acf = table.concat({
+        '"AppWorkshop"',
+        "{",
+        '\t"appid"\t\t"431960"',
+        '\t// Steam writes this file itself.',
+        '\t"WorkshopItemsInstalled"',
+        "\t{",
+        '\t\t"3765064055"',
+        "\t\t{",
+        '\t\t\t"size"\t\t"4096"',
+        '\t\t\t"timeupdated"\t\t"1785290565"',
+        '\t\t\t"manifest"\t\t"1948827864188560204"',
+        "\t\t}",
+        "\t}",
+        '\t"WorkshopItemDetails"',
+        "\t{",
+        '\t\t"3765064055"',
+        "\t\t{",
+        '\t\t\t"manifest"\t\t"1948827864188560204"',
+        '\t\t\t"title"\t\t"a \\"quoted\\" title"',
+        '\t\t\t"subscribedby"\t\t"89291590"',
+        "\t\t}",
+        "\t}",
+        "}",
+    }, "\n"),
+    workshop_acf_truncated = '"AppWorkshop"\n{\n\t"WorkshopItemDetails"\n\t{\n',
 }
