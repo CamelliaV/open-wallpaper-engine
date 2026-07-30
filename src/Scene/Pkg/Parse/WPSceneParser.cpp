@@ -4169,6 +4169,13 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             break;
         }
     }
+    const auto text_render_mode     = ResolveTextRenderMode(TextSurfaceRequirements {
+        .has_effect        = has_text_effect,
+        .copy_background   = obj.copybackground,
+        .opaque_background = obj.opaquebackground,
+        .linked_source     = context.IsLinkedSource(static_cast<std::int32_t>(obj.id)),
+    });
+    const bool direct_text          = text_render_mode == TextRenderMode::Direct;
     const bool copy_background_seed = has_text_effect || obj.copybackground;
 
     std::string s_text;
@@ -4335,7 +4342,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         material.name     = "text";
         material.textures = { atlas_url };
         material.defines  = { "g_Texture0" };
-        material.blenmode = copy_background_seed ? BlendMode::Translucent : BlendMode::Normal;
+        material.blenmode =
+            direct_text || copy_background_seed ? BlendMode::Translucent : BlendMode::Normal;
         material.customShader.shader = shader;
         sp_mesh->AddMaterial(std::move(material));
     }
@@ -4392,30 +4400,15 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     text_source_w = initial_metrics.source_width;
     text_source_h = initial_metrics.source_height;
 
-    auto sp_node = Arc<SceneNode>::make(
-        Vector3f(obj.origin.data()), Vector3f(obj.scale.data()), Vector3f(obj.angles.data()));
+    auto        sp_node     = Arc<SceneNode>::make(Vector3f(obj.origin.data()),
+                                                   Vector3f(obj.scale.data()),
+                                                   Vector3f(obj.angles.data()),
+                                                   direct_text ? obj.name : std::string {});
     const float text_bbox_w = text_w + 2.0f * style.padding;
     const float text_bbox_h = text_h + 2.0f * style.padding;
     sp_node->SetSize({ text_bbox_w, text_bbox_h });
     sp_node->AddMesh(sp_mesh);
 
-    // sp_node renders into the layer's private ortho RT. Parallax must NOT
-    // apply at this stage — the world-space mouse vector would shift glyphs
-    // inside ppong_a, but the compose pass samples a fixed UV window, so the
-    // shift would manifest as the text appearing to drift in the wrong frame
-    // of reference. Parallax goes on compose_node below (world-space quad).
-    context.text_uniform_configs.push(ParseContext::TextUniformConfigDraft {
-        .node = sp_node.clone(),
-    });
-
-    // --- per-layer compose -------------------------------------------------
-    // Render the glyphs into a private bbox-sized RT via an ortho camera
-    // that maps text-mesh pixel coords 1:1 onto the RT, then composite that
-    // RT onto _rt_default with a Translucent fullscreen-quad pass. The glyph
-    // pass writes straight RGBA into ppong_a; composing applies alpha once.
-    //
-    // Glyphs render immediately before compose_node. Attaching the layer
-    // camera to sp_node cancels parent transforms inside the private RT.
     struct TextAnchorState {
         std::string horizontal;
         std::string vertical;
@@ -4431,12 +4424,13 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         .height     = text_h,
     });
 
-    auto compose_node =
-        Arc<SceneNode>::make(Vector3f::Zero(), Vector3f::Ones(), Vector3f::Zero(), obj.name);
-    compose_node->SetReflected(obj.reflected);
-    // Layer RT must cover the source glyph bounds, not the main canvas.
-    // Clock/date scripts often render a large text source and shrink it with
-    // the scene transform when composing into the world.
+    auto layer_node =
+        direct_text
+            ? sp_node.clone()
+            : Arc<SceneNode>::make(Vector3f::Zero(), Vector3f::Ones(), Vector3f::Zero(), obj.name);
+    layer_node->SetReflected(obj.reflected);
+    layer_node->ID() = i32(obj.id);
+
     const float                    object_w = obj.size[0] > 0.0f ? obj.size[0] : text_bbox_w;
     const float                    object_h = obj.size[1] > 0.0f ? obj.size[1] : text_bbox_h;
     const text::TextGeometryPolicy geometry_policy {
@@ -4448,10 +4442,19 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     };
     const auto initial_geometry = text::ResolveTextGeometry(geometry_policy, layouter->Metrics());
     const auto [initial_layer_w, initial_layer_h] = TextLayerExtent(initial_geometry);
-    auto& scene                                   = *context.scene;
-    auto  runtime_targets                         = std::make_shared<TextRuntimeTargets>(
-        scene, mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr()));
-    {
+    auto&                               scene     = *context.scene;
+    std::shared_ptr<TextRuntimeTargets> runtime_targets;
+    if (direct_text) {
+        WPUniformNodeConfigDraft text_sv;
+        text_sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        text_sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+        SetWPUniformConfig(context, sp_node, rstd::move(text_sv));
+    } else {
+        context.text_uniform_configs.push(ParseContext::TextUniformConfigDraft {
+            .node = sp_node.clone(),
+        });
+        runtime_targets = std::make_shared<TextRuntimeTargets>(
+            scene, mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr()));
         const std::string addr    = getAddr(sp_node.as_ptr());
         const std::string ppong_a = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_A) + addr;
         const std::string ppong_b = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) + addr;
@@ -4492,13 +4495,12 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                        rstd::move(text_target));
         }
 
-        compose_node->CopyTrans(*sp_node.as_ptr());
-        compose_node->ID() = i32(obj.id);
-        compose_node->SetSize({ initial_geometry.draw_width, initial_geometry.draw_height });
+        layer_node->CopyTrans(*sp_node.as_ptr());
+        layer_node->SetSize({ initial_geometry.draw_width, initial_geometry.draw_height });
         scene.RegisterLayerLinkSource(WallpaperLayerId { .value = static_cast<i32>(obj.id) },
                                       *sp_node.as_ptr());
 
-        auto layer = std::make_shared<SceneImageEffectLayer>(has_text_effect ? compose_node.as_ptr()
+        auto layer = std::make_shared<SceneImageEffectLayer>(has_text_effect ? layer_node.as_ptr()
                                                                              : sp_node.as_ptr(),
                                                              static_cast<float>(initial_layer_w),
                                                              static_cast<float>(initial_layer_h),
@@ -4522,7 +4524,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
             auto text_projection =
                 std::make_shared<text::TextEffectProjectionState>(text::TextEffectProjectionState {
-                    .node = compose_node.clone(),
+                    .node = layer_node.clone(),
                     .size = { initial_geometry.effect_frame_width,
                               initial_geometry.effect_frame_height },
                 });
@@ -4691,7 +4693,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     sv.propagate_parallax_to_children = true;
                     sv.propagated_parallax_depth = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
                     sv.parallax_depth            = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
-                    sv.effect_projection_node    = Some(compose_node.clone());
+                    sv.effect_projection_node    = Some(layer_node.clone());
                     sv.effect_projection_size    = { initial_geometry.effect_frame_width,
                                                      initial_geometry.effect_frame_height };
                     SceneShaderValueAnimationMap final_quad_shader_values;
@@ -4715,7 +4717,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                             &scene, mesh->Material(), *user_texture_fallback, shader_info);
                     }
                     WireMaterialShaderValueScripts(
-                        context, compose_node, mesh->MaterialSlots().front(), wpmat, shader_info);
+                        context, layer_node, mesh->MaterialSlots().front(), wpmat, shader_info);
                     effect_node->AddMesh(mesh);
                     SetWPUniformConfig(context, effect_node, rstd::move(sv));
                     runtime_targets->effect_nodes.push_back(
@@ -4764,8 +4766,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         compose_mesh->AddMaterial(std::move(loaded->material));
         RegisterShaderUserVarIndex(
             &scene, compose_mesh->Material(), loaded->source, loaded->shader_info);
-        compose_node->AddMesh(compose_mesh);
-        SetWPUniformConfig(context, compose_node, rstd::move(compose_sv));
+        layer_node->AddMesh(compose_mesh);
+        SetWPUniformConfig(context, layer_node, rstd::move(compose_sv));
 
         // Move sp_node into layer space — identity transform so the glyph
         // mesh renders at the ortho origin.
@@ -4773,13 +4775,13 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         sp_node->SetCamera(addr);
     }
 
-    auto compose_hold      = SceneNodeArcHold(compose_node.clone());
-    auto apply_text_anchor = [compose_hold, anchor_state]() {
-        auto* compose_ptr = compose_hold.get();
-        auto  contains    = [](const std::string& value, std::string_view token) {
+    auto layer_hold        = SceneNodeArcHold(layer_node.clone());
+    auto apply_text_anchor = [layer_hold, anchor_state]() {
+        auto* layer_ptr = layer_hold.get();
+        auto  contains  = [](const std::string& value, std::string_view token) {
             return value.find(token) != std::string::npos;
         };
-        const auto& scale = compose_ptr->Scale();
+        const auto& scale = layer_ptr->Scale();
         Vector3f    pos   = anchor_state->origin;
         if (contains(anchor_state->horizontal, "left"))
             pos.x() += anchor_state->width * scale.x() * 0.5f;
@@ -4789,25 +4791,29 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             pos.y() -= anchor_state->height * scale.y() * 0.5f;
         if (contains(anchor_state->vertical, "bottom"))
             pos.y() += anchor_state->height * scale.y() * 0.5f;
-        compose_ptr->SetTranslate(pos);
+        layer_ptr->SetTranslate(pos);
     };
 
-    // Per-frame compose-quad rebuild: world card sized to current visible
-    // source bbox. The quad offset keeps glyphs at their logical text-box
-    // position after the private RT path centers them for UV cropping.
-    auto rebuild_compose = [compose_hold,
-                            anchor_state,
-                            apply_text_anchor,
-                            runtime_targets,
-                            geometry_policy,
-                            text_padding = style.padding](text::TextLayoutMetrics metrics) {
-        auto* compose_ptr   = compose_hold.get();
-        metrics.padding     = text_padding;
-        const auto geometry = text::ResolveTextGeometry(geometry_policy, metrics);
-        (void)runtime_targets->Apply(geometry);
+    auto update_text_layout = [layer_hold,
+                               anchor_state,
+                               apply_text_anchor,
+                               runtime_targets,
+                               geometry_policy,
+                               direct_text,
+                               text_padding = style.padding](text::TextLayoutMetrics metrics) {
+        auto* layer_ptr      = layer_hold.get();
+        metrics.padding      = text_padding;
         anchor_state->width  = metrics.text_width;
         anchor_state->height = metrics.text_height;
-        compose_ptr->SetSize({ geometry.draw_width, geometry.draw_height });
+        if (direct_text) {
+            layer_ptr->SetSize({ metrics.text_width + 2.0f * text_padding,
+                                 metrics.text_height + 2.0f * text_padding });
+            apply_text_anchor();
+            return;
+        }
+        const auto geometry = text::ResolveTextGeometry(geometry_policy, metrics);
+        (void)runtime_targets->Apply(geometry);
+        layer_ptr->SetSize({ geometry.draw_width, geometry.draw_height });
         apply_text_anchor();
         const float                  hx = geometry.draw_width * 0.5f;
         const float                  hy = geometry.draw_height * 0.5f;
@@ -4828,14 +4834,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         const rstd::array<float, 8> uv {
             u_l, v_b, u_l, v_t, u_r, v_b, u_r, v_t,
         };
-        auto* mesh = compose_ptr->Mesh();
+        auto* mesh = layer_ptr->Mesh();
         if (mesh == nullptr) return;
         auto& v = mesh->GetVertexArray(usize(0));
         v.SetVertex(as_string_view(WE_IN_POSITION), pos.as_slice());
         v.SetVertex(as_string_view(WE_IN_TEXCOORD), uv.as_slice());
         mesh->SetDirty();
     };
-    rebuild_compose(initial_metrics);
+    update_text_layout(initial_metrics);
 
     auto apply_text_origin = [anchor_state, apply_text_anchor](const script::ScriptValue& value) {
         Vector3f current = anchor_state->origin;
@@ -4844,19 +4850,19 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         anchor_state->origin = *next;
         apply_text_anchor();
     };
-    auto apply_text_scale = [compose_hold, apply_text_anchor](const script::ScriptValue& value) {
-        auto*    compose_ptr = compose_hold.get();
-        Vector3f current     = compose_ptr->Scale();
-        auto     next        = ScriptValueAsVec3(value, current);
+    auto apply_text_scale = [layer_hold, apply_text_anchor](const script::ScriptValue& value) {
+        auto*    layer_ptr = layer_hold.get();
+        Vector3f current   = layer_ptr->Scale();
+        auto     next      = ScriptValueAsVec3(value, current);
         if (! next) return;
-        compose_ptr->SetScale(*next);
+        layer_ptr->SetScale(*next);
         apply_text_anchor();
     };
 
-    auto set_halign = [layouter, rebuild_compose, anchor_state](std::string_view align) {
+    auto set_halign = [layouter, update_text_layout, anchor_state](std::string_view align) {
         anchor_state->horizontal = std::string(align);
         layouter->SetHorizontalAlign(align);
-        rebuild_compose(layouter->Metrics());
+        update_text_layout(layouter->Metrics());
     };
     auto set_valign = [anchor_state, apply_text_anchor](std::string_view align) {
         anchor_state->vertical = std::string(align);
@@ -4867,7 +4873,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                           font_source    = font_source,
                           sp_mesh,
                           layouter,
-                          rebuild_compose,
+                          update_text_layout,
                           current_text,
                           current_point_size](double next_point_size) {
         if (scene == nullptr || font_cache_ptr == nullptr || ! std::isfinite(next_point_size) ||
@@ -4884,11 +4890,11 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             (void)scene->SetMaterialTextureSlot(*mat, u32(), next_face->AtlasUrl());
         }
         layouter->SetFace(next_face);
-        rebuild_compose(layouter->Metrics());
+        update_text_layout(layouter->Metrics());
     };
 
     EnsureScriptScene(context).runtime().RegisterTextAlignSetters(
-        compose_node.as_ptr(),
+        layer_node.as_ptr(),
         anchor_state->horizontal,
         anchor_state->vertical,
         obj.pointsize,
@@ -4899,25 +4905,18 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         },
         set_pointsize);
 
-    // Transform-style script bindings (origin/scale/angles) animate the
-    // composite quad in world space, not the layer-space glyph node.
-    AssignNodeFieldAnimations(*compose_node.as_ptr(), obj.field_bindings);
-    WireFieldScripts(
-        context, compose_node, obj.field_bindings, apply_text_origin, apply_text_scale);
-    if (! obj.visible) compose_node->SetVisible(false);
+    AssignNodeFieldAnimations(*layer_node.as_ptr(), obj.field_bindings);
+    WireFieldScripts(context, layer_node, obj.field_bindings, apply_text_origin, apply_text_scale);
+    if (! obj.visible) layer_node->SetVisible(false);
     if (! obj.visible_user.empty())
-        compose_node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(obj.visible_user));
+        layer_node->SetVisibleUserBinding(ToSceneUserVisibilityBinding(obj.visible_user));
 
-    // --- text-content actuator. Captures the layouter + a closure that
-    // re-rasterises new codepoints, lays them out, and rebuilds the
-    // compose quad to the new text dims. Runs on the render thread, which
-    // is also the JS thread — no synchronization needed.
-    auto set_text = [layouter, rebuild_compose, current_text](std::string_view s) {
+    auto set_text = [layouter, update_text_layout, current_text](std::string_view s) {
         if (s == *current_text) return;
         *current_text = std::string(s);
         if (auto* active_face = layouter->Face()) active_face->Populate(text::DecodeUtf8(s));
         layouter->SetText(s);
-        rebuild_compose(layouter->Metrics());
+        update_text_layout(layouter->Metrics());
     };
     if (has_text_user) {
         context.scene->RegisterUserTextBinding(
@@ -4935,9 +4934,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        script::FieldKind::String,
                                                        sb.properties,
                                                        sb.initial_value,
-                                                       compose_node.as_ptr());
+                                                       layer_node.as_ptr());
         if (fs) {
-            SetScriptInitializationOrder(context, *fs, compose_node.as_ptr());
+            SetScriptInitializationOrder(context, *fs, layer_node.as_ptr());
             TrackRegisteredAssets(context, fs);
             ss.AddActuator({
                 fs,
@@ -4956,9 +4955,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                                                        script::FieldKind::Scalar,
                                                        sb.properties,
                                                        sb.initial_value,
-                                                       compose_node.as_ptr());
+                                                       layer_node.as_ptr());
         if (fs) {
-            SetScriptInitializationOrder(context, *fs, compose_node.as_ptr());
+            SetScriptInitializationOrder(context, *fs, layer_node.as_ptr());
             TrackRegisteredAssets(context, fs);
             ss.AddActuator({
                 fs,
@@ -4969,25 +4968,20 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
             });
         }
     }
-    // Scripts attached to non-text fields can mutate `thisLayer.text`
-    // directly. Register the setter so NodeSetText routes those writes
-    // back into the layouter. compose_node is the SceneNode every
-    // field-bound script's `thisLayer` resolves to (WireFieldScripts at
-    // line above).
     if (wants_dynamic_text) {
-        EnsureScriptScene(context).runtime().RegisterTextSetter(compose_node.as_ptr(),
+        EnsureScriptScene(context).runtime().RegisterTextSetter(layer_node.as_ptr(),
                                                                 [set_text](std::string_view s) {
                                                                     set_text(s);
                                                                 });
     }
 
     Vec<Arc<SceneNode>> text_before_nodes;
-    text_before_nodes.push(sp_node.clone());
+    if (! direct_text) text_before_nodes.push(sp_node.clone());
     RegisterNodeRef(context,
                     obj.id,
                     ParseContext::NodeRef {
                         obj.parent,
-                        Some(compose_node.clone()),
+                        Some(layer_node.clone()),
                         None(),
                         String::make(rstd::cppstd::as_str(obj.attachment).unwrap()),
                         None(),
@@ -6120,6 +6114,7 @@ auto WPSceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> documen
     context.scene_layer_text_writes = SceneWritesLayerText(scene_objs.as_slice());
     context.hidden_link_source_ids =
         CollectHiddenLinkedSourceIds(json, linked_source_ids, options.user_properties);
+    context.linked_source_ids = rstd::move(linked_source_ids);
 
     // Single JSON-order walk:
     // - record every object's id (and parent_id) in declaration order so the

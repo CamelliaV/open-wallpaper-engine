@@ -73,6 +73,17 @@ TEST(TextObjectJson, ReadsReflectionParticipation) {
     EXPECT_FALSE(text.reflected);
 }
 
+TEST(TextRenderMode, UsesDirectRenderingOnlyWithoutIndependentSurfaceRequirements) {
+    EXPECT_EQ(owe::ResolveTextRenderMode({}), owe::TextRenderMode::Direct);
+    EXPECT_EQ(owe::ResolveTextRenderMode({ .has_effect = true }), owe::TextRenderMode::Offscreen);
+    EXPECT_EQ(owe::ResolveTextRenderMode({ .copy_background = true }),
+              owe::TextRenderMode::Offscreen);
+    EXPECT_EQ(owe::ResolveTextRenderMode({ .opaque_background = true }),
+              owe::TextRenderMode::Offscreen);
+    EXPECT_EQ(owe::ResolveTextRenderMode({ .linked_source = true }),
+              owe::TextRenderMode::Offscreen);
+}
+
 TEST(SceneObjectExpansion, PreservesHiddenTextLayers) {
     auto parsed = owe::ParseJson(R"({
         "objects": [{

@@ -71,6 +71,26 @@ private:
     Scene*             m_scene { nullptr };
 };
 
+enum class TextRenderMode
+{
+    Direct,
+    Offscreen,
+};
+
+struct TextSurfaceRequirements {
+    bool has_effect { false };
+    bool copy_background { false };
+    bool opaque_background { false };
+    bool linked_source { false };
+};
+
+constexpr auto ResolveTextRenderMode(TextSurfaceRequirements requirements) -> TextRenderMode {
+    return requirements.has_effect || requirements.copy_background ||
+                   requirements.opaque_background || requirements.linked_source
+               ? TextRenderMode::Offscreen
+               : TextRenderMode::Direct;
+}
+
 // Per-Parse state. Built by BuildContext, mutated by ProcessObjects,
 // finalized by FinalizeScene. Holding it as a public struct lets the
 // CLI test driver run any subset of the pipeline.
@@ -171,8 +191,11 @@ struct ParseContext {
     wavsen::audio::SoundManager*             sound_manager { nullptr };
 
     HashMap<std::int32_t, String> system_media_image_fallbacks;
+    HashSet<std::int32_t>         linked_source_ids;
     HashSet<std::int32_t>         hidden_link_source_ids;
     bool                          scene_layer_text_writes { false };
+
+    bool IsLinkedSource(std::int32_t id) const { return linked_source_ids.contains(id); }
 };
 
 struct ProcessOpts {
