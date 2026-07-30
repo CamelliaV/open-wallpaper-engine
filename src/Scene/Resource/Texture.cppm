@@ -37,14 +37,15 @@ using TextureContentFlags = u32;
 
 enum class TextureContent : rstd::uint32_t
 {
-    SourceDefined        = 1u << 0u,
-    DiscardOnAcquire     = 1u << 1u,
-    ClearOnFirstWrite    = 1u << 2u,
-    ClearOnEveryWrite    = 1u << 3u,
-    PreserveWithinGraph  = 1u << 4u,
-    PreserveAcrossFrames = 1u << 5u,
-    ProducerUpdated      = 1u << 6u,
-    ExternalCurrentFrame = 1u << 7u,
+    SourceDefined         = 1u << 0u,
+    DiscardOnAcquire      = 1u << 1u,
+    ClearOnFirstWrite     = 1u << 2u,
+    ClearOnEveryWrite     = 1u << 3u,
+    PreserveWithinGraph   = 1u << 4u,
+    PreserveAcrossFrames  = 1u << 5u,
+    ProducerUpdated       = 1u << 6u,
+    ExternalCurrentFrame  = 1u << 7u,
+    InitializeTransparent = 1u << 8u,
 };
 
 inline constexpr TextureContentFlags TextureContentFlag(TextureContent content) {

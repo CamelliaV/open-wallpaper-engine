@@ -38,7 +38,7 @@ add_library(owe-base STATIC
   Timer/FrameTimer.cpp
   Scene/Scene.cpp
   Scene/SceneCamera.cpp
-  Scene/SceneImageEffectLayer.cpp
+  Scene/SceneNodeLayer.cpp
   Scene/SceneIndexArray.cpp
   Scene/SceneNode.cpp
   Scene/SceneVertexArray.cpp

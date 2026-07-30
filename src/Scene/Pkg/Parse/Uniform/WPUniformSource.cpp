@@ -395,7 +395,7 @@ auto WPTransformUniformSource::Evaluate(ref<dyn<UniformUpdateContext>> context,
         const auto& parallax = m_state->CameraParallax();
         auto        attached = camera.GetAttachedNode();
         const bool  own_image_effect =
-            camera.HasImgEffect() && attached.is_some() && *attached == m_node->node.as_ptr();
+            attached.is_some() && (*attached)->HasLayer() && *attached == m_node->node.as_ptr();
         if (node.Camera() != "effect" && parallax.enable && ! own_image_effect) {
             const auto& parallax_state = m_state->ResolveParallaxState(*m_node);
             parallax_state.node->UpdateTrans();

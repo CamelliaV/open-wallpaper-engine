@@ -208,6 +208,11 @@ struct ImageCopyOperation {
     std::vector<ImageMipCopyOperation> mipmaps;
 };
 
+struct ImageClearOperation {
+    rstd::sync::Arc<TextureAllocation> destination_lease;
+    ImageParameters                    destination;
+};
+
 } // namespace
 
 struct BufferAllocation::State {
@@ -234,6 +239,7 @@ struct RecordedImageUploads::State {
     u64                                       serial { 0 };
     bool                                      recorded { false };
     std::vector<ImageCopyOperation>           copies;
+    std::vector<ImageClearOperation>          clears;
     std::vector<std::shared_ptr<UploadBlock>> blocks;
     std::vector<ImageUploadTicket>            tickets;
 };
@@ -692,8 +698,37 @@ ImageUploadManager::QueueWrite(rstd::sync::Arc<TextureAllocation> allocation, co
     return Some(ticket);
 }
 
+Option<ImageUploadTicket>
+ImageUploadManager::QueueTransparentClear(rstd::sync::Arc<TextureAllocation> allocation) {
+    if (! m_impl->initialized) return None();
+    auto destinations = allocation->View();
+    if (destinations.slots.empty()) return None();
+    if (m_impl->pending && m_impl->pending->recorded) {
+        rstd_error("queue image clear while the pending upload batch is recorded");
+        return None();
+    }
+    if (! m_impl->pending) {
+        ++m_impl->next_batch;
+        if (m_impl->next_batch == u64()) ++m_impl->next_batch;
+        m_impl->pending         = std::make_shared<RecordedImageUploads::State>();
+        m_impl->pending->serial = m_impl->next_batch;
+    }
+    for (const auto& destination : destinations.slots) {
+        m_impl->pending->clears.push_back(ImageClearOperation {
+            .destination_lease = allocation.clone(),
+            .destination       = destination,
+        });
+    }
+    ++m_impl->next_ticket;
+    if (m_impl->next_ticket == u64()) ++m_impl->next_ticket;
+    ImageUploadTicket ticket { .value = m_impl->next_ticket };
+    m_impl->pending->tickets.push_back(ticket);
+    return Some(ticket);
+}
+
 bool ImageUploadManager::HasPendingUploads() const noexcept {
-    return m_impl->pending && ! m_impl->pending->copies.empty();
+    return m_impl->pending &&
+           (! m_impl->pending->copies.empty() || ! m_impl->pending->clears.empty());
 }
 
 bool ImageUploadManager::RecordPendingUploads(vvk::CommandBuffer&   command,
@@ -706,6 +741,47 @@ bool ImageUploadManager::RecordPendingUploads(vvk::CommandBuffer&   command,
     }
     for (const auto& block : m_impl->pending->blocks) {
         if (! block->Flush()) return false;
+    }
+
+    for (const auto& clear : m_impl->pending->clears) {
+        VkImageSubresourceRange range {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = clear.destination.mipmap_level,
+            .baseArrayLayer = 0,
+            .layerCount     = 1,
+        };
+        VkImageMemoryBarrier to_transfer {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask    = 0,
+            .dstAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image            = clear.destination.handle,
+            .subresourceRange = range,
+        };
+        command.PipelineBarrier(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_DEPENDENCY_BY_REGION_BIT,
+                                to_transfer);
+        const VkClearColorValue transparent {};
+        command.ClearColorImage(
+            clear.destination.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &transparent, range);
+        VkImageMemoryBarrier to_sampled {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image            = clear.destination.handle,
+            .subresourceRange = range,
+        };
+        command.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                VK_DEPENDENCY_BY_REGION_BIT,
+                                to_sampled);
     }
 
     for (const auto& copy : m_impl->pending->copies) {
@@ -826,6 +902,18 @@ auto ImagePrepareContext::CreateImportedTexture(
 auto ImagePrepareContext::AllocateTexture(TextureKey key)
     -> Option<rstd::sync::Arc<TextureAllocation>> {
     return m_textures.AllocateTexture(rstd::move(key));
+}
+
+auto ImagePrepareContext::AllocateTransparentTexture(TextureKey key)
+    -> Option<PreparedImageAllocation> {
+    auto allocation = m_textures.AllocateTexture(rstd::move(key));
+    if (allocation.is_none()) return None();
+    auto ticket = m_uploads.QueueTransparentClear(allocation->clone());
+    if (ticket.is_none()) return None();
+    return Some(PreparedImageAllocation {
+        .allocation = rstd::move(*allocation),
+        .upload     = Some(*ticket),
+    });
 }
 
 } // namespace owe::vulkan

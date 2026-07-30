@@ -32,8 +32,6 @@ using rstd::sync::Arc;
 using namespace owe;
 using namespace Eigen;
 
-std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(p)); }
-
 // ParseContext, SceneObjectVar, ProcessOpts and the stage entry points
 // (ExpandObjects / AdjustAutoOrthoProjection / BuildContext /
 // ProcessObjects / FinalizeScene) are exported from the
@@ -231,6 +229,11 @@ const WPUniformNodeConfigDraft* FindWPUniformConfig(const ParseContext& context,
 }
 
 void RegisterNodeRef(ParseContext& context, std::int32_t id, ParseContext::NodeRef node) {
+    if (node.node.is_some()) {
+        context.scene->RegisterNode(**node.node,
+                                    id >= 0 ? Some(WallpaperLayerId { .value = i32(id) })
+                                            : None<WallpaperLayerId>());
+    }
     (void)context.node_id_map.insert(id, rstd::move(node));
 }
 
@@ -2640,13 +2643,13 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         colorEffect.materials.push_back(std::move(colorMat));
         wpimgobj.effects.push_back(std::move(colorEffect));
     }
-    const bool is_hidden_link_source =
-        context.hidden_link_source_ids.contains(static_cast<std::int32_t>(wpimgobj.id));
-    if (! has_author_effect && (is_hidden_link_source || wpimgobj.composite_layer)) {
+    const bool is_linked_source =
+        context.linked_source_ids.contains(static_cast<std::int32_t>(wpimgobj.id));
+    if (! has_author_effect && wpimgobj.composite_layer && ! is_linked_source) {
         AppendLayerCompositePassthroughEffect(vfs, wpimgobj);
     }
 
-    bool hasEffect = CountVisibleImageEffects(wpimgobj.effects) > 0;
+    bool hasEffect = CountVisibleImageEffects(wpimgobj.effects) > 0 || is_linked_source;
 
     // No-effect fullscreen / compose layers contribute nothing on their own
     // (they just sample `_rt_default` and write it back). Mark as elidable
@@ -2675,7 +2678,9 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     spImgNode->SetPerspective(wpimgobj.perspective);
     spImgNode->SetReflected(wpimgobj.reflected);
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
-    spImgNode->ID() = i32(wpimgobj.id);
+    spImgNode->ID()          = i32(wpimgobj.id);
+    const auto image_node_id = context.scene->RegisterNode(
+        *spImgNode, Some(WallpaperLayerId { .value = i32(wpimgobj.id) }));
     if (! wpimgobj.visible_user.empty())
         spImgNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wpimgobj.visible_user));
     Vec<SceneMaterial*> image_property_materials;
@@ -2867,7 +2872,7 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
     // material blendmode for last step to use
     auto finalMaterialState = material;
     // disable img material blend, as it's the first effect node now
-    SceneImageEffectLayer* image_effect_layer { nullptr };
+    SceneNodeLayer* image_effect_layer { nullptr };
     if (hasEffect) {
         material.blenmode = BlendMode::Normal;
     }
@@ -3051,10 +3056,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
 
     SetWPUniformConfig(context, spImgNode, rstd::move(svData));
     if (hasEffect) {
-        auto& scene = *context.scene;
-        // currently use addr for unique
-        std::string nodeAddr = getAddr(spImgNode.as_ptr());
-        const auto  effect_extent =
+        auto&       scene    = *context.scene;
+        std::string nodeAddr = rstd::cppstd::to_string(
+            scene.NodeResourceKey(image_node_id, "layer_camera"_str).as_str());
+        const auto effect_extent =
             NonZeroRenderTargetExtent(effect_target_size[0], effect_target_size[1]);
         auto active = scene.ActiveCamera();
         if (active.is_none()) return;
@@ -3091,23 +3096,24 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         }
         spImgNode->SetCamera(nodeAddr);
         std::string effect_ppong_a, effect_ppong_b;
-        effect_ppong_a = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_A) + nodeAddr;
-        effect_ppong_b = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) + nodeAddr;
+        effect_ppong_a = rstd::cppstd::to_string(
+            scene.NodeResourceKey(image_node_id, "layer_pingpong_a"_str).as_str());
+        effect_ppong_b = rstd::cppstd::to_string(
+            scene.NodeResourceKey(image_node_id, "layer_pingpong_b"_str).as_str());
         // set image effect
-        auto imgEffectLayer =
-            std::make_shared<SceneImageEffectLayer>(spImgNode.as_ptr(),
-                                                    static_cast<float>(effect_extent[0]),
-                                                    static_cast<float>(effect_extent[1]),
-                                                    effect_ppong_a,
-                                                    effect_ppong_b);
-        image_effect_layer = imgEffectLayer.get();
+        auto imgEffectLayer = std::make_shared<SceneNodeLayer>(spImgNode.as_ptr(),
+                                                               static_cast<float>(effect_extent[0]),
+                                                               static_cast<float>(effect_extent[1]),
+                                                               effect_ppong_a,
+                                                               effect_ppong_b);
+        image_effect_layer  = imgEffectLayer.get();
         {
             imgEffectLayer->SetRequiresSourceDraw(parse_geometry.requires_source_draw);
             imgEffectLayer->SetFullscreen(wpimgobj.fullscreen);
             imgEffectLayer->SetFinalMaterialState(finalMaterialState);
             imgEffectLayer->SetSkipWhenNoRuntimeEffect(wpimgobj.fullscreen || isPassthrough);
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
-            layer_camera->AttatchImgEffect(imgEffectLayer);
+            spImgNode->AttachLayer(imgEffectLayer);
         }
         // set renderTarget for ping-pong operate
         {
@@ -3133,20 +3139,18 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                                        rstd::move(target));
         }
 
-        int32_t    i_eff = -1;
         bool       last_effect_can_composite_final { false };
         const bool allow_transparent_previous_final = ! solid_composite_context;
         const bool passthrough_can_composite_final =
             isPassthrough || ! parse_geometry.requires_source_draw;
         for (const auto& wpeffobj : wpimgobj.effects) {
-            i_eff++;
             if (! wpeffobj.visible && wpeffobj.visible_user.empty()) {
-                i_eff--;
                 continue;
             }
             std::shared_ptr<SceneImageEffect> imgEffect = std::make_shared<SceneImageEffect>();
             imgEffect->name                             = wpeffobj.name;
             imgEffect->runtime_visible                  = wpeffobj.visible;
+            const auto effect_id = scene.RegisterEffect(image_node_id, *imgEffectLayer, imgEffect);
             if (! wpeffobj.visible_user.empty()) {
                 imgEffect->visible_user_binding =
                     ToSceneUserVisibilityBinding(wpeffobj.visible_user);
@@ -3154,9 +3158,6 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
 
             // this will be replace when resolve, use here to get rt info
             const std::string inRT { effect_ppong_a };
-
-            // fbo name map and effect command
-            std::string effaddr = getAddr(imgEffectLayer.get());
 
             std::unordered_map<std::string, std::string> fboMap;
             {
@@ -3167,10 +3168,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                     // `_rt_` prefix (`_coc`, `_downscaled1`, ...). Force the
                     // prefix so IsSpecTex / render-target lookups treat them
                     // as render targets instead of disk textures.
-                    std::string rtname =
-                        as_str(wpfbo.name).unwrap().starts_with(WE_SPEC_PREFIX)
-                            ? wpfbo.name + "_" + effaddr
-                            : rstd::cppstd::to_string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
+                    std::string rtname = rstd::cppstd::to_string(
+                        scene.EffectResourceKey(effect_id, as_str(wpfbo.name).unwrap()).as_str());
                     if (wpimgobj.fullscreen) {
                         SceneRenderTarget target {
                             .width      = 2,
@@ -3236,8 +3235,8 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
             bool eff_mat_ok { true };
 
             for (std::size_t i_mat = 0; i_mat < wpeffobj.materials.size(); i_mat++) {
-                wpscene::Material wpmat = wpeffobj.materials.at(i_mat).clone();
-                std::string       matOutRT { rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) };
+                wpscene::Material                wpmat = wpeffobj.materials.at(i_mat).clone();
+                std::string                      matOutRT { effect_ppong_b };
                 std::optional<wpscene::Material> user_texture_fallback;
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
@@ -3258,15 +3257,17 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
                 // running chain result.
                 for (auto& t : wpmat.textures) {
                     if (ParseImageLayerCompositeId(as_str(t).unwrap()) ==
-                        static_cast<std::uint32_t>(wpimgobj.id))
-                        t = effect_ppong_a;
+                        static_cast<std::uint32_t>(wpimgobj.id)) {
+                        t = as_str(t).unwrap().ends_with("_b"_str) ? effect_ppong_b
+                                                                   : effect_ppong_a;
+                    }
                 }
                 if (wpmat.textures.size() == 0) wpmat.textures.resize(1);
                 if (wpmat.textures.at(0).empty()) {
                     wpmat.textures[0] = inRT;
                 }
-                auto         spEffNode  = Arc<SceneNode>::make();
-                std::string  effmataddr = getAddr(spEffNode.as_ptr());
+                auto spEffNode = Arc<SceneNode>::make();
+                scene.RegisterNode(*spEffNode);
                 WPShaderInfo wpEffShaderInfo;
                 wpEffShaderInfo.baseConstSvs = baseConstSvs;
                 wpEffShaderInfo.baseConstSvs[rstd::cppstd::to_string(G_ETVP)] =
@@ -3404,7 +3405,76 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
             }
         }
 
-        if (! wpimgobj.fullscreen && ! wpimgobj.copybackground &&
+        auto make_internal_passthrough =
+            [&](std::string_view input, std::string_view output, ref<str> name) {
+                std::shared_ptr<SceneImageEffect> result;
+                wpscene::Material                 passthrough_mat;
+                auto json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
+                if (! json || ! passthrough_mat.FromJson(*json)) {
+                    rstd_error("parse effectpassthrough.json failed for '{}'", wpimgobj.name);
+                    return result;
+                }
+                if (passthrough_mat.textures.empty())
+                    passthrough_mat.textures.push_back(std::string(input));
+                else
+                    passthrough_mat.textures[0] = std::string(input);
+
+                auto         node = Arc<SceneNode>::make();
+                WPShaderInfo shader_info;
+                shader_info.baseConstSvs = NeutralColorUniforms(baseConstSvs);
+                SceneMaterial            material;
+                WPUniformNodeConfigDraft uniform_config;
+                uniform_config.propagate_parallax_to_children = ! wpimgobj.disablepropagation;
+                uniform_config.propagated_parallax_depth      = { wpimgobj.parallaxDepth[0],
+                                                                  wpimgobj.parallaxDepth[1] };
+                uniform_config.parallax_depth                 = { wpimgobj.parallaxDepth[0],
+                                                                  wpimgobj.parallaxDepth[1] };
+                if (! LoadMaterial(vfs,
+                                   *context.shader_cache,
+                                   context.shader_environment,
+                                   passthrough_mat,
+                                   context.scene.get(),
+                                   &material,
+                                   &shader_info)) {
+                    rstd_error("effect passthrough failed to load for '{}'", wpimgobj.name);
+                    return result;
+                }
+                LoadConstvalue(material, passthrough_mat, shader_info);
+                auto mesh = std::make_shared<SceneMesh>();
+                mesh->AddMaterial(std::move(material));
+                RegisterShaderUserVarIndex(
+                    context.scene.get(), mesh->Material(), passthrough_mat, shader_info);
+                node->AddMesh(std::move(mesh));
+                scene.RegisterNode(*node);
+                SetWPUniformConfig(context, node, rstd::move(uniform_config));
+
+                result       = std::make_shared<SceneImageEffect>();
+                result->name = rstd::cppstd::to_string(name);
+                result->nodes.push_back(SceneImageEffectNode {
+                    .output    = std::string(output),
+                    .sceneNode = node.clone(),
+                });
+                return result;
+            };
+
+        if (is_linked_source) {
+            const auto link_output = scene.EnsureLinkRenderTarget(
+                WallpaperLayerId { .value = i32(wpimgobj.id) }, *spImgNode);
+            scene.RegisterLayerLinkSource(WallpaperLayerId { .value = i32(wpimgobj.id) },
+                                          *spImgNode);
+            auto publish =
+                make_internal_passthrough(effect_ppong_a, link_output, "linked_layer_publish"_str);
+            auto visible = make_internal_passthrough(link_output,
+                                                     rstd::cppstd::as_string_view(SpecTex_Default),
+                                                     "linked_layer_visible_resolve"_str);
+            if (publish && visible) {
+                imgEffectLayer->SetPublishedEffect(rstd::move(publish));
+                imgEffectLayer->SetVisibleResolveEffect(rstd::move(visible));
+                (void)scene.SetNodeVisible(*spImgNode, wpimgobj.visible);
+            }
+        }
+
+        if (! is_linked_source && ! wpimgobj.fullscreen && ! wpimgobj.copybackground &&
             ! passthrough_can_composite_final && ! last_effect_can_composite_final) {
             wpscene::Material passthrough_mat;
             auto json = LoadJsonFile(vfs, "/assets/materials/util/effectpassthrough.json");
@@ -4442,7 +4512,10 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
     };
     const auto initial_geometry = text::ResolveTextGeometry(geometry_policy, layouter->Metrics());
     const auto [initial_layer_w, initial_layer_h] = TextLayerExtent(initial_geometry);
-    auto&                               scene     = *context.scene;
+    auto&      scene                              = *context.scene;
+    const auto text_node_id =
+        scene.RegisterNode(*layer_node, Some(WallpaperLayerId { .value = i32(obj.id) }));
+    scene.RegisterNode(*sp_node);
     std::shared_ptr<TextRuntimeTargets> runtime_targets;
     if (direct_text) {
         WPUniformNodeConfigDraft text_sv;
@@ -4455,11 +4528,14 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         });
         runtime_targets = std::make_shared<TextRuntimeTargets>(
             scene, mut_ref<WPUniformSceneState>::from_raw_parts(context.uniform_state.as_ptr()));
-        const std::string addr    = getAddr(sp_node.as_ptr());
-        const std::string ppong_a = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_A) + addr;
-        const std::string ppong_b = rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) + addr;
-        const std::string effect_final =
-            rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_A) + "text_final_" + addr;
+        const std::string addr = rstd::cppstd::to_string(
+            scene.NodeResourceKey(text_node_id, "text_camera"_str).as_str());
+        const std::string ppong_a = rstd::cppstd::to_string(
+            scene.NodeResourceKey(text_node_id, "text_pingpong_a"_str).as_str());
+        const std::string ppong_b = rstd::cppstd::to_string(
+            scene.NodeResourceKey(text_node_id, "text_pingpong_b"_str).as_str());
+        const std::string effect_final = rstd::cppstd::to_string(
+            scene.NodeResourceKey(text_node_id, "text_effect_final"_str).as_str());
         runtime_targets->camera_key   = addr;
         runtime_targets->ppong_a      = ppong_a;
         runtime_targets->ppong_b      = ppong_b;
@@ -4500,13 +4576,13 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
         scene.RegisterLayerLinkSource(WallpaperLayerId { .value = static_cast<i32>(obj.id) },
                                       *sp_node.as_ptr());
 
-        auto layer = std::make_shared<SceneImageEffectLayer>(has_text_effect ? layer_node.as_ptr()
-                                                                             : sp_node.as_ptr(),
-                                                             static_cast<float>(initial_layer_w),
-                                                             static_cast<float>(initial_layer_h),
-                                                             ppong_a,
-                                                             has_text_effect ? ppong_b : ppong_a);
-        text_camera->AttatchImgEffect(layer);
+        auto layer = std::make_shared<SceneNodeLayer>(has_text_effect ? layer_node.as_ptr()
+                                                                      : sp_node.as_ptr(),
+                                                      static_cast<float>(initial_layer_w),
+                                                      static_cast<float>(initial_layer_h),
+                                                      ppong_a,
+                                                      has_text_effect ? ppong_b : ppong_a);
+        sp_node->AttachLayer(layer);
 
         if (copy_background_seed) {
             auto bg_node = Arc<SceneNode>::make();
@@ -4609,6 +4685,7 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                 auto effect             = std::make_shared<SceneImageEffect>();
                 effect->name            = wpeffobj.name;
                 effect->runtime_visible = wpeffobj.visible;
+                const auto effect_id    = scene.RegisterEffect(text_node_id, *layer, effect);
                 if (! wpeffobj.visible_user.empty()) {
                     effect->visible_user_binding =
                         ToSceneUserVisibilityBinding(wpeffobj.visible_user);
@@ -4618,12 +4695,9 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                 std::unordered_map<std::string, std::string> fboMap;
                 fboMap["previous"] = inRT;
 
-                const std::string effaddr = getAddr(layer.get());
                 for (const auto& wpfbo : wpeffobj.fbos) {
-                    const std::string rtname =
-                        as_str(wpfbo.name).unwrap().starts_with(WE_SPEC_PREFIX)
-                            ? wpfbo.name + "_" + effaddr
-                            : rstd::cppstd::to_string(WE_SPEC_PREFIX) + wpfbo.name + "_" + effaddr;
+                    const std::string rtname = rstd::cppstd::to_string(
+                        scene.EffectResourceKey(effect_id, as_str(wpfbo.name).unwrap()).as_str());
                     auto fbo_size = TextEffectFboExtent(initial_geometry, wpfbo.scale, wpfbo.fit);
                     scene.RegisterRenderTarget(String::make(as_str(rtname).unwrap()),
                                                SceneRenderTarget { .width      = fbo_size[0],
@@ -4656,8 +4730,8 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
 
                 bool effect_ok = true;
                 for (std::size_t i_mat = 0; i_mat < wpeffobj.materials.size(); ++i_mat) {
-                    wpscene::Material wpmat = wpeffobj.materials.at(i_mat).clone();
-                    std::string matOutRT { rstd::cppstd::to_string(OWE_EFFECT_PPONG_PREFIX_B) };
+                    wpscene::Material                wpmat = wpeffobj.materials.at(i_mat).clone();
+                    std::string                      matOutRT { ppong_b };
                     std::optional<wpscene::Material> user_texture_fallback;
                     if (wpeffobj.passes.size() > i_mat) {
                         const auto& pass = wpeffobj.passes.at(i_mat);
@@ -4674,13 +4748,15 @@ void ParseTextObj(ParseContext& context, wpscene::TextObject& obj) {
                     }
                     for (auto& tex : wpmat.textures) {
                         if (ParseImageLayerCompositeId(as_str(tex).unwrap()) ==
-                            static_cast<std::uint32_t>(obj.id))
-                            tex = ppong_a;
+                            static_cast<std::uint32_t>(obj.id)) {
+                            tex = as_str(tex).unwrap().ends_with("_b"_str) ? ppong_b : ppong_a;
+                        }
                     }
                     if (wpmat.textures.empty()) wpmat.textures.resize(1);
                     if (wpmat.textures.at(0).empty()) wpmat.textures[0] = inRT;
 
-                    auto         effect_node = Arc<SceneNode>::make();
+                    auto effect_node = Arc<SceneNode>::make();
+                    scene.RegisterNode(*effect_node);
                     WPShaderInfo shader_info;
                     shader_info.baseConstSvs = effect_base;
                     shader_info.baseConstSvs[rstd::cppstd::to_string(G_ETVP)] =
@@ -6189,6 +6265,7 @@ auto WPSceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> documen
             auto node = Arc<SceneNode>::make(
                 Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()), name);
             node->ID() = i32(id);
+            context.scene->RegisterNode(*node, Some(WallpaperLayerId { .value = i32(id) }));
             std::array<float, 2> parallax_depth { 0.0f, 0.0f };
             bool                 disable_propagation = false;
             owe::GetJsonValue(o, "parallaxDepth", parallax_depth, false);

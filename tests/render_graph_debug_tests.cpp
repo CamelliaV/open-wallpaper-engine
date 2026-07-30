@@ -311,7 +311,7 @@ TEST(RenderGraphResources, PreservesFrameBoundaryTextureVersions) {
     }
 }
 
-TEST(SceneRenderGraph, ReusesOneLinkCopyForMultipleConsumers) {
+TEST(SceneRenderGraph, SharesOneLinkTargetForMultipleConsumers) {
     owe::Scene scene;
     scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
     scene.RegisterRenderTarget(String::make("_rt_default"_str),
@@ -327,6 +327,8 @@ TEST(SceneRenderGraph, ReusesOneLinkCopyForMultipleConsumers) {
     source_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
     source->AddMesh(std::move(source_mesh));
     scene.RootMut()->AppendChild(source.clone());
+    scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(7) }, *source);
+    scene.MarkLayerStaticElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
 
     auto consumer                    = rstd::sync::Arc<owe::SceneNode>::make();
     consumer->ID()                   = rstd::i32(42);
@@ -345,14 +347,103 @@ TEST(SceneRenderGraph, ReusesOneLinkCopyForMultipleConsumers) {
     ASSERT_TRUE(ordered.is_ok());
     auto order = rstd::move(ordered).unwrap_unchecked();
 
-    EXPECT_EQ(order.len(), rstd::usize(3));
+    EXPECT_EQ(order.len(), rstd::usize(2));
     rstd::usize copy_count {};
     for (auto handle : order) {
         auto state = graph->passState(handle);
         ASSERT_TRUE(state.is_some());
         if (state->type == owe::rg::PassNode::Type::Copy) ++copy_count;
     }
-    EXPECT_EQ(copy_count, rstd::usize(1));
+    EXPECT_EQ(copy_count, rstd::usize());
+}
+
+TEST(SceneRenderGraph, ReadsPreviousThenCurrentLinkedSurfaceVersion) {
+    owe::Scene scene;
+    scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
+    scene.RegisterRenderTarget(String::make("_rt_default"_str),
+                               owe::SceneRenderTarget { .width = 1920, .height = 1080 });
+
+    auto make_consumer = [](std::string name) {
+        auto               node = Arc<owe::SceneNode>::make();
+        auto               mesh = std::make_shared<owe::SceneMesh>();
+        owe::SceneMaterial material;
+        material.name     = std::move(name);
+        material.textures = { "_rt_link_7" };
+        mesh->AddMaterial(std::move(material));
+        mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+        node->AddMesh(std::move(mesh));
+        return node;
+    };
+
+    auto before = make_consumer("before");
+    scene.RootMut()->AppendChild(rstd::move(before));
+
+    auto source = Arc<owe::SceneNode>::make();
+    source->SetSize({ 64.0f, 32.0f });
+    auto               source_mesh = std::make_shared<owe::SceneMesh>();
+    owe::SceneMaterial source_material;
+    source_material.name = "source";
+    source_mesh->AddMaterial(std::move(source_material));
+    source_mesh->Submeshes().push_back(owe::SceneMesh::Submesh {});
+    source->AddMesh(std::move(source_mesh));
+    scene.RootMut()->AppendChild(source.clone());
+    scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(7) }, *source);
+    scene.MarkLayerStaticElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
+
+    auto after = make_consumer("after");
+    scene.RootMut()->AppendChild(rstd::move(after));
+
+    auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
+    auto graph    = owe::sceneToRenderGraph(scene, snapshot);
+    auto ordered  = graph->topologicalOrder();
+    ASSERT_TRUE(ordered.is_ok());
+
+    auto        plan = graph->resourcePlan();
+    rstd::usize link_versions {};
+    bool        saw_previous {};
+    bool        saw_current {};
+    for (const auto& entry : plan.textures) {
+        if (entry.request.name != "_rt_link_7"_str) continue;
+        ++link_versions;
+        if (entry.version == rstd::u32()) {
+            saw_previous = true;
+        }
+        if (entry.version == rstd::u32(1)) {
+            saw_current = true;
+        }
+        EXPECT_EQ(entry.request.lifetime, owe::resource::TextureLifetimeClass::Retained);
+        EXPECT_NE(entry.request.content & owe::resource::TextureContentFlag(
+                                              owe::resource::TextureContent::PreserveAcrossFrames),
+                  rstd::u32());
+        EXPECT_NE(entry.request.content & owe::resource::TextureContentFlag(
+                                              owe::resource::TextureContent::InitializeTransparent),
+                  rstd::u32());
+    }
+    EXPECT_EQ(link_versions, rstd::usize(2));
+    EXPECT_TRUE(saw_previous);
+    EXPECT_TRUE(saw_current);
+
+    bool before_reads_previous {};
+    bool after_reads_current {};
+    auto ordered_passes = rstd::move(ordered).unwrap_unchecked();
+    for (auto handle : ordered_passes) {
+        auto state = graph->passState(handle);
+        ASSERT_TRUE(state.is_some());
+        if (state->name != "before"_str && state->name != "after"_str) continue;
+        auto pass = graph->getPass(state->pass);
+        ASSERT_TRUE(pass.is_some());
+        auto uses = static_cast<owe::vulkan::VulkanPass&>(*pass).resourceUses();
+        for (auto use : uses.textures) {
+            for (const auto& entry : plan.textures) {
+                if (entry.handle != use || entry.request.name != "_rt_link_7"_str) continue;
+                before_reads_previous |=
+                    state->name == "before"_str && entry.version == rstd::u32();
+                after_reads_current |= state->name == "after"_str && entry.version == rstd::u32(1);
+            }
+        }
+    }
+    EXPECT_TRUE(before_reads_previous);
+    EXPECT_TRUE(after_reads_current);
 }
 
 TEST(SceneRenderGraph, ElidesVisibilityHiddenSubtreeAndRestoresIt) {
@@ -373,6 +464,8 @@ TEST(SceneRenderGraph, ElidesVisibilityHiddenSubtreeAndRestoresIt) {
     child->AddMesh(std::move(mesh));
     parent->AppendChild(child.clone());
     scene.RootMut()->AppendChild(parent.clone());
+    scene.RegisterNode(*parent, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
+    scene.RegisterNode(*child, Some(owe::WallpaperLayerId { .value = rstd::i32(8) }));
 
     EXPECT_TRUE(scene.SetNodeVisible(*parent, false));
     auto hidden_snapshot = owe::ExtractRenderSceneSnapshot(scene);
@@ -407,7 +500,9 @@ TEST(SceneRenderGraph, PreservesLinkedSourceBelowVisibilityHiddenParent) {
     source->AddMesh(std::move(source_mesh));
     parent->AppendChild(source.clone());
     scene.RootMut()->AppendChild(parent.clone());
+    scene.RegisterNode(*parent, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
     scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(8) }, *source);
+    scene.MarkLayerStaticElidable(owe::WallpaperLayerId { .value = rstd::i32(8) });
 
     auto consumer                    = Arc<owe::SceneNode>::make();
     consumer->ID()                   = rstd::i32(42);
@@ -425,7 +520,7 @@ TEST(SceneRenderGraph, PreservesLinkedSourceBelowVisibilityHiddenParent) {
     auto graph    = owe::sceneToRenderGraph(scene, snapshot);
     auto ordered  = graph->topologicalOrder();
     ASSERT_TRUE(ordered.is_ok());
-    EXPECT_EQ(ordered.unwrap_unchecked().len(), rstd::usize(3));
+    EXPECT_EQ(ordered.unwrap_unchecked().len(), rstd::usize(2));
 }
 
 TEST(VulkanRenderDiagnostics, EmptyBeforeProgramBuild) {

@@ -25,6 +25,8 @@ class ShaderReflectionCache;
 
 using resource::SetTextureRequestIfChanged;
 using resource::TextureBindingRequest;
+using resource::TextureContent;
+using resource::TextureContentFlag;
 using resource::TextureDefinition;
 using resource::TextureDefinitionId;
 using resource::TextureLifetimeClass;
@@ -213,23 +215,33 @@ inline TextureRequest MakeImportedTextureRequest(std::string_view            nam
 
 inline TextureRequest MakeRenderTargetTextureRequest(std::string_view         name,
                                                      const SceneRenderTarget& rt) {
+    auto content = TextureContentFlag(TextureContent::SourceDefined);
+    if (rt.initialize_transparent) {
+        content |= TextureContentFlag(TextureContent::InitializeTransparent);
+    }
     return TextureRequest {
         .kind       = TextureRequestKind::RenderTarget,
         .name       = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .definition = rstd::Some(RenderTargetTextureDefinition(rt)),
         .lifetime =
             rt.allowReuse ? TextureLifetimeClass::FrameLocal : TextureLifetimeClass::Retained,
+        .content = content,
     };
 }
 
 inline TextureRequest MakeRenderTargetNoMipTextureRequest(std::string_view         name,
                                                           const SceneRenderTarget& rt) {
+    auto content = TextureContentFlag(TextureContent::SourceDefined);
+    if (rt.initialize_transparent) {
+        content |= TextureContentFlag(TextureContent::InitializeTransparent);
+    }
     return TextureRequest {
         .kind       = TextureRequestKind::RenderTarget,
         .name       = rstd::string::String::make(rstd::cppstd::as_str(name).unwrap()),
         .definition = rstd::Some(RenderTargetTextureDefinitionNoMip(rt)),
         .lifetime =
             rt.allowReuse ? TextureLifetimeClass::FrameLocal : TextureLifetimeClass::Retained,
+        .content = content,
     };
 }
 

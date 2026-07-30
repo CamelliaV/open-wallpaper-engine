@@ -133,6 +133,7 @@ struct TextureContentProvider {
 
 struct ImageBackend {
     rstd::usize creates { 0 };
+    rstd::usize transparent_creates { 0 };
     rstd::u64   generation { 0 };
 
     auto CreateImportedTexture(rstd::ref<owe::Image>,
@@ -142,6 +143,9 @@ struct ImageBackend {
         ++generation;
         return rstd::Some(owe::vulkan::PreparedImageAllocation {
             .allocation = TextureAllocation(generation.to_primitive()),
+            .upload     = rstd::Some(owe::vulkan::ImageUploadTicket {
+                .value = generation,
+            }),
         });
     }
 
@@ -150,6 +154,16 @@ struct ImageBackend {
         ++creates;
         ++generation;
         return rstd::Some(TextureAllocation(generation.to_primitive()));
+    }
+
+    auto AllocateTransparentTexture(owe::vulkan::TextureKey)
+        -> rstd::Option<owe::vulkan::PreparedImageAllocation> {
+        ++creates;
+        ++transparent_creates;
+        ++generation;
+        return rstd::Some(owe::vulkan::PreparedImageAllocation {
+            .allocation = TextureAllocation(generation.to_primitive()),
+        });
     }
 };
 
@@ -683,6 +697,50 @@ TEST(ResourcePrepareService, VisitsBufferAndShaderPlansThroughTypedProviders) {
     EXPECT_EQ(buffer_provider.loads, rstd::usize(1));
     EXPECT_EQ(upload_backend.allocations, rstd::usize(1));
     EXPECT_EQ(shader_provider.loads, rstd::usize(1));
+}
+
+TEST(ResourcePrepareService, InitializesRetainedHistoryTextureOnce) {
+    owe::resource::TextureRegistry         textures;
+    owe::resource_registry::BufferRegistry buffers;
+    owe::resource_registry::ShaderRegistry shaders;
+    BufferBackend                          buffer_backend;
+    ImageBackend                           image_backend;
+    auto buffer = rstd::dyn<owe::vulkan::BufferBackend>::from_ref(buffer_backend);
+    auto image  = rstd::dyn<owe::vulkan::ImagePrepareBackend>::from_ref(image_backend);
+
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(20) };
+    plan.textures.push(owe::resource::TexturePlanEntry {
+        .handle =
+            owe::resource::TextureUseHandle {
+                .index      = rstd::u64(1),
+                .generation = rstd::u64(20),
+            },
+        .request =
+            owe::resource::TextureRequest {
+                .kind       = owe::resource::TextureRequestKind::RenderTarget,
+                .name       = rstd::string::String::make("history"_str),
+                .definition = rstd::Some(owe::resource::TextureDefinition {
+                    .width  = rstd::i32(64),
+                    .height = rstd::i32(32),
+                }),
+                .lifetime   = owe::resource::TextureLifetimeClass::Retained,
+                .content    = owe::resource::TextureContentFlag(
+                    owe::resource::TextureContent::InitializeTransparent),
+            },
+        .access = owe::resource::ResourceAccess::ReadWrite,
+    });
+
+    owe::resource_registry::ResourcePrepareService service(
+        textures, rstd::Some(image.as_mut_ref()), buffers, buffer.as_mut_ref(), shaders);
+    auto first = service.Prepare(plan);
+    ASSERT_TRUE(first.is_ok());
+    EXPECT_EQ(first->TextureCount(), rstd::usize(1));
+    EXPECT_EQ(image_backend.transparent_creates, rstd::usize(1));
+
+    auto second = service.Prepare(plan);
+    ASSERT_TRUE(second.is_ok());
+    EXPECT_EQ(second->TextureCount(), rstd::usize(1));
+    EXPECT_EQ(image_backend.transparent_creates, rstd::usize(1));
 }
 
 TEST(ResourcePrepareService, BatchesDeduplicatesAndCachesImportedTextures) {

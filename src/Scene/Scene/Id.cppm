@@ -17,6 +17,7 @@ struct SceneResourceId {
 };
 
 struct SceneNodeIdTag;
+struct SceneEffectIdTag;
 struct SceneMaterialIdTag;
 struct SceneMeshIdTag;
 struct SceneDrawItemIdTag;
@@ -25,6 +26,7 @@ struct SceneRenderTargetIdTag;
 struct SceneCameraIdTag;
 
 using SceneNodeId         = SceneResourceId<SceneNodeIdTag>;
+using SceneEffectId       = SceneResourceId<SceneEffectIdTag>;
 using SceneMaterialId     = SceneResourceId<SceneMaterialIdTag>;
 using SceneMeshId         = SceneResourceId<SceneMeshIdTag>;
 using SceneDrawItemId     = SceneResourceId<SceneDrawItemIdTag>;

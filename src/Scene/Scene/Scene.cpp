@@ -1,6 +1,11 @@
+module;
+
+#include <rstd/macro.hpp>
+
 module wescene.scene;
 import eigen;
 import rstd;
+import rstd.log;
 import rstd.cppstd;
 
 using namespace rstd::prelude;
@@ -139,6 +144,8 @@ rstd::uint64_t scene_id_key(u32 index, u32 generation) {
 }
 
 rstd::uint64_t scene_id_key(SceneDrawItemId id) { return scene_id_key(id.index, id.generation); }
+
+rstd::uint64_t scene_id_key(SceneNodeId id) { return scene_id_key(id.index, id.generation); }
 
 rstd::uint64_t scene_id_key(SceneMaterialId id) { return scene_id_key(id.index, id.generation); }
 
@@ -313,30 +320,40 @@ ShaderValue eval_shader_value_animation(const SceneShaderValueAnimation& animati
     });
 }
 
-void collect_linked_ids_from_material(const SceneMaterial& material, BTreeSet<i32>& out) {
-    for (const auto& texture : material.textures) {
-        auto name = rstd::cppstd::as_str(texture).unwrap();
-        if (IsSpecLinkTex(name)) out.insert(rstd::as_cast<i32>(ParseLinkTex(name)));
+void collect_linked_ids_from_material(SceneMaterial& material, Scene& scene, BTreeSet<i32>& out) {
+    scene.ResolveMaterialTextureSources(material);
+    for (const auto& source : material.texture_sources) {
+        if (source.kind == SceneMaterialTextureSourceKind::LayerOutput &&
+            source.wallpaper_layer >= i32()) {
+            out.insert(source.wallpaper_layer);
+        }
     }
 }
 
 void collect_linked_ids_from_node(SceneNode* node, Scene& scene, BTreeSet<i32>& out) {
     if (node == nullptr) return;
-    if (node->HasMaterial()) collect_linked_ids_from_material(*node->Mesh()->Material(), out);
-    if (! node->Camera().empty()) {
-        auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
-        if (camera.is_some() && (**camera).HasImgEffect()) {
-            auto& effect_layer = (**camera).GetImgEffect();
-            for (usize i {}; i < effect_layer->EffectCount(); ++i) {
-                auto& effect = effect_layer->GetEffect(i);
-                for (auto& effect_node : effect->nodes) {
-                    if (effect_node.sceneNode->HasMaterial()) {
-                        collect_linked_ids_from_material(*effect_node.sceneNode->Mesh()->Material(),
-                                                         out);
-                    }
-                }
-            }
+    if (auto* mesh = node->Mesh(); mesh != nullptr) {
+        for (auto& material : mesh->MaterialSlots()) {
+            if (material) collect_linked_ids_from_material(*material, scene, out);
         }
+    }
+    if (node->HasLayer()) {
+        auto& effect_layer = node->Layer();
+        for (auto& prefill : effect_layer->PrefillNodes()) {
+            collect_linked_ids_from_node(prefill.sceneNode.as_ptr(), scene, out);
+        }
+        auto collect_effect = [&](const std::shared_ptr<SceneImageEffect>& effect) {
+            if (! effect) return;
+            for (auto& effect_node : effect->nodes) {
+                collect_linked_ids_from_node(effect_node.sceneNode.as_ptr(), scene, out);
+            }
+        };
+        for (usize i {}; i < effect_layer->EffectCount(); ++i) {
+            collect_effect(effect_layer->GetEffect(i));
+        }
+        collect_effect(effect_layer->FinalResolveEffect());
+        collect_effect(effect_layer->PublishedEffect());
+        collect_effect(effect_layer->VisibleResolveEffect());
     }
     for (auto& child : node->GetChildren())
         collect_linked_ids_from_node(child.as_ptr(), scene, out);
@@ -355,57 +372,19 @@ void collect_linked_ids_from_scene(Scene& scene, BTreeSet<i32>& out) {
     }
 }
 
-SceneNode* find_layer_node(SceneNode* node, Scene& scene, i32 id) {
-    if (node == nullptr) return nullptr;
-    if (node->ID() == id) return node;
-
-    if (! node->Camera().empty()) {
-        auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
-        if (camera.is_some() && (**camera).HasImgEffect()) {
-            auto& effect_layer = (**camera).GetImgEffect();
-            for (usize i {}; i < effect_layer->EffectCount(); ++i) {
-                auto& effect = effect_layer->GetEffect(i);
-                for (auto& effect_node : effect->nodes) {
-                    if (auto* found = find_layer_node(effect_node.sceneNode.as_ptr(), scene, id))
-                        return found;
-                }
-            }
-        }
-    }
-
-    for (auto& child : node->GetChildren()) {
-        if (auto* found = find_layer_node(child.as_ptr(), scene, id)) return found;
-    }
-    return nullptr;
-}
-
-SceneNode* find_layer_node(Scene& scene, WallpaperLayerId id) {
-    if (auto* found = find_layer_node(scene.RootMut().as_raw_ptr(), scene, id.value)) return found;
-    auto post_processes = scene.PostProcesses();
-    for (usize index {}; index < post_processes.len(); ++index) {
-        const auto& pp = post_processes[index];
-        for (auto& step : pp->steps) {
-            if (step.is_Pass()) {
-                auto& pass = step.as_Pass().value;
-                if (auto* found = find_layer_node(pass.node.as_ptr(), scene, id.value))
-                    return found;
-            }
-        }
-    }
-    return nullptr;
-}
-
 void ensure_snapshot_link_render_targets(Scene& scene, const BTreeSet<i32>& linked_ids) {
     auto ids = linked_ids.iter();
     for (auto next = ids.next(); next.is_some(); next = ids.next()) {
-        auto id = **next;
-        if (! scene.IsLayerElidable(WallpaperLayerId { .value = id })) continue;
+        auto id    = **next;
         auto layer = WallpaperLayerId { .value = id };
         auto key   = GenLinkTex(static_cast<std::ptrdiff_t>(id.to_primitive()));
         if (scene.RenderTarget(as_str(key).unwrap()).is_some()) continue;
         auto* source = scene.RegisteredLayerLinkSource(layer);
-        if (source == nullptr) source = find_layer_node(scene, layer);
-        if (source != nullptr) scene.EnsureLinkRenderTarget(layer, *source);
+        if (source == nullptr) {
+            rstd_error("linked layer {} has no registered composite producer", id);
+            continue;
+        }
+        scene.EnsureLinkRenderTarget(layer, *source);
     }
 }
 } // namespace
@@ -463,7 +442,8 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
         return id;
     };
 
-    auto register_material = [this, generation](SceneMaterial& material) {
+    auto register_material = [this, generation, &scene](SceneMaterial& material) {
+        scene.ResolveMaterialTextureSources(material);
         if (auto found = m_material_ids.get(&material); found.is_some()) {
             auto id = **found;
             if (valid_index(id, generation, m_materials.len().to_primitive())) {
@@ -514,17 +494,10 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
     };
 
     auto register_node = [&](SceneNode& node) {
-        if (auto found = m_node_ids.get(&node); found.is_some()) {
-            auto id = **found;
-            if (valid_index(id, generation, m_nodes.len().to_primitive())) {
-                m_nodes[index_from_id(id.index)] = &node;
-                return id;
-            }
-            (void)m_node_ids.remove(&node);
-        }
-        SceneNodeId id { .index      = index_from_size(m_nodes.len().to_primitive()),
-                         .generation = generation };
-        m_nodes.push(&node);
+        auto       id       = scene.RegisterNode(node);
+        const auto required = static_cast<std::size_t>(id.index.to_primitive()) + 1;
+        if (m_nodes.len().to_primitive() < required) m_nodes.resize(usize(required), nullptr);
+        m_nodes[index_from_id(id.index)] = &node;
         (void)m_node_ids.insert(&node, id);
         return id;
     };
@@ -536,38 +509,28 @@ void SceneResourceIndex::Rebuild(Scene& scene, u32 generation) {
 
         register_node(*node);
 
-        if (! node->Camera().empty()) {
-            auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
-            if (camera.is_some() && (**camera).HasImgEffect()) {
-                auto& eff_layer = (**camera).GetImgEffect();
-                for (usize ei {}; ei < eff_layer->EffectCount(); ++ei) {
-                    auto& eff = eff_layer->GetEffect(ei);
-                    for (auto& eff_node : eff->nodes) self(self, eff_node.sceneNode.as_ptr());
-                }
+        if (node->HasLayer()) {
+            auto& layer = node->Layer();
+            for (auto& prefill : layer->PrefillNodes()) {
+                self(self, prefill.sceneNode.as_ptr());
             }
+            for (usize ei {}; ei < layer->EffectCount(); ++ei) {
+                auto& effect = layer->GetEffect(ei);
+                for (auto& effect_node : effect->nodes) self(self, effect_node.sceneNode.as_ptr());
+            }
+            auto collect_internal = [&](const std::shared_ptr<SceneImageEffect>& effect) {
+                if (! effect) return;
+                for (auto& effect_node : effect->nodes) self(self, effect_node.sceneNode.as_ptr());
+            };
+            collect_internal(layer->FinalResolveEffect());
+            collect_internal(layer->PublishedEffect());
+            collect_internal(layer->VisibleResolveEffect());
         }
 
         for (auto& child : node->GetChildren()) self(self, child.as_ptr());
     };
 
     collect_node(collect_node, scene.RootMut().as_raw_ptr());
-    auto collect_effect = [&](const std::shared_ptr<SceneImageEffect>& effect) {
-        if (! effect) return;
-        for (auto& node : effect->nodes) collect_node(collect_node, node.sceneNode.as_ptr());
-    };
-    auto camera_names = scene.CameraNames();
-    for (usize name_index {}; name_index < camera_names.len(); ++name_index) {
-        auto camera = scene.Camera(camera_names[name_index].as_str());
-        if (camera.is_none() || ! (**camera).HasImgEffect()) continue;
-        auto& layer = (**camera).GetImgEffect();
-        for (auto& node : layer->PrefillNodes()) {
-            collect_node(collect_node, node.sceneNode.as_ptr());
-        }
-        for (usize index {}; index < layer->EffectCount(); ++index) {
-            collect_effect(layer->GetEffect(index));
-        }
-        collect_effect(layer->FinalResolveEffect());
-    }
     auto post_processes = scene.PostProcesses();
     for (usize index {}; index < post_processes.len(); ++index) {
         const auto& pp = post_processes[index];
@@ -843,9 +806,11 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
             }
         }
 
-        auto source_layer = node != nullptr ? scene.ResolveLayerLinkSource(*node).unwrap_or(
-                                                  WallpaperLayerId { .value = node->ID() })
-                                            : WallpaperLayerId { .value = i32(-1) };
+        auto source_layer =
+            node != nullptr
+                ? scene.ResolveLayerLinkSource(*node).unwrap_or(
+                      node->WallpaperIdentity().unwrap_or(WallpaperLayerId { .value = i32(-1) }))
+                : WallpaperLayerId { .value = i32(-1) };
         (void)m_render_item_ids.insert(scene_id_key(item.id), id);
         append_render_item(m_source_layer_items, source_layer.value.to_primitive(), id);
         append_render_item(m_material_render_items, scene_id_key(item.material), id);
@@ -871,6 +836,8 @@ void RenderSceneSnapshot::Rebuild(Scene& scene, RenderSceneVersion version) {
         (void)m_link_source_ids.insert(id.to_primitive(), record_index);
         m_link_sources.push(RenderLinkSourceRecord {
             .source_layer      = WallpaperLayerId { .value = id },
+            .scene_node        = scene.RegisteredLayerLinkSourceId(WallpaperLayerId { .value = id })
+                                     .unwrap_or(SceneNodeId {}),
             .render_target_key = String::make(rstd::cppstd::as_str(key).unwrap()),
             .render_target     = *desc_id,
         });
@@ -1035,9 +1002,71 @@ bool SceneCameraPath::Tick(double runtime) {
 Scene::Scene()
     : m_scene_graph(Box<SceneNode>::make()),
       m_resource_generation(next_scene_resource_generation()) {
+    RegisterNode(*m_scene_graph);
     m_runtime.RegisterSystem(SceneTextureAnimationRuntime { m_texture_animations });
 }
 Scene::~Scene() = default;
+
+SceneNodeId Scene::RegisterNode(SceneNode& node, Option<WallpaperLayerId> wallpaper) {
+    if (! node.m_identity.Valid() || node.m_identity.generation != m_resource_generation) {
+        node.m_identity = SceneNodeId {
+            .index      = m_next_node_index,
+            .generation = m_resource_generation,
+        };
+        ++m_next_node_index;
+    }
+    if (wallpaper.is_some()) {
+        if (node.m_wallpaper_identity.is_some() &&
+            node.m_wallpaper_identity->value != wallpaper->value) {
+            rstd_error("scene node {} already belongs to wallpaper layer {}",
+                       node.m_identity.index,
+                       node.m_wallpaper_identity->value);
+            return node.m_identity;
+        }
+        auto existing = m_wallpaper_node_ids.get(wallpaper->value);
+        if (existing.is_some() && **existing != node.m_identity) {
+            rstd_error("wallpaper layer {} already belongs to scene node {}",
+                       wallpaper->value,
+                       (**existing).index);
+            return node.m_identity;
+        }
+        node.m_wallpaper_identity = wallpaper;
+        node.m_id                 = wallpaper->value;
+        (void)m_wallpaper_node_ids.insert(wallpaper->value, node.m_identity);
+    }
+    return node.m_identity;
+}
+
+SceneEffectId Scene::RegisterEffect(SceneNodeId owner, SceneNodeLayer& layer,
+                                    std::shared_ptr<SceneImageEffect> effect) {
+    if (! effect) return {};
+    if (! owner.Valid() || owner.generation != m_resource_generation) return {};
+    if (! effect->id.Valid() || effect->id.generation != m_resource_generation) {
+        effect->id = SceneEffectId {
+            .index      = m_next_effect_index,
+            .generation = m_resource_generation,
+        };
+        ++m_next_effect_index;
+    }
+    effect->owner = owner;
+    (void)m_image_effects.insert(scene_id_key(effect->id.index, effect->id.generation),
+                                 ImageEffectRecord {
+                                     .owner  = owner,
+                                     .layer  = rstd::addressof(layer),
+                                     .effect = effect,
+                                 });
+    return effect->id;
+}
+
+String Scene::NodeResourceKey(SceneNodeId node, ref<str> role) const {
+    if (! node.Valid() || node.generation != m_resource_generation) return String {};
+    return rstd::format("_rt_node_{}_{}", node.index, role);
+}
+
+String Scene::EffectResourceKey(SceneEffectId effect, ref<str> local_name) const {
+    if (! effect.Valid() || effect.generation != m_resource_generation) return String {};
+    return rstd::format("_rt_effect_{}_{}", effect.index, local_name);
+}
 
 void Scene::RegisterTexture(String name, SceneTexture texture) {
     auto revision = m_texture_content_revisions.get_mut(name.as_str());
@@ -1558,6 +1587,87 @@ bool Scene::SetMaterialShaderValueByKey(SceneMaterial& material, ref<str> materi
     return material.SetShaderValue(std::move(uniform_name), value);
 }
 
+void Scene::ResolveMaterialTextureSources(SceneMaterial& material) {
+    material.texture_sources.resize(usize(material.textures.size()), SceneMaterialTextureSource {});
+    for (std::size_t index = 0; index < material.textures.size(); ++index) {
+        const auto& texture = material.textures[index];
+        auto&       source  = material.texture_sources[usize(index)];
+        source              = {};
+        source.key          = String::make(rstd::cppstd::as_str(texture).unwrap());
+        if (texture.empty()) continue;
+
+        auto name = rstd::cppstd::as_str(texture).unwrap();
+        if (auto linked = ParseImageLayerCompositeId(name); linked.has_value()) {
+            source.kind            = SceneMaterialTextureSourceKind::LayerOutput;
+            source.wallpaper_layer = rstd::as_cast<i32>(*linked);
+            auto key               = GenLinkTex(*linked);
+            source.key             = String::make(rstd::cppstd::as_str(key).unwrap());
+            source.layer =
+                RegisteredLayerLinkSourceId(WallpaperLayerId { .value = source.wallpaper_layer });
+            continue;
+        }
+        if (IsSpecLinkTex(name)) {
+            source.kind            = SceneMaterialTextureSourceKind::LayerOutput;
+            source.wallpaper_layer = rstd::as_cast<i32>(ParseLinkTex(name));
+            source.layer =
+                RegisteredLayerLinkSourceId(WallpaperLayerId { .value = source.wallpaper_layer });
+            continue;
+        }
+        if (name.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
+            source.kind = SceneMaterialTextureSourceKind::MipMappedFramebuffer;
+            continue;
+        }
+        if (auto rest = name.strip_prefix("_rt_effect_"_str); rest.is_some()) {
+            u32   effect_index {};
+            usize digit_count {};
+            for (usize offset {}; offset < rest->size(); ++offset) {
+                auto digit = (*rest)[offset].to_primitive();
+                if (digit < '0' || digit > '9') break;
+                effect_index = effect_index * u32(10) + u32(digit - '0');
+                ++digit_count;
+            }
+            SceneEffectId effect_id {
+                .index      = effect_index,
+                .generation = m_resource_generation,
+            };
+            if (digit_count > usize() && digit_count < rest->size() &&
+                (*rest)[digit_count].to_primitive() == '_' &&
+                m_image_effects.contains_key(scene_id_key(effect_id.index, effect_id.generation))) {
+                source.kind   = SceneMaterialTextureSourceKind::EffectLocal;
+                source.effect = Some(effect_id);
+                continue;
+            }
+        }
+        if (auto rest = name.strip_prefix("_rt_node_"_str); rest.is_some()) {
+            u32   node_index {};
+            usize digit_count {};
+            for (usize offset {}; offset < rest->size(); ++offset) {
+                auto digit = (*rest)[offset].to_primitive();
+                if (digit < '0' || digit > '9') break;
+                node_index = node_index * u32(10) + u32(digit - '0');
+                ++digit_count;
+            }
+            if (digit_count > usize() && digit_count < rest->size() &&
+                (*rest)[digit_count].to_primitive() == '_' && node_index < m_next_node_index &&
+                RenderTarget(name).is_some()) {
+                source.kind  = SceneMaterialTextureSourceKind::LayerStage;
+                source.layer = Some(SceneNodeId {
+                    .index      = node_index,
+                    .generation = m_resource_generation,
+                });
+                continue;
+            }
+        }
+        if (! IsSpecTex(name)) {
+            source.kind = SceneMaterialTextureSourceKind::Imported;
+        } else if (RenderTarget(name).is_some()) {
+            source.kind = SceneMaterialTextureSourceKind::SceneSurface;
+        } else {
+            source.kind = SceneMaterialTextureSourceKind::UnsupportedSpecial;
+        }
+    }
+}
+
 SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
                                                                std::string_view texture) {
     if (! EnsureTextureDescriptor(texture)) return {};
@@ -1572,6 +1682,7 @@ SceneMaterialTextureSlotMutation Scene::SetMaterialTextureSlot(SceneMaterial& ma
 
     current                               = std::string(texture);
     material.texture_metadata[slot_index] = {};
+    ResolveMaterialTextureSources(material);
     material.SetTextureBindingsDirty();
     if (m_resource_index.Empty()) RebuildResourceIndex();
     m_texture_animations.Rebuild(*this);
@@ -1585,6 +1696,8 @@ SceneMaterialShaderVariantMutation
 Scene::SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutation mutation) {
     if (! material.SetShaderVariant(std::move(mutation.shader), std::move(mutation.variant)))
         return {};
+
+    ResolveMaterialTextureSources(material);
 
     if (m_resource_index.Empty()) RebuildResourceIndex();
     m_texture_animations.Rebuild(*this);
@@ -1638,32 +1751,44 @@ bool Scene::ConsumeRenderGraphDirty() {
 }
 
 void Scene::RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node) {
-    auto previous = m_layer_link_sources.get(id.value);
-    if (previous.is_some()) (void)m_node_link_sources.remove(**previous);
-    (void)m_layer_link_sources.insert(id.value, rstd::addressof(node));
-    (void)m_node_link_sources.insert(rstd::addressof(node), id);
+    auto node_id  = RegisterNode(node);
+    auto previous = m_layer_link_source_ids.get(id.value);
+    if (previous.is_some()) (void)m_node_link_sources.remove(scene_id_key(**previous));
+    (void)m_layer_link_source_ids.insert(id.value, node_id);
+    (void)m_layer_link_source_nodes.insert(id.value, rstd::addressof(node));
+    (void)m_node_link_sources.insert(scene_id_key(node_id), id);
 }
 
 SceneNode* Scene::RegisteredLayerLinkSource(WallpaperLayerId id) const {
-    auto source = m_layer_link_sources.get(id.value);
+    auto source = m_layer_link_source_nodes.get(id.value);
     return source.is_some() ? **source : nullptr;
 }
 
+Option<SceneNodeId> Scene::RegisteredLayerLinkSourceId(WallpaperLayerId id) const {
+    auto source = m_layer_link_source_ids.get(id.value);
+    return source.is_some() ? Some<SceneNodeId>(**source) : None<SceneNodeId>();
+}
+
 Option<WallpaperLayerId> Scene::ResolveLayerLinkSource(const SceneNode& node) const {
-    auto node_key = rstd::addressof(node);
-    auto source   = m_node_link_sources.get(node_key);
+    auto source = m_node_link_sources.get(scene_id_key(node.Identity()));
     if (source.is_some()) return Some<WallpaperLayerId>(**source);
-    const i32 id = node.ID();
-    if (id < i32()) return None();
-    auto registered = m_layer_link_sources.get(id);
-    if (registered.is_some() && **registered != node_key) return None();
-    return Some(WallpaperLayerId { .value = id });
+    auto wallpaper = node.WallpaperIdentity();
+    if (wallpaper.is_none()) return None();
+    auto registered = m_layer_link_source_ids.get(wallpaper->value);
+    if (registered.is_some() && **registered != node.Identity()) return None();
+    return wallpaper;
 }
 
 bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
-    const i32  id           = node.ID();
-    const bool was_elidable = id >= i32() && m_elidable_layer_ids.contains(id);
+    auto       wallpaper            = node.WallpaperIdentity();
+    const i32  id                   = wallpaper.is_some() ? wallpaper->value : i32(-1);
+    const bool was_elidable         = id >= i32() && m_elidable_layer_ids.contains(id);
+    const bool publishes_output     = node.HasLayer() && node.Layer()->PublishesOutput();
+    node.m_visibility_affects_alpha = ! publishes_output;
     node.SetVisible(visible);
+    if (publishes_output) {
+        node.Layer()->SetVisibleOutputEnabled(visible);
+    }
     if (id < i32()) return false;
 
     if (! visible) {
@@ -1695,48 +1820,62 @@ bool Scene::ApplyUserNodeVisibilityBindings(std::string_view key, const Json& pr
 
 Option<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node,
                                                        std::string_view name) {
-    if (node.Camera().empty()) return None();
-    auto camera = CameraMut(rstd::cppstd::as_str(node.Camera()).unwrap());
-    if (camera.is_none() || ! (**camera).HasImgEffect()) return None();
-
-    auto& effect_layer = (**camera).GetImgEffect();
+    if (! node.HasLayer()) return None();
+    const auto& effect_layer = node.Layer();
     if (! effect_layer) return None();
     auto effect = effect_layer->FindEffect(name);
     if (! effect) return None();
-    return Some(SceneImageEffectRef { .layer = effect_layer.get(), .effect = std::move(effect) });
+    auto owner = RegisterNode(const_cast<SceneNode&>(node));
+    auto id    = RegisterEffect(owner, *effect_layer, rstd::move(effect));
+    return id.Valid() ? Some(SceneImageEffectRef { .id = id }) : None();
 }
 
 Option<SceneImageEffectRef> Scene::FindNodeImageEffect(const SceneNode& node, usize index) {
-    if (node.Camera().empty()) return None();
-    auto camera = CameraMut(rstd::cppstd::as_str(node.Camera()).unwrap());
-    if (camera.is_none() || ! (**camera).HasImgEffect()) return None();
-
-    auto& effect_layer = (**camera).GetImgEffect();
+    if (! node.HasLayer()) return None();
+    const auto& effect_layer = node.Layer();
     if (! effect_layer || index >= effect_layer->EffectCount()) return None();
     auto effect = effect_layer->GetEffect(index);
     if (! effect) return None();
-    return Some(SceneImageEffectRef { .layer = effect_layer.get(), .effect = std::move(effect) });
+    auto owner = RegisterNode(const_cast<SceneNode&>(node));
+    auto id    = RegisterEffect(owner, *effect_layer, rstd::move(effect));
+    return id.Valid() ? Some(SceneImageEffectRef { .id = id }) : None();
 }
 
 usize Scene::NodeImageEffectCount(const SceneNode& node) {
-    if (node.Camera().empty()) return usize();
-    auto camera = CameraMut(rstd::cppstd::as_str(node.Camera()).unwrap());
-    if (camera.is_none() || ! (**camera).HasImgEffect()) return usize();
-    const auto& effect_layer = (**camera).GetImgEffect();
+    if (! node.HasLayer()) return usize();
+    const auto& effect_layer = node.Layer();
     return effect_layer ? effect_layer->EffectCount() : usize();
 }
 
+String Scene::ImageEffectName(const SceneImageEffectRef& ref) const {
+    if (! ref.id.Valid() || ref.id.generation != m_resource_generation) return {};
+    auto record = m_image_effects.get(scene_id_key(ref.id.index, ref.id.generation));
+    if (record.is_none() || ! (**record).effect) return {};
+    return String::make(rstd::cppstd::as_str((**record).effect->name).unwrap());
+}
+
+bool Scene::ImageEffectRuntimeVisible(const SceneImageEffectRef& ref) const {
+    if (! ref.id.Valid() || ref.id.generation != m_resource_generation) return false;
+    auto record = m_image_effects.get(scene_id_key(ref.id.index, ref.id.generation));
+    return record.is_some() && (**record).effect && (**record).effect->runtime_visible;
+}
+
 SceneMaterial* Scene::ImageEffectMaterial(const SceneImageEffectRef& ref, usize index) {
-    if (! ref.effect || index >= usize(ref.effect->nodes.size())) return nullptr;
-    auto node = ref.effect->nodes.begin();
+    if (! ref.id.Valid() || ref.id.generation != m_resource_generation) return nullptr;
+    auto record = m_image_effects.get(scene_id_key(ref.id.index, ref.id.generation));
+    if (record.is_none() || ! (**record).effect || index >= usize((**record).effect->nodes.size()))
+        return nullptr;
+    auto node = (**record).effect->nodes.begin();
     std::advance(node, index.to_primitive());
     if (! node->sceneNode || ! node->sceneNode->HasMaterial()) return nullptr;
     return node->sceneNode->Mesh()->Material();
 }
 
 bool Scene::SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible) {
-    if (! ref.layer || ! ref.effect) return false;
-    if (! ref.layer->SetEffectRuntimeVisible(*ref.effect, visible)) return false;
+    if (! ref.id.Valid() || ref.id.generation != m_resource_generation) return false;
+    auto record = m_image_effects.get_mut(scene_id_key(ref.id.index, ref.id.generation));
+    if (record.is_none() || (**record).layer == nullptr || ! (**record).effect) return false;
+    if (! (**record).layer->SetEffectRuntimeVisible(*(**record).effect, visible)) return false;
     m_render_graph_dirty = true;
     return true;
 }
@@ -1749,18 +1888,17 @@ bool Scene::ApplyUserImageEffectVisibilityBindings(std::string_view key, const J
     auto                                  nodes = m_resource_index.Nodes();
     for (usize node_index {}; node_index < nodes.len(); ++node_index) {
         auto* node = nodes[node_index];
-        if (node == nullptr || node->Camera().empty()) continue;
-        auto camera = CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
-        if (camera.is_none() || ! (**camera).HasImgEffect()) continue;
-        auto& effect_layer = (**camera).GetImgEffect();
+        if (node == nullptr || ! node->HasLayer()) continue;
+        auto& effect_layer = node->Layer();
         for (usize i {}; i < effect_layer->EffectCount(); ++i) {
             auto& effect = effect_layer->GetEffect(i);
             if (! effect || ! visited.insert(effect.get()).second) continue;
             auto visible = ResolveSceneUserVisibilityBinding(
                 effect->visible_user_binding, rstd::cppstd::as_str(key).unwrap(), property);
             if (! visible) continue;
-            if (SetImageEffectRuntimeVisible({ .layer = effect_layer.get(), .effect = effect },
-                                             *visible)) {
+            auto owner = RegisterNode(*node);
+            auto id    = RegisterEffect(owner, *effect_layer, effect);
+            if (SetImageEffectRuntimeVisible({ .id = id }, *visible)) {
                 requires_graph_rebuild = true;
             }
         }
@@ -2055,6 +2193,7 @@ std::string Scene::EnsureLinkRenderTarget(WallpaperLayerId source_layer,
                                  .height     = sz.y() > 0 ? static_cast<std::int32_t>(sz.y())
                                                           : m_ortho[usize(1)].to_primitive(),
                                  .allowReuse = false,
+                                 .initialize_transparent = true,
                              });
     }
     return link_key;

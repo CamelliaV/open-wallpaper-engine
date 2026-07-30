@@ -729,6 +729,8 @@ public:
 
     auto QueueWrite(rstd::sync::Arc<TextureAllocation> allocation, const Image& image)
         -> Option<ImageUploadTicket>;
+    auto QueueTransparentClear(rstd::sync::Arc<TextureAllocation> allocation)
+        -> Option<ImageUploadTicket>;
 
     bool HasPendingUploads() const noexcept;
     bool RecordPendingUploads(vvk::CommandBuffer& command, RecordedImageUploads& recorded);
@@ -751,6 +753,7 @@ public:
                                Option<rstd::sync::Arc<VideoPlaybackState>> playback)
         -> Option<PreparedImageAllocation>;
     auto AllocateTexture(TextureKey key) -> Option<rstd::sync::Arc<TextureAllocation>>;
+    auto AllocateTransparentTexture(TextureKey key) -> Option<PreparedImageAllocation>;
 
 private:
     TextureCache&       m_textures;
@@ -774,10 +777,15 @@ struct ImagePrepareBackend {
         auto AllocateTexture(TextureKey key) -> rstd::Option<rstd::sync::Arc<TextureAllocation>> {
             return rstd::trait_call<1>(this, key);
         }
+
+        auto AllocateTransparentTexture(TextureKey key) -> rstd::Option<PreparedImageAllocation> {
+            return rstd::trait_call<2>(this, key);
+        }
     };
 
     template<typename T>
-    using Funcs = rstd::TraitFuncs<&T::CreateImportedTexture, &T::AllocateTexture>;
+    using Funcs = rstd::TraitFuncs<&T::CreateImportedTexture, &T::AllocateTexture,
+                                   &T::AllocateTransparentTexture>;
 };
 
 void RecordGenerateMipmaps(vvk::CommandBuffer&, const ImageParameters&);
@@ -1351,6 +1359,11 @@ struct Impl<owe::vulkan::ImagePrepareBackend, owe::vulkan::ImagePrepareContext>
     auto AllocateTexture(owe::vulkan::TextureKey key)
         -> Option<sync::Arc<owe::vulkan::TextureAllocation>> {
         return this->self().AllocateTexture(rstd::move(key));
+    }
+
+    auto AllocateTransparentTexture(owe::vulkan::TextureKey key)
+        -> Option<owe::vulkan::PreparedImageAllocation> {
+        return this->self().AllocateTransparentTexture(rstd::move(key));
     }
 };
 

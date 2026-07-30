@@ -703,6 +703,7 @@ public:
             }
 
             auto physical = m_textures.ResolveCurrent(handle);
+            if (physical.is_none()) physical = m_textures.ResolvePending(handle);
             if (physical.is_some()) {
                 auto inserted = InsertPrepared(
                     entry.handle, handle, entry.request.clone(), **physical, session.m_table);
@@ -711,10 +712,29 @@ public:
             }
 
             if (entry.request.kind != resource::TextureRequestKind::Imported) {
-                auto allocated = AllocateTexture(entry.request);
-                if (allocated.is_err()) {
-                    return Err(rstd::move(allocated).unwrap_err_unchecked());
+                const bool initialize_transparent =
+                    (entry.request.content &
+                     resource::TextureContentFlag(
+                         resource::TextureContent::InitializeTransparent)) != u32();
+                if (initialize_transparent) {
+                    auto prepared = AllocateTransparentTexture(entry.request);
+                    if (prepared.is_err()) {
+                        return Err(rstd::move(prepared).unwrap_err_unchecked());
+                    }
+                    auto allocation = rstd::move(prepared).unwrap_unchecked();
+                    auto published  = PublishPrepared(entry.handle,
+                                                      handle,
+                                                      entry.request.clone(),
+                                                      rstd::move(allocation.allocation),
+                                                      allocation.upload,
+                                                      session.m_table);
+                    if (published.is_err()) {
+                        return Err(rstd::move(published).unwrap_err_unchecked());
+                    }
+                    continue;
                 }
+                auto allocated = AllocateTexture(entry.request);
+                if (allocated.is_err()) return Err(rstd::move(allocated).unwrap_err_unchecked());
                 auto published = PublishPrepared(entry.handle,
                                                  handle,
                                                  entry.request.clone(),
@@ -917,6 +937,31 @@ private:
             return Err(resource::ResourceError {
                 .kind    = resource::ResourceErrorKind::BackendFailure,
                 .message = rstd::format("create texture {} failed", request.name.as_str()),
+            });
+        }
+        return Ok(rstd::move(*image));
+    }
+
+    auto AllocateTransparentTexture(const resource::TextureRequest& request)
+        -> Result<vulkan::PreparedImageAllocation, resource::ResourceError> {
+        if (m_textures_backend.is_none()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("texture backend unavailable"),
+            });
+        }
+        if (request.definition.is_none()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::MissingDefinition,
+                .message = rstd::format("texture definition {} unavailable", request.name.as_str()),
+            });
+        }
+        auto image =
+            (*m_textures_backend)->AllocateTransparentTexture(ToTextureKey(*request.definition));
+        if (image.is_none()) {
+            return Err(resource::ResourceError {
+                .kind    = resource::ResourceErrorKind::BackendFailure,
+                .message = rstd::format("initialize texture {} failed", request.name.as_str()),
             });
         }
         return Ok(rstd::move(*image));

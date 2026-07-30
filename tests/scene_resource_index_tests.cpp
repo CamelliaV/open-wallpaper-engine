@@ -190,11 +190,106 @@ TEST(SceneResourceIndex, RebuildPicksUpNewRenderTargets) {
     EXPECT_EQ(scene.ResourceIndex().renderTarget(*id)->height, 32);
 }
 
-TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
+TEST(SceneIdentity, RegistersStableNodeAndEffectOwners) {
+    owe::Scene scene;
+    auto       first  = Arc<owe::SceneNode>::make();
+    auto       second = Arc<owe::SceneNode>::make();
+    auto       first_id =
+        scene.RegisterNode(*first, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
+    auto second_id = scene.RegisterNode(*second);
+
+    EXPECT_TRUE(first_id.Valid());
+    EXPECT_TRUE(second_id.Valid());
+    EXPECT_NE(first_id.index, second_id.index);
+    EXPECT_EQ(scene.RegisterNode(*first), first_id);
+    EXPECT_EQ(first->WallpaperIdentity()->value, rstd::i32(7));
+    auto duplicate = Arc<owe::SceneNode>::make();
+    auto duplicate_id =
+        scene.RegisterNode(*duplicate, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
+    EXPECT_NE(duplicate_id, first_id);
+    EXPECT_TRUE(duplicate->WallpaperIdentity().is_none());
+
+    auto layer =
+        std::make_shared<owe::SceneNodeLayer>(first.as_ptr(), 64.0f, 32.0f, "_rt_a", "_rt_b");
+    auto effect_a  = std::make_shared<owe::SceneImageEffect>();
+    auto effect_b  = std::make_shared<owe::SceneImageEffect>();
+    effect_a->name = effect_b->name = "duplicate";
+    auto effect_a_id                = scene.RegisterEffect(first_id, *layer, effect_a);
+    auto effect_b_id                = scene.RegisterEffect(first_id, *layer, effect_b);
+    EXPECT_TRUE(effect_a_id.Valid());
+    EXPECT_TRUE(effect_b_id.Valid());
+    EXPECT_NE(effect_a_id.index, effect_b_id.index);
+    layer->SetPublishedEffect(std::make_shared<owe::SceneImageEffect>());
+    layer->SetVisibleResolveEffect(std::make_shared<owe::SceneImageEffect>());
+    first->AttachLayer(layer);
+    first->SetBaseColor({ 1.0f, 1.0f, 1.0f }, 0.5f);
+    EXPECT_TRUE(layer->VisibleOutputEnabled());
+    EXPECT_TRUE(scene.SetNodeVisible(*first, false));
+    EXPECT_FALSE(layer->VisibleOutputEnabled());
+    EXPECT_FLOAT_EQ(first->EffectiveAlpha(), 0.5f);
+    EXPECT_TRUE(scene.SetNodeVisible(*first, true));
+    EXPECT_TRUE(layer->VisibleOutputEnabled());
+
+    auto node_key = scene.NodeResourceKey(first_id, "layer_pingpong_a"_str);
+    auto fbo_a    = scene.EffectResourceKey(effect_a_id, "half"_str);
+    auto fbo_b    = scene.EffectResourceKey(effect_b_id, "half"_str);
+    EXPECT_EQ(rstd::cppstd::as_string_view(node_key), "_rt_node_1_layer_pingpong_a");
+    EXPECT_NE(fbo_a, fbo_b);
+
+    scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(7) }, *first);
+    scene.RegisterRenderTarget(String::make("_rt_default"_str), owe::SceneRenderTarget {});
+    scene.RegisterRenderTarget(node_key.clone(), owe::SceneRenderTarget {});
+    owe::SceneMaterial material;
+    material.textures = { "_rt_link_7",
+                          rstd::cppstd::to_string(fbo_a.as_str()),
+                          "_rt_default",
+                          "asset/image",
+                          "_rt_imageLayerComposite_7_b",
+                          rstd::cppstd::to_string(node_key.as_str()),
+                          "_rt_unknown" };
+    scene.ResolveMaterialTextureSources(material);
+    ASSERT_EQ(material.texture_sources.len(), usize(7));
+    EXPECT_EQ(material.texture_sources[usize()].kind,
+              owe::SceneMaterialTextureSourceKind::LayerOutput);
+    ASSERT_TRUE(material.texture_sources[usize()].layer.is_some());
+    EXPECT_EQ(*material.texture_sources[usize()].layer, first_id);
+    EXPECT_EQ(material.texture_sources[usize(1)].kind,
+              owe::SceneMaterialTextureSourceKind::EffectLocal);
+    ASSERT_TRUE(material.texture_sources[usize(1)].effect.is_some());
+    EXPECT_EQ(*material.texture_sources[usize(1)].effect, effect_a_id);
+    EXPECT_EQ(material.texture_sources[usize(2)].kind,
+              owe::SceneMaterialTextureSourceKind::SceneSurface);
+    EXPECT_EQ(material.texture_sources[usize(3)].kind,
+              owe::SceneMaterialTextureSourceKind::Imported);
+    EXPECT_EQ(material.texture_sources[usize(4)].kind,
+              owe::SceneMaterialTextureSourceKind::LayerOutput);
+    EXPECT_EQ(material.texture_sources[usize(4)].key, "_rt_link_7"_str);
+    ASSERT_TRUE(material.texture_sources[usize(4)].layer.is_some());
+    EXPECT_EQ(*material.texture_sources[usize(4)].layer, first_id);
+    EXPECT_EQ(material.texture_sources[usize(5)].kind,
+              owe::SceneMaterialTextureSourceKind::LayerStage);
+    ASSERT_TRUE(material.texture_sources[usize(5)].layer.is_some());
+    EXPECT_EQ(*material.texture_sources[usize(5)].layer, first_id);
+    EXPECT_EQ(material.texture_sources[usize(6)].kind,
+              owe::SceneMaterialTextureSourceKind::UnsupportedSpecial);
+
+    scene.RootMut()->AppendChild(first.clone());
+    scene.RootMut()->AppendChild(second.clone());
+    scene.RebuildResourceIndex();
+    auto rebuilt_id = scene.ResourceIndex().nodeId(*scene.ResourceIndex().node(first_id));
+    ASSERT_TRUE(rebuilt_id.is_some());
+    EXPECT_EQ(*rebuilt_id, first_id);
+    scene.RebuildResourceIndex();
+    rebuilt_id = scene.ResourceIndex().nodeId(*scene.ResourceIndex().node(first_id));
+    ASSERT_TRUE(rebuilt_id.is_some());
+    EXPECT_EQ(*rebuilt_id, first_id);
+}
+
+TEST(SceneResourceIndex, IncludesAllNodeLayerEffectDrawItems) {
     owe::Scene scene;
     auto       camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
-    auto layer = std::make_shared<owe::SceneImageEffectLayer>(
+    auto layer = std::make_shared<owe::SceneNodeLayer>(
         scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
 
     auto prefill = rstd::sync::Arc<owe::SceneNode>::make();
@@ -213,7 +308,7 @@ TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
     final_effect->nodes.push_back(owe::SceneImageEffectNode { .sceneNode = final_node.clone() });
     layer->SetFinalResolveEffect(final_effect);
 
-    camera->AttatchImgEffect(layer);
+    scene.RootMut()->AttachLayer(layer);
     scene.RegisterCamera(String::make("effect"_str), rstd::move(camera));
     scene.RebuildResourceIndex();
 
@@ -224,11 +319,11 @@ TEST(SceneResourceIndex, IncludesAllCameraEffectDrawItems) {
     }
 }
 
-TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterCameraBindingChanges) {
+TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterLayerBindingChanges) {
     owe::Scene scene;
     auto       camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(1920, 1080, -1.0, 1.0));
-    auto layer = std::make_shared<owe::SceneImageEffectLayer>(
+    auto layer = std::make_shared<owe::SceneNodeLayer>(
         scene.RootMut().as_raw_ptr(), 1920.0f, 1080.0f, "_rt_a", "_rt_b");
 
     auto effect_node = rstd::sync::Arc<owe::SceneNode>::make();
@@ -236,7 +331,7 @@ TEST(SceneResourceIndex, RebuildPreservesNodeAndDrawIdsAfterCameraBindingChanges
     auto effect = std::make_shared<owe::SceneImageEffect>();
     effect->nodes.push_back(owe::SceneImageEffectNode { .sceneNode = effect_node.clone() });
     layer->AddEffect(effect);
-    camera->AttatchImgEffect(layer);
+    scene.RootMut()->AttachLayer(layer);
     scene.RegisterCamera(String::make("effect"_str), rstd::move(camera));
 
     auto source_node = rstd::sync::Arc<owe::SceneNode>::make();
@@ -899,6 +994,7 @@ TEST(SceneVisibility, VisibleRuntimeChangeClearsOnlyVisibilityElideReason) {
     auto       node = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID()      = rstd::i32(7);
     node->SetVisible(false);
+    scene.RegisterNode(*node, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
     scene.RootMut()->AppendChild(node.clone());
 
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
@@ -922,6 +1018,7 @@ TEST(SceneVisibility, UserBindingVisibilityChangesRequireGraphRebuild) {
     auto       node = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID()      = rstd::i32(7);
     node->SetVisible(false);
+    scene.RegisterNode(*node, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
     scene.RootMut()->AppendChild(node.clone());
 
     scene.MarkLayerVisibilityElidable(owe::WallpaperLayerId { .value = rstd::i32(7) });
@@ -943,6 +1040,7 @@ TEST(SceneVisibility, TransientWritesDoNotDirtyTheFinalGraphState) {
     owe::Scene scene;
     auto       node = rstd::sync::Arc<owe::SceneNode>::make();
     node->ID()      = rstd::i32(7);
+    scene.RegisterNode(*node, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
     scene.RootMut()->AppendChild(node.clone());
 
     EXPECT_FALSE(scene.ConsumeRenderGraphDirty());
@@ -967,6 +1065,7 @@ TEST(SceneRenderTargets, EnsureLinkRenderTargetCreatesOwnedDescriptor) {
     ASSERT_TRUE(target.is_some());
     EXPECT_EQ((**target).width, 64);
     EXPECT_EQ((**target).height, 32);
+    EXPECT_TRUE((**target).initialize_transparent);
 
     owe::SceneNode fallback;
     auto           fallback_key =
@@ -1051,6 +1150,7 @@ TEST(RenderSceneSnapshot, ExtractsDescriptorsAndRenderItems) {
     mesh->Submeshes()[0].output_override = "_rt_mask";
     mesh->MaterialSlots()[0]->textures.push_back("_rt_link_7");
     child->AddMesh(mesh);
+    scene.RegisterNode(*child, Some(owe::WallpaperLayerId { .value = rstd::i32(42) }));
     scene.RootMut()->AppendChild(child.clone());
 
     auto snapshot = owe::ExtractRenderSceneSnapshot(scene);
@@ -1123,6 +1223,7 @@ TEST(RenderSceneSnapshot, PlansLinkRenderTargetForElidableLinkedSource) {
     source->SetSize({ 64.0f, 32.0f });
     source->AddMesh(MakeSingleSubmesh("source-material"));
     scene.RootMut()->AppendChild(source.clone());
+    scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(7) }, *source);
 
     auto consumer      = rstd::sync::Arc<owe::SceneNode>::make();
     consumer->ID()     = rstd::i32(42);
@@ -1166,6 +1267,7 @@ TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
     public_node->ID() = rstd::i32(7);
     public_node->SetSize({ 320.0f, 180.0f });
     public_node->AddMesh(MakeSingleSubmesh("public-material"));
+    scene.RegisterNode(*public_node, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
     scene.RootMut()->AppendChild(public_node.clone());
     scene.RegisterLayerLinkSource(owe::WallpaperLayerId { .value = rstd::i32(7) },
                                   *producer.as_ptr());
@@ -1188,7 +1290,9 @@ TEST(RenderSceneSnapshot, UsesRegisteredLayerLinkSource) {
     ASSERT_TRUE(link_target.is_some());
     EXPECT_EQ((**link_target).width, 64);
     EXPECT_EQ((**link_target).height, 32);
-    EXPECT_NE(snapshot.linkSource(owe::WallpaperLayerId { .value = rstd::i32(7) }), nullptr);
+    const auto* link_source = snapshot.linkSource(owe::WallpaperLayerId { .value = rstd::i32(7) });
+    ASSERT_NE(link_source, nullptr);
+    EXPECT_EQ(link_source->scene_node, producer->Identity());
 }
 
 TEST(SceneRenderGroups, ReplacesCameraByLayerId) {

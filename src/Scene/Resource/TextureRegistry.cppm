@@ -255,6 +255,24 @@ public:
         return physical;
     }
 
+    auto ResolvePending(resource::TextureHandle handle) const noexcept
+        -> Option<ref<TexturePhysical>> {
+        auto logical = ResolveTexture(handle);
+        if (logical.is_none()) return None();
+        auto batches = m_pending_uploads.values();
+        for (auto batch = batches.next(); batch.is_some(); batch = batches.next()) {
+            for (const auto& item : **batch) {
+                if (item.handle != handle) continue;
+                if ((**logical).definition_version != item.physical.definition_version ||
+                    (**logical).content_version != item.physical.content_version) {
+                    continue;
+                }
+                return Some(ref<TexturePhysical>::from_raw_parts(rstd::addressof(item.physical)));
+            }
+        }
+        return None();
+    }
+
     auto Find(TextureRequestKind kind, ref<str> key) const -> Option<resource::TextureHandle> {
         auto handle = m_handles.get(TextureRegistryIdentity {
             .kind = kind,

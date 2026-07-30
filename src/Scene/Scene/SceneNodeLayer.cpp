@@ -41,9 +41,8 @@ void ChangeMeshToUnitQuad(SceneMesh& target) {
 
 } // namespace
 
-SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
-                                             std::string_view pingpong_a,
-                                             std::string_view pingpong_b)
+SceneNodeLayer::SceneNodeLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
+                               std::string_view pingpong_b)
     : m_worldNode(node),
       m_width(w),
       m_height(h),
@@ -51,8 +50,7 @@ SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
       m_pingpong_b(pingpong_b),
       m_final_mesh(Box<SceneMesh>::make()) {};
 
-void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
-                                          std::string_view effect_cam) {
+void SceneNodeLayer::ResolveEffect(const SceneMesh& default_mesh, std::string_view effect_cam) {
     if (m_resolved) return;
     m_resolved_effects.clear();
     std::string_view ppong_a = m_pingpong_a, ppong_b = m_pingpong_b;
@@ -63,6 +61,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
 
     SceneImageEffectNode* last_output { nullptr };
     auto                  resolve_effect = [&](SceneImageEffect& eff) {
+        SceneImageEffectNode* effect_output { nullptr };
         for (auto& cmd : eff.commands) {
             auto state_it = m_command_resolve_state
                                 .try_emplace(&cmd,
@@ -73,11 +72,8 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                                 .first;
             cmd.src       = state_it->second.src;
             cmd.dst       = state_it->second.dst;
-            if (rstd::cppstd::as_str(cmd.src).unwrap().starts_with(OWE_EFFECT_PPONG_PREFIX_A))
-                cmd.src = ppong_a;
-
-            if (rstd::cppstd::as_str(cmd.dst).unwrap().starts_with(OWE_EFFECT_PPONG_PREFIX_A))
-                cmd.dst = ppong_a;
+            if (cmd.src == m_pingpong_a) cmd.src = ppong_a;
+            if (cmd.dst == m_pingpong_a) cmd.dst = ppong_a;
         }
         for (auto it = eff.nodes.begin(); it != eff.nodes.end(); it++) {
             rstd_assert(it->sceneNode->HasMaterial());
@@ -87,9 +83,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             auto& state = state_it->second;
             if (inserted) {
                 for (std::size_t i = 0; i < material.textures.size(); ++i) {
-                    if (rstd::cppstd::as_str(material.textures[i])
-                            .unwrap()
-                            .starts_with(OWE_EFFECT_PPONG_PREFIX_A))
+                    if (material.textures[i] == m_pingpong_a)
                         state.pingpong_input_slots.push_back(i);
                 }
             }
@@ -99,10 +93,11 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             }
 
             auto output = rstd::cppstd::as_str(it->output).unwrap();
-            if (output.starts_with(OWE_EFFECT_PPONG_PREFIX_B) || output == SpecTex_Default) {
+            if (it->output == m_pingpong_b || output == SpecTex_Default) {
                 it->output  = ppong_b;
                 last_output = &(*it);
             }
+            effect_output = &(*it);
 
             {
                 material.blenmode = BlendMode::Normal;
@@ -113,47 +108,57 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         }
         m_resolved_effects.push_back(&eff);
         swap_pp();
+        return effect_output;
     };
     for (auto& eff : m_effects) {
         if (eff && eff->runtime_visible) resolve_effect(*eff);
     }
     if (m_final_resolve_effect) resolve_effect(*m_final_resolve_effect);
-    if (last_output != nullptr) {
-        last_output->output  = m_final_target;
-        auto& mesh           = *(last_output->sceneNode->Mesh());
+    SceneImageEffectNode* published_output { nullptr };
+    if (m_published_effect) published_output = resolve_effect(*m_published_effect);
+    SceneImageEffectNode* visible_output { nullptr };
+    if (m_visible_output_enabled && m_visible_resolve_effect)
+        visible_output = resolve_effect(*m_visible_resolve_effect);
+
+    auto* final_output = visible_output != nullptr
+                             ? visible_output
+                             : (published_output == nullptr ? last_output : nullptr);
+    if (final_output != nullptr) {
+        final_output->output = m_final_target;
+        auto& mesh           = *(final_output->sceneNode->Mesh());
         auto& material       = *mesh.Material();
         material.blenmode    = m_final_blend;
         material.depth_test  = m_final_depth_test;
         material.depth_write = m_final_depth_write;
         material.cull_mode   = m_final_cull_mode;
         if (m_final_local) {
-            last_output->sceneNode->SetCamera(std::string(effect_cam));
-            last_output->sceneNode->SetParentAnchor(nullptr);
-            last_output->sceneNode->CopyTrans(default_node);
+            final_output->sceneNode->SetCamera(std::string(effect_cam));
+            final_output->sceneNode->SetParentAnchor(nullptr);
+            final_output->sceneNode->CopyTrans(default_node);
             mesh.ChangeMeshDataFrom(default_mesh);
         } else if (fullscreen) {
-            last_output->sceneNode->SetCamera(std::string(effect_cam));
-            last_output->sceneNode->SetParentAnchor(nullptr);
-            last_output->sceneNode->CopyTrans(default_node);
+            final_output->sceneNode->SetCamera(std::string(effect_cam));
+            final_output->sceneNode->SetParentAnchor(nullptr);
+            final_output->sceneNode->CopyTrans(default_node);
             mesh.ChangeMeshDataFrom(default_mesh);
         } else {
             const bool perspective = m_worldNode != nullptr && m_worldNode->Perspective();
-            last_output->sceneNode->SetCamera(m_final_camera.empty()
-                                                  ? (perspective ? "global_perspective" : "")
-                                                  : m_final_camera);
-            last_output->sceneNode->SetPerspective(perspective);
+            final_output->sceneNode->SetCamera(m_final_camera.empty()
+                                                   ? (perspective ? "global_perspective" : "")
+                                                   : m_final_camera);
+            final_output->sceneNode->SetPerspective(perspective);
             // Anchor to the layer's primary SceneNode so the composite quad
             // inherits the layer's world transform (including any container
             // parent chain) via ModelTrans. Identity local — no CopyTrans dance.
-            last_output->sceneNode->SetParentAnchor(m_worldNode);
-            if (last_output->uses_unit_final_quad) {
-                last_output->sceneNode->SetTranslate({ -m_width * 0.5f, -m_height * 0.5f, 0.0f });
-                last_output->sceneNode->SetScale({ m_width, m_height, 1.0f });
+            final_output->sceneNode->SetParentAnchor(m_worldNode);
+            if (final_output->uses_unit_final_quad) {
+                final_output->sceneNode->SetTranslate({ -m_width * 0.5f, -m_height * 0.5f, 0.0f });
+                final_output->sceneNode->SetScale({ m_width, m_height, 1.0f });
                 ChangeMeshToUnitQuad(mesh);
             } else {
                 mesh.ChangeMeshDataFrom(*m_final_mesh.as_ptr());
             }
-            last_output->final_quad_shader_values.iter().for_each([&](auto entry) {
+            final_output->final_quad_shader_values.iter().for_each([&](auto entry) {
                 auto [name, value] = entry;
                 material.SetShaderValue(rstd::cppstd::to_string(name->as_str()), value->base);
                 if (value->curve.is_some() && ! (**value->curve).Empty()) {
@@ -164,7 +169,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                 }
             });
         }
-        last_output->sceneNode->SetAlphaSource(m_worldNode);
+        final_output->sceneNode->SetAlphaSource(m_worldNode);
     }
     m_resolved = true;
 }

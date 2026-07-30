@@ -1867,8 +1867,8 @@ EffectHandle* GetEffectHandle(JSValueConst v) {
 JSValue WrapEffect(JSContext* ctx, Option<SceneImageEffectRef> ref) {
     JSValue obj = JS_NewObjectClass(ctx, s_effect_class_id);
     if (JS_IsException(obj)) return obj;
-    auto* host    = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-    bool  visible = ref && ref->effect ? ref->effect->runtime_visible : true;
+    auto* host   = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
+    bool visible = host && host->scene && ref ? host->scene->ImageEffectRuntimeVisible(*ref) : true;
     JS_SetOpaque(
         obj, new EffectHandle { .host = host, .ref = std::move(ref), .fallback_visible = visible });
     return obj;
@@ -1885,7 +1885,8 @@ JSValue WrapMaterial(JSContext* ctx, SceneMaterial* material) {
 JSValue EffectGetVisible(JSContext* ctx, JSValueConst this_val) {
     auto* h = GetEffectHandle(this_val);
     if (! h) return JS_NewBool(ctx, true);
-    if (h->ref && h->ref->effect) return JS_NewBool(ctx, h->ref->effect->runtime_visible);
+    if (h->host && h->host->scene && h->ref)
+        return JS_NewBool(ctx, h->host->scene->ImageEffectRuntimeVisible(*h->ref));
     return JS_NewBool(ctx, h->fallback_visible);
 }
 
@@ -2441,9 +2442,11 @@ JSValue NodeGetEffectCount(JSContext* ctx, JSValueConst this_val, int, JSValueCo
 
 JSValue EffectGetName(JSContext* ctx, JSValueConst this_val) {
     auto* handle = GetEffectHandle(this_val);
-    if (! handle || ! handle->ref || ! handle->ref->effect) return JS_NewString(ctx, "");
-    const auto& name = handle->ref->effect->name;
-    return JS_NewStringLen(ctx, name.data(), name.size());
+    if (! handle || ! handle->host || ! handle->host->scene || ! handle->ref)
+        return JS_NewString(ctx, "");
+    auto name = handle->host->scene->ImageEffectName(*handle->ref);
+    auto view = rstd::cppstd::as_string_view(name);
+    return JS_NewStringLen(ctx, view.data(), view.size());
 }
 
 JSValue EffectGetMaterial(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {

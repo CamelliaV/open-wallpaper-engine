@@ -182,6 +182,7 @@ struct SceneRenderTarget {
     // text "12:00" → "12:01" leaves "12:00"'s glyphs underneath).
     bool force_clear { false };
     bool clear_on_first_write { false };
+    bool initialize_transparent { false };
     // Later graph versions of this RT keep earlier color content. Use this
     // for composition targets, not transient effect outputs.
     bool preserve_on_write { false };
@@ -411,6 +412,45 @@ enum class SceneMaterialTextureDependency
     RenderTarget,
     LinkRenderTarget,
     MipMappedFramebuffer,
+};
+
+enum class SceneMaterialTextureSourceKind
+{
+    Empty,
+    Imported,
+    SceneSurface,
+    LayerStage,
+    LayerOutput,
+    EffectLocal,
+    MipMappedFramebuffer,
+    UnsupportedSpecial,
+};
+
+struct SceneMaterialTextureSource {
+    SceneMaterialTextureSource() = default;
+    SceneMaterialTextureSource(const SceneMaterialTextureSource& other)
+        : kind(other.kind),
+          key(other.key.clone()),
+          layer(other.layer),
+          effect(other.effect),
+          wallpaper_layer(other.wallpaper_layer) {}
+    SceneMaterialTextureSource(SceneMaterialTextureSource&&) noexcept = default;
+    SceneMaterialTextureSource& operator=(const SceneMaterialTextureSource& other) {
+        if (this == &other) return *this;
+        kind            = other.kind;
+        key             = other.key.clone();
+        layer           = other.layer;
+        effect          = other.effect;
+        wallpaper_layer = other.wallpaper_layer;
+        return *this;
+    }
+    SceneMaterialTextureSource& operator=(SceneMaterialTextureSource&&) noexcept = default;
+
+    SceneMaterialTextureSourceKind kind { SceneMaterialTextureSourceKind::Empty };
+    String                         key;
+    Option<SceneNodeId>            layer;
+    Option<SceneEffectId>          effect;
+    i32                            wallpaper_layer { -1 };
 };
 
 inline SceneMaterialTextureDependency ClassifySceneMaterialTexture(std::string_view texture) {
@@ -662,20 +702,26 @@ public:
             SceneShaderVariantHasActiveTextureMetadata(variant)) {
             auto previous_textures = textures;
             auto previous_metadata = texture_metadata;
+            auto previous_sources  = texture_sources.clone();
             textures               = variant.texture_slots;
             texture_metadata.resize(textures.size());
+            texture_sources.resize(usize(textures.size()), SceneMaterialTextureSource {});
             for (std::size_t i = 0; i < textures.size(); ++i) {
                 if (i >= previous_textures.size() || previous_textures[i] != textures[i]) {
-                    texture_metadata[i] = {};
+                    texture_metadata[i]       = {};
+                    texture_sources[usize(i)] = {};
                 } else if (i < previous_metadata.size()) {
                     texture_metadata[i] = previous_metadata[i];
+                    if (i < previous_sources.len().to_primitive())
+                        texture_sources[usize(i)] = previous_sources[usize(i)];
                 }
             }
             auto active = SceneShaderVariantActiveTextureSlots(variant);
             for (std::size_t i = 0; i < textures.size(); ++i) {
                 if (! active.contains(static_cast<unsigned>(i))) {
                     textures[i].clear();
-                    texture_metadata[i] = {};
+                    texture_metadata[i]       = {};
+                    texture_sources[usize(i)] = {};
                 }
             }
         }
@@ -688,6 +734,7 @@ public:
     std::string                               name;
     std::vector<std::string>                  textures;
     std::vector<SceneMaterialTextureMetadata> texture_metadata;
+    Vec<SceneMaterialTextureSource>           texture_sources;
     std::vector<std::string>                  defines;
 
     bool hasSprite { false };
@@ -727,6 +774,7 @@ private:
         name             = other.name;
         textures         = other.textures;
         texture_metadata = other.texture_metadata;
+        texture_sources  = other.texture_sources.clone();
         defines          = other.defines;
         hasSprite        = other.hasSprite;
         customShader     = other.customShader.Clone();
@@ -740,6 +788,7 @@ private:
         name             = std::move(other.name);
         textures         = std::move(other.textures);
         texture_metadata = std::move(other.texture_metadata);
+        texture_sources  = rstd::move(other.texture_sources);
         defines          = std::move(other.defines);
         hasSprite        = other.hasSprite;
         customShader     = std::move(other.customShader);
@@ -929,8 +978,12 @@ private:
 
 class SceneNode;
 struct SceneImageEffect;
-class SceneImageEffectLayer;
+class SceneNodeLayer;
 struct ScenePostProcess;
+
+struct WallpaperLayerId {
+    i32 value { -1 };
+};
 
 // ============================================================================
 // SceneCamera.h
@@ -992,11 +1045,6 @@ public:
     bool IsLookAt() const { return m_lookat; }
     auto Transforms() const -> SceneCameraTransforms;
     bool SetTransforms(const SceneCameraTransforms& transforms);
-
-    void        AttatchImgEffect(std::shared_ptr<SceneImageEffectLayer> eff) { m_imgEffect = eff; }
-    bool        HasImgEffect() const { return (bool)m_imgEffect; }
-    auto&       GetImgEffect() { return m_imgEffect; }
-    const auto& GetImgEffect() const { return m_imgEffect; }
 
     Eigen::Vector3d GetPosition(SceneRenderViewKind view = SceneRenderViewKind::Primary) const;
     Eigen::Vector3d GetDirection() const;
@@ -1062,8 +1110,7 @@ private:
     Eigen::Matrix4d m_viewMat { Eigen::Matrix4d::Identity() };
     Eigen::Matrix4d m_viewProjectionMat { Eigen::Matrix4d::Identity() };
 
-    SceneNode*                             m_node { nullptr };
-    std::shared_ptr<SceneImageEffectLayer> m_imgEffect { nullptr };
+    SceneNode* m_node { nullptr };
 };
 
 struct SceneAnimationKey {
@@ -1206,7 +1253,7 @@ public:
 // `m_children` / `m_parent` are written during parsing and by Scene-owned
 // runtime factories. Runtime-created nodes stay attached for the Scene's
 // lifetime; destroyLayer hides and recycles them. `SetParentAnchor` is used by
-// SceneImageEffectLayer::ResolveEffect to re-anchor an effect's composite
+// SceneNodeLayer::ResolveEffect to re-anchor an effect's composite
 // node onto its layer's worldNode for transform inheritance — both nodes
 // survive for the Scene's lifetime, so the re-anchor never dangles.
 //
@@ -1216,7 +1263,7 @@ public:
 //
 // Practical consequence: every non-owning `SceneNode*` reference held by
 // downstream subsystems (FieldScript::Impl::node, EngineHostState::text_setters,
-// SceneImageEffectLayer::m_worldNode, SceneCamera::m_node, m_parent itself)
+// SceneNodeLayer::m_worldNode, SceneCamera::m_node, m_parent itself)
 // is valid for the Scene's lifetime by construction. The dtor's parent
 // back-link clearing below is a defence against Scene teardown ordering,
 // where a child held by an external Arc (e.g. actuator closures)
@@ -1317,7 +1364,9 @@ public:
                (m_alpha_source != nullptr && m_alpha_source->IsAlphaOverridden());
     }
     float EffectiveAlpha() const {
-        float alpha = m_visible ? (m_alpha_overridden ? m_user_alpha : m_base_alpha) : 0.0f;
+        float alpha = ! m_visible && m_visibility_affects_alpha
+                          ? 0.0f
+                          : (m_alpha_overridden ? m_user_alpha : m_base_alpha);
         if (m_alpha_source != nullptr && m_alpha_source->IsAlphaOverridden())
             alpha *= m_alpha_source->EffectiveAlpha();
         return alpha;
@@ -1505,7 +1554,7 @@ public:
 
     // Anchor for transform-only inheritance. The node does NOT join `p`'s
     // children, so TraverseNode never visits it through `p`. Used for the
-    // SceneImageEffectLayer composite quad: the quad needs spImgNode's
+    // SceneNodeLayer composite quad: the quad needs spImgNode's
     // world transform but must not be rendered twice in scene-tree traversal.
     void SetParentAnchor(SceneNode* p) {
         if (m_parent == p) {
@@ -1531,14 +1580,25 @@ public:
     // BFS over self + descendants; returns first node whose Name() matches.
     SceneNode* FindByName(std::string_view name);
 
+    SceneNodeId              Identity() const { return m_identity; }
+    Option<WallpaperLayerId> WallpaperIdentity() const { return m_wallpaper_identity; }
+    void        AttachLayer(std::shared_ptr<SceneNodeLayer> layer) { m_layer = rstd::move(layer); }
+    bool        HasLayer() const { return static_cast<bool>(m_layer); }
+    auto&       Layer() { return m_layer; }
+    const auto& Layer() const { return m_layer; }
+
     i32  ID() const { return m_id; }
     i32& ID() { return m_id; }
 
 private:
+    friend class Scene;
+
     void MarkTransDirty();
 
-    i32         m_id { -1 };
-    std::string m_name;
+    SceneNodeId              m_identity;
+    Option<WallpaperLayerId> m_wallpaper_identity;
+    i32                      m_id { -1 };
+    std::string              m_name;
 
     bool            m_dirty;
     Eigen::Matrix4d m_trans;
@@ -1551,6 +1611,7 @@ private:
     Eigen::Matrix4d m_geometry_transform { Eigen::Matrix4d::Identity() };
 
     bool                                   m_visible { true };
+    bool                                   m_visibility_affects_alpha { true };
     SceneUserVisibilityBinding             m_visible_user_binding {};
     bool                                   m_visible_overridden { false };
     float                                  m_user_alpha { 1.0f };
@@ -1587,12 +1648,13 @@ private:
     // out-of-order teardown can dereference a stale pointer.
     SceneNode* m_parent { nullptr };
 
-    Vec<Arc<SceneNode>> m_children;
-    Vec<SceneNode*>     m_transform_anchors;
+    Vec<Arc<SceneNode>>             m_children;
+    Vec<SceneNode*>                 m_transform_anchors;
+    std::shared_ptr<SceneNodeLayer> m_layer;
 };
 
 // ============================================================================
-// SceneImageEffectLayer.h
+// SceneNodeLayer.h
 // ============================================================================
 
 struct SceneImageEffectNode {
@@ -1614,16 +1676,18 @@ struct SceneImageEffect {
         i32         afterpos { 0 };
     };
     std::string                     name;
+    SceneEffectId                   id;
+    SceneNodeId                     owner;
     std::vector<Command>            commands;
     std::list<SceneImageEffectNode> nodes;
     SceneUserVisibilityBinding      visible_user_binding;
     bool                            runtime_visible { true };
 };
 
-class SceneImageEffectLayer {
+class SceneNodeLayer {
 public:
-    SceneImageEffectLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
-                          std::string_view pingpong_b);
+    SceneNodeLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
+                   std::string_view pingpong_b);
 
     void AddEffect(const std::shared_ptr<SceneImageEffect>& node) {
         m_effects.push_back(node);
@@ -1649,9 +1713,13 @@ public:
         });
     }
     bool RequiresIntermediateTarget() const {
-        return m_final_resolve_effect || m_effects.empty() || HasRuntimeVisibleEffect();
+        return m_final_resolve_effect || m_published_effect || m_visible_resolve_effect ||
+               m_effects.empty() || HasRuntimeVisibleEffect();
     }
-    bool HasRenderEffects() const { return m_final_resolve_effect || HasRuntimeVisibleEffect(); }
+    bool HasRenderEffects() const {
+        return m_final_resolve_effect || m_published_effect || m_visible_resolve_effect ||
+               HasRuntimeVisibleEffect();
+    }
     const auto&      FirstTarget() const { return m_pingpong_a; }
     SceneMesh&       FinalMesh() { return *m_final_mesh.get(); }
     const SceneMesh& FinalMesh() const { return *m_final_mesh.as_ptr(); }
@@ -1690,6 +1758,23 @@ public:
         m_resolved             = false;
     }
     const auto& FinalResolveEffect() const { return m_final_resolve_effect; }
+    void        SetPublishedEffect(std::shared_ptr<SceneImageEffect> effect) {
+        m_published_effect = rstd::move(effect);
+        m_resolved         = false;
+    }
+    const auto& PublishedEffect() const { return m_published_effect; }
+    void        SetVisibleResolveEffect(std::shared_ptr<SceneImageEffect> effect) {
+        m_visible_resolve_effect = rstd::move(effect);
+        m_resolved               = false;
+    }
+    const auto& VisibleResolveEffect() const { return m_visible_resolve_effect; }
+    bool        PublishesOutput() const { return static_cast<bool>(m_published_effect); }
+    void        SetVisibleOutputEnabled(bool value) {
+        if (m_visible_output_enabled == value) return;
+        m_visible_output_enabled = value;
+        m_resolved               = false;
+    }
+    bool        VisibleOutputEnabled() const { return m_visible_output_enabled; }
     const auto& ResolvedEffects() const { return m_resolved_effects; }
     void        SetFinalLocal(bool value) {
         m_final_local = value;
@@ -1736,10 +1821,13 @@ private:
     std::string    m_final_camera;
     bool           m_skip_when_no_runtime_effect { false };
     bool           m_requires_source_draw { true };
+    bool           m_visible_output_enabled { true };
     bool           m_resolved { false };
 
     std::vector<std::shared_ptr<SceneImageEffect>>                    m_effects;
     std::shared_ptr<SceneImageEffect>                                 m_final_resolve_effect;
+    std::shared_ptr<SceneImageEffect>                                 m_published_effect;
+    std::shared_ptr<SceneImageEffect>                                 m_visible_resolve_effect;
     std::vector<SceneImageEffect*>                                    m_resolved_effects;
     std::vector<SceneImageEffectNode>                                 m_prefill_nodes;
     std::unordered_map<SceneImageEffectNode*, EffectNodeResolveState> m_node_resolve_state;
@@ -1748,8 +1836,7 @@ private:
 };
 
 struct SceneImageEffectRef {
-    SceneImageEffectLayer*            layer { nullptr };
-    std::shared_ptr<SceneImageEffect> effect;
+    SceneEffectId id;
 };
 
 // ============================================================================
@@ -1821,15 +1908,6 @@ struct IImageParser {
 
     template<typename T>
     using Funcs = TraitFuncs<&T::Parse, &T::ParseMany, &T::ParseHeader>;
-};
-
-struct WallpaperLayerId {
-    i32 value { -1 };
-};
-
-struct SceneLayerId {
-    i32 value { -1 };
-    u32 generation { 0 };
 };
 
 struct SceneDrawItemRecord {
@@ -2016,6 +2094,7 @@ struct RenderTargetDescRecord {
 
 struct RenderLinkSourceRecord {
     WallpaperLayerId   source_layer;
+    SceneNodeId        scene_node;
     String             render_target_key;
     RenderTargetDescId render_target;
 };
@@ -2243,6 +2322,8 @@ public:
     Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, std::string_view name);
     Option<SceneImageEffectRef> FindNodeImageEffect(const SceneNode& node, usize index);
     usize                       NodeImageEffectCount(const SceneNode& node);
+    String                      ImageEffectName(const SceneImageEffectRef& ref) const;
+    bool                        ImageEffectRuntimeVisible(const SceneImageEffectRef& ref) const;
     SceneMaterial*              ImageEffectMaterial(const SceneImageEffectRef& ref, usize index);
     bool SetImageEffectRuntimeVisible(const SceneImageEffectRef& ref, bool visible);
     void EnablePlanarReflection();
@@ -2286,8 +2367,14 @@ public:
 
     auto Root() const -> ref<SceneNode> { return m_scene_graph.deref(); }
     auto RootMut() -> mut_ref<SceneNode> { return m_scene_graph.deref_mut(); }
-    void SetRoot(Box<SceneNode> root) { m_scene_graph = rstd::move(root); }
-    void AttachRuntimeNode(SceneNode& parent, Arc<SceneNode> node);
+    void SetRoot(Box<SceneNode> root) {
+        RegisterNode(*root);
+        m_scene_graph = rstd::move(root);
+    }
+    SceneNodeId   RegisterNode(SceneNode& node, Option<WallpaperLayerId> wallpaper = None());
+    SceneEffectId RegisterEffect(SceneNodeId owner, SceneNodeLayer& layer,
+                                 std::shared_ptr<SceneImageEffect> effect);
+    void          AttachRuntimeNode(SceneNode& parent, Arc<SceneNode> node);
     auto AudioDemand() const -> ref<AudioResponseDemand> { return m_audio_response_demand.deref(); }
     auto AudioDemandMut() -> mut_ref<AudioResponseDemand> {
         return m_audio_response_demand.deref_mut();
@@ -2407,6 +2494,7 @@ public:
                                             const ShaderValue& value);
     SceneMaterialTextureSlotMutation SetMaterialTextureSlot(SceneMaterial& material, u32 slot,
                                                             std::string_view texture);
+    void                             ResolveMaterialTextureSources(SceneMaterial& material);
     SceneMaterialShaderVariantMutation
          SetMaterialShaderVariant(SceneMaterial& material, SceneShaderVariantMutation mutation);
     void MarkLayerStaticElidable(WallpaperLayerId id);
@@ -2422,6 +2510,7 @@ public:
     }
     void                     RegisterLayerLinkSource(WallpaperLayerId id, SceneNode& node);
     SceneNode*               RegisteredLayerLinkSource(WallpaperLayerId id) const;
+    Option<SceneNodeId>      RegisteredLayerLinkSourceId(WallpaperLayerId id) const;
     Option<WallpaperLayerId> ResolveLayerLinkSource(const SceneNode& node) const;
     void                     RegisterRenderGroup(WallpaperLayerId id, String camera) {
         (void)m_render_group_cameras.insert(id.value, rstd::move(camera));
@@ -2447,7 +2536,16 @@ public:
     const SceneResourceIndex& ResourceIndex() const { return m_resource_index; }
     u32                       ResourceGeneration() const { return m_resource_generation; }
 
+    String NodeResourceKey(SceneNodeId node, ref<str> role) const;
+    String EffectResourceKey(SceneEffectId effect, ref<str> local_name) const;
+
 private:
+    struct ImageEffectRecord {
+        SceneNodeId                       owner;
+        SceneNodeLayer*                   layer { nullptr };
+        std::shared_ptr<SceneImageEffect> effect;
+    };
+
     SceneUniformRegistry          m_uniforms;
     SceneTextureAnimationRegistry m_texture_animations;
     SceneRuntime                  m_runtime;
@@ -2491,13 +2589,18 @@ private:
     void RebuildElidableLayerIds();
 
     u32                                          m_resource_generation { 0 };
+    u32                                          m_next_node_index { 0 };
+    u32                                          m_next_effect_index { 0 };
+    HashMap<rstd::uint64_t, ImageEffectRecord>   m_image_effects;
+    HashMap<i32, SceneNodeId>                    m_wallpaper_node_ids;
     SceneResourceIndex                           m_resource_index;
     bool                                         m_render_graph_dirty { false };
     bool                                         m_planar_reflection_enabled { false };
     HashMap<i32, String>                         m_render_group_cameras;
     HashMap<String, Vec<String>>                 m_linked_cameras;
-    HashMap<i32, SceneNode*>                     m_layer_link_sources;
-    HashMap<const SceneNode*, WallpaperLayerId>  m_node_link_sources;
+    HashMap<i32, SceneNodeId>                    m_layer_link_source_ids;
+    HashMap<i32, SceneNode*>                     m_layer_link_source_nodes;
+    HashMap<rstd::uint64_t, WallpaperLayerId>    m_node_link_sources;
     Vec<SceneUserPropertyDiagnostic>             m_user_property_diagnostics;
     HashMap<String, SceneRenderTargetDirtyEvent> m_render_target_dirty_events;
 

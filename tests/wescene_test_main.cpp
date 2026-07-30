@@ -1539,15 +1539,11 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
             std::string tag = "[node id=" + std::to_string(n->ID().to_primitive()) +
                               " depth=" + std::to_string(depth) + "]";
             std::string output { rstd::cppstd::to_string(owe::SpecTex_Default) };
-            std::shared_ptr<owe::SceneImageEffectLayer> eff_layer;
-            if (! n->Camera().empty()) {
-                auto camera = scene.Camera(rstd::cppstd::as_str(n->Camera()).unwrap());
-                if (camera.is_some() && (**camera).HasImgEffect()) {
-                    eff_layer = (**camera).GetImgEffect();
-                    if (eff_layer->EffectCount() == usize() ||
-                        eff_layer->HasRuntimeVisibleEffect()) {
-                        output = eff_layer->FirstTarget();
-                    }
+            std::shared_ptr<owe::SceneNodeLayer> eff_layer;
+            if (n->HasLayer()) {
+                eff_layer = n->Layer();
+                if (eff_layer->EffectCount() == usize() || eff_layer->HasRuntimeVisibleEffect()) {
+                    output = eff_layer->FirstTarget();
                 }
             }
             if (eff_layer) {
@@ -1559,14 +1555,16 @@ void DumpSceneGraphPasses(FILE* out, owe::Scene& scene) {
             }
             DumpPass(out, tag, *n, output);
 
-            if (eff_layer && eff_layer->HasRuntimeVisibleEffect()) {
+            if (eff_layer && eff_layer->HasRenderEffects()) {
                 eff_layer->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
-                const usize effect_count = eff_layer->EffectCount();
+                const auto& resolved     = eff_layer->ResolvedEffects();
+                const auto  effect_count = usize(resolved.size());
                 std::fprintf(
                     out, "    image-effect chain (%zu effects):\n", effect_count.to_primitive());
                 for (usize ei {}; ei < effect_count; ++ei) {
-                    auto&       eff = eff_layer->GetEffect(ei);
-                    std::size_t ni  = 0;
+                    auto* eff = resolved[ei.to_primitive()];
+                    if (eff == nullptr) continue;
+                    std::size_t ni = 0;
                     for (auto cmd_it = eff->commands.begin(); cmd_it != eff->commands.end();
                          ++cmd_it) {
                         std::fprintf(out,

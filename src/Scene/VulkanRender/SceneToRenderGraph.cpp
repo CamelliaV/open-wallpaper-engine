@@ -58,13 +58,6 @@ void doCopy(RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc, TextureNo
 
 struct ExtraInfo;
 
-struct LinkTextureConsumer {
-    rg::NodeHandle   node;
-    rg::PassHandle   pass;
-    WallpaperLayerId source_layer;
-    u32              texture_index;
-};
-
 static rg::TextureDesc MakeTextureDescBase(std::string_view key) {
     auto name = as_str(key).unwrap();
     return rg::TextureDesc {
@@ -74,43 +67,12 @@ static rg::TextureDesc MakeTextureDescBase(std::string_view key) {
     };
 }
 
-struct GraphTextureOutput {
-    rg::TextureNodeRef            ref;
-    vulkan::TextureBindingRequest binding;
-    rg::TextureDesc               desc;
-};
-
-class GraphLinkFinalizer {
-public:
-    void setLinkedLayerIds(const BTreeSet<i32>* linked_ids) { m_linked_ids = linked_ids; }
-    void recordSource(WallpaperLayerId source_layer, GraphTextureOutput output) {
-        if (m_linked_ids == nullptr || m_linked_ids->contains(source_layer.value)) {
-            m_source_outputs[source_layer.value] = std::move(output);
-        }
-    }
-    void addConsumer(const rg::PassNode& pass, WallpaperLayerId source_layer, u32 texture_index) {
-        m_consumers.push_back(LinkTextureConsumer {
-            .node          = pass.handle,
-            .pass          = pass.pass,
-            .source_layer  = source_layer,
-            .texture_index = texture_index,
-        });
-    }
-    void apply(ExtraInfo& extra);
-
-private:
-    const BTreeSet<i32>*             m_linked_ids { nullptr };
-    Map<i32, GraphTextureOutput>     m_source_outputs;
-    std::vector<LinkTextureConsumer> m_consumers;
-};
-
 struct ExtraInfo {
     rg::RenderGraph*           rgraph { nullptr };
     Scene*                     scene { nullptr };
     Set<std::string>           depth_initialized_outputs {};
     Option<rg::TextureNodeRef> mip_framebuffer_history;
     const RenderSceneSnapshot* render_scene { nullptr };
-    GraphLinkFinalizer         link_finalizer;
 };
 
 static Option<vulkan::TextureRequest> BuildGraphTextureRequest(ExtraInfo&       extra,
@@ -152,23 +114,6 @@ static void FillCopyTextureRequests(ExtraInfo& extra, vulkan::CopyPass::Desc& de
     desc.dst_request = BuildGraphTextureRequest(extra, desc.dst);
 }
 
-static GraphTextureOutput CaptureTextureOutput(ExtraInfo& extra, rg::TextureNodeRef ref) {
-    auto state = extra.rgraph->textureState(ref);
-    rstd_assert(state.is_some());
-    if (state.is_none()) return {};
-    auto key = StdString(state->desc.key);
-    return GraphTextureOutput {
-        .ref = ref,
-        .binding =
-            vulkan::TextureBindingRequest {
-                .name    = String::make(rstd::cppstd::as_str(key).unwrap()),
-                .use     = Some(state->use),
-                .request = BuildGraphTextureRequest(extra, key),
-            },
-        .desc = rstd::move(state->desc),
-    };
-}
-
 static void AddCopyPass(ExtraInfo& extra, rg::TextureDesc in, rg::TextureDesc out) {
     extra.rgraph->addPass<vulkan::CopyPass>(
         "copy"_str,
@@ -207,46 +152,6 @@ static rg::TextureNodeRef AddCopyPass(ExtraInfo& extra, rg::TextureNodeRef in,
     return copy;
 }
 
-void GraphLinkFinalizer::apply(ExtraInfo& extra) {
-    for (auto& consumer : m_consumers) {
-        auto output_it = m_source_outputs.find(consumer.source_layer.value);
-        if (output_it == m_source_outputs.end()) {
-            rstd_error("link tex {} not found", consumer.source_layer.value);
-            continue;
-        }
-
-        auto rgpass = extra.rgraph->getPass(consumer.pass);
-        if (rgpass.is_none()) {
-            rstd_error("link tex {} pass not found", consumer.source_layer.value);
-            continue;
-        }
-        auto& pass = static_cast<vulkan::VulkanPass&>(*rgpass);
-
-        auto& input = output_it->second;
-        auto  link_key =
-            GenLinkTex(static_cast<std::ptrdiff_t>(consumer.source_layer.value.to_primitive()));
-        if (input.binding.name != rstd::cppstd::as_str(link_key).unwrap()) {
-            auto copy_desc        = CloneTextureDesc(input.desc);
-            copy_desc.key         = String::make(rstd::cppstd::as_str(link_key).unwrap());
-            copy_desc.name        = copy_desc.key.clone();
-            input.desc            = CloneTextureDesc(copy_desc);
-            input.ref             = AddCopyPass(extra, input.ref, Some(rstd::move(copy_desc)));
-            input.binding.name    = String::make(rstd::cppstd::as_str(link_key).unwrap());
-            input.binding.request = BuildGraphTextureRequest(extra, link_key);
-            auto copied_state     = extra.rgraph->textureState(input.ref);
-            if (copied_state.is_some()) input.binding.use = Some(copied_state->use);
-        }
-
-        if (! extra.rgraph->readTexture(consumer.node, input.ref)) {
-            rstd_error("link tex {} read failed", consumer.source_layer.value);
-            continue;
-        }
-        if (! pass.setTextureBinding(consumer.texture_index, input.binding.clone())) {
-            rstd_error("link tex {} binding failed", consumer.source_layer.value);
-        }
-    }
-}
-
 static rg::TextureNodeRef AddMipFramebufferHistory(ExtraInfo&              extra,
                                                    rg::RenderGraphBuilder& builder) {
     if (extra.mip_framebuffer_history.is_some()) {
@@ -270,13 +175,11 @@ static void StoreMipFramebufferHistory(ExtraInfo& extra) {
         extra, MakeTextureDesc(extra, as_string_view(SpecTex_Default)), rstd::move(history_desc));
 }
 
-static SceneImageEffectLayer*
-ToGraphPass(SceneNode* node, std::string_view output, Option<WallpaperLayerId> source_layer,
-            ExtraInfo& extra, bool defer_effect = false,
-            SceneRenderViewKind render_view = SceneRenderViewKind::Primary);
+static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, ExtraInfo& extra,
+                                   bool                defer_effect = false,
+                                   SceneRenderViewKind render_view  = SceneRenderViewKind::Primary);
 
-static void LoadGraphEffects(SceneImageEffectLayer* effs, Option<WallpaperLayerId> source_layer,
-                             ExtraInfo& extra) {
+static void LoadGraphEffects(SceneNodeLayer* effs, ExtraInfo& extra) {
     auto& scene = *extra.scene;
 
     effs->ResolveEffect(*scene.DefaultEffectMesh(), "effect");
@@ -294,15 +197,14 @@ static void LoadGraphEffects(SceneImageEffectLayer* effs, Option<WallpaperLayerI
                 cmdItor++;
             }
             auto& name = n.output;
-            ToGraphPass(n.sceneNode.as_ptr(), name, source_layer, extra);
+            ToGraphPass(n.sceneNode.as_ptr(), name, extra);
             nodePos++;
         }
     }
 }
 
-static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view output,
-                                          Option<WallpaperLayerId> source_layer, ExtraInfo& extra,
-                                          bool defer_effect, SceneRenderViewKind render_view) {
+static SceneNodeLayer* ToGraphPass(SceneNode* node, std::string_view output, ExtraInfo& extra,
+                                   bool defer_effect, SceneRenderViewKind render_view) {
     auto& rgraph = *extra.rgraph;
     auto& scene  = *extra.scene;
 
@@ -311,22 +213,19 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
     if (mesh->Submeshes().empty()) return nullptr;
     const auto& slots = mesh->MaterialSlots();
 
-    SceneImageEffectLayer* imgeff = nullptr;
-    if (! node->Camera().empty()) {
-        auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
-        if (camera.is_some() && (**camera).HasImgEffect()) {
-            auto* effect = (**camera).GetImgEffect().get();
-            if (effect->RequiresIntermediateTarget()) {
-                imgeff = effect;
-                output = imgeff->FirstTarget();
-            }
+    SceneNodeLayer* imgeff = nullptr;
+    if (node->HasLayer()) {
+        auto* effect = node->Layer().get();
+        if (effect->RequiresIntermediateTarget()) {
+            imgeff = effect;
+            output = imgeff->FirstTarget();
         }
     }
     if (imgeff != nullptr) {
         for (auto& prefill : imgeff->PrefillNodes()) {
             std::string_view prefill_output =
                 prefill.output.empty() ? output : std::string_view(prefill.output);
-            ToGraphPass(prefill.sceneNode.as_ptr(), prefill_output, source_layer, extra);
+            ToGraphPass(prefill.sceneNode.as_ptr(), prefill_output, extra);
         }
     }
 
@@ -336,7 +235,8 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
         const auto  material_slot = static_cast<std::size_t>(submesh.material_slot);
         if (material_slot >= slots.size() || ! slots[material_slot]) continue;
         SceneMaterial* material = slots[material_slot].get();
-        std::string    passName = material->name;
+        scene.ResolveMaterialTextureSources(*material);
+        std::string passName = material->name;
         // Per-submesh output override (clipping-mask submeshes write into a
         // shared RT that the main puppet pass samples via g_Texture8).
         std::string_view pass_output =
@@ -350,7 +250,6 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
              smi,
              pass_output,
              preserve_output = submesh.preserve_output,
-             source_layer,
              render_view,
              &scene,
              &extra](rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
@@ -372,22 +271,69 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                 }
                 pdesc.output = std::string(pass_output);
                 for (std::size_t i = 0; i < material->textures.size(); i++) {
-                    const auto&                url = material->textures[i];
+                    rstd_assert(i < material->texture_sources.len().to_primitive());
+                    if (i >= material->texture_sources.len().to_primitive()) {
+                        pdesc.texture_bindings.emplace_back();
+                        continue;
+                    }
+                    const auto&                source = material->texture_sources[usize(i)];
                     Option<rg::TextureNodeRef> input;
-                    if (url.empty()) {
+                    std::string                binding_key;
+                    if (source.kind == SceneMaterialTextureSourceKind::Empty) {
                         pdesc.texture_bindings.emplace_back();
                         continue;
-                    } else if (auto name = as_str(url).unwrap(); IsSpecLinkTex(name)) {
-                        auto id = ParseLinkTex(name);
-                        extra.link_finalizer.addConsumer(
-                            pass,
-                            WallpaperLayerId { .value = rstd::as_cast<i32>(id) },
-                            u32(static_cast<rstd::uint32_t>(i)));
+                    }
+                    if (source.kind == SceneMaterialTextureSourceKind::UnsupportedSpecial) {
+                        rstd_error("material '{}' references unsupported scene texture '{}'",
+                                   material->name,
+                                   source.key);
                         pdesc.texture_bindings.emplace_back();
                         continue;
+                    }
+                    if (source.kind == SceneMaterialTextureSourceKind::LayerOutput) {
+                        auto* link =
+                            extra.render_scene != nullptr && source.wallpaper_layer >= i32()
+                                ? extra.render_scene->linkSource(WallpaperLayerId {
+                                      .value = source.wallpaper_layer,
+                                  })
+                                : nullptr;
+                        if (link == nullptr) {
+                            rstd_error("material '{}' has no linked layer {} snapshot record",
+                                       material->name,
+                                       source.wallpaper_layer);
+                            pdesc.texture_bindings.emplace_back();
+                            continue;
+                        }
+                        if (source.layer.is_none()) {
+                            rstd_error("material '{}' has no linked layer {} scene owner",
+                                       material->name,
+                                       source.wallpaper_layer);
+                            pdesc.texture_bindings.emplace_back();
+                            continue;
+                        }
+                        if (link->scene_node != *source.layer) {
+                            rstd_error("material '{}' linked layer {} owner changed",
+                                       material->name,
+                                       source.wallpaper_layer);
+                            pdesc.texture_bindings.emplace_back();
+                            continue;
+                        }
+                        if (extra.render_scene->renderTargetDesc(link->render_target) == nullptr) {
+                            rstd_error("material '{}' linked layer {} target is stale",
+                                       material->name,
+                                       source.wallpaper_layer);
+                            pdesc.texture_bindings.emplace_back();
+                            continue;
+                        }
+                        binding_key = StdString(link->render_target_key);
+                        auto desc   = MakeTextureDesc(extra, binding_key);
+                        input       = Some(builder.createTexture(desc));
+                        builder.markVirtualWrite(*input);
                     } else {
-                        auto desc = MakeTextureDesc(extra, url);
-                        if (name.starts_with(WE_MIP_MAPPED_FRAME_BUFFER)) {
+                        binding_key = StdString(source.key);
+                        auto name   = as_str(binding_key).unwrap();
+                        auto desc   = MakeTextureDesc(extra, binding_key);
+                        if (source.kind == SceneMaterialTextureSourceKind::MipMappedFramebuffer) {
                             input = Some(AddMipFramebufferHistory(extra, builder));
                         } else {
                             input = Some(builder.createTexture(desc));
@@ -397,7 +343,7 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                         }
                     }
 
-                    if (url == pass_output) {
+                    if (binding_key == pass_output) {
                         builder.markSelfWrite(*input);
                         input = Some(AddCopyPass(extra, *input));
                     }
@@ -478,21 +424,11 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
                     extra.depth_initialized_outputs.erase(pass_output_s);
                 }
                 builder.write(output_node);
-                if (source_layer.is_some()) {
-                    extra.link_finalizer.recordSource(*source_layer,
-                                                      CaptureTextureOutput(extra, output_node));
-                }
-                auto output_name = as_str(pass_output).unwrap();
-                if (IsSpecLinkTex(output_name)) {
-                    extra.link_finalizer.recordSource(
-                        WallpaperLayerId { .value = rstd::as_cast<i32>(ParseLinkTex(output_name)) },
-                        CaptureTextureOutput(extra, output_node));
-                }
             });
     }
 
     if (! defer_effect && imgeff != nullptr && imgeff->HasRenderEffects())
-        LoadGraphEffects(imgeff, source_layer, extra);
+        LoadGraphEffects(imgeff, extra);
     return imgeff;
 }
 
@@ -503,10 +439,11 @@ static SceneImageEffectLayer* ToGraphPass(SceneNode* node, std::string_view outp
 static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const BTreeSet<i32>& linked_ids,
                                     Set<const SceneNode*>& out_skip,
                                     bool                   visibility_hidden_ancestor = false) {
-    const i32  nid         = node->ID();
+    const auto wallpaper   = node->WallpaperIdentity();
     const auto link_source = scene.ResolveLayerLinkSource(*node);
-    const i32  layer_id    = link_source.is_some() ? link_source->value : nid;
-    const bool linked      = link_source.is_some() && linked_ids.contains(link_source->value);
+    const i32 layer_id = link_source.is_some() ? link_source->value
+                                               : (wallpaper.is_some() ? wallpaper->value : i32(-1));
+    const bool linked  = link_source.is_some() && linked_ids.contains(link_source->value);
     const bool visibility_hidden_self =
         layer_id >= i32() &&
         scene.IsLayerVisibilityElidable(WallpaperLayerId { .value = layer_id }) && ! linked;
@@ -529,24 +466,21 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const BTreeSe
 }
 
 static bool ShouldSkipNoRuntimeEffect(SceneNode* node, Scene& scene) {
-    if (node == nullptr || node->Camera().empty()) return false;
-    auto camera = scene.Camera(rstd::cppstd::as_str(node->Camera()).unwrap());
-    if (camera.is_none() || ! (**camera).HasImgEffect()) return false;
-    const auto& effect_layer = (**camera).GetImgEffect();
+    (void)scene;
+    if (node == nullptr || ! node->HasLayer()) return false;
+    const auto& effect_layer = node->Layer();
     return effect_layer && effect_layer->SkipWhenNoRuntimeEffect() &&
-           effect_layer->EffectCount() > usize() && ! effect_layer->HasRuntimeVisibleEffect();
+           ! effect_layer->PublishesOutput() && effect_layer->EffectCount() > usize() &&
+           ! effect_layer->HasRuntimeVisibleEffect();
 }
 
 static void ConfigureNestedOutput(SceneNode* node, std::string_view output,
-                                  std::string_view inherited_camera, Scene& scene) {
+                                  std::string_view inherited_camera) {
     if (! inherited_camera.empty() && node->Camera().empty()) {
         node->SetCamera(std::string(inherited_camera));
     }
-    if (node->Camera().empty()) return;
-
-    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
-    if (camera.is_none() || ! (**camera).HasImgEffect()) return;
-    auto& effect_layer = (**camera).GetImgEffect();
+    if (! node->HasLayer()) return;
+    auto& effect_layer = node->Layer();
     if (! effect_layer) return;
     auto output_text = as_str(output).unwrap();
     if (output_text != SpecTex_Default &&
@@ -564,13 +498,14 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
                           const BTreeSet<i32>&         linked_ids) {
     if (node == nullptr || emit_skip_subtrees.count(node) != 0) return;
 
-    auto&            scene       = *extra.scene;
-    const i32        nid         = node->ID();
-    const auto       link_source = scene.ResolveLayerLinkSource(*node);
-    const i32        layer_id    = link_source.is_some() ? link_source->value : nid;
-    const bool       elidable    = scene.IsLayerElidable(WallpaperLayerId { .value = layer_id });
-    const bool       linked      = link_source.is_some() && linked_ids.contains(link_source->value);
-    bool             emit        = true;
+    auto&      scene       = *extra.scene;
+    const auto wallpaper   = node->WallpaperIdentity();
+    const auto link_source = scene.ResolveLayerLinkSource(*node);
+    const i32 layer_id = link_source.is_some() ? link_source->value
+                                               : (wallpaper.is_some() ? wallpaper->value : i32(-1));
+    const bool       elidable = scene.IsLayerElidable(WallpaperLayerId { .value = layer_id });
+    const bool       linked   = link_source.is_some() && linked_ids.contains(link_source->value);
+    bool             emit     = true;
     std::string      link_output;
     std::string_view node_output = inherited_output;
 
@@ -586,23 +521,21 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
             } else {
                 link_output = rstd::cppstd::to_string(source_record->render_target_key);
                 node_output = link_output;
-                if (! node->Camera().empty()) {
-                    auto camera = scene.CameraMut(rstd::cppstd::as_str(node->Camera()).unwrap());
-                    if (camera.is_some() && (**camera).HasImgEffect()) {
-                        (**camera).GetImgEffect()->SetFinalTarget(link_output);
-                        (**camera).GetImgEffect()->SetFinalLocal(true);
-                    }
+                if (node->HasLayer() && ! node->Layer()->PublishesOutput()) {
+                    node->Layer()->SetFinalTarget(link_output);
+                    node->Layer()->SetFinalLocal(true);
                 }
             }
         }
     }
 
-    auto group_camera = scene.RenderGroupCamera(WallpaperLayerId { .value = nid });
+    auto group_camera =
+        wallpaper.is_some() ? scene.RenderGroupCamera(*wallpaper) : None<ref<str>>();
     if (emit && group_camera) {
-        ConfigureNestedOutput(node, node_output, inherited_camera, scene);
-        auto* effect_layer = ToGraphPass(node, node_output, link_source, extra, true);
+        ConfigureNestedOutput(node, node_output, inherited_camera);
+        auto* effect_layer = ToGraphPass(node, node_output, extra, true);
         if (effect_layer == nullptr) {
-            rstd_error("render group layer {} has no effect target", nid);
+            rstd_error("render group layer {} has no effect target", wallpaper->value);
         }
         const std::string_view child_output =
             effect_layer == nullptr ? node_output : std::string_view(effect_layer->FirstTarget());
@@ -615,14 +548,14 @@ static void EmitSceneNode(SceneNode* node, std::string_view inherited_output,
                           linked_ids);
         }
         if (effect_layer != nullptr && effect_layer->HasRenderEffects()) {
-            LoadGraphEffects(effect_layer, link_source, extra);
+            LoadGraphEffects(effect_layer, extra);
         }
         return;
     }
 
     if (emit) {
-        ConfigureNestedOutput(node, node_output, inherited_camera, scene);
-        ToGraphPass(node, node_output, link_source, extra);
+        ConfigureNestedOutput(node, node_output, inherited_camera);
+        ToGraphPass(node, node_output, extra);
     }
     for (auto& child : node->GetChildren()) {
         EmitSceneNode(child.as_ptr(),
@@ -652,7 +585,6 @@ static void EmitPlanarReflectionNode(SceneNode* node, ExtraInfo& extra,
     if (node->Reflected() && ! SamplesPlanarReflection(*node)) {
         ToGraphPass(node,
                     as_string_view(WE_REFLECTION_PREFIX),
-                    None<WallpaperLayerId>(),
                     extra,
                     true,
                     SceneRenderViewKind::Reflection);
@@ -670,7 +602,6 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
     // The snapshot owns link-consumer discovery; graph build only consumes the
     // resulting source ids.
     const auto& linked_ids = render_scene.LinkedLayerIds();
-    extra.link_finalizer.setLinkedLayerIds(&linked_ids);
 
     // Skip subtrees the parser tagged as elidable (user-hidden, or no-effect
     // identity passthrough layers) when nothing in the subtree links anything.
@@ -701,8 +632,7 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
                 auto&            sp     = step.as_Pass().value;
                 std::string_view target = sp.output.empty() ? as_string_view(SpecTex_Default)
                                                             : std::string_view(sp.output);
-                ToGraphPass(
-                    sp.node.as_ptr(), target, scene.ResolveLayerLinkSource(*sp.node), extra);
+                ToGraphPass(sp.node.as_ptr(), target, extra);
             } else {
                 auto& cp = step.as_Copy().value;
                 AddCopyPass(extra, MakeTextureDesc(extra, cp.src), MakeTextureDesc(extra, cp.dst));
@@ -710,7 +640,6 @@ Box<rg::RenderGraph> owe::sceneToRenderGraph(Scene&                     scene,
         }
     }
 
-    extra.link_finalizer.apply(extra);
     StoreMipFramebufferHistory(extra);
 
     scene.RebuildResourceIndex();

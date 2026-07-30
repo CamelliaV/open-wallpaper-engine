@@ -619,12 +619,11 @@ TEST(WPUniformSourceParallax, ParentPropagationSelectsAncestorConfiguration) {
     auto layer_camera =
         Arc<owe::SceneCamera>::make(owe::SceneCamera::MakeOrthographic(3840, 2160, -1.0, 1.0));
     layer_camera->AttatchNode(effect.as_ptr());
-    layer_camera->AttatchImgEffect(
-        std::make_shared<owe::SceneImageEffectLayer>(child.as_ptr(),
-                                                     3840.0f,
-                                                     2160.0f,
-                                                     "_rt_effect_pingpong_a_test",
-                                                     "_rt_effect_pingpong_b_test"));
+    effect->AttachLayer(std::make_shared<owe::SceneNodeLayer>(child.as_ptr(),
+                                                              3840.0f,
+                                                              2160.0f,
+                                                              "_rt_effect_pingpong_a_test",
+                                                              "_rt_effect_pingpong_b_test"));
     scene.RegisterCamera(String::make("layer"_str), layer_camera.clone());
     camera_resolver->Add(String::make("layer"_str), layer_camera.clone());
     effect->SetCamera("layer");
