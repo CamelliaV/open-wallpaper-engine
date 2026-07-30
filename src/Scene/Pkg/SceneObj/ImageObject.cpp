@@ -24,12 +24,6 @@ auto LoadJsonFile(owe::fs::VFS& vfs, const std::string& path) -> std::optional<o
     return rstd::move(parsed).unwrap_unchecked();
 }
 
-float NormalizeLayerAlpha(float alpha) {
-    // Older WE scene JSON stores layer alpha as 0..100 percent.
-    if (alpha > 1.0f) alpha /= 100.0f;
-    return std::clamp(alpha, 0.0f, 1.0f);
-}
-
 constexpr std::string_view kFoliageSwayEffect = "effects/foliagesway/effect.json";
 constexpr SceneVersion     kNormalizedFoliageSwayStrengthVersion = 9;
 
@@ -81,6 +75,12 @@ void NormalizeLegacyFoliageSwayStrength(MaterialPass& pass) {
 }
 
 } // namespace
+
+float owe::wpscene::NormalizeLayerAlpha(float alpha) {
+    // Older WE scene JSON stores layer alpha as 0..100 percent.
+    if (alpha > 1.0f) alpha /= 100.0f;
+    return std::clamp(alpha, 0.0f, 1.0f);
+}
 
 bool EffectCommand::FromJson(const owe::Json& json) {
     owe::GetJsonValue(json, "command", command);

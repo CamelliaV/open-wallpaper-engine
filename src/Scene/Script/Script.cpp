@@ -464,9 +464,10 @@ struct EngineHostState {
     std::string                                  ls_path;
     // The script currently running. createLayer pops clones from this
     // FieldScript's clone_queue. Set around every init/update/cursor invoke.
-    FieldScript*                    active_field_script { nullptr };
-    Vec<String>                     pending_registered_assets;
-    Option<JsRuntime::LayerFactory> layer_factory;
+    FieldScript*                          active_field_script { nullptr };
+    Vec<String>                           pending_registered_assets;
+    Option<JsRuntime::LayerFactory>       layer_factory;
+    Option<JsRuntime::LayerConfigFactory> layer_config_factory;
     // SceneNode -> text-content setter. Populated by text layers in the
     // parser; consulted by NodeSetText so `thisLayer.text = "..."` reaches
     // TextLayouter::SetText. Missing entry means the layer is not text-
@@ -1344,6 +1345,7 @@ class Vec2 {
   }
   copy()      { return new Vec2(this.x, this.y); }
   clone()     { return new Vec2(this.x, this.y); }
+  toString()  { return `${this.x} ${this.y}`; }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y); }
   lengthSqr() { return this.x*this.x + this.y*this.y; }
   normalize() {
@@ -1377,6 +1379,7 @@ class Vec3 {
   }
   copy()      { return new Vec3(this.x, this.y, this.z); }
   clone()     { return new Vec3(this.x, this.y, this.z); }
+  toString()  { return `${this.x} ${this.y} ${this.z}`; }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z); }
   lengthSqr() { return this.x*this.x + this.y*this.y + this.z*this.z; }
   normalize() {
@@ -1410,6 +1413,7 @@ class Vec4 {
   }
   copy()      { return new Vec4(this.x, this.y, this.z, this.w); }
   clone()     { return new Vec4(this.x, this.y, this.z, this.w); }
+  toString()  { return `${this.x} ${this.y} ${this.z} ${this.w}`; }
   length()    { return Math.sqrt(this.x*this.x + this.y*this.y + this.z*this.z + this.w*this.w); }
   lengthSqr() { return this.x*this.x + this.y*this.y + this.z*this.z + this.w*this.w; }
   normalize() {
@@ -1420,6 +1424,13 @@ class Vec4 {
 globalThis.Vec2 = Vec2;
 globalThis.Vec3 = Vec3;
 globalThis.Vec4 = Vec4;
+globalThis.__wwSerializeLayerConfig = function(config) {
+  return JSON.stringify(config, function(_key, value) {
+    if (value instanceof Vec2 || value instanceof Vec3 || value instanceof Vec4)
+      return value.toString();
+    return value;
+  });
+};
 
 // --- thisLayer / thisScene stub ---------------------------------------------
 // Stand-in for the per-script SceneNode binding. Property reads return
@@ -2566,6 +2577,39 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc
             }
             JS_FreeCString(ctx, asset);
         }
+    } else if (argc > 0 && JS_IsObject(argv[0]) && host->layer_config_factory.is_some()) {
+        Option<Json> config;
+        if (auto* source_node = GetLayerNode(argv[0]); source_node != nullptr) {
+            auto initial = host->initial_layer_configs.get(source_node);
+            if (initial.is_some()) config = Some((**initial).clone());
+        } else {
+            JSValue global    = JS_GetGlobalObject(ctx);
+            JSValue serialize = JS_GetPropertyStr(ctx, global, "__wwSerializeLayerConfig");
+            JSValue encoded   = JS_Call(ctx, serialize, global, 1, argv);
+            JS_FreeValue(ctx, serialize);
+            JS_FreeValue(ctx, global);
+            if (JS_IsException(encoded)) {
+                JS_FreeValue(ctx, encoded);
+                return JS_EXCEPTION;
+            }
+            const char* source = JS_ToCString(ctx, encoded);
+            if (source != nullptr) {
+                auto parsed = ParseJson(source);
+                JS_FreeCString(ctx, source);
+                if (parsed.is_ok()) config = Some(rstd::move(parsed).unwrap_unchecked());
+            }
+            JS_FreeValue(ctx, encoded);
+            if (config.is_none())
+                return JS_ThrowTypeError(ctx, "createLayer configuration is not serializable");
+        }
+        if (config.is_some()) {
+            auto initial = (*config).clone();
+            auto created = (**host->layer_config_factory)(fs->m_impl->node, rstd::move(*config));
+            if (created.is_some()) {
+                node = (*created).as_ptr();
+                (void)host->initial_layer_configs.insert(node, rstd::move(initial));
+            }
+        }
     }
     if (! node && ! fs->m_impl->clone_queue.empty()) {
         node = fs->m_impl->clone_queue.front();
@@ -3401,7 +3445,13 @@ void JsRuntime::SetLayerFactory(LayerFactory factory) {
     m_impl->host.layer_factory = Some(rstd::move(factory));
 }
 
+void JsRuntime::SetLayerConfigFactory(LayerConfigFactory factory) {
+    m_impl->host.layer_config_factory = Some(rstd::move(factory));
+}
+
 void JsRuntime::ClearLayerFactory() { m_impl->host.layer_factory = None(); }
+
+void JsRuntime::ClearLayerConfigFactory() { m_impl->host.layer_config_factory = None(); }
 
 // --- Module load + FieldScript construction ---------------------------------
 

@@ -17,6 +17,8 @@ export namespace owe
 namespace wpscene
 {
 
+float NormalizeLayerAlpha(float alpha);
+
 class EffectCommand {
 public:
     bool        FromJson(const owe::Json&);

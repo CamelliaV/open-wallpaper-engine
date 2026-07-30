@@ -1790,6 +1790,68 @@ TEST(ScriptScene, CreateLayerActivatesOnlyConsumedGenericClones) {
     EXPECT_DOUBLE_EQ(LastScalar(fs), 1.0);
 }
 
+TEST(ScriptScene, CreateLayerRoutesConfigurationAndLayerCloneToFactory) {
+    auto root  = Arc<owe::SceneNode>::make();
+    auto owner = Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "owner");
+    auto style = Arc<owe::SceneNode>::make(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "Style1");
+    root->AppendChild(owner.clone());
+    root->AppendChild(style.clone());
+
+    Vec<owe::Json>           configs;
+    Vec<Arc<owe::SceneNode>> created;
+    JsRuntime                rt;
+    rt.RegisterInitialLayerConfig(
+        style.as_ptr(),
+        rstd::json::from_str(R"({"name":"Style1","text":"template"})"_str).unwrap());
+    rt.SetLayerConfigFactory(JsRuntime::LayerConfigFactory::make(
+        [&root, &configs, &created](owe::SceneNode*,
+                                    owe::Json config) -> Option<Arc<owe::SceneNode>> {
+            auto node = Arc<owe::SceneNode>::make();
+            root->AppendChild(node.clone());
+            configs.push(config.clone());
+            created.push(node.clone());
+            return Some(rstd::move(node));
+        }));
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            let result = 0;
+            export function init() {
+                const background = thisScene.createLayer({
+                    color: new Vec3(0.1, 0.2, 0.3),
+                    size: new Vec3(10, 20, 0).toString()
+                });
+                const text = thisScene.createLayer(thisScene.getLayer('Style1'));
+                result = background.visible && text.visible ? 2 : -1;
+            }
+            export function update() { return result; }
+        )JS",
+        "test/create_layer_configuration",
+        FieldKind::Scalar,
+        owe::MakeObject(),
+        owe::IntoJson(0),
+        owner.as_ptr());
+    ASSERT_NE(fs, nullptr);
+
+    rt.SetSceneRoot(root.as_ptr());
+    rt.ClearLayerFactory();
+    rt.ClearLayerConfigFactory();
+    rt.TickAll();
+
+    ASSERT_EQ(configs.len(), usize(2));
+    std::string color;
+    std::string size;
+    std::string text;
+    EXPECT_TRUE(owe::GetJsonValue(configs[usize()], "color", color, false));
+    EXPECT_TRUE(owe::GetJsonValue(configs[usize()], "size", size, false));
+    EXPECT_TRUE(owe::GetJsonValue(configs[usize(1)], "text", text, false));
+    EXPECT_EQ(color, "0.1 0.2 0.3");
+    EXPECT_EQ(size, "10 20 0");
+    EXPECT_EQ(text, "template");
+    EXPECT_DOUBLE_EQ(LastScalar(fs), 2.0);
+}
+
 TEST(ScriptScene, RegisteredAssetFactoryCreatesBeyondLegacyPoolAndReusesDestroyedLayer) {
     auto                     root = Arc<owe::SceneNode>::make();
     Vec<Arc<owe::SceneNode>> created;

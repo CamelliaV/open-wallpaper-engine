@@ -5419,6 +5419,77 @@ Option<Arc<SceneNode>> InstantiateRegisteredAsset(ParseContext& context, SceneNo
     }
 }
 
+Option<Arc<SceneNode>> AttachCreatedLayer(ParseContext& context, SceneNode* owner,
+                                          std::int32_t id) {
+    auto parsed = context.node_id_map.get_mut(id);
+    if (parsed.is_none() || (**parsed).node.is_none()) return None();
+
+    SceneNode* parent =
+        owner && owner->Parent() ? owner->Parent() : context.scene->RootMut().as_raw_ptr();
+    for (auto& before : (**parsed).ordered_before_nodes) parent->AppendChild(before.clone());
+    auto node = (*(**parsed).node).clone();
+    parent->AppendChild(node.clone());
+    (void)context.node_id_map.remove(id);
+    return Some(rstd::move(node));
+}
+
+Option<Arc<SceneNode>> InstantiateLayerConfiguration(ParseContext& context, SceneNode* owner,
+                                                     const Json& config) {
+    const std::int32_t id = context.next_dynamic_layer_id--;
+
+    if (config.get("text"_str).is_some()) {
+        wpscene::TextObject text;
+        if (! text.FromJson(config, *context.vfs, context.pkg_version)) return None();
+        text.id      = id;
+        text.parent  = 0;
+        text.visible = true;
+        ParseTextObj(context, text);
+        return AttachCreatedLayer(context, owner, id);
+    }
+
+    if (config.get("image"_str).is_some()) {
+        wpscene::ImageObject image;
+        if (! image.FromJson(config, *context.vfs, context.pkg_version)) return None();
+        image.id      = id;
+        image.parent  = 0;
+        image.visible = true;
+        ParseImageObj(context, image);
+        return AttachCreatedLayer(context, owner, id);
+    }
+
+    std::vector<float> requested_size;
+    owe::GetJsonValue(config, "size", requested_size, false);
+    array<float, 2> size { 2.0f, 2.0f };
+    if (requested_size.size() >= 2) {
+        size[usize()]  = requested_size[0];
+        size[usize(1)] = requested_size[1];
+    }
+
+    wpscene::ImageObject image;
+    if (! image.FromAsset(
+            "models/util/solidlayer.json"_str, size, *context.vfs, context.pkg_version)) {
+        return None();
+    }
+    image.id      = id;
+    image.name    = "__createLayer";
+    image.size    = { size[usize()], size[usize(1)] };
+    image.solid   = true;
+    image.parent  = 0;
+    image.visible = true;
+    owe::GetJsonValue(config, "origin", image.origin, false);
+    owe::GetJsonValue(config, "angles", image.angles, false);
+    owe::GetJsonValue(config, "scale", image.scale, false);
+    owe::GetJsonValue(config, "color", image.color, false);
+    owe::GetJsonValue(config, "alpha", image.alpha, false);
+    owe::GetJsonValue(config, "brightness", image.brightness, false);
+    owe::GetJsonValue(config, "alignment", image.alignment, false);
+    owe::GetJsonValue(config, "perspective", image.perspective, false);
+    image.alpha = wpscene::NormalizeLayerAlpha(image.alpha);
+    context.solid_layer_ids.insert(id);
+    ParseImageObj(context, image);
+    return AttachCreatedLayer(context, owner, id);
+}
+
 void ProcessObjects(ParseContext& context, mut_ref<SceneObjectVar[]> scene_objs,
                     wavsen::audio::SoundManager* sm, ProcessOpts opts,
                     SceneLoadBenchRecorderView load_bench) {
@@ -5793,10 +5864,17 @@ Box<Scene> FinalizeScene(ParseContext& context) {
                     rstd_error("registered layer asset '{}' is unsupported or unavailable", asset);
                 return node;
             }));
+        runtime.SetLayerConfigFactory(script::JsRuntime::LayerConfigFactory::make(
+            [&context](SceneNode* owner, Json config) -> Option<Arc<SceneNode>> {
+                auto node = InstantiateLayerConfiguration(context, owner, config);
+                if (node.is_none()) rstd_error("layer configuration is unsupported or unavailable");
+                return node;
+            }));
         WPShaderParser::InitGlslang();
         runtime.SetSceneRoot(context.scene->RootMut().as_raw_ptr());
         WPShaderParser::FinalGlslang();
         runtime.ClearLayerFactory();
+        runtime.ClearLayerConfigFactory();
         owe::script::InstallScriptScene(*context.scene,
                                         context.script_scene.take().unwrap_unchecked());
     }

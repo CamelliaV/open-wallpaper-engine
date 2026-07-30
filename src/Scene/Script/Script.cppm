@@ -217,7 +217,10 @@ public:
 
     using LayerFactory = Arc<dyn<FnMut<Option<Arc<owe::SceneNode>>(owe::SceneNode*, ref<str>)>>>;
     void SetLayerFactory(LayerFactory factory);
+    using LayerConfigFactory = Arc<dyn<FnMut<Option<Arc<owe::SceneNode>>(owe::SceneNode*, Json)>>>;
+    void SetLayerConfigFactory(LayerConfigFactory factory);
     void ClearLayerFactory();
+    void ClearLayerConfigFactory();
 
     // Same exposure rule as FieldScript::Impl above: opaque outside the
     // module, but visible to peer module impl files.
