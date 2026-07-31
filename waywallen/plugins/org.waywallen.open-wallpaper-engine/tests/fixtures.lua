@@ -112,8 +112,9 @@ return {
     },
     mutation_accepted = { response = {} },
     -- Shape Steam writes to steamapps/workshop/appworkshop_431960.acf: one
-    -- subscribed item, plus a comment and an escaped quote the reader has to
-    -- survive. The hand-placed directory 2589297069 appears in no record.
+    -- subscribed item, one subscribed item the client recorded without a size,
+    -- plus a comment and an escaped quote the reader has to survive. The
+    -- hand-placed directory 2589297069 appears in no record.
     workshop_acf = table.concat({
         '"AppWorkshop"',
         "{",
@@ -127,6 +128,11 @@ return {
         '\t\t\t"timeupdated"\t\t"1785290565"',
         '\t\t\t"manifest"\t\t"1948827864188560204"',
         "\t\t}",
+        '\t\t"3765064056"',
+        "\t\t{",
+        '\t\t\t"timeupdated"\t\t"1785290566"',
+        '\t\t\t"manifest"\t\t"1948827864188560205"',
+        "\t\t}",
         "\t}",
         '\t"WorkshopItemDetails"',
         "\t{",
@@ -134,6 +140,11 @@ return {
         "\t\t{",
         '\t\t\t"manifest"\t\t"1948827864188560204"',
         '\t\t\t"title"\t\t"a \\"quoted\\" title"',
+        '\t\t\t"subscribedby"\t\t"89291590"',
+        "\t\t}",
+        '\t\t"3765064056"',
+        "\t\t{",
+        '\t\t\t"manifest"\t\t"1948827864188560205"',
         '\t\t\t"subscribedby"\t\t"89291590"',
         "\t\t}",
         "\t}",

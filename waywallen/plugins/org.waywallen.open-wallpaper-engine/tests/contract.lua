@@ -771,6 +771,7 @@ project.classify = original_classify
 -- leaves hand-placed directories out, so they never offer an unsubscribe.
 local acf_path = steam_root .. "/steamapps/workshop/appworkshop_" .. project.WE_APPID .. ".acf"
 local hand_placed_dir = workshop .. "/2589297069"
+local unmeasured_dir = workshop .. "/3765064056"
 
 local function workshop_ctx(acf)
     local ctx = {}
@@ -780,6 +781,7 @@ local function workshop_ctx(acf)
     ctx.fs.exists = function(path)
         if path == acf_path then return acf ~= nil end
         if path == hand_placed_dir .. "/scene.pkg" then return true end
+        if path == unmeasured_dir .. "/scene.pkg" then return true end
         return source_ctx.fs.exists(path)
     end
     ctx.fs.read = function(path)
@@ -787,28 +789,28 @@ local function workshop_ctx(acf)
         return source_ctx.fs.read(path)
     end
     ctx.fs.list_dirs = function(path)
-        if path == workshop then return { item_dir, hand_placed_dir } end
+        if path == workshop then return { item_dir, hand_placed_dir, unmeasured_dir } end
         return source_ctx.fs.list_dirs(path)
     end
     return ctx
 end
 
 local recorded_items = main.source.scan(workshop_ctx(fixtures.workshop_acf))
-equal(#recorded_items, 3, "scan item count with Steam's record")
+equal(#recorded_items, 4, "scan item count with Steam's record")
 equal(recorded_items[1].external_id, "3765064055", "recorded subscription keeps its id")
+equal(recorded_items[1].size, 4096, "recorded item reports the size Steam measured")
 equal(recorded_items[2].name, "Workshop 2589297069", "hand-placed Workshop directory")
 equal(recorded_items[2].external_id, nil, "hand-placed directory must not offer unsubscribe")
+equal(recorded_items[2].size, nil, "hand-placed directory was never measured by Steam")
+equal(recorded_items[3].size, nil, "record without a size leaves the item unmeasured")
+equal(recorded_items[4].size, nil, "local project is outside Steam's Workshop record")
 
-equal(
-    main.source.scan(workshop_ctx(fixtures.workshop_acf_truncated))[2].external_id,
-    "2589297069",
-    "truncated record keeps the previous behaviour"
-)
-equal(
-    main.source.scan(workshop_ctx(nil))[2].external_id,
-    "2589297069",
-    "missing record keeps the previous behaviour"
-)
+local truncated_items = main.source.scan(workshop_ctx(fixtures.workshop_acf_truncated))
+equal(truncated_items[2].external_id, "2589297069", "truncated record keeps the previous behaviour")
+equal(truncated_items[1].size, nil, "truncated record measures nothing")
+local unrecorded_items = main.source.scan(workshop_ctx(nil))
+equal(unrecorded_items[2].external_id, "2589297069", "missing record keeps the previous behaviour")
+equal(unrecorded_items[1].size, nil, "missing record measures nothing")
 
 main.source.scan(workshop_ctx(fixtures.workshop_acf))
 local recorded_ctx = fake_context()
