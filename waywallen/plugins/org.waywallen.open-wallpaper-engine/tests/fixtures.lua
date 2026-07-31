@@ -77,12 +77,25 @@ return {
         .. '<div id="SubscribeItemOptionAdd" '
         .. 'class="subscribeOption add selected">Subscribe</div>',
     signed_out_page = '<a href="https://steamcommunity.com/login">Sign In</a>',
+    -- Shape of steamcommunity.com/profiles/<id>/?xml=1: the persona name is
+    -- wrapped in CDATA, and a group further down repeats tags the reader must
+    -- not confuse with the profile's own.
+    profile_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><profile>'
+        .. "<steamID64>76561198000000001</steamID64>"
+        .. "<steamID><![CDATA[Fixture &amp; Author]]></steamID>"
+        .. "<privacyState>public</privacyState>"
+        .. "<groups><group><groupName><![CDATA[Fixture group]]></groupName></group></groups>"
+        .. "</profile>",
+    profile_missing_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        .. "<response><error><![CDATA[The specified profile could not be found.]]></error>"
+        .. "</response>",
     query_files = {
         response = {
             total = 1,
             publishedfiledetails = {
                 {
                     publishedfileid = "3765064055",
+                    creator = "76561198000000001",
                     title = "Fixture wallpaper",
                     preview_url = "https://example.invalid/preview.jpg",
                     short_description = "Fixture description",
