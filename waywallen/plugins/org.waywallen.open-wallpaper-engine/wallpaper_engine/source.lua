@@ -46,6 +46,10 @@ local function scan_container(ctx, steam_root, container, name_prefix, is_worksh
                 tags = (project and project.tags) or {},
                 content_rating = project and project.contentrating or nil,
                 external_id = is_workshop and workshop.subscription_id(id) or nil,
+                -- Steam measured the item when it unpacked it; without that the
+                -- daemon stats `resource` alone and calls a web wallpaper's
+                -- directory inode the size of the wallpaper.
+                size = is_workshop and workshop.size(id) or nil,
                 metadata = {},
             })
         end

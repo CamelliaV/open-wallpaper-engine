@@ -13,6 +13,10 @@ local ACF_REL = "/steamapps/workshop/appworkshop_" .. project_util.WE_APPID .. "
 -- nil keeps every caller on the behaviour it had before this file existed.
 local subscribed = nil
 
+-- Bytes on disk per id, as Steam wrote them down when it unpacked the item.
+-- A missing id means "the record does not say", never "empty".
+local sizes = {}
+
 local ESCAPES = { n = "\n", t = "\t", r = "\r" }
 
 -- Read one quoted token and return it with the position just after it. Steam
@@ -97,10 +101,10 @@ local function field(node, name)
     return nil
 end
 
--- Fold one Steam root's record into `found`. Returns whether the file could be
--- used at all: an unreadable or detail-less file must leave the snapshot unset
--- instead of declaring every installed item unsubscribed.
-local function fold_root(ctx, steam_root, found)
+-- Fold one Steam root's record into `found` and `found_sizes`. Returns whether
+-- the file could be used at all: an unreadable or detail-less file must leave
+-- the snapshot unset instead of declaring every installed item unsubscribed.
+local function fold_root(ctx, steam_root, found, found_sizes)
     local path = steam_root .. ACF_REL
     if not ctx.fs.exists(path) then return false end
     local text = ctx.fs.read(path)
@@ -113,7 +117,21 @@ local function fold_root(ctx, steam_root, found)
         ctx.log("wallpaper_engine: unreadable Steam Workshop state in " .. path)
         return false
     end
-    local details = field(field(parsed, "AppWorkshop"), "WorkshopItemDetails")
+    local app = field(parsed, "AppWorkshop")
+    -- `WorkshopItemsInstalled` is the download bookkeeping: for every item the
+    -- client unpacked it holds the byte size of the unpacked directory, so the
+    -- scan gets the size on disk without walking the tree. A directory copied
+    -- into `content/431960` by hand is in no section and stays unmeasured.
+    local downloaded = field(app, "WorkshopItemsInstalled")
+    if type(downloaded) == "table" then
+        for id, entry in pairs(downloaded) do
+            local size = tonumber(field(entry, "size"))
+            if size and size > 0 then
+                found_sizes[tostring(id)] = math.floor(size)
+            end
+        end
+    end
+    local details = field(app, "WorkshopItemDetails")
     if type(details) ~= "table" then return false end
     local usable = false
     for id, entry in pairs(details) do
@@ -132,10 +150,13 @@ end
 -- Re-read Steam's record for every registered Steam root. Called from the
 -- source scan because that is the only callback whose context carries `ctx.fs`.
 function M.refresh(ctx, roots)
-    local found, usable = {}, false
+    local found, found_sizes, usable = {}, {}, false
     for _, steam_root in ipairs(roots) do
-        if fold_root(ctx, steam_root, found) then usable = true end
+        if fold_root(ctx, steam_root, found, found_sizes) then usable = true end
     end
+    -- Sizes stand on their own: they describe the directories on this disk, so
+    -- a record without usable details still gets to report the ones it listed.
+    sizes = found_sizes
     if not usable then
         subscribed = nil
         return
@@ -164,6 +185,13 @@ end
 function M.mark(id, is_subscribed)
     if not subscribed then return end
     subscribed[tostring(id)] = is_subscribed or nil
+end
+
+-- Size on disk in bytes for an item Steam downloaded, nil for everything the
+-- record does not cover. The daemon leaves a nil size to its own probing, and
+-- the client hides the "Size" row while nothing knows the answer.
+function M.size(id)
+    return sizes[tostring(id)]
 end
 
 -- The daemon turns a non-empty `external_id` into an "Unsubscribe" button, so
