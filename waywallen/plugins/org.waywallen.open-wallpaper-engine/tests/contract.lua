@@ -767,4 +767,74 @@ end
 
 project.classify = original_classify
 
+-- Steam's own record of the Workshop directory: it marks the subscriptions and
+-- leaves hand-placed directories out, so they never offer an unsubscribe.
+local acf_path = steam_root .. "/steamapps/workshop/appworkshop_" .. project.WE_APPID .. ".acf"
+local hand_placed_dir = workshop .. "/2589297069"
+
+local function workshop_ctx(acf)
+    local ctx = {}
+    for key, value in pairs(source_ctx) do ctx[key] = value end
+    ctx.fs = {}
+    for key, value in pairs(source_ctx.fs) do ctx.fs[key] = value end
+    ctx.fs.exists = function(path)
+        if path == acf_path then return acf ~= nil end
+        if path == hand_placed_dir .. "/scene.pkg" then return true end
+        return source_ctx.fs.exists(path)
+    end
+    ctx.fs.read = function(path)
+        if path == acf_path then return acf end
+        return source_ctx.fs.read(path)
+    end
+    ctx.fs.list_dirs = function(path)
+        if path == workshop then return { item_dir, hand_placed_dir } end
+        return source_ctx.fs.list_dirs(path)
+    end
+    return ctx
+end
+
+local recorded_items = main.source.scan(workshop_ctx(fixtures.workshop_acf))
+equal(#recorded_items, 3, "scan item count with Steam's record")
+equal(recorded_items[1].external_id, "3765064055", "recorded subscription keeps its id")
+equal(recorded_items[2].name, "Workshop 2589297069", "hand-placed Workshop directory")
+equal(recorded_items[2].external_id, nil, "hand-placed directory must not offer unsubscribe")
+
+equal(
+    main.source.scan(workshop_ctx(fixtures.workshop_acf_truncated))[2].external_id,
+    "2589297069",
+    "truncated record keeps the previous behaviour"
+)
+equal(
+    main.source.scan(workshop_ctx(nil))[2].external_id,
+    "2589297069",
+    "missing record keeps the previous behaviour"
+)
+
+main.source.scan(workshop_ctx(fixtures.workshop_acf))
+local recorded_ctx = fake_context()
+login(recorded_ctx)
+request_count = recorded_ctx.request_count()
+equal(subscription.status(recorded_ctx, { "3765064055" })["3765064055"], "subscribed",
+    "state answered from Steam's record")
+equal(recorded_ctx.request_count(), request_count, "recorded state must not call Steam")
+
+recorded_ctx.queue(fixtures.mutation_accepted)
+equal(subscription.unsubscribe(recorded_ctx, "3765064055").accepted, true, "unsubscribe accepted")
+recorded_ctx.advance(30001)
+recorded_ctx.queue(nil, 200, fixtures.unsubscribed_page)
+request_count = recorded_ctx.request_count()
+equal(subscription.status(recorded_ctx, { "3765064055" })["3765064055"], "unsubscribed",
+    "unsubscribing here drops the item from the record")
+equal(recorded_ctx.request_count(), request_count + 1, "dropped item falls back to the page")
+
+main.source.scan(workshop_ctx(fixtures.workshop_acf))
+local forget_ctx = fake_context()
+main.actions.invoke(forget_ctx, "steam_sign_out")
+login(forget_ctx)
+forget_ctx.queue(nil, 200, fixtures.subscribed_page)
+request_count = forget_ctx.request_count()
+equal(subscription.status(forget_ctx, { "3765064055" })["3765064055"], "subscribed",
+    "record is re-read from Steam after a sign-out")
+equal(forget_ctx.request_count(), request_count + 1, "sign-out drops the recorded state")
+
 print("OWE waywallen Lua contract fixtures passed")

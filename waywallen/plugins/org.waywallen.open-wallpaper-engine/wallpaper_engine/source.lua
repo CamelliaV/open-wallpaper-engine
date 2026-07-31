@@ -1,4 +1,5 @@
 local project_util = import("wallpaper_engine.project")
+local workshop = import("wallpaper_engine.workshop")
 
 local M = {}
 
@@ -44,7 +45,7 @@ local function scan_container(ctx, steam_root, container, name_prefix, is_worksh
                 description = project and project.description or nil,
                 tags = (project and project.tags) or {},
                 content_rating = project and project.contentrating or nil,
-                external_id = is_workshop and id or nil,
+                external_id = is_workshop and workshop.subscription_id(id) or nil,
                 metadata = {},
             })
         end
@@ -54,13 +55,20 @@ end
 function M.scan(ctx)
     local entries = {}
 
+    local roots = {}
     for _, library in ipairs(ctx.libraries()) do
-        local steam_root = project_util.normalize_root(library)
-        local workshop = steam_root .. project_util.WORKSHOP
-        if not ctx.fs.exists(workshop) then
+        table.insert(roots, project_util.normalize_root(library))
+    end
+    -- Steam's own record decides which Workshop directories are subscriptions;
+    -- read it once per scan, before any entry asks about its id.
+    workshop.refresh(ctx, roots)
+
+    for _, steam_root in ipairs(roots) do
+        local content = steam_root .. project_util.WORKSHOP
+        if not ctx.fs.exists(content) then
             ctx.log("wallpaper_engine: no WE workshop under " .. steam_root)
         else
-            scan_container(ctx, steam_root, workshop, "Workshop ", true, entries)
+            scan_container(ctx, steam_root, content, "Workshop ", true, entries)
         end
         for _, name in ipairs(project_util.LOCAL_DIRS) do
             scan_container(
