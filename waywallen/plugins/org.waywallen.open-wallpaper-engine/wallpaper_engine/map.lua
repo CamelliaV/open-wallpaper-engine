@@ -31,12 +31,15 @@ local function preview_url(item)
     return first.url or ""
 end
 
-function M.search_item(item)
+-- `authors` maps a creator's steamid64 to a persona name. A creator missing
+-- from it keeps the empty author the Workshop grid has always shown.
+function M.search_item(item, authors)
+    local creator = tostring(item.creator or "")
     return {
         id = tostring(item.publishedfileid or ""),
         title = item.title or "",
         preview_url = preview_url(item),
-        author = "",
+        author = authors and authors[creator] or "",
         wp_type = wp_type(item),
     }
 end

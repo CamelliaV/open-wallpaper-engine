@@ -206,6 +206,7 @@ install(FILES
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/auth.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/discover.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/map.lua
+    ${_OWE_PLUGIN_SRC}/wallpaper_engine/profile.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/project.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/session.lua
     ${_OWE_PLUGIN_SRC}/wallpaper_engine/source.lua
@@ -226,6 +227,7 @@ set(_OWE_FILES
     wallpaper_engine/auth.lua
     wallpaper_engine/discover.lua
     wallpaper_engine/map.lua
+    wallpaper_engine/profile.lua
     wallpaper_engine/project.lua
     wallpaper_engine/session.lua
     wallpaper_engine/source.lua

@@ -1,15 +1,24 @@
 local api = import("wallpaper_engine.api")
 local map = import("wallpaper_engine.map")
+local profile = import("wallpaper_engine.profile")
 
 local M = {}
 local cached_details = {}
 
 function M.search(ctx, params)
     local result = api.search(ctx, params)
+    -- Workshop items carry their creator's steamid64, never the name behind it;
+    -- resolve the ids in page order so the top of the grid is named first when
+    -- the lookup cannot cover all of them.
+    local creators = {}
+    for _, item in ipairs(result.items) do
+        creators[#creators + 1] = tostring(item.creator or "")
+    end
+    local authors = profile.names(ctx, creators)
     local items = {}
     for _, item in ipairs(result.items) do
         cached_details[tostring(item.publishedfileid or "")] = item
-        table.insert(items, map.search_item(item))
+        table.insert(items, map.search_item(item, authors))
     end
     local page = params.page or 1
     return {

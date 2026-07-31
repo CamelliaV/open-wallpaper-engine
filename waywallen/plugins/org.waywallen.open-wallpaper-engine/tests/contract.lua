@@ -563,7 +563,9 @@ equal(transient_ok, false, "finalization HTTP failure")
 
 local discover_ctx = fake_context()
 login(discover_ctx)
+local before_search = discover_ctx.request_count()
 discover_ctx.queue(fixtures.query_files)
+discover_ctx.queue(nil, 200, fixtures.profile_xml)
 local search = main.discover.search(discover_ctx, {
     query = "fixture",
     sort = "trend_week",
@@ -573,10 +575,22 @@ local search = main.discover.search(discover_ctx, {
 equal(#search.items, 1, "search item count")
 equal(search.items[1].id, "3765064055", "search item id")
 equal(search.items[1].wp_type, "scene", "search item type")
-request = discover_ctx.last_request()
+equal(search.items[1].author, "Fixture & Author", "search item author")
+request = discover_ctx.request_at(before_search + 1)
 equal(request.method, "GET", "QueryFiles method")
 equal(request.query_data.access_token, "header.community.signature", "QueryFiles Community token")
 equal(request.query_data.appid, "431960", "QueryFiles appid")
+equal(
+    discover_ctx.request_at(before_search + 2).url,
+    "https://steamcommunity.com/profiles/76561198000000001/?xml=1",
+    "creator profile XML URL"
+)
+-- A name already looked up costs nothing: a second search that asked Steam
+-- again would run out of queued responses and fail here.
+discover_ctx.queue(fixtures.query_files)
+local cached_search = main.discover.search(discover_ctx, { sort = "trend_week", page = 1 })
+equal(cached_search.items[1].author, "Fixture & Author", "cached author reused")
+equal(discover_ctx.queued_count(), 0, "cached author must not be looked up again")
 local request_count = discover_ctx.request_count()
 local details = main.discover.details(discover_ctx, "3765064055")
 equal(details.size, "4096", "cached details size")
@@ -588,6 +602,38 @@ equal(
 equal(discover_ctx.request_count(), request_count, "search metadata must be reused")
 discover_ctx.queue(fixtures.file_details)
 equal(main.discover.details(discover_ctx, "fallback").size, "8192", "fallback details")
+
+local profile = import("wallpaper_engine.profile")
+local profile_ctx = fake_context()
+
+-- Steam answering that it has no such profile is an answer: remember it, so the
+-- same dead creator is not looked up once per page for the rest of the session.
+profile_ctx.queue(nil, 200, fixtures.profile_missing_xml)
+equal(profile.names(profile_ctx, { "76561198000000002" })["76561198000000002"], nil,
+    "missing profile yields no author")
+local missing_requests = profile_ctx.request_count()
+profile.names(profile_ctx, { "76561198000000002" })
+equal(profile_ctx.request_count(), missing_requests, "missing profile must not be asked twice")
+
+-- Anything else Steam sends back is not an answer, so nothing is remembered and
+-- the grid keeps the empty author it had before.
+profile_ctx.queue(nil, 200, "<html><body>Steam is having a moment</body></html>")
+equal(next(profile.names(profile_ctx, { "76561198000000003" })), nil,
+    "unparsable profile yields no author")
+
+-- Steam being unreachable costs a search a couple of failed requests, not one
+-- per creator, and is forgotten so a later search can try again.
+profile_ctx.queue(nil, 503)
+profile_ctx.queue(nil, 503)
+equal(next(profile.names(profile_ctx, {
+    "76561198000000004",
+    "76561198000000005",
+    "76561198000000006",
+})), nil, "unreachable Steam yields no authors")
+equal(profile_ctx.queued_count(), 0, "failing lookups stop at the failure limit")
+profile_ctx.queue(nil, 200, fixtures.profile_xml)
+equal(profile.names(profile_ctx, { "76561198000000004" })["76561198000000004"],
+    "Fixture & Author", "a failed lookup is retried later")
 
 local subscription_ctx = fake_context()
 login(subscription_ctx)
