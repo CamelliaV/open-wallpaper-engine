@@ -252,6 +252,8 @@ struct RenderProgram {
     }
 
     void injectFramePasses(PrePass& prepass, FinPass& finpass) {
+        prepass.resetResourceUses();
+        finpass.resetResourceUses();
         frame_prepass =
             rstd::Some(rstd::mut_ref<PrePass>::from_raw_parts(rstd::addressof(prepass)));
         frame_finpass =

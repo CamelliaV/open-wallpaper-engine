@@ -36,6 +36,7 @@ public:
 
     bool             setResultRequest(rstd::Option<TextureRequest>,
                                       rstd::Option<TextureRequest> msaa_request = rstd::None());
+    void             resetResourceUses();
     void             declareResources(ResourceDeclarationContext&) override;
     PassResourceUses resourceUses() const override;
     bool             prepareResourceStates(

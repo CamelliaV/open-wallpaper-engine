@@ -35,8 +35,13 @@ bool FinPass::setResultRequest(rstd::Option<TextureRequest> request) {
     return SetTextureRequestIfChanged(m_desc.result_request, std::move(request));
 }
 
+void FinPass::resetResourceUses() {
+    m_desc.result_use   = rstd::None();
+    m_desc.external_use = rstd::None();
+}
+
 void FinPass::declareResources(ResourceDeclarationContext& context) {
-    m_desc.result_use = rstd::None();
+    resetResourceUses();
     if (m_desc.result_request.is_some()) {
         m_desc.result_use = rstd::Some(
             context.AddTexture(m_desc.result_request->clone(), resource::ResourceAccess::Read));

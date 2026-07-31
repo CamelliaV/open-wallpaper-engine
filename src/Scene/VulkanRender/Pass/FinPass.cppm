@@ -33,6 +33,7 @@ public:
                          rstd::mut_ref<rstd::dyn<resource_registry::ExternalResourcePreparer>>,
                          const DeviceCapabilities&, rstd::uint32_t graphics_queue_family);
     bool setResultRequest(rstd::Option<TextureRequest>);
+    void resetResourceUses();
     void declareResources(ResourceDeclarationContext&) override;
     PassResourceUses                          resourceUses() const override;
     std::vector<PassTextureRequestDiagnostic> textureRequestDiagnostics() const override;

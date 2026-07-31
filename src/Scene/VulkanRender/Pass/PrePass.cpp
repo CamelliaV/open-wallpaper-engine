@@ -24,11 +24,15 @@ bool PrePass::setResultRequest(rstd::Option<TextureRequest> request,
     return changed;
 }
 
-void PrePass::declareResources(ResourceDeclarationContext& context) {
+void PrePass::resetResourceUses() {
     m_desc.result_use      = rstd::None();
     m_desc.result_msaa_use = rstd::None();
     m_desc.render_pass_use = rstd::None();
     m_desc.framebuffer_use = rstd::None();
+}
+
+void PrePass::declareResources(ResourceDeclarationContext& context) {
+    resetResourceUses();
 
     if (m_desc.result_request.is_some()) {
         m_desc.result_use = rstd::Some(

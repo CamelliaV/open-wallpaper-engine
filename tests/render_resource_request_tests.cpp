@@ -865,6 +865,53 @@ TEST(FramePassResources, DeclaresTargetUsesOutsideTheRenderGraphPlan) {
     EXPECT_EQ(fin_diagnostics[0].use->index, rstd::u64(7));
 }
 
+TEST(FramePassResources, ClearsStaleUsesBeforeFramePassInjection) {
+    owe::SceneRenderTarget render_target {
+        .width        = 1920,
+        .height       = 1080,
+        .sample_count = 4,
+    };
+    auto target = owe::vulkan::MakeRenderTargetTextureRequest("_rt_default", render_target);
+    auto msaa   = owe::vulkan::MakeMsaaTextureRequest(
+        "_rt_default::msaa4", render_target, VK_SAMPLE_COUNT_4_BIT);
+    owe::resource::ResourcePlan plan { .generation = rstd::u64(7) };
+    plan.textures.push(owe::resource::TexturePlanEntry {
+        .handle =
+            owe::resource::TextureUseHandle { .index = rstd::u64(4), .generation = rstd::u64(7) },
+        .request = owe::vulkan::MakeImportedTextureRequest("particle/fog/fog1"),
+    });
+
+    owe::vulkan::ShaderReflectionCache shader_cache;
+    owe::vulkan::PrePass               pre(owe::vulkan::PrePass::Desc {
+        .result_request      = rstd::Some(target.clone()),
+        .result_msaa_request = rstd::Some(rstd::move(msaa)),
+    });
+    owe::vulkan::FinPass               fin(owe::vulkan::FinPass::Desc {
+        .result_request = rstd::Some(target.clone()),
+    });
+    {
+        owe::vulkan::ResourceDeclarationContext declarations(plan, shader_cache);
+        pre.declareResources(declarations);
+        fin.declareResources(declarations);
+    }
+    ASSERT_TRUE(pre.textureRequestDiagnostics()[0].use.is_some());
+    ASSERT_TRUE(fin.textureRequestDiagnostics()[0].use.is_some());
+
+    owe::vulkan::RenderProgram program;
+    program.injectFramePasses(pre, fin);
+
+    auto pre_diagnostics = pre.textureRequestDiagnostics();
+    auto fin_diagnostics = fin.textureRequestDiagnostics();
+    ASSERT_EQ(pre_diagnostics.size(), 2u);
+    ASSERT_EQ(fin_diagnostics.size(), 1u);
+    EXPECT_TRUE(pre_diagnostics[0].use.is_none());
+    EXPECT_TRUE(pre_diagnostics[1].use.is_none());
+    EXPECT_TRUE(fin_diagnostics[0].use.is_none());
+    EXPECT_TRUE(pre_diagnostics[0].request.is_some());
+    EXPECT_TRUE(pre_diagnostics[1].request.is_some());
+    EXPECT_TRUE(fin_diagnostics[0].request.is_some());
+}
+
 TEST(CustomShaderPass, RefreshesImportedTextureOnStableUse) {
     owe::Scene scene;
     scene.RootMut()->ID() = rstd::i32(1);
