@@ -173,7 +173,9 @@ void ParseImageObjImpl(SceneParseContext& context, wpscene::ImageObject& img_obj
     spImgNode->SetBaseColor(Vector3f(wpimgobj.color.data()), wpimgobj.alpha);
     spImgNode->ID()          = i32(wpimgobj.id);
     const auto image_node_id = context.scene->RegisterNode(
-        *spImgNode, Some(WallpaperLayerId { .value = i32(wpimgobj.id) }));
+        *spImgNode,
+        wpimgobj.id >= 0 ? Some(WallpaperLayerId { .value = i32(wpimgobj.id) })
+                         : None<WallpaperLayerId>());
     if (! wpimgobj.visible_user.empty())
         spImgNode->SetVisibleUserBinding(ToSceneUserVisibilityBinding(wpimgobj.visible_user));
     Vec<SceneMaterial*> image_property_materials;

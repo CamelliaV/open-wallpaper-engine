@@ -1799,13 +1799,17 @@ bool Scene::SetNodeVisible(SceneNode& node, bool visible) {
     auto       wallpaper            = node.WallpaperIdentity();
     const i32  id                   = wallpaper.is_some() ? wallpaper->value : i32(-1);
     const bool was_elidable         = id >= i32() && m_elidable_layer_ids.contains(id);
+    const bool visibility_changed   = node.Visible() != visible;
     const bool publishes_output     = node.HasLayer() && node.Layer()->PublishesOutput();
     node.m_visibility_affects_alpha = ! publishes_output;
     node.SetVisible(visible);
     if (publishes_output) {
         node.Layer()->SetVisibleOutputEnabled(visible);
     }
-    if (id < i32()) return false;
+    if (id < i32()) {
+        if (visibility_changed) m_render_graph_dirty = true;
+        return visibility_changed;
+    }
 
     if (! visible) {
         MarkLayerVisibilityElidable(WallpaperLayerId { .value = id });

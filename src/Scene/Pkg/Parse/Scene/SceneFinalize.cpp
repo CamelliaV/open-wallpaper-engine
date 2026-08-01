@@ -183,14 +183,12 @@ void FinalizeUniformSources(SceneParseContext& context) {
             auto particle_runtime    = context.particle_runtime.is_some()
                                            ? Some((*context.particle_runtime).clone())
                                            : None<Arc<ParticleRuntime>>();
-            auto next_id             = context.next_dynamic_layer_id;
             auto scene_ptr           = rstd::addressof(scene);
             (**scripts).runtime().SetLayerFactory(script::JsRuntime::LayerFactory::make(
                 [scene_ptr,
-                 image_prototypes    = rstd::move(image_prototypes),
-                 particle_prototypes = rstd::move(particle_prototypes),
-                 particle_runtime    = rstd::move(particle_runtime),
-                 next_id,
+                 image_prototypes     = rstd::move(image_prototypes),
+                 particle_prototypes  = rstd::move(particle_prototypes),
+                 particle_runtime     = rstd::move(particle_runtime),
                  shader_cache         = context.shader_cache.clone(),
                  shader_environment   = context.shader_environment,
                  global_base_uniforms = context.global_base_uniforms,
@@ -205,7 +203,7 @@ void FinalizeUniformSources(SceneParseContext& context) {
 
                     if (auto prototype = image_prototypes.get(asset); prototype.is_some()) {
                         auto node =
-                            CloneRegisteredNode((**prototype).node.deref(), asset, i32(next_id--));
+                            CloneRegisteredNode(*scene_ptr, (**prototype).node.deref(), asset);
                         scene_ptr->AttachRuntimeNode(*parent, node.clone());
                         if (! RegisterUniformNodeSources(*scene_ptr,
                                                          uniform_state,
@@ -228,7 +226,7 @@ void FinalizeUniformSources(SceneParseContext& context) {
                     }
 
                     auto particle    = (**prototype).Clone();
-                    particle.id      = next_id--;
+                    particle.id      = -1;
                     particle.name    = rstd::cppstd::to_string(asset);
                     particle.origin  = { 0.0f, 0.0f, 0.0f };
                     particle.scale   = { 1.0f, 1.0f, 1.0f };
@@ -248,6 +246,7 @@ void FinalizeUniformSources(SceneParseContext& context) {
                     auto parsed = BuildParticleObject(particle_services, particle);
                     if (parsed.root.is_none()) return None();
                     auto node = rstd::move(*parsed.root);
+                    scene_ptr->RegisterNode(*node);
                     scene_ptr->AttachRuntimeNode(*parent, node.clone());
                     for (auto& entry : parsed.uniform_configs) {
                         (void)RegisterUniformNodeSources(

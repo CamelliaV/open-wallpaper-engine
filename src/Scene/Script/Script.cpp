@@ -2646,7 +2646,10 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc
         fs->m_impl->clone_queue.erase(fs->m_impl->clone_queue.begin());
     }
     if (! node) return JS_ThrowReferenceError(ctx, "createLayer asset is unavailable");
-    node->SetVisible(true);
+    if (host->scene)
+        (void)host->scene->SetNodeVisible(*node, true);
+    else
+        node->SetVisible(true);
     node->Play();
     if (argc > 0 && JS_IsObject(argv[0])) {
         JSValue perspective = JS_GetPropertyStr(ctx, argv[0], "perspective");
@@ -2659,10 +2662,13 @@ JSValue NodeSceneCreateLayer(JSContext* ctx, JSValueConst /*this_val*/, int argc
 JSValue NodeSceneDestroyLayer(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     if (argc < 1) return JS_UNDEFINED;
     if (auto* n = GetLayerNode(argv[0])) {
-        n->SetVisible(false);
-        n->Stop();
         auto* host = static_cast<EngineHostState*>(JS_GetContextOpaque(ctx));
-        auto* fs   = host ? host->active_field_script : nullptr;
+        if (host && host->scene)
+            (void)host->scene->SetNodeVisible(*n, false);
+        else
+            n->SetVisible(false);
+        n->Stop();
+        auto* fs = host ? host->active_field_script : nullptr;
         if (fs) {
             auto key_it = fs->m_impl->clone_asset_keys.find(n);
             if (key_it != fs->m_impl->clone_asset_keys.end()) {

@@ -26,6 +26,12 @@ auto owe::FindUniformConfig(const SceneParseContext& context, const SceneNode& n
     return nullptr;
 }
 
+auto owe::SceneParseContext::NextSyntheticObjectId() -> i32 {
+    auto id                  = next_synthetic_object_id;
+    next_synthetic_object_id = next_synthetic_object_id.checked_sub(i32(1)).unwrap();
+    return id;
+}
+
 void owe::RegisterNodeRef(SceneParseContext& context, std::int32_t id,
                           SceneParseContext::NodeRef node) {
     if (node.node.is_some()) {

@@ -53,12 +53,11 @@ Option<array<float, 2>> ResolveImageAssetSize(SceneParseContext& context, ref<st
     return Some(array<float, 2> { width, height });
 }
 
-Arc<SceneNode> CloneRegisteredNode(ref<SceneNode> source, ref<str> asset, i32 id) {
-    auto node  = Arc<SceneNode>::make(Eigen::Vector3f::Zero(),
-                                      Eigen::Vector3f::Ones(),
-                                      Eigen::Vector3f::Zero(),
-                                      rstd::cppstd::to_string(asset));
-    node->ID() = id;
+Arc<SceneNode> CloneRegisteredNode(Scene& scene, ref<SceneNode> source, ref<str> asset) {
+    auto node = Arc<SceneNode>::make(Eigen::Vector3f::Zero(),
+                                     Eigen::Vector3f::Ones(),
+                                     Eigen::Vector3f::Zero(),
+                                     rstd::cppstd::to_string(asset));
     node->SetSize(source->Size());
     node->SetGeometryTransform(source->GeometryTransform());
     node->SetPerspective(source->Perspective());
@@ -67,6 +66,7 @@ Arc<SceneNode> CloneRegisteredNode(ref<SceneNode> source, ref<str> asset, i32 id
     node->TexAnim() = source->TexAnim();
     if (! source->Camera().empty()) node->SetCamera(source->Camera());
     if (source->MeshShared()) node->AddMesh(source->MeshShared()->CloneInstance());
+    scene.RegisterNode(*node);
     return node;
 }
 
@@ -77,12 +77,13 @@ void ResolveRegisteredAsset(SceneParseContext& context, ref<str> asset) {
         if (size.is_none()) return;
 
         wpscene::ImageObject image;
-        image.id = context.next_dynamic_layer_id--;
+        image.id = context.NextSyntheticObjectId().to_primitive();
         if (! image.FromAsset(asset, *size, *context.vfs, context.pkg_version)) return;
         ParseImageObj(context, image);
         auto parsed = context.node_id_map.get(image.id);
         if (parsed.is_none() || (**parsed).node.is_none()) return;
         auto node   = (*(**parsed).node).clone();
+        node->ID()  = i32(-1);
         auto config = FindUniformConfig(context, *node);
         if (config == nullptr) return;
         node->SetVisible(false);
@@ -93,13 +94,14 @@ void ResolveRegisteredAsset(SceneParseContext& context, ref<str> asset) {
     } else if (AssetEndsWith(asset, ".mdl"_str)) {
         if (context.dynamic_model_prototypes.contains_key(asset)) return;
         wpscene::ModelObject model;
-        model.id    = context.next_dynamic_layer_id--;
+        model.id    = context.NextSyntheticObjectId().to_primitive();
         model.name  = rstd::cppstd::to_string(asset);
         model.model = model.name;
         ParseModelObj(context, model);
         auto parsed = context.node_id_map.get(model.id);
         if (parsed.is_none() || (**parsed).node.is_none()) return;
-        auto node = (*(**parsed).node).clone();
+        auto node  = (*(**parsed).node).clone();
+        node->ID() = i32(-1);
         node->SetVisible(false);
         (void)context.dynamic_model_prototypes.insert(String::make(asset), rstd::move(node));
         (void)context.node_id_map.remove(model.id);
@@ -133,15 +135,14 @@ Option<Arc<SceneNode>> InstantiateRegisteredAsset(SceneParseContext& context, Sc
     if (AssetEndsWith(asset, ".json"_str) && asset.starts_with("models/"_str)) {
         auto prototype = context.dynamic_image_prototypes.get(asset);
         if (prototype.is_none()) return None();
-        auto node = CloneRegisteredNode(
-            (**prototype).node.deref(), asset, i32(context.next_dynamic_layer_id--));
+        auto node = CloneRegisteredNode(*context.scene, (**prototype).node.deref(), asset);
         SetUniformConfig(context, node, (**prototype).uniform_config.Clone());
         return attach(rstd::move(node));
     } else if (AssetEndsWith(asset, ".mdl"_str)) {
         auto prototype = context.dynamic_model_prototypes.get(asset);
         if (prototype.is_none()) return None();
         auto source = (**prototype).deref();
-        auto node   = CloneRegisteredNode(source, asset, i32(context.next_dynamic_layer_id--));
+        auto node   = CloneRegisteredNode(*context.scene, source, asset);
         if (auto config = FindUniformConfig(context, *source); config != nullptr)
             SetUniformConfig(context, node, config->Clone());
         return attach(rstd::move(node));
@@ -149,7 +150,7 @@ Option<Arc<SceneNode>> InstantiateRegisteredAsset(SceneParseContext& context, Sc
         auto prototype = context.dynamic_particle_prototypes.get(asset);
         if (prototype.is_none()) return None();
         auto particle    = (**prototype).Clone();
-        particle.id      = context.next_dynamic_layer_id--;
+        particle.id      = context.NextSyntheticObjectId().to_primitive();
         particle.name    = rstd::cppstd::to_string(asset);
         particle.origin  = { 0.0f, 0.0f, 0.0f };
         particle.scale   = { 1.0f, 1.0f, 1.0f };
@@ -159,20 +160,22 @@ Option<Arc<SceneNode>> InstantiateRegisteredAsset(SceneParseContext& context, Sc
         ParseParticleObj(context, particle);
         auto parsed = context.node_id_map.get(particle.id);
         if (parsed.is_none() || (**parsed).node.is_none()) return None();
-        auto node = (*(**parsed).node).clone();
+        auto node  = (*(**parsed).node).clone();
+        node->ID() = i32(-1);
         (void)context.node_id_map.remove(particle.id);
         return attach(rstd::move(node));
     } else if (AssetEndsWith(asset, ".ogg"_str)) {
         if (! context.sound_manager) return None();
         wpscene::SoundObject sound;
-        sound.id          = context.next_dynamic_layer_id--;
+        sound.id          = context.NextSyntheticObjectId().to_primitive();
         sound.name        = rstd::cppstd::to_string(asset);
         sound.startsilent = false;
         sound.sound.push_back(sound.name);
         ParseSoundObj(context, sound, *context.sound_manager);
         auto parsed = context.node_id_map.get(sound.id);
         if (parsed.is_none() || (**parsed).node.is_none()) return None();
-        auto node = (*(**parsed).node).clone();
+        auto node  = (*(**parsed).node).clone();
+        node->ID() = i32(-1);
         (void)context.node_id_map.remove(sound.id);
         return attach(rstd::move(node));
     } else {
@@ -188,7 +191,8 @@ Option<Arc<SceneNode>> AttachCreatedLayer(SceneParseContext& context, SceneNode*
     SceneNode* parent =
         owner && owner->Parent() ? owner->Parent() : context.scene->RootMut().as_raw_ptr();
     for (auto& before : (**parsed).ordered_before_nodes) parent->AppendChild(before.clone());
-    auto node = (*(**parsed).node).clone();
+    auto node  = (*(**parsed).node).clone();
+    node->ID() = i32(-1);
     parent->AppendChild(node.clone());
     (void)context.node_id_map.remove(id);
     return Some(rstd::move(node));
@@ -196,7 +200,7 @@ Option<Arc<SceneNode>> AttachCreatedLayer(SceneParseContext& context, SceneNode*
 
 Option<Arc<SceneNode>> InstantiateLayerConfiguration(SceneParseContext& context, SceneNode* owner,
                                                      const Json& config) {
-    const std::int32_t id = context.next_dynamic_layer_id--;
+    const std::int32_t id = context.NextSyntheticObjectId().to_primitive();
 
     if (config.get("text"_str).is_some()) {
         wpscene::TextObject text;

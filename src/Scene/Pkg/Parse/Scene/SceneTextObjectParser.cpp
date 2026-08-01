@@ -525,8 +525,9 @@ void ParseTextObjImpl(SceneParseContext& context, wpscene::TextObject& obj) {
     const auto initial_geometry = text::ResolveTextGeometry(geometry_policy, layouter->Metrics());
     const auto [initial_layer_w, initial_layer_h] = TextLayerExtent(initial_geometry);
     auto&      scene                              = *context.scene;
-    const auto text_node_id =
-        scene.RegisterNode(*layer_node, Some(WallpaperLayerId { .value = i32(obj.id) }));
+    const auto text_node_id                       = scene.RegisterNode(
+        *layer_node,
+        obj.id >= 0 ? Some(WallpaperLayerId { .value = i32(obj.id) }) : None<WallpaperLayerId>());
     scene.RegisterNode(*sp_node);
     std::shared_ptr<TextRuntimeTargets> runtime_targets;
     if (direct_text) {

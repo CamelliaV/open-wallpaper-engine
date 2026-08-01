@@ -308,7 +308,7 @@ std::vector<owe::SceneNode*> SpawnLayerClones(SceneParseContext& context, SceneN
         if (! tmpl->Camera().empty()) clone->SetCamera(tmpl->Camera());
         clone->AddMesh(tmpl->MeshShared());
         clone->SetVisible(false);
-        clone->ID() = i32(-static_cast<std::int32_t>(i) - 1); // negative IDs reserved for clones
+        context.scene->RegisterNode(*clone);
         if (auto config = FindUniformConfig(context, *tmpl); config != nullptr)
             SetUniformConfig(context, clone, config->Clone());
         if (auto layer = LookupPuppetLayer(context.puppet_layers, tmpl); layer.is_some()) {

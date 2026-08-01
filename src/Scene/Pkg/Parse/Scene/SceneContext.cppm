@@ -158,7 +158,7 @@ struct SceneParseContext {
     HashMap<std::int32_t, Json>          initial_layer_configs;
 
     HashMap<std::int32_t, Vec<Arc<SceneNode>>> layer_clones;
-    std::int32_t                               next_dynamic_layer_id { -100000 };
+    i32                                        next_synthetic_object_id { -1 };
     Vec<owe::script::FieldScript*>             registered_asset_scripts;
     HashMap<String, Arc<SceneNode>>            dynamic_model_prototypes;
     struct DynamicImagePrototype {
@@ -176,6 +176,7 @@ struct SceneParseContext {
     bool                          scene_layer_text_writes { false };
 
     bool IsLinkedSource(std::int32_t id) const { return linked_source_ids.contains(id); }
+    auto NextSyntheticObjectId() -> i32;
 };
 
 void SetUniformConfig(SceneParseContext&, const Arc<SceneNode>&, UniformNodeConfigDraft);
@@ -238,7 +239,7 @@ struct ParticleObjectParseOutput {
 
 auto BuildParticleObject(ParticleObjectParseServices&, wpscene::ParticleObject&)
     -> ParticleObjectParseOutput;
-auto CloneRegisteredNode(ref<SceneNode>, ref<str>, i32) -> Arc<SceneNode>;
+auto CloneRegisteredNode(Scene&, ref<SceneNode>, ref<str>) -> Arc<SceneNode>;
 auto InstantiateRegisteredAsset(SceneParseContext&, SceneNode*, ref<str>) -> Option<Arc<SceneNode>>;
 auto InstantiateLayerConfiguration(SceneParseContext&, SceneNode*, const Json&)
     -> Option<Arc<SceneNode>>;

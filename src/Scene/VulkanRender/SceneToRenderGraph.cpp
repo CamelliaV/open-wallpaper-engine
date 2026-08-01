@@ -445,8 +445,9 @@ static bool CollectEmitSkipSubtrees(SceneNode* node, Scene& scene, const BTreeSe
                                                : (wallpaper.is_some() ? wallpaper->value : i32(-1));
     const bool linked  = link_source.is_some() && linked_ids.contains(link_source->value);
     const bool visibility_hidden_self =
-        layer_id >= i32() &&
-        scene.IsLayerVisibilityElidable(WallpaperLayerId { .value = layer_id }) && ! linked;
+        (! node->Visible() || (layer_id >= i32() && scene.IsLayerVisibilityElidable(
+                                                        WallpaperLayerId { .value = layer_id }))) &&
+        ! linked;
     const bool visibility_hidden = visibility_hidden_ancestor || visibility_hidden_self;
 
     bool all_children_skippable = true;

@@ -417,6 +417,53 @@ TEST(SceneParserSoundScript, UserPropertyCanStartSilentSoundFromVolumeField) {
     EXPECT_FLOAT_EQ(controller->Volume(), 0.35f);
 }
 
+TEST(SceneParserScript, DynamicObjectsUseSceneIdentity) {
+    auto document = owe::wpscene::ParseSceneDocumentJson(
+        R"JSON({
+            "camera": {},
+            "general": {},
+            "objects": [
+                {
+                    "id": 90,
+                    "name": "Controller",
+                    "visible": {
+                        "value": true,
+                        "script": "let created; export function init(value) { created = thisScene.createLayer({size: '2 2'}); created.visible = false; return value; } export function update(value) { return value; }"
+                    }
+                },
+                {"id": 7, "name": "Low"}
+            ]
+        })JSON",
+        owe::wpscene::kSceneVersionUnknown);
+    ASSERT_TRUE(document.has_value());
+
+    auto assets = owe::fs::make_physical_fs(owe::fs::ToPath(WAYWALLEN_ASSETS_DIR));
+    ASSERT_TRUE(assets.is_ok());
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.mount("/assets"_str, rstd::move(assets).unwrap_unchecked()).is_ok());
+
+    wavsen::audio::SoundManager sound_manager;
+    owe::SceneParser            parser;
+    auto                        parsed = parser.Parse(
+        "dynamic-object-id"_str,
+        ref<owe::wpscene::SceneDocument>::from_raw_parts(rstd::addressof(*document)),
+        mut_ref<owe::fs::VFS>::from_raw_parts(rstd::addressof(vfs)),
+        mut_ref<wavsen::audio::SoundManager>::from_raw_parts(rstd::addressof(sound_manager)));
+    ASSERT_TRUE(parsed.is_ok());
+
+    auto scene      = rstd::move(parsed).unwrap();
+    auto controller = scene.scene->RootMut()->FindByName("Controller");
+    auto dynamic    = scene.scene->RootMut()->FindByName("__createLayer");
+    ASSERT_NE(controller, nullptr);
+    ASSERT_NE(dynamic, nullptr);
+    EXPECT_TRUE(dynamic->Identity().Valid());
+    EXPECT_NE(dynamic->Identity().index, controller->Identity().index);
+    EXPECT_TRUE(dynamic->WallpaperIdentity().is_none());
+    EXPECT_EQ(dynamic->ID(), i32(-1));
+    EXPECT_FALSE(dynamic->Visible());
+    EXPECT_TRUE(scene.scene->ConsumeRenderGraphDirty());
+}
+
 TEST(SceneParserText, EmptyStaticTextPreservesLayerHierarchy) {
     auto document = owe::wpscene::ParseSceneDocumentJson(
         R"JSON({

@@ -446,7 +446,7 @@ TEST(SceneRenderGraph, ReadsPreviousThenCurrentLinkedSurfaceVersion) {
     EXPECT_TRUE(after_reads_current);
 }
 
-TEST(SceneRenderGraph, ElidesVisibilityHiddenSubtreeAndRestoresIt) {
+TEST(SceneRenderGraph, ElidesSceneOwnedVisibilityHiddenSubtreeAndRestoresIt) {
     owe::Scene scene;
     scene.SetOrtho({ rstd::i32(1920), rstd::i32(1080) });
     scene.RegisterRenderTarget(String::make("_rt_default"_str),
@@ -464,8 +464,9 @@ TEST(SceneRenderGraph, ElidesVisibilityHiddenSubtreeAndRestoresIt) {
     child->AddMesh(std::move(mesh));
     parent->AppendChild(child.clone());
     scene.RootMut()->AppendChild(parent.clone());
-    scene.RegisterNode(*parent, Some(owe::WallpaperLayerId { .value = rstd::i32(7) }));
+    scene.RegisterNode(*parent);
     scene.RegisterNode(*child, Some(owe::WallpaperLayerId { .value = rstd::i32(8) }));
+    EXPECT_TRUE(parent->WallpaperIdentity().is_none());
 
     EXPECT_TRUE(scene.SetNodeVisible(*parent, false));
     auto hidden_snapshot = owe::ExtractRenderSceneSnapshot(scene);
