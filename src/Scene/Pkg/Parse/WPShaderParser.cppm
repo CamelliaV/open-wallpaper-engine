@@ -68,8 +68,8 @@ struct WPPreprocessorInfo {
 };
 
 struct WPShaderTexInfo {
-    bool                enabled { false };
-    std::array<bool, 3> composEnabled { false, false, false };
+    bool           enabled { false };
+    array<bool, 4> composEnabled { false, false, false, false };
 };
 
 struct WPShaderUnit {

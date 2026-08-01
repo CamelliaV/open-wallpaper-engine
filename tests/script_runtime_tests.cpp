@@ -1487,6 +1487,35 @@ TEST(ScriptWEMath, SmoothStepCamelCaseAndAliases) {
               50.0 + 50.0 * 100 + 3142.0 * 10000 + 180.0 * 1e9);
 }
 
+TEST(ScriptModule, ImportedBindingInitializesTopLevelConstBeforeUpdate) {
+    JsRuntime   rt;
+    FrameInputs fi {};
+    rt.SetFrameInputs(fi);
+    auto* fs = rt.MakeFieldScript(
+        R"JS(
+            import * as WEColor from 'WEColor';
+            const colors = {
+                blue: WEColor.normalizeColor(new Vec3(110, 168, 255)),
+            };
+            export function update() {
+                return WEColor.expandColor(colors.blue).divide(255);
+            }
+        )JS",
+        "test/module_top_level_import_binding",
+        FieldKind::Vec3,
+        owe::MakeObject(),
+        owe::IntoJson("0.0 0.0 0.0"),
+        nullptr);
+    ASSERT_NE(fs, nullptr);
+
+    rt.TickAll();
+    ASSERT_TRUE(std::holds_alternative<Vec3Value>(fs->last_value()));
+    const auto& value = std::get<Vec3Value>(fs->last_value());
+    EXPECT_NEAR(value.x, 110.0 / 255.0, 0.0001);
+    EXPECT_NEAR(value.y, 168.0 / 255.0, 0.0001);
+    EXPECT_NEAR(value.z, 1.0, 0.0001);
+}
+
 TEST(ScriptWEVector, VectorAngle2UsesDegrees) {
     JsRuntime   rt;
     FrameInputs fi {};

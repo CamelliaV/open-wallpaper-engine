@@ -49,6 +49,9 @@ enum class WPLightUniformOutput : rstd::uint32_t
     Position,
     ColorLegacy,
     ColorRadius,
+    DirectionType,
+    ConeExponent,
+    CastShadow,
 };
 
 enum class WPColorUniformOutput : rstd::uint32_t

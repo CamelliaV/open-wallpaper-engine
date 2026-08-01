@@ -745,7 +745,7 @@ TEST(SceneMaterialShaderVariant, CarriesCompileDescriptorThroughMaterialMove) {
         owe::SceneSamplerBinding { .texture_slot = 0, .shader_member = "u_Albedo" });
     variant.texture_infos.push_back(owe::SceneShaderTextureCompileInfo {
         .enabled    = true,
-        .components = { true, false, true },
+        .components = { true, false, true, false },
     });
     variant.stages.push_back(owe::SceneShaderVariantStage {
         .stage      = owe::ShaderType::VERTEX,

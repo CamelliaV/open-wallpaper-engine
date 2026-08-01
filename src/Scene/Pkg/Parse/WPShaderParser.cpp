@@ -240,22 +240,63 @@ float4 mod(float4 a, float  b) { return a - b * floor(a / b); }
 #define texture(t, uv)             texSample2D((t), (uv))
 #define textureLod(t, uv, lod)     texSample2DLod((t), (uv), (lod))
 
-// WE injects PerformLighting_V1 from the active scene lights. Until that
-// injection is available, an empty light set must contribute no direct light;
-// the caller combines this result with the scene's ambient light.
-float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
-                          float3 specularTint, float3 f0, float roughness, float metallic) {
-    return float3(0.0, 0.0, 0.0);
-}
-float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
-                          float3 specularTint, float3 f0, float roughness, float metallic,
-                          float ao) {
-    return float3(0.0, 0.0, 0.0);
-}
-
 __SHADER_TAIL__
 __SHADER_PLACEHOLD__
 
+)";
+
+static constexpr const char* lighting_v1_source = R"(
+uniform vec3 g_LightsPosition[4];
+uniform vec4 g_LightsColorRadius[4];
+uniform vec4 g_LightsDirectionType[4];
+uniform vec4 g_LightsConeExponent[4];
+uniform float g_LightsCastShadow[4];
+
+float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
+                          float3 specularTint, float3 f0, float roughness, float metallic) {
+    float3 light = float3(0.0, 0.0, 0.0);
+    for (int i = 0; i < 4; ++i) {
+        float type = g_LightsDirectionType[i].w;
+        float3 color = g_LightsColorRadius[i].rgb;
+        float shadowFactor = 1.0;
+#if OWE_IMAGE_LAYER && SCENE_ORTHO
+        // Shadow-atlas rendering is not available yet. Suppress shadow-casting
+        // lights on 2D layers instead of leaking them across the whole quad.
+        shadowFactor = 1.0 - step(0.5, g_LightsCastShadow[i]);
+#endif
+        if (type < -0.5 || dot(color, color) <= 0.0)
+            continue;
+
+        if (type > 1.5) {
+            light += ComputePBRLightShadowInfinite(
+                normal, g_LightsDirectionType[i].xyz, viewVector, albedo, color,
+                specularTint, f0, roughness, metallic, shadowFactor);
+            continue;
+        }
+
+        float3 toLight = g_LightsPosition[i] - worldPos;
+        if (type > 0.5) {
+            float3 lightToSurface = -normalize(toLight);
+            float cone = smoothstep(g_LightsConeExponent[i].y,
+                                    g_LightsConeExponent[i].x,
+                                    dot(lightToSurface, g_LightsDirectionType[i].xyz));
+            color *= cone;
+        }
+        light += ComputePBRLightShadow(
+            normal, toLight, viewVector, albedo, color,
+            max(g_LightsColorRadius[i].w, 0.0001),
+            max(g_LightsConeExponent[i].z, 0.0), specularTint, f0,
+            roughness, metallic, shadowFactor);
+    }
+    return light;
+}
+
+float3 PerformLighting_V1(float3 worldPos, float3 albedo, float3 normal, float3 viewVector,
+                          float3 specularTint, float3 f0, float roughness, float metallic,
+                          float ao) {
+    return PerformLighting_V1(worldPos, albedo, normal, viewVector, specularTint, f0,
+                              roughness, metallic) * ao;
+}
 )";
 
 // VS/FS tail: stage I/O is plumbed by the Finalprocessor synthesizer. It
@@ -683,11 +724,16 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         for (; ! w.Done(); w.Step()) {
             shader_lex::Cursor c(source);
             c.SeekTo(w.LineStart());
-            auto saved = c.Save();
             if (c.MatchHashDirective("require"_str)) {
+                c.SkipHSpace();
+                auto requirement = c.ReadIdent();
+                if (requirement.is_some() && *requirement == "LightingV1"_str) {
+                    out.append(lighting_v1_source);
+                    if (w.LineEnd().to_primitive() < with_prologue.size()) out.push_back('\n');
+                    continue;
+                }
                 out.append("//");
             }
-            c.Restore(saved);
             out.append(with_prologue,
                        w.LineStart().to_primitive(),
                        (w.LineEnd() - w.LineStart()).to_primitive());
@@ -1440,7 +1486,7 @@ using ShaderCacheDigest = std::array<std::uint8_t, 20>;
 
 constexpr std::array<std::uint8_t, 8> kShaderCacheMagic { 'O', 'W', 'E', 'S', 'P', 'V', '3', 0 };
 constexpr std::uint32_t               kShaderCacheFormatVersion = 3;
-constexpr std::uint32_t               kShaderCacheAbiVersion    = 5;
+constexpr std::uint32_t               kShaderCacheAbiVersion    = 9;
 // 8-byte magic, six u32 fields, and four SHA-1 digests total 112 bytes.
 constexpr std::uint32_t kShaderCacheHeaderSize = static_cast<std::uint32_t>(
     kShaderCacheMagic.size() + 6 * sizeof(std::uint32_t) + 4 * ShaderCacheDigest {}.size());
@@ -1944,8 +1990,8 @@ Option<String> MakeShaderSourceCacheKey(const std::string&                  sour
     key.U32(u32(texinfos.size()).to_primitive());
     for (const auto& texinfo : texinfos) {
         u32 bits { texinfo.enabled ? 1u : 0u };
-        for (std::size_t index = 0; index < texinfo.composEnabled.size(); ++index) {
-            if (texinfo.composEnabled[index]) bits |= u32(1u << (index + 1));
+        for (usize index {}; index < texinfo.composEnabled.len(); ++index) {
+            if (texinfo.composEnabled[index]) bits |= u32(1u << (index.to_primitive() + 1));
         }
         key.U32(bits.to_primitive());
     }
@@ -2428,18 +2474,14 @@ namespace
 WPShaderTexInfo ToWPShaderTexInfo(const SceneShaderTextureCompileInfo& info) {
     return WPShaderTexInfo {
         .enabled       = info.enabled,
-        .composEnabled = std::array<bool, 3> { info.components[usize(0)],
-                                               info.components[usize(1)],
-                                               info.components[usize(2)] },
+        .composEnabled = info.components,
     };
 }
 
 SceneShaderTextureCompileInfo ToSceneShaderTextureCompileInfo(const WPShaderTexInfo& info) {
     return SceneShaderTextureCompileInfo {
         .enabled    = info.enabled,
-        .components = rstd::array<bool, 3> { info.composEnabled[0],
-                                             info.composEnabled[1],
-                                             info.composEnabled[2] },
+        .components = info.composEnabled,
     };
 }
 
@@ -2728,13 +2770,13 @@ CompileMaterialShaderResult WPShaderParser::CompileMaterialShader(const Json&   
     }
 
     // Texture info: enabled flag from non-empty material.textures.
-    // composEnabled[3] would normally come from each .tex header
-    // (extraHeader.compoN). Skipping the header parse keeps this entry
-    // path lightweight; sprite-sheet / packed-channel materials may
-    // accordingly compile a different variant than the production path.
+    // Component flags normally come from each .tex header. Skipping the
+    // header parse keeps this entry path lightweight; sprite-sheet /
+    // packed-channel materials may accordingly compile a different variant
+    // than the production path.
     r.tex_info.reserve(mat.textures.size());
     for (const auto& t : mat.textures) {
-        r.tex_info.push_back({ ! t.empty(), { false, false, false } });
+        r.tex_info.push_back({ ! t.empty() });
     }
 
     // Combos: material's int combos -> string, then override wins.

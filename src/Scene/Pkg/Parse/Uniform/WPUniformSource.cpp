@@ -654,10 +654,16 @@ auto WPColorUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
 auto WPLightUniformSource::Describe(mut_ref<dyn<UniformBindingSink>> sink) const
     -> Result<empty, UniformError> {
     using Output = WPLightUniformOutput;
-    const rstd::array<BindingEntry<Output>, 3> entries {
+    const rstd::array<BindingEntry<Output>, 6> entries {
         BindingEntry<Output> { Output::Position, G_LP, UniformValueShape::Float(u32(12)) },
         BindingEntry<Output> { Output::ColorLegacy, G_LCP, UniformValueShape::Float(u32(12)) },
         BindingEntry<Output> { Output::ColorRadius, G_LCR, UniformValueShape::Float(u32(16)) },
+        BindingEntry<Output> {
+            Output::DirectionType, G_LIGHTDIRECTIONTYPE, UniformValueShape::Float(u32(16)) },
+        BindingEntry<Output> {
+            Output::ConeExponent, G_LIGHTCONEEXPONENT, UniformValueShape::Float(u32(16)) },
+        BindingEntry<Output> {
+            Output::CastShadow, G_LIGHTCASTSHADOW, UniformValueShape::Float(u32(4)) },
     };
     return BindEntries(sink, entries);
 }
@@ -675,19 +681,41 @@ auto WPLightUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
     rstd::array<float, 12> positions {};
     rstd::array<float, 16> colors_radius {};
     rstd::array<float, 12> colors_legacy {};
+    rstd::array<float, 16> directions_type {};
+    rstd::array<float, 16> cones_exponent {};
+    rstd::array<float, 4>  cast_shadow {};
+    for (usize index {}; index < max_lights; ++index)
+        directions_type[index * usize(4) + usize(3)] = -1.0f;
     for (usize index {}; index < rstd::cmp::min(max_lights, m_lights.len()); ++index) {
         const auto& light = *m_lights[index];
         if (light.node() == nullptr || ! light.runtimeVisible()) continue;
-        const auto position                        = light.node()->Translate();
+        auto& node = *light.node();
+        node.UpdateTrans();
+        const auto transform = node.ModelTrans();
+        const auto position  = transform.block<3, 1>(0, 3).cast<float>();
+        auto       color     = light.color();
+        if (node.IsColorOverridden()) color = node.Color() * light.desc().intensity;
         positions[index * usize(3)]                = position.x();
         positions[index * usize(3) + usize(1)]     = position.y();
         positions[index * usize(3) + usize(2)]     = position.z();
-        colors_radius[index * usize(4)]            = light.color().x();
-        colors_radius[index * usize(4) + usize(1)] = light.color().y();
-        colors_radius[index * usize(4) + usize(2)] = light.color().z();
+        colors_radius[index * usize(4)]            = color.x();
+        colors_radius[index * usize(4) + usize(1)] = color.y();
+        colors_radius[index * usize(4) + usize(2)] = color.z();
         colors_radius[index * usize(4) + usize(3)] = light.radius();
+        Eigen::Vector3d local_direction            = Eigen::Vector3d::UnitX();
+        if (light.type() != SceneLightType::Spot) local_direction = -local_direction;
+        const auto direction =
+            (transform.block<3, 3>(0, 0) * local_direction).normalized().cast<float>();
+        directions_type[index * usize(4)]            = direction.x();
+        directions_type[index * usize(4) + usize(1)] = direction.y();
+        directions_type[index * usize(4) + usize(2)] = direction.z();
+        directions_type[index * usize(4) + usize(3)] = static_cast<float>(light.type());
+        cones_exponent[index * usize(4)]             = light.desc().inner_cone_cos;
+        cones_exponent[index * usize(4) + usize(1)]  = light.desc().outer_cone_cos;
+        cones_exponent[index * usize(4) + usize(2)]  = light.desc().exponent;
+        cast_shadow[index]                           = light.desc().cast_shadow ? 1.0f : 0.0f;
         if (index < usize(3)) {
-            const auto premultiplied = light.premultipliedColor();
+            const auto premultiplied = color * light.radius() * light.radius();
             for (usize component {}; component < usize(3); ++component) {
                 colors_legacy[index * usize(4) + component] =
                     premultiplied[component.to_primitive()];
@@ -697,6 +725,9 @@ auto WPLightUniformSource::Evaluate(ref<dyn<UniformUpdateContext>>,
     writer.Write(Output::Position, positions);
     writer.Write(Output::ColorLegacy, colors_legacy);
     writer.Write(Output::ColorRadius, colors_radius);
+    writer.Write(Output::DirectionType, directions_type);
+    writer.Write(Output::ConeExponent, cones_exponent);
+    writer.Write(Output::CastShadow, cast_shadow);
     return writer.Finish();
 }
 

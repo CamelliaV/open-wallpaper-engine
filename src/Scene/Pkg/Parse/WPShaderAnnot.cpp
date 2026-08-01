@@ -168,9 +168,10 @@ void HandleUniformLine(WPShaderInfo* info, std::span<const WPShaderTexInfo> texi
         }
         if (has_texture && texinfos[texture_index].enabled) {
             auto&       compos = texinfos[texture_index].composEnabled;
-            std::size_t num    = std::min(std::size(compos), wput.components.len().to_primitive());
+            std::size_t num =
+                std::min(compos.len().to_primitive(), wput.components.len().to_primitive());
             for (std::size_t i = 0; i < num; i++) {
-                if (compos[i]) {
+                if (compos[usize(i)]) {
                     auto& combo = wput.components[usize(i)].combo;
                     info->combos[rstd::cppstd::to_string(combo.as_str())] = "1";
                 }

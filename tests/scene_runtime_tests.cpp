@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 import eigen;
 import rstd;
 import rstd.cppstd;
@@ -239,6 +241,51 @@ TEST(WPLightUniformSource, ExposesLogicalVec3Array) {
     auto            value = scene_test::Capture(frame, source, owe::WPLightUniformOutput::Position);
     ASSERT_EQ(value.size(), usize(12));
     for (usize index {}; index < value.size(); ++index) EXPECT_FLOAT_EQ(value[index], 0.0f);
+}
+
+TEST(WPLightUniformSource, PublishesWorldDirectionAndType) {
+    auto parent = Arc<owe::SceneNode>::make();
+    parent->SetTranslate({ 10.0f, 20.0f, 30.0f });
+    parent->SetRotation({ 0.0f, 0.0f, -0.25f });
+    auto node = Arc<owe::SceneNode>::make();
+    node->SetTranslate({ 2.0f, 0.0f, 0.0f });
+    parent->AppendChild(node.clone());
+
+    owe::SceneLight::Desc desc;
+    desc.type        = owe::SceneLightType::Directional;
+    desc.color       = { 0.25f, 0.5f, 1.0f };
+    desc.intensity   = 2.0f;
+    desc.cast_shadow = true;
+    owe::SceneLight light(desc);
+    light.setNode(node.as_ptr());
+
+    auto lights = Vec<ref<owe::SceneLight>>::make();
+    lights.push(ref<owe::SceneLight>::from_raw_parts(rstd::addressof(light)));
+    owe::WPLightUniformSource source(rstd::move(lights));
+    owe::SceneFrame           frame;
+
+    auto position = scene_test::Capture(frame, source, owe::WPLightUniformOutput::Position);
+    ASSERT_EQ(position.size(), usize(12));
+    EXPECT_NEAR(position[usize()], 10.0f + 2.0f * std::cos(0.25f), 1e-5f);
+    EXPECT_NEAR(position[usize(1)], 20.0f - 2.0f * std::sin(0.25f), 1e-5f);
+    EXPECT_NEAR(position[usize(2)], 30.0f, 1e-5f);
+
+    auto direction = scene_test::Capture(frame, source, owe::WPLightUniformOutput::DirectionType);
+    ASSERT_EQ(direction.size(), usize(16));
+    EXPECT_NEAR(direction[usize()], -std::cos(0.25f), 1e-5f);
+    EXPECT_NEAR(direction[usize(1)], std::sin(0.25f), 1e-5f);
+    EXPECT_NEAR(direction[usize(2)], 0.0f, 1e-5f);
+    EXPECT_FLOAT_EQ(direction[usize(3)], static_cast<float>(owe::SceneLightType::Directional));
+
+    auto color = scene_test::Capture(frame, source, owe::WPLightUniformOutput::ColorRadius);
+    ASSERT_EQ(color.size(), usize(16));
+    EXPECT_FLOAT_EQ(color[usize()], 0.5f);
+    EXPECT_FLOAT_EQ(color[usize(1)], 1.0f);
+    EXPECT_FLOAT_EQ(color[usize(2)], 2.0f);
+
+    auto cast_shadow = scene_test::Capture(frame, source, owe::WPLightUniformOutput::CastShadow);
+    ASSERT_EQ(cast_shadow.size(), usize(4));
+    EXPECT_FLOAT_EQ(cast_shadow[usize()], 1.0f);
 }
 
 TEST(WPTextureUniformSource, StaticTextureUsesIdentityTransform) {

@@ -67,6 +67,26 @@ void main(){}
     EXPECT_EQ(info.combos.at("MASK"), "1");
 }
 
+TEST(WPShaderParser, FourthPackedTextureComponentSetsItsCombo) {
+    const std::string            src = R"(
+uniform sampler2D g_Texture2; // {"components":[{"combo":"METALLIC_MAP"},{"combo":"ROUGHNESS_MAP"},{"combo":"REFLECTION_MAP"},{"combo":"EMISSIVE_MAP"}]}
+void main(){}
+)";
+    WPShaderInfo                 info {};
+    std::vector<WPShaderTexInfo> texs(3);
+    texs[2] = WPShaderTexInfo {
+        .enabled       = true,
+        .composEnabled = { false, false, false, true },
+    };
+
+    ParseWPShader(src, &info, texs);
+
+    EXPECT_FALSE(info.combos.contains("METALLIC_MAP"));
+    EXPECT_FALSE(info.combos.contains("ROUGHNESS_MAP"));
+    EXPECT_FALSE(info.combos.contains("REFLECTION_MAP"));
+    EXPECT_EQ(info.combos.at("EMISSIVE_MAP"), "1");
+}
+
 TEST(WPShaderParser, ComboLineCollectedRegardlessOfIfdef) {
     const std::string src  = R"(
 #if 0
@@ -381,6 +401,65 @@ TEST(WPShaderParser, CompileSceneShaderVariantRejectsInvalidDescriptor) {
     EXPECT_FALSE(result.ok);
     EXPECT_FALSE(result.shader);
     EXPECT_FALSE(result.error.empty());
+}
+
+TEST(WPShaderParser, LightingRequirementInjectsSceneLightInterface) {
+    owe::SceneShaderVariantDesc desc;
+    desc.scene_id                        = "lighting-v1-interface-test";
+    desc.shader_name                     = "lighting-v1-interface-test";
+    desc.input_combos["SCENE_ORTHO"]     = "1";
+    desc.input_combos["OWE_IMAGE_LAYER"] = "1";
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::VERTEX,
+        .source_key = "/assets/shaders/lighting-v1-interface-test.vert",
+        .source     = R"(
+attribute vec3 a_Position;
+varying vec3 v_WorldPos;
+void main() {
+    v_WorldPos = a_Position;
+    gl_Position = vec4(a_Position, 1.0);
+}
+)",
+    });
+    desc.stages.push_back(owe::SceneShaderVariantStage {
+        .stage      = owe::ShaderType::FRAGMENT,
+        .source_key = "/assets/shaders/lighting-v1-interface-test.frag",
+        .source     = R"(
+varying vec3 v_WorldPos;
+vec3 ComputePBRLightShadow(vec3 N, vec3 L, vec3 V, vec3 albedo, vec3 lightColor,
+    float radius, float exponent, vec3 specularTint, vec3 baseReflectance,
+    float roughness, float metallic, float shadowFactor) {
+    return lightColor;
+}
+vec3 ComputePBRLightShadowInfinite(vec3 N, vec3 L, vec3 V, vec3 albedo,
+    vec3 lightColor, vec3 specularTint, vec3 baseReflectance, float roughness,
+    float metallic, float shadowFactor) {
+    return lightColor;
+}
+#require LightingV1
+void main() {
+    vec3 light = PerformLighting_V1(v_WorldPos, vec3(1.0), vec3(0.0, 1.0, 0.0),
+        vec3(0.0, 0.0, 1.0), vec3(1.0), vec3(0.04), 0.5, 0.0);
+    gl_FragColor = vec4(light, 1.0);
+}
+)",
+    });
+
+    owe::fs::VFS vfs;
+    const auto   result = owe::WPShaderParser::CompileSceneShaderVariant(desc, vfs);
+
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_TRUE(result.shader);
+    std::vector<owe::vulkan::Uni_ShaderSpv> spvs;
+    owe::vulkan::ShaderReflected            reflected;
+    ASSERT_TRUE(owe::vulkan::GenReflect(result.shader->codes, spvs, reflected));
+    ASSERT_EQ(reflected.blocks.size(), 1u);
+    const auto& members = reflected.blocks.front().member_map;
+    EXPECT_TRUE(members.contains("g_LightsPosition"));
+    EXPECT_TRUE(members.contains("g_LightsColorRadius"));
+    EXPECT_TRUE(members.contains("g_LightsDirectionType"));
+    EXPECT_TRUE(members.contains("g_LightsConeExponent"));
+    EXPECT_TRUE(members.contains("g_LightsCastShadow"));
 }
 
 TEST(WPShaderParser, CompileSceneShaderVariantAcceptsPackedAudioSpectrumAccess) {
@@ -726,7 +805,7 @@ void main() {
                (static_cast<std::uint32_t>(header[offset + 3]) << 24);
     };
     EXPECT_EQ(read_u32(8), 3u);
-    EXPECT_EQ(read_u32(12), 5u);
+    EXPECT_EQ(read_u32(12), 9u);
     EXPECT_EQ(read_u32(16), 112u);
     EXPECT_EQ(read_u32(24), 2u);
     const auto initial_write_time = std::filesystem::last_write_time(artifact_path);

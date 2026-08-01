@@ -96,7 +96,7 @@ inline usize SceneShaderCodeHash(const SceneShader& shader) {
 
 struct SceneShaderTextureCompileInfo {
     bool                 enabled { false };
-    rstd::array<bool, 3> components { false, false, false };
+    rstd::array<bool, 4> components { false, false, false, false };
 };
 
 struct SceneShaderVariantStage {

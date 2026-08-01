@@ -84,12 +84,14 @@ inline constexpr ref<str> WE_CB_GS_ENABLED           = "GS_ENABLED"_str;
 inline constexpr ref<str> WE_CB_LIGHTING             = "LIGHTING"_str;
 inline constexpr ref<str> WE_CB_REFLECTION           = "REFLECTION"_str;
 inline constexpr ref<str> WE_CB_NORMALMAP            = "NORMALMAP"_str;
+inline constexpr ref<str> WE_CB_SCENE_ORTHO          = "SCENE_ORTHO"_str;
 inline constexpr ref<str> WE_CB_MORPHING             = "MORPHING"_str;
 inline constexpr ref<str> WE_CB_SKINNING             = "SKINNING"_str;
 inline constexpr ref<str> WE_CB_POINTEMITTER         = "POINTEMITTER"_str;
 inline constexpr ref<str> WE_CB_LINEEMITTER          = "LINEEMITTER"_str;
 inline constexpr ref<str> WE_PRENDER_ROPE            = "PRENDER_ROPE"_str;
 inline constexpr ref<str> WE_PRENDER_ROPE_TRAIL      = "PRENDER_ROPE_TRAIL"_str;
+inline constexpr ref<str> OWE_CB_IMAGE_LAYER         = "OWE_IMAGE_LAYER"_str;
 
 // Compile-time (name, type) pair for declarative attribute layouts.
 struct VertexAttrSpec {
@@ -144,6 +146,9 @@ inline constexpr ref<str> G_ETVPI              = "g_EffectTextureProjectionMatri
 inline constexpr ref<str> G_LP                 = "g_LightsPosition"_str;
 inline constexpr ref<str> G_LCP                = "g_LightsColorPremultiplied"_str;
 inline constexpr ref<str> G_LCR                = "g_LightsColorRadius"_str;
+inline constexpr ref<str> G_LIGHTDIRECTIONTYPE = "g_LightsDirectionType"_str;
+inline constexpr ref<str> G_LIGHTCONEEXPONENT  = "g_LightsConeExponent"_str;
+inline constexpr ref<str> G_LIGHTCASTSHADOW    = "g_LightsCastShadow"_str;
 inline constexpr ref<str> G_LIGHTAMBIENTCOLOR  = "g_LightAmbientColor"_str;
 inline constexpr ref<str> G_LIGHTSKYLIGHTCOLOR = "g_LightSkylightColor"_str;
 inline constexpr ref<str> G_FOGDISTANCECOLOR   = "g_FogDistanceColor"_str;

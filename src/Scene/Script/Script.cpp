@@ -1695,6 +1695,12 @@ function c(v, k, i) {
     return Number(v ?? 0);
 }
 function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+export function normalizeColor(rgb) {
+    return v3(c(rgb, 'x', 0) / 255, c(rgb, 'y', 1) / 255, c(rgb, 'z', 2) / 255);
+}
+export function expandColor(rgb) {
+    return v3(c(rgb, 'x', 0) * 255, c(rgb, 'y', 1) * 255, c(rgb, 'z', 2) * 255);
+}
 export function rgb2hsv(rgb) {
     const r = clamp01(c(rgb, 'x', 0));
     const g = clamp01(c(rgb, 'y', 1));
@@ -3522,6 +3528,35 @@ void RunFieldScriptInit(JSContext* ctx, JsRuntime::Impl* rt, FieldScript* fs) {
     I->init_done                 = true;
 }
 
+JSValue AwaitModuleEvaluation(JSContext* ctx, JSValue value) {
+    for (;;) {
+        switch (JS_PromiseState(ctx, value)) {
+        case JS_PROMISE_FULFILLED: {
+            JSValue result = JS_PromiseResult(ctx, value);
+            JS_FreeValue(ctx, value);
+            return result;
+        }
+        case JS_PROMISE_REJECTED: {
+            JSValue reason = JS_PromiseResult(ctx, value);
+            JS_FreeValue(ctx, value);
+            return JS_Throw(ctx, reason);
+        }
+        case JS_PROMISE_PENDING: {
+            JSContext* job_ctx = nullptr;
+            int        status  = JS_ExecutePendingJob(JS_GetRuntime(ctx), &job_ctx);
+            if (status > 0) continue;
+            JS_FreeValue(ctx, value);
+            if (status == 0) {
+                return JS_ThrowInternalError(ctx, "module evaluation is pending without a job");
+            }
+            JSContext* exception_ctx = job_ctx != nullptr ? job_ctx : ctx;
+            return JS_Throw(ctx, JS_GetException(exception_ctx));
+        }
+        case JS_PROMISE_NOT_A_PROMISE: return value;
+        }
+    }
+}
+
 } // namespace
 
 FieldScript* JsRuntime::MakeFieldScript(
@@ -3562,7 +3597,7 @@ FieldScript* JsRuntime::MakeFieldScript(
             return nullptr;
         }
         JSModuleDef* m  = static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(compiled));
-        JSValue      ev = JS_EvalFunction(ctx, compiled);
+        JSValue      ev = AwaitModuleEvaluation(ctx, JS_EvalFunction(ctx, compiled));
         if (JS_IsException(ev)) {
             m_impl->LogError(ctx, script_sha, "module eval failed");
             JS_FreeValue(ctx, ev);

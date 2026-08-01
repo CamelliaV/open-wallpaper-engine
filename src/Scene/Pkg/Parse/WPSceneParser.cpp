@@ -1389,6 +1389,12 @@ BlendMode ParseBlendMode(std::string_view str) {
 
 void ApplyImageColorBlend(wpscene::Material& material, const wpscene::ImageObject& image) {
     if (image.colorBlendMode == 0) return;
+
+    if (image.colorBlendMode == 31) {
+        material.combos.erase(rstd::cppstd::to_string(WE_CB_BLENDMODE));
+        material.blending = "additive";
+        return;
+    }
     material.combos[rstd::cppstd::to_string(WE_CB_BLENDMODE)] = image.colorBlendMode;
 }
 
@@ -1466,9 +1472,8 @@ void ParseSpecTexName(std::string& name, const wpscene::Material& wpmat, const W
 
 SceneShaderTextureCompileInfo ToSceneShaderTextureCompileInfo(const WPShaderTexInfo& info) {
     return SceneShaderTextureCompileInfo {
-        .enabled = info.enabled,
-        .components =
-            array<bool, 3> { info.composEnabled[0], info.composEnabled[1], info.composEnabled[2] },
+        .enabled    = info.enabled,
+        .components = info.composEnabled,
     };
 }
 
@@ -1675,6 +1680,7 @@ bool LoadMaterial(fs::VFS& vfs, WPShaderCache& shader_cache,
                                      (bool)texh.extraHeader.at("compo1").val,
                                      (bool)texh.extraHeader.at("compo2").val,
                                      (bool)texh.extraHeader.at("compo3").val,
+                                     (bool)texh.extraHeader.at("compo4").val,
                                  } });
         } else
             texinfos.push_back({ true });
@@ -2729,8 +2735,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
 
     ShaderValueMap    baseConstSvs = context.global_base_uniforms;
     WPShaderInfo      shaderInfo;
-    wpscene::Material image_wpmat                 = wpimgobj.material.clone();
-    wpscene::Material image_user_texture_fallback = image_wpmat.clone();
+    wpscene::Material image_wpmat                                   = wpimgobj.material.clone();
+    image_wpmat.combos[rstd::cppstd::to_string(WE_CB_SCENE_ORTHO)]  = wpimgobj.perspective ? 0 : 1;
+    image_wpmat.combos[rstd::cppstd::to_string(OWE_CB_IMAGE_LAYER)] = 1;
+    wpscene::Material image_user_texture_fallback                   = image_wpmat.clone();
     if (color_blend_uses_layer_material && ! hasEffect) ApplyImageColorBlend(image_wpmat, wpimgobj);
     ApplyUserTextureBindings(context, image_wpmat);
     {
@@ -2901,6 +2909,10 @@ void ParseImageObj(ParseContext& context, wpscene::ImageObject& img_obj,
         const auto& material_ref       = supplemental_mesh->mat_json_files[usize()];
         auto        supplemental_wpmat = WPMdlParser::ParseMaterial(material_ref, vfs);
         if (supplemental_wpmat.is_none()) continue;
+
+        supplemental_wpmat->combos[rstd::cppstd::to_string(WE_CB_SCENE_ORTHO)] =
+            wpimgobj.perspective ? 0 : 1;
+        supplemental_wpmat->combos[rstd::cppstd::to_string(OWE_CB_IMAGE_LAYER)] = 1;
 
         auto supplemental_user_texture_fallback = supplemental_wpmat->clone();
         ApplyUserTextureBindings(context, *supplemental_wpmat);
@@ -4032,12 +4044,12 @@ void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
                                      light_obj.name);
 
     SceneLight::Desc desc;
-    if (light_obj.light == "spot") {
+    if (light_obj.light == "spot" || light_obj.light == "lspot") {
         desc.type = SceneLightType::Spot;
-    } else if (light_obj.light == "directional") {
+    } else if (light_obj.light == "directional" || light_obj.light == "ldirectional") {
         desc.type = SceneLightType::Directional;
     } else {
-        desc.type = SceneLightType::Point; // default + "point"
+        desc.type = SceneLightType::Point; // default + point/lpoint
     }
     desc.color       = Vector3f(light_obj.color.data());
     desc.radius      = light_obj.radius;
@@ -4045,10 +4057,10 @@ void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
     desc.exponent    = light_obj.exponent;
     desc.attenuation = light_obj.attenuation;
     desc.mindistance = light_obj.mindistance;
-    // WE cone fields are full angles in degrees; convert to cos(half-angle).
+    // WE evaluates spot cones against cos(full angle), as stored by the official renderer.
     const float kDegToRad     = rstd::f32::consts::PI.to_primitive() / 180.0f;
-    desc.inner_cone_cos       = std::cos(light_obj.innercone * 0.5f * kDegToRad);
-    desc.outer_cone_cos       = std::cos(light_obj.outercone * 0.5f * kDegToRad);
+    desc.inner_cone_cos       = std::cos(light_obj.innercone * kDegToRad);
+    desc.outer_cone_cos       = std::cos(light_obj.outercone * kDegToRad);
     desc.light_source_size    = light_obj.lightsourcesize;
     desc.cascade_distances[0] = light_obj.cascadedistance0;
     desc.cascade_distances[1] = light_obj.cascadedistance1;
@@ -4059,6 +4071,7 @@ void ParseLightObj(ParseContext& context, wpscene::LightObject& light_obj) {
     auto light = context.scene->RegisterLight(Box<SceneLight>::make(desc));
     light->setNode(node.as_ptr());
     light->setRuntimeVisible(light_obj.visible);
+    node->SetBaseColor(desc.color, 1.0f);
     if (! light_obj.visible_user.empty()) {
         light->setVisibleUserBinding(ToSceneUserVisibilityBinding(light_obj.visible_user));
     }
@@ -6263,10 +6276,11 @@ auto WPSceneParser::Parse(ref<str> scene_id, ref<wpscene::SceneDocument> documen
         }
         auto visibility_info = BuildObjectVisibilityInfo(json, options.user_properties);
         auto has_kind        = [](const Json& o) {
-            for (auto key : rstd::array<ref<str>, 7> { "image"_str,
+            for (auto key : rstd::array<ref<str>, 8> { "image"_str,
                                                        "particle"_str,
                                                        "sound"_str,
                                                        "light"_str,
+                                                       "shape"_str,
                                                        "text"_str,
                                                        "model"_str,
                                                        "camera"_str }) {

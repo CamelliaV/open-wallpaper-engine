@@ -30,7 +30,8 @@ enum class WPTexFlagEnum : uint32_t
 
     compo1 = 20,
     compo2 = 21,
-    compo3 = 22
+    compo3 = 22,
+    compo4 = 23
 };
 using WPTexFlags = BitFlags<WPTexFlagEnum>;
 
@@ -122,6 +123,7 @@ WPTexFormatVersion LoadHeader(fs::BinaryReader& file, ImageHeader& header) {
         header.extraHeader["compo1"].val = flags[WPTexFlagEnum::compo1];
         header.extraHeader["compo2"].val = flags[WPTexFlagEnum::compo2];
         header.extraHeader["compo3"].val = flags[WPTexFlagEnum::compo3];
+        header.extraHeader["compo4"].val = flags[WPTexFlagEnum::compo4];
     }
 
     /*

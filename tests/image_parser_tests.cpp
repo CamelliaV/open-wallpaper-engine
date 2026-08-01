@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
 import rstd;
 import rstd.cppstd;
+import wescene.fs;
 import wescene.pkg.parse;
 import wescene.scene;
 import wescene.types;
@@ -70,6 +74,10 @@ public:
     }
 };
 
+void WriteU32(std::ofstream& output, std::uint32_t value) {
+    output.write(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
 TEST(ImageParser, BatchPreservesOrderAndBoundsConcurrency) {
     TrackingImageParser parser;
     Vec<String>         names;
@@ -87,6 +95,47 @@ TEST(ImageParser, BatchPreservesOrderAndBoundsConcurrency) {
     }
     EXPECT_GT(parser.peak(), 1);
     EXPECT_LE(parser.peak(), 4);
+}
+
+TEST(ImageParser, TextureHeaderExposesFourthPackedComponent) {
+    auto root =
+        std::filesystem::temp_directory_path() /
+        ("owe-image-parser-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()));
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "materials");
+    {
+        std::ofstream output(root / "materials" / "mask.tex", std::ios::binary);
+        output.write("TEXV0005", 9);
+        output.write("TEXI0001", 9);
+        WriteU32(output, 4);
+        WriteU32(output, 1u << 23);
+        WriteU32(output, 1);
+        WriteU32(output, 1);
+        WriteU32(output, 1);
+        WriteU32(output, 1);
+        WriteU32(output, 0);
+        output.write("TEXB0001", 9);
+        WriteU32(output, 1);
+        WriteU32(output, 1);
+        WriteU32(output, 1);
+        WriteU32(output, 1);
+    }
+
+    auto physical = owe::fs::make_physical_fs(owe::fs::ToPath(root.string()));
+    ASSERT_TRUE(physical.is_ok());
+    owe::fs::VFS vfs;
+    ASSERT_TRUE(vfs.mount("/assets"_str, rstd::move(physical).unwrap_unchecked()).is_ok());
+
+    owe::WPTexImageParser parser(&vfs);
+    auto                  parsed = parser.ParseHeader("mask"_str);
+    ASSERT_TRUE(parsed.is_ok());
+    auto header = rstd::move(parsed).unwrap_unchecked();
+    EXPECT_EQ(header.extraHeader.at("compo1").val, 0);
+    EXPECT_EQ(header.extraHeader.at("compo2").val, 0);
+    EXPECT_EQ(header.extraHeader.at("compo3").val, 0);
+    EXPECT_EQ(header.extraHeader.at("compo4").val, 1);
+
+    std::filesystem::remove_all(root);
 }
 
 TEST(ImageParser, SceneBatchPreservesRuntimeParserAndErrorPositions) {
